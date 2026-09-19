@@ -48,8 +48,8 @@ func TestUFWStatusIsRead(t *testing.T) {
 }
 
 // The rules are read in the form they can be deleted by: "ufw delete" takes
-// the specification the rule was added with, and the numbers of "ufw
-// status numbered" shift with every deletion.
+// the specification the rule was added with, and the numbers of "ufw status
+// numbered" shift with every deletion.
 func TestUFWRulesCarryOwnershipMarker(t *testing.T) {
 	rules := ParseUFWAdded(ufwShowAdded)
 	if len(rules) != 5 {
@@ -149,10 +149,8 @@ func TestUFWRefusesWhatItCannotExpress(t *testing.T) {
 	}
 }
 
-// The transition between two registries deletes what changed or vanished
-// by its old specification and adds what appeared or changed. The rollback
-// is the same function the other way round: ufw has no rebuild short of a
-// reset that drops the operator's rules too.
+// The transition between two registries deletes what changed or vanished by
+// its old specification and adds what appeared or changed.
 func TestUFWTransitionIsComputedFromRegistries(t *testing.T) {
 	smtp := RuleSpec{ID: "smtp", Chain: ChainInput, Action: ActionDrop, Protocol: "tcp",
 		Ports: []string{"25"}, Sources: []string{"10.10.0.0/16"}}
@@ -206,8 +204,7 @@ func TestUFWTransitionIsComputedFromRegistries(t *testing.T) {
 }
 
 // A deletion of a rule ufw no longer has is the state the step wanted: it
-// happens on the rollback of a change that stopped halfway. Any other
-// failure, and any failure of an addition, stays a failure.
+// happens on the rollback of a change that stopped halfway.
 func TestUFWDeletionOfAbsentRuleIsNotAFailure(t *testing.T) {
 	removal, _ := UFWDeleteArguments(smtpRule())
 	if !UFWDeletionOfAbsentRule(removal[0], "Could not delete non-existent rule\nCould not delete non-existent rule (v6)") {

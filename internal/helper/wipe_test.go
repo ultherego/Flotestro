@@ -31,9 +31,9 @@ func wipeRequest() *helperv1.HelperRequest {
 	}
 }
 
-// agentStateDirFixture builds a state directory the way the agent leaves
-// it: the identity store with a generation, the journal, the old flat key,
-// and the state file that is to stay.
+// agentStateDirFixture builds a state directory the way the agent leaves it:
+// the identity store with a generation, the journal, the old flat key, and the
+// state file that is to stay.
 func agentStateDirFixture(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -57,9 +57,9 @@ func agentStateDirFixture(t *testing.T) string {
 	return dir
 }
 
-// The wipe removes the identity and the journal, disables the agent unit
-// and schedules the stop for after the reply; what is not the agent's
-// membership in the fleet stays.
+// The wipe removes the identity and the journal, disables the agent unit and
+// schedules the stop for after the reply; what is not the agent's membership
+// in the fleet stays.
 func TestFinalWipeRemovesTheIdentityAndDisablesTheAgent(t *testing.T) {
 	dir := agentStateDirFixture(t)
 	tool := &fakeAccountTool{}

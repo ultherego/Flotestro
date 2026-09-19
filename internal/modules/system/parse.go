@@ -8,8 +8,7 @@ import (
 
 // notableFlags are the processor flags an operator asks about: whether the
 // machine can host virtual machines, whether it is one, which crypto and
-// vector instructions it has and which mitigations the kernel found. The
-// whole list runs to two hundred entries that mean nothing on a page.
+// vector instructions it has and which mitigations the kernel found.
 var notableFlags = []string{
 	// Virtualization: a host of guests, or a guest itself.
 	"vmx", "svm", "hypervisor",
@@ -22,11 +21,8 @@ var notableFlags = []string{
 	"asimd", "sha1", "sha2", "crc32", "atomics", "sve",
 }
 
-// ParseCPUInfo reads the processor from the content of /proc/cpuinfo.
-//
-// The file is one block per logical processor. The model, the vendor and
-// the flags are the same in every block, so they are taken from the first
-// one; the layout is counted across all of them.
+// ParseCPUInfo reads the processor from the content of /proc/cpuinfo. The file
+// is one block per logical processor.
 func ParseCPUInfo(content string) CPU {
 	cpu := CPU{}
 	threads := 0
@@ -34,13 +30,13 @@ func ParseCPUInfo(content string) CPU {
 	coresBySocket := map[string]int{}
 	physicalCores := map[string]bool{}
 	seenFlags := false
-	// The model is named differently by every architecture; the candidates
-	// are kept by key and the best one chosen at the end, so a board that
-	// writes both "Hardware" and "Model" is named by the friendlier line.
+	// The model is named differently by every architecture; the candidates are
+	// kept by key and the best one chosen at the end, so a board that writes both
+	// "Hardware" and "Model" is named by the friendlier line.
 	models := map[string]string{}
-	// The "physical id" of the block being read carries to the "core id"
-	// and "cpu cores" lines below it: cpuinfo writes the id before the
-	// counts, so the parse is one pass.
+	// The "physical id" of the block being read carries to the "core id" and "cpu
+	// cores" lines below it: cpuinfo writes the id before the counts, so the
+	// parse is one pass.
 	currentSocket := ""
 	for _, line := range strings.Split(content, "\n") {
 		key, value, found := strings.Cut(line, ":")
@@ -101,9 +97,8 @@ func ParseCPUInfo(content string) CPU {
 		count := len(sockets)
 		cpu.Sockets = &count
 	}
-	// The core count comes from "cpu cores" per socket when the file names
-	// it; otherwise from the distinct core ids. A file with neither - ARM,
-	// most virtual machines without topology - leaves the cores unknown.
+	// The core count comes from "cpu cores" per socket when the file names it;
+	// otherwise from the distinct core ids.
 	switch {
 	case len(coresBySocket) > 0:
 		total := 0
@@ -173,9 +168,8 @@ func ParseOSRelease(content string) Distribution {
 	return distribution
 }
 
-// chassisTypes translates the SMBIOS chassis type into words. The numbers
-// come from the SMBIOS specification, table "System Enclosure or Chassis
-// Types".
+// chassisTypes translates the SMBIOS chassis type into words. The numbers come
+// from the SMBIOS specification, table "System Enclosure or Chassis Types".
 var chassisTypes = map[string]string{
 	"1": "other", "2": "unknown", "3": "desktop", "4": "low profile desktop",
 	"5": "pizza box", "6": "mini tower", "7": "tower", "8": "portable",
@@ -199,15 +193,9 @@ func ChassisType(code string) string {
 	return code
 }
 
-// DetectVirtualization decides what the host runs on from the evidence it
-// was given: the DMI vendor and product, the hypervisor flag of the
-// processor, the hypervisor type sysfs names, and the container marker
-// systemd leaves in /run.
-//
-// The order is the order of certainty. A container marker says the kernel
-// is somebody else's; the hypervisor type in sysfs is what the kernel
-// itself found; DMI is what the machine claims; the flag alone says only
-// "some hypervisor".
+// DetectVirtualization decides what the host runs on from the evidence it was
+// given: the DMI vendor and product, the hypervisor flag of the processor, the
+// hypervisor type sysfs names, and the container marker systemd leaves in
 func DetectVirtualization(container, sysfsHypervisor, dmiVendor, dmiProduct string, hypervisorFlag bool) Virtualization {
 	if container = strings.TrimSpace(container); container != "" {
 		return Virtualization{Kind: container, Source: "/run/systemd/container"}

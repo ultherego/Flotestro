@@ -5,9 +5,8 @@ import (
 	"time"
 )
 
-// TestReadWindowIsBounded guards the property that lets this operation
-// exist at all: an order outside the bounds is trimmed, so the task always
-// ends. A read without an end would stay on the host forever.
+// TestReadWindowIsBounded guards the property that lets this operation exist
+// at all: an order outside the bounds is trimmed, so the task always ends.
 func TestReadWindowIsBounded(t *testing.T) {
 	options := boundOptions(EventsOptions{
 		Since:  7 * 24 * time.Hour,
@@ -25,8 +24,8 @@ func TestReadWindowIsBounded(t *testing.T) {
 	}
 }
 
-// TestNoOrderGivesDefaultWindow guards that the most common path - "show
-// what happened here" - requires nothing from the operator, and is bounded
+// TestNoOrderGivesDefaultWindow guards that the most common path - "show what
+// happened here" - requires nothing from the operator, and is bounded
 // nevertheless.
 func TestNoOrderGivesDefaultWindow(t *testing.T) {
 	options := boundOptions(EventsOptions{})
@@ -44,9 +43,8 @@ func TestNoOrderGivesDefaultWindow(t *testing.T) {
 	}
 }
 
-// TestUnknownKindsAreSkipped guards the filter boundary: the kind goes to
-// the Engine API, so the list is closed. Daemon and plugin events answer no
-// question of this tab.
+// TestUnknownKindsAreSkipped guards the filter boundary: the kind goes to the
+// Engine API, so the list is closed.
 func TestUnknownKindsAreSkipped(t *testing.T) {
 	options := boundOptions(EventsOptions{Types: []string{"daemon", "plugin", "Container", "container"}})
 	if len(options.Types) != 1 || options.Types[0] != "container" {

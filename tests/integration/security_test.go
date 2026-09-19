@@ -124,9 +124,8 @@ func TestSecurityStateComesFromTheHost(t *testing.T) {
 			if len(state.Listening) == 0 {
 				t.Error("the host reported no socket at all, yet at least the agent listens somewhere")
 			}
-			// The reach is a classification, not a conclusion about
-			// visibility from the internet: that cannot be seen from the
-			// address alone.
+			// The reach is a classification, not a conclusion about visibility from the
+			// internet: that cannot be seen from the address alone.
 			classes := map[string]bool{"loopback": true, "host-network": true, "all-interfaces": true}
 			for _, socket := range state.Listening {
 				if !classes[socket.Reach] {
@@ -146,9 +145,8 @@ func TestSecurityStateComesFromTheHost(t *testing.T) {
 					t.Errorf("a running audit without rule counters: %+v", state.Audit)
 				}
 			}
-			// An undetermined state carries a reason: the secure boot
-			// question on a host without EFI has no answer and it is not
-			// made up.
+			// An undetermined state carries a reason: the secure boot question on a
+			// host without EFI has no answer and it is not made up.
 			if state.SecureBoot == nil && state.SecureBootReason == "" {
 				t.Error("undetermined secure boot without a reason")
 			}
@@ -172,8 +170,7 @@ func TestFindingsAreRepeatable(t *testing.T) {
 		t.Error("report without a plan fingerprint")
 	}
 	// The canonical form of the fingerprint is versioned: a change in the
-	// computation rules is to invalidate approved plans explicitly, not
-	// quietly.
+	// computation rules is to invalidate approved plans explicitly, not quietly.
 	if report.PlanHashVersion == 0 {
 		t.Error("report without the fingerprint canonicalisation version")
 	}
@@ -190,9 +187,8 @@ func TestFindingsAreRepeatable(t *testing.T) {
 		if (finding.Passed || finding.Unknown || !finding.Applicable) && finding.Remediation != nil {
 			t.Errorf("%s needs no action, yet carries a remediation", finding.CheckID)
 		}
-		// An undetermined state and "not applicable" carry a reason code:
-		// without it the operator does not know whether to wait, fix or
-		// grant permissions.
+		// An undetermined state and "not applicable" carry a reason code: without it
+		// the operator does not know whether to wait, fix or grant permissions.
 		if (finding.Unknown || !finding.Applicable) && finding.ReasonCode == "" {
 			t.Errorf("%s without a result and without a reason code", finding.CheckID)
 		}
@@ -213,9 +209,9 @@ func TestFindingsAreRepeatable(t *testing.T) {
 	}
 }
 
-// TestNotApplicableCheckIsNotAFailure guards the assessment boundary: a
-// host without a given component does not fail its check and does not
-// quietly pass it.
+// TestNotApplicableCheckIsNotAFailure guards the assessment boundary: a host
+// without a given component does not fail its check and does not quietly pass
+// it.
 func TestNotApplicableCheckIsNotAFailure(t *testing.T) {
 	h := newHarness(t)
 
@@ -293,9 +289,9 @@ func TestRemediationRequiresAPlanAndAChoice(t *testing.T) {
 			"reason": securityReason}, nil, http.StatusBadRequest)
 }
 
-// TestRemediationCreatesAModuleJob checks that remediation is not a
-// separate mechanism: it is an ordinary job of the module responsible for
-// the given thing.
+// TestRemediationCreatesAModuleJob checks that remediation is not a separate
+// mechanism: it is an ordinary job of the module responsible for the given
+// thing.
 func TestRemediationCreatesAModuleJob(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -461,9 +457,8 @@ type remediationOrderView struct {
 	Groups   []remediationGroupView `json:"groups"`
 }
 
-// fixableCheck picks a check the lab has fixable findings for, together
-// with the hosts that carry them. It prefers the password check, because
-// its remediation is one declarative sshd write on every host.
+// fixableCheck picks a check the lab has fixable findings for, together with
+// the hosts that carry them.
 func fixableCheck(t *testing.T, h *harness) (fleetCheckView, []string) {
 	t.Helper()
 	var fleet struct {
@@ -494,19 +489,17 @@ func fixableCheck(t *testing.T, h *harness) (fleetCheckView, []string) {
 	return chosen, hostIDs
 }
 
-// TestFleetRemediationGroupsPlansAndBindsTheApproval checks the fleet
-// form of remediation: chosen checks on chosen hosts, every host with its
-// own plan, hosts with the same steps in one group, and one campaign whose
-// approval fingerprint covers the whole set of plans. The campaign is not
-// approved - the lab stays as it is - and is cancelled at the end.
+// TestFleetRemediationGroupsPlansAndBindsTheApproval checks the fleet form of
+// remediation: chosen checks on chosen hosts, every host with its own plan,
+// hosts with the same steps in one group, and one campaign whose approval
 func TestFleetRemediationGroupsPlansAndBindsTheApproval(t *testing.T) {
 	h := newHarness(t)
 	check, hostIDs := fixableCheck(t, h)
 	selector := map[string]any{"host_ids": hostIDs}
 
 	// There is no fix-all: neither an empty check list nor an empty host
-	// selection is "everything", and a check that does not exist is a
-	// refusal rather than a silent no-op on the fleet.
+	// selection is "everything", and a check that does not exist is a refusal
+	// rather than a silent no-op on the fleet.
 	h.do(http.MethodPost, "/api/v1/security/remediation/preview",
 		map[string]any{"check_ids": []string{}, "selector": selector}, nil, http.StatusBadRequest)
 	h.do(http.MethodPost, "/api/v1/security/remediation/preview",
@@ -547,10 +540,9 @@ func TestFleetRemediationGroupsPlansAndBindsTheApproval(t *testing.T) {
 		}
 	}
 
-	// The composite permission: an operator may write the sshd
-	// configuration and create campaigns, but does not hold the remediation
-	// permission - so the order is refused as a whole, naming the missing
-	// one, and nothing comes into being. The preview, a read, still answers.
+	// The composite permission: an operator may write the sshd configuration and
+	// create campaigns, but does not hold the remediation permission - so the
+	// order is refused as a whole, naming the missing one, and nothing comes into
 	host := h.hostByFamily("debian")
 	operator := h.withToken(h.createPrincipal(uniqueSubject("remediation-operator"), []map[string]string{
 		{"role": "operator", "site": host.Site, "environment": host.Environment},
@@ -595,10 +587,8 @@ func TestFleetRemediationGroupsPlansAndBindsTheApproval(t *testing.T) {
 		t.Errorf("offline policy = %q, expected the operation's wait_until_deadline", campaign.OfflinePolicy)
 	}
 
-	// The plan set is the one the preview showed: the same groups with the
-	// same digests, one plan per eligible host, every plan a remediation
-	// plan. The snapshot keeps the hosts without a plan too, closed with
-	// their reason.
+	// The plan set is the one the preview showed: the same groups with the same
+	// digests, one plan per eligible host, every plan a remediation plan.
 	var plans struct {
 		Items []struct {
 			PlanHash string   `json:"plan_hash"`
@@ -648,10 +638,8 @@ func TestFleetRemediationGroupsPlansAndBindsTheApproval(t *testing.T) {
 		}
 	}
 
-	// The consent covers the plans: the same hosts with a different check
-	// set are a different set of plans, and the approval fingerprint moves
-	// with it. Where a second fixable check shares a host the plan set
-	// digest moves too; otherwise only the order differs.
+	// The consent covers the plans: the same hosts with a different check set are
+	// a different set of plans, and the approval fingerprint moves with it.
 	second := []string{check.CheckID}
 	var fleet struct {
 		Checks []fleetCheckView `json:"checks"`

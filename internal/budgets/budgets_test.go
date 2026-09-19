@@ -160,10 +160,9 @@ func TestBackendBudgetFollowsTheRepository(t *testing.T) {
 	}
 }
 
-// TestJobClassFollowsTheOperatorThenTheEvidence guards the order of the
-// class rule: what the order stated, then what can be seen - the panel's
-// own sweeps never make an operator wait, locking an account never waits
-// behind a campaign.
+// TestJobClassFollowsTheOperatorThenTheEvidence guards the order of the class
+// rule: what the order stated, then what can be seen - the panel's own sweeps
+// never make an operator wait, locking an account never waits behind a
 func TestJobClassFollowsTheOperatorThenTheEvidence(t *testing.T) {
 	cases := []struct {
 		action    opspec.ActionType
@@ -200,8 +199,8 @@ func TestWaitReasonNamesTheKeyAndReadsBack(t *testing.T) {
 	}
 }
 
-// TestUnknownOperationAsksForTheScarcerCapacity guards that an operation
-// the registry does not describe is not treated as a read: unknown is not
+// TestUnknownOperationAsksForTheScarcerCapacity guards that an operation the
+// registry does not describe is not treated as a read: unknown is not
 // harmless.
 func TestUnknownOperationAsksForTheScarcerCapacity(t *testing.T) {
 	needs := Needs(opspec.ActionType("nobody.knows"), Topology{Site: "warsaw"}, "")
@@ -212,8 +211,6 @@ func TestUnknownOperationAsksForTheScarcerCapacity(t *testing.T) {
 
 // TestDescribedKeyReadsTheBudgetOutOfTheSentence guards the only place a
 // waiting campaign target names its budget: the sentence Describe wrote.
-// A key with colons of its own, a backend key with a path, and both
-// reasons have to read back; any other message names no budget.
 func TestDescribedKeyReadsTheBudgetOutOfTheSentence(t *testing.T) {
 	refusals := []Refusal{
 		{Key: "site:warsaw:packages", Reason: ReasonCapacity, Used: 5, Capacity: 5, Waiting: 3 * time.Second},
@@ -233,10 +230,8 @@ func TestDescribedKeyReadsTheBudgetOutOfTheSentence(t *testing.T) {
 }
 
 // TestLeaseClassIsReadFromTheHolder guards how the budget screen tells the
-// classes apart although the lease records none: a job's class comes from
-// its order, a campaign always asks as maintenance, a fan-out as
-// interactive - and a holder the panel cannot place is unknown, not
-// background.
+// classes apart although the lease records none: a job's class comes from its
+// order, a campaign always asks as maintenance, a fan-out as interactive - and
 func TestLeaseClassIsReadFromTheHolder(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -260,11 +255,9 @@ func TestLeaseClassIsReadFromTheHolder(t *testing.T) {
 	}
 }
 
-// TestChangeLoadsItsFailureDomainAndGateway guards the topology budgets of
-// the document: a change on a host loads the rack, the zone or the cluster
-// the operator placed it in and the gateway its session goes through,
-// each with a token of the operation's family, next to the site - and a
-// read loads neither.
+// TestChangeLoadsItsFailureDomainAndGateway guards the topology budgets of the
+// document: a change on a host loads the rack, the zone or the cluster the
+// operator placed it in and the gateway its session goes through, each with a
 func TestChangeLoadsItsFailureDomainAndGateway(t *testing.T) {
 	where := Topology{Site: "warsaw", FailureDomain: "rack-1", Gateway: "edge-03"}
 	needs := Needs(opspec.ActionUnitRestart, where, "")
@@ -286,9 +279,9 @@ func TestChangeLoadsItsFailureDomainAndGateway(t *testing.T) {
 	}
 }
 
-// TestTopologyKeysStayInThreeParts guards the spelling of free text in a
-// key: a domain named the way the document does ("cluster:pg-a") must not
-// break the key into four parts, and an unknown part names no budget.
+// TestTopologyKeysStayInThreeParts guards the spelling of free text in a key:
+// a domain named the way the document does ("cluster:pg-a") must not break the
+// key into four parts, and an unknown part names no budget.
 func TestTopologyKeysStayInThreeParts(t *testing.T) {
 	if key := DomainKey("cluster:pg-a", "reboot"); key != "domain:cluster_pg-a:reboot" {
 		t.Errorf("domain key = %q", key)

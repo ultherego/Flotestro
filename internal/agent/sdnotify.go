@@ -8,10 +8,7 @@ import (
 	"time"
 )
 
-// Notify sends a state to the service manager over NOTIFY_SOCKET. Without
-// the variable - outside systemd, in a test - it does nothing and says so
-// with false. The protocol is a datagram of "KEY=VALUE" lines; no library
-// is needed for that.
+// Notify sends a state to the service manager over NOTIFY_SOCKET.
 func Notify(state string) bool {
 	path := os.Getenv("NOTIFY_SOCKET")
 	if path == "" {
@@ -26,11 +23,9 @@ func Notify(state string) bool {
 	return err == nil
 }
 
-// WatchdogInterval returns how often the service manager expects a sign
-// of life, halved so that one late ping does not end the process, and
-// zero when no watchdog is set. WATCHDOG_PID names the process the setting
-// is for; a child that inherited the variable must not answer for its
-// parent.
+// WatchdogInterval returns how often the service manager expects a sign of
+// life, halved so that one late ping does not end the process, and zero when
+// no watchdog is set.
 func WatchdogInterval() time.Duration {
 	if pid := os.Getenv("WATCHDOG_PID"); pid != "" && pid != strconv.Itoa(os.Getpid()) {
 		return 0
@@ -42,10 +37,7 @@ func WatchdogInterval() time.Duration {
 	return time.Duration(usec) * time.Microsecond / 2
 }
 
-// KeepWatchdogFed pings the service manager until the context ends. The
-// ping says that the process is alive and its scheduler is not deadlocked
-// - not that the host is connected: a host waiting out a network outage
-// is healthy and must not be restarted for it.
+// KeepWatchdogFed pings the service manager until the context ends.
 func KeepWatchdogFed(ctx context.Context, interval time.Duration) {
 	if interval <= 0 {
 		return

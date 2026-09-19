@@ -770,7 +770,7 @@ func (s *Server) readLVM(ctx context.Context) storage.Snapshot {
 	}
 	// The physical volumes say which disk carries which group and how much of it
 	// is still unallocated: that is what an extension of a group is confirmed
-	// against afterwards, and a disk prepared for LVM but in no group is a fact
+	// against afterwards, and a disk prepared for LVM but in no group is a fact.
 	if exists(storage.PVSPath) {
 		if output, err := toolOutput(ctx, storage.PVSPath,
 			"--reportformat", "json", "--units", "b", "-o", storage.PVSFields); err == nil {

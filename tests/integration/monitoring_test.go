@@ -159,8 +159,8 @@ func awaitAlert(h *harness, hostID, ruleID, state string, limit time.Duration) a
 }
 
 // TestHostReportsItsOwnMetrics guards the property the built-in monitoring
-// rests on: the agent samples the host itself, and the panel answers with
-// the charts without any system in between.
+// rests on: the agent samples the host itself, and the panel answers with the
+// charts without any system in between.
 func TestHostReportsItsOwnMetrics(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -219,9 +219,8 @@ func TestHostReportsItsOwnMetrics(t *testing.T) {
 }
 
 // TestAlertRuleFiresSilencesAndResolves walks an alert through its life: a
-// rule that always holds fires on its host at once, a silence keeps it out
-// of the on-call view without hiding it, and removing the rule resolves
-// it.
+// rule that always holds fires on its host at once, a silence keeps it out of
+// the on-call view without hiding it, and removing the rule resolves it.
 func TestAlertRuleFiresSilencesAndResolves(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -364,9 +363,9 @@ func TestAlertRuleFiresSilencesAndResolves(t *testing.T) {
 	}
 }
 
-// TestProbeSaysWhatTheHostSees guards the distinction that is the whole
-// value of a probe: the operation succeeded and the service does not answer
-// - that is not the same as an operation that failed.
+// TestProbeSaysWhatTheHostSees guards the distinction that is the whole value
+// of a probe: the operation succeeded and the service does not answer - that
+// is not the same as an operation that failed.
 func TestProbeSaysWhatTheHostSees(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")

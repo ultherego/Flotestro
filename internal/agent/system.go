@@ -14,8 +14,6 @@ import (
 )
 
 // systemProbe reads the DMI facts that belong to root through the helper.
-// Without it the picture is still built, with the serial number and the
-// UUID named as refused.
 var systemProbe func(context.Context) (system.Supplement, error)
 
 // SetSystemProbe points at the function that reads the privileged part of
@@ -34,12 +32,6 @@ func SetSudoersProbe(probe func(context.Context) (sudoers.Snapshot, error)) {
 }
 
 // CollectSystem reads the platform picture of the host.
-//
-// First what can be seen without root: the processor, the memory, the
-// kernel, the distribution, the firmware and the public DMI fields. Only
-// what the kernel refused - the serial numbers and the UUID - is ordered
-// from the helper, and only when it was refused: a container without DMI
-// tables has nothing for root to read either.
 func CollectSystem(ctx context.Context) system.Snapshot {
 	snapshot := system.Collect(os.DirFS("/"), time.Now())
 	if !refusedToAgent(snapshot) || systemProbe == nil {
@@ -70,9 +62,7 @@ func refusedToAgent(snapshot system.Snapshot) bool {
 	return false
 }
 
-// CollectSudoers reads the local sudo policy through the helper. A host
-// without a helper reports the policy as not read, with the reason: the
-// panel must not take silence for "nobody has sudo here".
+// CollectSudoers reads the local sudo policy through the helper.
 func CollectSudoers(ctx context.Context) sudoers.Snapshot {
 	if sudoersProbe == nil {
 		return sudoers.Snapshot{

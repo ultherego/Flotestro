@@ -20,9 +20,8 @@ func (s *Server) detectPackages() (packages.Manager, error) {
 	return packages.Detect()
 }
 
-// approvedPlan reads the approved plan out of the request: the digest and
-// the header the envelope is rebuilt with. False means the request binds
-// no plan - a legacy order that runs as before.
+// approvedPlan reads the approved plan out of the request: the digest and the
+// header the envelope is rebuilt with.
 func approvedPlan(action *helperv1.PackageActionRequest) (plan.Reference, packages.PlanHeader, bool) {
 	if len(action.GetPlanHash()) == 0 {
 		return plan.Reference{}, packages.PlanHeader{}, false
@@ -55,16 +54,6 @@ func planMode(operation helperv1.PackageActionRequest_Operation) string {
 }
 
 // executeApproved carries an approved plan out, and nothing else.
-//
-// The helper does not trust that the agent checked the plan: under the
-// package lock, right before the transaction, it reads the host again,
-// computes the same plan with the header of the approved one and compares
-// the digest. A difference is a refusal with its code - stale_plan for a
-// moved content, replan_required for another planner, plan_expired for a
-// plan past its validity - never a quiet update of the plan. The
-// transaction then runs on the exact specs of the plan computed now, which
-// are the approved ones since the digests matched; afterwards the state
-// is read and every expected effect settled.
 func (s *Server) executeApproved(ctx context.Context, request *helperv1.HelperRequest,
 	manager packages.Manager, action *helperv1.PackageActionRequest,
 	options packages.Options) *helperv1.HelperResponse {
@@ -83,9 +72,9 @@ func (s *Server) executeApproved(ctx context.Context, request *helperv1.HelperRe
 
 	current, err := manager.Plan(ctx, options)
 	if err != nil {
-		// A plan that cannot be computed against the metadata the approved
-		// one was read from is a plan the host no longer computes: the
-		// cache is gone or was replaced. Anything else is the failure it is.
+		// A plan that cannot be computed against the metadata the approved one was
+		// read from is a plan the host no longer computes: the cache is gone or was
+		// replaced.
 		if expected := action.GetPlanResourceRevision(); expected != "" &&
 			packages.MetadataRevision(manager) != expected {
 			s.log.Warn("the package plan is stale: the repository metadata moved",
@@ -106,9 +95,9 @@ func (s *Server) executeApproved(ctx context.Context, request *helperv1.HelperRe
 	if err := packages.SpaceShortfall(current.Space); err != nil {
 		return packageFailure(manager.Name(), err)
 	}
-	// A protected package in the plan is a plan that will not be carried
-	// out, whatever the digest says: the policy of the host weighs more
-	// than the consent.
+	// A protected package in the plan is a plan that will not be carried out,
+	// whatever the digest says: the policy of the host weighs more than the
+	// consent.
 	if len(current.Protected) > 0 {
 		return packageFailure(manager.Name(), fmt.Errorf("%w: %s",
 			packages.ErrProtectedPackage, strings.Join(current.Protected, ", ")))
@@ -141,11 +130,9 @@ func (s *Server) executeApproved(ctx context.Context, request *helperv1.HelperRe
 	return response
 }
 
-// describeDrift names the elements that differ between the approved specs
-// and the plan computed now, so the refusal says which package moved
-// rather than that two digests differ. Empty when the specs were not sent
-// or nothing among them differs - the drift is then in the header or in
-// an element the panel did not send.
+// describeDrift names the elements that differ between the approved specs and
+// the plan computed now, so the refusal says which package moved rather than
+// that two digests differ.
 func describeDrift(approved []*helperv1.PackageExactSpec, current packages.Plan) string {
 	if len(approved) == 0 {
 		return ""

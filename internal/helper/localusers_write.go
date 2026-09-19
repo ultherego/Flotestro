@@ -194,7 +194,7 @@ func (s *Server) createLocalUser(ctx context.Context, request *helperv1.HelperRe
 	}
 	// A service account is allocated below the range of people, as useradd
 	// --system does; the order has to say so, because an account in the wrong
-	// range is either invisible to the panel or a person's identifier taken by a
+	// range is either invisible to the panel or a person's identifier taken by a.
 	if action.GetSystem() {
 		args = append(args, "--system")
 	}

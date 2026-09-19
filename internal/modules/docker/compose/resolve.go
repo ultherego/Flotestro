@@ -35,9 +35,7 @@ func pinnedDigest(image string) string {
 	return digest
 }
 
-// PinReference replaces the tag of a reference with the digest. The tag is
-// the part after the last colon that comes after the last slash - a colon
-// before the last slash is the port of the registry.
+// PinReference replaces the tag of a reference with the digest.
 func PinReference(image, digest string) string {
 	if pinnedDigest(image) != "" {
 		return image
@@ -59,15 +57,6 @@ func repositoryOf(image string) string {
 }
 
 // ResolveWithDocker resolves tags with the Docker client on the host.
-//
-// The registry is asked first: "docker manifest inspect" fetches the
-// manifest without pulling the image, so the plan learns what the tag
-// means today even for an image the host has never seen. The client runs
-// without a credential store, so a private registry answers only when the
-// image is already on the host - then the digest recorded at the pull is
-// taken from "docker image inspect". A tag neither the registry nor the
-// host can resolve leaves the plan unresolved, and the operator pins a
-// digest in the manifest or pulls the image on the host first.
 func ResolveWithDocker(docker Runner) ImageResolver {
 	return func(ctx context.Context, image string) (ResolvedImage, error) {
 		var registryErr error
@@ -105,10 +94,7 @@ type manifestEntry struct {
 	} `json:"Descriptor"`
 }
 
-// digestFromManifest picks the manifest that will run on this host. A
-// multi-platform image lists one manifest per platform; the one for this
-// architecture is the one the pull would take. Attestation manifests come
-// with the platform "unknown" and are never an image to run.
+// digestFromManifest picks the manifest that will run on this host.
 func digestFromManifest(output, architecture string) (string, error) {
 	output = strings.TrimSpace(output)
 	var entries []manifestEntry
@@ -139,11 +125,8 @@ func digestFromManifest(output, architecture string) (string, error) {
 	return "", fmt.Errorf("the manifest has no linux/%s image", architecture)
 }
 
-// digestFromLocalImage reads the digest the host recorded when it pulled
-// the image. An image pulled under several names carries several digests;
-// the one of this repository is taken, and an image built on the host
-// carries none at all - it never came from a registry, so no digest names
-// it there.
+// digestFromLocalImage reads the digest the host recorded when it pulled the
+// image.
 func digestFromLocalImage(output, image string) (string, error) {
 	var repoDigests []string
 	if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &repoDigests); err != nil {

@@ -299,7 +299,7 @@ var contracts = map[ActionType]contract{
 	ActionTimeConfigApply: {cancel: CancelCheckpointOnly, retry: RetryAfterReplan, rollback: RollbackCompensating, verify: VerifyPlanRecheck},
 	// The timezone has no lock class of its own in the registry, but it rewrites
 	// the clock configuration the time sources change goes through, and that
-	// change holds the units class for its daemon reload; the timezone joins it
+	// change holds the units class for its daemon reload; the timezone joins it.
 	ActionTimezoneSet: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom, extra: []ResourceClaim{exclusive(LockUnits)}},
 
 	// The kernel. A sysctl value and a module take the network as well: they
@@ -349,7 +349,7 @@ var contracts = map[ActionType]contract{
 	ActionDomainLeave: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom, weight: 2},
 	// A keytab renewal is one fetch that replaces the key once it lands: the old
 	// key is already retired in the directory, so there is no way back, only
-	// another renewal; the host's own verification - the principal's key version
+	// another renewal; the host's own verification - the principal's key version.
 	ActionIdentityKeytabRenew: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackNone, verify: VerifyCustom},
 
 	// Local accounts.

@@ -14,18 +14,9 @@ import (
 	"time"
 )
 
-// The fault of chapter 23, "expired agent certificate": the gateway turns
-// the host away and the panel has to say so, not show a host that looks
-// switched off.
-//
-// The expired certificate itself is out of the test's reach: the key of the
-// fleet CA lies on the panel machine and nothing here can sign with it, so
-// the classification of an expired and a not-yet-valid certificate is
-// covered by the unit test of the gateway with certificates minted there.
-// What the fleet can show is the rest of the path, with a refusal the API
-// can cause: the host is refused at the session layer, the refusal stands
-// on the host with a code and a time, the list filters by it, and the next
-// session that opens clears it.
+// The fault of chapter 23, "expired agent certificate": the gateway turns the
+// host away and the panel has to say so, not show a host that looks switched
+// off.
 func TestRefusedConnectionIsNamedOnTheHost(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -73,9 +64,9 @@ func TestRefusedConnectionIsNamedOnTheHost(t *testing.T) {
 		t.Errorf("the refused host is not on the list filtered by its refusal")
 	}
 
-	// Released, the host connects, and the reason it could not is gone
-	// with the session that opened: an old refusal must not send the
-	// operator after a fault the host no longer has.
+	// Released, the host connects, and the reason it could not is gone with the
+	// session that opened: an old refusal must not send the operator after a
+	// fault the host no longer has.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/quarantine/release",
 		map[string]any{"reason": hardeningReason}, nil, http.StatusOK)
 	if err := knock(ctx, identity); err != nil {
@@ -104,9 +95,8 @@ func (h *harness) hostRefusal(hostID string) *struct {
 	return view.LastConnectionRefusal
 }
 
-// knock opens the agent stream at the test gateway with the identity,
-// sends Hello and waits for the session configuration, then hangs up. Nil
-// means a session opened; the error is the gateway's refusal otherwise.
+// knock opens the agent stream at the test gateway with the identity, sends
+// Hello and waits for the session configuration, then hangs up.
 func knock(ctx context.Context, identity tls.Certificate) error {
 	return knockAs(ctx, envOr("FLOTESTRO_TEST_GATEWAY", defaultGateway), identity, nil)
 }
@@ -139,9 +129,9 @@ func (h *harness) enrollSyntheticHostWithIdentity(t *testing.T) (hostView, tls.C
 	if err := json.Unmarshal(raw, &result); err != nil {
 		t.Fatal(err)
 	}
-	// The synthetic machine disappears together with the test, straight in
-	// the database, as the plain helper does it: the product has no such
-	// operation and should not.
+	// The synthetic machine disappears together with the test, straight in the
+	// database, as the plain helper does it: the product has no such operation
+	// and should not.
 	t.Cleanup(func() {
 		ctx := context.Background()
 		if _, err := h.database(ctx).Exec(ctx,

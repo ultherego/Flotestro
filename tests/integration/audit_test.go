@@ -12,8 +12,8 @@ import (
 )
 
 // TestReadingTheTrailIsOnTheTrail checks that a read of the audit log is
-// itself an audit event, with the filter it asked with: whoever looked at
-// what somebody did is part of the story of an incident.
+// itself an audit event, with the filter it asked with: whoever looked at what
+// somebody did is part of the story of an incident.
 func TestReadingTheTrailIsOnTheTrail(t *testing.T) {
 	h := newHarness(t)
 	marker := uniqueSubject("nobody")
@@ -46,8 +46,8 @@ func TestReadingTheTrailIsOnTheTrail(t *testing.T) {
 }
 
 // TestTheExportChainVerifies checks that an export of the trail is a file
-// whose hash chain the offline verifier accepts, and that the export
-// itself is on the trail.
+// whose hash chain the offline verifier accepts, and that the export itself is
+// on the trail.
 func TestTheExportChainVerifies(t *testing.T) {
 	h := newHarness(t)
 	since := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
@@ -90,9 +90,9 @@ func TestTheExportChainVerifies(t *testing.T) {
 	}
 }
 
-// TestAnExpiredBindingGrantsNothingAtTheDoor checks that a role bound with
-// a validity already past grants nothing, and that one with time left
-// grants as before.
+// TestAnExpiredBindingGrantsNothingAtTheDoor checks that a role bound with a
+// validity already past grants nothing, and that one with time left grants as
+// before.
 func TestAnExpiredBindingGrantsNothingAtTheDoor(t *testing.T) {
 	h := newHarness(t)
 	yesterday := time.Now().Add(-24 * time.Hour).UTC().Format(time.RFC3339)
@@ -201,8 +201,8 @@ func TestTheAccessReviewFlagsAFreshAdministrator(t *testing.T) {
 }
 
 // TestSettingsMaskTheSecrets checks that the settings screen names the
-// identity provider and shows the client secret as set or not, never as
-// its value.
+// identity provider and shows the client secret as set or not, never as its
+// value.
 func TestSettingsMaskTheSecrets(t *testing.T) {
 	h := newHarness(t)
 	var settings struct {

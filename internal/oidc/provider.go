@@ -1,11 +1,5 @@
 // Package oidc handles the login of operators through an external identity
-// provider. The panel never accepts the name of a group from a request: the
-// roles come from a signed token with a verified issuer and audience alone.
-//
-// The verification of the signature and the rotation of the keys are done by
-// the go-oidc library. A JWT validation of one's own is a common source of
-// holes (alg=none, a confused kid, a missing audience check), and this is the
-// code the whole access to the panel depends on.
+// provider.
 package oidc
 
 import (
@@ -37,14 +31,8 @@ type Config struct {
 	// the user.
 	GroupsClaim string
 	HTTPClient  *http.Client
-	// AdminLogout lets the panel end a user's sessions at the provider when
-	// the user is disabled from the panel. It works against a Keycloak
-	// realm alone, through the admin API, with the panel's own client
-	// credentials: the client needs a service account with the realm
-	// management roles view-users and manage-users. Off by default, because
-	// the panel's local denial is what cuts the user off; this closes the
-	// window in which the provider would still log them into other
-	// applications.
+	// AdminLogout lets the panel end a user's sessions at the provider when the
+	// user is disabled from the panel.
 	AdminLogout bool
 }
 
@@ -116,8 +104,7 @@ type AuthFlow struct {
 }
 
 // StepUp describes a demand for another authentication. The operations of the
-// greatest impact require a fresh login rather than merely holding a
-// session.
+// greatest impact require a fresh login rather than merely holding a session.
 type StepUp struct {
 	// Force demands another authentication even with a valid session at the
 	// provider (prompt=login, max_age=0).
@@ -127,9 +114,7 @@ type StepUp struct {
 	ACRValues string
 }
 
-// BeginAuth builds the login address together with PKCE. The verifier stays on
-// the side of the server; only its digest reaches the browser in the
-// challenge.
+// BeginAuth builds the login address together with PKCE.
 func (p *Provider) BeginAuth(stepUp StepUp) (*AuthFlow, error) {
 	state, err := randomString(32)
 	if err != nil {
@@ -149,10 +134,7 @@ func (p *Provider) BeginAuth(stepUp StepUp) (*AuthFlow, error) {
 	}, nil
 }
 
-// authOptions assembles the parameters of the authorisation request. At a
-// step-up we add prompt=login and max_age=0: without them the provider would
-// send the existing session back and the panel would treat an old
-// authentication as fresh.
+// authOptions assembles the parameters of the authorisation request.
 func authOptions(nonce, verifier string, stepUp StepUp) []oauth2.AuthCodeOption {
 	options := []oauth2.AuthCodeOption{
 		coreoidc.Nonce(nonce),
@@ -185,20 +167,15 @@ type Claims struct {
 	Name              string
 	Groups            []string
 
-	// AuthTime is the moment the provider actually authenticated the user. A
-	// zero value means the provider did not give it and must not be read as "a
-	// moment ago".
+	// AuthTime is the moment the provider actually authenticated the user.
 	AuthTime time.Time
-	// ACR and AMR describe the way of the authentication. The panel does not
-	// interpret them in its own way: MFA belongs to the identity provider, and
-	// the panel only checks whether it got the declared level.
+	// ACR and AMR describe the way of the authentication.
 	ACR string
 	AMR []string
 }
 
 // Exchange exchanges the authorisation code for the tokens and verifies the
-// identity token. The nonce is checked, because without it a token from
-// another login session could be injected into a running flow.
+// identity token.
 func (p *Provider) Exchange(ctx context.Context, code, codeVerifier, nonce string) (*TokenSet, *Claims, error) {
 	exchangeCtx := coreoidc.ClientContext(ctx, p.client)
 	token, err := p.oauth.Exchange(exchangeCtx, code, oauth2.VerifierOption(codeVerifier))
@@ -254,12 +231,9 @@ func (p *Provider) Refresh(ctx context.Context, refreshToken string) (*TokenSet,
 	return set, nil, nil
 }
 
-// IsInvalidGrant says whether a renewal failed because the provider no
-// longer honours the refresh token: the user was disabled or deleted, the
-// provider's session was logged out, or the token was revoked. Every other
-// failure - the provider unreachable, a malformed answer, a signature that
-// does not verify - says nothing about the user and is treated as
-// transient by the callers.
+// IsInvalidGrant says whether a renewal failed because the provider no longer
+// honours the refresh token: the user was disabled or deleted, the provider's
+// session was logged out, or the token was revoked.
 func IsInvalidGrant(err error) bool {
 	var retrieve *oauth2.RetrieveError
 	return errors.As(err, &retrieve) && retrieve.ErrorCode == "invalid_grant"
@@ -298,9 +272,7 @@ func (p *Provider) verify(ctx context.Context, rawIDToken, expectedNonce string)
 	return claims, nil
 }
 
-// LogoutURL builds the logout address at the provider. Invalidating the
-// session of the panel is not enough: without this the provider would log the
-// user in again without asking.
+// LogoutURL builds the logout address at the provider.
 func (p *Provider) LogoutURL(idToken, redirectAfter string) string {
 	var endpoint struct {
 		EndSessionEndpoint string `json:"end_session_endpoint"`
@@ -324,19 +296,14 @@ func (p *Provider) LogoutURL(idToken, redirectAfter string) string {
 // logout on. It is not a failure: the local denial holds without it.
 var ErrAdminLogoutDisabled = errors.New("the provider logout is not enabled")
 
-// ErrNotKeycloak means an issuer without a realm in its address. The admin
-// API the logout uses is Keycloak's; another provider gets nothing sent to
-// an address that would be invented.
+// ErrNotKeycloak means an issuer without a realm in its address.
 var ErrNotKeycloak = errors.New("the issuer is not a Keycloak realm")
 
-// ErrSubjectNotFound means the provider knows no user by that name. The
-// panel's account and the provider's may drift - a user renamed in the
-// directory, or one that only ever held an API token.
+// ErrSubjectNotFound means the provider knows no user by that name.
 var ErrSubjectNotFound = errors.New("the provider knows no such user")
 
-// keycloakRealm splits the issuer into the address of the server and the
-// realm name. Keycloak issues under {server}/realms/{realm}, and the admin
-// API lives under {server}/admin/realms/{realm}.
+// keycloakRealm splits the issuer into the address of the server and the realm
+// name.
 func keycloakRealm(issuer string) (server, realm string, ok bool) {
 	base, name, found := strings.Cut(strings.TrimSuffix(issuer, "/"), "/realms/")
 	if !found || name == "" || strings.Contains(name, "/") {
@@ -345,17 +312,9 @@ func keycloakRealm(issuer string) (server, realm string, ok bool) {
 	return base, name, true
 }
 
-// LogoutSubject ends every session the provider holds for the user, so a
-// user disabled in the panel is not logged into other applications by the
-// provider's own session until it expires. The subject is the login name
-// the panel knows the user by - for a directory-backed realm, the uid.
-//
-// The answer says what happened and nothing more: the caller records it
-// and never fails on it. A disabled installation answers
-// ErrAdminLogoutDisabled, an issuer that is not a realm ErrNotKeycloak, a
-// user the realm does not know ErrSubjectNotFound, and a refusal by the
-// admin API carries its status - the usual cause being a service account
-// without the view-users and manage-users roles.
+// LogoutSubject ends every session the provider holds for the user, so a user
+// disabled in the panel is not logged into other applications by the
+// provider's own session until it expires.
 func (p *Provider) LogoutSubject(ctx context.Context, subject string) error {
 	if !p.config.AdminLogout {
 		return ErrAdminLogoutDisabled
@@ -373,9 +332,9 @@ func (p *Provider) LogoutSubject(ctx context.Context, subject string) error {
 	}
 	admin := server + "/admin/realms/" + neturl.PathEscape(realm)
 
-	// The lookup asks for the exact name: a search by prefix would match
-	// "anna" against "annabel", and logging the wrong person out is a
-	// different mistake from logging nobody out.
+	// The lookup asks for the exact name: a search by prefix would match "anna"
+	// against "annabel", and logging the wrong person out is a different mistake
+	// from logging nobody out.
 	query := neturl.Values{"username": {subject}, "exact": {"true"}, "max": {"2"}}
 	var users []struct {
 		ID       string `json:"id"`
@@ -400,10 +359,8 @@ func (p *Provider) LogoutSubject(ctx context.Context, subject string) error {
 	return nil
 }
 
-// serviceToken gets an access token for the panel's own client through
-// the client credentials grant. The token is fetched per call and never
-// kept: a logout is rare, and a cached admin token would be a credential
-// lying in memory for the sake of a request that comes once a week.
+// serviceToken gets an access token for the panel's own client through the
+// client credentials grant.
 func (p *Provider) serviceToken(ctx context.Context) (string, error) {
 	form := neturl.Values{
 		"grant_type":    {"client_credentials"},
@@ -435,10 +392,7 @@ func (p *Provider) serviceToken(ctx context.Context) (string, error) {
 	return body.AccessToken, nil
 }
 
-// adminCall makes one request to the admin API with the service token. A
-// body is decoded into out when given; a status outside 2xx is an error
-// that names it, because the status is the whole diagnosis - 403 is the
-// missing role, 404 a realm the address does not have.
+// adminCall makes one request to the admin API with the service token.
 func (p *Provider) adminCall(ctx context.Context, token, method, address string, out any) error {
 	request, err := http.NewRequestWithContext(ctx, method, address, nil)
 	if err != nil {
@@ -472,10 +426,7 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// timeClaim reads a timestamp expressed in seconds of the epoch. A missing
-// value gives the zero time, which means "undetermined": the panel must not
-// assume the authentication happened a moment ago when the provider did not
-// say so.
+// timeClaim reads a timestamp expressed in seconds of the epoch.
 func timeClaim(claims map[string]any, name string) time.Time {
 	switch value := claims[name].(type) {
 	case float64:

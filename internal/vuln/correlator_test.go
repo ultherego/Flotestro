@@ -27,10 +27,8 @@ func debPackage(name, version, source string) packages.InstalledPackage {
 	if source == "" {
 		source = name
 	}
-	// APT does not record a vendor with the package, so the origin is
-	// collected by the agent from the repository metadata. A package without
-	// one is undetermined - and that is how it should be, but here we
-	// describe a package of the distribution.
+	// APT does not record a vendor with the package, so the origin is collected
+	// by the agent from the repository metadata.
 	return packages.InstalledPackage{
 		Name: name, Version: version, Architecture: "amd64", SourceName: source,
 		SourceVersion: version, Origin: "deb.debian.org",
@@ -126,8 +124,8 @@ func TestTheVendorVersionSettlesTheAssessment(t *testing.T) {
 	}
 
 	// A version with a backported fix looks by the upstream numbering exactly
-	// like a vulnerable one - and only the rule of the distribution tells
-	// them apart.
+	// like a vulnerable one - and only the rule of the distribution tells them
+	// apart.
 	vulnerable := Evaluate(debianInput(debPackage("openssl", "3.0.11-1~deb13u1", "openssl")),
 		debianSnapshot("trixie"), advisories, 6*time.Hour, now)
 	if vulnerable.State.Affected != 1 || len(vulnerable.Findings) != 1 {
@@ -203,9 +201,8 @@ func TestTheVendorStatusesHaveSeparateMeanings(t *testing.T) {
 		if finding.RepositoryCandidate != c.candidate {
 			t.Errorf("%s: candidate in the repositories = %q", name, finding.RepositoryCandidate)
 		}
-		// Only the package plan of the host knows whether the transaction can
-		// be carried out. The panel has no right to promise that from an
-		// advisory alone.
+		// Only the package plan of the host knows whether the transaction can be
+		// carried out.
 		if finding.Transaction != TransactionUnknown {
 			t.Errorf("%s: transaction = %q, and nobody computed a plan",
 				name, finding.Transaction)
@@ -214,9 +211,8 @@ func TestTheVendorStatusesHaveSeparateMeanings(t *testing.T) {
 }
 
 func TestAPackageFromOutsideTheDistributionIsUnknown(t *testing.T) {
-	// An RPM rebuilt locally or taken from a foreign repository has a version
-	// the vendor does not know. Pretending its findings apply to it would
-	// give a false "safe".
+	// An RPM rebuilt locally or taken from a foreign repository has a version the
+	// vendor does not know.
 	own := packages.InstalledPackage{
 		Name: "docker-ce", Version: "27.1.1", Release: "1.fc42", Architecture: "x86_64",
 		SourceName: "docker-ce", Vendor: "Docker Inc.",
@@ -278,9 +274,9 @@ func TestAnRPMAssessmentTakesTheEpochIntoAccount(t *testing.T) {
 }
 
 func TestAFindingForAnotherArchitectureDoesNotConcernThePackage(t *testing.T) {
-	// The vendor releases separate packages for every architecture; a finding
-	// for i686 does not fix the x86_64 package - and attached to it would give
-	// two findings about the same package.
+	// The vendor releases separate packages for every architecture; a finding for
+	// i686 does not fix the x86_64 package - and attached to it would give two
+	// findings about the same package.
 	pkg := packages.InstalledPackage{
 		Name: "openssh", Version: "9.9p1", Release: "13.fc42", Architecture: "x86_64",
 		SourceName: "openssh", Vendor: "Fedora Project",
@@ -306,10 +302,8 @@ func TestAFindingForAnotherArchitectureDoesNotConcernThePackage(t *testing.T) {
 	if len(evaluation.Findings) != 1 {
 		t.Fatalf("read %d findings: %+v", len(evaluation.Findings), evaluation.Findings)
 	}
-	// A finding from the metadata of the host means the vendor released a fix
-	// and that it lies in a repository the host takes packages from. Whether
-	// the transaction goes through is a third question - and the package plan
-	// answers it.
+	// A finding from the metadata of the host means the vendor released a fix and
+	// that it lies in a repository the host takes packages from.
 	finding := evaluation.Findings[0]
 	if finding.VendorFix != VendorFixKnown {
 		t.Errorf("vendor fix = %q", finding.VendorFix)
@@ -324,13 +318,6 @@ func TestAFindingForAnotherArchitectureDoesNotConcernThePackage(t *testing.T) {
 
 // TestDebianComparesTheSourceVersion guards the rule that settles the
 // correctness of the whole assessment for Debian.
-//
-// The tracker speaks about the source package and gives its version. The
-// binary version is sometimes from an entirely different numbering: the
-// metapackage "gcc" from the source "gcc-defaults" carries the version of the
-// compiler it points at rather than the version of its own source. Comparing
-// the binary one against a source finding then calls the package fixed
-// although it does not carry the fix - and that is a miss, not a false alarm.
 func TestDebianComparesTheSourceVersion(t *testing.T) {
 	metapackage := packages.InstalledPackage{
 		Name: "gcc", Epoch: "4", Version: "12.2.0", Release: "3", Architecture: "amd64",

@@ -10,7 +10,6 @@ import (
 // The sudo check judges what the helper parsed: the distribution's default
 // grant to the sudo group passes because it asks for a password, a
 // passwordless drop-in fails with the file named, and a policy the helper
-// could not read is undetermined rather than clean.
 func TestRootWithoutPasswordIsJudgedFromTheParsedPolicy(t *testing.T) {
 	group := sudoers.Rule{
 		Users: []string{"%sudo"}, Hosts: []string{"ALL"}, RunAs: []string{"ALL"}, Commands: []string{"ALL"},
@@ -71,11 +70,8 @@ func TestRootWithoutPasswordIsJudgedFromTheParsedPolicy(t *testing.T) {
 	}
 }
 
-// A policy the parser did not fully understand cannot pass: a skipped line
-// or an unreadable drop-in may hold the very grant the check looks for.
-// The verdict is undetermined with parse_error and the note says what was
-// not read. A grant the parser did find still fails - what was read is a
-// finding whatever else was missed.
+// A policy the parser did not fully understand cannot pass: a skipped line or
+// an unreadable drop-in may hold the very grant the check looks for.
 func TestAParserProblemNeverPassesTheSudoCheck(t *testing.T) {
 	group := sudoers.Rule{
 		Users: []string{"%sudo"}, Hosts: []string{"ALL"}, RunAs: []string{"ALL"}, Commands: []string{"ALL"},

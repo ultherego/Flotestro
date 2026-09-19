@@ -8,10 +8,8 @@ import (
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 )
 
-// applyCompose asks the helper for a plan or a deployment of a Compose project.
-//
-// The agent has access neither to the Docker socket nor to the manifest
-// directory: both belong to root, and the agent runs without privileges.
+// applyCompose asks the helper for a plan or a deployment of a Compose
+// project.
 func (e *TaskExecutor) applyCompose(ctx context.Context, task *agentv1.TaskEnvelope,
 	action *agentv1.ComposeAction) *agentv1.TaskResult {
 	timeout := time.Duration(task.GetLimits().GetTimeoutSeconds()) * time.Second

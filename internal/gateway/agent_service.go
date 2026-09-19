@@ -288,7 +288,7 @@ func (s *AgentService) Connect(ctx context.Context,
 
 	// The host's own proof on a relayed session: the envelope on Hello, signed
 	// with the host key, settles whether the session is end_to_end or rests on
-	// the relay alone - and whether it opens at all under the mode of the
+	// the relay alone - and whether it opens at all under the mode of the.
 	var relayed *relayedSession
 	if relayID != "" {
 		strength, err := s.admitRelayedHello(ctx, who, first)
@@ -484,7 +484,7 @@ type relayedSession struct {
 
 // errMessageDropped says a relayed message was put aside on its own without
 // ending the session: a message the panel consumed already and the relay
-// carried again, a sequence the session never spent, or a message without an
+// carried again, a sequence the session never spent, or a message without an.
 var errMessageDropped = errors.New("the message was dropped")
 
 // admitRelayedHello settles the strength of a relayed session from its Hello.
@@ -1085,7 +1085,7 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 	}
 	// Everything a result changes on the host's record - the desired state of a
 	// file, a deployed certificate, a package list, a backup run, the inventory
-	// fragments the agent sent back with it - follows the settlement rather than
+	// fragments the agent sent back with it - follows the settlement rather than.
 	if !accepted {
 		s.recordUnappliedResult(ctx, hostID, jobID, attemptID, statusName, result, attemptStatus)
 		return nil
@@ -1097,7 +1097,7 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 	if result.GetStatus() == agentv1.TaskResult_STATUS_SUCCEEDED {
 		// The content the host reported goes into the store of versions first:
 		// without it there is no getting back to the state from before the panel
-		// managed the file, and the desired state written below names a version that
+		// managed the file, and the desired state written below names a version
 		var restored []byte
 		if file := result.GetFileResult(); file != nil && len(file.GetContent()) > 0 &&
 			!file.GetTruncated() {
@@ -2430,7 +2430,7 @@ func (s *AgentService) openSession(ctx context.Context, session *Session,
 
 	// The older sessions of this host are closed in the database at once: a row
 	// left open on a gateway that no longer serves the host inflates every
-	// measurement that counts connections and has the scheduler send jobs into
+	// measurement that counts connections and has the scheduler send jobs into.
 	if _, err := s.pool.Exec(ctx, `
 		update agent_sessions set ended_at = now(), end_reason = 'superseded'
 		where host_id = $1 and epoch < $2 and ended_at is null`,
@@ -2973,7 +2973,7 @@ const (
 	RelayIdentityPrefer RelayIdentityMode = "prefer"
 	// RelayIdentityEnforce requires the host's envelope on a relayed session: a
 	// relay that names the host alone is refused as relay_identity_missing, and
-	// an agent that does not sign behind a relay that attests as
+	// an agent that does not sign behind a relay that attests as.
 	RelayIdentityEnforce RelayIdentityMode = "enforce"
 )
 

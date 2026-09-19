@@ -11,8 +11,7 @@ import (
 )
 
 // The rate limit protects the link and the notification database from a host
-// printing megabytes of logs. Without it one host in an error loop would flood
-// the panel.
+// printing megabytes of logs.
 func TestTheRateBudgetLimitsTheFlow(t *testing.T) {
 	budget := newRateBudget(100)
 
@@ -114,8 +113,6 @@ func TestThePreviewArgumentsHaveLimits(t *testing.T) {
 
 // A live view takes the narrowing a read takes: the same unit, the same
 // priority, the same start of the range and the same boot of the host.
-// Only the end of the range is missing - the view ends by its own limit -
-// and a boot identifier that is not one never becomes "every boot".
 func TestThePreviewTakesTheNarrowingOfARead(t *testing.T) {
 	priority := uint32(4)
 	args, err := previewArguments(&opspec.JournalPayload{
@@ -145,9 +142,7 @@ func TestThePreviewTakesTheNarrowingOfARead(t *testing.T) {
 }
 
 // What the view could not carry is counted, and it is counted where the
-// operator is looking: in the batch that is missing it. A number that
-// arrives only at the end of the view leaves a gap that reads as a quiet
-// host.
+// operator is looking: in the batch that is missing it.
 func TestTheDroppedLinesAreCountedInTheBatchAndInTheTotal(t *testing.T) {
 	var batches []*agentv1.TaskLogLines
 	executor := &TaskExecutor{logLines: func(lines *agentv1.TaskLogLines) {

@@ -12,10 +12,6 @@ const FirewallCmdPath = "/usr/bin/firewall-cmd"
 var zoneHeader = regexp.MustCompile(`^(\S+)(?:\s+\(([^)]*)\))?$`)
 
 // ParseZones reads the output of "firewall-cmd --list-all-zones".
-//
-// firewalld describes access with zones, not rules: the operator's question
-// is "what is open on this interface", not "which rule matches first".
-// Rewriting that into a rule list would lose the difference.
 func ParseZones(output, defaultZone string) []Zone {
 	var zones []Zone
 	var current *Zone
@@ -24,9 +20,8 @@ func ParseZones(output, defaultZone string) []Zone {
 		if strings.TrimSpace(raw) == "" {
 			continue
 		}
-		// A zone header starts at the beginning of the row; the zone fields
-		// are indented. That is the only thing telling them apart in this
-		// format.
+		// A zone header starts at the beginning of the row; the zone fields are
+		// indented.
 		if !strings.HasPrefix(raw, " ") && !strings.HasPrefix(raw, "\t") {
 			fields := zoneHeader.FindStringSubmatch(strings.TrimSpace(raw))
 			if fields == nil {
@@ -66,11 +61,6 @@ func ParseZones(output, defaultZone string) []Zone {
 }
 
 // PortArguments assembles the command opening a port in a zone.
-//
-// The change is permanent and reloaded at once: firewalld keeps the runtime
-// and the permanent state separately, and a change in only one of them
-// vanishes after a reboot or after a reload - each time at a different
-// moment.
 func PortArguments(zone, port, protocol string, open bool) ([][]string, error) {
 	if err := validateZone(zone); err != nil {
 		return nil, err

@@ -10,22 +10,10 @@ import (
 	"time"
 )
 
-// Plan describes the difference between the certificate the host has under
-// a path and the one that is to land there.
-//
-// The same certificate deployed to two hosts is almost never the same
-// change: one has a certificate expiring tomorrow there, another the same
-// as ordered, a third has no file at all, and each reloads a different
-// service. The operator's approval is meant to cover those differences.
-//
-// The private key is not in the plan and not in the fingerprint: the plan
-// is stored in the database and shown in the panel, so it would be a place
-// of a leak. The plan says about the key only where the host takes it from
-// - the secret name and version.
+// Plan describes the difference between the certificate the host has under a
+// path and the one that is to land there.
 type Plan struct {
-	// Kind names the plan kind. The certificates module computes three
-	// different plans with the same task, and the receiver is not meant to
-	// recognise them by which fields happen to be empty.
+	// Kind names the plan kind.
 	Kind    string `json:"kind"`
 	Path    string `json:"path"`
 	KeyPath string `json:"key_path,omitempty"`
@@ -56,9 +44,8 @@ type Plan struct {
 
 	Changes []string `json:"changes,omitempty"`
 	// Refusal names the reason the deployment will not land on this host:
-	// material the host will not accept, a target outside the certificate
-	// scope, no reference to the key. A plan with a refusal is an answer
-	// the operator is meant to see before approving.
+	// material the host will not accept, a target outside the certificate scope,
+	// no reference to the key.
 	Refusal string `json:"refusal,omitempty"`
 
 	PlanHash string `json:"plan_hash"`
@@ -94,10 +81,6 @@ type Order struct {
 
 // Compute computes the difference between the certificate found and the
 // ordered one.
-//
-// A missing file and an unread file are two different answers: the first
-// means "the certificate will be created", the second "it is unknown what
-// lies there" - and the second must not pretend to be the first.
 func Compute(current Certificate, order Order, now time.Time) Plan {
 	plan := Plan{
 		Kind: KindDeployment,
@@ -129,9 +112,7 @@ func Compute(current Certificate, order Order, now time.Time) Plan {
 			return plan.withRefusal(err.Error())
 		}
 	}
-	// The private key travels to the host only as a reference to the
-	// store. A deployment without it would leave the new certificate with
-	// the old key, and the service would not come up after the reload.
+	// The private key travels to the host only as a reference to the store.
 	if order.KeyPath != "" && !order.HasKey {
 		return plan.withRefusal("a key deployment requires a reference to the secret store")
 	}
@@ -146,9 +127,8 @@ func Compute(current Certificate, order Order, now time.Time) Plan {
 	if err := CheckChain(certs); err != nil {
 		return plan.withRefusal(err.Error())
 	}
-	// A probe target outside the certificate scope would end in rolling
-	// back the deployment after the files were replaced. Better to say so
-	// before approval.
+	// A probe target outside the certificate scope would end in rolling back the
+	// deployment after the files were replaced.
 	if order.Target != "" {
 		if name := targetName(order.Target); name != "" && !Covers(certs[0], name) {
 			return plan.withRefusal("the certificate does not cover the name " + name +
@@ -164,9 +144,8 @@ func Compute(current Certificate, order Order, now time.Time) Plan {
 
 	switch {
 	case plan.Exists && plan.CurrentFingerprint == "":
-		// The file could not be read. That means neither "will be created"
-		// nor "no change": the operator is meant to see the reason before
-		// approving.
+		// The file could not be read. That means neither "will be created" nor "no
+		// change": the operator is meant to see the reason before approving.
 		return plan.withRefusal("the current certificate was not read: " + plan.UnavailableReason)
 	case !plan.Exists:
 		plan.Action = PlanCreate
@@ -200,9 +179,9 @@ func Compute(current Certificate, order Order, now time.Time) Plan {
 	return plan
 }
 
-// Refuse records a refusal reason learned after the differences were
-// computed and recomputes the fingerprint: a plan with a refusal is a
-// different answer than a plan without one.
+// Refuse records a refusal reason learned after the differences were computed
+// and recomputes the fingerprint: a plan with a refusal is a different answer
+// than a plan without one.
 func (p *Plan) Refuse(reason string) {
 	p.Refusal = reason
 	p.PlanHash = planFingerprint(*p)
@@ -237,8 +216,7 @@ func orNone(value string) string {
 }
 
 // planFingerprint computes the plan fingerprint excluding the fingerprint
-// itself. The private key is not in the plan, so it is not in the
-// fingerprint either.
+// itself.
 func planFingerprint(plan Plan) string {
 	stripped := plan
 	stripped.PlanHash = ""
@@ -252,21 +230,12 @@ func planFingerprint(plan Plan) string {
 
 // FileMissing says whether the unavailability reason describes a file that
 // does not exist.
-//
-// A non-existent file and an unread file are two different answers: the
-// first is a target state to create, the second is no knowledge.
 func FileMissing(reason string) bool {
 	return strings.Contains(reason, "no such file or directory") ||
 		strings.Contains(reason, os.ErrNotExist.Error())
 }
 
 // RenewalPlan describes a certificate renewal by the host daemon.
-//
-// A renewal is a different change than a deployment: the panel sends no
-// material, it only asks the daemon to fetch a new certificate from its
-// authority. That is why the plan talks about what the host has now and
-// whether it has anyone to order the renewal from at all - not about the
-// content that will come.
 type RenewalPlan struct {
 	Kind   string `json:"kind"`
 	Path   string `json:"path"`
@@ -277,8 +246,6 @@ type RenewalPlan struct {
 	CurrentNotAfter    *time.Time `json:"current_not_after,omitempty"`
 	DaysToExpiry       *int       `json:"days_to_expiry,omitempty"`
 	// Request is the identifier of the certmonger request on this host.
-	// The same certificate has a different identifier on every host, so
-	// the campaign gives the path and the host finds the request itself.
 	Request string `json:"request,omitempty"`
 	Status  string `json:"status,omitempty"`
 	CA      string `json:"ca,omitempty"`
@@ -304,10 +271,8 @@ func ComputeRenewal(current Certificate, tracking *Tracking, hasDaemon bool,
 	if err := ValidateUnit(unit); err != nil {
 		return plan.withRefusal(err.Error())
 	}
-	// The host daemon is the only one here who can renew: the panel has
-	// neither the key nor an agreement with the authority. A host without
-	// the daemon is not a host to be fixed by a change - it is a host that
-	// will not accept this change.
+	// The host daemon is the only one here who can renew: the panel has neither
+	// the key nor an agreement with the authority.
 	if !hasDaemon {
 		return plan.withRefusal("this host has no certmonger, so there is nobody to order the renewal from")
 	}
@@ -330,9 +295,9 @@ func ComputeRenewal(current Certificate, tracking *Tracking, hasDaemon bool,
 		plan.Changes = append(plan.Changes,
 			fmt.Sprintf("the current certificate expires in %d days", *plan.DaysToExpiry))
 	}
-	// The request state matters more here than the fact that the daemon
-	// knows it: CA_UNREACHABLE means care that does not work, and the
-	// operator is meant to see that before approval, not after.
+	// The request state matters more here than the fact that the daemon knows it:
+	// CA_UNREACHABLE means care that does not work, and the operator is meant to
+	// see that before approval, not after.
 	if tracking.Status != "" && tracking.Status != "MONITORING" {
 		plan.Changes = append(plan.Changes, "certmonger reports the state "+tracking.Status)
 	}
@@ -358,10 +323,6 @@ func (p RenewalPlan) withRefusal(reason string) RenewalPlan {
 
 // renewalPlanFingerprint computes the plan fingerprint excluding the
 // fingerprint itself.
-//
-// The request identifier is different on every host and changes with every
-// new request, so it enters the fingerprint: a renewal approved for one
-// request must not land on another.
 func renewalPlanFingerprint(plan RenewalPlan) string {
 	stripped := plan
 	stripped.PlanHash = ""

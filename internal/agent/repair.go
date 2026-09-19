@@ -9,11 +9,6 @@ import (
 )
 
 // repairPackages unblocks the package operations through the root helper.
-//
-// The operation ends in success only when no blocking package is left after the
-// repair. A partial repair is a negative result with a list of what remains: a
-// host on which the updates still will not go through must not be reported as
-// repaired.
 func (e *TaskExecutor) repairPackages(ctx context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.PackageRepairPayload) *agentv1.TaskResult {
 	timeout := timeoutOf(task, opspec.ActionPackageRepair)
@@ -64,9 +59,7 @@ func (e *TaskExecutor) repairPackages(ctx context.Context, task *agentv1.TaskEnv
 
 	message := "the package operations were unblocked"
 	if len(detail.GetAnswered()) == 0 {
-		// A repair of a host that needed nothing is a success. A campaign
-		// covering the whole fleet will meet such hosts and must not report
-		// errors because of them.
+		// A repair of a host that needed nothing is a success.
 		message = "nothing needed a repair"
 	}
 	return &agentv1.TaskResult{

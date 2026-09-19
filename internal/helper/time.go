@@ -13,11 +13,6 @@ import (
 )
 
 // syncWindow limits the wait for the daemon after a change of the sources.
-//
-// A write and an effect are two different things: a file with servers is not
-// yet a synchronized clock. With iburst the first exchange takes a few seconds,
-// so the wait is long enough to answer the question "did it work" and no
-// longer, so as not to hold the task forever.
 const (
 	syncWindow = 45 * time.Second
 	syncStep   = 5 * time.Second
@@ -69,9 +64,9 @@ func (s *Server) writeTimeServers(ctx context.Context, action *helperv1.TimeRequ
 	}
 
 	snapshot := hosttime.Collect(ctx, toolOutput)
-	// A change approved on the basis of a plan is to enter the state the
-	// operator looked at: a different panel file or a different daemon than at
-	// planning time is a refusal, not a warning.
+	// A change approved on the basis of a plan is to enter the state the operator
+	// looked at: a different panel file or a different daemon than at planning
+	// time is a refusal, not a warning.
 	if expected := action.GetPlanHash(); expected != "" {
 		if now := hosttime.Compute(snapshot, servers, action.GetEnableDropin()); now.PlanHash != expected {
 			return reject(ErrorPreconditionFailed,
@@ -89,8 +84,7 @@ func (s *Server) writeTimeServers(ctx context.Context, action *helperv1.TimeRequ
 }
 
 // planTimeServers computes the difference for a change of the time sources
-// without touching the host. A missing daemon and a missing directory without
-// consent are a refusal in the plan.
+// without touching the host.
 func (s *Server) planTimeServers(ctx context.Context, action *helperv1.TimeRequest) *helperv1.HelperResponse {
 	snapshot := hosttime.Collect(ctx, toolOutput)
 	plan := hosttime.Compute(snapshot, action.GetServers(), action.GetEnableDropin())
@@ -116,9 +110,9 @@ func (s *Server) planTimeServers(ctx context.Context, action *helperv1.TimeReque
 // writeChrony adds the servers to the directory chrony includes on its own.
 func (s *Server) writeChrony(ctx context.Context, servers []string,
 	snapshot hosttime.Snapshot, directoryConsent bool) *helperv1.HelperResponse {
-	// A host that includes no directory can be brought into a writable state
-	// with one appended line - but only with explicit consent: this is the only
-	// place where the panel touches somebody else's configuration.
+	// A host that includes no directory can be brought into a writable state with
+	// one appended line - but only with explicit consent: this is the only place
+	// where the panel touches somebody else's configuration.
 	restartNeeded := false
 	if snapshot.ManagedPath == "" {
 		if !directoryConsent {
@@ -154,8 +148,7 @@ func (s *Server) writeChrony(ctx context.Context, servers []string,
 	}
 
 	// The daemon reloads the sources directory without a restart, so the host
-	// does not lose synchronization during the change. The configuration
-	// directory needs a restart.
+	// does not lose synchronization during the change.
 	message := "the servers were written"
 	if kind == hosttime.KindSources && !restartNeeded {
 		if output, err := toolOutput(ctx, hosttime.ChronycPath, "reload", "sources"); err != nil {
@@ -169,9 +162,8 @@ func (s *Server) writeChrony(ctx context.Context, servers []string,
 			unit = "chronyd.service"
 		}
 		if output, err := toolOutput(ctx, systemctlPath, "restart", unit); err != nil {
-			// A daemon that does not come up with the new configuration would
-			// leave the host without a clock. The previous content is restored
-			// and the daemon brought back up before the error is reported.
+			// A daemon that does not come up with the new configuration would leave the
+			// host without a clock.
 			restore(snapshot.ManagedPath, previous)
 			_, _ = toolOutput(ctx, systemctlPath, "restart", unit)
 			return reject(ErrorExecFailed, "restart "+unit+": "+err.Error()+" "+output)
@@ -185,10 +177,6 @@ func (s *Server) writeChrony(ctx context.Context, servers []string,
 
 // enableSourceDirectory creates the panel directory and points the daemon at
 // it.
-//
-// The line is appended in place and not by replacing the file: the file belongs
-// to the distribution, and appending preserves its owner, its permissions and
-// its SELinux label. The panel changes nothing there and removes nothing.
 func enableSourceDirectory(snapshot hosttime.Snapshot) *helperv1.HelperResponse {
 	if snapshot.ConfigPath == "" {
 		return reject(ErrorUnsupported, "the main chrony file was not found")
@@ -229,9 +217,7 @@ func (s *Server) writeTimesyncd(ctx context.Context, servers []string) *helperv1
 		return reject(ErrorExecFailed, "writing "+hosttime.TimesyncdFile+": "+err.Error())
 	}
 	// A host with synchronization switched off still has it switched off after
-	// the file is written: timesyncd does not run until timedated enables it. A
-	// write of the servers without this step would look successful and do
-	// nothing.
+	// the file is written: timesyncd does not run until timedated enables it.
 	if exists(hosttime.TimedatectlPath) {
 		if output, err := toolOutput(ctx, hosttime.TimedatectlPath, "set-ntp", "true"); err != nil {
 			restore(hosttime.TimesyncdFile, previous)
@@ -276,9 +262,8 @@ func (s *Server) setTimezone(ctx context.Context, action *helperv1.TimeRequest) 
 			snapshot.Timezone+" instead of "+zone)
 	}
 	message := "the zone was set to " + zone
-	// A hardware clock in local time will show a different hour at the next
-	// start after a zone change. This is a fact about the host, not about the
-	// operation.
+	// A hardware clock in local time will show a different hour at the next start
+	// after a zone change.
 	if snapshot.RTCInLocalTime != nil && *snapshot.RTCInLocalTime {
 		message += "; the hardware clock runs in local time, so after a restart the host will come up with a shifted hour"
 	}

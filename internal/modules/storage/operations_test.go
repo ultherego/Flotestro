@@ -121,9 +121,8 @@ func TestFilesystemResizeDependsOnType(t *testing.T) {
 	}
 }
 
-// The same volume has two names, and a hyphen in the group name is doubled
-// in the mapper form. Comparing the strings drifts exactly where the
-// operator looks.
+// The same volume has two names, and a hyphen in the group name is doubled in
+// the mapper form.
 func TestVolumeRecognisedByBothNames(t *testing.T) {
 	volume := LogicalVolume{Name: "root", Group: "debian-13-vg", Path: "/dev/debian-13-vg/root"}
 

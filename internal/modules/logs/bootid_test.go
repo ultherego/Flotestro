@@ -5,10 +5,9 @@ import (
 	"testing"
 )
 
-// The kernel and the journal spell one boot identifier two ways; both
-// reach journalctl as the bare lowercase form, and nothing else reaches
-// it at all - a wrong value would read as "no such boot" or, empty, as
-// every boot.
+// The kernel and the journal spell one boot identifier two ways; both reach
+// journalctl as the bare lowercase form, and nothing else reaches it at all -
+// a wrong value would read as "no such boot" or, empty, as every boot.
 func TestNormalizeBootIDTakesBothSpellingsAndNothingElse(t *testing.T) {
 	const bare = "2cd1131243654fe6b49ee4d704ea2c5a"
 	for _, raw := range []string{

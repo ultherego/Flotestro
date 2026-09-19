@@ -573,7 +573,7 @@ func (s *Store) MarkDispatched(ctx context.Context, jobID, attemptID string, fen
 
 // MarkDispatchedWithLease is MarkDispatched with the lease the caller chose:
 // the short dispatch lease for an agent that acknowledges a task, the
-// execution lease for one that never will - an agent from before the
+// execution lease for one that never will - an agent from before the.
 func (s *Store) MarkDispatchedWithLease(ctx context.Context, jobID, attemptID string,
 	fence Fence, lease time.Duration) error {
 	tx, err := s.pool.Begin(ctx)
@@ -609,7 +609,7 @@ func (s *Store) MarkDispatchedWithLease(ctx context.Context, jobID, attemptID st
 	}
 	// The envelope leaves before this row is written, and a quick agent
 	// acknowledges it in between: an attempt that was accepted already keeps the
-	// lease the acceptance gave it, and the job stays where the acknowledgement
+	// lease the acceptance gave it, and the job stays where the acknowledgement.
 	if _, err := tx.Exec(ctx, `
 		update job_attempts
 		   set dispatched_at = now(), session_id = $2,
@@ -1201,7 +1201,7 @@ func (s Sort) String() string {
 
 // sortColumn is one column the list can be ordered by: the SQL expression that
 // carries its order, the type the cursor's value is cast back to, the
-// rendering of a row's value for the cursor and the check of a value that came
+// rendering of a row's value for the cursor and the check of a value that
 type sortColumn struct {
 	expression string
 	kind       string

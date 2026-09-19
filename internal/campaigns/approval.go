@@ -9,9 +9,9 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// ApprovedPlan is the plan of one host as it was when the consent was
-// given: the digest of its envelope, the planner that computed it, who
-// consented and against which revision of the campaign, and the body.
+// ApprovedPlan is the plan of one host as it was when the consent was given:
+// the digest of its envelope, the planner that computed it, who consented and
+// against which revision of the campaign, and the body.
 type ApprovedPlan struct {
 	ApprovalID     string          `json:"approval_id"`
 	HostID         string          `json:"host_id"`
@@ -23,15 +23,9 @@ type ApprovedPlan struct {
 	CreatedAt      time.Time       `json:"created_at"`
 }
 
-// ApproveWithPlans approves a campaign and records, with the approval,
-// the plan of every host as it stands now: the consent has to keep what
-// it covered, because campaign_plans is overwritten by the next planning
-// and the fingerprint alone does not say what the approver read. The
-// policy revision is the revision of the campaign record the consent was
-// given against - its rollout policy included - as read before the
-// approval raised it. Everything is written in the caller's transaction:
-// there is no approval without its plans and no plans without the
-// approval.
+// ApproveWithPlans approves a campaign and records, with the approval, the
+// plan of every host as it stands now: the consent has to keep what it
+// covered, because campaign_plans is overwritten by the next planning and the
 func (s *Store) ApproveWithPlans(ctx context.Context, tx pgx.Tx, campaign Campaign,
 	approval Approval) (*Campaign, error) {
 	approved, err := s.Approve(ctx, tx, campaign.ID, approval)

@@ -14,10 +14,7 @@ import (
 )
 
 // The verifiers are checked against a host made of stub readers: every case
-// says what the host shows, and the test asks what the verifier makes of
-// it. Three answers matter and each is checked separately - a match, a
-// state other than the one ordered, and a host that could not be read,
-// which is never a pass and never a failure of the change.
+// says what the host shows, and the test asks what the verifier makes of it.
 
 func expectVerified(t *testing.T, found observation) {
 	t.Helper()
@@ -357,10 +354,9 @@ func TestAnUnknownVerifierIsNeverASuccess(t *testing.T) {
 	expectUnreadable(t, found)
 }
 
-// The layers above a bare disk are settled by a read of the host and never
-// by the exit code of a tool: mdadm exits zero on a member it accepted and
-// on one the array had already forgotten, and lvcreate rounds a size up to
-// whole extents without saying so.
+// The layers above a bare disk are settled by a read of the host and never by
+// the exit code of a tool: mdadm exits zero on a member it accepted and on one
+// the array had already forgotten, and lvcreate rounds a size up to whole
 func TestVerifyingAnArrayMember(t *testing.T) {
 	array := storage.RAIDArray{
 		Path: "/dev/md0", Name: "md0", UUID: "array-uuid", Level: "raid1",
@@ -518,8 +514,8 @@ func TestVerifyingADiskTakenIntoAGroup(t *testing.T) {
 }
 
 // A check that ran is confirmed by the filesystem still being there: the
-// outcome worth catching is a repair that ended with a filesystem the host
-// no longer recognises.
+// outcome worth catching is a repair that ended with a filesystem the host no
+// longer recognises.
 func TestVerifyingAFilesystemCheck(t *testing.T) {
 	host := func(snapshot storage.Snapshot) *hostReaders {
 		return &hostReaders{storage: func(context.Context) storage.Snapshot { return snapshot }}

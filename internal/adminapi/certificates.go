@@ -16,13 +16,8 @@ import (
 	"github.com/ultherego/flotestro/internal/secrets"
 )
 
-// certificateView joins what the host sees with what the panel knows about
-// the file.
-//
-// The certificate alone does not answer the operator's question. The
-// question is: is what lies on the host what the panel put there, who will
-// renew it and what breaks when the date passes. Only the combination of the
-// host observation, the watch scope and the deployment history answers that.
+// certificateView joins what the host sees with what the panel knows about the
+// file.
 type certificateView struct {
 	certmodule.Certificate
 	// Status is the panel's judgement, not a fact from the host.
@@ -50,9 +45,7 @@ type certificateView struct {
 type certificateReport struct {
 	HostID       string            `json:"host_id"`
 	Certificates []certificateView `json:"certificates"`
-	// Targets lists the panel's watch scope. A target without an
-	// observation is a separate message: the panel watches a file the host
-	// has not reported yet - most often because nobody ordered a scan.
+	// Targets lists the panel's watch scope.
 	Targets []certificatestore.Target `json:"targets"`
 	Status  string                    `json:"status"`
 	// TrackingKnown and KeysKnown say what could not be established.
@@ -157,10 +150,9 @@ func composeCertificateReport(hostID string, fragment *inventory.Fragment,
 			moment := deployment.DeployedAt.UTC()
 			view.DeployedAt = &moment
 			view.DeployedBy = deployment.DeployedBy
-			// A deployment from the panel and the file on the host are two
-			// different things: a certificate swapped outside the panel has a
-			// different fingerprint, while the history row stays. That is why
-			// the fingerprints are compared.
+			// A deployment from the panel and the file on the host are two different
+			// things: a certificate swapped outside the panel has a different
+			// fingerprint, while the history row stays.
 			if deployment.FingerprintSHA256 == certificate.FingerprintSHA256 {
 				view.Managed = true
 				view.Source = certmodule.SourcePanel
@@ -170,9 +162,9 @@ func composeCertificateReport(hostID string, fragment *inventory.Fragment,
 		report.Certificates = append(report.Certificates, view)
 	}
 
-	// A target the host did not report is an unknown state, not the absence
-	// of a problem: the file may not exist, may be unreadable, and the scan
-	// may never have run.
+	// A target the host did not report is an unknown state, not the absence of a
+	// problem: the file may not exist, may be unreadable, and the scan may never
+	// have run.
 	observed := map[string]bool{}
 	for _, certificate := range snapshot.Certificates {
 		observed[certificate.Path] = true
@@ -213,11 +205,6 @@ type watchRequest struct {
 }
 
 // handleWatchCertificate creates or updates a watched file.
-//
-// This is not an operation on the host and does not go through opspec: it
-// changes what the panel watches, not the machine state. The host learns
-// about the change at the next scan - and only then answers what lies under
-// that path.
 func (s *Server) handleWatchCertificate(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
 	_, scope, ok := s.hostScope(w, r, hostID)
@@ -380,9 +367,8 @@ func fleetCertificateOf(row certificatestore.FleetRow, now time.Time) fleetCerti
 	}
 }
 
-// fleetCertificatesView is the answer of the fleet screen: the coverage
-// of the fleet, the counts over every certificate in scope, and one page
-// of the list.
+// fleetCertificatesView is the answer of the fleet screen: the coverage of the
+// fleet, the counts over every certificate in scope, and one page of the list.
 type fleetCertificatesView struct {
 	fleetCoverage
 	Items      []fleetCertificate `json:"items"`
@@ -391,9 +377,9 @@ type fleetCertificatesView struct {
 	NextCursor string             `json:"next_cursor,omitempty"`
 	Counts     map[string]int     `json:"counts"`
 	Timeline   []hostGroup        `json:"timeline"`
-	// HostsTotal and HostsWithoutCertificates keep the names the screen
-	// read before the coverage head: the hosts in scope, and the judged
-	// hosts that report an empty list.
+	// HostsTotal and HostsWithoutCertificates keep the names the screen read
+	// before the coverage head: the hosts in scope, and the judged hosts that
+	// report an empty list.
 	HostsTotal               int            `json:"hosts_total"`
 	HostsWithoutCertificates int            `json:"hosts_without_certificates"`
 	Thresholds               map[string]int `json:"thresholds"`
@@ -401,13 +387,6 @@ type fleetCertificatesView struct {
 
 // handleFleetCertificates returns the certificate expiries of the whole
 // visible fleet.
-//
-// This is the basic mode of this module. A certificate expires quietly and
-// always at the worst moment; the only defence is a list on which all the
-// dates stand side by side, sorted from the nearest. The counts and the
-// timeline are counted by the database over every host in scope; the list
-// comes a page at a time, and a host that reported nothing is an unknown
-// host, not a host without certificates.
 func (s *Server) handleFleetCertificates(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermCertificateRead, "fleet")
 	if !ok {
@@ -465,9 +444,9 @@ func (s *Server) handleFleetCertificates(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// moduleCoverage renders the coverage of one inventory module as the head
-// of a fleet view: the hosts judged are the observed ones with a fresh
-// fragment; the rest are unknown, each under its reason.
+// moduleCoverage renders the coverage of one inventory module as the head of a
+// fleet view: the hosts judged are the observed ones with a fresh fragment;
+// the rest are unknown, each under its reason.
 func moduleCoverage(coverage hosts.ModuleCoverage) fleetCoverage {
 	head := fleetCoverage{
 		TotalHosts: coverage.Hosts, EvaluatedHosts: coverage.Evaluated(), UnknownHosts: coverage.Unknown(),
@@ -492,11 +471,9 @@ var certificatesCSVColumns = []string{
 	"renewal", "owner_service", "unavailable_reason",
 }
 
-// writeCertificatesCSV streams every certificate of the visible fleet,
-// nearest expiry first as the screen sorts them, a page at a time from
-// the same cursor the screen pages with: the file is for the operator
-// who wants the whole list, and the truncation row of the export is the
-// only bound.
+// writeCertificatesCSV streams every certificate of the visible fleet, nearest
+// expiry first as the screen sorts them, a page at a time from the same cursor
+// the screen pages with: the file is for the operator who wants the whole
 func (s *Server) writeCertificatesCSV(w http.ResponseWriter, r *http.Request, scopes []authz.Scope, now time.Time) {
 	s.writeCSV(w, r, exportFileName("certificates", now), certificatesCSVColumns, func(yield func([]string) bool) error {
 		cursor := certificatestore.FleetCursor{}
@@ -521,8 +498,7 @@ func (s *Server) writeCertificatesCSV(w http.ResponseWriter, r *http.Request, sc
 }
 
 // fleetCertificateCSVRow renders one certificate in the order of
-// certificatesCSVColumns. A certificate the host could not read has no
-// date and no days, and its reason stands in the last column.
+// certificatesCSVColumns.
 func fleetCertificateCSVRow(item fleetCertificate) []string {
 	return []string{
 		item.Hostname, item.HostID, item.Path, item.Subject, item.Issuer, formatTime(item.NotAfter),
@@ -560,21 +536,14 @@ type fleetTrustView struct {
 	fleetCoverage
 	Items      []fleetAnchor `json:"items"`
 	HostsTotal int           `json:"hosts_total"`
-	// HostsWithoutTrustStore groups the judged hosts whose store could not
-	// be read, by the reason; HostsUnknown counts the hosts that reported
-	// no store at all.
+	// HostsWithoutTrustStore groups the judged hosts whose store could not be
+	// read, by the reason; HostsUnknown counts the hosts that reported no store
+	// at all.
 	HostsWithoutTrustStore []hostGroup `json:"hosts_without_trust_store"`
 	HostsUnknown           int         `json:"hosts_unknown"`
 }
 
 // handleFleetTrust shows which authority which host trusts.
-//
-// This is the rotation screen: during a rotation part of the fleet trusts
-// both authorities at once, and only this view says whether the old one can
-// be withdrawn yet. Without it the operator would infer that from campaigns
-// that finished a week ago. The anchors are read from the certificates
-// fragment of every host in scope, a page at a time; a sweep out of its
-// time budget says so.
 func (s *Server) handleFleetTrust(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermCertificateRead, "fleet")
 	if !ok {
@@ -612,9 +581,8 @@ func (s *Server) handleFleetTrust(w http.ResponseWriter, r *http.Request) {
 				return true
 			}
 			for _, anchor := range snapshot.Trust.Anchors {
-				// The store has hundreds of distribution authorities; the panel
-				// shows the ones it installed itself. The rest is the content of
-				// the host image, not of the fleet.
+				// The store has hundreds of distribution authorities; the panel shows the
+				// ones it installed itself.
 				if !anchor.Managed {
 					continue
 				}

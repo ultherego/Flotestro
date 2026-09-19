@@ -41,9 +41,7 @@ func TestARepairRequiresTheAdapterFeature(t *testing.T) {
 	}
 }
 
-// An agent from before the registry sends no features. Silence must not take
-// away from a host an operation that works on it - that would mean treating
-// ignorance as a fact.
+// An agent from before the registry sends no features.
 func TestAnUnknownFeatureDoesNotTakeAwayAnOperation(t *testing.T) {
 	beforeRegistry := Capabilities{{Name: CapAPT, Version: 0, Available: true}}
 	if !beforeRegistry.Satisfies(NeedPackageRepair) {

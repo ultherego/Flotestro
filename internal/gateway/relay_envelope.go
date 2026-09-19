@@ -29,10 +29,8 @@ type RelayPeer struct {
 	Environment string
 	Revoked     bool
 	HostID      string
-	// HostCertificate is the certificate the relay saw in its own handshake
-	// with the host, nil for a relay from before it sent it. It is not
-	// trusted for anything by itself: the gateway takes its key only once
-	// the fingerprint on record confirms it is the issued certificate.
+	// HostCertificate is the certificate the relay saw in its own handshake with
+	// the host, nil for a relay from before it sent it.
 	HostCertificate *x509.Certificate
 }
 
@@ -41,11 +39,9 @@ type RelayPeer struct {
 type RelayRefusal struct {
 	Code   string
 	Detail string
-	// Redelivery marks a relay_sequence_replayed that is no replay at
-	// all: the sequence is one the same session spent already, so the
-	// message is one the panel consumed and the relay carried again
-	// because the acknowledgement never reached it. The caller drops the
-	// message, acknowledges it once more and writes nothing on the host.
+	// Redelivery marks a relay_sequence_replayed that is no replay at all: the
+	// sequence is one the same session spent already, so the message is one the
+	// panel consumed and the relay carried again because the acknowledgement
 	Redelivery bool
 }
 
@@ -61,9 +57,7 @@ func RelayRefusalOf(err error) *RelayRefusal {
 	return nil
 }
 
-// The records the verifier reads. Interfaces rather than the store, so a
-// test drives the verifier with a certificate and a host of its own making
-// and without a database.
+// The records the verifier reads.
 type certificateRecords interface {
 	LookupCertificateBySerial(ctx context.Context, serial string) (hosts.CertificateStatus, error)
 }
@@ -73,20 +67,14 @@ type hostRecords interface {
 }
 
 // sequenceRecords accepts a sequence of a session once and refuses it the
-// second time. The last sequence the session accepted comes back with the
-// refusal, so that the caller can tell a message consumed before - the
-// relay carrying its spool again - from a number the session never took.
+// second time.
 type sequenceRecords interface {
 	Accept(ctx context.Context, hostID, sessionID string, sequence uint64) (accepted bool, last uint64, err error)
 }
 
-// RelayVerifier checks the inner identity envelope of a relayed message
-// the way the security document lays it out: the relay is the one that
-// forwarded the message, the certificate the envelope names is on record,
-// live and the host's own, the host lies in the relay's site and
-// environment, the payload is the one the host signed, the signature
-// verifies under the certificate's key, and the sequence has not been
-// seen.
+// RelayVerifier checks the inner identity envelope of a relayed message the
+// way the security document lays it out: the relay is the one that forwarded
+// the message, the certificate the envelope names is on record, live and the
 type RelayVerifier struct {
 	certs     certificateRecords
 	hosts     hostRecords
@@ -99,22 +87,19 @@ func NewRelayVerifier(certs certificateRecords, hostStore hostRecords, sequences
 	return &RelayVerifier{certs: certs, hosts: hostStore, sequences: sequences, now: time.Now}
 }
 
-// Verified is what a verified envelope established, for the caller to
-// record: the certificate the host signed with, its key, and the key's DER
-// when the record had none and the relay's certificate supplied it.
+// Verified is what a verified envelope established, for the caller to record:
+// the certificate the host signed with, its key, and the key's DER when the
+// record had none and the relay's certificate supplied it.
 type Verified struct {
 	Serial    string
 	PublicKey crypto.PublicKey
 	// LearnedKeyDER is set when the key came from the certificate the relay
-	// presented rather than from the record; the caller writes it on the
-	// record so the next session needs no relay to supply it.
+	// presented rather than from the record; the caller writes it on the record
+	// so the next session needs no relay to supply it.
 	LearnedKeyDER []byte
 }
 
-// VerifyMessage checks the envelope of a message of the stream. The
-// sequence is consumed: a message that verifies is one the session has
-// accepted and will not accept again. There is no time window - a result
-// the relay buffered for a day is still the host's result.
+// VerifyMessage checks the envelope of a message of the stream.
 func (v *RelayVerifier) VerifyMessage(ctx context.Context, peer RelayPeer, msg *agentv1.AgentMessage) (*Verified, error) {
 	kind, body, err := relayproof.Payload(msg)
 	if err != nil {
@@ -123,11 +108,8 @@ func (v *RelayVerifier) VerifyMessage(ctx context.Context, peer RelayPeer, msg *
 	return v.verify(ctx, peer, msg.GetEnvelope(), kind, body, true, 0)
 }
 
-// VerifyRequest checks the envelope of a unary request - a renewal, a
-// secret fetch. The body is the request with its identity field cleared,
-// as the agent signed it. No sequence is consumed: the challenge and the
-// lease are one-time on their own, and a short window on issued_at keeps
-// an old envelope from being replayed on either.
+// VerifyRequest checks the envelope of a unary request - a renewal, a secret
+// fetch.
 func (v *RelayVerifier) VerifyRequest(ctx context.Context, peer RelayPeer, envelope *agentv1.RelayedEnvelope,
 	kind string, body proto.Message) (*Verified, error) {
 	return v.verify(ctx, peer, envelope, kind, body, false, relayproof.UnaryWindow)
@@ -144,9 +126,8 @@ func (v *RelayVerifier) verify(ctx context.Context, peer RelayPeer, envelope *ag
 	if err := relayproof.CheckShape(envelope); err != nil {
 		return nil, invalid(err.Error())
 	}
-	// The relay first: the envelope names the relay the host connected to,
-	// and it has to be the one that forwarded the message. A relay that
-	// was revoked meanwhile forwards nothing, whatever the host signed.
+	// The relay first: the envelope names the relay the host connected to, and it
+	// has to be the one that forwarded the message.
 	if peer.Revoked {
 		return nil, invalid("the relay " + peer.RelayID + " was revoked")
 	}
@@ -173,9 +154,7 @@ func (v *RelayVerifier) verify(ctx context.Context, peer RelayPeer, envelope *ag
 		return nil, &RelayRefusal{Code: code, Detail: detail}
 	}
 
-	// The host in the relay's scope. The relay is checked against the
-	// host again here rather than trusted from the handshake alone: the
-	// envelope may name a session the relay buffered before the host moved.
+	// The host in the relay's scope.
 	host, err := v.hosts.Get(ctx, peer.HostID)
 	if err != nil {
 		return nil, err
@@ -196,9 +175,9 @@ func (v *RelayVerifier) verify(ctx context.Context, peer RelayPeer, envelope *ag
 		return nil, invalid(err.Error())
 	}
 
-	// The payload, then the signature: a digest that does not match says
-	// the content changed on the way, and that is worth naming apart from
-	// a signature that does not verify at all.
+	// The payload, then the signature: a digest that does not match says the
+	// content changed on the way, and that is worth naming apart from a signature
+	// that does not verify at all.
 	matches, err := relayproof.DigestMatches(envelope, body)
 	if err != nil {
 		return nil, invalid("the payload cannot be digested: " + err.Error())
@@ -230,12 +209,9 @@ func (v *RelayVerifier) verify(ctx context.Context, peer RelayPeer, envelope *ag
 			return nil, err
 		}
 		if !accepted {
-			// A number at or below the one the same session last spent is
-			// a message this panel consumed already: the relay holds it in
-			// its spool until an acknowledgement arrives, and a link that
-			// broke in between means it sends it once more. That is the
-			// spool working, not a host or a relay to suspect. Anything
-			// else under this code is a sequence the session never took.
+			// A number at or below the one the same session last spent is a message
+			// this panel consumed already: the relay holds it in its spool until an
+			// acknowledgement arrives, and a link that broke in between means it sends
 			if envelope.GetSequence() <= last {
 				return nil, &RelayRefusal{Code: hosts.RefusalRelaySequenceReplayed, Redelivery: true,
 					Detail: "sequence " + strconv.FormatUint(envelope.GetSequence(), 10) +
@@ -251,11 +227,8 @@ func (v *RelayVerifier) verify(ctx context.Context, peer RelayPeer, envelope *ag
 }
 
 // publicKeyOf finds the key the envelope is checked against: the one on
-// record, or - for a certificate issued before the record carried keys -
-// the one in the certificate the relay presented, once its fingerprint is
-// the fingerprint on record. The fingerprint is the SHA-256 of the whole
-// certificate, so a certificate that matches it is the issued one and its
-// key is the issued key. The DER comes back for the caller to record.
+// record, or - for a certificate issued before the record carried keys - the
+// one in the certificate the relay presented, once its fingerprint is the
 func publicKeyOf(certificate hosts.CertificateStatus, presented *x509.Certificate) (crypto.PublicKey, []byte, error) {
 	if len(certificate.PublicKeyDER) > 0 {
 		key, err := x509.ParsePKIXPublicKey(certificate.PublicKeyDER)
@@ -282,12 +255,8 @@ type relaySequences struct {
 }
 
 // Accept records the sequence when it is greater than the last one of the
-// session, in one statement: two gateways serving a host's buffered
-// messages at once cannot both accept the same number. The number the
-// session stood at before the statement comes back with the answer: the
-// write of the common table expression is not visible to the rest of the
-// query, so the read gives the state the message met rather than the one
-// it left behind. A session nobody has spoken in stands at zero.
+// session, in one statement: two gateways serving a host's buffered messages
+// at once cannot both accept the same number.
 func (r relaySequences) Accept(ctx context.Context, hostID, sessionID string,
 	sequence uint64) (bool, uint64, error) {
 	var accepted bool
@@ -314,11 +283,8 @@ func (r relaySequences) Accept(ctx context.Context, hostID, sessionID string,
 	return accepted, uint64(last), nil
 }
 
-// sequenceRetention is how long a session's last sequence is kept after
-// its last message. A relay buffers results for the length of an outage,
-// and a result signed in a session that ended arrives under that
-// session's number; a month covers any outage a relay's buffer survives,
-// and a number older than that guards nothing a replay could still use.
+// sequenceRetention is how long a session's last sequence is kept after its
+// last message.
 const sequenceRetention = 30 * 24 * time.Hour
 
 // Sweep removes the sequences of sessions nobody has spoken in for longer
@@ -333,9 +299,8 @@ func (r relaySequences) Sweep(ctx context.Context) (int64, error) {
 	return tag.RowsAffected(), nil
 }
 
-// SweepRelayProofs removes what the relay proofs leave behind and nobody
-// can use any more: expired challenges and the sequences of long-silent
-// sessions. The housekeeping calls it on its cycle.
+// SweepRelayProofs removes what the relay proofs leave behind and nobody can
+// use any more: expired challenges and the sequences of long-silent sessions.
 func (s *AgentService) SweepRelayProofs(ctx context.Context) error {
 	challenges, err := s.challenges.Sweep(ctx)
 	if err != nil {
@@ -356,9 +321,8 @@ type identityChallenges struct {
 	pool *pgxpool.Pool
 }
 
-// Issue stores the digest of a challenge for the host, bound to the relay
-// it was asked through (empty for a direct call), for the challenge's
-// lifetime.
+// Issue stores the digest of a challenge for the host, bound to the relay it
+// was asked through (empty for a direct call), for the challenge's lifetime.
 func (c identityChallenges) Issue(ctx context.Context, hostID, relayID string, digest []byte, expires time.Time) error {
 	_, err := c.pool.Exec(ctx, `
 		insert into identity_challenges (id, host_id, relay_id, challenge_hash, expires_at)
@@ -370,9 +334,8 @@ func (c identityChallenges) Issue(ctx context.Context, hostID, relayID string, d
 	return nil
 }
 
-// Consume spends a challenge: it has to be the host's, asked through the
-// same relay, unspent and unexpired. False is a challenge that is none of
-// that, which the caller refuses without saying which.
+// Consume spends a challenge: it has to be the host's, asked through the same
+// relay, unspent and unexpired.
 func (c identityChallenges) Consume(ctx context.Context, hostID, relayID string, digest []byte) (bool, error) {
 	tag, err := c.pool.Exec(ctx, `
 		update identity_challenges set consumed_at = now()
@@ -386,9 +349,8 @@ func (c identityChallenges) Consume(ctx context.Context, hostID, relayID string,
 	return tag.RowsAffected() > 0, nil
 }
 
-// Sweep removes the challenges nobody can use any more: expired or spent
-// for longer than an hour. The trail of a renewal is in the audit; the
-// row has no further use.
+// Sweep removes the challenges nobody can use any more: expired or spent for
+// longer than an hour.
 func (c identityChallenges) Sweep(ctx context.Context) (int64, error) {
 	tag, err := c.pool.Exec(ctx, `
 		delete from identity_challenges

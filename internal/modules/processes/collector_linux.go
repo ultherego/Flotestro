@@ -1,9 +1,5 @@
-// Package processes reads the host processes from /proc.
-//
-// The module is a diagnostic, not an observability system. A snapshot is
-// taken only on the operator's request and has an upper size bound: a
-// continuous stream of process metrics belongs to Prometheus, not to the
-// management panel.
+// Package processes reads the host processes from /proc. The module is a
+// diagnostic, not an observability system.
 package processes
 
 import (
@@ -30,13 +26,10 @@ type Process struct {
 	// truth, not missing data.
 	RSSBytes int64 `json:"rss_bytes"`
 	Threads  int32 `json:"threads"`
-	// StartTimeTicks binds the process to its identifier. The PID alone is
-	// reused by the kernel, so a signal sent a moment later could hit an
-	// entirely different process.
+	// StartTimeTicks binds the process to its identifier.
 	StartTimeTicks uint64 `json:"start_time_ticks"`
-	// CPUTicks is the total processor time. The panel does not derive
-	// percentages from it: that needs two measurements and the snapshot is
-	// one.
+	// CPUTicks is the total processor time. The panel does not derive percentages
+	// from it: that needs two measurements and the snapshot is one.
 	CPUTicks uint64 `json:"cpu_ticks"`
 	// Unit and Container point at what manages the process. Without them
 	// the operator sees a PID and has to guess whose it is.
@@ -47,9 +40,8 @@ type Process struct {
 // Snapshot is the result of one read.
 type Snapshot struct {
 	Processes []Process `json:"processes"`
-	// Total says how many processes were on the host. The list may be
-	// shorter than this number: a truncated list without it would look
-	// complete.
+	// Total says how many processes were on the host. The list may be shorter
+	// than this number: a truncated list without it would look complete.
 	Total     int   `json:"total"`
 	Truncated bool  `json:"truncated"`
 	ClockHz   int64 `json:"clock_hz"`
@@ -58,9 +50,8 @@ type Snapshot struct {
 // MaxProcesses bounds one snapshot.
 const MaxProcesses = 500
 
-// Sorting decides which processes make it into the result when there are
-// more than the limit. The choice belongs to the operator: they look either
-// for a memory hog, a CPU hog, or a specific command.
+// Sorting decides which processes make it into the result when there are more
+// than the limit.
 const (
 	SortByRSS     = "rss"
 	SortByCPU     = "cpu"
@@ -68,11 +59,8 @@ const (
 	SortByStarted = "started"
 )
 
-// Collect reads the host processes.
-//
-// The read comes from /proc and needs no root: the panel shows what every
-// user of the host can see. Sending a signal does need privileges and goes
-// through the helper.
+// Collect reads the host processes. The read comes from /proc and needs no
+// root: the panel shows what every user of the host can see.
 func Collect(root string, sortBy string, limit int) Snapshot {
 	if root == "" {
 		root = "/proc"
@@ -158,11 +146,6 @@ func readProcess(root string, pid int32, users map[uint32]string) (Process, bool
 }
 
 // parseStat reads /proc/<pid>/stat.
-//
-// The process name is in parentheses and may contain spaces and parentheses
-// themselves, so the numeric fields are read only after the last closing
-// parenthesis - splitting the whole line on spaces would give wrong results
-// for such names.
 func parseStat(line string) (Process, bool) {
 	open := strings.IndexByte(line, '(')
 	close := strings.LastIndexByte(line, ')')

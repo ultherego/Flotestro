@@ -19,14 +19,6 @@ const (
 
 // refreshInventory collects the inventory on request and sends back the
 // revision that came out of it.
-//
-// The task ends only when a new picture has really been built and sent.
-// Accepting the order proves nothing on its own: the read could fail or not
-// arrive, and the panel would still show the state from a quarter of an hour
-// ago with the note "refreshed".
-//
-// Concurrent refresh requests join the collection already running instead of
-// starting a second one: the host would pay twice for the same picture.
 func (e *TaskExecutor) refreshInventory(ctx context.Context,
 	task *agentv1.TaskEnvelope) *agentv1.TaskResult {
 	if e.inventoryRefresh == nil {

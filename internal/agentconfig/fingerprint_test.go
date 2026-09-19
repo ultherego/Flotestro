@@ -7,10 +7,8 @@ import (
 	"testing"
 )
 
-// TestEquivalentFilesShareAFingerprint: the fingerprint is of what the
-// agent runs on. Comments, the order of the keys, spacing and a default
-// written out do not change it; a different gateway list does, and so
-// does the same list in another order, because the order is the priority.
+// TestEquivalentFilesShareAFingerprint: the fingerprint is of what the agent
+// runs on.
 func TestEquivalentFilesShareAFingerprint(t *testing.T) {
 	reference, err := Read(strings.NewReader(fullExample))
 	if err != nil {
@@ -85,8 +83,8 @@ connection:
 }
 
 // TestLoadIsWhatCurrentReports: the file the process loaded is the one the
-// session tells the panel about, with its schema and fingerprint; a
-// process that loaded none reports none.
+// session tells the panel about, with its schema and fingerprint; a process
+// that loaded none reports none.
 func TestLoadIsWhatCurrentReports(t *testing.T) {
 	loadedMu.Lock()
 	loaded = nil

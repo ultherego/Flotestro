@@ -6,38 +6,26 @@ import (
 	"time"
 )
 
-// The campaign report: every campaign that closed in the period, with how
-// it ended and what became of its hosts.
-//
-// A campaign is in the report when its finished_at falls in the period,
-// whatever its terminal state - a canceled campaign is a decision of the
-// period and belongs in its report as much as a completed one. A campaign
-// with no host in the reader's scope is not in it, like on the list.
+// The campaign report: every campaign that closed in the period, with how it
+// ended and what became of its hosts.
 
 // OutcomeCounts tallies the targets of one or more campaigns by how they
-// ended. The tally is in the terms of the campaign report: succeeded takes
-// in the hosts that changed nothing because they already stood in the
-// desired state, and skipped takes in the hosts left out on purpose - by
-// a policy, a window, the operator or a missing adapter.
+// ended.
 type OutcomeCounts struct {
 	Targets   int `json:"targets"`
 	Succeeded int `json:"succeeded"`
 	// NoChange is the part of Succeeded that changed nothing.
 	NoChange int `json:"no_change"`
 	Failed   int `json:"failed"`
-	// Unknown counts the hosts whose task ended without a result. Not a
-	// success and not a failure of the change: a question to read off the
-	// host.
+	// Unknown counts the hosts whose task ended without a result. Not a success
+	// and not a failure of the change: a question to read off the host.
 	Unknown  int `json:"unknown"`
 	Skipped  int `json:"skipped"`
 	Canceled int `json:"canceled"`
 }
 
-// Rate is the success rate: the share of the attempted hosts that
-// succeeded, that is the successes over the successes, failures and
-// unknowns. A host skipped or canceled was not attempted and counts in
-// neither side. Nil when nothing was attempted - a rate over nothing is
-// not a hundred per cent.
+// Rate is the success rate: the share of the attempted hosts that succeeded,
+// that is the successes over the successes, failures and unknowns.
 func (c OutcomeCounts) Rate() *float64 {
 	attempted := c.Succeeded + c.Failed + c.Unknown
 	if attempted == 0 {
@@ -102,14 +90,13 @@ type CampaignsReport struct {
 	BySite []CampaignGroup `json:"by_site"`
 }
 
-// campaignRowLimit bounds the report: a period with more closed
-// campaigns than this is a period to narrow. The campaigns are ordered
-// by people, a few a day, so a month stays far under it.
+// campaignRowLimit bounds the report: a period with more closed campaigns than
+// this is a period to narrow.
 const campaignRowLimit = 5000
 
-// Campaigns computes the campaign report of the period: the campaigns
-// that closed in it and touch a host the reader may see under the filter,
-// newest first, each with its per-site split, and the totals over them.
+// Campaigns computes the campaign report of the period: the campaigns that
+// closed in it and touch a host the reader may see under the filter, newest
+// first, each with its per-site split, and the totals over them.
 func (s *Store) Campaigns(ctx context.Context, period Period, filter Filter) (*CampaignsReport, error) {
 	report := &CampaignsReport{Campaigns: []CampaignRow{}, BySite: []CampaignGroup{}}
 	report.Totals.ByState = map[string]int{}
@@ -117,10 +104,9 @@ func (s *Store) Campaigns(ctx context.Context, period Period, filter Filter) (*C
 	clause, args := hostClause(filter, 2)
 	args = append([]any{period.From, period.To}, args...)
 	args = append(args, campaignRowLimit)
-	// The campaigns of the period, with the tally over all of their
-	// targets: the outcome of a campaign is the outcome of the whole
-	// campaign, as its own report states it, and the scope decides only
-	// whether the reader sees the campaign at all.
+	// The campaigns of the period, with the tally over all of their targets: the
+	// outcome of a campaign is the outcome of the whole campaign, as its own
+	// report states it, and the scope decides only whether the reader sees the
 	rows, err := s.pool.Query(ctx, fmt.Sprintf(`
 		select c.id::text, c.name, c.action_type, c.state, c.created_by, coalesce(c.approved_by, ''),
 		       c.created_at, c.started_at, c.finished_at, `+outcomeSQL+`

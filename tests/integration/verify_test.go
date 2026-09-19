@@ -21,27 +21,13 @@ import (
 	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
 )
 
-// The verification of a change on a live fleet: only a state the host
-// showed after the change may end a job succeeded.
-//
-// Three gaps of chapter 1 of the functional review are reproduced here
-// negatively - each of them used to end in a green job that nobody had
-// confirmed:
-//
-//   - a change the host applies and does not keep ends applied_unverified
-//     rather than succeeded, with the verifier's own observation on the
-//     attempt;
-//   - a restart stays open until the host comes back on another boot
-//     identifier, instead of succeeding on the exit code of the
-//     scheduling;
-//   - a copy bound to a plan that no longer holds is refused with
-//     stale_plan and nothing runs.
+// The verification of a change on a live fleet: only a state the host showed
+// after the change may end a job succeeded.
 
 const verifyReason = "integration test of the verification of a change"
 
-// verifiedAttemptView is an attempt with the reading the host made of
-// itself after the change. The harness's own attempt view predates the
-// verifications, so this test carries its own.
+// verifiedAttemptView is an attempt with the reading the host made of itself
+// after the change.
 type verifiedAttemptView struct {
 	Number       int    `json:"attempt_number"`
 	Status       string `json:"status"`
@@ -76,24 +62,9 @@ func lastVerifiedAttempt(t *testing.T, h *harness, jobID string) verifiedAttempt
 	return attempts[len(attempts)-1]
 }
 
-// TestAChangeTheHostDoesNotShowEndsUnverified drives the case chapter 1
-// calls false success: the tool reports that it did the work, the host
-// does not hold the state that was ordered, and the job used to say
-// succeeded.
-//
-// The change is a kernel setting the kernel itself will not keep. Asking
-// for a million huge pages on a machine with three gigabytes of memory is
-// accepted by sysctl - the write returns zero - and /proc/sys then reads
-// back the number of pages the kernel really managed to reserve, which is
-// a different number. That is exactly "applied, not observed", it is
-// harmless, and the host can produce it on demand; a unit that a restart
-// leaves down cannot be built through the API at all, because a unit file
-// is outside the write scope of the files module and nothing in the panel
-// reloads systemd's definitions. The unit side of the same rule is
-// guarded below, on a masked unit.
-//
-// The contract puts a rollback on this operation, so the host also puts
-// the previous value back and says so in the reason.
+// TestAChangeTheHostDoesNotShowEndsUnverified drives the case chapter 1 calls
+// false success: the tool reports that it did the work, the host does not hold
+// the state that was ordered, and the job used to say succeeded.
 func TestAChangeTheHostDoesNotShowEndsUnverified(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByName("agent-debian")
@@ -119,9 +90,9 @@ func TestAChangeTheHostDoesNotShowEndsUnverified(t *testing.T) {
 		t.Fatalf("error code = %q, expected applied_unverified (%s)", job.ResultErrorCode, job.ResultMessage)
 	}
 
-	// The observation is on the attempt, in full: an operator must be able
-	// to read which verifier looked, what it wanted and what it found
-	// without opening the host.
+	// The observation is on the attempt, in full: an operator must be able to
+	// read which verifier looked, what it wanted and what it found without
+	// opening the host.
 	attempt := lastVerifiedAttempt(t, h, job.ID)
 	if attempt.Verification == nil {
 		t.Fatal("the attempt carries no verification at all")
@@ -143,10 +114,9 @@ func TestAChangeTheHostDoesNotShowEndsUnverified(t *testing.T) {
 	}
 }
 
-// TestARestartOfAMaskedUnitIsNeverASuccess is the unit half of the same
-// rule, in the one shape the lab can produce honestly: a masked unit
-// cannot be started, and the job says so instead of reporting a restart
-// nobody performed.
+// TestARestartOfAMaskedUnitIsNeverASuccess is the unit half of the same rule,
+// in the one shape the lab can produce honestly: a masked unit cannot be
+// started, and the job says so instead of reporting a restart nobody
 func TestARestartOfAMaskedUnitIsNeverASuccess(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByName("agent-debian")
@@ -181,25 +151,13 @@ func TestARestartOfAMaskedUnitIsNeverASuccess(t *testing.T) {
 	}
 }
 
-// TestARestartSettlesOnTheReturnOfTheHost drives the second gap: the job
-// of a restart used to end succeeded on the exit code of the scheduling,
-// which is the same exit code a host that never comes back produces.
-//
-// The restart is ordered on the Debian host of the fleet and on no other:
-// the Ubuntu and Fedora machines of the lab hang on a restart under
-// VirtualBox, and a test that leaves the fleet in pieces is worse than no
-// test. The job has to stay open while the host is down and settle
-// succeeded only once a session with another boot identifier is there,
-// with that identifier in the result.
+// TestARestartSettlesOnTheReturnOfTheHost drives the second gap: the job of a
+// restart used to end succeeded on the exit code of the scheduling, which is
+// the same exit code a host that never comes back produces.
 func TestARestartSettlesOnTheReturnOfTheHost(t *testing.T) {
-	// The machines of this laboratory do not come back from a restart
-	// they order themselves: VirtualBox leaves the guest stopped, and the
-	// workstation brings it back with vagrant. A test that orders a real
-	// restart therefore waits for a host nobody will start, so the
-	// restart is exercised only where a host really comes back. The panel
-	// side of the settlement - a job open until a session with another
-	// boot identifier arrives - is proven without a restart in
-	// TestARestartWaitsForAnotherBootIdentifier.
+	// The machines of this laboratory do not come back from a restart they order
+	// themselves: VirtualBox leaves the guest stopped, and the workstation brings
+	// it back with vagrant.
 	if os.Getenv("FLOTESTRO_TEST_REBOOT") == "" {
 		t.Skip("set FLOTESTRO_TEST_REBOOT=1 on a fleet whose hosts come back from a restart on their own")
 	}
@@ -220,9 +178,7 @@ func TestARestartSettlesOnTheReturnOfTheHost(t *testing.T) {
 		job = h.approve(job.ID, job.PayloadHash)
 	}
 
-	// The whole point of the operation: while the host is away the job is
-	// open. A settlement before a session with another boot identifier is
-	// the false success this test exists for.
+	// The whole point of the operation: while the host is away the job is open.
 	deadline := time.Now().Add(6 * time.Minute)
 	var settled jobView
 	for settled.ID == "" && time.Now().Before(deadline) {
@@ -280,11 +236,8 @@ func bootIDOf(h *harness, hostID string) string {
 	return ""
 }
 
-// TestACopyBoundToAForeignPlanIsRefused drives the third gap: the plan of
-// a copy binds the copy. The helper computes the plan again under the
-// lock of the backup family right before anything is written, and a
-// digest that no longer describes this host and this repository is
-// refused with stale_plan - nothing runs, and no repository is created.
+// TestACopyBoundToAForeignPlanIsRefused drives the third gap: the plan of a
+// copy binds the copy.
 func TestACopyBoundToAForeignPlanIsRefused(t *testing.T) {
 	h := newHarness(t)
 	host := hostWithRestic(t, h)
@@ -334,8 +287,6 @@ func TestACopyBoundToAForeignPlanIsRefused(t *testing.T) {
 // TestARestartWaitsForAnotherBootIdentifier proves the panel's half of the
 // settlement without restarting anything: a synthetic host takes the order,
 // its session ends the way a machine going down ends one, and the job stays
-// open until a session with another boot identifier arrives. It is the same
-// path a real restart takes; what it leaves out is the machine.
 func TestARestartWaitsForAnotherBootIdentifier(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

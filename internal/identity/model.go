@@ -1,7 +1,5 @@
 // Package identity carries out changes in the identity directory: the plan,
-// the approval and an execution made of phases. Creating a user is one
-// business transaction of the panel but several operations of the
-// directory.
+// the approval and an execution made of phases.
 package identity
 
 import (
@@ -24,9 +22,9 @@ const (
 	ActionUserEnable   ActionType = "identity.user.enable"
 	ActionGroupMembers ActionType = "identity.group.members"
 	ActionSSHKeys      ActionType = "identity.sshkeys.set"
-	// The rest of the user lifecycle the document names: an expiration, the
-	// POSIX attributes, a removal that keeps the entry, and a password reset
-	// whose one-time value the requester reads once and nobody stores.
+	// The rest of the user lifecycle the document names: an expiration, the POSIX
+	// attributes, a removal that keeps the entry, and a password reset whose
+	// one-time value the requester reads once and nobody stores.
 	ActionUserExpire        ActionType = "identity.user.expire"
 	ActionUserPOSIX         ActionType = "identity.user.posix"
 	ActionUserPreserve      ActionType = "identity.user.preserve"
@@ -34,9 +32,9 @@ const (
 	// Host group membership decides which access and sudo rules reach a
 	// host, so it goes the way of a user group change.
 	ActionHostGroupMembers ActionType = "identity.hostgroup.members"
-	// Directory DNS is a central change, just like an account: it concerns
-	// the whole network rather than one host and goes in one transaction
-	// through the directory connector - not through an agent.
+	// Directory DNS is a central change, just like an account: it concerns the
+	// whole network rather than one host and goes in one transaction through the
+	// directory connector - not through an agent.
 	ActionDNSRecordEnsure ActionType = "dns.record.ensure"
 	ActionDNSRecordRemove ActionType = "dns.record.remove"
 	// The access and sudo rules. A rule reaches every host it names, so it
@@ -45,15 +43,11 @@ const (
 	ActionHBACRuleRemove ActionType = "identity.hbac.rule.remove"
 	ActionSudoRuleEnsure ActionType = "identity.sudo.rule.ensure"
 	ActionSudoRuleRemove ActionType = "identity.sudo.rule.remove"
-	// ActionHBACTest is a read: the directory's own simulation of an access
-	// rule. It is never a change and never enters the change store; it is
-	// named here so its permission stands next to the rules it reads.
+	// ActionHBACTest is a read: the directory's own simulation of an access rule.
 	ActionHBACTest ActionType = "identity.hbac.test"
-	// A service keytab rotation has two halves under one consent: the
-	// directory retires the current keytab of the principal, and the fleet
-	// host that carries the service fetches a new one with its own
-	// credentials. No key material passes through the panel; the change
-	// records the retirement and the task it ordered on the host.
+	// A service keytab rotation has two halves under one consent: the directory
+	// retires the current keytab of the principal, and the fleet host that
+	// carries the service fetches a new one with its own credentials.
 	ActionKeytabRotate ActionType = "identity.keytab.rotate"
 )
 
@@ -98,8 +92,7 @@ type Payload struct {
 }
 
 // KeytabPayload names the service principal whose keytab is rotated, as
-// service/host.example.test with an optional realm. The host is the part
-// after the slash: the renewal is ordered on the fleet host of that name.
+// service/host.
 type KeytabPayload struct {
 	Principal string `json:"principal"`
 }
@@ -119,19 +112,14 @@ type HostGroupPayload struct {
 	Remove []string `json:"remove,omitempty"`
 }
 
-// ExpiryPayload sets or clears the Kerberos expirations of an account. A
-// field that is absent is left as it is; an empty string clears the
-// expiration, so that "never expires" is ordered as deliberately as a
-// date rather than by leaving something out.
+// ExpiryPayload sets or clears the Kerberos expirations of an account.
 type ExpiryPayload struct {
 	UID                string  `json:"uid"`
 	PrincipalExpiresAt *string `json:"principal_expires_at,omitempty"`
 	PasswordExpiresAt  *string `json:"password_expires_at,omitempty"`
 }
 
-// Spec translates the payload into the adapter's declaration. The
-// validation has already checked the dates, so a parse failure here is
-// a defect rather than a request error.
+// Spec translates the payload into the adapter's declaration.
 func (p ExpiryPayload) Spec() (freeipa.Expiry, error) {
 	var spec freeipa.Expiry
 	var err error
@@ -246,10 +234,7 @@ type DNSRecordPayload struct {
 	// Value is the content of the record: an address, a name or text - depending on the type.
 	Value string `json:"value"`
 	TTL   int    `json:"ttl,omitempty"`
-	// Reverse is the consent to add the reverse record. A PTR record is a
-	// separate, visible element of the plan: it decides what a query about an
-	// address answers, and forgetting it is the most common mistake when
-	// adding hosts.
+	// Reverse is the consent to add the reverse record.
 	Reverse bool `json:"reverse,omitempty"`
 	// ReverseZone allows naming the reverse zone explicitly. Empty means the
 	// zone computed from the address - and that assumes a /24 split.
@@ -348,9 +333,9 @@ func Validate(action ActionType, payload Payload) error {
 		if payload.DNS == nil {
 			return fmt.Errorf("the operation %s requires a dns payload", action)
 		}
-		// We check with the same code that will carry out the write: a record
-		// the directory refuses is to fall out at ordering time rather than
-		// after the approval.
+		// We check with the same code that will carry out the write: a record the
+		// directory refuses is to fall out at ordering time rather than after the
+		// approval.
 		if err := (freeipa.RecordSpec{
 			Zone: payload.DNS.Zone, Name: payload.DNS.Name, Type: payload.DNS.Type,
 			Value: payload.DNS.Value, TTL: payload.DNS.TTL,
@@ -381,9 +366,8 @@ func Validate(action ActionType, payload Payload) error {
 			return err
 		}
 		if payload.HBACRule.Enabled {
-			// An enabled rule with a side missing matches nothing - or, once
-			// somebody fills the side in, more than anybody planned. A draft
-			// stays disabled.
+			// An enabled rule with a side missing matches nothing - or, once somebody
+			// fills the side in, more than anybody planned.
 			rule := payload.HBACRule
 			if !rule.AllUsers && len(rule.Users) == 0 && len(rule.UserGroups) == 0 {
 				return fmt.Errorf("an enabled rule requires users, groups or every user")
@@ -426,10 +410,9 @@ func Validate(action ActionType, payload Payload) error {
 		if payload.Keytab == nil {
 			return fmt.Errorf("the operation %s requires a keytab payload", action)
 		}
-		// The same check the connector makes before service_disable: a
-		// host principal is refused by name, because retiring it is a
-		// re-join and would cut the host off from the directory it has to
-		// fetch the new key from.
+		// The same check the connector makes before service_disable: a host
+		// principal is refused by name, because retiring it is a re-join and would
+		// cut the host off from the directory it has to fetch the new key from.
 		if err := freeipa.ValidateServicePrincipal(payload.Keytab.Principal); err != nil {
 			return err
 		}
@@ -460,9 +443,9 @@ func (a ActionType) Permission() string {
 		// A simulation reads the rules; it changes nothing.
 		return "identity.policy.read"
 	case ActionKeytabRotate:
-		// The rotation has a right of its own, the architecture document's
-		// "keytab rotation per separate permission": the same right the
-		// host's half of it asks for, so nobody holds one half alone.
+		// The rotation has a right of its own, the architecture document's "keytab
+		// rotation per separate permission": the same right the host's half of it
+		// asks for, so nobody holds one half alone.
 		return "identity.keytab.rotate"
 	default:
 		return "identity.policy.write"
@@ -470,18 +453,16 @@ func (a ActionType) Permission() string {
 }
 
 // ChangesAccess says whether the change alters who may sign in where: an
-// account, its keys, a group membership or an access or sudo rule. Such a
-// change is taken with fresh authentication, like an access rule on a host;
-// a DNS record is not.
+// account, its keys, a group membership or an access or sudo rule.
 func (a ActionType) ChangesAccess() bool {
 	switch a {
 	case ActionUserCreate, ActionUserDisable, ActionUserEnable, ActionGroupMembers, ActionSSHKeys,
 		ActionUserExpire, ActionUserPOSIX, ActionUserPreserve, ActionUserPasswordReset,
 		ActionHostGroupMembers,
 		ActionHBACRuleEnsure, ActionHBACRuleRemove, ActionSudoRuleEnsure, ActionSudoRuleRemove,
-		// A keytab is the credential a service authenticates with: replacing
-		// it is a change of access in both directions, and the gap between
-		// the retirement and the renewal is an outage of that service.
+		// A keytab is the credential a service authenticates with: replacing it is a
+		// change of access in both directions, and the gap between the retirement
+		// and the renewal is an outage of that service.
 		ActionKeytabRotate:
 		return true
 	default:
@@ -489,9 +470,8 @@ func (a ActionType) ChangesAccess() bool {
 	}
 }
 
-// Known checks whether the type of change is supported. A simulation is
-// not a change, so it is not known here: it cannot be ordered, approved or
-// executed.
+// Known checks whether the type of change is supported. A simulation is not a
+// change, so it is not known here: it cannot be ordered, approved or executed.
 func (a ActionType) Known() bool {
 	switch a {
 	case ActionUserCreate, ActionUserDisable, ActionUserEnable, ActionGroupMembers, ActionSSHKeys,
@@ -536,10 +516,8 @@ type Plan struct {
 	Warnings []string `json:"warnings,omitempty"`
 	// Conflicts stop the execution: the directory already holds an object with that name.
 	Conflicts []string `json:"conflicts,omitempty"`
-	// PreserveEntry is the directory entry a preserve would move: where it
-	// is, which entry it is and when it last changed. The execution refuses
-	// when any of the three moved between the plan and the change, so two
-	// operators cannot preserve the same account twice.
+	// PreserveEntry is the directory entry a preserve would move: where it is,
+	// which entry it is and when it last changed.
 	PreserveEntry *freeipa.EntryReference `json:"preserve_entry,omitempty"`
 }
 
@@ -574,16 +552,12 @@ type Change struct {
 	StartedAt        *time.Time      `json:"started_at,omitempty"`
 	FinishedAt       *time.Time      `json:"finished_at,omitempty"`
 	CreatedAt        time.Time       `json:"created_at"`
-	// SecretAvailable says a one-time value of this change - the password
-	// of a reset - waits for its requester. It is not a column: the value
-	// lives in the memory of the process that carried the change out, and
-	// so does this flag.
+	// SecretAvailable says a one-time value of this change - the password of a
+	// reset - waits for its requester.
 	SecretAvailable bool `json:"secret_available,omitempty"`
 }
 
 // StateFor decides the final state from the results of the phases.
-// A partial success has its own state: presenting it as a success would hide
-// the fact that some of the changes were applied and some were not.
 func StateFor(phases []Phase) State {
 	var succeeded, failed int
 	for _, phase := range phases {

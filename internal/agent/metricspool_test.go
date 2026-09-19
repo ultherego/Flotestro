@@ -21,9 +21,7 @@ func openSpool(t *testing.T, dir, bootID string, limit int) *MetricsSpool {
 }
 
 // TestTheSpoolNumbersEverySampleWithinTheBoot proves the identity: the
-// sequence starts at one, grows by one, and carries the boot the host is
-// on. That pair, and not the host's clock, is what the panel recognises a
-// second delivery by.
+// sequence starts at one, grows by one, and carries the boot the host is on.
 func TestTheSpoolNumbersEverySampleWithinTheBoot(t *testing.T) {
 	spool := openSpool(t, t.TempDir(), "boot-a", 10)
 	for want := uint64(1); want <= 3; want++ {
@@ -80,10 +78,9 @@ func TestTheSpoolKeepsASampleUntilItIsAcknowledged(t *testing.T) {
 	}
 }
 
-// TestAnAcknowledgementOfAnotherBootLeavesTheSpoolAlone: the sequence
-// starts again at one on every boot, so an answer that names a boot the
-// spool does not hold must not free the sample that happens to share its
-// number.
+// TestAnAcknowledgementOfAnotherBootLeavesTheSpoolAlone: the sequence starts
+// again at one on every boot, so an answer that names a boot the spool does
+// not hold must not free the sample that happens to share its number.
 func TestAnAcknowledgementOfAnotherBootLeavesTheSpoolAlone(t *testing.T) {
 	spool := openSpool(t, t.TempDir(), "boot-b", 10)
 	if err := spool.Enqueue(&agentv1.MetricsSample{SampledAtUnix: 10}); err != nil {
@@ -95,10 +92,8 @@ func TestAnAcknowledgementOfAnotherBootLeavesTheSpoolAlone(t *testing.T) {
 	}
 }
 
-// TestTheSpoolSurvivesARestartOfTheAgent: a restart within one boot picks
-// up what was not answered and carries on counting. Handing out a number
-// twice would have the panel answer the new reading as a duplicate and
-// never store it.
+// TestTheSpoolSurvivesARestartOfTheAgent: a restart within one boot picks up
+// what was not answered and carries on counting.
 func TestTheSpoolSurvivesARestartOfTheAgent(t *testing.T) {
 	dir := t.TempDir()
 	first := openSpool(t, dir, "boot-a", 10)
@@ -128,9 +123,9 @@ func TestTheSpoolSurvivesARestartOfTheAgent(t *testing.T) {
 	}
 }
 
-// TestARestartCountsPastNumbersNothingIsLeftOf is the case the counter
-// file exists for: every sample was acknowledged, so the directory holds
-// nothing to learn the last number from.
+// TestARestartCountsPastNumbersNothingIsLeftOf is the case the counter file
+// exists for: every sample was acknowledged, so the directory holds nothing to
+// learn the last number from.
 func TestARestartCountsPastNumbersNothingIsLeftOf(t *testing.T) {
 	dir := t.TempDir()
 	first := openSpool(t, dir, "boot-a", 10)
@@ -245,9 +240,9 @@ func TestACorruptSpoolFileIsDiscarded(t *testing.T) {
 	}
 }
 
-// TestTheSamplerResendsWhatWasNotAcknowledged is the session's half: on a
-// new stream the agent sends what the panel never confirmed, oldest first,
-// before the reading it is about to take.
+// TestTheSamplerResendsWhatWasNotAcknowledged is the session's half: on a new
+// stream the agent sends what the panel never confirmed, oldest first, before
+// the reading it is about to take.
 func TestTheSamplerResendsWhatWasNotAcknowledged(t *testing.T) {
 	dir := t.TempDir()
 	spool := openSpool(t, dir, "boot-a", 10)

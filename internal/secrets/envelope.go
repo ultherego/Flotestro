@@ -11,36 +11,18 @@ import (
 	"strconv"
 )
 
-// The envelope is how a value lies in the database since the second
-// version of the store.
-//
-// Every version of every secret gets a random data key of its own; the
-// value is sealed under that key, and the data key is wrapped by the
-// installation's key encryption key through the provider. The provider is
-// the only party that ever sees the key encryption key, so a rotation of
-// it touches the wrapped data keys alone - never the values - and the
-// value of one secret never shares a key with the value of another.
-//
-// A row written the first way still opens: its envelope version says so,
-// and the key it was sealed under is registered with the provider under
-// the name "legacy". Such a row is rewrapped in the background into the
-// second form, so an installation upgrades without re-entering anything.
+// The envelope is how a value lies in the database since the second version of
+// the store.
 
 // EnvelopeVersion is the form new versions are written in.
 const EnvelopeVersion = 2
 
-// LegacyKeyID names, with the provider, the key an installation from
-// before the envelope sealed its values under. The startup guard registers
-// the old key file under this name, and the rows written the first way
-// are opened with it until the rewrap reaches them.
+// LegacyKeyID names, with the provider, the key an installation from before
+// the envelope sealed its values under.
 const LegacyKeyID = "legacy"
 
-// KeyProvider keeps the key encryption keys and wraps data keys with them.
-//
-// The interface is the seam between the store and the place the keys
-// live. The built-in provider keeps them in files of the state directory;
-// a vault or a hardware module can implement the same four methods later
-// without the store noticing.
+// KeyProvider keeps the key encryption keys and wraps data keys with them. The
+// interface is the seam between the store and the place the keys live.
 type KeyProvider interface {
 	// ActiveKeyID names the key new envelopes are wrapped with.
 	ActiveKeyID(ctx context.Context) (string, error)
@@ -55,16 +37,13 @@ type KeyProvider interface {
 }
 
 // LegacyOpener is a provider that also holds the key the rows of the first
-// form were sealed under. The built-in provider has it after adopting an
-// installation from before the envelope; a provider without it cannot
-// open such rows, and says so through the error rather than by guessing.
+// form were sealed under.
 type LegacyOpener interface {
 	LegacyCipher() (*Cipher, bool)
 }
 
 // ErrKeyUnavailable means the provider does not hold the key an envelope
-// names. It is the error of a row written under a key that has since
-// been removed, or of a store started without its key.
+// names.
 var ErrKeyUnavailable = errors.New("secrets_key_unavailable")
 
 // Envelope is one sealed value together with what is needed to open it,
@@ -78,11 +57,6 @@ type Envelope struct {
 }
 
 // AssociatedData renders what an envelope is bound to.
-//
-// The row and the kind of thing in it go into the authentication: a
-// ciphertext moved to another secret, another version, or from a secret
-// into the sentinel, does not open. The envelope version is part of it
-// too, so a row cannot be re-labelled as the other form.
 func AssociatedData(secretID string, version int, kind string, envelopeVersion int) []byte {
 	return []byte(secretID + "|" + strconv.Itoa(version) + "|" + kind + "|" + strconv.Itoa(envelopeVersion))
 }
@@ -148,9 +122,7 @@ func (e Envelope) Open(ctx context.Context, keys KeyProvider, associated []byte)
 	return value, nil
 }
 
-// Rewrap moves the envelope to another key encryption key. The value and
-// its data key stay as they are: only the wrapping changes hands, which
-// is what makes a rotation cheap enough to run over the whole store.
+// Rewrap moves the envelope to another key encryption key.
 func (e Envelope) Rewrap(ctx context.Context, keys KeyProvider, toKeyID string) (Envelope, error) {
 	if e.Version != EnvelopeVersion {
 		return Envelope{}, fmt.Errorf("envelope version %d cannot be rewrapped", e.Version)

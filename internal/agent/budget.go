@@ -9,19 +9,13 @@ import (
 // The resource classes of the host. Tasks of one class compete with each other
 // and not with the whole management of the host.
 const (
-	// ClassPackages covers the operations of the package manager. A limit of one
-	// is not caution: two apt runs at once rebuild the same cache and together
-	// take longer than one after the other.
+	// ClassPackages covers the operations of the package manager.
 	ClassPackages = "packages"
 	// ClassGeneral is the rest: unit operations, journal reads, state.
 	ClassGeneral = "general"
 )
 
 // budget watches how many tasks of a given class may run at once.
-//
-// A shared pool for all tasks had a flaw visible from the panel: two long
-// package reads took both slots, and an operation lasting milliseconds waited
-// behind them for a minute. The host then looked hung although it was working.
 type budget struct {
 	slots map[string]chan struct{}
 }
@@ -51,9 +45,7 @@ func (b *budget) acquire(ctx context.Context, class string) func() {
 	}
 }
 
-// taskClass recognizes the resource class by the type of the operation. An
-// unknown operation lands in the general class: an unknown cost must not block
-// the whole package class, and it still passes through the general limit.
+// taskClass recognizes the resource class by the type of the operation.
 func taskClass(task *agentv1.TaskEnvelope) string {
 	switch task.GetAction().(type) {
 	case *agentv1.TaskEnvelope_PackagePlan,

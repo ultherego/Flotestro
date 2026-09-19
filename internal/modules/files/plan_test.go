@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-// TestPlanDistinguishesMissingFileFromDifferentContent guards the essence
-// of the per-host plan: two hosts with the same desired state have two
-// different answers.
+// TestPlanDistinguishesMissingFileFromDifferentContent guards the essence of
+// the per-host plan: two hosts with the same desired state have two different
+// answers.
 func TestPlanDistinguishesMissingFileFromDifferentContent(t *testing.T) {
 	desired := []byte("new content\n")
 
@@ -38,9 +38,8 @@ func TestPlanDistinguishesMissingFileFromDifferentContent(t *testing.T) {
 	}
 }
 
-// TestPlanNoChangeIsAnAnswer guards that a host already matching the
-// desired state says so directly. Without that the operator does not know
-// how many hosts the campaign will really touch.
+// TestPlanNoChangeIsAnAnswer guards that a host already matching the desired
+// state says so directly.
 func TestPlanNoChangeIsAnAnswer(t *testing.T) {
 	desired := []byte("the same content\n")
 	fingerprint := Fingerprint(desired)
@@ -75,8 +74,8 @@ func TestPlanSeesPermissionsAlone(t *testing.T) {
 	}
 }
 
-// TestPlanOfSecretFileCarriesNoContent guards the boundary the plan must
-// not cross: a value from the store has no right to appear in the change
+// TestPlanOfSecretFileCarriesNoContent guards the boundary the plan must not
+// cross: a value from the store has no right to appear in the change
 // description or in its fingerprint.
 func TestPlanOfSecretFileCarriesNoContent(t *testing.T) {
 	plan := Compute(File{
@@ -107,19 +106,17 @@ func TestRemovalPlanDistinguishesExistingFile(t *testing.T) {
 	}
 }
 
-// TestPlanFingerprintDoesNotDependOnValidatorOutput guards repeatability:
-// the same diff must give the same fingerprint, even when the validator
-// prints something else.
+// TestPlanFingerprintDoesNotDependOnValidatorOutput guards repeatability: the
+// same diff must give the same fingerprint, even when the validator prints
+// something else.
 func TestPlanFingerprintDoesNotDependOnValidatorOutput(t *testing.T) {
 	desired := []byte("content\n")
 	current := File{Path: "/etc/x.conf", Exists: true, SHA256: "aaa", Mode: "0644"}
 
 	plan := Compute(current, Desired{Content: desired, Mode: "0644"})
 
-	// The fingerprint is computed directly on two plans differing only in
-	// the validator output. Setting the field after Compute would check
-	// nothing: the fingerprint is made inside, before the validator even
-	// runs.
+	// The fingerprint is computed directly on two plans differing only in the
+	// validator output.
 	withOutput := plan
 	withOutput.ValidatorOutput = "nginx: configuration file test is successful"
 	withoutOutput := plan
@@ -147,9 +144,8 @@ func containsChange(changes []string, fragment string) bool {
 }
 
 // TestPlanCarriesTheWholeIntendedState guards what an approval is meant to
-// cover: not a digest, but the inode, the rule the path was resolved
-// under, who would check the content and what would have to be reloaded
-// afterwards.
+// cover: not a digest, but the inode, the rule the path was resolved under,
+// who would check the content and what would have to be reloaded afterwards.
 func TestPlanCarriesTheWholeIntendedState(t *testing.T) {
 	desired := []byte("server {}\n")
 	identity := ValidatorIdentity{Known: true, Name: "nginx", Command: "/usr/sbin/nginx",
@@ -188,8 +184,8 @@ func TestPlanCarriesTheWholeIntendedState(t *testing.T) {
 }
 
 // TestAPlanWithoutConsumersSaysWhy guards the doctrine on an empty list:
-// "nothing to reload" and "the panel knows of nothing" are different
-// answers, and only one of them is silence.
+// "nothing to reload" and "the panel knows of nothing" are different answers,
+// and only one of them is silence.
 func TestAPlanWithoutConsumersSaysWhy(t *testing.T) {
 	plan := Compute(File{Path: "/etc/motd", Exists: true, SHA256: "aaa", Mode: "0644"},
 		Desired{Content: []byte("hello\n"), Mode: "0644"})
@@ -207,9 +203,9 @@ func TestAPlanWithoutConsumersSaysWhy(t *testing.T) {
 	}
 }
 
-// TestAMissingValidatorIsNotAPassedCheck guards the plan of a host without
-// the tool: the identity says the tool is not there, which is not the same
-// as a check that found nothing wrong.
+// TestAMissingValidatorIsNotAPassedCheck guards the plan of a host without the
+// tool: the identity says the tool is not there, which is not the same as a
+// check that found nothing wrong.
 func TestAMissingValidatorIsNotAPassedCheck(t *testing.T) {
 	plan := Compute(File{Path: "/etc/nginx/conf.d/app.conf", Exists: false},
 		Desired{Content: []byte("server {}\n"), Mode: "0644",
@@ -223,10 +219,9 @@ func TestAMissingValidatorIsNotAPassedCheck(t *testing.T) {
 	}
 }
 
-// TestThePlanFingerprintIgnoresTheSurroundings guards that an approval
-// binds the change and not the environment: the version of the tool, the
-// units installed and the number of copies kept may differ between the
-// plan and the write without turning it into a different change.
+// TestThePlanFingerprintIgnoresTheSurroundings guards that an approval binds
+// the change and not the environment: the version of the tool, the units
+// installed and the number of copies kept may differ between the plan and the
 func TestThePlanFingerprintIgnoresTheSurroundings(t *testing.T) {
 	current := File{Path: "/etc/nginx/conf.d/app.conf", Exists: true, SHA256: "aaa", Mode: "0644"}
 	desired := Desired{Content: []byte("server {}\n"), Mode: "0644",
@@ -241,9 +236,8 @@ func TestThePlanFingerprintIgnoresTheSurroundings(t *testing.T) {
 	if before.PlanHash != after.PlanHash {
 		t.Error("an upgrade of the tool turned an approved change into a different one")
 	}
-	// The identity of the checker still differs where it describes the
-	// check itself: a validator that is suddenly unavailable is a
-	// different plan.
+	// The identity of the checker still differs where it describes the check
+	// itself: a validator that is suddenly unavailable is a different plan.
 	desired.Validator.Available = false
 	if Compute(current, desired).PlanHash == before.PlanHash {
 		t.Error("a plan whose validator disappeared has the same fingerprint")

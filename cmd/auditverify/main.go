@@ -1,20 +1,4 @@
-// Command auditverify checks an export of the audit trail without the
-// panel.
-//
-// An export is a file of JSON lines linked by a hash chain: every line
-// carries the digest of the line before it, and the closing line carries
-// the count and the digest of the last event. The tool recomputes the
-// chain and says whether the file is what the panel wrote - a line
-// changed, removed, inserted or cut off breaks it. Nothing else is needed:
-// no database, no key, no network. That is the point of the file: a copy
-// kept on write-once storage or handed to an auditor is checked where it
-// lies.
-//
-//	auditverify audit-from-20260901T000000Z.jsonl
-//	auditverify < export.jsonl
-//
-// The exit status is 0 for a file that verifies, 1 for one that does not,
-// and 2 for a wrong invocation.
+// Command auditverify checks an export of the audit trail without the panel.
 package main
 
 import (

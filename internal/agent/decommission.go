@@ -13,17 +13,13 @@ import (
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 )
 
-// ErrDecommissioned ends the agent after the final commit of the panel. It
-// is not a failure: the process exits cleanly, and the service stays down
-// because the helper disabled it.
+// ErrDecommissioned ends the agent after the final commit of the panel.
 var ErrDecommissioned = errors.New("the host was decommissioned by the panel")
 
 // errLeasesDropped is the answer to a secret asked for after the final task.
 var errLeasesDropped = errors.New("the host is leaving the fleet; its secret leases were dropped")
 
-// RejectRetiring marks a task delivered after the final task. The host is
-// leaving the fleet and starts nothing new; the panel already cancelled what
-// was queued, so a task that still arrives was in flight when it did.
+// RejectRetiring marks a task delivered after the final task.
 const RejectRetiring = "host_retiring"
 
 // defaultFinalGrace is how long the agent waits for the tasks under way
@@ -34,11 +30,6 @@ const defaultFinalGrace = 90 * time.Second
 const finalWipeTimeout = 60 * time.Second
 
 // finalHandshake is the agent's side of the decommission handshake.
-//
-// It counts the attempts under way, so that the final task can wait for
-// them, and remembers that the host is leaving, so that nothing new starts.
-// Both live here rather than in the executor: the executor performs one
-// task and knows nothing of the others.
 type finalHandshake struct {
 	mu       sync.Mutex
 	leaving  bool
@@ -46,9 +37,7 @@ type finalHandshake struct {
 	running  map[string]struct{}
 	idle     chan struct{}
 	idleOnce sync.Once
-	// done is set once the commit went through. The session reads it on
-	// its way out: whichever error ends the stream first, the reason the
-	// agent leaves is the decommission.
+	// done is set once the commit went through.
 	done atomic.Bool
 }
 
@@ -140,13 +129,8 @@ func refuseRetiring(taskID string) *agentv1.TaskResult {
 }
 
 // answerFinalTask carries the agent's side of the first step out: nothing new
-// starts, the secret leases are dropped, the running work gets its grace,
-// and FinalReady goes back with what was still running.
-//
-// A task that does not finish within the grace is not interrupted: the panel
-// hears which ones were still running and decides. Cutting a package
-// transaction in half to leave the fleet a minute sooner would be a strange
-// way to end the trust in a host cleanly.
+// starts, the secret leases are dropped, the running work gets its grace, and
+// FinalReady goes back with what was still running.
 func answerFinalTask(ctx context.Context, task *agentv1.FinalTask, handshake *finalHandshake,
 	send func(*agentv1.AgentMessage) error, log *slog.Logger) error {
 	if !handshake.begin(task.GetReason()) {
@@ -173,9 +157,8 @@ func answerFinalTask(ctx context.Context, task *agentv1.FinalTask, handshake *fi
 	})
 }
 
-// finalWiper asks the root helper to remove what makes this host a member
-// of the fleet. A nil helper means a host without one; the wipe is then
-// refused and said so.
+// finalWiper asks the root helper to remove what makes this host a member of
+// the fleet.
 type finalWiper func(ctx context.Context, reason string) (*helperv1.HelperResponse, error)
 
 // helperWiper builds the wiper over the real helper client.
@@ -194,21 +177,13 @@ func helperWiper(client *HelperClient) finalWiper {
 	}
 }
 
-// applyFinalCommit carries the second step out. With a wipe ordered, the
-// helper removes the identity and the journal and disables the service; the
-// agent then ends with ErrDecommissioned, which the process turns into a
-// clean exit. A helper that refuses, or is missing, leaves the agent running:
-// its certificate is revoked by now, so it will fail to reconnect and say why
-// - and its identity files stay for the operator to read, which is better
-// than an agent that exited without doing what it was told.
-//
-// Without a wipe there is nothing to do on the disk; the agent only ends.
+// applyFinalCommit carries the second step out.
 func applyFinalCommit(ctx context.Context, commit *agentv1.FinalCommit, handshake *finalHandshake,
 	wipe finalWiper, log *slog.Logger) error {
 	if !handshake.isLeaving() {
-		// A commit without a final task before it is not the handshake; the
-		// panel does not send one, so this is either an old panel or a
-		// message meant for somebody else. Not acted on.
+		// A commit without a final task before it is not the handshake; the panel
+		// does not send one, so this is either an old panel or a message meant for
+		// somebody else.
 		log.Warn("a final commit arrived without a final task; ignored")
 		return nil
 	}

@@ -35,8 +35,7 @@ func (f *fakeSessions) RevokeSessionsOf(_ context.Context, principalID, reason s
 
 func TestADirectoryUserMatchesThePrincipalsTheLoginNamedAfterIt(t *testing.T) {
 	// The login names a principal after preferred_username, or after
-	// "uid@issuer-host" when that name was taken. Both are the same person
-	// in the directory; a name that merely starts alike is not.
+	// "uid@issuer-host" when that name was taken.
 	cases := []struct {
 		subject, uid string
 		matches      bool
@@ -106,9 +105,9 @@ func TestNothingToRevokeIsNotAFailure(t *testing.T) {
 }
 
 func TestAFailedListingFailsTheRevocationPhase(t *testing.T) {
-	// The directory change itself succeeded; a phase that fails here makes
-	// the change partially applied, which is the truth: the membership moved
-	// and the old sessions may still be alive.
+	// The directory change itself succeeded; a phase that fails here makes the
+	// change partially applied, which is the truth: the membership moved and the
+	// old sessions may still be alive.
 	executor := &Executor{sessions: &fakeSessions{listErr: errors.New("database gone")}}
 	phase, _ := executor.revokeChangedMembers(context.Background(), []string{"alice"}, "moved")
 	if phase.Status != "failed" {
@@ -141,10 +140,9 @@ func TestADisableEndsTheProviderSessionsAndNeverFailsOnThem(t *testing.T) {
 		t.Fatalf("the provider was asked to log out %v", provider.loggedOut)
 	}
 
-	// The provider refuses or is unreachable: the disable holds on the
-	// local marker, so the phase is skipped with the reason rather than
-	// failed - a failed phase would call the whole disable partially
-	// applied, and it is not.
+	// The provider refuses or is unreachable: the disable holds on the local
+	// marker, so the phase is skipped with the reason rather than failed - a
+	// failed phase would call the whole disable partially applied, and it is not.
 	refusing := &Executor{provider: &fakeLogoutProvider{err: errors.New("the admin API answered 403 Forbidden")}}
 	phase, ended = refusing.endProviderSessions(context.Background(), "alice")
 	if phase.Status != "skipped" || ended.Ended || !strings.Contains(ended.Reason, "403") {
@@ -161,9 +159,9 @@ func TestADisableEndsTheProviderSessionsAndNeverFailsOnThem(t *testing.T) {
 	}
 }
 
-// preserveHarness is an executor whose four halves of a preserve are
-// recorded: what the directory was asked, in which order, and whether the
-// local account was touched at all.
+// preserveHarness is an executor whose four halves of a preserve are recorded:
+// what the directory was asked, in which order, and whether the local account
+// was touched at all.
 type preserveHarness struct {
 	executor *Executor
 	// order is what happened and in which sequence. The order is the point
@@ -190,9 +188,9 @@ func newPreserveHarness(t *testing.T) *preserveHarness {
 	harness.executor = &Executor{
 		sessions: &fakeSessions{live: map[string]int64{}},
 		capabilities: func(_ context.Context, uid string) (freeipa.DirectoryCapabilities, error) {
-			// The question is about this account's entry: the order records
-			// which one it was asked about, so a preserve that asked about
-			// somebody else would be visible here.
+			// The question is about this account's entry: the order records which one
+			// it was asked about, so a preserve that asked about somebody else would be
+			// visible here.
 			harness.order = append(harness.order, "capabilities:"+uid)
 			return harness.capabilities, nil
 		},
@@ -221,11 +219,8 @@ func preserveChange(entry freeipa.EntryReference) Change {
 	return Change{ID: "change-1", ActionType: string(ActionUserPreserve), Plan: plan}
 }
 
-// did says whether the recorded order contains the step.
-// did says whether a step happened. The steps carry what they were asked
-// about - which account, which entry - so the match is by prefix: a test
-// asks "was the account preserved", not "was it preserved against exactly
-// this distinguished name", which its own assertions check separately.
+// did says whether the recorded order contains the step. did says whether a
+// step happened.
 func (h *preserveHarness) did(step string) bool {
 	for _, done := range h.order {
 		if done == step || strings.HasPrefix(done, step+"@") {
@@ -236,9 +231,7 @@ func (h *preserveHarness) did(step string) bool {
 }
 
 // A directory that refuses the move leaves the local account exactly as it
-// was. The old order - local denial first - made a refused moddn into a user
-// locked out of the panel and the hosts while the directory still held the
-// account: locked out everywhere, removed nowhere.
+// was.
 func TestADirectoryThatRefusesThePreserveLeavesTheLocalAccountAsItWas(t *testing.T) {
 	harness := newPreserveHarness(t)
 	harness.preserveErr = &freeipa.DirectoryError{
@@ -260,9 +253,8 @@ func TestADirectoryThatRefusesThePreserveLeavesTheLocalAccountAsItWas(t *testing
 		t.Fatalf("the last phase is %s (%s), expected a failure coded %s",
 			last.Status, last.Message, RefusalDirectoryRefused)
 	}
-	// The refusal carries the directory's own reason, not a summary of it:
-	// an ACI that is missing and a container that is not there are repaired
-	// differently.
+	// The refusal carries the directory's own reason, not a summary of it: an ACI
+	// that is missing and a container that is not there are repaired differently.
 	if !strings.Contains(last.Message, "ACIError") ||
 		!strings.Contains(last.Message, "Insufficient 'delete' privilege") {
 		t.Errorf("the refusal %q does not carry the directory's own reason", last.Message)
@@ -300,8 +292,6 @@ func TestAPreserveAsksTheDirectoryBeforeItTouchesTheLocalAccount(t *testing.T) {
 
 // Two operators preserving the same user: the second one finds the entry
 // somewhere else, because a preserved account lives in another container.
-// The plan is bound to the entry it was made for, so the second execution is
-// refused as stale instead of preserving an account twice.
 func TestAnEntryThatMovedSinceThePlanRefusesAsStale(t *testing.T) {
 	harness := newPreserveHarness(t)
 	planned := harness.entry
@@ -350,9 +340,8 @@ func TestAnEntryTheDirectoryNoLongerHoldsRefusesAsStale(t *testing.T) {
 	}
 }
 
-// A directory that proved it cannot move an entry blocks the operation
-// before anything is ordered. This is the preflight the document asks for:
-// the panel refuses rather than discovering the ACI halfway through.
+// A directory that proved it cannot move an entry blocks the operation before
+// anything is ordered.
 func TestADirectoryThatCannotMoveAnEntryBlocksThePreserveBeforeItStarts(t *testing.T) {
 	harness := newPreserveHarness(t)
 	harness.capabilities = freeipa.DirectoryCapabilities{
@@ -374,8 +363,7 @@ func TestADirectoryThatCannotMoveAnEntryBlocksThePreserveBeforeItStarts(t *testi
 }
 
 // A directory that does not report the rights on an entry is not a directory
-// that refused them. The operation goes on - it now asks the directory first,
-// so a refusal there costs nothing locally - and the unknown is recorded.
+// that refused them.
 func TestADirectoryThatDoesNotReportRightsDoesNotBlockThePreserve(t *testing.T) {
 	harness := newPreserveHarness(t)
 	harness.capabilities = freeipa.DirectoryCapabilities{

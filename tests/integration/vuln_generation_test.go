@@ -35,13 +35,8 @@ type fleetVulnerabilityAnswer struct {
 	} `json:"candidates"`
 }
 
-// TestAHostVerdictNamesTheGenerationThatProducedIt guards what chapter 11
-// asks for: a verdict has to say which feed snapshot judged the host.
-//
-// Without it a host with no findings says nothing about the age of the
-// answer - "judged against yesterday's feed" and "judged a minute ago"
-// look the same - and a re-assessment after a new fetch changes the
-// numbers with nothing to say why.
+// TestAHostVerdictNamesTheGenerationThatProducedIt guards what chapter 11 asks
+// for: a verdict has to say which feed snapshot judged the host.
 func TestAHostVerdictNamesTheGenerationThatProducedIt(t *testing.T) {
 	h := newHarness(t)
 	var fleet fleetVulnerabilityAnswer
@@ -60,9 +55,8 @@ func TestAHostVerdictNamesTheGenerationThatProducedIt(t *testing.T) {
 	judged := 0
 	for _, item := range fleet.Items {
 		if item.EvaluatedAt == "" || generations[item.Provider] == "" {
-			// A host nobody has assessed, or one whose findings come from
-			// its own repository metadata, where there is no central
-			// generation to name.
+			// A host nobody has assessed, or one whose findings come from its own
+			// repository metadata, where there is no central generation to name.
 			continue
 		}
 		judged++
@@ -79,10 +73,7 @@ func TestAHostVerdictNamesTheGenerationThatProducedIt(t *testing.T) {
 		t.Skip("no host of this fleet is assessed against a feed with a generation")
 	}
 
-	// The same snapshot always produces the same generation. That is what
-	// makes the field worth reading: a difference between two hosts then
-	// means one of them really was not reassessed, rather than that two
-	// passes happened to run a minute apart.
+	// The same snapshot always produces the same generation.
 	perSnapshot := map[string]string{}
 	for _, item := range fleet.Items {
 		if item.GenerationID == "" || item.SnapshotDigest == "" {
@@ -113,15 +104,8 @@ func TestAHostVerdictNamesTheGenerationThatProducedIt(t *testing.T) {
 	}
 }
 
-// TestTheSanityGateHoldsAShrunkenFetchUntilItIsAccepted guards the second
-// half of chapter 11. "Empty" was the easy case: a fetch that came back
-// with a tenth of the findings is the same broken download and would have
-// been activated in silence, reporting most of the fleet as clean.
-//
-// The candidate is prepared directly in the database under a provider of
-// its own: activating a real feed with a tenth of its findings would
-// change what the panel says about the lab's hosts, which is exactly the
-// accident this gate exists to prevent.
+// TestTheSanityGateHoldsAShrunkenFetchUntilItIsAccepted guards the second half
+// of chapter 11.
 func TestTheSanityGateHoldsAShrunkenFetchUntilItIsAccepted(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -153,9 +137,9 @@ func TestTheSanityGateHoldsAShrunkenFetchUntilItIsAccepted(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The screen that shows the numbers is the screen that shows the fetch
-	// being held back: a held-back feed is the reason those numbers have
-	// stopped moving.
+	// The screen that shows the numbers is the screen that shows the fetch being
+	// held back: a held-back feed is the reason those numbers have stopped
+	// moving.
 	var fleet fleetVulnerabilityAnswer
 	h.get("/api/v1/vulnerabilities?limit=1", &fleet)
 	var listed bool
@@ -187,9 +171,8 @@ func TestTheSanityGateHoldsAShrunkenFetchUntilItIsAccepted(t *testing.T) {
 		map[string]any{"reason": "the vendor retired the findings of the release"},
 		nil, http.StatusConflict)
 
-	// Until it is accepted, the fetch in force stays in force. That is the
-	// point: older data that say they are older beat newer data nobody has
-	// looked at.
+	// Until it is accepted, the fetch in force stays in force. That is the point:
+	// older data that say they are older beat newer data nobody has looked at.
 	var activeDigest string
 	if err := pool.QueryRow(ctx,
 		`select digest from vuln_snapshots where provider = $1 and active`, provider).

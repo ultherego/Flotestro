@@ -139,9 +139,8 @@ func TestTheHostWaitsForMutationsInFlight(t *testing.T) {
 }
 
 // TestAReadWithoutAContractClaimTakesNoResource guards that a read whose
-// contract lists nothing takes nothing: a unit status read has no lock
-// class and costs the host nothing worth rationing, so its cost is
-// limited by the task budget alone.
+// contract lists nothing takes nothing: a unit status read has no lock class
+// and costs the host nothing worth rationing, so its cost is limited by the
 func TestAReadWithoutAContractClaimTakesNoResource(t *testing.T) {
 	read := &agentv1.TaskEnvelope{
 		TaskId: "read",
@@ -154,11 +153,9 @@ func TestAReadWithoutAContractClaimTakesNoResource(t *testing.T) {
 	}
 }
 
-// TestAReadTakesTheSharedClaimsOfItsContract guards the other kind of
-// read: the journal read takes the logs class shared with the weight the
-// contract gives it, and a package plan takes the package class shared -
-// so that it does not run under a package transaction, and a package
-// transaction does not start under it.
+// TestAReadTakesTheSharedClaimsOfItsContract guards the other kind of read:
+// the journal read takes the logs class shared with the weight the contract
+// gives it, and a package plan takes the package class shared - so that it
 func TestAReadTakesTheSharedClaimsOfItsContract(t *testing.T) {
 	journal := &agentv1.TaskEnvelope{
 		TaskId: "journal",
@@ -190,9 +187,9 @@ func TestAUnitMutationTakesTheResourceClass(t *testing.T) {
 	}
 }
 
-// TestTheClaimsOfEveryOperationAreTheContractsOwn guards the source of
-// the claims: for every operation the agent binds the classes the
-// contract declares, the file class to the path, and nothing of its own.
+// TestTheClaimsOfEveryOperationAreTheContractsOwn guards the source of the
+// claims: for every operation the agent binds the classes the contract
+// declares, the file class to the path, and nothing of its own.
 func TestTheClaimsOfEveryOperationAreTheContractsOwn(t *testing.T) {
 	reboot := &agentv1.TaskEnvelope{
 		TaskId: "reboot",
@@ -260,9 +257,7 @@ func TestFilesAreSeparateResources(t *testing.T) {
 
 // TestTheRepairPayloadHashesTheSameAsInThePanel guards the property that joins
 // the panel with the agent: the envelope has to reproduce exactly the payload
-// the panel computed the plan hash from. An empty list is written differently in
-// JSON than a missing one, so a repair without answers used to end in a
-// payload_hash_mismatch refusal.
+// the panel computed the plan hash from.
 func TestTheRepairPayloadHashesTheSameAsInThePanel(t *testing.T) {
 	inThePanel := opspec.Payload{PackageRepair: &opspec.PackageRepairPayload{}}
 	expected, err := opspec.PayloadHash(opspec.ActionPackageRepair, opspec.ActionVersion, inThePanel)
@@ -290,9 +285,8 @@ func TestTheRepairPayloadHashesTheSameAsInThePanel(t *testing.T) {
 }
 
 // TestAWaitingTaskNamesItsBlocker guards what the panel shows under a host
-// that has not started: the wait is reported the moment the task finds
-// the resource busy, the report names the resource and the task holding
-// it, and a task that finds its resources free reports no wait at all.
+// that has not started: the wait is reported the moment the task finds the
+// resource busy, the report names the resource and the task holding it, and a
 func TestAWaitingTaskNamesItsBlocker(t *testing.T) {
 	l := newLocks()
 	ctx := context.Background()
@@ -378,9 +372,9 @@ func enters(t *testing.T, l *locks, task, operation string, claims []opspec.Reso
 	return l.acquire(short, task, operation, claims)
 }
 
-// TestSharedClaimsCoexist guards the point of a shared claim: two reads of
-// the journal, and two reads of the package database, run side by side
-// on the same class, and each gives back only its own place.
+// TestSharedClaimsCoexist guards the point of a shared claim: two reads of the
+// journal, and two reads of the package database, run side by side on the same
+// class, and each gives back only its own place.
 func TestSharedClaimsCoexist(t *testing.T) {
 	l := newLocks()
 
@@ -420,10 +414,9 @@ func TestSharedClaimsCoexist(t *testing.T) {
 	second()
 }
 
-// TestSharedAndExclusiveClaimsExcludeEachOther guards both directions:
-// a package upgrade waits for a package plan still reading the database,
-// and a package plan waits for an upgrade under way - the read would
-// otherwise describe a state that is changing under it.
+// TestSharedAndExclusiveClaimsExcludeEachOther guards both directions: a
+// package upgrade waits for a package plan still reading the database, and a
+// package plan waits for an upgrade under way - the read would otherwise
 func TestSharedAndExclusiveClaimsExcludeEachOther(t *testing.T) {
 	l := newLocks()
 
@@ -466,11 +459,9 @@ func TestSharedAndExclusiveClaimsExcludeEachOther(t *testing.T) {
 	}
 }
 
-// TestWeightsAddUpAgainstTheCapacity guards the ration of a shared class:
-// the logs class carries four at once, so readers enter while their
-// weights fit and the one that would exceed the capacity waits for a
-// release - and a claim heavier than the whole capacity still gets an
-// empty class rather than waiting for ever.
+// TestWeightsAddUpAgainstTheCapacity guards the ration of a shared class: the
+// logs class carries four at once, so readers enter while their weights fit
+// and the one that would exceed the capacity waits for a release - and a claim
 func TestWeightsAddUpAgainstTheCapacity(t *testing.T) {
 	if opspec.SharedCapacity(opspec.ClaimLogsRead) != 4 || opspec.SharedCapacity(opspec.ClaimInventoryHeavy) != 2 {
 		t.Fatalf("the capacities are logs %d and inventory %d; the test assumes 4 and 2",

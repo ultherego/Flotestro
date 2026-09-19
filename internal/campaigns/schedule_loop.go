@@ -7,19 +7,14 @@ import (
 	"time"
 )
 
-// ScheduleOrderer places the order of a schedule: the door of the
-// campaign API, given the schedule instead of a request. It answers with
-// the campaign it created, or with a ScheduleRefusal when the door
-// refused the order, or with an error when the panel itself failed.
+// ScheduleOrderer places the order of a schedule: the door of the campaign
+// API, given the schedule instead of a request.
 type ScheduleOrderer interface {
 	OrderFromSchedule(ctx context.Context, schedule Schedule, runAt time.Time) (*Campaign, error)
 }
 
-// ScheduleRefusal is the door's answer when it would not place the order:
-// the code and the sentence the request would have got. It is kept on
-// the schedule for the operator to read, and the schedule moves on to its
-// next moment - a refusal at two in the morning is not a reason to place
-// the same refused order every five seconds.
+// ScheduleRefusal is the door's answer when it would not place the order: the
+// code and the sentence the request would have got.
 type ScheduleRefusal struct {
 	Code   string
 	Detail string
@@ -28,11 +23,6 @@ type ScheduleRefusal struct {
 func (r ScheduleRefusal) Error() string { return r.Code + ": " + r.Detail }
 
 // ScheduleLoop places the orders of the schedules whose moment has come.
-//
-// The tick is short so a moment is met within seconds of itself; the work
-// is one indexed question per tick and nothing when nothing is due. Two
-// panels on one database claim a moment before placing its order, so the
-// order is placed once.
 type ScheduleLoop struct {
 	store    *Store
 	orderer  ScheduleOrderer
@@ -62,11 +52,7 @@ func (l *ScheduleLoop) Run(ctx context.Context) {
 	}
 }
 
-// tick places the order of every due schedule. A schedule is moved past
-// its moment before its order is placed: a door that refuses the order
-// must not leave the moment standing to be tried again at the next tick,
-// and a panel that dies mid-order leaves a schedule that moved on with
-// no campaign named, which the record shows as it is.
+// tick places the order of every due schedule.
 func (l *ScheduleLoop) tick(ctx context.Context) {
 	now := time.Now().UTC()
 	due, err := l.store.DueSchedules(ctx, now)

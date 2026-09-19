@@ -1,6 +1,5 @@
 // Package jobs holds the model of typed operations: the state machine, the
-// queue with leases and the record of attempts. The package knows neither the
-// HTTP layer nor the agent protocol.
+// queue with leases and the record of attempts.
 package jobs
 
 import "fmt"
@@ -16,14 +15,8 @@ const (
 	StateLeased           State = "leased"
 	StateDispatched       State = "dispatched"
 	StateRunning          State = "running"
-	// StateCancelRequested is a cancel asked of a host that holds the task:
-	// the request went out, and the job waits for the agent to say what it
-	// found. It keeps its budget tokens meanwhile - the host may still be
-	// working - and it never goes back to the queue. The acknowledgement
-	// settles it: canceled when the host had not started or interrupted
-	// the work, running again when the host is in a phase that has to
-	// finish, and the result when the host had already finished. No
-	// answer within the operation's own timeout ends it as unknown.
+	// StateCancelRequested is a cancel asked of a host that holds the task: the
+	// request went out, and the job waits for the agent to say what it found.
 	StateCancelRequested State = "cancel_requested"
 	StateSucceeded       State = "succeeded"
 	StateFailed          State = "failed"
@@ -42,11 +35,9 @@ var transitions = map[State][]State{
 	StateLeased:     {StateDispatched, StateQueued, StateCanceled, StateExpired, StateFailed},
 	StateDispatched: {StateRunning, StateSucceeded, StateFailed, StateTimedOut, StateCanceled, StateExpired, StateQueued, StateCancelRequested},
 	StateRunning:    {StateSucceeded, StateFailed, StateTimedOut, StateCanceled, StateQueued, StateCancelRequested},
-	// A requested cancel ends the way the host says: canceled on
-	// not_started or interrupted, back to running on not_interruptible,
-	// with the result on already_done - and failed by the sweep when no
-	// answer came. Never back to the queue: the task is not delivered
-	// again after somebody asked to stop it.
+	// A requested cancel ends the way the host says: canceled on not_started or
+	// interrupted, back to running on not_interruptible, with the result on
+	// already_done - and failed by the sweep when no answer came.
 	StateCancelRequested: {StateCanceled, StateRunning, StateSucceeded, StateFailed, StateTimedOut},
 }
 

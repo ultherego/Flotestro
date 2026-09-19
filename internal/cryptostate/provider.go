@@ -1,18 +1,6 @@
-// Package cryptostate guards the cryptographic identity of an
-// installation: the key encryption keys of the secret store and the fleet
-// CA, and the record in the database that says which of them this
-// installation is.
-//
-// The rule is one and it is hard: a missing key or a missing part of the
-// CA is never a reason to make a new one when the installation already
-// has data. The panel then stops before it touches anything and says
-// which state it found and what brings it back. Creating material happens
-// on the explicit initialisation of an empty installation alone, under a
-// lock, so two panels of one installation cannot each make their own.
-//
-// The package name is not "crypto" on purpose: that is the name of the
-// standard library's package, and the two would shadow each other in any
-// file that needs both.
+// Package cryptostate guards the cryptographic identity of an installation:
+// the key encryption keys of the secret store and the fleet CA, and the record
+// in the database that says which of them this installation is.
 package cryptostate
 
 import (
@@ -55,9 +43,9 @@ func ValidateKeyID(id string) error {
 	return nil
 }
 
-// Provider is what the startup guard needs from a key provider on top of
-// what the store needs: to know what material is there, to create and
-// adopt keys during initialisation, and to name itself in the record.
+// Provider is what the startup guard needs from a key provider on top of what
+// the store needs: to know what material is there, to create and adopt keys
+// during initialisation, and to name itself in the record.
 type Provider interface {
 	secrets.KeyProvider
 	// Name is the provider's name in the installation record.
@@ -73,24 +61,14 @@ type Provider interface {
 	// GenerateNamed creates a new key under the given name. It refuses a
 	// name that exists.
 	GenerateNamed(ctx context.Context, id string) error
-	// Adopt registers existing material under a name. The same material
-	// under the same name is accepted again; different material under a
-	// taken name is refused.
+	// Adopt registers existing material under a name.
 	Adopt(ctx context.Context, id string, key []byte) error
 	// SetActive names the key new envelopes are wrapped with.
 	SetActive(id string)
 }
 
 // LocalSealedProvider keeps the key encryption keys as files of the state
-// directory: keys/<key-id>.key, owned by the service user, mode 0600,
-// written through a temporary file and a rename with the directory
-// synced afterwards.
-//
-// A key may also come from a systemd credential instead of a file: with
-// LoadCredential the unit hands the process a file under
-// $CREDENTIALS_DIRECTORY that nothing else on the machine reads, which is
-// a narrower place than the state directory. Such a key is read and
-// never written.
+// directory: keys/<key-id>.
 type LocalSealedProvider struct {
 	dir string
 	// credential names the systemd credential that holds a key, as
@@ -107,9 +85,7 @@ type LocalSealedProvider struct {
 }
 
 // NewLocalProvider reads the keys of the directory and, when named, the
-// systemd credential. A directory that does not exist yet is an empty
-// provider, not an error: whether emptiness is allowed is the guard's
-// decision.
+// systemd credential.
 func NewLocalProvider(dir, credential string) (*LocalSealedProvider, error) {
 	p := &LocalSealedProvider{
 		dir: dir, credential: credential,
@@ -126,9 +102,9 @@ func NewLocalProvider(dir, credential string) (*LocalSealedProvider, error) {
 		}
 		id := strings.TrimSuffix(name, keyFileSuffix)
 		if err := ValidateKeyID(id); err != nil {
-			// A file with a name that cannot be a key id is not a key of
-			// this provider - a temporary file of an interrupted write, or
-			// something put there by hand.
+			// A file with a name that cannot be a key id is not a key of this provider
+			// - a temporary file of an interrupted write, or something put there by
+			// hand.
 			continue
 		}
 		key, err := secrets.ReadKeyFile(filepath.Join(dir, name))
@@ -236,9 +212,7 @@ func (p *LocalSealedProvider) ActiveKeyID(context.Context) (string, error) {
 	return p.active, nil
 }
 
-// Wrap implements secrets.KeyProvider: the data key is sealed under the
-// named key with the key's name as the associated data, so a wrapped key
-// moved under another name does not unwrap.
+// Wrap implements secrets.
 func (p *LocalSealedProvider) Wrap(_ context.Context, id string, dek []byte) ([]byte, error) {
 	p.mu.RLock()
 	cipher, ok := p.keys[id]
@@ -272,9 +246,8 @@ func (p *LocalSealedProvider) Unwrap(_ context.Context, id string, wrapped []byt
 	return dek, nil
 }
 
-// Health implements secrets.KeyProvider: the active key is named and
-// its file is still there and unchanged. A key removed from under a
-// running panel is caught here rather than at the next fetch.
+// Health implements secrets. KeyProvider: the active key is named and its file
+// is still there and unchanged.
 func (p *LocalSealedProvider) Health(ctx context.Context) error {
 	id, err := p.ActiveKeyID(ctx)
 	if err != nil {
@@ -306,9 +279,7 @@ func (p *LocalSealedProvider) LegacyCipher() (*secrets.Cipher, bool) {
 	return cipher, ok
 }
 
-// Generate implements Provider. The name is random: two panels of one
-// installation initialising at once - which the lock already prevents -
-// would at worst make two files rather than fight over one.
+// Generate implements Provider.
 func (p *LocalSealedProvider) Generate(ctx context.Context) (string, error) {
 	suffix := make([]byte, 6)
 	if _, err := io.ReadFull(rand.Reader, suffix); err != nil {
@@ -329,9 +300,9 @@ func (p *LocalSealedProvider) GenerateNamed(_ context.Context, id string) error 
 	if err := p.RequireKey(context.Background(), id); err == nil {
 		return fmt.Errorf("the key %s already exists", id)
 	}
-	// A file that appeared since the directory was read is another panel
-	// of the same installation making the same key; it is taken as is
-	// rather than replaced.
+	// A file that appeared since the directory was read is another panel of the
+	// same installation making the same key; it is taken as is rather than
+	// replaced.
 	if onDisk, err := secrets.ReadKeyFile(p.path(id)); err == nil {
 		return p.register(id, onDisk, false)
 	} else if !errors.Is(err, secrets.ErrKeyMissing) {
@@ -362,9 +333,9 @@ func (p *LocalSealedProvider) Adopt(_ context.Context, id string, key []byte) er
 		}
 		return nil
 	}
-	// A file that appeared since the directory was read - another panel
-	// of the same installation adopting the same key on a shared state
-	// directory - is accepted when it holds the same material.
+	// A file that appeared since the directory was read - another panel of the
+	// same installation adopting the same key on a shared state directory - is
+	// accepted when it holds the same material.
 	if onDisk, err := secrets.ReadKeyFile(p.path(id)); err == nil {
 		if string(onDisk) != string(key) {
 			return fmt.Errorf("the key file %s already exists with different material", p.path(id))
@@ -379,9 +350,9 @@ func (p *LocalSealedProvider) Adopt(_ context.Context, id string, key []byte) er
 	return p.register(id, key, false)
 }
 
-// Remove deletes a key file that was created in this process and turned
-// out not to be needed: the cleanup of an initialisation that could not
-// record itself. It never touches a credential.
+// Remove deletes a key file that was created in this process and turned out
+// not to be needed: the cleanup of an initialisation that could not record
+// itself.
 func (p *LocalSealedProvider) Remove(id string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()

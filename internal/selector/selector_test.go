@@ -32,9 +32,8 @@ func parse(t *testing.T, text string) *Expression {
 }
 
 // TestCompileRendersEveryLeaf pins the SQL of every kind of leaf and the
-// numbering of the parameters: the condition joins a query that already
-// has parameters of its own, and a placeholder off by one would filter
-// on the wrong value in silence.
+// numbering of the parameters: the condition joins a query that already has
+// parameters of its own, and a placeholder off by one would filter on the
 func TestCompileRendersEveryLeaf(t *testing.T) {
 	cases := []struct {
 		name string
@@ -103,8 +102,8 @@ func TestCompileRendersEveryLeaf(t *testing.T) {
 }
 
 // TestVersionPartsMatchesTheHostList: the version condition of a selector
-// reads the same pattern the host list matches, so "agent_version < x"
-// in a campaign and "behind" on the dashboard order the versions alike.
+// reads the same pattern the host list matches, so "agent_version < x" in a
+// campaign and "behind" on the dashboard order the versions alike.
 func TestVersionPartsMatchesTheHostList(t *testing.T) {
 	want := `string_to_array(substring(h.agent_version from '^v?(\d+(?:\.\d+)*)'), '.')::int[]`
 	if got := VersionParts("h"); got != want {
@@ -164,9 +163,9 @@ func TestCompileNestsCombinators(t *testing.T) {
 	}
 }
 
-// TestCompileRefusesAnUnexpandedGroup guards the order of the steps: a
-// group is resolved by the expander, and the compiler must not invent a
-// membership test from a name.
+// TestCompileRefusesAnUnexpandedGroup guards the order of the steps: a group
+// is resolved by the expander, and the compiler must not invent a membership
+// test from a name.
 func TestCompileRefusesAnUnexpandedGroup(t *testing.T) {
 	_, _, err := Compile(parse(t, `{"group":"databases"}`), 0)
 	if !errors.Is(err, ErrUnexpanded) {
@@ -254,8 +253,8 @@ func TestValidateBoundsTheShape(t *testing.T) {
 }
 
 // TestExpandResolvesGroups: a static group becomes a membership test, a
-// dynamic group is replaced by its selector, and the input stays as it
-// was - the campaign records what was asked for, not what it resolved to.
+// dynamic group is replaced by its selector, and the input stays as it was -
+// the campaign records what was asked for, not what it resolved to.
 func TestExpandResolvesGroups(t *testing.T) {
 	groups := fakeGroups{
 		"static": {ID: "0b0e7a3e-0000-4000-8000-000000000001", Name: "databases", Kind: KindStatic},
@@ -290,8 +289,8 @@ func TestExpandResolvesGroups(t *testing.T) {
 }
 
 // TestExpandRefusesACycleAndAMissingGroup: a group that refers to itself
-// through others has no answer; a group that does not exist is named,
-// not silently matched to nothing.
+// through others has no answer; a group that does not exist is named, not
+// silently matched to nothing.
 func TestExpandRefusesACycleAndAMissingGroup(t *testing.T) {
 	groups := fakeGroups{
 		"a": {ID: "0b0e7a3e-0000-4000-8000-00000000000a", Name: "a", Kind: KindDynamic,
@@ -323,10 +322,8 @@ func TestDescribeReadsInOneLine(t *testing.T) {
 	}
 }
 
-// TestExpandRecountsTheNodes: the bound on the size holds after the
-// expansion too. A selector of a few references passes validation; the
-// dynamic groups behind them must not blow it up past what the database
-// is asked to evaluate.
+// TestExpandRecountsTheNodes: the bound on the size holds after the expansion
+// too.
 func TestExpandRecountsTheNodes(t *testing.T) {
 	// A dynamic group with a wide "any": each reference adds all of it.
 	tags := make([]string, 0, MaxNodes/2)
@@ -364,10 +361,8 @@ func (c *countingGroups) Lookup(ctx context.Context, ref string) (*Group, error)
 	return c.fakeGroups.Lookup(ctx, ref)
 }
 
-// TestExpandStopsAtTheBound: the bound holds during the expansion, not
-// only after it. Each group of a chain passes its own check when saved and
-// widens afterwards; expanding the head would otherwise look up and copy
-// a tree of thousands of nodes before the count says no.
+// TestExpandStopsAtTheBound: the bound holds during the expansion, not only
+// after it.
 func TestExpandStopsAtTheBound(t *testing.T) {
 	const width = 16
 	groups := &countingGroups{fakeGroups: fakeGroups{}}
@@ -397,9 +392,9 @@ func TestExpandStopsAtTheBound(t *testing.T) {
 	}
 }
 
-// TestExpandCountsStaticReferencesOnce: a reference to a static group is
-// one membership test, and the running count must agree with the finished
-// tree - a selector at the bound made of such references is still valid.
+// TestExpandCountsStaticReferencesOnce: a reference to a static group is one
+// membership test, and the running count must agree with the finished tree - a
+// selector at the bound made of such references is still valid.
 func TestExpandCountsStaticReferencesOnce(t *testing.T) {
 	groups := fakeGroups{
 		"static": {ID: "0b0e7a3e-0000-4000-8000-000000000001", Name: "databases", Kind: KindStatic},

@@ -23,9 +23,7 @@ func ValidProjectName(name string) bool {
 	return projectName.MatchString(name)
 }
 
-// maxManifest bounds the manifest size. A file bigger than this is no
-// longer a project configuration, only something the operator will not
-// read before approving.
+// maxManifest bounds the manifest size.
 const maxManifest = 256 << 10
 
 // Planner computes the deployment plan on the host.
@@ -33,10 +31,7 @@ type Planner struct {
 	// Runner runs the compose command. Separated so that the plan can be
 	// checked in a test without a container engine.
 	Runner Runner
-	// Resolver turns an image reference into the digest that will run. A
-	// planner without one plans nothing that is not pinned already: a tag
-	// left unresolved is a deployment of whatever the registry serves at
-	// that moment, which is not what the operator approved.
+	// Resolver turns an image reference into the digest that will run.
 	Resolver ImageResolver
 	// Dir is the working directory for manifests. It belongs to root and
 	// is not shared with anything else.
@@ -46,9 +41,9 @@ type Planner struct {
 // Runner runs the compose command and returns its output.
 type Runner func(ctx context.Context, args ...string) (stdout string, stderr string, err error)
 
-// ErrDigestUnresolved means a service names an image by a tag whose digest
-// the host could not learn - neither from the registry nor from an image
-// already on the host.
+// ErrDigestUnresolved means a service names an image by a tag whose digest the
+// host could not learn - neither from the registry nor from an image already
+// on the host.
 var ErrDigestUnresolved = fmt.Errorf("the image digest could not be resolved")
 
 // Plan computes the difference between the project state and the manifest.
@@ -70,9 +65,8 @@ func (p Planner) Plan(ctx context.Context, project, manifest string) (Plan, erro
 	}
 	defer cleanup()
 
-	// Normalisation is validation at the same time: Compose refuses when
-	// the manifest is invalid, and does so before anything moves on the
-	// host.
+	// Normalisation is validation at the same time: Compose refuses when the
+	// manifest is invalid, and does so before anything moves on the host.
 	stdout, stderr, err := p.Runner(ctx, "-p", project, "-f", path, "config", "--format", "json")
 	if err != nil {
 		return plan, fmt.Errorf("manifest rejected by compose: %s", firstLine(stderr))
@@ -82,9 +76,7 @@ func (p Planner) Plan(ctx context.Context, project, manifest string) (Plan, erro
 	if err != nil {
 		return plan, err
 	}
-	// Every tag is resolved to a digest before the plan exists. The plan
-	// is what the operator approves, and it has to name what will run, not
-	// what the tag pointed at when they looked.
+	// Every tag is resolved to a digest before the plan exists.
 	if err := p.resolveDigests(ctx, services); err != nil {
 		return plan, err
 	}
@@ -97,14 +89,7 @@ func (p Planner) Plan(ctx context.Context, project, manifest string) (Plan, erro
 	}
 	defer cleanupOverride()
 
-	// The dry run says what will really change. A difference computed from
-	// the manifest alone would be guessing: Compose also takes into account
-	// whether a container needs recreating because of an image or
-	// configuration change. Compose reports the dry run on the diagnostic
-	// stream, not on the output, so both are read - otherwise the change
-	// list comes out empty and the plan looks as if the deployment changed
-	// nothing. The dry run sees the pinned images, the way the deployment
-	// will.
+	// The dry run says what will really change.
 	dryOut, dryErr, err := p.Runner(ctx, "-p", project, "-f", path, "-f", override, "up", "-d", "--dry-run")
 	if err == nil {
 		plan.Changes = changesFromDryRun(dryOut + "\n" + dryErr)
@@ -149,17 +134,8 @@ func (p Planner) resolve(ctx context.Context, image string) (ResolvedImage, erro
 	return resolved, nil
 }
 
-// writeOverride writes the file that replaces every tag with the digest
-// the plan resolved. Compose merges it over the manifest, so the project
-// keeps every other setting the operator wrote and only the image
-// references change. The file is JSON, which every YAML reader takes, so
-// no hand-written YAML has to escape anything.
-//
-// The override is the way the digest is bound instead of pulling the image
-// and re-tagging it: a re-tag would rewrite what the tag means on this host
-// for everything else that uses it, and "docker compose" would still record
-// the tag in the container - an operator reading "docker ps" a week later
-// would see a tag and not the digest that really runs.
+// writeOverride writes the file that replaces every tag with the digest the
+// plan resolved.
 func (p Planner) writeOverride(project string, services []Service) (string, func(), error) {
 	type image struct {
 		Image string `json:"image"`
@@ -187,17 +163,8 @@ func (p Planner) writeOverride(project string, services []Service) (string, func
 	return path, func() { _ = os.Remove(path) }, nil
 }
 
-// Digest binds the deployment to the plan.
-//
-// Computed from the whole normalised project configuration, not from the
-// service list alone. A manifest with the same services and images may
-// publish a different port or run a different command - the operator
-// approved a specific plan, so the digest must cover everything the plan
-// describes.
-//
-// The basis is the "compose config" output, because Compose canonicalises
-// it: the same meaning written differently gives the same text, and a
-// different meaning always a different one.
+// Digest binds the deployment to the plan. Computed from the whole normalised
+// project configuration, not from the service list alone.
 func Digest(project string, configuration string, services []Service) string {
 	sorted := make([]Service, len(services))
 	copy(sorted, services)
@@ -206,9 +173,8 @@ func Digest(project string, configuration string, services []Service) string {
 	sum := sha256.New()
 	fmt.Fprintf(sum, "project=%s\n", project)
 	fmt.Fprintf(sum, "config=%s\n", strings.TrimSpace(configuration))
-	// The image digests are added separately: the configuration carries a
-	// tag, and a tag may point at a different image tomorrow. A change of
-	// what will really come up is also meant to invalidate the approval.
+	// The image digests are added separately: the configuration carries a tag,
+	// and a tag may point at a different image tomorrow.
 	for _, service := range sorted {
 		fmt.Fprintf(sum, "image=%s digest=%s\n", service.Image, service.ImageDigest)
 	}
@@ -253,10 +219,7 @@ func servicesFromConfiguration(configuration string) ([]Service, []string, error
 		if service.Deploy.Replicas != nil {
 			entry.Replicas = *service.Deploy.Replicas
 		}
-		// An image named by a tag may mean something else tomorrow. The
-		// deployment binds the digest the tag resolves to now, so the
-		// warning is information: the operator approves this digest, and a
-		// tag that moves before the deployment makes the plan stale.
+		// An image named by a tag may mean something else tomorrow.
 		if pinnedDigest(service.Image) == "" {
 			warnings = append(warnings,
 				fmt.Sprintf("service %s uses a mutable tag (%s); the deployment binds the digest it resolves to now",
@@ -264,9 +227,8 @@ func servicesFromConfiguration(configuration string) ([]Service, []string, error
 		}
 		for key := range service.Environment {
 			if looksLikeSecret(key) {
-				// The manifest is stored in the panel together with the
-				// version history, so a value written into it directly stops
-				// being a secret.
+				// The manifest is stored in the panel together with the version history,
+				// so a value written into it directly stops being a secret.
 				warnings = append(warnings,
 					fmt.Sprintf("service %s sets %s inline; the manifest is stored in the panel, "+
 						"so use env_file on the host instead", name, key))
@@ -279,15 +241,12 @@ func servicesFromConfiguration(configuration string) ([]Service, []string, error
 	return services, warnings, nil
 }
 
-// dryRunPattern reads lines like:
-//
-//	DRY-RUN MODE -  Container trial-web-1  Creating
+// dryRunPattern reads lines like: DRY-RUN MODE - Container trial-web-1
+// Creating.
 var dryRunPattern = regexp.MustCompile(
 	`(?i)(Container|Network|Volume|Image)\s+(\S+)\s+(Creating|Created|Recreate|Recreated|Starting|Started|Stopping|Stopped|Removing|Removed|Pulling|Pulled)`)
 
 // changesFromDryRun extracts the change list from the dry run output.
-// Compose reports every step twice - during and after - so the first
-// occurrence of an object counts.
 func changesFromDryRun(output string) []Change {
 	seen := map[string]bool{}
 	var changes []Change

@@ -11,11 +11,6 @@ import (
 )
 
 // listPackages reads the full list of the installed packages.
-//
-// Without root and without the helper: the dpkg database and the RPM database
-// are readable by everyone, and every trip through root has to be justified.
-// The list is big, so it travels on request from the panel - the inventory
-// keeps only the digest and the number of packages.
 func (e *TaskExecutor) listPackages(ctx context.Context, task *agentv1.TaskEnvelope,
 	action opspec.ActionType) *agentv1.TaskResult {
 	timeout := timeoutOf(task, action)
@@ -30,8 +25,7 @@ func (e *TaskExecutor) listPackages(ctx context.Context, task *agentv1.TaskEnvel
 	}
 
 	// The vendor findings are read on the same occasion: for dnf they lie in the
-	// repository metadata the host has anyway. They are facts about packages,
-	// exactly like the list itself - the judgement is made in the panel.
+	// repository metadata the host has anyway.
 	advisories, advisoriesReason := packages.Advisories(readCtx, manager, list.Packages)
 	encodedAdvisories, err := json.Marshal(advisories)
 	if err != nil {
@@ -86,9 +80,7 @@ func itoa(value int) string {
 	return string(digits)
 }
 
-// packageHolds reads the packages held on the host for the inventory. A
-// manager without a hold feature answers with a reason, not with an empty
-// list: the panel then shows the count as unknown rather than as zero.
+// packageHolds reads the packages held on the host for the inventory.
 func packageHolds(ctx context.Context) ([]string, string) {
 	manager, err := packages.Detect()
 	if err != nil {

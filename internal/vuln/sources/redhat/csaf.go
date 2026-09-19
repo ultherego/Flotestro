@@ -1,21 +1,5 @@
-// Package redhat reads the CSAF/VEX date of Red Hat.
-//
-// This is the settling source for RHEL hosts. Red Hat publishes one VEX
-// document per CVE and says three things in it at once: which products are
-// vulnerable, which ones it does not concern and in which version of a
-// package the fix is.
-//
-// We read the base RHEL alone. The EUS, AUS and E4S streams have fixes of
-// their own and are available only to some customers, and the layered
-// products (OpenShift, RHEM) are separate package distributions. A finding
-// from such a stream would describe a host the panel does not have in front
-// of it.
-//
-// AlmaLinux, Rocky and CentOS Stream are deliberately not supported here:
-// their packages carry version numbers of their own, so the findings of Red
-// Hat would speak about something else. Until the panel reads their own
-// sources, their hosts are to get the reason "feed missing" - that is a more
-// honest answer than somebody else's assessment.
+// Package redhat reads the CSAF/VEX date of Red Hat. This is the settling
+// source for RHEL hosts.
 package redhat
 
 import (
@@ -69,14 +53,8 @@ type relationship struct {
 	RelatesTo        string `json:"relates_to_product_reference"`
 }
 
-// Advisories translates one VEX document into findings of the panel.
-//
-// It takes the named releases of the base RHEL alone. The filter is here
-// rather than higher up because of the size: a CVE document that touches
-// every product of the vendor is dozens of megabytes and several hundred
-// thousand identifiers. Read into memory as a whole it would cost a multiple
-// of that size, so we read it as a stream and reject foreign products at
-// once.
+// Advisories translates one VEX document into findings of the panel. It takes
+// the named releases of the base RHEL alone.
 func Advisories(document []byte, releases map[string]bool) ([]vuln.Advisory, error) {
 	decoder := json.NewDecoder(bytes.NewReader(document))
 	opening, err := decoder.Token()
@@ -110,10 +88,8 @@ func Advisories(document []byte, releases map[string]bool) ([]vuln.Advisory, err
 			}
 			treeRead = true
 		case "vulnerabilities":
-			// The product tree comes in the document before the
-			// vulnerabilities and it alone says which release an identifier
-			// concerns. A document in another order is rejected rather than
-			// guessed at.
+			// The product tree comes in the document before the vulnerabilities and it
+			// alone says which release an identifier concerns.
 			if !treeRead {
 				return nil, fmt.Errorf("the VEX document has vulnerabilities before the product tree")
 			}
@@ -179,10 +155,6 @@ func readTree(decoder *json.Decoder, releases map[string]bool,
 
 // readRelationships binds packages to products, skipping foreign products at
 // once.
-//
-// A large document holds more than ten thousand relationships and most of
-// them concern layered products. Keeping all of them in memory only to reject
-// them right away is what the panel cannot afford.
 func readRelationships(decoder *json.Decoder, products, streams map[string]string) error {
 	opening, err := decoder.Token()
 	if err != nil {
@@ -242,11 +214,6 @@ type productState struct {
 }
 
 // readVulnerability assembles the findings of one vulnerability.
-//
-// The keys of the document run alphabetically, so the product states arrive
-// before the remediations and before the title. We gather the states first -
-// already filtered down to the base RHEL - and settle them only once the
-// whole object has been read.
 func readVulnerability(decoder *json.Decoder, header documentHeader, severity string,
 	products, streams map[string]string) ([]vuln.Advisory, error) {
 	opening, err := decoder.Token()
@@ -337,9 +304,9 @@ func readStates(decoder *json.Decoder, products, streams map[string]string) ([]p
 		case "under_investigation":
 			status = vuln.StatusUnderInvestigation
 		}
-		// The "not affected" state is not written down: the correlator makes
-		// no finding out of it anyway, and the vendor lists thousands of
-		// packages per CVE in it.
+		// The "not affected" state is not written down: the correlator makes no
+		// finding out of it anyway, and the vendor lists thousands of packages per
+		// CVE in it.
 		if status == "" {
 			if err := skip(decoder); err != nil {
 				return nil, err
@@ -458,10 +425,6 @@ func ours(id string, products, streams map[string]string) bool {
 }
 
 // skip jumps over a value the panel does not read.
-//
-// The descriptions and the CVSS scores alone are most of the volume of the
-// document, and they add nothing to the answer "is this package
-// vulnerable".
 func skip(decoder *json.Decoder) error {
 	token, err := decoder.Token()
 	if err != nil {
@@ -506,17 +469,15 @@ func assemble(states []productState, cveNumber, title, severity, releaseDate str
 		}
 		status := state.status
 		if status == vuln.StatusOpen && noFixPlanned[state.id] {
-			// The vendor settled that it will not release a fix. That is an
-			// answer rather than a missing answer - and the host is still
-			// vulnerable.
+			// The vendor settled that it will not release a fix. That is an answer
+			// rather than a missing answer - and the host is still vulnerable.
 			status = vuln.StatusDeferred
 		}
 		current := vuln.Advisory{
 			Provider: Provider, AdvisoryID: cveNumber, CVEIDs: []string{cveNumber},
 			Distribution: Distribution, Release: release,
-			// The RPM family correlates by the binary package: a Red Hat
-			// finding speaks about a specific version to install rather than
-			// about a source.
+			// The RPM family correlates by the binary package: a Red Hat finding speaks
+			// about a specific version to install rather than about a source.
 			SourcePackage: pkg, BinaryPackage: pkg,
 			FixedVersion: version, Status: status, VendorSeverity: severity,
 			Title: title, URL: link(errata[state.id], cveNumber),
@@ -536,12 +497,6 @@ func assemble(states []productState, cveNumber, title, severity, releaseDate str
 }
 
 // put merges the findings about the same package in the same release.
-//
-// One release has several streams (BaseOS, AppStream) and several
-// architectures, and the fix is released in each of them separately - with
-// the same version number, because the vendor builds it once. The fix wins,
-// and of several versions the lowest one: it is from that one that the
-// package carries the fix, so a host with a higher version is fixed.
 func put(gathered map[mergeKey]vuln.Advisory, where mergeKey, current vuln.Advisory) {
 	previous, ok := gathered[where]
 	if !ok {
@@ -560,15 +515,8 @@ func put(gathered map[mergeKey]vuln.Advisory, where mergeKey, current vuln.Advis
 	}
 }
 
-// split translates a product identifier into the release, the package and
-// the version.
-//
-// The identifier has two shapes: "product:package" for a vulnerability
-// without a fix and "stream:NEVRA" for a fixed version.
-//
-// The architecture is not written down. The vendor builds the fix once and
-// releases it under the same number for every architecture, so a finding per
-// architecture would be the same sentence said five times.
+// split translates a product identifier into the release, the package and the
+// version.
 func split(id string, products, streams map[string]string) (string, string, string, bool) {
 	productID, rest, ok := strings.Cut(id, ":")
 	if !ok || rest == "" {
@@ -584,9 +532,8 @@ func split(id string, products, streams map[string]string) (string, string, stri
 	if release == "" {
 		return "", "", "", false
 	}
-	// Container components carry an image path in their name rather than a
-	// system package - the panel does not have them on the package list of a
-	// host.
+	// Container components carry an image path in their name rather than a system
+	// package - the panel does not have them on the package list of a host.
 	if strings.Contains(rest, "/") {
 		return "", "", "", false
 	}
@@ -648,11 +595,6 @@ func collectReleases(entry branch, releases map[string]bool, products map[string
 
 // ReleaseFromCPE returns the release of the base RHEL, or empty when the CPE
 // describes another product.
-//
-// The base RHEL carries "enterprise_linux" in its CPE. The extended streams
-// (rhel_eus, rhel_aus, rhel_e4s, rhel_tus) have names of their own and fixes
-// of their own - a host that has not bought them must not be assessed with
-// them.
 func ReleaseFromCPE(cpe string) string {
 	parts := strings.Split(cpe, ":")
 	if len(parts) < 5 {

@@ -131,7 +131,7 @@ const (
 	ActionCertificatePlan ActionType = "certificate.plan"
 	// Rotating the authority is a sequence of states, not one change: the host
 	// first trusts the old and the new authority at once, then gets a new
-	// certificate, and the old authority disappears at the end - and only where
+	// certificate, and the old authority disappears at the end - and only where.
 	ActionCertificateTrustPlan   ActionType = "certificate.trust.plan"
 	ActionCertificateTrustEnsure ActionType = "certificate.trust.ensure"
 	ActionCertificateTrustRemove ActionType = "certificate.trust.remove"
@@ -1586,7 +1586,7 @@ func checkDockerDeclaration(action ActionType, payload *DockerEnsurePayload) err
 
 	// A description already says what the object is and what it is called, so an
 	// order that also writes the kind or the name in by hand carries the same
-	// fact twice - and the host, which rebuilds the order from the description,
+	// fact twice - and the host, which rebuilds the order from the description,.
 	if described > 0 && (payload.Kind != "" || payload.Name != "") {
 		return fmt.Errorf("the description already says what this object is and what it is called; " +
 			"the kind and the name travel by themselves only in a removal")
@@ -3107,7 +3107,7 @@ func Validate(action ActionType, payload Payload) error {
 		}
 		// The panel knows the manager from the host's inventory, but the order has
 		// to be checkable without it: the shared fields we check always, and those
-		// that depend on the system family - for the manager that matches the
+		// that depend on the system family - for the manager that matches the.
 		manager := "dnf"
 		if len(repo.Suites) > 0 || len(repo.Components) > 0 {
 			manager = "apt"
@@ -3368,7 +3368,7 @@ func Validate(action ActionType, payload Payload) error {
 		if payload.Storage != nil && payload.Storage.Plan != "" {
 			// Building or tearing down an array is outside the panel on purpose, so it
 			// is answered with that sentence and its own code rather than with "no such
-			// plan": a boundary drawn deliberately reads in the interface like a
+			// plan": a boundary drawn deliberately reads in the interface like a.
 			if refusal := storage.ArrayLifecycleRefusalFor(payload.Storage.Plan); refusal != nil {
 				return &RefusalError{Code: refusal.Code, Err: refusal}
 			}
@@ -4004,7 +4004,7 @@ var servicePrincipalPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}/[a-zA-Z0-
 
 // ValidateServicePrincipal checks that a principal names a service of a host
 // and not the host itself: the host's own keytab is replaced by a re-join, and
-// a renewal of host/ would leave the host unable to talk to the directory it
+// a renewal of host/ would leave the host unable to talk to the directory it.
 func ValidateServicePrincipal(principal string) error {
 	if !servicePrincipalPattern.MatchString(principal) {
 		return fmt.Errorf("invalid service principal %q: expected service/host.example.test", principal)

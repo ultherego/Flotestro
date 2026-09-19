@@ -10,15 +10,10 @@ import (
 	"github.com/ultherego/flotestro/internal/config"
 )
 
-// DefaultConfigPath is where a packaged helper reads its file from. The
-// file is optional: a helper without one runs on the environment and the
-// defaults, which is what every host from before the file does.
+// DefaultConfigPath is where a packaged helper reads its file from.
 const DefaultConfigPath = "/etc/flotestro/helper.yaml"
 
-// helperConfig is the part of /etc/flotestro/helper.yaml the helper reads.
-// The file belongs to root and is not writable by the agent's user, so
-// what it says about the mode and the trust directory is the owner's
-// decision and not something a compromised agent can lower.
+// helperConfig is the part of /etc/flotestro/helper. yaml the helper reads.
 type helperConfig struct {
 	SchemaVersion int `yaml:"schema_version"`
 	Identity      struct {
@@ -33,10 +28,8 @@ type helperConfig struct {
 	} `yaml:"capabilities"`
 }
 
-// Settings is what the helper runs with after the file and the
-// environment were read. The agent's control tool reads the same file, so
-// a root enrollment finds the trust the helper keeps where the helper
-// keeps it.
+// Settings is what the helper runs with after the file and the environment
+// were read.
 type Settings struct {
 	Mode       Mode
 	TrustDir   string
@@ -46,12 +39,9 @@ type Settings struct {
 	Source string
 }
 
-// LoadSettings reads the file when it exists and lets the
-// environment override it: FLOTESTRO_HELPER_CAPABILITY_MODE,
-// FLOTESTRO_HELPER_TRUST_DIR, FLOTESTRO_HELPER_REPLAY_DIR and
-// FLOTESTRO_HELPER_HOST_ID_FILE. A file that cannot be parsed is an error
-// rather than a fallback to the defaults: the owner wrote a decision down
-// and the helper must not run on another one.
+// LoadSettings reads the file when it exists and lets the environment override
+// it: FLOTESTRO_HELPER_CAPABILITY_MODE, FLOTESTRO_HELPER_TRUST_DIR,
+// FLOTESTRO_HELPER_REPLAY_DIR and FLOTESTRO_HELPER_HOST_ID_FILE.
 func LoadSettings(path string) (Settings, error) {
 	settings := Settings{
 		Mode:       ModePrefer,

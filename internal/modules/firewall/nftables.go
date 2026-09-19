@@ -25,12 +25,6 @@ var (
 )
 
 // ParseRuleset reads the output of "nft -a list ruleset".
-//
-// The text form is read, not JSON, because the rule text is meant to be
-// exactly the one the operator knows from the command line. Assembling the
-// text from an expression tree ourselves would drift from what the host
-// really has - and with a firewall that is the difference between "passes"
-// and "rejects".
 func ParseRuleset(output string) Snapshot {
 	snapshot := Snapshot{Adapter: AdapterNftables}
 	owners := map[string]string{}
@@ -131,10 +125,6 @@ func ruleFromLine(line string, chain Chain) Rule {
 }
 
 // markOrigin separates the panel rules from foreign ones.
-//
-// A table belonging to docker or firewalld is rewritten without the panel's
-// participation, so a rule in it is neither ours nor durable - and the
-// operator is meant to see that before starting to fix it.
 func markOrigin(snapshot *Snapshot, owners map[string]string) {
 	origin := func(family, name string) (string, string) {
 		if owner, foreign := owners[family+" "+name]; foreign {
@@ -165,10 +155,6 @@ func markOrigin(snapshot *Snapshot, owners map[string]string) {
 }
 
 // Fingerprint computes the digest of a ruleset.
-//
-// A change ordered against a different ruleset is not the same change the
-// operator viewed: the counters are skipped, because they grow on their own
-// and every read would give a different fingerprint of the same ruleset.
 func Fingerprint(ruleset string) string {
 	withoutCounters := ruleCounters.ReplaceAllString(ruleset, "counter")
 	sum := sha256.Sum256([]byte(withoutCounters))

@@ -5,9 +5,8 @@ import (
 	"testing"
 )
 
-// The certificate check is what tells the operator whether a rename costs
-// a re-enrollment. The panel issues the certificate for the identifier, so
-// with the identifier in the certificate the answer is no.
+// The certificate check is what tells the operator whether a rename costs a
+// re-enrollment.
 func TestCertificateCheckTellsIdentifierFromName(t *testing.T) {
 	byID := certificateCheck("3f1c2a7e-0b2d-4c1e-9a1f-0f4d2e6b7a8c", "web01")
 	if byID.Passed == nil || !*byID.Passed || byID.GetBlocking() {
@@ -24,8 +23,7 @@ func TestCertificateCheckTellsIdentifierFromName(t *testing.T) {
 }
 
 // A name that resolves to one of this host's addresses is the host's own
-// record; one that resolves elsewhere blocks the rename. The lookup goes
-// to the resolver, so the test uses localhost, which every resolver knows.
+// record; one that resolves elsewhere blocks the rename.
 func TestDNSCheckComparesWithOwnAddresses(t *testing.T) {
 	own := map[string]bool{"127.0.0.1": true, "::1": true}
 	check := dnsCheck(context.Background(), "localhost", own)

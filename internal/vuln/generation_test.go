@@ -7,11 +7,7 @@ import (
 	"github.com/ultherego/flotestro/internal/packages"
 )
 
-// A verdict that does not name the data behind it cannot be read. The
-// digest says which data; the generation says which data and when they
-// were taken, and that is the difference between "this host has no
-// findings" and "this host was judged against yesterday's feed and has not
-// been looked at since".
+// A verdict that does not name the data behind it cannot be read.
 func TestTheVerdictOfAHostNamesTheGenerationThatProducedIt(t *testing.T) {
 	snapshot := debianSnapshot("trixie")
 	snapshot.GenerationID = "11111111-1111-1111-1111-111111111111"
@@ -31,9 +27,7 @@ func TestTheVerdictOfAHostNamesTheGenerationThatProducedIt(t *testing.T) {
 }
 
 // Two hosts judged in one pass against the same snapshot name the same
-// generation. That is what makes the field worth having: a difference
-// between two hosts then means one of them really was not reassessed,
-// rather than that the two passes happened to run a minute apart.
+// generation.
 func TestTwoHostsJudgedInOnePassNameTheSameGeneration(t *testing.T) {
 	snapshot := debianSnapshot("trixie")
 	snapshot.GenerationID = "22222222-2222-2222-2222-222222222222"
@@ -67,11 +61,7 @@ func TestTwoHostsJudgedInOnePassNameTheSameGeneration(t *testing.T) {
 	}
 }
 
-// A snapshot without a generation leaves the verdict without one. That is
-// the honest answer for the findings a host reads from its own repository
-// metadata, where there is no central fetch to name - and it must not be
-// filled in with anything that would read as "judged against the feed in
-// force".
+// A snapshot without a generation leaves the verdict without one.
 func TestAVerdictWithoutAGenerationSaysSoRatherThanInventingOne(t *testing.T) {
 	// The shape the scheduler builds for a host whose findings come from
 	// its own repositories: a digest and a moment, and no generation.

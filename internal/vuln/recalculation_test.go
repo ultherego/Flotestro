@@ -30,8 +30,8 @@ func TestWeRecomputeOnlyChangedInput(t *testing.T) {
 	}
 
 	// Each of the three sources has to force a recomputation on its own: the
-	// feed, the package list and the set of findings change independently of
-	// one another.
+	// feed, the package list and the set of findings change independently of one
+	// another.
 	changes := map[string]func(*HostState, *Input, *Snapshot){
 		"a different feed snapshot": func(_ *HostState, _ *Input, s *Snapshot) { s.Digest = "s2" },
 		"a different package list":  func(_ *HostState, i *Input, _ *Snapshot) { i.InventoryDigest = "list-2" },
@@ -59,9 +59,9 @@ func TestWeRecomputeOnlyChangedInput(t *testing.T) {
 		}
 	}
 
-	// The passage of time alone changes the result as well: a feed fresh in
-	// the morning is sometimes stale in the evening, and that is a different
-	// answer with the same digests.
+	// The passage of time alone changes the result as well: a feed fresh in the
+	// morning is sometimes stale in the evening, and that is a different answer
+	// with the same digests.
 	later := now.Add(12 * time.Hour)
 	if !scheduler.toRecalculate(previous, input, snapshot, later) {
 		t.Error("a feed that had grown old did not force a recomputation")

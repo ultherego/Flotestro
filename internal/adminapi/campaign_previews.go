@@ -37,7 +37,7 @@ func previewScopes(principal authz.Principal, now time.Time) []string {
 
 // previewBinding builds what a preview promises, or what an order has to
 // match, from the same material in both places: the identity, the permission
-// the fleet was narrowed by, the operation, the selector and the hosts that
+// the fleet was narrowed by, the operation, the selector and the hosts that.
 func previewBinding(principal authz.Principal, permission authz.Permission, action opspec.ActionType,
 	chosen campaigns.Selector, ready []hosts.Host, now time.Time) (campaigns.PreviewBinding, error) {
 	selectorHash, err := campaigns.SelectorHash(chosen)

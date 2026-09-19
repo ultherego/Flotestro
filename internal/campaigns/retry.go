@@ -5,13 +5,8 @@ import (
 	"fmt"
 )
 
-// A retry is a new campaign that runs the same order again on the hosts
-// of a finished campaign that did not reach the desired state. The hosts
-// that succeeded hold what was ordered and are not touched: ordering the
-// change on them a second time would be a second change nobody asked
-// for. The rules below say which hosts a retry may take and when; the
-// order then goes through the ordinary door - the same checks, the same
-// approval - with a link back to the campaign it retries.
+// A retry is a new campaign that runs the same order again on the hosts of a
+// finished campaign that did not reach the desired state.
 
 // The codes a refused retry answers with.
 const (
@@ -43,19 +38,6 @@ func RetryCode(err error) string {
 }
 
 // RetryTargets picks the hosts a retry of the campaign runs on.
-//
-// The campaign has to be finished: a paused campaign can be resumed and a
-// running one is still settling hosts, so a retry ordered against it
-// would race the campaign it retries. A canceled campaign counts - the
-// hosts that failed before the stop stay failed.
-//
-// Failed hosts are always taken. Unknown hosts are taken only when the
-// order says so: a host that ended without a result may hold the change
-// half done, and the document says what it holds is a question to read
-// off the host, not to answer by running the change again blind. The
-// operator who asks for them has read that. Skipped, canceled, ineligible
-// and excluded hosts never took part and are left out: a retry runs what
-// went wrong, not what was left out on purpose.
 func RetryTargets(original Campaign, targets []Target, includeUnknown bool) ([]Target, error) {
 	if !original.State.Terminal() {
 		return nil, &RetryError{

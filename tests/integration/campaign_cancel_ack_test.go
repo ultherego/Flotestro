@@ -9,9 +9,9 @@ import (
 	"time"
 )
 
-// cancelJobView is a job as the cancel protocol tests read it: the state,
-// and the record of the cancel - when it was asked of the host, when the
-// host answered, and what it answered.
+// cancelJobView is a job as the cancel protocol tests read it: the state, and
+// the record of the cancel - when it was asked of the host, when the host
+// answered, and what it answered.
 type cancelJobView struct {
 	ID                string     `json:"id"`
 	State             string     `json:"state"`
@@ -30,9 +30,9 @@ func (h *harness) cancelJobView(jobID string) cancelJobView {
 	return job
 }
 
-// awaitCancelState waits until the job is in one of the wanted states,
-// without failing on a terminal state: the cancel protocol ends jobs, and
-// a test of it wants to see which end.
+// awaitCancelState waits until the job is in one of the wanted states, without
+// failing on a terminal state: the cancel protocol ends jobs, and a test of it
+// wants to see which end.
 func (h *harness) awaitCancelState(jobID string, timeout time.Duration, states ...string) cancelJobView {
 	h.t.Helper()
 	wanted := map[string]bool{}
@@ -54,13 +54,8 @@ func (h *harness) awaitCancelState(jobID string, timeout time.Duration, states .
 }
 
 // TestACancelOfARunningPreviewIsAcknowledgedAsInterrupted is the cancel
-// protocol on a live host: a cancel of a task the host holds does not
-// write "canceled" on its own. The job stands cancel_requested with its
-// budget tokens until the agent answers; a journal preview is a read the
-// agent may interrupt, so the answer is INTERRUPTED with the phase the
-// host was in, and only then is the job canceled and its capacity free.
-// The host's own account of the interrupted preview follows the
-// acknowledgement and does not reopen the job.
+// protocol on a live host: a cancel of a task the host holds does not write
+// "canceled" on its own.
 func TestACancelOfARunningPreviewIsAcknowledgedAsInterrupted(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -73,9 +68,8 @@ func TestACancelOfARunningPreviewIsAcknowledgedAsInterrupted(t *testing.T) {
 	h.do(http.MethodPost, "/api/v1/jobs/"+job.ID+"/cancel",
 		map[string]any{"reason": "canceled while the host was on it"}, nil, http.StatusOK)
 
-	// The request is on the trail the instance holding the session reads
-	// it from, in the same transaction as the state that says it is
-	// pending.
+	// The request is on the trail the instance holding the session reads it from,
+	// in the same transaction as the state that says it is pending.
 	var requests int
 	if err := pool.QueryRow(ctx, `
 		select count(*) from outbox_events
@@ -131,18 +125,16 @@ func TestACancelOfARunningPreviewIsAcknowledgedAsInterrupted(t *testing.T) {
 }
 
 // TestACancelOfAQueuedTaskNeverAsksAHost guards the other path of the
-// protocol: a task still in the panel's queue - here on a synthetic host
-// that never connected - is canceled at once. Nothing is asked of any
-// host, no request goes on the trail, and the record says so: no cancel
-// was requested of a host and no host answered.
+// protocol: a task still in the panel's queue - here on a synthetic host that
+// never connected - is canceled at once.
 func TestACancelOfAQueuedTaskNeverAsksAHost(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 	pool := h.database(ctx)
 	host := h.enrollSyntheticHost(t)
-	// The host never connected, so it announced no adapter; the order is
-	// judged at the door against the registry, and a systemd adapter of
-	// an agent that will never answer is what lets the task into the queue.
+	// The host never connected, so it announced no adapter; the order is judged
+	// at the door against the registry, and a systemd adapter of an agent that
+	// will never answer is what lets the task into the queue.
 	if _, err := pool.Exec(ctx, `
 		insert into host_capability_registry (host_id, name, version, available, features)
 		values ($1::uuid, 'systemd', 1, true, '{}'::jsonb)
@@ -188,12 +180,8 @@ func TestACancelOfAQueuedTaskNeverAsksAHost(t *testing.T) {
 }
 
 // TestAnOfflineCanaryHoldsTheWaveUntilItIsSkipped is the barrier of the
-// document: a canary that was not connected when its turn came stays
-// queued offline and the waves do not open over it - the canary has said
-// nothing about the change. An operator may let it go by name, with a
-// reason; a skip without one is refused, and a skip of a host that is not
-// waiting offline is refused with its own code. Once the canary is
-// skipped the barrier opens and the first wave starts.
+// document: a canary that was not connected when its turn came stays queued
+// offline and the waves do not open over it - the canary has said nothing
 func TestAnOfflineCanaryHoldsTheWaveUntilItIsSkipped(t *testing.T) {
 	h := newHarness(t)
 	offline := h.enrollSyntheticHost(t)

@@ -15,17 +15,8 @@ import (
 	"github.com/ultherego/flotestro/internal/jobs"
 )
 
-// The session fence in one scene: two sessions claim the same host one
-// after the other, and only the later claim may settle the host's job.
-// The earlier session writes with the token it was given and is refused
-// by the database, whatever it believes about its stream; the later one
-// settles the job; and the job makes exactly one terminal transition. A
-// notification the earlier instance never got changes nothing here,
-// because nothing here depends on one.
-//
-// The host is a synthetic one with no agent, so no scheduler and no host
-// touch the job while the test holds it, and the store is driven
-// directly, the way the gateway drives it.
+// The session fence in one scene: two sessions claim the same host one after
+// the other, and only the later claim may settle the host's job.
 func TestOnlyNewestSessionMayCommit(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -78,9 +69,9 @@ func TestOnlyNewestSessionMayCommit(t *testing.T) {
 		t.Fatalf("the job is %s after the owner's result", state)
 	}
 
-	// Exactly one terminal transition: a second result from the owner is
-	// answered by the state of the job, not by the fence, and changes
-	// nothing; the superseded session gets the same refusal as before.
+	// Exactly one terminal transition: a second result from the owner is answered
+	// by the state of the job, not by the fence, and changes nothing; the
+	// superseded session gets the same refusal as before.
 	accepted, err = store.RecordResult(ctx, jobID, attemptID, jobs.Result{Status: "failed"},
 		jobs.StateFailed, jobs.Fence{SessionID: sessionB, Token: tokenB})
 	if err != nil || accepted {
@@ -88,9 +79,8 @@ func TestOnlyNewestSessionMayCommit(t *testing.T) {
 	}
 	if _, err := store.RecordResult(ctx, jobID, attemptID, jobs.Result{Status: "failed"},
 		jobs.StateFailed, jobs.Fence{SessionID: sessionA, Token: tokenA}); err != nil {
-		// A settled job answers by its state before the fence is asked: the
-		// trail keeps a late result as not applied rather than as a
-		// refused write.
+		// A settled job answers by its state before the fence is asked: the trail
+		// keeps a late result as not applied rather than as a refused write.
 		t.Fatalf("a late result on a settled job was answered by the fence, not by the state: %v", err)
 	}
 	var status, message string
@@ -122,10 +112,9 @@ func TestOnlyNewestSessionMayCommit(t *testing.T) {
 	}
 }
 
-// A hundred sessions claim one host at the same moment and every one of
-// them gets a token of its own: the tokens are unique, contiguous, and a
-// claim made after them all gets a higher one. The row serialises the
-// claims; nothing in any process has to.
+// A hundred sessions claim one host at the same moment and every one of them
+// gets a token of its own: the tokens are unique, contiguous, and a claim made
+// after them all gets a higher one.
 func TestAHundredClaimsGiveRisingTokens(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -169,8 +158,8 @@ func TestAHundredClaimsGiveRisingTokens(t *testing.T) {
 }
 
 // A host with a lease that ran out has no owner for the scheduler, and the
-// sweep forgets the session while the token stays: a write under the
-// old token is refused after the sweep as it was before.
+// sweep forgets the session while the token stays: a write under the old token
+// is refused after the sweep as it was before.
 func TestAnExpiredOwnerIsForgottenButNotItsToken(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -206,9 +195,9 @@ func TestAnExpiredOwnerIsForgottenButNotItsToken(t *testing.T) {
 	}
 }
 
-// stageDispatchedJob writes a job of the host as the scheduler leaves it
-// after a delivery - dispatched, with an open attempt - without a session
-// to deliver it over. It is removed with the test.
+// stageDispatchedJob writes a job of the host as the scheduler leaves it after
+// a delivery - dispatched, with an open attempt - without a session to deliver
+// it over.
 func stageDispatchedJob(t *testing.T, h *harness, hostID string) string {
 	t.Helper()
 	ctx := context.Background()

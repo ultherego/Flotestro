@@ -24,9 +24,7 @@ func TestAMissingDeclarationMeansRefusal(t *testing.T) {
 
 // TestIrreversibleOperationsDoNotRunInBulk guards that a boundary drawn on a
 // single host holds for the fleet as well: an operation that requires typing
-// the target name has no single target to type in a campaign. The one way
-// through is an order the panel splits host by host: its mapping names
-// every host by itself, which is the typing, one host at a time.
+// the target name has no single target to type in a campaign.
 func TestIrreversibleOperationsDoNotRunInBulk(t *testing.T) {
 	for _, action := range AllActions() {
 		if !action.RequiresTargetConfirmation() || PanelPlanned(action) {
@@ -79,9 +77,8 @@ func TestExecutableModesAreSamePayloadAndReboot(t *testing.T) {
 	if !ExecutableMode(ActionSystemReboot) {
 		t.Error("rebooting a host is not executable in bulk, although it has its own phase")
 	}
-	// A package upgrade computes a different plan on every host, so the
-	// campaign runs it through a planning phase - and only for that reason is
-	// it allowed.
+	// A package upgrade computes a different plan on every host, so the campaign
+	// runs it through a planning phase - and only for that reason is it allowed.
 	if ActionPackageUpgrade.CampaignMode() != CampaignPerHostPlan {
 		t.Errorf("a package upgrade has the mode %q", ActionPackageUpgrade.CampaignMode())
 	}
@@ -92,9 +89,9 @@ func TestExecutableModesAreSamePayloadAndReboot(t *testing.T) {
 	if !ExecutableMode(ActionPackageUpgrade) {
 		t.Error("a package upgrade is not run despite the planning phase")
 	}
-	// A Compose deployment computes its plan on every host just like
-	// packages do: the digest comes from the manifest and from the digests of
-	// the images this host really sees, and comes back to it with the change.
+	// A Compose deployment computes its plan on every host just like packages do:
+	// the digest comes from the manifest and from the digests of the images this
+	// host really sees, and comes back to it with the change.
 	for change, planner := range map[ActionType]ActionType{
 		ActionComposeDeploy:          ActionComposePlan,
 		ActionFileEnsure:             ActionFilePlan,
@@ -133,9 +130,8 @@ func TestExecutableModesAreSamePayloadAndReboot(t *testing.T) {
 		}
 	}
 
-	// Every family declared as a per-host plan has a planner: a missing one
-	// would mean a campaign that declares planning and cannot do it. A new
-	// family without a planner has to fall out here, not in production.
+	// Every family declared as a per-host plan has a planner: a missing one would
+	// mean a campaign that declares planning and cannot do it.
 	for _, action := range AllActions() {
 		if action.CampaignMode() != CampaignPerHostPlan {
 			continue
@@ -157,12 +153,8 @@ func TestExecutableModesAreSamePayloadAndReboot(t *testing.T) {
 }
 
 // TestARollbackNamedPerHostIsNotOnePayload guards the two reverse operations
-// whose payload names a plan the host itself minted: the identifier differs
-// on every host, so one approved payload cannot mean the same thing on the
-// fleet. They stay declared - the operation is a reverse on one host - and
-// stay refused as a campaign until the engine can split the order host by
-// host; a same_payload declaration here would send one host's identifier
-// to every other.
+// whose payload names a plan the host itself minted: the identifier differs on
+// every host, so one approved payload cannot mean the same thing on the fleet.
 func TestARollbackNamedPerHostIsNotOnePayload(t *testing.T) {
 	for _, action := range []ActionType{ActionNetworkRollback, ActionFirewallRulesetRestore} {
 		if mode := action.CampaignMode(); mode != CampaignSpecialized {
@@ -190,9 +182,8 @@ func TestARestoreDoesNotRunInBulk(t *testing.T) {
 }
 
 // TestWithdrawingAnAuthorityNeedsTheWholeFleet guards a boundary invisible on
-// a single host: withdrawing an authority is only correct once it covers
-// every target. A host left out keeps a trust the rest of the fleet no longer
-// has.
+// a single host: withdrawing an authority is only correct once it covers every
+// target.
 func TestWithdrawingAnAuthorityNeedsTheWholeFleet(t *testing.T) {
 	if FullCoverageReason(ActionCertificateTrustRemove) == "" {
 		t.Error("withdrawing an authority may be run on part of the fleet")
@@ -209,8 +200,7 @@ func TestWithdrawingAnAuthorityNeedsTheWholeFleet(t *testing.T) {
 
 // TestAPackageSourceIsTheSameDeclarationEverywhere guards the row of the
 // packages chapter: a source is an address, a key and a consent, and those
-// mean the same on every host - there is no diff to plan, so the campaign
-// runs it as one payload, fifty hosts a wave.
+// mean the same on every host - there is no diff to plan, so the campaign runs
 func TestAPackageSourceIsTheSameDeclarationEverywhere(t *testing.T) {
 	if mode := ActionRepositorySet.CampaignMode(); mode != CampaignSamePayload {
 		t.Fatalf("a package source has the mode %q", mode)
@@ -233,8 +223,7 @@ func TestAPackageSourceIsTheSameDeclarationEverywhere(t *testing.T) {
 
 // TestAnInventoryRefreshFansOutAndIsNotACampaign guards the row of the
 // overview chapter: a refresh changes nothing and needs no approval, so it
-// goes the way of the reads - up to the document's wave of two hundred
-// hosts - and never the way of a campaign.
+// goes the way of the reads - up to the document's wave of two hundred hosts -
 func TestAnInventoryRefreshFansOutAndIsNotACampaign(t *testing.T) {
 	if limit := ActionInventoryRefresh.FanOutLimit(); limit != 200 {
 		t.Fatalf("a refresh fans out to %d hosts, the document says 200", limit)
@@ -248,9 +237,8 @@ func TestAnInventoryRefreshFansOutAndIsNotACampaign(t *testing.T) {
 }
 
 // TestARenameSplitsTheMappingPerHost guards the mechanism of the system
-// chapter: a rename in bulk carries a map of host to new name, every host
-// gets its own name and nothing else, and a host the map does not name is
-// ineligible with a reason rather than renamed to a default.
+// chapter: a rename in bulk carries a map of host to new name, every host gets
+// its own name and nothing else, and a host the map does not name is
 func TestARenameSplitsTheMappingPerHost(t *testing.T) {
 	if !PanelPlanned(ActionSystemHostnameSet) {
 		t.Fatal("a rename is not planned from the order")
@@ -258,9 +246,8 @@ func TestARenameSplitsTheMappingPerHost(t *testing.T) {
 	if PanelPlanned(ActionUnitRestart) {
 		t.Fatal("restarting a unit is planned from the order")
 	}
-	// A plan split from the order has no host planner: no read on the host
-	// can say which name the operator intends for it. The engine plans it
-	// from the order, so the operation is executable in bulk all the same.
+	// A plan split from the order has no host planner: no read on the host can
+	// say which name the operator intends for it.
 	if PlanningAction(ActionSystemHostnameSet) != "" {
 		t.Errorf("a rename names a host planner %q", PlanningAction(ActionSystemHostnameSet))
 	}

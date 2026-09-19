@@ -12,9 +12,9 @@ import (
 	"github.com/ultherego/flotestro/internal/packages"
 )
 
-// stubManager stands in for the package adapter of the host: a replacement
-// has to be decided the same way whichever manager answers, and a unit test
-// must not depend on the one the machine running it happens to have.
+// stubManager stands in for the package adapter of the host: a replacement has
+// to be decided the same way whichever manager answers, and a unit test must
+// not depend on the one the machine running it happens to have.
 type stubManager struct{ name string }
 
 func (s stubManager) Name() string             { return s.name }
@@ -65,9 +65,6 @@ func upgradeEnvelope(payload *opspec.AgentUpgradePayload) *agentv1.TaskEnvelope 
 }
 
 // A refresh the helper did not accept is the refusal of the whole upgrade.
-// Carrying on would install a version chosen from metadata whose freshness
-// nobody confirmed - and the transaction that follows cannot be taken back,
-// because it ends the process that ordered it.
 func TestARefusedMetadataRefreshRefusesTheUpgradeAndInstallsNothing(t *testing.T) {
 	withStubbedHost(t, "apt", agentDatabase("0.54.0"))
 
@@ -104,8 +101,7 @@ func TestARefusedMetadataRefreshRefusesTheUpgradeAndInstallsNothing(t *testing.T
 }
 
 // An artefact that is not the one the release published stops the upgrade
-// before the package manager is allowed near the database. The host keeps the
-// version it runs and the refusal names why.
+// before the package manager is allowed near the database.
 func TestAnArtefactDigestThatDoesNotMatchRefusesAndChangesNothing(t *testing.T) {
 	withStubbedHost(t, "apt", agentDatabase("0.54.0"))
 
@@ -137,8 +133,8 @@ func TestAnArtefactDigestThatDoesNotMatchRefusesAndChangesNothing(t *testing.T) 
 			result.GetErrorCode(), result.GetMessage(), helper.ErrorArtefactDigest)
 	}
 	// A rejection rather than a failure: the host was not touched, so the
-	// operator corrects the release and orders again, and a campaign is not
-	// told the host broke.
+	// operator corrects the release and orders again, and a campaign is not told
+	// the host broke.
 	if result.GetStatus() != agentv1.TaskResult_STATUS_REJECTED {
 		t.Errorf("status = %s, expected rejected", result.GetStatus())
 	}
@@ -147,10 +143,7 @@ func TestAnArtefactDigestThatDoesNotMatchRefusesAndChangesNothing(t *testing.T) 
 	}
 }
 
-// A host already at the ordered version still has the order proven. Nothing
-// is installed - the answer says so - and a wrong digest is refused there as
-// well, because an order naming an artefact the release never published is a
-// wrong order whatever the host's state.
+// A host already at the ordered version still has the order proven.
 func TestAnOrderForTheRunningVersionIsProvenWithoutInstallingAnything(t *testing.T) {
 	previousVersion := Version
 	Version = "0.54.0"
@@ -207,7 +200,6 @@ func TestAnOrderForTheRunningVersionIsProvenWithoutInstallingAnything(t *testing
 
 // The order the helper receives carries the fields the panel approved: the
 // digest to check the artefact against and the version to keep a way back to.
-// A field that stays behind in the agent is a field the helper cannot act on.
 func TestTheReplacementOrderCarriesTheDigestAndTheRollbackVersion(t *testing.T) {
 	payload := &opspec.AgentUpgradePayload{
 		TargetVersion:   "0.55.0",
@@ -233,8 +225,7 @@ func TestTheReplacementOrderCarriesTheDigestAndTheRollbackVersion(t *testing.T) 
 }
 
 // The package database writes a version with the epoch its manager keeps and
-// the packaging revision its distribution appends. The same release must not
-// read as a different one because of them.
+// the packaging revision its distribution appends.
 func TestTheInstalledVersionIsTheOrderedReleaseWhateverThePackagingAddsToIt(t *testing.T) {
 	cases := []struct {
 		installed, target string

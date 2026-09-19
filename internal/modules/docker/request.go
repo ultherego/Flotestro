@@ -21,7 +21,7 @@ type ContainerRequest struct {
 	EnvSecrets map[string]string `json:"env_secrets,omitempty"`
 	// Ports, Mounts and Networks are the compact forms:
 	// [host-address:][host-port:]container-port[/protocol]
-	// volume:<name>:<target>[:ro] | bind:<path>:<target>[:ro] |
+	// volume:<name>:<target>[:ro] | bind:<path>:<target>[:ro] |.
 	Ports    []string `json:"ports,omitempty"`
 	Mounts   []string `json:"mounts,omitempty"`
 	Networks []string `json:"networks,omitempty"`

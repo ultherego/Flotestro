@@ -14,7 +14,6 @@ const mib = 1 << 20
 // The judgement is per file system, with the headroom, and never on a fact
 // whose need was not measured: a full /boot refuses a kernel while "/" has
 // room, two paths on one file system share its free bytes, and a host whose
-// tools publish no sizes is reported rather than stopped.
 func TestSpaceShortfallJudgesPerFilesystem(t *testing.T) {
 	cases := []struct {
 		name    string

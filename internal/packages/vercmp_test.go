@@ -3,8 +3,8 @@ package packages
 import "testing"
 
 // The direction of a change decides what the operator approves and which
-// switches the transaction gets, so the ordering has to agree with the
-// tools on the cases that come up on real hosts.
+// switches the transaction gets, so the ordering has to agree with the tools
+// on the cases that come up on real hosts.
 func TestCompareDebVersions(t *testing.T) {
 	cases := []struct {
 		a, b string

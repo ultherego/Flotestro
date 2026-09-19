@@ -85,11 +85,9 @@ func (h *harness) awaitSchedulePlacement(id string, timeout time.Duration) campa
 	}
 }
 
-// TestAScheduledCampaignIsPlacedAtItsMomentAndWaitsForApproval guards
-// the schedule loop: a schedule with a moment a few seconds ahead places
-// its order at that moment, the campaign it places is an ordinary one -
-// requested by the schedule, waiting for its approval - and a single
-// moment fires once: afterwards the schedule has nothing more to place.
+// TestAScheduledCampaignIsPlacedAtItsMomentAndWaitsForApproval guards the
+// schedule loop: a schedule with a moment a few seconds ahead places its order
+// at that moment, the campaign it places is an ordinary one - requested by the
 func TestAScheduledCampaignIsPlacedAtItsMomentAndWaitsForApproval(t *testing.T) {
 	h := newHarness(t)
 	startAt := time.Now().UTC().Add(5 * time.Second).Truncate(time.Second)
@@ -144,10 +142,9 @@ func TestAScheduledCampaignIsPlacedAtItsMomentAndWaitsForApproval(t *testing.T) 
 	}
 }
 
-// TestRunNowPlacesTheScheduledOrderAtOnce guards the on-demand run: the
-// order is placed immediately under the schedule's name, the run is
-// recorded on the schedule and the next moment of a recurring schedule
-// stays where the rule put it.
+// TestRunNowPlacesTheScheduledOrderAtOnce guards the on-demand run: the order
+// is placed immediately under the schedule's name, the run is recorded on the
+// schedule and the next moment of a recurring schedule stays where the rule
 func TestRunNowPlacesTheScheduledOrderAtOnce(t *testing.T) {
 	h := newHarness(t)
 	schedule := h.createCampaignSchedule(map[string]any{
@@ -198,9 +195,8 @@ func TestRunNowPlacesTheScheduledOrderAtOnce(t *testing.T) {
 }
 
 // TestAScheduleIsRefusedWhereItCouldNeverFire guards the door of the
-// schedules: a moment in the past, a rule outside the subset, an
-// operation that does not run in bulk and a write without a reason are
-// each refused with their code, and nothing is recorded.
+// schedules: a moment in the past, a rule outside the subset, an operation
+// that does not run in bulk and a write without a reason are each refused with
 func TestAScheduleIsRefusedWhereItCouldNeverFire(t *testing.T) {
 	h := newHarness(t)
 	order := labScheduleOrder(t, h, "refused")
@@ -236,9 +232,8 @@ func TestAScheduleIsRefusedWhereItCouldNeverFire(t *testing.T) {
 }
 
 // TestTheCalendarListsScheduleMomentsAndDisablingRemovesThem guards the
-// calendar and the life of a schedule: a weekly rule draws its moments in
-// the month, a disabled schedule draws none and names no next moment, a
-// removal needs its reason and ends it.
+// calendar and the life of a schedule: a weekly rule draws its moments in the
+// month, a disabled schedule draws none and names no next moment, a removal
 func TestTheCalendarListsScheduleMomentsAndDisablingRemovesThem(t *testing.T) {
 	h := newHarness(t)
 	order := labScheduleOrder(t, h, "weekly cron restart")

@@ -88,8 +88,8 @@ func candidate(id string, action opspec.ActionType, site string) jobs.Candidate 
 	}
 }
 
-// TestMutationIsAdmittedAgainstTheMutationAndSiteBudgets guards the rule:
-// a change asks for the fleet's mutation token and the site's token of its
+// TestMutationIsAdmittedAgainstTheMutationAndSiteBudgets guards the rule: a
+// change asks for the fleet's mutation token and the site's token of its
 // family, under the job as the owner and the operator as the claimant.
 func TestMutationIsAdmittedAgainstTheMutationAndSiteBudgets(t *testing.T) {
 	b := newFakeBudgets()
@@ -139,9 +139,9 @@ func TestReadIsNotBlockedByTheMutationBudget(t *testing.T) {
 	}
 }
 
-// TestRefusedTaskWaitsWithTheBudgetNamedAndHoldsNothing guards visibility
-// and the all-or-nothing grant: a task the budget refuses stays queued
-// with the key written next to it and no token under its name.
+// TestRefusedTaskWaitsWithTheBudgetNamedAndHoldsNothing guards visibility and
+// the all-or-nothing grant: a task the budget refuses stays queued with the
+// key written next to it and no token under its name.
 func TestRefusedTaskWaitsWithTheBudgetNamedAndHoldsNothing(t *testing.T) {
 	b := newFakeBudgets(budgets.KeyGlobalMutations)
 	w := &fakeWaits{}
@@ -276,8 +276,8 @@ func TestTokensOfTasksTheLeaseMissedGoBack(t *testing.T) {
 }
 
 // TestUnwrittenReasonIsAnError guards that a wait the panel could not write
-// down is reported rather than passed over: a silent wait is the failure
-// the reason exists to prevent.
+// down is reported rather than passed over: a silent wait is the failure the
+// reason exists to prevent.
 func TestUnwrittenReasonIsAnError(t *testing.T) {
 	b := newFakeBudgets(budgets.KeyGlobalMutations)
 	w := &fakeWaits{fail: errors.New("database away")}
@@ -319,10 +319,9 @@ func (f *fakeTopology) FailureDomains(_ context.Context, hostIDs []string) (map[
 	return f.domains, nil
 }
 
-// TestHostInAFailureDomainAsksForItsDomainBudget guards the topology
-// budget of a job: a change on a host the operator placed in a rack asks
-// for the rack's token of the family, next to the site's and the
-// gateway's, and a host nobody placed asks for no domain at all.
+// TestHostInAFailureDomainAsksForItsDomainBudget guards the topology budget of
+// a job: a change on a host the operator placed in a rack asks for the rack's
+// token of the family, next to the site's and the gateway's, and a host nobody
 func TestHostInAFailureDomainAsksForItsDomainBudget(t *testing.T) {
 	b := newFakeBudgets("domain:rack-1:units")
 	w := &fakeWaits{}
@@ -362,9 +361,9 @@ func TestHostInAFailureDomainAsksForItsDomainBudget(t *testing.T) {
 	}
 }
 
-// TestFailedDomainLookupStopsThePass guards that a limit the operator set
-// does not lapse because a query did: the pass ends with the error rather
-// than admitting the tasks as hosts of no domain.
+// TestFailedDomainLookupStopsThePass guards that a limit the operator set does
+// not lapse because a query did: the pass ends with the error rather than
+// admitting the tasks as hosts of no domain.
 func TestFailedDomainLookupStopsThePass(t *testing.T) {
 	a := newAdmission(newFakeBudgets(), &fakeWaits{})
 	a.topology = &fakeTopology{fail: errors.New("the database is away")}

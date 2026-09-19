@@ -6,8 +6,8 @@ import (
 )
 
 // The bucket lets the burst through, refuses beyond it, fills back at the
-// rate, and records one refusal a minute per key so that a flood leaves
-// one event on the trail rather than one per attempt.
+// rate, and records one refusal a minute per key so that a flood leaves one
+// event on the trail rather than one per attempt.
 func TestRateLimiterBurstsRefillsAndRecordsOnce(t *testing.T) {
 	clock := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
 	limiter := newRateLimiter(3)
@@ -54,10 +54,8 @@ func TestRateLimiterBurstsRefillsAndRecordsOnce(t *testing.T) {
 	}
 }
 
-// A key that gets its token back after every accepted attempt is never
-// held to the rate: the limit prices guesses, and an accepted attempt was
-// not one. A refund never fills the bucket past its burst, and a key the
-// limiter has not seen has nothing to refund.
+// A key that gets its token back after every accepted attempt is never held to
+// the rate: the limit prices guesses, and an accepted attempt was not one.
 func TestARefundedKeyIsNotHeldToTheRate(t *testing.T) {
 	clock := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
 	limiter := newRateLimiter(3)

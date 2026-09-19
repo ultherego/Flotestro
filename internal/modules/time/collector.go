@@ -10,11 +10,6 @@ import (
 )
 
 // Runner runs a host tool and returns its output.
-//
-// State collection lives here, not in the agent, because two sides need
-// it: the agent at every inventory cycle and the helper right after a
-// change, to say whether the change took effect. The injected runner keeps
-// the package testable without running anything.
 type Runner func(ctx context.Context, path string, args ...string) (string, error)
 
 const systemctlPath = "/usr/bin/systemctl"
@@ -24,10 +19,6 @@ const systemctlPath = "/usr/bin/systemctl"
 var timeUnits = []string{"chronyd.service", "chrony.service", "systemd-timesyncd.service"}
 
 // Collect reads the host time state.
-//
-// The read needs no root: timedatectl asks the services over the bus,
-// chronyc talks to the daemon over the loopback, and the time
-// configuration files are readable by everyone.
 func Collect(ctx context.Context, run Runner) Snapshot {
 	now := time.Now()
 	_, offset := now.Zone()
@@ -93,8 +84,8 @@ func copyChrony(snapshot *Snapshot, fromChrony Snapshot) {
 	snapshot.LeapStatus = fromChrony.LeapStatus
 	snapshot.LastSyncAt = fromChrony.LastSyncAt
 	// The daemon's answer is closer to the truth than the timedatectl one:
-	// timedated says whether any service reports synchronisation, and
-	// chrony knows whether it selected a source.
+	// timedated says whether any service reports synchronisation, and chrony
+	// knows whether it selected a source.
 	if fromChrony.Synchronized != nil {
 		snapshot.Synchronized = fromChrony.Synchronized
 	}
@@ -114,11 +105,6 @@ func copyTimesyncd(snapshot *Snapshot, state TimesyncdState) {
 }
 
 // daemonUnit points at the time daemon unit and its state.
-//
-// The load state is asked for, not "is-active": systemd answers "inactive"
-// also about a unit the host does not have, so that state alone would make
-// the panel name chrony on a host without chrony. One call covers all the
-// candidates, because the inventory is meant to be light.
 func daemonUnit(ctx context.Context, run Runner) (string, *bool) {
 	args := append([]string{"show", "-p", "Id", "-p", "LoadState", "-p", "ActiveState"}, timeUnits...)
 	output, err := run(ctx, systemctlPath, args...)
@@ -180,10 +166,9 @@ func readChronyConfiguration(snapshot *Snapshot) {
 
 	dir, kind := DropInDir(content)
 	if dir == "" {
-		// The panel does not rewrite the main chrony file, so a host
-		// without an included directory is read-only for the panel - and
-		// says so directly instead of writing a file the daemon never
-		// reads.
+		// The panel does not rewrite the main chrony file, so a host without an
+		// included directory is read-only for the panel - and says so directly
+		// instead of writing a file the daemon never reads.
 		snapshot.WriteReason = "chrony on this host includes no drop-in directory; " +
 			"the panel does not rewrite " + main + " unless you let it add its own sources directory"
 		snapshot.CanAddSourceDir = true
@@ -217,11 +202,6 @@ func readChronyConfiguration(snapshot *Snapshot) {
 }
 
 // readTimesyncdConfiguration marks the panel entries on the daemon's list.
-//
-// The list timesyncd reports is the list in effect; the panel file only
-// says who wrote it. Appending the same addresses a second time would show
-// every server twice. An entry written by the panel that the daemon does
-// not list is added separately - it means the write did not take effect.
 func readTimesyncdConfiguration(snapshot *Snapshot) {
 	snapshot.ManagedPath = TimesyncdFile
 	managed, err := os.ReadFile(TimesyncdFile)

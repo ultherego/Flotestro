@@ -584,7 +584,7 @@ const (
 
 // legacyStatus reads a state as the previous release's status: delivered is
 // sent, a dead letter or a wait for the next attempt is failed, and the rest -
-// queued, in hand, suppressed - has no word in that vocabulary and reads as
+// queued, in hand, suppressed - has no word in that vocabulary and reads as.
 func legacyStatus(state string) string {
 	switch state {
 	case StateDelivered:

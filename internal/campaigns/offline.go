@@ -17,11 +17,6 @@ import (
 
 // holdOffline applies the campaign's offline policy to a host that was not
 // connected when its turn came.
-//
-// The policy decides, not the orchestrator: a reactive order is refused, a
-// read is left out, a declaration of a target state waits for the host
-// without taking a slot. Whatever the answer, the row says why - a host
-// passed over in silence looks like a forgotten host.
 func (o *Orchestrator) holdOffline(ctx context.Context, campaign Campaign,
 	target *Target, host *hosts.Host) error {
 	detail := "the host is " + host.ConnectionState
@@ -64,19 +59,12 @@ func (o *Orchestrator) holdOffline(ctx context.Context, campaign Campaign,
 }
 
 // pastDeadline says whether the campaign has stopped waiting for offline
-// hosts. No deadline means it never stops - a record from before the
-// deadline existed.
+// hosts.
 func pastDeadline(campaign Campaign, now time.Time) bool {
 	return campaign.DeadlineAt != nil && now.After(*campaign.DeadlineAt)
 }
 
 // serviceOfflineQueue looks after the hosts waiting for their connection.
-//
-// A host that came back goes to the queue of its wave - or, under
-// replan_on_reconnect, computes its plan again first. A host that did not
-// come back by the deadline is closed with a reason. The queue is walked
-// on every pass and across every wave, because the wave barrier does not
-// hold such hosts: their turn comes when they do.
 func (o *Orchestrator) serviceOfflineQueue(ctx context.Context, campaign Campaign,
 	targets []Target) error {
 	now := time.Now()
@@ -115,20 +103,13 @@ func (o *Orchestrator) serviceOfflineQueue(ctx context.Context, campaign Campaig
 }
 
 // replanTarget orders the plan of a host again after it came back.
-//
-// The consent covered a diff computed against the state the host had before
-// it disappeared. The host may have changed meanwhile - been updated by
-// hand, rebooted into another kernel, lost a file - and the change would
-// then differ from what was approved. The plan is computed once more, and
-// the change runs only when the digest is the approved one.
 func (o *Orchestrator) replanTarget(ctx context.Context, campaign Campaign,
 	target *Target, host *hosts.Host) error {
 	change := opspec.ActionType(campaign.ActionType)
 	action := opspec.PlanningAction(change)
 	if action == "" {
-		// The policy was validated against the registry, so this is a
-		// registry that changed underneath a running campaign. The host is
-		// not started on a plan nobody can check.
+		// The policy was validated against the registry, so this is a registry that
+		// changed underneath a running campaign.
 		o.finishTarget(ctx, campaign, target, TargetSkipped, "plan_changed_offline",
 			"the operation has no planner any more, so the plan cannot be checked after the reconnect")
 		return nil
@@ -145,10 +126,8 @@ func (o *Orchestrator) replanTarget(ctx context.Context, campaign Campaign,
 	if target.PlanJobID != nil {
 		previous = *target.PlanJobID
 	}
-	// The plan computed again is the next attempt of the same plan step:
-	// the strip shows one plan with two attempts, not two plans. The task
-	// and the transition commit together under the campaign's lock, like
-	// every launch.
+	// The plan computed again is the next attempt of the same plan step: the
+	// strip shows one plan with two attempts, not two plans.
 	jobID, err := o.launch(ctx, &campaign, target,
 		func(tx pgx.Tx) (string, error) {
 			return o.submitJobTx(ctx, tx, campaign, host, action, planPayload(action, change, payload),
@@ -173,13 +152,7 @@ func (o *Orchestrator) replanTarget(ctx context.Context, campaign Campaign,
 	return nil
 }
 
-// afterReplan settles a host whose plan was computed again after a
-// reconnect.
-//
-// The same digest means the same change: the host goes back to the queue
-// and the plan's age starts over, because it was just verified. A different
-// digest means the consent does not cover what would run now; the host ends
-// skipped with the reason, and nobody runs the new plan in silence.
+// afterReplan settles a host whose plan was computed again after a reconnect.
 func (o *Orchestrator) afterReplan(ctx context.Context, campaign Campaign, target *Target) error {
 	if target.PlanJobID == nil {
 		return nil
@@ -210,12 +183,8 @@ func (o *Orchestrator) afterReplan(ctx context.Context, campaign Campaign, targe
 		return nil
 	}
 	if planNoChange(plan) {
-		// The host came back already in the desired state - somebody
-		// brought it there while it was away. That is not a changed plan
-		// the consent missed; it is nothing left to do, and the host ends
-		// the way a host planned that way from the start does. The
-		// approved plan stays on record as approved: the set digest the
-		// consent named is not rewritten under a settled host.
+		// The host came back already in the desired state - somebody brought it
+		// there while it was away.
 		o.settleNoChange(ctx, campaign, target, hash)
 		return nil
 	}
@@ -224,9 +193,7 @@ func (o *Orchestrator) afterReplan(ctx context.Context, campaign Campaign, targe
 		return err
 	}
 	if hash != approved {
-		// The plan step did its work - the answer is a different plan. It
-		// is the change that does not run, and the strip says so on the
-		// change rather than on the plan.
+		// The plan step did its work - the answer is a different plan.
 		why := fmt.Sprintf("the plan computed after the reconnect (%s) differs from the approved one (%s); "+
 			"the consent covered the old plan", shortHash(hash), shortHash(approved))
 		o.finishTargetSteps(ctx, campaign, target, TargetSkipped, "plan_changed_offline", why,
@@ -257,14 +224,8 @@ func shortHash(hash string) string {
 	return hash
 }
 
-// connectivityLost says whether a task ended because the session to the
-// host broke while it ran, rather than because the change failed.
-//
-// Three shapes of the same event: the task expired in the queue after its
-// lease was reclaimed, an attempt's lease ran out without a result, or the
-// task timed out and the host is not connected now. In every one the
-// outcome on the host is unknown, and the campaign counts such hosts
-// separately from failures of the change.
+// connectivityLost says whether a task ended because the session to the host
+// broke while it ran, rather than because the change failed.
 func (o *Orchestrator) connectivityLost(ctx context.Context, job *jobs.Job, target *Target) (bool, string, error) {
 	switch job.State {
 	case jobs.StateExpired:
@@ -292,9 +253,8 @@ func (o *Orchestrator) connectivityLost(ctx context.Context, job *jobs.Job, targ
 	return false, "", nil
 }
 
-// pauseOnConnectivityLoss holds a campaign back once too many hosts lost
-// their session mid-task. A change that cuts hosts off does not show up as
-// failures - the hosts simply stop answering - so it has its own threshold.
+// pauseOnConnectivityLoss holds a campaign back once too many hosts lost their
+// session mid-task.
 func (o *Orchestrator) pauseOnConnectivityLoss(ctx context.Context, campaign Campaign, targets []Target,
 	lost int) error {
 	reason := fmt.Sprintf("connectivity_lost: %d hosts lost their session while their task ran; the limit is %d",

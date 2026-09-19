@@ -13,13 +13,9 @@ const (
 	GrantScheduleRootExec = "schedule.root.exec"
 )
 
-// GrantsFor derives the grants of a capability from what the creator of
-// the task holds: the permission of the action itself, every permission of
-// the creator in the same family (schedule.* for a schedule operation,
-// localuser.* for an account operation), and the root grant for a schedule
-// entry that runs as root - held by a creator who has it, or earned by
-// the approval the policy demanded for such an entry. The list is what
-// the helper's own checks read; it never widens what the creator had.
+// GrantsFor derives the grants of a capability from what the creator of the
+// task holds: the permission of the action itself, every permission of the
+// creator in the same family (schedule.
 func GrantsFor(action opspec.ActionType, payload opspec.Payload, permissions []string, approved bool) []string {
 	grants := []string{}
 	if permission := action.Permission(); permission != "" {

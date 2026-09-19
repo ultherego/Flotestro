@@ -10,10 +10,7 @@ import (
 
 // TestJobListFiltersByFanOutAndHost orders a read fan-out over the connected
 // hosts and checks that the job list narrows to it: the fan-out filter keeps
-// exactly its jobs, the host filter keeps the jobs of that host alone, and
-// the two together name the one job the fan-out placed on the host. The
-// hostname filter is the same question asked the way an operator asks it,
-// by the name typed in part.
+// exactly its jobs, the host filter keeps the jobs of that host alone, and the
 func TestJobListFiltersByFanOutAndHost(t *testing.T) {
 	h := newHarness(t)
 	online := onlineHosts(t, h)
@@ -109,9 +106,9 @@ func TestJobListFiltersByFanOutAndHost(t *testing.T) {
 	}
 }
 
-// sharesPrefix says whether the host with the identifier is one of the
-// listed hosts and its name begins with the prefix: two lab hosts may be
-// named alike, and the name filter keeps both by design.
+// sharesPrefix says whether the host with the identifier is one of the listed
+// hosts and its name begins with the prefix: two lab hosts may be named alike,
+// and the name filter keeps both by design.
 func sharesPrefix(hosts []hostView, hostID, prefix string) bool {
 	for _, host := range hosts {
 		if host.ID == hostID && len(host.Hostname) >= len(prefix) && host.Hostname[:len(prefix)] == prefix {

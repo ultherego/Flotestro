@@ -10,14 +10,6 @@ import (
 
 // MountPlan describes the difference between the mount found and the one
 // requested on a single host.
-//
-// The order "mount /dev/sdb at /data" means something different on every
-// host: /dev/sdb is a different partition with a different UUID, and /data
-// is at times already mounted, written in fstab or empty. The plan resolves
-// the source to the UUID of the filesystem this host really has, and that
-// UUID goes in the change. Thanks to that a disk that got a different path
-// after a reboot is not mounted in somebody else's place - a mount by UUID
-// finds the right one or none.
 type MountPlan struct {
 	Target string `json:"target"`
 	// Action names what would happen: create, update, no_change, remove or
@@ -28,44 +20,35 @@ type MountPlan struct {
 	// a mount nor as an fstab entry.
 	Current *Mount `json:"current,omitempty"`
 
-	// RequestedSource is the source from the order; ResolvedSource - the
-	// same source after resolving to a UUID on this host. The latter goes in
-	// the change. If the order was already by UUID, both are equal. The
-	// requested source stays out of the fingerprint: the change comes back
-	// with the resolved one, and the plan it is compared against has to be
-	// the same plan.
+	// RequestedSource is the source from the order; ResolvedSource - the same
+	// source after resolving to a UUID on this host.
 	RequestedSource string `json:"requested_source,omitempty"`
 	ResolvedSource  string `json:"resolved_source,omitempty"`
-	// SourceUUID and SourcePartUUID are the identity of the filesystem and
-	// of the partition it sits on: together with the target and the type
-	// they say what the plan is about, whatever path the source has today.
+	// SourceUUID and SourcePartUUID are the identity of the filesystem and of the
+	// partition it sits on: together with the target and the type they say what
+	// the plan is about, whatever path the source has today.
 	SourceUUID     string `json:"source_uuid,omitempty"`
 	SourcePartUUID string `json:"source_part_uuid,omitempty"`
-	// Device describes the device the host has under the source, without
-	// the usage counters, which change between two reads and would make
-	// every plan stale on nothing.
+	// Device describes the device the host has under the source, without the
+	// usage counters, which change between two reads and would make every plan
+	// stale on nothing.
 	Device *Device `json:"device,omitempty"`
 
 	DesiredFSType  string `json:"desired_fs_type,omitempty"`
 	DesiredOptions string `json:"desired_options,omitempty"`
 	DesiredPersist bool   `json:"desired_persist,omitempty"`
 
-	// FstabRevision is the digest of /etc/fstab the plan was computed
-	// against. The change is compared with a plan computed again on the
-	// host: an fstab edited in between gives another revision, another
-	// fingerprint, and a refusal to write into a file nobody approved.
+	// FstabRevision is the digest of /etc/fstab the plan was computed against.
 	FstabRevision string `json:"fstab_revision,omitempty"`
-	// TargetState is what stat says about the mount point: missing,
-	// directory or not_a_directory. A target that appeared or vanished
-	// since the plan is a changed base.
+	// TargetState is what stat says about the mount point: missing, directory or
+	// not_a_directory.
 	TargetState string `json:"target_state,omitempty"`
 
 	// Changes lists in human terms what will change.
 	Changes []string `json:"changes,omitempty"`
-	// Refusal names the reason the change will not land on this host: the
-	// source is absent, the filesystem is of a different type than
-	// requested, the target is already taken by another device. A plan with
-	// a refusal is an answer the operator is meant to see before approving.
+	// Refusal names the reason the change will not land on this host: the source
+	// is absent, the filesystem is of a different type than requested, the target
+	// is already taken by another device.
 	Refusal string `json:"refusal,omitempty"`
 
 	PlanHash string `json:"plan_hash"`
@@ -102,9 +85,9 @@ func ComputeMount(state Snapshot, source, target, fsType, options string,
 	plan.SourcePartUUID = device.PartUUID
 	switch {
 	case device.UUID == "":
-		// Without a UUID there is nothing to bind the change to: the
-		// /dev/sdX path points at something else after a reboot, and an
-		// order by path would then mount somebody else's disk.
+		// Without a UUID there is nothing to bind the change to: the /dev/sdX path
+		// points at something else after a reboot, and an order by path would then
+		// mount somebody else's disk.
 		plan.Refusal = "the filesystem on " + source + " has no UUID; it cannot be bound to the change"
 	case fsType != "" && device.FSType != "" && device.FSType != fsType:
 		plan.Refusal = "the source has the filesystem " + device.FSType + ", and the order requests " + fsType
@@ -124,9 +107,7 @@ func ComputeMount(state Snapshot, source, target, fsType, options string,
 			plan.Changes = append(plan.Changes, "the fstab entry will be created")
 		}
 	case !sameSource(current.Source, device):
-		// The target is already taken by another filesystem. Mounting a
-		// second one on it would cover the first - that is not a change
-		// allowed to happen quietly in a campaign.
+		// The target is already taken by another filesystem.
 		found := *current
 		plan.Current = &found
 		plan.Refusal = "the target " + target + " is taken by " + current.Source
@@ -164,10 +145,9 @@ func ComputeUnmount(state Snapshot, target string) MountPlan {
 	return plan
 }
 
-// Refuse records in the plan a refusal reason learned after the
-// differences were computed - for example processes holding the filesystem
-// - and recomputes the fingerprint, because a plan with a refusal is a
-// different answer than a plan without one.
+// Refuse records in the plan a refusal reason learned after the differences
+// were computed - for example processes holding the filesystem - and
+// recomputes the fingerprint, because a plan with a refusal is a different
 func (p *MountPlan) Refuse(reason string) {
 	p.Refusal = reason
 	p.PlanHash = mountPlanFingerprint(*p)
@@ -180,19 +160,15 @@ const (
 	TargetNotADirectory = "not_a_directory"
 )
 
-// ObserveTarget records what stat says about the mount point and
-// recomputes the fingerprint. The host calls it on the plan and again
-// before the change, so a target that appeared, vanished or turned into a
-// file in between is a different plan.
+// ObserveTarget records what stat says about the mount point and recomputes
+// the fingerprint.
 func (p *MountPlan) ObserveTarget(state string) {
 	p.TargetState = state
 	p.PlanHash = mountPlanFingerprint(*p)
 }
 
-// SourceDevice resolves the order source to a host device.
-//
-// The source may be a path, UUID= or LABEL=. Each points at a device
-// differently, and the plan needs one: the one the host has.
+// SourceDevice resolves the order source to a host device. The source may be a
+// path, UUID= or LABEL=.
 func (s Snapshot) SourceDevice(source string) *Device {
 	switch {
 	case strings.HasPrefix(source, "UUID="):
@@ -270,10 +246,9 @@ func orDefaults(options string) string {
 	return options
 }
 
-// mountPlanFingerprint computes the plan fingerprint excluding the
-// fingerprint itself and the requested source: the change carries the
-// resolved source, and the plan it is compared against on the host has to
-// come out the same.
+// mountPlanFingerprint computes the plan fingerprint excluding the fingerprint
+// itself and the requested source: the change carries the resolved source, and
+// the plan it is compared against on the host has to come out the same.
 func mountPlanFingerprint(plan MountPlan) string {
 	stripped := plan
 	stripped.PlanHash = ""

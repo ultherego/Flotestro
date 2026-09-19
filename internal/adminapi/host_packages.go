@@ -9,11 +9,8 @@ import (
 )
 
 // hostPackageList is the installed packages of one host as the panel holds
-// them, with the state of the copy: when it was read, from which job, and
-// why it is missing when it is. The list is the panel's copy and not a
-// fresh read - the inventory carries the digest of the host's own list, so
-// a copy that stopped describing the host is named as such rather than
-// served as current.
+// them, with the state of the copy: when it was read, from which job, and why
+// it is missing when it is.
 type hostPackageList struct {
 	Items []packages.InstalledPackage `json:"items"`
 	Count int                         `json:"count"`
@@ -21,12 +18,6 @@ type hostPackageList struct {
 }
 
 // handleHostPackages returns the installed packages of a host.
-//
-// The whole list at once rather than a page: a host carries a few thousand
-// packages, the operator searches and sorts them on the screen, and a
-// search over a list the browser already holds answers at once. The list
-// is the copy behind the vulnerability assessment, so it is read with the
-// same right as that assessment's source: the package list permission.
 func (s *Server) handleHostPackages(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
 	_, scope, ok := s.hostScope(w, r, hostID)

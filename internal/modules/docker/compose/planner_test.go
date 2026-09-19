@@ -79,10 +79,8 @@ func TestDigestDoesNotDependOnOrder(t *testing.T) {
 	}
 }
 
-// A manifest with the same services and images may publish a different
-// port or run a different command. A digest computed from the service list
-// alone would let through the deployment of a plan the operator did not
-// see.
+// A manifest with the same services and images may publish a different port or
+// run a different command.
 func TestDigestCoversWholeManifest(t *testing.T) {
 	services := []Service{{Name: "web", Image: "nginx:alpine", Replicas: 1}}
 	withPort8083 := `{"services":{"web":{"image":"nginx:alpine","ports":[{"published":"8083"}]}}}`
@@ -93,9 +91,8 @@ func TestDigestCoversWholeManifest(t *testing.T) {
 	}
 }
 
-// The manifest is stored in the panel together with the version history,
-// so a value written into it directly stops being a secret. The operator is
-// meant to see that before approving, not after the leak.
+// The manifest is stored in the panel together with the version history, so a
+// value written into it directly stops being a secret.
 func TestPlanWarnsAboutSecretsInManifest(t *testing.T) {
 	planner := testPlanner(t, map[string]string{
 		"config": configuration,
@@ -142,9 +139,8 @@ func TestPinnedImageIsNotWarnedAbout(t *testing.T) {
 	}
 }
 
-// Compose reports every step twice - during and after. A doubled change
-// list would suggest to the operator twice as much work as the deployment
-// does.
+// Compose reports every step twice - during and after. A doubled change list
+// would suggest to the operator twice as much work as the deployment does.
 func TestChangesAreNotCountedTwice(t *testing.T) {
 	changes := changesFromDryRun(strings.Join([]string{
 		" DRY-RUN MODE -  Network shop_default  Creating",
@@ -174,9 +170,7 @@ func TestProjectNameIsValidated(t *testing.T) {
 	}
 }
 
-// The deployment goes only with the plan the operator approved. A
-// different digest means the deployment would bring something else than
-// what they viewed.
+// The deployment goes only with the plan the operator approved.
 func TestDeploymentRefusesOnDifferentPlan(t *testing.T) {
 	executor := Executor{Planner: testPlanner(t, map[string]string{
 		"config": configuration,
@@ -192,9 +186,9 @@ func TestDeploymentRefusesOnDifferentPlan(t *testing.T) {
 	}
 }
 
-// A mutable tag is planned only once its digest is known, and the
-// deployment binds that digest: a tag that moved between the approval and
-// the deployment is a stale plan, not a surprise in production.
+// A mutable tag is planned only once its digest is known, and the deployment
+// binds that digest: a tag that moved between the approval and the deployment
+// is a stale plan, not a surprise in production.
 func TestMutableTagIsBoundToTheResolvedDigest(t *testing.T) {
 	answers := map[string]string{"config": configuration, "up": "", "ps": ""}
 	planner := Planner{Dir: t.TempDir(), Runner: runner(answers),
@@ -313,9 +307,7 @@ func TestDigestIsPickedForTheHostPlatform(t *testing.T) {
 	}
 }
 
-// Compose reports the dry run on the diagnostic stream. Reading the output
-// alone gave an empty change list, that is a plan saying the deployment
-// changes nothing - the worst possible answer.
+// Compose reports the dry run on the diagnostic stream.
 func TestChangesAreReadFromBothStreams(t *testing.T) {
 	planner := Planner{Dir: t.TempDir(), Runner: func(_ context.Context, args ...string) (string, string, error) {
 		command := strings.Join(args, " ")

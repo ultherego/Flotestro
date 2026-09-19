@@ -417,7 +417,7 @@ func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*
 	}
 	// The tasks the campaign created that are still in the panel's queue never
 	// reached a host, and a cancel takes them back: a host that came online an
-	// hour later would otherwise carry out a change of a campaign that no longer
+	// hour later would otherwise carry out a change of a campaign that no longer.
 	why := "the campaign was canceled by " + actor
 	if reason != "" {
 		why += ": " + reason
@@ -432,7 +432,7 @@ func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*
 	}
 	// The tasks the hosts hold are asked to stop, not written off: each moves to
 	// cancel_requested with a request on the trail, and the agent answers what
-	// the request found - a task not yet started ends canceled, one under way in
+	// the request found - a task not yet started ends canceled, one under way in.
 	if _, err := jobs.RequestCancelOf(ctx, tx, campaignID, actor, why, owed); err != nil {
 		return nil, fmt.Errorf("asking the hosts of the campaign to stop: %w", err)
 	}
@@ -453,7 +453,7 @@ func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*
 	}
 	// The hosts still carrying a task keep it, and the row says the cancel
 	// reached them while they worked: the campaign waits for them, and the
-	// acknowledgement of the agent says whether the task was interrupted, never
+	// acknowledgement of the agent says whether the task was interrupted, never.
 	if _, err := tx.Exec(ctx, `
 		update campaign_targets
 		   set cancel_requested_at = coalesce(cancel_requested_at, now()), revision = revision + 1
@@ -533,7 +533,7 @@ func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*
 
 // followUpJobs lists the reboot and verification tasks of the hosts whose
 // change is done: a cancel does not take those back, because a host left with
-// its change applied and its reboot never ordered is a host the cancel would
+// its change applied and its reboot never ordered is a host the cancel would.
 func (s *Store) followUpJobs(ctx context.Context, tx pgx.Tx, campaignID string) ([]string, error) {
 	rows, err := tx.Query(ctx, `
 		select j::text from campaign_targets t
@@ -1356,7 +1356,7 @@ func (s *Store) FollowTask(ctx context.Context, target *Target, state TargetStat
 
 // AttachJobTx binds a target to the task that was created, inside the caller's
 // transaction - the one that creates the task and moves the target, so a
-// target never names a task that does not exist and a task is never created
+// target never names a task that does not exist and a task is never created.
 func (s *Store) AttachJobTx(ctx context.Context, tx pgx.Tx, target *Target, column, jobID string) error {
 	return s.attachJob(ctx, tx, target, column, jobID)
 }
@@ -1408,7 +1408,7 @@ func (s *Store) setBootIDBefore(ctx context.Context, q stepQuerier, target *Targ
 
 // ErrSkipNotAllowed says the host is not one an operator may skip: only a host
 // waiting for its connection is, because only such a host is holding the
-// campaign for nothing - a host under way settles on its own, and a host in
+// campaign for nothing - a host under way settles on its own, and a host in.
 var ErrSkipNotAllowed = errors.New("skip_not_allowed: only a host waiting for its connection can be skipped")
 
 // SkipTarget lets an operator leave a host waiting for its connection out of

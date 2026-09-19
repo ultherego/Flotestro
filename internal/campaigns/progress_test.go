@@ -10,12 +10,9 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// TestTheRebootJudgementFollowsTheWindowThenTheTimeout guards the
-// mandatory scenario "the host does not come back within the maintenance
-// window": a host still away when the window ends is closed with the
-// window as the reason, whatever the timeout says; without a window, or
-// inside it, the campaign's own timeout decides; and until either passes
-// the host is waited for.
+// TestTheRebootJudgementFollowsTheWindowThenTheTimeout guards the mandatory
+// scenario "the host does not come back within the maintenance window": a host
+// still away when the window ends is closed with the window as the reason,
 func TestTheRebootJudgementFollowsTheWindowThenTheTimeout(t *testing.T) {
 	ordered := time.Date(2026, 9, 14, 22, 50, 0, 0, time.UTC)
 	windowEnd := ordered.Add(10 * time.Minute)
@@ -81,9 +78,7 @@ func TestTheRebootJudgementFollowsTheWindowThenTheTimeout(t *testing.T) {
 }
 
 // TestTheWaitForARebootIsCountedFromTheReboot guards the moment the wait
-// starts from: the last transition of the target, not the start of its
-// change. A change that took half an hour must not fail the host the
-// moment its reboot is ordered.
+// starts from: the last transition of the target, not the start of its change.
 func TestTheWaitForARebootIsCountedFromTheReboot(t *testing.T) {
 	started := time.Date(2026, 9, 14, 22, 0, 0, 0, time.UTC)
 	rebooted := started.Add(30 * time.Minute)
@@ -104,13 +99,8 @@ func TestTheWaitForARebootIsCountedFromTheReboot(t *testing.T) {
 }
 
 // TestTheOutcomeOfATaskNamesTheHostState guards the mapping from a settled
-// task onto the host: a success is a success, a success the host says
-// changed nothing is no_change, a task that ended without a result - the
-// session broke, or the agent came back from a restart - is unknown rather
-// than failed, a task canceled before the host changed anything ends the
-// host canceled rather than failed, a cancel request nobody answered ends
-// it unknown with that code, and the rest fail with the code the host
-// gave.
+// task onto the host: a success is a success, a success the host says changed
+// nothing is no_change, a task that ended without a result - the session
 func TestTheOutcomeOfATaskNamesTheHostState(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -138,11 +128,9 @@ func TestTheOutcomeOfATaskNamesTheHostState(t *testing.T) {
 	}
 }
 
-// TestTheHostFollowsItsTask guards the stages of an open task on the
-// host: dispatched until the agent reports a start, waiting for the lock
-// the agent named while it waits, running once it started. The queue
-// states before the hand-over read as dispatched too: the host has a
-// task and no word from the agent.
+// TestTheHostFollowsItsTask guards the stages of an open task on the host:
+// dispatched until the agent reports a start, waiting for the lock the agent
+// named while it waits, running once it started.
 func TestTheHostFollowsItsTask(t *testing.T) {
 	for _, state := range []jobs.State{jobs.StateQueued, jobs.StateLeased, jobs.StateDispatched} {
 		if got, blocker := taskStanding(state, ""); got != TargetDispatched || blocker != "" {
@@ -163,9 +151,8 @@ func TestTheHostFollowsItsTask(t *testing.T) {
 }
 
 // TestTheResultSaysWhetherAnythingChanged guards how the campaign reads
-// "nothing changed" off a result: a changed flag says it outright, a
-// package transaction says it by applying nothing, and a result that says
-// nothing either way is taken as a change.
+// "nothing changed" off a result: a changed flag says it outright, a package
+// transaction says it by applying nothing, and a result that says nothing
 func TestTheResultSaysWhetherAnythingChanged(t *testing.T) {
 	cases := map[string]struct {
 		detail   string
@@ -191,9 +178,8 @@ func TestTheResultSaysWhetherAnythingChanged(t *testing.T) {
 }
 
 // TestThePlanSaysWhetherThereIsAnythingToDo guards how the campaign reads
-// "nothing to do" off a plan: a plan that names no_change or the removal
-// of an absent file, or a package plan with no changes and nothing
-// blocked. A plan of another shape is a change until proven otherwise.
+// "nothing to do" off a plan: a plan that names no_change or the removal of an
+// absent file, or a package plan with no changes and nothing blocked.
 func TestThePlanSaysWhetherThereIsAnythingToDo(t *testing.T) {
 	cases := map[string]struct {
 		plan     string
@@ -222,9 +208,8 @@ func TestThePlanSaysWhetherThereIsAnythingToDo(t *testing.T) {
 }
 
 // TestTheRebootFollowsThePolicyAndTheResult guards the reboot decision now
-// that it reads the result it is handed: never and always answer on their
-// own, if_required asks the package transaction, and anything else does
-// not reboot.
+// that it reads the result it is handed: never and always answer on their own,
+// if_required asks the package transaction, and anything else does not reboot.
 func TestTheRebootFollowsThePolicyAndTheResult(t *testing.T) {
 	needs := json.RawMessage(`{"kind":"package_apply","reboot_required":true}`)
 	if rebootNeeded(Campaign{RebootPolicy: RebootNever}, needs) {
@@ -247,13 +232,9 @@ func TestTheRebootFollowsThePolicyAndTheResult(t *testing.T) {
 	}
 }
 
-// TestOnlyAConfirmedChangeCarriesTheHostForward guards what chapter 1 of
-// the functional review asks for: a task that says succeeded settles the
-// host succeeded only once the host's own reading after the change showed
-// the state that was ordered. A verification that failed leaves the host
-// applied_unverified with the verifier's reason, and an operation that has
-// no verifier of its own - or one the panel settles on the host's return -
-// is not held back by a verification it was never going to send.
+// TestOnlyAConfirmedChangeCarriesTheHostForward guards what chapter 1 of the
+// functional review asks for: a task that says succeeded settles the host
+// succeeded only once the host's own reading after the change showed the state
 func TestOnlyAConfirmedChangeCarriesTheHostForward(t *testing.T) {
 	verified := &jobs.Attempt{Verification: json.RawMessage(
 		`{"verifier":"unit_state","verified":true,"expected":"active","observed":"active"}`)}
@@ -279,9 +260,9 @@ func TestOnlyAConfirmedChangeCarriesTheHostForward(t *testing.T) {
 		!strings.Contains(said, "failed") {
 		t.Errorf("the observation says nothing: %s", said)
 	}
-	// A read is its own observation, a restart is settled by the panel on
-	// the host's return, and an attempt from an agent before the verifiers
-	// sends none at all: none of the three is a failed verification.
+	// A read is its own observation, a restart is settled by the panel on the
+	// host's return, and an attempt from an agent before the verifiers sends none
+	// at all: none of the three is a failed verification.
 	if reason := unverifiedChange(opspec.ActionUnitStatus, failed); reason != "" {
 		t.Errorf("an operation without a verifier was held back: %s", reason)
 	}

@@ -6,10 +6,9 @@ import (
 	"github.com/ultherego/flotestro/internal/authz"
 )
 
-// The coverage of a module is the arithmetic a fleet screen rests on, so
-// it is checked here rather than through a screen: a host nobody has
-// heard from must never fall out of the sum, because that is exactly the
-// host a plausible wrong number would hide.
+// The coverage of a module is the arithmetic a fleet screen rests on, so it is
+// checked here rather than through a screen: a host nobody has heard from must
+// never fall out of the sum, because that is exactly the host a plausible
 
 func TestModuleCoverageCountsEveryHostOnce(t *testing.T) {
 	coverage := ModuleCoverage{Hosts: 1000, Observed: 700, Unavailable: 40, Stale: 100}
@@ -38,9 +37,8 @@ func TestModuleCoverageWithoutAnyFragment(t *testing.T) {
 	}
 }
 
-// The counts come from a left join, so a fragment of a host outside the
-// scope could in principle outnumber the hosts. The arithmetic must not
-// answer with a negative count of hosts nobody has heard from.
+// The counts come from a left join, so a fragment of a host outside the scope
+// could in principle outnumber the hosts.
 func TestModuleCoverageNeverReportsNegativeMissing(t *testing.T) {
 	coverage := ModuleCoverage{Hosts: 3, Observed: 3, Unavailable: 2}
 	if got := coverage.Missing(); got != 0 {
@@ -71,9 +69,9 @@ func TestScopeConditionNarrowsOrRefuses(t *testing.T) {
 			args:   2,
 		},
 		{
-			// The case the count must not read as the whole fleet: a team
-			// binding carries the wildcard site and environment, so only
-			// the team column may answer for it.
+			// The case the count must not read as the whole fleet: a team binding
+			// carries the wildcard site and environment, so only the team column may
+			// answer for it.
 			name:   "a team scope compares the team column alone",
 			scopes: []authz.Scope{{Site: authz.Wildcard, Environment: authz.Wildcard, Team: "1e83"}},
 			want:   "(h.team_id = $1::uuid)",

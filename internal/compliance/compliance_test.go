@@ -14,9 +14,7 @@ import (
 )
 
 // readAt is the moment the host reported its facts, and testNow the moment of
-// the assessment. The difference is small on purpose: an assessment computed
-// against an old read ends with an undetermined state, and that is a separate
-// test.
+// the assessment.
 var readAt = time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
 var testNow = readAt.Add(time.Minute)
 
@@ -205,9 +203,7 @@ func TestSecurityUpdatesComeFromThePanelsInventory(t *testing.T) {
 	}
 }
 
-// Every remediation has to name an operation the panel knows. A check
-// proposing a non-existent operation type would be rejected only at the
-// ordering, and the operator would then see an error instead of a plan.
+// Every remediation has to name an operation the panel knows.
 func TestRemediationsPointAtOperationsFromTheCatalogue(t *testing.T) {
 	for _, check := range Checks {
 		if check.ID == "" || check.Version == 0 || check.Severity == "" {
@@ -229,11 +225,9 @@ func TestRemediationsPointAtOperationsFromTheCatalogue(t *testing.T) {
 			t.Errorf("%s proposes the unknown operation %q", result.CheckID, action)
 			continue
 		}
-		// The remediation payload must pass the operation's validation just
-		// like a payload typed by hand: a plan that can only be ordered
-		// after a fix is not a plan.
-		// An operation without a payload is valid: a scan or a reload of the
-		// rules has nothing to carry.
+		// The remediation payload must pass the operation's validation just like a
+		// payload typed by hand: a plan that can only be ordered after a fix is not
+		// a plan.
 		var payload opspec.Payload
 		if len(result.Remediation.Payload) == 0 {
 			if err := opspec.Validate(action, payload); err != nil {
@@ -299,9 +293,7 @@ func hostWithEveryNonConformance(t *testing.T) Input {
 func truePointer() *bool          { yes := true; return &yes }
 func countPointer(value int) *int { return &value }
 
-// A host with AppArmor does not fail a check requiring SELinux. The "not
-// applicable" state is a separate answer: it enters neither conformance nor
-// non-conformance, and it creates no plan step.
+// A host with AppArmor does not fail a check requiring SELinux.
 func TestACheckThatDoesNotApplyIsNotAFailure(t *testing.T) {
 	three, zero := 3, 0
 	state := security.Snapshot{
@@ -342,9 +334,8 @@ func TestACheckThatDoesNotApplyIsNotAFailure(t *testing.T) {
 	}
 }
 
-// Every undetermined state carries a reason code: without it the operator
-// does not know whether to wait for a read, repair the agent or grant
-// permissions.
+// Every undetermined state carries a reason code: without it the operator does
+// not know whether to wait for a read, repair the agent or grant permissions.
 func TestEveryUndeterminedFindingHasAReasonCode(t *testing.T) {
 	cases := map[string]Input{
 		"without modules": {},
@@ -432,9 +423,7 @@ func TestAStaleReadIsNotConformance(t *testing.T) {
 	}
 }
 
-// The plan digest has a fixed canonical form, versioned and bound to the
-// host. The vectors are nailed down: a change of the form is to break this
-// test rather than silently invalidate approved plans.
+// The plan digest has a fixed canonical form, versioned and bound to the host.
 func TestPlanDigestVectors(t *testing.T) {
 	empty := PlanHash("host-a", nil)
 	if empty != "974678b3d16d9c31041a89a484c91bf837cb0921e5584c9a6d634ccc51ad38e8" {

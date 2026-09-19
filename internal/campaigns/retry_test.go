@@ -4,12 +4,9 @@ import (
 	"testing"
 )
 
-// TestARetryTakesTheFailedHostsOfAFinishedCampaign guards the rules a
-// retry order is checked against: the campaign has to be finished, the
-// failed hosts are taken, the unknown ones only on request, and the hosts
-// that succeeded or took no part are never run again. Each refusal
-// carries its own code, because the panel acts on the code and the
-// operator reads the sentence.
+// TestARetryTakesTheFailedHostsOfAFinishedCampaign guards the rules a retry
+// order is checked against: the campaign has to be finished, the failed hosts
+// are taken, the unknown ones only on request, and the hosts that succeeded or
 func TestARetryTakesTheFailedHostsOfAFinishedCampaign(t *testing.T) {
 	original := Campaign{ID: "orig", Name: "rollout", ActionType: "unit.restart", State: StateCompletedWithIssues}
 	targets := []Target{
@@ -78,9 +75,9 @@ func TestARetryTakesTheFailedHostsOfAFinishedCampaign(t *testing.T) {
 	}
 }
 
-// TestProgressTellsUnknownFromFailed guards the list tally: unknown is
-// its own number, the hosts that took no part are skipped, and everything
-// not settled is pending.
+// TestProgressTellsUnknownFromFailed guards the list tally: unknown is its own
+// number, the hosts that took no part are skipped, and everything not settled
+// is pending.
 func TestProgressTellsUnknownFromFailed(t *testing.T) {
 	var progress Progress
 	progress.Add(TargetSucceeded, 3)

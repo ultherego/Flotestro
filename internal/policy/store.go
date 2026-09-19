@@ -74,9 +74,9 @@ func (s *Store) query(ctx context.Context, q querier, clause string, args ...any
 		if p.Rules == nil {
 			p.Rules = []Rule{}
 		}
-		// The draft flag compares the row with the frozen document: a
-		// policy edited after its publication is judged by the published
-		// text, and the screen has to say so.
+		// The draft flag compares the row with the frozen document: a policy edited
+		// after its publication is judged by the published text, and the screen has
+		// to say so.
 		if p.Version > 0 && string(published) != "null" {
 			var frozen Document
 			if err := json.Unmarshal(published, &frozen); err == nil {
@@ -245,9 +245,7 @@ type Publication struct {
 	AuthenticatedAt *time.Time
 }
 
-// Publish freezes the draft as the next version. The document is read
-// and frozen in one transaction, so the version number and the text
-// cannot drift between two publishers.
+// Publish freezes the draft as the next version.
 func (s *Store) Publish(ctx context.Context, id string, publication Publication) (*Policy, *Version, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -377,9 +375,8 @@ func (s *Store) Due(ctx context.Context, now time.Time) ([]Policy, error) {
 	return policies, nil
 }
 
-// ReplaceResults writes the verdicts of one evaluation of a policy and
-// marks the evaluation. The hosts the selector no longer names lose their
-// rows: a verdict about a host outside the policy is not a verdict.
+// ReplaceResults writes the verdicts of one evaluation of a policy and marks
+// the evaluation.
 func (s *Store) ReplaceResults(ctx context.Context, policyID string, version int, results []Result, now time.Time) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -567,10 +564,8 @@ func (s *Store) Campaigns(ctx context.Context, policyID string) ([]CampaignLink,
 	return links, rows.Err()
 }
 
-// OpenRemediation says whether a remediation campaign of the policy is
-// still on the table - awaiting approval, planned or under way. A second
-// campaign for the same policy while one is open would fix the same
-// hosts twice or ask for two approvals of one drift.
+// OpenRemediation says whether a remediation campaign of the policy is still
+// on the table - awaiting approval, planned or under way.
 func (s *Store) OpenRemediation(ctx context.Context, policyID string) (string, error) {
 	var campaignID string
 	err := s.pool.QueryRow(ctx, `

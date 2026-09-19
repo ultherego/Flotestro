@@ -6,12 +6,8 @@ import (
 	"time"
 )
 
-// Loop judges the published policies at their intervals.
-//
-// The loop never reads a host: it judges what the inventory holds. Its
-// tick is short and its work is bounded by the policies that are due, so
-// a policy with a fifteen-minute interval is judged within a minute of
-// its time and a fleet without policies costs one query a minute.
+// Loop judges the published policies at their intervals. The loop never reads
+// a host: it judges what the inventory holds.
 type Loop struct {
 	store     *Store
 	evaluator *Evaluator
@@ -42,10 +38,7 @@ func (l *Loop) Run(ctx context.Context) {
 	}
 }
 
-// tick evaluates every policy that is due. One failing policy does not
-// hold the others back: its error is logged, and the next tick tries it
-// again - the last evaluation time only moves on success, so a broken
-// selector is retried every minute rather than silently every interval.
+// tick evaluates every policy that is due.
 func (l *Loop) tick(ctx context.Context) {
 	due, err := l.store.Due(ctx, time.Now().UTC())
 	if err != nil {

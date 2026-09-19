@@ -14,9 +14,9 @@ const pacmanReason = "integration test of the pacman adapter"
 // consequence when held for a minute.
 const pacmanHoldPackage = "which"
 
-// TestPackageListOnPacman guards that the Arch host answers the package
-// read with the pacman adapter: the list is read, its manager is named and
-// the inventory carries the same name.
+// TestPackageListOnPacman guards that the Arch host answers the package read
+// with the pacman adapter: the list is read, its manager is named and the
+// inventory carries the same name.
 func TestPackageListOnPacman(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("arch")
@@ -42,9 +42,8 @@ func TestPackageListOnPacman(t *testing.T) {
 	if report.PackageState.PackageCount == 0 {
 		t.Fatalf("the panel holds no packages of the host: %+v", report.PackageState)
 	}
-	// Arch has no vulnerability feed; the assessment says so rather than
-	// showing a clean host. The correlator gathers recomputation requests
-	// for a dozen seconds, so the answer is awaited rather than read once.
+	// Arch has no vulnerability feed; the assessment says so rather than showing
+	// a clean host.
 	deadline := time.Now().Add(90 * time.Second)
 	for report.State.CoverageReason != "family_unsupported" && time.Now().Before(deadline) {
 		time.Sleep(3 * time.Second)
@@ -56,8 +55,8 @@ func TestPackageListOnPacman(t *testing.T) {
 }
 
 // TestUpdatePlanOnPacman guards that the plan either comes from checkupdates
-// or refuses with the code that names the missing tool - never an empty
-// plan pretending there is nothing to do.
+// or refuses with the code that names the missing tool - never an empty plan
+// pretending there is nothing to do.
 func TestUpdatePlanOnPacman(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("arch")

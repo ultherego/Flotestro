@@ -79,9 +79,8 @@ func TestRoutesKeepProtocolAndMetric(t *testing.T) {
 	}
 }
 
-// The management channel is pointed at by the address the agent really
-// talks to the panel with. Guessing from the first position of the list
-// would end in changing the interface the order has just arrived through.
+// The management channel is pointed at by the address the agent really talks
+// to the panel with.
 func TestManagementChannelPointsAtConnectionInterface(t *testing.T) {
 	interfaces, err := ParseInterfaces(interfacesOutput)
 	if err != nil {

@@ -14,12 +14,6 @@ import (
 
 // enrollmentCommand carries out the one-time admission of a host into the
 // fleet.
-//
-// A separate command rather than a side effect of the start of the daemon:
-// enrollment is a one-time decision of the operator and requires a secret
-// that has no right to lie in the environment file of a service. The daemon
-// starts only once the identity is there - and then it needs no token at
-// all.
 func enrollmentCommand(args []string, in_ io.Reader, out, errOut io.Writer) int {
 	flags := flag.NewFlagSet("enroll", flag.ContinueOnError)
 	flags.SetOutput(errOut)
@@ -42,8 +36,6 @@ func enrollmentCommand(args []string, in_ io.Reader, out, errOut io.Writer) int 
 	}
 
 	// An identity that already works must not be replaced in passing.
-	// Replacing an existing identity is a separate decision and goes through
-	// a recovery request in the panel.
 	state := agent.ReadIdentity(cfg.Agent.StateDir)
 	if state.Present && !state.Expired {
 		fmt.Fprintf(errOut, "%s: the host is already registered as host/%s (the certificate is valid until %s)\n",
@@ -55,9 +47,9 @@ func enrollmentCommand(args []string, in_ io.Reader, out, errOut io.Writer) int 
 		fmt.Fprintf(errOut, "%v\n", err)
 		return 1
 	}
-	// An attempt that has not ended is repeated rather than started anew:
-	// the operator is told, because the panel will answer with the
-	// certificate of that attempt and not with a new one.
+	// An attempt that has not ended is repeated rather than started anew: the
+	// operator is told, because the panel will answer with the certificate of
+	// that attempt and not with a new one.
 	if pending := agent.ReadPendingAttempt(cfg.Agent.StateDir, time.Now()); pending != nil && pending.Err == "" && !pending.Stale {
 		fmt.Fprintf(errOut, "repeating the attempt %s started %s ago\n", pending.ClientRequestID, rounded(pending.Age))
 	}
@@ -105,9 +97,6 @@ func enrollmentCommand(args []string, in_ io.Reader, out, errOut io.Writer) int 
 }
 
 // enrollmentHint says what to do next for a refused enrollment.
-//
-// The panel gives every refusal of the token the same answer, so the hint
-// cannot name the reason; it can name where the reason is written down.
 func enrollmentHint(err error) string {
 	switch agent.ErrorCode(err) {
 	case agent.CodeTokenInvalid:

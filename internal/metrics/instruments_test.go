@@ -6,8 +6,7 @@ import (
 )
 
 // A histogram renders every bucket, +Inf, the sum and the count for each
-// series - the shape Prometheus expects. Rendering the shape by hand is the
-// point of this package, so the shape is what the test nails down.
+// series - the shape Prometheus expects.
 func TestHistogramRendersTheExpositionShape(t *testing.T) {
 	r := &Registry{}
 	h := r.NewHistogram("test_duration_seconds", "Test.", []float64{1, 10}, "action")
@@ -38,9 +37,8 @@ func TestHistogramRendersTheExpositionShape(t *testing.T) {
 	}
 }
 
-// A counter adds counts as well as events, and never goes down: a pass
-// that held back a batch reports the batch, and nothing reports a
-// negative one.
+// A counter adds counts as well as events, and never goes down: a pass that
+// held back a batch reports the batch, and nothing reports a negative one.
 func TestCounterAddsCountsAndOnlyGoesUp(t *testing.T) {
 	r := &Registry{}
 	c := r.NewCounter("test_held_total", "Test.", "gateway")

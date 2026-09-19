@@ -12,9 +12,7 @@ import (
 	"github.com/ultherego/flotestro/internal/vuln"
 )
 
-// cveNumber is the shape of a CVE identifier. The path takes nothing else,
-// so a vendor advisory number or a package name in the address is refused
-// by name rather than answered with an empty page.
+// cveNumber is the shape of a CVE identifier.
 var cveNumber = regexp.MustCompile(`^CVE-\d{4}-\d{4,}$`)
 
 // The page of the CVE list: what the screen gets without asking and the
@@ -26,10 +24,6 @@ const (
 
 // handleFleetCVEs lists the vulnerabilities of the visible fleet one CVE per
 // row, the gravest and the most widespread first.
-//
-// The host list answers "which machine is in the worst shape"; this one
-// answers "which vulnerability touches the most of the fleet" - the
-// question an operator asks when a number from the news lands on the desk.
 func (s *Server) handleFleetCVEs(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermVulnerabilityRead, "fleet")
 	if !ok {
@@ -77,8 +71,8 @@ func (s *Server) handleFleetCVEs(w http.ResponseWriter, r *http.Request) {
 }
 
 // cveReport is the answer of the CVE page: what the upstream database says
-// about the vulnerability, what the vendors published and which hosts in
-// scope carry it.
+// about the vulnerability, what the vendors published and which hosts in scope
+// carry it.
 type cveReport struct {
 	CVE string `json:"cve"`
 	// Details is the enrichment; it may be missing and it decides nothing.
@@ -87,10 +81,9 @@ type cveReport struct {
 	Severity   string              `json:"severity"`
 	References []vuln.CVEReference `json:"references"`
 	Hosts      []vuln.CVEHost      `json:"hosts"`
-	// HostsTotal counts the rows the page could list, which may exceed
-	// the rows it did; AffectedHosts and HostsWithVendorFix count distinct
-	// hosts among the rows returned, because those are the hosts the
-	// operator can act on from this page.
+	// HostsTotal counts the rows the page could list, which may exceed the rows
+	// it did; AffectedHosts and HostsWithVendorFix count distinct hosts among the
+	// rows returned, because those are the hosts the operator can act on from
 	HostsTotal         int      `json:"hosts_total"`
 	AffectedHosts      int      `json:"affected_hosts"`
 	UndecidedHosts     int      `json:"undecided_hosts"`
@@ -100,11 +93,6 @@ type cveReport struct {
 }
 
 // handleCVE returns one vulnerability across the visible fleet.
-//
-// A CVE with no finding in scope and no description is unknown to this
-// installation; a CVE the upstream database describes but no host carries
-// is a page with an empty host table, because the description is an
-// answer of its own.
 func (s *Server) handleCVE(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermVulnerabilityRead, "fleet")
 	if !ok {

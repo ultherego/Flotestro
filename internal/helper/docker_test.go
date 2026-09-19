@@ -6,10 +6,9 @@ import (
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 )
 
-// TestCleanupRejectsANameWithAPath guards the trust boundary of the helper:
-// a volume name lands in the query path of the Engine API, and the helper runs
+// TestCleanupRejectsANameWithAPath guards the trust boundary of the helper: a
+// volume name lands in the query path of the Engine API, and the helper runs
 // as root and cannot trust the content of the message, even though the panel
-// has already checked it.
 func TestCleanupRejectsANameWithAPath(t *testing.T) {
 	cases := []struct {
 		name    string

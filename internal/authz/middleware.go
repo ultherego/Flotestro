@@ -36,25 +36,22 @@ type Authenticator struct {
 	Sessions SessionAuthenticator
 }
 
-// Middleware establishes the identity of the request. Authentication by
-// itself authorises nothing: the handlers make the decisions, because only
-// they know the target's scope.
+// Middleware establishes the identity of the request.
 func (a Authenticator) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		principal := Anonymous
-		// What the trail records about the request beyond the identity: the
-		// session and its authentication, when there is one, and the
-		// request identifier either way.
+		// What the trail records about the request beyond the identity: the session
+		// and its authentication, when there is one, and the request identifier
+		// either way.
 		actor := audit.Actor{RequestID: r.Header.Get("X-Request-Id")}
 
 		// The browser session takes precedence; the API token serves automation.
 		if cookie, err := r.Cookie(SessionCookie); err == nil && a.Sessions != nil {
 			if authenticated, session, err := a.Sessions.AuthenticateSession(ctx, cookie.Value); err == nil {
-				// A state-changing request with a cookie requires CSRF
-				// confirmation: the browser attaches the cookie
-				// automatically, so having it does not prove the user's
-				// intent.
+				// A state-changing request with a cookie requires CSRF confirmation: the
+				// browser attaches the cookie automatically, so having it does not prove
+				// the user's intent.
 				if !safeMethod(r.Method) && !csrfValid(r) {
 					writeCSRFError(w)
 					return
@@ -88,9 +85,7 @@ func (a Authenticator) Middleware(next http.Handler) http.Handler {
 	})
 }
 
-// ContextWithSession attaches the session to the context. Outside the
-// middleware it serves tests that check behaviour depending on the way of
-// authenticating.
+// ContextWithSession attaches the session to the context.
 func ContextWithSession(ctx context.Context, session *Session) context.Context {
 	return context.WithValue(ctx, sessionContextKey{}, session)
 }

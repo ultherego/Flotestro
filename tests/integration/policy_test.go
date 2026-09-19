@@ -9,9 +9,9 @@ import (
 	"time"
 )
 
-// The desired-state policies against the lab: the panel judges the hosts
-// from their inventory, and the only change a policy sets in motion is a
-// campaign that waits for approval.
+// The desired-state policies against the lab: the panel judges the hosts from
+// their inventory, and the only change a policy sets in motion is a campaign
+// that waits for approval.
 
 type policyView struct {
 	ID              string           `json:"id"`
@@ -114,10 +114,9 @@ func (h *harness) connectedDebianHosts(t *testing.T) map[string]hostView {
 	return online
 }
 
-// TestPolicyJudgesAUnitOverTheDebianFamily publishes a policy that wants
-// cron enabled and running on every debian host and checks that the
-// evaluation reads the unit listing and finds every connected host
-// compliant.
+// TestPolicyJudgesAUnitOverTheDebianFamily publishes a policy that wants cron
+// enabled and running on every debian host and checks that the evaluation
+// reads the unit listing and finds every connected host compliant.
 func TestPolicyJudgesAUnitOverTheDebianFamily(t *testing.T) {
 	h := newHarness(t)
 	online := h.connectedDebianHosts(t)
@@ -180,11 +179,8 @@ func TestPolicyJudgesAUnitOverTheDebianFamily(t *testing.T) {
 	}
 }
 
-// packageDriftPolicy publishes a policy that wants a package nobody ships
-// and evaluates it; the caller reads the consequences of its mode. The
-// judgement rests on the panel's copy of the package list, which the
-// vulnerability cycle fetches - without it the verdict is an error, not a
-// drift, and the test says so rather than pretending.
+// packageDriftPolicy publishes a policy that wants a package nobody ships and
+// evaluates it; the caller reads the consequences of its mode.
 func packageDriftPolicy(t *testing.T, h *harness, mode string) (policyView, policyOutcomeView, map[string]hostView) {
 	t.Helper()
 	online := h.connectedDebianHosts(t)
@@ -233,10 +229,9 @@ func TestPolicyInReportModeRecordsDriftAndOrdersNothing(t *testing.T) {
 	}
 }
 
-// TestPolicyInCampaignModeOrdersOneCampaignAwaitingApproval checks the
-// second mode: one campaign for the drift set, linked to the policy, one
-// target per drifted host, waiting for a consent nobody gave yet - and no
-// second campaign for the same drift.
+// TestPolicyInCampaignModeOrdersOneCampaignAwaitingApproval checks the second
+// mode: one campaign for the drift set, linked to the policy, one target per
+// drifted host, waiting for a consent nobody gave yet - and no second campaign
 func TestPolicyInCampaignModeOrdersOneCampaignAwaitingApproval(t *testing.T) {
 	h := newHarness(t)
 	policy, outcome, online := packageDriftPolicy(t, h, "campaign")
@@ -318,9 +313,9 @@ func TestPolicyRefusesARuleKindItDoesNotJudge(t *testing.T) {
 	}
 }
 
-// TestAutomaticRemediationNeedsItsOwnPermission checks that the approver
-// - who publishes policies - cannot publish one that changes hosts
-// without a second look, and that the platform administrator can.
+// TestAutomaticRemediationNeedsItsOwnPermission checks that the approver - who
+// publishes policies - cannot publish one that changes hosts without a second
+// look, and that the platform administrator can.
 func TestAutomaticRemediationNeedsItsOwnPermission(t *testing.T) {
 	h := newHarness(t)
 	h.connectedDebianHosts(t)
@@ -348,8 +343,8 @@ func TestAutomaticRemediationNeedsItsOwnPermission(t *testing.T) {
 	}
 
 	// An approval-bound rule in an automatic policy is refused before the
-	// permission is even asked: a removal is approved with what really
-	// goes, and a publication cannot show that.
+	// permission is even asked: a removal is approved with what really goes, and
+	// a publication cannot show that.
 	bound := h.createPolicy(t, uniqueSubject("bound"), "automatic", []map[string]any{
 		{"kind": "package_absent", "name": "telnetd"},
 	})

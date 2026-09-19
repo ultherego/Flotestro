@@ -60,9 +60,8 @@ func TestBadRuleIsRejected(t *testing.T) {
 	}
 }
 
-// The management channel is the only thing that must not be lost: without
-// it the host stops answering and there is nothing to revert the change
-// with.
+// The management channel is the only thing that must not be lost: without it
+// the host stops answering and there is nothing to revert the change with.
 func TestRuleCannotCutOffPanel(t *testing.T) {
 	const panel = "192.168.56.10"
 	const port = 8443

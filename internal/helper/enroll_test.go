@@ -14,13 +14,8 @@ import (
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 )
 
-// The preflight runs the real tools of the host: name resolution, a TCP
-// dial and a version query of ipa-client-install. On the machine running
-// the unit tests those tools are absent or answer at once, so every scenario
-// below is arranged so that its verdict does not depend on what the machine
-// happens to have. The realm check reads /etc/ipa/default.conf at a fixed
-// path, so the "host already in another domain" branch has no unit test:
-// it needs a joined host, which the lab provides.
+// The preflight runs the real tools of the host: name resolution, a TCP dial
+// and a version query of ipa-client-install.
 
 // enrollRequest wraps the join order in the envelope enrollDomain reads the
 // deadline from.
@@ -56,9 +51,9 @@ func checkNames(checks []*helperv1.EnrollCheck) []string {
 	return names
 }
 
-// TestThePreflightRefusesAShortHostName checks the first condition of a
-// join: ipa-client-install needs a fully qualified name, and the preflight
-// says so as a blocking failure instead of letting the tool find out.
+// TestThePreflightRefusesAShortHostName checks the first condition of a join:
+// ipa-client-install needs a fully qualified name, and the preflight says so
+// as a blocking failure instead of letting the tool find out.
 func TestThePreflightRefusesAShortHostName(t *testing.T) {
 	checks := runPreflight(context.Background(),
 		&helperv1.DomainEnrollRequest{Domain: "flotestro.test", Realm: "FLOTESTRO.TEST"}, "web1")
@@ -77,9 +72,7 @@ func TestThePreflightRefusesAShortHostName(t *testing.T) {
 }
 
 // TestThePreflightRefusesANameThatDoesNotResolve uses a name under the
-// reserved .invalid domain, which no resolver answers, so the forward lookup
-// fails wherever the test runs. Without a forward record the reverse check
-// is not even attempted: it would only repeat the same failure.
+// reserved .
 func TestThePreflightRefusesANameThatDoesNotResolve(t *testing.T) {
 	const hostname = "web1.does-not-exist.invalid"
 	checks := runPreflight(context.Background(),
@@ -108,8 +101,7 @@ func TestThePreflightRefusesANameThatDoesNotResolve(t *testing.T) {
 
 // TestThePreflightReportsEachClosedPort checks that the directory server is
 // probed on every port the join needs, one verdict per port, so the operator
-// learns which firewall rule is missing. The loopback address with nothing
-// listening refuses at once, so the probe is quick and its result certain.
+// learns which firewall rule is missing.
 func TestThePreflightReportsEachClosedPort(t *testing.T) {
 	ports := []string{"88", "389", "443"}
 	for _, port := range ports {
@@ -143,8 +135,8 @@ func TestThePreflightReportsEachClosedPort(t *testing.T) {
 }
 
 // TestThePreflightSkipsThePortsWithoutAServer guards that a join without a
-// named server - discovery through DNS - is not refused for ports nobody
-// asked to probe.
+// named server - discovery through DNS - is not refused for ports nobody asked
+// to probe.
 func TestThePreflightSkipsThePortsWithoutAServer(t *testing.T) {
 	checks := runPreflight(context.Background(),
 		&helperv1.DomainEnrollRequest{Domain: "flotestro.test", Realm: "FLOTESTRO.TEST"}, "web1")
@@ -156,9 +148,7 @@ func TestThePreflightSkipsThePortsWithoutAServer(t *testing.T) {
 }
 
 // TestAHostInNoDomainPassesTheRealmCheck checks the realm conflict for the
-// common case of a fresh host. The check reads the IPA client configuration
-// at its fixed path; a machine that is itself joined to a domain cannot run
-// this test and says so.
+// common case of a fresh host.
 func TestAHostInNoDomainPassesTheRealmCheck(t *testing.T) {
 	if _, err := os.Stat("/etc/ipa/default.conf"); err == nil {
 		t.Skip("this machine is joined to a domain; the fresh-host case cannot be observed here")
@@ -177,10 +167,9 @@ func TestAHostInNoDomainPassesTheRealmCheck(t *testing.T) {
 	}
 }
 
-// TestTheJoinStopsAtAFailedPreflight is the point of the preflight: a
-// blocking failure ends the order before ipa-client-install starts, with the
-// typed code, the list of failed conditions and every check attached, so the
-// operator sees what to fix. The one-time password stays out of the answer.
+// TestTheJoinStopsAtAFailedPreflight is the point of the preflight: a blocking
+// failure ends the order before ipa-client-install starts, with the typed
+// code, the list of failed conditions and every check attached, so the
 func TestTheJoinStopsAtAFailedPreflight(t *testing.T) {
 	const password = "one-time-secret-4711"
 	action := &helperv1.DomainEnrollRequest{
@@ -241,9 +230,7 @@ func TestAPreflightOnlyOrderReportsWithoutJoining(t *testing.T) {
 
 // TestAJoinWithoutThePasswordIsRefusedAfterThePreflight guards the order of
 // the refusals: the conditions of the host come before the credential, so an
-// operator who fixes the missing password on a host that cannot join anyway
-// is not sent around twice. A short name fails the preflight whatever the
-// machine, so the refusal has to be the preflight, not the credential.
+// operator who fixes the missing password on a host that cannot join anyway is
 func TestAJoinWithoutThePasswordIsRefusedAfterThePreflight(t *testing.T) {
 	action := &helperv1.DomainEnrollRequest{
 		Domain: "flotestro.test", Realm: "FLOTESTRO.TEST", Hostname: "web1",
@@ -259,9 +246,9 @@ func TestAJoinWithoutThePasswordIsRefusedAfterThePreflight(t *testing.T) {
 	}
 }
 
-// TestBlockingFailuresIgnoreAdvisoryChecks checks the split between what
-// stops the join and what only warns: a missing reverse record or an
-// unsynchronised clock are reported, not enforced.
+// TestBlockingFailuresIgnoreAdvisoryChecks checks the split between what stops
+// the join and what only warns: a missing reverse record or an unsynchronised
+// clock are reported, not enforced.
 func TestBlockingFailuresIgnoreAdvisoryChecks(t *testing.T) {
 	checks := []*helperv1.EnrollCheck{
 		check("dns_reverse", false, false, "no PTR record"),
@@ -278,19 +265,16 @@ func TestBlockingFailuresIgnoreAdvisoryChecks(t *testing.T) {
 	}
 }
 
-// fakeIdentityTool records the directory tool calls, each with what it got
-// on its standard input, instead of running them. Every tool answers as if
-// it succeeded: the tests below are about what the helper hands to the
-// tools, not about what the tools say back.
+// fakeIdentityTool records the directory tool calls, each with what it got on
+// its standard input, instead of running them.
 type fakeIdentityTool struct {
 	calls    [][]string
 	inputs   []string
 	failures []fakeFailure
 }
 
-// fakeFailure makes a tool whose argv carries the marker end with the
-// given code and stderr, the way the real one fails: with a banner on
-// stdout first.
+// fakeFailure makes a tool whose argv carries the marker end with the given
+// code and stderr, the way the real one fails: with a banner on stdout first.
 type fakeFailure struct {
 	tool, marker string
 	code         int
@@ -352,9 +336,7 @@ func useFakeIdentityTool(t *testing.T) *fakeIdentityTool {
 }
 
 // resolvableHostname finds a qualified name the machine running the tests
-// resolves, so the preflight of a join can pass without a directory. A
-// machine that resolves none of the candidates cannot observe a join
-// reaching the tool and says so.
+// resolves, so the preflight of a join can pass without a directory.
 func resolvableHostname(t *testing.T) string {
 	t.Helper()
 	candidates := []string{"localhost.localdomain", "localhost."}
@@ -371,9 +353,8 @@ func resolvableHostname(t *testing.T) string {
 }
 
 // TestTheJoinArgumentsCarryThePassword pins the measured residual: the
-// unattended tool takes the one-time password nowhere but in argv (it
-// refuses -W without a terminal), so the argv carries it, and every
-// message of the result is redacted instead.
+// unattended tool takes the one-time password nowhere but in argv (it refuses
+// -W without a terminal), so the argv carries it, and every message of the
 func TestTheJoinArgumentsCarryThePassword(t *testing.T) {
 	args := enrollArguments(&helperv1.DomainEnrollRequest{
 		Domain: "flotestro.test", Realm: "FLOTESTRO.TEST", Server: "ipa.flotestro.test",
@@ -399,9 +380,8 @@ func TestTheJoinArgumentsCarryThePassword(t *testing.T) {
 }
 
 // TestAJoinThatExitsWithAnErrorIsNotASuccess guards the verdict: the tool
-// prints its banner before it fails, and a banner on stdout must not turn
-// a non-zero exit into a join. The preflight is the real one, so the test
-// needs a name that resolves and a machine that is in no domain.
+// prints its banner before it fails, and a banner on stdout must not turn a
+// non-zero exit into a join.
 func TestAJoinThatExitsWithAnErrorIsNotASuccess(t *testing.T) {
 	if _, err := os.Stat("/etc/ipa/default.conf"); err == nil {
 		t.Skip("this machine is joined to a domain; the realm check would refuse the join")
@@ -428,8 +408,7 @@ func TestAJoinThatExitsWithAnErrorIsNotASuccess(t *testing.T) {
 }
 
 // TestTheRealRunnerHandsTheInputToTheTool checks the runner itself, with a
-// real process: what is given as input arrives on the tool's standard
-// input. cat echoes it back, and it lives at a fixed path on every Linux.
+// real process: what is given as input arrives on the tool's standard input.
 func TestTheRealRunnerHandsTheInputToTheTool(t *testing.T) {
 	if _, err := os.Stat("/usr/bin/cat"); err != nil {
 		t.Skip("/usr/bin/cat is missing")
@@ -444,9 +423,9 @@ func TestTheRealRunnerHandsTheInputToTheTool(t *testing.T) {
 	}
 }
 
-// TestALeaveOfAHostInNoDomainIsRefused is the first condition of leaving:
-// a host that is in no domain has nothing to leave, and the order stops
-// before ipa-client-install --uninstall runs.
+// TestALeaveOfAHostInNoDomainIsRefused is the first condition of leaving: a
+// host that is in no domain has nothing to leave, and the order stops before
+// ipa-client-install --uninstall runs.
 func TestALeaveOfAHostInNoDomainIsRefused(t *testing.T) {
 	if _, err := os.Stat("/etc/ipa/default.conf"); err == nil {
 		t.Skip("this machine is joined to a domain; the fresh-host case cannot be observed here")
@@ -485,9 +464,9 @@ func TestALeaveOfAHostInNoDomainIsRefused(t *testing.T) {
 	}
 }
 
-// TestTheLeaveVerificationsNameWhatIsLeftBehind pins the meaning of the
-// checks after a leave on a machine that was never joined: the client
-// configuration and the keytab are absent, and that is what "gone" means.
+// TestTheLeaveVerificationsNameWhatIsLeftBehind pins the meaning of the checks
+// after a leave on a machine that was never joined: the client configuration
+// and the keytab are absent, and that is what "gone" means.
 func TestTheLeaveVerificationsNameWhatIsLeftBehind(t *testing.T) {
 	if _, err := os.Stat("/etc/ipa/default.conf"); err == nil {
 		t.Skip("this machine is joined to a domain")

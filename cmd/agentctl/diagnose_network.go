@@ -10,9 +10,7 @@ import (
 
 // The network checks are the ones the tool of the relay runs as well: the
 // clock, the names and the handshakes are questions about the path to the
-// panel, not about which component asks. The diagnostics hand their dialer
-// and clock over, so a test still runs the whole diagnosis without a
-// network.
+// panel, not about which component asks.
 
 // network wires the shared checks to the dialers of this diagnosis.
 func (d diagnostics) network() ctl.Network {

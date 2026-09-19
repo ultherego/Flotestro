@@ -7,15 +7,8 @@ import (
 	"time"
 )
 
-// The compliance report: where the visible hosts stand against the
-// declared policies at the end of the period.
-//
-// The panel keeps one verdict per policy, host and rule - the latest
-// evaluation - so a verdict recorded after the end of the period has
-// overwritten the one that stood then. Such a host is counted as unknown
-// for the period rather than under its later verdict: the report says
-// what was known at its end, and what it cannot know it says it does not
-// know. A period that ends now has nothing unknown for this reason.
+// The compliance report: where the visible hosts stand against the declared
+// policies at the end of the period.
 
 // The verdicts a policy rule gives, and the one the report adds.
 const (
@@ -36,11 +29,6 @@ type HostRef struct {
 }
 
 // PolicyRow is one policy of the report with its hosts by verdict.
-//
-// A host has one verdict per policy, the worst of its rules: drift over
-// error over compliant over not applicable, so a host with one rule in
-// drift is a host in drift whatever its other rules say. The rule tally
-// counts the verdicts as the rule results do, one per rule.
 type PolicyRow struct {
 	ID              string     `json:"id"`
 	Name            string     `json:"name"`
@@ -94,15 +82,13 @@ type PolicyCompliance struct {
 	Totals     PolicyTotals `json:"totals"`
 }
 
-// driftHostLimit bounds the host names a policy row carries. The count
-// is exact; the names are a sample, and the drift host table lists the
-// rest.
+// driftHostLimit bounds the host names a policy row carries. The count is
+// exact; the names are a sample, and the drift host table lists the rest.
 const driftHostLimit = 50
 
 // hostVerdictsSQL judges every visible host under every policy: the worst
-// verdict of its rules, with the verdicts recorded after the end of the
-// period read as unknown. $1 is the end of the period; the clause is
-// numbered from $2.
+// verdict of its rules, with the verdicts recorded after the end of the period
+// read as unknown.
 const hostVerdictsSQL = `
 	with verdicts as (
 		select r.policy_id, r.host_id, h.hostname, h.site, h.environment,

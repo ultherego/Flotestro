@@ -14,10 +14,6 @@ import (
 var hexFingerprint = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // fileView joins the desired state with what the host really has.
-//
-// The drift between the two is the whole content of this tab: a file
-// changed outside the panel looks the same as a matching file until the
-// fingerprints are compared.
 type fileView struct {
 	managedfiles.DesiredState
 	ObservedSHA256 string `json:"observed_sha256,omitempty"`
@@ -29,9 +25,9 @@ type fileView struct {
 	Mode               string `json:"observed_mode,omitempty"`
 	Owner              string `json:"observed_owner,omitempty"`
 	UnavailableReason  string `json:"unavailable_reason,omitempty"`
-	// HostVersions are the copies the host itself kept: the content from
-	// before the panel managed the file, and anything changed outside the
-	// panel, exist nowhere else.
+	// HostVersions are the copies the host itself kept: the content from before
+	// the panel managed the file, and anything changed outside the panel, exist
+	// nowhere else.
 	HostVersions []filesmodule.KeptVersion `json:"host_versions,omitempty"`
 }
 
@@ -52,9 +48,8 @@ func (s *Server) handleListManagedFiles(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// The actual state comes from the inventory: it is the host that says
-	// how the file looks now, not the panel that remembers what it once
-	// sent.
+	// The actual state comes from the inventory: it is the host that says how the
+	// file looks now, not the panel that remembers what it once sent.
 	observed := map[string]filesmodule.File{}
 	fragment, err := s.inventory.Fragment(r.Context(), hostID, "files")
 	if err == nil && fragment != nil && len(fragment.Payload) > 0 {
@@ -76,12 +71,8 @@ func (s *Server) handleListManagedFiles(w http.ResponseWriter, r *http.Request) 
 			view.Owner = file.Owner
 			view.UnavailableReason = file.UnavailableReason
 			view.HostVersions = file.Versions
-			// Drift means only a confirmed divergence: a file the host did
-			// not read is neither matching nor diverged.
-			//
-			// A file from a secret is not compared at all: the panel has no
-			// fingerprint of it and cannot have one. Instead of a false
-			// match it says directly that it does not check the content.
+			// Drift means only a confirmed divergence: a file the host did not read is
+			// neither matching nor diverged.
 			view.Drift = state.SecretName == "" && file.Exists &&
 				file.SHA256 != "" && file.SHA256 != state.SHA256
 			if state.SecretName != "" && file.Exists {
@@ -117,10 +108,6 @@ func (s *Server) handleFileHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleFileVersion returns the content of a file version.
-//
-// The content is a separate permission from the list: a configuration file
-// is at times sensitive even when it is not a secret - it carries
-// addresses, account names and topology.
 func (s *Server) handleFileVersion(w http.ResponseWriter, r *http.Request) {
 	fingerprint := r.PathValue("sha256")
 	if !hexFingerprint.MatchString(fingerprint) {

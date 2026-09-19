@@ -102,7 +102,7 @@ type fanOutHost struct {
 	Lines []string `json:"lines,omitempty"`
 	// Detail is the typed result of a structured read, as the job stored it;
 	// Snapshot is the state the read refreshed in the inventory, for the reads
-	// whose answer lands there rather than in the job - a process snapshot, a
+	// whose answer lands there rather than in the job - a process snapshot, a.
 	Detail   json.RawMessage `json:"detail,omitempty"`
 	Snapshot json.RawMessage `json:"snapshot,omitempty"`
 }

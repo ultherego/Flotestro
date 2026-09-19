@@ -1,16 +1,5 @@
-// Package identitystore keeps the agent's identity as indivisible
-// generations.
-//
-// The key, the certificate and the trust bundle are one whole. Written
-// separately, each with its own atomic write, they give a window in which the
-// host has the key of one pair and the certificate of another - and can no
-// longer log in to the fleet. Recovering such a host requires walking up to
-// it, so that is the failure this whole package exists to prevent.
-//
-// A new generation comes into being alongside, is checked and fsynced, and
-// only then is it pointed at by the atomically replaced "current" symlink.
-// The previous one stays on disk: when the new one turns out to be bad, there
-// is something to go back to.
+// Package identitystore keeps the agent's identity as indivisible generations.
+// The key, the certificate and the trust bundle are one whole.
 package identitystore
 
 import (
@@ -48,9 +37,6 @@ const (
 )
 
 // GenerationsKept says how many generations stay on disk.
-//
-// The current one and one previous: more is needed for nothing, and each of
-// them is a private key that had better not lie around longer than it must.
 const GenerationsKept = 2
 
 // The store's errors. The codes are part of the contract with the operator -
@@ -65,9 +51,7 @@ var (
 
 // Generation is the complete cryptographic material of a host.
 type Generation struct {
-	// Key is the source of the private material. An interface, because a key
-	// cannot always be exported - a hardware profile leaves it in the chip
-	// and gives out signing only.
+	// Key is the source of the private material.
 	Key Key
 	// KeyPEM is the way for a key that is an ordinary file. Empty when Key is
 	// given; given when the caller already has the material.
@@ -113,10 +97,6 @@ func New(stateDir string) *Store {
 }
 
 // NewWithSource creates the store with the given source of keys.
-//
-// A hardware profile replaces the source alone: the rest of the store, the
-// enrollment and the renewal do not know where the key lies, and are not
-// meant to.
 func NewWithSource(stateDir string, source KeySource) *Store {
 	if source == nil {
 		source = Software()
@@ -131,10 +111,6 @@ func (m *Store) NewKey() (Key, error) { return m.source.New() }
 func (m *Store) Dir() string { return m.root }
 
 // Check verifies a generation before any change on disk.
-//
-// The order matters: first the key-certificate pair, then the chain to the
-// trust bundle, and the identity in the certificate last. Each of them means
-// something different to the operator.
 func Check(g Generation) error {
 	key, err := g.key()
 	if err != nil {
@@ -149,8 +125,8 @@ func Check(g Generation) error {
 		return fmt.Errorf("%w: %v", ErrKeyPair, err)
 	}
 	// The pair is checked through the public key rather than by combining the
-	// certificate with the private material: a hardware key cannot be
-	// combined, and it is known anyway whether it matches.
+	// certificate with the private material: a hardware key cannot be combined,
+	// and it is known anyway whether it matches.
 	if !keysMatch(leaf.PublicKey, key.Public()) {
 		return fmt.Errorf("%w: the certificate does not match the key", ErrKeyPair)
 	}
@@ -165,10 +141,8 @@ func Check(g Generation) error {
 	}); err != nil {
 		return fmt.Errorf("%w: %v", ErrChain, err)
 	}
-	// The store keeps the agent's identity and the relay's identity: it
-	// records a key with a certificate rather than a role. The kind is
-	// settled by what is done with that certificate, and the services on the
-	// other side check it.
+	// The store keeps the agent's identity and the relay's identity: it records a
+	// key with a certificate rather than a role.
 	if _, _, err := pki.IdentityFromCert(leaf); err != nil {
 		return fmt.Errorf("%w: %v", ErrIdentityURI, err)
 	}
@@ -176,11 +150,6 @@ func Check(g Generation) error {
 }
 
 // Commit records a new generation and switches "current" to it.
-//
-// The order is the whole content of this function: nothing switches the
-// identity before the complete set lies on disk and passes verification. An
-// interruption at any point leaves the host on the previous, working
-// generation.
 func (m *Store) Commit(g Generation) (*Identity, error) {
 	if err := Check(g); err != nil {
 		return nil, err
@@ -204,9 +173,7 @@ func (m *Store) Commit(g Generation) (*Identity, error) {
 		return nil, err
 	}
 
-	// The key writes itself: only it knows what persisting it means. The
-	// certificate and the bundle are not secret and can be read by diagnostic
-	// tools.
+	// The key writes itself: only it knows what persisting it means.
 	key, err := g.key()
 	if err != nil {
 		return nil, err
@@ -229,11 +196,8 @@ func (m *Store) Commit(g Generation) (*Identity, error) {
 		return nil, err
 	}
 	target := filepath.Join(generations, serial)
-	// The name has to be free: the store never removes a generation to
-	// make room for another. The same serial number means the same
-	// certificate, so a repeat after an interrupted start meets either the
-	// active generation - which stays, and is used if it is whole - or a
-	// complete copy nobody switched to, which is set aside for Clean.
+	// The name has to be free: the store never removes a generation to make room
+	// for another.
 	if err := renameNoReplace(temporary, target); err != nil {
 		if !errors.Is(err, os.ErrExist) {
 			return nil, err
@@ -286,9 +250,8 @@ func setAside(generations, serial string) (string, error) {
 	return aside, nil
 }
 
-// renameNoReplaceFallback is the check-then-move for a filesystem without
-// the atomic form. The window between the two is small and it errs
-// towards refusing, never towards replacing.
+// renameNoReplaceFallback is the check-then-move for a filesystem without the
+// atomic form.
 func renameNoReplaceFallback(oldPath, newPath string) error {
 	if _, err := os.Lstat(newPath); err == nil {
 		return &os.LinkError{Op: "rename", Old: oldPath, New: newPath, Err: os.ErrExist}
@@ -313,10 +276,6 @@ func (m *Store) switchTo(serial string) error {
 }
 
 // Current loads the identity pointed at by "current".
-//
-// We resolve the symlink to the real generation directory: that directory is
-// the answer to "what is the host using now", not the symlink path, which is
-// always the same.
 func (m *Store) Current() (*Identity, error) {
 	dir, err := filepath.EvalSymlinks(filepath.Join(m.root, CurrentName))
 	if err != nil {
@@ -326,10 +285,6 @@ func (m *Store) Current() (*Identity, error) {
 }
 
 // Previous loads the generation from before the current one.
-//
-// It stays on disk so that there is something to go back to when the new one
-// turns out to be bad - for example when the panel issues a certificate it
-// then does not recognise itself.
 func (m *Store) Previous() (*Identity, error) {
 	current, err := os.Readlink(filepath.Join(m.root, CurrentName))
 	if err != nil {
@@ -349,11 +304,7 @@ func (m *Store) Previous() (*Identity, error) {
 	return nil, ErrIdentityMissing
 }
 
-// Clean removes the traces of interrupted writes and the surplus
-// generations.
-//
-// Called at start and after every commit: a temporary directory left after a
-// crash and the ".current-next" symlink are rubbish rather than state.
+// Clean removes the traces of interrupted writes and the surplus generations.
 func (m *Store) Clean() error {
 	// A temporary symlink is never the host's identity: either it was renamed
 	// to "current" or it does not exist.
@@ -367,9 +318,8 @@ func (m *Store) Clean() error {
 		}
 		return err
 	}
-	// A half-written generation and a copy set aside by a repeated write
-	// are never pointed at by "current"; both are rubbish rather than
-	// state.
+	// A half-written generation and a copy set aside by a repeated write are
+	// never pointed at by "current"; both are rubbish rather than state.
 	for _, entry := range entries {
 		if strings.HasPrefix(entry.Name(), newPrefix) || strings.HasPrefix(entry.Name(), stalePrefix) {
 			_ = os.RemoveAll(filepath.Join(generations, entry.Name()))
@@ -437,10 +387,6 @@ func (m *Store) generations() ([]string, error) {
 }
 
 // load reads the complete set from a generation directory.
-//
-// The source loads the key rather than this function: for a hardware key the
-// directory holds a handle rather than material, and only the source knows
-// what to do with it.
 func load(dir string, source KeySource) (*Identity, error) {
 	if source == nil {
 		source = Software()
@@ -473,9 +419,7 @@ func load(dir string, source KeySource) (*Identity, error) {
 	}
 	_, hostID, err := pki.IdentityFromCert(leaf)
 	if err != nil {
-		// Older fleet certificates may have no URI SAN. The common name is
-		// then the only thing the host knows about itself - and better than
-		// refusing to start.
+		// Older fleet certificates may have no URI SAN.
 		hostID = leaf.Subject.CommonName
 	}
 	pair.Leaf = leaf
@@ -487,9 +431,6 @@ func load(dir string, source KeySource) (*Identity, error) {
 }
 
 // serialNumber names a generation by the certificate's serial number.
-//
-// The name has to be different for different certificates and the same for a
-// repeated write of the same one - a serial number does both.
 func serialNumber(certPEM []byte) (string, error) {
 	block, _ := pem.Decode(certPEM)
 	if block == nil {
@@ -530,13 +471,6 @@ func syncDir(path string) error {
 }
 
 // Migrate moves an identity from the old file layout into generations.
-//
-// A host set up before the store was introduced has its key, certificate and
-// bundle loose in the state directory. Moving them as a whole happens once
-// and does not delete the originals: should anything go wrong, the previous
-// version of the agent has something to start from.
-//
-// It returns true when a migration really happened.
 func (m *Store) Migrate(keyPath, certPath, trustPath string) (bool, error) {
 	if _, err := os.Lstat(filepath.Join(m.root, CurrentName)); err == nil {
 		return false, nil

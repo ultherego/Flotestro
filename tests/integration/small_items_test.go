@@ -21,16 +21,14 @@ type preferencesView struct {
 	UpdatedAt   *time.Time `json:"updated_at"`
 }
 
-// TestPreferencesRoundTrip guards that an identity's preferences are
-// written whole under the identity, read back the same, and refused when
-// they name a zone, a page or a language the panel cannot honour. A new
-// identity is on the defaults, which the read says with empty fields
-// rather than with a refusal.
+// TestPreferencesRoundTrip guards that an identity's preferences are written
+// whole under the identity, read back the same, and refused when they name a
+// zone, a page or a language the panel cannot honour.
 func TestPreferencesRoundTrip(t *testing.T) {
 	h := newHarness(t)
-	// A fresh identity, so the test does not overwrite the preferences of
-	// whoever runs the suite; the operator role is enough, because the
-	// preferences need no permission beyond being signed in.
+	// A fresh identity, so the test does not overwrite the preferences of whoever
+	// runs the suite; the operator role is enough, because the preferences need
+	// no permission beyond being signed in.
 	token := h.createPrincipal(uniqueSubject("preferences"), []map[string]string{
 		{"role": "operator", "site": "*", "environment": "*"},
 	})
@@ -110,9 +108,9 @@ type notedHostView struct {
 	Notes string `json:"notes"`
 }
 
-// TestHostNotesRoundTripWithAudit guards that the notes of a host are
-// written under the tag permission, come back with the host, clear with
-// an empty text, and leave both texts on the trail.
+// TestHostNotesRoundTripWithAudit guards that the notes of a host are written
+// under the tag permission, come back with the host, clear with an empty text,
+// and leave both texts on the trail.
 func TestHostNotesRoundTripWithAudit(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -142,9 +140,7 @@ func TestHostNotesRoundTripWithAudit(t *testing.T) {
 	h.do(http.MethodPut, "/api/v1/hosts/"+host.ID+"/notes",
 		map[string]any{"notes": "bell\x07here"}, nil, http.StatusBadRequest)
 
-	// Clearing is an empty text, and the trail keeps what was cleared. A
-	// fresh variable: the cleared field is absent from the answer, and a
-	// decode into the earlier one would keep the old text in it.
+	// Clearing is an empty text, and the trail keeps what was cleared.
 	var emptied struct {
 		Notes string `json:"notes"`
 	}
@@ -179,11 +175,9 @@ type tagCatalogueView struct {
 	} `json:"items"`
 }
 
-// TestTagCatalogueListsAndRenames guards that a tag set on a host appears
-// in the catalogue with its host count, that a rename moves it on every
-// host carrying it in one step and says how many moved, that the old
-// name leaves the catalogue and the new one takes its place, and that a
-// rename of a tag nobody carries is refused rather than recorded.
+// TestTagCatalogueListsAndRenames guards that a tag set on a host appears in
+// the catalogue with its host count, that a rename moves it on every host
+// carrying it in one step and says how many moved, that the old name leaves
 func TestTagCatalogueListsAndRenames(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -267,11 +261,9 @@ func hasTag(tags []string, tag string) bool {
 	return false
 }
 
-// TestBudgetDeleteRefusedWhileHeld guards that a configured budget cannot
-// be taken away while somebody holds its tokens - the ceiling is not
-// pulled from under running work - and goes away, with a trail entry,
-// once the tokens are back. A budget nobody configured is not there to
-// delete.
+// TestBudgetDeleteRefusedWhileHeld guards that a configured budget cannot be
+// taken away while somebody holds its tokens - the ceiling is not pulled from
+// under running work - and goes away, with a trail entry, once the tokens are
 func TestBudgetDeleteRefusedWhileHeld(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

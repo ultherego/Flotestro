@@ -9,9 +9,9 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// casQuerier stands in for the database under a compare-and-swap write:
-// it answers every row query with the rows it was told to have - none, for
-// a row that moved - and counts what was asked of it.
+// casQuerier stands in for the database under a compare-and-swap write: it
+// answers every row query with the rows it was told to have - none, for a row
+// that moved - and counts what was asked of it.
 type casQuerier struct {
 	matched  bool
 	revision int64
@@ -36,9 +36,9 @@ func (q *casQuerier) QueryRow(_ context.Context, _ string, args ...any) pgx.Row 
 	if !q.matched {
 		return casRow{err: pgx.ErrNoRows}
 	}
-	// The statement returns the new revision, the state it left, the time
-	// spent in it and the action; the fake reports the state written as
-	// the one left, so no metric is observed.
+	// The statement returns the new revision, the state it left, the time spent
+	// in it and the action; the fake reports the state written as the one left,
+	// so no metric is observed.
 	return casRow{revision: q.revision, previous: args[4].(string)}
 }
 
@@ -60,10 +60,8 @@ func (r casRow) Scan(dest ...any) error {
 }
 
 // TestAConcurrentTransitionIsRefused guards the compare-and-swap: a write
-// against a row whose revision, state or claim token moved touches nothing
-// and comes back as ErrConcurrentTransition, so the caller reads the row
-// again instead of repeating a decision made on a stale picture. A write
-// against the row as it was read moves it and returns the new revision.
+// against a row whose revision, state or claim token moved touches nothing and
+// comes back as ErrConcurrentTransition, so the caller reads the row again
 func TestAConcurrentTransitionIsRefused(t *testing.T) {
 	store := &Store{}
 	moved := &casQuerier{matched: false}
@@ -96,10 +94,9 @@ func TestAConcurrentTransitionIsRefused(t *testing.T) {
 	}
 }
 
-// TestASettledHostNeverMovesAgain guards the terminal rule of the target
-// state machine: a settled host is not written again, whatever state is
-// asked for, and the database is not even asked - a late result is an
-// observation about the host, not a transition of it.
+// TestASettledHostNeverMovesAgain guards the terminal rule of the target state
+// machine: a settled host is not written again, whatever state is asked for,
+// and the database is not even asked - a late result is an observation about
 func TestASettledHostNeverMovesAgain(t *testing.T) {
 	store := &Store{}
 	for _, from := range []TargetState{TargetSucceeded, TargetNoChange, TargetFailed, TargetUnknown,
@@ -146,10 +143,9 @@ func TestASettledHostNeverMovesAgain(t *testing.T) {
 	}
 }
 
-// TestTheCampaignStateMachineHasNoWayOutOfTheEnd guards the campaign
-// side: a terminal campaign never runs again, the orchestrator's
-// transitions follow the phases, and the pausing state sits between a
-// running campaign and a paused one.
+// TestTheCampaignStateMachineHasNoWayOutOfTheEnd guards the campaign side: a
+// terminal campaign never runs again, the orchestrator's transitions follow
+// the phases, and the pausing state sits between a running campaign and a
 func TestTheCampaignStateMachineHasNoWayOutOfTheEnd(t *testing.T) {
 	for _, from := range []State{StateCompleted, StateCompletedWithIssues, StateFailed, StatePlanFailed, StateExpired, StateCanceled} {
 		for _, to := range []State{StateRunning, StateCanary, StatePaused, StatePausing, StateCanceled, StateCompleted} {
@@ -184,11 +180,9 @@ func TestTheCampaignStateMachineHasNoWayOutOfTheEnd(t *testing.T) {
 	}
 }
 
-// TestAPauseWaitsForTheHostsUnderWay guards the pausing state: a pause
-// with hosts still carrying a task is pausing, a pause with none is
-// paused, and neither pausing nor paused starts a host - only the planning
-// phase, a planned campaign on its first pass, the canary and the waves
-// do.
+// TestAPauseWaitsForTheHostsUnderWay guards the pausing state: a pause with
+// hosts still carrying a task is pausing, a pause with none is paused, and
+// neither pausing nor paused starts a host - only the planning phase, a
 func TestAPauseWaitsForTheHostsUnderWay(t *testing.T) {
 	for _, state := range []TargetState{TargetDispatched, TargetAwaitingLock, TargetRunning, TargetRebooting, TargetVerifying} {
 		targets := []Target{{State: TargetSucceeded}, {State: state}, {State: TargetPending}}

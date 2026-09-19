@@ -23,10 +23,8 @@ const (
 	getentPath     = "/usr/bin/getent"
 )
 
-// CollectDNS reads the state of the resolver of the host.
-//
-// The read needs no root: resolv.conf is readable by everyone, and resolvectl
-// asks the services over the system bus.
+// CollectDNS reads the state of the resolver of the host. The read needs no
+// root: resolv.
 func CollectDNS(ctx context.Context) dns.Snapshot {
 	snapshot := dns.Snapshot{ObservedAt: time.Now().UTC(), ResolvConf: resolvConfPath}
 
@@ -39,8 +37,7 @@ func CollectDNS(ctx context.Context) dns.Snapshot {
 	snapshot.Owner = dns.ResolvConfOwner(target, string(content))
 
 	// resolvectl gives more than the file: the per-link state, DNSSEC and
-	// DNS-over-TLS. Without it only the file is left, and it says no more than
-	// where the queries go.
+	// DNS-over-TLS.
 	if network.Exists(resolvectlPath) {
 		if output, err := commandOutput(ctx, resolvectlPath, "status", "--no-pager"); err == nil {
 			fromResolved := dns.ParseResolvectl(output)
@@ -60,10 +57,7 @@ func CollectDNS(ctx context.Context) dns.Snapshot {
 		}
 	}
 
-	// The write goes through the connection profile. Without NetworkManager the
-	// panel has nothing to change the resolver with in a way that survives the
-	// next network event - and it says so directly instead of writing to a file
-	// that will disappear anyway.
+	// The write goes through the connection profile.
 	if network.Exists(network.NmcliPath) {
 		snapshot.Writable = true
 		snapshot.WriteAdapter = network.AdapterNetworkManager
@@ -209,10 +203,6 @@ func testNames(ctx context.Context, names []string) []dns.QueryResult {
 }
 
 // testName asks one question and describes the answer.
-//
-// The result is named, because the duration is filled in from a defer: without
-// that the measurement would be lost at every early return and every query
-// would seem to take zero milliseconds.
 func testName(ctx context.Context, name string) (result dns.QueryResult) {
 	result = dns.QueryResult{Name: name}
 	if !dns.ValidTestName(name) {
@@ -223,16 +213,15 @@ func testName(ctx context.Context, name string) (result dns.QueryResult) {
 	defer func() { result.TookMillis = time.Since(start).Milliseconds() }()
 
 	if network.Exists(resolvectlPath) {
-		// The legend carries the protocol and the source of the answer, so it is
-		// not switched off: the operator asks not only "which address" but also
-		// "who told me that".
+		// The legend carries the protocol and the source of the answer, so it is not
+		// switched off: the operator asks not only "which address" but also "who
+		// told me that".
 		output, errorMessage, err := outputWithError(ctx, resolvectlPath, "query", name)
 		if err == nil {
 			result.Addresses, result.Server = addressesFromResolvectl(output)
 			if len(result.Addresses) == 0 {
-				// An empty answer without a reason would be silence: a name
-				// without an address and a name that did not resolve are two
-				// different things.
+				// An empty answer without a reason would be silence: a name without an
+				// address and a name that did not resolve are two different things.
 				result.Error = "the resolver returned no address"
 			}
 			return result
@@ -264,11 +253,6 @@ func testName(ctx context.Context, name string) (result dns.QueryResult) {
 }
 
 // addressesFromResolvectl reads the answer of "resolvectl query".
-//
-// An answer line has the form "name: address -- link: enp0s8", and the legend
-// lines start with two dashes and say where the answer came from. The source is
-// taken from the legend, because it is what answers the question "who told me
-// that" - and in a DNS diagnosis that is the whole question.
 func addressesFromResolvectl(output string) (addresses []string, server string) {
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)

@@ -365,10 +365,9 @@ func TestOperatorDoesNotApproveCampaigns(t *testing.T) {
 		consent, nil, http.StatusOK)
 }
 
-// TestCampaignOutsideTheScopeIsRejected checks that the scope is examined
-// for every host of the snapshot, not only for the first: an explicit
-// list is strict, and a host outside the caller's scope is refused with
-// its reason rather than skipped or let through with the rest.
+// TestCampaignOutsideTheScopeIsRejected checks that the scope is examined for
+// every host of the snapshot, not only for the first: an explicit list is
+// strict, and a host outside the caller's scope is refused with its reason
 func TestCampaignOutsideTheScopeIsRejected(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -387,19 +386,12 @@ func TestCampaignOutsideTheScopeIsRejected(t *testing.T) {
 }
 
 // TestCampaignRefusesAnOperationWithoutABulkMode guards the gate that
-// separates single-host operations from fleet ones. The refusal is to come
-// when ordering and have its own code: a campaign that approves one payload
-// for an operation computing a different plan on every host would approve a
-// change nobody saw.
+// separates single-host operations from fleet ones.
 func TestCampaignRefusesAnOperationWithoutABulkMode(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
-	// A specialised operation without its own phase in the engine. Every
-	// family with a per-host plan already has a planner; this gate guards
-	// that the pass is a declaration and a mechanism, not the operation
-	// name - package repair has its own state machine, which the campaign
-	// does not drive yet.
+	// A specialised operation without its own phase in the engine.
 	cases := map[string]map[string]any{
 		"packages.repair": {"package_repair": map[string]any{
 			"answers": []map[string]any{},
@@ -425,9 +417,9 @@ func TestCampaignRefusesAnOperationWithoutABulkMode(t *testing.T) {
 	}
 }
 
-// TestApprovalConcernsWhatIsVisible guards the consent invariant: an
-// approval without a fingerprint or with somebody else's fingerprint is not
-// consent to this campaign.
+// TestApprovalConcernsWhatIsVisible guards the consent invariant: an approval
+// without a fingerprint or with somebody else's fingerprint is not consent to
+// this campaign.
 func TestApprovalConcernsWhatIsVisible(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -451,8 +443,7 @@ func TestApprovalConcernsWhatIsVisible(t *testing.T) {
 }
 
 // TestCampaignWorksOnManyHostsAtOnce is the proof that multitasking really
-// works. A concurrency limit greater than one is to mean that two hosts
-// work side by side, not that the queue goes faster.
+// works.
 func TestCampaignWorksOnManyHostsAtOnce(t *testing.T) {
 	h := newHarness(t)
 	// One OS family: the campaign is to show concurrency, not the
@@ -484,8 +475,8 @@ func TestCampaignWorksOnManyHostsAtOnce(t *testing.T) {
 	}
 
 	// Concurrency is decided from the attempt times, not from polling: two
-	// operations lasting a fraction of a second could fit between one query
-	// and the next, and still work side by side.
+	// operations lasting a fraction of a second could fit between one query and
+	// the next, and still work side by side.
 	windows := make([]window, 0, len(online))
 	for _, target := range h.campaignTargets(campaign.ID) {
 		if target.JobID == "" {
@@ -539,12 +530,6 @@ type timedAttempt struct {
 
 // TestConflictingOperationsOnAHostAreSerialised guards the host resource
 // locks.
-//
-// Three restarts of the same unit ordered at once must run one after
-// another. The proof is in the unit state: every restart sees in front of
-// it the process the previous one left. If two restarts went side by side,
-// that chain would break - and the host job limit alone does not ensure it,
-// because the general class has more than one slot.
 func TestConflictingOperationsOnAHostAreSerialised(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -604,15 +589,9 @@ func TestConflictingOperationsOnAHostAreSerialised(t *testing.T) {
 	}
 }
 
-// TestPackageCampaignComputesAPlanOnEveryHost guards the most important
-// change of Campaigns v2: the consent does not concern one payload, but a
-// set of plans.
-//
-// Two hosts picked by the same order almost never have the same diff, so
-// the campaign first asks every host what comes out there, and only then
-// asks for consent. The approval fingerprint changes after planning - the
-// proof is that consent given with the fingerprint from before planning is
-// rejected.
+// TestPackageCampaignComputesAPlanOnEveryHost guards the most important change
+// of Campaigns v2: the consent does not concern one payload, but a set of
+// plans.
 func TestPackageCampaignComputesAPlanOnEveryHost(t *testing.T) {
 	h := newHarness(t)
 	hosts := h.hosts()
@@ -642,10 +621,7 @@ func TestPackageCampaignComputesAPlanOnEveryHost(t *testing.T) {
 	}
 	orderFingerprint := campaign.ApprovalFingerprint
 
-	// The planning phase ends on its own: every host computes its plan. A
-	// fleet with no security update waiting has nothing to approve: every
-	// host settles as no_change at planning and the campaign completes
-	// without a change, which is what an unattended fleet mostly says.
+	// The planning phase ends on its own: every host computes its plan.
 	afterPlanning := h.awaitCampaign(campaign.ID,
 		map[string]bool{"awaiting_approval": true, "completed": true, "paused": true, "failed": true}, 3*time.Minute)
 	if afterPlanning.State == "completed" {
@@ -675,9 +651,9 @@ func TestPackageCampaignComputesAPlanOnEveryHost(t *testing.T) {
 	h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/approve",
 		map[string]any{"approval_fingerprint": orderFingerprint}, nil, http.StatusConflict)
 
-	// Every target has a planning job and went back to the queue - or, on
-	// a host whose plan found nothing to change, settled as no_change
-	// without ever needing the approval.
+	// Every target has a planning job and went back to the queue - or, on a host
+	// whose plan found nothing to change, settled as no_change without ever
+	// needing the approval.
 	for _, target := range h.campaignTargets(campaign.ID) {
 		if target.PlanJobID == "" {
 			t.Errorf("target %s without a planning job", target.Hostname)
@@ -719,16 +695,6 @@ func (h *harness) setBudget(key string, capacity, afterTest int) {
 
 // TestSiteBudgetStopsTheExcessChange guards invariant I-05: the campaign
 // concurrency limit is not the only limit of the system.
-//
-// The campaign asks for three hosts at once and has consent for that - and
-// yet the site admits one change of this family. The proof is in the
-// attempt times: no two may overlap. The second proof is visibility: a host
-// that waits must say so, not stand in the queue without a reason.
-//
-// The negative control stands next to it: TestCampaignWorksOnManyHostsAtOnce
-// does the same on the same fleet at the default capacity and requires the
-// windows to overlap. Without that pair "no overlap" could simply mean a
-// slow fleet, not a working budget.
 func TestSiteBudgetStopsTheExcessChange(t *testing.T) {
 	h := newHarness(t)
 	// One OS family and one site: the proof concerns the budget, not the
@@ -776,9 +742,8 @@ func TestSiteBudgetStopsTheExcessChange(t *testing.T) {
 		campaign = h.approveCampaign(campaign)
 	}
 
-	// Along the way at least one host must report that it waits for
-	// capacity. This is checked during the run, because the state is
-	// transient.
+	// Along the way at least one host must report that it waits for capacity.
+	// This is checked during the run, because the state is transient.
 	waited := false
 	deadline := time.Now().Add(4 * time.Minute)
 	for time.Now().Before(deadline) {
@@ -821,9 +786,8 @@ func TestSiteBudgetStopsTheExcessChange(t *testing.T) {
 	if len(windows) < 2 {
 		t.Fatalf("the campaign left %d attempts with times", len(windows))
 	}
-	// The crux of the invariant: the campaign had consent for three at
-	// once, and the site admitted one. Overlapping windows would mean the
-	// budget did not bind.
+	// The crux of the invariant: the campaign had consent for three at once, and
+	// the site admitted one.
 	if overlap(windows) {
 		t.Errorf("two changes went side by side despite a budget of 1: %+v", windows)
 	}
@@ -861,8 +825,8 @@ func TestBudgetShowsUsageAndRefusesZeroCapacity(t *testing.T) {
 }
 
 // TestBudgetChangeRequiresAPermission guards that capacities are not raised
-// quietly: a budget raised without a trace takes the meaning away from
-// every limit below it.
+// quietly: a budget raised without a trace takes the meaning away from every
+// limit below it.
 func TestBudgetChangeRequiresAPermission(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -893,14 +857,8 @@ type previewView struct {
 	} `json:"notes"`
 }
 
-// TestPreviewTellsReadyFromIncapable guards criterion A-02: before the
-// start the operator is to know which hosts go and why the rest do not.
-//
-// The test fleet has an Arch host that has neither apt nor dnf. A package
-// update is infeasible on it and the panel is to say so before the campaign
-// is created, not with an error at execution. The same host is at the same
-// time ready for a unit restart - qualification depends on the operation,
-// not on the host.
+// TestPreviewTellsReadyFromIncapable guards criterion A-02: before the start
+// the operator is to know which hosts go and why the rest do not.
 func TestPreviewTellsReadyFromIncapable(t *testing.T) {
 	h := newHarness(t)
 
@@ -925,11 +883,8 @@ func TestPreviewTellsReadyFromIncapable(t *testing.T) {
 		t.Errorf("the package update described as %q, plan=%v",
 			update.CampaignMode, update.RequiresPlan)
 	}
-	// The same fleet, a different operation: a host without the adapter
-	// is to be excluded with a reason, not counted as ready. Every lab
-	// family has a package manager now, so the operation without an
-	// adapter everywhere is a container image pull - only the host with
-	// a container engine can carry it out.
+	// The same fleet, a different operation: a host without the adapter is to be
+	// excluded with a reason, not counted as ready.
 	h.get("/api/v1/campaigns/preview?action=docker.image.pull", &update)
 	if update.Eligible >= restart.Eligible {
 		t.Errorf("the image pull has %d ready hosts with %d ready for a restart - "+
@@ -956,10 +911,6 @@ func TestPreviewTellsReadyFromIncapable(t *testing.T) {
 
 // TestCampaignKeepsTheIncapableHostInTheSnapshot guards the doctrine: a host
 // that will not carry out the operation does not disappear quietly.
-//
-// A quiet exclusion is worse than a refusal: the operator approves a
-// campaign on four hosts and learns about three only from the report - or
-// does not learn at all.
 func TestCampaignKeepsTheIncapableHostInTheSnapshot(t *testing.T) {
 	h := newHarness(t)
 	targets := make([]string, 0, 4)
@@ -1022,21 +973,14 @@ func TestCampaignKeepsTheIncapableHostInTheSnapshot(t *testing.T) {
 }
 
 // TestComposeCampaignCarriesThePlanDigestToTheHost guards that the planning
-// phase is not owned by packages: the second family computes the plan on
-// the host and gets it back together with the change.
-//
-// The Compose plan digest is made from the manifest and from the image
-// digests this host really sees. The deployment carries it back, and the
-// host refuses when it stopped matching - the consent concerned that plan,
-// not this one.
+// phase is not owned by packages: the second family computes the plan on the
+// host and gets it back together with the change.
 func TestComposeCampaignCarriesThePlanDigestToTheHost(t *testing.T) {
 	h := newHarness(t)
 	const project = "flotestro-campaign"
 	manifest := "services:\n  web:\n    image: nginx:alpine\n"
 
-	// Docker is on one host in this fleet. That is enough to show the
-	// planning phase, and the other hosts show along the way that
-	// incapability is not a failure.
+	// Docker is on one host in this fleet.
 	targets := make([]string, 0, 4)
 	withDocker := 0
 	for _, host := range h.hosts() {
@@ -1089,9 +1033,8 @@ func TestComposeCampaignCarriesThePlanDigestToTheHost(t *testing.T) {
 		t.Error("the plan set did not change the approval fingerprint")
 	}
 
-	// A host without a container engine is incapable, not broken: it does
-	// not count towards the failure threshold and does not stop the
-	// campaign.
+	// A host without a container engine is incapable, not broken: it does not
+	// count towards the failure threshold and does not stop the campaign.
 	planned, ineligible := 0, 0
 	for _, target := range h.campaignTargets(campaign.ID) {
 		switch target.State {
@@ -1112,9 +1055,7 @@ func TestComposeCampaignCarriesThePlanDigestToTheHost(t *testing.T) {
 			ineligible, len(targets)-withDocker)
 	}
 
-	// The manifest names the image by a mutable tag. The plan is computed
-	// only once the tag resolves to a digest, and that digest is what the
-	// deployment binds: the plan says which one, and where it came from.
+	// The manifest names the image by a mutable tag.
 	for _, target := range h.campaignTargets(campaign.ID) {
 		if target.State != "pending" {
 			continue
@@ -1132,9 +1073,9 @@ func TestComposeCampaignCarriesThePlanDigestToTheHost(t *testing.T) {
 		}
 	}
 
-	// The cleanup goes by containers, because the panel has no "take the
-	// project down" operation: a deployment is a declaration of state, not
-	// a command that can be undone with one order.
+	// The cleanup goes by containers, because the panel has no "take the project
+	// down" operation: a deployment is a declaration of state, not a command that
+	// can be undone with one order.
 	t.Cleanup(func() {
 		for _, hostID := range targets {
 			for _, container := range projectContainers(h, hostID, project) {
@@ -1232,14 +1173,9 @@ type timelineEntryView struct {
 	OccurredAt time.Time       `json:"occurred_at"`
 }
 
-// TestCampaignTimelineSurvivesAPanelRestart guards invariant I-14: the
-// course of a campaign can be reconstructed from durable records, not only
-// from notifications.
-//
-// A notification sent at the moment the panel was restarting no longer
-// exists anywhere. The final state stays in the tables, but the course -
-// what happened and when - vanished with it. A campaign without a timeline
-// is a report after the fact, not control over the rollout.
+// TestCampaignTimelineSurvivesAPanelRestart guards invariant I-14: the course
+// of a campaign can be reconstructed from durable records, not only from
+// notifications.
 func TestCampaignTimelineSurvivesAPanelRestart(t *testing.T) {
 	h := newHarness(t)
 	online := make([]string, 0, 2)
@@ -1273,9 +1209,7 @@ func TestCampaignTimelineSurvivesAPanelRestart(t *testing.T) {
 		t.Fatal("campaign without a single event in the timeline")
 	}
 
-	// The timeline is to name the campaign phases and the fate of the
-	// hosts. The final state alone is visible in the tables; here it is
-	// about how it came to be.
+	// The timeline is to name the campaign phases and the fate of the hosts.
 	kinds := map[string]int{}
 	for _, entry := range timeline.Items {
 		kinds[entry.Type]++
@@ -1293,9 +1227,9 @@ func TestCampaignTimelineSurvivesAPanelRestart(t *testing.T) {
 			t.Errorf("timeline without the event %s: %+v", required, kinds)
 		}
 	}
-	// A host passes through dispatched and running; a restart that ends
-	// within the engine's pass may be seen succeeded straight from
-	// dispatched, and that is the truth of the timeline, not a gap in it.
+	// A host passes through dispatched and running; a restart that ends within
+	// the engine's pass may be seen succeeded straight from dispatched, and that
+	// is the truth of the timeline, not a gap in it.
 	if kinds["target.running"] == 0 && kinds["target.dispatched"] == 0 {
 		t.Errorf("timeline without the hand-over to the host: %+v", kinds)
 	}
@@ -1313,20 +1247,13 @@ func TestCampaignTimelineSurvivesAPanelRestart(t *testing.T) {
 	}
 }
 
-// TestMetricsShowTheCampaignMachinery guards the observability of the part
-// of the system that is invisible without it.
-//
-// A campaign standing on a budget and a campaign that goes look the same
-// from outside: both are "in progress". Only one of them needs a reaction,
-// and what tells them apart is the reason code at the hosts and the budget
-// usage.
+// TestMetricsShowTheCampaignMachinery guards the observability of the part of
+// the system that is invisible without it.
 func TestMetricsShowTheCampaignMachinery(t *testing.T) {
 	h := newHarness(t)
 	text := h.text("/metrics")
 
-	// Budgets are always described - also when nothing takes them. A
-	// capacity given only when there is a problem would not let anybody see
-	// how close to the limit the fleet works.
+	// Budgets are always described - also when nothing takes them.
 	for _, fragment := range []string{
 		"flotestro_budget_tokens",
 		`flotestro_budget_tokens{budget="global:mutations",status="capacity"}`,
@@ -1377,10 +1304,9 @@ func TestMetricsShowTheCampaignMachinery(t *testing.T) {
 	h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 3*time.Minute)
 
-	// A finished campaign leaves its measurements behind: how long the
-	// hosts sat in each state, how long the agents took and how many tasks
-	// were handed over. These are histograms and counters measured at the
-	// point of the event - a table read at scrape time could not give them.
+	// A finished campaign leaves its measurements behind: how long the hosts sat
+	// in each state, how long the agents took and how many tasks were handed
+	// over.
 	text = h.text("/metrics")
 	for _, fragment := range []string{
 		`flotestro_job_dispatch_total{outcome="dispatched"`,
@@ -1393,9 +1319,9 @@ func TestMetricsShowTheCampaignMachinery(t *testing.T) {
 				extract(text, strings.SplitN(fragment, "{", 2)[0]))
 		}
 	}
-	// The host sat in dispatched, and in running when the start was heard
-	// before the result; a restart that ends within one pass of the engine
-	// leaves only the first of the two behind.
+	// The host sat in dispatched, and in running when the start was heard before
+	// the result; a restart that ends within one pass of the engine leaves only
+	// the first of the two behind.
 	if !strings.Contains(text, `flotestro_target_state_duration_seconds_count{state="running",action="unit.restart"}`) &&
 		!strings.Contains(text, `flotestro_target_state_duration_seconds_count{state="dispatched",action="unit.restart"}`) {
 		t.Errorf("metrics without the hand-over of the host:\n%s", extract(text, "flotestro_target_state_duration_seconds_count"))
@@ -1414,15 +1340,8 @@ func extract(text, name string) string {
 	return strings.Join(lines, "\n")
 }
 
-// TestFileCampaignComputesTheDiffOnEveryHost guards what tells a file from
-// an operation with a portable intent.
-//
-// The same desired state means different things on two hosts: one has a
-// file with different content, the other does not have it at all. The
-// campaign must ask every host separately, the consent is to concern the
-// set of those answers, and the write is to come back to the host with the
-// digest of the content the operator looked at - otherwise a change made
-// between the plan and the write would vanish without a trace.
+// TestFileCampaignComputesTheDiffOnEveryHost guards what tells a file from an
+// operation with a portable intent.
 func TestFileCampaignComputesTheDiffOnEveryHost(t *testing.T) {
 	h := newHarness(t)
 	const path = "/etc/flotestro-file-campaign.conf"
@@ -1445,9 +1364,8 @@ func TestFileCampaignComputesTheDiffOnEveryHost(t *testing.T) {
 		}
 	})
 
-	// The first host gets a file with different content; the second stays
-	// without it. From now on the same desired state is two different
-	// changes.
+	// The first host gets a file with different content; the second stays without
+	// it.
 	job, attempts := h.runOperation(targets[0], map[string]any{
 		"action": "file.ensure", "reason": "preparation of the file plans test",
 		"payload": map[string]any{"file": map[string]any{
@@ -1515,9 +1433,8 @@ func TestFileCampaignComputesTheDiffOnEveryHost(t *testing.T) {
 		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
 	}
 
-	// Both hosts reached the same desired state, although they went there
-	// from two different places. A plan computed now has nothing left to
-	// do.
+	// Both hosts reached the same desired state, although they went there from
+	// two different places.
 	for _, hostID := range targets {
 		job, attempts := h.runOperation(hostID, map[string]any{
 			"action": "file.plan", "reason": "checking the state after the campaign",
@@ -1556,16 +1473,8 @@ func planAction(h *harness, jobID string) string {
 	return ""
 }
 
-// TestFirewallCampaignComputesTheDiffAndRefusesBeforeConsent guards two
-// things at once.
-//
-// First: a firewall rule ordered on two hosts is two different changes -
-// one host creates it, the other changes it - and each comes back to the
-// host with the ruleset fingerprint that host had at planning.
-//
-// Second: a rule that would cut off the management channel is to fall out
-// at the plan stage, before anybody approves anything. A refusal at
-// execution on half the fleet would be a belated answer.
+// TestFirewallCampaignComputesTheDiffAndRefusesBeforeConsent guards two things
+// at once.
 func TestFirewallCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 	h := newHarness(t)
 	const name = "firewall-campaign-test"
@@ -1658,9 +1567,9 @@ func TestFirewallCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 		}
 	}
 
-	// A rule cutting off the panel: the plan is to reject it on every host,
-	// and the campaign is to stop without consent, because no host is left
-	// to work on.
+	// A rule cutting off the panel: the plan is to reject it on every host, and
+	// the campaign is to stop without consent, because no host is left to work
+	// on.
 	cutting := h.createCampaign(map[string]any{
 		"name": "cutting rule", "action": "firewall.rule.ensure",
 		"reason": "firewall plan refusal test",
@@ -1708,10 +1617,8 @@ func firewallPlanAction(h *harness, jobID string) string {
 }
 
 // TestMountCampaignResolvesTheUUIDOnEveryHost checks that the order "mount
-// /dev/sdb" does not go to the hosts as a path: every host resolves it to
-// the UUID of the filesystem it really has, and that UUID comes back in the
-// change. Two hosts with the same path have two different filesystems - and
-// two different UUIDs.
+// /dev/sdb" does not go to the hosts as a path: every host resolves it to the
+// UUID of the filesystem it really has, and that UUID comes back in the
 func TestMountCampaignResolvesTheUUIDOnEveryHost(t *testing.T) {
 	h := newHarness(t)
 	const target = "/mnt/flotestro-campaign"
@@ -1815,9 +1722,9 @@ func TestMountCampaignResolvesTheUUIDOnEveryHost(t *testing.T) {
 		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
 	}
 
-	// The change that went onto the host is to carry that host's UUID, not
-	// the path from the order - and the host is to have the mount recorded
-	// in fstab afterwards.
+	// The change that went onto the host is to carry that host's UUID, not the
+	// path from the order - and the host is to have the mount recorded in fstab
+	// afterwards.
 	for _, campaignTarget := range h.campaignTargets(campaign.ID) {
 		var job struct {
 			Payload struct {
@@ -1837,10 +1744,8 @@ func TestMountCampaignResolvesTheUUIDOnEveryHost(t *testing.T) {
 	}
 }
 
-// hostMounted waits until the host inventory shows the target mounted and
-// in fstab. The storage fragment comes from the inventory cycle, so after
-// the change it has to be refreshed, and the fragment write is asynchronous
-// with respect to the job.
+// hostMounted waits until the host inventory shows the target mounted and in
+// fstab.
 func hostMounted(t *testing.T, h *harness, hostID, target string) bool {
 	t.Helper()
 	h.runOperation(hostID, map[string]any{
@@ -1903,8 +1808,6 @@ func mountPlan(h *harness, jobID string) (plan struct {
 // TestNetworkCampaignComputesTheDiffAndRefusesBeforeConsent checks that a
 // network change in a campaign gets a plan computed on the host: the
 // difference against the profile the host has, the fingerprint of that
-// difference in the change, and a refusal before consent where the change
-// has nothing to land on.
 func TestNetworkCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 	h := newHarness(t)
 
@@ -1999,9 +1902,9 @@ func TestNetworkCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 	if final.State != "completed" {
 		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
 	}
-	// The change that went onto the host carries that host's plan
-	// fingerprint: the host computed the plan once more before the change
-	// and had something to compare against.
+	// The change that went onto the host carries that host's plan fingerprint:
+	// the host computed the plan once more before the change and had something to
+	// compare against.
 	for _, target := range h.campaignTargets(campaign.ID) {
 		var job struct {
 			Payload struct {
@@ -2017,9 +1920,9 @@ func TestNetworkCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 		}
 	}
 
-	// An interface without a profile: the plan is to refuse on every host,
-	// and the campaign is to stop without consent, because no host is left
-	// to work on.
+	// An interface without a profile: the plan is to refuse on every host, and
+	// the campaign is to stop without consent, because no host is left to work
+	// on.
 	withoutProfile := h.createCampaign(map[string]any{
 		"name": "MTU on an interface that does not exist", "action": "network.mtu.set",
 		"reason": "network plan refusal test",
@@ -2042,10 +1945,9 @@ func TestNetworkCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 	}
 }
 
-// TestFirewalldZoneCampaignComputesTheDiffAndRefusesBeforeConsent checks
-// that a firewalld zone entry in a campaign gets a plan computed on the
-// host: whether the port is already open, in which zone and against which
-// ruleset - and a zone the host does not have is a refusal before consent.
+// TestFirewalldZoneCampaignComputesTheDiffAndRefusesBeforeConsent checks that
+// a firewalld zone entry in a campaign gets a plan computed on the host:
+// whether the port is already open, in which zone and against which ruleset -
 func TestFirewalldZoneCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 	h := newHarness(t)
 	const port = "9445"
@@ -2137,9 +2039,9 @@ func TestFirewalldZoneCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.
 		"failure_threshold_percent": 0, "failure_threshold_absolute": 0,
 		"reboot_policy": "never",
 	})
-	// The second run of the same change finds every host in the desired
-	// state: the plans are empty, the hosts settle as no_change, and the
-	// campaign completes at planning with nothing to approve.
+	// The second run of the same change finds every host in the desired state:
+	// the plans are empty, the hosts settle as no_change, and the campaign
+	// completes at planning with nothing to approve.
 	afterRepeat := h.awaitCampaign(repeat.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true, "plan_failed": true, "completed": true}, 3*time.Minute)
 	if afterRepeat.State != "completed" {
@@ -2210,9 +2112,8 @@ func zonePlan(h *harness, jobID string) (plan struct {
 }
 
 // TestResolverCampaignComputesTheDiffAndRefusesBeforeConsent checks that a
-// resolver change in a campaign gets a plan computed on the host against
-// the profile the host has, and comes back with its fingerprint - and an
-// interface without a profile is a refusal before consent.
+// resolver change in a campaign gets a plan computed on the host against the
+// profile the host has, and comes back with its fingerprint - and an interface
 func TestResolverCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 	h := newHarness(t)
 	const server = "192.168.56.50"
@@ -2242,9 +2143,8 @@ func TestResolverCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 	}
 	targets = selected
 
-	// The cleanup leaves the server without search domains: a resolver
-	// without a server is a refusal, so an empty profile cannot be restored
-	// here.
+	// The cleanup leaves the server without search domains: a resolver without a
+	// server is a refusal, so an empty profile cannot be restored here.
 	t.Cleanup(func() {
 		for _, hostID := range targets {
 			h.runOperation(hostID, map[string]any{
@@ -2366,8 +2266,6 @@ func planOfKind(h *harness, jobID, kind string) (plan struct {
 // TestSSHCampaignComputesTheDiffAndRefusesBeforeConsent checks that an sshd
 // configuration change in a campaign gets a plan computed on the host: the
 // difference against what the server applies, the panel file the write
-// overwrites, and a refusal before consent when the change would cut off
-// all login methods.
 func TestSSHCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 	h := newHarness(t)
 
@@ -2393,10 +2291,8 @@ func TestSSHCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 		}
 	})
 
-	// The first host gets a different value than the rest, so the host
-	// plans are to differ by the state found, not by the order. The rest
-	// get the value explicitly: the previous run may have left the host
-	// already in the desired state.
+	// The first host gets a different value than the rest, so the host plans are
+	// to differ by the state found, not by the order.
 	for i, hostID := range targets {
 		value := "6"
 		if i == 0 {
@@ -2479,9 +2375,9 @@ func TestSSHCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 		"failure_threshold_percent": 0, "failure_threshold_absolute": 0,
 		"reboot_policy": "never",
 	})
-	// The second run of the same change finds every host in the desired
-	// state: the plans are empty, the hosts settle as no_change, and the
-	// campaign completes at planning with nothing to approve.
+	// The second run of the same change finds every host in the desired state:
+	// the plans are empty, the hosts settle as no_change, and the campaign
+	// completes at planning with nothing to approve.
 	afterRepeat := h.awaitCampaign(repeat.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true, "plan_failed": true, "completed": true}, 3*time.Minute)
 	if afterRepeat.State != "completed" {
@@ -2501,9 +2397,7 @@ func TestSSHCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 	h.do(http.MethodPost, "/api/v1/campaigns/"+repeat.ID+"/cancel",
 		map[string]any{"reason": "no-change plan test"}, nil, 0)
 
-	// Cutting off all login methods: a refusal in the plan on every host. A
-	// host with GSSAPI keeps one method, so for it that is not a cut-off -
-	// it stays out of this part of the test.
+	// Cutting off all login methods: a refusal in the plan on every host.
 	withoutGSSAPI := targets[:0:0]
 	for _, hostID := range targets {
 		if !strings.EqualFold(hostSSHSnapshot(t, h, hostID).GSSAPIAuthentication, "yes") {
@@ -2537,10 +2431,9 @@ func TestSSHCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 	}
 }
 
-// TestModuleBlacklistCampaignComputesTheDiffOnEveryHost checks that a
-// module blacklist in a campaign gets a plan computed on the host: a host
-// that already blacklists the module has no change, and the rest get the
-// entry - and the change comes back with that host's plan fingerprint.
+// TestModuleBlacklistCampaignComputesTheDiffOnEveryHost checks that a module
+// blacklist in a campaign gets a plan computed on the host: a host that
+// already blacklists the module has no change, and the rest get the entry -
 func TestModuleBlacklistCampaignComputesTheDiffOnEveryHost(t *testing.T) {
 	h := newHarness(t)
 	const module = "floppy"
@@ -2616,9 +2509,9 @@ func TestModuleBlacklistCampaignComputesTheDiffOnEveryHost(t *testing.T) {
 	}
 	for _, target := range h.campaignTargets(campaign.ID) {
 		if target.State == "no_change" {
-			// The module was on the blacklist already (a previous run left
-			// it): nothing was ordered for this host, so there is no job
-			// whose payload could carry the fingerprint.
+			// The module was on the blacklist already (a previous run left it): nothing
+			// was ordered for this host, so there is no job whose payload could carry
+			// the fingerprint.
 			continue
 		}
 		var job struct {
@@ -2643,11 +2536,9 @@ func TestModuleBlacklistCampaignComputesTheDiffOnEveryHost(t *testing.T) {
 	}
 }
 
-// TestTimeSourceCampaignComputesTheDiffAndRefusesBeforeConsent checks that
-// a time source change in a campaign gets a plan computed on the host:
-// which daemon, whether a restart or a reload - and a host without a daemon
-// or without the panel directory is a refusal before consent, not a failure
-// halfway through the fleet.
+// TestTimeSourceCampaignComputesTheDiffAndRefusesBeforeConsent checks that a
+// time source change in a campaign gets a plan computed on the host: which
+// daemon, whether a restart or a reload - and a host without a daemon or
 func TestTimeSourceCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 	h := newHarness(t)
 
@@ -2668,9 +2559,9 @@ func TestTimeSourceCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) 
 	if len(targets) < 2 || server == "" {
 		t.Skip("the fleet has no two hosts and a working time source")
 	}
-	// Without consent to the directory, a chrony host without a drop-in and
-	// a host without a daemon are to fall out in the plan; the rest get a
-	// change plan.
+	// Without consent to the directory, a chrony host without a drop-in and a
+	// host without a daemon are to fall out in the plan; the rest get a change
+	// plan.
 	refusals := map[string]bool{}
 	for hostID, state := range states {
 		refusals[hostID] = state.Service == "" ||
@@ -2726,11 +2617,8 @@ func TestTimeSourceCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) 
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "completed_with_issues": true,
 			"failed": true, "paused": true}, 6*time.Minute)
-	// A host that cannot reach the time server refuses the change, and it
-	// is right to: a source nothing answers is not a source. Whether this
-	// laboratory's machines reach the public pool is not what this test is
-	// about, so that one refusal is read and allowed; anything else is a
-	// failure of the change itself.
+	// A host that cannot reach the time server refuses the change, and it is
+	// right to: a source nothing answers is not a source.
 	if final.State == "completed_with_issues" {
 		for _, target := range h.campaignTargets(campaign.ID) {
 			if target.State != "failed" {
@@ -2761,10 +2649,9 @@ func TestTimeSourceCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) 
 	}
 }
 
-// TestFilesystemCheckCampaignComputesAPlanOnEveryHost checks that a
-// filesystem check in a campaign gets a plan computed on the host: which
-// filesystem and UUID the host has under the path, whether it is unmounted
-// - and a device the host does not see is a refusal before consent.
+// TestFilesystemCheckCampaignComputesAPlanOnEveryHost checks that a filesystem
+// check in a campaign gets a plan computed on the host: which filesystem and
+// UUID the host has under the path, whether it is unmounted - and a device the
 func TestFilesystemCheckCampaignComputesAPlanOnEveryHost(t *testing.T) {
 	h := newHarness(t)
 
@@ -2912,11 +2799,9 @@ func devicePlan(h *harness, jobID string) (plan struct {
 	return plan
 }
 
-// TestCertificateCampaignComputesTheDiffAndProtectsTheKey checks two things
-// at once: a certificate deployment in a campaign gets a plan computed on
-// the host (the found and desired fingerprints, the expiry), and the
-// private key appears neither in the plan, nor in the job envelope, nor in
-// the audit log.
+// TestCertificateCampaignComputesTheDiffAndProtectsTheKey checks two things at
+// once: a certificate deployment in a campaign gets a plan computed on the
+// host (the found and desired fingerprints, the expiry), and the private key
 func TestCertificateCampaignComputesTheDiffAndProtectsTheKey(t *testing.T) {
 	h := newHarness(t)
 
@@ -3068,9 +2953,8 @@ func certificatePlan(h *harness, jobID string) (plan struct {
 }
 
 // TestBackupCampaignComputesTheScopeAndRequiresAVerification checks three
-// things at once: a copy in a campaign gets a plan computed on the host
-// (the scope, the size, the repository state), the copy ends with a
-// repository check, and a restore does not run in bulk at all.
+// things at once: a copy in a campaign gets a plan computed on the host (the
+// scope, the size, the repository state), the copy ends with a repository
 func TestBackupCampaignComputesTheScopeAndRequiresAVerification(t *testing.T) {
 	h := newHarness(t)
 
@@ -3234,8 +3118,6 @@ func backupPlan(h *harness, jobID string) (plan struct {
 // TestCatalogueSaysWhatACampaignWillNotDoAndWhy checks what the interface
 // recognises the boundaries by: the installation says whether it runs
 // campaigns at all, and the operation catalogue - which change it will not
-// order in bulk and for what reason. A refusal without a reason looks in
-// the panel like a missing feature.
 func TestCatalogueSaysWhatACampaignWillNotDoAndWhy(t *testing.T) {
 	h := newHarness(t)
 
@@ -3278,9 +3160,8 @@ func TestCatalogueSaysWhatACampaignWillNotDoAndWhy(t *testing.T) {
 				t.Errorf("%s does not run in bulk and does not say why", item.Action)
 			}
 		}
-		// A backup restore is a boundary, not a missing feature: the reason
-		// is to speak of an operator at the host, not of the campaign
-		// engine.
+		// A backup restore is a boundary, not a missing feature: the reason is to
+		// speak of an operator at the host, not of the campaign engine.
 		if item.Action == "backup.restore" {
 			if item.Ready || !strings.Contains(item.Refusal, "an operator present at every host") {
 				t.Errorf("restore: ready=%v, reason=%q", item.Ready, item.Refusal)
@@ -3295,11 +3176,9 @@ func TestCatalogueSaysWhatACampaignWillNotDoAndWhy(t *testing.T) {
 	}
 }
 
-// TestBackendBudgetStopsTheSecondCampaign guards a limit that exists
-// neither in the campaign nor in the site: the backup repository is one,
-// and there may be several campaigns writing to it at once. The backend
-// limit is to spread them out, although each on its own fits within its
-// concurrency limit.
+// TestBackendBudgetStopsTheSecondCampaign guards a limit that exists neither
+// in the campaign nor in the site: the backup repository is one, and there may
+// be several campaigns writing to it at once.
 func TestBackendBudgetStopsTheSecondCampaign(t *testing.T) {
 	h := newHarness(t)
 
@@ -3356,12 +3235,9 @@ func TestBackendBudgetStopsTheSecondCampaign(t *testing.T) {
 		for _, target := range h.campaignTargets(campaign.ID) {
 			if target.State == "awaiting_budget" {
 				if !waited {
-					// The budget screen counts the waiting host from the
-					// budget's side, read while the host still waits - the
-					// operator looking at the budget must see the campaign
-					// behind it, not only the campaign looking at the budget.
-					// The host may be admitted between the two reads; a
-					// count of none is a failure only while it still waits.
+					// The budget screen counts the waiting host from the budget's side, read
+					// while the host still waits - the operator looking at the budget must
+					// see the campaign behind it, not only the campaign looking at the
 					shown := h.budgetState("backend:" + repository + ":backup")
 					if shown.WaitingTargets < 1 && stillWaiting(h.campaignTargets(campaign.ID), target.HostID) {
 						t.Errorf("a host waits for the backend and the budget counts %d waiting targets", shown.WaitingTargets)
@@ -3389,9 +3265,8 @@ func TestBackendBudgetStopsTheSecondCampaign(t *testing.T) {
 		t.Error("no host waited for the repository capacity")
 	}
 
-	// The crux of the invariant: the campaign had consent for two hosts at
-	// once, and the backend admitted one stream. Overlapping windows would
-	// mean the repository budget did not bind.
+	// The crux of the invariant: the campaign had consent for two hosts at once,
+	// and the backend admitted one stream.
 	windows := make([]window, 0, len(targets))
 	for _, target := range h.campaignTargets(campaign.ID) {
 		if target.JobID == "" {
@@ -3432,11 +3307,8 @@ func stillWaiting(targets []campaignTargetView, hostID string) bool {
 }
 
 // TestTrustCampaignDistributesTheAuthorityAndProtectsTheOneInUse walks two
-// steps of an authority rotation: the fleet starts trusting the new
-// authority, and withdrawing an authority that still signs a host
-// certificate falls out in the plan. Between those steps the host trusts
-// both authorities at once - and that is the whole substance of a
-// rotation.
+// steps of an authority rotation: the fleet starts trusting the new authority,
+// and withdrawing an authority that still signs a host certificate falls out
 func TestTrustCampaignDistributesTheAuthorityAndProtectsTheOneInUse(t *testing.T) {
 	h := newHarness(t)
 
@@ -3500,8 +3372,7 @@ func TestTrustCampaignDistributesTheAuthorityAndProtectsTheOneInUse(t *testing.T
 	}
 
 	// Step two, before anything was replaced: a certificate signed by this
-	// authority lies on the first host, so the withdrawal is to fall out
-	// there.
+	// authority lies on the first host, so the withdrawal is to fall out there.
 	path := fmt.Sprintf("/etc/ssl/certs/flotestro-rotation-%d.crt", time.Now().UnixNano())
 	leaf := leafFromAuthority(t, "rotation.flotestro.test", authority, authorityKey)
 	secret := newSecret(t, h, leaf.key)
@@ -3521,9 +3392,9 @@ func TestTrustCampaignDistributesTheAuthorityAndProtectsTheOneInUse(t *testing.T
 		t.Fatalf("deploying the leaf: state = %s, %s", job.State, lastMessage(attempts))
 	}
 
-	// An authority withdrawal binds the whole fleet at once: a campaign
-	// covering an unconnected host does not start at all, because that
-	// host would be left with a trust the rest of the fleet no longer has.
+	// An authority withdrawal binds the whole fleet at once: a campaign covering
+	// an unconnected host does not start at all, because that host would be left
+	// with a trust the rest of the fleet no longer has.
 	var incomplete struct {
 		Code   string `json:"code"`
 		Detail string `json:"detail"`
@@ -3602,10 +3473,8 @@ func trustPlan(h *harness, jobID string) (plan struct {
 	return plan
 }
 
-// hostOutside returns a host that will not carry out a change now:
-// unconnected or in a maintenance window. Without such a host the full
-// coverage rule cannot be shown, so the test has nothing to check without
-// it.
+// hostOutside returns a host that will not carry out a change now: unconnected
+// or in a maintenance window.
 func hostOutside(t *testing.T, h *harness, used []string) string {
 	t.Helper()
 	taken := map[string]bool{}
@@ -3617,9 +3486,7 @@ func hostOutside(t *testing.T, h *harness, used []string) string {
 			return host.ID
 		}
 	}
-	// The test fleet tends to be fully connected. A host in a maintenance
-	// window is an equivalent uncertain target here: it will not carry out
-	// the change now either.
+	// The test fleet tends to be fully connected.
 	for _, host := range h.hosts() {
 		if taken[host.ID] {
 			continue
@@ -3639,12 +3506,8 @@ func hostOutside(t *testing.T, h *harness, used []string) string {
 	return ""
 }
 
-// TestRenewalCampaignSaysWhoTracksTheCertificate checks the rotation step
-// the panel does not do itself: the host daemon asks for a new certificate.
-// There are two answers here and both must be audible - a host without
-// certmonger falls out already on capability, and a host with certmonger
-// that does not track this file falls out in the plan. One must not pose as
-// the other.
+// TestRenewalCampaignSaysWhoTracksTheCertificate checks the rotation step the
+// panel does not do itself: the host daemon asks for a new certificate.
 func TestRenewalCampaignSaysWhoTracksTheCertificate(t *testing.T) {
 	h := newHarness(t)
 
@@ -3738,9 +3601,8 @@ func renewalPlan(h *harness, jobID string) (plan struct {
 }
 
 // TestCampaignPlansAreGroupedByFingerprint checks the screen on which the
-// operator makes the decision: the consent concerns a set of plans, so the
-// set must be visible - and a hundred hosts with an identical diff are to
-// be one item, not a wall of text.
+// operator makes the decision: the consent concerns a set of plans, so the set
+// must be visible - and a hundred hosts with an identical diff are to be one
 func TestCampaignPlansAreGroupedByFingerprint(t *testing.T) {
 	h := newHarness(t)
 	const name = "grouped-plans-test"
@@ -3836,10 +3698,8 @@ func TestCampaignPlansAreGroupedByFingerprint(t *testing.T) {
 		map[string]any{"reason": "plan grouping test"}, nil, 0)
 }
 
-// TestPreviewShowsTheSnapshotDistribution checks what the bare number of
-// ready hosts does not say: what the frozen snapshot consists of. Thirty
-// hosts from one site are a different change than thirty scattered across
-// three.
+// TestPreviewShowsTheSnapshotDistribution checks what the bare number of ready
+// hosts does not say: what the frozen snapshot consists of.
 func TestPreviewShowsTheSnapshotDistribution(t *testing.T) {
 	h := newHarness(t)
 
@@ -3869,9 +3729,9 @@ func TestPreviewShowsTheSnapshotDistribution(t *testing.T) {
 			}
 			sum += group.Count
 		}
-		// Every ready host belongs to exactly one group in every dimension:
-		// a distribution that does not add up to the whole speaks of a
-		// different snapshot than the one entering the campaign.
+		// Every ready host belongs to exactly one group in every dimension: a
+		// distribution that does not add up to the whole speaks of a different
+		// snapshot than the one entering the campaign.
 		if sum != preview.Eligible {
 			t.Errorf("%s: the distribution adds up to %d, %d are ready", dimension, sum, preview.Eligible)
 		}
@@ -3884,10 +3744,9 @@ func TestPreviewShowsTheSnapshotDistribution(t *testing.T) {
 	}
 }
 
-// TestFleetShowsWhomItTrustsDuringARotation checks the screen without which
-// an authority rotation is invisible: during it part of the fleet trusts
-// both authorities at once, and only that says whether the old one may be
-// withdrawn.
+// TestFleetShowsWhomItTrustsDuringARotation checks the screen without which an
+// authority rotation is invisible: during it part of the fleet trusts both
+// authorities at once, and only that says whether the old one may be
 func TestFleetShowsWhomItTrustsDuringARotation(t *testing.T) {
 	h := newHarness(t)
 
@@ -3913,9 +3772,8 @@ func TestFleetShowsWhomItTrustsDuringARotation(t *testing.T) {
 		}
 	})
 
-	// One host gets the authority, the other does not: that is exactly
-	// what the fleet looks like during a rotation, and the view is to show
-	// it.
+	// One host gets the authority, the other does not: that is exactly what the
+	// fleet looks like during a rotation, and the view is to show it.
 	job, attempts := h.runOperation(targets[0], map[string]any{
 		"action": "certificate.trust.ensure", "reason": "trust view test",
 		"payload": map[string]any{"certificate": map[string]any{
@@ -3950,9 +3808,8 @@ func TestFleetShowsWhomItTrustsDuringARotation(t *testing.T) {
 				continue
 			}
 			found = true
-			// An authority handed to one host is to be counted for one, not
-			// for the whole fleet: that is the whole substance of this
-			// screen.
+			// An authority handed to one host is to be counted for one, not for the
+			// whole fleet: that is the whole substance of this screen.
 			if item.Hosts != 1 || len(item.Sample) != 1 {
 				t.Errorf("authority on %d hosts: %+v", item.Hosts, item.Sample)
 			}
@@ -3972,10 +3829,9 @@ func TestFleetShowsWhomItTrustsDuringARotation(t *testing.T) {
 	}
 }
 
-// TestBackendBudgetBindsTwoCampaigns guards the boundary from the document
-// in its full form: the backend limit is to hold between campaigns, not
-// only within one. Two campaigns to one repository must not write at once,
-// although each on its own fits within its limit.
+// TestBackendBudgetBindsTwoCampaigns guards the boundary from the document in
+// its full form: the backend limit is to hold between campaigns, not only
+// within one.
 func TestBackendBudgetBindsTwoCampaigns(t *testing.T) {
 	h := newHarness(t)
 
@@ -4070,11 +3926,6 @@ func TestBackendBudgetBindsTwoCampaigns(t *testing.T) {
 // TestCampaignStreamResumesFromTheLastEvent guards the durable stream of a
 // campaign: the trail events carry identifiers, a reconnection with
 // Last-Event-ID gets only what happened after it, and the publisher marks
-// every row it handed on.
-//
-// Without the identifier a broken connection would lose the events sent in
-// between, and the operator watching the canary would see a state jump
-// with no way to tell what happened.
 func TestCampaignStreamResumesFromTheLastEvent(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -4202,7 +4053,6 @@ func (h *harness) streamTimeline(campaignID string, after int64) []timelineEntry
 // TestCampaignTargetsArePagedAndFilteredOnTheServer guards the contract a
 // large campaign needs: the targets come page by page in the order of the
 // rollout, a filter is answered by the database and the total says how many
-// hosts match beyond the page.
 func TestCampaignTargetsArePagedAndFilteredOnTheServer(t *testing.T) {
 	h := newHarness(t)
 	online := make([]string, 0, 2)
@@ -4270,9 +4120,9 @@ func TestCampaignTargetsArePagedAndFilteredOnTheServer(t *testing.T) {
 		nil, nil, http.StatusBadRequest)
 }
 
-// TestActionCatalogueCarriesTemplates guards the shape the wizard starts
-// from: every operation ready for a campaign comes with a payload template,
-// and the ones that need certificate material say so.
+// TestActionCatalogueCarriesTemplates guards the shape the wizard starts from:
+// every operation ready for a campaign comes with a payload template, and the
+// ones that need certificate material say so.
 func TestActionCatalogueCarriesTemplates(t *testing.T) {
 	h := newHarness(t)
 	var catalogue struct {
@@ -4303,9 +4153,9 @@ func TestActionCatalogueCarriesTemplates(t *testing.T) {
 	if ready < 40 {
 		t.Errorf("only %d operations are ready for a campaign", ready)
 	}
-	// The certificate deployment, the trust anchor and the repository
-	// source: each carries material (a key, a certificate) that no
-	// template can stand in for.
+	// The certificate deployment, the trust anchor and the repository source:
+	// each carries material (a key, a certificate) that no template can stand in
+	// for.
 	if withMaterial != 3 {
 		t.Errorf("%d operations need material, expected the deployment, the trust anchor and the repository key", withMaterial)
 	}
@@ -4314,7 +4164,6 @@ func TestActionCatalogueCarriesTemplates(t *testing.T) {
 // TestTrailConsumerMovesOnlyAfterDelivery guards the contract of an external
 // consumer of the trail: the cursor moves only after the receiver took the
 // batch, a refusal leaves it in place and holds the consumer back, and the
-// events arrive in order without a gap.
 func TestTrailConsumerMovesOnlyAfterDelivery(t *testing.T) {
 	h := newHarness(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -4407,10 +4256,9 @@ func (r *recordingReceiver) Deliver(_ context.Context, events []outbox.Event) er
 	return nil
 }
 
-// TestOpenAPIDescribesTheLiveAPI guards the public contract: the running
-// panel serves a document that names the routes the tests use, and every
-// route the document names answers - a 404 would be a contract without an
-// implementation.
+// TestOpenAPIDescribesTheLiveAPI guards the public contract: the running panel
+// serves a document that names the routes the tests use, and every route the
+// document names answers - a 404 would be a contract without an
 func TestOpenAPIDescribesTheLiveAPI(t *testing.T) {
 	h := newHarness(t)
 	var document struct {
@@ -4455,9 +4303,9 @@ func TestOpenAPIDescribesTheLiveAPI(t *testing.T) {
 	}
 }
 
-// TestRepeatedOrdersAreIdempotent guards the contract a pipeline relies
-// on: an order repeated with the same Idempotency-Key gives the campaign
-// or the job that already exists, not a second one.
+// TestRepeatedOrdersAreIdempotent guards the contract a pipeline relies on: an
+// order repeated with the same Idempotency-Key gives the campaign or the job
+// that already exists, not a second one.
 func TestRepeatedOrdersAreIdempotent(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -4513,9 +4361,7 @@ func (h *harness) postWithKey(path string, body any, key string, wantStatus int)
 }
 
 // TestCampaignHonorsMaxConcurrent is the other half of the proof of
-// multitasking: a concurrency limit is a ceiling, not a hint. With the
-// limit at one, two hosts of one wave work one after another - their
-// attempts never share a moment - and both still get done.
+// multitasking: a concurrency limit is a ceiling, not a hint.
 func TestCampaignHonorsMaxConcurrent(t *testing.T) {
 	h := newHarness(t)
 	online := make([]string, 0, 2)
@@ -4567,10 +4413,9 @@ func TestCampaignHonorsMaxConcurrent(t *testing.T) {
 	}
 }
 
-// TestCampaignReportExportsCSV covers the report a spreadsheet reads: the
-// same endpoint with format=csv hands out a file with one row per target
-// and the columns in a fixed order, so an operator can hand the outcome
-// of a campaign on to somebody without an account in the panel.
+// TestCampaignReportExportsCSV covers the report a spreadsheet reads: the same
+// endpoint with format=csv hands out a file with one row per target and the
+// columns in a fixed order, so an operator can hand the outcome of a campaign
 func TestCampaignReportExportsCSV(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -4638,11 +4483,9 @@ func TestCampaignReportExportsCSV(t *testing.T) {
 	}
 }
 
-// TestTwoOrchestratorsCreateOneJobPerTarget guards the invariant of a
-// second control-plane instance: two orchestrators driving the same
-// campaign at once create one job per target step and hold one set of
-// budget tokens per target, not two. The second orchestrator runs inside
-// the test against the same database, ticking faster than the panel's.
+// TestTwoOrchestratorsCreateOneJobPerTarget guards the invariant of a second
+// control-plane instance: two orchestrators driving the same campaign at once
+// create one job per target step and hold one set of budget tokens per target,
 func TestTwoOrchestratorsCreateOneJobPerTarget(t *testing.T) {
 	h := newHarness(t)
 	online := make([]string, 0, 2)
@@ -4815,10 +4658,9 @@ func TestApprovalLeavesAnImmutableRecord(t *testing.T) {
 	}
 }
 
-// TestARevokedRoleStopsTheHostsNotStarted guards the pre-dispatch check:
-// the approval was given while the creator held the right, and the right
-// withdrawn since then must not carry the change onto the hosts that have
-// not started.
+// TestARevokedRoleStopsTheHostsNotStarted guards the pre-dispatch check: the
+// approval was given while the creator held the right, and the right withdrawn
+// since then must not carry the change onto the hosts that have not started.
 func TestARevokedRoleStopsTheHostsNotStarted(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -4839,9 +4681,7 @@ func TestARevokedRoleStopsTheHostsNotStarted(t *testing.T) {
 			map[string]any{"reason": "end of the test"}, nil, 0)
 	})
 
-	// The role goes away between the approval and the start. There is no
-	// API for that on purpose - a binding is removed by a person with the
-	// database, or expires - so the test removes it directly.
+	// The role goes away between the approval and the start.
 	ctx := context.Background()
 	if _, err := h.database(ctx).Exec(ctx, `
 		delete from role_bindings where principal_id = (select id from principals where subject = $1)`,
@@ -4865,10 +4705,9 @@ func TestARevokedRoleStopsTheHostsNotStarted(t *testing.T) {
 	}
 }
 
-// TestAnExpiredPlanDoesNotStartTheHost guards the bound in time: a plan
-// older than a day is not carried out even though its digest still matches
-// the consent. The age is staged in the database; the panel has no way to
-// wait a day.
+// TestAnExpiredPlanDoesNotStartTheHost guards the bound in time: a plan older
+// than a day is not carried out even though its digest still matches the
+// consent.
 func TestAnExpiredPlanDoesNotStartTheHost(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -4909,10 +4748,9 @@ func TestAnExpiredPlanDoesNotStartTheHost(t *testing.T) {
 		campaign.ID); err != nil {
 		t.Fatal(err)
 	}
-	// The approval may land before or after the engine sees the age: an
-	// approved campaign with a stale plan closes the host as failed with
-	// plan_stale, and one the engine caught first expires as a whole with
-	// the host skipped for the same reason. Either way nothing runs.
+	// The approval may land before or after the engine sees the age: an approved
+	// campaign with a stale plan closes the host as failed with plan_stale, and
+	// one the engine caught first expires as a whole with the host skipped for
 	h.approveCampaign(planned)
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true, "expired": true}, 3*time.Minute)
@@ -4926,11 +4764,9 @@ func TestAnExpiredPlanDoesNotStartTheHost(t *testing.T) {
 	}
 }
 
-// TestOfflinePolicySkipsAHostThatIsNotConnected guards the answer a
-// campaign gives for a host that is not connected when its turn comes: the
-// policy decides, and the host is closed with a reason rather than passed
-// over in silence. A synthetic host never connects, so it stands in for
-// every unplugged machine of a real fleet.
+// TestOfflinePolicySkipsAHostThatIsNotConnected guards the answer a campaign
+// gives for a host that is not connected when its turn comes: the policy
+// decides, and the host is closed with a reason rather than passed over in
 func TestOfflinePolicySkipsAHostThatIsNotConnected(t *testing.T) {
 	h := newHarness(t)
 	offline := h.enrollSyntheticHost(t)
@@ -4976,9 +4812,9 @@ func TestOfflinePolicySkipsAHostThatIsNotConnected(t *testing.T) {
 	}
 }
 
-// TestWaitingPolicyClosesTheHostAtTheDeadline guards the bound on
-// waiting: a host queued offline takes no slot, and a campaign does not wait
-// for it without end. The deadline is short here; a real one is a day.
+// TestWaitingPolicyClosesTheHostAtTheDeadline guards the bound on waiting: a
+// host queued offline takes no slot, and a campaign does not wait for it
+// without end.
 func TestWaitingPolicyClosesTheHostAtTheDeadline(t *testing.T) {
 	h := newHarness(t)
 	offline := h.enrollSyntheticHost(t)
@@ -5032,9 +4868,8 @@ func TestWaitingPolicyClosesTheHostAtTheDeadline(t *testing.T) {
 }
 
 // TestManualGateStopsAfterTheCanary guards the stop the document asks for
-// between the canary and the waves: with the gate set, the campaign waits
-// for a person after the canary, and only an explicit advance lets the
-// waves go.
+// between the canary and the waves: with the gate set, the campaign waits for
+// a person after the canary, and only an explicit advance lets the waves go.
 func TestManualGateStopsAfterTheCanary(t *testing.T) {
 	h := newHarness(t)
 	// The unit exists on the debian family; a host without it would fail
@@ -5107,9 +4942,9 @@ func TestManualGateStopsAfterTheCanary(t *testing.T) {
 	}
 }
 
-// TestOfflinePolicyMayOnlyBeTightened guards the boundary the registry
-// draws: a reboot requires the host online, and a campaign that would wait
-// a day for a host to reboot it is exactly the order that must not exist.
+// TestOfflinePolicyMayOnlyBeTightened guards the boundary the registry draws:
+// a reboot requires the host online, and a campaign that would wait a day for
+// a host to reboot it is exactly the order that must not exist.
 func TestOfflinePolicyMayOnlyBeTightened(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -5157,9 +4992,6 @@ func TestOfflinePolicyMayOnlyBeTightened(t *testing.T) {
 // TestTheCatalogueCarriesTheOperationContract guards the second half of the
 // contract on the wire: what a cancel does to an operation under way, whether
 // it may be repeated, what way back exists, what is verified and which host
-// resources it takes. The panel draws its cancel button and its rollback
-// link from these fields, so a mutating operation without them would draw a
-// promise nobody made.
 func TestTheCatalogueCarriesTheOperationContract(t *testing.T) {
 	h := newHarness(t)
 
@@ -5250,11 +5082,9 @@ func TestTheCatalogueCarriesTheOperationContract(t *testing.T) {
 	}
 }
 
-// TestFinishedCampaignKeepsAnImmutableReport guards the record of a
-// rollout: once a campaign ends, its report is written with the terminal
-// transition and served as stored, and the database refuses to change or
-// remove it. A report computed from the target rows would lose the host
-// that failed the day that host leaves the fleet.
+// TestFinishedCampaignKeepsAnImmutableReport guards the record of a rollout:
+// once a campaign ends, its report is written with the terminal transition and
+// served as stored, and the database refuses to change or remove it.
 func TestFinishedCampaignKeepsAnImmutableReport(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")

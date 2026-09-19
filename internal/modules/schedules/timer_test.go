@@ -21,9 +21,8 @@ func timerEntry() Schedule {
 	}
 }
 
-// A managed timer is two files that say who wrote them, when the job runs
-// and as whom. The marker is what makes the pair ours; without it a later
-// operation would not recognise its own work and would refuse to touch it.
+// A managed timer is two files that say who wrote them, when the job runs and
+// as whom.
 func TestRenderTimerWritesBothUnitsWithTheMarker(t *testing.T) {
 	plan, err := RenderTimer(SystemdUnitDir, timerEntry())
 	if err != nil {
@@ -78,8 +77,8 @@ func TestRenderTimerWritesBothUnitsWithTheMarker(t *testing.T) {
 }
 
 // The account rules of cron apply to a timer as well: an entry without an
-// account is not an entry for root, a name outside the allowed set is
-// refused, and so is a command that is not an argument list.
+// account is not an entry for root, a name outside the allowed set is refused,
+// and so is a command that is not an argument list.
 func TestRenderTimerKeepsTheRulesOfACronEntry(t *testing.T) {
 	for _, bad := range []struct {
 		what  string
@@ -119,8 +118,7 @@ func TestRenderTimerFoldsTheCommentIntoOneLine(t *testing.T) {
 }
 
 // Cron runs a job when the day of the month or the day of the week matches,
-// systemd only when both do. An expression that restricts both means two
-// different things on the two mechanisms, so it becomes neither.
+// systemd only when both do.
 func TestCalendarFromCron(t *testing.T) {
 	for _, tc := range []struct{ expression, calendar string }{
 		{"15 3 * * *", "*-*-* 03:15:00"},
@@ -154,9 +152,7 @@ func TestCalendarFromCron(t *testing.T) {
 	}
 }
 
-// The plan says what would be written and what is already there. Ordering
-// the same entry twice changes nothing: that is what makes an order a
-// declaration of a state and not a command to write a file.
+// The plan says what would be written and what is already there.
 func TestPlanTimerSeesWhatIsAlreadyOnTheHost(t *testing.T) {
 	dir := t.TempDir()
 	plan, err := PlanTimer(dir, timerEntry())
@@ -191,10 +187,8 @@ func TestPlanTimerSeesWhatIsAlreadyOnTheHost(t *testing.T) {
 	}
 }
 
-// A unit under the name a managed timer would use, without the marker,
-// belongs to the host administrator. It is neither rewritten nor removed,
-// and the refusal names the file, so the operator knows what stands in the
-// way.
+// A unit under the name a managed timer would use, without the marker, belongs
+// to the host administrator.
 func TestATimerThePanelDidNotWriteIsNeverTouched(t *testing.T) {
 	dir := t.TempDir()
 	foreign := filepath.Join(dir, UnitPrefix+"nightly-report.service")
@@ -247,9 +241,8 @@ func TestRemoveTimerTakesOurOwnPair(t *testing.T) {
 	}
 }
 
-// The files say which entry a unit is, what it runs and as whom; systemd
-// says whether it is installed and when it fires next. Each side answers
-// what it knows, and a timer the panel did not write stays a found entry.
+// The files say which entry a unit is, what it runs and as whom; systemd says
+// whether it is installed and when it fires next.
 func TestReadAndMergeManagedTimers(t *testing.T) {
 	dir := t.TempDir()
 	plan, err := RenderTimer(dir, timerEntry())
@@ -303,9 +296,9 @@ func TestReadAndMergeManagedTimers(t *testing.T) {
 		t.Errorf("the found timer was lost: %+v", merged[1])
 	}
 
-	// A timer systemd reports as not installed is switched off, and it stays
-	// in the list: an entry that disappears when it is switched off cannot
-	// be switched back on.
+	// A timer systemd reports as not installed is switched off, and it stays in
+	// the list: an entry that disappears when it is switched off cannot be
+	// switched back on.
 	off := MergeManagedTimers(found, managed, map[string]string{
 		UnitPrefix + "nightly-report.timer": "disabled",
 	})
@@ -315,10 +308,7 @@ func TestReadAndMergeManagedTimers(t *testing.T) {
 }
 
 // A managed entry writes into /etc/systemd/system, which is the directory
-// systemd prefers over the one a package installs into. A unit of the same
-// name further down would therefore not be overwritten but shadowed: the
-// host would keep the file and stop running it, and nothing would say so.
-// The plan refuses that, and the refusal names both paths.
+// systemd prefers over the one a package installs into.
 func TestAUnitThatWouldShadowAnotherIsRefused(t *testing.T) {
 	root := t.TempDir()
 	etc := filepath.Join(root, "etc")
@@ -355,8 +345,8 @@ func TestAUnitThatWouldShadowAnotherIsRefused(t *testing.T) {
 	}
 }
 
-// The namespace of a managed entry is the protection itself: no identifier
-// an operator can type reaches a unit of the product, and none reaches the
+// The namespace of a managed entry is the protection itself: no identifier an
+// operator can type reaches a unit of the product, and none reaches the
 // transient unit a manual run uses either.
 func TestAManagedEntryCannotReachTheProductsOwnUnits(t *testing.T) {
 	for _, id := range []string{"agent", "helper", "relay", "control-plane", "schedule-nightly"} {

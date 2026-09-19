@@ -17,12 +17,8 @@ import (
 // parsing be checked without a host with certmonger.
 type Runner func(ctx context.Context, name string, args ...string) (string, error)
 
-// Target names a file to look at together with what the panel already
-// knows about it.
-//
-// The key path and the service name are not guessed from the directory
-// name: a human who knows what reads what enters them. A panel that
-// guessed them would show relations looking checked and being a guess.
+// Target names a file to look at together with what the panel already knows
+// about it.
 type Target struct {
 	Path    string `json:"path"`
 	KeyPath string `json:"key_path,omitempty"`
@@ -30,11 +26,6 @@ type Target struct {
 }
 
 // Scan reads the named files without root privileges.
-//
-// The scope is exactly what came in the order, later extended by what the
-// host knows about itself - that is the certmonger requests. The module
-// does not search the filesystem, so it will not find a certificate nobody
-// mentioned; that is the price of not looking where it should not.
 func Scan(targets []Target) Snapshot {
 	snapshot := Snapshot{
 		ObservedAt: time.Now().UTC(),
@@ -45,9 +36,8 @@ func Scan(targets []Target) Snapshot {
 		snapshot.Scanned = append(snapshot.Scanned, target.Path)
 		snapshot.Certificates = append(snapshot.Certificates, inspect(target, snapshot.Missing))
 		if len(snapshot.Certificates) >= MaxCertificates {
-			// A cut-off list must say so. Silence here looks like a host
-			// that has no more certificates - and it is a host nobody asked
-			// about the rest.
+			// A cut-off list must say so. Silence here looks like a host that has no
+			// more certificates - and it is a host nobody asked about the rest.
 			if len(targets) > len(snapshot.Certificates) {
 				snapshot.Truncated = len(targets) - len(snapshot.Certificates)
 				snapshot.TruncatedReason = fmt.Sprintf(
@@ -58,10 +48,9 @@ func Scan(targets []Target) Snapshot {
 		}
 	}
 
-	// The state of the certmonger requests needs root, but the question
-	// "does anything on this host watch certificates at all" has an answer
-	// without it: a host without the tool has nothing to track and that is
-	// not an unknown state.
+	// The state of the certmonger requests needs root, but the question "does
+	// anything on this host watch certificates at all" has an answer without it:
+	// a host without the tool has nothing to track and that is not an unknown
 	if !HasCertmonger() {
 		snapshot.TrackingKnown = true
 		snapshot.TrackingReason = "this host does not run certmonger"
@@ -74,9 +63,8 @@ func Scan(targets []Target) Snapshot {
 		snapshot.Missing[FactTracking] = "certmonger request list requires root"
 	}
 
-	// The private key lies in a directory closed to everyone but the
-	// service, so even its permissions are seen only by root. No knowledge
-	// about the key is not the same as a key that does not exist.
+	// The private key lies in a directory closed to everyone but the service, so
+	// even its permissions are seen only by root.
 	if keysNeeded(targets) {
 		snapshot.Missing[FactKeyMetadata] = "private key metadata requires root"
 	} else {
@@ -129,10 +117,9 @@ func inspect(target Target, missing map[string]string) Certificate {
 	data, err := ReadFile(target.Path)
 	if err != nil {
 		description.UnavailableReason = err.Error()
-		// A file the agent cannot open is not a file that does not exist:
-		// a service certificate is at times kept in a directory closed to
-		// everyone but the service. The helper is then asked for the
-		// content, by file name.
+		// A file the agent cannot open is not a file that does not exist: a service
+		// certificate is at times kept in a directory closed to everyone but the
+		// service.
 		if errors.Is(err, os.ErrPermission) {
 			missing[FactCertificateFiles] = "certificate files are not readable without root"
 		}
@@ -151,10 +138,6 @@ func inspect(target Target, missing map[string]string) Certificate {
 }
 
 // ReadFile reads a certificate file with an upper size bound.
-//
-// The open goes with O_NOFOLLOW: a certificate path is at times a symlink,
-// but a symlink may also point anywhere else - and the module would then
-// read a file nobody named for it.
 func ReadFile(path string) ([]byte, error) {
 	handle, err := os.OpenFile(path, os.O_RDONLY|unix.O_NOFOLLOW, 0)
 	if err != nil {
@@ -182,9 +165,9 @@ func DescribeKey(path string) KeyMetadata {
 	info, err := os.Lstat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// A missing file is an answer, not a read error: a service with
-			// a certificate without a key does not come up and the operator
-			// is meant to see that.
+			// A missing file is an answer, not a read error: a service with a
+			// certificate without a key does not come up and the operator is meant to
+			// see that.
 			return description
 		}
 		description.Reason = err.Error()
@@ -218,11 +201,6 @@ func groupName(gid int) string {
 }
 
 // CollectSupplement reads the facts the agent asked for by name.
-//
-// The helper receives neither a "read this file" nor a "run this tool"
-// command: it receives a list of fact names and a list of targets the panel
-// has already approved once, and checks every path again with its own
-// rule.
 func CollectSupplement(ctx context.Context, run Runner,
 	facts []string, targets []Target) Supplement {
 	extra := Supplement{Errors: map[string]string{}}
@@ -350,10 +328,6 @@ func (s Snapshot) Supplemented(extra Supplement) Snapshot {
 }
 
 // AddTracked adds to the scope the certificates watched by certmonger.
-//
-// The host knows about them itself, so the panel does not have to configure
-// them - and without them the tab would show emptiness on a host that has
-// its own domain certificate and has been renewing it for months.
 func AddTracked(targets []Target, trackings map[string]Tracking) []Target {
 	known := map[string]bool{}
 	for _, target := range targets {

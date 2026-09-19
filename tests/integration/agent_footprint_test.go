@@ -9,22 +9,17 @@ import (
 	"time"
 )
 
-// The footprint budget of the agent from the architecture document: what
-// the agent may cost a host before a release ships. The same numbers stand
-// in the monitoring package; they are spelled out here so the gate reads
-// as the document does and a change to either side is a deliberate one.
+// The footprint budget of the agent from the architecture document: what the
+// agent may cost a host before a release ships.
 const (
 	footprintRSSBudget = 30 << 20
 	footprintCPUBudget = 0.2
-	// footprintFreshness is how old the newest sample may be for the host
-	// to count: three sampling intervals, as the panel counts a host as
-	// reporting.
+	// footprintFreshness is how old the newest sample may be for the host to
+	// count: three sampling intervals, as the panel counts a host as reporting.
 	footprintFreshness = 3 * time.Minute
 )
 
-// footprintPoint is the part of a chart point the gate reads. The
-// footprint fields are pointers: absent means the agent did not report
-// the value, and that is not a value of zero.
+// footprintPoint is the part of a chart point the gate reads.
 type footprintPoint struct {
 	At              time.Time `json:"at"`
 	AgentRSSBytes   *uint64   `json:"agent_rss_bytes"`
@@ -42,10 +37,8 @@ type footprintMetricsView struct {
 	LastSampleAt *time.Time       `json:"last_sample_at"`
 }
 
-// rssPercentile returns the 95th percentile of the resident memory over
-// the points of the last hour, or nil when the hour holds fewer than five
-// samples. The document's budget is a p95: one sample taken in the middle
-// of an inventory read says what the agent peaked at, not what it costs.
+// rssPercentile returns the 95th percentile of the resident memory over the
+// points of the last hour, or nil when the hour holds fewer than five samples.
 func rssPercentile(points []footprintPoint, since time.Time) *uint64 {
 	var values []uint64
 	for _, point := range points {
@@ -73,13 +66,9 @@ func (h *harness) latestFootprint(hostID string) footprintMetricsView {
 	return view
 }
 
-// TestAgentFootprintIsWithinBudget is the release gate on the agent's
-// cost: on every online host of the lab the agent's newest sample says it
-// uses less than 128 MiB of resident memory and less than ten per cent of
-// one core. A host whose newest sample is older than three minutes is
-// skipped with the reason - a stale reading says nothing about the agent
-// running now - and a host whose agent reports no footprint fails: a gate
-// that was not measured did not pass.
+// TestAgentFootprintIsWithinBudget is the release gate on the agent's cost: on
+// every online host of the lab the agent's newest sample says it uses less
+// than 128 MiB of resident memory and less than ten per cent of one core.
 func TestAgentFootprintIsWithinBudget(t *testing.T) {
 	h := newHarness(t)
 	var online []hostView
@@ -94,9 +83,9 @@ func TestAgentFootprintIsWithinBudget(t *testing.T) {
 
 	for _, host := range online {
 		view := h.latestFootprint(host.ID)
-		// An agent samples once a minute and the first sample follows the
-		// start; a host that joined the fleet a moment ago has none yet,
-		// which is not a missing footprint - it is waited for, once.
+		// An agent samples once a minute and the first sample follows the start; a
+		// host that joined the fleet a moment ago has none yet, which is not a
+		// missing footprint - it is waited for, once.
 		for waited := time.Duration(0); (view.Latest == nil || view.LastSampleAt == nil) && waited < 150*time.Second; waited += 10 * time.Second {
 			time.Sleep(10 * time.Second)
 			view = h.latestFootprint(host.ID)
@@ -111,9 +100,8 @@ func TestAgentFootprintIsWithinBudget(t *testing.T) {
 			continue
 		}
 		latest := view.Latest
-		// The CPU share needs an interval, so the first sample after the
-		// agent started carries none. One more sample settles it; the
-		// wait is bounded by two sampling intervals.
+		// The CPU share needs an interval, so the first sample after the agent
+		// started carries none.
 		if latest.AgentRSSBytes != nil && latest.AgentCPUPercent == nil {
 			latest = h.awaitFootprintCPU(host.ID, latest.At, 2*time.Minute+15*time.Second)
 		}
@@ -123,9 +111,9 @@ func TestAgentFootprintIsWithinBudget(t *testing.T) {
 			continue
 		}
 		summary := describeFootprint(latest)
-		// The memory budget is judged at the 95th percentile of the last
-		// hour where the hour has enough samples; the newest sample alone
-		// decides only on a host that has just joined.
+		// The memory budget is judged at the 95th percentile of the last hour where
+		// the hour has enough samples; the newest sample alone decides only on a
+		// host that has just joined.
 		rss := *latest.AgentRSSBytes
 		if p95 := rssPercentile(view.Points, time.Now().Add(-time.Hour)); p95 != nil {
 			rss = *p95

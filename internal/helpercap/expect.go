@@ -373,7 +373,7 @@ func Expect(request *helperv1.HelperRequest) Expectation {
 
 // CheckBinding compares what the request names with what the bound payload
 // names, for the operations whose payload carries the target: the unit, the
-// packages, the schedule entry with its user and command, the file path, the
+// packages, the schedule entry with its user and command, the file path, the.
 func CheckBinding(request *helperv1.HelperRequest, bound *BoundPayload) error {
 	payload := bound.Payload
 	switch action := request.GetAction().(type) {
@@ -477,7 +477,7 @@ func agentPackagesOnly(action *helperv1.PackageActionRequest, upgrade *opspec.Ag
 	}
 	// The digest the helper checks the artefact against and the version it keeps
 	// a way back to are part of what the operator approved: an agent must not ask
-	// the helper to verify another file or to prepare a return to a version
+	// the helper to verify another file or to prepare a return to a version.
 	if err := same("package digest", action.GetPackageSha256(), upgrade.PackageSHA256); err != nil {
 		return err
 	}

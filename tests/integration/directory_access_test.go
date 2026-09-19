@@ -130,9 +130,7 @@ func approveAndRun(t *testing.T, h, approver *harness, change ruleChange) ruleCh
 	return awaitDirectoryChange(t, h, change.ID, 90*time.Second)
 }
 
-// removeRule orders and approves the removal of a test rule. It is used
-// both as the second half of a test and as the cleanup after a failure, so
-// it reports nothing when the rule is already gone.
+// removeRule orders and approves the removal of a test rule.
 func removeRule(t *testing.T, h, approver *harness, action, family, name string) {
 	t.Helper()
 	var change ruleChange
@@ -151,8 +149,7 @@ func removeRule(t *testing.T, h, approver *harness, action, family, name string)
 
 // TestDirectoryHBACRuleGoesThroughPlanApprovalAndExecution walks the whole
 // path of a managed access rule: the plan with its impact, the approval by a
-// second person with a reason, the execution, the rule as the directory
-// holds it, and its removal.
+// second person with a reason, the execution, the rule as the directory holds
 func TestDirectoryHBACRuleGoesThroughPlanApprovalAndExecution(t *testing.T) {
 	h := newHarness(t)
 	if !directoryAvailable(t, h) {
@@ -388,8 +385,7 @@ func TestAccessSimulationAnswersForALabHost(t *testing.T) {
 }
 
 // TestHostEffectiveAccessIsAProjectionOrHonestlyUnknown reads the effective
-// access of a fleet host. A host the directory knows gets its groups and
-// rules; one it does not know is reported as unknown, never as "no access".
+// access of a fleet host.
 func TestHostEffectiveAccessIsAProjectionOrHonestlyUnknown(t *testing.T) {
 	h := newHarness(t)
 	if !directoryAvailable(t, h) {
@@ -488,8 +484,7 @@ func userOutsideTheGroup(t *testing.T, h *harness, group string) string {
 
 // TestHBACSimulationDeniesAUserOutsideTheGroup is the denial the design
 // requires the panel to show honestly: a rule for one group on one host does
-// not admit a user outside that group, and the directory's own simulation
-// says so together with the rule it evaluated.
+// not admit a user outside that group, and the directory's own simulation says
 func TestHBACSimulationDeniesAUserOutsideTheGroup(t *testing.T) {
 	h := newHarness(t)
 	if !directoryAvailable(t, h) {
@@ -532,9 +527,9 @@ func TestHBACSimulationDeniesAUserOutsideTheGroup(t *testing.T) {
 		t.Fatalf("the verdict does not list %s among the rules that did not match: %+v", name, result)
 	}
 
-	// The verdict itself is a denial only when no other rule admits
-	// everyone: a fresh directory ships with allow_all enabled, and next to it
-	// nobody is ever denied. The lab decides which of the two it is.
+	// The verdict itself is a denial only when no other rule admits everyone: a
+	// fresh directory ships with allow_all enabled, and next to it nobody is ever
+	// denied.
 	var rules struct {
 		Items []catchAllRuleView `json:"items"`
 	}

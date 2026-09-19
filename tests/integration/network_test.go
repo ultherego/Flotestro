@@ -40,11 +40,9 @@ type networkSnapshot struct {
 	UnavailableReason   string `json:"unavailable_reason"`
 }
 
-// TestNetworkPointsAtTheManagementChannel checks the thing that decides
-// the safety of every network change: the host is to say itself which
-// interface it talks to the panel through. Guessing from the first item of
-// the list would end with changing the interface the command has just
-// arrived through.
+// TestNetworkPointsAtTheManagementChannel checks the thing that decides the
+// safety of every network change: the host is to say itself which interface it
+// talks to the panel through.
 func TestNetworkPointsAtTheManagementChannel(t *testing.T) {
 	h := newHarness(t)
 
@@ -74,9 +72,8 @@ func TestNetworkPointsAtTheManagementChannel(t *testing.T) {
 	}
 }
 
-// TestNetworkTellsInterfaceKindsApart guards that a container bridge does
-// not pose as a network card. A host with docker has a dozen virtual
-// interfaces and without the kind the picture is unreadable.
+// TestNetworkTellsInterfaceKindsApart guards that a container bridge does not
+// pose as a network card.
 func TestNetworkTellsInterfaceKindsApart(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -104,10 +101,8 @@ func TestNetworkTellsInterfaceKindsApart(t *testing.T) {
 	}
 }
 
-// TestMissingNetworkWriteHasAReason checks the boundary between an
-// unavailable module and a read-only one. A host without NetworkManager is
-// not a host without a network - and is to say why the panel will change
-// nothing here.
+// TestMissingNetworkWriteHasAReason checks the boundary between an unavailable
+// module and a read-only one.
 func TestMissingNetworkWriteHasAReason(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -155,10 +150,9 @@ func hasPrefixMask(address string) bool {
 	return false
 }
 
-// TestBadNetworkConfigurationDoesNotReachTheHost checks that a value the
-// host would not accept, or that would cut it off from the panel, is
-// rejected when ordered. A network change is no place to learn from an
-// execution error.
+// TestBadNetworkConfigurationDoesNotReachTheHost checks that a value the host
+// would not accept, or that would cut it off from the panel, is rejected when
+// ordered.
 func TestBadNetworkConfigurationDoesNotReachTheHost(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("rhel")
@@ -195,8 +189,8 @@ func TestBadNetworkConfigurationDoesNotReachTheHost(t *testing.T) {
 }
 
 // TestHostWithoutAWriteMechanismRefusesWhenOrdered checks the boundary the
-// capability registry is to guard: a host that will not keep the change
-// across a reboot is not to get it at all.
+// capability registry is to guard: a host that will not keep the change across
+// a reboot is not to get it at all.
 func TestHostWithoutAWriteMechanismRefusesWhenOrdered(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -219,10 +213,9 @@ func TestHostWithoutAWriteMechanismRefusesWhenOrdered(t *testing.T) {
 		nil, http.StatusCreated)
 }
 
-// TestNetworkChangeIsConfirmedByConnectivity walks the full path of a
-// change: the host arms the rollback, changes the MTU, checks the path to
-// the panel and only then disarms the timer. After the test the MTU goes
-// back to the default.
+// TestNetworkChangeIsConfirmedByConnectivity walks the full path of a change:
+// the host arms the rollback, changes the MTU, checks the path to the panel
+// and only then disarms the timer.
 func TestNetworkChangeIsConfirmedByConnectivity(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("rhel")
@@ -251,9 +244,8 @@ func TestNetworkChangeIsConfirmedByConnectivity(t *testing.T) {
 	if job.State != "succeeded" {
 		t.Fatalf("MTU change: state = %s, %s", job.State, lastMessage(attempts))
 	}
-	// The message is to say that the rescue timer was armed and was
-	// disarmed after checking the path to the panel. A quiet network change
-	// would be indistinguishable from a change that had no timer at all.
+	// The message is to say that the rescue timer was armed and was disarmed
+	// after checking the path to the panel.
 	if !strings.Contains(lastMessage(attempts), "the rollback was disarmed") {
 		t.Errorf("change without a connectivity confirmation: %s", lastMessage(attempts))
 	}
@@ -339,11 +331,6 @@ func networkPlan(t *testing.T, h *harness, hostID, iface, mtu string) networkPla
 // TestNetplanHostPlansInItsOwnFile finds the host that writes its network
 // through netplan - the Ubuntu host of the lab - and checks that a plan is
 // computed there the way the doctrine wants it: against the merged
-// configuration, naming the adapter, and showing the panel's own file
-// rather than the distribution's. An interface other than the management
-// one gets a real MTU change planned; the management interface only a plan
-// with its current value, which must honestly say "no change". Nothing is
-// applied: the management interface of a lab host is not to be touched.
 func TestNetplanHostPlansInItsOwnFile(t *testing.T) {
 	h := newHarness(t)
 	host, state := hostWithWriteAdapter(t, h, "netplan")
@@ -351,10 +338,8 @@ func TestNetplanHostPlansInItsOwnFile(t *testing.T) {
 		t.Fatal("the host did not point at the management interface")
 	}
 
-	// A real change is planned on an interface the change cannot cut the
-	// panel off through. netplan may not describe every interface the
-	// kernel has; such an interface is a refusal, not a plan, and the test
-	// then falls back to the management interface.
+	// A real change is planned on an interface the change cannot cut the panel
+	// off through.
 	planned := false
 	for _, iface := range state.Interfaces {
 		if iface.Management || iface.Kind != "ethernet" || iface.OperState != "up" {
@@ -371,9 +356,8 @@ func TestNetplanHostPlansInItsOwnFile(t *testing.T) {
 		if plan.Action != "update" || len(plan.Changes) != 1 || !strings.Contains(plan.Changes[0], "MTU") {
 			t.Errorf("plan on %s: %q %v", iface.Name, plan.Action, plan.Changes)
 		}
-		// The document is the panel's file after the merge: the touched
-		// interface with the MTU, and nothing of the distribution's
-		// definition copied in.
+		// The document is the panel's file after the merge: the touched interface
+		// with the MTU, and nothing of the distribution's definition copied in.
 		if !strings.Contains(plan.Document, iface.Name) || !strings.Contains(plan.Document, "mtu: 1400") {
 			t.Errorf("the plan document does not carry the change: %q", plan.Document)
 		}
@@ -388,9 +372,9 @@ func TestNetplanHostPlansInItsOwnFile(t *testing.T) {
 		return
 	}
 
-	// Without another interface the management one is planned with the
-	// value the kernel reports, then with the value the plan itself calls
-	// current: the second is a no-op plan and has to say so.
+	// Without another interface the management one is planned with the value the
+	// kernel reports, then with the value the plan itself calls current: the
+	// second is a no-op plan and has to say so.
 	kernelMTU := "1500"
 	for _, iface := range state.Interfaces {
 		if iface.Management && iface.MTU > 0 {
@@ -407,10 +391,8 @@ func TestNetplanHostPlansInItsOwnFile(t *testing.T) {
 	assertNoChangePlan(t, h, host.ID, state.ManagementInterface, plan)
 }
 
-// assertNoChangePlan plans the interface once more with the MTU the given
-// plan calls current. That plan is a no-op and has to say so, with a
-// fingerprint of its own: a host already in the desired state is an answer
-// the campaign shows, not a change it applies.
+// assertNoChangePlan plans the interface once more with the MTU the given plan
+// calls current.
 func assertNoChangePlan(t *testing.T, h *harness, hostID, iface string, plan networkPlanView) {
 	t.Helper()
 	if plan.Current == nil || plan.Current.MTU == "" {

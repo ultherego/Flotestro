@@ -104,8 +104,6 @@ func TestReadHealthUsesTheCache(t *testing.T) {
 }
 
 // A regression: the agent used to report zero and false where the read failed.
-// A state that was not determined has to stay undetermined all the way to the
-// heartbeat.
 func TestReadHealthDoesNotTurnIgnoranceIntoZero(t *testing.T) {
 	// The package adapter failed, systemd was not queried, the restart is
 	// unknown.

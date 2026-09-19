@@ -104,11 +104,9 @@ func storagePlanDetail(t *testing.T, h *harness, jobID, kind string) json.RawMes
 	return nil
 }
 
-// TestDevicesCarryAStableIdentity checks the thing every destructive
-// operation binds to: a disk is named by its /dev/disk/by-id link, its
-// serial or WWN, and the topology says what stands on it. A virtual disk
-// in the lab has no WWN, but it has a serial and an ata- link - and a
-// device that has none says why, rather than showing an empty cell.
+// TestDevicesCarryAStableIdentity checks the thing every destructive operation
+// binds to: a disk is named by its /dev/disk/by-id link, its serial or WWN,
+// and the topology says what stands on it.
 func TestDevicesCarryAStableIdentity(t *testing.T) {
 	h := newHarness(t)
 	for _, family := range []string{"debian", "rhel"} {
@@ -144,9 +142,9 @@ func TestDevicesCarryAStableIdentity(t *testing.T) {
 			if system.ByID == "" {
 				t.Errorf("the system disk has no by-id link: %s", system.IdentityUnavailableReason)
 			}
-			// A partition that is a physical volume is held by the volume
-			// group; the holder is what makes the disk in use even with
-			// nothing mounted directly on it.
+			// A partition that is a physical volume is held by the volume group; the
+			// holder is what makes the disk in use even with nothing mounted directly
+			// on it.
 			for _, device := range devices {
 				if device.Parent == system.Path && len(device.Holders) > 0 && !device.HasOpenHolders {
 					t.Errorf("%s has holders but is not marked as held: %+v", device.Path, device)
@@ -156,10 +154,9 @@ func TestDevicesCarryAStableIdentity(t *testing.T) {
 	}
 }
 
-// TestDestructivePlanOnTheRootDiskIsRefused checks the plan of a wipe
-// against the system disk: the plan carries the identity of the disk and
-// refuses with disk_in_use before anybody approves anything. A plan is a
-// read; nothing on the host moves.
+// TestDestructivePlanOnTheRootDiskIsRefused checks the plan of a wipe against
+// the system disk: the plan carries the identity of the disk and refuses with
+// disk_in_use before anybody approves anything.
 func TestDestructivePlanOnTheRootDiskIsRefused(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -196,11 +193,8 @@ func TestDestructivePlanOnTheRootDiskIsRefused(t *testing.T) {
 	}
 }
 
-// TestDestructiveOperationIsRefusedByIdentityBeforeAnythingRuns guards
-// the two refusals of chapter 7.3 on a real host: a disk of the same size
-// with another WWN is another disk (disk_changed), and the system disk is
-// never wiped (disk_in_use). Both are checked by the host right before the
-// change, after two people approved.
+// TestDestructiveOperationIsRefusedByIdentityBeforeAnythingRuns guards the two
+// refusals of chapter 7.
 func TestDestructiveOperationIsRefusedByIdentityBeforeAnythingRuns(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -258,10 +252,9 @@ func TestDestructiveOperationIsRefusedByIdentityBeforeAnythingRuns(t *testing.T)
 	}
 }
 
-// TestDestructiveOperationWithoutAStableIdentityIsRefused checks that an
-// order naming the device by its serial and size alone does not reach the
-// disk: the panel refuses it at the door, or the host refuses it with
-// stable_identity_required - and either way nothing runs.
+// TestDestructiveOperationWithoutAStableIdentityIsRefused checks that an order
+// naming the device by its serial and size alone does not reach the disk: the
+// panel refuses it at the door, or the host refuses it with
 func TestDestructiveOperationWithoutAStableIdentityIsRefused(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -300,11 +293,9 @@ func TestDestructiveOperationWithoutAStableIdentityIsRefused(t *testing.T) {
 	}
 }
 
-// TestMountPlanCarriesTheFstabRevision checks that a mount plan is bound
-// to the fstab it was computed against and to the state of the mount
-// point: the fingerprint covers both, so an fstab edited after the plan
-// makes the change stale. The plan is computed for a target that does not
-// exist, so nothing is mounted.
+// TestMountPlanCarriesTheFstabRevision checks that a mount plan is bound to
+// the fstab it was computed against and to the state of the mount point: the
+// fingerprint covers both, so an fstab edited after the plan makes the change
 func TestMountPlanCarriesTheFstabRevision(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -361,8 +352,7 @@ func TestMountPlanCarriesTheFstabRevision(t *testing.T) {
 		t.Errorf("the plan has no fingerprint: %+v", plan)
 	}
 	// A change sent with a fingerprint of another plan is stale: the host
-	// compares before touching fstab. The target does not exist and nothing
-	// is written.
+	// compares before touching fstab.
 	change, changeAttempts := h.runOperation(host.ID, map[string]any{
 		"action": "mount.ensure", "reason": identityReason,
 		"payload": map[string]any{"storage": map[string]any{

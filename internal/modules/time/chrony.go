@@ -7,10 +7,6 @@ import (
 )
 
 // sourceModes and sourceStates translate the chrony symbols into words.
-//
-// The operator is not meant to remember that "^*" means "selected server"
-// and "x" - "a source that lies". The symbol stays in the result only when
-// its meaning is unknown: an unknown state is not an empty state here.
 var sourceModes = map[string]string{
 	"^": "server",
 	"=": "peer",
@@ -27,10 +23,6 @@ var sourceStates = map[string]string{
 }
 
 // ParseTracking reads the output of "chronyc -c tracking".
-//
-// The CSV mode is a deliberate choice: the plain chrony output is a table
-// for humans, and its headers and units change between versions. The field
-// order in CSV is part of the tool's contract.
 func ParseTracking(output string) Snapshot {
 	snapshot := Snapshot{Service: DaemonChrony}
 	line := strings.TrimSpace(output)
@@ -111,12 +103,6 @@ func ParseSources(output string) []Source {
 }
 
 // DropInDir points at the directory the panel writes the servers to.
-//
-// The panel does not rewrite the main chrony file: it holds platform
-// decisions (keys, access, clock drivers) whose change does not belong to
-// the "set time servers" operation. Instead it reads which directory the
-// daemon itself includes, and writes only there. A host without such a
-// directory gets a refusal with a reason, not a file chrony never reads.
 func DropInDir(configuration string) (dir, kind string) {
 	for _, line := range strings.Split(configuration, "\n") {
 		line = strings.TrimSpace(line)
@@ -143,9 +129,8 @@ func DropInDir(configuration string) (dir, kind string) {
 				return first, KindSources
 			}
 		case "include":
-			// The pattern "include /etc/chrony.d/*.conf" points at a
-			// configuration directory just like confdir, only in the older
-			// syntax.
+			// The pattern "include /etc/chrony. d/*. conf" points at a configuration
+			// directory just like confdir, only in the older syntax.
 			if dir := dirFromPattern(firstPath(path)); dir != "" {
 				return dir, KindConfiguration
 			}

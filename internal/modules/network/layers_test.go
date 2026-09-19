@@ -8,11 +8,8 @@ import (
 )
 
 // The output of "ip -details -json link show" on a host that has all three
-// kinds of layer at once: a bond of two cards, a VLAN riding on the bond,
-// and a bridge with one port. It is the shape the kernel really emits -
-// the relation lives on the member's side, in "master", and the VLAN names
-// its parent in "link" - because a fixture that put the members on the bond
-// would test a kernel nobody has.
+// kinds of layer at once: a bond of two cards, a VLAN riding on the bond, and
+// a bridge with one port.
 const ipLinkOutput = `[
   {"ifindex":1,"ifname":"lo","mtu":65536,"linkinfo":{}},
   {"ifindex":2,"ifname":"enp0s3","mtu":1500},
@@ -57,8 +54,8 @@ const bridgeVLANOutput = `[
 ]`
 
 // layeredSnapshot builds the picture the plans in this file are computed
-// against: the addresses of both families with the layering merged onto
-// them, and the management channel on enp0s3.
+// against: the addresses of both families with the layering merged onto them,
+// and the management channel on enp0s3.
 func layeredSnapshot(t *testing.T) Snapshot {
 	t.Helper()
 	interfaces, err := ParseInterfaces(ipAddressOutput)
@@ -157,8 +154,7 @@ func TestLinkStateReadsWhatTheHostHas(t *testing.T) {
 }
 
 // TestLayeredRefusalsAreNamed walks every relation that forbids a layered
-// change. Each one has a code of its own: an operator told only "malformed"
-// would have no idea which of five relations stood in the way.
+// change.
 func TestLayeredRefusalsAreNamed(t *testing.T) {
 	snapshot := layeredSnapshot(t)
 
@@ -259,8 +255,8 @@ func TestManagementLayerIsNeverRemoved(t *testing.T) {
 }
 
 // TestMechanismThatCannotExpressALayerSaysSo is the difference between a
-// refusal and half a bond: a host driven profile by profile is told no,
-// rather than left with the first of the several profiles a bond needs.
+// refusal and half a bond: a host driven profile by profile is told no, rather
+// than left with the first of the several profiles a bond needs.
 func TestMechanismThatCannotExpressALayerSaysSo(t *testing.T) {
 	snapshot := layeredSnapshot(t)
 	spec := LinkSpec{Name: "bond1", Kind: LinkBond, Mode: "active-backup",
@@ -331,9 +327,9 @@ func TestLayeredPlanDescribesWhatItBuilds(t *testing.T) {
 		t.Fatalf("members the host does not have passed: %+v", plan)
 	}
 
-	// The same bond on interfaces the host really has: the existing bond and
-	// its VLAN are taken out of the picture and its members set free, which
-	// is the host an operator building a first bond is looking at.
+	// The same bond on interfaces the host really has: the existing bond and its
+	// VLAN are taken out of the picture and its members set free, which is the
+	// host an operator building a first bond is looking at.
 	taken := layeredSnapshot(t)
 	var free Snapshot
 	free.ManagementInterface = taken.ManagementInterface
@@ -402,9 +398,9 @@ func TestNmstateLinkDocumentCarriesTheLayer(t *testing.T) {
 		t.Errorf("the removal document:\n%s", removal)
 	}
 
-	// VLAN filtering is refused by name: nmstate expresses it through the
-	// VLAN configuration of every bridge port, which this module does not
-	// write, and a bridge built silently without it is not what was ordered.
+	// VLAN filtering is refused by name: nmstate expresses it through the VLAN
+	// configuration of every bridge port, which this module does not write, and a
+	// bridge built silently without it is not what was ordered.
 	if _, err := NmstateLinkDocument(LinkState{Name: "br1"},
 		LinkState{Name: "br1", Kind: LinkBridge, Present: true, VLANFiltering: true}); err == nil {
 		t.Error("VLAN filtering passed without a refusal")
@@ -445,8 +441,8 @@ func TestNetplanLinkDocumentWritesItsOwnSection(t *testing.T) {
 	}
 
 	// Removing something the panel never defined is refused rather than
-	// pretended: a later netplan file cannot unmake an earlier one's
-	// definition, so the interface would be back after the next boot.
+	// pretended: a later netplan file cannot unmake an earlier one's definition,
+	// so the interface would be back after the next boot.
 	removal := Plan{
 		Interface: "bond1", Operation: PlanLinkRemove,
 		CurrentLink: &LinkState{Name: "bond1", Kind: LinkBond, Present: true},
@@ -546,8 +542,8 @@ func TestIPv6PlanCarriesBothFamilies(t *testing.T) {
 		t.Errorf("the link-local gateway was dropped: %+v", plan.Desired)
 	}
 	// The two families are listed on their own lines: folding them into one
-	// sentence would hide which family an address belongs to, and that is
-	// the one thing an operator reading a dual-stack plan has to see.
+	// sentence would hide which family an address belongs to, and that is the one
+	// thing an operator reading a dual-stack plan has to see.
 	var sixth bool
 	for _, change := range plan.Changes {
 		if strings.HasPrefix(change, "IPv6") {
@@ -581,9 +577,7 @@ func TestRoutesAreSplitByFamily(t *testing.T) {
 }
 
 func TestBondStatusReadsWhatTheDriverKnows(t *testing.T) {
-	// The shape /proc/net/bonding/bond0 really has. The driver says two
-	// things "ip" does not: which member carries the traffic now, and what
-	// it thinks of each member.
+	// The shape /proc/net/bonding/bond0 really has.
 	const status = `Ethernet Channel Bonding Driver: v5.15.0
 
 Bonding Mode: fault-tolerance (active-backup)

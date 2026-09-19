@@ -17,17 +17,8 @@ import (
 	"github.com/ultherego/flotestro/internal/ctl"
 )
 
-// diagnoseCommand checks the path from the host to the panel step by step.
-//
-// The steps are deliberately separate and independent. "It does not work" is
-// not an answer: one thing is fixed when a name does not resolve, another
-// when a port is closed, and another still when the chain of certificates
-// does not match. A failed step stops the rest only when it makes them
-// meaningless - and then they say so instead of failing a second time for
-// the same reason.
-//
-// Nothing here changes the host. The diagnosis reads, connects and reports;
-// the fix is always a separate, explicit command.
+// diagnoseCommand checks the path from the host to the panel step by step. The
+// steps are deliberately separate and independent.
 func diagnoseCommand(args []string, out, errOut io.Writer) int {
 	flags := flag.NewFlagSet("diagnose", flag.ContinueOnError)
 	flags.SetOutput(errOut)
@@ -59,10 +50,6 @@ func diagnoseCommand(args []string, out, errOut io.Writer) int {
 }
 
 // diagnostics gathers everything a diagnosis touches outside the process.
-//
-// The clock, the paths and the network are fields rather than calls to the
-// packages, so that a test can run the whole diagnosis on a temporary
-// directory without a network and without root.
 type diagnostics struct {
 	ConfigPath      string
 	EnvironmentPath string
@@ -129,10 +116,9 @@ func (d diagnostics) run(ctx context.Context) Report {
 		identity := d.Identity(cfg.Agent.StateDir)
 		pool, poolErr := trustPool(cfg, identity)
 
-		// The names are resolved first: a name that does not resolve makes
-		// every dial to it meaningless, and the checks that would dial say
-		// so instead of failing a second time for the same reason. The
-		// report still lists the clock before the names, as read.
+		// The names are resolved first: a name that does not resolve makes every
+		// dial to it meaningless, and the checks that would dial say so instead of
+		// failing a second time for the same reason.
 		resolved := map[string]bool{}
 		dns := make([]Check, 0, len(endpoints))
 		for _, target := range endpoints {
@@ -165,11 +151,6 @@ func (d diagnostics) run(ctx context.Context) Report {
 }
 
 // checkConfiguration reads the file and says which overrides apply to it.
-//
-// Three outcomes: the file loads, the file is missing but the environment
-// file still carries the settings from before the YAML was introduced, or
-// nothing usable is there. The second is a warning rather than a failure -
-// the daemon still starts on it - but it is the state the host has to leave.
 func (d diagnostics) checkConfiguration() (agentconfig.Config, Check, bool) {
 	fileValues, fileErr := readEnvironmentFile(d.EnvironmentPath)
 	if fileErr != nil {
@@ -180,8 +161,8 @@ func (d diagnostics) checkConfiguration() (agentconfig.Config, Check, bool) {
 		environ = processEnvironment()
 	}
 	// The daemon sees the environment file through systemd as its own
-	// environment; a variable given to the process directly wins over the
-	// file, the way a flag would win over both.
+	// environment; a variable given to the process directly wins over the file,
+	// the way a flag would win over both.
 	effective := map[string]string{}
 	for key, value := range fileValues {
 		effective[key] = value
@@ -223,8 +204,7 @@ func (d diagnostics) checkConfiguration() (agentconfig.Config, Check, bool) {
 	}
 
 	// What the daemon connects to is the file with the overrides on top: a
-	// diagnosis of the file alone would pass while the daemon goes
-	// elsewhere.
+	// diagnosis of the file alone would pass while the daemon goes elsewhere.
 	effectiveCfg, err := overlayEnvironment(cfg, effective)
 	if err != nil {
 		check := fail("config", codeOf(err, "config_decode"),
@@ -239,9 +219,8 @@ func (d diagnostics) checkConfiguration() (agentconfig.Config, Check, bool) {
 		check.Overrides = list
 	}
 	if fileValues["FLOTESTRO_ENROLLMENT_TOKEN"] != "" {
-		// The token is used once; a line that stays after the enrollment
-		// keeps a secret in a file that survives package updates and ends
-		// up in backups.
+		// The token is used once; a line that stays after the enrollment keeps a
+		// secret in a file that survives package updates and ends up in backups.
 		check = warn("config", "enrollment_token_lingering",
 			fmt.Sprintf("%s; the enrollment token is still in %s: remove the line once the host is enrolled",
 				d.ConfigPath, d.EnvironmentPath))
@@ -257,10 +236,6 @@ var machineIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 // checkMachineID makes sure the host has the identifier the enrollment is
 // bound to.
-//
-// A host cloned from an image often carries the machine-id of the image, and
-// two hosts with one identifier look like one host to the panel. The check
-// cannot see the clone, but it can see the missing or the malformed file.
 func (d diagnostics) checkMachineID() Check {
 	content, err := os.ReadFile(d.MachineIDPath)
 	if err != nil {
@@ -275,12 +250,6 @@ func (d diagnostics) checkMachineID() Check {
 }
 
 // trustPool assembles the trust for checking the connections.
-//
-// The same bundle the agent uses: the trust bundle of the identity when the
-// host has one, and the bootstrap CA from the configuration. Nothing
-// configured means the system roots, which is the public-CA variant of the
-// bootstrap. A configured bundle that cannot be read or parsed is an error
-// of its own, not a silent fall back to the system roots.
 func trustPool(cfg agentconfig.Config, identity agent.StoredIdentity) (*x509.CertPool, error) {
 	pool := x509.NewCertPool()
 	added := false
@@ -320,9 +289,8 @@ func (d diagnostics) checkIdentity(identity agent.StoredIdentity) Check {
 	detail := fmt.Sprintf("host/%s, the certificate until %s (%d days)", identity.HostID, until, days)
 	check := pass("identity", detail)
 	if days < 7 {
-		// The daemon renews at a third of the validity left, so a
-		// certificate this close to the end means the renewal has been
-		// failing for days.
+		// The daemon renews at a third of the validity left, so a certificate this
+		// close to the end means the renewal has been failing for days.
 		check = warn("identity", "identity_expiring", detail+"; the renewal is late: see the journal of the agent")
 	}
 	check.DaysLeft = &days
@@ -363,9 +331,6 @@ func (d diagnostics) checkCapabilities() Check {
 var unmergedSuffixes = []string{".pacnew", ".rpmnew", ".dpkg-dist"}
 
 // checkPacnew looks for a configuration the package update did not merge.
-//
-// The new version lies next to the file and waits; until somebody merges it
-// the host runs on the old settings and nothing says so.
 func (d diagnostics) checkPacnew() Check {
 	var found []string
 	for _, suffix := range unmergedSuffixes {

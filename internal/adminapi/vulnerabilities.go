@@ -25,18 +25,12 @@ func (s *Server) SetVulnerabilities(store *vuln.Store, packages *vuln.PackageSto
 }
 
 // vulnerabilityReport is the answer of the host tab.
-//
-// A finding count without coverage means nothing: a host the feed does not
-// cover and a host without vulnerabilities both have zero on the counter.
-// That is why the coverage and the reason for its absence stand here next
-// to the list, not below it.
 type vulnerabilityReport struct {
 	HostID   string            `json:"host_id"`
 	State    vuln.HostState    `json:"state"`
 	Findings []vuln.Assessment `json:"findings"`
-	// PackageState describes the package list the assessment was based on,
-	// and AdvisoryState - the set of vendor advisories known to the host.
-	// These are two separate sources and two separate refresh cycles.
+	// PackageState describes the package list the assessment was based on, and
+	// AdvisoryState - the set of vendor advisories known to the host.
 	PackageState  vuln.PackageListState `json:"package_state"`
 	AdvisoryState vuln.AdvisoryState    `json:"advisory_state"`
 	// Snapshot describes the data that decided.
@@ -44,32 +38,20 @@ type vulnerabilityReport struct {
 	// SnapshotStale says the data is older than the policy allows.
 	SnapshotStale bool `json:"snapshot_stale"`
 	// GenerationCurrent says whether this verdict was produced by the feed
-	// generation in force right now. False means the host still carries an
-	// older judgement - the feed has moved on and this host has not been
-	// assessed against it yet. Empty for a host whose verdict predates
-	// generations or whose findings come from its own repositories, where
-	// there is no central generation to be current against.
+	// generation in force right now.
 	GenerationCurrent *bool `json:"generation_current,omitempty"`
 	// CoveragePercent is the share of packages covered by the feed.
 	CoveragePercent float64 `json:"coverage_percent"`
 	// FullyAssessed says whether the assessment is complete: no coverage
-	// obstacle, a feed covering all the packages and not a single
-	// undetermined package. An empty reason alone does not mean that.
+	// obstacle, a feed covering all the packages and not a single undetermined
+	// package.
 	FullyAssessed bool `json:"fully_assessed"`
 	// CVEDetails are an enrichment: the CVSS score and the vulnerability
-	// description from the upstream database. They stand next to the
-	// findings, not in them, because they change nothing in them - whether
-	// a package is vulnerable is said only by the distribution vendor. A
-	// missing entry is normal.
+	// description from the upstream database.
 	CVEDetails map[string]vuln.CVEDetails `json:"cve_details,omitempty"`
 }
 
 // cveDetails picks the enrichment for the findings.
-//
-// Silently: missing descriptions must not prevent showing the assessment,
-// because the assessment does not use them. When the enriching source is
-// missing or the read fails, the tab shows the same as always, only without
-// the upstream weight.
 func (s *Server) cveDetails(ctx context.Context, findings []vuln.Assessment) map[string]vuln.CVEDetails {
 	seen := map[string]bool{}
 	ids := make([]string, 0, len(findings))
@@ -152,9 +134,7 @@ func (s *Server) handleHostVulnerabilities(w http.ResponseWriter, r *http.Reques
 			}
 		} else if report.State.SnapshotDigest != "" {
 			// The RPM family reads the advisories from the metadata of its own
-			// repositories, so there is no central snapshot. The panel must
-			// still say what decided the assessment - otherwise the result has
-			// no source.
+			// repositories, so there is no central snapshot.
 			findings, collected, err := s.hostPackages.HostAdvisories(r.Context(), hostID)
 			if err == nil {
 				count := 0
@@ -179,21 +159,13 @@ type hostVulnerabilities struct {
 	vuln.HostState
 	CoveragePercent float64 `json:"coverage_percent"`
 	// FullyAssessed says whether the assessment of this host is complete.
-	// Without this field the screen would have to guess from the empty
-	// reason alone - and a host with one package outside the distribution
-	// has an empty reason and an incomplete assessment.
 	FullyAssessed bool `json:"fully_assessed"`
-	// BySeverity counts the affected findings by canonical severity, so
-	// the table can say "three critical" without the operator opening the
-	// host. An absent word is a zero here, because the count comes from the
-	// findings themselves; it is the coverage next to it that says whether
-	// zero means anything.
+	// BySeverity counts the affected findings by canonical severity, so the table
+	// can say "three critical" without the operator opening the host.
 	BySeverity map[string]int `json:"by_severity"`
 }
 
-// fleetHostFilter narrows the host table of the fleet screen. The summary
-// numbers above the table are counted over the whole visible fleet either
-// way: a filter changes what the table lists, not how bad the fleet is.
+// fleetHostFilter narrows the host table of the fleet screen.
 type fleetHostFilter struct {
 	// Query is a fragment of the hostname.
 	Query string
@@ -204,9 +176,8 @@ type fleetHostFilter struct {
 	// most vendor fixes waiting first) or "hostname".
 	Sort  string
 	Limit int
-	// Cursor is the key of the last row of the previous page; Offset the
-	// number of rows to skip for a caller that still pages the old way.
-	// The cursor wins when both are given.
+	// Cursor is the key of the last row of the previous page; Offset the number
+	// of rows to skip for a caller that still pages the old way.
 	Cursor vuln.FleetCursor
 	Offset int
 }
@@ -255,9 +226,9 @@ func (f fleetHostFilter) store(scopes []authz.Scope) vuln.FleetFilter {
 	return vuln.FleetFilter{Scopes: scopes, Query: f.Query, Severity: f.Severity, Sort: f.Sort}
 }
 
-// fleetVulnerabilitiesView is the answer of the fleet screen: the coverage
-// of the fleet, the sums over every assessed host in scope, the sources
-// and one page of the host table.
+// fleetVulnerabilitiesView is the answer of the fleet screen: the coverage of
+// the fleet, the sums over every assessed host in scope, the sources and one
+// page of the host table.
 type fleetVulnerabilitiesView struct {
 	fleetCoverage
 	Items      []hostVulnerabilities `json:"items"`
@@ -271,27 +242,23 @@ type fleetVulnerabilitiesView struct {
 	AffectedWithVendorFix int `json:"affected_with_vendor_fix"`
 	AffectedNoFix         int `json:"affected_no_fix"`
 	Unknown               int `json:"unknown"`
-	// Four numbers, because they are four different questions: how many
-	// CVEs, how many vendor issues, how many package instances to touch
-	// and how many hosts it concerns. One "findings" number answers none
-	// of them.
+	// Four numbers, because they are four different questions: how many CVEs, how
+	// many vendor issues, how many package instances to touch and how many hosts
+	// it concerns.
 	UniqueCVEs               int `json:"unique_cves"`
 	UniqueAdvisories         int `json:"unique_advisories"`
 	AffectedPackageInstances int `json:"affected_package_instances"`
 	HostsAffected            int `json:"hosts_affected"`
-	// HostsTotal, HostsAssessed and HostsWithoutAssessment keep the names
-	// the screen read before the coverage head: the hosts in scope, those
-	// fully assessed and those never assessed.
+	// HostsTotal, HostsAssessed and HostsWithoutAssessment keep the names the
+	// screen read before the coverage head: the hosts in scope, those fully
+	// assessed and those never assessed.
 	HostsTotal             int              `json:"hosts_total"`
 	HostsAssessed          int              `json:"hosts_assessed"`
 	HostsWithoutAssessment int              `json:"hosts_without_assessment"`
 	CoverageReasons        map[string]int   `json:"coverage_reasons"`
 	Sources                []map[string]any `json:"sources"`
 	MaxSnapshotAgeHours    int              `json:"max_snapshot_age_hours"`
-	// Candidates are the fetches the sanity gate is holding back. They are
-	// on the fleet screen rather than behind a settings page, because a
-	// held-back feed is the reason the numbers below have stopped moving,
-	// and the operator reading those numbers is the one who has to decide.
+	// Candidates are the fetches the sanity gate is holding back.
 	Candidates []candidateView `json:"candidates"`
 }
 
@@ -312,9 +279,8 @@ type candidateView struct {
 	ActiveReleases   []string `json:"active_releases,omitempty"`
 }
 
-// candidateViews dresses the held-back fetches with what the snapshot in
-// force carries, so the screen shows the comparison rather than one half
-// of it.
+// candidateViews dresses the held-back fetches with what the snapshot in force
+// carries, so the screen shows the comparison rather than one half of it.
 func (s *Server) candidateViews(ctx context.Context, active []vuln.Snapshot) ([]candidateView, error) {
 	candidates, err := s.vulnerabilities.Candidates(ctx)
 	if err != nil {
@@ -341,15 +307,7 @@ func (s *Server) candidateViews(ctx context.Context, active []vuln.Snapshot) ([]
 	return views, nil
 }
 
-// handleAcceptSnapshotCandidate activates a fetch the sanity gate held
-// back.
-//
-// The gate refused the fetch because it looked like a broken download;
-// only somebody who has compared it with the snapshot in force can say it
-// was a real change at the vendor. That is a decision about what the panel
-// will say about every host of that distribution, so it is taken with the
-// right to change how the panel judges the fleet, with fresh
-// authentication and a reason, and it leaves one entry on the trail.
+// handleAcceptSnapshotCandidate activates a fetch the sanity gate held back.
 func (s *Server) handleAcceptSnapshotCandidate(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	principal, ok := s.authorize(w, r, authz.PermMonitoringRulesWrite, authz.GlobalScope,
@@ -417,11 +375,6 @@ func (s *Server) handleAcceptSnapshotCandidate(w http.ResponseWriter, r *http.Re
 
 // handleFleetVulnerabilities returns the assessment of the whole visible
 // fleet.
-//
-// The screen has two numbers, not one: how many vulnerabilities and what
-// part of the fleet could be assessed at all. Without the second the first
-// is a promise, not a result. Both are counted by the database over every
-// host in scope, and the table comes a page at a time under its order.
 func (s *Server) handleFleetVulnerabilities(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermVulnerabilityRead, "fleet")
 	if !ok {
@@ -452,9 +405,8 @@ func (s *Server) handleFleetVulnerabilities(w http.ResponseWriter, r *http.Reque
 		s.fail(w, err)
 		return
 	}
-	// Uniques are counted at the fleet level, not by summing per host: the
-	// same CVE on twenty hosts is one vendor issue and twenty hosts to
-	// touch. Summing the host counters turns one into the other.
+	// Uniques are counted at the fleet level, not by summing per host: the same
+	// CVE on twenty hosts is one vendor issue and twenty hosts to touch.
 	uniques, err := s.vulnerabilities.UniquesInScope(r.Context(), scopes)
 	if err != nil {
 		s.fail(w, err)
@@ -482,16 +434,13 @@ func (s *Server) handleFleetVulnerabilities(w http.ResponseWriter, r *http.Reque
 			"advisories": snapshot.AdvisoryCount, "releases": snapshot.Releases,
 			"fetched_at": snapshot.FetchedAt, "stale": snapshot.Stale(s.feedAge, now),
 			"error": snapshot.Error,
-			// The generation of the data in force. A host's verdict names
-			// one too, and the two together answer "was this host judged
-			// against what the panel holds now".
+			// The generation of the data in force.
 			"generation_id": snapshot.GenerationID, "generation_at": snapshot.GenerationAt,
 		})
 	}
-	// The advisories a host reads from its own repositories - Fedora's
-	// updateinfo - are a source too, without a feed of their own: the
-	// table names it, or a Fedora host's findings would seem to come from
-	// nowhere.
+	// The advisories a host reads from its own repositories - Fedora's updateinfo
+	// - are a source too, without a feed of their own: the table names it, or a
+	// Fedora host's findings would seem to come from nowhere.
 	if repository, err := s.vulnerabilities.HostRepositorySourceInScope(r.Context(), scopes); err != nil {
 		s.fail(w, err)
 		return
@@ -533,9 +482,9 @@ func (s *Server) handleFleetVulnerabilities(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-// fleetVulnerabilityRows dresses one page of host states for the table:
-// the coverage as a share, the verdict on its completeness and the
-// findings by severity, the last read in one query for the page.
+// fleetVulnerabilityRows dresses one page of host states for the table: the
+// coverage as a share, the verdict on its completeness and the findings by
+// severity, the last read in one query for the page.
 func (s *Server) fleetVulnerabilityRows(ctx context.Context, states []vuln.HostState) ([]hostVulnerabilities, error) {
 	ids := make([]string, 0, len(states))
 	for _, state := range states {
@@ -559,27 +508,22 @@ func (s *Server) fleetVulnerabilityRows(ctx context.Context, states []vuln.HostS
 	return rows, nil
 }
 
-// vulnerabilitiesCSVColumns is the header of the fleet export. The order
-// is fixed: a sheet built against one export reads the next one. The
-// severity columns count the affected findings of that canonical
-// severity on the host.
+// vulnerabilitiesCSVColumns is the header of the fleet export. The order is
+// fixed: a sheet built against one export reads the next one.
 var vulnerabilitiesCSVColumns = []string{
 	"hostname", "host_id", "distribution", "release", "affected", "affected_with_vendor_fix", "affected_no_fix",
 	"unknown", "critical", "high", "medium", "low", "negligible", "unrated",
 	"affected_packages", "unique_advisories", "unique_cves", "packages_total", "packages_covered",
 	"coverage_percent", "fully_assessed", "coverage_reason", "advisories_reason", "provider", "evaluated_at",
-	// Appended at the end, where a new column does not move the ones a
-	// sheet already reads: the generation that produced the verdict and
-	// when that generation was taken.
+	// Appended at the end, where a new column does not move the ones a sheet
+	// already reads: the generation that produced the verdict and when that
+	// generation was taken.
 	"generation_id", "generation_at",
 }
 
-// writeVulnerabilitiesCSV streams the fleet assessment as a file: one row
-// per host of the filtered table, in the order the screen sorts it, a
-// page at a time from the same cursor the screen pages with, with the
-// coverage next to the counts - a host with zero findings and no
-// assessment is not a clean host, and the file says so in its own
-// columns. The screen's page does not apply; the export's own cap does.
+// writeVulnerabilitiesCSV streams the fleet assessment as a file: one row per
+// host of the filtered table, in the order the screen sorts it, a page at a
+// time from the same cursor the screen pages with, with the coverage next to
 func (s *Server) writeVulnerabilitiesCSV(w http.ResponseWriter, r *http.Request, filter vuln.FleetFilter, now time.Time) {
 	s.writeCSV(w, r, exportFileName("vulnerabilities", now), vulnerabilitiesCSVColumns, func(yield func([]string) bool) error {
 		cursor := vuln.FleetCursor{}

@@ -20,23 +20,16 @@ import (
 
 // The resource sample travels separately from the heartbeat: the heartbeat
 // carries decision signals and must stay small and cheap, while a sample is a
-// measurement the panel keeps for charts and alert rules. The two also have
-// different rhythms - a heartbeat spreads over a jitter window to protect the
-// panel, a sample wants an even interval so that the rates it yields mean
-// something.
+// measurement the panel keeps for charts and alert rules.
 const (
 	// defaultMetricsInterval is used when the session configuration names
 	// no interval.
 	defaultMetricsInterval = 60 * time.Second
-	// metricsJitter is the most a sample is delayed past its interval. A few
-	// seconds are enough to keep a fleet started at once from sampling in
-	// lockstep; more would bend the interval the panel computes rates over.
+	// metricsJitter is the most a sample is delayed past its interval.
 	metricsJitter = 5 * time.Second
 )
 
-// realFilesystems are the filesystem types that live on a disk. A pseudo
-// filesystem, an overlay or a tmpfs is left out: a full /run or a full
-// container layer says nothing the operator would act on with a disk.
+// realFilesystems are the filesystem types that live on a disk.
 var realFilesystems = map[string]bool{
 	"ext2": true, "ext3": true, "ext4": true, "xfs": true, "btrfs": true,
 	"zfs": true, "vfat": true, "exfat": true, "f2fs": true,
@@ -51,10 +44,6 @@ type FilesystemUsage struct {
 }
 
 // Sampler reads the host resource counters from the kernel files.
-//
-// The roots and the clock are fields rather than constants so that a test
-// can point the sampler at fixtures and a fixed time; the production sampler
-// reads /proc and the real clock.
 type Sampler struct {
 	// ProcRoot is the mount point of procfs; /proc by default.
 	ProcRoot string
@@ -78,27 +67,18 @@ type Sampler struct {
 	previousProcess *processCPU
 	// releasedAt is when the pages were last handed back.
 	releasedAt time.Time
-	// spool keeps the samples the panel has not acknowledged. Nil is a
-	// sampler that keeps nothing: the fleet simulator, and a host whose
-	// state directory the spool could not be opened in.
+	// spool keeps the samples the panel has not acknowledged.
 	spool *MetricsSpool
 }
 
-// NewSampler returns a sampler reading the real host and keeping nothing:
-// a sample it cannot send is lost. It is what a test and the fleet
-// simulator use.
+// NewSampler returns a sampler reading the real host and keeping nothing: a
+// sample it cannot send is lost.
 func NewSampler() *Sampler {
 	return &Sampler{ProcRoot: "/proc", Now: time.Now, Statfs: statfsUsage, HelperPID: helperMainPID}
 }
 
-// NewSpooledSampler returns a sampler that keeps every reading until the
-// panel says it holds it.
-//
-// This is the one a host runs. A spool that cannot be opened - a state
-// directory that is not writable, a disk that is full - is not a reason to
-// stop sampling: the agent then reports as it did before, and the host
-// keeps its charts while the readings it cannot deliver are lost rather
-// than kept. The reason is logged once, here, where it can be acted on.
+// NewSpooledSampler returns a sampler that keeps every reading until the panel
+// says it holds it.
 func NewSpooledSampler(stateDir, bootID string, log *slog.Logger) *Sampler {
 	sampler := NewSampler()
 	spool, err := OpenMetricsSpool(stateDir, bootID, MetricsSpoolSize, log)
@@ -111,10 +91,7 @@ func NewSpooledSampler(stateDir, bootID string, log *slog.Logger) *Sampler {
 	return sampler
 }
 
-// Acknowledge drops the sample the panel says it holds. A sample that was
-// refused outright - too old to be stored at all - is dropped as well:
-// keeping a reading the panel will never take would push out the readings
-// it would.
+// Acknowledge drops the sample the panel says it holds.
 func (s *Sampler) Acknowledge(ack *agentv1.MetricsAck) {
 	if s.spool == nil {
 		return
@@ -123,9 +100,7 @@ func (s *Sampler) Acknowledge(ack *agentv1.MetricsAck) {
 }
 
 // SpoolDepth is how many samples wait for an acknowledgement; zero on a
-// sampler without a spool. The agent's own state file reports it, so
-// somebody on the host can see that the panel is not taking what it is
-// being sent.
+// sampler without a spool.
 func (s *Sampler) SpoolDepth() int {
 	if s.spool == nil {
 		return 0
@@ -134,10 +109,6 @@ func (s *Sampler) SpoolDepth() int {
 }
 
 // Run sends a sample every interval until the context ends.
-//
-// The CPU counters are primed at the start, so the first sample already
-// carries a percentage over a real interval rather than the average since
-// boot - which would say nothing about the host now.
 func (s *Sampler) Run(ctx context.Context, interval time.Duration,
 	send func(*agentv1.MetricsSample) error, log *slog.Logger) {
 	if interval <= 0 {
@@ -149,12 +120,8 @@ func (s *Sampler) Run(ctx context.Context, interval time.Duration,
 	// The agent's own counter is primed for the same reason; without it the
 	// first sample would carry no CPU figure for the agent at all.
 	s.readProcessCPU(filepath.Join(s.ProcRoot, "self", "stat"))
-	// What the panel never confirmed goes first, oldest first, before the
-	// reading this session is about to take. A chart is drawn in the order
-	// of the moments the samples carry, not the order they arrive in, but
-	// the rollup is cheaper when the late ones come in order, and the
-	// panel's refusal of anything too old is easier to read in the log
-	// when the oldest is what asked first.
+	// What the panel never confirmed goes first, oldest first, before the reading
+	// this session is about to take.
 	if !s.drain(send, log) {
 		return
 	}
@@ -166,16 +133,12 @@ func (s *Sampler) Run(ctx context.Context, interval time.Duration,
 		}
 		sample, err := s.SampleContext(ctx)
 		if err != nil {
-			// A host without a readable procfs is not a reason to end the
-			// session: the panel then shows the host without metrics, and the
-			// tasks keep flowing.
+			// A host without a readable procfs is not a reason to end the session: the
+			// panel then shows the host without metrics, and the tasks keep flowing.
 			log.Warn("the resource sample was not taken", "err", err)
 			continue
 		}
 		// The identity and the copy on disk come before the send, always.
-		// A sample that went out and was never written is the one a broken
-		// stream loses for good, and the counters it was read from have
-		// moved on by the time anybody notices.
 		if s.spool != nil {
 			if err := s.spool.Enqueue(sample); err != nil {
 				log.Warn("the resource sample was not kept for a resend", "err", err)
@@ -188,14 +151,7 @@ func (s *Sampler) Run(ctx context.Context, interval time.Duration,
 	}
 }
 
-// drain sends the samples the panel has not acknowledged. It says whether
-// the session is still worth sampling on: a send that failed here has
-// ended the stream, and the caller stops rather than taking a reading
-// nobody can receive.
-//
-// Nothing is deleted here. A sample leaves the spool when the panel says
-// it holds it and at no other moment, so a stream that breaks in the
-// middle of the drain costs a second delivery and never a reading.
+// drain sends the samples the panel has not acknowledged.
 func (s *Sampler) drain(send func(*agentv1.MetricsSample) error, log *slog.Logger) bool {
 	if s.spool == nil {
 		return true
@@ -242,9 +198,9 @@ func (s *Sampler) SampleContext(ctx context.Context) (*agentv1.MetricsSample, er
 	if err := s.readUptime(sample); err != nil {
 		return nil, err
 	}
-	// A mount that cannot be measured or an interface list that cannot be
-	// read leaves its list empty rather than failing the whole sample: the
-	// CPU and memory are still worth reporting.
+	// A mount that cannot be measured or an interface list that cannot be read
+	// leaves its list empty rather than failing the whole sample: the CPU and
+	// memory are still worth reporting.
 	sample.Filesystems = s.readFilesystems()
 	sample.Interfaces = s.readInterfaces()
 	// The agent's own footprint rides along; a value it could not read
@@ -285,9 +241,9 @@ func (s *Sampler) readCPU() (float64, error) {
 				return 0, fmt.Errorf("/proc/stat: %w", err)
 			}
 			current.total += value
-			// Idle (index 3) and iowait (index 4) are the time the CPU had
-			// nothing to do; everything else is work, steal included - a
-			// stolen CPU is a CPU the host does not have.
+			// Idle (index 3) and iowait (index 4) are the time the CPU had nothing to
+			// do; everything else is work, steal included - a stolen CPU is a CPU the
+			// host does not have.
 			if i != 3 && i != 4 {
 				current.busy += value
 			}
@@ -407,9 +363,7 @@ func (s *Sampler) readUptime(sample *agentv1.MetricsSample) error {
 	return nil
 }
 
-// readFilesystems lists the real filesystems with their usage. The last
-// mount on a path is the visible one, so a path mounted twice is reported
-// once, as the kernel shows it.
+// readFilesystems lists the real filesystems with their usage.
 func (s *Sampler) readFilesystems() []*agentv1.FilesystemSample {
 	file, err := os.Open(filepath.Join(s.ProcRoot, "mounts"))
 	if err != nil {

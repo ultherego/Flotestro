@@ -9,10 +9,7 @@ import (
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 )
 
-// TestAPanicInATaskDoesNotKillTheAgent guards the resilience barrier. An error
-// while handling one operation must not take the management of the host away:
-// the control plane would then see a broken session instead of information
-// about what went wrong.
+// TestAPanicInATaskDoesNotKillTheAgent guards the resilience barrier.
 func TestAPanicInATaskDoesNotKillTheAgent(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	task := &agentv1.TaskEnvelope{TaskId: "task-1"}

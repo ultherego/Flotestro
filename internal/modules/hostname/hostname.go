@@ -1,7 +1,5 @@
 // Package hostname holds the rules of renaming a host: what a name may look
-// like and how the entries of /etc/hosts follow the rename. The panel
-// validates an order with the same code the helper checks it with, so an
-// order the host would refuse is refused already when it is placed.
+// like and how the entries of /etc/hosts follow the rename.
 package hostname
 
 import (
@@ -13,9 +11,8 @@ import (
 // HostsPath is the file that maps names to addresses locally.
 const HostsPath = "/etc/hosts"
 
-// BackupPath keeps the content of /etc/hosts from before the first rename
-// by the panel. It is written once and never overwritten: the file from
-// before the panel touched anything is the one an administrator wants back.
+// BackupPath keeps the content of /etc/hosts from before the first rename by
+// the panel.
 const BackupPath = "/etc/hosts.flotestro-before"
 
 // maxLength is the limit the kernel sets on a hostname (HOST_NAME_MAX);
@@ -27,10 +24,6 @@ const maxLength = 64
 var label = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
 // Validate rejects a name that cannot be a hostname.
-//
-// Upper-case letters are refused rather than folded: hostnamectl would
-// lower them and the host would end up with a name other than the one the
-// operator approved. A trailing dot is refused for the same reason.
 func Validate(name string) error {
 	if name == "" {
 		return fmt.Errorf("the hostname is empty")
@@ -73,21 +66,13 @@ func Short(name string) string {
 
 // RewriteHosts replaces the old hostname with the new one in the entries of
 // /etc/hosts that name it.
-//
-// Only the name fields are touched, never the address and never a comment,
-// and only whole names are replaced: a host called "db" must not turn
-// "db-backup" into something else. The short forms of both names are
-// treated as well, because distributions write the short name next to the
-// full one on the same line. The rewrite is idempotent: content that no
-// longer names the old hostname comes back unchanged.
 func RewriteHosts(content, previous, current string) (string, bool) {
 	if previous == "" || previous == current {
 		return content, false
 	}
 	replacements := map[string]string{previous: current}
-	// The short form follows the long one: distributions write the short
-	// name next to the full one on the same line. A short old name is the
-	// full old name and is already covered.
+	// The short form follows the long one: distributions write the short name
+	// next to the full one on the same line.
 	if short := Short(previous); short != previous && Short(current) != short {
 		replacements[short] = Short(current)
 	}

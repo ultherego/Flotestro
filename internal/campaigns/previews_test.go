@@ -7,11 +7,9 @@ import (
 	"github.com/ultherego/flotestro/internal/selector"
 )
 
-// The binding is a promise about one picture of the fleet, so what it is
-// made of has to be exactly what changes it: the hosts, the selector, the
-// scopes, the identity. These tests hold that line, because a hash that
-// takes in too little lets a changed fleet pass and one that takes in too
-// much refuses an order that changed nothing.
+// The binding is a promise about one picture of the fleet, so what it is made
+// of has to be exactly what changes it: the hosts, the selector, the scopes,
+// the identity.
 
 func TestASetOfHostsHashesTheSameWhateverOrderItComesIn(t *testing.T) {
 	first := SnapshotHash([]string{"b", "a", "c"})

@@ -61,14 +61,8 @@ const (
 	ErrorTrustUntrusted = "trust_bundle_untrusted"
 )
 
-// TrustStore is the root-owned keyring and host identity on a host.
-//
-// The keys are files named <key_id>.pub in the directory, PEM public keys.
-// The identifier is derived from the key, never read from the name, so a
-// file cannot claim another key's identity. The host identifier is one
-// line in its own file. Both belong to root; the agent's user cannot write
-// them, so a compromised agent cannot make the helper trust a key of its
-// own.
+// TrustStore is the root-owned keyring and host identity on a host. The keys
+// are files named <key_id>.
 type TrustStore struct {
 	// Dir holds the key files. A missing directory is an empty keyring.
 	Dir string
@@ -86,10 +80,7 @@ const (
 	DefaultHostIDPath = "/var/lib/flotestro-helper/host-id"
 )
 
-// Keyring loads the keys. A file that is not a usable root-owned key is
-// skipped and named in the second value: an unusable key must not stop
-// the helper from honouring the usable ones, and must not be honoured
-// either.
+// Keyring loads the keys.
 func (t TrustStore) Keyring() (*Keyring, []string, error) {
 	entries, err := os.ReadDir(t.Dir)
 	if errors.Is(err, os.ErrNotExist) {
@@ -98,11 +89,9 @@ func (t TrustStore) Keyring() (*Keyring, []string, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	// The directory has to be root's as much as the files: a directory
-	// another user can write to is a directory that user can empty, and an
-	// emptied keyring must not become an opening. Such a directory is an
-	// error, not an empty keyring - every capability is refused until the
-	// operator fixes the ownership.
+	// The directory has to be root's as much as the files: a directory another
+	// user can write to is a directory that user can empty, and an emptied
+	// keyring must not become an opening.
 	if t.RequireRoot {
 		info, err := os.Stat(t.Dir)
 		if err != nil {
@@ -204,19 +193,8 @@ type TrustUpdate struct {
 	Bootstrap bool
 }
 
-// Apply replaces the keyring and the host identity with a bundle.
-//
-// The bundle has to be signed by a key the helper already trusts. The one
-// exception is a host with neither a keyring nor an identity: at
-// enrollment there is nothing to verify against, so the first bundle is
-// taken on trust, verified against a key it carries itself so at least a
-// damaged bundle is refused. From then on only the panel that signed the
-// first bundle can change the keys or the host identity - a rotation lists
-// the new key in a bundle signed by the old one. A key missing from the
-// bundle is removed: that is how a retired key stops being honoured. A
-// host with an identity but no keys is not taken back on trust: its keys
-// went away without the panel, and the operator restores them by hand
-// (a key file in the trust directory, or the identity file removed).
+// Apply replaces the keyring and the host identity with a bundle. The bundle
+// has to be signed by a key the helper already trusts.
 func (t TrustStore) Apply(bundle *helperv1.HelperTrustBundle) (*TrustUpdate, error) {
 	keys, err := checkBundle(bundle)
 	if err != nil {
@@ -289,12 +267,8 @@ func (t TrustStore) Apply(bundle *helperv1.HelperTrustBundle) (*TrustUpdate, err
 	return &TrustUpdate{HostID: bundle.GetHostId(), KeyIDs: ids, Changed: changed, Bootstrap: bootstrap}, nil
 }
 
-// Reset forgets the host identity and every trusted key, so the next
-// bundle is taken on trust again. It is the decision a root operator
-// takes when the host is enrolled afresh: the agent's identity is gone,
-// the panel that signed the old bundle may be gone with it, and what the
-// helper trusted belonged to that identity. Nothing but root can do it -
-// the files belong to root - and a failure leaves what is there.
+// Reset forgets the host identity and every trusted key, so the next bundle is
+// taken on trust again.
 func (t TrustStore) Reset() error {
 	if err := os.Remove(t.HostIDPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err

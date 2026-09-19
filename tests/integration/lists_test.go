@@ -25,10 +25,9 @@ type hostPage struct {
 	NextCursor string       `json:"next_cursor"`
 }
 
-// TestHostSearchFindsAHostByFragmentAndAddress checks that the search runs
-// in the database: a fragment of the name and the management address both
-// find the lab host, and the total says how many hosts match rather than
-// how many fit on the page.
+// TestHostSearchFindsAHostByFragmentAndAddress checks that the search runs in
+// the database: a fragment of the name and the management address both find
+// the lab host, and the total says how many hosts match rather than how many
 func TestHostSearchFindsAHostByFragmentAndAddress(t *testing.T) {
 	h := newHarness(t)
 	var fleet hostPage
@@ -71,9 +70,9 @@ func TestHostSearchFindsAHostByFragmentAndAddress(t *testing.T) {
 	}
 }
 
-// TestHostListPagesWithTheCursor walks the fleet one host per page and
-// checks that the pages neither overlap nor skip: together they are the
-// whole list, in the same order.
+// TestHostListPagesWithTheCursor walks the fleet one host per page and checks
+// that the pages neither overlap nor skip: together they are the whole list,
+// in the same order.
 func TestHostListPagesWithTheCursor(t *testing.T) {
 	h := newHarness(t)
 	var whole hostPage
@@ -118,9 +117,9 @@ type jobPage struct {
 	NextCursor string    `json:"next_cursor"`
 }
 
-// TestJobListFiltersByActionAndPages orders two reads and checks that the
-// list narrowed to that operation holds only such tasks, newest first, and
-// pages by the cursor without repeating a task.
+// TestJobListFiltersByActionAndPages orders two reads and checks that the list
+// narrowed to that operation holds only such tasks, newest first, and pages by
+// the cursor without repeating a task.
 func TestJobListFiltersByActionAndPages(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -194,8 +193,8 @@ type auditPage struct {
 }
 
 // TestAuditListFiltersByAction checks that the trail narrowed to one action
-// holds only that action, that ordering a task leaves a fresh event in it
-// and that the pages follow the cursor.
+// holds only that action, that ordering a task leaves a fresh event in it and
+// that the pages follow the cursor.
 func TestAuditListFiltersByAction(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -236,10 +235,7 @@ func TestAuditListFiltersByAction(t *testing.T) {
 
 // TestHostAuditTrailFiltersAndPages checks that the trail of one host takes
 // the filters of the fleet trail and pages the same way: the host tab asks
-// "the job events on this host" by the family of the action, every event
-// on the page concerns that host, and a further page holds older events
-// than the last one of the first. The action family is a prefix, because
-// an operator narrows to job. and does not know the full list of actions.
+// "the job events on this host" by the family of the action, every event on
 func TestHostAuditTrailFiltersAndPages(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -301,10 +297,8 @@ func TestHostAuditTrailFiltersAndPages(t *testing.T) {
 	h.awaitTerminal(job.ID, 60*time.Second)
 }
 
-// TestFleetSummaryCarriesAttentionCounters checks that the dashboard
-// counters are numbers computed on the server. A counter the panel cannot
-// answer is allowed to be missing; one that is present has to be a
-// non-negative number and agree with the size of the fleet.
+// TestFleetSummaryCarriesAttentionCounters checks that the dashboard counters
+// are numbers computed on the server.
 func TestFleetSummaryCarriesAttentionCounters(t *testing.T) {
 	h := newHarness(t)
 	var summary struct {

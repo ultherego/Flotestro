@@ -11,18 +11,16 @@ import (
 )
 
 // The timers are tested on the Arch host: it runs systemd and, unlike the
-// Debian hosts, has no /etc/cron.d, so it is the host where a managed entry
-// has nowhere to go until timers can be written.
+// Debian hosts, has no /etc/cron.
 const timerReason = "integration test of the managed systemd timers"
 
-// unitDirectory is where a managed timer lives. The agent's own service
-// unit lives there too, which is what makes it the file to prove ownership
-// against.
+// unitDirectory is where a managed timer lives. The agent's own service unit
+// lives there too, which is what makes it the file to prove ownership against.
 const unitDirectory = "/etc/systemd/system/"
 
-// TestManagedTimerLifecycle walks the whole path of a timer the panel
-// writes: the pair of units on the host, the runs systemd computes for it,
-// the same order once more changing nothing, and the removal.
+// TestManagedTimerLifecycle walks the whole path of a timer the panel writes:
+// the pair of units on the host, the runs systemd computes for it, the same
+// order once more changing nothing, and the removal.
 func TestManagedTimerLifecycle(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("arch")
@@ -55,9 +53,9 @@ func TestManagedTimerLifecycle(t *testing.T) {
 	if entry.Kind != "timer" || entry.Source != "managed" || !entry.Enabled {
 		t.Fatalf("the entry after the write = %+v", entry)
 	}
-	// The entry reads back in the language the operator typed it in, and
-	// the units it lives in are named: the operator has to know where to
-	// look when the panel cannot do something.
+	// The entry reads back in the language the operator typed it in, and the
+	// units it lives in are named: the operator has to know where to look when
+	// the panel cannot do something.
 	if entry.Expression != "15 3 * * *" {
 		t.Errorf("the entry runs on %q, want the expression it was ordered with", entry.Expression)
 	}
@@ -78,9 +76,8 @@ func TestManagedTimerLifecycle(t *testing.T) {
 		}
 	}
 
-	// The same order again is the same state: nothing is written and
-	// systemd is not reloaded. An order is a declaration, not a command to
-	// write a file.
+	// The same order again is the same state: nothing is written and systemd is
+	// not reloaded.
 	job, attempts = h.runOperation(host.ID, order, 120*time.Second)
 	if job.State != "succeeded" {
 		t.Fatalf("writing the timer again: state = %s, %s", job.State, lastMessage(attempts))
@@ -103,18 +100,9 @@ func TestManagedTimerLifecycle(t *testing.T) {
 	}
 }
 
-// TestAnEntryNamedAfterTheProductCannotTouchItsUnits is the ownership
-// boundary of the mechanism, and it is drawn by the namespace rather than
-// by a check that could be got around.
-//
-// /etc/systemd/system is the directory systemd prefers over the one a
-// package installs into, so a managed entry written under the product's
-// own unit name would not collide with the agent's unit - it would shadow
-// it, and the host would lose its agent at the next reload with nothing to
-// say so. A managed entry therefore writes flotestro-entry-<id>, which no
-// identifier an operator can type turns into a unit of the product; the
-// entry called "agent" is written, read back under that name, and the
-// agent goes on running from its own unit.
+// TestAnEntryNamedAfterTheProductCannotTouchItsUnits is the ownership boundary
+// of the mechanism, and it is drawn by the namespace rather than by a check
+// that could be got around.
 func TestAnEntryNamedAfterTheProductCannotTouchItsUnits(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("arch")
@@ -158,10 +146,8 @@ func TestAnEntryNamedAfterTheProductCannotTouchItsUnits(t *testing.T) {
 	h.awaitConnection(host.ID, 60*time.Second)
 }
 
-// TestTheMechanismIsAVisibleDecision checks what a host without /etc/cron.d
-// answers to an order that does not name a mechanism. The order means what
-// it always meant - a cron entry - and the refusal names the directory the
-// host does not have and the mechanism it does.
+// TestTheMechanismIsAVisibleDecision checks what a host without /etc/cron. d
+// answers to an order that does not name a mechanism.
 func TestTheMechanismIsAVisibleDecision(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("arch")
@@ -279,10 +265,8 @@ func TestTheTimerPlanSaysWhatWouldBeWritten(t *testing.T) {
 		t.Errorf("the service unit names no account:\n%s", preview.Units[1].Content)
 	}
 
-	// Cron runs a job when the day of the month or the day of the week
-	// matches, systemd only when both do. Such an expression means two
-	// different things on the two mechanisms, so the panel writes neither -
-	// and says so before the order becomes a job.
+	// Cron runs a job when the day of the month or the day of the week matches,
+	// systemd only when both do.
 	_, body := h.request(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 		map[string]any{"action": "schedule.ensure", "reason": timerReason,
 			"payload": map[string]any{"schedule": map[string]any{

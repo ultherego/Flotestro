@@ -13,17 +13,13 @@ import (
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 )
 
-// The SSSD configuration and its drop-in directory. The main file is readable
-// by root only, which is the whole reason this parser lives in the helper and
-// not in the agent.
+// The SSSD configuration and its drop-in directory.
 const (
 	sssdConfPath      = "/etc/sssd/sssd.conf"
 	sssdConfDropInDir = "/etc/sssd/conf.d"
 )
 
 // The defaults SSSD applies when a key is absent from the domain section.
-// They are facts about SSSD, not measurements, so a value taken from here is
-// always named in Defaulted.
 const (
 	sssdDefaultCacheCredentials       = false
 	sssdDefaultOfflineExpirationDays  = uint32(0)
@@ -32,8 +28,7 @@ const (
 )
 
 // sssdOfflinePolicy is the parsed offline behaviour of one SSSD domain. A nil
-// field is a value that could not be read; the reason says why. The panel
-// judges what the values mean, the helper only reports them.
+// field is a value that could not be read; the reason says why.
 type sssdOfflinePolicy struct {
 	CacheCredentials                 *bool
 	OfflineCredentialsExpirationDays *uint32
@@ -46,9 +41,8 @@ type sssdOfflinePolicy struct {
 	UnavailableReason string
 }
 
-// readSSSDOfflinePolicy reads the offline policy of the domain from the
-// system configuration. Nothing is executed: the file says what SSSD would
-// do, and that is the fact the panel needs.
+// readSSSDOfflinePolicy reads the offline policy of the domain from the system
+// configuration.
 func readSSSDOfflinePolicy(domain string) sssdOfflinePolicy {
 	return parseSSSDOfflinePolicy(domain, sssdConfPath, sssdConfDropInDir)
 }
@@ -118,9 +112,7 @@ func parseSSSDOfflinePolicy(domain, mainPath, dropInDir string) sssdOfflinePolic
 }
 
 // readSSSDDomainSection collects the keys of the domain section across the
-// main file and the drop-ins. A missing main file is an error - SSSD without
-// a configuration is not a domain client - while a missing drop-in
-// directory is the ordinary case.
+// main file and the drop-ins.
 func readSSSDDomainSection(domain, mainPath, dropInDir string) (map[string]string, bool, error) {
 	section := map[string]string{}
 	found, err := mergeSSSDDomainSection(section, domain, mainPath)
@@ -165,9 +157,8 @@ func sssdDropIns(dir string) []string {
 	return paths
 }
 
-// mergeSSSDDomainSection adds the keys of [domain/<name>] from one file to
-// the map, later files overriding earlier ones. The section name is compared
-// without regard to case: SSSD treats domain names that way.
+// mergeSSSDDomainSection adds the keys of [domain/<name>] from one file to the
+// map, later files overriding earlier ones.
 func mergeSSSDDomainSection(into map[string]string, domain, path string) (bool, error) {
 	file, err := os.Open(path)
 	if err != nil {

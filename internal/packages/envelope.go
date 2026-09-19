@@ -183,7 +183,7 @@ func (p Plan) RepositoryIDs() []string {
 
 // exactSpec spells one element the way the manager takes an exact version on
 // its command line: name=version for apt (with the architecture where the plan
-// names one, so a foreign-architecture package is not resolved to the native
+// names one, so a foreign-architecture package is not resolved to the native.
 func exactSpec(manager string, change Change) string {
 	if change.Action == ActionRemove {
 		return change.Name
@@ -241,7 +241,7 @@ func lockPathsOf(manager string) []string {
 
 // finishPlan completes what every manager's plan shares: the header from the
 // options, the planner's own version, the metadata revision the plan was read
-// against, the direction and the flags of every element, and the rollback
+// against, the direction and the flags of every element, and the rollback.
 func finishPlan(ctx context.Context, manager Manager, p Plan, options Options) Plan {
 	p.SchemaVersion = plan.SchemaVersion
 	p.PlannerVersion = PlannerVersion
@@ -295,7 +295,7 @@ func finishPlan(ctx context.Context, manager Manager, p Plan, options Options) P
 	}
 	// The removals of the older shape become elements of the plan: a removal plan
 	// whose only content was its list of removals read as "nothing to change",
-	// and a dependency that goes away is exactly what the operator approves or
+	// and a dependency that goes away is exactly what the operator approves or.
 	for _, name := range p.Removals {
 		if hasChange(p.Changes, name) {
 			continue

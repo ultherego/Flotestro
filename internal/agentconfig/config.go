@@ -1,17 +1,5 @@
-// Package agentconfig reads the agent's configuration from a YAML file.
-//
-// The file is the canonical source of the host's settings. Environment
-// variables and flags remain only as a limited override for images and tests.
-//
-// The parser is strict on purpose. A typo in a field name must not end in a
-// silent start with a default setting: the host would then look configured
-// while connecting somewhere else or nowhere at all. Every error has its own
-// code, because that is what reaches diagnostics on a host without a panel.
-//
-// What is not in this file and will not be: the enrollment token and the
-// identity. The token is a single-use secret and must not lie in a file that
-// survives a package upgrade; the host's identity comes from its certificate
-// rather than from text anyone can copy.
+// Package agentconfig reads the agent's configuration from a YAML file. The
+// file is the canonical source of the host's settings.
 package agentconfig
 
 import (
@@ -63,8 +51,7 @@ type Agent struct {
 	StateDir     string `yaml:"state_dir"`
 	InventoryRaw string `yaml:"inventory_interval"`
 	// MaxRaw is a pointer so as to tell "there is no entry" from "zero was
-	// written". A missing entry takes the default value, and an explicit zero
-	// is an error: an agent that runs no task at all is not an agent.
+	// written".
 	MaxRaw *int `yaml:"max_concurrent_tasks"`
 	// The "read_only" mode does not start the helper: the host is then
 	// observed rather than managed.
@@ -85,9 +72,7 @@ const (
 	ModeReadOnly = "read_only"
 )
 
-// The configuration error codes. They are part of the contract with the
-// operator: they are what shows up on a host that has no connection with the
-// panel yet.
+// The configuration error codes.
 var (
 	ErrOpen             = errors.New("config_open")
 	ErrDecode           = errors.New("config_decode")
@@ -124,9 +109,7 @@ func Defaults() Config {
 	}
 }
 
-// Load reads and checks the configuration from a file. The file read
-// becomes the one Current reports, so the session can tell the panel what
-// the host runs on.
+// Load reads and checks the configuration from a file.
 func Load(path string) (Config, error) {
 	file, err := os.Open(filepath.Clean(path))
 	if err != nil {
@@ -144,9 +127,8 @@ func Load(path string) (Config, error) {
 // Read reads the configuration from a stream.
 func Read(source io.Reader) (Config, error) {
 	decoder := yaml.NewDecoder(io.LimitReader(source, MaxSize))
-	// An unknown field is an error rather than a detail: "gateway_url"
-	// instead of "gateway_urls" would leave the agent without an address and
-	// without a word.
+	// An unknown field is an error rather than a detail: "gateway_url" instead of
+	// "gateway_urls" would leave the agent without an address and without a word.
 	decoder.KnownFields(true)
 
 	var cfg Config
@@ -154,8 +136,7 @@ func Read(source io.Reader) (Config, error) {
 		return Config{}, fmt.Errorf("%w: %v", ErrDecode, err)
 	}
 	// A second document in the file means somebody added configuration after
-	// "---" and is convinced it works. It does not - and they have to see
-	// that.
+	// "---" and is convinced it works.
 	var extra any
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		if err == nil {
@@ -290,11 +271,6 @@ func reconnectRange(value time.Duration) error {
 }
 
 // httpsAddress guards that an address is what it looks like.
-//
-// Without HTTPS the whole bootstrap of trust is make-believe, and userinfo, a
-// query and a fragment in the panel's address mean nothing beyond somebody
-// having pasted the wrong thing - or trying to smuggle credentials into the
-// logs.
 func httpsAddress(name, raw string) error {
 	address, err := url.Parse(raw)
 	if err != nil || address.Scheme != "https" || address.Host == "" {
@@ -307,12 +283,6 @@ func httpsAddress(name, raw string) error {
 }
 
 // CheckBootstrapCA guards that the named CA bundle is an ordinary file.
-//
-// Separate from the rest of the validation, because it touches the
-// filesystem: the configuration parser has to work also when we check a file
-// from another machine. A symlink leading into a directory writable by anyone
-// is dangerous here: replacing the CA bundle means replacing the host's whole
-// trust.
 func (c Config) CheckBootstrapCA() error {
 	if c.Connection.BootstrapCA == "" {
 		return nil

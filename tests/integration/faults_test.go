@@ -2,35 +2,9 @@
 
 package integration
 
-// Fault injection from chapter 23 of the architecture document: the panel
-// goes away while a job runs, the link to a host is cut while a job runs,
-// and a lease runs out on an attempt nobody will ever finish.
-//
-// These tests need more than the API. Besides the variables of the harness
-// (FLOTESTRO_TEST_TOKEN, FLOTESTRO_TEST_API, FLOTESTRO_TEST_DATABASE_URL,
-// FLOTESTRO_TEST_GATEWAY) they read:
-//
-//   - FLOTESTRO_TEST_CONTROL_PLANE_UNIT - the systemd unit of the control
-//     plane on the machine the tests run on. Set, it says the tests run as
-//     root on the panel itself and may restart the unit and add nft rules.
-//     Empty, the tests that need it skip.
-//
-// What the product promises here, as read from the code:
-//
-//   - A task runs under the context of the session that delivered it
-//     (internal/agent/session.go: executeTask(sessionCtx, ...)). A session
-//     that breaks ends the task; the end of a journal preview is a success
-//     ("the preview ended"). The result is written to the idempotency
-//     journal before it is sent, and a failed send is only logged.
-//   - Nothing on the panel closes an attempt when its session dies. The
-//     lease is the only signal (internal/jobs/store.go ReclaimExpiredLeases:
-//     "time is the only certain signal that an attempt failed"); it lasts
-//     five minutes (cmd/control-plane/main.go) and the scheduler reclaims it
-//     in a housekeeping pass every 30 s. The reclaimed attempt is marked
-//     lease_expired and the job goes back to the queue; the next delivery is
-//     answered from the journal with replayed = true.
-//   - A job stays "dispatched" while the agent works: no code path moves it
-//     to "running". The tests wait for either.
+// Fault injection from chapter 23 of the architecture document: the panel goes
+// away while a job runs, the link to a host is cut while a job runs, and a
+// lease runs out on an attempt nobody will ever finish.
 
 import (
 	"context"
@@ -46,16 +20,11 @@ import (
 )
 
 // leaseRecoveryBound is how long a lost result may take to reach the panel:
-// the five-minute lease, the housekeeping pass that reclaims it, the
-// dispatch pass that redelivers it and a margin for the agent.
+// the five-minute lease, the housekeeping pass that reclaims it, the dispatch
+// pass that redelivers it and a margin for the agent.
 const leaseRecoveryBound = 7 * time.Minute
 
-// linkCutDuration is how long the link stays black-holed. It must exceed
-// the only liveness check on the link: the agent's HTTP/2 client pings
-// after 30 s without a frame and gives up 15 s later (newHTTP2Client in
-// internal/agent/session.go); the gateway itself has no keepalive and the
-// heartbeat is 60 s with a 30 s jitter. Anything shorter is a hiccup TCP
-// retransmission papers over, and the session would never be reopened.
+// linkCutDuration is how long the link stays black-holed.
 const linkCutDuration = 60 * time.Second
 
 // nftTable is the throwaway table the link cut lives in. A table of its own
@@ -63,8 +32,8 @@ const linkCutDuration = 60 * time.Second
 const nftTable = "flotestro_test"
 
 // controlPlaneUnit returns the systemd unit of the control plane or skips:
-// restarting the panel and filtering its traffic need root on the panel,
-// and only the lab script knows whether that is where the tests run.
+// restarting the panel and filtering its traffic need root on the panel, and
+// only the lab script knows whether that is where the tests run.
 func controlPlaneUnit(t *testing.T) string {
 	t.Helper()
 	unit := os.Getenv("FLOTESTRO_TEST_CONTROL_PLANE_UNIT")
@@ -80,10 +49,8 @@ func controlPlaneUnit(t *testing.T) string {
 	return unit
 }
 
-// journalFollow orders a live preview that keeps the agent busy for the
-// given number of seconds. A long read is the honest way to have a job in
-// flight when the fault strikes: it changes nothing on the host, so the
-// test may be repeated freely, and its end is a success either way.
+// journalFollow orders a live preview that keeps the agent busy for the given
+// number of seconds.
 func journalFollow(seconds int) map[string]any {
 	return map[string]any{
 		"action": "journal.follow",
@@ -103,10 +70,8 @@ func openSession(ctx context.Context, pool *pgxpool.Pool, hostID string) (id, re
 	return id, remoteAddr, err == nil
 }
 
-// awaitNewSession waits until the host has a live session other than the
-// one it had before the fault. The API alone would not do: after a restart
-// the panel keeps saying "online" until the host either comes back or goes
-// stale, so only a new row proves the agent reconnected.
+// awaitNewSession waits until the host has a live session other than the one
+// it had before the fault.
 func awaitNewSession(ctx context.Context, t *testing.T, pool *pgxpool.Pool,
 	hostID, previous string, limit time.Duration) string {
 	t.Helper()
@@ -132,9 +97,9 @@ func sessionEnd(ctx context.Context, pool *pgxpool.Pool, sessionID string) strin
 	return reason
 }
 
-// assertReplayedFromTheJournal checks the shape of a job whose first
-// attempt lost its session: the first attempt was reclaimed by the lease,
-// the last one carries the stored result and says so.
+// assertReplayedFromTheJournal checks the shape of a job whose first attempt
+// lost its session: the first attempt was reclaimed by the lease, the last one
+// carries the stored result and says so.
 func assertReplayedFromTheJournal(t *testing.T, attempts []attemptView) {
 	t.Helper()
 	if len(attempts) < 2 {
@@ -152,13 +117,8 @@ func assertReplayedFromTheJournal(t *testing.T, attempts []attemptView) {
 	}
 }
 
-// TestThePanelRestartsWhileAJobRuns restarts the control plane with a
-// preview in flight on one host.
-//
-// The promise: the fleet comes back on its own, the host takes new work
-// straight away, and the job in flight is not lost - the agent kept its
-// result in the journal and the panel, after the lease ran out, asked for
-// it again and got the stored answer rather than a second execution.
+// TestThePanelRestartsWhileAJobRuns restarts the control plane with a preview
+// in flight on one host.
 func TestThePanelRestartsWhileAJobRuns(t *testing.T) {
 	unit := controlPlaneUnit(t)
 	h := newHarness(t)
@@ -193,17 +153,17 @@ func TestThePanelRestartsWhileAJobRuns(t *testing.T) {
 	}
 	h.awaitHealthy(90 * time.Second)
 
-	// The agents reconnect with a backoff that doubles from 2 s with full
-	// jitter (internal/endpoints), so a few refused dials while the panel was
-	// away add up to about a minute.
+	// The agents reconnect with a backoff that doubles from 2 s with full jitter
+	// (internal/endpoints), so a few refused dials while the panel was away add
+	// up to about a minute.
 	for hostID, previous := range before {
 		awaitNewSession(ctx, t, pool, hostID, previous, 3*time.Minute)
 		h.awaitConnection(hostID, 30*time.Second)
 	}
 
 	// New work on the same host goes through while the old attempt is still
-	// waiting for its lease to run out: the two are different jobs and the
-	// agent does not hold one behind the other.
+	// waiting for its lease to run out: the two are different jobs and the agent
+	// does not hold one behind the other.
 	status, _ := h.runOperation(host.ID, map[string]any{
 		"action":  "unit.status",
 		"payload": map[string]any{"unit_status": map[string]any{"units": []string{"systemd-journald.service"}}},
@@ -223,9 +183,6 @@ func TestThePanelRestartsWhileAJobRuns(t *testing.T) {
 }
 
 // linkCut black-holes the traffic of one host to the gateway on the panel.
-//
-// A drop, not a reject: a WAN that goes away answers nothing, and the point
-// is to see what the product does when nobody tells it the link is gone.
 type linkCut struct {
 	t   *testing.T
 	nft string
@@ -264,21 +221,6 @@ func (c *linkCut) restore() {
 
 // TestAResultSurvivesALinkCut cuts the link between agent-debian and the
 // gateway while a preview runs on it, long enough for the agent to notice.
-//
-// What was found in the code and is asserted here: the agent, not the
-// gateway, notices the dead link (HTTP/2 ping, about 45 s), ends the preview
-// with a success, stores the result in its journal and fails to send it.
-// It then reconnects, and the new session supersedes the old row. The
-// panel learns nothing from the cut itself: the attempt stays open until
-// the lease runs out, is reclaimed, and the redelivery is answered from
-// the journal with replayed = true.
-//
-// One race is left to the kernel and accepted: the agent closes its socket
-// with the result still in the send queue, and Linux keeps retransmitting
-// an orphaned socket. If that retransmission lands before the new session
-// supersedes the old one, the result reaches the first attempt directly and
-// there is nothing to redeliver. Both endings keep the result; the test
-// accepts both and says which one it saw.
 func TestAResultSurvivesALinkCut(t *testing.T) {
 	controlPlaneUnit(t)
 	nft := nftPath()
@@ -367,19 +309,6 @@ func TestAResultSurvivesALinkCut(t *testing.T) {
 // TestAnExpiredLeaseIsReclaimedByTheScheduler leaves the reclaim to the
 // scheduler's housekeeping instead of putting the job back in the queue by
 // hand, which is what TestRedeliveryDoesNotRepeatTheMutation does.
-//
-// The mutation is real and finished on the host; what is simulated is the
-// panel's picture after a gateway crashed holding the lease: the attempt
-// still open, its lease in the past, the job still handed over. A live link
-// cannot produce that picture - the result arrives within a second of the
-// mutation, and a redelivery that reaches the agent while it is still
-// working is acknowledged as in progress rather than replayed - so the rows
-// are set to it directly, and from there the product is on its own.
-//
-// The promise: ReclaimExpiredLeases marks the attempt lease_expired and
-// returns the job to the queue, the scheduler redelivers it, and the agent
-// answers from its journal with replayed = true, so the service is not
-// restarted a second time.
 func TestAnExpiredLeaseIsReclaimedByTheScheduler(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

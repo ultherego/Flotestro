@@ -14,9 +14,6 @@ import (
 
 // factNames translates the protocol enumeration into the fact names of the
 // module.
-//
-// The translation exists so that the helper does not accept an arbitrary
-// string: the scope of its work is a closed list, not a text from the agent.
 var factNames = map[helperv1.SecurityRequest_Fact]string{
 	helperv1.SecurityRequest_FACT_APPARMOR_PROFILES: security.FactAppArmorProfiles,
 	helperv1.SecurityRequest_FACT_AUDIT_RULES:       security.FactAuditRules,
@@ -58,11 +55,6 @@ func securityGuard(operation helperv1.SecurityRequest_Operation) string {
 }
 
 // collectFacts reads only the facts the agent asked for.
-//
-// The module does not go through root as a whole: most of the picture the agent
-// reads on its own, and only what cannot be seen without root lands here - the
-// AppArmor profiles in securityfs, the audit rules, the EFI variable and the
-// owners of sockets.
 func collectFacts(ctx context.Context, requested []helperv1.SecurityRequest_Fact) *helperv1.HelperResponse {
 	if len(requested) == 0 {
 		return reject(ErrorMalformed, "the order names no fact")
@@ -113,8 +105,7 @@ func setMACMode(ctx context.Context, mode string) *helperv1.HelperResponse {
 	}
 
 	// A change made on the spot does not survive a restart, so it is written to
-	// the configuration as well. The panel changes one line and does not rewrite
-	// the rest of the file.
+	// the configuration as well.
 	message := "the mode " + mode + " applies from now on"
 	if err := writeModeToConfiguration(mode); err != nil {
 		message += "; it was not written to the configuration (" + err.Error() +
@@ -141,10 +132,6 @@ func setMACMode(ctx context.Context, mode string) *helperv1.HelperResponse {
 }
 
 // reloadRules loads the audit rules from the files into the kernel.
-//
-// It goes through augenrules and not through a restart of the unit: auditd on
-// some distributions has RefuseManualStop and a restart ends in a refusal that
-// looks like a panel error while it is a distribution policy.
 func reloadRules(ctx context.Context) *helperv1.HelperResponse {
 	if !exists(security.AugenrulesPath) {
 		return reject(ErrorUnsupported, "this host has no augenrules tool")

@@ -40,8 +40,7 @@ func listHostsBy(t *testing.T, h *harness, query url.Values) []attentionHostView
 }
 
 // versionParts reads an agent version the way the database orders it:
-// numerically, part by part. The second result is false for a version
-// that does not parse, which the filters leave out.
+// numerically, part by part.
 func versionParts(version string) ([]int, bool) {
 	version = strings.TrimPrefix(version, "v")
 	if version == "" {
@@ -75,11 +74,9 @@ func compareParts(a, b []int) int {
 	return len(a) - len(b)
 }
 
-// TestHostListAttentionFiltersKeepOnlyTheHostsTheyName guards the filters
-// the dashboard tiles link with: each keeps every host that satisfies it
-// and no host that does not, a value that matches nothing gives an empty
-// list rather than an error, and a value that is not a valid filter is
-// refused as the request's fault.
+// TestHostListAttentionFiltersKeepOnlyTheHostsTheyName guards the filters the
+// dashboard tiles link with: each keeps every host that satisfies it and no
+// host that does not, a value that matches nothing gives an empty list rather
 func TestHostListAttentionFiltersKeepOnlyTheHostsTheyName(t *testing.T) {
 	h := newHarness(t)
 	fleet := listHostsBy(t, h, url.Values{})
@@ -132,9 +129,9 @@ func TestHostListAttentionFiltersKeepOnlyTheHostsTheyName(t *testing.T) {
 		return host.Identity.Enrolled && host.Identity.SSSDOnline != nil && *host.Identity.SSSDOnline
 	})
 
-	// The yardstick of "behind" is the newest version the fleet reports,
-	// as the dashboard counts it; a host whose version does not parse is
-	// on neither list.
+	// The yardstick of "behind" is the newest version the fleet reports, as the
+	// dashboard counts it; a host whose version does not parse is on neither
+	// list.
 	var newest []int
 	for _, host := range fleet {
 		if host.LifecycleState == "retired" {
@@ -162,9 +159,8 @@ func TestHostListAttentionFiltersKeepOnlyTheHostsTheyName(t *testing.T) {
 		return ok && compareParts(parts, newest) == 0
 	})
 
-	// The relay filter follows the open sessions, not the hosts: a host is
-	// behind the relay only while its session says so. A fleet without a
-	// relay skips this part alone, not the whole test.
+	// The relay filter follows the open sessions, not the hosts: a host is behind
+	// the relay only while its session says so.
 	ctx := context.Background()
 	var relayID string
 	if err := h.database(ctx).QueryRow(ctx, `
@@ -194,9 +190,9 @@ func TestHostListAttentionFiltersKeepOnlyTheHostsTheyName(t *testing.T) {
 		t.Errorf("a relay that does not exist attests %d hosts", len(stray))
 	}
 
-	// The failure domain is what an operator recorded; one host placed in
-	// a rack of its own is the whole answer for that rack, and a rack
-	// nobody named is empty.
+	// The failure domain is what an operator recorded; one host placed in a rack
+	// of its own is the whole answer for that rack, and a rack nobody named is
+	// empty.
 	placed := h.placeInFailureDomain(fleet[0].ID, "integration-filter-rack")
 	byDomain := listHostsBy(t, h, url.Values{"failure_domain": {"integration-filter-rack"}})
 	if len(byDomain) != 1 || byDomain[0].ID != placed.ID {
@@ -221,9 +217,8 @@ func TestHostListAttentionFiltersKeepOnlyTheHostsTheyName(t *testing.T) {
 }
 
 // TestFleetSummaryCountsTheDecisionsWaiting guards the counters behind the
-// dashboard's "waiting for approval" tile and the sidebar's badges: the
-// global test identity may read every list they count, so every counter is
-// present, and each agrees with the list it leads to.
+// dashboard's "waiting for approval" tile and the sidebar's badges: the global
+// test identity may read every list they count, so every counter is present,
 func TestFleetSummaryCountsTheDecisionsWaiting(t *testing.T) {
 	h := newHarness(t)
 	var summary struct {

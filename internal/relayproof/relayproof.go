@@ -1,20 +1,6 @@
 // Package relayproof is the host's own proof on a path that goes through a
-// relay: the inner identity envelope, the renewal proof bound to the old
-// key, and the sealing of a secret to a one-time key of the host.
-//
-// A relay is a buffer and a gate of its site. It proves itself in its own
-// handshake, but the certificate it presents to the centre describes the
-// relay, not the host it forwards for - so without more the centre would
-// take the relay's word for whose message it carries. The envelope closes
-// that gap without taking anything from the relay: the agent signs the
-// identity of the session, a sequence number and the digest of the payload
-// with its host key, and the gateway checks the signature against the
-// public key of the certificate on record. The relay can forward the word
-// of the host, but it cannot speak for it.
-//
-// The package is shared: the agent signs with it, the relay carries what it
-// produces untouched, the gateway verifies with it, and the tests of every
-// side drive the same code.
+// relay: the inner identity envelope, the renewal proof bound to the old key,
+// and the sealing of a secret to a one-time key of the host.
 package relayproof
 
 import (
@@ -42,39 +28,28 @@ import (
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 )
 
-// SchemaVersion is the layout of the envelope this release signs and
-// verifies. It is the "v2" of relay.identity.v2: the first relay identity
-// was the relay's attestation in the headers, without the host's own
-// signature.
+// SchemaVersion is the layout of the envelope this release signs and verifies.
+// It is the "v2" of relay.
 const SchemaVersion uint32 = 2
 
-// The capability an agent announces in Hello when it signs the envelope,
-// and its feature. The panel reads them from the registry of the host; a
-// host without the feature behind a relay is one to upgrade before the
-// installation can require the envelope.
+// The capability an agent announces in Hello when it signs the envelope, and
+// its feature.
 const (
 	Capability = "relay.identity"
 	Feature    = "v2"
 )
 
-// NonceSize is the length of the nonce of an envelope. Sixteen random
-// bytes make two envelopes with the same sequence tell apart, which the
-// signature alone would not once the payload repeats.
+// NonceSize is the length of the nonce of an envelope.
 const NonceSize = 16
 
 // ChallengeSize is the length of the renewal challenge the panel issues.
 const ChallengeSize = 32
 
-// ChallengeTTL is how long a renewal challenge is good for. Long enough for
-// the host to sign and send, short enough that a challenge left in the
-// database means nothing to anyone.
+// ChallengeTTL is how long a renewal challenge is good for.
 const ChallengeTTL = 120 * time.Second
 
-// UnaryWindow is how far the issued_at of an envelope on a renewal or a
-// secret fetch may lie from the panel's clock. A stream message has no
-// window - a result the relay buffered for a day is still the host's
-// result - but a renewal or a lease is a short act, and an old envelope
-// replayed on one of them buys nothing.
+// UnaryWindow is how far the issued_at of an envelope on a renewal or a secret
+// fetch may lie from the panel's clock.
 const UnaryWindow = 5 * time.Minute
 
 // The kinds of the unary requests. A stream message takes its kind from
@@ -84,14 +59,12 @@ const (
 	KindFetchSecret      = "fetch_secret"
 )
 
-// Sealing names the scheme a relayed secret is sealed with. The host checks
-// the word before it opens anything: a scheme it does not know is a value
-// it cannot read, not a value to guess at.
+// Sealing names the scheme a relayed secret is sealed with.
 const Sealing = "x25519-hkdf-sha256-aes256gcm"
 
 // The domain prefixes keep the signatures of this package apart from every
-// other use of the host key - a certificate request, a capability - and
-// from each other.
+// other use of the host key - a certificate request, a capability - and from
+// each other.
 const (
 	envelopePrefix  = "flotestro-relay-envelope/2\n"
 	ephemeralPrefix = "flotestro-secret-seal-key/1\n"
@@ -101,29 +74,24 @@ const (
 // The errors of a verification. The gateway maps them to its typed refusal
 // codes; the agent reads them when it opens a sealed value.
 var (
-	// ErrUnsupportedKey is a key the fleet does not sign with. The
-	// identities of the fleet are ECDSA P-256; another kind is not a
-	// weaker signature, it is no signature the verifier can read.
+	// ErrUnsupportedKey is a key the fleet does not sign with.
 	ErrUnsupportedKey = errors.New("the host key is not an ECDSA key")
 	// ErrBadSignature is a signature that does not verify under the key of
 	// the certificate the envelope names.
 	ErrBadSignature = errors.New("the host signature does not verify")
 	// ErrBodyDigest is a payload other than the one the envelope signs.
 	ErrBodyDigest = errors.New("the payload does not match the digest the host signed")
-	// ErrShape is an envelope that is not one this release reads: another
-	// schema, an empty identifier, a nonce or a digest of the wrong length,
-	// a sequence of zero.
+	// ErrShape is an envelope that is not one this release reads: another schema,
+	// an empty identifier, a nonce or a digest of the wrong length, a sequence of
+	// zero.
 	ErrShape = errors.New("the envelope is not of the expected shape")
-	// ErrSealing is a sealed value this release cannot open: an unknown
-	// scheme, a key of the wrong length, or a cipher text that does not
-	// authenticate.
+	// ErrSealing is a sealed value this release cannot open: an unknown scheme, a
+	// key of the wrong length, or a cipher text that does not authenticate.
 	ErrSealing = errors.New("the sealed value cannot be opened")
 )
 
-// Payload names the kind of a message of the agent and returns the payload
-// the envelope hashes. The kind is the name of the field of the oneof, so a
-// kind added to the contract later is known here without a change - and
-// the digest covers exactly the message the field holds.
+// Payload names the kind of a message of the agent and returns the payload the
+// envelope hashes.
 func Payload(msg *agentv1.AgentMessage) (kind string, body proto.Message, err error) {
 	if msg == nil {
 		return "", nil, errors.New("no message")
@@ -145,17 +113,6 @@ func Payload(msg *agentv1.AgentMessage) (kind string, body proto.Message, err er
 
 // BodyDigest is the SHA-256 of a message in its deterministic protobuf
 // encoding.
-//
-// The digest is computed from the decoded message on both sides rather
-// than from the bytes on the wire: a relay decodes and encodes the message
-// again, and the bytes it forwards are not the bytes the agent signed. The
-// deterministic encoding is what makes the two sides agree - with one
-// condition, which is the fleet rule anyway: the panel is upgraded before
-// the agents. A field the panel does not know is kept as an unknown field
-// and encoded after the known ones, where the agent encoded it in field
-// order; the digests then differ, and the gateway refuses the message as
-// relay_body_hash_mismatch. That is the intended fail-closed: a message
-// the panel cannot fully read is not one it can vouch for.
 func BodyDigest(body proto.Message) ([]byte, error) {
 	if body == nil {
 		return nil, errors.New("no payload to digest")
@@ -178,11 +135,8 @@ func DigestMatches(envelope *agentv1.RelayedEnvelope, body proto.Message) (bool,
 	return subtle.ConstantTimeCompare(digest, envelope.GetBodySha256()) == 1, nil
 }
 
-// SigningBytes is the deterministic byte form of fields 1-10 of an
-// envelope, the thing the host signs and the gateway verifies. Every field
-// is length-prefixed, so no two envelopes have the same bytes unless they
-// have the same fields; the prefix keeps the signature apart from every
-// other use of the key.
+// SigningBytes is the deterministic byte form of fields 1-10 of an envelope,
+// the thing the host signs and the gateway verifies.
 func SigningBytes(e *agentv1.RelayedEnvelope) []byte {
 	var out []byte
 	out = append(out, envelopePrefix...)
@@ -210,9 +164,9 @@ func appendBytes(out, value []byte) []byte {
 	return append(out, value...)
 }
 
-// CheckShape refuses an envelope this release does not read before any
-// key is looked up: another schema, an empty identifier, a nonce or a
-// digest of the wrong length, a sequence of zero.
+// CheckShape refuses an envelope this release does not read before any key is
+// looked up: another schema, an empty identifier, a nonce or a digest of the
+// wrong length, a sequence of zero.
 func CheckShape(e *agentv1.RelayedEnvelope) error {
 	switch {
 	case e == nil:
@@ -236,8 +190,7 @@ func CheckShape(e *agentv1.RelayedEnvelope) error {
 }
 
 // Verify checks the signature of an envelope under the public key of the
-// certificate it names. The shape is checked first, so an envelope that is
-// not one never reaches the arithmetic.
+// certificate it names.
 func Verify(public crypto.PublicKey, e *agentv1.RelayedEnvelope) error {
 	if err := CheckShape(e); err != nil {
 		return err
@@ -251,10 +204,8 @@ func digestOf(data []byte) []byte {
 	return sum[:]
 }
 
-// signDigest signs with the host key. The identities of the fleet are
-// ECDSA P-256, and the signature is the ASN.1 form crypto.Signer produces
-// for them; another kind of key is refused rather than signed in a form
-// the verifier would not read.
+// signDigest signs with the host key. The identities of the fleet are ECDSA
+// P-256, and the signature is the ASN.
 func signDigest(key crypto.Signer, digest []byte) ([]byte, error) {
 	if key == nil {
 		return nil, errors.New("no host key")
@@ -276,11 +227,7 @@ func verifyDigest(public crypto.PublicKey, digest, signature []byte) error {
 	return nil
 }
 
-// Signer signs the envelopes of one session of a host. The sequence grows
-// with every envelope, starting at 1; a session is one Signer, and a unary
-// request - a renewal, a secret fetch - is a session of its own with one
-// envelope, so the numbers of the stream and of the calls beside it never
-// race each other at the gateway.
+// Signer signs the envelopes of one session of a host.
 type Signer struct {
 	key      crypto.Signer
 	hostID   string
@@ -294,10 +241,7 @@ type Signer struct {
 	random io.Reader
 }
 
-// NewSigner prepares the signer of a session. relayID is the relay the
-// session goes through, empty for a direct connection - the envelope is
-// then signed the same way, and the gateway ignores it, because the
-// handshake already proved the host.
+// NewSigner prepares the signer of a session.
 func NewSigner(key crypto.Signer, hostID, certificateSerial, relayID, sessionID string) *Signer {
 	return &Signer{
 		key: key, hostID: hostID, serial: certificateSerial, relayID: relayID, session: sessionID,
@@ -313,8 +257,8 @@ func (s *Signer) SessionID() string { return s.session }
 func (s *Signer) Key() crypto.Signer { return s.key }
 
 // ForCall derives the signer of one unary request from the signer of the
-// session: the same key, host, certificate and relay, a session of its
-// own, so the request's envelope does not take a number from the stream.
+// session: the same key, host, certificate and relay, a session of its own, so
+// the request's envelope does not take a number from the stream.
 func (s *Signer) ForCall() *Signer {
 	return &Signer{
 		key: s.key, hostID: s.hostID, serial: s.serial, relayID: s.relayID,
@@ -361,9 +305,8 @@ func (s *Signer) envelope(kind string, bodyDigest []byte, sequence uint64) (*age
 	return envelope, nil
 }
 
-// SignMessage attaches the next envelope of the session to a message of
-// the stream. The kind and the digest come from the payload the message
-// holds; a message without a payload cannot be signed.
+// SignMessage attaches the next envelope of the session to a message of the
+// stream.
 func (s *Signer) SignMessage(msg *agentv1.AgentMessage) error {
 	kind, body, err := Payload(msg)
 	if err != nil {
@@ -381,9 +324,9 @@ func (s *Signer) SignMessage(msg *agentv1.AgentMessage) error {
 	return nil
 }
 
-// SignRequest signs the single envelope of a unary request: the body is
-// the request itself, with its identity field cleared by the caller, and
-// the sequence is 1.
+// SignRequest signs the single envelope of a unary request: the body is the
+// request itself, with its identity field cleared by the caller, and the
+// sequence is 1.
 func (s *Signer) SignRequest(kind string, body proto.Message) (*agentv1.RelayedEnvelope, error) {
 	digest, err := BodyDigest(body)
 	if err != nil {
@@ -392,10 +335,8 @@ func (s *Signer) SignRequest(kind string, body proto.Message) (*agentv1.RelayedE
 	return s.envelope(kind, digest, 1)
 }
 
-// RenewalProofDigest is what the old host key signs when a host renews
-// through a relay: SHA256(csr_der || challenge || relay_id). The CSR is
-// self-delimiting and the challenge has a fixed length, so the
-// concatenation names one triple.
+// RenewalProofDigest is what the old host key signs when a host renews through
+// a relay: SHA256(csr_der || challenge || relay_id).
 func RenewalProofDigest(csrDER, challenge []byte, relayID string) []byte {
 	data := make([]byte, 0, len(csrDER)+len(challenge)+len(relayID))
 	data = append(data, csrDER...)
@@ -460,9 +401,9 @@ func (k *EphemeralKey) Open(serverPublic, sealed, nonce, aad []byte) ([]byte, er
 	return Open(k.private, serverPublic, sealed, nonce, aad)
 }
 
-// EphemeralKeySigningBytes is what the host key signs over a one-time
-// key: the task, the secret and the key itself, so a key signed for one
-// fetch buys nothing for another.
+// EphemeralKeySigningBytes is what the host key signs over a one-time key: the
+// task, the secret and the key itself, so a key signed for one fetch buys
+// nothing for another.
 func EphemeralKeySigningBytes(taskID, secretName string, public []byte) []byte {
 	var out []byte
 	out = append(out, ephemeralPrefix...)
@@ -489,17 +430,16 @@ func VerifyEphemeralKey(hostPublic crypto.PublicKey, taskID, secretName string, 
 	return verifyDigest(hostPublic, digestOf(EphemeralKeySigningBytes(taskID, secretName, ephemeral)), signature)
 }
 
-// SecretAAD is the associated data of a sealed value: the task, the name
-// and the version, so a sealed value carried from one lease to another does
-// not open.
+// SecretAAD is the associated data of a sealed value: the task, the name and
+// the version, so a sealed value carried from one lease to another does not
+// open.
 func SecretAAD(taskID, secretName string, version uint32) []byte {
 	return []byte(taskID + "|" + secretName + "|" + strconv.FormatUint(uint64(version), 10))
 }
 
-// Seal encrypts a value to the host's one-time key with a one-time key of
-// the panel's own: X25519 for the shared secret, HKDF-SHA256 for the
-// cipher key, AES-256-GCM for the value. What comes back is what the host
-// needs to open it and nothing a relay on the way can use.
+// Seal encrypts a value to the host's one-time key with a one-time key of the
+// panel's own: X25519 for the shared secret, HKDF-SHA256 for the cipher key,
+// AES-256-GCM for the value.
 func Seal(hostPublic, plaintext, aad []byte) (sealed, nonce, serverPublic []byte, err error) {
 	peer, err := ecdh.X25519().NewPublicKey(hostPublic)
 	if err != nil {
@@ -553,9 +493,7 @@ func Open(private *ecdh.PrivateKey, serverPublic, sealed, nonce, aad []byte) ([]
 	return plaintext, nil
 }
 
-// sealingCipher derives the AES-256-GCM key from the shared secret. Both
-// public keys go into the salt, so the key is bound to exactly this pair
-// of one-time keys.
+// sealingCipher derives the AES-256-GCM key from the shared secret.
 func sealingCipher(shared, hostPublic, serverPublic []byte) (cipher.AEAD, error) {
 	salt := make([]byte, 0, len(hostPublic)+len(serverPublic))
 	salt = append(salt, hostPublic...)

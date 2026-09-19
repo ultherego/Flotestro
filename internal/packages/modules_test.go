@@ -7,9 +7,7 @@ import (
 )
 
 // A module directory replaced by an empty directory is the signature of a
-// namespace with ProtectKernelModules. A transaction in such an environment
-// produces an initramfs without drivers, so it has to be rejected before it
-// starts.
+// namespace with ProtectKernelModules.
 func TestHiddenKernelModulesAreDetected(t *testing.T) {
 	root := t.TempDir()
 	proc := writeProc(t, root, "dm_mod 200704 1 - Live 0x0000000000000000\n")

@@ -48,7 +48,7 @@ var campaignModes = map[ActionType]CampaignMode{
 
 	// An agent replacement: the target version means the same on every host, and
 	// the verification is the host's own - the job is settled by the host coming
-	// back with the version asked for, not by the exit code of the package
+	// back with the version asked for, not by the exit code of the package.
 	ActionAgentUpgrade: CampaignSamePayload,
 
 	// Containers: the container identifier is local, but the operation goes
@@ -76,7 +76,7 @@ var campaignModes = map[ActionType]CampaignMode{
 	ActionCertificateRenew:  CampaignPerHostPlan,
 	// Rotating the authority is a sequence of steps, but every step is its own
 	// change with its own per-host plan: the host trusts both authorities at
-	// once, gets a new certificate, and only then does the old authority
+	// once, gets a new certificate, and only then does the old authority.
 	ActionCertificateTrustEnsure: CampaignPerHostPlan,
 	ActionCertificateTrustRemove: CampaignPerHostPlan,
 	ActionMountEnsure:            CampaignPerHostPlan,
@@ -89,7 +89,7 @@ var campaignModes = map[ActionType]CampaignMode{
 	ActionNetworkMTUSet:          CampaignPerHostPlan,
 	// A layered change is planned per host for the same reason an address change
 	// is, and for one more: the refusals are about relations on that particular
-	// host - which interface another bond already owns, which one the panel talks
+	// host - which interface another bond already owns, which one the panel
 	ActionNetworkLinkApply:      CampaignPerHostPlan,
 	ActionNetworkLinkRemove:     CampaignPerHostPlan,
 	ActionDNSHostApply:          CampaignPerHostPlan,
@@ -117,7 +117,7 @@ var campaignModes = map[ActionType]CampaignMode{
 	ActionPackageRepair: CampaignSpecialized,
 	// The rollback of a network profile and the restore of a firewall rule set
 	// name a plan the host kept under an identifier it minted from its own clock
-	// at the time of the change - a different one on every host, and gone from
+	// at the time of the change - a different one on every host, and gone from.
 	ActionNetworkRollback:        CampaignSpecialized,
 	ActionFirewallRulesetRestore: CampaignSpecialized,
 	// A fleet remediation: every host gets its own plan of typed steps, computed

@@ -5,9 +5,7 @@ import (
 	"testing"
 )
 
-// The progress lines of dnf come straight from a test host. The description
-// column is padded to a fixed width, so sometimes one space is left before the
-// percentage and sometimes a dozen - the pattern has to cope with both.
+// The progress lines of dnf come straight from a test host.
 func TestTheDNFStepRecognisesBothColumnWidths(t *testing.T) {
 	cases := []struct {
 		line        string
@@ -58,10 +56,7 @@ func TestOrdinaryLinesAreNotASteps(t *testing.T) {
 	}
 }
 
-// Apt reports progress over a machine channel of its own. The format is
-// "kind:package:percentage:description" and it does not depend on the width of
-// the terminal or on the locale - which is why we read it rather than the bars
-// on the screen.
+// Apt reports progress over a machine channel of its own.
 func TestTheAPTStatusIsParsed(t *testing.T) {
 	input := strings.Join([]string{
 		"dlstatus:1:20.0000:Fetching file 1 of 5",
@@ -74,9 +69,8 @@ func TestTheAPTStatusIsParsed(t *testing.T) {
 
 	var gathered []Progress
 	throttle := &throttler{receiver: func(p Progress) { gathered = append(gathered, p) }}
-	// Every report gets a timestamp of its own outside the throttling window,
-	// so that the test checks the parsing rather than the limiting of the
-	// pace.
+	// Every report gets a timestamp of its own outside the throttling window, so
+	// that the test checks the parsing rather than the limiting of the pace.
 	readAPTStatusForTest(strings.NewReader(input), throttle)
 
 	if len(gathered) != 4 {

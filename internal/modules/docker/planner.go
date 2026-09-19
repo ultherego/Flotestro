@@ -174,7 +174,7 @@ func containerChanges(detail ContainerDetail, desired ContainerSpec) []Change {
 	}
 	// A declaration is a statement about what it names, and some of what a
 	// container has comes from the image or from the engine rather than from
-	// anybody's order: the command baked into the image, the network the engine
+	// anybody's order: the command baked into the image, the network the engine.
 	stated := func(field, was, wanted string) {
 		if wanted == "" {
 			return

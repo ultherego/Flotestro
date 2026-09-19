@@ -269,8 +269,7 @@ func (l *lab) openFatal(t *testing.T, code string) *FatalError {
 }
 
 // The first row of the startup table: no record, an empty database and no
-// files. The explicit initialisation makes the installation identifier,
-// the key and the CA, and records them.
+// files.
 func TestAnEmptyInstallationIsInitialised(t *testing.T) {
 	l := newLab(t)
 	runtime := l.open(t)
@@ -309,9 +308,8 @@ func TestAnEmptyInstallationIsInitialised(t *testing.T) {
 	}
 }
 
-// The third row: the record names a key that is gone. No key is made in
-// its place; the start stops with the code and the installation stays as
-// it is.
+// The third row: the record names a key that is gone. No key is made in its
+// place; the start stops with the code and the installation stays as it is.
 func TestAMissingSecretsKeyStopsTheStart(t *testing.T) {
 	l := newLab(t)
 	record := l.open(t).Record()
@@ -412,9 +410,8 @@ func TestBrokenCAMaterialStopsTheStart(t *testing.T) {
 	})
 }
 
-// PKI-01 of the document: data in the database and no key to open it
-// with is a fatal start, not a fresh key. Here the installation is one
-// from before the record: secrets exist, the old key file does not.
+// PKI-01 of the document: data in the database and no key to open it with is a
+// fatal start, not a fresh key.
 func TestSecretsWithoutAnyKeyStopTheStart(t *testing.T) {
 	l := newLab(t)
 	if _, err := pki.Init(l.dir); err != nil {
@@ -430,10 +427,8 @@ func TestSecretsWithoutAnyKeyStopTheStart(t *testing.T) {
 	}
 }
 
-// The upgrade of an installation from before the record: the old key file
-// and the CA are there, the database is full. The key is adopted under the
-// legacy name and becomes the active one, the CA is opened, the record is
-// written, and a value sealed the old way still opens.
+// The upgrade of an installation from before the record: the old key file and
+// the CA are there, the database is full.
 func TestAnExistingInstallationIsAdopted(t *testing.T) {
 	l := newLab(t)
 	if _, err := pki.Init(l.dir); err != nil {
@@ -482,9 +477,9 @@ func TestAnExistingInstallationIsAdopted(t *testing.T) {
 	}
 }
 
-// A database that knows a fleet next to a state directory without a CA is
-// a restore that forgot the directory; the start stops rather than
-// making a CA the fleet does not trust.
+// A database that knows a fleet next to a state directory without a CA is a
+// restore that forgot the directory; the start stops rather than making a CA
+// the fleet does not trust.
 func TestAFleetWithoutItsCAIsAmbiguous(t *testing.T) {
 	l := newLab(t)
 	l.storage.facts = Facts{Hosts: 5, Certificates: 5}
@@ -503,9 +498,9 @@ func TestAFleetWithoutItsCAIsAmbiguous(t *testing.T) {
 	m.openFatal(t, CodeStateAmbiguous)
 }
 
-// An initialisation that wrote its key and died before the record leaves
-// one key and an empty database: the next start takes that key rather
-// than stopping or making another.
+// An initialisation that wrote its key and died before the record leaves one
+// key and an empty database: the next start takes that key rather than
+// stopping or making another.
 func TestASingleKeyWithoutARecordIsTakenOver(t *testing.T) {
 	l := newLab(t)
 	if err := l.provider.GenerateNamed(context.Background(), "k-only"); err != nil {

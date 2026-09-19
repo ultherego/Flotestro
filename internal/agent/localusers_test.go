@@ -93,9 +93,8 @@ func TestTheClassificationOfAccounts(t *testing.T) {
 	content := "root:x:0:0:root:/root:/bin/bash\n" +
 		"daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\n" +
 		"smith:x:1001:1001:John Smith,,,:/home/smith:/bin/bash\n" +
-		// "nobody" lies above the range of the accounts of people and is a
-		// system account despite its high UID; the lower bound alone would not
-		// detect that.
+		// "nobody" lies above the range of the accounts of people and is a system
+		// account despite its high UID; the lower bound alone would not detect that.
 		"nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin\n" +
 		"broken:x:not-a-number:0::/tmp:/bin/sh\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {

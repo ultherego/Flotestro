@@ -12,13 +12,9 @@ import (
 )
 
 // The scope of a package transaction is a prefix in front of the tool - the
-// systemd-run invocation the helper builds. The tests stand a script in for
-// systemd-run: it records what it was given, drops its own flags and starts
-// the tool, so the assertion is on the argv that reached the process.
+// systemd-run invocation the helper builds.
 
 // scopeShim writes the stand-in for systemd-run and a tool for it to start.
-// The shim records its whole argument array in a file, one argument per
-// line, so an argument with a space in it is seen as one argument.
 func scopeShim(t *testing.T) (shim, tool, record string) {
 	t.Helper()
 	directory := t.TempDir()

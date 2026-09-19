@@ -6,15 +6,12 @@ import (
 	"github.com/ultherego/flotestro/internal/authz"
 )
 
-// The system module of a host: the platform picture travels in the
-// inventory fragment like every other module, so the tab reads it from
-// the generic module endpoint. What the panel adds is the history - the
-// kernels and releases it has seen the host on - which no single report
-// carries.
+// The system module of a host: the platform picture travels in the inventory
+// fragment like every other module, so the tab reads it from the generic
+// module endpoint.
 
-// handleHostSystemHistory lists the platforms the host was seen on, the
-// most recent first. An empty list is a host the panel has not heard
-// from since the history was introduced, not a host without a kernel.
+// handleHostSystemHistory lists the platforms the host was seen on, the most
+// recent first.
 func (s *Server) handleHostSystemHistory(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
 	_, scope, ok := s.hostScope(w, r, hostID)

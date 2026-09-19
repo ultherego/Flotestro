@@ -9,11 +9,8 @@ import (
 )
 
 // authorizePayload checks the permissions the content of an order asks for
-// beyond the operation's own: an entry for root, a write allowed to skip
-// its validator. The operation's permission has been checked already; this
-// is the second gate, in the same scope, with a code of its own - the
-// operator is to see that it was the content of the order that was
-// refused, not the operation.
+// beyond the operation's own: an entry for root, a write allowed to skip its
+// validator.
 func (s *Server) authorizePayload(w http.ResponseWriter, r *http.Request, action opspec.ActionType,
 	payload opspec.Payload, scope authz.Scope, targetType, targetID string) (authz.Principal, bool) {
 	principal := authz.FromContext(r.Context())

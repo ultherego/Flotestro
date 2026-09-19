@@ -8,10 +8,9 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// The verdicts of the action preview are the ones the order would get:
-// the same permission in the same scope, the same registry, the same
-// lifecycle states. The tests build the principal and the host by hand,
-// so what is judged is the judgement and nothing around it.
+// The verdicts of the action preview are the ones the order would get: the
+// same permission in the same scope, the same registry, the same lifecycle
+// states.
 
 var labScope = authz.Scope{Site: "lab", Environment: "test"}
 

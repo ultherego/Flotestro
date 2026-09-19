@@ -1,10 +1,5 @@
 // Package power describes the power, boot and maintenance window state of the
 // host.
-//
-// A restart does not end with sending the command: it ends when the host comes
-// back with a new boot identifier and healthy units. That is why the module
-// carries the boot_id, the uptime and what holds the restart back - not just
-// the button.
 package power
 
 import (
@@ -41,10 +36,6 @@ const (
 
 // Inhibitor is a logind inhibitor: a process that asks for a delay or blocks
 // the shutdown of the host.
-//
-// Telling the modes apart matters here: "delay" postpones the shutdown by a
-// given time, "block" does not allow it at all. A panel that does not tell them
-// apart promises the operator a restart that will not happen.
 type Inhibitor struct {
 	Who  string `json:"who"`
 	User string `json:"user,omitempty"`
@@ -113,9 +104,6 @@ const DelayLimit = 3600
 const ReasonLength = 500
 
 // ValidateShutdownReason checks the justification of a host shutdown.
-//
-// Shutting a remote host down needs an explicit reason: nobody will power it on
-// remotely afterwards, so the audit trail is the only thing that stays.
 func ValidateShutdownReason(reason string) error {
 	reason = strings.TrimSpace(reason)
 	if len(reason) < 10 {
@@ -167,11 +155,6 @@ func ParseRebootReasons(content string) []string {
 }
 
 // ParseInhibitors reads the table of "systemd-inhibit --list".
-//
-// The table is aligned to the width of the longest value in a column, so the
-// positions of the headers mark the boundaries of the fields. Splitting on
-// whitespace would not work: the column with the justification contains
-// spaces.
 func ParseInhibitors(output string) ([]Inhibitor, bool) {
 	lines := strings.Split(strings.ReplaceAll(output, "\r\n", "\n"), "\n")
 	header := -1
@@ -271,11 +254,8 @@ func ParseBootList(output string) []Boot {
 	return boots
 }
 
-// ParseScheduled reads /run/systemd/shutdown/scheduled.
-//
-// The file says the host is going to shut down even though nobody from the
-// panel asked for it. The operator is to see that before ordering anything
-// else.
+// ParseScheduled reads /run/systemd/shutdown/scheduled. The file says the host
+// is going to shut down even though nobody from the panel asked for it.
 func ParseScheduled(content string) *Shutdown {
 	shutdown := Shutdown{}
 	for _, line := range strings.Split(content, "\n") {

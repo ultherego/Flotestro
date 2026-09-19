@@ -29,11 +29,6 @@ import (
 )
 
 // Version is the version of the agent reported to the control plane.
-//
-// A variable and not a constant: a release writes the package number here at
-// build time (-ldflags -X). Without it the panel would see one version for the
-// whole life of the fleet and would have no way of checking whether an upgrade
-// really arrived.
 var Version = buildinfo.Version
 
 // Identity is the cryptographic material of the host stored locally.
@@ -42,9 +37,7 @@ type Identity struct {
 	Certificate tls.Certificate
 	CAPool      *x509.CertPool
 	NotAfter    time.Time
-	// TrustPEM is the bundle that decides the trust of this identity. It is kept
-	// in memory, because a renewal writes the whole generation at once - also
-	// when the panel sent no new bundle.
+	// TrustPEM is the bundle that decides the trust of this identity.
 	TrustPEM []byte
 }
 
@@ -74,10 +67,6 @@ func paths(stateDir string) IdentityPaths {
 }
 
 // The stable error codes of an enrollment.
-//
-// They are the contract with the operator: a refusal reaches a host that has
-// no session with the panel, and the code is what the operator can act on
-// without reading the source.
 const (
 	// CodeTokenInvalid is every refusal of the token. The panel tells no
 	// more on purpose - the reason stays in its audit trail.
@@ -139,9 +128,7 @@ func ErrorCode(err error) string {
 
 func coded(code string, err error) error { return &EnrollmentError{Code: code, Err: err} }
 
-// IdentityRequest describes the identity declared during enrollment. The
-// simulator gives synthetic values, the agent on a host reads them from the
-// system.
+// IdentityRequest describes the identity declared during enrollment.
 type IdentityRequest struct {
 	StateDir        string
 	EnrollmentURL   string
@@ -149,17 +136,12 @@ type IdentityRequest struct {
 	BootstrapCAPath string
 	MachineID       string
 	Hostname        string
-	// Advertised are the network names the enrolling party is visible under. The
-	// relay uses them: it also has to act as a server towards the agents of its
-	// site, and an agent verifies the name in the certificate.
+	// Advertised are the network names the enrolling party is visible under.
 	Advertised   string
 	OSFamily     string
 	OSVersion    string
 	Architecture string
-	// HelperSocket is the socket of the root helper on this host. When it is
-	// given, the enrollment hands the helper the panel's trust bundle - the
-	// host identifier and the capability keys - right after the identity is
-	// written. Empty means the daemon will do it at its first session.
+	// HelperSocket is the socket of the root helper on this host.
 	HelperSocket string
 }
 
@@ -184,13 +166,8 @@ func LocalIdentityRequest(stateDir, enrollmentURL, token, bootstrapCAPath string
 	}, nil
 }
 
-// LoadIdentity loads the identity the host already has.
-//
-// This is all the daemon does with the identity: it enrolls nothing. An
-// enrollment needs a token, and a token has no place in the environment of a
-// service that restarts on its own - it belongs to a one-time command of the
-// operator, flotestro-agentctl enroll. A host without an identity is an
-// error here, and the unit file keeps the daemon from starting at all.
+// LoadIdentity loads the identity the host already has. This is all the daemon
+// does with the identity: it enrolls nothing.
 func LoadIdentity(stateDir string) (*Identity, error) {
 	store := identitystore.New(stateDir)
 	if err := store.Clean(); err != nil {
@@ -208,9 +185,6 @@ func LoadIdentity(stateDir string) (*Identity, error) {
 }
 
 // loadCurrent reads the current generation, moving an old layout first.
-//
-// A host set up before the store was introduced has the whole set loose in
-// the state directory. It is moved once, without deleting the originals.
 func loadCurrent(store *identitystore.Store, stateDir string) (*Identity, error) {
 	if identity, err := store.Current(); err == nil {
 		return fromIdentity(identity), nil
@@ -226,9 +200,6 @@ func loadCurrent(store *identitystore.Store, stateDir string) (*Identity, error)
 }
 
 // EnsureIdentityFor loads an existing identity or performs an enrollment.
-//
-// The relay and the simulator take this path: for them the enrollment is
-// part of the start. The daemon of the agent does not - see LoadIdentity.
 func EnsureIdentityFor(ctx context.Context, request IdentityRequest) (*Identity, error) {
 	if err := os.MkdirAll(request.StateDir, 0o700); err != nil {
 		return nil, fmt.Errorf("the state directory: %w", err)
@@ -243,11 +214,8 @@ func EnsureIdentityFor(ctx context.Context, request IdentityRequest) (*Identity,
 	return Enroll(ctx, request)
 }
 
-// Enroll registers the host with the panel and writes the identity.
-//
-// It refuses nothing about an identity that is already there: the callers
-// decide that. The operator's tool refuses an ordinary enrollment of a
-// registered host; a recovery replaces the identity on purpose.
+// Enroll registers the host with the panel and writes the identity. It refuses
+// nothing about an identity that is already there: the callers decide that.
 func Enroll(ctx context.Context, request IdentityRequest) (*Identity, error) {
 	enrollment, err := prepare(request)
 	if err != nil {
@@ -257,12 +225,6 @@ func Enroll(ctx context.Context, request IdentityRequest) (*Identity, error) {
 }
 
 // Recover replaces the identity of the host with a recovery token.
-//
-// The difference from an enrollment is the verification: the new certificate
-// has to open a handshake with the gateway before the store switches to it.
-// The current generation works until then - a recovery that left the host
-// with a certificate the fleet does not accept would be worse than no
-// recovery at all.
 func Recover(ctx context.Context, request IdentityRequest, gatewayURL string) (*Identity, error) {
 	enrollment, err := prepare(request)
 	if err != nil {
@@ -293,11 +255,8 @@ func prepare(request IdentityRequest) (*Enrollment, error) {
 	}, nil
 }
 
-// Issuer answers an enrollment request.
-//
-// In production it is the enrollment service of the panel behind the
-// bootstrap CA. A test replaces it with one that loses answers on purpose:
-// the whole point of the pending record is what happens then.
+// Issuer answers an enrollment request. In production it is the enrollment
+// service of the panel behind the bootstrap CA.
 type Issuer interface {
 	Enroll(ctx context.Context, request *agentv1.EnrollRequest) (*agentv1.EnrollResponse, error)
 }
@@ -324,11 +283,6 @@ func (c enrollmentClient) Enroll(ctx context.Context, request *agentv1.EnrollReq
 
 // Enrollment carries one admission of a host into the fleet, with its parts
 // replaceable.
-//
-// The clock, the source of randomness, the issuer and the directory are
-// given from outside so that a test can prove the invariants rather than the
-// happy path: that a retry repeats the same attempt, that an old attempt is
-// abandoned, that a rejected certificate switches nothing.
 type Enrollment struct {
 	Store   *identitystore.Store
 	Issuer  Issuer
@@ -336,9 +290,7 @@ type Enrollment struct {
 	// BootstrapPEM is the trust bundle the request went out under. It becomes
 	// the bundle of the generation when the panel sends none.
 	BootstrapPEM []byte
-	// Verify checks the new identity before the store switches to it. Nil
-	// means the store's own checks are enough - an enrollment has no
-	// identity to lose yet.
+	// Verify checks the new identity before the store switches to it.
 	Verify func(ctx context.Context, identity *Identity) error
 	// Now and Random default to the real clock and crypto/rand.
 	Now    func() time.Time
@@ -349,10 +301,6 @@ type Enrollment struct {
 }
 
 // Run carries the enrollment out.
-//
-// The order is the contract: the attempt is on disk before the first
-// request, the answer is checked before the write, the write happens as one
-// generation, and the record of the attempt goes away last.
 func (e *Enrollment) Run(ctx context.Context) (*Identity, error) {
 	if e.Now == nil {
 		e.Now = time.Now
@@ -371,9 +319,8 @@ func (e *Enrollment) Run(ctx context.Context) (*Identity, error) {
 	if err != nil {
 		return nil, err
 	}
-	// The same attempt goes out as many times as needed: the same number
-	// and the same request. That is what lets the panel answer a retry with
-	// the certificate it has already issued.
+	// The same attempt goes out as many times as needed: the same number and the
+	// same request.
 	response, err := e.Issuer.Enroll(ctx, &agentv1.EnrollRequest{
 		EnrollmentToken: e.Request.Token,
 		MachineId:       e.Request.MachineID,
@@ -405,9 +352,9 @@ func (e *Enrollment) Run(ctx context.Context) (*Identity, error) {
 		Key: key, CertificatePEM: response.GetCertificatePem(), TrustPEM: bundle,
 	}
 	if err := identitystore.Check(generation); err != nil {
-		// The answer does not fit the key or the trust: the store would
-		// refuse it as well, but the code has to say that it is the answer
-		// that is wrong and not the disk.
+		// The answer does not fit the key or the trust: the store would refuse it as
+		// well, but the code has to say that it is the answer that is wrong and not
+		// the disk.
 		return nil, coded(CodeIdentityRejected, err)
 	}
 	if e.Verify != nil {
@@ -423,14 +370,11 @@ func (e *Enrollment) Run(ctx context.Context) (*Identity, error) {
 	if err != nil {
 		return nil, coded(CodeCommitFailed, err)
 	}
-	// The attempt is closed: the next enrollment is a new matter and goes
-	// under a new number. Should this removal fail, the next attempt
-	// recognises the record by the key of the identity that is now current.
+	// The attempt is closed: the next enrollment is a new matter and goes under a
+	// new number.
 	_ = e.Store.RemovePending()
-	// The helper learns the host identity and the panel's keys from the
-	// panel's signed bundle, never from the agent's word. It is handed over
-	// now when the socket is known, and by the daemon at its first session
-	// otherwise; a helper that is not up yet is not a failed enrollment.
+	// The helper learns the host identity and the panel's keys from the panel's
+	// signed bundle, never from the agent's word.
 	if e.Request.HelperSocket != "" && response.GetHelperTrust() != nil {
 		registerSessionHelper(NewHelperClient(e.Request.HelperSocket))
 		deliverHelperTrust(ctx, response.GetHelperTrust(), e.Log)
@@ -439,11 +383,6 @@ func (e *Enrollment) Run(ctx context.Context) (*Identity, error) {
 }
 
 // attempt loads the unfinished attempt or starts a new one.
-//
-// An attempt is repeated when its record is there, is not too old and does
-// not belong to an identity that has already been written. Anything else is
-// abandoned: a token lives at most a day, and an attempt whose answer has
-// already been committed asks for what the host already has.
 func (e *Enrollment) attempt() (*identitystore.Pending, error) {
 	now := e.Now()
 	pending, err := e.Store.LoadPending()
@@ -457,9 +396,9 @@ func (e *Enrollment) attempt() (*identitystore.Pending, error) {
 		}
 	case errors.Is(err, identitystore.ErrPendingMissing):
 	default:
-		// A record that cannot be repeated is not silently replaced: the
-		// operator decides with identity reset --discard-pending, and the
-		// status shows the record meanwhile.
+		// A record that cannot be repeated is not silently replaced: the operator
+		// decides with identity reset --discard-pending, and the status shows the
+		// record meanwhile.
 		return nil, coded(CodePendingInvalid, err)
 	}
 
@@ -474,9 +413,8 @@ func (e *Enrollment) attempt() (*identitystore.Pending, error) {
 	return pending, nil
 }
 
-// finished says whether the attempt has already produced the current
-// identity - an interruption after the commit and before the removal of the
-// record.
+// finished says whether the attempt has already produced the current identity
+// - an interruption after the commit and before the removal of the record.
 func (e *Enrollment) finished(pending *identitystore.Pending) bool {
 	current, err := e.Store.Current()
 	if err != nil || current.Certificate.Leaf == nil {
@@ -507,9 +445,6 @@ func advertised(list string) (dns []string, addresses []net.IP) {
 }
 
 // tokenPrefixLength is how much of a token is kept as its name.
-//
-// The four letters of the scheme and four characters of the body: enough to
-// tell two orders apart by eye, and a negligible part of the secret.
 const tokenPrefixLength = 8
 
 // TokenPrefix returns the non-secret opening of a fleet token, or an empty
@@ -549,14 +484,7 @@ func inMemory(generation identitystore.Generation) (*Identity, error) {
 	}, nil
 }
 
-// GatewayHandshake verifies an identity by opening a session with the
-// gateway.
-//
-// The gateway requires and verifies the client certificate in the handshake
-// itself, so a completed exchange is the proof: the fleet accepts this
-// certificate. The request that follows the handshake asks for nothing - any
-// answer at all means the connection was established with the new identity,
-// and a certificate refused in the handshake never gets one.
+// GatewayHandshake verifies an identity by opening a session with the gateway.
 func GatewayHandshake(gatewayURL string) func(ctx context.Context, identity *Identity) error {
 	return func(ctx context.Context, identity *Identity) error {
 		client := &http.Client{
@@ -584,11 +512,6 @@ func GatewayHandshake(gatewayURL string) func(ctx context.Context, identity *Ide
 }
 
 // enrollmentFailure gives a refusal its stable code.
-//
-// The panel answers every refusal of the token in the same way, so that
-// nothing about the orders can be probed from outside; the agent passes
-// that on as one code. The network and the trust are told apart, because
-// the operator fixes each of them somewhere else.
 func enrollmentFailure(err error) error {
 	var unknown x509.UnknownAuthorityError
 	var hostname x509.HostnameError
@@ -635,9 +558,6 @@ func readCABundle(statePath, bootstrapPath string) ([]byte, error) {
 }
 
 // PendingAttempt describes an unfinished enrollment for the operator.
-//
-// Without the key and the request: the status names the attempt, it does not
-// repeat it.
 type PendingAttempt struct {
 	ClientRequestID string
 	CreatedAt       time.Time

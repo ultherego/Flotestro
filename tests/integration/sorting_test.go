@@ -24,8 +24,7 @@ type sortedHostPage struct {
 
 // walkHosts reads the whole list one page at a time under the given query,
 // following the cursor, and returns every row in the order the pages gave
-// them. The walk is bounded by the size of the fleet: a cursor that never
-// runs dry is a defect, not a reason to loop for ever.
+// them.
 func walkHosts(t *testing.T, h *harness, query url.Values, fleet int) []sortedHost {
 	t.Helper()
 	var walked []sortedHost
@@ -50,13 +49,9 @@ func walkHosts(t *testing.T, h *harness, query url.Values, fleet int) []sortedHo
 	return nil
 }
 
-// TestHostListSortsAndPagesUnderASort checks the order the list can be
-// asked for: sorted by hostname the rows come in the database's order,
-// turned round under :desc, and the pages of a sorted list neither repeat
-// a host nor skip one - together they are the whole fleet, in the order
-// of the unpaged list. A sort by a column with many equal values walks
-// the tie-break by identifier; a sort by a column that never changes
-// under the test walks the value itself.
+// TestHostListSortsAndPagesUnderASort checks the order the list can be asked
+// for: sorted by hostname the rows come in the database's order, turned round
+// under :desc, and the pages of a sorted list neither repeat a host nor skip
 func TestHostListSortsAndPagesUnderASort(t *testing.T) {
 	h := newHarness(t)
 	var whole sortedHostPage
@@ -78,9 +73,7 @@ func TestHostListSortsAndPagesUnderASort(t *testing.T) {
 		}
 	}
 
-	// Descending is the same list read from the other end. The rows are
-	// compared to each other rather than to a Go comparison of the names,
-	// because the database's collation decides the order, not the bytes.
+	// Descending is the same list read from the other end.
 	var reversed sortedHostPage
 	h.get("/api/v1/hosts?sort=hostname:desc&limit=500", &reversed)
 	if len(reversed.Items) != len(whole.Items) {
@@ -119,9 +112,8 @@ func TestHostListSortsAndPagesUnderASort(t *testing.T) {
 		}
 	}
 
-	// A cursor is issued under an order and refused under another: the
-	// key it carries is a name, and a page sorted by site cannot start
-	// after a name.
+	// A cursor is issued under an order and refused under another: the key it
+	// carries is a name, and a page sorted by site cannot start after a name.
 	var first sortedHostPage
 	h.get("/api/v1/hosts?sort=hostname&limit=1", &first)
 	if first.NextCursor == "" {
@@ -152,9 +144,8 @@ func TestHostListSortsAndPagesUnderASort(t *testing.T) {
 }
 
 // TestJobListSortsByCreationTime orders two reads and checks that the list
-// asked for oldest first gives the first read before the second, page by
-// page, while the default stays newest first; a sort by a column the list
-// has not got is refused with invalid_sort.
+// asked for oldest first gives the first read before the second, page by page,
+// while the default stays newest first; a sort by a column the list has not
 func TestJobListSortsByCreationTime(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")

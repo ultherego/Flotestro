@@ -1,16 +1,5 @@
-// Command sbom writes the software bill of materials of a built binary.
-//
-// The bill is CycloneDX 1.5 JSON with one component per Go module that
-// entered the binary, named by its package URL (pkg:golang/...). The source
-// is the build metadata the binary itself carries - read from the file, or
-// from the text "go version -m" prints - so the bill describes exactly the
-// release artefact, not the go.mod of the working tree at the time somebody
-// ran the tool.
-//
-//	flotestro-sbom -binary <file> [-binary <file> ...] -out-dir <dir>
-//	flotestro-sbom -modules <go version -m output> -out-dir <dir>
-//
-// Every binary gets <name>.cdx.json in the output directory.
+// Command sbom writes the software bill of materials of a built binary. The
+// bill is CycloneDX 1.
 package main
 
 import (
@@ -106,9 +95,9 @@ func run(args []string, in io.Reader, out, errOut io.Writer) int {
 	return 0
 }
 
-// buildTime is the timestamp of the bill: SOURCE_DATE_EPOCH when the
-// release sets it, so that the bills of one release agree and a rebuild
-// gives the same file; otherwise now.
+// buildTime is the timestamp of the bill: SOURCE_DATE_EPOCH when the release
+// sets it, so that the bills of one release agree and a rebuild gives the same
+// file; otherwise now.
 func buildTime() time.Time {
 	if epoch := os.Getenv("SOURCE_DATE_EPOCH"); epoch != "" {
 		if seconds, err := strconv.ParseInt(epoch, 10, 64); err == nil {

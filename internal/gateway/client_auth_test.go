@@ -91,10 +91,9 @@ func (a testAuthority) pool() *x509.CertPool {
 
 const testHostID = "6f1c3c2e-6d1a-4c8b-9d2e-0b1f9a7e5c11"
 
-// TestClassifyClientCertificate: the refusal is named after what is wrong
-// with the certificate, and the host is named only when the fleet signed
-// the certificate - a stranger's certificate names nobody, whatever it
-// claims.
+// TestClassifyClientCertificate: the refusal is named after what is wrong with
+// the certificate, and the host is named only when the fleet signed the
+// certificate - a stranger's certificate names nobody, whatever it claims.
 func TestClassifyClientCertificate(t *testing.T) {
 	now := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
 	fleet := newTestAuthority(t, "Flotestro Fleet CA", now)
@@ -154,9 +153,8 @@ func TestClassifyClientCertificate(t *testing.T) {
 }
 
 // TestRevokedCertificateIsRefusedAtTheSessionLayer: revocation is a fact of
-// the database, not of the certificate, so the handshake cannot see it;
-// the session layer refuses it and the code is the one the host page
-// shows.
+// the database, not of the certificate, so the handshake cannot see it; the
+// session layer refuses it and the code is the one the host page shows.
 func TestRevokedCertificateIsRefusedAtTheSessionLayer(t *testing.T) {
 	now := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
 	fleet := newTestAuthority(t, "Flotestro Fleet CA", now)
@@ -221,9 +219,8 @@ func (r *recordingRefusals) RecordConnectionRefusal(_ context.Context, hostID, c
 }
 
 // TestVerifierRefusesTheHandshakeAndRecordsTheHost: the handshake hook ends
-// the handshake for an expired certificate of the fleet and writes the
-// refusal on the host; a stranger is refused without a host to write on;
-// a retry within the quiet period costs no second row.
+// the handshake for an expired certificate of the fleet and writes the refusal
+// on the host; a stranger is refused without a host to write on; a retry
 func TestVerifierRefusesTheHandshakeAndRecordsTheHost(t *testing.T) {
 	now := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
 	fleet := newTestAuthority(t, "Flotestro Fleet CA", now)

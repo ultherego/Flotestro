@@ -17,17 +17,16 @@ import (
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 )
 
-// probeIdentity reads the privileged part of the domain state: the host keytab,
-// the SSSD cache database and the SSSD offline policy in sssd.conf. The agent
-// has no access to them and should not have one.
+// probeIdentity reads the privileged part of the domain state: the host
+// keytab, the SSSD cache database and the SSSD offline policy in sssd.
 func (s *Server) probeIdentity(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.IdentityProbeRequest) *helperv1.HelperResponse {
 	result := &helperv1.IdentityProbeResult{}
 	var missing []string
 
-	// Every tool below has its own short limit; the limit of the order binds
-	// them together, so a stuck SSSD does not hold the connection for all of
-	// them in a row.
+	// Every tool below has its own short limit; the limit of the order binds them
+	// together, so a stuck SSSD does not hold the connection for all of them in a
+	// row.
 	ctx, cancel := deadline(ctx, request, 2*time.Minute, 10*time.Minute)
 	defer cancel()
 
@@ -55,9 +54,9 @@ func (s *Server) probeIdentity(ctx context.Context, request *helperv1.HelperRequ
 		result.ConfigIssues = issues
 	}
 
-	// The offline policy is a file read, not a tool run, so a stuck SSSD
-	// cannot hide it; its own reason travels inside the message because a
-	// half-read policy is still worth showing next to what is unknown.
+	// The offline policy is a file read, not a tool run, so a stuck SSSD cannot
+	// hide it; its own reason travels inside the message because a half-read
+	// policy is still worth showing next to what is unknown.
 	policy := readSSSDOfflinePolicy(action.GetDomain())
 	result.SssdOfflinePolicy = sssdOfflinePolicyToProto(policy)
 	if policy.UnavailableReason != "" {
@@ -142,12 +141,8 @@ func sssdStatus(ctx context.Context, domain string) (*bool, []string, error) {
 	return online, issues, nil
 }
 
-// parseConfigCheck reads the result of the SSSD configuration check.
-//
-// The tool ends its output with the summary line "Issues identified by
-// validators: N". Counting it as a problem would turn an "everything is fine"
-// report into a warning, so the summary serves only to decide whether to return
-// any details at all.
+// parseConfigCheck reads the result of the SSSD configuration check. The tool
+// ends its output with the summary line "Issues identified by validators: N".
 func parseConfigCheck(ctx context.Context) []string {
 	output, _, err := runIdentityTool(ctx, 20*time.Second, "sssctl", "config-check")
 	if err != nil {
@@ -186,41 +181,35 @@ func parseConfigCheck(ctx context.Context) []string {
 	return details
 }
 
-// runIdentityTool runs a tool from a fixed list of paths with nothing on
-// its standard input. The name never comes from the request, so it cannot
-// point at an arbitrary program.
+// runIdentityTool runs a tool from a fixed list of paths with nothing on its
+// standard input.
 func runIdentityTool(ctx context.Context, timeout time.Duration, tool string, args ...string) (string, string, error) {
 	stdout, stderr, err := identityToolRunner(ctx, timeout, nil, tool, args...)
 	var exit *exitStatusError
 	if errors.As(err, &exit) {
-		// A query tool that printed its answer and then complained is
-		// believed for the answer: klist lists the keytab and exits with
-		// a warning about a missing default, and the listing is the point.
+		// A query tool that printed its answer and then complained is believed for
+		// the answer: klist lists the keytab and exits with a warning about a
+		// missing default, and the listing is the point.
 		return stdout, stderr, nil
 	}
 	return stdout, stderr, err
 }
 
 // runIdentityToolWithInput runs a tool with the given text on its standard
-// input, for a tool that takes a credential on its prompt rather than in
-// argv. No tool of the join does today (ipa-client-install refuses a
-// prompt unattended); the runner stays for the one that will.
+// input, for a tool that takes a credential on its prompt rather than in argv.
 func runIdentityToolWithInput(ctx context.Context, timeout time.Duration, input string,
 	tool string, args ...string) (string, string, error) {
 	return identityToolRunner(ctx, timeout, strings.NewReader(input), tool, args...)
 }
 
-// runIdentityToolStrict runs a tool whose exit code is the verdict. The
-// lenient runner forgives a non-zero exit when the tool printed a result,
-// which suits a query tool; a join or a leave prints its banner and then
-// fails, and the banner must not pass for success.
+// runIdentityToolStrict runs a tool whose exit code is the verdict.
 func runIdentityToolStrict(ctx context.Context, timeout time.Duration, tool string, args ...string) (string, string, error) {
 	return identityToolRunner(ctx, timeout, nil, tool, args...)
 }
 
-// exitStatusError says the tool ended with a non-zero code; the lenient
-// runner returns it alongside a result, the strict one treats it as the
-// failure it is.
+// exitStatusError says the tool ended with a non-zero code; the lenient runner
+// returns it alongside a result, the strict one treats it as the failure it
+// is.
 type exitStatusError struct {
 	tool   string
 	code   int
@@ -232,8 +221,8 @@ func (e *exitStatusError) Error() string {
 }
 
 // identityToolRunner is the seam the tests replace: the join and the leave
-// call real directory tools, and a unit test has neither a directory nor
-// the right to change the host running it.
+// call real directory tools, and a unit test has neither a directory nor the
+// right to change the host running it.
 var identityToolRunner = execIdentityTool
 
 // execIdentityTool runs the tool. A nil input leaves the tool without a
@@ -261,10 +250,8 @@ func execIdentityTool(ctx context.Context, timeout time.Duration, input io.Reade
 	cmd.Env = []string{"LC_ALL=C", "LANG=C", "PATH=/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/var/lib/flotestro-helper"}
 	if input != nil {
 		cmd.Stdin = input
-		// A password prompt reads the controlling terminal first and falls
-		// back to standard input only without one. The helper runs as a
-		// service and has none, but an operator starting it by hand from a
-		// shell does; a session of its own makes the fallback certain.
+		// A password prompt reads the controlling terminal first and falls back to
+		// standard input only without one.
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	}
 
@@ -274,9 +261,8 @@ func execIdentityTool(ctx context.Context, timeout time.Duration, input io.Reade
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) && stdout.Len() > 0 {
-		// The tool may have returned a result despite a non-zero code. The
-		// result goes back with the code, and the caller decides which one
-		// it believes.
+		// The tool may have returned a result despite a non-zero code. The result
+		// goes back with the code, and the caller decides which one it believes.
 		return stdout.String(), stderr.String(),
 			&exitStatusError{tool: tool, code: exitErr.ExitCode(), stderr: stderr.String()}
 	}

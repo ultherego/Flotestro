@@ -10,17 +10,9 @@ import (
 	"time"
 )
 
-// TestHostnameCampaignSplitsTheMappingPerHost checks a rename in bulk as
-// the system chapter describes it: the order carries a map of host to new
-// name, the panel splits it into one plan per host, and a host the map
-// does not name is ineligible with a reason rather than renamed to a
-// default.
-//
-// No lab host changes its name: every host is mapped to the name it has
-// now. A rename to the same name is a valid plan the host carries out as a
-// no-op, and it exercises the whole path - the preview, the split, the
-// approval of the set of names, the task on every host - without leaving
-// the other tests a fleet they do not recognise.
+// TestHostnameCampaignSplitsTheMappingPerHost checks a rename in bulk as the
+// system chapter describes it: the order carries a map of host to new name,
+// the panel splits it into one plan per host, and a host the map does not name
 func TestHostnameCampaignSplitsTheMappingPerHost(t *testing.T) {
 	h := newHarness(t)
 	online := h.onlineDebianHosts()
@@ -71,9 +63,9 @@ func TestHostnameCampaignSplitsTheMappingPerHost(t *testing.T) {
 		}
 	}
 
-	// An order without a mapping is refused before any host is resolved:
-	// there is no shared name, and a name in the shared part would be the
-	// one name every host must not get.
+	// An order without a mapping is refused before any host is resolved: there is
+	// no shared name, and a name in the shared part would be the one name every
+	// host must not get.
 	for name, payload := range map[string]map[string]any{
 		"no mapping":     {"hostname": map[string]any{"hostname": "shared.flotestro.test"}},
 		"duplicate name": {"hostname": map[string]any{"mapping": map[string]string{first.ID: "twin.flotestro.test", second.ID: "twin.flotestro.test"}}},
@@ -93,9 +85,9 @@ func TestHostnameCampaignSplitsTheMappingPerHost(t *testing.T) {
 		})
 	}
 
-	// A mapping that names one host only: the other settles as ineligible
-	// at planning, with the code the wizard shows before the order, and
-	// the named host gets a plan that carries its own name.
+	// A mapping that names one host only: the other settles as ineligible at
+	// planning, with the code the wizard shows before the order, and the named
+	// host gets a plan that carries its own name.
 	partial := h.createCampaign(order("rename with a host left out", map[string]string{first.ID: first.Hostname}))
 	if partial.State != "planning" {
 		t.Fatalf("the rename campaign started from state %s; the mapping is split at planning", partial.State)
@@ -170,9 +162,9 @@ func TestHostnameCampaignSplitsTheMappingPerHost(t *testing.T) {
 	}
 }
 
-// assertPlansCarryOwnNames reads the plan set of a rename campaign and
-// checks that every named host's plan carries that host's own name, from
-// the order - and no other host's.
+// assertPlansCarryOwnNames reads the plan set of a rename campaign and checks
+// that every named host's plan carries that host's own name, from the order -
+// and no other host's.
 func assertPlansCarryOwnNames(t *testing.T, h *harness, campaignID string, wanted map[string]string) {
 	t.Helper()
 	var groups struct {

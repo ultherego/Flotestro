@@ -9,8 +9,6 @@ import (
 )
 
 // The panel chains. The panel holds two: for incoming and outgoing traffic.
-// More is not needed, and every extra one is another place where the rule
-// order decides access to the host.
 const (
 	ChainInput  = "input"
 	ChainOutput = "output"
@@ -23,17 +21,10 @@ const (
 	ActionReject = "reject"
 )
 
-// CommentPrefix marks the panel rules. The comment is the only durable
-// ownership marker: the handle is assigned by the kernel and changes at
-// every table reload.
+// CommentPrefix marks the panel rules.
 const CommentPrefix = "flotestro:"
 
 // RuleSpec describes a rule in a form the panel can assemble and revert.
-//
-// The panel does not accept raw nft notation: the rule text is a language,
-// and accepting a language from the operator would mean the host runs
-// everything that can be written in it. The wizard assembles the rule from
-// fields the panel understands.
 type RuleSpec struct {
 	// ID is the rule name given by the operator. It goes into the comment,
 	// so the rule can be found after a table reload.
@@ -130,10 +121,6 @@ func (r RuleSpec) Marker() string {
 }
 
 // Expression assembles the rule text in the nft language.
-//
-// The fields are returned separately, not as one string, so that the
-// command goes as an argument list: text glued into one argument would have
-// to pass through a shell.
 func (r RuleSpec) Expression() []string {
 	var parts []string
 	if r.Interface != "" {
@@ -178,11 +165,6 @@ func set(values []string) string {
 }
 
 // TableSetupArguments assembles the commands creating the panel table.
-//
-// The table is our own, because the host firewall usually belongs to
-// somebody already: docker rewrites its chains at every container start,
-// and firewalld at a reload. The chain policy stays "accept": the panel
-// table adds explicit rules, it does not cut the host off by default.
 func TableSetupArguments() [][]string {
 	return [][]string{
 		{NftPath, "add", "table", FlotestroFamily, FlotestroTable},
@@ -216,12 +198,6 @@ func RemovalArguments(chain string, handle int) ([]string, error) {
 
 // ProtectsManagementChannel checks that the rule does not cut the panel off
 // from the host.
-//
-// It is the only rule that must not be lost: without it the host stops
-// answering and there is nothing to revert the change with. The check is
-// conservative - in doubt it refuses, because the cost of a false refusal
-// is one click, and the cost of a false approval is a trip to the server
-// room.
 func ProtectsManagementChannel(rule RuleSpec, panelAddress string, agentPort int) error {
 	if rule.Action == ActionAccept {
 		return nil

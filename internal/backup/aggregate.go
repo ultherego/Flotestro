@@ -13,13 +13,6 @@ import (
 )
 
 // The fleet screen, counted by the database.
-//
-// The screen used to read the first five hundred hosts, fetch their
-// definitions and the newest runs, and judge the age of every copy in the
-// panel. On a bigger fleet the numbers were plausible and wrong. The
-// queries here judge every definition of every host in scope in the
-// database, with the same thresholds State applies, and hand the rows
-// out a page at a time by a key that holds still under the reader.
 
 // The size of a page of the fleet list: what a screen gets without
 // asking, and the most it may ask for.
@@ -28,9 +21,7 @@ const (
 	MaxPage     = 500
 )
 
-// The kinds of run the fleet view reads. They are the operation names of
-// the backup module, repeated here so the store does not depend on the
-// module that records them.
+// The kinds of run the fleet view reads.
 const (
 	kindPlan    = "plan"
 	kindBackup  = "run"
@@ -40,9 +31,8 @@ const (
 
 // FleetSummary is what the database counted over the visible fleet.
 type FleetSummary struct {
-	// Hosts is the number of hosts in scope; HostsWithDefinitions those
-	// with at least one backup definition. A host without one is not a
-	// host without backups: the panel does not know.
+	// Hosts is the number of hosts in scope; HostsWithDefinitions those with at
+	// least one backup definition.
 	Hosts                int
 	HostsWithDefinitions int
 	// Definitions is the number of rows the list has across every page.
@@ -63,9 +53,8 @@ type FleetRow struct {
 	Definition string
 	Tool       string
 	Repository string
-	// LastSuccessAt is the newest successful copy: what the last plan
-	// reported, or the moment of the last successful run when no plan
-	// said. Nil is a copy that never ran.
+	// LastSuccessAt is the newest successful copy: what the last plan reported,
+	// or the moment of the last successful run when no plan said.
 	LastSuccessAt *time.Time
 	VerifiedAt    *time.Time
 	RestoredAt    *time.Time
@@ -77,17 +66,11 @@ type RepositoryLoad struct {
 	// Definitions counts the definitions writing to the backend.
 	Definitions int
 	Unverified  int
-	// OldestAgeHours is the age of the oldest copy in this repository. A
-	// repository is as good as its worst copy; nil means no copy has
-	// succeeded yet.
+	// OldestAgeHours is the age of the oldest copy in this repository.
 	OldestAgeHours *float64
 }
 
-// FleetCursor is the key of the last row of a page. The order is the
-// worst first: the state, then the age of the copy, then the host and
-// the definition. The moment the states were judged at travels in the
-// cursor, so every page of one reading judges by the same clock and a
-// copy does not change state between two pages.
+// FleetCursor is the key of the last row of a page.
 type FleetCursor struct {
 	Now        time.Time
 	Rank       int
@@ -149,9 +132,7 @@ func scopeCondition(scopes []authz.Scope, offset int) (string, []any) {
 }
 
 // copiesSQL joins every definition of the hosts in scope with the newest
-// successful run of each kind. The parameters $1..$3 are the instants a
-// copy turns critical, turns stale and stops counting as verified; $4 is
-// the moment of the reading. The scope condition is the format argument.
+// successful run of each kind.
 const copiesSQL = `
 	with scoped as (
 		select h.id, h.hostname from hosts h where %s
@@ -237,15 +218,13 @@ func (s *Store) FleetSummary(ctx context.Context, scopes []authz.Scope, now time
 	return summary, nil
 }
 
-// FleetPage reads one page of the definitions of the visible fleet, the
-// worst first. The first page is judged at now; the next pages are
-// judged at the moment of the cursor. The second result is the cursor
-// of the next page, empty on the last one.
+// FleetPage reads one page of the definitions of the visible fleet, the worst
+// first.
 func (s *Store) FleetPage(ctx context.Context, scopes []authz.Scope, cursor FleetCursor, limit int,
 	now time.Time) ([]FleetRow, string, error) {
 	// A caller asking for more than a page may hold gets the page, not the
-	// default: it then pages on with the cursor rather than quietly
-	// receiving a fifth of what it asked for.
+	// default: it then pages on with the cursor rather than quietly receiving a
+	// fifth of what it asked for.
 	limit = paging.Limit(limit, DefaultPage, MaxPage)
 	if cursor.Set {
 		now = cursor.Now
@@ -257,9 +236,9 @@ func (s *Store) FleetPage(ctx context.Context, scopes []authz.Scope, cursor Flee
 		select host_id::text, hostname, name, tool, repository, last_success_at, verified_at, restored_at, rank
 		from judged`
 	if cursor.Set {
-		// Every column of the key ascends: the rank is negated so the
-		// worst state comes first, and a copy that never ran carries the
-		// key before every instant.
+		// Every column of the key ascends: the rank is negated so the worst state
+		// comes first, and a copy that never ran carries the key before every
+		// instant.
 		args = append(args, -cursor.Rank, cursor.Last, cursor.Hostname, cursor.HostID, cursor.Definition)
 		query += fmt.Sprintf(` where (-rank, coalesce(last_success_at, '-infinity'::timestamptz), hostname, host_id, name)
 		       > ($%d, $%d::timestamptz, $%d, $%d::uuid, $%d)`,
@@ -292,9 +271,9 @@ func (s *Store) FleetPage(ctx context.Context, scopes []authz.Scope, cursor Flee
 	if len(result) <= limit {
 		return result, "", nil
 	}
-	// One row more than the page says there is a next page; the cursor
-	// names the last row of the page, not the extra one, with the rank
-	// the query sorted it by.
+	// One row more than the page says there is a next page; the cursor names the
+	// last row of the page, not the extra one, with the rank the query sorted it
+	// by.
 	last := result[limit-1]
 	result = result[:limit]
 	next := FleetCursor{

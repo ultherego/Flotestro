@@ -10,12 +10,8 @@ import (
 )
 
 // The mandatory scenario of chapter 23: a host joins the domain through the
-// panel and leaves it, and a join that cannot work stops at the preflight
-// with the failed conditions named. The lab's directory is FreeIPA on
-// ipa.flotestro.test; Vagrant/lab-ipa-client.sh puts the client packages
-// and the names in place on the debian-family hosts, and the panel does
-// the rest - installing directory packages is a decision about trust, so
-// the test does not do it either.
+// panel and leaves it, and a join that cannot work stops at the preflight with
+// the failed conditions named.
 
 const domainJoinReason = "integration test of the domain join and leave"
 
@@ -101,9 +97,9 @@ func failedChecks(checks []domainCheck) []string {
 	return failed
 }
 
-// refreshIdentity orders a read of the identity module and waits for the
-// panel to hold it: the facts after a join or a leave have to come from
-// after the change, not from the last inventory cycle.
+// refreshIdentity orders a read of the identity module and waits for the panel
+// to hold it: the facts after a join or a leave have to come from after the
+// change, not from the last inventory cycle.
 func refreshIdentity(t *testing.T, h *harness, hostID string) identityFacts {
 	t.Helper()
 	job, attempts := h.runOperation(hostID, map[string]any{
@@ -117,9 +113,7 @@ func refreshIdentity(t *testing.T, h *harness, hostID string) identityFacts {
 }
 
 // awaitSSSDOnline refreshes the identity facts until SSSD reports itself
-// connected to the directory. Right after a join SSSD may still be coming
-// up; a state it has not reported is unknown, not offline, so the wait is
-// bounded and the last facts are returned either way.
+// connected to the directory.
 func awaitSSSDOnline(t *testing.T, h *harness, hostID string, limit time.Duration) identityFacts {
 	t.Helper()
 	deadline := time.Now().Add(limit)
@@ -134,11 +128,8 @@ func awaitSSSDOnline(t *testing.T, h *harness, hostID string, limit time.Duratio
 	return facts
 }
 
-// candidateForJoin picks a connected debian-family host that is in no
-// domain and has the IPA client installed. The lab joins agent-fedora by
-// hand, so it never qualifies; agent-debian and agent-ubuntu do once
-// Vagrant/lab-ipa-client.sh ran. A host without the client is not a
-// failure of the product: the panel does not install directory packages.
+// candidateForJoin picks a connected debian-family host that is in no domain
+// and has the IPA client installed.
 func candidateForJoin(t *testing.T, h *harness) (hostView, string) {
 	t.Helper()
 	var skipped []string
@@ -151,9 +142,9 @@ func candidateForJoin(t *testing.T, h *harness) (hostView, string) {
 			skipped = append(skipped, host.Hostname+": already in "+facts.Realm)
 			continue
 		}
-		// The preflight is the host's own word on whether the client is
-		// there: the identity facts of a host outside a domain say nothing
-		// about ipa-client-install.
+		// The preflight is the host's own word on whether the client is there: the
+		// identity facts of a host outside a domain say nothing about
+		// ipa-client-install.
 		job, attempts := h.runOperation(host.ID, map[string]any{
 			"action": "identity.host.preflight", "reason": domainJoinReason,
 			"payload": map[string]any{"domain_enroll": map[string]any{
@@ -167,9 +158,9 @@ func candidateForJoin(t *testing.T, h *harness) (hostView, string) {
 			continue
 		}
 		if job.State != "succeeded" {
-			// The client is there and something else blocks the join: that
-			// is what the negative half of the scenario is about, so the
-			// test says what it is instead of running the join blind.
+			// The client is there and something else blocks the join: that is what the
+			// negative half of the scenario is about, so the test says what it is
+			// instead of running the join blind.
 			skipped = append(skipped, host.Hostname+": preflight "+strings.Join(failedChecks(detail.Checks), ", ")+
 				" ("+lastMessage(attempts)+")")
 			continue
@@ -189,9 +180,9 @@ func fqdnOf(hostname string) string {
 	return hostname + "." + labDomain
 }
 
-// currentHostname re-reads the host: the join renames it to its FQDN and
-// the leave restores the short name, and the typed target has to be the
-// name the panel holds at the moment of the order.
+// currentHostname re-reads the host: the join renames it to its FQDN and the
+// leave restores the short name, and the typed target has to be the name the
+// panel holds at the moment of the order.
 func currentHostname(t *testing.T, h *harness, hostID string) string {
 	t.Helper()
 	for _, host := range h.hosts() {
@@ -213,14 +204,9 @@ func leaveDomain(t *testing.T, h *harness, hostID string) (jobView, []attemptVie
 	}, 10*time.Minute)
 }
 
-// TestAHostJoinsTheDomainThroughThePanelAndLeavesIt runs the join end to
-// end: the panel fetches the one-time password from the directory at
-// dispatch, the host joins, the verifications after the join pass and the
-// identity inventory shows the realm with SSSD online. The host then
-// leaves through the panel and is in no domain again - also in t.Cleanup,
-// so a failed assertion does not leave the lab host joined. Last, a join
-// with a server that does not exist stops at the preflight with the
-// unreachable ports named and changes nothing.
+// TestAHostJoinsTheDomainThroughThePanelAndLeavesIt runs the join end to end:
+// the panel fetches the one-time password from the directory at dispatch, the
+// host joins, the verifications after the join pass and the identity inventory
 func TestAHostJoinsTheDomainThroughThePanelAndLeavesIt(t *testing.T) {
 	h := newHarness(t)
 	if !directoryAvailable(t, h) {

@@ -11,10 +11,8 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// listProcesses reads the processes of the host.
-//
-// The read goes straight from /proc and needs no root: the panel shows what
-// every user of the host sees. Only sending a signal needs privileges.
+// listProcesses reads the processes of the host. The read goes straight from
+// /proc and needs no root: the panel shows what every user of the host sees.
 func (e *TaskExecutor) listProcesses(_ context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.ProcessListPayload) *agentv1.TaskResult {
 	if payload == nil {

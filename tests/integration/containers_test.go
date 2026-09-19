@@ -59,12 +59,9 @@ type engineState struct {
 
 const containersReason = "integration test of networks and volumes"
 
-// TestNetworkAndVolumeUsageFollowsFromContainers guards the property
-// without which this tab lies: the engine returns an empty container map in
-// the network list, and gives the volume size and reference count only in a
-// separate disk usage call. Usage must therefore be computed from the
-// containers - otherwise every network and every volume would look
-// abandoned and end up under cleanup.
+// TestNetworkAndVolumeUsageFollowsFromContainers guards the property without
+// which this tab lies: the engine returns an empty container map in the
+// network list, and gives the volume size and reference count only in a
 func TestNetworkAndVolumeUsageFollowsFromContainers(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -140,10 +137,7 @@ func TestNetworkAndVolumeUsageFollowsFromContainers(t *testing.T) {
 	}
 }
 
-// TestCleanupRefusesAnObjectInUse guards the cleanup boundary. The refusal
-// is to come from the host and have its own code: an operator who asked to
-// remove the volume of a running service is to see that the host refused,
-// not that the operation failed.
+// TestCleanupRefusesAnObjectInUse guards the cleanup boundary.
 func TestCleanupRefusesAnObjectInUse(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -186,11 +180,6 @@ func TestCleanupRefusesAnObjectInUse(t *testing.T) {
 
 // refusal orders a cleanup and requires the host to refuse with the given
 // code.
-//
-// Cleanup deletes data irreversibly, so it requires two people's approval.
-// The test collects both: without the second one the job would stay in
-// awaiting_approval and nobody would learn whether the host would refuse at
-// all.
 func refusal(t *testing.T, h *harness, host hostView, prune map[string]any, code string) {
 	t.Helper()
 	job := h.createOperation(host.ID, map[string]any{
@@ -318,10 +307,9 @@ type eventsResult struct {
 	UnavailableReason string `json:"unavailable_reason"`
 }
 
-// TestEventReadEndsOnItsOwn guards the property without which this
-// operation could not exist: the read is closed in a window and ends on its
-// own, also when nobody waits for it. A job reading events "until further
-// notice" would stay on the host forever.
+// TestEventReadEndsOnItsOwn guards the property without which this operation
+// could not exist: the read is closed in a window and ends on its own, also
+// when nobody waits for it.
 func TestEventReadEndsOnItsOwn(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -349,9 +337,8 @@ func TestEventReadEndsOnItsOwn(t *testing.T) {
 	if result.Kind != "docker_events" {
 		t.Fatalf("result kind = %q", result.Kind)
 	}
-	// The window must come back in the result: without it an empty list
-	// says nothing, because silence in the window and no read look the
-	// same.
+	// The window must come back in the result: without it an empty list says
+	// nothing, because silence in the window and no read look the same.
 	if result.Events.Since.IsZero() || result.Events.Until.IsZero() {
 		t.Fatalf("result without a window: %+v", result.Events)
 	}
@@ -373,8 +360,7 @@ func TestEventReadEndsOnItsOwn(t *testing.T) {
 }
 
 // TestEventReadSeesOperationsOnTheHost checks that the log answers the
-// question the host state does not: what happened here. A container restart
-// leaves the same container in the state as before, and a trace in the log.
+// question the host state does not: what happened here.
 func TestEventReadSeesOperationsOnTheHost(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -429,9 +415,9 @@ func TestEventReadSeesOperationsOnTheHost(t *testing.T) {
 	}
 }
 
-// TestEventOrderOutsideTheWindowIsRejected guards that the limits are part
-// of the operation contract: the operator learns about them when ordering,
-// not through a quiet trim on the host.
+// TestEventOrderOutsideTheWindowIsRejected guards that the limits are part of
+// the operation contract: the operator learns about them when ordering, not
+// through a quiet trim on the host.
 func TestEventOrderOutsideTheWindowIsRejected(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -477,10 +463,9 @@ type logsResult struct {
 	UnavailableReason string   `json:"unavailable_reason"`
 }
 
-// TestContainerLogsAreBounded checks the log read of one container: the
-// tail asked for comes back as lines, a short tail is not cut, and the
-// result says so rather than leaving the operator to guess. The read is
-// aimed at a running container, so there is something to read.
+// TestContainerLogsAreBounded checks the log read of one container: the tail
+// asked for comes back as lines, a short tail is not cut, and the result says
+// so rather than leaving the operator to guess.
 func TestContainerLogsAreBounded(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")

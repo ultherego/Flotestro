@@ -15,23 +15,17 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// The capability is minted at dispatch, not when the job is created: a
-// host that is offline for hours must not hold a valid authorization for
-// hours. The window starts now and is as long as the class of the
-// operation needs to start, and the nonce is fresh for this attempt.
+// The capability is minted at dispatch, not when the job is created: a host
+// that is offline for hours must not hold a valid authorization for hours.
 
-// helperCapabilityDispatch counts what the dispatch did about the
-// capability: minted, legacy_agent for a host whose agent does not forward
-// one, no_signer for a panel without a key, refused for a host held back
-// under enforce. The share of legacy hosts is what decides when the mode
-// can move on.
+// helperCapabilityDispatch counts what the dispatch did about the capability:
+// minted, legacy_agent for a host whose agent does not forward one, no_signer
+// for a panel without a key, refused for a host held back under enforce.
 var helperCapabilityDispatch = metrics.Default.NewCounter("flotestro_helper_capability_total",
 	"Capabilities minted at dispatch, by outcome.", "outcome", "gateway")
 
-// PrincipalPermissions reads the permissions of the creator of a task, by
-// the subject the task records. An interface rather than the authz store:
-// the scheduler is to derive the grants, not to know how identities are
-// kept.
+// PrincipalPermissions reads the permissions of the creator of a task, by the
+// subject the task records.
 type PrincipalPermissions interface {
 	PermissionsOfSubject(ctx context.Context, subject string) ([]string, error)
 }
@@ -40,10 +34,7 @@ type PrincipalPermissions interface {
 type HelperCapabilities struct {
 	// Signer holds the panel's key. Nil mints nothing.
 	Signer *helpercap.Signer
-	// Mode is the panel's stage of the rollout. Under observe and prefer a
-	// host whose agent does not forward a capability gets the envelope it
-	// knows; prefer says so on the log. Under enforce such a host gets no
-	// mutating task at all.
+	// Mode is the panel's stage of the rollout.
 	Mode helpercap.Mode
 	// Permissions reads the creator's permissions for the grants. Nil means
 	// the grants are the permission of the action alone.
@@ -61,10 +52,8 @@ var errCapabilityUnsupported = errors.New("the agent of the host does not forwar
 // ErrorHelperCapabilityUnsupported is the code such a task ends with.
 const ErrorHelperCapabilityUnsupported = "helper_capability_unsupported"
 
-// attachCapability mints and signs the capability of a mutating task and
-// puts it on the envelope. It returns the identifier for the audit trail,
-// or "" when no capability went out, and an error only under enforce for
-// a host that cannot carry one.
+// attachCapability mints and signs the capability of a mutating task and puts
+// it on the envelope.
 func (s *Scheduler) attachCapability(ctx context.Context, item jobs.LeasedJob,
 	envelope *agentv1.TaskEnvelope) (string, error) {
 	action := opspec.ActionType(item.Job.ActionType)
@@ -98,9 +87,9 @@ func (s *Scheduler) attachCapability(ctx context.Context, item jobs.LeasedJob,
 	if err != nil {
 		return "", fmt.Errorf("the canonical payload: %w", err)
 	}
-	// The grants come from the creator's permissions; a creator the store
-	// does not know - a system task, a subject removed since - gets the
-	// permission of the action alone, which is the narrow side.
+	// The grants come from the creator's permissions; a creator the store does
+	// not know - a system task, a subject removed since - gets the permission of
+	// the action alone, which is the narrow side.
 	var permissions []string
 	if s.capabilities.Permissions != nil && item.Job.CreatedBy != "" {
 		permissions, err = s.capabilities.Permissions.PermissionsOfSubject(ctx, item.Job.CreatedBy)

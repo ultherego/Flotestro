@@ -89,10 +89,9 @@ func TestValidateBoundsAJournalRead(t *testing.T) {
 	}
 }
 
-// A read bounded to the window of a job names both ends in UTC: the
-// panel knows the job's times in UTC, and a bare timestamp would be read
-// in the host's own zone. The ends take the same forms, and nothing that
-// is not a time.
+// A read bounded to the window of a job names both ends in UTC: the panel
+// knows the job's times in UTC, and a bare timestamp would be read in the
+// host's own zone.
 func TestAJournalReadTakesAWindowInUTC(t *testing.T) {
 	for _, window := range []JournalPayload{
 		{Lines: 100, Since: "2026-09-15 10:00:00 UTC", Until: "2026-09-15 10:05:30 UTC"},
@@ -140,10 +139,7 @@ func TestMutatingOperationsAreDistinguished(t *testing.T) {
 }
 
 // A payload with an empty sub-payload describes the same operation as a
-// payload without one. On a read the panel sends an empty payload, the
-// envelope has nothing to carry, and the agent reconstructs a zero structure
-// from it - and without a shared canonical form the hash came out different
-// on the two sides.
+// payload without one.
 func TestTheHashDoesNotDependOnAnEmptySubPayload(t *testing.T) {
 	empty, err := PayloadHash(ActionSecurityScan, ActionVersion, Payload{})
 	if err != nil {
@@ -207,11 +203,9 @@ func TestReplacingTheAgentHasItsOwnRules(t *testing.T) {
 	}
 }
 
-// TestEveryHashSchemeIsAFunctionOfThePlan guards the switch of the scheme:
-// the agent accepts a hash of any known scheme, so every scheme has to be
-// as sensitive to a swapped plan as the one the panel issues, and the
-// schemes have to differ from one another - otherwise the version number
-// says nothing.
+// TestEveryHashSchemeIsAFunctionOfThePlan guards the switch of the scheme: the
+// agent accepts a hash of any known scheme, so every scheme has to be as
+// sensitive to a swapped plan as the one the panel issues, and the schemes
 func TestEveryHashSchemeIsAFunctionOfThePlan(t *testing.T) {
 	plan := Payload{Unit: &UnitPayload{Unit: "nginx.service"}}
 	swapped := Payload{Unit: &UnitPayload{Unit: "sshd.service"}}
@@ -249,11 +243,9 @@ func TestEveryHashSchemeIsAFunctionOfThePlan(t *testing.T) {
 	}
 }
 
-// TestTheReverseTableNamesOnlyDeclaredWaysBack guards the table a
-// compensation is checked against: every row is a mutating operation whose
-// reverse is another known mutating operation with a real way back, and an
-// operation without a row - a restart, a signal - has no reverse at all
-// rather than a guessed one.
+// TestTheReverseTableNamesOnlyDeclaredWaysBack guards the table a compensation
+// is checked against: every row is a mutating operation whose reverse is
+// another known mutating operation with a real way back, and an operation
 func TestTheReverseTableNamesOnlyDeclaredWaysBack(t *testing.T) {
 	for forward, reverse := range reverseActions {
 		if !forward.Known() || !forward.Mutating() {
@@ -265,9 +257,8 @@ func TestTheReverseTableNamesOnlyDeclaredWaysBack(t *testing.T) {
 		if forward == reverse {
 			t.Errorf("%s is listed as its own reverse", forward)
 		}
-		// A change whose contract says there is no way back cannot have
-		// one in the table: the two declarations would contradict each
-		// other on the screen.
+		// A change whose contract says there is no way back cannot have one in the
+		// table: the two declarations would contradict each other on the screen.
 		if forward.Contract().Rollback == RollbackNone || forward.Contract().Rollback == RollbackBestEffort {
 			t.Errorf("%s declares rollback %s and yet names %s as its reverse",
 				forward, forward.Contract().Rollback, reverse)
@@ -292,10 +283,8 @@ func scheduleOrder(user string, command ...string) Payload {
 	}}
 }
 
-// The user of a cron line is separated from the command by whitespace
-// only, and it used to reach the host unchecked, root by default. A value
-// that would not stay in its field is refused at ordering time, as is an
-// entry that names no account: root is a decision, not a default.
+// The user of a cron line is separated from the command by whitespace only,
+// and it used to reach the host unchecked, root by default.
 func TestAScheduleUserHasToBeAnAccountName(t *testing.T) {
 	for _, user := range []string{
 		"", "root; /bin/sh", "root\n* * * * * root /bin/sh", "root\t/bin/sh", "root #",
@@ -332,10 +321,8 @@ func TestAScheduleCommandRefusesAZeroByte(t *testing.T) {
 	}
 }
 
-// The content of an order can ask for more than the operation: an entry
-// for root needs schedule.root.exec on top of schedule.write, and a write
-// allowed to skip its validator needs file.write.unvalidated. Everything
-// else asks for nothing beyond the registry's permission.
+// The content of an order can ask for more than the operation: an entry for
+// root needs schedule.
 func TestPayloadPermissionsNameWhatTheContentAsksFor(t *testing.T) {
 	if got := PayloadPermissions(ActionScheduleEnsure, scheduleOrder("root")); len(got) != 1 || got[0] != PermissionScheduleRootExec {
 		t.Errorf("root entry needs %v, want [%s]", got, PermissionScheduleRootExec)

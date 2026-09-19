@@ -33,9 +33,8 @@ func createSegment(dir string, id uint64) (*segment, error) {
 	return &segment{id: id, file: file}, nil
 }
 
-// openSegment reopens an existing segment for appending. The file is
-// walked first: a torn tail is cut off, so the append starts at a frame
-// boundary.
+// openSegment reopens an existing segment for appending. The file is walked
+// first: a torn tail is cut off, so the append starts at a frame boundary.
 func openSegment(dir string, id uint64) (*segment, error) {
 	path := segmentPath(dir, id)
 	if err := walkSegment(path, func(byte, []byte, int64, int) error { return nil }); err != nil {
@@ -60,9 +59,9 @@ func (s *segment) append(framed []byte) (int64, error) {
 	for written < len(framed) {
 		n, err := s.file.Write(framed[written:])
 		if err != nil {
-			// A short write leaves a torn frame at the tail; the size is
-			// left where the frame began, so the next append overwrites
-			// nothing but the walk at the next start cuts it off.
+			// A short write leaves a torn frame at the tail; the size is left where the
+			// frame began, so the next append overwrites nothing but the walk at the
+			// next start cuts it off.
 			return 0, fmt.Errorf("writing a record: %w", err)
 		}
 		written += n
@@ -96,9 +95,8 @@ func syncDir(dir string) error {
 	return handle.Sync()
 }
 
-// listSegments returns the identifiers of the segments in the directory
-// in ascending order. Files with other names are not the spool's and are
-// left alone.
+// listSegments returns the identifiers of the segments in the directory in
+// ascending order.
 func listSegments(dir string) ([]uint64, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -120,12 +118,8 @@ func listSegments(dir string) ([]uint64, error) {
 	return ids, nil
 }
 
-// walkSegment reads the frames of a segment in order and calls the
-// function with each. A frame the reader cannot take - the file ends
-// inside it, or its checksum does not match - is where the segment is
-// cut: the file is truncated at the offset the frame began, the frames
-// before it are kept, and the walk ends without an error. That is the
-// crash the document names: the last record torn, the earlier ones whole.
+// walkSegment reads the frames of a segment in order and calls the function
+// with each.
 func walkSegment(path string, visit func(kind byte, body []byte, offset int64, size int) error) error {
 	file, err := os.OpenFile(path, os.O_RDWR, 0o600)
 	if err != nil {

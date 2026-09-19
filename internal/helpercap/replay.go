@@ -18,19 +18,8 @@ import (
 // DefaultReplayDir is where a packaged helper remembers consumed nonces.
 const DefaultReplayDir = "/var/lib/flotestro-helper/replay"
 
-// ReplayStore remembers every nonce the helper consumed, as a file per
-// nonce in a root-owned directory. No database and no service: the file
-// system is what survives a restart of the helper, and O_EXCL is what
-// makes two consumptions of one nonce impossible - the second create
-// fails in the kernel, whichever process asks.
-//
-// One task may ask the helper more than once under one capability: a
-// network change is applied and then confirmed, a package upgrade
-// refreshes the metadata and then upgrades. The nonce is consumed by the
-// first request; a later request of the same task is honoured for as long
-// as this process lives, because the record names the task and the life
-// of the helper that made it. After a restart the same nonce is a replay,
-// which is what the document's third helper test demands.
+// ReplayStore remembers every nonce the helper consumed, as a file per nonce
+// in a root-owned directory.
 type ReplayStore struct {
 	dir   string
 	dirfd int
@@ -42,10 +31,8 @@ type ReplayStore struct {
 	now     func() time.Time
 }
 
-// OpenReplayStore opens the directory, creating it with mode 0700 when it
-// is missing. The directory descriptor is kept open, so every record is
-// created relative to it and never through a path somebody else could
-// redirect.
+// OpenReplayStore opens the directory, creating it with mode 0700 when it is
+// missing.
 func OpenReplayStore(dir string) (*ReplayStore, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
@@ -153,10 +140,8 @@ func writeAndFsync(fd int, content string) error {
 	return nil
 }
 
-// Sweep removes the records of capabilities that expired long enough ago
-// that no clock skew could bring them back. A record is kept ClockSkew
-// past its expiry, because the verifier accepts a capability that far past
-// its window on a host whose clock runs ahead.
+// Sweep removes the records of capabilities that expired long enough ago that
+// no clock skew could bring them back.
 func (s *ReplayStore) Sweep() {
 	s.mu.Lock()
 	defer s.mu.Unlock()

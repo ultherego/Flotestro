@@ -13,15 +13,8 @@ import (
 	"time"
 )
 
-// The durable notification queue, against receivers that really answer.
-//
-// The tests run on the panel machine, so a server started here stands at
-// 127.0.0.1 for the panel as well, and a channel can point at it. That is
-// what lets this file check what the log of the previous release could
-// not: that a receiver which is down delays a message rather than losing
-// it, that the row carries the attempts and comes back when the receiver
-// does, and that a receiver which refuses the credentials ends as a dead
-// letter an operator - not the panel - sends again.
+// The durable notification queue, against receivers that really answer. The
+// tests run on the panel machine, so a server started here stands at 127.
 
 // queueRowView is one row of the queue as the API serves it.
 type queueRowView struct {
@@ -44,9 +37,7 @@ type queueListView struct {
 	DeadLetters int            `json:"dead_letters"`
 }
 
-// recipient is a receiver the panel really talks to. It counts what
-// arrived and answers with whatever status the test has set, so the same
-// address can be down for one attempt and back for the next.
+// recipient is a receiver the panel really talks to.
 type recipient struct {
 	server   *httptest.Server
 	status   atomic.Int64
@@ -78,8 +69,7 @@ func rowsOf(h *harness, channelID string) queueListView {
 }
 
 // awaitQueueRow waits until a row of the channel for the event satisfies the
-// condition and returns it. The message travels through the trail, the
-// router and the worker, so "at once" is a few seconds.
+// condition and returns it.
 func awaitQueueRow(h *harness, channelID, eventType string, limit time.Duration,
 	what string, ok func(queueRowView) bool) queueRowView {
 	h.t.Helper()
@@ -102,16 +92,8 @@ func awaitQueueRow(h *harness, channelID, eventType string, limit time.Duration,
 	return queueRowView{}
 }
 
-// TestTheQueueHoldsAMessageUntilTheReceiverTakesIt guards chapter 10 of
-// the security document end to end: the durable queue.
-//
-// One event, two receivers. The first is down with a 500 and comes back;
-// its row has to wait in retry_wait with the attempts counted on it, and
-// it has to be delivered once the receiver answers - the message is never
-// lost, and the event is never marked delivered on a failed attempt. The
-// second refuses the credentials with a 401; retrying that on its own
-// cannot help, so the row is a dead letter at once and stays one until an
-// operator puts it back by hand.
+// TestTheQueueHoldsAMessageUntilTheReceiverTakesIt guards chapter 10 of the
+// security document end to end: the durable queue.
 func TestTheQueueHoldsAMessageUntilTheReceiverTakesIt(t *testing.T) {
 	h := newHarness(t)
 	name := fmt.Sprintf("integration-queue-%d", time.Now().UnixNano())
@@ -121,10 +103,8 @@ func TestTheQueueHoldsAMessageUntilTheReceiverTakesIt(t *testing.T) {
 	flaky := newRecipient(t, http.StatusInternalServerError)
 	rejecting := newRecipient(t, http.StatusUnauthorized)
 
-	// Both channels carry one subject, and the enrollment of a machine
-	// below is what produces it. The filter names no part of the fleet:
-	// the channel of the whole installation is the one an event of any
-	// place reaches.
+	// Both channels carry one subject, and the enrollment of a machine below is
+	// what produces it.
 	subject := "enrollment.completed"
 	down := createChannel(h, map[string]any{
 		"name": name + "-down", "kind": "webhook",
@@ -143,9 +123,8 @@ func TestTheQueueHoldsAMessageUntilTheReceiverTakesIt(t *testing.T) {
 		t.Fatal("the synthetic host was not enrolled")
 	}
 
-	// A 500 passes: the row waits for another attempt, with the attempt
-	// counted on it and the transport code of the answer. It is not
-	// delivered, and it does not say it was.
+	// A 500 passes: the row waits for another attempt, with the attempt counted
+	// on it and the transport code of the answer.
 	waiting := awaitQueueRow(h, down.ID, subject, 60*time.Second, "waiting for another attempt",
 		func(row queueRowView) bool { return row.State == "retry_wait" })
 	if waiting.Attempt < 1 {
@@ -166,9 +145,9 @@ func TestTheQueueHoldsAMessageUntilTheReceiverTakesIt(t *testing.T) {
 		t.Errorf("the row names no next attempt: %+v", waiting)
 	}
 
-	// A 401 is the credential's fault and cannot be mended by trying
-	// again, so the row is a dead letter at once, with the code of the
-	// document rather than the transport status.
+	// A 401 is the credential's fault and cannot be mended by trying again, so
+	// the row is a dead letter at once, with the code of the document rather than
+	// the transport status.
 	dead := awaitQueueRow(h, refusing.ID, subject, 60*time.Second, "refused as a dead letter",
 		func(row queueRowView) bool { return row.State == "dead_letter" })
 	if dead.LastErrorCode != "channel_credentials_rejected" {
@@ -187,9 +166,9 @@ func TestTheQueueHoldsAMessageUntilTheReceiverTakesIt(t *testing.T) {
 	// waiting all along, and the next attempt carries the same message.
 	flaky.status.Store(int64(http.StatusOK))
 	before := flaky.received.Load()
-	// The first pause is the worker's base backoff with full jitter - up
-	// to half a minute as the panel is configured - so the wait here is
-	// that pause and a round of the queue, not a guess.
+	// The first pause is the worker's base backoff with full jitter - up to half
+	// a minute as the panel is configured - so the wait here is that pause and a
+	// round of the queue, not a guess.
 	delivered := awaitQueueRow(h, down.ID, subject, 60*time.Second, "delivered after the receiver came back",
 		func(row queueRowView) bool { return row.State == "delivered" })
 	if delivered.ID != waiting.ID {
@@ -205,9 +184,8 @@ func TestTheQueueHoldsAMessageUntilTheReceiverTakesIt(t *testing.T) {
 		t.Errorf("the receiver was sent %v rather than the event", flaky.body.Load())
 	}
 
-	// A dead letter is an operator's to send again; the row goes back to
-	// the queue with its attempts reset and the message it always
-	// carried.
+	// A dead letter is an operator's to send again; the row goes back to the
+	// queue with its attempts reset and the message it always carried.
 	var retried queueRowView
 	h.do(http.MethodPost, "/api/v1/notifications/deliveries/"+dead.ID+"/retry", nil, &retried, http.StatusOK)
 	if retried.State != "pending" || retried.Attempt != 0 {
@@ -220,9 +198,7 @@ func TestTheQueueHoldsAMessageUntilTheReceiverTakesIt(t *testing.T) {
 	// hand is not an operator's to restart.
 	h.do(http.MethodPost, "/api/v1/notifications/deliveries/"+delivered.ID+"/retry", nil, nil, http.StatusBadRequest)
 
-	// And the credential never comes back out. A webhook's signing key is
-	// a secret of the store: the channel says one is configured and when
-	// it was rotated, and nothing more.
+	// And the credential never comes back out.
 	var fetched struct {
 		Config           json.RawMessage `json:"config"`
 		PublicConfig     json.RawMessage `json:"public_config"`
@@ -240,11 +216,7 @@ func TestTheQueueHoldsAMessageUntilTheReceiverTakesIt(t *testing.T) {
 	}
 }
 
-// TestAnIncomingWebhookKeepsItsAddress guards the other half of the same
-// rule. The address of an incoming webhook carries the token that lets
-// anybody post to the room, so it is the credential itself: it goes to
-// the secret store on the way in, the API never shows it back, and an
-// edit that types none keeps the stored one.
+// TestAnIncomingWebhookKeepsItsAddress guards the other half of the same rule.
 func TestAnIncomingWebhookKeepsItsAddress(t *testing.T) {
 	h := newHarness(t)
 	name := fmt.Sprintf("integration-incoming-%d", time.Now().UnixNano())
@@ -277,8 +249,8 @@ func TestAnIncomingWebhookKeepsItsAddress(t *testing.T) {
 		t.Errorf("the channel does not say an address is set: %s", fetched.Config)
 	}
 	// The summary beside it names the host and nothing of the path, so an
-	// operator tells the right receiver from a mistyped one without ever
-	// being shown the token.
+	// operator tells the right receiver from a mistyped one without ever being
+	// shown the token.
 	var public map[string]any
 	_ = json.Unmarshal(fetched.PublicConfig, &public)
 	host, _ := public["display_host"].(string)
@@ -300,9 +272,8 @@ func TestAnIncomingWebhookKeepsItsAddress(t *testing.T) {
 			outcome, room.received.Load())
 	}
 
-	// An edit that types no address keeps the stored one: the channel
-	// still sends afterwards, which is the only way to tell "kept" from
-	// "quietly emptied".
+	// An edit that types no address keeps the stored one: the channel still sends
+	// afterwards, which is the only way to tell "kept" from "quietly emptied".
 	h.do(http.MethodPut, "/api/v1/notifications/channels/"+channel.ID, map[string]any{
 		"name": name, "kind": "slack_webhook",
 		"config":  map[string]any{"url_set": true},

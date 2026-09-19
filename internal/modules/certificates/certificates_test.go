@@ -164,9 +164,8 @@ func TestCheckRejectsMaterialBeforeWrite(t *testing.T) {
 		t.Fatal("an expired certificate was accepted")
 	}
 
-	// The probe is meant to confirm exactly this certificate: a target
-	// outside its names means a test that would not confirm the deployment
-	// anyway.
+	// The probe is meant to confirm exactly this certificate: a target outside
+	// its names means a test that would not confirm the deployment anyway.
 	foreignTarget := base
 	foreignTarget.Target = "other.test:443"
 	if _, err := Check(foreignTarget, time.Now()); err == nil {
@@ -339,9 +338,8 @@ func TestAddTrackedSkipsPathsOutsideScope(t *testing.T) {
 	}
 }
 
-// A list cut off by the limit must say so: silence here looks like a host
-// that has no more certificates, and it is a host nobody asked about the
-// rest.
+// A list cut off by the limit must say so: silence here looks like a host that
+// has no more certificates, and it is a host nobody asked about the rest.
 func TestScanReportsTruncatedList(t *testing.T) {
 	targets := make([]Target, 0, MaxCertificates+5)
 	for i := 0; i < MaxCertificates+5; i++ {

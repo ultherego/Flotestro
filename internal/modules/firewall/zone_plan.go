@@ -7,12 +7,8 @@ import (
 	"fmt"
 )
 
-// ZonePlan describes the difference between the firewalld zone found and
-// the one requested on a single host.
-//
-// "Open 8080/tcp in the public zone" is a change on one host, already open
-// on another, and a third has no firewalld or no such zone. A zone is a
-// set: the plan says whether the entry is in it, not which rule matches.
+// ZonePlan describes the difference between the firewalld zone found and the
+// one requested on a single host.
 type ZonePlan struct {
 	Zone string `json:"zone"`
 	// Kind names the entry kind: port or service; Entry is the entry in the
@@ -76,9 +72,9 @@ func ComputeService(zones []Zone, zone, service string, enable bool,
 	return plan.against(zones, func(z Zone) []string { return z.Services })
 }
 
-// Refuse records a refusal reason learned after the differences were
-// computed and recomputes the fingerprint: a plan with a refusal is a
-// different answer than a plan without one.
+// Refuse records a refusal reason learned after the differences were computed
+// and recomputes the fingerprint: a plan with a refusal is a different answer
+// than a plan without one.
 func (p *ZonePlan) Refuse(reason string) {
 	p.Refusal = reason
 	p.PlanHash = zonePlanFingerprint(*p)
@@ -100,9 +96,8 @@ func (p ZonePlan) against(zones []Zone, entries func(Zone) []string) ZonePlan {
 		}
 	}
 	if found == nil {
-		// The zone is absent: firewalld would refuse at write time, and it
-		// is better for the operator to see that in the plan than half-way
-		// through the fleet.
+		// The zone is absent: firewalld would refuse at write time, and it is better
+		// for the operator to see that in the plan than half-way through the fleet.
 		return p.withRefusal(fmt.Sprintf("the host has no zone %s", p.Zone))
 	}
 	p.ZoneExists = true

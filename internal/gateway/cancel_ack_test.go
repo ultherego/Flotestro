@@ -8,9 +8,9 @@ import (
 	"github.com/ultherego/flotestro/internal/jobs"
 )
 
-// The outcome the agent answers with is stored under the protocol's own
-// name in lower case, and every name the protocol has is one the store
-// knows: an answer must never be refused for a spelling the panel chose.
+// The outcome the agent answers with is stored under the protocol's own name
+// in lower case, and every name the protocol has is one the store knows: an
+// answer must never be refused for a spelling the panel chose.
 func TestTheCancelOutcomeIsStoredUnderTheProtocolsName(t *testing.T) {
 	cases := map[agentv1.CancelAck_Outcome]string{
 		agentv1.CancelAck_NOT_STARTED:       jobs.CancelOutcomeNotStarted,
@@ -29,9 +29,8 @@ func TestTheCancelOutcomeIsStoredUnderTheProtocolsName(t *testing.T) {
 }
 
 // The request the host gets names the attempt it holds the task by, the
-// revision the answer is read against and the deadline after which the
-// panel stops waiting - and a reason, even when the operator gave none,
-// so the agent's log says why the task stopped.
+// revision the answer is read against and the deadline after which the panel
+// stops waiting - and a reason, even when the operator gave none, so the
 func TestTheCancelRequestCarriesTheAttemptTheRevisionAndTheDeadline(t *testing.T) {
 	deadline := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
 	message := cancelTaskOf(jobs.CancelRequest{
@@ -52,9 +51,9 @@ func TestTheCancelRequestCarriesTheAttemptTheRevisionAndTheDeadline(t *testing.T
 	}
 }
 
-// A request is sent once per interval and not on every tick: the answer
-// comes within a round trip, and a host that has not answered in half a
-// minute is asked again rather than every five seconds.
+// A request is sent once per interval and not on every tick: the answer comes
+// within a round trip, and a host that has not answered in half a minute is
+// asked again rather than every five seconds.
 func TestARequestIsNotRepeatedWithinTheInterval(t *testing.T) {
 	var sends cancelSends
 	now := time.Now()

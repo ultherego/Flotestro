@@ -8,13 +8,6 @@ import (
 
 // FuzzParse feeds the sudoers parser a main file and one drop-in of any
 // content.
-//
-// The parser reads files only root can write, so the input is trusted in
-// origin but not in shape: sudo's grammar is wide and the files are edited
-// by hand. A file the parser cannot read must show up as a problem in the
-// picture, never as a crash of the helper. The property: the parser
-// returns, every rule and every problem names the file and the line it
-// came from, and the observed time is the one given.
 func FuzzParse(f *testing.F) {
 	dropin := "vagrant ALL=(ALL) NOPASSWD: ALL\n"
 	for _, seed := range []string{

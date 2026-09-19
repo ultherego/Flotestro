@@ -5,9 +5,8 @@ import (
 	"testing"
 )
 
-// Every mutating operation names the read that confirms it, every read
-// names none, and the names are the registry's. The two operations the
-// panel settles on the host's return are marked so.
+// Every mutating operation names the read that confirms it, every read names
+// none, and the names are the registry's.
 func TestEveryMutatingOperationDeclaresAVerifier(t *testing.T) {
 	if err := ValidateVerifiers(); err != nil {
 		t.Fatalf("the verifiers do not validate: %v", err)

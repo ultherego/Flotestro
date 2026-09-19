@@ -16,25 +16,18 @@ import (
 )
 
 const (
-	// defaultLease is the term of the tokens. Shorter than the longest
-	// operation, because a lease is renewed for as long as the work lives. An
-	// orchestrator failure has to free capacity after a moment, not after an
-	// hour.
+	// defaultLease is the term of the tokens. Shorter than the longest operation,
+	// because a lease is renewed for as long as the work lives.
 	defaultLease = 2 * time.Minute
-	// waiterAge says how long a waiting entry that is no longer refreshed
-	// counts towards the share. A campaign that stopped asking must not keep
-	// shrinking everyone else's share forever.
+	// waiterAge says how long a waiting entry that is no longer refreshed counts
+	// towards the share.
 	waiterAge = 30 * time.Second
 	// sweepInterval sets how often expired rows are removed.
 	sweepInterval = time.Minute
 )
 
-// Store is the authoritative state of the grants.
-//
-// It lives in the database, not in process memory, because there can be more
-// than one orchestrator. A limit enforced in the memory of each of them is not
-// a fleet limit but an instance limit - and with two instances it means twice
-// what it promised.
+// Store is the authoritative state of the grants. It lives in the database,
+// not in process memory, because there can be more than one orchestrator.
 type Store struct {
 	pool  *pgxpool.Pool
 	log   *slog.Logger
@@ -46,32 +39,13 @@ func NewStore(pool *pgxpool.Pool, log *slog.Logger) *Store {
 }
 
 // Acquire grants every need or none of them.
-//
-// A partial grant would be worse than a refusal: a global token held while
-// waiting for a site token lowers the fleet capacity for everyone else without
-// bringing this work any closer to starting. That is why the whole set goes in
-// one transaction, and the capacity rows are locked in a fixed order - without
-// that two orchestrators could deadlock.
-//
-// An empty refusal means success. The owner is the identifier of the work (for
-// us: a campaign target), the claimant is the unit of fairness, that is the
-// whole campaign.
 func (s *Store) Acquire(ctx context.Context, owner, claimant string, class Class,
 	needs []Need) (Refusal, error) {
 	return s.AcquireFenced(ctx, owner, claimant, class, needs, 0)
 }
 
-// AcquireFenced grants the needs like Acquire and writes the caller's
-// fencing token on every lease it records.
-//
-// The token is the claim token of a campaign target: minted when the
-// runner claims the target, moved on when another runner takes it over.
-// A renewal or a release that names the token is applied only while the
-// lease still carries it, so the runner that lost the target cannot
-// extend or free the tokens of the runner that holds it now. A single job
-// passes zero and keeps the unfenced path: the scheduler is the one owner
-// of a job's lease, and the job's own lease on the agent is what guards
-// the work there.
+// AcquireFenced grants the needs like Acquire and writes the caller's fencing
+// token on every lease it records.
 func (s *Store) AcquireFenced(ctx context.Context, owner, claimant string, class Class,
 	needs []Need, token int64) (Refusal, error) {
 	if len(needs) == 0 {
@@ -125,9 +99,7 @@ func (s *Store) AcquireFenced(ctx context.Context, owner, claimant string, class
 			return Refusal{}, err
 		}
 	}
-	// A grant ends the wait. The waiting entries say how long it took, and
-	// that is measured here - a wait that never ends in a grant is visible
-	// as the current waits, not as a duration.
+	// A grant ends the wait.
 	rows, err := tx.Query(ctx,
 		`delete from budget_waiters where claimant = $1 and key = any($2)
 		 returning key, extract(epoch from now() - since)::float8`,
@@ -163,9 +135,7 @@ type waitedFor struct {
 	seconds float64
 }
 
-// siteOf takes the site out of a budget key. A fleet-wide or backend
-// budget has no site; it is reported under the class of the key instead of
-// an empty label.
+// siteOf takes the site out of a budget key.
 func siteOf(key string) string {
 	parts := strings.SplitN(key, ":", 3)
 	if len(parts) == 3 && parts[0] == "site" {
@@ -178,9 +148,6 @@ func siteOf(key string) string {
 }
 
 // capacities reads and locks the capacity rows for the whole set of needs.
-//
-// An exact key wins over a pattern: an installation may describe one site
-// differently from all the others.
 func (s *Store) capacities(ctx context.Context, tx pgx.Tx,
 	needs []Need) (map[string]int, error) {
 	wanted := make([]string, 0, 2*len(needs))
@@ -251,9 +218,7 @@ func (s *Store) check(ctx context.Context, tx pgx.Tx, owner, claimant string,
 			Used: used, Capacity: capacity, Waiting: waiting}, nil
 	}
 
-	// The share is computed only once there is capacity. Free tokens are
-	// divided between those who ask for them: a campaign covering a thousand
-	// hosts gets a portion, not everything that happens to be free.
+	// The share is computed only once there is capacity.
 	claimants, err := s.claimants(ctx, tx, need.Key)
 	if err != nil {
 		return Refusal{}, err
@@ -316,9 +281,9 @@ func (s *Store) recordWaiter(ctx context.Context, tx pgx.Tx,
 
 func (s *Store) recordLease(ctx context.Context, tx pgx.Tx, need Need,
 	owner, claimant string, token int64) error {
-	// A lease taken again by the same owner - a task retried, a target
-	// claimed once more - carries the token of the newest claim: the
-	// older claim is the one that must not be able to touch it.
+	// A lease taken again by the same owner - a task retried, a target claimed
+	// once more - carries the token of the newest claim: the older claim is the
+	// one that must not be able to touch it.
 	const query = `
 		insert into budget_leases (key, owner, claimant, weight, lease_until, fencing_token)
 		values ($1, $2, $3, $4, now() + make_interval(secs => $5), $6)
@@ -331,10 +296,6 @@ func (s *Store) recordLease(ctx context.Context, tx pgx.Tx, need Need,
 }
 
 // Renew extends the leases of work that is still running.
-//
-// Without renewal long operations - a package transaction can take a quarter
-// of an hour - would free capacity halfway through, and the system would start
-// more than it can really carry.
 func (s *Store) Renew(ctx context.Context, owners []string) error {
 	if len(owners) == 0 {
 		return nil
@@ -353,10 +314,6 @@ type Fenced struct {
 }
 
 // RenewFenced extends the leases the caller still holds under its tokens.
-// A lease whose token moved on - another runner took the owner over - is
-// left alone: the document's rule is that the losing replica cannot
-// extend the lease of the new holder, and the same statement keeps it
-// from extending a lease it merely used to hold.
 func (s *Store) RenewFenced(ctx context.Context, leases []Fenced) error {
 	if len(leases) == 0 {
 		return nil
@@ -382,9 +339,8 @@ func (s *Store) Release(ctx context.Context, owner string) error {
 	return err
 }
 
-// ReleaseFenced returns the tokens of one piece of work only while the
-// lease still carries the caller's token. A runner that lost the owner to
-// another one releases nothing: the tokens are the new holder's now.
+// ReleaseFenced returns the tokens of one piece of work only while the lease
+// still carries the caller's token.
 func (s *Store) ReleaseFenced(ctx context.Context, owner string, token int64) error {
 	_, err := s.pool.Exec(ctx,
 		`delete from budget_leases where owner = $1 and fencing_token = $2`, owner, token)
@@ -393,22 +349,12 @@ func (s *Store) ReleaseFenced(ctx context.Context, owner string, token int64) er
 
 // ReleaseIn returns the tokens of one piece of work inside the caller's
 // transaction.
-//
-// A job's tokens go back in the same transaction that settles the job: a
-// process that dies between the settlement and a separate release would
-// leave capacity held by work that no longer exists, for as long as the
-// lease lasts - and the next job would wait for room nobody was using.
 func ReleaseIn(ctx context.Context, tx pgx.Tx, owner string) error {
 	_, err := tx.Exec(ctx, `delete from budget_leases where owner = $1`, owner)
 	return err
 }
 
 // ReleaseClaimant returns everything one campaign holds.
-//
-// Cancelling does not go through closing every host one by one: the campaign
-// is stopped with a single write, and its hosts get no further round in which
-// they could give anything back. Without this the tokens stayed until the
-// lease expired and the next campaign waited for capacity nobody was using.
 func (s *Store) ReleaseClaimant(ctx context.Context, claimant string) error {
 	if _, err := s.pool.Exec(ctx,
 		`delete from budget_leases where claimant = $1`, claimant); err != nil {
@@ -419,10 +365,6 @@ func (s *Store) ReleaseClaimant(ctx context.Context, claimant string) error {
 }
 
 // Run sweeps expired leases and abandoned waiting entries.
-//
-// An expired lease does not count towards usage anyway, so the sweep changes
-// no decision - it keeps the tables tidy and makes sure that a waiting entry
-// left after a failure does not shrink the share forever.
 func (s *Store) Run(ctx context.Context) {
 	ticker := time.NewTicker(sweepInterval)
 	defer ticker.Stop()
@@ -450,12 +392,8 @@ func (s *Store) sweep(ctx context.Context) error {
 	return err
 }
 
-// SetCapacity writes the capacity policy of one budget.
-//
-// The key may be exact ('site:warsaw:packages') or a pattern
-// ('site:*:packages'). A pattern changes the default policy for the sites
-// nobody described separately; an exact key takes one of them out from under
-// that policy.
+// SetCapacity writes the capacity policy of one budget. The key may be exact
+// ('site:warsaw:packages') or a pattern ('site:*:packages').
 func (s *Store) SetCapacity(ctx context.Context, key string, capacity int,
 	note string) error {
 	const query = `
@@ -473,23 +411,15 @@ type State struct {
 	Capacity  int    `json:"capacity"`
 	Used      int    `json:"used"`
 	Claimants int    `json:"claimants"`
-	// WaitingJobs counts the single-host jobs standing in the queue for
-	// this budget. A campaign shows its waiting hosts on its own screen; a
-	// job ordered by hand has no screen but the job list, and the budget
-	// that holds it must be visible from the budget's side as well.
+	// WaitingJobs counts the single-host jobs standing in the queue for this
+	// budget.
 	WaitingJobs int `json:"waiting_jobs"`
 	// WaitingTargets counts the hosts of running campaigns that stand in
-	// awaiting_budget for this budget. The campaign's screen shows them one
-	// by one; here they add up to the pressure on one key, next to the jobs.
+	// awaiting_budget for this budget.
 	WaitingTargets int `json:"waiting_targets"`
-	// Holders lists the live leases, newest first, at most holdersShown of
-	// them. The usage says how much is taken; the holders say by whom, which
-	// is what an operator needs before deciding whether to raise the
-	// capacity or wait a minute.
+	// Holders lists the live leases, newest first, at most holdersShown of them.
 	Holders []Holder `json:"holders"`
-	// ByClass is the weight of the tokens in use per class of work. The
-	// lease records no class, so it is read from the holder; a holder the
-	// panel cannot place counts under unknown rather than under nothing.
+	// ByClass is the weight of the tokens in use per class of work.
 	ByClass map[string]int `json:"by_class"`
 }
 
@@ -507,16 +437,11 @@ type Holder struct {
 	Since time.Time `json:"since"`
 }
 
-// holdersShown bounds the holders listed per budget. A budget of two
-// hundred reads may have two hundred holders, and the screen needs the
-// newest few to say who is there, not the whole ledger.
+// holdersShown bounds the holders listed per budget.
 const holdersShown = 50
 
 // States returns the picture of the budgets that hold anything or have anyone
 // asking.
-//
-// A budget that stops nobody does not have to be on the screen. A budget that
-// stops someone must be - otherwise a campaign stands with no reason given.
 func (s *Store) States(ctx context.Context) ([]State, error) {
 	const query = `
 		select l.key, l.capacity,
@@ -539,9 +464,8 @@ func (s *Store) States(ctx context.Context) ([]State, error) {
 		                                     where e.key = substr(j.wait_reason, length($2::text) + 1)))))
 		  from budget_limits l
 		 order by l.key`
-	// A job waits on the exact key of its site; the row on the screen may
-	// be the pattern that gave the site its capacity. The job counts under
-	// the pattern only when no exact row took the site out from under it.
+	// A job waits on the exact key of its site; the row on the screen may be the
+	// pattern that gave the site its capacity.
 	rows, err := s.pool.Query(ctx, query, waiterAge.Seconds(), WaitReasonPrefix)
 	if err != nil {
 		return nil, err
@@ -564,10 +488,9 @@ func (s *Store) States(ctx context.Context) ([]State, error) {
 		return states, nil
 	}
 
-	// The leases and the waiting targets name the exact key of their site;
-	// they land on the row of that key, or on the pattern's row when no
-	// exact row took the site out from under it - the same attribution
-	// the waiting jobs get above.
+	// The leases and the waiting targets name the exact key of their site; they
+	// land on the row of that key, or on the pattern's row when no exact row took
+	// the site out from under it - the same attribution the waiting jobs get
 	rowOf := map[string]int{}
 	for i, state := range states {
 		rowOf[state.Key] = i
@@ -592,10 +515,8 @@ func (s *Store) States(ctx context.Context) ([]State, error) {
 // holders, all of them into the per-class sum.
 func (s *Store) collectHolders(ctx context.Context, states []State,
 	resolve func(string) (int, bool)) error {
-	// The class of a job's lease is the job's; the owner names the job,
-	// and its row says with what class it asked. The cast is guarded,
-	// because an owner of another shape - a test's stand-in, a future
-	// caller - must not break the whole read.
+	// The class of a job's lease is the job's; the owner names the job, and its
+	// row says with what class it asked.
 	const query = `
 		select l.key, l.owner, l.claimant, l.weight, l.acquired_at,
 		       j.action_type, j.created_by, j.budget_class
@@ -638,11 +559,6 @@ func (s *Store) collectHolders(ctx context.Context, states []State,
 }
 
 // countWaitingTargets adds up the campaign hosts waiting on each budget.
-//
-// Only the campaigns that still run count: a paused campaign keeps its
-// hosts in awaiting_budget, but they ask for nothing until it resumes, and
-// a number that includes them would say the budget is under pressure it
-// is not.
 func (s *Store) countWaitingTargets(ctx context.Context, states []State,
 	resolve func(string) (int, bool)) error {
 	const query = `
@@ -684,14 +600,7 @@ func keysOf(needs []Need) []string {
 	return result
 }
 
-// FailureDomains reads the failure domain of every given host. A host
-// nobody placed in a domain is missing from the answer, and a host
-// nobody knows is too.
-//
-// The lookup lives with the budgets rather than with the queue because it
-// serves the budget keys alone: the queue carries the site of a host, and
-// the domain is asked for the same way at the same moment, by the
-// scheduler for a job and by the orchestrator for a campaign target.
+// FailureDomains reads the failure domain of every given host.
 func (s *Store) FailureDomains(ctx context.Context, hostIDs []string) (map[string]string, error) {
 	if len(hostIDs) == 0 {
 		return map[string]string{}, nil
@@ -716,13 +625,8 @@ func (s *Store) FailureDomains(ctx context.Context, hostIDs []string) (map[strin
 	return domains, rows.Err()
 }
 
-// SessionGateway names the gateway the host's open session is on; empty
-// means the host has no open session, and so no gateway to load.
-//
-// The registry of a gateway knows only its own sessions. A campaign is
-// driven by whichever instance runs the orchestrator, and the host it
-// starts may be connected to another one - the session table is the one
-// place every gateway's sessions meet, so the gateway is read from there.
+// SessionGateway names the gateway the host's open session is on; empty means
+// the host has no open session, and so no gateway to load.
 func (s *Store) SessionGateway(ctx context.Context, hostID string) (string, error) {
 	var gateway string
 	err := s.pool.QueryRow(ctx, `

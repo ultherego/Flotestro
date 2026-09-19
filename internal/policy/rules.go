@@ -25,9 +25,7 @@ const (
 	moduleAccounts    = "accounts"
 )
 
-// The reason codes of a verdict that is not a judgement of the state. The
-// code goes first in the reason, so a screen can group the errors by what
-// the operator has to do: wait, refresh, order a read, repair the agent.
+// The reason codes of a verdict that is not a judgement of the state.
 const (
 	ReasonFactMissing    = "fact_missing"
 	ReasonReadFailed     = "read_failed"
@@ -38,12 +36,9 @@ const (
 	ReasonSelectorFailed = "selector_failed"
 )
 
-// The pace of the modules, as the agent's cadence classes set it: the
-// services in every cycle, the packages and the files every fourth, the
-// kernel and the accounts with the daily full report. The unit listing is
-// a read the panel orders on demand and refreshes after every unit
-// operation, so it ages like a static module. A fact older than twice its
-// pace describes a host that has been silent - not a compliant host.
+// The pace of the modules, as the agent's cadence classes set it: the services
+// in every cycle, the packages and the files every fourth, the kernel and the
+// accounts with the daily full report.
 var modulePace = map[string]time.Duration{
 	moduleServices:    15 * time.Minute,
 	modulePackages:    time.Hour,
@@ -68,9 +63,8 @@ type PackageFacts struct {
 	// Loaded says the copy was read at all; a policy without package
 	// rules does not read it.
 	Loaded bool
-	// Digest is the digest of the copy; ReportedDigest the one the host
-	// last reported in its inventory. Different digests mean a copy that
-	// stopped describing the host.
+	// Digest is the digest of the copy; ReportedDigest the one the host last
+	// reported in its inventory.
 	Digest         string
 	ReportedDigest string
 	CollectedAt    *time.Time
@@ -79,16 +73,15 @@ type PackageFacts struct {
 	Installed         map[string]bool
 }
 
-// Facts is everything one host is judged from: the record of the host,
-// its inventory fragments, the package copy and, for the file rules, a
-// way to fetch the content of a managed version.
+// Facts is everything one host is judged from: the record of the host, its
+// inventory fragments, the package copy and, for the file rules, a way to
+// fetch the content of a managed version.
 type Facts struct {
 	Host      hosts.Host
 	Fragments map[string]inventory.Fragment
 	Packages  PackageFacts
-	// FileContent returns the content of the managed version with the
-	// digest, or false when the panel does not hold it. Nil means the
-	// store was not consulted.
+	// FileContent returns the content of the managed version with the digest, or
+	// false when the panel does not hold it.
 	FileContent func(sha256 string) ([]byte, bool)
 	Now         time.Time
 }
@@ -124,9 +117,8 @@ func Judge(rule Rule, facts Facts) Judgement {
 	return errorVerdict(ReasonUnsupported, "the rule kind "+rule.Kind+" is not judged by this panel")
 }
 
-// Finding turns a judgement into the shape the remediation builder reads:
-// a compliance finding with the rule as its check. Only a drift with a
-// remediation gives a step; the rest is carried for the record.
+// Finding turns a judgement into the shape the remediation builder reads: a
+// compliance finding with the rule as its check.
 func Finding(index int, rule Rule, version int, judgement Judgement) compliance.Finding {
 	finding := compliance.Finding{
 		CheckID: CheckID(index, rule), CheckVersion: version, Title: rule.Describe(),
@@ -184,9 +176,7 @@ func notApplicable(reason string) Judgement {
 	return Judgement{Verdict: VerdictNotApplicable, Reason: ReasonUnsupported + ": " + reason}
 }
 
-// capabilityKnown says whether the host has reported its adapters at
-// all. A host without a registry is not a host without the adapter: it
-// is a host the panel cannot place, and that is an error, not a pass.
+// capabilityKnown says whether the host has reported its adapters at all.
 func capabilityKnown(host hosts.Host) bool { return len(host.Capabilities) > 0 }
 
 // judgePackage judges the presence or the absence of a package from the
@@ -237,9 +227,7 @@ func judgePackage(rule Rule, facts Facts, wantInstalled bool) Judgement {
 			Remediation: &compliance.Remediation{Action: string(opspec.ActionPackageInstall), Payload: payload},
 		}
 	}
-	// A removal is approved with the set that really goes. The panel
-	// names the package alone as that set; a host where the manager would
-	// take more refuses the step, and the campaign shows it.
+	// A removal is approved with the set that really goes.
 	payload, _ := json.Marshal(opspec.Payload{PackageChange: &opspec.PackageChangePayload{
 		Packages: []string{rule.Name}, ExpectedRemovals: []string{rule.Name}}})
 	return Judgement{
@@ -265,9 +253,9 @@ type unitListing struct {
 	Truncated bool `json:"truncated"`
 }
 
-// judgeUnit judges a unit from the full listing the panel holds and, for
-// the active half, from the failed units of the last cycle: a unit on
-// that list is not active whatever the older listing says.
+// judgeUnit judges a unit from the full listing the panel holds and, for the
+// active half, from the failed units of the last cycle: a unit on that list is
+// not active whatever the older listing says.
 func judgeUnit(rule Rule, facts Facts) Judgement {
 	if capabilityKnown(facts.Host) && !facts.Host.Capabilities.Available(hosts.CapSystemd) {
 		return notApplicable("the host has no systemd")
@@ -321,9 +309,9 @@ func judgeUnit(rule Rule, facts Facts) Judgement {
 		if units.Truncated {
 			return withRevision(errorVerdict(ReasonFactMissing, "the unit listing is cut off and does not carry "+rule.Unit), listing)
 		}
-		// A unit the host does not know cannot be enabled; the fix for a
-		// declared unit is to install what provides it, which is a
-		// package rule, not a unit operation.
+		// A unit the host does not know cannot be enabled; the fix for a declared
+		// unit is to install what provides it, which is a package rule, not a unit
+		// operation.
 		return Judgement{Verdict: VerdictDrift, Revision: listing.Revision,
 			Reason: ReasonNoRemediation + ": the host has no unit " + rule.Unit + "; declare the package that provides it"}
 	}
@@ -357,10 +345,9 @@ func judgeUnit(rule Rule, facts Facts) Judgement {
 	if len(drifts) == 0 {
 		return Judgement{Verdict: VerdictCompliant, Reason: rule.Unit + " is as declared", Revision: listing.Revision}
 	}
-	// One rule, one step: the first drift is fixed first, and the next
-	// evaluation - the reconciliation cycle the document names - finds
-	// the second and fixes it. A rule of two steps would need two check
-	// identifiers, and the results table has one row per rule.
+	// One rule, one step: the first drift is fixed first, and the next evaluation
+	// - the reconciliation cycle the document names - finds the second and fixes
+	// it.
 	return Judgement{Verdict: VerdictDrift, Reason: strings.Join(drifts, "; "), Revision: listing.Revision,
 		Remediation: &steps[0]}
 }
@@ -412,8 +399,8 @@ func judgeFile(rule Rule, facts Facts) Judgement {
 			Reason: ReasonNoRemediation + ": " + reason + "; the panel holds no version " + shortDigest(rule.SHA256)}
 	}
 	// The write is bound to the content the host reports now, the way an
-	// operator's write is: a file changed again between the judgement and
-	// the step is not overwritten blind.
+	// operator's write is: a file changed again between the judgement and the
+	// step is not overwritten blind.
 	payload := opspec.FilePayload{Path: rule.Path, Content: string(content)}
 	if observed != nil {
 		payload.Mode = observed.Mode
@@ -471,10 +458,7 @@ type accountListing struct {
 }
 
 // judgeSSHKey judges a key from the fingerprints the host reports on the
-// account. The host reports fingerprints and no material, so the fix can
-// only be composed when nothing would be replaced: an account without a
-// key gets the policy's key; an account with other keys is reported and
-// left to the operator, who knows which of those keys are to stay.
+// account.
 func judgeSSHKey(rule Rule, facts Facts) Judgement {
 	fragment, failed := fresh(facts, moduleAccounts)
 	if failed != nil {

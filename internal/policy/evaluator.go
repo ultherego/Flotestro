@@ -400,7 +400,7 @@ func (e *Evaluator) remediate(ctx context.Context, policy Policy, version Versio
 
 	// The campaign is created on the publisher's authority, and the publisher's
 	// rights are read now, not assumed from the publication: a host the publisher
-	// may not change is closed in the snapshot the way a fleet remediation closes
+	// may not change is closed in the snapshot the way a fleet remediation
 	publisher, err := e.principal(ctx, version.PublishedBy)
 	if err != nil {
 		e.recordRemediation(ctx, policy, document, audit.OutcomeDenied, map[string]any{
@@ -478,7 +478,7 @@ func (e *Evaluator) remediate(ctx context.Context, policy Policy, version Versio
 	if document.RemediationMode == ModeAutomatic {
 		// The publication is the approval: the record quotes the same authentication
 		// the publisher gave then, and names the policy as the reason, so the
-		// approval chain reads the way the document describes it - approved at
+		// approval chain reads the way the document describes it - approved at.
 		approval := campaigns.Approval{
 			ApprovedBy:      version.PublishedBy,
 			Authentication:  version.Authentication,

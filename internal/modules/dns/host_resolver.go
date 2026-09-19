@@ -31,10 +31,6 @@ func ParseResolvConf(content string) (servers, domains []string) {
 }
 
 // ResolvConfOwner decides who writes the resolver file.
-//
-// The owner decides whether the panel may change anything: a file belonging
-// to a service is overwritten on the next network event, so writing into it
-// would be a change that vanishes on its own.
 func ResolvConfOwner(linkTarget, content string) string {
 	switch {
 	case strings.Contains(linkTarget, "/systemd/resolve/"):
@@ -52,9 +48,8 @@ func ResolvConfOwner(linkTarget, content string) string {
 		strings.Contains(header, "resolvconf"):
 		return OwnerDHCP
 	case content == "":
-		// An empty file says nothing about the owner, and guessing "manual"
-		// would encourage the panel to write over something it does not
-		// understand.
+		// An empty file says nothing about the owner, and guessing "manual" would
+		// encourage the panel to write over something it does not understand.
 		return OwnerUnknown
 	}
 	return OwnerManual
@@ -69,11 +64,6 @@ func firstLines(content string, count int) string {
 }
 
 // ParseResolvectl reads the output of "resolvectl status".
-//
-// The format is meant for humans, so the parser sticks strictly to the labels
-// systemd has printed for years and assumes no section order. Values it does
-// not understand are simply skipped - better to show less than to invent a
-// per-link DNS the operator will later rely on.
 func ParseResolvectl(output string) Snapshot {
 	snapshot := Snapshot{}
 	var current *Link
@@ -169,11 +159,6 @@ func assignProtocols(link *Link, value string) {
 
 // fromProtocols extracts the DNSSEC and DNS-over-TLS state from a protocol
 // row.
-//
-// systemd writes them as "DNSSEC=no/unsupported" and "-DNSOverTLS" or
-// "+DNSOverTLS". Minus and plus mean disabled and enabled; a missing entry
-// leaves the state undetermined, because older versions do not print it at
-// all.
 func fromProtocols(value, dnssec, dot string) (string, string) {
 	for _, field := range strings.Fields(value) {
 		switch {
@@ -191,9 +176,6 @@ func fromProtocols(value, dnssec, dot string) (string, string) {
 }
 
 // ValidTestName checks a name requested for resolution.
-//
-// The name goes to the command as an argument, so it has to be a name and
-// not anything else: an address, a flag and a path are not a query here.
 func ValidTestName(name string) bool {
 	if name == "" || len(name) > 253 || strings.HasPrefix(name, "-") {
 		return false

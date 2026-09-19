@@ -25,9 +25,8 @@ func hostnameRequest(name, pretty string) *helperv1.HelperRequest {
 	}
 }
 
-// The rename sets the static and the transient name in one call and the
-// pretty name only when the order carries one. The hosts file follows, and
-// the file from before is kept.
+// The rename sets the static and the transient name in one call and the pretty
+// name only when the order carries one.
 func TestRenameSetsTheNameAndFollowsInHostsFile(t *testing.T) {
 	previous := staticHostname()
 	if previous == "" {

@@ -214,7 +214,7 @@ func verifyScheduleEntry(ctx context.Context, readers *hostReaders, in verifyInp
 	}
 	// An order that named the mechanism is verified against it: an entry written
 	// as a cron line where a timer was ordered runs the command, but it is not
-	// what the operator asked the host for, and the next order would write the
+	// what the operator asked the host for, and the next order would write the.
 	if in.action == opspec.ActionScheduleEnsure &&
 		(payload.Kind == opspec.ScheduleKindCron || payload.Kind == opspec.ScheduleKindTimer) &&
 		found.Kind != payload.Kind {
@@ -628,7 +628,7 @@ func verifyMountState(ctx context.Context, readers *hostReaders, in verifyInput)
 
 // verifyStorageLayout reads the device after the change: a volume or a
 // filesystem that grew, a device that carries the filesystem ordered, a device
-// that carries no signature after a wipe, an array that knows its member under
+// that carries no signature after a wipe, an array that knows its member
 func verifyStorageLayout(ctx context.Context, readers *hostReaders, in verifyInput) observation {
 	payload := in.payload.Storage
 	if payload == nil {

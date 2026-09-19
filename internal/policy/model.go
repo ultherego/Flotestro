@@ -1,14 +1,4 @@
 // Package policy judges the fleet against declared desired state.
-//
-// A policy is the third model of change the architecture names, next to
-// the interactive operation and the campaign: a declaration of what is to
-// be true on a dynamic group of hosts, judged continuously. The judgement
-// follows the same doctrine as the hardening checks: the host reports
-// facts, the panel judges them, and an unknown fact is never a compliant
-// one. A policy never touches a host by itself. Where the operator asks
-// for a remediation, the drift becomes a campaign of typed steps - each
-// the ordinary operation of the module responsible for the thing, with its
-// own permission - and the campaign waits for its approval like any other.
 package policy
 
 import (
@@ -21,10 +11,7 @@ import (
 	"github.com/ultherego/flotestro/internal/campaigns"
 )
 
-// The remediation modes. Report writes verdicts and nothing else; campaign
-// turns a drift set into a campaign that waits for approval; automatic
-// does the same and approves it with the publication, which is why it is
-// a permission of its own.
+// The remediation modes.
 const (
 	ModeReport    = "report"
 	ModeCampaign  = "campaign"
@@ -73,9 +60,8 @@ const (
 	DefaultCheckInterval = 15 * time.Minute
 	MinCheckInterval     = time.Minute
 	MaxCheckInterval     = 24 * time.Hour
-	// MaxRules bounds one policy. A policy with more rules than this is
-	// several policies; the results table would otherwise stop being
-	// readable per host.
+	// MaxRules bounds one policy. A policy with more rules than this is several
+	// policies; the results table would otherwise stop being readable per host.
 	MaxRules = 50
 	// MaxNameLength bounds the name the campaigns and the audit quote.
 	MaxNameLength = 120
@@ -87,9 +73,7 @@ type Rule struct {
 	Kind string `json:"kind"`
 	// Name is the package of package_installed and package_absent.
 	Name string `json:"name,omitempty"`
-	// Unit, Enabled and Active describe a unit_state rule. A nil pointer
-	// leaves that half of the state undeclared: a rule may say "enabled"
-	// without saying anything about "active".
+	// Unit, Enabled and Active describe a unit_state rule.
 	Unit    string `json:"unit,omitempty"`
 	Enabled *bool  `json:"enabled,omitempty"`
 	Active  *bool  `json:"active,omitempty"`
@@ -100,11 +84,8 @@ type Rule struct {
 	// Key and Value describe a sysctl rule.
 	Key   string `json:"key,omitempty"`
 	Value string `json:"value,omitempty"`
-	// User and Fingerprint describe an ssh_key_present rule: the account
-	// and the SHA256 fingerprint of the key, as the host reports it. The
-	// optional PublicKey is the material of that key; without it the
-	// panel can judge but not fix, because setting the keys of an account
-	// replaces the whole list.
+	// User and Fingerprint describe an ssh_key_present rule: the account and the
+	// SHA256 fingerprint of the key, as the host reports it.
 	User        string `json:"user,omitempty"`
 	Fingerprint string `json:"fingerprint,omitempty"`
 	PublicKey   string `json:"public_key,omitempty"`
@@ -155,10 +136,8 @@ func (r Rule) Describe() string {
 	return r.Kind
 }
 
-// CheckID is the identifier a rule carries as a remediation step: the
-// index binds it to the document, the kind and the subject make it
-// readable. It is stable for a version, which is what the runner's
-// idempotency key and the plan digest need.
+// CheckID is the identifier a rule carries as a remediation step: the index
+// binds it to the document, the kind and the subject make it readable.
 func CheckID(index int, rule Rule) string {
 	return fmt.Sprintf("rule:%d:%s:%s", index, rule.Kind, rule.Subject())
 }
@@ -191,9 +170,9 @@ func (e ErrInvalidRule) Error() string {
 	return fmt.Sprintf("rule %d: %s", e.Index, e.Reason)
 }
 
-// ErrApprovalBound is a rule whose fix is bound to an approval the
-// publication cannot stand in for: a package removal is approved with the
-// set of packages that really go, and only a campaign shows that set.
+// ErrApprovalBound is a rule whose fix is bound to an approval the publication
+// cannot stand in for: a package removal is approved with the set of packages
+// that really go, and only a campaign shows that set.
 type ErrApprovalBound struct {
 	Index int
 	Kind  string
@@ -210,10 +189,8 @@ var ErrNoRules = errors.New("a policy needs at least one rule")
 // ErrInvalidMode is an unknown remediation mode.
 var ErrInvalidMode = errors.New("the remediation mode is report, campaign or automatic")
 
-// ValidateRules checks every rule for its kind and its fields, and the
-// set against the mode. A rule the version does not know is refused
-// rather than skipped: a typo must not turn into a rule that judges
-// nothing on the whole fleet.
+// ValidateRules checks every rule for its kind and its fields, and the set
+// against the mode.
 func ValidateRules(rules []Rule, mode string) error {
 	if !KnownMode(mode) {
 		return ErrInvalidMode
@@ -235,9 +212,7 @@ func ValidateRules(rules []Rule, mode string) error {
 	return nil
 }
 
-// approvalBound names the kinds whose fix is a removal. The operator
-// approves a removal together with what really goes, and a publication
-// cannot show that.
+// approvalBound names the kinds whose fix is a removal.
 func approvalBound(kind string) bool {
 	return kind == KindPackageAbsent
 }
@@ -313,9 +288,7 @@ type Policy struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Version     int    `json:"version"`
-	// Selector is the campaign selector as recorded. It travels raw the
-	// way a campaign's does: the typed form is read with DocumentOf when
-	// the panel needs it.
+	// Selector is the campaign selector as recorded.
 	Selector        json.RawMessage `json:"selector"`
 	Rules           []Rule          `json:"rules"`
 	RemediationMode string          `json:"remediation_mode"`
@@ -345,9 +318,8 @@ type Document struct {
 	CheckInterval   int                `json:"check_interval_seconds"`
 }
 
-// DocumentOf takes the frozen part out of a policy. A selector that does
-// not decode reads as empty: a policy over nobody, which the publication
-// refuses.
+// DocumentOf takes the frozen part out of a policy. A selector that does not
+// decode reads as empty: a policy over nobody, which the publication refuses.
 func DocumentOf(policy Policy) Document {
 	document := Document{
 		Name: policy.Name, Description: policy.Description,
@@ -424,10 +396,7 @@ type Spec struct {
 	CheckInterval   int                `json:"check_interval_seconds"`
 }
 
-// Validate checks the parts a draft has to have. The rules are checked
-// at publication - a draft may be half-written - but the name, the mode
-// and the interval are required from the start, because the list shows
-// them.
+// Validate checks the parts a draft has to have.
 func (s Spec) Validate() error {
 	name := strings.TrimSpace(s.Name)
 	if name == "" {

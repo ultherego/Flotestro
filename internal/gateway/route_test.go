@@ -9,10 +9,6 @@ import (
 // TestTheRouteOfARegistrationIsPartOfTheScope guards the property an order
 // carries a relay_id for at all: a token carried out of an isolated site must
 // not register a host somewhere else.
-//
-// A relay terminates TLS and sees the token of its site. That is the price of
-// registering in an isolated site, and that is why the scope of a token is to
-// be narrow.
 func TestTheRouteOfARegistrationIsPartOfTheScope(t *testing.T) {
 	cases := []struct {
 		name   string

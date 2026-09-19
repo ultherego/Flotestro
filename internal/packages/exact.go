@@ -112,7 +112,7 @@ func (a *APT) ApplyExact(ctx context.Context, approved Plan, options Options) (A
 
 // ApplyExact carries the plan out with dnf on the exact NEVRAs and only from
 // the repositories the plan names, against the metadata the plan was read
-// from: the cached metadata is declared never expired, so dnf resolves on what
+// from: the cached metadata is declared never expired, so dnf resolves on
 func (d *DNF) ApplyExact(ctx context.Context, approved Plan, options Options) (Apply, error) {
 	apply := Apply{Manager: d.Name()}
 	byAction := map[string][]string{}
@@ -178,7 +178,7 @@ func (d *DNF) ApplyExact(ctx context.Context, approved Plan, options Options) (A
 
 // ApplyExact carries the plan out with pacman from downloaded, signed
 // archives: the targets are resolved against the private copy of the sync
-// database the plan was read from, downloaded into the cache with -Sw, and
+// database the plan was read from, downloaded into the cache with -Sw, and.
 func (p *Pacman) ApplyExact(ctx context.Context, approved Plan, options Options) (Apply, error) {
 	apply := Apply{Manager: p.Name()}
 	if len(approved.Changes) == 0 {

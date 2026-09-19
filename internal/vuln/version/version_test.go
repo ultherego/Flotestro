@@ -83,8 +83,7 @@ func TestVersionComparisonCorpus(t *testing.T) {
 				pair.Line, pair.Kind, pair.A, pair.B, result, pair.Expected)
 		}
 		// The comparison has to be antisymmetric: otherwise the same pair of
-		// versions gives different answers depending on the order of the
-		// arguments.
+		// versions gives different answers depending on the order of the arguments.
 		var reversed int
 		if pair.Kind == "deb" {
 			reversed = Sign(CompareDeb(pair.B, pair.A))
@@ -102,9 +101,8 @@ func TestComparisonIsTransitive(t *testing.T) {
 	// An ordered sequence of versions: each next one has to be newer than
 	// every previous one. This catches errors the pairs alone do not show.
 	sequences := map[string][]string{
-		// "1.0a" stands after "1.0-2" not by mistake: the upstream part is
-		// compared before the revision, so "1.0a" is newer than every
-		// "1.0-N".
+		// "1. 0a" stands after "1. 0-2" not by mistake: the upstream part is
+		// compared before the revision, so "1.
 		"deb": {"1.0~~", "1.0~rc1", "1.0", "1.0-1", "1.0-2", "1.0a", "1.0+deb12u1-1", "1:0.9", "2:0.1"},
 		"rpm": {"1.0~rc1-1", "1.0-1", "1.0-2", "1.0^20260101-1", "1.1-1", "1:0.9-1", "2:0.1-1"},
 	}

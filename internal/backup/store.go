@@ -1,10 +1,5 @@
 // Package backup stores the definitions of copies and the history of their
 // runs.
-//
-// There is no backup data here and there never will be: the host talks to the
-// repository directly. The panel keeps what the host will not say by itself -
-// what is to be backed up, where to and for how long it stays - and what the
-// host does not remember between operations: when the last copy succeeded.
 package backup
 
 import (
@@ -144,9 +139,9 @@ func readDefinition(rows pgx.Rows) (Definition, error) {
 
 // Set creates or updates a definition.
 func (s *Store) Set(ctx context.Context, definition Definition) (Definition, error) {
-	// An empty list and a missing list mean the same thing in the database -
-	// the column does not accept an empty value, and a definition without
-	// exclusions is an ordinary definition.
+	// An empty list and a missing list mean the same thing in the database - the
+	// column does not accept an empty value, and a definition without exclusions
+	// is an ordinary definition.
 	definition.Paths = nonNilList(definition.Paths)
 	definition.Excludes = nonNilList(definition.Excludes)
 	definition.Tags = nonNilList(definition.Tags)
@@ -238,10 +233,6 @@ func (s *Store) Runs(ctx context.Context, hostID, definition string, limit int) 
 }
 
 // Latest returns the newest run of every kind for every definition.
-//
-// It is where the answer to the two questions the operator asks most often
-// comes from: when the last copy succeeded and whether anybody has ever
-// verified it.
 func (s *Store) Latest(ctx context.Context, hostID string) (map[string]map[string]Run, error) {
 	rows, err := s.pool.Query(ctx, `select distinct on (definition, kind) `+kolumnyPrzebiegu+`
 		from backup_runs where host_id = $1 and outcome = 'succeeded'

@@ -14,11 +14,6 @@ const RelayStateFileName = "status.json"
 
 // RelayState is the picture of the work of a relay as seen from outside the
 // process.
-//
-// Without it the tool on the machine can say only as much as the file
-// system shows: that the certificate exists and that the service runs. The
-// operator of a site needs an answer to a different question - whether the
-// relay really reaches the centre, and how much waits in its buffer.
 type RelayState struct {
 	RelayVersion string `json:"relay_version"`
 	RelayID      string `json:"relay_id,omitempty"`
@@ -33,9 +28,7 @@ type RelayState struct {
 	BufferedItems  int   `json:"buffered_items"`
 	BufferDropped  int64 `json:"buffer_dropped"`
 	// BufferingSince says when the buffer last went from empty to holding
-	// something. The oldest item is at most that old: the relay drains the
-	// buffer in order, so the moment it started filling bounds the wait of
-	// everything in it.
+	// something.
 	BufferingSince *time.Time `json:"buffering_since,omitempty"`
 	// UpstreamOK says whether the last contact with the centre succeeded.
 	UpstreamOK bool `json:"upstream_ok"`
@@ -43,9 +36,8 @@ type RelayState struct {
 	LastUpstreamAt      *time.Time `json:"last_upstream_at,omitempty"`
 	LastUpstreamError   string     `json:"last_upstream_error,omitempty"`
 	LastUpstreamErrorAt *time.Time `json:"last_upstream_error_at,omitempty"`
-	// CentreSessions is how many sessions the centre sees through this
-	// relay, as reported at the last contact. A divergence from Sessions
-	// is the first symptom of a session hanging on one side.
+	// CentreSessions is how many sessions the centre sees through this relay, as
+	// reported at the last contact.
 	CentreSessions      *int      `json:"centre_sessions,omitempty"`
 	CertificateNotAfter time.Time `json:"certificate_not_after"`
 	UpdatedAt           time.Time `json:"updated_at"`
@@ -92,10 +84,6 @@ func (w *RelayStateWriter) Snapshot() RelayState {
 }
 
 // write persists the state through a temporary file and a rename.
-//
-// An interrupted write must not leave half a file: a diagnostic tool would
-// then read a syntax error instead of a state, and that would look like a
-// failure of the relay that is not there.
 func (w *RelayStateWriter) write() {
 	w.state.UpdatedAt = time.Now().UTC()
 	content, err := json.MarshalIndent(w.state, "", "  ")

@@ -37,17 +37,9 @@ func (h *harness) campaignSteps(id, query string) campaignStepsView {
 	return result
 }
 
-// TestCampaignRecordsAStepPerTargetPhase guards the step ledger of a
-// target: every executable step of a host is its own durable row with its
-// task, its attempts and - where it did not run - the reason.
-//
-// A file campaign is the cheapest planned change the lab has: the host
-// computes a plan, the change runs under that plan's digest, the reboot
-// policy says never. That gives a plan step and an execute step that
-// succeeded with their tasks, a reboot step skipped with the policy as the
-// reason, and no verification at all - the host never reached it. The
-// unique index closes the door on a second row for the same step of the
-// same target under the same plan, nulls included.
+// TestCampaignRecordsAStepPerTargetPhase guards the step ledger of a target:
+// every executable step of a host is its own durable row with its task, its
+// attempts and - where it did not run - the reason.
 func TestCampaignRecordsAStepPerTargetPhase(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -81,9 +73,9 @@ func TestCampaignRecordsAStepPerTargetPhase(t *testing.T) {
 		t.Fatalf("planning ended in state %s (%s)", afterPlanning.State, afterPlanning.PauseReason)
 	}
 
-	// After planning the plan step is closed and nothing else exists yet:
-	// the change has not been ordered, so it has no row rather than a
-	// pending one - nothing was decided about it.
+	// After planning the plan step is closed and nothing else exists yet: the
+	// change has not been ordered, so it has no row rather than a pending one -
+	// nothing was decided about it.
 	planned := h.campaignSteps(campaign.ID, "")
 	if len(planned.Items) != 1 || planned.Items[0].StepKey != "plan" || planned.Items[0].State != "succeeded" {
 		t.Fatalf("after planning the steps are %+v, expected one succeeded plan step", planned.Items)
@@ -106,9 +98,9 @@ func TestCampaignRecordsAStepPerTargetPhase(t *testing.T) {
 		t.Fatalf("the target ended as %+v", targets)
 	}
 
-	// The ledger of the finished host, filtered on the host: the plan and
-	// the change succeeded with their tasks, the reboot was skipped by the
-	// policy and says so, the verification was never reached.
+	// The ledger of the finished host, filtered on the host: the plan and the
+	// change succeeded with their tasks, the reboot was skipped by the policy and
+	// says so, the verification was never reached.
 	steps := h.campaignSteps(campaign.ID, "?host_id="+host.ID)
 	byKey := map[string]campaignStepView{}
 	for _, step := range steps.Items {
@@ -156,9 +148,7 @@ func TestCampaignRecordsAStepPerTargetPhase(t *testing.T) {
 		t.Errorf("a single host has a next page: %q", steps.NextCursor)
 	}
 
-	// The unique index: one step of one kind per target and plan. A second
-	// execute under the same plan is refused, and so is a second plan step
-	// - the plan runs under no digest, and nulls count as equal there.
+	// The unique index: one step of one kind per target and plan.
 	ctx := context.Background()
 	pool := h.database(ctx)
 	execute := byKey["execute"]
@@ -185,9 +175,9 @@ func TestCampaignRecordsAStepPerTargetPhase(t *testing.T) {
 	}
 }
 
-// TestCampaignStepsFollowTheCampaignPermission guards the door: the steps
-// are read with the same right as the campaign, and a stranger to the
-// scope gets the same refusal as for the campaign itself.
+// TestCampaignStepsFollowTheCampaignPermission guards the door: the steps are
+// read with the same right as the campaign, and a stranger to the scope gets
+// the same refusal as for the campaign itself.
 func TestCampaignStepsFollowTheCampaignPermission(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")

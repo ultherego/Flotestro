@@ -108,9 +108,8 @@ func TestAnchorPlanRefusesMaterialThatIsNotAnAuthority(t *testing.T) {
 	}
 }
 
-// Removing an authority that still signs something breaks trust for
-// clients that changed nothing. That is the rotation boundary: the old
-// authority vanishes only when no host certificate comes from it any more.
+// Removing an authority that still signs something breaks trust for clients
+// that changed nothing.
 func TestAnchorRemovalPlanLooksAtHostCertificates(t *testing.T) {
 	store := testStore()
 	store.Anchors = []Anchor{{ID: "lab-ca", Managed: true, Subject: "CN=Flotestro Lab CA",

@@ -28,9 +28,9 @@ type versionView struct {
 const filesReason = "integration test of the files module"
 const testPath = "/etc/flotestro-test.conf"
 
-// TestForbiddenFileDoesNotReachTheHost guards the boundary that separates
-// this module from a root file manager: the password hash file, a private
-// key and a sudo rule have modules of their own and are not editable here.
+// TestForbiddenFileDoesNotReachTheHost guards the boundary that separates this
+// module from a root file manager: the password hash file, a private key and a
+// sudo rule have modules of their own and are not editable here.
 func TestForbiddenFileDoesNotReachTheHost(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -234,11 +234,8 @@ func min(a, b int) int {
 	return b
 }
 
-// TestAMissingValidatorRefusesTheWrite closes the hole where a validator
-// the host did not have counted as a passed check. The order names the
-// nginx check for a file the allowlist covers; a host without nginx
-// refuses with validator_unavailable and writes nothing. A host that does
-// have nginx runs the check instead, so the test says so and stops.
+// TestAMissingValidatorRefusesTheWrite closes the hole where a validator the
+// host did not have counted as a passed check.
 func TestAMissingValidatorRefusesTheWrite(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")

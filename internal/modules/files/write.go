@@ -40,9 +40,6 @@ func ValidateMode(mode string) (os.FileMode, error) {
 }
 
 // Ownership returns the user and group identifiers.
-//
-// Empty names mean "leave as is": the panel does not rewrite the owner of a
-// file whose owner nobody asked about.
 func Ownership(username, group string) (int, int, error) {
 	uid, gid := -1, -1
 	if username != "" {
@@ -63,16 +60,6 @@ func Ownership(username, group string) (int, int, error) {
 }
 
 // WriteAtomically writes a file so that nobody sees it half-written.
-//
-// The order matters and is the whole point here: the permissions and the
-// owner are set on the new file before it takes the place of the old one.
-// The reverse order leaves a window in which the configuration file already
-// sits in place with default permissions - and that is enough for somebody
-// to read or replace it.
-//
-// At the end the file and the directory are synced: without that the change
-// is lost on a power failure, and a configuration file is read precisely
-// after such an event.
 func WriteAtomically(path string, content []byte, mode os.FileMode, uid, gid int) error {
 	dir := filepath.Dir(path)
 	temporary := filepath.Join(dir, ".flotestro-"+filepath.Base(path)+".new")
@@ -123,9 +110,9 @@ func WriteAtomically(path string, content []byte, mode os.FileMode, uid, gid int
 		_ = os.Remove(temporary)
 		return err
 	}
-	// The rename itself is atomic, but without syncing the directory it may
-	// not survive a power failure - and then the old content is left under
-	// the new name.
+	// The rename itself is atomic, but without syncing the directory it may not
+	// survive a power failure - and then the old content is left under the new
+	// name.
 	handle, err := os.Open(dir)
 	if err != nil {
 		return nil
@@ -154,9 +141,8 @@ func Describe(path string) File {
 		description.Owner = userName(int(stat.Uid))
 		description.Group = groupName(int(stat.Gid))
 	}
-	// A symlink is not a configuration file, only a pointer to another
-	// file. The panel does not read it and does not pretend to know its
-	// content.
+	// A symlink is not a configuration file, only a pointer to another file. The
+	// panel does not read it and does not pretend to know its content.
 	if info.Mode()&os.ModeSymlink != 0 {
 		description.UnavailableReason = "the path is a symbolic link"
 	}

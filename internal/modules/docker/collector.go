@@ -16,13 +16,8 @@ type Snapshot struct {
 	Volumes    []Volume    `json:"volumes"`
 }
 
-// Collect reads the engine state.
-//
-// The full lists are fetched on the operator's request, and the summary
-// goes into the inventory. Querying the engine at every heartbeat would
-// load the host for no reason: the container count changes less often than
-// every thirty seconds, and the operator looks at this tab only when they
-// need it anyway.
+// Collect reads the engine state. The full lists are fetched on the operator's
+// request, and the summary goes into the inventory.
 func Collect(ctx context.Context, client *Client) Snapshot {
 	if client == nil {
 		return Snapshot{Summary: Summary{UnavailableReason: "no container engine adapter"}}
@@ -31,9 +26,8 @@ func Collect(ctx context.Context, client *Client) Snapshot {
 	snapshot := Snapshot{}
 	engine, api, err := client.Version(ctx)
 	if err != nil {
-		// An unavailable engine is not the same as a host without
-		// containers. An empty list without a reason would look like a tidy
-		// host.
+		// An unavailable engine is not the same as a host without containers. An
+		// empty list without a reason would look like a tidy host.
 		snapshot.Summary.UnavailableReason = unavailableReason(err)
 		return snapshot
 	}
@@ -47,9 +41,8 @@ func Collect(ctx context.Context, client *Client) Snapshot {
 	}
 	snapshot.Containers = containers
 
-	// The health state and the restart counter need a separate query, so
-	// only the containers for which it means anything are asked. A stopped
-	// container has no health to check.
+	// The health state and the restart counter need a separate query, so only the
+	// containers for which it means anything are asked.
 	for i := range snapshot.Containers {
 		if snapshot.Containers[i].State != "running" && snapshot.Containers[i].State != "restarting" {
 			continue
@@ -78,15 +71,6 @@ func Collect(ctx context.Context, client *Client) Snapshot {
 }
 
 // linkUsage fills the network and volume usage from the container list.
-//
-// The engine does not answer this question: in the network list it returns
-// an empty container map, and it reports the volume size and reference
-// count only with a separate disk usage computation. Without this
-// derivation every network and every volume would look abandoned - and
-// those are the ones that go under the prune.
-//
-// A stopped container counts too: the volume of a stopped container is not
-// nobody's volume.
 func linkUsage(snapshot *Snapshot) {
 	byName := map[string]int{}
 	byID := map[string]int{}
@@ -106,9 +90,8 @@ func linkUsage(snapshot *Snapshot) {
 				index, ok = byID[attachment.ID]
 			}
 			if !ok {
-				// The network vanished between one query and the other. The
-				// container tells the truth about it, but there is nothing
-				// to attach it to.
+				// The network vanished between one query and the other. The container
+				// tells the truth about it, but there is nothing to attach it to.
 				continue
 			}
 			network := &snapshot.Networks[index]
@@ -148,9 +131,7 @@ func linkUsage(snapshot *Snapshot) {
 	}
 }
 
-// summarise computes the decision signals. The summary is not a metric: it
-// says whether something needs the operator's attention, not how much of
-// what there is at every moment.
+// summarise computes the decision signals.
 func summarise(snapshot Snapshot, base Summary) Summary {
 	summary := base
 	summary.Containers = len(snapshot.Containers)
@@ -158,9 +139,8 @@ func summarise(snapshot Snapshot, base Summary) Summary {
 	summary.Networks = len(snapshot.Networks)
 	summary.Volumes = len(snapshot.Volumes)
 	for _, network := range snapshot.Networks {
-		// A predefined network is not a cleanup candidate, so it is not in
-		// the counter - otherwise every host would have three networks "to
-		// remove".
+		// A predefined network is not a cleanup candidate, so it is not in the
+		// counter - otherwise every host would have three networks "to remove".
 		if !network.InUse && !network.Predefined {
 			summary.NetworksUnused++
 		}
@@ -184,9 +164,8 @@ func summarise(snapshot Snapshot, base Summary) Summary {
 		if container.Health == "unhealthy" {
 			summary.Unhealthy++
 		}
-		// A container that comes up over and over is fine at every single
-		// moment and broken nevertheless. Without this counter it is not
-		// visible at all.
+		// A container that comes up over and over is fine at every single moment and
+		// broken nevertheless.
 		if container.State == "restarting" || container.RestartCount >= restartLoopThreshold {
 			summary.RestartLooping++
 		}
@@ -221,9 +200,8 @@ func summarise(snapshot Snapshot, base Summary) Summary {
 	return summary
 }
 
-// restartLoopThreshold separates a container that came up once from one
-// that comes up over and over. The value is deliberately low: the operator
-// is meant to see the problem before it grows to hundreds of restarts.
+// restartLoopThreshold separates a container that came up once from one that
+// comes up over and over.
 const restartLoopThreshold = 5
 
 func contains(items []string, value string) bool {

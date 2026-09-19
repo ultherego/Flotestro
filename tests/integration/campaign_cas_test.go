@@ -9,9 +9,9 @@ import (
 	"time"
 )
 
-// casTargetView is a campaign target as the compare-and-swap tests read
-// it: the identifier is the owner of the host's budget lease, and the
-// revision is what a client will send back as If-Match.
+// casTargetView is a campaign target as the compare-and-swap tests read it:
+// the identifier is the owner of the host's budget lease, and the revision is
+// what a client will send back as If-Match.
 type casTargetView struct {
 	ID        string `json:"id"`
 	HostID    string `json:"host_id"`
@@ -66,12 +66,9 @@ func settledTarget(state string) bool {
 	}
 }
 
-// TestPauseKeepsTheRunningHostAndStartsNoNewOne is the document's CAM-02:
-// a pause ordered while a host carries its task either finds the task
-// already created - and then follows it to its end, with the budget lease
-// renewed meanwhile - or finds no task, and none comes into being after
-// the pause. The campaign is pausing while the host works and paused once
-// it settled; no host of the next wave gets a task in between.
+// TestPauseKeepsTheRunningHostAndStartsNoNewOne is the document's CAM-02: a
+// pause ordered while a host carries its task either finds the task already
+// created - and then follows it to its end, with the budget lease renewed
 func TestPauseKeepsTheRunningHostAndStartsNoNewOne(t *testing.T) {
 	h := newHarness(t)
 	online := 0
@@ -129,9 +126,9 @@ func TestPauseKeepsTheRunningHostAndStartsNoNewOne(t *testing.T) {
 		}
 	}
 
-	// While the campaign is pausing, the host under way keeps its budget
-	// lease: the orchestrator renews it, and the lease is not left to
-	// expire under a host halfway through its work.
+	// While the campaign is pausing, the host under way keeps its budget lease:
+	// the orchestrator renews it, and the lease is not left to expire under a
+	// host halfway through its work.
 	ctx := context.Background()
 	pool := h.database(ctx)
 	sawPausing := false
@@ -199,13 +196,8 @@ func TestPauseKeepsTheRunningHostAndStartsNoNewOne(t *testing.T) {
 }
 
 // TestCancelTakesBackTheQueuedTaskOfAnOfflineHost guards the cancel of a
-// campaign whose host went offline right after its task was created: the
-// task sits in the panel's queue, and a cancel takes it back in the same
-// transaction that cancels the campaign, so a host that comes online an
-// hour later does not carry out a change of a campaign that no longer
-// exists. The host stands in for a clone that enrolled and never spoke
-// again: it is marked online for the dispatch and offline before the
-// cancel, the way a session that opened and broke would leave it.
+// campaign whose host went offline right after its task was created: the task
+// sits in the panel's queue, and a cancel takes it back in the same
 func TestCancelTakesBackTheQueuedTaskOfAnOfflineHost(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -236,9 +228,9 @@ func TestCancelTakesBackTheQueuedTaskOfAnOfflineHost(t *testing.T) {
 	var target casTargetView
 	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) && target.JobID == "" {
-		// The host is held online until its turn comes: nothing here keeps
-		// a session open, and a sweep that finds none would take the row
-		// back to offline while the campaign is still deciding.
+		// The host is held online until its turn comes: nothing here keeps a session
+		// open, and a sweep that finds none would take the row back to offline while
+		// the campaign is still deciding.
 		if _, err := pool.Exec(ctx,
 			`update hosts set connection_state = 'online' where id = $1::uuid`, host.ID); err != nil {
 			t.Fatalf("keeping the synthetic host online: %v", err)

@@ -45,7 +45,6 @@ func accessDenied(message string) func(rpcCall) (any, *rpcError) {
 
 // readableDirectory answers the reads the preflight makes, so that a test
 // about the provisioning does not fail on the verification that follows it.
-// The rights say the move is allowed: that is what the provisioning is for.
 func readableDirectory(fake *fakeDirectory, entryRights string) {
 	fake.answers["dnszone_find"] = answerList(false)
 	fake.answers["user_find"] = answerList(false, map[string]any{"uid": []any{"jane"}})
@@ -65,8 +64,8 @@ func outcomes(report ProvisioningReport) []string {
 }
 
 // The provisioning binds the connector's own account to the permission the
-// directory already publishes, through a privilege and a role of the
-// panel's own, and says what it created.
+// directory already publishes, through a privilege and a role of the panel's
+// own, and says what it created.
 func TestTheProvisioningCreatesWhatIsMissingAndNamesIt(t *testing.T) {
 	fake, client := newFakeDirectory(t)
 	readableDirectory(fake, "vadn")
@@ -120,9 +119,9 @@ func TestTheProvisioningCreatesWhatIsMissingAndNamesIt(t *testing.T) {
 	}
 }
 
-// Running the step again is the point of it: everything is read before it
-// is written, the directory's own "already a member" is the wanted state,
-// and the report says nothing changed.
+// Running the step again is the point of it: everything is read before it is
+// written, the directory's own "already a member" is the wanted state, and the
+// report says nothing changed.
 func TestASecondRunOfTheProvisioningChangesNothingAndSaysSo(t *testing.T) {
 	fake, client := newFakeDirectory(t)
 	readableDirectory(fake, "vadn")
@@ -160,8 +159,8 @@ func TestASecondRunOfTheProvisioningChangesNothingAndSaysSo(t *testing.T) {
 }
 
 // A connector that may not create the objects itself says so, hands the
-// operator the exact commands, and stops instead of carrying on into
-// refusals that would all say the same thing.
+// operator the exact commands, and stops instead of carrying on into refusals
+// that would all say the same thing.
 func TestTheProvisioningReportsWhatItMayNotDoItself(t *testing.T) {
 	fake, client := newFakeDirectory(t)
 	readableDirectory(fake, "vad")
@@ -193,9 +192,8 @@ func TestTheProvisioningReportsWhatItMayNotDoItself(t *testing.T) {
 	}
 }
 
-// A directory that does not publish the permission at all cannot be given
-// one through the API: a permission has no moddn right. The step says so
-// and writes out the ACI an administrator adds instead.
+// A directory that does not publish the permission at all cannot be given one
+// through the API: a permission has no moddn right.
 func TestADirectoryWithoutThePermissionGetsTheACIAnAdministratorAdds(t *testing.T) {
 	fake, client := newFakeDirectory(t)
 	fake.answers["permission_show"] = notFound
@@ -223,8 +221,8 @@ func TestADirectoryWithoutThePermissionGetsTheACIAnAdministratorAdds(t *testing.
 	}
 }
 
-// The commands that change the directory's own configuration are not part
-// of any ordinary operation: the closed list does not hold them, and the
+// The commands that change the directory's own configuration are not part of
+// any ordinary operation: the closed list does not hold them, and the
 // provisioning door takes nothing else.
 func TestTheProvisioningCommandsAreOutOfReachOfAnOrdinaryOperation(t *testing.T) {
 	fake, client := newFakeDirectory(t)

@@ -14,13 +14,8 @@ import (
 	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
 )
 
-// Enrollment is the proxy of host registrations in an isolated site.
-//
-// A host that does not see the centre has no way of getting an identity. The
-// relay is the only point that sees both sides, so it accepts the registration
-// and forwards it over its own mTLS channel. It signs nothing: the CA of the
-// fleet stays in the centre, and the relay adds only what the host cannot
-// prove - which site the registration came from.
+// Enrollment is the proxy of host registrations in an isolated site. A host
+// that does not see the centre has no way of getting an identity.
 type Enrollment struct {
 	relay *Relay
 }
@@ -31,12 +26,6 @@ func (r *Relay) EnrollmentHandler() (string, http.Handler) {
 }
 
 // Enroll forwards the registration of a host to the centre.
-//
-// With the WAN link down the relay does not finish the enrollment itself and
-// does not set the registration aside in the buffer. A token and a CSR must
-// not wait in a queue: the token is one-time, and a host that got its
-// certificate hours late would have tried again in the meantime anyway. The
-// agent retries once the centre is back.
 func (e *Enrollment) Enroll(ctx context.Context,
 	req *connect.Request[agentv1.EnrollRequest],
 ) (*connect.Response[agentv1.EnrollResponse], error) {
@@ -59,12 +48,6 @@ func (e *Enrollment) Enroll(ctx context.Context,
 }
 
 // relayCentre assembles the client of the relay service in the centre.
-//
-// A client separate from the one that carries the sessions of the agents: that
-// one goes to the agent gateway, and the registrations go to the relay
-// service. The address is the same, but the identity used in the handshake -
-// the certificate of the relay - can change at a renewal, so the client is
-// created on demand.
 func (r *Relay) relayCentre() agentv1connect.RelayServiceClient {
 	material := r.identity.Load()
 	return agentv1connect.NewRelayServiceClient(

@@ -14,20 +14,14 @@ import (
 )
 
 // The limit on forced renewals is shared with the tool of the relay: the
-// record lies in the state directory next to the identity, so a reinstall
-// of the tool does not reset it.
+// record lies in the state directory next to the identity, so a reinstall of
+// the tool does not reset it.
 const (
 	forcedRenewalFile     = ctl.ForcedRenewalFile
 	forcedRenewalInterval = ctl.ForcedRenewalInterval
 )
 
 // renewCommand forces a renewal of the certificate of the host.
-//
-// The daemon renews on its own when a third of the validity is left; this is
-// for the moment the operator does not want to wait - after a rotation of the
-// CA, or when the key is to be replaced today. The path is the same one the
-// daemon takes: the current certificate proves the identity over mTLS, the
-// enrollment token takes no part.
 func renewCommand(args []string, out, errOut io.Writer) int {
 	flags := flag.NewFlagSet("renew", flag.ContinueOnError)
 	flags.SetOutput(errOut)
@@ -48,9 +42,8 @@ func renewCommand(args []string, out, errOut io.Writer) int {
 	r := renewal{
 		StateDir: cfg.Agent.StateDir,
 		// Every gateway of the configuration, in its order of priority: a
-		// certificate close to its term must not depend on one instance of
-		// the panel being up, and the host already knows where the others
-		// are.
+		// certificate close to its term must not depend on one instance of the panel
+		// being up, and the host already knows where the others are.
 		Gateways: cfg.Connection.GatewayURLs,
 		Now:      time.Now,
 		Identity: agent.ReadIdentity,
@@ -72,9 +65,6 @@ type renewal struct {
 }
 
 // run carries the renewal out.
-//
-// The exit codes follow the tool: 0 renewed, 1 a problem to fix, 2 a refusal
-// of the request itself - too soon after the previous one.
 func (r renewal) run(ctx context.Context, out, errOut io.Writer) int {
 	now := r.Now()
 	throttle := ctl.Throttle{StateDir: r.StateDir}
@@ -103,18 +93,17 @@ func (r renewal) run(ctx context.Context, out, errOut io.Writer) int {
 		return 1
 	}
 
-	// The attempt is recorded before it is made: a refusal by the gateway
-	// counts as much as a success, and a script must not be able to hammer
-	// the gateway by retrying a failure.
+	// The attempt is recorded before it is made: a refusal by the gateway counts
+	// as much as a success, and a script must not be able to hammer the gateway
+	// by retrying a failure.
 	if err := throttle.Record(now); err != nil {
 		fmt.Fprintf(errOut, "the renewal record was not written: %v\n", err)
 		return 1
 	}
 
 	// The gateways are tried in order until one answers; which one did is
-	// printed, because an operator repeating the command after an outage
-	// wants to know whether they are talking to the main panel or to the
-	// standby.
+	// printed, because an operator repeating the command after an outage wants to
+	// know whether they are talking to the main panel or to the standby.
 	var renewed *agent.Identity
 	answered, err := endpoints.New(r.Gateways, 0, 0).Try(ctx,
 		func(ctx context.Context, gatewayURL string) error {
@@ -132,21 +121,15 @@ func (r renewal) run(ctx context.Context, out, errOut io.Writer) int {
 	fmt.Fprintf(out, "Renewed:      host/%s\n", renewed.HostID)
 	fmt.Fprintf(out, "Gateway:      %s\n", answered)
 	fmt.Fprintf(out, "Certificate:  valid until %s\n", renewed.NotAfter.UTC().Format(time.RFC3339))
-	// The daemon has no local channel to be told about the new generation,
-	// and the previous certificate stays valid until its term - so the
-	// session goes on, and the switch happens at the next start.
+	// The daemon has no local channel to be told about the new generation, and
+	// the previous certificate stays valid until its term - so the session goes
+	// on, and the switch happens at the next start.
 	fmt.Fprintln(out, "The running agent keeps its session on the previous certificate; to switch: systemctl restart flotestro-agent.service")
 	return 0
 }
 
 // sameOwner refuses to write the identity as somebody other than its owner.
-//
-// The store writes the new generation as the calling user. Run as root, it
-// would leave a key the daemon cannot read - and the host would drop out of
-// the fleet at the next restart, not now, when the operator is looking. The
-// command is named in the hint so that the operator can repeat it as the
-// right user. A directory that does not exist yet has no owner to compare
-// with: the caller creates it as itself.
+// The store writes the new generation as the calling user.
 func sameOwner(stateDir, command string) error {
 	return ctl.SameOwner(stateDir, "flotestro-agent", "flotestro-agentctl", command)
 }

@@ -10,13 +10,6 @@ import (
 )
 
 // renameNoReplace moves a directory under a name that must be free.
-//
-// A plain rename replaces an existing target, and for a generation that
-// is the failure this store exists to prevent: the active identity would
-// be swapped underneath the host. The kernel does the check and the move
-// as one step; a filesystem that does not offer that falls back to the
-// check-then-rename, which is the best the old code did and still never
-// removes anything.
 func renameNoReplace(oldPath, newPath string) error {
 	err := unix.Renameat2(unix.AT_FDCWD, oldPath, unix.AT_FDCWD, newPath, unix.RENAME_NOREPLACE)
 	switch {

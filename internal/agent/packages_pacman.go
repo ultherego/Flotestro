@@ -9,13 +9,6 @@ import (
 )
 
 // pacmanSummary counts the packages and the pending updates on Arch.
-//
-// The updates come from checkupdates, which syncs a copy of the database in
-// a directory of its own; the inventory must not sync the system database,
-// because on Arch a synced database without an upgrade is the state the
-// distribution warns against. Without checkupdates the count is
-// undetermined rather than zero, and the security count is always
-// undetermined: the Arch repositories carry no security metadata.
 func pacmanSummary(ctx context.Context) Packages {
 	summary := Packages{Manager: packages.PacmanName}
 

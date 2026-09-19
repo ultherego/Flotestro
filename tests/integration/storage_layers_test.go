@@ -92,8 +92,8 @@ func hostLayerSnapshot(t *testing.T, h *harness, hostID string) layerSnapshot {
 }
 
 // TestSoftwareRAIDIsReadOrExplained guards the doctrine on the one module
-// where an empty list is the easiest lie to tell: a host with no arrays
-// and a host nobody could ask about must not look the same.
+// where an empty list is the easiest lie to tell: a host with no arrays and a
+// host nobody could ask about must not look the same.
 func TestSoftwareRAIDIsReadOrExplained(t *testing.T) {
 	h := newHarness(t)
 	for _, family := range []string{"debian", "rhel"} {
@@ -105,9 +105,6 @@ func TestSoftwareRAIDIsReadOrExplained(t *testing.T) {
 			}
 			if len(state.Arrays) == 0 && state.RAIDUnavailableReason == "" {
 				// The kernel has the md driver and no array is assembled.
-				// That is a legitimate answer and the one the lab gives; it
-				// is recorded here so a future empty list with no reason is
-				// read as the answer it is rather than as a gap.
 				t.Log("this host has software RAID support and no array assembled")
 			}
 			for _, array := range state.Arrays {
@@ -137,9 +134,9 @@ func TestSoftwareRAIDIsReadOrExplained(t *testing.T) {
 	}
 }
 
-// TestVolumesCarryTheIdentityAnOrderBindsTo guards the other half: a group
-// or a volume without a UUID is a group or a volume no order may name,
-// and a snapshot is told apart from an ordinary volume.
+// TestVolumesCarryTheIdentityAnOrderBindsTo guards the other half: a group or
+// a volume without a UUID is a group or a volume no order may name, and a
+// snapshot is told apart from an ordinary volume.
 func TestVolumesCarryTheIdentityAnOrderBindsTo(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -181,9 +178,9 @@ func TestVolumesCarryTheIdentityAnOrderBindsTo(t *testing.T) {
 	}
 }
 
-// TestAnArrayOrderWithoutAnIdentityDoesNotReachTheHost guards the binding
-// that makes these operations safe at all: an order that names an array by
-// path or a member by path is not created.
+// TestAnArrayOrderWithoutAnIdentityDoesNotReachTheHost guards the binding that
+// makes these operations safe at all: an order that names an array by path or
+// a member by path is not created.
 func TestAnArrayOrderWithoutAnIdentityDoesNotReachTheHost(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -245,9 +242,9 @@ func TestAVolumeOrderWithoutAUUIDDoesNotReachTheHost(t *testing.T) {
 	}
 }
 
-// TestDeletingAVolumeIsTreatedLikeAFormat guards that the destructive half
-// of LVM gets the destructive treatment: the host name typed out and two
-// people behind it.
+// TestDeletingAVolumeIsTreatedLikeAFormat guards that the destructive half of
+// LVM gets the destructive treatment: the host name typed out and two people
+// behind it.
 func TestDeletingAVolumeIsTreatedLikeAFormat(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -293,8 +290,8 @@ func TestDeletingAVolumeIsTreatedLikeAFormat(t *testing.T) {
 }
 
 // TestTheHostRefusesAnArrayItDoesNotHave guards the far end of the same
-// question: an order that passed the panel is still refused by the host,
-// with a typed code, rather than succeeding on nothing.
+// question: an order that passed the panel is still refused by the host, with
+// a typed code, rather than succeeding on nothing.
 func TestTheHostRefusesAnArrayItDoesNotHave(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -312,10 +309,8 @@ func TestTheHostRefusesAnArrayItDoesNotHave(t *testing.T) {
 	if len(attempts) == 0 {
 		t.Fatal("the job produced no attempt")
 	}
-	// A host with mdadm answers that it has no such array; a host without
-	// the tool answers that it cannot manage arrays at all. Both are the
-	// refusal this test is about - the order does not reach a disk - and
-	// each says which of the two it is, which is the point of typing them.
+	// A host with mdadm answers that it has no such array; a host without the
+	// tool answers that it cannot manage arrays at all.
 	switch code := attempts[len(attempts)-1].ErrorCode; code {
 	case "array_unknown", "unsupported":
 	default:
@@ -323,9 +318,9 @@ func TestTheHostRefusesAnArrayItDoesNotHave(t *testing.T) {
 	}
 }
 
-// TestBuildingAnArrayIsRefusedByName guards the boundary the catalogue
-// draws: the panel manages the members of an array that exists, and says
-// so with its own code instead of looking like a module with a gap.
+// TestBuildingAnArrayIsRefusedByName guards the boundary the catalogue draws:
+// the panel manages the members of an array that exists, and says so with its
+// own code instead of looking like a module with a gap.
 func TestBuildingAnArrayIsRefusedByName(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -375,9 +370,9 @@ func TestBuildingAnArrayIsRefusedByName(t *testing.T) {
 	}
 }
 
-// TestTheCatalogueDeclaresAVerifierForEveryLayerOperation guards the rule
-// this whole task is about: no storage change is settled by the exit code
-// of a tool.
+// TestTheCatalogueDeclaresAVerifierForEveryLayerOperation guards the rule this
+// whole task is about: no storage change is settled by the exit code of a
+// tool.
 func TestTheCatalogueDeclaresAVerifierForEveryLayerOperation(t *testing.T) {
 	h := newHarness(t)
 	var catalogue struct {

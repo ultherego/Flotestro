@@ -1,10 +1,5 @@
-// Command agent-helper carries out the operations that require root on
-// behalf of the agent.
-//
-// The helper is activated by systemd on demand, listens on a unix socket
-// alone and never connects to the network. A compromise of the agent
-// therefore gives no access to root beyond what the helper explicitly
-// supports.
+// Command agent-helper carries out the operations that require root on behalf
+// of the agent.
 package main
 
 import (
@@ -60,9 +55,6 @@ func run() error {
 	slog.SetDefault(log)
 
 	// The agent replacement mode is called by a transient systemd unit.
-	// Installing the agent package stops the helper and restarts the agent,
-	// so it must not run in the process that ordered it: that process would
-	// not live to the end of its own transaction.
 	if *agentReplacement != "" {
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
@@ -71,9 +63,7 @@ func run() error {
 	}
 
 	// The rollback mode is called by a transient systemd unit when nobody has
-	// confirmed connectivity after a network change. It works without a
-	// socket, without the agent and without the panel - it is the last thing
-	// that works when a change cuts the host off from the world.
+	// confirmed connectivity after a network change.
 	if *rollbackFirewall != "" {
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
@@ -139,29 +129,21 @@ func run() error {
 		"agent_user", *agentUser, "uid", allowedUID,
 		"socket_activated", activated, "protocol_version", helper.ProtocolVersion)
 
-	// A package transaction holds the agent package for its own duration so
-	// as not to replace it halfway through its own work. When it died with
-	// the process, the hold stayed for good and blocked every later
-	// replacement of the agent. We clean it up at the start - but only when
-	// it was us who placed it.
+	// A package transaction holds the agent package for its own duration so as
+	// not to replace it halfway through its own work.
 	if released, err := packages.ReleaseAbandonedHold(ctx); err != nil {
 		log.Warn("the abandoned hold on the agent package was not released", "err", err)
 	} else if released {
 		log.Info("the abandoned hold on the agent package was released")
 	}
 
-	// The helper finishes its work after a period of idleness. With the fleet
-	// at rest not a single root process runs. The server counts the idleness
-	// from the last connection and never during a job: a clock counted here
-	// from the start cut a transaction that happened to be running in its
-	// fifth minute.
+	// The helper finishes its work after a period of idleness. With the fleet at
+	// rest not a single root process runs.
 	server := helper.NewServer(allowedUID, log)
 	server.IdleTimeout = *idleTimeout
 
-	// The capability of the panel: the keyring and the host identity are
-	// root's, the replay store is root's, and the mode is the owner's
-	// decision. A helper that cannot open its replay store does not start:
-	// without it a consumed nonce could be consumed again.
+	// The capability of the panel: the keyring and the host identity are root's,
+	// the replay store is root's, and the mode is the owner's decision.
 	settings, err := helpercap.LoadSettings(*configPath)
 	if err != nil {
 		return err

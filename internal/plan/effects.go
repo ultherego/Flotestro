@@ -15,9 +15,7 @@ const (
 )
 
 // Outcome is the settlement of one expected effect once the change ran:
-// achieved or not, with what was observed instead. A partial result lists
-// every outcome, so the operator sees what the host reached and what it
-// did not rather than one word for the whole transaction.
+// achieved or not, with what was observed instead.
 type Outcome struct {
 	Effect   Effect `json:"effect"`
 	Achieved bool   `json:"achieved"`
@@ -26,10 +24,9 @@ type Outcome struct {
 	Observed string `json:"observed"`
 }
 
-// Settle reads every expected effect off the installed state - package
-// name to installed version, a package not in the map is absent - and
-// returns the outcomes achieved and the outcomes missed, each sorted by
-// subject.
+// Settle reads every expected effect off the installed state - package name to
+// installed version, a package not in the map is absent - and returns the
+// outcomes achieved and the outcomes missed, each sorted by subject.
 func (e Effects) Settle(installed map[string]string) (achieved, missed []Outcome) {
 	for _, effect := range e.Expected {
 		version, present := installed[effect.Subject]
@@ -56,9 +53,8 @@ func (e Effects) Settle(installed map[string]string) (achieved, missed []Outcome
 	return achieved, missed
 }
 
-// Partial turns the missed outcomes into the typed error of a partial
-// result, or nil when nothing was missed. The message names the subjects
-// so the job says which effects the host did not reach.
+// Partial turns the missed outcomes into the typed error of a partial result,
+// or nil when nothing was missed.
 func Partial(missed []Outcome) error {
 	if len(missed) == 0 {
 		return nil

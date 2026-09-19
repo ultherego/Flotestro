@@ -6,10 +6,9 @@ import (
 	"github.com/ultherego/flotestro/internal/ctl"
 )
 
-// The report of a diagnosis is shared with the tool of the relay: both
-// answer the same questions about the path to the panel, and a playbook
-// compares the same codes whichever of the two wrote them. The names below
-// keep the tool reading as one piece.
+// The report of a diagnosis is shared with the tool of the relay: both answer
+// the same questions about the path to the panel, and a playbook compares the
+// same codes whichever of the two wrote them.
 const (
 	StatusPass   = ctl.StatusPass
 	StatusFail   = ctl.StatusFail

@@ -134,10 +134,8 @@ func TestMissingReasonIsRequestError(t *testing.T) {
 	}
 }
 
-// TestStepUpRefusesTokensWhenThePolicySaysSo: the installation may decide
-// that a person has to stand behind every change of the access rules. The
-// refusal then asks for a session rather than for a permission, and a
-// session with fresh authentication still passes.
+// TestStepUpRefusesTokensWhenThePolicySaysSo: the installation may decide that
+// a person has to stand behind every change of the access rules.
 func TestStepUpRefusesTokensWhenThePolicySaysSo(t *testing.T) {
 	policy := stepUpPolicy{MaxAge: 5 * time.Minute, RefuseTokens: true}
 	reason := "revoking the token of a leaving contractor"

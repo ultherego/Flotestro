@@ -87,9 +87,8 @@ func TestLVMReadsSizesInBytes(t *testing.T) {
 	if len(groups) != 1 || groups[0].SizeBytes != 67691872256 {
 		t.Fatalf("groups = %+v", groups)
 	}
-	// A group without free space is a fact that decides about the
-	// possibility of an extension - and is meant to be zero, not a missing
-	// value.
+	// A group without free space is a fact that decides about the possibility of
+	// an extension - and is meant to be zero, not a missing value.
 	if groups[0].FreeBytes != 0 || groups[0].LVCount != 2 {
 		t.Errorf("group = %+v", groups[0])
 	}

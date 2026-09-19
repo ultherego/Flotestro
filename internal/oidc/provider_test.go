@@ -9,9 +9,9 @@ import (
 )
 
 func TestOnlyAnInvalidGrantMeansTheUserIsGone(t *testing.T) {
-	// The refresher ends a session on this answer alone: every other failure
-	// says something about the provider or the network, not about the user,
-	// and a session must not be lost to an outage.
+	// The refresher ends a session on this answer alone: every other failure says
+	// something about the provider or the network, not about the user, and a
+	// session must not be lost to an outage.
 	cases := []struct {
 		name string
 		err  error

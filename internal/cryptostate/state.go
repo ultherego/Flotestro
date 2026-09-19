@@ -19,9 +19,8 @@ import (
 // The states that stop the start. Each is a code the log carries and the
 // runbook names; the reason next to it says which file or row it is about.
 const (
-	// CodeSecretsKeyUnavailable: the installation has secrets, or a
-	// record naming a key, and that key is not there or does not open the
-	// sentinel.
+	// CodeSecretsKeyUnavailable: the installation has secrets, or a record naming
+	// a key, and that key is not there or does not open the sentinel.
 	CodeSecretsKeyUnavailable = "secrets_key_unavailable"
 	// CodeIssuerKeyUnavailable: the certificate of the fleet CA is there
 	// and its private key is not.
@@ -32,11 +31,9 @@ const (
 	// CodeStateAmbiguous: no record, and what is there does not add up to
 	// either an empty installation or a complete old one.
 	CodeStateAmbiguous = "crypto_state_ambiguous"
-	// CodeInstallationMismatch: the state directory and the database
-	// describe two different installations, or one of them describes none
-	// while the other has a history. It is the deployment mistake of
-	// chapter 21 - a control plane scaled with a state volume of its own -
-	// and the reason names which of the two is the stranger.
+	// CodeInstallationMismatch: the state directory and the database describe two
+	// different installations, or one of them describes none while the other has
+	// a history.
 	CodeInstallationMismatch = "installation_state_mismatch"
 )
 
@@ -47,10 +44,9 @@ const RunbookHint = "do not create keys or a CA by hand; follow docs/runbooks/db
 type FatalError struct {
 	Code   string
 	Reason string
-	// Stranger is set on the refusals that compare the state directory
-	// with the database: it names the half that does not belong to the
-	// installation the other half describes. It is empty on every other
-	// refusal, where there is nothing to compare.
+	// Stranger is set on the refusals that compare the state directory with the
+	// database: it names the half that does not belong to the installation the
+	// other half describes.
 	Stranger Stranger
 	Err      error
 }
@@ -83,9 +79,8 @@ type Options struct {
 	// LegacyKeyPath is where an installation from before the provider
 	// kept its one key. Empty means nowhere to look.
 	LegacyKeyPath string
-	// RotateTo names a key to switch the store to at this start; empty
-	// leaves the active key alone. A key that already exists and is
-	// active is a no-op, so the setting may stay in the environment.
+	// RotateTo names a key to switch the store to at this start; empty leaves the
+	// active key alone.
 	RotateTo string
 	Log      *slog.Logger
 }
@@ -107,9 +102,7 @@ type Runtime struct {
 	store       *secrets.Store
 }
 
-// Open is the startup guard. It runs before anything touches the secret
-// store or the CA, under the installation lock, and either returns the
-// checked material or a FatalError with the state it found.
+// Open is the startup guard.
 func Open(ctx context.Context, o Options) (*Runtime, error) {
 	if o.Log == nil {
 		o.Log = slog.Default()
@@ -145,14 +138,12 @@ func Open(ctx context.Context, o Options) (*Runtime, error) {
 	return r, nil
 }
 
-// verify is the path of an installation with a record: the key it names
-// must be there and must open the sentinel, and the CA on disk must be
-// the one it names.
+// verify is the path of an installation with a record: the key it names must
+// be there and must open the sentinel, and the CA on disk must be the one it
+// names.
 func (r *Runtime) verify(ctx context.Context, o Options, record Record) error {
-	// Which installation the state directory belongs to is asked before
-	// anything else. A key that does not open a sentinel says "the key is
-	// wrong"; the marker says "these two were never one installation", and
-	// that is a different repair.
+	// Which installation the state directory belongs to is asked before anything
+	// else.
 	marker, err := readMarker(o.CADir)
 	if err != nil {
 		return err
@@ -165,10 +156,8 @@ func (r *Runtime) verify(ctx context.Context, o Options, record Record) error {
 				"one fleet CA while the database records another",
 			o.CADir, marker, record.InstallationID))
 	case marker == "" && stateDirectoryEmpty(o):
-		// The shape of the mistake chapter 21 forbids: a replica with a
-		// state volume of its own next to the database of an installation
-		// that exists. It is also what a database restored without its
-		// state directory looks like, and the repair is the same one.
+		// The shape of the mistake chapter 21 forbids: a replica with a state volume
+		// of its own next to the database of an installation that exists.
 		return fatalStranger(CodeInstallationMismatch, StrangerStateDirectory, fmt.Sprintf(
 			"the database describes the installation %s and %s holds no secret store key, no fleet CA "+
 				"and no marker of any installation: this is either a control plane started with a state "+
@@ -209,10 +198,9 @@ func (r *Runtime) verify(ctx context.Context, o Options, record Record) error {
 	}
 	active := trust.Active()
 	if active.IssuerID() != record.IssuerID {
-		// The one benign case: the files were swapped by an activation
-		// and the record was not told - the panel died between the two,
-		// or the update failed. Then the CA the record names is among
-		// the retired ones, and the record catches up.
+		// The one benign case: the files were swapped by an activation and the
+		// record was not told - the panel died between the two, or the update
+		// failed.
 		if !isRetired(trust, record.IssuerID) {
 			return fatal(CodePKIStateMismatch,
 				fmt.Sprintf("the CA on disk (%s, issuer %s) is not the one the installation %s records (issuer %s)",
@@ -234,10 +222,7 @@ func (r *Runtime) verify(ctx context.Context, o Options, record Record) error {
 				active.FingerprintHex(), record.IssuerFingerprint), nil)
 	}
 	// Everything matched, so a directory that carried no marker is this
-	// installation's and may now say so. An installation from before the
-	// marker gets it on its first start under this version, and from then
-	// on a directory paired with the wrong database is named as such
-	// rather than reported as a key that does not open.
+	// installation's and may now say so.
 	if marker == "" {
 		if err := writeMarker(o.CADir, record.InstallationID); err != nil {
 			return fmt.Errorf("naming the installation of the state directory: %w", err)
@@ -262,9 +247,7 @@ func (r *Runtime) establish(ctx context.Context, o Options) error {
 		return fmt.Errorf("reading what the database holds: %w", err)
 	}
 	// A state directory that names an installation next to a database that
-	// describes none: the database is the stranger. It is an empty or a
-	// foreign database under a directory with a history, and initialising
-	// over it would make a second installation out of one set of keys.
+	// describes none: the database is the stranger.
 	marker, err := readMarker(o.CADir)
 	if err != nil {
 		return err
@@ -309,8 +292,8 @@ func (r *Runtime) establish(ctx context.Context, o Options) error {
 	}
 
 	// The key: the legacy file is adopted when it is there; without it an
-	// installation with secrets has lost its key, and one without secrets
-	// may take a key that exists alone or make a new one.
+	// installation with secrets has lost its key, and one without secrets may
+	// take a key that exists alone or make a new one.
 	var activeKey string
 	var createdKey bool
 	switch {
@@ -370,9 +353,9 @@ func (r *Runtime) establish(ctx context.Context, o Options) error {
 	if err != nil {
 		return fmt.Errorf("reading the installation record back: %w", err)
 	}
-	// The directory is named only once the record is safely in the
-	// database: a marker without a record would refuse the very next start
-	// of an installation that was never created.
+	// The directory is named only once the record is safely in the database: a
+	// marker without a record would refuse the very next start of an installation
+	// that was never created.
 	if err := writeMarker(o.CADir, record.InstallationID); err != nil {
 		return fmt.Errorf("naming the installation of the state directory: %w", err)
 	}
@@ -392,9 +375,8 @@ func (r *Runtime) establish(ctx context.Context, o Options) error {
 }
 
 // stateDirectoryEmpty says whether the state directory holds nothing that
-// could belong to any installation: no key of the provider, no CA material
-// and no legacy key file. A directory like that next to a database that
-// describes an installation is never a state to start from.
+// could belong to any installation: no key of the provider, no CA material and
+// no legacy key file.
 func stateDirectoryEmpty(o Options) bool {
 	if o.Provider.HasMaterial() || pki.HasAnyMaterial(o.CADir) {
 		return false
@@ -443,10 +425,8 @@ func isRetired(trust *pki.Trust, issuerID string) bool {
 	return false
 }
 
-// The sentinel is the installation identifier sealed under the active
-// key, bound to itself by the associated data. Opening it at start is the
-// self-test: a key of the right length that is not the installation's
-// fails here and nowhere later.
+// The sentinel is the installation identifier sealed under the active key,
+// bound to itself by the associated data.
 const sentinelKind = "sentinel"
 
 func sentinelAssociated(installationID string) []byte {
@@ -475,10 +455,8 @@ func openSentinel(ctx context.Context, keys secrets.KeyProvider, record Record) 
 	return nil
 }
 
-// rotate switches the store to another key: the key is made when it does
-// not exist yet, the sentinel is resealed under it and the record moves.
-// The rows of the store follow in the background; the old key stays until
-// none of them names it.
+// rotate switches the store to another key: the key is made when it does not
+// exist yet, the sentinel is resealed under it and the record moves.
 func (r *Runtime) rotate(ctx context.Context, to string) error {
 	if err := ValidateKeyID(to); err != nil {
 		return fmt.Errorf("FLOTESTRO_SECRETS_KEY_ROTATE_TO: %w", err)
@@ -577,14 +555,13 @@ func (r *Runtime) SetSecrets(store *secrets.Store) {
 // rewrapBatch bounds one transaction of the rewrap.
 const rewrapBatch = 200
 
-// maintainInterval is how often the background work repeats: the rewrap
-// of rows still on another key, and the issuer identifier of certificate
-// rows written without one. Both are cheap when there is nothing to do.
+// maintainInterval is how often the background work repeats: the rewrap of
+// rows still on another key, and the issuer identifier of certificate rows
+// written without one.
 const maintainInterval = 5 * time.Minute
 
-// Maintain runs the background work until the context ends: once at
-// start and then at every interval. A rewrap that stopped on an error
-// resumes here rather than at the next restart.
+// Maintain runs the background work until the context ends: once at start and
+// then at every interval.
 func (r *Runtime) Maintain(ctx context.Context) {
 	ticker := time.NewTicker(maintainInterval)
 	defer ticker.Stop()
@@ -599,9 +576,8 @@ func (r *Runtime) Maintain(ctx context.Context) {
 	}
 }
 
-// Rewrap moves every live version onto the active key, a batch at a
-// time, and returns when none is left or the context ends. It is safe to
-// run at every start: with nothing to do it costs one count.
+// Rewrap moves every live version onto the active key, a batch at a time, and
+// returns when none is left or the context ends.
 func (r *Runtime) Rewrap(ctx context.Context) {
 	r.mu.RLock()
 	store := r.store

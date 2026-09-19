@@ -7,19 +7,8 @@ import (
 )
 
 // CancelQueuedOf takes back the tasks of a campaign that are still in the
-// panel: planned, waiting for an approval or queued for a host that has
-// not taken them. It returns the identifiers of the tasks it canceled, and
-// gives back the budget tokens any of them held, inside the caller's
-// transaction - the campaign's own cancel commits the two together, so
-// there is no moment at which the campaign is canceled and a task of it
-// waits for a host to come online.
-//
-// A task the agent already holds - leased, dispatched, running - is not
-// taken away: the host may be halfway through a package transaction, and
-// the campaign records the cancel on the target instead and waits for the
-// host to settle. The tasks named in keep are left alone whatever their
-// state: the reboot and the verification owed to a host whose change
-// landed, which a cancel does not take back either.
+// panel: planned, waiting for an approval or queued for a host that has not
+// taken them.
 func CancelQueuedOf(ctx context.Context, tx pgx.Tx, campaignID, actor, reason string,
 	keep []string) ([]string, error) {
 	if keep == nil {

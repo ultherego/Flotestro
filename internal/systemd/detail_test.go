@@ -6,9 +6,8 @@ import (
 	"time"
 )
 
-// The detail reads override files only from the drop-in directories: a
-// path systemd names elsewhere is reported by path with a reason, never
-// opened.
+// The detail reads override files only from the drop-in directories: a path
+// systemd names elsewhere is reported by path with a reason, never opened.
 func TestDropInsOutsideTheDirectoriesAreNotRead(t *testing.T) {
 	dropIns := readDropIns([]string{
 		"/usr/lib/systemd/system/cron.service.d/packaged.conf",

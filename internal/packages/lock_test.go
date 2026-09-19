@@ -11,15 +11,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// lockCheckBudget bounds the lock check. The scenario of chapter 23 is a
-// refusal that does not hang: apt-get itself waits up to two minutes for a
-// busy lock, and a check that waited with it would freeze the whole job.
+// lockCheckBudget bounds the lock check.
 const lockCheckBudget = 2 * time.Second
 
 // holdLock takes the lock the way dpkg and rpm do: an exclusive flock on the
-// file, held until the end of the test. The adapter opens the file through
-// a descriptor of its own, and flock locks belong to the open file
-// description, so the lock is really contended rather than re-entered.
+// file, held until the end of the test.
 func holdLock(t *testing.T, path string) {
 	t.Helper()
 	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o640)
@@ -56,8 +52,8 @@ func timed(t *testing.T, what string, run func()) {
 }
 
 // TestLockHeldSeesTheFrontendLock is the scenario of a local administrator in
-// the middle of "apt install": the panel's operation is refused with the
-// typed code, names the lock, and does not queue behind it.
+// the middle of "apt install": the panel's operation is refused with the typed
+// code, names the lock, and does not queue behind it.
 func TestLockHeldSeesTheFrontendLock(t *testing.T) {
 	dpkg := t.TempDir()
 	frontend := filepath.Join(dpkg, "lock-frontend")
@@ -81,9 +77,9 @@ func TestLockHeldSeesTheFrontendLock(t *testing.T) {
 		}
 	})
 
-	// The transaction itself refuses before it starts anything, with the
-	// code the panel shows and the error the callers recognise as a refusal
-	// rather than a broken transaction.
+	// The transaction itself refuses before it starts anything, with the code the
+	// panel shows and the error the callers recognise as a refusal rather than a
+	// broken transaction.
 	timed(t, "Upgrade", func() {
 		apply, err := apt.Upgrade(context.Background(), Options{})
 		if !errors.Is(err, ErrLocked) {
@@ -110,10 +106,8 @@ func TestLockHeldSeesTheFrontendLock(t *testing.T) {
 	})
 }
 
-// TestAFreeLockDoesNotRefuseTheChange guards the other side: the check
-// must not turn every transaction away. A free file is free, and a file the
-// process cannot open is "not checked" rather than "held" - a missing
-// directory must not block the host for good.
+// TestAFreeLockDoesNotRefuseTheChange guards the other side: the check must
+// not turn every transaction away.
 func TestAFreeLockDoesNotRefuseTheChange(t *testing.T) {
 	dpkg := t.TempDir()
 	free := filepath.Join(dpkg, "lock-frontend")
@@ -135,9 +129,9 @@ func TestAFreeLockDoesNotRefuseTheChange(t *testing.T) {
 	if held, path := (&APT{}).LockHeld(); held {
 		t.Fatalf("a free lock was reported as held at %s", path)
 	}
-	// The lock the check took to look must be gone: the check may not leave
-	// the file locked behind itself, or the administrator's next apt call
-	// would wait for the panel.
+	// The lock the check took to look must be gone: the check may not leave the
+	// file locked behind itself, or the administrator's next apt call would wait
+	// for the panel.
 	if held, _ := lockHeld(free); held {
 		t.Fatal("the check left the lock held")
 	}

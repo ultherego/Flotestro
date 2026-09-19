@@ -186,9 +186,7 @@ func TestReadListSourceRecognisesTheKey(t *testing.T) {
 }
 
 func TestTheFirstAPTErrorReadsAWarningAsAnError(t *testing.T) {
-	// apt ends with the code zero also when an index could not be fetched. To
-	// the panel that is not a warning: a source that does not answer will
-	// block every next package operation on the host.
+	// apt ends with the code zero also when an index could not be fetched.
 	output := "Get:1 https://packages.example.test/debian stable InRelease\n" +
 		"Err:1 https://packages.example.test/debian stable InRelease\n" +
 		"  Temporary failure resolving 'packages.example.test'\n" +

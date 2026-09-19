@@ -3,12 +3,6 @@ package files
 import "time"
 
 // Change describes what a write really did to a file.
-//
-// The plan says what was going to happen; this says what happened, in the
-// same terms, so the two can be laid side by side. An operator who
-// approved a whole intended state - the bytes, the inode, the check that
-// ran and what has to be reloaded - is owed an answer in the same shape,
-// not a fingerprint and the word "written".
 type Change struct {
 	Path string `json:"path"`
 	// Action is create, update or rollback.
@@ -45,9 +39,8 @@ type Change struct {
 	Consumers       []Consumer `json:"consumers,omitempty"`
 	ConsumersReason string     `json:"consumers_reason,omitempty"`
 
-	// KeptVersion is the copy of the previous content the host put aside
-	// before the rename. Nil means there was nothing to keep, which is the
-	// case of a file created now.
+	// KeptVersion is the copy of the previous content the host put aside before
+	// the rename.
 	KeptVersion *KeptVersion `json:"kept_version,omitempty"`
 	// RestoredFrom is the version a rollback put back.
 	RestoredFrom *KeptVersion `json:"restored_from,omitempty"`

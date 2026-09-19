@@ -20,15 +20,9 @@ type sessionView struct {
 	Reason string
 }
 
-// TestNewSessionReplacesTheOldOne guards the property the session epoch
-// exists for in the first place: at any moment a host has exactly one
-// authoritative session.
-//
-// Without it two gateways would consider themselves authoritative for the
-// same host and the same job would go out twice - and irreversible
-// operations would run twice. The test forces a reconnect through
-// quarantine, because that is the only way to break a session through the
-// API.
+// TestNewSessionReplacesTheOldOne guards the property the session epoch exists
+// for in the first place: at any moment a host has exactly one authoritative
+// session.
 func TestNewSessionReplacesTheOldOne(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -50,9 +44,9 @@ func TestNewSessionReplacesTheOldOne(t *testing.T) {
 	}
 	highest := before[0].Epoch
 
-	// The cleanup lifts the quarantine only when the test did not manage to
-	// lift it itself: releasing a host that is already active is a state
-	// conflict and would mask the real cause of the failure.
+	// The cleanup lifts the quarantine only when the test did not manage to lift
+	// it itself: releasing a host that is already active is a state conflict and
+	// would mask the real cause of the failure.
 	t.Cleanup(func() {
 		var state struct {
 			LifecycleState string `json:"lifecycle_state"`
@@ -111,15 +105,9 @@ func (h *harness) hostSessions(t *testing.T, hostID string) []sessionView {
 	return sessions
 }
 
-// TestACloneOfTheIdentityIsReported guards the detection of a copied
-// identity and the packaged reaction to it: the same certificate alive on
-// two boots at the same time is recorded as an incident, and under the
-// quarantine policy the lab runs on - reset-lab.sh sets none, so the
-// packaged FLOTESTRO_CLONE_POLICY=quarantine applies - the host is put
-// into quarantine and both sessions end with the reason
-// duplicate_identity. The clone is staged as a session row whose
-// heartbeat is dated ahead, so it counts as alive however long the real
-// agent takes to reconnect with its own boot ID.
+// TestACloneOfTheIdentityIsReported guards the detection of a copied identity
+// and the packaged reaction to it: the same certificate alive on two boots at
+// the same time is recorded as an incident, and under the quarantine policy
 func TestACloneOfTheIdentityIsReported(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -159,12 +147,6 @@ func TestACloneOfTheIdentityIsReported(t *testing.T) {
 		h.awaitConnection(host.ID, 2*time.Minute)
 	})
 	// The reconnect of the real agent is forced the only way the API allows.
-	// The host does not go offline in between: the staged clone row is an
-	// open session of a higher epoch, and the panel rightly takes that as
-	// the host being connected elsewhere. The real agent's new session
-	// meets the clone the moment it opens and is ended at once, so the
-	// wait is for the policy's doing - the host back in quarantine, this
-	// time by the gateway's hand - not for an open session.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/quarantine",
 		map[string]any{"reason": "duplicate identity test"}, nil, http.StatusOK)
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/quarantine/release",
@@ -188,9 +170,8 @@ func TestACloneOfTheIdentityIsReported(t *testing.T) {
 		t.Errorf("the quarantine does not name the clone as its reason: %q", state.LifecycleReason)
 	}
 
-	// Both sessions of the identity end with the same reason: the staged
-	// clone, and the real agent's session that met it. The real one is
-	// closed a moment after it was ended, so it is given a moment.
+	// Both sessions of the identity end with the same reason: the staged clone,
+	// and the real agent's session that met it.
 	if reason := sessionEnd(ctx, pool, cloneID); reason != "duplicate_identity" {
 		t.Errorf("the clone's session ended with %q, want duplicate_identity", reason)
 	}
@@ -221,9 +202,9 @@ func TestACloneOfTheIdentityIsReported(t *testing.T) {
 			if event.Detail["previous_boot_id"] != "cloned-boot" || event.Detail["previous_addr"] != "203.0.113.7" {
 				t.Errorf("the incident does not describe the clone: %+v", event.Detail)
 			}
-			// The incident carries the policy applied and what it did, so
-			// the operator reading the trail knows whether the host is
-			// waiting for them or still in the fleet.
+			// The incident carries the policy applied and what it did, so the operator
+			// reading the trail knows whether the host is waiting for them or still in
+			// the fleet.
 			if event.Detail["policy"] != "quarantine" || event.Detail["quarantined"] != true {
 				t.Errorf("the incident does not say the host was quarantined by policy: %+v", event.Detail)
 			}

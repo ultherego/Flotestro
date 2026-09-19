@@ -13,8 +13,7 @@ func testStore(t *testing.T) VersionStore {
 }
 
 // TestAKeptVersionComesBackByteForByte guards the promise the contract of
-// file.ensure makes: a previous version is kept and can be put back
-// exactly - the bytes and the inode, not the bytes alone.
+// file.
 func TestAKeptVersionComesBackByteForByte(t *testing.T) {
 	store := testStore(t)
 	content := []byte("key = first\nkey2 = \x01\x02 binary\n")
@@ -43,9 +42,9 @@ func TestAKeptVersionComesBackByteForByte(t *testing.T) {
 	}
 }
 
-// TestAnUnknownDigestIsRefused guards the difference between a rollback
-// and an undo: the operator names a content, and a host that does not have
-// it says so instead of putting back the newest copy.
+// TestAnUnknownDigestIsRefused guards the difference between a rollback and an
+// undo: the operator names a content, and a host that does not have it says so
+// instead of putting back the newest copy.
 func TestAnUnknownDigestIsRefused(t *testing.T) {
 	store := testStore(t)
 	if _, err := store.Keep("/etc/app.conf", File{Exists: true}, []byte("first\n"), ""); err != nil {
@@ -62,9 +61,9 @@ func TestAnUnknownDigestIsRefused(t *testing.T) {
 	}
 }
 
-// TestACorruptedCopyIsNotWrittenBack guards the check on the way out: a
-// copy whose bytes no longer hash to the digest it is filed under is not
-// content anybody approved.
+// TestACorruptedCopyIsNotWrittenBack guards the check on the way out: a copy
+// whose bytes no longer hash to the digest it is filed under is not content
+// anybody approved.
 func TestACorruptedCopyIsNotWrittenBack(t *testing.T) {
 	store := testStore(t)
 	kept, err := store.Keep("/etc/app.conf", File{Exists: true}, []byte("first\n"), "")
@@ -113,9 +112,9 @@ func TestTheCountBoundDropsTheOldest(t *testing.T) {
 	}
 }
 
-// TestTheByteBoundDropsTheOldestAcrossFiles guards the second bound: one
-// file rewritten with large content stays inside its own count and would
-// still fill the disk.
+// TestTheByteBoundDropsTheOldestAcrossFiles guards the second bound: one file
+// rewritten with large content stays inside its own count and would still fill
+// the disk.
 func TestTheByteBoundDropsTheOldestAcrossFiles(t *testing.T) {
 	store := VersionStore{Root: t.TempDir(), KeepPerPath: 10, MaxBytes: 2048}
 	large := make([]byte, 1000)
@@ -158,10 +157,9 @@ func TestTheSameContentIsKeptOnce(t *testing.T) {
 	}
 }
 
-// TestTheDigestOfASecretVersionIsNotReported guards the boundary of the
-// secret store: the host keeps the copy, so a rollback does not need the
-// store again, but it does not put a fingerprint of a secret value into
-// the panel's database.
+// TestTheDigestOfASecretVersionIsNotReported guards the boundary of the secret
+// store: the host keeps the copy, so a rollback does not need the store again,
+// but it does not put a fingerprint of a secret value into the panel's
 func TestTheDigestOfASecretVersionIsNotReported(t *testing.T) {
 	store := testStore(t)
 	current := File{Path: "/etc/token.conf", Exists: true, Mode: "0600", FromSecret: true}
@@ -188,9 +186,9 @@ func TestTheDigestOfASecretVersionIsNotReported(t *testing.T) {
 	}
 }
 
-// TestTheStoreIsReadableByRootAlone guards the reason keeping content from
-// the secret store is safe at all: the copy has the protection the file
-// itself had.
+// TestTheStoreIsReadableByRootAlone guards the reason keeping content from the
+// secret store is safe at all: the copy has the protection the file itself
+// had.
 func TestTheStoreIsReadableByRootAlone(t *testing.T) {
 	store := testStore(t)
 	if _, err := store.Keep("/etc/app.conf", File{Exists: true}, []byte("first\n"), ""); err != nil {

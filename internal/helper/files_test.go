@@ -26,10 +26,9 @@ func openDirectory(t *testing.T, dir string) *os.File {
 	return handle
 }
 
-// The staging file used to sit under a name derived from the target and
-// was written with a call that follows symlinks: a link planted under that
-// name had the helper overwrite any file, as root. The staging now never
-// touches such a name, whichever way the file is created.
+// The staging file used to sit under a name derived from the target and was
+// written with a call that follows symlinks: a link planted under that name
+// had the helper overwrite any file, as root.
 func TestStagingDoesNotFollowALinkPlantedUnderThePredictableName(t *testing.T) {
 	dir := t.TempDir()
 	victim := filepath.Join(dir, "victim.conf")
@@ -64,11 +63,9 @@ func TestStagingDoesNotFollowALinkPlantedUnderThePredictableName(t *testing.T) {
 	}
 }
 
-// The named fallback is the path a file system without O_TMPFILE takes, so
-// it is exercised on its own: the file is created with O_EXCL and
-// O_NOFOLLOW in the opened directory, carries the content, keeps the
-// suffix of the target for the tools that read the kind of file from it,
-// and vanishes with Discard.
+// The named fallback is the path a file system without O_TMPFILE takes, so it
+// is exercised on its own: the file is created with O_EXCL and O_NOFOLLOW in
+// the opened directory, carries the content, keeps the suffix of the target
 func TestNamedStagingCreatesAFreshFileAndRemovesIt(t *testing.T) {
 	dir := t.TempDir()
 	directory := openDirectory(t, dir)
@@ -111,9 +108,8 @@ func TestNamedStagingCreatesAFreshFileAndRemovesIt(t *testing.T) {
 	}
 }
 
-// A link that is already there under the chosen name is refused, not
-// opened: O_EXCL refuses the existing entry and O_NOFOLLOW refuses the
-// link. The file behind it stays as it was.
+// A link that is already there under the chosen name is refused, not opened:
+// O_EXCL refuses the existing entry and O_NOFOLLOW refuses the link.
 func TestNamedStagingRefusesAnExistingLink(t *testing.T) {
 	dir := t.TempDir()
 	victim := filepath.Join(dir, "victim.conf")
@@ -137,10 +133,8 @@ func TestNamedStagingRefusesAnExistingLink(t *testing.T) {
 	}
 }
 
-// An anonymous file has no entry in the directory at all, so there is
-// nothing for anyone to plant a link over; it disappears with the
-// descriptor. A file system without O_TMPFILE is allowed to answer with
-// the named fallback instead.
+// An anonymous file has no entry in the directory at all, so there is nothing
+// for anyone to plant a link over; it disappears with the descriptor.
 func TestAnonymousStagingLeavesNoEntry(t *testing.T) {
 	dir := t.TempDir()
 	directory := openDirectory(t, dir)
@@ -166,9 +160,9 @@ func TestAnonymousStagingLeavesNoEntry(t *testing.T) {
 	}
 }
 
-// A validator whose tool is not on the host is not a passed check: the
-// caller gets the unavailable marker and refuses the write with its own
-// code, instead of writing content nobody looked at.
+// A validator whose tool is not on the host is not a passed check: the caller
+// gets the unavailable marker and refuses the write with its own code, instead
+// of writing content nobody looked at.
 func TestAMissingValidatorToolIsReportedAsUnavailable(t *testing.T) {
 	validator := files.Validator{
 		Name:    "probe",
@@ -183,9 +177,7 @@ func TestAMissingValidatorToolIsReportedAsUnavailable(t *testing.T) {
 	}
 }
 
-// The tool gets the staged content and its verdict comes back with its
-// output. The check runs against a script standing in for the tool, so the
-// test sees which path the tool received and what it read there.
+// The tool gets the staged content and its verdict comes back with its output.
 func TestTheValidatorReadsTheStagedContent(t *testing.T) {
 	tool := filepath.Join(t.TempDir(), "check.sh")
 	if err := os.WriteFile(tool, []byte("#!/bin/sh\ncat \"$1\"\ncase \"$1\" in /proc/self/fd/*) echo anonymous;; *) echo named;; esac\nexit 3\n"), 0o700); err != nil {
@@ -237,9 +229,8 @@ func scopeOf(dir string) files.Allowlist {
 	return files.Allowlist{Patterns: []string{dir + "/*"}, Source: "the test"}
 }
 
-// A write keeps the content it replaces, with the inode it had. Without
-// that the contract of file.ensure - a previous version is kept and can be
-// put back exactly - is a promise nothing on the host backs.
+// A write keeps the content it replaces, with the inode it had. Without that
+// the contract of file.
 func TestAWriteKeepsTheContentItReplaces(t *testing.T) {
 	store := versionStoreInTest(t)
 	dir := t.TempDir()
@@ -290,9 +281,9 @@ func TestAWriteKeepsTheContentItReplaces(t *testing.T) {
 	}
 }
 
-// A return to a version puts back exactly what was kept - the bytes and
-// the permissions - and refuses a digest this host never had instead of
-// writing the newest copy.
+// A return to a version puts back exactly what was kept - the bytes and the
+// permissions - and refuses a digest this host never had instead of writing
+// the newest copy.
 func TestARollbackRestoresTheVersionThatWasNamed(t *testing.T) {
 	store := versionStoreInTest(t)
 	dir := t.TempDir()
@@ -358,10 +349,7 @@ func TestARollbackRestoresTheVersionThatWasNamed(t *testing.T) {
 	}
 }
 
-// A version the validator no longer accepts is not written back. The
-// content was valid for whoever wrote it; a service upgraded since then
-// may refuse it, and putting it back anyway leaves a configuration nothing
-// can load.
+// A version the validator no longer accepts is not written back.
 func TestARollbackRefusesAVersionTheValidatorRejects(t *testing.T) {
 	versionStoreInTest(t)
 	dir := t.TempDir()
@@ -401,9 +389,7 @@ func TestARollbackRefusesAVersionTheValidatorRejects(t *testing.T) {
 	}
 }
 
-// The plan says who would check the content and in which version. A
-// verdict without the identity of the checker is not something an operator
-// can weigh, and a built-in check has an identity too.
+// The plan says who would check the content and in which version.
 func TestThePlanCarriesTheIdentityOfTheValidator(t *testing.T) {
 	versionStoreInTest(t)
 	dir := t.TempDir()

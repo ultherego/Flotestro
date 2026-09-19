@@ -5,10 +5,8 @@ import (
 	"unicode"
 )
 
-// The direction of a change in the plan. Every element of a plan carries
-// one: the operator approves "openssl goes up to 3.0.16", not "something
-// happens to openssl", and a downgrade is a decision of its own that the
-// transaction must not slip in under the name of an upgrade.
+// The direction of a change in the plan. Every element of a plan carries one:
+// the operator approves "openssl goes up to 3.
 const (
 	ActionInstall   = "install"
 	ActionUpgrade   = "upgrade"
@@ -17,11 +15,7 @@ const (
 )
 
 // changeAction names the direction of a version change of the manager's
-// family. A package that is not there is installed; one that is there and
-// goes away is removed; between two versions the manager's own ordering
-// decides. The comparison is done here rather than by running the tool
-// once per package: a plan of four hundred packages would otherwise start
-// four hundred processes to learn what a few lines of arithmetic say.
+// family.
 func changeAction(manager, current, candidate string) string {
 	switch {
 	case current == "" && candidate == "":
@@ -45,9 +39,7 @@ func changeAction(manager, current, candidate string) string {
 
 // CompareDebVersions orders two Debian versions the way dpkg does
 // (deb-version(7)): the epoch numerically, then the upstream part and the
-// revision each by the alternating comparison of non-digit and digit
-// runs, where a tilde sorts before everything including the end of the
-// string, letters before the other characters, and digit runs by value.
+// revision each by the alternating comparison of non-digit and digit runs,
 func CompareDebVersions(a, b string) int {
 	epochA, restA := splitEpoch(a)
 	epochB, restB := splitEpoch(b)
@@ -78,9 +70,9 @@ func splitDebRevision(version string) (upstream, revision string) {
 	return version, ""
 }
 
-// debOrder is the weight of one character in a non-digit run: a tilde
-// before the end of the string, the end before letters, letters before
-// everything else, and within a class the byte value.
+// debOrder is the weight of one character in a non-digit run: a tilde before
+// the end of the string, the end before letters, letters before everything
+// else, and within a class the byte value.
 func debOrder(c byte, present bool) int {
 	switch {
 	case !present:
@@ -135,12 +127,9 @@ func compareDebPart(a, b string) int {
 	return 0
 }
 
-// CompareRPMVersions orders two EVR strings the way rpm does (rpmvercmp):
-// the epoch numerically, then the version and the release each by their
+// CompareRPMVersions orders two EVR strings the way rpm does (rpmvercmp): the
+// epoch numerically, then the version and the release each by their
 // alphanumeric segments, where a numeric segment beats an alphabetic one,
-// numbers compare by value, a tilde sorts before everything including the
-// end, and a caret sorts after the end but before any other segment. The
-// same ordering serves pacman, whose vercmp descends from rpmvercmp.
 func CompareRPMVersions(a, b string) int {
 	epochA, restA := splitEpoch(a)
 	epochB, restB := splitEpoch(b)

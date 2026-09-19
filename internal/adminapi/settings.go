@@ -215,7 +215,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		}},
 		// The audit retention stands apart from the working record: the trail is
 		// evidence and is kept forever unless the installation decides otherwise,
-		// while the jobs, the campaigns and the delivered events are always swept
+		// while the jobs, the campaigns and the delivered events are always swept.
 		{Key: "retention", Title: "Retention", Facts: []settingsFact{
 			durationFact("metrics_raw", effective.MetricsRawRetention),
 			durationFact("metrics_rollup", effective.MetricsRollupRetention),

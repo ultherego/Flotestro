@@ -9,14 +9,9 @@ import (
 	"time"
 )
 
-// A result that arrives after the job was settled - here: canceled from
-// the panel while the host was still on it - does not take the decision
-// back and does not rewrite what the attempt says. The store closes the
-// attempt with the bare facts of the result and refuses its output and
-// detail; the gateway puts the result on the trail as not applied and
-// changes nothing on the host's record. The preview of the journal is the
-// operation: the host answers an interrupted preview with a summary of
-// its own, which is exactly what must not land on a settled job.
+// A result that arrives after the job was settled - here: canceled from the
+// panel while the host was still on it - does not take the decision back and
+// does not rewrite what the attempt says.
 func TestALateResultDoesNotRewriteASettledJob(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

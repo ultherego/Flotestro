@@ -1,33 +1,7 @@
 package agent
 
-// The agent's own spool of resource samples: the readings the panel has
-// not yet said it holds.
-//
-// A sample used to be sent and forgotten. Whatever happened to it after
-// the write to the socket - a stream that broke while it was in flight, a
-// panel that restarted between the receive and the commit, a relay whose
-// disk was full - left a hole in the chart that nothing could fill,
-// because the counters it was read from had already moved on. The panel is
-// the only alerting channel of this product, and a sample that is silently
-// lost is a page that never happens.
-//
-// So a sample is written to disk before it is sent and deleted only when
-// the panel acknowledges that very sample. On the next session the agent
-// sends what was never acknowledged, oldest first, ahead of the current
-// reading.
-//
-// It takes the shape of the relay's spool where that shape fits - written
-// before the send, a checksum on every record, deleted on the application
-// acknowledgement and not on the socket - and departs from it where it
-// does not. The relay holds a site's results in segment files and cares
-// about priorities and quotas; this holds at most a few hours of one
-// host's own readings, so it is one small file per sample, which makes the
-// acknowledgement a deletion and a restart a directory listing.
-//
-// It is bounded, and the bound is the point: an agent whose panel has been
-// unreachable for a week must cost that host four hours of samples, not a
-// week of them. Past the bound the oldest reading is dropped, because the
-// newest is the one an operator is waiting for.
+// The agent's own spool of resource samples: the readings the panel has not
+// yet said it holds.
 
 import (
 	"encoding/binary"
@@ -48,11 +22,8 @@ import (
 )
 
 const (
-	// MetricsSpoolSize is how many unacknowledged samples the agent keeps:
-	// four hours at one a minute. Long enough to cover a panel upgrade, a
-	// network that is down for a morning or a relay draining a backlog;
-	// short enough that the whole spool is around a megabyte on disk and
-	// that what it holds is still worth drawing when it arrives.
+	// MetricsSpoolSize is how many unacknowledged samples the agent keeps: four
+	// hours at one a minute.
 	MetricsSpoolSize = 240
 	// metricsSpoolDirName is the directory of the spool inside the agent's
 	// state directory.
@@ -60,14 +31,13 @@ const (
 	// metricsSpoolSuffix marks a spooled sample. A file without it - the
 	// counter, a half-written temporary file - is not one.
 	metricsSpoolSuffix = ".sample"
-	// metricsSpoolCounter holds the last sequence handed out, so a restart
-	// of the agent within one boot carries on counting instead of handing
-	// out numbers the panel already holds and would answer as duplicates.
+	// metricsSpoolCounter holds the last sequence handed out, so a restart of the
+	// agent within one boot carries on counting instead of handing out numbers
+	// the panel already holds and would answer as duplicates.
 	metricsSpoolCounter = "sequence"
 	// metricsSpoolMagic and metricsSpoolHeader are the header of a spooled
-	// sample: four bytes that say what the file is and four that say
-	// whether it survived. A file that fails either is removed at open - a
-	// reading nobody can trust is not a reading.
+	// sample: four bytes that say what the file is and four that say whether it
+	// survived.
 	metricsSpoolHeader = 8
 	// maxSpooledSample bounds what is read back from one file. A sample is
 	// a few hundred bytes; anything of this size is a corrupt length.
@@ -80,9 +50,8 @@ var metricsSpoolMagic = [4]byte{'F', 'M', 'S', '1'}
 // the relay's spool uses.
 var castagnoliSpool = crc32.MakeTable(crc32.Castagnoli)
 
-// MetricsSpool is the bounded, file-backed queue of the samples the panel
-// has not acknowledged. Every method may be called from the sampling
-// goroutine and from the receive loop of the session at once.
+// MetricsSpool is the bounded, file-backed queue of the samples the panel has
+// not acknowledged.
 type MetricsSpool struct {
 	dir    string
 	limit  int
@@ -90,10 +59,7 @@ type MetricsSpool struct {
 	log    *slog.Logger
 
 	mu sync.Mutex
-	// epoch orders the boots in the spool. A sequence starts again at one
-	// on every boot, so it alone cannot say which of two samples is older;
-	// the epoch, handed out once per boot and written into the file name,
-	// can. It never goes backwards within a spool directory.
+	// epoch orders the boots in the spool.
 	epoch uint64
 	// sequence is the last number handed out for this boot.
 	sequence uint64
@@ -111,13 +77,6 @@ type spooledSample struct {
 
 // OpenMetricsSpool opens - and if need be creates - the spool under the
 // agent's state directory for the boot the host is on.
-//
-// Whatever it finds it puts back in order: the boot the agent runs on
-// keeps the epoch it had, so a restarted agent adds to the same run rather
-// than starting a new one, and a boot that is new gets the next epoch, so
-// the samples of the boot before it are still the older ones. A file that
-// does not decode, or whose checksum fails, is removed rather than kept:
-// the agent cannot tell the panel what such a file held.
 func OpenMetricsSpool(stateDir, bootID string, limit int, log *slog.Logger) (*MetricsSpool, error) {
 	if bootID == "" {
 		return nil, errors.New("a metrics spool needs the boot the samples are counted within")
@@ -184,10 +143,8 @@ func (s *MetricsSpool) load() error {
 	} else {
 		s.epoch = highestEpoch + 1
 	}
-	// The next number is past everything this boot has already used: what
-	// the counter recorded, and what is still on disk. A number handed out
-	// twice would be answered as a duplicate and the reading behind it
-	// would never be stored.
+	// The next number is past everything this boot has already used: what the
+	// counter recorded, and what is still on disk.
 	s.sequence = s.readCounter()
 	for _, entry := range s.entries {
 		if entry.bootID == s.bootID && entry.sequence > s.sequence {
@@ -198,14 +155,8 @@ func (s *MetricsSpool) load() error {
 	return nil
 }
 
-// Enqueue gives the sample its identity, writes it to the spool and
-// returns it ready to send.
-//
-// The write comes first and the send second, always: a sample that was
-// sent and not written is a sample a broken stream loses for good. A write
-// that fails does not stop the send - a full disk on the host must not
-// also cost the operator the reading he can still have - and says so in
-// the error, so the caller can log it once.
+// Enqueue gives the sample its identity, writes it to the spool and returns it
+// ready to send.
 func (s *MetricsSpool) Enqueue(sample *agentv1.MetricsSample) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -227,9 +178,8 @@ func (s *MetricsSpool) Enqueue(sample *agentv1.MetricsSample) error {
 	return nil
 }
 
-// Pending returns the samples the panel has not acknowledged, oldest
-// first: what the agent sends on reconnect before the reading it is about
-// to take.
+// Pending returns the samples the panel has not acknowledged, oldest first:
+// what the agent sends on reconnect before the reading it is about to take.
 func (s *MetricsSpool) Pending() []*agentv1.MetricsSample {
 	s.mu.Lock()
 	held := append([]spooledSample(nil), s.entries...)
@@ -240,9 +190,6 @@ func (s *MetricsSpool) Pending() []*agentv1.MetricsSample {
 		sample, err := s.read(entry.file)
 		if err != nil {
 			// The file was readable when it was written and is not now.
-			// It is dropped rather than retried for ever: the spool is
-			// bounded, and a file nobody can decode would hold a place
-			// that a reading of the host could use. Forget deletes it.
 			if s.log != nil {
 				s.log.Warn("a spooled sample could not be read back and was dropped",
 					"file", entry.file, "err", err)
@@ -255,10 +202,7 @@ func (s *MetricsSpool) Pending() []*agentv1.MetricsSample {
 	return pending
 }
 
-// Acknowledge drops the sample the panel named. It is deliberately quiet
-// about a sample it does not hold: the acknowledgement of a sample this
-// agent sent before its own restart, or of one already dropped by the
-// bound, is an answer to a question nobody is still asking.
+// Acknowledge drops the sample the panel named.
 func (s *MetricsSpool) Acknowledge(ack *agentv1.MetricsAck) {
 	if ack == nil || ack.GetBootId() == "" || ack.GetSequence() == 0 {
 		return
@@ -289,12 +233,6 @@ func (s *MetricsSpool) Len() int {
 
 // evict drops the oldest samples until the spool is within its bound. The
 // caller holds the lock.
-//
-// The oldest goes rather than the newest. A panel that has been away long
-// enough to fill the spool wants the readings around the moment it comes
-// back, not the ones from the start of the outage; and the gap the drop
-// leaves is a gap in the chart either way, while a spool that grew without
-// a bound would be a full disk on the host.
 func (s *MetricsSpool) evict() {
 	for len(s.entries) > s.limit {
 		oldest := s.entries[0]
@@ -411,9 +349,7 @@ func (s *MetricsSpool) syncDir() error {
 	return handle.Sync()
 }
 
-// remove deletes one spool file. A deletion that fails is logged and
-// nothing more: the entry has left the spool in memory, and the file is
-// swept at the next open when it decodes into a sample nobody waits for.
+// remove deletes one spool file.
 func (s *MetricsSpool) remove(name string) {
 	if err := os.Remove(filepath.Join(s.dir, name)); err != nil && !os.IsNotExist(err) && s.log != nil {
 		s.log.Debug("a spooled sample was not deleted", "file", name, "err", err)
@@ -429,8 +365,8 @@ func (s *MetricsSpool) discard(name, reason string) {
 }
 
 // spoolName is the file name of one sample: the epoch of its boot and its
-// sequence, both zero-padded so that the directory sorts into the order
-// the samples were taken.
+// sequence, both zero-padded so that the directory sorts into the order the
+// samples were taken.
 func spoolName(epoch, sequence uint64) string {
 	return fmt.Sprintf("%010d-%019d%s", epoch, sequence, metricsSpoolSuffix)
 }

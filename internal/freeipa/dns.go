@@ -10,16 +10,12 @@ import (
 	"strings"
 )
 
-// Directory DNS is a different scope from the host's resolver: there the
-// panel tells a host whom to ask, and here - what the directory answers the
-// whole network. A record pointing at a wrong address breaks not one host but
-// everyone who asks about it.
+// Directory DNS is a different scope from the host's resolver: there the panel
+// tells a host whom to ask, and here - what the directory answers the whole
+// network.
 
-// The record types the panel can write.
-//
-// The list is closed and short on purpose. NS, SOA and DNSSEC records change
-// how the zone itself works rather than its content - and they are not
-// something one adds from a fleet management panel.
+// The record types the panel can write. The list is closed and short on
+// purpose.
 const (
 	RecordA     = "A"
 	RecordAAAA  = "AAAA"
@@ -156,10 +152,6 @@ func (c *Client) Zones(ctx context.Context) ([]Zone, error) {
 }
 
 // Records returns the records of one zone.
-//
-// We do not cache them: a record is what changes in response to the panel's
-// operations, and a list from a minute ago would show the state from before
-// the change.
 func (c *Client) Records(ctx context.Context, zone string) ([]Record, error) {
 	if !zoneNamePattern.MatchString(zone) {
 		return nil, fmt.Errorf("invalid zone name %q", zone)
@@ -200,11 +192,6 @@ func (c *Client) Records(ctx context.Context, zone string) ([]Record, error) {
 }
 
 // EnsureRecord adds a record to a zone.
-//
-// The directory adds the value to the record rather than replacing the whole
-// entry: a name with two addresses stays a name with two addresses. The panel
-// removes nothing while writing - removal is a separate operation of higher
-// risk.
 func (c *Client) EnsureRecord(ctx context.Context, spec RecordSpec) (Record, error) {
 	if err := spec.Validate(); err != nil {
 		return Record{}, err
@@ -236,12 +223,7 @@ func (c *Client) RemoveRecord(ctx context.Context, spec RecordSpec) error {
 	return err
 }
 
-// FullName builds the full name of a record from the zone and a relative
-// name.
-//
-// An entry at the root of a zone is written as "@" and must not give a name
-// starting with that character: the PTR target "@.example.test." points at
-// nothing while looking like a valid record.
+// FullName builds the full name of a record from the zone and a relative name.
 func FullName(zone, name string) string {
 	zoneName := strings.TrimSuffix(zone, ".")
 	if name == "" || name == "@" {
@@ -252,13 +234,6 @@ func FullName(zone, name string) string {
 
 // NameInZone computes the relative name of a PTR record within the given
 // reverse zone.
-//
-// A reverse zone does not have to cover a whole /24 or /64: an installation
-// may have a narrower split, named explicitly in the request. The relative
-// name is then longer than one label - and computing it for a /24 gave a
-// record for an entirely different address. That is why we compute the full
-// arpa name and subtract the zone from it instead of assuming the width of
-// the split.
 func NameInZone(address, zone string) (string, error) {
 	full, err := FullReverseName(address)
 	if err != nil {
@@ -283,12 +258,7 @@ func FullReverseName(address string) (string, error) {
 	return name + "." + zone, nil
 }
 
-// ReverseZone computes the zone and the name of the PTR record for an
-// address.
-//
-// The reverse record is a separate, visible element of the plan: it decides
-// what a query about an address answers - and forgetting it is the most
-// common mistake when adding hosts.
+// ReverseZone computes the zone and the name of the PTR record for an address.
 func ReverseZone(address string) (zone, name string, err error) {
 	ip := net.ParseIP(address)
 	if ip == nil {

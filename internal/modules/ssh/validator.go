@@ -63,10 +63,6 @@ func Validate(settings Settings) error {
 
 // CutsOffAllMethods says whether at least one authentication method remains
 // after the change.
-//
-// A server nobody can log into by any method is not secured - it is
-// unavailable. These are not the same, and the panel must not turn one into
-// the other by oversight.
 func CutsOffAllMethods(desired Settings, state Snapshot) bool {
 	value := func(wanted, current string) string {
 		if wanted != "" {

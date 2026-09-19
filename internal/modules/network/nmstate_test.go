@@ -185,9 +185,8 @@ func TestNmstateDocumentIsMinimal(t *testing.T) {
 	}
 }
 
-// Replacing the routes removes the ones the interface has and adds the
-// desired ones: nmstate has no "set the list" - an entry not marked absent
-// stays.
+// Replacing the routes removes the ones the interface has and adds the desired
+// ones: nmstate has no "set the list" - an entry not marked absent stays.
 func TestNmstateRoutesAreReplacedNotAppended(t *testing.T) {
 	state, _ := ParseNmstateState([]byte(nmstateYAML))
 	current, _ := state.Profile("enp0s8")
@@ -236,9 +235,9 @@ func TestNmstateProfileDocumentSetsAddressesGatewayAndResolver(t *testing.T) {
 	if strings.Contains(document, "10.9.0.0/24") {
 		t.Errorf("the profile document touched the static routes: %s", document)
 	}
-	// The way back is the same function the other way round, and it names
-	// the interface by its type too: the desired profile carries the type
-	// over from the one found.
+	// The way back is the same function the other way round, and it names the
+	// interface by its type too: the desired profile carries the type over from
+	// the one found.
 	back, err := NmstateDocument(PlanProfile, *plan.Desired, current)
 	if err != nil {
 		t.Fatal(err)

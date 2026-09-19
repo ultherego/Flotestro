@@ -9,10 +9,8 @@ import (
 	"github.com/ultherego/flotestro/internal/paging"
 )
 
-// The fleet table is sorted in the database and paged by the key of its
-// last row, so the key has to carry the order it was cut under. A cursor
-// read under another order would silently skip hosts, and on this screen
-// a skipped host is a host with vulnerabilities nobody looks at.
+// The fleet table is sorted in the database and paged by the key of its last
+// row, so the key has to carry the order it was cut under.
 
 const aHostID = "a4b2f1c0-3d5e-4f60-9a71-2c3d4e5f6a7b"
 
@@ -46,9 +44,8 @@ func TestParseFleetCursorRefusesWhatThisListDidNotIssue(t *testing.T) {
 	}
 }
 
-// Every order ascends on both of its keys, because the page boundary is
-// one comparison over the whole tuple. An order that wants the worst
-// first therefore negates the count rather than sorting descending.
+// Every order ascends on both of its keys, because the page boundary is one
+// comparison over the whole tuple.
 func TestFleetKeysAscendUnderEveryOrder(t *testing.T) {
 	for _, order := range []string{SortAffected, SortFixable, SortHostname, ""} {
 		primary, secondary := fleetKeys(order)
@@ -62,9 +59,9 @@ func TestFleetKeysAscendUnderEveryOrder(t *testing.T) {
 			t.Errorf("order %q sorts on %q, which does not put the worst first", order, primary)
 		}
 	}
-	// An order nobody named is the worst first, like the default of the
-	// screen; the second key puts a host that could not be assessed before
-	// the clean ones, because a zero with a reason is not a result.
+	// An order nobody named is the worst first, like the default of the screen;
+	// the second key puts a host that could not be assessed before the clean
+	// ones, because a zero with a reason is not a result.
 	primary, secondary := fleetKeys("")
 	byName, _ := fleetKeys(SortAffected)
 	if primary != byName {
@@ -86,9 +83,9 @@ func TestEscapeLikeKeepsWildcardsOutOfASearch(t *testing.T) {
 	}
 }
 
-// The filter narrows the table; the scope narrows what may be read at
-// all, and it is always the first condition, so a filter cannot be built
-// that forgets it.
+// The filter narrows the table; the scope narrows what may be read at all, and
+// it is always the first condition, so a filter cannot be built that forgets
+// it.
 func TestFleetConditionsAlwaysStartWithTheScope(t *testing.T) {
 	conditions, args := fleetConditions(FleetFilter{})
 	if len(conditions) != 1 || conditions[0] != "false" {
@@ -111,9 +108,9 @@ func TestFleetConditionsAlwaysStartWithTheScope(t *testing.T) {
 	}
 }
 
-// A host without an assessment is not a host without vulnerabilities, so
-// the condition that names it must read both a missing row and a row
-// nobody has evaluated yet.
+// A host without an assessment is not a host without vulnerabilities, so the
+// condition that names it must read both a missing row and a row nobody has
+// evaluated yet.
 func TestUnassessedReadsBothWaysAHostCanBeSilent(t *testing.T) {
 	if !strings.Contains(unassessedSQL, "v.host_id is null") ||
 		!strings.Contains(unassessedSQL, "v.evaluated_at is null") {

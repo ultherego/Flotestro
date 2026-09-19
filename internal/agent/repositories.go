@@ -11,11 +11,8 @@ import (
 	"github.com/ultherego/flotestro/internal/packages"
 )
 
-// CollectRepositories reads the package sources visible on the host.
-//
-// Without root: the source files are public. The exception is a source with a
-// password, which the panel itself gave root-only permissions - such a source
-// stays on the list with a reason instead of disappearing from it.
+// CollectRepositories reads the package sources visible on the host. Without
+// root: the source files are public.
 func CollectRepositories(manager string) packages.RepositoryImage {
 	return packages.ReadRepositories(manager)
 }
@@ -39,10 +36,7 @@ func (e *TaskExecutor) applyRepository(ctx context.Context, task *agentv1.TaskEn
 		AllowUnsigned: payload.AllowUnsigned, Username: payload.Username,
 		Remove: payload.Remove,
 	}
-	// The password is fetched only now, right before the write. The value lives
-	// for a moment in the memory of the agent and of the helper - it is not in
-	// the envelope of the task, in the journal or in the result. Only the name of
-	// the secret stays in the source file.
+	// The password is fetched only now, right before the write.
 	if !payload.PasswordSecret.Empty() && !payload.Remove {
 		if e.secrets == nil {
 			return rejected(agentv1.TaskResult_STATUS_FAILED, RejectInternalError,

@@ -39,17 +39,15 @@ type connectionTestView struct {
 	} `json:"connector"`
 }
 
-// The keys every checklist carries, in the order the steps are taken. A
-// step the installation lacks is still listed, as optional: the screen
-// is a fixed list with states, not a list that shrinks.
+// The keys every checklist carries, in the order the steps are taken.
 var setupStepKeys = []string{
 	"identity_provider", "group_mapping", "bootstrap_token", "directory", "hosts",
 	"relay", "policy", "alert_rule", "notification_channel", "fleet_ca",
 }
 
-// TestSetupChecklistNamesEveryStep checks that the checklist lists the
-// steps in order, each with a state, a sentence and a page, and that the
-// lab - which has group mappings and hosts - reports those two as done.
+// TestSetupChecklistNamesEveryStep checks that the checklist lists the steps
+// in order, each with a state, a sentence and a page, and that the lab - which
+// has group mappings and hosts - reports those two as done.
 func TestSetupChecklistNamesEveryStep(t *testing.T) {
 	h := newHarness(t)
 	var checklist setupView
@@ -98,8 +96,8 @@ func TestSetupChecklistNamesEveryStep(t *testing.T) {
 }
 
 // TestSetupChecklistIsReadByAViewer checks that the checklist needs no
-// permission beyond a valid identity: a viewer sees the same list, read
-// only, while the test buttons stay behind their permissions.
+// permission beyond a valid identity: a viewer sees the same list, read only,
+// while the test buttons stay behind their permissions.
 func TestSetupChecklistIsReadByAViewer(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -123,7 +121,6 @@ func TestSetupChecklistIsReadByAViewer(t *testing.T) {
 // TestSetupDirectoryTestAnswersWithAVerdict checks that the directory test
 // answers 200 either way: ok with the directory's own summary when the
 // connector reaches it, or a typed reason when it does not - never a bare
-// server error, because an unreachable directory is a finding.
 func TestSetupDirectoryTestAnswersWithAVerdict(t *testing.T) {
 	h := newHarness(t)
 	var result connectionTestView
@@ -142,8 +139,8 @@ func TestSetupDirectoryTestAnswersWithAVerdict(t *testing.T) {
 }
 
 // TestSetupIdentityProviderTestAnswersWithAVerdict checks the same of the
-// identity provider test: the lab's Keycloak answers with its issuer and
-// at least one signing key, and a panel without a provider says so.
+// identity provider test: the lab's Keycloak answers with its issuer and at
+// least one signing key, and a panel without a provider says so.
 func TestSetupIdentityProviderTestAnswersWithAVerdict(t *testing.T) {
 	h := newHarness(t)
 	var result connectionTestView

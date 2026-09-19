@@ -60,9 +60,7 @@ func (a *APT) LockHeld() (bool, string) {
 	return false, ""
 }
 
-// Plan computes the upgrade through a simulation. A simulation needs neither
-// the lock nor root, so planning does not collide with the manual work of the
-// administrator.
+// Plan computes the upgrade through a simulation.
 func (a *APT) Plan(ctx context.Context, options Options) (Plan, error) {
 	plan, err := a.plan(ctx, options)
 	if err != nil {
@@ -74,8 +72,7 @@ func (a *APT) Plan(ctx context.Context, options Options) (Plan, error) {
 func (a *APT) plan(ctx context.Context, options Options) (Plan, error) {
 	plan := Plan{Manager: a.Name(), DiskAvailableBytes: diskAvailable("/"), Mode: options.Mode}
 	// A package waiting for its configuration stops every transaction, so the
-	// plan says so at once. Without that the operator learns about the block
-	// only after a failed upgrade.
+	// plan says so at once.
 	plan.Blocked = a.BlockedPackages(ctx)
 
 	switch options.Mode {
@@ -104,9 +101,9 @@ func (a *APT) plan(ctx context.Context, options Options) (Plan, error) {
 		}
 	}
 
-	// The archives of a narrowed upgrade are those of the named packages,
-	// not of everything apt-get would raise; the transaction narrows the same
-	// way, with "install --only-upgrade" and the names.
+	// The archives of a narrowed upgrade are those of the named packages, not of
+	// everything apt-get would raise; the transaction narrows the same way, with
+	// "install --only-upgrade" and the names.
 	sizing := []string{"upgrade"}
 	if options.SecurityOnly || len(options.Packages) > 0 {
 		sizing = append([]string{"install", "--only-upgrade"}, changeNames(plan.Changes)...)
@@ -116,10 +113,7 @@ func (a *APT) plan(ctx context.Context, options Options) (Plan, error) {
 	return plan, nil
 }
 
-// planSpace measures where the bytes of the plan go. The archives of the
-// operation come from --print-uris, the growth of /usr from the installed
-// sizes apt-cache and dpkg-query know; sizing is the apt-get operation whose
-// archives are counted.
+// planSpace measures where the bytes of the plan go.
 func (a *APT) planSpace(ctx context.Context, changes []Change, sizing []string) (uint64, []SpaceFact) {
 	// Nothing to change needs nothing; the tools are not asked about an
 	// empty set, which apt-get would read as "everything".
@@ -134,9 +128,9 @@ func (a *APT) planSpace(ctx context.Context, changes []Change, sizing []string) 
 	candidate, installed := a.candidateSizes(ctx, names), a.installedSizes(ctx, names)
 	grown, measured := growth(names, candidate, installed)
 	installNeeds(&needs, grown, measured)
-	// The plan carries per package what the sums were made of: the digest
-	// of the archive the index publishes and the growth of the installed
-	// files, each only where it was measured.
+	// The plan carries per package what the sums were made of: the digest of the
+	// archive the index publishes and the growth of the installed files, each
+	// only where it was measured.
 	for i := range changes {
 		change := &changes[i]
 		if digest, ok := digests[change.Name]; ok {
@@ -160,8 +154,7 @@ func changeNames(changes []Change) []string {
 }
 
 // candidateSizes reads the installed size of the candidate version of every
-// named package. --no-all-versions keeps the record of the candidate alone;
-// the size is in KiB, as the Debian policy defines the field.
+// named package.
 func (a *APT) candidateSizes(ctx context.Context, names []string) map[string]uint64 {
 	result := run(ctx, 2*time.Minute, aptCachePath,
 		append([]string{"--no-all-versions", "show"}, names...)...)
@@ -174,9 +167,7 @@ func (a *APT) candidateSizes(ctx context.Context, names []string) map[string]uin
 }
 
 // installedSizes reads the installed size of the installed version of every
-// named package. A package that is not installed yet makes dpkg-query
-// complain on the error output and end with the code 1, with the rest of the
-// answer intact on the standard output.
+// named package.
 func (a *APT) installedSizes(ctx context.Context, names []string) map[string]uint64 {
 	result := run(ctx, 2*time.Minute, dpkgQueryPath,
 		append([]string{"-W", "-f", "${binary:Package}\t${Installed-Size}\n"}, names...)...)
@@ -206,9 +197,8 @@ func ParseAPTCacheSizes(output string) map[string]uint64 {
 	return sizes
 }
 
-// ParseInstalledSizeLines reads lines of "name<TAB>KiB", as dpkg-query
-// prints them with the format above. A line without a size - a package
-// known to dpkg but not installed - is skipped.
+// ParseInstalledSizeLines reads lines of "name<TAB>KiB", as dpkg-query prints
+// them with the format above.
 func ParseInstalledSizeLines(output string) map[string]uint64 {
 	sizes := map[string]uint64{}
 	for _, line := range strings.Split(output, "\n") {
@@ -223,12 +213,7 @@ func ParseInstalledSizeLines(output string) map[string]uint64 {
 	return sizes
 }
 
-// parseAptInstLine reads a line of the form:
-//
-//	Inst libfoo [1.0-1] (1.0-2 Debian:12/stable [amd64])
-//
-// The format is stable under LC_ALL=C and does not depend on the language of
-// the interface.
+// parseAptInstLine reads a line of the form: Inst libfoo [1. 0-1] (1.
 func parseAptInstLine(line string) (Change, bool) {
 	if !strings.HasPrefix(line, "Inst ") {
 		return Change{}, false
@@ -240,9 +225,9 @@ func parseAptInstLine(line string) (Change, bool) {
 	}
 
 	change := Change{Name: fields[0]}
-	// The current version stands in brackets before the parenthesis; the
-	// brackets after it hold the architecture, and a fresh install has no
-	// current version at all.
+	// The current version stands in brackets before the parenthesis; the brackets
+	// after it hold the architecture, and a fresh install has no current version
+	// at all.
 	head := rest
 	if open := strings.Index(rest, "("); open >= 0 {
 		head = rest[:open]
@@ -258,9 +243,9 @@ func parseAptInstLine(line string) (Change, bool) {
 			if len(inner) > 0 {
 				change.CandidateVersion = inner[0]
 			}
-			// The architecture closes the line in brackets; what stands
-			// between the version and it is the origin, possibly more than
-			// one repository separated by commas.
+			// The architecture closes the line in brackets; what stands between the
+			// version and it is the origin, possibly more than one repository separated
+			// by commas.
 			if last := len(inner) - 1; last > 0 && strings.HasPrefix(inner[last], "[") && strings.HasSuffix(inner[last], "]") {
 				change.Architecture = strings.Trim(inner[last], "[]")
 				inner = inner[:last]
@@ -279,10 +264,8 @@ func parseAptInstLine(line string) (Change, bool) {
 	return change, true
 }
 
-// downloadManifest reads what the operation fetches: the sum of the sizes
-// of the archives and the digest of each, keyed by package name. The sum
-// is an estimate of the plan rather than a promise; on an error nothing is
-// known, and the caller says so rather than guessing.
+// downloadManifest reads what the operation fetches: the sum of the sizes of
+// the archives and the digest of each, keyed by package name.
 func (a *APT) downloadManifest(ctx context.Context, operation ...string) (uint64, map[string]string, bool) {
 	args := append([]string{"--print-uris", "--quiet", "--yes", "-o", "Debug::NoLocking=true"},
 		operation...)
@@ -294,13 +277,8 @@ func (a *APT) downloadManifest(ctx context.Context, operation ...string) (uint64
 	return total, digests, true
 }
 
-// ParseAPTPrintURIs reads the lines of apt-get --print-uris:
-//
-//	'http://deb.debian.org/.../openssl_3.0.16-1~deb12u1_amd64.deb' openssl_3.0.16-1~deb12u1_amd64.deb 1456 SHA256:9f86...
-//
-// The digest is the one the index publishes for the archive - apt checks
-// it after the download - and the plan carries it so the approval names
-// the bytes and not only the version.
+// ParseAPTPrintURIs reads the lines of apt-get --print-uris: 'http://deb.
+// debian.
 func ParseAPTPrintURIs(output string) (uint64, map[string]string) {
 	var total uint64
 	digests := map[string]string{}
@@ -352,10 +330,7 @@ func (a *APT) Refresh(ctx context.Context) error {
 	return nil
 }
 
-// Upgrade carries the transaction out. The behaviour towards conffiles is
-// defined explicitly: we keep the file of the administrator and never ask
-// interactively. A prompt in this mode would mean a hang rather than a
-// success.
+// Upgrade carries the transaction out.
 func (a *APT) Upgrade(ctx context.Context, options Options) (Apply, error) {
 	apply := Apply{Manager: a.Name()}
 
@@ -363,9 +338,7 @@ func (a *APT) Upgrade(ctx context.Context, options Options) (Apply, error) {
 		return apply, fmt.Errorf("%w: %s", ErrLocked, path)
 	}
 
-	// A transaction can pull a rebuild of the initramfs. When the process does
-	// not see the kernel modules, the image comes out without the disk driver
-	// and the host does not come up after a restart - better not to start.
+	// A transaction can pull a rebuild of the initramfs.
 	if hidden, dir := modulesHidden(); hidden {
 		return apply, fmt.Errorf("%w: %s", ErrModulesHidden, dir)
 	}
@@ -374,10 +347,8 @@ func (a *APT) Upgrade(ctx context.Context, options Options) (Apply, error) {
 	// the transaction fails.
 	before := a.installedVersions(ctx)
 
-	// APT has no "security only" mode: apt-get upgrade raises everything that
-	// can be raised. The narrowing is therefore computed from the plan and
-	// passed as a list of names - otherwise the operator would approve three
-	// security packages and the host would raise forty.
+	// APT has no "security only" mode: apt-get upgrade raises everything that can
+	// be raised.
 	if options.SecurityOnly && len(options.Packages) == 0 {
 		plan, err := a.Plan(ctx, options)
 		if err != nil {
@@ -389,10 +360,8 @@ func (a *APT) Upgrade(ctx context.Context, options Options) (Apply, error) {
 			return apply, nil
 		}
 		for _, change := range plan.Changes {
-			// The agent package has an operation of its own for replacing it:
-			// raised in this transaction it would stop the helper that runs
-			// it. The remaining protected packages are raised normally - the
-			// protection covers removing them rather than security updates.
+			// The agent package has an operation of its own for replacing it: raised in
+			// this transaction it would stop the helper that runs it.
 			if change.Name == AgentPackage {
 				continue
 			}
@@ -410,12 +379,9 @@ func (a *APT) Upgrade(ctx context.Context, options Options) (Apply, error) {
 		"-o", "APT::Get::Assume-Yes=true",
 		"upgrade",
 	}
-	// An ordinary upgrade does not touch the agent: replacing it in the middle
-	// of a transaction it carries out itself ends with a host cut off halfway
-	// through the work and a result nobody collects. APT has no exclusions, so
-	// the package is held for the duration of the transaction and released
-	// afterwards. Replacing the agent has an operation of its own that skips
-	// this deliberately.
+	// An ordinary upgrade does not touch the agent: replacing it in the middle of
+	// a transaction it carries out itself ends with a host cut off halfway
+	// through the work and a result nobody collects.
 	if release, err := a.holdAgent(ctx); err == nil {
 		defer release()
 	}
@@ -433,10 +399,8 @@ func (a *APT) Upgrade(ctx context.Context, options Options) (Apply, error) {
 	result := runWithProgress(ctx, 45*time.Minute, options.Progress, options.Progress != nil,
 		aptGetPath, args...)
 
-	// A damaged archive in the cache repairs itself, because it has one
-	// correct answer. A configuration question of a package has none and is
-	// left to the operator - that is the boundary between repairing and
-	// deciding for a person.
+	// A damaged archive in the cache repairs itself, because it has one correct
+	// answer.
 	if (!result.Ran || result.ExitCode != 0) && BrokenDownload(result.Stderr, result.Stdout) {
 		cleaning := run(ctx, 5*time.Minute, aptGetPath, "--quiet", "clean")
 		if cleaning.Ran && cleaning.ExitCode == 0 {
@@ -456,8 +420,8 @@ func (a *APT) Upgrade(ctx context.Context, options Options) (Apply, error) {
 
 	if !result.Ran || result.ExitCode != 0 {
 		// The name of the package goes into the message, because without it the
-		// operator knows only that the transaction failed and has to log into
-		// the host to establish the cause.
+		// operator knows only that the transaction failed and has to log into the
+		// host to establish the cause.
 		apply.Output = tailLines(result.Stderr, result.Stdout, maxResultLines)
 		if len(apply.PackagesNeedingAttention) > 0 {
 			return apply, fmt.Errorf("apt-get upgrade: %s; needs attention: %s",
@@ -470,11 +434,9 @@ func (a *APT) Upgrade(ctx context.Context, options Options) (Apply, error) {
 
 // installedVersions returns a map of package -> version.
 func (a *APT) installedVersions(ctx context.Context) map[string]string {
-	// Both spellings of the name are recorded: a package that may be
-	// installed for more than one architecture is printed by dpkg as
-	// name:arch, while apt names it without the suffix in a plan. A
-	// lookup by the plan's name must find what dpkg holds, or a package
-	// that is installed reads as absent.
+	// Both spellings of the name are recorded: a package that may be installed
+	// for more than one architecture is printed by dpkg as name:arch, while apt
+	// names it without the suffix in a plan.
 	result := run(ctx, 2*time.Minute, dpkgQueryPath, "-W", "-f",
 		"${Package} ${Architecture} ${Version} ${db:Status-Status}\n")
 	if !result.Ran || result.ExitCode != 0 {
@@ -483,9 +445,7 @@ func (a *APT) installedVersions(ctx context.Context) map[string]string {
 	return parseInstalledDebian(result.Stdout)
 }
 
-// parseInstalledDebian reads what dpkg-query printed. A package that is
-// not fully installed - unpacked, half-configured, removed but not purged
-// - is not a version the host has.
+// parseInstalledDebian reads what dpkg-query printed.
 func parseInstalledDebian(output string) map[string]string {
 	versions := map[string]string{}
 	for _, line := range strings.Split(output, "\n") {
@@ -494,9 +454,8 @@ func parseInstalledDebian(output string) map[string]string {
 			continue
 		}
 		name, architecture, version := fields[0], fields[1], fields[2]
-		// A second architecture of the same package would otherwise
-		// overwrite the first under the bare name; the qualified name
-		// stays exact either way.
+		// A second architecture of the same package would otherwise overwrite the
+		// first under the bare name; the qualified name stays exact either way.
 		if _, taken := versions[name]; !taken {
 			versions[name] = version
 		}
@@ -505,22 +464,13 @@ func parseInstalledDebian(output string) map[string]string {
 	return versions
 }
 
-// DatabaseBroken checks whether dpkg was left in a state that needs
-// repairing. After such a failure the following campaigns on the host have to
-// be held back.
+// DatabaseBroken checks whether dpkg was left in a state that needs repairing.
 func (a *APT) DatabaseBroken(ctx context.Context) bool {
 	return len(a.PackagesNeedingAttention(ctx)) > 0
 }
 
 // PackagesNeedingAttention lists the packages whose state blocks a
 // transaction.
-//
-// The state is read straight from the dpkg database rather than through "dpkg
-// --audit": the audit needs access to the lock of the database directory,
-// which the agent without root does not have. The status file is readable by
-// everyone, so the same information is available both to the agent and to the
-// helper - and the plan of an operation can warn about the block before anyone
-// orders an upgrade.
 func (a *APT) PackagesNeedingAttention(ctx context.Context) []string {
 	blocked := a.blockedFromStatus()
 	names := make([]string, 0, len(blocked))
@@ -561,10 +511,7 @@ func blockedFromStatusFile(path string) []Blocked {
 		if len(fields) != 3 {
 			continue
 		}
-		// The third field describes the actual state of the package. Installed
-		// and configuration files alone block nothing; every other state means
-		// dpkg did not finish its work and will do it during the next
-		// transaction - and may fail on it then.
+		// The third field describes the actual state of the package.
 		switch fields[2] {
 		case "installed", "config-files", "not-installed":
 			continue
@@ -613,10 +560,7 @@ func fileExists(path string) bool {
 }
 
 // planRemove computes what will disappear along with the named packages.
-//
-// Removing one package can pull dozens of dependent ones. The operator is to
-// see the full list before the approval rather than discover it after the
-// fact, when the host can no longer be restored without a registry.
+// Removing one package can pull dozens of dependent ones.
 func (a *APT) planRemove(ctx context.Context, plan Plan, options Options) (Plan, error) {
 	if len(options.Packages) == 0 {
 		return plan, fmt.Errorf("a removal plan requires a list of packages")
@@ -667,9 +611,7 @@ func (a *APT) planInstall(ctx context.Context, plan Plan, options Options) (Plan
 	return plan, nil
 }
 
-// parseAptRemvLine reads a line of the form:
-//
-//	Remv libfoo [1.0-1]
+// parseAptRemvLine reads a line of the form: Remv libfoo [1.
 func parseAptRemvLine(line string) (string, bool) {
 	fields := strings.Fields(strings.TrimSpace(line))
 	if len(fields) < 2 || fields[0] != "Remv" {
@@ -678,11 +620,8 @@ func parseAptRemvLine(line string) (string, bool) {
 	return fields[1], true
 }
 
-// holdAgent holds the agent package for the duration of one transaction.
-//
-// It returns the releasing function. When the package was held earlier by the
-// administrator we do not release it: the decision of the operator of the host
-// weighs more than the convenience of one transaction.
+// holdAgent holds the agent package for the duration of one transaction. It
+// returns the releasing function.
 func (a *APT) holdAgent(ctx context.Context) (func(), error) {
 	state := run(ctx, 30*time.Second, aptMarkPath, "showhold")
 	if !state.Ran {
@@ -695,17 +634,13 @@ func (a *APT) holdAgent(ctx context.Context) (func(), error) {
 		result.ExitCode != 0 {
 		return nil, fmt.Errorf("apt-mark hold: %s", result.Reason())
 	}
-	// The trace of our own hold. A transaction can die with its process - the
-	// deferred release does not run then and the package stays held for good,
-	// blocking every later replacement of the agent. This file is how we
-	// recognise our own hold, and only such a hold is released: the decision
-	// of the administrator of the host stays untouched.
+	// The trace of our own hold.
 	_ = os.WriteFile(holdTrace(), []byte(AgentPackage+"\n"), 0o600)
 
 	return func() {
-		// The context of the transaction may already be cancelled and the
-		// release has to run anyway: a package left on hold would block a
-		// later replacement of the agent.
+		// The context of the transaction may already be cancelled and the release
+		// has to run anyway: a package left on hold would block a later replacement
+		// of the agent.
 		releasing, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
 		run(releasing, 30*time.Second, aptMarkPath, "unhold", AgentPackage)
@@ -718,19 +653,13 @@ func holdTrace() string {
 	return filepath.Join(runtimeDir, "state", "agent-hold")
 }
 
-// legacyHoldTrace is the name earlier helpers gave the marker. A host
-// upgraded with an abandoned hold from such a helper still has it under
-// the old name, and it has to be released the same way.
+// legacyHoldTrace is the name earlier helpers gave the marker.
 func legacyHoldTrace() string {
 	return filepath.Join(runtimeDir, "state", "wstrzymany-agent")
 }
 
 // ReleaseAbandonedHold lifts the hold on the agent package left behind by a
 // transaction that did not reach its end.
-//
-// Called at the start of the helper. Without it a host whose transaction died
-// with its process was left with the agent package held for good - and no
-// later replacement of the agent could go through.
 func ReleaseAbandonedHold(ctx context.Context) (bool, error) {
 	trace := holdTrace()
 	if _, err := os.Stat(trace); err != nil {
@@ -804,11 +733,6 @@ func (a *APT) Install(ctx context.Context, options Options) (Apply, error) {
 }
 
 // Remove removes the named packages along with their dependencies.
-//
-// The set to remove is computed again right before the operation and compared
-// with what the operator approved. A difference means the host has changed
-// since the plan and a different set would be removed - and a refusal is then
-// the right reaction rather than carrying out something nobody saw.
 func (a *APT) Remove(ctx context.Context, options Options, expected []string) (Apply, error) {
 	apply := Apply{Manager: a.Name()}
 	if len(options.Packages) == 0 {

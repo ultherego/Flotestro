@@ -10,9 +10,7 @@ import (
 )
 
 // The contract is generated from the route table, so a route cannot exist
-// outside it. What can go wrong is the shape: the document must be valid
-// JSON with a path for every recorded API route, parameters for every path
-// placeholder and a schema for every resource the responses point at.
+// outside it.
 func TestOpenAPICoversEveryRoute(t *testing.T) {
 	s := &Server{}
 	mux := http.NewServeMux()
@@ -90,9 +88,9 @@ func TestOpenAPICoversEveryRoute(t *testing.T) {
 	walk(document)
 }
 
-// The schema of a resource follows its json tags: the field names are the
-// wire names, and time and raw JSON are described as what they are on the
-// wire rather than as Go structs.
+// The schema of a resource follows its json tags: the field names are the wire
+// names, and time and raw JSON are described as what they are on the wire
+// rather than as Go structs.
 func TestSchemaFollowsTheJSONTags(t *testing.T) {
 	schema := schemaOf(reflect.TypeOf(jobs.Job{}), map[string]any{})
 	properties := schema["properties"].(map[string]any)

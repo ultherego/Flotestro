@@ -14,13 +14,6 @@ import (
 )
 
 // The fleet screen, counted by the database.
-//
-// The screen used to read the first five hundred hosts, fetch their
-// assessment states and add them up in the panel; on a bigger fleet the
-// counters were plausible and wrong, and the table was sorted and cut in
-// memory. The queries here count over every host in scope, tell the hosts
-// without an assessment from the hosts with none, and hand the table out
-// a page at a time by a key that holds still under the reader.
 
 // The size of a page of the fleet table: what a screen gets without
 // asking, and the most it may ask for.
@@ -38,10 +31,9 @@ const (
 
 // FleetSummary is what the database counted over the visible fleet.
 type FleetSummary struct {
-	// Hosts is the number of hosts in scope; Evaluated those with an
-	// assessment; Unassessed those without one - not hosts without
-	// vulnerabilities; FullyAssessed those whose assessment is complete
-	// in the sense of FullAssessment.
+	// Hosts is the number of hosts in scope; Evaluated those with an assessment;
+	// Unassessed those without one - not hosts without vulnerabilities;
+	// FullyAssessed those whose assessment is complete in the sense of
 	Hosts         int
 	Evaluated     int
 	Unassessed    int
@@ -75,9 +67,8 @@ type FleetFilter struct {
 	Sort string
 }
 
-// FleetCursor is the key of the last row of a page under one order: the
-// order itself, the two counters the order reads, the host name and the
-// identifier.
+// FleetCursor is the key of the last row of a page under one order: the order
+// itself, the two counters the order reads, the host name and the identifier.
 type FleetCursor struct {
 	Sort      string
 	Primary   int
@@ -232,8 +223,7 @@ func (s *Store) HostRepositorySourceInScope(ctx context.Context, scopes []authz.
 }
 
 // fleetKeys are the two counters an order reads, as expressions over the
-// joined row, both ascending: a count the order wants descending is
-// negated. The host name and the identifier complete the key.
+// joined row, both ascending: a count the order wants descending is negated.
 func fleetKeys(sort string) (primary, secondary string) {
 	switch sort {
 	case SortFixable:
@@ -281,10 +271,8 @@ const hostStateColumns = `h.id::text, h.hostname,
 	coalesce(v.unique_cves, 0), coalesce(v.coverage_reason, ''), coalesce(v.advisories_reason, ''),
 	v.evaluated_at, coalesce(v.generation_id::text, ''), v.generation_at`
 
-// FleetPage reads one page of the fleet table under the filter's order.
-// A cursor issued under another order is refused. offset skips rows
-// before the page for a caller that pages the old way; a cursor is the
-// way that holds still when the fleet moves.
+// FleetPage reads one page of the fleet table under the filter's order. A
+// cursor issued under another order is refused.
 func (s *Store) FleetPage(ctx context.Context, filter FleetFilter, cursor FleetCursor, limit, offset int) (FleetPage, error) {
 	page := FleetPage{Items: []HostState{}}
 	if filter.Sort == "" {
@@ -294,8 +282,8 @@ func (s *Store) FleetPage(ctx context.Context, filter FleetFilter, cursor FleetC
 		return page, fmt.Errorf("%w: issued for the order %s, not %s", paging.ErrInvalidCursor, cursor.Sort, filter.Sort)
 	}
 	// A caller asking for more than a page may hold gets the page, not the
-	// default: it then pages on with the cursor rather than quietly
-	// receiving a fifth of what it asked for.
+	// default: it then pages on with the cursor rather than quietly receiving a
+	// fifth of what it asked for.
 	limit = paging.Limit(limit, DefaultPage, MaxPage)
 	conditions, args := fleetConditions(filter)
 	from := ` from hosts h left join vuln_host_state v on v.host_id = h.id where `

@@ -53,10 +53,9 @@ func TestValidateAllowsRepeatingTheSameState(t *testing.T) {
 	}
 }
 
-// TestRunningIsReachedFromDispatchedOnly: the agent's word that the
-// operation started moves a delivered job to running and nothing else
-// does - a job that was never handed over cannot start, and a running job
-// ends the way any executed job ends.
+// TestRunningIsReachedFromDispatchedOnly: the agent's word that the operation
+// started moves a delivered job to running and nothing else does - a job that
+// was never handed over cannot start, and a running job ends the way any
 func TestRunningIsReachedFromDispatchedOnly(t *testing.T) {
 	if !StateDispatched.CanTransition(StateRunning) {
 		t.Fatal("dispatched -> running is the start the agent reports and has to be allowed")
@@ -76,9 +75,9 @@ func TestRunningIsReachedFromDispatchedOnly(t *testing.T) {
 	}
 }
 
-// TestTheLockWaitReasonRoundTrips: the reason a delivered job waits with
-// names the blocker the agent reported, under its own prefix, so that a
-// budget wait and a lock wait are told apart by the prefix alone.
+// TestTheLockWaitReasonRoundTrips: the reason a delivered job waits with names
+// the blocker the agent reported, under its own prefix, so that a budget wait
+// and a lock wait are told apart by the prefix alone.
 func TestTheLockWaitReasonRoundTrips(t *testing.T) {
 	reason := LockWaitReason("units held by task 7c1e (schedule.run_now)")
 	if reason != "awaiting_lock:units held by task 7c1e (schedule.run_now)" {

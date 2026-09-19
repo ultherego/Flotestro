@@ -1,15 +1,4 @@
 // Package backup drives the backup tools already present on the host.
-//
-// Backup data does not flow through Flotestro and never will: the host
-// talks to the repository directly, and the panel sees only metadata - when
-// the backup succeeded, how much it takes and what it covers. A panel the
-// copies of a hundred hosts flowed through would be a bottleneck and the
-// most interesting target in the whole installation.
-//
-// Repository credentials do not go in command arguments. A process command
-// line is readable by every user of the host through /proc, so a password
-// given as an argument would be a password given publicly. They go through
-// the environment, which only the process owner reads.
 package backup
 
 import (
@@ -40,11 +29,6 @@ const (
 )
 
 // Overwrite plan on restore.
-//
-// A restore without an overwrite plan is an operation whose effect nobody
-// knows: the files may land next to the existing ones, on them or not at
-// all. That is why the panel requires a decision, and the host checks it
-// before unpacking anything.
 const (
 	// OverwriteEmpty requires the target directory to be empty.
 	OverwriteEmpty = "empty-target"
@@ -53,11 +37,6 @@ const (
 )
 
 // RunbookDir holds the scripts the panel may run.
-//
-// The panel does not send the script content and cannot create it: it only
-// names a file the host administrator placed there earlier. Otherwise a
-// "runbook" would be remote execution of arbitrary code under a different
-// name.
 const RunbookDir = "/etc/flotestro/backup-runbooks"
 
 // Size limits. The output of a backup tool can be long, and the panel
@@ -74,10 +53,6 @@ var (
 )
 
 // Definition describes what to back up and where to.
-//
-// There are no credentials here: they are separate, because they have a
-// different life - they come from the store right before the operation and
-// stay nowhere but in the process memory.
 type Definition struct {
 	ID   string `json:"id"`
 	Tool string `json:"tool"`
@@ -87,9 +62,8 @@ type Definition struct {
 	Paths      []string `json:"paths,omitempty"`
 	Excludes   []string `json:"excludes,omitempty"`
 	Tags       []string `json:"tags,omitempty"`
-	// Retention describes how many copies stay. Zero means "do not clean
-	// up": deleting old copies is a decision separate from making a new
-	// one.
+	// Retention describes how many copies stay. Zero means "do not clean up":
+	// deleting old copies is a decision separate from making a new one.
 	KeepLast    int  `json:"keep_last,omitempty"`
 	KeepDaily   int  `json:"keep_daily,omitempty"`
 	KeepWeekly  int  `json:"keep_weekly,omitempty"`
@@ -97,10 +71,7 @@ type Definition struct {
 	Prune       bool `json:"prune,omitempty"`
 	// Runbook names the script in the runbook directory.
 	Runbook string `json:"runbook,omitempty"`
-	// Initialize allows creating the repository at the first copy. Without
-	// this consent the host creates nothing: a repository created by a typo
-	// in the address looks like a working backup and is an empty directory
-	// next to the right one.
+	// Initialize allows creating the repository at the first copy.
 	Initialize bool `json:"initialize,omitempty"`
 }
 
@@ -116,9 +87,7 @@ type Restore struct {
 type Order struct {
 	Definition
 	Restore Restore
-	// Password and Environment carry values from the store. They live in
-	// the process memory for the duration of the operation and do not go
-	// into the arguments, the result or the log.
+	// Password and Environment carry values from the store.
 	Password    []byte
 	Environment map[string][]byte
 	// Verify may read data, not only the repository structure. That is a
@@ -145,9 +114,7 @@ type State struct {
 	Repository  string `json:"repository,omitempty"`
 	// Snapshots is the list of copies, oldest first.
 	Snapshots []Snapshot `json:"snapshots,omitempty"`
-	// LastSuccessAt is the time of the last successful copy. Nil means a
-	// repository without copies or an undetermined state - the reason tells
-	// them apart.
+	// LastSuccessAt is the time of the last successful copy.
 	LastSuccessAt  *time.Time `json:"last_success_at,omitempty"`
 	TotalSizeBytes *uint64    `json:"total_size_bytes,omitempty"`
 	ObservedAt     time.Time  `json:"observed_at"`
@@ -184,10 +151,6 @@ type Progress struct {
 type ProgressFunc func(Progress)
 
 // Adapter is the driver of one backup tool.
-//
-// The module does not make backups itself and will not: the tools the host
-// already has and the administrator already trusts do. The panel's job is
-// to run them, read the result and show it next to a hundred other hosts.
 type Adapter interface {
 	Name() string
 	Available() bool
@@ -258,27 +221,18 @@ func (d Definition) Validate() error {
 }
 
 // Trees the panel does not restore data into.
-//
-// A restore straight into the host filesystem turns a backup into unpacking
-// an old state onto a running system: the configuration, accounts and
-// libraries come back in one jump, and nobody reviews it. Data is restored
-// into a working directory, and what returns from it into place is a
-// separate decision and a separate operation.
 var forbiddenTrees = []string{
 	"/etc", "/usr", "/bin", "/sbin", "/lib", "/lib64", "/boot",
 	"/dev", "/proc", "/sys", "/run",
 	// The state of the panel and its helper is no place for restored data.
 	"/var/lib/flotestro", "/var/lib/flotestro-helper",
 	// The helper runs with PrivateTmp, so it has its own private /tmp and
-	// /var/tmp. Data restored there vanishes together with the process,
-	// and the operator sees a success and an empty directory - the worst
-	// possible answer.
+	// /var/tmp.
 	"/tmp", "/var/tmp",
 }
 
 // forbiddenRoots lists the directories that are not touched themselves,
-// although their interior is an ordinary place for data. A restore into
-// /home/anna/copy is normal work; a restore into /home is not.
+// although their interior is an ordinary place for data.
 var forbiddenRoots = []string{"/", "/home", "/root", "/var", "/srv", "/opt", "/mnt", "/media"}
 
 // ValidateRestore checks the target and the overwrite plan.
@@ -327,16 +281,12 @@ func ValidateRestore(restore Restore) error {
 }
 
 // CheckTarget checks the target directory right before unpacking.
-//
-// The check is on the host, not in the panel, because only the host knows
-// what really lies in this directory - and knows it only at the moment of
-// the operation.
 func CheckTarget(restore Restore) error {
 	info, err := os.Stat(restore.Target)
 	if os.IsNotExist(err) {
-		// A directory that does not exist is not created half-way down the
-		// tree: the parent must exist so that a typo does not create a
-		// directory in a random place.
+		// A directory that does not exist is not created half-way down the tree: the
+		// parent must exist so that a typo does not create a directory in a random
+		// place.
 		parent := filepath.Dir(restore.Target)
 		if info, err := os.Stat(parent); err != nil || !info.IsDir() {
 			return fmt.Errorf("the directory %s does not exist", parent)
@@ -375,11 +325,6 @@ func ValidateEnvironment(variables []string) error {
 }
 
 // Mask removes from the output the values that must not leave it.
-//
-// Backup tools print the repository address, and that is at times an
-// address with a password written in. The credential values themselves are
-// masked too: one echo in a script is enough for the password to land in
-// the task result, and from there in the panel database.
 func Mask(output string, secrets [][]byte) string {
 	result := output
 	for _, value := range secrets {

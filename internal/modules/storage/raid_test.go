@@ -3,8 +3,7 @@ package storage
 import "testing"
 
 // The kernel's own view of two arrays: one healthy mirror and one that has
-// lost a member and is rebuilding onto a spare. Copied from a host with
-// the md driver.
+// lost a member and is rebuilding onto a spare.
 const mdstatOutput = `Personalities : [raid1] [raid6] [raid5] [raid4]
 md0 : active raid1 sdb1[1] sda1[0]
       1048512 blocks super 1.2 [2/2] [UU]
@@ -198,9 +197,7 @@ func TestMDAdmScanNamesEveryArrayByUUID(t *testing.T) {
 	}
 }
 
-// The kernel decides which arrays exist; the superblock adds the UUID. An
-// array the detail could not be read for keeps its kernel facts and says
-// why it has no UUID - it is not dropped, and it is not silently bindable.
+// The kernel decides which arrays exist; the superblock adds the UUID.
 func TestMergingKeepsTheKernelListAndNamesWhatIsMissing(t *testing.T) {
 	arrays, err := ParseMDStat(mdstatOutput)
 	if err != nil {
@@ -230,9 +227,7 @@ func TestMergingKeepsTheKernelListAndNamesWhatIsMissing(t *testing.T) {
 	}
 }
 
-// mdadm knows nothing about /dev/disk/by-id. A member the host does not
-// list keeps the reason rather than an empty identity that reads as "no
-// link on this disk".
+// mdadm knows nothing about /dev/disk/by-id.
 func TestMemberIdentityComesFromTheBlockDeviceList(t *testing.T) {
 	arrays, err := ParseMDStat(mdstatOutput)
 	if err != nil {

@@ -10,11 +10,8 @@ import (
 	"github.com/ultherego/flotestro/internal/secrets"
 )
 
-// The secret store has one property that must not be lost: a value goes
-// in and does not come out. The API allows creating, rotating and retiring
-// a secret and destroying a version - but there is no way to read the
-// content through it. The only way out for a value leads through a lease
-// issued to a host for the duration of one task.
+// The secret store has one property that must not be lost: a value goes in and
+// does not come out.
 
 type secretRequest struct {
 	Name        string `json:"name"`
@@ -22,10 +19,7 @@ type secretRequest struct {
 	// Value is the only place where the value appears in the API - and only
 	// in the direction towards the panel.
 	Value string `json:"value"`
-	// Reason says what the change is for. A secret is a resource of the
-	// whole fleet: whoever can create or rotate one can put a value on
-	// every host, so the change asks for fresh authentication and leaves
-	// its reason on the trail.
+	// Reason says what the change is for.
 	Reason string `json:"reason"`
 }
 
@@ -198,10 +192,6 @@ func (s *Server) handleRetireSecret(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDestroySecretVersion deletes the content of one version.
-//
-// The row stays: the history is meant to show that the version existed and
-// when it stopped. Destroyed content cannot be recovered from a database
-// backup either.
 func (s *Server) handleDestroySecretVersion(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	principal, ok := s.authorize(w, r, authz.PermSecretDestroy, authz.GlobalScope, "secret", name)

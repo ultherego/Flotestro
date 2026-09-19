@@ -45,8 +45,8 @@ func directoryAvailable(t *testing.T, h *harness) bool {
 }
 
 // TestDirectoryRecordPlansTheReverseRecord guards the rule that is skipped
-// most often: the PTR record is a separate, visible plan step, not a detail
-// of writing the A record.
+// most often: the PTR record is a separate, visible plan step, not a detail of
+// writing the A record.
 func TestDirectoryRecordPlansTheReverseRecord(t *testing.T) {
 	h := newHarness(t)
 	if !directoryAvailable(t, h) {

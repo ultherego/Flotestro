@@ -1,20 +1,7 @@
 package opspec
 
-// fanOutLimits is the registry of diagnostic reads that may run on many
-// hosts at once, with the ceiling of hosts one fan-out covers.
-//
-// A read fan-out is not a campaign: it changes nothing, needs no approval
-// and has no waves - it is the same read the operator orders on one host,
-// ordered on a handful at once. The ceiling protects the control plane,
-// not the hosts: every host answers with its own output, and fifty
-// journal reads at once are fifty outputs the panel has to hold and merge.
-//
-// The registry is an explicit list for the same reason the campaign modes
-// are one: a read being cheap on one host says nothing about what it costs
-// on a hundred. An operation outside this map does not fan out - a missing
-// declaration is a refusal, not consent by omission. The ceilings follow
-// the module chapters of the multitasking document: a process snapshot on
-// ten hosts, a log read on twenty, a state read or a test on fifty.
+// fanOutLimits is the registry of diagnostic reads that may run on many hosts
+// at once, with the ceiling of hosts one fan-out covers.
 var fanOutLimits = map[ActionType]int{
 	// A process snapshot is the largest single read: up to five hundred
 	// rows per host, each with a command line.
@@ -49,23 +36,13 @@ var fanOutLimits = map[ActionType]int{
 	ActionFilePlan:         50,
 	ActionDomainPreflight:  50,
 
-	// An inventory refresh is a read whose answer lands in the inventory,
-	// not in a merged output, so the panel holds nothing per host: the
-	// ceiling is the wave of the overview chapter (two hundred), and the
-	// cost on the hosts is bounded by the agent's own rate limit and
-	// jitter. A refresh is not a campaign: it changes nothing, and the
-	// operator asking "how are things now" on a site must not need an
-	// approval to find out.
+	// An inventory refresh is a read whose answer lands in the inventory, not in
+	// a merged output, so the panel holds nothing per host: the ceiling is the
+	// wave of the overview chapter (two hundred), and the cost on the hosts is
 	ActionInventoryRefresh: 200,
 }
 
 // FanOutLimit says how many hosts one diagnostic read may cover at once.
-//
-// Zero means an operation that does not fan out: every mutation, and the
-// reads that are deliberately kept to one host. A live view of the journal
-// is one of them - it holds a process on the host for as long as it lasts,
-// and five hosts streaming into one screen is a different feature with its
-// own limits, not a read repeated five times.
 func (a ActionType) FanOutLimit() int {
 	if a.Mutating() {
 		return 0

@@ -9,12 +9,7 @@ import (
 	"strings"
 )
 
-// The access and sudo rules of the directory. A rule is declared as a whole
-// - its members, its categories and its state - and the adapter brings the
-// directory to that declaration with the commands the directory exposes for
-// it: one to create or modify the entry, one per member kind to add and to
-// remove, one to enable or disable. The directory itself keeps the
-// invariants, so nothing here writes to LDAP directly.
+// The access and sudo rules of the directory.
 
 // ruleNamePattern bounds the name of an access or sudo rule.
 var ruleNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_.-]{1,64}$`)
@@ -43,9 +38,7 @@ type HBACRuleSpec struct {
 	Services    []string
 	// ServiceGroups are HBAC service groups such as "Sudo".
 	ServiceGroups []string
-	// AllUsers, AllHosts and AllServices set the category of the rule to
-	// "all". The directory refuses a category together with members of the
-	// same kind, so the adapter never sends both.
+	// AllUsers, AllHosts and AllServices set the category of the rule to "all".
 	AllUsers    bool
 	AllHosts    bool
 	AllServices bool
@@ -113,9 +106,7 @@ type SudoRuleSpec struct {
 	RunAsAnyUser bool
 }
 
-// sudoOptionNames are the sudo options the panel writes. The list is closed:
-// a misspelt option is silently ignored by sudo, so a rule with one would
-// look tighter than it is.
+// sudoOptionNames are the sudo options the panel writes.
 var sudoOptionNames = []string{
 	"authenticate", "requiretty", "env_reset", "env_keep", "env_check", "env_delete",
 	"setenv", "noexec", "log_input", "log_output", "mail_badpass", "mail_always",
@@ -224,9 +215,8 @@ type HBACTestResult struct {
 	// Matched and NotMatched name the rules the directory evaluated.
 	Matched    []string `json:"matched"`
 	NotMatched []string `json:"not_matched"`
-	// Errors names rules the directory could not evaluate; Warnings carries
-	// its remarks. Both are shown as they came: the panel does not turn a
-	// remark of the directory into its own verdict.
+	// Errors names rules the directory could not evaluate; Warnings carries its
+	// remarks.
 	Errors   []string `json:"errors,omitempty"`
 	Warnings []string `json:"warnings,omitempty"`
 }
@@ -252,8 +242,7 @@ func (c *Client) HostGroups(ctx context.Context) ([]HostGroup, error) {
 }
 
 // HBACTest asks the directory whether the user may use the service on the
-// host. The directory evaluates its own rules, so the verdict is the one the
-// host will apply - not a reconstruction by the panel.
+// host.
 func (c *Client) HBACTest(ctx context.Context, user, host, service string) (HBACTestResult, error) {
 	result := HBACTestResult{User: user, Host: host, Service: service}
 	if !userNamePattern.MatchString(user) {
@@ -291,9 +280,7 @@ func (c *Client) HBACTest(ctx context.Context, user, host, service string) (HBAC
 	return result, nil
 }
 
-// ruleNames reads the rule names out of an hbactest list. The directory
-// returns plain names; with details switched on it returns records, and
-// the name is then the cn field.
+// ruleNames reads the rule names out of an hbactest list.
 func ruleNames(items []any) []string {
 	names := make([]string, 0, len(items))
 	for _, item := range items {
@@ -358,9 +345,7 @@ func isNotFound(err error) bool {
 	return strings.Contains(text, "(NotFound)") || strings.Contains(text, "not found")
 }
 
-// isEmptyModification recognises a modification that changed nothing. The
-// directory reports it as an error, but for the adapter the rule already
-// stands as declared.
+// isEmptyModification recognises a modification that changed nothing.
 func isEmptyModification(err error) bool {
 	text := err.Error()
 	return strings.Contains(text, "(EmptyModError)") || strings.Contains(text, "no modifications")
@@ -368,11 +353,6 @@ func isEmptyModification(err error) bool {
 
 // EnsureHBACRule brings the rule to the declared state and returns it as the
 // directory holds it afterwards.
-//
-// A category and members of the same kind exclude each other in the
-// directory, so the order matters: a category that goes away is cleared
-// before members are added, and members are removed before a category is
-// set. The rule is enabled last, when it already has its final shape.
 func (c *Client) EnsureHBACRule(ctx context.Context, spec HBACRuleSpec) (*HBACRule, error) {
 	if err := spec.Validate(); err != nil {
 		return nil, err
@@ -594,8 +574,7 @@ func (c *Client) modifyRule(ctx context.Context, method, name string, options ma
 }
 
 // setRuleEnabled switches the rule with the dedicated commands. The flag
-// attribute changed its type between directory versions; the commands did
-// not.
+// attribute changed its type between directory versions; the commands did not.
 func (c *Client) setRuleEnabled(ctx context.Context, family, name string, current, wanted bool) error {
 	if current == wanted {
 		return nil
@@ -619,9 +598,7 @@ type memberStep struct {
 	names  []string
 }
 
-// changeRuleMembers adds or removes members of one kind. The directory
-// answers a partial failure with a list rather than an error, and a partial
-// success must not pass as a success.
+// changeRuleMembers adds or removes members of one kind.
 func (c *Client) changeRuleMembers(ctx context.Context, method, name, kind string, members []string) error {
 	if len(members) == 0 {
 		return nil

@@ -19,12 +19,8 @@ import (
 // before a change.
 const firewallPlanExtension = ".firewall.json"
 
-// applyFirewall handles the operations on the host firewall.
-//
-// The panel changes only its own nftables table or a firewalld zone. Chains
-// owned by others - docker, firewalld, iptables-nft - are rewritten without its
-// participation, so a rule in them would disappear without a trace at the first
-// container start or service reload.
+// applyFirewall handles the operations on the host firewall. The panel changes
+// only its own nftables table or a firewalld zone.
 func (s *Server) applyFirewall(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.FirewallRequest) *helperv1.HelperResponse {
 	release, busy := s.hold(firewallGuard(action.GetOperation()), request)
@@ -67,16 +63,6 @@ func firewallGuard(operation helperv1.FirewallRequest_Operation) string {
 
 // planRule computes the difference between the rule found and the one
 // requested.
-//
-// It changes nothing. The checks are the same as during a change - a rule that
-// is invalid or that cuts off the management channel has to fall out here, at
-// the plan stage, and not on half the fleet during execution. A refusal is then
-// the content of the plan, not a failure: the operator sees it before giving
-// consent.
-//
-// The plan carries the digest of the whole rule set the host has now. The
-// change comes back with that digest and the host refuses when the set changed
-// in the meantime.
 func (s *Server) planRule(ctx context.Context, action *helperv1.FirewallRequest) *helperv1.HelperResponse {
 	state := s.readFirewall(ctx)
 	if state.UnavailableReason != "" {
@@ -93,8 +79,7 @@ func (s *Server) planRule(ctx context.Context, action *helperv1.FirewallRequest)
 	}
 
 	// A plan without a chain and an action is a removal plan: creating a rule
-	// always carries them, removing one never does. The result names this
-	// directly.
+	// always carries them, removing one never does.
 	removal := action.GetChain() == "" && action.GetAction() == ""
 
 	var plan firewall.Plan
@@ -122,9 +107,8 @@ func (s *Server) planRule(ctx context.Context, action *helperv1.FirewallRequest)
 		after = registry.Set(rule)
 	}
 	if state.Adapter == firewall.AdapterUFW && plan.Refusal == "" {
-		// ufw is driven by its command line, so the plan is the list of
-		// commands - and what ufw cannot express falls out here, not on the
-		// host.
+		// ufw is driven by its command line, so the plan is the list of commands -
+		// and what ufw cannot express falls out here, not on the host.
 		steps, err := firewall.UFWTransition(registry, after)
 		if err != nil {
 			plan.Refuse(err.Error())
@@ -144,9 +128,7 @@ func (s *Server) planRule(ctx context.Context, action *helperv1.FirewallRequest)
 	return response
 }
 
-// planZone computes the difference for an entry in a firewalld zone. The checks
-// are the same as during a change, including the protection of the management
-// channel: a refusal is the content of the plan, not a failure.
+// planZone computes the difference for an entry in a firewalld zone.
 func (s *Server) planZone(state firewall.Snapshot, action *helperv1.FirewallRequest) *helperv1.HelperResponse {
 	var plan firewall.ZonePlan
 	switch {
@@ -209,8 +191,8 @@ func describeFirewallPlan(plan firewall.Plan) string {
 	}
 }
 
-// changeRules creates or removes a panel rule and rebuilds the table - or,
-// on a host where ufw holds the rules, runs the ufw commands that carry the
+// changeRules creates or removes a panel rule and rebuilds the table - or, on
+// a host where ufw holds the rules, runs the ufw commands that carry the
 // registry from the state before to the state after.
 func (s *Server) changeRules(ctx context.Context, action *helperv1.FirewallRequest) *helperv1.HelperResponse {
 	state := s.readFirewall(ctx)
@@ -243,9 +225,9 @@ func (s *Server) changeRules(ctx context.Context, action *helperv1.FirewallReque
 		if err := rule.Validate(); err != nil {
 			return reject(ErrorMalformed, err.Error())
 		}
-		// The management channel is the one thing that must not be lost: without
-		// it the host stops answering and there is nothing left to undo the
-		// change with.
+		// The management channel is the one thing that must not be lost: without it
+		// the host stops answering and there is nothing left to undo the change
+		// with.
 		if !action.GetBreakGlass() {
 			if err := firewall.ProtectsManagementChannel(rule,
 				action.GetManagementAddress(), int(action.GetManagementPort())); err != nil {
@@ -277,11 +259,9 @@ func (s *Server) changeRules(ctx context.Context, action *helperv1.FirewallReque
 		return response
 	}
 	if state.Adapter == firewall.AdapterUFW {
-		// ufw is changed rule by rule, so the registry is written before the
-		// first step: a change that stops halfway is then rolled back from
-		// the registry it was heading to - deleting what landed and adding
-		// back what was removed - rather than from one that says nothing
-		// changed.
+		// ufw is changed rule by rule, so the registry is written before the first
+		// step: a change that stops halfway is then rolled back from the registry it
+		// was heading to - deleting what landed and adding back what was removed -
 		if err := saveRuleRegistry(state.Adapter, registry); err != nil {
 			return reject(ErrorExecFailed, "writing the rule registry: "+err.Error())
 		}
@@ -366,9 +346,7 @@ func (s *Server) applyRegistry(ctx context.Context, adapter string, registry fir
 	for _, step := range ufwSteps {
 		output, err := runTool(ctx, step)
 		if err != nil && firewall.UFWDeletionOfAbsentRule(step, output) {
-			// A rule already gone is the state the step wanted. It happens on
-			// a rollback of a change that stopped halfway, and on a host where
-			// somebody removed the panel's rule by hand.
+			// A rule already gone is the state the step wanted.
 			continue
 		}
 		if err != nil {
@@ -378,9 +356,7 @@ func (s *Server) applyRegistry(ctx context.Context, adapter string, registry fir
 	return nil
 }
 
-// restoreRegistry returns to the registry of a rollback plan. For ufw the
-// transition is computed from the registry the host has now to the one from
-// before the change: the same function as the change, the other way round.
+// restoreRegistry returns to the registry of a rollback plan.
 func (s *Server) restoreRegistry(ctx context.Context, plan firewallPlan) error {
 	var steps [][]string
 	if plan.Adapter == firewall.AdapterUFW {
@@ -399,9 +375,6 @@ func (s *Server) restoreRegistry(ctx context.Context, plan firewallPlan) error {
 }
 
 // loadRuleRegistry reads the registry of the mechanism that holds the rules.
-// Each mechanism has one of its own: the same rule is written differently
-// by each, and a host switching between them must not rebuild one's rules
-// through the other.
 func loadRuleRegistry(adapter string) (firewall.Registry, error) {
 	if adapter == firewall.AdapterUFW {
 		return firewall.LoadNamedRegistry(firewall.RegistryDir, firewall.UFWRegistryFile)
@@ -501,10 +474,8 @@ func (s *Server) readFirewall(ctx context.Context) firewall.Snapshot {
 	}
 	var ruleset string
 	if nft {
-		// nft writes the warnings about tables belonging to other programs to
-		// the error stream, not to the output. Without them the panel would
-		// take the docker tables for ordinary host tables - and would allow
-		// touching them.
+		// nft writes the warnings about tables belonging to other programs to the
+		// error stream, not to the output.
 		output, warnings, err := outputWithWarnings(ctx, firewall.NftPath, "-a", "list", "ruleset")
 		if err != nil {
 			snapshot.UnavailableReason = "nft list ruleset: " + err.Error()
@@ -516,11 +487,9 @@ func (s *Server) readFirewall(ctx context.Context) firewall.Snapshot {
 		snapshot.Writable = true
 	}
 
-	// ufw loads its rules into the tables underneath through iptables-nft,
-	// which nft reports as foreign: the rules the operator knows are the ufw
-	// ones, read in the form ufw takes them back in. An installed but
-	// inactive ufw holds nothing, and the panel's own nftables table works as
-	// on any other host.
+	// ufw loads its rules into the tables underneath through iptables-nft, which
+	// nft reports as foreign: the rules the operator knows are the ufw ones, read
+	// in the form ufw takes them back in.
 	if ufw {
 		if response := s.readUFW(ctx, &snapshot, ruleset); response != "" {
 			snapshot.ReadOnlyReason = response
@@ -576,15 +545,12 @@ func (s *Server) readUFW(ctx context.Context, snapshot *firewall.Snapshot, rules
 	loaded := firewall.UFWLoadedRules(snapshot.Rules)
 	snapshot.Rules = append(snapshot.Rules, firewall.ParseUFWAdded(added)...)
 	snapshot.Adapter = firewall.AdapterUFW
-	// What ufw keeps in its files and what the kernel filters with now are
-	// two pictures, and the panel used to see only the tool's account of
-	// itself. A rule written into user.rules and never loaded does nothing
-	// while looking enforced; a rule in the kernel no file keeps vanishes
-	// at the next reload.
+	// What ufw keeps in its files and what the kernel filters with now are two
+	// pictures, and the panel used to see only the tool's account of itself.
 	snapshot.Drift = ufwDrift(ruleset, loaded)
-	// The fingerprint covers the ufw rules together with the tables: a rule
-	// added with ufw since the plan is a changed rule set even when the
-	// operator's nft listing looks the same at a glance.
+	// The fingerprint covers the ufw rules together with the tables: a rule added
+	// with ufw since the plan is a changed rule set even when the operator's nft
+	// listing looks the same at a glance.
 	snapshot.Hash = firewall.Fingerprint(ruleset + "\n" + added)
 	snapshot.Writable = true
 	return ""
@@ -660,9 +626,6 @@ func removeFirewallPlan(id string) error {
 }
 
 // RollbackFirewall restores the panel rules from before a change.
-//
-// Called by the transient systemd unit when nobody confirmed connectivity after
-// a firewall change. It works without the agent and without the panel.
 func RollbackFirewall(ctx context.Context, id string) error {
 	plan, err := readFirewallPlan(id)
 	if err != nil {
@@ -699,21 +662,12 @@ func runTool(ctx context.Context, arguments []string) (string, error) {
 }
 
 // toolOutput runs a tool and attaches its error message.
-//
-// The exit code alone says nothing: "exit status 3" from nft can mean a missing
-// netlink socket, a missing table or a syntax error, and the operator is to read
-// which of them it was.
 func toolOutput(ctx context.Context, path string, arguments ...string) (string, error) {
 	output, _, err := outputWithWarnings(ctx, path, arguments...)
 	return output, err
 }
 
 // outputWithWarnings returns both streams separately.
-//
-// The error stream is sometimes the content of the answer and not noise: nft
-// writes there the warnings about tables owned by others, and on a failure -
-// the reason. The exit code alone says nothing: "exit status 3" can mean a
-// missing netlink socket, a missing table or a syntax error.
 func outputWithWarnings(ctx context.Context, path string, arguments ...string) (string, string, error) {
 	cmd := exec.CommandContext(ctx, path, arguments...)
 	cmd.Env = toolEnvironment()
@@ -736,9 +690,7 @@ func exists(path string) bool {
 }
 
 // ufwDrift compares what ufw keeps in its files with what the kernel filters
-// with now. Without a listing from the kernel, or with a file that cannot be
-// read, there is no comparison at all: an empty side would call every rule of
-// the other one a drift.
+// with now.
 func ufwDrift(ruleset string, loaded []firewall.Rule) []firewall.Drift {
 	if ruleset == "" {
 		return nil

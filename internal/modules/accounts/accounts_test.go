@@ -24,9 +24,9 @@ func fingerprintOf(t *testing.T, key string) string {
 	return line.Fingerprint
 }
 
-// The editor touches the lines it was asked about and nothing else: a
-// comment, an unreadable line and the options in front of a key all come
-// out as they went in.
+// The editor touches the lines it was asked about and nothing else: a comment,
+// an unreadable line and the options in front of a key all come out as they
+// went in.
 func TestAddingAKeyKeepsEveryOtherLine(t *testing.T) {
 	content := "# keys of the deploy account\n" +
 		"command=\"/usr/bin/rrsync /srv\",no-pty " + keyOne + "\n" +
@@ -59,9 +59,8 @@ func TestAddingAKeyKeepsEveryOtherLine(t *testing.T) {
 	}
 }
 
-// A key already in the file is not written twice: neither when it comes
-// with other options or another comment, nor when the same order names it
-// twice. The repeat of an add is a no-op the result says so about.
+// A key already in the file is not written twice: neither when it comes with
+// other options or another comment, nor when the same order names it twice.
 func TestAddingIsIdempotentByFingerprint(t *testing.T) {
 	lines := ParseKeyFile([]byte("from=\"10.0.0.0/8\" " + keyOne + "\n"))
 	edited, change, err := AddKeys(lines, []KeyInput{
@@ -160,8 +159,8 @@ func TestRemovingByFingerprint(t *testing.T) {
 }
 
 // A key on two lines - once plain, once with options - is one key by
-// fingerprint: the inventory lists it once, and a removal takes both
-// lines, because leaving one would leave the access.
+// fingerprint: the inventory lists it once, and a removal takes both lines,
+// because leaving one would leave the access.
 func TestADuplicateFingerprintIsOneKey(t *testing.T) {
 	lines := ParseKeyFile([]byte(keyOne + "\n" + "no-pty " + keyOne + "\n"))
 	if fingerprints := Fingerprints(lines); len(fingerprints) != 1 {
@@ -209,9 +208,9 @@ func TestSameFingerprintsIgnoresOrderAndSpace(t *testing.T) {
 	}
 }
 
-// Rendering keeps the file byte for byte when nothing changed, and a
-// file without a final newline gets one: sshd reads the last line either
-// way, and a later append must not glue itself to it.
+// Rendering keeps the file byte for byte when nothing changed, and a file
+// without a final newline gets one: sshd reads the last line either way, and a
+// later append must not glue itself to it.
 func TestRenderRoundTrip(t *testing.T) {
 	content := "# a\n\n" + keyOne + "\n"
 	if got := Render(ParseKeyFile([]byte(content))); got != content {
@@ -225,9 +224,8 @@ func TestRenderRoundTrip(t *testing.T) {
 	}
 }
 
-// One classifier for both sides: the file says where people start and
-// end, and everything outside - including nobody at 65534 - is the
-// system's.
+// One classifier for both sides: the file says where people start and end, and
+// everything outside - including nobody at 65534 - is the system's.
 func TestTheUIDRangeComesFromLoginDefs(t *testing.T) {
 	uidRange := ParseLoginDefs("# comment\nUID_MIN\t\t 500 # inline\nUID_MAX\t\t 50000\nSYS_UID_MAX 499\nGID_MIN 1000\n")
 	if uidRange.Min != 500 || uidRange.Max != 50000 || uidRange.SystemMax != 499 || uidRange.Source != "login.defs" {

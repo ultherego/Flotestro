@@ -17,24 +17,11 @@ type agentHostView struct {
 	ConnectionState string `json:"connection_state"`
 }
 
-// The artefact refusals of a replacement. Which of them answers depends on
-// what the repository of the host could give it: a repository that hands out
-// the release refuses on the digest, one that cannot produce the file at all
-// refuses before that. Both mean the same thing here - nothing was
-// installed.
+// The artefact refusals of a replacement.
 var artefactRefusals = []string{"agent_package_digest_mismatch", "agent_package_unavailable"}
 
-// TestAnAgentUpgradeWithAWrongPackageDigestIsRefusedAndTheAgentKeepsRunning
-// is the negative side of chapter 14.5: the panel names the checksum of the
-// release, the host checks the artefact against it before anything is
-// installed, and an artefact that is not the one the release published stops
-// the replacement.
-//
-// The order names the version the host already runs. That is deliberate:
-// this test must not roll a shared lab agent to another release, and the
-// digest is checked whatever the host's state - an order naming an artefact
-// the release never published is a wrong order however little work it would
-// otherwise be.
+// TestAnAgentUpgradeWithAWrongPackageDigestIsRefusedAndTheAgentKeepsRunning is
+// the negative side of chapter 14.
 func TestAnAgentUpgradeWithAWrongPackageDigestIsRefusedAndTheAgentKeepsRunning(t *testing.T) {
 	h := newHarness(t)
 	// A Debian-family host: its package manager fetches a file of a version

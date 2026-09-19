@@ -141,7 +141,7 @@ func PlanTimer(dir string, entry Schedule) (TimerPlan, error) {
 	for _, file := range plan.Files {
 		// A unit of that name somewhere else on the host is the dangerous case:
 		// writing ours into /etc/systemd/system would not collide with it, it would
-		// shadow it, and the unit the host really runs would be gone at the next
+		// shadow it, and the unit the host really runs would be gone at the next.
 		if shadowed, err := shadowingUnit(filepath.Base(file.Path), file.Path); err != nil {
 			return TimerPlan{}, err
 		} else if shadowed != "" {

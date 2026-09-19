@@ -13,18 +13,13 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// payloadScheme is the line that opens the canonical payload: the scheme
-// of the payload hash the agent already verifies (opspec.PayloadHashVersion
-// 2). The capability binds the same bytes the agent checked the envelope
-// against, so the helper and the agent agree on the payload by
-// construction rather than by a second convention.
+// payloadScheme is the line that opens the canonical payload: the scheme of
+// the payload hash the agent already verifies (opspec.
 const payloadScheme = "flotestro-payload-hash/2"
 
-// CanonicalPayload renders the bytes the capability binds: the preimage of
-// the version 2 payload hash - the scheme line, the action type, the
-// action version and the canonical JSON of the payload. Its SHA-256 is
-// exactly opspec.PayloadHash, so the capability's digest is the task's
-// payload hash and the helper recomputes it over the bytes it is handed.
+// CanonicalPayload renders the bytes the capability binds: the preimage of the
+// version 2 payload hash - the scheme line, the action type, the action
+// version and the canonical JSON of the payload.
 func CanonicalPayload(action opspec.ActionType, version int, payload opspec.Payload) ([]byte, error) {
 	encoded, err := jcs.Canonical(withoutEmptySubPayloads(payload))
 	if err != nil {
@@ -33,12 +28,9 @@ func CanonicalPayload(action opspec.ActionType, version int, payload opspec.Payl
 	return fmt.Appendf(nil, "%s\n%s\n%d\n%s", payloadScheme, action, version, encoded), nil
 }
 
-// withoutEmptySubPayloads drops the sub-payloads that carry no content,
-// the way the payload hash does: a payload with an empty sub-payload and
-// one without it describe the same operation, and the bytes under the
-// digest have to be the same for both. The rule is generic - a pointer
-// field whose pointee is the zero value is set to nil - so it does not
-// have to know the fields of the payload.
+// withoutEmptySubPayloads drops the sub-payloads that carry no content, the
+// way the payload hash does: a payload with an empty sub-payload and one
+// without it describe the same operation, and the bytes under the digest have
 func withoutEmptySubPayloads(payload opspec.Payload) opspec.Payload {
 	value := reflect.ValueOf(&payload).Elem()
 	for i := 0; i < value.NumField(); i++ {
@@ -61,9 +53,7 @@ type BoundPayload struct {
 	Payload opspec.Payload
 }
 
-// DecodeCanonicalPayload reads the canonical payload back. It refuses a
-// scheme it does not know: the helper would otherwise compare fields
-// against a document it misread.
+// DecodeCanonicalPayload reads the canonical payload back.
 func DecodeCanonicalPayload(canonical []byte) (*BoundPayload, error) {
 	parts := bytes.SplitN(canonical, []byte("\n"), 4)
 	if len(parts) != 4 {

@@ -32,26 +32,20 @@ type enrollmentRequestBody struct {
 	Environment string `json:"environment"`
 	// Kind decides what may be registered: an agent or a relay.
 	Kind string `json:"kind"`
-	// Purpose decides what may be done with a machine the panel already
-	// knows. Empty means a new host - and such a token does not take over
-	// the identity of a running machine.
+	// Purpose decides what may be done with a machine the panel already knows.
 	Purpose           string `json:"purpose"`
 	ExpectedMachineID string `json:"expected_machine_id"`
-	// RelayID confines the order to one site: the token works only through
-	// this relay. Empty means no route restriction - and stays so for
-	// installations without relays.
+	// RelayID confines the order to one site: the token works only through this
+	// relay.
 	RelayID string `json:"relay_id"`
-	// Owner and Tags are what the operator already knows about the
-	// machine; they go onto the host the moment it enrolls. The tags are
-	// checked like host tags, so a token cannot put a shape on a host the
-	// tag editor would refuse.
+	// Owner and Tags are what the operator already knows about the machine; they
+	// go onto the host the moment it enrolls.
 	Owner      string   `json:"owner"`
 	Tags       []string `json:"tags"`
 	MaxUses    int      `json:"max_uses"`
 	TTLMinutes int      `json:"ttl_minutes"`
 	// Reason is the purpose of an order that requires fresh authentication:
-	// production, a batch token or a relay. The description stands in for
-	// it when it says enough.
+	// production, a batch token or a relay.
 	Reason string `json:"reason"`
 }
 
@@ -69,9 +63,8 @@ func (s *Server) handleCreateEnrollmentRequest(w http.ResponseWriter, r *http.Re
 
 	order, err := s.createOrder(r, req, principal.Subject, "")
 	if errors.Is(err, enrollment.ErrRepeated) {
-		// The same order again, from a caller that lost the first answer.
-		// The token is not repeated: it was shown once. A caller that
-		// needs a new one revokes this order and places another.
+		// The same order again, from a caller that lost the first answer. The token
+		// is not repeated: it was shown once.
 		writeJSON(w, http.StatusOK, orderView{Request: order, ConfigURL: configURL(order.ID)})
 		return
 	}
@@ -83,8 +76,8 @@ func (s *Server) handleCreateEnrollmentRequest(w http.ResponseWriter, r *http.Re
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
 		Action: "host.enrollment.create", TargetType: "enrollment_request",
 		TargetID: order.ID, Outcome: audit.OutcomeSuccess,
-		// The token value does not go to the audit log: it is a secret, and
-		// the audit log is read by more people than the one who ordered the
+		// The token value does not go to the audit log: it is a secret, and the
+		// audit log is read by more people than the one who ordered the
 		// installation.
 		Detail: withStepUp(map[string]any{
 			"site": order.Site, "environment": order.Environment,
@@ -102,18 +95,13 @@ func (s *Server) handleCreateEnrollmentRequest(w http.ResponseWriter, r *http.Re
 }
 
 // authorizeOrder checks an order for a new machine or a relay before it is
-// placed: the right where the machine will live, the batch right for a
-// pool of uses, the facts of the host, fresh authentication where the
-// order asks for it. The body is normalised in place. A refusal is
-// answered here; the caller places the order and records it in its own
-// words. targetID names the order the request is about, when there is
-// one - a replacement names the order it replaces.
+// placed: the right where the machine will live, the batch right for a pool of
+// uses, the facts of the host, fresh authentication where the order asks for
 func (s *Server) authorizeOrder(w http.ResponseWriter, r *http.Request, req *enrollmentRequestBody,
 	stepUpAction, targetID string) (authz.Principal, map[string]any, bool) {
 	req.Site, req.Environment = orderPlacement(req.Site, req.Environment)
-	// The order is authorised where the machine will live: an operator of
-	// one site invites machines into that site, not into the whole fleet.
-	// A relay is a separate right - it carries the traffic of a site.
+	// The order is authorised where the machine will live: an operator of one
+	// site invites machines into that site, not into the whole fleet.
 	permission := authz.PermHostEnrollCreate
 	if req.Kind == enrollment.KindRelay {
 		permission = authz.PermRelayEnrollCreate
@@ -123,27 +111,23 @@ func (s *Server) authorizeOrder(w http.ResponseWriter, r *http.Request, req *enr
 	if !ok {
 		return principal, nil, false
 	}
-	// A token good for many machines is a right on top of inviting one:
-	// a pool of uses is a standing door, and the document prefers a token
-	// per host. The refusal names the permission, so the operator learns
-	// what is missing rather than reading "forbidden" on an order they
-	// may place for one machine.
+	// A token good for many machines is a right on top of inviting one: a pool of
+	// uses is a standing door, and the document prefers a token per host.
 	if req.MaxUses > 1 && req.Kind != enrollment.KindRelay {
 		if _, ok := s.authorize(w, r, authz.PermHostEnrollBatch, scope, "enrollment_request", targetID); !ok {
 			return principal, nil, false
 		}
 	}
-	// Identity recovery has its own entry on the host and its own
-	// permission: only orders for new machines and relays are accepted
-	// here.
+	// Identity recovery has its own entry on the host and its own permission:
+	// only orders for new machines and relays are accepted here.
 	if req.Purpose == enrollment.PurposeReplace {
 		problem(w, http.StatusBadRequest, "purpose_not_allowed",
 			"identity recovery is requested on the host itself")
 		return principal, nil, false
 	}
-	// The facts for the host are checked here, where the order is placed:
-	// an order that fails at enrollment time would fail in the middle of
-	// the night, on the machine, with nobody to read the reason.
+	// The facts for the host are checked here, where the order is placed: an
+	// order that fails at enrollment time would fail in the middle of the night,
+	// on the machine, with nobody to read the reason.
 	owner, err := hosts.NormalizeOwner(req.Owner)
 	if errors.Is(err, hosts.ErrInvalidOwner) {
 		problem(w, http.StatusBadRequest, "invalid_owner", err.Error())
@@ -165,8 +149,6 @@ func (s *Server) authorizeOrder(w http.ResponseWriter, r *http.Request, req *enr
 	}
 	req.Tags = tags
 	// Enrollment opens the way to root on the machine through the helper.
-	// An order for production, a token good for many machines or a relay
-	// requires fresh authentication, like any change of that weight.
 	var stepUpEvidence map[string]any
 	if s.requiresSecondPerson(req.Environment) || req.MaxUses > 1 || req.Kind == enrollment.KindRelay {
 		reason := strings.TrimSpace(req.Reason)
@@ -190,12 +172,9 @@ type replacementBody struct {
 	Reason      string `json:"reason"`
 }
 
-// similarOrder is an order like the one given: the same placement, kind,
-// relay binding, owner, tags and pool of uses, with a fresh token and a
-// fresh deadline. The token is a new secret - nothing of the old one is
-// copied, and the store keeps only its digest anyway. The expected
-// machine is not copied either: it bound one order to one machine, and a
-// new order is bound when it is placed for one.
+// similarOrder is an order like the one given: the same placement, kind, relay
+// binding, owner, tags and pool of uses, with a fresh token and a fresh
+// deadline.
 func similarOrder(order *enrollment.Request, body replacementBody) enrollmentRequestBody {
 	ttl := body.TTLMinutes
 	if ttl <= 0 {
@@ -219,19 +198,8 @@ func similarOrder(order *enrollment.Request, body replacementBody) enrollmentReq
 	}
 }
 
-// handleReplaceEnrollmentRequest places an order like the one named and
-// shows its token once. An order still open is revoked first: two live
-// tokens for one placement would be one too many, and an operator who
-// asks for a new token means the old one is not to work. A settled,
-// expired or revoked order is only copied.
-//
-// The old token is never shown again, on this path or any other: the
-// store holds its digest alone. The right is judged twice, where the
-// machine will live: to close the old order and to place the new one, so
-// an operator of one site replaces the orders of that site without a
-// global right. The revocation goes first, and a failure of the placement
-// after it leaves the old order closed: a closed door is the safe side of
-// a half-done replacement, and the answer says so.
+// handleReplaceEnrollmentRequest places an order like the one named and shows
+// its token once.
 func (s *Server) handleReplaceEnrollmentRequest(w http.ResponseWriter, r *http.Request) {
 	old, ok := s.readableOrder(w, r)
 	if !ok {
@@ -331,16 +299,14 @@ func (s *Server) handleReplaceEnrollmentRequest(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusCreated, orderView{Request: order, ConfigURL: configURL(order.ID)})
 }
 
-// configURL points at the ready configuration of an order. The
-// configuration carries no token: it can be fetched as many times as the
-// installation needs, the token cannot.
+// configURL points at the ready configuration of an order.
 func configURL(orderID string) string {
 	return "/api/v1/enrollment-requests/" + orderID + "/config"
 }
 
-// orderPlacement fills in the site and the environment of an order that
-// names none: a machine has to land somewhere, and "unassigned" says
-// honestly that nobody decided yet.
+// orderPlacement fills in the site and the environment of an order that names
+// none: a machine has to land somewhere, and "unassigned" says honestly that
+// nobody decided yet.
 func orderPlacement(site, environment string) (string, string) {
 	if site == "" {
 		site = "default"
@@ -370,17 +336,12 @@ func (s *Server) createOrder(r *http.Request, req enrollmentRequestBody, actor,
 }
 
 // installationStep is one stage visible on the installation screen.
-//
-// The stages are separate, because each fails for a different reason and
-// is fixed differently: the token may expire, the certificate may be
-// rejected on a CSR error, the session may not get through a firewall, and
-// the inventory may not arrive when the agent has no capabilities yet.
 type installationStep struct {
 	Key   string `json:"key"`
 	State string `json:"state"`
-	// ErrorCode names why the step does not go on, when the panel knows:
-	// a refused attempt recorded against the order, or a readiness gate
-	// the host has not passed in time. Detail says the same in a sentence.
+	// ErrorCode names why the step does not go on, when the panel knows: a
+	// refused attempt recorded against the order, or a readiness gate the host
+	// has not passed in time.
 	ErrorCode string `json:"error_code,omitempty"`
 	Detail    string `json:"detail,omitempty"`
 }
@@ -396,15 +357,11 @@ const (
 	StateFailed     = "failed"
 )
 
-// The readiness gates on the host side of the installation. The panel
-// cannot see the host, only its absence: a certificate without a session
-// after a while, a session without an inventory after a while.
+// The readiness gates on the host side of the installation.
 const (
 	GateEnrolledNotConnected = "enrolled_not_connected"
 	GateInventoryUnavailable = "inventory_unavailable"
-	// readinessPatience is how long a step may wait before its silence is
-	// named. An agent starts within seconds; two minutes covers a slow
-	// package manager and a first reconnect backoff.
+	// readinessPatience is how long a step may wait before its silence is named.
 	readinessPatience = 2 * time.Minute
 )
 
@@ -418,11 +375,6 @@ type orderView struct {
 
 // installationSteps computes the installation progress from what the panel
 // really sees.
-//
-// Nothing here is an agent declaration: a used token follows from the use
-// counter, the certificate from the saved host, the session from the
-// connection state, and the inventory from the fragments that have already
-// arrived.
 func (s *Server) installationSteps(r *http.Request,
 	order *enrollment.Request) []installationStep {
 	failed := order.Status == enrollment.StatusExpired ||
@@ -456,9 +408,7 @@ func (s *Server) installationSteps(r *http.Request,
 		installationStep{Key: StepConnected, State: stepState(connected)},
 		installationStep{Key: StepInventory, State: stepState(withInventory)})
 
-	// A refused attempt names the reason on the step it stopped at. Only a
-	// step that is not done carries it: a batch order that admitted one
-	// host and refused another is still an order that works.
+	// A refused attempt names the reason on the step it stopped at.
 	if code, detail := s.lastDenial(r, order.ID); code != "" {
 		index := 1
 		if tokenDenial(code) {
@@ -468,9 +418,8 @@ func (s *Server) installationSteps(r *http.Request,
 			steps[index].ErrorCode, steps[index].Detail = code, detail
 		}
 	}
-	// The gates on the host side. The panel sees no error there, only
-	// silence - and names it once it has lasted long enough to mean
-	// something.
+	// The gates on the host side. The panel sees no error there, only silence -
+	// and names it once it has lasted long enough to mean something.
 	if order.EnrolledHostID != "" && !connected && !failed &&
 		time.Since(order.UpdatedAt) > readinessPatience {
 		steps[2].ErrorCode = GateEnrolledNotConnected
@@ -486,8 +435,8 @@ func (s *Server) installationSteps(r *http.Request,
 }
 
 // sessionStart is the moment the inventory clock starts: the start of the
-// session this gateway holds, or - when another gateway holds it - the
-// moment the certificate was issued.
+// session this gateway holds, or - when another gateway holds it - the moment
+// the certificate was issued.
 func (s *Server) sessionStart(order *enrollment.Request) time.Time {
 	if s.registry != nil {
 		if session, ok := s.registry.Get(order.EnrolledHostID); ok && session != nil {
@@ -510,12 +459,6 @@ func tokenDenial(code string) bool {
 }
 
 // lastDenial reads the newest refused attempt recorded against an order.
-//
-// The audit trail is the record: the gateway writes every refusal there
-// with the order as its target, and nothing else about a refusal survives
-// - the agent gets a uniform answer by design. A few newest events are
-// read, because the same target also carries the refusals of the panel's
-// own authorisation, which say nothing about the host.
 func (s *Server) lastDenial(r *http.Request, orderID string) (string, string) {
 	page, err := s.audit.ListPaged(r.Context(), audit.ListFilter{
 		TargetType: "enrollment_request", TargetID: orderID,
@@ -541,11 +484,9 @@ func (s *Server) lastDenial(r *http.Request, orderID string) (string, string) {
 	return "", ""
 }
 
-// handleListEnrollmentRequests shows the pending and closed installations
-// the caller may read: the list is narrowed in the query to the scopes of
-// the caller's right, so the operator of one site sees that site's orders
-// and never learns where else machines are being installed. The page is
-// keyed, and the filters name the status, the kind and the placement.
+// handleListEnrollmentRequests shows the pending and closed installations the
+// caller may read: the list is narrowed in the query to the scopes of the
+// caller's right, so the operator of one site sees that site's orders and
 func (s *Server) handleListEnrollmentRequests(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermHostEnrollRead, "enrollment_request")
 	if !ok {
@@ -597,9 +538,7 @@ func (s *Server) handleGetEnrollmentRequest(w http.ResponseWriter, r *http.Reque
 }
 
 // readableOrder loads an order and authorises reading it where the machine
-// will live. The one who placed an order for a site is to follow it without
-// a global right: the installation screen polls this until the host is
-// ready.
+// will live.
 func (s *Server) readableOrder(w http.ResponseWriter, r *http.Request) (*enrollment.Request, bool) {
 	id := r.PathValue("id")
 	if _, err := uuid.Parse(id); err != nil {
@@ -623,11 +562,6 @@ func (s *Server) readableOrder(w http.ResponseWriter, r *http.Request) (*enrollm
 }
 
 // handleEnrollmentConfig serves the ready configuration file of an order.
-//
-// The file is the same the installation profile composes for the order's
-// placement, so it can be fetched with curl on the host instead of pasted.
-// It never carries the token: the token was shown once, and a file that
-// can be fetched again must not be a second way to it.
 func (s *Server) handleEnrollmentConfig(w http.ResponseWriter, r *http.Request) {
 	order, ok := s.readableOrder(w, r)
 	if !ok {
@@ -652,12 +586,6 @@ func (s *Server) handleEnrollmentConfig(w http.ResponseWriter, r *http.Request) 
 }
 
 // handleRevokeEnrollmentRequest blocks the remaining uses immediately.
-//
-// The order is read first and the right is checked where the machine was
-// to live: the operator of a site revokes the orders of that site, and an
-// identifier from elsewhere is a refusal with the scope on the trail. A
-// right over the whole fleet is not required for that, and no right at all
-// does not learn whether the identifier exists.
 func (s *Server) handleRevokeEnrollmentRequest(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if _, ok := s.authorizeCollection(w, r, authz.PermHostEnrollRevoke, "enrollment_request"); !ok {
@@ -668,8 +596,8 @@ func (s *Server) handleRevokeEnrollmentRequest(w http.ResponseWriter, r *http.Re
 		return
 	}
 	// The order is read before it is revoked: the right is judged by its
-	// placement, and the announcement of the revocation carries that
-	// placement once the row is gone from the screen.
+	// placement, and the announcement of the revocation carries that placement
+	// once the row is gone from the screen.
 	order, err := s.tokens.Request(r.Context(), id)
 	if errors.Is(err, enrollment.ErrUnknownRequest) {
 		problem(w, http.StatusNotFound, "not_found", "enrollment request not found")
@@ -703,9 +631,9 @@ func (s *Server) handleRevokeEnrollmentRequest(w http.ResponseWriter, r *http.Re
 		RequestID: order.ID, Change: events.EnrollmentRevoked,
 		Site: order.Site, Environment: order.Environment, Kind: order.Kind,
 	})
-	// A revoked recovery order may have been the only thing a host in
-	// recovery was waiting for; it comes back to active at once rather than
-	// at the next sweep.
+	// A revoked recovery order may have been the only thing a host in recovery
+	// was waiting for; it comes back to active at once rather than at the next
+	// sweep.
 	s.lapseRecoveries(r.Context(), principal.Subject)
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -731,11 +659,6 @@ func (s *Server) lapseRecoveries(ctx context.Context, actor string) {
 }
 
 // handleIdentityRecovery orders the identity recovery of an existing host.
-//
-// A separate entry and a separate permission, because this is not an
-// invitation for a new machine: the token from this order fits only the
-// named host, and it returns to the panel with the same history, not as a
-// second row next to a dead twin.
 func (s *Server) handleIdentityRecovery(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
 	host, scope, ok := s.hostScope(w, r, hostID)
@@ -747,9 +670,7 @@ func (s *Server) handleIdentityRecovery(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// A retired host does not return to the fleet with a token. An order
-	// that cannot be used anyway would be an empty promise - the return
-	// starts with reversing the decommissioning decision.
+	// A retired host does not return to the fleet with a token.
 	if host.LifecycleState == hosts.StateRetired || host.LifecycleState == hosts.StateRetiring {
 		problem(w, http.StatusConflict, "host_retired",
 			"a retired host cannot be brought back with a recovery token")
@@ -758,9 +679,7 @@ func (s *Server) handleIdentityRecovery(w http.ResponseWriter, r *http.Request) 
 
 	var req struct {
 		enrollmentRequestBody
-		// RevokeOldImmediately cuts the old key off now, for a suspected
-		// theft. Without it the old certificate stays valid until the new
-		// session confirms the replacement - a planned key change.
+		// RevokeOldImmediately cuts the old key off now, for a suspected theft.
 		RevokeOldImmediately bool `json:"revoke_old_immediately"`
 		TTLSeconds           int  `json:"ttl_seconds"`
 	}
@@ -770,9 +689,8 @@ func (s *Server) handleIdentityRecovery(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
-	// The scope comes from the host, not from the request: identity
-	// recovery is not an occasion to move the host to another site or
-	// environment.
+	// The scope comes from the host, not from the request: identity recovery is
+	// not an occasion to move the host to another site or environment.
 	req.Site, req.Environment = host.Site, host.Environment
 	req.Kind, req.Purpose = enrollment.KindAgent, enrollment.PurposeReplace
 	req.MaxUses = 1
@@ -809,9 +727,6 @@ func (s *Server) handleIdentityRecovery(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		// The host may hold its session on another instance of the panel.
-		// A revoked certificate the host is still connected with is exactly
-		// the case this must not leave open, so the session is ended
-		// wherever it is held rather than only here.
 		sessionClose, err = gateway.CloseHostSession(r.Context(), s.pool, s.registry, s.jobs,
 			s.log, hostID, "identity_recovery", principal.Subject)
 		if err != nil {
@@ -819,11 +734,9 @@ func (s *Server) handleIdentityRecovery(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
-	// An active host enters recovery: no operation and no secret until the
-	// new certificate opens its first session, while the old one may still
-	// connect for the overlap. A quarantined host stays quarantined - the
-	// quarantine is the stronger "no", and its release is a decision of its
-	// own once the identity is back.
+	// An active host enters recovery: no operation and no secret until the new
+	// certificate opens its first session, while the old one may still connect
+	// for the overlap.
 	state := host.LifecycleState
 	canceled := 0
 	if host.LifecycleState == hosts.StateActive {
@@ -853,11 +766,9 @@ func (s *Server) handleIdentityRecovery(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusCreated, orderView{Request: order, ConfigURL: configURL(order.ID)})
 }
 
-// enterRecovery moves an active host into the recovery state and cancels
-// what was queued for it, as a quarantine does: a host whose key is being
-// replaced takes no mutation until the new key has proven it works. A host
-// that is no longer active when the write lands - a quarantine placed a
-// moment earlier - is left as it is: that decision is the stronger one.
+// enterRecovery moves an active host into the recovery state and cancels what
+// was queued for it, as a quarantine does: a host whose key is being replaced
+// takes no mutation until the new key has proven it works.
 func (s *Server) enterRecovery(r *http.Request, hostID, reason, actor string) (int, error) {
 	tx, err := s.pool.Begin(r.Context())
 	if err != nil {
@@ -879,9 +790,7 @@ func (s *Server) enterRecovery(r *http.Request, hostID, reason, actor string) (i
 	return canceled, tx.Commit(r.Context())
 }
 
-// revokeNow revokes every live certificate of the host in its own
-// transaction. The old certificate record stays with the revocation reason:
-// history is not deleted.
+// revokeNow revokes every live certificate of the host in its own transaction.
 func (s *Server) revokeNow(r *http.Request, hostID, reason string) (int, error) {
 	tx, err := s.pool.Begin(r.Context())
 	if err != nil {
@@ -895,13 +804,11 @@ func (s *Server) revokeNow(r *http.Request, hostID, reason string) (int, error) 
 	return revoked, tx.Commit(r.Context())
 }
 
-// Installation describes how a new host reaches this panel and where it
-// takes its packages from. The installation profile is composed from it;
-// the panel knows nothing else about the network around it.
+// Installation describes how a new host reaches this panel and where it takes
+// its packages from.
 type Installation struct {
-	// AdvertisedAddresses are the names and addresses the agents see the
-	// control plane under, in order of preference. They are in the server
-	// certificate of the gateway, so any other address fails TLS.
+	// AdvertisedAddresses are the names and addresses the agents see the control
+	// plane under, in order of preference.
 	AdvertisedAddresses []string
 	// GatewayAddr and EnrollmentAddr are the listen addresses; only their
 	// ports matter here.
@@ -919,9 +826,7 @@ func (s *Server) SetInstallation(installation Installation) { s.installation = i
 // directly against the panel.
 func (s *Server) SetRelays(store *relays.Store) { s.relays = store }
 
-// The paths and accounts the packages set up on a host. They are part of
-// the instructions, so they live next to them rather than in the package
-// scripts alone.
+// The paths and accounts the packages set up on a host.
 const (
 	agentConfigPath = "/etc/flotestro/agent.yaml"
 	agentCAPath     = "/var/lib/flotestro-agent/ca.pem"
@@ -930,9 +835,6 @@ const (
 	relayCAPath     = "/var/lib/flotestro-relay/ca.pem"
 	relayAccount    = "flotestro-relay"
 	// relayPort is the port a relay listens on for the agents of its site.
-	// The panel does not know the listen address of a relay; the package
-	// configures this one, and a relay on another port advertises it in
-	// its name.
 	relayPort = "8453"
 	// repositoryPlaceholder stands in the commands of an installation
 	// without a configured repository.
@@ -951,9 +853,8 @@ type installationProfile struct {
 	Environment  string `json:"environment"`
 	Architecture string `json:"architecture"`
 	Channel      string `json:"channel"`
-	// ReasonRequired says the order for this placement is refused without
-	// a reason: the environment is a production one. A batch token and a
-	// relay require one as well, whatever the environment.
+	// ReasonRequired says the order for this placement is refused without a
+	// reason: the environment is a production one.
 	ReasonRequired bool                   `json:"reason_required"`
 	Connection     installationConnection `json:"connection"`
 	Config         installationFile       `json:"config"`
@@ -1056,12 +957,8 @@ func (s *Server) installationProblem(w http.ResponseWriter, err error) {
 	}
 }
 
-// handleInstallationProfile composes what a host of the given placement
-// needs: the configuration, the trust, the repository and the commands.
-//
-// Nothing here is secret. The token is ordered separately and shown once;
-// the profile can be read as often as an installation needs, which is why
-// it is a read of the placement rather than part of the order.
+// handleInstallationProfile composes what a host of the given placement needs:
+// the configuration, the trust, the repository and the commands.
 func (s *Server) handleInstallationProfile(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	site, environment := orderPlacement(query.Get("site"), query.Get("environment"))
@@ -1073,9 +970,9 @@ func (s *Server) handleInstallationProfile(w http.ResponseWriter, r *http.Reques
 		problem(w, http.StatusBadRequest, "invalid_kind", "kind is agent or relay")
 		return
 	}
-	// The profile is read where the machine will live, like the order is
-	// placed: the addresses and the CA are the same for the whole fleet,
-	// but the right to prepare an installation is not.
+	// The profile is read where the machine will live, like the order is placed:
+	// the addresses and the CA are the same for the whole fleet, but the right to
+	// prepare an installation is not.
 	scope := authz.Scope{Site: site, Environment: environment}
 	if _, ok := s.authorize(w, r, authz.PermHostEnrollRead, scope, "installation_profile", ""); !ok {
 		return
@@ -1161,11 +1058,8 @@ func installationChannel(value string) (string, error) {
 	return value, nil
 }
 
-// installationConnection settles where a host of the site connects: the
-// panel under its advertised addresses, or the relay named by the order.
-//
-// A relay stands in for both the enrollment and the gateway: it mediates
-// the registration and terminates the session afterwards, on one port.
+// installationConnection settles where a host of the site connects: the panel
+// under its advertised addresses, or the relay named by the order.
 func (s *Server) installationConnection(r *http.Request, site, relayID string) (installationConnection, error) {
 	if relayID == "" {
 		addresses := s.reachableAddresses()
@@ -1200,9 +1094,9 @@ func (s *Server) installationConnection(r *http.Request, site, relayID string) (
 	if relay.RevokedAt != nil {
 		return installationConnection{}, errRelayRevoked
 	}
-	// The route is part of the scope: an order of one site does not pass
-	// through the relay of another, so a profile that suggested it would
-	// describe an installation that cannot succeed.
+	// The route is part of the scope: an order of one site does not pass through
+	// the relay of another, so a profile that suggested it would describe an
+	// installation that cannot succeed.
 	if site != "" && relay.Site != site {
 		return installationConnection{}, fmt.Errorf("%w: %s", errRelaySite, relay.Site)
 	}
@@ -1225,10 +1119,8 @@ func (s *Server) installationConnection(r *http.Request, site, relayID string) (
 	}, nil
 }
 
-// reachableAddresses are the advertised addresses a host on another
-// machine can use. The loopback stays only when nothing else is there:
-// then the profile is at least right for a host on the panel's machine,
-// and the warning says the rest.
+// reachableAddresses are the advertised addresses a host on another machine
+// can use.
 func (s *Server) reachableAddresses() []string {
 	var addresses, loopback []string
 	for _, address := range s.installation.AdvertisedAddresses {
@@ -1281,8 +1173,8 @@ func relayAddress(name string) string {
 	return net.JoinHostPort(name, relayPort)
 }
 
-// installationCA is the trust the host starts with: the whole bundle, so a
-// CA prepared for an exchange is already there, and the fingerprint of the
+// installationCA is the trust the host starts with: the whole bundle, so a CA
+// prepared for an exchange is already there, and the fingerprint of the
 // signing one, which the operator compares on the host.
 func (s *Server) installationCA(kind string) (installationCA, error) {
 	if s.trust == nil {
@@ -1318,12 +1210,8 @@ func (s *Server) installationRepository(kind string) installationRepository {
 	return repository
 }
 
-// agentConfigText composes the configuration file of an agent or a relay
-// for one placement.
-//
-// Text rather than a marshalled structure, because the file is read by
-// people first: the comments say what is not in it and why. The shape is
-// the one the packages ship, so a later edit by hand finds what it expects.
+// agentConfigText composes the configuration file of an agent or a relay for
+// one placement.
 func agentConfigText(kind, site, environment string, connection installationConnection) string {
 	var b strings.Builder
 	gateways := func(indent string) {
@@ -1378,28 +1266,20 @@ func agentConfigText(kind, site, environment string, connection installationConn
 	return b.String()
 }
 
-// yamlString quotes a value for a YAML file. The Go quoting is a subset of
-// the YAML double-quoted style, and it keeps an address with a stray
-// character from breaking the file.
+// yamlString quotes a value for a YAML file.
 func yamlString(value string) string {
 	return strconv.Quote(value)
 }
 
 // installationFamilies composes the commands per distribution family.
-//
-// The commands put the files on the host with here-documents, so one paste
-// carries the content and the operator does not copy a file across a
-// terminal by hand. The token appears nowhere: the enrollment step asks
-// for it in a hidden prompt.
 func installationFamilies(kind string, repository installationRepository, channel string,
 	config installationFile, ca installationCA) []installationFamily {
 	account, service, enroll := agentAccount, "flotestro-agent.service",
 		"sudo -u flotestro-agent flotestro-agentctl enroll"
 	if kind == enrollment.KindRelay {
 		account, service = relayAccount, "flotestro-relay.service"
-		// The relay takes the token from a pipe; the shell reads it without
-		// an echo, so that it lands neither in the history nor in the
-		// process list.
+		// The relay takes the token from a pipe; the shell reads it without an echo,
+		// so that it lands neither in the history nor in the process list.
 		enroll = "read -rs -p 'Enrollment token: ' TOKEN; echo; printf '%s' \"$TOKEN\" | " +
 			"sudo -u flotestro-relay flotestro-relay enroll; unset TOKEN"
 	}

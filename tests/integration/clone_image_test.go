@@ -22,9 +22,8 @@ type cloneIdentity struct {
 	Fingerprint string
 }
 
-// enrollClone plays one first boot of a machine started from the image:
-// a fresh key, a fresh machine id, the image's token. The host is deleted
-// with the test the way the other synthetic hosts are.
+// enrollClone plays one first boot of a machine started from the image: a
+// fresh key, a fresh machine id, the image's token.
 func enrollClone(t *testing.T, h *harness, token, machine string) cloneIdentity {
 	t.Helper()
 	status, raw := h.enrollAttempt(t, token, machine, testCSR(t, machine))
@@ -63,22 +62,8 @@ func enrollClone(t *testing.T, h *harness, token, machine string) cloneIdentity 
 }
 
 // TestTwoClonesOfOneImageGetDistinctIdentities is the CI test the lifecycle
-// document asks for next to the golden image procedure: two machines
-// started from one image must end up as two hosts with two keys and two
-// certificates, and a clone that kept the image's machine id must not
-// become a second copy of the first.
-//
-// The image is stood in for by one batch order (max_uses 2) and the two
-// first boots by two enrollments with fresh keys and different machine
-// ids. The rule under test in the negative half is checkPurpose in
-// internal/gateway/enrollment_service.go: a token of purpose "new" does
-// not fit a machine id the panel already knows under an unretired host,
-// whatever order it came with - the attempt is refused (HTTP 403, the same
-// answer as every refused token), the reason duplicate_machine_id goes to
-// the audit trail and to the certificate step of the order, and nothing
-// is adopted or superseded: the first host keeps its row, its machine id
-// and its certificate. The token is not used up either, because the
-// refusal rolls the transaction back.
+// document asks for next to the golden image procedure: two machines started
+// from one image must end up as two hosts with two keys and two certificates,
 func TestTwoClonesOfOneImageGetDistinctIdentities(t *testing.T) {
 	h := newHarness(t)
 
@@ -153,10 +138,9 @@ func TestTwoClonesOfOneImageGetDistinctIdentities(t *testing.T) {
 		t.Errorf("the image's order is %q after its last use", used.Status)
 	}
 
-	// The negative half: a third machine from the image that kept the
-	// first one's /etc/machine-id, with an order bound to that machine id
-	// - the shape the Ansible role orders. The token fits the machine, the
-	// purpose does not: the machine is already a host.
+	// The negative half: a third machine from the image that kept the first one's
+	// /etc/machine-id, with an order bound to that machine id - the shape the
+	// Ansible role orders.
 	var bound orderView
 	h.do(http.MethodPost, "/api/v1/enrollment-requests", map[string]any{
 		"description": "clone that kept its machine-id", "site": "lab", "environment": "test",
@@ -174,9 +158,8 @@ func TestTwoClonesOfOneImageGetDistinctIdentities(t *testing.T) {
 		t.Fatalf("a clone with a known machine id was answered with %d: %s", status, body)
 	}
 
-	// Nothing was adopted: the first host is the same row with the same
-	// machine id and the same certificate, and no other host carries that
-	// machine id.
+	// Nothing was adopted: the first host is the same row with the same machine
+	// id and the same certificate, and no other host carries that machine id.
 	var kept struct {
 		ID             string `json:"id"`
 		MachineID      string `json:"machine_id"`
@@ -208,9 +191,9 @@ func TestTwoClonesOfOneImageGetDistinctIdentities(t *testing.T) {
 		t.Errorf("the machine %s is %d hosts, wanted 1", first.MachineID, rows)
 	}
 
-	// The refusal is named where the operator reads it: on the order, at
-	// the certificate step (the token itself was fine), and in the trail
-	// against the order. The token was not used up by the refusal.
+	// The refusal is named where the operator reads it: on the order, at the
+	// certificate step (the token itself was fine), and in the trail against the
+	// order.
 	var refused orderView
 	h.get("/api/v1/enrollment-requests/"+bound.ID, &refused)
 	if refused.Uses != 0 {

@@ -17,14 +17,6 @@ import (
 
 // The host timeline: what happened to one host, newest first, from every
 // record the panel keeps about it.
-//
-// The tasks, the audit trail, the sessions, the campaigns and the alerts
-// each have their own screen, and an operator looking at a host that
-// misbehaves since Tuesday has to open five of them and line the times up
-// by hand. The timeline lines them up in the database: one query over the
-// sources, each row cut to the same shape, ordered by time. Nothing here
-// is derived or guessed - every row is one record of one table, and its
-// reference points back at it.
 
 // TimelineItem is one event in the history of a host.
 type TimelineItem struct {
@@ -34,9 +26,8 @@ type TimelineItem struct {
 	// part of the page key and carries no other meaning.
 	ID    string `json:"id"`
 	Title string `json:"title"`
-	// Event is the moment of the record the row stands for: a task is
-	// created and finished, a session opened and ended, an alert fired
-	// and resolved. Empty for records that are one moment.
+	// Event is the moment of the record the row stands for: a task is created and
+	// finished, a session opened and ended, an alert fired and resolved.
 	Event     string `json:"event,omitempty"`
 	Detail    string `json:"detail,omitempty"`
 	State     string `json:"state,omitempty"`
@@ -51,12 +42,7 @@ type Ref struct {
 	ID   string `json:"id"`
 }
 
-// timelineSource is one table folded into the timeline. Every source
-// selects the same columns in the same order, so the union needs no
-// per-source handling: at, kind, id, title, event, detail, state,
-// error_code, actor, ref_type, ref_id. The host is $1 in every query,
-// always read as a uuid: the trail keys its target by text, and a
-// parameter read as two types in one statement is a parse error.
+// timelineSource is one table folded into the timeline.
 type timelineSource struct {
 	kind string
 	// permission is what the caller needs in the host's scope to see the
@@ -65,10 +51,8 @@ type timelineSource struct {
 	query      string
 }
 
-// lifecycleActions are the audit actions that change what the host is to
-// the fleet. They come from the trail like every other audit event, but
-// the timeline shows them as their own kind: a quarantine is not one more
-// line among the tag edits.
+// lifecycleActions are the audit actions that change what the host is to the
+// fleet.
 const lifecycleActions = "('host.quarantine', 'host.quarantine.release', 'host.retiring', 'host.decommission', " +
 	"'host.identity.recovery', 'host.identity.recovered', 'host.identity.recovery.lapsed')"
 
@@ -148,10 +132,7 @@ const (
 	maxTimelinePage     = 200
 )
 
-// timelineCursor is the key of the last row of the previous page. The
-// order is time, then kind, then identifier - all three fixed once a row
-// exists, so the page after a cursor is the same whatever was written in
-// the meantime.
+// timelineCursor is the key of the last row of the previous page.
 type timelineCursor struct {
 	At   time.Time
 	Kind string
@@ -177,11 +158,9 @@ func parseTimelineCursor(value string) (timelineCursor, error) {
 	return timelineCursor{At: at, Kind: parts[1], ID: parts[2], Set: true}, nil
 }
 
-// validateTimelineKey checks that the kind and the identifier of a cursor
-// are ones the timeline issues: the kind is a source, and the identifier
-// is the record key of that source - a number for the trail, a UUID with
-// an optional event suffix for everything else. A foreign cursor is an
-// invalid request, not a query the database gets to fail on.
+// validateTimelineKey checks that the kind and the identifier of a cursor are
+// ones the timeline issues: the kind is a source, and the identifier is the
+// record key of that source - a number for the trail, a UUID with an optional
 func validateTimelineKey(kind, id string) error {
 	known := false
 	for _, source := range timelineSources {
@@ -209,13 +188,8 @@ func (c timelineCursor) String() string {
 	return paging.Encode(paging.FormatTime(c.At), c.Kind, c.ID)
 }
 
-// handleHostTimeline serves the history of one host, newest first.
-//
-// Reading the host is the permission of the endpoint; each source then
-// asks for its own. A caller without the audit permission gets the
-// timeline without the trail, and the answer lists the sources it
-// covers, so a screen can say what is missing rather than show a quiet
-// history.
+// handleHostTimeline serves the history of one host, newest first. Reading the
+// host is the permission of the endpoint; each source then asks for its own.
 func (s *Server) handleHostTimeline(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
 	_, scope, ok := s.hostScope(w, r, hostID)
@@ -255,11 +229,8 @@ func (s *Server) handleHostTimeline(w http.ResponseWriter, r *http.Request) {
 			readsTrail = readsTrail || source.permission == authz.PermAuditRead
 		}
 	}
-	// The timeline is one more way of reading the trail, and a read of the
-	// trail is itself on the trail, however it was made. It is recorded
-	// the way the trail's own handlers record it - the same event, the
-	// same filter - and only when the trail is among the sources: a
-	// caller without the permission did not read it.
+	// The timeline is one more way of reading the trail, and a read of the trail
+	// is itself on the trail, however it was made.
 	if readsTrail {
 		extra := map[string]any{"limit": limit, "sources": kinds}
 		if cursor.Set {
@@ -308,9 +279,8 @@ func (s *Server) hostTimeline(ctx context.Context, hostID string, sources []time
 	if len(conditions) > 0 {
 		where = " where " + strings.Join(conditions, " and ")
 	}
-	// One row more than the page says whether there is a next page without
-	// a count over every source. The columns are named on the derived
-	// table, so the shape does not depend on which source comes first.
+	// One row more than the page says whether there is a next page without a
+	// count over every source.
 	args = append(args, limit+1)
 	const columns = "at, kind, id, title, event, detail, state, error_code, actor, ref_type, ref_id"
 	query := "select " + columns + " from (" + strings.Join(parts, " union all ") + ") as e (" + columns + ")" +

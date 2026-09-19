@@ -72,9 +72,6 @@ func TestLocalAccountOperationsHaveSeparatePermissions(t *testing.T) {
 }
 
 // TestPackageRepairValidation guards the boundaries of the repair operation.
-// An answer to a configuration question reaches debconf's input, where every
-// line is a separate setting: a value with a newline would allow appending
-// settings nobody asked for.
 func TestPackageRepairValidation(t *testing.T) {
 	valid := Payload{PackageRepair: &PackageRepairPayload{
 		Answers: []DebconfAnswer{{

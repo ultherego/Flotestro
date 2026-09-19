@@ -8,11 +8,9 @@ import (
 	"testing"
 )
 
-// The vectors are the public contract of the library: the panel, the agent
-// and the helper all have to produce these bytes and these digests for
-// these documents, and another implementation of the scheme has to as
-// well. A vector that stops matching is a change of the contract, not a
-// detail of the library.
+// The vectors are the public contract of the library: the panel, the agent and
+// the helper all have to produce these bytes and these digests for these
+// documents, and another implementation of the scheme has to as well.
 type vectorFile struct {
 	Documents []struct {
 		Name      string `json:"name"`
@@ -78,10 +76,8 @@ func TestEnvelopeVectors(t *testing.T) {
 	}
 }
 
-// A zero envelope, an envelope with a nil payload, one with an empty
-// document and one with "null" are the same thing and hash the same. The
-// first vector of the file is exactly that document, so the digest is also
-// pinned against it.
+// A zero envelope, an envelope with a nil payload, one with an empty document
+// and one with "null" are the same thing and hash the same.
 func TestEmptyPayloadHasOneCanonicalForm(t *testing.T) {
 	variants := map[string]Envelope{
 		"zero":  {},
@@ -112,9 +108,9 @@ func TestEmptyPayloadHasOneCanonicalForm(t *testing.T) {
 	}
 }
 
-// The digest is the digest of the canonical bytes and nothing else: the
-// same document spelled twice gives one digest, and the bytes returned are
-// what was hashed.
+// The digest is the digest of the canonical bytes and nothing else: the same
+// document spelled twice gives one digest, and the bytes returned are what was
+// hashed.
 func TestSpellingDoesNotChangeTheDigest(t *testing.T) {
 	first, firstBytes, err := SHA256(json.RawMessage(`{"b":2,"a":1}`))
 	if err != nil {

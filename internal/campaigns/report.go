@@ -12,10 +12,6 @@ import (
 
 // BuildReport summarises the targets of a campaign: the state totals, the
 // split into waves and the lists of hosts that need attention.
-//
-// The same function serves the screen of a campaign under way and the
-// record written when it ends, so the two never disagree about what a
-// failure or a changed plan is.
 func BuildReport(campaign Campaign, targets []Target) Report {
 	report := Report{
 		CampaignID: campaign.ID,
@@ -35,24 +31,19 @@ func BuildReport(campaign Campaign, targets []Target) Report {
 		if !target.State.Finished() {
 			waveOpen[target.Wave] = true
 		}
-		// The failures are the hosts the operator has to look at. A host
-		// that ended unknown is on the list for that reason - it needs a
-		// read of the host before anything is ordered again - and its own
-		// state on the row tells it from a change that failed. The totals
-		// count the two apart, as the document's report does.
+		// The failures are the hosts the operator has to look at.
 		if target.State == TargetFailed || target.State == TargetUnknown {
 			report.Failures = append(report.Failures, target)
 		}
-		// A host verifying its units without a reboot behind it is not
-		// waiting for one; only a reboot that was ordered keeps the host on
-		// this list until the verification settles it.
+		// A host verifying its units without a reboot behind it is not waiting for
+		// one; only a reboot that was ordered keeps the host on this list until the
+		// verification settles it.
 		if target.State == TargetRebooting || (target.State == TargetVerifying && target.RebootJobID != nil) {
 			report.RebootPending = append(report.RebootPending, target.HostID)
 		}
-		// A host that came back with a different plan ran nothing, and the
-		// report says so by name: the consent covered the old plan, and a
-		// campaign that quietly counted it among the skipped would hide the
-		// one host the operator has to look at again.
+		// A host that came back with a different plan ran nothing, and the report
+		// says so by name: the consent covered the old plan, and a campaign that
+		// quietly counted it among the skipped would hide the one host the operator
 		if target.State == TargetSkipped && target.ErrorCode == "plan_changed_offline" {
 			report.PlanChanged = append(report.PlanChanged, target)
 		}
@@ -75,10 +66,8 @@ func BuildReport(campaign Campaign, targets []Target) Report {
 	return report
 }
 
-// ReportView is the report as the API serves it: the summary together
-// with where it came from. Stored says the report is the record written
-// when the campaign ended; a report of a campaign under way is computed
-// on request and carries no generation time.
+// ReportView is the report as the API serves it: the summary together with
+// where it came from.
 type ReportView struct {
 	Report
 	Stored      bool       `json:"stored"`
@@ -152,9 +141,7 @@ func (s *Store) StoredReport(ctx context.Context, campaignID string) (ReportView
 
 // recordReport writes the final report of a campaign that just reached a
 // terminal state, inside the transaction of the transition: there is no
-// finished campaign without its report and no report of a campaign that
-// did not finish. A report already present stays as it is - the first
-// record is the record.
+// finished campaign without its report and no report of a campaign that did
 func (s *Store) recordReport(ctx context.Context, tx pgx.Tx, campaignID string) error {
 	campaign, err := s.getTx(ctx, tx, campaignID)
 	if err != nil {
@@ -171,9 +158,9 @@ func (s *Store) recordReport(ctx context.Context, tx pgx.Tx, campaignID string) 
 	if report.PlanChanged == nil {
 		report.PlanChanged = []Target{}
 	}
-	// The lists go in as JSON documents: the report is read back as a
-	// whole, never queried by host, and a column per list would have to
-	// grow with every kind of attention the report learns to draw.
+	// The lists go in as JSON documents: the report is read back as a whole,
+	// never queried by host, and a column per list would have to grow with every
+	// kind of attention the report learns to draw.
 	encoded := map[string][]byte{}
 	for name, value := range map[string]any{
 		"totals": report.Totals, "waves": report.Waves,
@@ -200,9 +187,8 @@ func (s *Store) recordReport(ctx context.Context, tx pgx.Tx, campaignID string) 
 	return nil
 }
 
-// targetsTx reads the whole target list inside a transaction, in the order
-// of the rollout. The paged reader serves the screens from the pool; the
-// report needs the rows as the transition sees them.
+// targetsTx reads the whole target list inside a transaction, in the order of
+// the rollout.
 func (s *Store) targetsTx(ctx context.Context, tx pgx.Tx, campaignID string) ([]Target, error) {
 	const query = `
 		select t.id, t.campaign_id, t.host_id, coalesce(h.hostname, ''), t.wave, t.position,

@@ -20,10 +20,7 @@ func countCertificates(t *testing.T, bundle []byte) int {
 }
 
 // TestTheRotationHasTwoPhases guards the condition that protects the fleet
-// from being cut off. A new CA has to be recognised and distributed before it
-// starts signing: a server certificate issued by a CA the agent does not know
-// ends in the loss of the connection to the whole fleet at the panel's next
-// restart.
+// from being cut off.
 func TestTheRotationHasTwoPhases(t *testing.T) {
 	dir := t.TempDir()
 	trust, err := EnsureTrust(dir)
@@ -121,8 +118,7 @@ func TestTheSetSurvivesARestart(t *testing.T) {
 }
 
 // TestThePreparationMarkerIsResilient checks the behaviour when the marker
-// file is missing. The panel is then to take the safe value rather than
-// refuse to start or assume the fleet already knows the new CA.
+// file is missing.
 func TestThePreparationMarkerIsResilient(t *testing.T) {
 	dir := t.TempDir()
 	trust, err := EnsureTrust(dir)
@@ -192,10 +188,9 @@ func TestWithdrawalProtectsTheHosts(t *testing.T) {
 	}
 }
 
-// An activation interrupted between the key and the certificate is
-// finished at the next open rather than reported as a broken CA: the key
-// goes first, the pending certificate stays until both are in place, and
-// that combination is unmistakable.
+// An activation interrupted between the key and the certificate is finished at
+// the next open rather than reported as a broken CA: the key goes first, the
+// pending certificate stays until both are in place, and that combination is
 func TestAnInterruptedActivationIsFinishedAtTheNextOpen(t *testing.T) {
 	dir := t.TempDir()
 	trust, err := EnsureTrust(dir)

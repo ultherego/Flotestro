@@ -11,12 +11,8 @@ import (
 	"github.com/ultherego/flotestro/internal/agentconfig"
 )
 
-// DefaultEnvironmentPath is the environment file of the service.
-//
-// It is the legacy form of the configuration: a host set up before agent.yaml
-// was introduced keeps its settings here, and the daemon still reads the
-// variables. The file also used to carry the enrollment token, which is why
-// nothing here ever prints its value.
+// DefaultEnvironmentPath is the environment file of the service. It is the
+// legacy form of the configuration: a host set up before agent.
 const DefaultEnvironmentPath = "/etc/flotestro/agent.env"
 
 // environmentSetting ties a variable of the environment file to the entry of
@@ -30,12 +26,8 @@ type environmentSetting struct {
 	Secret bool
 }
 
-// environmentSettings lists the variables in the order the daemon applies them.
-//
-// This mirrors the precedence in the daemon: an explicit flag, then a
-// variable, then the file, then the defaults. The tool sees no flags of the
-// daemon - the service unit passes none - so a variable is the only override
-// it can report.
+// environmentSettings lists the variables in the order the daemon applies
+// them.
 var environmentSettings = []environmentSetting{
 	{Variable: "FLOTESTRO_ENROLLMENT_TOKEN", Secret: true},
 	{Variable: "FLOTESTRO_ENROLLMENT_URL", Field: "connection.enrollment_url"},
@@ -50,9 +42,6 @@ var environmentSettings = []environmentSetting{
 }
 
 // readEnvironmentFile reads the variables of a systemd environment file.
-//
-// A missing file is an empty set rather than an error: the Arch package does
-// not carry one, and the service unit marks it optional too.
 func readEnvironmentFile(path string) (map[string]string, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -107,12 +96,8 @@ func configurationFromEnvironment(values map[string]string) (agentconfig.Config,
 	return overlayEnvironment(agentconfig.Defaults(), values)
 }
 
-// overlayEnvironment puts the variables on top of a configuration the way
-// the daemon does.
-//
-// A gateway variable replaces the whole list: whoever gives one address
-// wants exactly that one. The token is deliberately left out: it has no
-// place in a file that survives package updates and ends up in backups.
+// overlayEnvironment puts the variables on top of a configuration the way the
+// daemon does.
 func overlayEnvironment(cfg agentconfig.Config, values map[string]string) (agentconfig.Config, error) {
 	if !legacySettings(values) {
 		return cfg, nil
@@ -157,10 +142,6 @@ func overlayEnvironment(cfg agentconfig.Config, values map[string]string) (agent
 
 // overrides lists the variables that take precedence over the file, in the
 // order the daemon applies them and without a single secret value.
-//
-// Two sources: the process environment - the way a container or a test gives
-// its settings - and the environment file of the service, which the daemon
-// sees through systemd and this tool does not.
 func overrides(environ map[string]string, file map[string]string, filePath string) []string {
 	var lines []string
 	for _, setting := range environmentSettings {

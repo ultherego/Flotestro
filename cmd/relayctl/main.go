@@ -1,13 +1,5 @@
-// Command relayctl operates the Flotestro relay of a site.
-//
-// The tool is deliberately separate from the daemon, just as with the
-// agent. An operator who is setting a relay up or looking for the cause of a
-// site falling silent needs an answer at once and without the panel - and
-// the relay at that moment either does not come up or is just trying to
-// reach the centre.
-//
-// No command changes the state of the machine beyond an explicit command of
-// the operator, and none prints secrets.
+// Command relayctl operates the Flotestro relay of a site. The tool is
+// deliberately separate from the daemon, just as with the agent.
 package main
 
 import (
@@ -41,9 +33,8 @@ func runWithInput(args []string, in_ io.Reader, out, errOut io.Writer) int {
 	case "renew":
 		return renewCommand(args[1:], out, errOut)
 	case "version":
-		// The version number alone is not enough when a package behaves
-		// differently than it should: the first question is "which commit is
-		// this from".
+		// The version number alone is not enough when a package behaves differently
+		// than it should: the first question is "which commit is this from".
 		fmt.Fprintln(out, buildinfo.Describe("flotestro-relayctl"))
 		return 0
 	case "help", "-h", "--help":

@@ -12,10 +12,7 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// IdentityState describes the integration of the host with the domain. It is
-// collected in the inventory cycle, never in the heartbeat: querying the
-// directory several times a minute from every host of the fleet would be
-// exactly the load the document guards against.
+// IdentityState describes the integration of the host with the domain.
 type IdentityState struct {
 	Enrolled bool     `json:"enrolled"`
 	Domain   string   `json:"domain,omitempty"`
@@ -36,16 +33,13 @@ type IdentityState struct {
 	ConfigIssues      []string `json:"config_issues,omitempty"`
 	UnavailableReason string   `json:"unavailable_reason,omitempty"`
 
-	// SSSDOfflinePolicy is what sssd.conf says happens to logins during a
-	// directory outage. Nil means the helper did not read it at all; the
-	// panel judges the policy, the host only carries the facts.
+	// SSSDOfflinePolicy is what sssd. conf says happens to logins during a
+	// directory outage.
 	SSSDOfflinePolicy *SSSDOfflinePolicy `json:"sssd_offline_policy,omitempty"`
 }
 
 // SSSDOfflinePolicy is the offline behaviour SSSD was configured with for the
-// joined domain. A nil field is a value that could not be read; a key absent
-// from the file took the SSSD default and is named in Defaulted, so the panel
-// never mistakes an assumed value for a configured one.
+// joined domain.
 type SSSDOfflinePolicy struct {
 	CacheCredentials                 *bool    `json:"cache_credentials,omitempty"`
 	OfflineCredentialsExpirationDays *uint32  `json:"offline_credentials_expiration_days,omitempty"`
@@ -57,14 +51,7 @@ type SSSDOfflinePolicy struct {
 
 const ipaConfigPath = "/etc/ipa/default.conf"
 
-// ReadIdentityState collects the domain state locally. No query goes to the
-// directory server: what matters is the state of the host and not the content
-// of the directory.
-//
-// The host keytab and the SSSD cache database are readable only by root, so
-// that part goes through the helper. The agent has no access to them and should
-// have none: reading the keytab means reading the authentication material of
-// the host.
+// ReadIdentityState collects the domain state locally.
 func ReadIdentityState(ctx context.Context) IdentityState {
 	state := IdentityState{
 		SSSDInstalled: exists("/usr/sbin/sssd") || exists("/usr/lib/systemd/system/sssd.service"),
@@ -112,8 +99,6 @@ func (s IdentityState) Merge(privileged PrivilegedIdentity) IdentityState {
 }
 
 // sssdOfflinePolicyFromHelper takes the policy out of the helper's answer.
-// A helper from before the field sends nothing, and nothing is what the
-// panel then sees: an older helper must not look like a host without a cache.
 func sssdOfflinePolicyFromHelper(message *helperv1.SssdOfflinePolicy) *SSSDOfflinePolicy {
 	if message == nil {
 		return nil
@@ -193,10 +178,7 @@ func clockState(ctx context.Context) (skew *float64, synchronized bool) {
 	return skew, synchronized
 }
 
-// leaveDomain asks the helper to take the host out of its domain. The
-// executor mirrors the join: the helper's preflight is a refusal with the
-// checks attached, and the verification after the uninstall decides the
-// result - the command finishing is not the host being out.
+// leaveDomain asks the helper to take the host out of its domain.
 func (e *TaskExecutor) leaveDomain(ctx context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.DomainLeavePayload) *agentv1.TaskResult {
 	if payload == nil {
@@ -227,10 +209,8 @@ func (e *TaskExecutor) leaveDomain(ctx context.Context, task *agentv1.TaskEnvelo
 	// panel reads the checks and the verifications the way it already does.
 	detail := enrollResultToAgent(response.GetEnrollResult())
 	if !response.GetAccepted() {
-		// A refusal before the uninstall - the preflight, a held guard - is
-		// a rejection: nothing changed. A failure of the uninstall itself
-		// is not: the host may be half out, and the panel must not read it
-		// as untouched.
+		// A refusal before the uninstall - the preflight, a held guard - is a
+		// rejection: nothing changed.
 		status := agentv1.TaskResult_STATUS_FAILED
 		if response.GetErrorCode() == "preflight_failed" || response.GetErrorCode() == "locked" {
 			status = agentv1.TaskResult_STATUS_REJECTED
@@ -255,12 +235,8 @@ func (e *TaskExecutor) leaveDomain(ctx context.Context, task *agentv1.TaskEnvelo
 	}
 }
 
-// renewKeytab asks the helper to fetch a new key of a service principal
-// into the host's own keytab. The principal is checked here the way the
-// panel checked it, because an envelope is not trusted for its shape; the
-// helper checks it once more before the argument reaches ipa-getkeytab.
-// The key version number before and after is the result: a fetch that
-// left the number where it was replaced nothing, and the helper says so.
+// renewKeytab asks the helper to fetch a new key of a service principal into
+// the host's own keytab.
 func (e *TaskExecutor) renewKeytab(ctx context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.KeytabPayload) *agentv1.TaskResult {
 	if payload == nil {
@@ -296,10 +272,8 @@ func (e *TaskExecutor) renewKeytab(ctx context.Context, task *agentv1.TaskEnvelo
 		}
 	}
 	if !response.GetAccepted() {
-		// A refusal before the fetch - a held guard, a principal the helper
-		// would not pass on - is a rejection: nothing changed. A failure of
-		// the fetch itself is not: the directory has retired the old key
-		// already, and the panel must not read the service as untouched.
+		// A refusal before the fetch - a held guard, a principal the helper would
+		// not pass on - is a rejection: nothing changed.
 		status := agentv1.TaskResult_STATUS_FAILED
 		if response.GetErrorCode() == "locked" || response.GetErrorCode() == "malformed_request" {
 			status = agentv1.TaskResult_STATUS_REJECTED

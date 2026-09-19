@@ -14,9 +14,7 @@ import (
 // the file system the parser was given.
 const MainFile = "etc/sudoers"
 
-// maxFiles bounds the include walk. A policy is a handful of files; a
-// walk that goes further is a loop the visited set did not catch or a
-// directory somebody pointed at by mistake.
+// maxFiles bounds the include walk.
 const maxFiles = 256
 
 // ParseSystem reads the policy of the host the process runs on. Only root
@@ -25,9 +23,7 @@ func ParseSystem(root fs.FS, now time.Time) Snapshot {
 	return Parse(root, MainFile, now)
 }
 
-// Parse reads the policy starting at the given file. The file system is
-// rooted at "/": the includes name absolute paths and are resolved
-// against it, so a test can hand the parser a tree of its own.
+// Parse reads the policy starting at the given file.
 func Parse(root fs.FS, main string, now time.Time) Snapshot {
 	snapshot := Snapshot{Rules: []Rule{}, Defaults: []Default{}, Files: []File{}, ObservedAt: now.UTC()}
 	reader := &reader{root: root, visited: map[string]bool{}}
@@ -81,9 +77,9 @@ type reader struct {
 	problems []Problem
 }
 
-// walk reads one file and, in order, the files it includes at the place of
-// the include directive - that is where sudo puts them, and the order
-// decides which Defaults win.
+// walk reads one file and, in order, the files it includes at the place of the
+// include directive - that is where sudo puts them, and the order decides
+// which Defaults win.
 func (r *reader) walk(file, includedFrom string) []logicalLine {
 	display := "/" + strings.TrimPrefix(file, "/")
 	if r.visited[file] || len(r.files) >= maxFiles {
@@ -127,10 +123,7 @@ func (r *reader) walk(file, includedFrom string) []logicalLine {
 	return lines
 }
 
-// include resolves one include directive. A relative path is relative to
-// the directory of the including file, as sudo resolves it; "%h" in the
-// name stands for the hostname, which the parser does not know, so such a
-// directive is reported rather than guessed.
+// include resolves one include directive.
 func (r *reader) include(target string, directory bool, from, display string, line int) []logicalLine {
 	if strings.Contains(target, "%h") {
 		r.problems = append(r.problems, Problem{
@@ -151,9 +144,7 @@ func (r *reader) include(target string, directory bool, from, display string, li
 		r.files = append(r.files, File{Path: "/" + target, IncludedFrom: display, Reason: describe(err)})
 		return nil
 	}
-	// The files of a directory go in lexical order, the order sudo reads
-	// them in. A name with a dot or a trailing tilde is an editor's or a
-	// package manager's leftover and sudo skips it.
+	// The files of a directory go in lexical order, the order sudo reads them in.
 	names := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		name := entry.Name()
@@ -199,9 +190,7 @@ func includeDirective(text string) (target string, directory bool, ok bool) {
 	return "", false, false
 }
 
-// stripComment removes a comment from a line. A "#" starts a comment
-// unless it starts a uid ("#1000") or an include; a comment inside a
-// statement follows whitespace.
+// stripComment removes a comment from a line.
 func stripComment(text string) string {
 	if strings.HasPrefix(text, "#") {
 		if _, _, ok := includeDirective(text); ok {
@@ -253,9 +242,9 @@ func aliasKind(text string) string {
 
 func isAliasLine(text string) bool { return aliasKind(text) != "" }
 
-// collectAliases reads every alias definition before the rules are read:
-// sudo resolves aliases when it matches, so a definition below its use is
-// as good as one above it.
+// collectAliases reads every alias definition before the rules are read: sudo
+// resolves aliases when it matches, so a definition below its use is as good
+// as one above it.
 func collectAliases(lines []logicalLine, snapshot *Snapshot) aliasTable {
 	table := aliasTable{aliasUser: {}, aliasRunas: {}, aliasHost: {}, aliasCmnd: {}}
 	for _, line := range lines {
@@ -281,9 +270,8 @@ func collectAliases(lines []logicalLine, snapshot *Snapshot) aliasTable {
 	return table
 }
 
-// aliasName is the shape of an alias name: capitals, digits and
-// underscores, starting with a capital. ALL has the shape but is not an
-// alias.
+// aliasName is the shape of an alias name: capitals, digits and underscores,
+// starting with a capital.
 var aliasName = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 
 // resolve expands the aliases of one kind in a list. A negated alias
@@ -438,9 +426,7 @@ func (g grant) sameTerms(other grant) bool {
 		g.runAsSelf == other.runAsSelf && equalLists(g.tags, other.tags) && g.noPasswd == other.noPasswd
 }
 
-// parseCommandList reads a Cmnd_Spec_List. A run-as and the tags stay in
-// force for the commands after them until changed - that is sudo's rule,
-// and the reason "(ALL) NOPASSWD: ALL, /bin/ls" makes both passwordless.
+// parseCommandList reads a Cmnd_Spec_List.
 func parseCommandList(text string, aliases aliasTable) ([]grant, error) {
 	var grants []grant
 	current := grant{}

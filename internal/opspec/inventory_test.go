@@ -48,7 +48,6 @@ func TestAScopeOfValidModulesPasses(t *testing.T) {
 // TestARefreshTakesNoLock guards a property that follows from the operation
 // changing nothing: a read may run alongside an operation that is under way -
 // at worst it will see state halfway through a change, and that is the truth
-// about this moment.
 func TestARefreshTakesNoLock(t *testing.T) {
 	spec := ActionInventoryRefresh.Describe()
 	if spec.Mutating {

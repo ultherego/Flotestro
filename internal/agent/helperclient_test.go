@@ -6,10 +6,9 @@ import (
 	"github.com/ultherego/flotestro/internal/helper"
 )
 
-// A refusal of the request itself - the helper did not read it, does not
-// speak its version or does not know the action - is one answer whichever
-// module asked. An outcome of the operation keeps its own code: the
-// operator repairs a locked resource and a failed precondition differently.
+// A refusal of the request itself - the helper did not read it, does not speak
+// its version or does not know the action - is one answer whichever module
+// asked.
 func TestOnlyAContractRefusalOfTheHelperBecomesHelperRejected(t *testing.T) {
 	for _, code := range []string{helper.ErrorMalformed, helper.ErrorUnsupportedVersion, helper.ErrorUnknownAction} {
 		if !helperRefusedContract(code) {

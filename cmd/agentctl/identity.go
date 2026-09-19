@@ -31,13 +31,6 @@ func identityCommands(args []string, in_ io.Reader, out, errOut io.Writer) int {
 
 // identityResetCommand replaces the identity of the host with a recovery
 // token.
-//
-// Not an enrollment: the host already is in the fleet, and the panel issued
-// the token for exactly this host after an operator's decision. What the
-// command guards is the moment of the switch - the current generation works
-// until the new certificate has been received and has opened a session
-// with the gateway. A typed confirmation stands in for the "are you sure"
-// of the panel: the command line has no second person to approve.
 func identityResetCommand(args []string, in_ io.Reader, out, errOut io.Writer) int {
 	flags := flag.NewFlagSet("identity reset", flag.ContinueOnError)
 	flags.SetOutput(errOut)
@@ -72,9 +65,9 @@ func identityResetCommand(args []string, in_ io.Reader, out, errOut io.Writer) i
 		Now:            time.Now,
 		Identity:       agent.ReadIdentity,
 		ReadToken:      func() ([]byte, error) { return readToken(*tokenFile, in_, errOut) },
-		// A recovery is the way back for a host whose identity is gone, so
-		// it may not hang on one address: the new certificate is verified
-		// against whichever gateway of the configuration answers.
+		// A recovery is the way back for a host whose identity is gone, so it may
+		// not hang on one address: the new certificate is verified against whichever
+		// gateway of the configuration answers.
 		Gateways: cfg.Connection.GatewayURLs,
 		Recover: func(ctx context.Context, token []byte, gatewayURL string) (*agent.Identity, error) {
 			request, err := agent.LocalIdentityRequest(cfg.Agent.StateDir,
@@ -106,9 +99,6 @@ type identityReset struct {
 }
 
 // run carries the reset out.
-//
-// The exit codes follow the tool: 0 replaced, 1 a problem to fix, 2 a
-// refusal of the request itself - no confirmation or the wrong one.
 func (r identityReset) run(ctx context.Context, out, errOut io.Writer) int {
 	if r.DiscardPending {
 		discarded, err := agent.DiscardPendingAttempt(r.StateDir)
@@ -128,9 +118,7 @@ func (r identityReset) run(ctx context.Context, out, errOut io.Writer) int {
 		}
 	}
 
-	// The confirmation is the name of this host, typed out. Not a flag that
-	// says "yes": the operator has to look at which machine the command is
-	// being run on.
+	// The confirmation is the name of this host, typed out.
 	if r.Confirm == "" {
 		fmt.Fprintln(errOut, "confirmation_required: identity reset replaces the identity of this host; repeat the command with --confirm <hostname>")
 		return 2
@@ -168,9 +156,9 @@ func (r identityReset) run(ctx context.Context, out, errOut io.Writer) int {
 		return 1
 	}
 
-	// The gateways are tried in order: the identity the panel issued is
-	// one for the whole fleet, so any of them may verify it, and the one
-	// that did is printed next to the new certificate.
+	// The gateways are tried in order: the identity the panel issued is one for
+	// the whole fleet, so any of them may verify it, and the one that did is
+	// printed next to the new certificate.
 	var identity *agent.Identity
 	answered, err := endpoints.New(r.Gateways, 0, 0).Try(ctx,
 		func(ctx context.Context, gatewayURL string) error {
@@ -194,15 +182,12 @@ func (r identityReset) run(ctx context.Context, out, errOut io.Writer) int {
 	fmt.Fprintf(out, "Gateway:      %s\n", answered)
 	fmt.Fprintf(out, "Certificate:  valid until %s\n", identity.NotAfter.UTC().Format(time.RFC3339))
 	if current.Present && current.HostID != identity.HostID {
-		// A recovery token names one host; another answer means the order
-		// in the panel was for a different one. The switch has happened
-		// already, so the operator needs to know rather than be stopped.
+		// A recovery token names one host; another answer means the order in the
+		// panel was for a different one.
 		fmt.Fprintf(errOut, "warning: the panel answered with host/%s, this host was host/%s - check the recovery order\n",
 			identity.HostID, current.HostID)
 	}
-	// Revocation is a decision of the panel. This host has no way of
-	// revoking anything, and must have none: a host that could revoke
-	// certificates could revoke somebody else's.
+	// Revocation is a decision of the panel.
 	if r.RevokeOld {
 		fmt.Fprintln(out, "Revocation:   the previous certificate is revoked by the panel, not by this host; the recovery order carries revoke_old_immediately")
 	} else {

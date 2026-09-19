@@ -2,9 +2,8 @@ package opspec
 
 import "testing"
 
-// Every guide names a stage, a retry policy and both answers - what
-// happened and what to do - and no code appears twice. A code that raises
-// the failure rate has to be a failure of the change, never an exclusion.
+// Every guide names a stage, a retry policy and both answers - what happened
+// and what to do - and no code appears twice.
 func TestErrorGuidesAreComplete(t *testing.T) {
 	seen := map[string]bool{}
 	for _, guide := range ErrorGuides() {
@@ -31,10 +30,8 @@ func TestErrorGuidesAreComplete(t *testing.T) {
 	}
 }
 
-// The campaigns document names a few conditions differently from the code
-// the panel reports. Each such name is in the guide, says which code it
-// stands for, and gives the same advice as that code - so an operator
-// reading the document and one reading a job land on one answer.
+// The campaigns document names a few conditions differently from the code the
+// panel reports.
 func TestDocumentNamesAreAliasesOfReportedCodes(t *testing.T) {
 	for name, reported := range map[string]string{
 		"verification_failed":   "health_check_failed",
@@ -62,9 +59,8 @@ func TestDocumentNamesAreAliasesOfReportedCodes(t *testing.T) {
 			t.Errorf("%s is itself an alias (%q); a reported code has none", reported, target.Alias)
 		}
 	}
-	// The codes the machinery reports under their own names carry no
-	// alias: a reported code pointing at another would send the panel in
-	// a circle.
+	// The codes the machinery reports under their own names carry no alias: a
+	// reported code pointing at another would send the panel in a circle.
 	for _, code := range []string{"helper_rejected", "operation_non_cancelable", "inventory_stale", "dispatch_ambiguous"} {
 		guide, ok := ErrorGuideFor(code)
 		if !ok || guide.Alias != "" {
@@ -84,9 +80,9 @@ func TestAnAliasOfAnUnknownCodeIsRefused(t *testing.T) {
 	withAliases(reportedGuides, []documentAlias{{code: "x", reportedAs: "something_nobody_wrote"}})
 }
 
-// The refusals of the schedule user, the root grant, the missing validator
-// and the payload permission gate are operator-visible and have advice in
-// the guide; a code the panel shows without advice is a dead end.
+// The refusals of the schedule user, the root grant, the missing validator and
+// the payload permission gate are operator-visible and have advice in the
+// guide; a code the panel shows without advice is a dead end.
 func TestTheGuideCoversTheScheduleAndValidatorRefusals(t *testing.T) {
 	for _, code := range []string{"user_required", "unknown_user", "root_grant_required",
 		"validator_unavailable", "payload_permission_missing"} {

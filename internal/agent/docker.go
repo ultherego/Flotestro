@@ -248,7 +248,7 @@ func declaredObject(payload *opspec.DockerEnsurePayload) ([]byte, error) {
 	case payload.Container != nil:
 		// The references are written into the description here, on the way to the
 		// host: the order keeps them typed beside it, and the host needs them
-		// inside, because the digest of the description is what turns a rotated
+		// inside, because the digest of the description is what turns a rotated.
 		order := *payload.Container
 		order.EnvSecrets = nil
 		if len(payload.EnvSecrets) > 0 {

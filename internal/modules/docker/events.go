@@ -13,11 +13,6 @@ import (
 )
 
 // Event is one event of the container engine log.
-//
-// An event answers the question "what happened here", it is not the host
-// state: it does not go into the inventory and does not replace a state
-// read. A container killed by the OOM killer looks in the inventory the
-// same as a container stopped by hand - the difference is only here.
 type Event struct {
 	Time time.Time `json:"time"`
 	// Type is the object kind: container, image, network, volume.
@@ -26,24 +21,19 @@ type Event struct {
 	Action    string `json:"action"`
 	ActorID   string `json:"actor_id,omitempty"`
 	ActorName string `json:"actor_name,omitempty"`
-	// Attributes carries selected event attributes. The engine also puts
-	// all the container labels there, so the list is narrowed: the event
-	// log is not a place for a secret to leak from a label.
+	// Attributes carries selected event attributes.
 	Attributes map[string]string `json:"attributes,omitempty"`
 }
 
 // EventsSnapshot is the result of one log read.
 type EventsSnapshot struct {
 	Events []Event `json:"events"`
-	// Since and Until describe the window that was really read. Without
-	// them an empty list says nothing: silence in the window and no read
-	// look the same.
+	// Since and Until describe the window that was really read. Without them an
+	// empty list says nothing: silence in the window and no read look the same.
 	Since time.Time `json:"since"`
 	Until time.Time `json:"until"`
 	Types []string  `json:"types,omitempty"`
-	// Truncated marks a read cut off by a limit. A cut-off list without
-	// this marker would look complete - and the operator would draw
-	// conclusions from a log they did not see in full.
+	// Truncated marks a read cut off by a limit.
 	Truncated bool   `json:"truncated"`
 	Reason    string `json:"truncated_reason,omitempty"`
 }
@@ -56,9 +46,7 @@ type EventsOptions struct {
 	Max    int
 }
 
-// Log read bounds. They are here, not only in the panel, because it is the
-// host that pays for the read: a request without an end would stay on it
-// forever.
+// Log read bounds.
 const (
 	// MaxEventsWindow bounds the look back.
 	MaxEventsWindow = 24 * time.Hour
@@ -73,11 +61,8 @@ const (
 	defaultEventsWindow = time.Hour
 )
 
-// EventTypes lists the object kinds that may be asked about.
-//
-// The list is closed, because the filter goes to the Engine API. The
-// engine also knows daemon and plugin events - those answer no question of
-// the operator of this tab.
+// EventTypes lists the object kinds that may be asked about. The list is
+// closed, because the filter goes to the Engine API.
 var EventTypes = []string{"container", "image", "network", "volume"}
 
 // KnownEventType says whether the name is a known kind.
@@ -90,21 +75,15 @@ func KnownEventType(name string) bool {
 	return false
 }
 
-// eventAttributes lists the attributes that make it into the result.
-//
-// The engine puts all the object's labels into the event. Labels are at
-// times the place somebody wrote a token into - the event log is not a
-// place for it to leak, so the list is closed.
+// eventAttributes lists the attributes that make it into the result. The
+// engine puts all the object's labels into the event.
 var eventAttributes = []string{
 	"image", "exitCode", "signal", "container", "name",
 	"com.docker.compose.project", "com.docker.compose.service",
 }
 
-// Events reads the engine event log in a closed time window.
-//
-// The window is closed on both sides: until is computed at the start, not
-// left open. Thanks to that the read ends on its own, also when the panel
-// stopped listening.
+// Events reads the engine event log in a closed time window. The window is
+// closed on both sides: until is computed at the start, not left open.
 func Events(ctx context.Context, client *Client, opts EventsOptions) (EventsSnapshot, error) {
 	if client == nil {
 		return EventsSnapshot{}, fmt.Errorf("%w: no engine adapter", ErrUnavailable)
@@ -158,9 +137,9 @@ func Events(ctx context.Context, client *Client, opts EventsOptions) (EventsSnap
 		snapshot.Reason = fmt.Sprintf("the read limit of %d bytes was reached",
 			MaxEventsSize)
 	case errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil:
-		// The end of the window is a normal end of the read, not a failure:
-		// the engine keeps the stream open until until and sometimes does
-		// not close it itself.
+		// The end of the window is a normal end of the read, not a failure: the
+		// engine keeps the stream open until until and sometimes does not close it
+		// itself.
 	default:
 		return snapshot, err
 	}

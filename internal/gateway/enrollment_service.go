@@ -25,10 +25,7 @@ import (
 // EnrollmentService accepts the hosts that have no identity yet. It is the
 // only endpoint available without a client certificate.
 type EnrollmentService struct {
-	// certIssuer signs the identity certificates. An interface rather than an
-	// authority: moving the CA key into an HSM is to change the
-	// implementation rather than this service and the protocol of the
-	// agent.
+	// certIssuer signs the identity certificates.
 	certIssuer issuer.Issuer
 	relays     *relays.Store
 	hosts      *hosts.Store
@@ -36,13 +33,12 @@ type EnrollmentService struct {
 	audit      *audit.Recorder
 	log        *slog.Logger
 	// The limits of the public door: per source address and per machine
-	// identifier, so neither a guessing client nor a looping installer
-	// gets more than a few attempts a minute.
+	// identifier, so neither a guessing client nor a looping installer gets more
+	// than a few attempts a minute.
 	perIP      *rateLimiter
 	perMachine *rateLimiter
-	// helperSigner signs the trust bundle a new host hands to its root
-	// helper: the host identifier and the panel's capability keys. Nil is a
-	// panel without a signing key, and then no bundle goes out.
+	// helperSigner signs the trust bundle a new host hands to its root helper:
+	// the host identifier and the panel's capability keys.
 	helperSigner *helpercap.Signer
 }
 
@@ -71,9 +67,7 @@ func NewEnrollmentService(certIssuer issuer.Issuer, hostStore *hosts.Store,
 // knocks too often. It says nothing about the token.
 var ErrTooManyAttempts = errors.New("too many enrollment attempts; try again in a minute")
 
-// throttle applies the limits of the public door. A refusal goes on the
-// trail once a minute per key: the operator is to see that somebody is
-// knocking, not to drown in the knocks.
+// throttle applies the limits of the public door.
 func (s *EnrollmentService) throttle(ctx context.Context, req *connect.Request[agentv1.EnrollRequest]) error {
 	ip := peerHost(req.Peer().Addr)
 	machineID := req.Msg.GetMachineId()
@@ -122,10 +116,6 @@ func peerHost(addr string) string {
 
 // relayAttestation describes the relay that forwarded the registration of a
 // host.
-//
-// Empty means a direct registration. The distinction matters: a token tied to
-// a site must not work outside it, and a token without a tie works the same
-// way over both paths.
 type relayAttestation struct {
 	ID   string
 	Site string
@@ -140,18 +130,14 @@ func (s *EnrollmentService) Enroll(ctx context.Context,
 	}
 	response, err := s.enrollThroughRelay(ctx, req.Msg, relayAttestation{})
 	if err == nil {
-		// The address paid for a guess and made none: a fleet behind one
-		// NAT registers at the panel's pace, not at ten hosts a minute.
-		// The machine keeps paying - one machine registering over and
-		// over is the case the second limit is for.
+		// The address paid for a guess and made none: a fleet behind one NAT
+		// registers at the panel's pace, not at ten hosts a minute.
 		s.perIP.refund(peerHost(req.Peer().Addr))
 	}
 	return response, err
 }
 
-// enrollThroughRelay handles the registration of a host. The whole operation
-// is one transaction: the token, the host, the certificate and the audit event
-// either come into being together or not at all.
+// enrollThroughRelay handles the registration of a host.
 func (s *EnrollmentService) enrollThroughRelay(ctx context.Context,
 	msg *agentv1.EnrollRequest, viaRelay relayAttestation,
 ) (*connect.Response[agentv1.EnrollResponse], error) {
@@ -177,9 +163,7 @@ func (s *EnrollmentService) enrollThroughRelay(ctx context.Context,
 	result, err := s.tokens.Redeem(ctx, tx, attempt)
 	if err != nil {
 		if errors.Is(err, enrollment.ErrInvalidToken) {
-			// A refusal is an audit event just as a success is. The reason
-			// stays in the audit of the server; the agent always gets the same
-			// answer, so that tokens cannot be guessed from it.
+			// A refusal is an audit event just as a success is.
 			var denial *enrollment.Denial
 			if !errors.As(err, &denial) {
 				denial = &enrollment.Denial{Code: "invalid_token"}
@@ -192,18 +176,15 @@ func (s *EnrollmentService) enrollThroughRelay(ctx context.Context,
 	scope := result.Scope
 
 	// The route of a registration is part of the scope rather than a detail of
-	// the network. A token tied to a relay and carried to another site must
-	// not register anything; a token without a tie works the same way over
-	// both paths.
+	// the network.
 	if err := checkRoute(scope, viaRelay); err != nil {
 		s.deny(ctx, msg, scope.TokenID, enrollment.DenialRelayScope, err.Error(),
 			map[string]any{"relay_id": nullableRelay(viaRelay.ID)})
 		return nil, connect.NewError(connect.CodePermissionDenied, enrollment.ErrInvalidToken)
 	}
 
-	// A repeat of an attempt whose answer was lost in the network: the agent
-	// gets the same certificate that has already been issued for it. Nothing
-	// is used up and nothing comes into being a second time.
+	// A repeat of an attempt whose answer was lost in the network: the agent gets
+	// the same certificate that has already been issued for it.
 	if replayed := result.Replay; replayed != nil {
 		if err := tx.Commit(ctx); err != nil {
 			return nil, connect.NewError(connect.CodeInternal, err)
@@ -227,17 +208,13 @@ func (s *EnrollmentService) enrollThroughRelay(ctx context.Context,
 		}), nil
 	}
 
-	// The token settles what comes into being. Registering a relay with a
-	// token issued for an agent would be a silent change of a trust boundary:
-	// a relay terminates the sessions of the agents and attests their
-	// identity.
+	// The token settles what comes into being.
 	if scope.Kind == enrollment.KindRelay {
 		return s.enrollRelay(ctx, tx, msg, scope)
 	}
 
-	// The purpose of the order settles what may be done with a machine the
-	// panel already knows. Without it every token would be a key to taking
-	// over the identity of a running host.
+	// The purpose of the order settles what may be done with a machine the panel
+	// already knows.
 	if err := s.checkPurpose(ctx, tx, msg, scope); err != nil {
 		s.deny(ctx, msg, scope.TokenID, purposeDenialCode(err), err.Error(),
 			map[string]any{"purpose": scope.Purpose})
@@ -272,9 +249,9 @@ func (s *EnrollmentService) enrollThroughRelay(ctx context.Context,
 			return nil, connect.NewError(connect.CodeInternal, err)
 		}
 	}
-	// The owner and the tags of the order land with the host row: the
-	// operator wrote them when ordering the installation, so the host is
-	// somebody's and tagged from its first second in the fleet.
+	// The owner and the tags of the order land with the host row: the operator
+	// wrote them when ordering the installation, so the host is somebody's and
+	// tagged from its first second in the fleet.
 	if err := s.hosts.ApplyEnrollmentFacts(ctx, tx, hostID, scope.Owner, scope.Tags); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -287,9 +264,8 @@ func (s *EnrollmentService) enrollThroughRelay(ctx context.Context,
 			Outcome: audit.OutcomeFailure,
 			Detail:  map[string]any{"reason": "invalid_csr", "error": err.Error()},
 		})
-		// The order is what the operator watches: a refused CSR is to show
-		// up on the installation screen, not only under a host that does
-		// not exist yet.
+		// The order is what the operator watches: a refused CSR is to show up on the
+		// installation screen, not only under a host that does not exist yet.
 		s.deny(ctx, msg, scope.TokenID, enrollment.DenialCSRInvalid,
 			"the certificate request was refused", map[string]any{"host_id": hostID})
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
@@ -315,8 +291,8 @@ func (s *EnrollmentService) enrollThroughRelay(ctx context.Context,
 	}
 
 	// The attempt is written in the same transaction as the host and the
-	// certificate: a write after the commit might not arrive, and the
-	// idempotence would then be only apparent.
+	// certificate: a write after the commit might not arrive, and the idempotence
+	// would then be only apparent.
 	if err := s.tokens.RecordAttempt(ctx, tx, scope.TokenID, attempt, enrollment.Replay{
 		HostID: hostID, CertificatePEM: issued.PEM, CABundlePEM: trust,
 		CertificateSerial: issued.Serial,
@@ -341,9 +317,8 @@ func (s *EnrollmentService) enrollThroughRelay(ctx context.Context,
 	}); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	// The screen of the order is told in the same transaction: the
-	// notification leaves with the commit and never for a registration
-	// that was rolled back.
+	// The screen of the order is told in the same transaction: the notification
+	// leaves with the commit and never for a registration that was rolled back.
 	s.announce(ctx, tx, events.EnrollmentChange{
 		RequestID: scope.TokenID, Change: events.EnrollmentRedeemed,
 		Site: scope.Site, Environment: scope.Environment,
@@ -362,19 +337,14 @@ func (s *EnrollmentService) enrollThroughRelay(ctx context.Context,
 		CertificatePem: issued.PEM,
 		CaBundlePem:    trust,
 		NotAfter:       timestamppb.New(issued.NotAfter),
-		// The helper of the new host takes its identity and the panel's
-		// capability keys from this bundle, signed, rather than from what
-		// the agent says about itself.
+		// The helper of the new host takes its identity and the panel's capability
+		// keys from this bundle, signed, rather than from what the agent says about
+		// itself.
 		HelperTrust: s.helperTrustFor(hostID),
 	}), nil
 }
 
 // enrollRelay registers the relay of a site and issues a certificate for it.
-//
-// A relay gets an identity of a kind other than a host: the panel reads the
-// kind from the URI SAN, so a certificate of a relay cannot impersonate an
-// agent or the other way round. The scope of a relay comes from the token and
-// limits which hosts it may mediate for.
 func (s *EnrollmentService) enrollRelay(ctx context.Context, tx pgx.Tx,
 	msg *agentv1.EnrollRequest, scope enrollment.Scope,
 ) (*connect.Response[agentv1.EnrollResponse], error) {
@@ -409,8 +379,6 @@ func (s *EnrollmentService) enrollRelay(ctx context.Context, tx pgx.Tx,
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	// The network names from the first CSR become a record in the registry.
-	// From then on the panel says which names the relay attests; a renewal
-	// does not change them.
 	if err := s.relays.SaveNames(ctx, tx, relayID, networkNames(issued)); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -444,13 +412,8 @@ func (s *EnrollmentService) enrollRelay(ctx context.Context, tx pgx.Tx,
 	}), nil
 }
 
-// checkPurpose guards that the order matches what is really happening.
-//
-// The distinction is the whole point of this function. "A new host" means a
-// machine the panel does not know: a token with that purpose must not take
-// over the identity of a running machine, even when somebody gives its
-// machine_id. "A replacement of an identity" means the specific host named
-// when ordering - and only it.
+// checkPurpose guards that the order matches what is really happening. The
+// distinction is the whole point of this function.
 func (s *EnrollmentService) checkPurpose(ctx context.Context, tx pgx.Tx,
 	msg *agentv1.EnrollRequest, scope enrollment.Scope) error {
 	existing, err := s.hosts.IDByMachineID(ctx, tx, msg.GetMachineId())
@@ -460,12 +423,9 @@ func (s *EnrollmentService) checkPurpose(ctx context.Context, tx pgx.Tx,
 	switch scope.Purpose {
 	case enrollment.PurposeNew:
 		if existing != "" {
-			// A retired host holds its machine identifier for the retention
-			// period: the machine that left the fleet does not come back as
-			// a new host on the strength of a token alone. After that the
-			// retired row lets the identifier go, and the machine is a
-			// stranger again - with the history of the old host kept under
-			// the old row.
+			// A retired host holds its machine identifier for the retention period: the
+			// machine that left the fleet does not come back as a new host on the
+			// strength of a token alone.
 			retired, until, err := s.hosts.RetiredMachine(ctx, tx, existing)
 			if err != nil {
 				return err
@@ -486,9 +446,8 @@ func (s *EnrollmentService) checkPurpose(ctx context.Context, tx pgx.Tx,
 		if scope.ExpectedHostID == "" {
 			return errors.New("recovery_without_host")
 		}
-		// A withdrawn host does not come back to the fleet through a recovery
-		// of its identity. The loss of trust is a decision of the operator and
-		// is taken back in the panel rather than with a token on the host.
+		// A withdrawn host does not come back to the fleet through a recovery of its
+		// identity.
 		host, err := s.hosts.Get(ctx, scope.ExpectedHostID)
 		if err != nil {
 			return err
@@ -499,9 +458,8 @@ func (s *EnrollmentService) checkPurpose(ctx context.Context, tx pgx.Tx,
 		if host.LifecycleState == hosts.StateRetired {
 			return errors.New("host_retired")
 		}
-		// A machine unknown to the panel is fine here: after a reinstall a
-		// host has a new machine_id, and we recover the identity by the named
-		// host_id. A known machine has to be the same host.
+		// A machine unknown to the panel is fine here: after a reinstall a host has
+		// a new machine_id, and we recover the identity by the named host_id.
 		if existing != "" && existing != scope.ExpectedHostID {
 			return errors.New("machine_id_other_host")
 		}
@@ -514,12 +472,6 @@ func (s *EnrollmentService) checkPurpose(ctx context.Context, tx pgx.Tx,
 }
 
 // deny records a refused attempt against the order it was made with.
-//
-// The order is the target, because that is what the operator watches on the
-// installation screen: the screen reads the last refusal of its order and
-// says why the host does not go on. An attempt with a token that matched no
-// order has nothing to be attached to and is recorded without a target. The
-// agent learns none of this - it gets the same answer for every reason.
 func (s *EnrollmentService) deny(ctx context.Context, msg *agentv1.EnrollRequest,
 	requestID, code, message string, extra map[string]any) {
 	detail := map[string]any{
@@ -537,11 +489,7 @@ func (s *EnrollmentService) deny(ctx context.Context, msg *agentv1.EnrollRequest
 		event.TargetType, event.TargetID = "enrollment_request", requestID
 	}
 	s.audit.Record(ctx, event)
-	// The order's screen hears of the refusal at once. The announcement
-	// carries the placement of the order, read back for it: the stream
-	// lets it through by where the order places the host, and a refusal
-	// without a placement would reach only a global reader. An attempt
-	// that matched no order has no screen to reach.
+	// The order's screen hears of the refusal at once.
 	if requestID == "" || s.hosts == nil {
 		return
 	}
@@ -552,11 +500,7 @@ func (s *EnrollmentService) deny(ctx context.Context, msg *agentv1.EnrollRequest
 	s.announce(ctx, s.hosts.Pool(), change)
 }
 
-// announce tells the open screens that an order turned. The enrollment
-// door has no bus of its own: the notification goes through the database,
-// the same way every other event reaches every instance of the panel. A
-// notification that fails to leave is a log line; the screen polls the
-// order anyway and misses nothing but a moment.
+// announce tells the open screens that an order turned.
 func (s *EnrollmentService) announce(ctx context.Context, through events.Notifier, change events.EnrollmentChange) {
 	if err := events.PublishEnrollment(ctx, through, change); err != nil {
 		s.log.Debug("the turn of an installation order was not announced",
@@ -565,8 +509,6 @@ func (s *EnrollmentService) announce(ctx context.Context, through events.Notifie
 }
 
 // denialMessage puts a token refusal into words the operator can act on.
-// The agent never sees these: they go to the order on the installation
-// screen, where the person who placed the order reads them.
 func denialMessage(code string) string {
 	switch code {
 	case enrollment.DenialTokenExpired:
@@ -587,9 +529,7 @@ func denialMessage(code string) string {
 }
 
 // purposeDenialCode names a purpose refusal the way the installation screen
-// does. Two of the internal reasons mean the same thing to the operator: the
-// machine is already in the fleet under another host, so a "new host" token
-// does not fit it. The remaining reasons keep their own names.
+// does.
 func purposeDenialCode(err error) string {
 	switch err.Error() {
 	case "machine_id_known", "machine_id_other_host":
@@ -601,21 +541,13 @@ func purposeDenialCode(err error) string {
 
 // networkNames gathers the names the panel issued in the certificate of a
 // relay.
-//
-// The source is the issued certificate rather than the request: it is the
-// certificate that settles what the relay really attests towards the agents of
-// its site.
 func networkNames(issued *issuer.Certificate) []string {
 	names := append([]string{}, issued.DNSNames...)
 	return append(names, issued.IPAddresses...)
 }
 
 // checkRoute guards that a registration arrived over a path the order allows.
-//
-// A relay terminates TLS, so it sees the token of its site. That is the price
-// of registering in an isolated site, and that is why the scope of a token is
-// to be narrow: an order tied to a relay works through it alone, and an order
-// of a site does not pass through the relay of another site.
+// A relay terminates TLS, so it sees the token of its site.
 func checkRoute(scope enrollment.Scope, viaRelay relayAttestation) error {
 	if viaRelay.ID == "" {
 		// A direct registration. An order tied to a relay must not go this

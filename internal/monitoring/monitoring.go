@@ -1,10 +1,5 @@
 // Package monitoring keeps the resource samples of the hosts, rolls them up,
 // evaluates the alert rules over them and holds the alerts and silences.
-//
-// The agent reads the kernel counters and sends a sample every interval;
-// the panel is the only place they go. There is no external metrics system
-// and no external alert manager: an installation has charts and alerts the
-// moment its hosts connect, and nothing to map its fleet onto.
 package monitoring
 
 import (
@@ -21,10 +16,7 @@ import (
 )
 
 const (
-	// SamplingInterval is how often an agent sends a sample. The gateway
-	// leaves the interval of the session configuration empty, so this is
-	// what every agent runs at - and what the freshness of a host is
-	// measured against.
+	// SamplingInterval is how often an agent sends a sample.
 	SamplingInterval = 60 * time.Second
 	// silentAfter is the age of the last sample past which a host counts as
 	// silent: three intervals, like the heartbeat.
@@ -32,70 +24,41 @@ const (
 	// rollupInterval is how often the finished quarter-hours are rolled up
 	// and the retention is applied.
 	rollupInterval = 15 * time.Minute
-	// evaluationInterval is how often the rules are evaluated. One
-	// sampling interval: evaluating more often would look at the same
-	// sample twice.
+	// evaluationInterval is how often the rules are evaluated. One sampling
+	// interval: evaluating more often would look at the same sample twice.
 	evaluationInterval = SamplingInterval
 
-	// DefaultRawRetention and DefaultRollupRetention are the retention of
-	// the raw samples and of the quarter-hour rollups: a week of readings
-	// at full resolution, a quarter of a year of quarter-hours. A week
-	// covers the question an operator asks on a Monday about a Saturday
-	// night; the rollups carry the capacity trend a purchase is argued
-	// from. Both are settings, and the raw samples are dropped a
-	// partition at a time, so a longer window costs storage rather than a
-	// sweep that holds the database.
+	// DefaultRawRetention and DefaultRollupRetention are the retention of the raw
+	// samples and of the quarter-hour rollups: a week of readings at full
+	// resolution, a quarter of a year of quarter-hours.
 	DefaultRawRetention    = 7 * 24 * time.Hour
 	DefaultRollupRetention = 90 * 24 * time.Hour
-	// DefaultMaxLateness is how long after it was taken a sample may still
-	// arrive and be stored. A relay whose link to the centre was down for a
-	// day drains its spool and every reading lands in the chart it belongs
-	// to; anything older is refused with a reason rather than drawn at the
-	// wrong moment.
+	// DefaultMaxLateness is how long after it was taken a sample may still arrive
+	// and be stored.
 	DefaultMaxLateness = 24 * time.Hour
-	// DefaultRawQueryWindow is the longest window a chart reads raw
-	// samples over. It is not a limit on the charts - the ranges do that -
-	// but the promise the retention is checked against: what the panel
-	// offers to show at full resolution.
+	// DefaultRawQueryWindow is the longest window a chart reads raw samples over.
 	DefaultRawQueryWindow = 24 * time.Hour
-	// DefaultClockSkewLimit is how far a host's clock may differ from the
-	// panel's before the sample is stamped with the panel's time instead.
-	// The host's clock is an observation, not an identity: the sample is
-	// identified by its boot and its sequence, so a stamp corrected here
-	// changes where the point is drawn and never which sample it is.
+	// DefaultClockSkewLimit is how far a host's clock may differ from the panel's
+	// before the sample is stamped with the panel's time instead.
 	DefaultClockSkewLimit = 5 * time.Minute
-	// DefaultPartitionsAhead is how many daily partitions of the raw
-	// samples exist before they are needed. An insert into a day no
-	// partition covers is an error, so the margin is the number of days
-	// the maintenance may fail to run without a fleet losing its samples.
+	// DefaultPartitionsAhead is how many daily partitions of the raw samples
+	// exist before they are needed.
 	DefaultPartitionsAhead = 3
-	// DefaultEvaluatorLease is how long one control-plane instance holds
-	// the right to evaluate the alert rules. Three renewals fit in it,
-	// like the ownership of a session: a renewal that fails once does not
-	// hand the fleet over, and an instance that stops renewing loses it
-	// within one evaluation interval.
+	// DefaultEvaluatorLease is how long one control-plane instance holds the
+	// right to evaluate the alert rules.
 	DefaultEvaluatorLease = 45 * time.Second
 	// evaluatorRenewEvery is how often the holder renews while it
 	// evaluates.
 	evaluatorRenewEvery = 15 * time.Second
-	// rollupCatchUp is how far back the rollup looks for buckets nobody
-	// queued. Every stored sample marks its bucket in the transaction that
-	// stored it, so this scan finds nothing on a healthy panel; it is the
-	// net under the rows a database held before the queue existed. Bounded
-	// on purpose: an unbounded one would read the whole retention window
-	// every quarter of an hour.
+	// rollupCatchUp is how far back the rollup looks for buckets nobody queued.
 	rollupCatchUp = 4 * rollupInterval
 	// rollupBatchSize is how many buckets one pass of the rollup claims.
 	rollupBatchSize = 500
 	// rollupMaxPasses bounds one run of the rollup, so a backlog is worked
 	// off over several runs rather than in one transaction that never ends.
 	rollupMaxPasses = 40
-	// identitySweepBatch and identitySweepPasses bound the deletion of the
-	// sample identities. They are the one part of the monitoring that is
-	// still deleted by the row - the identity cannot be partitioned by
-	// time, because the whole point of it is that it does not contain the
-	// host's clock - so it is deleted in bounded batches, like the rest of
-	// the housekeeping, and never as one statement over a day of a fleet.
+	// identitySweepBatch and identitySweepPasses bound the deletion of the sample
+	// identities.
 	identitySweepBatch  = 20000
 	identitySweepPasses = 16
 )
@@ -120,17 +83,12 @@ type Interface struct {
 
 // Sample is one reading of a host as it is stored.
 type Sample struct {
-	// BootID and Sequence identify the reading: the boot the agent runs on
-	// and the number of the sample within that boot, counted from one.
-	// Together with the host they are what a second delivery is recognised
-	// by. Both are empty on a sample from an agent that predates them;
-	// such a sample is deduplicated by its moment alone, as before.
+	// BootID and Sequence identify the reading: the boot the agent runs on and
+	// the number of the sample within that boot, counted from one.
 	BootID   string
 	Sequence uint64
-	// At is the moment the host says it took the reading and the moment
-	// the chart draws it at; ReceivedAt is when the panel got it. They
-	// differ by whatever the sample spent in a spool, and freshness is
-	// judged by the second one.
+	// At is the moment the host says it took the reading and the moment the chart
+	// draws it at; ReceivedAt is when the panel got it.
 	At              time.Time
 	ReceivedAt      time.Time
 	CPUPercent      float64
@@ -145,10 +103,7 @@ type Sample struct {
 	UptimeSeconds   uint64
 	Filesystems     []Filesystem
 	Interfaces      []Interface
-	// The agent's own footprint, as it read it from /proc/self. Nil is a
-	// value the agent could not read - or an agent too old to send one -
-	// and is stored as null, never as zero: the release gate reads these,
-	// and a zero would let a host it never measured pass.
+	// The agent's own footprint, as it read it from /proc/self.
 	AgentRSSBytes   *uint64
 	AgentCPUPercent *float64
 	AgentGoroutines *uint32
@@ -168,9 +123,7 @@ type Sample struct {
 type Options struct {
 	RawRetention    time.Duration
 	RollupRetention time.Duration
-	// MaxLateness is how old a sample may be on arrival and still be
-	// stored. Past it the panel answers the host with a terminal refusal
-	// and the gap stays a gap with a reason.
+	// MaxLateness is how old a sample may be on arrival and still be stored.
 	MaxLateness time.Duration
 	// RawQueryWindow is how far back the panel offers raw resolution.
 	RawQueryWindow time.Duration
@@ -212,14 +165,6 @@ func (o Options) withDefaults() Options {
 }
 
 // Validate refuses a configuration that throws data away by definition.
-//
-// Raw samples have to be kept for at least as long as the panel offers to
-// show them plus the longest a sample may take to arrive: with a shorter
-// retention the reading a relay delivers after its link comes back is
-// dropped by the sweep in the same hour it landed, and the chart the panel
-// promises at full resolution has a hole nobody ordered. The check runs
-// before the panel serves anything, because the alternative is finding out
-// from a missing week.
 func (o Options) Validate() error {
 	filled := o.withDefaults()
 	if filled.RawRetention < filled.RawQueryWindow+filled.MaxLateness {
@@ -235,9 +180,7 @@ func (o Options) Validate() error {
 	return nil
 }
 
-// maxPartitionsAhead bounds the margin. A partition is a table; a
-// configuration asking for a year of empty ones is a mistake, not a
-// preference.
+// maxPartitionsAhead bounds the margin.
 const maxPartitionsAhead = 60
 
 // Store is the database side of the monitoring.
@@ -245,9 +188,8 @@ type Store struct {
 	pool    *pgxpool.Pool
 	log     *slog.Logger
 	options Options
-	// instanceID names this control-plane process among the ones that
-	// share the database. It says who holds the evaluator's lease and
-	// nothing else; who holds it is read from the row every time.
+	// instanceID names this control-plane process among the ones that share the
+	// database.
 	instanceID string
 }
 
@@ -256,8 +198,8 @@ func NewStore(pool *pgxpool.Pool, log *slog.Logger, options Options) *Store {
 }
 
 // ClockSkewLimit and MaxLateness are what the gateway judges an arriving
-// sample by: how far the host's clock may be out before the panel's time
-// is used, and how old a sample may be before it is refused outright.
+// sample by: how far the host's clock may be out before the panel's time is
+// used, and how old a sample may be before it is refused outright.
 func (s *Store) ClockSkewLimit() time.Duration { return s.options.ClockSkewLimit }
 
 func (s *Store) MaxLateness() time.Duration { return s.options.MaxLateness }
@@ -266,10 +208,7 @@ func (s *Store) MaxLateness() time.Duration { return s.options.MaxLateness }
 // status screen.
 func (s *Store) Settings() Options { return s.options }
 
-// The codes the monitoring puts on a refusal, as the error guide lists
-// them. They travel to the host on the acknowledgement of a sample and to
-// the operator on the screen, so they are named once here rather than
-// written out at each place that sends one.
+// The codes the monitoring puts on a refusal, as the error guide lists them.
 const (
 	// ErrorSampleTooOld: the sample reached the panel older than the raw
 	// samples are kept for and was not stored.
@@ -281,10 +220,7 @@ const (
 	ErrorRetentionTooShort = "metrics_retention_too_short"
 )
 
-// RecordOutcome says what one delivery of a sample did. The gateway
-// answers the host with it: a sample the panel already holds is
-// acknowledged all the same, so the copy the agent kept for the resend can
-// go, and nothing is written a second time.
+// RecordOutcome says what one delivery of a sample did.
 type RecordOutcome string
 
 const (
@@ -298,24 +234,6 @@ const (
 )
 
 // Record stores a sample of a host and marks the host as reporting.
-//
-// A sample that arrives twice - the agent drained its spool after a broken
-// stream, the relay carried a record whose acknowledgement never got back -
-// is stored once. What makes it the same sample is the host, the boot the
-// agent runs on and the sequence within that boot, not the moment: a clock
-// that is stepped, or a virtual machine resumed from a snapshot, changes
-// the moment of every following reading, and identity by the clock would
-// then either count a resend twice or drop a genuinely new sample onto an
-// older one.
-//
-// The identity, the reading, the mark on the bucket and the freshness of
-// the host are one transaction. That is what lets the gateway acknowledge
-// after the commit and nowhere earlier: whatever the host is told, the
-// panel either holds the whole sample or holds none of it.
-//
-// A sample from an agent that sends no identity - one release older - is
-// stored under the old rule, the host and the moment. It keeps its charts;
-// what it does not have is a resend that is free.
 func (s *Store) Record(ctx context.Context, hostID string, sample Sample) (RecordOutcome, error) {
 	filesystems, err := json.Marshal(orEmptyFilesystems(sample.Filesystems))
 	if err != nil {
@@ -341,10 +259,7 @@ func (s *Store) Record(ctx context.Context, hostID string, sample Sample) (Recor
 			hostID, sample.BootID, int64(sample.Sequence), sample.At,
 			orNullTime(sample.ReceivedAt)).Scan(&taken)
 		if errors.Is(err, pgx.ErrNoRows) {
-			// The panel holds this reading already. Nothing is written -
-			// not even the freshness of the host, because a second
-			// delivery of an old sample says nothing new about the host -
-			// and the transaction is rolled back by the deferred call.
+			// The panel holds this reading already.
 			return OutcomeDuplicate, nil
 		}
 		if err != nil {
@@ -370,11 +285,7 @@ func (s *Store) Record(ctx context.Context, hostID string, sample Sample) (Recor
 		nullableUint64(sample.HelperRSSBytes), orNullTime(sample.ReceivedAt)); err != nil {
 		return OutcomeUnknown, err
 	}
-	// The quarter-hour this reading falls in has to be computed again. The
-	// mark is written here rather than left to the rollup to notice,
-	// because a reading that arrives late for a quarter the rollup has
-	// already finished is exactly the one nobody would notice: the
-	// rollup's own progress says that quarter is done.
+	// The quarter-hour this reading falls in has to be computed again.
 	if _, err := tx.Exec(ctx, `
 		insert into metric_rollup_dirty (host_id, bucket_at)
 		values ($1, date_trunc('hour', $2::timestamptz)
@@ -396,9 +307,7 @@ func (s *Store) Record(ctx context.Context, hostID string, sample Sample) (Recor
 }
 
 // orNullTime passes a moment the caller did not observe as null, so the
-// database stamps its own. The gateway does observe it - it is the moment
-// the message came off the stream - and a reading that then waits on a
-// busy pool is not thereby fresher than it is.
+// database stamps its own.
 func orNullTime(at time.Time) *time.Time {
 	if at.IsZero() {
 		return nil
@@ -463,10 +372,7 @@ func (s *Store) Run(ctx context.Context) {
 }
 
 func (s *Store) maintain(ctx context.Context) {
-	// The partitions of the days ahead come first. Everything else here
-	// delays a chart; a day with no partition to write into refuses every
-	// sample of the fleet, and that is the one failure of the maintenance
-	// that costs readings instead of time.
+	// The partitions of the days ahead come first.
 	if err := s.EnsurePartitions(ctx, time.Now()); err != nil && ctx.Err() == nil {
 		s.log.Error("the partitions of the raw samples were not prepared", "err", err)
 	}
@@ -478,27 +384,8 @@ func (s *Store) maintain(ctx context.Context) {
 	}
 }
 
-// Rollup recomputes every quarter-hour bucket that owes one.
-//
-// The previous rollup asked the newest row of host_metrics_15m where to
-// carry on from. That single mark is wrong the moment a fleet has more
-// than one kind of link: a host behind a relay whose line to the centre
-// was down for an hour delivers its readings after every directly
-// connected host has already pushed the mark past that hour, and those
-// readings are then never folded into a quarter at all. They sit in
-// host_metrics until the retention drops them, and the long chart of that
-// one host has a hole with no cause on any screen.
-//
-// Two things replace it. Every stored sample marks its own quarter in the
-// transaction that stored it, so a reading that is late for a quarter the
-// rollup finished long ago says so itself; and the progress mark is kept
-// per host, so no host's progress can speak for another's. The queue is
-// the working part - it is why late data is correct - and the mark is what
-// bounds the catch-up scan and what the panel can show as "rolled up
-// through" for one host.
-//
-// Only finished quarters are computed: the one that is running now would
-// have to be written again on the next pass anyway.
+// Rollup recomputes every quarter-hour bucket that owes one. The previous
+// rollup asked the newest row of host_metrics_15m where to carry on from.
 func (s *Store) Rollup(ctx context.Context) error {
 	if err := s.queueFinishedBuckets(ctx); err != nil {
 		return err
@@ -519,16 +406,9 @@ func (s *Store) Rollup(ctx context.Context) error {
 	return nil
 }
 
-// queueFinishedBuckets is the net under the queue: it looks over the last
-// hour for a bucket of a host that nobody marked, queues it, and moves
-// that host's mark to the quarter now running.
-//
-// On a healthy panel it finds nothing, because the mark is written with
-// the sample. What it does catch is the rows a database already held when
-// the queue was introduced, and any bucket whose mark was lost. The scan
-// is bounded by the hour rather than by the retention on purpose: an
-// unbounded one would read a week of a fleet's samples every quarter of an
-// hour to find, almost always, nothing.
+// queueFinishedBuckets is the net under the queue: it looks over the last hour
+// for a bucket of a host that nobody marked, queues it, and moves that host's
+// mark to the quarter now running.
 func (s *Store) queueFinishedBuckets(ctx context.Context) error {
 	const queue = `
 		with edge as (
@@ -565,17 +445,6 @@ func (s *Store) queueFinishedBuckets(ctx context.Context) error {
 
 // rollupBatch claims a batch of dirty buckets, recomputes exactly those and
 // clears them, all in one statement and so in one transaction.
-//
-// The claim skips the rows another instance holds, so two panels share the
-// queue instead of fighting over it. A sample that arrives for a bucket
-// while it is being recomputed waits on that row, and once the
-// recomputation has committed and the row is gone its mark goes in again:
-// the reading is never lost in the gap between the two.
-//
-// The network counters are cumulative, so a quarter keeps the last values
-// rather than an average of counters, and the footprint averages skip the
-// samples without one - a quarter with a single reading keeps that reading
-// rather than a mean dragged towards zero by the unknowns.
 func (s *Store) rollupBatch(ctx context.Context) (int64, error) {
 	const recompute = `
 		with claimed as (
@@ -660,11 +529,7 @@ func (s *Store) sweep(ctx context.Context) error {
 	if err := s.sweepIdentities(ctx); err != nil {
 		return err
 	}
-	// The quarter-hour rollups stay a delete by the row. A quarter is a
-	// sixtieth of the raw volume, so a day of them on a fleet of ten
-	// thousand hosts is around a million rows rather than fourteen
-	// million, and the sweep is bounded work rather than the thing that
-	// holds the oldest transaction in the database.
+	// The quarter-hour rollups stay a delete by the row.
 	if _, err := s.pool.Exec(ctx,
 		`delete from host_metrics_15m where at < now() - make_interval(secs => $1)`,
 		s.options.RollupRetention.Seconds()); err != nil {
@@ -676,20 +541,8 @@ func (s *Store) sweep(ctx context.Context) error {
 	return err
 }
 
-// sweepIdentities deletes the identities of the samples that can no longer
-// be delivered a second time.
-//
-// An identity is worth keeping exactly as long as a copy of its sample
-// could still arrive, and a sample older than the maximum lateness is
-// refused before the identity is ever consulted - so the identity of a
-// sample past that has nothing left to protect. An hour of slack covers a
-// delivery in flight while the setting is changed.
-//
-// This is the one part of the monitoring still deleted by the row: the
-// identity cannot be partitioned by time, because not containing the
-// host's clock is the whole point of it. It is deleted in bounded batches
-// like the rest of the housekeeping, so it never becomes the long
-// transaction it was meant to remove.
+// sweepIdentities deletes the identities of the samples that can no longer be
+// delivered a second time.
 func (s *Store) sweepIdentities(ctx context.Context) error {
 	horizon := (s.options.MaxLateness + time.Hour).Seconds()
 	for pass := 0; pass < identitySweepPasses; pass++ {
@@ -796,9 +649,8 @@ type Series struct {
 	LastSampleAt *time.Time
 }
 
-// Series reads the points of a host over a range: raw samples for the
-// short windows, rollups for the long ones. The latest point is always the
-// newest raw sample, whatever the range.
+// Series reads the points of a host over a range: raw samples for the short
+// windows, rollups for the long ones.
 func (s *Store) Series(ctx context.Context, hostID string, r Range) (Series, error) {
 	series := Series{Range: r, Points: []Point{}}
 	var samples []Sample
@@ -819,9 +671,8 @@ func (s *Store) Series(ctx context.Context, hostID string, r Range) (Series, err
 	return series, err
 }
 
-// Latest returns the newest raw sample of a host as a chart point, with
-// the rates against the sample before it, and the moment it was taken. Nil
-// for a host that never sent a sample.
+// Latest returns the newest raw sample of a host as a chart point, with the
+// rates against the sample before it, and the moment it was taken.
 func (s *Store) Latest(ctx context.Context, hostID string) (*Point, *time.Time, error) {
 	newest, err := s.samples(ctx, hostID, 0, 2)
 	if err != nil || len(newest) == 0 {
@@ -832,9 +683,8 @@ func (s *Store) Latest(ctx context.Context, hostID string) (*Point, *time.Time, 
 	return &latest, &latest.At, nil
 }
 
-// samples reads the raw samples of a host within the window, oldest first.
-// A window of zero means every sample; a limit above zero keeps the newest
-// ones.
+// samples reads the raw samples of a host within the window, oldest first. A
+// window of zero means every sample; a limit above zero keeps the newest ones.
 func (s *Store) samples(ctx context.Context, hostID string, window time.Duration, limit int) ([]Sample, error) {
 	query := `
 		select at, cpu_percent, load1, load5, load15, memory_total, memory_used,
@@ -973,13 +823,8 @@ func reverse(list []Sample) {
 	}
 }
 
-// toPoints turns samples ordered oldest first into chart points, computing
-// the network rates between consecutive samples.
-//
-// The first point has no previous counters and so no rates; its interface
-// list is empty rather than a list of zeros, because an unknown rate is not
-// a rate of zero. A counter that went backwards - a reboot, a reset of the
-// interface - yields no rate for that step either.
+// toPoints turns samples ordered oldest first into chart points, computing the
+// network rates between consecutive samples.
 func toPoints(samples []Sample) []Point {
 	points := make([]Point, 0, len(samples))
 	type counters struct {
@@ -1031,8 +876,8 @@ func toPoints(samples []Sample) []Point {
 }
 
 // Reporting counts the hosts that sent a sample within the last three
-// intervals and those that did not, among the hosts that are not retired
-// and within the given SQL condition over the alias h.
+// intervals and those that did not, among the hosts that are not retired and
+// within the given SQL condition over the alias h.
 func (s *Store) Reporting(ctx context.Context, visible string, args []any) (reporting, silent int, err error) {
 	params := append(append([]any{}, args...), silentAfter.Seconds())
 	cutoff := fmt.Sprintf("now() - make_interval(secs => $%d::double precision)", len(params))

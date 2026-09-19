@@ -17,10 +17,8 @@ type fleetIdentityStatus struct {
 	ByVerdict            map[string]int      `json:"by_verdict"`
 }
 
-// handleIdentityStatus describes the state of the directory connection and
-// of the hosts cut off from it. The two halves are independent: a directory
-// the panel cannot reach says nothing about which hosts still let users in,
-// and the fleet half is reported even without a directory connector.
+// handleIdentityStatus describes the state of the directory connection and of
+// the hosts cut off from it.
 func (s *Server) handleIdentityStatus(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorize(w, r, authz.PermIdentityRead, authz.GlobalScope, "identity", ""); !ok {
 		return
@@ -55,9 +53,9 @@ func (s *Server) handleIdentityStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	summary, err := s.directory.Ping(r.Context())
-	// The connector's own account of itself - its keytab, its last answer
-	// and its last failure, the age of its cache - is read after the ping,
-	// so that the ping just made is the call it reports.
+	// The connector's own account of itself - its keytab, its last answer and its
+	// last failure, the age of its cache - is read after the ping, so that the
+	// ping just made is the call it reports.
 	connector := s.directory.Health()
 	if err != nil {
 		// An unavailable directory is not a panel error: the state is
@@ -83,9 +81,7 @@ func (s *Server) handleIdentityStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // directoryUsers reads the live accounts, or with preserved=true the ones
-// removed with their entry kept. The two lists are served apart on purpose:
-// a preserved account belongs to no group and reaches no host, and mixing
-// it into the live list would count it where it does not belong.
+// removed with their entry kept.
 func directoryUsers(s *Server, r *http.Request) ([]freeipa.User, error) {
 	if r.URL.Query().Get("preserved") == "true" {
 		return s.directory.PreservedUsers(r.Context())
@@ -94,15 +90,12 @@ func directoryUsers(s *Server, r *http.Request) ([]freeipa.User, error) {
 }
 
 // directoryServices reads the Kerberos service principals of the hosts.
-// Reading which principal has a keytab is the whole of it: no keytab is
-// ever fetched, and the adapter has no command that would.
 func directoryServices(s *Server, r *http.Request) ([]freeipa.Service, error) {
 	return s.directory.Services(r.Context())
 }
 
-// directoryHandler builds a read handler for one directory resource.
-// Each of them requires the identity.read permission in the global scope:
-// the directory covers the whole fleet, not a single environment.
+// directoryHandler builds a read handler for one directory resource. Each of
+// them requires the identity.
 func directoryHandler[T any](s *Server, name string,
 	load func(*Server, *http.Request) ([]T, error)) http.HandlerFunc {
 	return directoryHandlerFor(s, name, authz.PermIdentityRead, load)

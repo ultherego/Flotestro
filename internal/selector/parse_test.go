@@ -8,9 +8,9 @@ import (
 	"testing"
 )
 
-// TestParseReadsTheTextForm: every key, the operators and the
-// combinators come out as the structure a JSON selector would have, so
-// the text form and the typed form compile to the same SQL.
+// TestParseReadsTheTextForm: every key, the operators and the combinators come
+// out as the structure a JSON selector would have, so the text form and the
+// typed form compile to the same SQL.
 func TestParseReadsTheTextForm(t *testing.T) {
 	cases := []struct {
 		name string
@@ -76,10 +76,9 @@ func TestParseReadsTheTextForm(t *testing.T) {
 	}
 }
 
-// TestParseRefusesWhatDoesNotParse: a text that does not hold together
-// is refused as a syntax error naming the place, and one that parses
-// into a selector no host can match is refused as an invalid selector -
-// both are ErrInvalid to a handler.
+// TestParseRefusesWhatDoesNotParse: a text that does not hold together is
+// refused as a syntax error naming the place, and one that parses into a
+// selector no host can match is refused as an invalid selector - both are
 func TestParseRefusesWhatDoesNotParse(t *testing.T) {
 	syntax := map[string]string{
 		"empty":                   ``,
@@ -173,9 +172,9 @@ func TestParseCompilesLikeJSON(t *testing.T) {
 	}
 }
 
-// TestKeysNameEveryLeaf: the catalogue the panel suggests from names
-// every leaf field the selector has, group references excepted, so a key
-// added to the structure is not missing from the grammar.
+// TestKeysNameEveryLeaf: the catalogue the panel suggests from names every
+// leaf field the selector has, group references excepted, so a key added to
+// the structure is not missing from the grammar.
 func TestKeysNameEveryLeaf(t *testing.T) {
 	e := &Expression{}
 	for _, fact := range e.leaves() {

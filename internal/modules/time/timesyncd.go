@@ -6,12 +6,6 @@ import (
 )
 
 // TimesyncdState is the state of the systemd-timesyncd daemon.
-//
-// timesyncd does not report the clock offset: it says whom it talked to
-// and what it got in reply, but does not compute how late the host is. That
-// is why the offset field stays empty and the panel measures it with its
-// own query - that is the whole difference between "the daemon runs" and
-// "the clock is good".
 type TimesyncdState struct {
 	ServerName     string
 	ServerAddress  string
@@ -24,10 +18,6 @@ type TimesyncdState struct {
 }
 
 // ParseTimedatectl reads the output of "timedatectl show".
-//
-// The host time is not taken from here: the agent stands on the same host,
-// so its own clock is the same clock, and "TimeUSec" is text for humans
-// that changes its form with the zone and the language.
 func ParseTimedatectl(output string) Snapshot {
 	snapshot := Snapshot{}
 	for _, line := range strings.Split(output, "\n") {
@@ -65,9 +55,8 @@ func ParseTimesync(output, source string) TimesyncdState {
 		case "ServerAddress":
 			state.ServerAddress = value
 		case "SystemNTPServers", "LinkNTPServers", "RuntimeNTPServers", "FallbackNTPServers":
-			// The entry source answers the question "where did it come
-			// from": a link server comes from DHCP, a fallback one from the
-			// systemd build.
+			// The entry source answers the question "where did it come from": a link
+			// server comes from DHCP, a fallback one from the systemd build.
 			origin := source
 			switch key {
 			case "LinkNTPServers":

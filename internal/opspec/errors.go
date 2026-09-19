@@ -27,7 +27,7 @@ type ErrorGuide struct {
 	Code string `json:"code"`
 	// Stage is where the code arises: materialize, preflight, planning,
 	// admission, dispatch, agent, helper, verify, reconcile, approval, cancel,
-	// startup for the states the panel refuses to start in, notification for the
+	// startup for the states the panel refuses to start in, notification for the.
 	Stage string      `json:"stage"`
 	Retry RetryPolicy `json:"retry"`
 	// What happened, in one sentence.

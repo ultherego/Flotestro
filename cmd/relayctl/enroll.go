@@ -16,13 +16,6 @@ import (
 
 // enrollmentCommand carries out the one-time admission of a relay into the
 // fleet.
-//
-// A separate command rather than a side effect of the start of the daemon:
-// enrollment is a one-time decision of the operator and requires a secret
-// that has no right to lie in the unit of a service. The daemon starts only
-// once the identity is there - and then it needs no token at all. The
-// daemon keeps its own "enroll" for the scripts that use it; this is the
-// same registration, from the tool the operator reaches for.
 func enrollmentCommand(args []string, in_ io.Reader, out, errOut io.Writer) int {
 	flags := flag.NewFlagSet("enroll", flag.ContinueOnError)
 	flags.SetOutput(errOut)
@@ -45,9 +38,7 @@ func enrollmentCommand(args []string, in_ io.Reader, out, errOut io.Writer) int 
 		}
 	}
 
-	// An identity that already works must not be replaced in passing. A
-	// relay that is to change its identity is revoked in the panel and
-	// registered anew with a fresh token - two deliberate decisions.
+	// An identity that already works must not be replaced in passing.
 	state := readIdentity(cfg.Relay.StateDir)
 	if state.Present && !state.Expired {
 		fmt.Fprintf(errOut, "%s: the relay is already registered as relay/%s (the certificate is valid until %s)\n",
@@ -74,9 +65,9 @@ func enrollmentCommand(args []string, in_ io.Reader, out, errOut io.Writer) int 
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 
-	// The same request the daemon makes: the name of the relay stands for
-	// the machine-id, and the network names go into the certificate so
-	// that the agents of the site can verify the relay by name.
+	// The same request the daemon makes: the name of the relay stands for the
+	// machine-id, and the network names go into the certificate so that the
+	// agents of the site can verify the relay by name.
 	identity, err := agent.Enroll(ctx, agent.IdentityRequest{
 		StateDir:        cfg.Relay.StateDir,
 		EnrollmentURL:   cfg.Upstream.EnrollmentURL,
@@ -101,9 +92,6 @@ func enrollmentCommand(args []string, in_ io.Reader, out, errOut io.Writer) int 
 }
 
 // enrollmentHint says what to do next for a refused enrollment.
-//
-// The panel gives every refusal of the token the same answer, so the hint
-// cannot name the reason; it can name where the reason is written down.
 func enrollmentHint(err error) string {
 	switch agent.ErrorCode(err) {
 	case agent.CodeTokenInvalid:

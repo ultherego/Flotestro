@@ -9,33 +9,20 @@ import (
 	"github.com/google/uuid"
 )
 
-// The rhythm of the buffer history.
-//
-// A relay reports itself once a minute, so that is the distance between
-// two raw points. The rollup and the retention run on the quarter-hour,
-// the same cadence the resource samples of the hosts are folded on, and
-// the rules are evaluated at every sampling interval.
+// The rhythm of the buffer history. A relay reports itself once a minute, so
+// that is the distance between two raw points.
 const (
 	SamplingInterval   = time.Minute
 	rollupInterval     = 15 * time.Minute
 	evaluationInterval = time.Minute
-	// maxSampleGap is how old the newest report may be and still count as
-	// a reading. Beyond it the relay is not quiet about its buffer - it is
-	// quiet altogether, which is what the silent state says.
+	// maxSampleGap is how old the newest report may be and still count as a
+	// reading.
 	maxSampleGap = 5 * SamplingInterval
-	// droppedWindow is the stretch the growth of the drop counter is read
-	// over. It is deliberately longer than the sampling interval: one lost
-	// heartbeat must not hide a drop.
+	// droppedWindow is the stretch the growth of the drop counter is read over.
 	droppedWindow = 15 * time.Minute
 )
 
 // The retention of the buffer history.
-//
-// Seven days of raw points cover "was this site cut off last night" and
-// the week an operator looks back over; ninety days of quarter-hour
-// rollups cover "has this spool been filling for a month". Both are
-// configurable, because a fleet of many relays pays for the raw days and
-// a small installation may want a year of the rollups.
 const (
 	DefaultRawRetention    = 7 * 24 * time.Hour
 	DefaultRollupRetention = 90 * 24 * time.Hour
@@ -61,18 +48,14 @@ func (o Options) withDefaults() Options {
 // at startup, before the sweep runs and before the panel serves.
 func (s *Store) SetRetention(options Options) { s.retention = options.withDefaults() }
 
-// Retention is how long the buffer history is kept. The endpoint answers
-// with it, so a window that reaches further back than the retention is
-// read as "not kept that long" rather than as "the relay was quiet".
+// Retention is how long the buffer history is kept.
 func (s *Store) Retention() Options { return s.retention.withDefaults() }
 
 // Sample is one buffer report of a relay as the history keeps it.
 type Sample struct {
 	RelayID    string
 	ReportedAt time.Time
-	// InstanceID names the process of the relay. A change of it between
-	// two samples is a restart, and that is the only thing that explains
-	// the drop counter going back to zero.
+	// InstanceID names the process of the relay.
 	InstanceID     string
 	BytesUsed      int64
 	BytesLimit     int64
@@ -84,10 +67,6 @@ type Sample struct {
 }
 
 // SampleOf renders a heartbeat as a row of the history.
-//
-// The limit is the spool's when the relay reports one and the old buffer
-// maximum otherwise: a relay from before the spool reported only the
-// memory buffer, and its history is to be readable next to a new one.
 func SampleOf(relayID string, heartbeat Heartbeat) Sample {
 	limit := heartbeat.SpoolBytesLimit
 	if limit <= 0 {
@@ -103,10 +82,6 @@ func SampleOf(relayID string, heartbeat Heartbeat) Sample {
 }
 
 // RecordSample writes one report of a relay into the history.
-//
-// A repeated report for the same instant overwrites rather than fails: a
-// relay that retries its heartbeat after a timeout must not be refused for
-// a row it has already written.
 func (s *Store) RecordSample(ctx context.Context, sample Sample) error {
 	const query = `
 		insert into relay_buffer_samples (relay_id, reported_at, instance_id, bytes_used,
@@ -146,30 +121,22 @@ type BufferPoint struct {
 	ItemCount    int   `json:"item_count"`
 	ItemCountMax int   `json:"item_count_max"`
 	DroppedTotal int64 `json:"dropped_total"`
-	// DroppedDelta is the growth of the drop counter since the previous
-	// point. It is empty across a restart and at the first point: the
-	// counter starts again with the process, and a difference taken across
-	// that would be a negative number nobody can read.
+	// DroppedDelta is the growth of the drop counter since the previous point.
 	DroppedDelta   *int64 `json:"dropped_delta"`
 	ActiveSessions int    `json:"active_sessions"`
 	UpstreamState  string `json:"upstream_state,omitempty"`
-	// Disconnected says the relay had no upstream at this point. On a
-	// rollup it is true when any report of the quarter said so, because a
-	// quarter with one such report is an outage too.
+	// Disconnected says the relay had no upstream at this point.
 	Disconnected bool `json:"disconnected"`
 	// Restarted marks a point whose process differs from the previous
 	// one's: the relay was restarted between them.
 	Restarted bool   `json:"restarted"`
 	Version   string `json:"version,omitempty"`
-	// Samples is how many reports the point is made of: one on a raw
-	// point, the reports of the quarter on a rollup. Zero reports are
-	// never a point at all - a gap stays a gap.
+	// Samples is how many reports the point is made of: one on a raw point, the
+	// reports of the quarter on a rollup.
 	Samples int `json:"samples"`
 }
 
-// UsedPercent is the fill of the buffer as a share of its limit. The
-// second result is false for a relay that reported no limit: an unknown
-// limit makes the share unknown, and an unknown share is not zero.
+// UsedPercent is the fill of the buffer as a share of its limit.
 func (p BufferPoint) UsedPercent() (float64, bool) {
 	if p.BytesLimit <= 0 {
 		return 0, false
@@ -189,10 +156,7 @@ type BufferRange struct {
 // Rollup says whether the range reads the quarter-hour rollups.
 func (r BufferRange) Rollup() bool { return r.Step > SamplingInterval }
 
-// The windows the buffer chart offers. Three hours and a day come from
-// the raw reports, because that is where a single lost minute matters; a
-// week, a month and a quarter come from the rollups, whose retention is
-// what makes them answer at all.
+// The windows the buffer chart offers.
 var bufferRanges = map[string]BufferRange{
 	"3h":  {Name: "3h", Window: 3 * time.Hour, Step: SamplingInterval},
 	"24h": {Name: "24h", Window: 24 * time.Hour, Step: SamplingInterval},
@@ -238,9 +202,9 @@ func (s *Store) BufferSamples(ctx context.Context, relayID string,
 	}
 	history.Points = markPoints(points)
 
-	// The latest raw report is read separately: a long window answers from
-	// the rollups, whose newest quarter is up to fifteen minutes behind,
-	// and the head of the page is to say what the relay reports now.
+	// The latest raw report is read separately: a long window answers from the
+	// rollups, whose newest quarter is up to fifteen minutes behind, and the head
+	// of the page is to say what the relay reports now.
 	latest, err := s.bufferRaw(ctx, relayID, maxSampleGap)
 	if err != nil {
 		return history, err
@@ -280,9 +244,9 @@ func (s *Store) bufferRaw(ctx context.Context, relayID string,
 		point.BytesUsedMax = point.BytesUsed
 		point.ItemCountMax = point.ItemCount
 		point.Samples = 1
-		// A relay that says nothing about its link is not a relay that
-		// says the link is up: an empty state stays empty and the point is
-		// not counted as an outage.
+		// A relay that says nothing about its link is not a relay that says the link
+		// is up: an empty state stays empty and the point is not counted as an
+		// outage.
 		point.Disconnected = point.UpstreamState != "" && point.UpstreamState != UpstreamConnected
 		points = append(points, point)
 	}
@@ -320,13 +284,8 @@ func (s *Store) bufferRollups(ctx context.Context, relayID string,
 	return points, rows.Err()
 }
 
-// markPoints fills in what one point alone cannot say: the growth of the
-// drop counter and the restarts.
-//
-// Both are differences against the previous point, and both are left
-// empty across a restart: the counter of a fresh process starts at zero,
-// so a difference taken over the restart would report a negative growth
-// or, worse, hide the drops of the process that ended.
+// markPoints fills in what one point alone cannot say: the growth of the drop
+// counter and the restarts.
 func markPoints(points []BufferPoint) []BufferPoint {
 	for i := range points {
 		if i == 0 {
@@ -339,9 +298,9 @@ func markPoints(points []BufferPoint) []BufferPoint {
 			continue
 		}
 		if points[i].DroppedTotal < previous.DroppedTotal {
-			// The counter went backwards without the process changing
-			// name: the relay is older than the instance identifier, and
-			// the only honest reading of that is a restart.
+			// The counter went backwards without the process changing name: the relay
+			// is older than the instance identifier, and the only honest reading of
+			// that is a restart.
 			points[i].Restarted = true
 			continue
 		}
@@ -353,15 +312,6 @@ func markPoints(points []BufferPoint) []BufferPoint {
 
 // Run rolls the buffer reports up, applies the retention and evaluates the
 // buffer rules until the context ends.
-//
-// It follows the shape of the resource samples of the hosts - raw rows, a
-// quarter-hour rollup, a retention sweep and rules evaluated over the
-// newest reading - but it is kept here rather than in the monitoring
-// store, because the shapes do not fit: a monitoring rule carries a host
-// selector and an alert carries a host that cannot be null, and a relay is
-// not a host. The retention deletes rows rather than dropping daily
-// partitions for the same reason the migration gives: a fleet of relays is
-// three orders of magnitude smaller than a fleet of hosts.
 func (s *Store) Run(ctx context.Context, log *slog.Logger) {
 	options := s.Retention()
 	rollup := time.NewTicker(rollupInterval)
@@ -395,12 +345,6 @@ func (s *Store) maintain(ctx context.Context, options Options, log *slog.Logger)
 }
 
 // RollupBuffer folds the finished quarter-hours into the rollup table.
-//
-// The rollup starts at the newest quarter already written and ends at the
-// start of the current one, so a quarter is written once complete and
-// rewritten only while it is the newest - a report that arrived late for
-// it is then counted. The drop counter is cumulative, so the quarter keeps
-// its last value rather than a mean of counters.
 func (s *Store) RollupBuffer(ctx context.Context, options Options) error {
 	options = options.withDefaults()
 	_, err := s.pool.Exec(ctx, `
@@ -475,9 +419,8 @@ const (
 	// MetricBufferUsedPercent is the fill of the spool as a share of its
 	// limit. Unknown for a relay that reports no limit.
 	MetricBufferUsedPercent = "relay_buffer_used_percent"
-	// MetricBufferDroppedIncrease is the growth of the drop counter over
-	// the evaluation window. It is never read across a restart: the
-	// counter starts again with the process.
+	// MetricBufferDroppedIncrease is the growth of the drop counter over the
+	// evaluation window.
 	MetricBufferDroppedIncrease = "relay_buffer_dropped_increase"
 )
 
@@ -569,15 +512,12 @@ func (s *Store) FiringBufferAlerts(ctx context.Context, relayID string) ([]Buffe
 type Reading struct {
 	RelayID string
 	Latest  Sample
-	// DroppedIncrease is the growth of the drop counter over the window,
-	// within one process of the relay. Empty when it cannot be said: a
-	// single report, or a restart inside the window.
+	// DroppedIncrease is the growth of the drop counter over the window, within
+	// one process of the relay.
 	DroppedIncrease *int64
 }
 
-// Value returns the reading of a metric. The second result is false when
-// nothing can be said - an unknown fill is not a fill of zero, and a rule
-// must not fire or resolve on it.
+// Value returns the reading of a metric.
 func (r Reading) Value(metric string) (float64, string, bool) {
 	switch metric {
 	case MetricBufferUsedPercent:
@@ -628,10 +568,9 @@ func (s *Store) readings(ctx context.Context, now time.Time) (map[string]Reading
 	}
 	defer rows.Close()
 
-	// The oldest report of each relay within the window that still belongs
-	// to the process reporting now: the growth is read between it and the
-	// newest one, so a relay that restarted inside the window contributes
-	// no growth at all rather than a difference across two counters.
+	// The oldest report of each relay within the window that still belongs to the
+	// process reporting now: the growth is read between it and the newest one, so
+	// a relay that restarted inside the window contributes no growth at all
 	oldest := map[string]Sample{}
 	result := map[string]Reading{}
 	for rows.Next() {
@@ -654,9 +593,8 @@ func (s *Store) readings(ctx context.Context, now time.Time) (map[string]Reading
 	}
 
 	for id, reading := range result {
-		// A reading older than a few heartbeats is not a reading: the
-		// relay is silent, which is a matter for the relay state rather
-		// than for its buffer.
+		// A reading older than a few heartbeats is not a reading: the relay is
+		// silent, which is a matter for the relay state rather than for its buffer.
 		if now.Sub(reading.Latest.ReportedAt) > maxSampleGap {
 			delete(result, id)
 			continue
@@ -675,14 +613,8 @@ func (s *Store) readings(ctx context.Context, now time.Time) (map[string]Reading
 	return result, nil
 }
 
-// EvaluateBufferRules runs every enabled buffer rule over every relay that
-// is reporting.
-//
-// An episode starts pending the first time the condition holds, fires once
-// it has held for the rule's window, and resolves the first time it does
-// not. A relay that says nothing advances no episode in either direction:
-// silence is not a resolution, and a rule must not resolve itself because
-// the site went off the air.
+// EvaluateBufferRules runs every enabled buffer rule over every relay that is
+// reporting.
 func (s *Store) EvaluateBufferRules(ctx context.Context, now time.Time) error {
 	rules, err := s.BufferRules(ctx)
 	if err != nil {

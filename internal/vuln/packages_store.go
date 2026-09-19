@@ -1,14 +1,5 @@
-// Package vuln correlates installed packages with the findings of the
-// security trackers of distributions.
-//
-// It is the distribution vendor that settles the matter, not an upstream
-// feed: Debian, Ubuntu and Fedora backport fixes into versions that still
-// look vulnerable by the upstream numbering. Comparing a range from NVD with
-// the version of a Debian package gives false alarms one way and misses the
-// other way.
-//
-// The panel does not guess: a package the feed says nothing about is an
-// undetermined state with a reason code - not a safe package.
+// Package vuln correlates installed packages with the findings of the security
+// trackers of distributions.
 package vuln
 
 import (
@@ -41,11 +32,6 @@ type PackageListState struct {
 
 // AdvisoryState describes what the panel knows about the vendor findings the
 // host knows from the metadata of its repositories.
-//
-// Separate from the state of the package list, because it is a separate
-// source and a separate cycle: the vendor releases fixes also when not a
-// single package on the host has changed. Without it the panel would refresh
-// the findings only when the list changed - that is, sometimes never.
 type AdvisoryState struct {
 	HostID string `json:"host_id"`
 	// Digest is the digest of the set of findings the panel holds.
@@ -68,15 +54,6 @@ func NewPackageStore(pool *pgxpool.Pool) *PackageStore {
 }
 
 // ReplaceImage swaps the whole image of a host in one transaction.
-//
-// One, because the package list and the vendor findings come from the same
-// read and describe the same moment. Written separately they could drift
-// apart: a new list with the previous findings gives an assessment that
-// never held on any host.
-//
-// A swap rather than a merge: a partial list is worse than a missing one,
-// because it looks like the full thing. Either the panel has an image from
-// one moment or it has none at all.
 func (m *PackageStore) ReplaceImage(ctx context.Context, hostID string,
 	pkgs []packages.InstalledPackage, state PackageListState,
 	advisories []HostAdvisory, advisoryState AdvisoryState) error {
@@ -158,12 +135,7 @@ func (m *PackageStore) ReplaceImage(ctx context.Context, hostID string,
 	return tx.Commit(ctx)
 }
 
-// AdvisoriesDigest computes the digest of the set of findings known to a
-// host.
-//
-// A digest rather than a mere count: the set changes also when the count
-// stays the same - the vendor raises the fixed version inside the same
-// advisory.
+// AdvisoriesDigest computes the digest of the set of findings known to a host.
 func AdvisoriesDigest(advisories []HostAdvisory) string {
 	lines := make([]string, 0, len(advisories))
 	for _, advisory := range advisories {

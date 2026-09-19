@@ -35,10 +35,9 @@ func testState() Snapshot {
 	}
 }
 
-// TestNetworkUsageComesFromContainers guards the most important property
-// of this view: the engine returns an empty container map in the network
-// list, so without the derivation from containers every network would look
-// abandoned - and would go under the prune.
+// TestNetworkUsageComesFromContainers guards the most important property of
+// this view: the engine returns an empty container map in the network list, so
+// without the derivation from containers every network would look abandoned -
 func TestNetworkUsageComesFromContainers(t *testing.T) {
 	state := testState()
 	linkUsage(&state)
@@ -77,9 +76,9 @@ func TestVolumeOfStoppedContainerIsInUse(t *testing.T) {
 	}
 }
 
-// TestSummaryCountsPruneCandidates guards that the counter talks about
-// objects that can really be removed: a predefined network is not a
-// candidate, so it must not bump the counter on every host.
+// TestSummaryCountsPruneCandidates guards that the counter talks about objects
+// that can really be removed: a predefined network is not a candidate, so it
+// must not bump the counter on every host.
 func TestSummaryCountsPruneCandidates(t *testing.T) {
 	state := testState()
 	linkUsage(&state)
@@ -131,9 +130,9 @@ func TestPruneRefusesMissing(t *testing.T) {
 	}
 }
 
-// TestPruneChecksWholeListUpFront guards that a busy object at the end of
-// the list stops the operation before the first one vanishes: a half-way
-// prune would leave the host in a state nobody asked for.
+// TestPruneChecksWholeListUpFront guards that a busy object at the end of the
+// list stops the operation before the first one vanishes: a half-way prune
+// would leave the host in a state nobody asked for.
 func TestPruneChecksWholeListUpFront(t *testing.T) {
 	state := testState()
 	linkUsage(&state)

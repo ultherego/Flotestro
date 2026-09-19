@@ -45,9 +45,8 @@ func (h *harness) previewOf(expression string) (int, []string) {
 	return preview.Count, preview.Sample
 }
 
-// TestSelectorNamesHostsByTheirHealthFacts: a selector on a health fact
-// picks exactly the hosts whose record carries the fact. A host that has
-// not reported the fact is in neither answer - unknown is not "none".
+// TestSelectorNamesHostsByTheirHealthFacts: a selector on a health fact picks
+// exactly the hosts whose record carries the fact.
 func TestSelectorNamesHostsByTheirHealthFacts(t *testing.T) {
 	h := newHarness(t)
 	fleet := h.factsHosts()
@@ -104,9 +103,9 @@ func TestSelectorNamesHostsByTheirHealthFacts(t *testing.T) {
 		nil, nil, http.StatusBadRequest)
 }
 
-// TestSelectorComparesTheAgentVersion: a version comparison picks the
-// hosts on one side of it, part by part; a host without a parseable
-// version is on neither side.
+// TestSelectorComparesTheAgentVersion: a version comparison picks the hosts on
+// one side of it, part by part; a host without a parseable version is on
+// neither side.
 func TestSelectorComparesTheAgentVersion(t *testing.T) {
 	h := newHarness(t)
 	fleet := h.factsHosts()
@@ -152,10 +151,9 @@ func TestSelectorComparesTheAgentVersion(t *testing.T) {
 		nil, nil, http.StatusBadRequest)
 }
 
-// TestAlertRuleScopesByTagGroupAndExpression: a rule scoped by a tag
-// covers the tagged host and nobody else, as the host page counts it; a
-// rule scoped by an expression is read with the campaign grammar; a rule
-// naming a group nobody created is refused with the name.
+// TestAlertRuleScopesByTagGroupAndExpression: a rule scoped by a tag covers
+// the tagged host and nobody else, as the host page counts it; a rule scoped
+// by an expression is read with the campaign grammar; a rule naming a group
 func TestAlertRuleScopesByTagGroupAndExpression(t *testing.T) {
 	h := newHarness(t)
 	lab := h.hosts()

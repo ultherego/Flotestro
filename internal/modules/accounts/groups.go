@@ -7,19 +7,12 @@ import (
 	"sync"
 )
 
-// DefaultPrivilegedGroups lists the groups whose membership is root by
-// another name on the distributions the fleet runs: sudo and wheel give
-// root directly, docker and lxd give it through the engine socket. The
-// list is a setting of the installation (FLOTESTRO_ACCOUNTS_PRIVILEGED_GROUPS);
-// this is what it says when nobody set it.
+// DefaultPrivilegedGroups lists the groups whose membership is root by another
+// name on the distributions the fleet runs: sudo and wheel give root directly,
+// docker and lxd give it through the engine socket.
 var DefaultPrivilegedGroups = []string{"sudo", "wheel", "docker", "lxd"}
 
-// PrivilegedGroupsEnv names the setting of the installation. It is read
-// here rather than by each binary's configuration: the control plane
-// judges an order by this list and the host reports memberships against
-// it, and a list that differed between the two would mean the panel
-// calling privileged what the host does not, or worse the other way
-// round.
+// PrivilegedGroupsEnv names the setting of the installation.
 const PrivilegedGroupsEnv = "FLOTESTRO_ACCOUNTS_PRIVILEGED_GROUPS"
 
 func init() {
@@ -27,9 +20,7 @@ func init() {
 }
 
 // LoadPrivilegedGroups takes the list from one setting value: group names
-// separated by commas or whitespace. An empty value leaves the default,
-// because an installation that set nothing did not mean "no group is
-// privileged".
+// separated by commas or whitespace.
 func LoadPrivilegedGroups(value string) {
 	if strings.TrimSpace(value) == "" {
 		return
@@ -52,10 +43,7 @@ func PrivilegedGroups() []string {
 	return append([]string(nil), privilegedGroups...)
 }
 
-// SetPrivilegedGroups replaces the list. Names are trimmed and lowered,
-// empty entries dropped, duplicates folded; an empty list means the
-// default, because an installation with no privileged group at all is not
-// a configuration anybody means.
+// SetPrivilegedGroups replaces the list.
 func SetPrivilegedGroups(groups []string) {
 	seen := map[string]bool{}
 	var cleaned []string

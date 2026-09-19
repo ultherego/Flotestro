@@ -80,8 +80,7 @@ func TestTheLocalProviderKeepsKeysAsFiles(t *testing.T) {
 }
 
 // Adopting the same material under the same name twice is fine; different
-// material under a taken name is refused. That is what makes the adoption
-// of the legacy key repeatable across an interrupted first start.
+// material under a taken name is refused.
 func TestAdoptionIsRepeatableAndRefusesDifferentMaterial(t *testing.T) {
 	ctx := context.Background()
 	provider, err := NewLocalProvider(filepath.Join(t.TempDir(), KeysDir), "")
@@ -111,9 +110,9 @@ func TestAdoptionIsRepeatableAndRefusesDifferentMaterial(t *testing.T) {
 	}
 }
 
-// A key may come from a systemd credential rather than a file of the
-// state directory; it is read, registered under the credential's name and
-// never written.
+// A key may come from a systemd credential rather than a file of the state
+// directory; it is read, registered under the credential's name and never
+// written.
 func TestAKeyMayComeFromASystemdCredential(t *testing.T) {
 	ctx := context.Background()
 	credentials := t.TempDir()

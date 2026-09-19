@@ -10,8 +10,8 @@ import (
 )
 
 // A file address answers like the remote feed: the content with a tag, a
-// repeat with the tag answers 304, and a missing file is a 404 rather than
-// an error - the sources treat those the way they treat the vendor's.
+// repeat with the tag answers 304, and a missing file is a 404 rather than an
+// error - the sources treat those the way they treat the vendor's.
 func TestFileAddressAnswersLikeAFeed(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "feed.json")

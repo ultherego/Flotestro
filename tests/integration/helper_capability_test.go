@@ -3,32 +3,16 @@
 package integration
 
 // The signed capability of the root helper (chapter 3 of the remediation
-// document). What the product promises, as read from the code:
-//
-//   - The scheduler mints an Ed25519-signed capability for every mutating
-//     task at dispatch, for a host whose agent announces that it forwards
-//     one (internal/scheduler/capability.go); the job.dispatch audit event
-//     carries its capability_id.
-//   - The agent forwards it to the helper untouched, the helper verifies
-//     it against its root-owned keyring and host identity, and the task
-//     runs (internal/helpercap, internal/helper/server.go).
-//   - The host reports the helper's mode in its Hello, which the panel
-//     shows as the adapter helper.capability with the mode among its
-//     features - one of observe, prefer, enforce true, or all false with a
-//     reason for a helper that has not said (internal/agent/capabilities.go).
-//
-// The lab runs the panel and the agents at the default mode, prefer: a
-// capability that is handed over is verified and a refusal reaches the
-// job, while an agent from before the capability still gets its tasks.
+// document).
 
 import (
 	"testing"
 	"time"
 )
 
-// TestAUnitRestartCarriesAVerifiedHelperCapability: a service restart
-// ordered through the API succeeds under prefer, and the dispatch event
-// on the trail names the capability the helper verified.
+// TestAUnitRestartCarriesAVerifiedHelperCapability: a service restart ordered
+// through the API succeeds under prefer, and the dispatch event on the trail
+// names the capability the helper verified.
 func TestAUnitRestartCarriesAVerifiedHelperCapability(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -68,9 +52,7 @@ func TestAUnitRestartCarriesAVerifiedHelperCapability(t *testing.T) {
 	}
 }
 
-// TestTheHostReportsItsHelperCapabilityMode: the host detail lists the
-// helper.capability adapter, and once the helper has answered the agent
-// the mode is one of the three and exactly one.
+// TestTheHostReportsItsHelperCapabilityMode: the host detail lists the helper.
 func TestTheHostReportsItsHelperCapabilityMode(t *testing.T) {
 	h := newHarness(t)
 	for _, family := range []string{"debian", "rhel"} {

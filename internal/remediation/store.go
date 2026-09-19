@@ -38,10 +38,6 @@ type Spec struct {
 }
 
 // Create records a plan together with its steps.
-//
-// Two plans must not run on one host at once: the steps of one assume the
-// state the previous one left, and a parallel plan changes that state under
-// them.
 func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, steps []Step) (*Plan, error) {
 	var running int
 	if err := tx.QueryRow(ctx,
@@ -113,11 +109,8 @@ func (s *Store) ForHost(ctx context.Context, hostID string, limit int) ([]Plan, 
 	return s.query(ctx, "where host_id = $1 order by created_at desc limit $2", hostID, limit)
 }
 
-// ForCampaignHost returns the plan a campaign started on a host - the
-// most recent one, should the campaign ever have started two.
-//
-// The plan carries no campaign column: the creator is the record of who
-// ordered it, and a campaign is recorded there like any other creator.
+// ForCampaignHost returns the plan a campaign started on a host - the most
+// recent one, should the campaign ever have started two.
 func (s *Store) ForCampaignHost(ctx context.Context, campaignID, hostID string) (*Plan, error) {
 	plans, err := s.query(ctx,
 		"where host_id = $1 and created_by = $2 order by created_at desc limit 1",

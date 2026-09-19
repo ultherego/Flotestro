@@ -104,7 +104,7 @@ func SecretValue(name string) (string, error) {
 
 	// Both forms at once is a refusal rather than a precedence rule: the two mean
 	// different things to whoever set them, and starting with one of them
-	// silently is how an installation signs with a secret nobody believes is in
+	// silently is how an installation signs with a secret nobody believes is in.
 	if valueSet && fileSet {
 		return "", &SecretError{Name: name, Reason: SecretReasonConflict}
 	}

@@ -137,9 +137,7 @@ func TestTheTwoNotationsOfPortsMeetEachOther(t *testing.T) {
 	}
 }
 
-// An application profile names ports the file does not hold. The panel says it
-// cannot compare the rule instead of inventing a drift - and, because it
-// cannot, it does not accuse the kernel rules either.
+// An application profile names ports the file does not hold.
 func TestAnApplicationProfileIsReportedAsNotComparable(t *testing.T) {
 	filed := UFWFileRules("ip", tuple("allow_in tcp any 0.0.0.0/0 any 0.0.0.0/0 dapp=OpenSSH", ""))
 	loaded := []Rule{{Family: "ip", Chain: "ufw-user-input", Text: `tcp dport 22 counter packets 0 bytes 0 accept`}}
@@ -190,9 +188,8 @@ func TestTheCommentIsNotReadAsTheVerdict(t *testing.T) {
 	}
 }
 
-// ufw writes the direction twice over its versions: as a suffix of the
-// action, and as a field of its own. Both are the same rule, and a rule read
-// with the wrong direction would be reported as two drifts at once.
+// ufw writes the direction twice over its versions: as a suffix of the action,
+// and as a field of its own.
 func TestTheDirectionIsReadInBothOfTheFormsUFWWritesIt(t *testing.T) {
 	for _, form := range []string{
 		"deny_out udp 53 0.0.0.0/0 any 0.0.0.0/0",

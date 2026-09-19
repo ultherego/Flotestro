@@ -57,9 +57,7 @@ func TestRunCommandSetsAWritableHome(t *testing.T) {
 	}
 	t.Cleanup(func() { runtimeDir = os.TempDir() })
 
-	// Tools such as dnf create files in HOME and XDG. The agent has no home
-	// directory, so the absence of those variables used to end in an error taken
-	// for a result.
+	// Tools such as dnf create files in HOME and XDG.
 	result := runCommand(context.Background(), 5*time.Second, "/usr/bin/env")
 	if !result.Ran {
 		t.Skip("/usr/bin/env is missing")
@@ -97,9 +95,8 @@ func TestInterpretNeedsRestarting(t *testing.T) {
 			want:   boolPtr(true),
 		},
 		{
-			// This is a regression: dnf without a writable HOME ends with code 1
-			// and stays silent on stdout. That used to be reported as "a restart
-			// is required" on every Fedora host.
+			// This is a regression: dnf without a writable HOME ends with code 1 and
+			// stays silent on stdout.
 			name: "code 1 without an answer is an error, not a result",
 			result: commandResult{
 				Ran: true, ExitCode: 1, Stdout: "",

@@ -8,14 +8,8 @@ import (
 	"sort"
 )
 
-// Plan describes the difference between the rule found and the one
-// requested on a single host.
-//
-// The same rule ordered on two hosts is almost never the same change: one
-// host already has it, another has it in a different shape, a third does
-// not have it at all - and each has a different ruleset the change counts
-// against. The operator's approval is meant to cover those differences, not
-// the intent alone.
+// Plan describes the difference between the rule found and the one requested
+// on a single host.
 type Plan struct {
 	RuleID string `json:"rule_id"`
 	// Action names what would happen: create, update, no_change, remove or
@@ -31,21 +25,16 @@ type Plan struct {
 	Changes []string `json:"changes,omitempty"`
 
 	// RulesetHash is the fingerprint of the whole ruleset the host had at
-	// planning. The change comes back to the host with this fingerprint: a
-	// ruleset changed after planning stops it instead of landing on
-	// somebody else's rule.
+	// planning.
 	RulesetHash string `json:"ruleset_hash"`
 	// Adapter says what mechanism the host has underneath. A plan for a
 	// host without nftables is a refusal, not an empty list of changes.
 	Adapter string `json:"adapter,omitempty"`
-	// Refusal names the reason the change cannot land on this host: it
-	// would cut off the management channel or the rule does not belong to
-	// the panel. A plan with a refusal is an answer - the operator is meant
-	// to see it before approving.
+	// Refusal names the reason the change cannot land on this host: it would cut
+	// off the management channel or the rule does not belong to the panel.
 	Refusal string `json:"refusal,omitempty"`
-	// Commands lists, for a mechanism driven by its command line (ufw),
-	// the commands the change runs - as the operator would type them. The
-	// nftables table is rebuilt from the registry and lists nothing here.
+	// Commands lists, for a mechanism driven by its command line (ufw), the
+	// commands the change runs - as the operator would type them.
 	Commands []string `json:"commands,omitempty"`
 
 	PlanHash string `json:"plan_hash"`
@@ -102,10 +91,9 @@ func ComputeRemoval(registry Registry, id, rulesetHash, adapter string) Plan {
 	return plan
 }
 
-// Refuse records a refusal reason learned after the differences were
-// computed - for example the management channel protection - and
-// recomputes the fingerprint: a plan with a refusal is a different answer
-// than a plan without one.
+// Refuse records a refusal reason learned after the differences were computed
+// - for example the management channel protection - and recomputes the
+// fingerprint: a plan with a refusal is a different answer than a plan without
 func (p *Plan) Refuse(reason string) {
 	p.Refusal = reason
 	p.PlanHash = planFingerprint(*p)
@@ -183,10 +171,6 @@ func orAny(value string) string {
 
 // planFingerprint computes the plan fingerprint excluding the fingerprint
 // itself.
-//
-// It covers the ruleset fingerprint: the same diff computed against a
-// different ruleset is a different change, because it enters a different
-// neighbourhood of rules.
 func planFingerprint(plan Plan) string {
 	stripped := plan
 	stripped.PlanHash = ""

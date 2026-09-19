@@ -22,9 +22,9 @@ const statusFixture = "Name:\tflotestro-agent\n" +
 	"RssAnon:\t   20000 kB\n" +
 	"Threads:\t12\n"
 
-// The stat line of a process whose name has a space and a parenthesis in
-// it: the fields are counted from the last closing parenthesis, or utime
-// would land on the wrong column.
+// The stat line of a process whose name has a space and a parenthesis in it:
+// the fields are counted from the last closing parenthesis, or utime would
+// land on the wrong column.
 func statFixture(utime, stime uint64) string {
 	return "4242 (flotestro (agent) v0) S 1 4242 4242 0 -1 4194560 2000 0 0 0 " +
 		strconv.FormatUint(utime, 10) + " " + strconv.FormatUint(stime, 10) + " 0 0 20 0 12 0 12345 1228800000 8642 18446744073709551615 1 1 0 0 0 0 0 0 0 0 0 0 17 3 0 0 0 0 0\n"
@@ -148,9 +148,8 @@ func TestFootprintRidesAlongWithTheSample(t *testing.T) {
 }
 
 func TestFootprintLeavesOutWhatItCannotRead(t *testing.T) {
-	// A procfs without the self directory: the host counters are there,
-	// the agent's own are not. Nothing about the agent is reported, and
-	// nothing is reported as zero.
+	// A procfs without the self directory: the host counters are there, the
+	// agent's own are not.
 	root := procFixture(t, "cpu 100 0 50 800 20 0 5 25 0 0")
 	sampler := fixtureSampler(t, root)
 	// A helper that systemd says is not running.
@@ -174,9 +173,8 @@ func TestFootprintLeavesOutWhatItCannotRead(t *testing.T) {
 }
 
 // TestTheAgentHandsBackWhatItNoLongerUses: a sample taken while the agent
-// holds more than the release threshold frees the pages once and reports
-// what the host sees afterwards; the next sample a minute later does not
-// free again, and a small agent is never asked to.
+// holds more than the release threshold frees the pages once and reports what
+// the host sees afterwards; the next sample a minute later does not free
 func TestTheAgentHandsBackWhatItNoLongerUses(t *testing.T) {
 	root := procFixture(t, "cpu 100 0 50 800 20 0 5 25 0 0")
 	selfFixture(t, root, statFixture(100, 20), 7)

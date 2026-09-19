@@ -94,9 +94,9 @@ func TestFinalTaskWaitsForTheRunningWorkAndRefusesNewWork(t *testing.T) {
 	}
 }
 
-// TestFinalTaskReportsWhatIsStillRunningAfterTheGrace guards that a task
-// which outlives the grace is neither interrupted nor hidden: the panel
-// hears its identifier.
+// TestFinalTaskReportsWhatIsStillRunningAfterTheGrace guards that a task which
+// outlives the grace is neither interrupted nor hidden: the panel hears its
+// identifier.
 func TestFinalTaskReportsWhatIsStillRunningAfterTheGrace(t *testing.T) {
 	handshake := newFinalHandshake()
 	stream := newFakeStream()
@@ -125,9 +125,9 @@ func TestFinalTaskReportsWhatIsStillRunningAfterTheGrace(t *testing.T) {
 	}
 }
 
-// TestFinalCommitWipesThroughTheHelperAndEndsTheAgent guards the second
-// step: the wipe goes to the helper, and a wipe that went through ends the
-// agent with the decommission as the reason.
+// TestFinalCommitWipesThroughTheHelperAndEndsTheAgent guards the second step:
+// the wipe goes to the helper, and a wipe that went through ends the agent
+// with the decommission as the reason.
 func TestFinalCommitWipesThroughTheHelperAndEndsTheAgent(t *testing.T) {
 	handshake := newFinalHandshake()
 	handshake.begin("handed over")
@@ -152,9 +152,9 @@ func TestFinalCommitWipesThroughTheHelperAndEndsTheAgent(t *testing.T) {
 	}
 }
 
-// TestFinalCommitRefusedByTheHelperKeepsTheAgentRunning guards the promise
-// of the commit: an agent that could not wipe itself says so and stays,
-// rather than leaving with its identity on the disk and nobody the wiser.
+// TestFinalCommitRefusedByTheHelperKeepsTheAgentRunning guards the promise of
+// the commit: an agent that could not wipe itself says so and stays, rather
+// than leaving with its identity on the disk and nobody the wiser.
 func TestFinalCommitRefusedByTheHelperKeepsTheAgentRunning(t *testing.T) {
 	handshake := newFinalHandshake()
 	handshake.begin("handed over")

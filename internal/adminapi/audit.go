@@ -11,10 +11,7 @@ import (
 	"github.com/ultherego/flotestro/internal/paging"
 )
 
-// Reading the trail is itself on the trail. Whoever looked at what
-// somebody did is part of the story of an incident, and an export is the
-// one read that takes the evidence out of the panel - so every read is
-// recorded once, with the filter it asked with, before the answer goes out.
+// Reading the trail is itself on the trail.
 
 // recordAuditRead writes the event of one read of the trail.
 func (s *Server) recordAuditRead(r *http.Request, actor authz.Principal, action string,
@@ -57,11 +54,9 @@ func (s *Server) handleHostAudit(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// The trail of one host takes the filters of the fleet trail and pages
-	// the same way: the host tab asks "the denials on this host since
-	// Monday" as the fleet page does, and a host with a long history is
-	// browsed rather than cut off at the newest rows. The target is the
-	// host of the address, whatever the query says.
+	// The trail of one host takes the filters of the fleet trail and pages the
+	// same way: the host tab asks "the denials on this host since Monday" as the
+	// fleet page does, and a host with a long history is browsed rather than cut
 	filter, ok := auditFilter(w, r)
 	if !ok {
 		return
@@ -91,18 +86,15 @@ func (s *Server) handleHostAudit(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// auditFilter reads the filter of a trail read from the query. The time
-// bounds are checked here: a value that is not a timestamp is the caller's
-// mistake and must not quietly turn into "no bound".
+// auditFilter reads the filter of a trail read from the query.
 func auditFilter(w http.ResponseWriter, r *http.Request) (audit.ListFilter, bool) {
 	query := r.URL.Query()
 	filter := audit.ListFilter{
 		TargetID:   query.Get("target_id"),
 		TargetType: query.Get("target_type"),
 		Actor:      query.Get("actor"),
-		// The snapshot filters: who acted by the immutable identifier and
-		// the kind, which is how the interface groups the trail. The text
-		// filter above stays for the readers that know it.
+		// The snapshot filters: who acted by the immutable identifier and the kind,
+		// which is how the interface groups the trail.
 		ActorKind:        query.Get("actor_kind"),
 		ActorPrincipalID: query.Get("actor_principal_id"),
 		ActorResourceID:  query.Get("actor_resource_id"),
@@ -156,14 +148,9 @@ func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleAuditExport streams the trail between two moments as JSON lines
-// linked by a hash chain, oldest first, with a closing line carrying the
-// count and the digest of the last event. A file kept outside the panel
-// can then be verified without it - cmd/auditverify does exactly that.
-//
-// The export is a read of the trail like any other and is recorded as
-// one, with its bounds; the event of the export itself is written before
-// the read, so an export up to "now" carries its own record.
+// handleAuditExport streams the trail between two moments as JSON lines linked
+// by a hash chain, oldest first, with a closing line carrying the count and
+// the digest of the last event.
 func (s *Server) handleAuditExport(w http.ResponseWriter, r *http.Request) {
 	actor, ok := s.authorize(w, r, authz.PermAuditRead, authz.GlobalScope, "audit", "")
 	if !ok {
@@ -180,9 +167,9 @@ func (s *Server) handleAuditExport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 
-	// A failure midway cannot change the status any more: the answer is
-	// then a file without its closing line, which is what the verifier
-	// reports as cut short. The log says why.
+	// A failure midway cannot change the status any more: the answer is then a
+	// file without its closing line, which is what the verifier reports as cut
+	// short.
 	writer := audit.NewChainWriter(w)
 	err := s.audit.Each(r.Context(), filter, writer.Write)
 	if err != nil {

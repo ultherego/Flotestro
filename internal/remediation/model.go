@@ -1,10 +1,5 @@
-// Package remediation drives a remediation plan through its steps.
-//
-// A remediation is not one operation. The steps go in order, each is an
-// ordinary task of the module responsible for the thing, and each can fail.
-// The plan exists so that it is known what has already gone out, what waits
-// and why the rest did not start - without it a handful of unrelated tasks is
-// all that is left.
+// Package remediation drives a remediation plan through its steps. A
+// remediation is not one operation.
 package remediation
 
 import (
@@ -34,11 +29,7 @@ const (
 	StepSkipped   = "skipped"
 )
 
-// ReturnWindow bounds the wait for a host after a step that requires a
-// reboot.
-//
-// A reboot ends the plan, but the plan ends only once the host comes back: a
-// command that was sent is not yet a running host.
+// ReturnWindow bounds the wait for a host after a step that requires a reboot.
 const ReturnWindow = 15 * time.Minute
 
 // Step is one stage of a plan.
@@ -83,13 +74,8 @@ type Arranged struct {
 	Skipped map[string]string
 }
 
-// Arrange fixes the order of the steps and guards the reboot boundary.
-//
-// The order is not arbitrary. First the configuration changes, then what
-// requires a reboot - and the reboot comes last, because after it the host's
-// state has to be assessed anew, and steps planned earlier would refer to
-// facts from before the reboot. A plan with two reboots does not come into
-// being: those are two plans.
+// Arrange fixes the order of the steps and guards the reboot boundary. The
+// order is not arbitrary.
 func Arrange(findings []compliance.Finding) (Arranged, error) {
 	result := Arranged{Skipped: map[string]string{}}
 	var ordinary, reboots []Step

@@ -13,12 +13,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// The space a package change needs is not one number. The archives land in
-// the cache, the files in /usr, the kernel in /boot - and on a host with a
-// separate /var or /boot each of those can be full on its own while "/" has
-// gigabytes to spare. A transaction that runs out of space halfway through
-// leaves a package database nobody can trust, so the plan says where the
-// bytes go and the helper refuses before the first byte is written.
+// The space a package change needs is not one number.
 
 // The purposes of a space fact: what the bytes on that path are for.
 const (
@@ -35,9 +30,8 @@ const (
 	// BasisInstalledSize: the growth of the installed size, package by
 	// package, from the metadata of the candidate and the installed version.
 	BasisInstalledSize = "installed_size"
-	// BasisDownloadOnly: the installed size could not be read, so the size of
-	// the archives stands in - a lower bound, because the archives are
-	// compressed.
+	// BasisDownloadOnly: the installed size could not be read, so the size of the
+	// archives stands in - a lower bound, because the archives are compressed.
 	BasisDownloadOnly = "download_only"
 	// BasisBootFiles: the files the running kernel keeps in /boot; a new
 	// kernel of the same host needs about as much.
@@ -64,19 +58,11 @@ func (f SpaceFact) Known() bool {
 	return f.Basis != BasisUnknown && f.Basis != ""
 }
 
-// ErrNoSpace means a file system the change writes to does not have the
-// bytes the change needs. Nothing was attempted: a transaction interrupted by
-// a full disk is exactly what the check exists to prevent.
+// ErrNoSpace means a file system the change writes to does not have the bytes
+// the change needs.
 var ErrNoSpace = errors.New("not enough free space")
 
-// The headroom over the bytes a plan counts. The counted bytes are the
-// packages alone; the transaction also writes what nobody lists - the status
-// file dpkg rewrites, the journal of the rpm database, the initramfs dracut or
-// update-initramfs builds, the backup copies of the conffiles - and a file
-// system filled to the last byte breaks the services that share it long
-// before the package manager notices. Five percent covers the bookkeeping of
-// a large transaction; the floor of 64 MiB covers an initramfs rebuild after
-// a small one. The larger of the two applies.
+// The headroom over the bytes a plan counts.
 const (
 	spaceHeadroomPercent        = 5
 	spaceHeadroomMinimum uint64 = 64 << 20
@@ -91,11 +77,7 @@ func spaceHeadroom(needed uint64) uint64 {
 	return headroom
 }
 
-// SpaceShortfall judges the facts of a plan. It returns an error wrapping
-// ErrNoSpace naming the first file system that cannot take the change, or
-// nil when every measured need fits. Facts without a measured need are
-// reported, never judged: refusing on an unknown would stop every upgrade on
-// a host whose tools do not publish sizes.
+// SpaceShortfall judges the facts of a plan.
 func SpaceShortfall(facts []SpaceFact) error {
 	type demand struct {
 		needed    uint64
@@ -131,9 +113,7 @@ func SpaceShortfall(facts []SpaceFact) error {
 	return nil
 }
 
-// FormatBytes writes a size the way a person reads it. A refusal names the
-// bytes of a file system; "insufficient space: 1234567890 bytes" tells
-// nobody whether to free a file or a disk.
+// FormatBytes writes a size the way a person reads it.
 func FormatBytes(size uint64) string {
 	const unit = 1024
 	if size < unit {
@@ -149,9 +129,7 @@ func FormatBytes(size uint64) string {
 	return fmt.Sprintf("%d B", size)
 }
 
-// spaceFact measures a path. The path need not exist yet - the cache of a
-// manager that has never downloaded anything is created by the first
-// transaction - so the nearest existing ancestor stands in for it.
+// spaceFact measures a path.
 func spaceFact(path, purpose string, needed uint64, basis string) SpaceFact {
 	existing := nearestExisting(path)
 	return SpaceFact{
@@ -179,8 +157,7 @@ func nearestExisting(path string) string {
 }
 
 // mountPointOf finds the mount point of a path: the highest ancestor on the
-// same device. A separate partition for /var or /boot is exactly the case
-// the facts exist for, so the mount point is what the facts are keyed by.
+// same device.
 func mountPointOf(path string) string {
 	var stat unix.Stat_t
 	if err := unix.Stat(path, &stat); err != nil {
@@ -230,10 +207,8 @@ func spaceFacts(cacheDir, databaseDir string, needs spaceNeeds) []SpaceFact {
 	install := spaceFact(installRoot, SpaceInstall, needs.install, installBasis)
 	facts = append(facts, install)
 
-	// The package database grows with every transaction, but by how much
-	// nobody publishes. On the usual layout it shares the file system with
-	// /usr and is covered by the install fact; on a separate /var it gets a
-	// fact of its own, reported so the operator sees the free space there.
+	// The package database grows with every transaction, but by how much nobody
+	// publishes.
 	database := spaceFact(databaseDir, SpaceInstall, 0, BasisUnknown)
 	if database.Filesystem != install.Filesystem {
 		facts = append(facts, database)
@@ -266,12 +241,8 @@ func runningKernelRelease() string {
 	return strings.TrimRight(string(uts.Release[:]), "\x00")
 }
 
-// bootFilesSize sums up the files of the running kernel in the boot
-// directory: its image, its initramfs, its symbol map. A new kernel on the
-// same host needs about as much, and the old one stays until the transaction
-// is over, so this is the growth of /boot to expect. A boot directory
-// without recognisable files - a BLS layout under a machine ID, an ESP with
-// its own naming - gives no number rather than a guess.
+// bootFilesSize sums up the files of the running kernel in the boot directory:
+// its image, its initramfs, its symbol map.
 func bootFilesSize(dir, release string) (uint64, bool) {
 	if release == "" {
 		return 0, false
@@ -297,8 +268,7 @@ func bootFilesSize(dir, release string) (uint64, bool) {
 }
 
 // KernelPackage recognises a kernel by the name of its package in the given
-// family. A kernel is the one package that writes to /boot, and the one
-// whose half-installed state leaves a host that does not come up.
+// family.
 func KernelPackage(manager, name string) bool {
 	switch manager {
 	case "apt":
@@ -307,9 +277,7 @@ func KernelPackage(manager, name string) bool {
 		return strings.HasPrefix(name, "linux-image-")
 	case "dnf":
 		// kernel and kernel-core carry the image; the variants - kernel-rt-core,
-		// kernel-debug-core, kernel-64k-core - do the same under their own
-		// names. The modules, the headers and the devel packages do not touch
-		// /boot.
+		// kernel-debug-core, kernel-64k-core - do the same under their own names.
 		return name == "kernel" || name == "kernel-core" ||
 			strings.HasPrefix(name, "kernel-") && strings.HasSuffix(name, "-core")
 	case "pacman":
@@ -329,11 +297,7 @@ func anyKernel(manager string, changes []Change) bool {
 }
 
 // growth sums up how much the named packages grow: the installed size of the
-// candidate over the installed size of what is there now. A package that
-// shrinks frees nothing before it is unpacked, so it contributes nothing
-// rather than a credit for the others. The result is known only when every
-// candidate has a size: a partial sum with the label of a full one would
-// understate the need.
+// candidate over the installed size of what is there now.
 func growth(names []string, candidate, current map[string]uint64) (uint64, bool) {
 	var total uint64
 	for _, name := range names {
@@ -361,9 +325,8 @@ func installNeeds(needs *spaceNeeds, grown uint64, known bool) {
 	}
 }
 
-// ParseHumanSize reads a size the tools print for people: "12 M", "1.2 GiB",
-// "345 k", "512 B". Every unit is binary: dnf and pacman both count in
-// multiples of 1024, whatever letter they put after the number.
+// ParseHumanSize reads a size the tools print for people: "12 M", "1. 2 GiB",
+// "345 k", "512 B".
 func ParseHumanSize(text string) (uint64, bool) {
 	fields := strings.Fields(strings.TrimSpace(text))
 	if len(fields) == 0 || len(fields) > 2 {
@@ -388,9 +351,9 @@ func ParseHumanSize(text string) (uint64, bool) {
 	if !ok {
 		return 0, false
 	}
-	// "inf M" and "nan k" pass strconv as numbers, and a product past the
-	// largest integer has no defined conversion: each came out as a size
-	// that was neither refused nor real.
+	// "inf M" and "nan k" pass strconv as numbers, and a product past the largest
+	// integer has no defined conversion: each came out as a size that was neither
+	// refused nor real.
 	total := value * float64(multiplier)
 	if math.IsNaN(total) || math.IsInf(total, 0) || total >= math.MaxUint64 {
 		return 0, false

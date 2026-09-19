@@ -66,14 +66,8 @@ var severityRank = map[string]int{
 }
 
 // TestCVEListAgreesWithTheCVEPage guards that the fleet's CVE list and the
-// page of one CVE tell the same story: the host count of the row is the
-// number of distinct affected hosts the page lists, the severity is the
-// same word, and a search by the CVE number finds that row and no other.
-//
-// The list is a grouped query and the page a plain one; two queries over
-// the same table drift apart silently, and the operator reading "12 hosts"
-// on one screen and eleven rows on the next has no way to tell which one
-// lies.
+// page of one CVE tell the same story: the host count of the row is the number
+// of distinct affected hosts the page lists, the severity is the same word,
 func TestCVEListAgreesWithTheCVEPage(t *testing.T) {
 	h := newHarness(t)
 	var list cveListView
@@ -190,9 +184,9 @@ func TestCVEListAgreesWithTheCVEPage(t *testing.T) {
 	}
 }
 
-// TestCVEPageRefusesWhatIsNotACVE guards that the page takes only a CVE
-// number and says so when nothing is known about the one asked for: an
-// empty page for a typo would read as "no host is affected".
+// TestCVEPageRefusesWhatIsNotACVE guards that the page takes only a CVE number
+// and says so when nothing is known about the one asked for: an empty page for
+// a typo would read as "no host is affected".
 func TestCVEPageRefusesWhatIsNotACVE(t *testing.T) {
 	h := newHarness(t)
 	h.do(http.MethodGet, "/api/v1/vulnerabilities/cves/openssl", nil, nil, http.StatusBadRequest)
@@ -200,9 +194,9 @@ func TestCVEPageRefusesWhatIsNotACVE(t *testing.T) {
 	h.do(http.MethodGet, "/api/v1/vulnerabilities/cves?severity=grave", nil, nil, http.StatusBadRequest)
 }
 
-// TestFleetHostTableFiltersWithoutMovingTheSummary guards that the host
-// table of the fleet screen narrows by hostname, severity and page while
-// the numbers above it keep describing the whole visible fleet.
+// TestFleetHostTableFiltersWithoutMovingTheSummary guards that the host table
+// of the fleet screen narrows by hostname, severity and page while the numbers
+// above it keep describing the whole visible fleet.
 func TestFleetHostTableFiltersWithoutMovingTheSummary(t *testing.T) {
 	h := newHarness(t)
 	// The summary next to the rows: the numbers a filter must not move.
@@ -253,9 +247,8 @@ func TestFleetHostTableFiltersWithoutMovingTheSummary(t *testing.T) {
 		t.Errorf("the second page does not continue the first")
 	}
 
-	// A severity filter keeps the hosts with a finding of that word, and
-	// every row of the unfiltered table carries the counts the filter
-	// reads.
+	// A severity filter keeps the hosts with a finding of that word, and every
+	// row of the unfiltered table carries the counts the filter reads.
 	for _, row := range whole.Rows {
 		sum := 0
 		for _, count := range row.BySeverity {

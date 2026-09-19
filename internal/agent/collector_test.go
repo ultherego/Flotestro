@@ -10,9 +10,7 @@ import (
 	"time"
 )
 
-// Ordering a collection must not wait for its result. The message receive loop
-// orders the inventory and has to come back for the next tasks at once -
-// otherwise a slow read stops the management of the host.
+// Ordering a collection must not wait for its result.
 func TestOrderingACollectionDoesNotBlock(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -113,8 +111,7 @@ func quietLogger() *slog.Logger {
 }
 
 // A periodic order names the modules due in its cycle, and the report says
-// which ones it covered. A full order waiting next to it absorbs the list:
-// the host reads everything once rather than the list and then everything.
+// which ones it covered.
 func TestPeriodicOrdersCarryTheirModules(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

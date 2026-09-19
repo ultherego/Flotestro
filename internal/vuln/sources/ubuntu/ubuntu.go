@@ -1,26 +1,5 @@
-// Package ubuntu reads the OVAL data of Canonical.
-//
-// This is the settling source for Ubuntu hosts. Canonical publishes a
-// separate file for every release, and in it definitions per CVE: which
-// source package is vulnerable and in which version it was fixed. The
-// versions are backported, so by the upstream numbering they look
-// vulnerable.
-//
-// What this source does not say and what the panel does not pretend to know
-// from it:
-//
-// The pocket. A fix released in esm-apps or esm-infra requires an Ubuntu Pro
-// subscription, and the file records the pocket in the comment of a criterion
-// alone. The panel treats it like any other vendor fix: "the vendor released
-// it" is the vendor_fix axis, and "it can be taken from a repository of this
-// host" is a separate axis that stays undetermined without the repository
-// metadata. Neither of them promises more than the panel has checked.
-//
-// The kernel. OVAL settles the kernel by the version of the one currently
-// running. The panel assesses installed packages, so an old kernel lying next
-// to the running one gets a finding as well. That is deliberate: a vulnerable
-// file on disk is vulnerable, and "is it running" is a question a package
-// assessment does not answer.
+// Package ubuntu reads the OVAL data of Canonical. This is the settling source
+// for Ubuntu hosts.
 package ubuntu
 
 import (
@@ -47,10 +26,7 @@ const Provider = "ubuntu"
 // DefaultURL points at the directory with the OVAL data.
 const DefaultURL = "https://security-metadata.canonical.com/oval/"
 
-// The limits of a fetch. The file of one release is more than a dozen
-// megabytes compressed and around two hundred decompressed; a substantially
-// larger answer means we are fetching something other than we think - or that
-// somebody planted a bomb.
+// The limits of a fetch.
 const (
 	MaxCompressedSize = 256 << 20
 	MaxSize           = 2 << 30
@@ -83,11 +59,6 @@ func (z *Source) Name() string { return Provider }
 
 // Fetch pulls the data for the named releases and glues them into one
 // snapshot.
-//
-// Canonical publishes a file per release, so there are as many fetches as the
-// fleet has releases. A release Canonical does not publish does not reach the
-// snapshot - and rightly so: a host of such a release is to get the reason "a
-// release outside the feed" rather than a silent zero findings.
 func (z *Source) Fetch(ctx context.Context, releases []string,
 	etag string) (vuln.Snapshot, []vuln.Advisory, error) {
 	snapshot := vuln.Snapshot{Provider: Provider}
@@ -130,10 +101,8 @@ func (z *Source) Fetch(ctx context.Context, releases []string,
 	if !changed {
 		return snapshot, nil, ErrNotModified
 	}
-	// There is one snapshot and it has to be complete: the releases that
-	// answered "no changes" are fetched once more unconditionally. Otherwise
-	// we would write a snapshot without their findings and their hosts would
-	// look clean.
+	// There is one snapshot and it has to be complete: the releases that answered
+	// "no changes" are fetched once more unconditionally.
 	for _, release := range unchanged {
 		result, err := z.fetchRelease(ctx, release, "")
 		if err != nil {
@@ -210,10 +179,8 @@ func (z *Source) fetchRelease(ctx context.Context, release, etag string) (releas
 		}
 	}
 
-	// Two counters, because there are two sizes: the compressed one guards
-	// the link, the decompressed one guards memory. An archive of a few
-	// megabytes can decompress into gigabytes, and a stream cut in half would
-	// look like the whole thing.
+	// Two counters, because there are two sizes: the compressed one guards the
+	// link, the decompressed one guards memory.
 	compressed := &byteCounter{source: io.LimitReader(response.Body, MaxCompressedSize+1)}
 	decompressed := &byteCounter{
 		source: io.LimitReader(bzip2.NewReader(compressed), MaxSize+1),
@@ -246,9 +213,7 @@ func (l *byteCounter) Read(buffer []byte) (int, error) {
 	return n, err
 }
 
-// The elements of an OVAL document that settle anything. We do not read the
-// rest: the document also describes the tests of the system family and of the
-// release, and the panel knows those from the inventory of the host.
+// The elements of an OVAL document that settle anything.
 type definition struct {
 	Class    string   `xml:"class,attr"`
 	Metadata metadata `xml:"metadata"`
@@ -319,13 +284,6 @@ type correlationTest struct {
 }
 
 // definitionEntry is a definition after slimming down.
-//
-// The definitions come in the document before the tests, so we have to keep
-// them until the end of the file - and as a whole they do not fit in the
-// memory of the panel: the descriptions of one release alone are well over a
-// hundred megabytes, because Canonical appends to each of them update
-// instructions for dozens of kernel variants. We keep from a definition only
-// what reaches the finding.
 type definitionEntry struct {
 	cve      string
 	severity string
@@ -356,11 +314,6 @@ func slim(entry definition) definitionEntry {
 
 // Parse reads the OVAL data of one release and returns the findings of the
 // panel.
-//
-// As a stream, because the file of a release is around two hundred megabytes
-// once decompressed. The definitions come in the document before the tests
-// and the states, so the join is made at the end - we keep from a definition
-// only what it needs.
 func Parse(source io.Reader, release string) ([]vuln.Advisory, error) {
 	decoder := xml.NewDecoder(source)
 	var definitions []definitionEntry
@@ -396,9 +349,9 @@ func Parse(source io.Reader, release string) ([]vuln.Advisory, error) {
 				if kernel && !strings.Contains(entry.Comment, "kernel") {
 					continue
 				}
-				// The name of the source package is in the comment of the
-				// test: the OVAL structure carries only binary packages in
-				// the object, and Canonical tracks security by the source.
+				// The name of the source package is in the comment of the test: the OVAL
+				// structure carries only binary packages in the object, and Canonical
+				// tracks security by the source.
 				pkg := inQuotes(entry.Comment)
 				if pkg == "" {
 					continue
@@ -420,17 +373,13 @@ func Parse(source io.Reader, release string) ([]vuln.Advisory, error) {
 		}
 	}
 
-	// A document cut in half simply ends with no further token. Without this
-	// check the panel would get half the data as the whole thing and treat
-	// the missing findings as non-existent.
+	// A document cut in half simply ends with no further token.
 	if !closed {
 		return nil, fmt.Errorf("the OVAL document was cut before the closing")
 	}
 
 	advisories := join(definitions, tests, states, release)
-	// Date we cannot read are not empty data. Were Canonical to change the
-	// shape of the document, the panel is to say "error" rather than show a
-	// fleet without vulnerabilities.
+	// Date we cannot read are not empty data.
 	if len(definitions) > 0 && len(advisories) == 0 {
 		return nil, fmt.Errorf("the OVAL document has %d definitions, none of which settles anything",
 			len(definitions))
@@ -440,11 +389,6 @@ func Parse(source io.Reader, release string) ([]vuln.Advisory, error) {
 }
 
 // stateVersion extracts the fixed version out of an OVAL state.
-//
-// We understand only the comparison "less than": that is how Canonical writes
-// "fixed from this version". We do not guess any other operator - a state we
-// do not understand is left without a version and the package comes out as
-// vulnerable without a fix rather than as fixed.
 func stateVersion(entry stateEntry) string {
 	for _, field := range []*value{entry.EVR, entry.Value} {
 		if field == nil || field.Operation != "less than" {
@@ -500,12 +444,6 @@ func join(definitions []definitionEntry, tests map[string]correlationTest,
 }
 
 // merge settles two findings about the same package in one CVE.
-//
-// One CVE can describe the same package in several pockets: in the main one
-// without a fix, in esm-apps with one. The fix wins - the vendor released it.
-// When there are several versions we take the lowest: it is from that one
-// that the package carries the fix, so a host with a higher version is fixed
-// in every pocket.
 func merge(previous, current packageState) packageState {
 	if previous.status == "" {
 		return current
@@ -557,9 +495,7 @@ func advisoryFor(entry definitionEntry, release, pkg string, state packageState)
 }
 
 // Severity translates the priority of Canonical into a vendor severity.
-//
 // "untriaged" is not a severity: it is a missing severity and is to stay one.
-// A vendor that has not scored yet has not said "negligible".
 func Severity(priority, severity string) string {
 	for _, candidate := range []string{priority, severity} {
 		switch strings.ToLower(strings.TrimSpace(candidate)) {
@@ -607,10 +543,6 @@ func Digest(advisories []vuln.Advisory) string {
 }
 
 // ParseETags reads the ETags written down with the previous snapshot.
-//
-// There is one snapshot and as many files as releases - so one field holds a
-// map "release=etag". An entry that does not have that shape is not guessed
-// at: worse than fetching too much is not fetching a change.
 func ParseETags(etag string) map[string]string {
 	etags := map[string]string{}
 	for _, entry := range strings.Fields(etag) {
@@ -633,9 +565,7 @@ func JoinETags(etags map[string]string) string {
 	entries := make([]string, 0, len(releases))
 	for _, release := range releases {
 		tag := etags[release]
-		// An etag with a space would fall apart into two entries when read
-		// back. We skip it: an unconditional fetch is a cheaper mistake than
-		// a conditional fetch with a wrong value.
+		// An etag with a space would fall apart into two entries when read back.
 		if tag == "" || strings.ContainsAny(tag, " \t\n") {
 			continue
 		}
@@ -659,11 +589,6 @@ func inQuotes(text string) string {
 }
 
 // withoutInstructions cuts the update instructions out of a description.
-//
-// Canonical appends to the description a list of packages to install - for
-// every kernel variant separately. That is an instruction rather than a
-// description of the vulnerability, and after trimming to three hundred
-// characters only half of the first command would be left of it.
 func withoutInstructions(description string) string {
 	if cut := strings.Index(description, "Update Instructions:"); cut >= 0 {
 		description = description[:cut]

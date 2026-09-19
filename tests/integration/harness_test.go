@@ -1,8 +1,6 @@
 //go:build integration
 
 // Package integration tests the control plane against a running fleet.
-// The tests need a provisioned environment: the panel, the database and
-// hosts with the agent.
 package integration
 
 import (
@@ -77,9 +75,7 @@ func (h *harness) requireHealthy() {
 	}
 }
 
-// database opens a connection to the fleet database. It serves only to
-// simulate events that cannot be triggered through the API, such as a lease
-// expiring.
+// database opens a connection to the fleet database.
 func (h *harness) database(ctx context.Context) *pgxpool.Pool {
 	h.t.Helper()
 	if h.pool != nil {
@@ -124,10 +120,6 @@ func (h *harness) get(path string, out any) {
 }
 
 // text fetches a response that is not JSON.
-//
-// The metrics exposition is text in the Prometheus format and is to stay
-// that way: passing it through JSON just for the test's convenience would
-// check something other than what Prometheus reads.
 func (h *harness) text(path string) string {
 	h.t.Helper()
 	request, err := http.NewRequest(http.MethodGet, h.api+path, nil)
@@ -261,9 +253,8 @@ type attemptView struct {
 	Status    string `json:"status"`
 	ExitCode  *int   `json:"exit_code"`
 	ErrorCode string `json:"error_code"`
-	// Message carries the refusal reason. A refusal without a reason forces
-	// the operator to guess whether the file is missing or outside the
-	// allowed scope.
+	// Message carries the refusal reason. A refusal without a reason forces the
+	// operator to guess whether the file is missing or outside the allowed scope.
 	Message         string `json:"message"`
 	Stdout          string `json:"stdout"`
 	Stderr          string `json:"stderr"`
@@ -294,9 +285,9 @@ type packageDetail struct {
 		CurrentVersion   string `json:"current_version"`
 		CandidateVersion string `json:"candidate_version"`
 	} `json:"applied"`
-	// Removals and Protected are the content of a removal plan: what goes
-	// away together with the package and what the panel will not remove
-	// despite the request.
+	// Removals and Protected are the content of a removal plan: what goes away
+	// together with the package and what the panel will not remove despite the
+	// request.
 	Removals              []string `json:"removals"`
 	Protected             []string `json:"protected"`
 	PlanHash              string   `json:"plan_hash"`
@@ -420,10 +411,6 @@ func unitPayload(unit string) map[string]any {
 }
 
 // awaitConnection waits until the host comes back to the fleet.
-//
-// The agent connects with its own backoff, so after the panel closes the
-// session there is a moment when the host is offline and that is not a
-// failure.
 func (h *harness) awaitConnection(hostID string, limit time.Duration) {
 	h.t.Helper()
 	deadline := time.Now().Add(limit)
@@ -445,10 +432,6 @@ func (h *harness) awaitConnection(hostID string, limit time.Duration) {
 const defaultEnrollment = "https://192.168.56.10:8444"
 
 // enrollSyntheticHost brings a machine that does not exist into the fleet.
-//
-// The lifecycle tests have to really retire something, and a test fleet host
-// must not be: retirement is irreversible and would take the machine away
-// from the remaining tests.
 func (h *harness) enrollSyntheticHost(t *testing.T) hostView {
 	t.Helper()
 	var order struct {
@@ -476,10 +459,7 @@ func (h *harness) enrollSyntheticHostWithToken(t *testing.T, token string) hostV
 		t.Fatal(err)
 	}
 
-	// The synthetic machine disappears together with the test. A retired
-	// host stays in the fleet forever - and after a few runs the fleet screen
-	// would show nothing but test leftovers. It is deleted straight in the
-	// database, because the product has no such operation and should not.
+	// The synthetic machine disappears together with the test.
 	t.Cleanup(func() {
 		ctx := context.Background()
 		if _, err := h.database(ctx).Exec(ctx,
@@ -498,8 +478,7 @@ func (h *harness) enrollSyntheticHostWithToken(t *testing.T, token string) hostV
 }
 
 // enrollAttempt knocks on the public enrollment door once and returns the
-// status and the body, whatever they are. The tests of the door itself -
-// its refusals and its limits - need the answer rather than a host.
+// status and the body, whatever they are.
 func (h *harness) enrollAttempt(t *testing.T, token, machine string, csrPEM []byte) (int, []byte) {
 	t.Helper()
 	body, err := json.Marshal(map[string]any{
@@ -562,10 +541,6 @@ func testCSR(t *testing.T, commonName string) []byte {
 }
 
 // awaitJobState waits until the job is in one of the wanted states.
-//
-// A job that reaches a final state other than the wanted ones is a failure
-// right away: waiting out the whole bound for something that cannot happen
-// any more would only hide the reason.
 func (h *harness) awaitJobState(jobID string, timeout time.Duration, states ...string) jobView {
 	h.t.Helper()
 	wanted := map[string]bool{}
@@ -591,9 +566,6 @@ func (h *harness) awaitJobState(jobID string, timeout time.Duration, states ...s
 }
 
 // awaitHealthy waits until the control plane answers on /healthz again.
-//
-// Unlike requireHealthy it tolerates a refused connection: the panel is
-// expected to be away for a moment, and only staying away is a failure.
 func (h *harness) awaitHealthy(limit time.Duration) {
 	h.t.Helper()
 	client := &http.Client{Timeout: 3 * time.Second}
@@ -617,9 +589,7 @@ func (h *harness) awaitHealthy(limit time.Duration) {
 	}
 }
 
-// cancelJob ends a job that a test leaves behind. It ignores the answer: a
-// job that has already finished refuses the cancellation, and that is fine
-// for a cleanup.
+// cancelJob ends a job that a test leaves behind.
 func (h *harness) cancelJob(jobID string) {
 	h.t.Helper()
 	h.do(http.MethodPost, "/api/v1/jobs/"+jobID+"/cancel",

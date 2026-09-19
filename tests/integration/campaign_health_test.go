@@ -58,10 +58,8 @@ func (h *harness) onlineDebianHosts() []hostView {
 	return online
 }
 
-// healthCampaign is a cron restart with the given units verified after
-// the change, on the given hosts, with no reboot in it. The thresholds
-// are the ones the API defaults to: the scenario the document requires
-// is what an operator gets without tuning anything.
+// healthCampaign is a cron restart with the given units verified after the
+// change, on the given hosts, with no reboot in it.
 func healthCampaign(name string, hostIDs []string, units []string) map[string]any {
 	return map[string]any{
 		"name":                       name,
@@ -79,9 +77,8 @@ func healthCampaign(name string, hostIDs []string, units []string) map[string]an
 }
 
 // TestCampaignVerifiesUnitsWithoutAReboot guards the health check of a
-// campaign that reboots nothing: the units named in the order are
-// verified right after the change, with a unit.status task of their own,
-// and the strip says the reboot was skipped and the verification ran.
+// campaign that reboots nothing: the units named in the order are verified
+// right after the change, with a unit.
 func TestCampaignVerifiesUnitsWithoutAReboot(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -136,8 +133,6 @@ func TestCampaignVerifiesUnitsWithoutAReboot(t *testing.T) {
 // TestACanaryHealthFailureStopsTheNextWave guards the mandatory scenario
 // "canary health check negative, wave two stopped": a canary whose change
 // succeeded but whose units are not up afterwards fails with
-// health_check_failed, the failure counts towards the threshold like a
-// failed change, and no host of the next wave is touched.
 func TestACanaryHealthFailureStopsTheNextWave(t *testing.T) {
 	h := newHarness(t)
 	online := h.onlineDebianHosts()
@@ -201,14 +196,6 @@ func TestACanaryHealthFailureStopsTheNextWave(t *testing.T) {
 // TestAHostStillRebootingWhenTheWindowClosesIsFailedAndPausesTheCampaign
 // guards the mandatory scenario "the host does not come back within the
 // maintenance window".
-//
-// No host is really rebooted: a reboot of a lab machine is a minute of
-// waiting and a flake per run. The campaign is put mid-reboot by hand -
-// its canary rebooting with the boot ID the host still has, the window
-// already over - and the orchestrator is left to judge it on its next
-// pass. The judgement is the product: the host fails with
-// reboot_window_closed, the message names the window, the campaign
-// pauses with the reason, and the host of the next wave is not touched.
 func TestAHostStillRebootingWhenTheWindowClosesIsFailedAndPausesTheCampaign(t *testing.T) {
 	h := newHarness(t)
 	online := h.onlineDebianHosts()
@@ -237,9 +224,9 @@ func TestAHostStillRebootingWhenTheWindowClosesIsFailedAndPausesTheCampaign(t *t
 		"maintenance_end":            windowEnd.Format(time.RFC3339),
 	})
 
-	// The campaign is not approved: it is moved straight into the state
-	// the scenario is about, with the canary away since three minutes
-	// before the window ended a second ago.
+	// The campaign is not approved: it is moved straight into the state the
+	// scenario is about, with the canary away since three minutes before the
+	// window ended a second ago.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	pool := h.database(ctx)
@@ -296,10 +283,9 @@ func TestAHostStillRebootingWhenTheWindowClosesIsFailedAndPausesTheCampaign(t *t
 	}
 }
 
-// TestTheRebootTimeoutIsPartOfTheOrder guards the field on the API: the
-// bound is recorded and read back, the default applies when the order
-// says nothing, and a value outside the bounds is refused with a reason
-// rather than rounded.
+// TestTheRebootTimeoutIsPartOfTheOrder guards the field on the API: the bound
+// is recorded and read back, the default applies when the order says nothing,
+// and a value outside the bounds is refused with a reason rather than rounded.
 func TestTheRebootTimeoutIsPartOfTheOrder(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")

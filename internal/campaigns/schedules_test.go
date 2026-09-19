@@ -16,11 +16,9 @@ func mustLocation(t *testing.T, name string) *time.Location {
 	return loc
 }
 
-// TestAMonthlyRuleNamesTheNextDayOfTheMonth guards the monthly rule: the
-// next occurrence is the named day of the month at the named wall-clock
-// time in the schedule's zone, this month when the moment is still ahead
-// and the next month otherwise; a month without the day is skipped, as
-// RRULE skips it, rather than rounded to the day after.
+// TestAMonthlyRuleNamesTheNextDayOfTheMonth guards the monthly rule: the next
+// occurrence is the named day of the month at the named wall-clock time in the
+// schedule's zone, this month when the moment is still ahead and the next
 func TestAMonthlyRuleNamesTheNextDayOfTheMonth(t *testing.T) {
 	warsaw := mustLocation(t, "Europe/Warsaw")
 	rule, err := ParseRecurrence("FREQ=MONTHLY;BYMONTHDAY=15;BYHOUR=2;BYMINUTE=30")
@@ -66,9 +64,8 @@ func TestAMonthlyRuleNamesTheNextDayOfTheMonth(t *testing.T) {
 }
 
 // TestAWeeklyRuleNamesTheNextListedWeekday guards the weekly rule: the
-// weekdays are read in any order and each once, and the next occurrence
-// is the nearest listed weekday at the named time, today included when
-// the time is still ahead.
+// weekdays are read in any order and each once, and the next occurrence is the
+// nearest listed weekday at the named time, today included when the time is
 func TestAWeeklyRuleNamesTheNextListedWeekday(t *testing.T) {
 	rule, err := ParseRecurrence("freq=weekly;byday=FR,MO,MO;byhour=22;byminute=0")
 	if err != nil {
@@ -92,10 +89,9 @@ func TestAWeeklyRuleNamesTheNextListedWeekday(t *testing.T) {
 	}
 }
 
-// TestARecurrenceOutsideTheSubsetIsRefused guards the parser: a key the
-// panel does not read, a frequency it does not schedule, a day out of
-// range or a rule without its day are refused with the reason, never
-// stored to fire at a moment the author did not write.
+// TestARecurrenceOutsideTheSubsetIsRefused guards the parser: a key the panel
+// does not read, a frequency it does not schedule, a day out of range or a
+// rule without its day are refused with the reason, never stored to fire at a
 func TestARecurrenceOutsideTheSubsetIsRefused(t *testing.T) {
 	refused := map[string]string{
 		"":                                       "empty",
@@ -123,9 +119,9 @@ func TestARecurrenceOutsideTheSubsetIsRefused(t *testing.T) {
 	}
 }
 
-// TestNextRunReadsTheStartAsTheEarliestMoment guards how the first moment
-// is computed: a single moment fires at its start and never again; a rule
-// fires from the later of its start and now.
+// TestNextRunReadsTheStartAsTheEarliestMoment guards how the first moment is
+// computed: a single moment fires at its start and never again; a rule fires
+// from the later of its start and now.
 func TestNextRunReadsTheStartAsTheEarliestMoment(t *testing.T) {
 	now := time.Date(2026, time.September, 15, 12, 0, 0, 0, time.UTC)
 	ahead := now.Add(48 * time.Hour)
@@ -157,10 +153,9 @@ func TestNextRunReadsTheStartAsTheEarliestMoment(t *testing.T) {
 	}
 }
 
-// TestCheckScheduleRefusesWhatCannotFire guards the spec check: a name,
-// an order with an operation, a real zone, a readable rule and a moment
-// that lies ahead are each required with their own code, and a spec that
-// passes carries its next moment.
+// TestCheckScheduleRefusesWhatCannotFire guards the spec check: a name, an
+// order with an operation, a real zone, a readable rule and a moment that lies
+// ahead are each required with their own code, and a spec that passes carries
 func TestCheckScheduleRefusesWhatCannotFire(t *testing.T) {
 	now := time.Date(2026, time.September, 15, 12, 0, 0, 0, time.UTC)
 	ahead := now.Add(time.Hour)
@@ -205,9 +200,9 @@ func TestCheckScheduleRefusesWhatCannotFire(t *testing.T) {
 	}
 }
 
-// TestOccurrencesListTheMomentsOfARange guards what the calendar draws:
-// every moment of a rule inside the range from the row's next moment on,
-// a single moment once, and nothing for a disabled schedule.
+// TestOccurrencesListTheMomentsOfARange guards what the calendar draws: every
+// moment of a rule inside the range from the row's next moment on, a single
+// moment once, and nothing for a disabled schedule.
 func TestOccurrencesListTheMomentsOfARange(t *testing.T) {
 	next := time.Date(2026, time.September, 21, 22, 0, 0, 0, time.UTC)
 	weekly := Schedule{Enabled: true, Recurrence: "FREQ=WEEKLY;BYDAY=MO;BYHOUR=22;BYMINUTE=0", Timezone: "UTC", NextRunAt: &next}

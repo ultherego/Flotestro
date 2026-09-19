@@ -13,16 +13,6 @@ import (
 )
 
 // The highest-impact operations require fresh authentication and a reason.
-// These are the changes that move the access rules themselves: mapping
-// groups to roles, granting permissions to a principal, global directory
-// rules.
-//
-// The panel does not implement MFA and does not pretend to know it. MFA
-// belongs to the identity provider; the panel checks only whether it got
-// the declared authentication level (acr) and whether the authentication is
-// fresh. When the installation defined no level, freshness alone remains -
-// and that is how it is written in the audit log, so nobody reads it as an
-// MFA confirmation.
 type stepUpPolicy struct {
 	// MaxAge is the allowed authentication age. Zero disables the freshness
 	// requirement.
@@ -30,31 +20,22 @@ type stepUpPolicy struct {
 	// ACR is the required authentication level. Empty means the
 	// installation did not define it.
 	ACR string
-	// RefuseTokens denies the highest-impact operations to API tokens
-	// altogether. By default a token may carry them out and the trail says
-	// so; an installation that wants a person behind every change of the
-	// access rules sets the policy to refuse.
+	// RefuseTokens denies the highest-impact operations to API tokens altogether.
 	RefuseTokens bool
 }
 
 const minimalStepUpReason = 8
 
-// stepUpDenial describes a refusal together with what is missing. The
-// client is meant to learn from it that re-authenticating and retrying the
-// request is worthwhile.
+// stepUpDenial describes a refusal together with what is missing.
 type stepUpDenial struct {
 	Code    string
 	Message string
 	Detail  map[string]any
-	// RequestError means a refusal re-authentication will not fix. A missing
-	// reason is a gap in the request, not in the session - sending the
-	// client to the login would make them fix what is not broken.
+	// RequestError means a refusal re-authentication will not fix.
 	RequestError bool
 }
 
-// evaluate decides whether a highest-impact operation may take place. The
-// function has no side effects: the audit record and the HTTP response
-// belong to the layer above, so the rule itself can be checked in a test.
+// evaluate decides whether a highest-impact operation may take place.
 func (p stepUpPolicy) evaluate(reason string, session *authz.Session) (map[string]any, *stepUpDenial) {
 	reason = strings.TrimSpace(reason)
 	if len([]rune(reason)) < minimalStepUpReason {
@@ -68,18 +49,15 @@ func (p stepUpPolicy) evaluate(reason string, session *authz.Session) (map[strin
 
 	if session == nil {
 		if p.RefuseTokens {
-			// The installation decided that no automaton changes the access
-			// rules. The refusal names what is missing: a session, not a
-			// permission.
+			// The installation decided that no automaton changes the access rules. The
+			// refusal names what is missing: a session, not a permission.
 			return nil, &stepUpDenial{
 				Code:    "reauthentication_required",
 				Message: "this operation requires a browser session; API tokens may not carry it out in this installation",
 				Detail:  map[string]any{"authentication": "api_token", "policy": "refuse"},
 			}
 		}
-		// An automated identity cannot re-authenticate: there is no human
-		// behind it. The operation is allowed, but the audit log records
-		// directly that the authentication was not refreshed.
+		// An automated identity cannot re-authenticate: there is no human behind it.
 		return map[string]any{
 			"high_impact": true, "purpose": reason,
 			"authentication": "api_token", "reauthenticated": false,
@@ -127,10 +105,6 @@ func (p stepUpPolicy) evaluate(reason string, session *authz.Session) (map[strin
 
 // requireStepUp applies the rule and returns the authentication evidence to
 // record in the audit entry of the operation itself.
-//
-// A refusal is audited here, because the operation never takes place. A
-// success is audited by the handler together with the change description:
-// one operation is meant to leave one entry, not two saying the same.
 func (s *Server) requireStepUp(w http.ResponseWriter, r *http.Request,
 	principal authz.Principal, reason, action, targetType, targetID string) (map[string]any, bool) {
 	session, _ := authz.SessionFromContext(r.Context())
@@ -155,9 +129,8 @@ func (s *Server) requireStepUp(w http.ResponseWriter, r *http.Request,
 	return evidence, true
 }
 
-// withStepUp attaches the authentication evidence to the change
-// description. Thanks to that one audit entry says both what changed and on
-// what basis.
+// withStepUp attaches the authentication evidence to the change description.
+// Thanks to that one audit entry says both what changed and on what basis.
 func withStepUp(detail, evidence map[string]any) map[string]any {
 	for key, value := range evidence {
 		detail[key] = value
@@ -165,10 +138,8 @@ func withStepUp(detail, evidence map[string]any) map[string]any {
 	return detail
 }
 
-// requestReason reads the reason of a change: from the body when there is
-// one, otherwise from the query, as the removal of a group mapping takes
-// it. The body is read here once; body, when given, receives what else it
-// carried.
+// requestReason reads the reason of a change: from the body when there is one,
+// otherwise from the query, as the removal of a group mapping takes it.
 func requestReason(w http.ResponseWriter, r *http.Request, body any) (string, bool) {
 	reason := r.URL.Query().Get("reason")
 	if r.Body == nil || r.ContentLength == 0 {

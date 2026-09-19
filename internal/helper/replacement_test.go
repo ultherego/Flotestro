@@ -42,9 +42,7 @@ func TestAgentReplacementRecognizesTheAgentPackage(t *testing.T) {
 }
 
 // The artefact of the version the host can go back to is kept locally before
-// the replacement runs. The document's rule is that a return must not depend
-// on the repository still carrying the old release, so the copy is what
-// proves the return exists at all.
+// the replacement runs.
 func TestTheArtefactToGoBackToIsKeptOutOfThePackageCache(t *testing.T) {
 	state := t.TempDir()
 	cache := t.TempDir()
@@ -86,9 +84,8 @@ func TestAnArtefactToGoBackToThatCannotBeObtainedRefusesTheUpgrade(t *testing.T)
 	}
 }
 
-// The digest is what settles whether the file on disk is the file the
-// release published. A file that hashes to anything else is refused with the
-// code the panel acts on, and nothing is installed from it.
+// The digest is what settles whether the file on disk is the file the release
+// published.
 func TestAnArtefactIsAcceptedOnlyOnTheOrderedDigest(t *testing.T) {
 	dir := t.TempDir()
 	artefact := filepath.Join(dir, "flotestro-agent_0.55.0-1_amd64.deb")
@@ -165,9 +162,8 @@ func TestTheRollbackVersionIsNamedInTheNotationOfTheOrder(t *testing.T) {
 	}
 }
 
-// The unit that outlives the helper reads the order only when it is the
-// order for the package it was started with. A leftover of an abandoned run
-// must not decide what a new one installs.
+// The unit that outlives the helper reads the order only when it is the order
+// for the package it was started with.
 func TestAReplacementOrderIsReadOnlyForItsOwnPackage(t *testing.T) {
 	withUpgradeDirs(t, t.TempDir(), nil)
 	order := replacementOrder{

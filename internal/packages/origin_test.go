@@ -4,11 +4,6 @@ import "testing"
 
 // TestPolicyRecognisesTheOrigin guards the rule the coverage of the
 // vulnerability assessment rests on for the APT family.
-//
-// dpkg does not record the vendor with the package - only APT knows it from
-// the package lists. Without that a package from a foreign repository would
-// look like a package of the distribution and would count as covered by its
-// findings, although the vendor has nothing to say about it.
 func TestPolicyRecognisesTheOrigin(t *testing.T) {
 	output := `openssl:
   Installed: 3.0.15-1~deb12u1
@@ -60,9 +55,8 @@ absent:
 		"nginx":     {Origin: "http://nginx.org/packages/debian", Class: OriginThirdParty},
 		"own-agent": {Origin: "/var/lib/dpkg/status", Class: OriginLocal},
 		// A version withdrawn from a repository looks in policy exactly like a
-		// package built locally - and it is an old kernel lying on disk after
-		// an upgrade. Pushed outside the coverage it would hide exactly the
-		// vulnerabilities that most need to be seen.
+		// package built locally - and it is an old kernel lying on disk after an
+		// upgrade.
 		"linux-image-amd64": {Origin: "http://deb.debian.org/debian",
 			Class: OriginDistribution},
 	}

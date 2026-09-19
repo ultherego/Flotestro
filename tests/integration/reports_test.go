@@ -9,9 +9,9 @@ import (
 	"time"
 )
 
-// The management reports against the lab: each one is a read over the
-// records the other screens show, so each is checked against the screen
-// it summarises - the host list, the campaign, the policy results.
+// The management reports against the lab: each one is a read over the records
+// the other screens show, so each is checked against the screen it summarises
+// - the host list, the campaign, the policy results.
 
 type patchStatusReportView struct {
 	Report string `json:"report"`
@@ -48,9 +48,8 @@ func reportPeriod(back time.Duration) string {
 }
 
 // TestPatchStatusReportListsEveryVisibleHostOnce checks the patch report
-// against the host list: every host of the list once, the total equal to
-// the list's, the unknowns counted apart from the zeros, the breakdown
-// by site summing to the total, and the file with the fixed header.
+// against the host list: every host of the list once, the total equal to the
+// list's, the unknowns counted apart from the zeros, the breakdown by site
 func TestPatchStatusReportListsEveryVisibleHostOnce(t *testing.T) {
 	h := newHarness(t)
 	var list struct {
@@ -153,10 +152,8 @@ type campaignsReportView struct {
 }
 
 // TestCampaignsReportCountsACanceledCampaign checks that a campaign that
-// closed in the period is in the report whatever its end: a campaign
-// ordered and canceled before any host started is a canceled campaign of
-// the period, with its hosts counted as canceled and no success rate,
-// because nothing was attempted.
+// closed in the period is in the report whatever its end: a campaign ordered
+// and canceled before any host started is a canceled campaign of the period,
 func TestCampaignsReportCountsACanceledCampaign(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -250,11 +247,9 @@ type complianceReportView struct {
 	} `json:"security"`
 }
 
-// TestComplianceReportAgreesWithThePolicyResults checks the compliance
-// report against the results list of a policy the test publishes and
-// evaluates: the rule tally by verdict equals the list's counts, the
-// hosts add up across the verdicts, and the security section is there
-// for a reader with the right to it.
+// TestComplianceReportAgreesWithThePolicyResults checks the compliance report
+// against the results list of a policy the test publishes and evaluates: the
+// rule tally by verdict equals the list's counts, the hosts add up across the
 func TestComplianceReportAgreesWithThePolicyResults(t *testing.T) {
 	h := newHarness(t)
 	policy := h.createPolicy(t, uniqueSubject("report-cron"), "report", []map[string]any{

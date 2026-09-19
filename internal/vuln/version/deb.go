@@ -1,12 +1,5 @@
 // Package version compares package versions by the rules of their own
 // managers.
-//
-// This is the place where a silent error with serious consequences is
-// easiest to make. Package versions are not SemVer and cannot be compared
-// lexically: "1.10" is newer than "1.9", "1.0~rc1" older than "1.0", and the
-// epoch in "1:2.0" beats anything without an epoch. A wrong answer in this
-// direction means a vulnerability considered fixed - that is, a host the
-// panel calls safe.
 package version
 
 import (
@@ -15,9 +8,6 @@ import (
 )
 
 // CompareDeb compares versions by the Debian rule (deb-version(7)).
-//
-// It returns a negative number, zero or a positive one - just like
-// dpkg --compare-versions.
 func CompareDeb(a, b string) int {
 	epochA, upstreamA, revisionA := splitDeb(a)
 	epochB, upstreamB, revisionB := splitDeb(b)
@@ -58,11 +48,6 @@ func compareNumbers(a, b int) int {
 }
 
 // compareDebPart compares one part of a Debian version.
-//
-// The algorithm is exactly the one from dpkg: alternately we compare
-// non-numeric fragments by a character order of their own and numeric
-// fragments as numbers. A tilde is smaller than everything, including the
-// end of the string - which is why "1.0~rc1" is older than "1.0".
 func compareDebPart(a, b string) int {
 	i, j := 0, 0
 	for i < len(a) || j < len(b) {
@@ -109,10 +94,6 @@ func compareDebPart(a, b string) int {
 func isDigit(c byte) bool { return c >= '0' && c <= '9' }
 
 // debOrder gives characters the order used by dpkg.
-//
-// A tilde is smaller than empty space, letters come before the remaining
-// characters and everything else after them - by the ASCII code shifted so
-// that it does not fall between the letters.
 func debOrder(c byte) int {
 	switch {
 	case c == '~':

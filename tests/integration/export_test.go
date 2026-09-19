@@ -11,9 +11,7 @@ import (
 )
 
 // csvExport asks a list for its file and hands back the parsed rows, the
-// header first. It checks what every export owes: the status, the media
-// type and the disposition that makes the browser save a file named
-// after the list.
+// header first.
 func csvExport(t *testing.T, h *harness, path, list string) [][]string {
 	t.Helper()
 	response, raw := h.request(http.MethodGet, path, nil, nil)
@@ -57,9 +55,9 @@ func requireHeader(t *testing.T, rows [][]string, want []string) {
 	}
 }
 
-// TestHostListExportsEveryHostOfTheFilter checks the fleet export against
-// the JSON list: the same filter, the total of the list as the number of
-// rows whatever the page size, and the columns in their fixed order.
+// TestHostListExportsEveryHostOfTheFilter checks the fleet export against the
+// JSON list: the same filter, the total of the list as the number of rows
+// whatever the page size, and the columns in their fixed order.
 func TestHostListExportsEveryHostOfTheFilter(t *testing.T) {
 	h := newHarness(t)
 	wantHeader := []string{
@@ -102,10 +100,9 @@ func TestHostListExportsEveryHostOfTheFilter(t *testing.T) {
 	}
 }
 
-// TestJobListExportGuardsFormulas checks the task export against the
-// paged JSON list of one host, and that a cell an operator typed cannot
-// become a formula: a cancel reason beginning with '=' is written with a
-// leading apostrophe, so a spreadsheet shows the text and runs nothing.
+// TestJobListExportGuardsFormulas checks the task export against the paged
+// JSON list of one host, and that a cell an operator typed cannot become a
+// formula: a cancel reason beginning with '=' is written with a leading
 func TestJobListExportGuardsFormulas(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -175,9 +172,9 @@ func TestJobListExportGuardsFormulas(t *testing.T) {
 	}
 }
 
-// TestBackupListExportsWhatTheScreenLists checks a fleet export built from
-// a computed view rather than a paged table: the file has one row per
-// item of the JSON answer, in its columns.
+// TestBackupListExportsWhatTheScreenLists checks a fleet export built from a
+// computed view rather than a paged table: the file has one row per item of
+// the JSON answer, in its columns.
 func TestBackupListExportsWhatTheScreenLists(t *testing.T) {
 	h := newHarness(t)
 	var view struct {

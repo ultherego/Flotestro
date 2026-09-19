@@ -1,10 +1,5 @@
 // Command agent-simulator keeps many simulated agents against a real control
 // plane.
-//
-// The document puts the fleet simulator before the dashboard: the exit
-// condition of the agent stage is 2000 concurrent idle sessions, and of the
-// scaling stage 10 000. Without the simulator there is no measuring that
-// other than in production.
 package main
 
 import (
@@ -175,8 +170,6 @@ func simulate(ctx context.Context, index int, prefix, stateDir, enrollmentURL, g
 }
 
 // syntheticFacts builds believable but different facts for every agent.
-// Identical facts would give the same inventory revision and hide the cost of
-// the write.
 func syntheticFacts(hostname, machineID string) agent.Facts {
 	sum := sha256.Sum256([]byte(machineID))
 	seed := int(sum[0])<<8 | int(sum[1])

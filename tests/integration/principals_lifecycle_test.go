@@ -13,13 +13,9 @@ import (
 
 const identityLifecycleReason = "integration test of the identity lifecycle"
 
-// TestAnIdentityIsDisabledAndEnabledAgain walks an identity through its
-// whole life: created without a token, given one with a short life and a
-// description, listed with its sessions, disabled with every credential
-// ending at once, refused a second disabling, enabled again and issued a
-// new token that works. The credentials ended at the disabling stay
-// ended; the roles come back with the identity. Every step leaves its own
-// event on the trail.
+// TestAnIdentityIsDisabledAndEnabledAgain walks an identity through its whole
+// life: created without a token, given one with a short life and a
+// description, listed with its sessions, disabled with every credential ending
 func TestAnIdentityIsDisabledAndEnabledAgain(t *testing.T) {
 	h := newHarness(t)
 	subject := uniqueSubject("lifecycle")
@@ -40,9 +36,9 @@ func TestAnIdentityIsDisabledAndEnabledAgain(t *testing.T) {
 		t.Error("a token was issued although none was asked for")
 	}
 
-	// A token with a life of an hour and a description of its own: the
-	// listing shows both, so a reviewer knows what the token is for and
-	// when it stops on its own.
+	// A token with a life of an hour and a description of its own: the listing
+	// shows both, so a reviewer knows what the token is for and when it stops on
+	// its own.
 	var issued struct {
 		ID          string    `json:"id"`
 		Token       string    `json:"token"`
@@ -93,9 +89,8 @@ func TestAnIdentityIsDisabledAndEnabledAgain(t *testing.T) {
 	probe := h.withToken(issued.Token)
 	probe.get("/api/v1/whoami", nil)
 
-	// A token is not a session: an identity that only ever used tokens has
-	// none, and the answer is the shape of the list, not a refusal. A
-	// session identifier that is not one of this identity's ends nothing.
+	// A token is not a session: an identity that only ever used tokens has none,
+	// and the answer is the shape of the list, not a refusal.
 	var sessions struct {
 		Items       []map[string]any `json:"items"`
 		Count       int              `json:"count"`
@@ -135,9 +130,8 @@ func TestAnIdentityIsDisabledAndEnabledAgain(t *testing.T) {
 		t.Errorf("the disabled identity lost its bindings: %+v", disabled.Bindings)
 	}
 
-	// Enabling brings the identity back with its roles; the token that
-	// ended stays ended, and a new one works. Enabling what is enabled is
-	// the same kind of conflict as disabling what is disabled.
+	// Enabling brings the identity back with its roles; the token that ended
+	// stays ended, and a new one works.
 	var enabled struct {
 		ID       string `json:"id"`
 		Subject  string `json:"subject"`

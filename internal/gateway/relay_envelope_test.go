@@ -63,9 +63,9 @@ func (f *fakeRecords) Accept(_ context.Context, hostID, sessionID string, sequen
 	return true, last, nil
 }
 
-// fixedSequences answers the same way every time: what the record of a
-// session says without a database behind it, so that a refusal the real
-// store reaches only in a race can be put in front of the verifier.
+// fixedSequences answers the same way every time: what the record of a session
+// says without a database behind it, so that a refusal the real store reaches
+// only in a race can be put in front of the verifier.
 type fixedSequences struct {
 	accepted bool
 	last     uint64
@@ -151,9 +151,9 @@ func refusalCode(err error) string {
 	return "error: " + err.Error()
 }
 
-// A session whose messages the host signed verifies message by message,
-// the sequence counting up; the same message a second time is a replay,
-// and a number below the last one is a replay too.
+// A session whose messages the host signed verifies message by message, the
+// sequence counting up; the same message a second time is a replay, and a
+// number below the last one is a replay too.
 func TestASignedSessionVerifiesAndRefusesReplays(t *testing.T) {
 	host := newTestHost(t, true)
 	signer := host.signer(uuid.NewString())
@@ -187,9 +187,9 @@ func TestASignedSessionVerifiesAndRefusesReplays(t *testing.T) {
 	}
 }
 
-// A payload changed after the signature is a hash mismatch; an envelope
-// signed with another key is a bad signature; the two are told apart, and
-// the message is refused before the sequence is spent.
+// A payload changed after the signature is a hash mismatch; an envelope signed
+// with another key is a bad signature; the two are told apart, and the message
+// is refused before the sequence is spent.
 func TestATamperedMessageIsRefusedWithItsCode(t *testing.T) {
 	host := newTestHost(t, true)
 	ctx := context.Background()
@@ -210,10 +210,9 @@ func TestATamperedMessageIsRefusedWithItsCode(t *testing.T) {
 	}
 }
 
-// The envelope has to name the relay that forwarded it and the host the
-// relay named, in the relay's scope, under a certificate that is live and
-// the host's; a message without an envelope is invalid rather than
-// unsigned.
+// The envelope has to name the relay that forwarded it and the host the relay
+// named, in the relay's scope, under a certificate that is live and the
+// host's; a message without an envelope is invalid rather than unsigned.
 func TestTheEnvelopeIsBoundToTheRelayTheHostAndTheCertificate(t *testing.T) {
 	host := newTestHost(t, true)
 	ctx := context.Background()
@@ -262,11 +261,9 @@ func TestTheEnvelopeIsBoundToTheRelayTheHostAndTheCertificate(t *testing.T) {
 	}
 }
 
-// A certificate issued before the record carried keys has none on record;
-// the key comes from the certificate the relay presented, once its
-// fingerprint is the one on record, and is handed back to be recorded. A
-// certificate of another fingerprint supplies nothing, and without any
-// key the envelope cannot be checked.
+// A certificate issued before the record carried keys has none on record; the
+// key comes from the certificate the relay presented, once its fingerprint is
+// the one on record, and is handed back to be recorded.
 func TestTheKeyOfAnOlderCertificateComesFromTheRelay(t *testing.T) {
 	host := newTestHost(t, false)
 	ctx := context.Background()
@@ -316,9 +313,9 @@ func TestAUnaryRequestIsCheckedWithinItsWindow(t *testing.T) {
 	}
 }
 
-// The certificate a relay presents in its attestation has to be the one
-// of the fingerprint it names; one that is not is an attestation the
-// gateway cannot read.
+// The certificate a relay presents in its attestation has to be the one of the
+// fingerprint it names; one that is not is an attestation the gateway cannot
+// read.
 func TestTheRelayPresentedCertificateHasToMatchItsFingerprint(t *testing.T) {
 	host := newTestHost(t, true)
 	headers := http.Header{}
@@ -345,9 +342,9 @@ func TestTheRelayPresentedCertificateHasToMatchItsFingerprint(t *testing.T) {
 	}
 }
 
-// The strength a session records follows from how the host was
-// identified: the host's own signature is end_to_end, the relay's word
-// or attestation is relay_only, a direct connection records nothing.
+// The strength a session records follows from how the host was identified: the
+// host's own signature is end_to_end, the relay's word or attestation is
+// relay_only, a direct connection records nothing.
 func TestTheAuthStrengthFollowsTheRelayIdentity(t *testing.T) {
 	for identity, want := range map[string]string{
 		hosts.RelayIdentityEndToEnd: "end_to_end",
@@ -362,11 +359,7 @@ func TestTheAuthStrengthFollowsTheRelayIdentity(t *testing.T) {
 }
 
 // A relay keeps a message until the panel acknowledges it, so a link that
-// breaks in between means the relay carries the message again. That
-// second copy is a redelivery rather than a replay: the same session
-// spent the number already. A number the session never spent - one above
-// its last, which only another gateway's write can produce - stays the
-// refusal it was.
+// breaks in between means the relay carries the message again.
 func TestARedeliveredSequenceIsToldFromAReplay(t *testing.T) {
 	host := newTestHost(t, true)
 	ctx := context.Background()
@@ -385,11 +378,9 @@ func TestARedeliveredSequenceIsToldFromAReplay(t *testing.T) {
 		t.Fatal("a message the session had consumed was not read as a redelivery")
 	}
 
-	// The same store refusing a number the session never spent - it
-	// stands below the first message of a session nobody has spoken in,
-	// which is what another gateway's write or another session's number
-	// looks like from here. Nothing the relay is retrying, and the host
-	// hears about it.
+	// The same store refusing a number the session never spent - it stands below
+	// the first message of a session nobody has spoken in, which is what another
+	// gateway's write or another session's number looks like from here.
 	verifier := NewRelayVerifier(host.records, host.records, fixedSequences{accepted: false, last: 0})
 	_, err = verifier.VerifyMessage(ctx, host.peer, signedHello(t, host.signer(uuid.NewString())))
 	refusal = RelayRefusalOf(err)
@@ -401,10 +392,9 @@ func TestARedeliveredSequenceIsToldFromAReplay(t *testing.T) {
 	}
 }
 
-// The stream drops a redelivered message and acknowledges it once more -
-// the record is stuck in the spool of the relay until it hears the panel
-// has it - and writes nothing on the host: an honest retry of a relay is
-// not a refusal of a machine.
+// The stream drops a redelivered message and acknowledges it once more - the
+// record is stuck in the spool of the relay until it hears the panel has it -
+// and writes nothing on the host: an honest retry of a relay is not a refusal
 func TestARedeliveredMessageIsAcknowledgedAndNotHeldAgainstTheHost(t *testing.T) {
 	host := newTestHost(t, true)
 	service := &AgentService{
@@ -447,9 +437,9 @@ func TestARedeliveredMessageIsAcknowledgedAndNotHeldAgainstTheHost(t *testing.T)
 	}
 }
 
-// A message that carries an envelope is acknowledged over its own
-// session, and one without an envelope - a host connected directly, with
-// no spool behind it - is not.
+// A message that carries an envelope is acknowledged over its own session, and
+// one without an envelope - a host connected directly, with no spool behind it
+// - is not.
 func TestOnlyARelayedMessageIsAcknowledged(t *testing.T) {
 	service := &AgentService{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	session := NewSession(uuid.NewString(), testHostID, "0.54.0", uuid.NewString(), "127.0.0.1:1", 4)

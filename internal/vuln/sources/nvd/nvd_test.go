@@ -94,9 +94,8 @@ func TestAVulnerabilityWithoutAScoreKeepsTheDescription(t *testing.T) {
 }
 
 func TestTheSeverityOfVersionTwoStandsNextToTheData(t *testing.T) {
-	// In CVSS 2 the severity sits with the metric rather than in the data of
-	// the score. Without that older vulnerabilities would carry a number and
-	// not a word next to it.
+	// In CVSS 2 the severity sits with the metric rather than in the data of the
+	// score.
 	metrics := map[string][]metric{"cvssMetricV2": {{
 		Type: "Primary", BaseSeverity: "MEDIUM",
 		CVSSData: struct {

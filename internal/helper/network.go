@@ -101,7 +101,7 @@ func (s *Server) planNetwork(ctx context.Context, adapter string,
 	profiles := s.adapterProfiles(ctx, adapter)
 	// A layered plan is computed against the whole host and not against one
 	// profile: every one of its refusals is about a relation to something else -
-	// a member another layer owns, a parent that is not there, the interface the
+	// a member another layer owns, a parent that is not there, the interface the.
 	if kind := networkChangeKind(action); kind == network.PlanLink || kind == network.PlanLinkRemove {
 		snapshot, err := s.networkSnapshot(ctx, action.GetManagementAddress())
 		if err != nil {
@@ -119,12 +119,12 @@ func (s *Server) planNetwork(ctx context.Context, adapter string,
 
 // adapterPlan computes the plan and attaches to it what the mechanism will
 // apply: nothing for NetworkManager, which takes arguments, the nmstate
-// document of the touched interface, or the panel's netplan file after the
+// document of the touched interface, or the panel's netplan file after the.
 func (s *Server) adapterPlan(ctx context.Context, adapter string, action *helperv1.NetworkRequest,
 	profile network.Profile) network.Plan {
 	// The second family's switches come from the kernel, not from the profile: a
 	// mechanism will happily write an IPv6 address onto an interface whose
-	// disable_ipv6 is set, and the address then exists nowhere the verifier can
+	// disable_ipv6 is set, and the address then exists nowhere the verifier can.
 	ipv6 := network.CombineIPv6(
 		network.ReadIPv6Settings(network.IPv6ConfDir, "all"),
 		network.ReadIPv6Settings(network.IPv6ConfDir, action.GetInterface()))

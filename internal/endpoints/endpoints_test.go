@@ -62,8 +62,6 @@ func TestAConfigurationErrorWaitsLonger(t *testing.T) {
 		t.Fatal(err)
 	}
 	// After a minute the gateway may still not be ready - that is the point.
-	// We only check that the manager does not ask to wait longer than the
-	// class of the error implies.
 	if waiting := m.UntilNext(now); waiting > ConfigurationBackoff {
 		t.Fatalf("the waiting %s exceeds the limit", waiting)
 	}
@@ -125,9 +123,9 @@ func TestDuplicateGatewaysAreSkipped(t *testing.T) {
 	}
 }
 
-// tryManager is a manager with the clock stopped and the backoff between
-// the addresses skipped: the failover order is what the tests are about,
-// not how long the waiting takes.
+// tryManager is a manager with the clock stopped and the backoff between the
+// addresses skipped: the failover order is what the tests are about, not how
+// long the waiting takes.
 func tryManager(addresses ...string) *Manager {
 	m := New(addresses, time.Second, time.Minute)
 	m.now = func() time.Time { return now }
@@ -135,11 +133,9 @@ func tryManager(addresses ...string) *Manager {
 	return m
 }
 
-// TestTheRenewalTriesTheGatewaysInOrder guards the property the gap names:
-// a renewal or an identity recovery does not depend on the first address
-// of the list being up. The first one is still tried first - it is the
-// priority, not a suggestion - and the answer says which gateway answered,
-// so the operator knows where their certificate came from.
+// TestTheRenewalTriesTheGatewaysInOrder guards the property the gap names: a
+// renewal or an identity recovery does not depend on the first address of the
+// list being up.
 func TestTheRenewalTriesTheGatewaysInOrder(t *testing.T) {
 	m := tryManager("https://a:8443", "https://b:8443", "https://c:8443")
 	var tried []string
@@ -168,9 +164,8 @@ func TestTheRenewalTriesTheGatewaysInOrder(t *testing.T) {
 }
 
 // TestEveryGatewayRefusingIsOneAnswer guards that a fleet-wide outage is
-// reported as what it is: every address, in order, with the reason each
-// one gave. A caller that only saw the last error would have the operator
-// chasing the last gateway in the list.
+// reported as what it is: every address, in order, with the reason each one
+// gave.
 func TestEveryGatewayRefusingIsOneAnswer(t *testing.T) {
 	m := tryManager("https://a:8443", "https://b:8443")
 	_, err := m.Try(context.Background(), func(ctx context.Context, url string) error {
@@ -194,10 +189,9 @@ func TestEveryGatewayRefusingIsOneAnswer(t *testing.T) {
 	}
 }
 
-// TestARejectedIdentityStopsTheFailover guards the doctrine of the class:
-// a certificate the panel revoked is refused by every gateway, so the
-// second address is not even tried - and the caller learns the reason
-// rather than a connection error.
+// TestARejectedIdentityStopsTheFailover guards the doctrine of the class: a
+// certificate the panel revoked is refused by every gateway, so the second
+// address is not even tried - and the caller learns the reason rather than a
 func TestARejectedIdentityStopsTheFailover(t *testing.T) {
 	m := tryManager("https://a:8443", "https://b:8443")
 	tried := 0
@@ -214,8 +208,8 @@ func TestARejectedIdentityStopsTheFailover(t *testing.T) {
 }
 
 // TestOneAddressBehavesAsBefore guards the installations that configure a
-// single gateway: one attempt, its own error, and no waiting introduced by
-// the failover.
+// single gateway: one attempt, its own error, and no waiting introduced by the
+// failover.
 func TestOneAddressBehavesAsBefore(t *testing.T) {
 	m := tryManager("https://a:8443")
 	tried := 0

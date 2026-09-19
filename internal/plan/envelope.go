@@ -1,34 +1,6 @@
 // Package plan is the one shape every planner's answer takes before it is
-// approved and executed: the envelope of chapter 7 of the security
-// remediation plan.
-//
-// A plan is the declaration of the complete intended effect of a change on
-// one host. An approval means "the operator accepted exactly these
-// artifacts and these effects", so the digest that binds the approval
-// covers the whole content of the envelope - every precondition, step,
-// effect and artifact, the rollback, the planner and the metadata revision
-// - and both sides of the trust boundary - the agent that plans and the
-// root helper that executes - have to compute it over the same bytes. The
-// bytes are the canonical JSON of RFC 8785 through package canonical, with
-// every collection in a deterministic order, so the digest depends on the
-// plan alone and never on which process printed it.
-//
-// Two things stay outside the digest on purpose. The presentational
-// description, because a wording is not a plan. And the identity header -
-// the host, the inventory revision and the expiry - because the same
-// state has to give the same digest wherever and whenever it is read: a
-// hundred hosts with one shape of change are one group on the screen of
-// plans, and a plan of the same host read a minute later is the same
-// plan. The header is not unprotected for that: it travels in the payload
-// the panel hashes and the capability signs, and the executor checks the
-// expiry field by field (plan_expired) rather than through the digest.
-//
-// Right before the change the helper reads the observed state again under
-// the proper lock, computes the same plan and compares the final hash. A
-// difference is a refusal with a typed code, never a quiet update of the
-// plan: stale_plan when the content moved, replan_required when the
-// planner that made the plan is not the planner that would execute it,
-// plan_expired when the plan outlived its validity.
+// approved and executed: the envelope of chapter 7 of the security remediation
+// plan.
 package plan
 
 import (
@@ -42,30 +14,23 @@ import (
 	"github.com/ultherego/flotestro/internal/canonical"
 )
 
-// SchemaVersion is the layout version of the envelope this release
-// writes. A layout change raises it; a plan of another schema is not read
-// as a different plan but as one that has to be computed again.
+// SchemaVersion is the layout version of the envelope this release writes.
 const SchemaVersion uint32 = 1
 
-// The stable codes of a plan refused at execution. They are part of the
-// contract of a job result and of the API (409 for both when a change is
-// launched against a plan the host no longer computes).
+// The stable codes of a plan refused at execution.
 const (
-	// ErrorStalePlan: the plan the host computes now differs from the
-	// approved one - a repository, a version, an origin or an architecture
-	// moved between the approval and the execution.
+	// ErrorStalePlan: the plan the host computes now differs from the approved
+	// one - a repository, a version, an origin or an architecture moved between
+	// the approval and the execution.
 	ErrorStalePlan = "stale_plan"
-	// ErrorReplanRequired: the planner that would execute is not the
-	// planner that made the plan. That is not a JSON error and not a
-	// mismatch of content: the plan has to be made again by the current
-	// planner and approved again.
+	// ErrorReplanRequired: the planner that would execute is not the planner that
+	// made the plan.
 	ErrorReplanRequired = "replan_required"
 	// ErrorPlanExpired: the plan outlived its validity; the state it
 	// described is too old to be trusted blind.
 	ErrorPlanExpired = "plan_expired"
-	// ErrorEffectsPartial: the transaction ran, and the state read
-	// afterwards does not show every effect the plan promised. The result
-	// lists each effect achieved and each not achieved.
+	// ErrorEffectsPartial: the transaction ran, and the state read afterwards
+	// does not show every effect the plan promised.
 	ErrorEffectsPartial = "effects_partial"
 )
 
@@ -100,13 +65,10 @@ func CodeOf(err error) (string, bool) {
 }
 
 // DefaultTTL is how long a plan stays valid when the planner sets no other
-// expiry. It equals the plan TTL of the campaigns: a plan approved on the
-// last minute of its life is still the plan the host is started on.
+// expiry.
 const DefaultTTL = 24 * time.Hour
 
 // Precondition is a fact the helper checks again right before the change.
-// The agent hands the plan over, but the helper does not trust that the
-// agent checked anything: the critical preconditions are its own to read.
 type Precondition struct {
 	// Kind names what is checked: metadata_revision, lock_free,
 	// modules_visible, space, protected_absent.
@@ -129,10 +91,8 @@ type Step struct {
 	Spec string `json:"spec"`
 }
 
-// Artifact is one thing the change fetches or replaces: the exact package
-// with its architecture and the repository it comes from. A digest that
-// the manager publishes in its index goes in; an empty digest says the
-// index carries none, never that the digest is zero.
+// Artifact is one thing the change fetches or replaces: the exact package with
+// its architecture and the repository it comes from.
 type Artifact struct {
 	Kind         string `json:"kind"`
 	Name         string `json:"name"`
@@ -142,30 +102,25 @@ type Artifact struct {
 	Digest       string `json:"digest"`
 }
 
-// Effect is one observable outcome the change promises: after the
-// transaction the subject has this value. The executor reads the state
-// and settles every effect as achieved or not.
+// Effect is one observable outcome the change promises: after the transaction
+// the subject has this value.
 type Effect struct {
-	// Kind names what is observed: package_version (the subject is
-	// installed at the value), package_absent (the subject is not
-	// installed).
+	// Kind names what is observed: package_version (the subject is installed at
+	// the value), package_absent (the subject is not installed).
 	Kind    string `json:"kind"`
 	Subject string `json:"subject"`
 	Value   string `json:"value,omitempty"`
 }
 
-// Effects is what the host looks like once the plan has run, beyond the
-// list of artifacts: the expected state per package, the restart the
-// change brings and the bytes it moves. Every number carries whether it is
-// known, because an unknown need is not a need of zero.
+// Effects is what the host looks like once the plan has run, beyond the list
+// of artifacts: the expected state per package, the restart the change brings
+// and the bytes it moves.
 type Effects struct {
 	Expected []Effect `json:"expected"`
 	// RebootRequired is the prediction of the planner; the state after the
 	// transaction says whether it came true.
 	RebootRequired bool `json:"reboot_required"`
-	// ServicesRestart names the services whose libraries change. The
-	// package tools know that only after the transaction, so a planner that
-	// cannot name them says so with ServicesRestartKnown false.
+	// ServicesRestart names the services whose libraries change.
 	ServicesRestart      []string `json:"services_restart"`
 	ServicesRestartKnown bool     `json:"services_restart_known"`
 	// DownloadBytes is what comes down the wire; InstallDeltaBytes is how
@@ -176,9 +131,8 @@ type Effects struct {
 	InstallDeltaKnown bool   `json:"install_delta_known"`
 }
 
-// RollbackPlan says how the change can be taken back: the mechanism and
-// its identifier, or unavailable with the reason. A rollback that is not
-// there is written down as such, never left blank.
+// RollbackPlan says how the change can be taken back: the mechanism and its
+// identifier, or unavailable with the reason.
 type RollbackPlan struct {
 	Mechanism string `json:"mechanism"`
 	ID        string `json:"id"`
@@ -187,12 +141,6 @@ type RollbackPlan struct {
 }
 
 // Envelope is the plan as it is hashed, approved and executed.
-//
-// The host identifier and the revisions are strings rather than the
-// numeric types of the design document: the fleet names hosts by UUID
-// strings and its inventory revisions are content digests, and the
-// envelope carries them as the fleet names them so a digest here can be
-// checked against a record there without a translation.
 type Envelope struct {
 	SchemaVersion     uint32         `json:"schema_version"`
 	PlannerVersion    string         `json:"planner_version"`
@@ -206,18 +154,13 @@ type Envelope struct {
 	Artifacts         []Artifact     `json:"artifacts"`
 	Rollback          RollbackPlan   `json:"rollback"`
 	ExpiresAt         time.Time      `json:"expires_at"`
-	// Description is the plan in words for the screen. It is the one field
-	// outside the hash: two plans that differ in wording alone are the same
-	// plan, and a translation of the description must not invalidate a
-	// consent.
+	// Description is the plan in words for the screen.
 	Description string `json:"description,omitempty"`
 }
 
-// Normalized returns the envelope in its one canonical shape: every
-// collection sorted, no nil collection (a nil and an empty list describe
-// the same plan and must hash the same), the expiry in UTC to the second.
-// The order of the steps is not a decision of the planner either - the
-// package tools order a transaction themselves - so they are sorted too.
+// Normalized returns the envelope in its one canonical shape: every collection
+// sorted, no nil collection (a nil and an empty list describe the same plan
+// and must hash the same), the expiry in UTC to the second.
 func (e Envelope) Normalized() Envelope {
 	out := e
 	out.Preconditions = append([]Precondition(nil), e.Preconditions...)
@@ -276,10 +219,8 @@ func (e Envelope) Sum() ([32]byte, []byte, error) {
 	return canonical.SHA256(e.Hashed())
 }
 
-// Hash returns the digest of the envelope, or nil when the envelope
-// cannot be canonicalized. A nil digest never equals an approved one, so
-// a plan that cannot be hashed cannot be executed - the refusal is the
-// safe side.
+// Hash returns the digest of the envelope, or nil when the envelope cannot be
+// canonicalized.
 func (e Envelope) Hash() []byte {
 	sum, _, err := e.Sum()
 	if err != nil {
@@ -293,11 +234,8 @@ func (e Envelope) HashHex() string {
 	return hex.EncodeToString(e.Hash())
 }
 
-// Reference is what an execution carries of the approved plan: the digest
-// to compare, the planner that made the plan and the expiry. The content
-// is not carried - the host computes it again, that is the point - and the
-// agent cannot change the expected digest, because the reference travels
-// in the payload the panel's capability signs.
+// Reference is what an execution carries of the approved plan: the digest to
+// compare, the planner that made the plan and the expiry.
 type Reference struct {
 	Hash           []byte
 	SchemaVersion  uint32
@@ -306,12 +244,6 @@ type Reference struct {
 }
 
 // Verify compares the envelope computed now with the approved reference.
-//
-// The order of the checks is the order of the questions: is this the
-// planner the plan was made by (replan_required), is the plan still valid
-// (plan_expired), and only then is it the same plan (stale_plan). A
-// planner mismatch reported as a stale plan would send the operator to
-// look for a change of the host that never happened.
 func (e Envelope) Verify(expected Reference, now time.Time) error {
 	if expected.SchemaVersion != 0 && expected.SchemaVersion != e.SchemaVersion {
 		return fmt.Errorf("%w: schema %d was approved, this host writes schema %d",

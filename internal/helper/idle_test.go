@@ -10,9 +10,8 @@ import (
 	"time"
 )
 
-// Idleness is counted from the closing of the last connection: the helper
-// must not end its work in the middle of a task that takes longer than the
-// window.
+// Idleness is counted from the closing of the last connection: the helper must
+// not end its work in the middle of a task that takes longer than the window.
 func TestIdlenessDoesNotEndTheWorkDuringAConnection(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "helper.sock")
 	listener, err := net.Listen("unix", path)

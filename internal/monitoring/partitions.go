@@ -1,14 +1,7 @@
 package monitoring
 
-// The daily partitions of the raw samples: creating the ones the coming
-// days will need, and dropping the ones the retention has passed.
-//
-// A partition is dropped, never emptied. The sweep this replaces deleted a
-// day of a fleet's samples row by row - fourteen million of them on ten
-// thousand hosts - which writes as much WAL as the insert did, leaves the
-// space to the vacuum and holds the oldest transaction in the database
-// while it runs. Dropping the partition is a catalogue write and the
-// removal of its files.
+// The daily partitions of the raw samples: creating the ones the coming days
+// will need, and dropping the ones the retention has passed.
 
 import (
 	"context"
@@ -20,12 +13,9 @@ import (
 )
 
 const (
-	// rawPartitionParent is the partitioned table, and rawPartitionPrefix
-	// with rawPartitionLayout is how one of its partitions is named: the
-	// day its range begins, in UTC. The name is not decoration - the
-	// retention reads the day out of it to know where the range ends,
-	// which keeps this code out of the business of parsing partition
-	// bounds out of the catalogue.
+	// rawPartitionParent is the partitioned table, and rawPartitionPrefix with
+	// rawPartitionLayout is how one of its partitions is named: the day its range
+	// begins, in UTC.
 	rawPartitionParent = "host_metrics"
 	rawPartitionPrefix = "host_metrics_p"
 	rawPartitionLayout = "20060102"
@@ -35,18 +25,6 @@ const (
 
 // EnsurePartitions creates the partitions of the raw samples that the days
 // ahead will need.
-//
-// It only ever creates days after the newest partition there is. A day
-// older than every partition cannot need one: the migration left the table
-// it converted as the partition that holds everything up to its cutover,
-// so there is no gap below, and a sample too old for the retention is
-// refused by the gateway before it is ever written. Creating a day that
-// another partition already covers would be an overlap, which is an error
-// and not a no-op.
-//
-// A panel that was down for a week creates the days it missed on its first
-// pass, which is right: they are empty, and the next sample lands in the
-// day it belongs to rather than in whatever was left open.
 func (s *Store) EnsurePartitions(ctx context.Context, now time.Time) error {
 	partitioned, err := s.rawIsPartitioned(ctx)
 	if err != nil || !partitioned {
@@ -72,11 +50,7 @@ func (s *Store) EnsurePartitions(ctx context.Context, now time.Time) error {
 	return nil
 }
 
-// createPartition adds the partition of one day. The bounds are written
-// into the statement rather than bound as parameters, because a partition
-// bound is part of the definition of a table and not a value a statement
-// takes; they are formatted from a moment this code computed, so nothing
-// of a host's making reaches the text.
+// createPartition adds the partition of one day.
 func (s *Store) createPartition(ctx context.Context, at time.Time) error {
 	name := partitionName(at)
 	statement := fmt.Sprintf(
@@ -89,17 +63,8 @@ func (s *Store) createPartition(ctx context.Context, at time.Time) error {
 	return nil
 }
 
-// DropExpiredPartitions removes the partitions whose whole range is past
-// the raw retention.
-//
-// A partition that still owes a rollup is kept. The queue of dirty buckets
-// is the only record that a quarter has to be recomputed, and the raw
-// samples are the only place the numbers to recompute it from exist: a
-// partition dropped while a bucket of its days is queued would leave the
-// queue pointing at readings nobody can read, and the long chart would
-// keep a hole that no later pass can fill. The wait is bounded - the
-// rollup drains the queue every quarter of an hour - and one more day of
-// samples is a cheaper mistake than a rollup that is quietly wrong.
+// DropExpiredPartitions removes the partitions whose whole range is past the
+// raw retention.
 func (s *Store) DropExpiredPartitions(ctx context.Context, now time.Time) error {
 	partitioned, err := s.rawIsPartitioned(ctx)
 	if err != nil || !partitioned {
@@ -137,9 +102,7 @@ func (s *Store) DropExpiredPartitions(ctx context.Context, now time.Time) error 
 	return nil
 }
 
-// rawIsPartitioned says whether the raw samples live in a partitioned
-// table. A database whose migration has not run yet keeps the plain table,
-// and the maintenance has nothing to do on it.
+// rawIsPartitioned says whether the raw samples live in a partitioned table.
 func (s *Store) rawIsPartitioned(ctx context.Context) (bool, error) {
 	var partitioned bool
 	err := s.pool.QueryRow(ctx, `
@@ -150,9 +113,8 @@ func (s *Store) rawIsPartitioned(ctx context.Context) (bool, error) {
 	return partitioned, err
 }
 
-// partitionDays reads the days the existing partitions are named after,
-// oldest first. A child whose name does not follow the convention is left
-// alone: this code created none such and will not drop one.
+// partitionDays reads the days the existing partitions are named after, oldest
+// first.
 func (s *Store) partitionDays(ctx context.Context) ([]time.Time, error) {
 	rows, err := s.pool.Query(ctx, `
 		select c.relname
@@ -197,24 +159,23 @@ func partitionDay(name string) (time.Time, bool) {
 	return at, true
 }
 
-// MaintenanceState is what the status screen says about the machinery
-// behind the samples: how much raw history is on disk, how much of it is
-// waiting to be rolled up, and who is judging the rules.
+// MaintenanceState is what the status screen says about the machinery behind
+// the samples: how much raw history is on disk, how much of it is waiting to
+// be rolled up, and who is judging the rules.
 type MaintenanceState struct {
 	Partitioned  bool       `json:"raw_partitioned"`
 	Partitions   int        `json:"raw_partitions"`
 	OldestRawDay *time.Time `json:"oldest_raw_day,omitempty"`
 	NewestRawDay *time.Time `json:"newest_raw_day,omitempty"`
-	// DirtyBuckets is the backlog of the rollup: quarters whose readings
-	// changed and which have not been recomputed. A number that does not
-	// come back down is a rollup that has stopped.
+	// DirtyBuckets is the backlog of the rollup: quarters whose readings changed
+	// and which have not been recomputed.
 	DirtyBuckets  int64      `json:"dirty_buckets"`
 	OldestDirtyAt *time.Time `json:"oldest_dirty_bucket_at,omitempty"`
 	// HostsWatermarked counts the hosts the rollup has a mark for.
 	HostsWatermarked int64 `json:"hosts_with_rollup_mark"`
-	// SampleIdentities is the estimated size of the table the duplicates
-	// are recognised by; an estimate because counting it exactly is a scan
-	// nobody should pay for on a status page.
+	// SampleIdentities is the estimated size of the table the duplicates are
+	// recognised by; an estimate because counting it exactly is a scan nobody
+	// should pay for on a status page.
 	SampleIdentities int64 `json:"sample_identities_estimate"`
 	// The lease of the alert evaluator, as the database holds it.
 	EvaluatorHolder string     `json:"evaluator_holder,omitempty"`
@@ -263,9 +224,9 @@ func (s *Store) MaintenanceState(ctx context.Context) (MaintenanceState, error) 
 		`select count(*) from metric_rollup_watermarks`).Scan(&state.HostsWatermarked); err != nil {
 		return state, err
 	}
-	// The planner's own estimate: a count over a table of a fleet's
-	// identities is a sequential scan, and a status page that answers in
-	// five seconds is worth more here than an exact number.
+	// The planner's own estimate: a count over a table of a fleet's identities is
+	// a sequential scan, and a status page that answers in five seconds is worth
+	// more here than an exact number.
 	if err := s.pool.QueryRow(ctx, `
 		select greatest(coalesce(reltuples, 0), 0)::bigint
 		  from pg_class where oid = to_regclass('metric_samples')`).

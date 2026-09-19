@@ -43,8 +43,8 @@ func TestADamagedNotificationDoesNotCloseASession(t *testing.T) {
 }
 
 // Only the unique index on the host's epoch makes a session try the next
-// number: any other refusal of the insert is an error to report, not a
-// race to retry.
+// number: any other refusal of the insert is an error to report, not a race to
+// retry.
 func TestOnlyATakenEpochIsRetried(t *testing.T) {
 	taken := &pgconn.PgError{Code: "23505", ConstraintName: "agent_sessions_host_epoch_key"}
 	if !epochTaken(taken) || !epochTaken(fmt.Errorf("opening: %w", taken)) {

@@ -69,9 +69,9 @@ func TestRenderJSONCarriesTheBufferNumbers(t *testing.T) {
 	}
 }
 
-// testDiagnostics wires a diagnosis to a temporary directory and to a
-// network that answers the way the test says: the names resolve, every
-// port is closed, and the relay has written a healthy state.
+// testDiagnostics wires a diagnosis to a temporary directory and to a network
+// that answers the way the test says: the names resolve, every port is closed,
+// and the relay has written a healthy state.
 func testDiagnostics(t *testing.T) (diagnostics, string, time.Time) {
 	t.Helper()
 	path, directory := configurationFile(t, goodConfiguration)

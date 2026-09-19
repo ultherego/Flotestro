@@ -1,11 +1,4 @@
-// Package docker is the container engine adapter. The module reads the
-// state through the Engine API and runs only typed operations; there is no
-// "arbitrary request to Docker" operation.
-//
-// The agent gets no access to the Docker socket. The socket belongs to
-// root, and membership in the docker group is equivalent to root - an agent
-// running without privileges cannot have it. The whole conversation with
-// the engine goes through the helper.
+// Package docker is the container engine adapter.
 package docker
 
 import "time"
@@ -29,9 +22,8 @@ type Container struct {
 	Labels map[string]string `json:"labels,omitempty"`
 	// Compose is filled for containers managed by Compose.
 	Compose *ComposeMembership `json:"compose,omitempty"`
-	// Networks lists the networks the container is attached to. This is
-	// how it is known which network is in use: the engine's network list
-	// does not say.
+	// Networks lists the networks the container is attached to. This is how it is
+	// known which network is in use: the engine's network list does not say.
 	Networks []ContainerNetwork `json:"networks,omitempty"`
 	// RestartCount helps to tell a healthy container from one that comes up
 	// in a loop.
@@ -95,27 +87,21 @@ type Network struct {
 	Scope    string   `json:"scope,omitempty"`
 	Subnets  []string `json:"subnets,omitempty"`
 	Gateways []string `json:"gateways,omitempty"`
-	// Internal marks a network without an exit to the outside, Attachable -
-	// a network a container from outside the service may be attached to.
-	// Both change what passes through this network, so they are not a
-	// detail.
+	// Internal marks a network without an exit to the outside, Attachable - a
+	// network a container from outside the service may be attached to.
 	Internal   bool              `json:"internal"`
 	Attachable bool              `json:"attachable"`
 	IPv6       bool              `json:"ipv6"`
 	Ingress    bool              `json:"ingress,omitempty"`
 	Labels     map[string]string `json:"labels,omitempty"`
 	CreatedAt  time.Time         `json:"created_at,omitempty"`
-	// Predefined marks a network built into the engine - bridge, host,
-	// none. The engine does not allow removing it, so the panel must not
-	// propose that.
+	// Predefined marks a network built into the engine - bridge, host, none. The
+	// engine does not allow removing it, so the panel must not propose that.
 	Predefined bool `json:"predefined"`
-	// Compose points at the project that created this network. A project
-	// network removed by hand comes back at the next deployment, so that is
-	// not cleanup.
+	// Compose points at the project that created this network. A project network
+	// removed by hand comes back at the next deployment, so that is not cleanup.
 	Compose string `json:"compose,omitempty"`
-	// Containers lists the attached containers. The engine's network list
-	// does not report them, so they are derived from the container list -
-	// and it is they, not a flag from the engine, that decide about usage.
+	// Containers lists the attached containers.
 	Containers []NetworkMember `json:"containers,omitempty"`
 	InUse      bool            `json:"in_use"`
 }
@@ -139,17 +125,14 @@ type Volume struct {
 	CreatedAt  time.Time         `json:"created_at,omitempty"`
 	// Compose points at the project that created the volume.
 	Compose string `json:"compose,omitempty"`
-	// UsedBy lists the containers that mount this volume - stopped ones
-	// included. The volume of a stopped container is not an abandoned
-	// volume, and it is the abandoned one that dies in a prune.
+	// UsedBy lists the containers that mount this volume - stopped ones included.
 	UsedBy []VolumeMount `json:"used_by,omitempty"`
 	InUse  bool          `json:"in_use"`
 	// SizeBytes may be undetermined: computing the size requires walking
 	// the whole volume and the engine does not report it in every query.
 	SizeBytes *int64 `json:"size_bytes,omitempty"`
-	// SizeReason says why there is no size. Zero would mean an empty
-	// volume, ready to be deleted - and that is entirely different
-	// information.
+	// SizeReason says why there is no size. Zero would mean an empty volume,
+	// ready to be deleted - and that is entirely different information.
 	SizeReason string `json:"size_reason,omitempty"`
 }
 
@@ -172,9 +155,7 @@ type Project struct {
 	Total       int      `json:"total"`
 }
 
-// Summary is a light summary for the inventory. The full lists are fetched
-// on request: querying the engine at every heartbeat would load the host
-// for no reason.
+// Summary is a light summary for the inventory.
 type Summary struct {
 	EngineVersion string `json:"engine_version,omitempty"`
 	APIVersion    string `json:"api_version,omitempty"`
@@ -183,9 +164,8 @@ type Summary struct {
 	Paused        int    `json:"paused"`
 	Stopped       int    `json:"stopped"`
 	Unhealthy     int    `json:"unhealthy"`
-	// RestartLooping counts the containers that come up over and over. It
-	// is a decision signal, not a metric - that is why it is in the
-	// inventory.
+	// RestartLooping counts the containers that come up over and over. It is a
+	// decision signal, not a metric - that is why it is in the inventory.
 	RestartLooping int `json:"restart_looping"`
 	Images         int `json:"images"`
 	Volumes        int `json:"volumes"`
@@ -195,8 +175,7 @@ type Summary struct {
 	VolumesUnused  int       `json:"volumes_unused"`
 	NetworksUnused int       `json:"networks_unused"`
 	Projects       []Project `json:"projects,omitempty"`
-	// UnavailableReason says why the state could not be determined. An
-	// empty engine and an engine not asked are two different pieces of
-	// information.
+	// UnavailableReason says why the state could not be determined. An empty
+	// engine and an engine not asked are two different pieces of information.
 	UnavailableReason string `json:"unavailable_reason,omitempty"`
 }

@@ -16,9 +16,8 @@ type Store struct {
 	keys KeyProvider
 }
 
-// NewStore builds the store over the provider that holds the key
-// encryption keys. The store never sees those keys: it hands data keys to
-// the provider to wrap and gets them back unwrapped.
+// NewStore builds the store over the provider that holds the key encryption
+// keys.
 func NewStore(pool *pgxpool.Pool, keys KeyProvider) *Store {
 	return &Store{pool: pool, keys: keys}
 }
@@ -57,9 +56,6 @@ func (s *Store) Create(ctx context.Context, name, description string, value []by
 }
 
 // Rotate adds a new version and makes it the current one.
-//
-// The previous versions stay: a host that got a lease on version 3 is to get
-// it also when version 4 has come into being in the meantime.
 func (s *Store) Rotate(ctx context.Context, name string, value []byte, author string) (*Secret, error) {
 	if err := ValidateValue(value); err != nil {
 		return nil, err
@@ -211,10 +207,6 @@ func (s *Store) Destroy(ctx context.Context, name string, version int) error {
 }
 
 // Issue creates a lease for the duration of one task.
-//
-// We fix the version at the moment of issuing: a task ordered against the
-// current version is to get the version that was current when it was
-// delivered - not the one that comes into being while it runs.
 func (s *Store) Issue(ctx context.Context, name string, version int,
 	jobID, hostID string, window time.Duration) (*Lease, error) {
 	if err := ValidateName(name); err != nil {
@@ -253,12 +245,8 @@ func (s *Store) Issue(ctx context.Context, name string, version int,
 	return lease, nil
 }
 
-// Redeem returns the value of the secret and uses up the lease.
-//
-// A lease is single-use: the same task may fetch the secret once. A second
-// attempt is a refusal rather than a second copy - a repeated fetch means
-// either a retry of the operation, which gets its own lease, or somebody
-// using a lease that is not theirs.
+// Redeem returns the value of the secret and uses up the lease. A lease is
+// single-use: the same task may fetch the secret once.
 func (s *Store) Redeem(ctx context.Context, jobID, hostID, name string, version int) ([]byte, int, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -305,10 +293,8 @@ func (s *Store) Redeem(ctx context.Context, jobID, hostID, name string, version 
 	return value, issuedVersion, nil
 }
 
-// Revoke closes the unused leases of a task.
-//
-// A task that has finished or was cancelled has no reason to keep an open
-// right to a secret.
+// Revoke closes the unused leases of a task. A task that has finished or was
+// cancelled has no reason to keep an open right to a secret.
 func (s *Store) Revoke(ctx context.Context, jobID string) error {
 	_, err := s.pool.Exec(ctx, `
 		update secret_leases set revoked_at = now()
@@ -350,11 +336,8 @@ func nullable(value string) any {
 	return value
 }
 
-// ReadCurrent returns the current value of a secret for the panel's own
-// use - the password of the mail relay a notification channel names. The
-// value goes to the panel's own client and to no host, so no lease is
-// issued and no issuance is recorded: none happened. A retired or
-// destroyed secret is refused with the same errors a host gets.
+// ReadCurrent returns the current value of a secret for the panel's own use -
+// the password of the mail relay a notification channel names.
 func (s *Store) ReadCurrent(ctx context.Context, name string) ([]byte, error) {
 	var secretID string
 	var version int
@@ -373,9 +356,9 @@ func (s *Store) ReadCurrent(ctx context.Context, name string) ([]byte, error) {
 	return s.open(ctx, s.pool, secretID, version)
 }
 
-// kindSecret labels the envelopes of the store in the associated data;
-// the installation sentinel carries a kind of its own, so the two never
-// open in each other's place.
+// kindSecret labels the envelopes of the store in the associated data; the
+// installation sentinel carries a kind of its own, so the two never open in
+// each other's place.
 const kindSecret = "secret"
 
 // querier is what open reads through: the pool outside a transaction, the
@@ -384,13 +367,8 @@ type querier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-// open reads and decrypts one version by the form it was written in.
-//
-// A row of the second form opens through the provider. A row of the first
-// form opens with the legacy key, which the provider holds only after
-// adopting an installation from before the envelope; without it the row
-// is refused with the key's own error rather than a decryption failure,
-// because the two mean different things to whoever reads the log.
+// open reads and decrypts one version by the form it was written in. A row of
+// the second form opens through the provider.
 func (s *Store) open(ctx context.Context, q querier, secretID string, version int) ([]byte, error) {
 	var nonce, ciphertext, wrapped []byte
 	var destroyed *time.Time
@@ -427,15 +405,13 @@ func (s *Store) open(ctx context.Context, q querier, secretID string, version in
 	return envelope.Open(ctx, s.keys, AssociatedData(secretID, version, kindSecret, envelopeVersion))
 }
 
-// LegacyFormLabel is the label VersionsByKey counts the versions of the
-// first form under: they are on the legacy key, but not yet in an
-// envelope, and the rewrap has them to do even while that key is active.
+// LegacyFormLabel is the label VersionsByKey counts the versions of the first
+// form under: they are on the legacy key, but not yet in an envelope, and the
+// rewrap has them to do even while that key is active.
 const LegacyFormLabel = LegacyKeyID + "/v1"
 
-// VersionsByKey counts the live versions by the key they are wrapped
-// with; a version of the first form counts under LegacyFormLabel. The
-// status screen shows it, and a key rotation is finished only when every
-// count but the active key's is zero.
+// VersionsByKey counts the live versions by the key they are wrapped with; a
+// version of the first form counts under LegacyFormLabel.
 func (s *Store) VersionsByKey(ctx context.Context) (map[string]int, error) {
 	rows, err := s.pool.Query(ctx, `
 		select case when envelope_version < $1 then $2 else coalesce(key_id, '') end, count(*)
@@ -458,15 +434,8 @@ func (s *Store) VersionsByKey(ctx context.Context) (map[string]int, error) {
 	return counts, rows.Err()
 }
 
-// RewrapBatch moves up to limit live versions onto the active key and
-// says how many remain.
-//
-// A version of the first form is decrypted with the legacy key and sealed
-// afresh in an envelope; one of the second form has its data key rewrapped
-// alone. The batch runs in one transaction with the rows locked, so two
-// panels rewrapping at once do not undo each other; and it is resumable,
-// because a row is chosen by what key it is on rather than by a cursor
-// anybody has to keep.
+// RewrapBatch moves up to limit live versions onto the active key and says how
+// many remain.
 func (s *Store) RewrapBatch(ctx context.Context, limit int) (moved, remaining int, err error) {
 	active, err := s.keys.ActiveKeyID(ctx)
 	if err != nil {

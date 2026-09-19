@@ -13,11 +13,9 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// The negative matrix of chapter 19 for the helper: HLP-01 a request of
-// the right user without a signature, HLP-02 a valid signature over a
-// changed payload, HLP-03 a nonce replayed after a restart of the helper -
-// and the other refusals of the verifier, each with its own code, in the
-// order the contract fixes.
+// The negative matrix of chapter 19 for the helper: HLP-01 a request of the
+// right user without a signature, HLP-02 a valid signature over a changed
+// payload, HLP-03 a nonce replayed after a restart of the helper - and the
 
 type fixture struct {
 	t         *testing.T
@@ -109,9 +107,7 @@ func TestAValidCapabilityIsAcceptedOnce(t *testing.T) {
 	}
 }
 
-// HLP-01: the right user, no signature. The policy refuses under enforce
-// with permission-denied semantics (capability_required) and nothing ran;
-// under prefer the request passes as a legacy one, marked.
+// HLP-01: the right user, no signature.
 func TestHLP01NoSignatureIsRefusedUnderEnforce(t *testing.T) {
 	f := newFixture(t)
 	request := f.request(nil, nil)
@@ -158,9 +154,7 @@ func TestHLP02ChangedPayloadIsAPayloadHashMismatch(t *testing.T) {
 }
 
 // HLP-03: the nonce is consumed, the helper restarts, the same capability
-// comes again. The new life refuses it; within the same life a second
-// request of the same task is honoured, because one task may ask the
-// helper twice under one capability.
+// comes again.
 func TestHLP03NonceReplayAfterRestartIsRefused(t *testing.T) {
 	f := newFixture(t)
 	capability, signature := f.issue(Mint{})
@@ -222,9 +216,8 @@ func TestExpiredAndNotYetValidAreRefused(t *testing.T) {
 	}
 }
 
-// A window longer than the class allows is a window the panel would not
-// have signed - whoever signed it. The signature is valid here; the
-// length is refused before the signature is even looked at.
+// A window longer than the class allows is a window the panel would not have
+// signed - whoever signed it.
 func TestTTLTooLongIsRefused(t *testing.T) {
 	f := newFixture(t)
 	capability, _ := f.issue(Mint{})
@@ -309,9 +302,9 @@ func TestPayloadBindingMismatchIsRefused(t *testing.T) {
 	}
 }
 
-// The capability binds the bytes the agent already verified: the digest
-// of the canonical payload is the version 2 payload hash of the task, also
-// for a payload with an empty sub-payload, which the hash drops.
+// The capability binds the bytes the agent already verified: the digest of the
+// canonical payload is the version 2 payload hash of the task, also for a
+// payload with an empty sub-payload, which the hash drops.
 func TestCanonicalPayloadDigestIsThePayloadHash(t *testing.T) {
 	payloads := []opspec.Payload{
 		{Unit: &opspec.UnitPayload{Unit: "cron.service"}},
@@ -345,8 +338,8 @@ func TestCanonicalPayloadDigestIsThePayloadHash(t *testing.T) {
 }
 
 // The signing bytes are a function of every field: two capabilities that
-// differ in one field never share them, and the prefix keeps them apart
-// from the trust bundle's.
+// differ in one field never share them, and the prefix keeps them apart from
+// the trust bundle's.
 func TestSigningBytesCoverEveryField(t *testing.T) {
 	f := newFixture(t)
 	base, _ := f.issue(Mint{Grants: []string{"unit.restart"}})
@@ -423,10 +416,8 @@ func TestGrantsFollowTheCreator(t *testing.T) {
 	}
 }
 
-// Every mutating operation of the registry that goes through the helper
-// is named by some expectation, so a capability for it can match a
-// request. The reverse - that a read never demands a capability - is what
-// keeps inventory working under enforce.
+// Every mutating operation of the registry that goes through the helper is
+// named by some expectation, so a capability for it can match a request.
 func TestExpectationsCoverTheMutatingRequests(t *testing.T) {
 	reads := []*helperv1.HelperRequest{
 		{Action: &helperv1.HelperRequest_System{System: &helperv1.SystemRequest{}}},

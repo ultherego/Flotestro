@@ -14,13 +14,6 @@ import (
 )
 
 // applyRepository writes or removes a package source.
-//
-// The order here is the same as with certificates and for the same reason:
-// everything that can be checked without touching the disk is checked before
-// the first write, the previous content is kept in memory, and if the metadata
-// of the new source cannot be fetched - the state from before the change comes
-// back. A source that does not answer would block every next package operation
-// on this host.
 func (s *Server) applyRepository(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.RepositoryRequest) *helperv1.HelperResponse {
 	// A source write ends with a metadata refresh on the same package
@@ -62,8 +55,7 @@ func (s *Server) applyRepository(ctx context.Context, request *helperv1.HelperRe
 	}
 
 	// The key is checked before the write: it decides whose packages the host
-	// will install. The fingerprint comes back in the result so that a human has
-	// something to compare with the fingerprint given by the vendor.
+	// will install.
 	fingerprint := ""
 	if !action.GetRemove() && repo.Signed {
 		fingerprint, err = packages.KeyFingerprint(action.GetGpgKey())
@@ -74,9 +66,9 @@ func (s *Server) applyRepository(ctx context.Context, request *helperv1.HelperRe
 	}
 
 	paths := packages.SourcePaths(repo.ID, managerName)
-	// A pacman source is a section of the shared configuration file rather
-	// than a file of its own: the file is remembered for the undo like the
-	// rest, but it is never removed with the source.
+	// A pacman source is a section of the shared configuration file rather than a
+	// file of its own: the file is remembered for the undo like the rest, but it
+	// is never removed with the source.
 	remembered := paths
 	if managerName == packages.PacmanName {
 		remembered = append(append([]string{}, paths...), packages.PacmanConfPath)
@@ -139,9 +131,7 @@ func (s *Server) applyRepository(ctx context.Context, request *helperv1.HelperRe
 		}
 	}
 	if managerName == packages.PacmanName {
-		// The section is edited into pacman.conf and the key, once on disk,
-		// goes into the keyring: a key nobody signed locally makes every
-		// package of the source "unknown trust".
+		// The section is edited into pacman.
 		if err := packages.WritePacmanSource(actionCtx, repo); err != nil {
 			undo()
 			return reject(ErrorExecFailed, err.Error())
@@ -150,8 +140,7 @@ func (s *Server) applyRepository(ctx context.Context, request *helperv1.HelperRe
 	}
 
 	// A write does not mean an effect: the manager is asked whether anything can
-	// be fetched from this source. A disabled source is skipped - there is
-	// nothing to fetch.
+	// be fetched from this source.
 	message := "the source " + repo.ID + " was written"
 	if repo.Enabled {
 		if err := packages.RefreshSource(actionCtx, managerName, repo.ID, sourcePath); err != nil {
@@ -197,9 +186,6 @@ func repositoryResponse(s *Server, manager, message, fingerprint string, undone 
 
 // fileCopy holds the previous content of a file for the duration of an
 // operation.
-//
-// In memory and not next to the file: one of these files carries a password,
-// and a copy next to it would stay on the disk also after a successful change.
 type fileCopy struct {
 	path     string
 	existed  bool

@@ -1,11 +1,4 @@
 // Package secrets stores the values that must not travel through tasks.
-//
-// The rule is single and hard: the value of a secret appears neither in a
-// task, nor in the audit trail, nor in the inventory. The task carries a
-// reference - a name and a version - and the host reaches for the content
-// only when it starts the operation, on the strength of a short lease issued
-// for that one task. The panel records the fact of issuance, never the issued
-// value.
 package secrets
 
 import (
@@ -32,10 +25,6 @@ const (
 )
 
 // LeaseWindow bounds the time between issuing a lease and fetching the value.
-//
-// The lease is short on purpose: it comes into being when the task is
-// delivered to the host and is to last for its execution, not for anything
-// after it.
 const LeaseWindow = 5 * time.Minute
 
 var (
@@ -54,9 +43,6 @@ var (
 var secretName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{1,62}$`)
 
 // ValidateName checks the name of a secret.
-//
-// The name reaches tasks, the audit trail and the interface, so it has to be
-// short, unambiguous and free of characters that obscure anything.
 func ValidateName(name string) error {
 	if !secretName.MatchString(name) {
 		return fmt.Errorf("secret name %q: lowercase letters, digits, a dot, a dash and an underscore are allowed (2-63 characters)", name)
@@ -75,9 +61,8 @@ func ValidateValue(value []byte) error {
 	return nil
 }
 
-// Secret is the metadata of a secret. The structure has no field for the
-// value and must not have one: it is what travels to the interface and to the
-// API.
+// Secret is the metadata of a secret. The structure has no field for the value
+// and must not have one: it is what travels to the interface and to the API.
 type Secret struct {
 	ID             string     `json:"id"`
 	Name           string     `json:"name"`
@@ -100,10 +85,9 @@ type Version struct {
 	CreatedBy string     `json:"created_by"`
 	CreatedAt time.Time  `json:"created_at"`
 	Destroyed *time.Time `json:"destroyed_at,omitempty"`
-	// EnvelopeVersion says how the value is sealed: 1 is the value under
-	// the installation's key directly, 2 a data key of its own wrapped by
-	// the key named in KeyID. The operator reads it during a key rotation:
-	// a version still on the old key is one the rotation has not reached.
+	// EnvelopeVersion says how the value is sealed: 1 is the value under the
+	// installation's key directly, 2 a data key of its own wrapped by the key
+	// named in KeyID.
 	EnvelopeVersion int    `json:"envelope_version"`
 	KeyID           string `json:"key_id,omitempty"`
 }
@@ -128,25 +112,13 @@ func (d Lease) Valid(now time.Time) bool {
 	return d.RedeemedAt == nil && d.RevokedAt == nil && now.Before(d.ExpiresAt)
 }
 
-// Cipher is the primitive of the store: AES-256-GCM under one key.
-//
-// It serves two things that must stay apart in the reader's mind. A version
-// written before the envelope was introduced has its value sealed directly
-// under the installation's key, and that is what Encrypt and Decrypt do; the
-// local key provider wraps the per-version data keys with the same
-// primitive. The key itself lies in a file rather than in the database: a
-// copy of the database without that file is not enough to read anything.
-// That is the whole difference between a secret store and a column of
-// passwords.
+// Cipher is the primitive of the store: AES-256-GCM under one key. It serves
+// two things that must stay apart in the reader's mind.
 type Cipher struct {
 	aead cipher.AEAD
 }
 
-// ErrKeyMissing means the key file is not there. The store never creates
-// one in its place on its own: a key that appears by itself next to an
-// existing database is the beginning of two installations sharing one
-// name, and the startup guard is the only place allowed to decide that
-// nothing depends on the old one yet.
+// ErrKeyMissing means the key file is not there.
 var ErrKeyMissing = errors.New("secrets_key_missing")
 
 // NewCipher builds the primitive over raw key material.
@@ -191,14 +163,8 @@ func OpenCipher(path string) (*Cipher, error) {
 	return NewCipher(key)
 }
 
-// InitCipher creates a new key in a file that must not exist yet and
-// returns the primitive over it.
-//
-// The explicit initialisation is the only way a key comes into being. The
-// file is created exclusively and written through a temporary name, so
-// two processes racing for the same path cannot both believe they own the
-// key, and a crash halfway leaves no half-written file under the final
-// name.
+// InitCipher creates a new key in a file that must not exist yet and returns
+// the primitive over it.
 func InitCipher(path string) (*Cipher, error) {
 	key := make([]byte, KeyLength)
 	if _, err := io.ReadFull(rand.Reader, key); err != nil {
@@ -210,12 +176,8 @@ func InitCipher(path string) (*Cipher, error) {
 	return NewCipher(key)
 }
 
-// WriteKeyFile persists key material so that the file is either complete
-// or absent, and refuses to replace an existing key.
-//
-// Key material is written with the narrowest mode, synced to disk and
-// renamed into place, and the directory is synced after the rename: a key
-// that a power cut turns into an empty file is a store nobody can open.
+// WriteKeyFile persists key material so that the file is either complete or
+// absent, and refuses to replace an existing key.
 func WriteKeyFile(path string, key []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
@@ -259,17 +221,8 @@ func WriteKeyFile(path string, key []byte) error {
 // NonceSize is the length of the nonce Encrypt produces.
 func (s *Cipher) NonceSize() int { return s.aead.NonceSize() }
 
-// Encrypt returns the nonce and the ciphertext of one version of one
-// secret sealed the first way: directly under this key. New versions go
-// through Seal instead; this stays for the tests of the old rows and for
-// the one place that still writes this way, the local provider's own
-// wrapping of data keys.
-//
-// The identifier and the version go in as the associated data: the
-// ciphertext then opens only in the row it was written for. Without that a
-// ciphertext moved between rows of the database - the current version of
-// a password swapped for an old one, or the value of one secret put under
-// the name of another - would decrypt as if nothing had happened.
+// Encrypt returns the nonce and the ciphertext of one version of one secret
+// sealed the first way: directly under this key.
 func (s *Cipher) Encrypt(value []byte, secretID string, version int) (nonce, ciphertext []byte, err error) {
 	nonce = make([]byte, s.aead.NonceSize())
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
@@ -279,13 +232,6 @@ func (s *Cipher) Encrypt(value []byte, secretID string, version int) (nonce, cip
 }
 
 // Decrypt returns the value of a version sealed the first way.
-//
-// A version written before the associated data was introduced carries
-// none, so a ciphertext that does not open with it is tried once more the
-// old way. Such a version stays readable and is not rewritten in place:
-// the next rotation writes the new version bound to its row, and the old
-// one goes when it is destroyed. The order of the two attempts matters -
-// the bound one first, so a moved ciphertext of the new kind never opens.
 func (s *Cipher) Decrypt(nonce, ciphertext []byte, secretID string, version int) ([]byte, error) {
 	value, err := s.aead.Open(nil, nonce, ciphertext, associatedData(secretID, version))
 	if err == nil {
@@ -299,12 +245,8 @@ func associatedData(secretID string, version int) []byte {
 	return []byte(secretID + "|" + strconv.Itoa(version))
 }
 
-// Fingerprint computes the checksum of a value.
-//
-// The fingerprint serves the host to check that it got what the panel issued.
-// It is recorded neither in the database nor in the audit trail: for a short
-// value the fingerprint itself is sometimes a hint, and the store is not to
-// leave hints.
+// Fingerprint computes the checksum of a value. The fingerprint serves the
+// host to check that it got what the panel issued.
 func Fingerprint(value []byte) string {
 	sum := sha256.Sum256(value)
 	return hex.EncodeToString(sum[:])

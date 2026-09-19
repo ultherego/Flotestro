@@ -25,13 +25,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Re-authentication has two reasons and both require the same from the
-	// provider: that it asks for credentials instead of handing back the
-	// existing session.
-	//
-	// step_up concerns the highest-impact operations and also demands an
-	// authentication level. force changes the account: without it a user
-	// with an active SSO session of another user is quietly logged in with
-	// the wrong account, and there is no way out of it in the panel.
+	// provider: that it asks for credentials instead of handing back the existing
+	// session.
 	query := r.URL.Query()
 	stepUp := oidc.StepUp{}
 	switch {
@@ -85,9 +80,7 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, "invalid_callback", "missing login code or state")
 		return
 	}
-	// The browser has to be the one that started this login. The check
-	// comes before the state is consumed: a replayed callback must not use
-	// up a login somebody else is in the middle of.
+	// The browser has to be the one that started this login.
 	if !loginStateMatches(r, state) {
 		s.audit.Record(r.Context(), audit.Event{
 			ActorType: audit.ActorUser, ActorID: "anonymous",
@@ -139,10 +132,7 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A login replaces the session the browser came with. Both re-login
-	// entries ("sign in as a different user", the step-up) leave the old
-	// session behind otherwise, valid until its idle window runs out and
-	// bound to the account the browser has just walked away from.
+	// A login replaces the session the browser came with.
 	previous, hasPrevious := authz.SessionFromContext(r.Context())
 
 	sessionID, cookieValue, err := s.authz.CreateSession(r.Context(), tx, principalID,
@@ -209,8 +199,7 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleLogout ends the panel session and directs to the logout at the
-// provider. Deleting the cookie alone is not enough: the provider would log
-// the user in again without asking for a password.
+// provider.
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	principal := authz.FromContext(r.Context())
 	session, hasSession := authz.SessionFromContext(r.Context())
@@ -278,9 +267,8 @@ func (s *Server) clearSessionCookies(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// cookieSecure enables the Secure flag when the panel is exposed over
-// HTTPS. In a lab over HTTP the flag would make logging in impossible at
-// all.
+// cookieSecure enables the Secure flag when the panel is exposed over HTTPS.
+// In a lab over HTTP the flag would make logging in impossible at all.
 func (s *Server) cookieSecure(r *http.Request) bool {
 	if strings.HasPrefix(strings.ToLower(s.publicURL), "https://") {
 		return true
@@ -288,10 +276,8 @@ func (s *Server) cookieSecure(r *http.Request) bool {
 	return r.TLS != nil
 }
 
-// localPathPattern is what a redirect target inside the panel looks like:
-// an absolute path of the characters a route of the panel uses. Anything
-// else - a backslash a browser reads as a slash, a control character, a
-// second scheme hidden in the path - is refused rather than normalised.
+// localPathPattern is what a redirect target inside the panel looks like: an
+// absolute path of the characters a route of the panel uses.
 var localPathPattern = regexp.MustCompile(`^/[A-Za-z0-9/_.\-?=&%#]*$`)
 
 // localPath rejects redirect targets pointing outside the panel.
@@ -304,22 +290,15 @@ func localPath(value string) string {
 		strings.HasPrefix(parsed.Path, "//") {
 		return ""
 	}
-	// The decoded path is what the Location header carries, so it has to
-	// pass the same test as the raw value: "/%5Cevil.example.com" is a
-	// backslash once decoded, and "/%09/evil.example.com" a tab a browser
-	// drops before reading the rest as a host.
+	// The decoded path is what the Location header carries, so it has to pass the
+	// same test as the raw value: "/%5Cevil.
 	if !localPathPattern.MatchString(parsed.Path) || strings.HasPrefix(parsed.Path, "//") {
 		return ""
 	}
 	return parsed.Path
 }
 
-// loginStateCookie binds the login to the browser that started it. The
-// state travels through the identity provider and back in the URL, where
-// anybody who sees it can replay it; the cookie stays in the browser that
-// asked. A callback with a state the cookie does not vouch for logs the
-// browser into somebody else's login - that is the login CSRF the cookie
-// closes.
+// loginStateCookie binds the login to the browser that started it.
 const loginStateCookie = "flotestro_login"
 
 // setLoginStateCookie remembers the digest of the state for the length of

@@ -130,8 +130,8 @@ func TestDebianDefaultReadsRootAndTheSudoGroup(t *testing.T) {
 	}
 
 	// The README has no dot, so sudo reads it - and so does the parser; the
-	// backup and the editor leftover are skipped, so their intruder line
-	// is not a rule.
+	// backup and the editor leftover are skipped, so their intruder line is not a
+	// rule.
 	paths := make([]string, 0, len(snapshot.Files))
 	for _, file := range snapshot.Files {
 		paths = append(paths, file.Path)

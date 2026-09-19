@@ -37,9 +37,9 @@ func (s status) run(out io.Writer) int {
 	cfg, err := relayconfig.Load(s.ConfigPath)
 	if err != nil {
 		fmt.Fprintf(out, "Config:       ERROR (%s): %v\n", s.ConfigPath, err)
-		// Without the configuration we do not even know where to look for
-		// the identity - guessing the directory would give an answer about
-		// somebody else's state.
+		// Without the configuration we do not even know where to look for the
+		// identity - guessing the directory would give an answer about somebody
+		// else's state.
 		return 1
 	}
 	fmt.Fprintf(out, "Config:       correct (%s)\n", s.ConfigPath)
@@ -127,10 +127,6 @@ func describeCentre(out io.Writer, state ctl.RelayState, now time.Time, problems
 }
 
 // describeBuffer puts the fill of the buffer into one line.
-//
-// The oldest item is at most as old as the moment the buffer started
-// filling: the relay drains it in order, so that moment bounds the wait of
-// everything in it.
 func describeBuffer(out io.Writer, state ctl.RelayState, now time.Time, problems *int) {
 	line := fmt.Sprintf("Buffer:       %s of %s, %d items", ctl.Bytes(state.BufferBytes),
 		ctl.Bytes(state.BufferMaxBytes), state.BufferedItems)
@@ -144,9 +140,7 @@ func describeBuffer(out io.Writer, state ctl.RelayState, now time.Time, problems
 	fmt.Fprintln(out, line)
 }
 
-// listenerWorks checks whether the relay accepts connections on its
-// address. A wildcard address is probed on the loopback: the question is
-// whether the process listens, not which interface answers.
+// listenerWorks checks whether the relay accepts connections on its address.
 func listenerWorks(address string) error {
 	host, port, err := net.SplitHostPort(address)
 	if err != nil {

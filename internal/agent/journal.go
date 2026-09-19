@@ -17,14 +17,7 @@ import (
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 )
 
-// IdempotencyJournal remembers the results of performed tasks. The network
-// works at-least-once, so the same task can arrive several times - the handler
-// has to return the previous result then instead of performing the mutation
-// again.
-//
-// The key is the idempotency_key and not the task_id. Ordering the same
-// operation again creates a new attempt with a new task_id, so keying by
-// task_id would allow the mutation to be performed a second time.
+// IdempotencyJournal remembers the results of performed tasks.
 type IdempotencyJournal struct {
 	dir string
 	mu  sync.Mutex
@@ -63,13 +56,7 @@ func (j *IdempotencyJournal) Lookup(idempotencyKey string) *agentv1.TaskResult {
 	return &result
 }
 
-// Store writes the result of a task. The write is atomic so that an interrupted
-// agent does not leave a truncated entry that would look like a valid result.
-//
-// The result replaces the in-flight marker of the same key: from now on the
-// journal knows how the operation ended, so the question the marker asked is
-// answered. The marker goes only after the result is in place - a crash
-// between the two must leave the marker rather than nothing.
+// Store writes the result of a task.
 func (j *IdempotencyJournal) Store(idempotencyKey string, result *agentv1.TaskResult) error {
 	if idempotencyKey == "" {
 		return fmt.Errorf("an empty idempotency key")
@@ -91,14 +78,7 @@ func (j *IdempotencyJournal) Store(idempotencyKey string, result *agentv1.TaskRe
 	return nil
 }
 
-// MarkInFlight records that the host is about to carry a mutation out. The
-// marker lives next to the result, under its own name, and is written with
-// the same discipline: a truncated marker must not look like a valid one.
-//
-// The marker is what tells a restart in the middle of an operation from a
-// task that never started. Without it the agent that came back would compute
-// the plan again and either carry the change out a second time or refuse it
-// as changed - and neither answer says that the host has been touched.
+// MarkInFlight records that the host is about to carry a mutation out.
 func (j *IdempotencyJournal) MarkInFlight(marker InFlight) error {
 	if marker.IdempotencyKey == "" {
 		return fmt.Errorf("an empty idempotency key")
@@ -124,9 +104,7 @@ func (j *IdempotencyJournal) InFlight(idempotencyKey string) (InFlight, bool) {
 	return j.readInFlight(j.inFlightPath(idempotencyKey))
 }
 
-// InFlightMarkers lists every marker the journal holds. The agent reads the
-// list once, when it starts: every entry is an operation the previous process
-// did not live to see the end of.
+// InFlightMarkers lists every marker the journal holds.
 func (j *IdempotencyJournal) InFlightMarkers() []InFlight {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -147,10 +125,7 @@ func (j *IdempotencyJournal) InFlightMarkers() []InFlight {
 	return markers
 }
 
-// readInFlight decodes one marker. A marker that cannot be read is treated
-// as absent: the file is either a leftover the atomic write protects
-// against or of a shape this agent does not know, and neither is evidence
-// of a change in progress.
+// readInFlight decodes one marker.
 func (j *IdempotencyJournal) readInFlight(path string) (InFlight, bool) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -195,17 +170,13 @@ func (j *IdempotencyJournal) Prune() {
 	}
 }
 
-// path turns the key into a file name through a digest. The key comes from the
-// network and can contain any characters, so it does not go into a path
-// directly.
+// path turns the key into a file name through a digest.
 func (j *IdempotencyJournal) path(idempotencyKey string) string {
 	sum := sha256.Sum256([]byte(idempotencyKey))
 	return filepath.Join(j.dir, hex.EncodeToString(sum[:]))
 }
 
-// inFlightSuffix tells a marker from a result in the same directory. The
-// result keeps the bare digest, as it always has, so a journal written by an
-// older agent is read unchanged.
+// inFlightSuffix tells a marker from a result in the same directory.
 const inFlightSuffix = ".inflight"
 
 func (j *IdempotencyJournal) inFlightPath(idempotencyKey string) string {

@@ -10,10 +10,9 @@ import (
 	"github.com/ultherego/flotestro/internal/paging"
 )
 
-// The cursor is what keeps a fleet list honest between two pages: it
-// carries the moment the states were judged at and the key of the last
-// row, and it must come back exactly as it went out. A token from
-// somewhere else is refused before it reaches the database.
+// The cursor is what keeps a fleet list honest between two pages: it carries
+// the moment the states were judged at and the key of the last row, and it
+// must come back exactly as it went out.
 
 func TestFleetCursorSurvivesTheRoundTrip(t *testing.T) {
 	now := time.Date(2026, 9, 17, 10, 30, 0, 123456000, time.UTC)

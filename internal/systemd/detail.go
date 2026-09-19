@@ -14,12 +14,8 @@ import (
 
 const journalctlPath = "/usr/bin/journalctl"
 
-// UnitDetail is the full picture of one unit: what it depends on, what
-// starts it, what overrides its file and what it last wrote to the journal.
-//
-// The picture is read on request for one open row in the panel. It costs
-// several processes and a few file reads, so it is not part of the listing
-// and not part of a health check.
+// UnitDetail is the full picture of one unit: what it depends on, what starts
+// it, what overrides its file and what it last wrote to the journal.
 type UnitDetail struct {
 	State        UnitState `json:"state"`
 	Description  string    `json:"description,omitempty"`
@@ -37,13 +33,11 @@ type UnitDetail struct {
 	TriggeredBy []string `json:"triggered_by,omitempty"`
 	Triggers    []string `json:"triggers,omitempty"`
 	DropIns     []DropIn `json:"drop_ins,omitempty"`
-	// ExecMainStart is the start time of the main process: RFC 3339 when
-	// the host's words could be read as a date, otherwise the words
-	// themselves. Empty for a unit without a running main process.
+	// ExecMainStart is the start time of the main process: RFC 3339 when the
+	// host's words could be read as a date, otherwise the words themselves.
 	ExecMainStart string `json:"exec_main_start,omitempty"`
-	// The last journal lines of the unit and the cursor of the last one, so
-	// a longer read can continue from there. The list is never nil: no
-	// lines is an answer, not a missing one.
+	// The last journal lines of the unit and the cursor of the last one, so a
+	// longer read can continue from there.
 	JournalLines     []string `json:"journal_lines"`
 	JournalCursor    string   `json:"journal_cursor,omitempty"`
 	JournalTruncated bool     `json:"journal_truncated,omitempty"`
@@ -72,8 +66,6 @@ const (
 )
 
 // dropInPatterns are the only places the detail reads override files from.
-// The packaged drop-ins under /usr/lib are the distribution's and are
-// reported by path only; the administrator's overrides live here.
 var dropInPatterns = []string{
 	"/etc/systemd/system/*.d/*.conf",
 	"/run/systemd/system/*.d/*.conf",
@@ -85,13 +77,6 @@ var detailProperties = append(append([]string{}, shownProperties...),
 	"TriggeredBy", "Triggers", "DropInPaths", "ExecMainStartTimestamp")
 
 // ShowDetail reads the full picture of a unit.
-//
-// The state and the dependencies come from one "systemctl show" call in
-// the key=value form; the drop-ins are read from the file system through
-// the safe reader of the files module; the journal tail is a separate,
-// bounded call. A journal that cannot be read does not fail the detail:
-// the operator still sees the state and the dependencies, together with
-// the reason.
 func ShowDetail(ctx context.Context, unit string) (UnitDetail, error) {
 	if !unitPattern.MatchString(unit) {
 		return UnitDetail{}, fmt.Errorf("%w: %q", ErrInvalidUnit, unit)
@@ -164,10 +149,7 @@ func ShowDetail(ctx context.Context, unit string) (UnitDetail, error) {
 	return detail, nil
 }
 
-// mainStart turns the timestamp systemd prints into RFC 3339. The host's
-// words are "Mon 2026-09-14 10:00:00 CEST"; they are read in the host's
-// own zone, which is the one the abbreviation belongs to. Words that do
-// not read as a date are passed on as they are - "n/a" is an answer too.
+// mainStart turns the timestamp systemd prints into RFC 3339.
 func mainStart(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" || value == "n/a" {
@@ -180,11 +162,6 @@ func mainStart(value string) string {
 }
 
 // readDropIns reads the override files the unit loads.
-//
-// Every path is checked against the drop-in directories before it is
-// opened, and opened without following symlinks: the list comes from
-// systemd, but the file it points at could still be somebody's link into
-// a directory the panel never shows.
 func readDropIns(paths []string) []DropIn {
 	allowlist := files.Allowlist{Patterns: dropInPatterns, Source: "unit drop-in directories"}
 	var dropIns []DropIn
@@ -232,15 +209,8 @@ func readBounded(path string, limit int) (content string, truncated bool, proble
 	return string(data), false, ""
 }
 
-// journalTail reads the last lines of the unit's journal and the cursor of
-// the last one.
-//
-// The cursor is what lets the Logs page continue where the detail ended:
-// journalctl prints it as the final line when asked, and the panel hands
-// it back with --after-cursor. The read is bounded by the line count, by
-// the byte limit and by its own timeout. It is quiet: without --quiet
-// journalctl decorates a tail that spans reboots with "-- Boot ... --"
-// markers, and the tail carries more lines than were asked for.
+// journalTail reads the last lines of the unit's journal and the cursor of the
+// last one.
 func journalTail(ctx context.Context, unit string) (lines []string, cursor string, truncated bool, err error) {
 	args := []string{
 		"--unit=" + unit, "--lines=" + fmt.Sprint(journalTailSize),

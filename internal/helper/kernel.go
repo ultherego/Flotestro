@@ -51,11 +51,6 @@ func kernelGuard(operation helperv1.KernelRequest_Operation) string {
 }
 
 // writeSysctl writes the settings persistently and applies them right away.
-//
-// A write and an effect are two different things: some settings the kernel
-// takes immediately, and some only at boot. The panel separates them in the
-// result instead of reporting a success and leaving the operator with a value
-// that does not apply.
 func (s *Server) writeSysctl(ctx context.Context, action *helperv1.KernelRequest) *helperv1.HelperResponse {
 	settings := action.GetSettings()
 	if len(settings) == 0 {
@@ -138,9 +133,9 @@ func (s *Server) blockModule(ctx context.Context, action *helperv1.KernelRequest
 	if err := kernel.ValidateModule(action.GetModule()); err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
-	// A change approved on the basis of a plan is to enter the state the
-	// operator looked at: a different block file or a different module state
-	// than at planning time is a refusal, not a warning.
+	// A change approved on the basis of a plan is to enter the state the operator
+	// looked at: a different block file or a different module state than at
+	// planning time is a refusal, not a warning.
 	if expected := action.GetPlanHash(); expected != "" {
 		now := kernel.PlanBlacklist(s.readKernel(ctx, nil), action.GetModule(), action.GetBlacklist())
 		if now.PlanHash != expected {
@@ -174,9 +169,9 @@ func (s *Server) blockModule(ctx context.Context, action *helperv1.KernelRequest
 	message := "the module " + action.GetModule() + " was unblocked"
 	if action.GetBlacklist() {
 		message = "the module " + action.GetModule() + " was blocked"
-		// A block does not unload a module that already runs, and for modules
-		// pulled in by the initramfs it does not work even after a restart until
-		// the initramfs is rebuilt. The panel says this directly.
+		// A block does not unload a module that already runs, and for modules pulled
+		// in by the initramfs it does not work even after a restart until the
+		// initramfs is rebuilt.
 		if reason := kernel.InitramfsRequired(action.GetModule(), s.moduleLoaded(action.GetModule())); reason != "" {
 			message += "; " + reason
 		}
@@ -185,8 +180,7 @@ func (s *Server) blockModule(ctx context.Context, action *helperv1.KernelRequest
 }
 
 // planBlock computes the difference for a module block without touching the
-// host. A protected module and a wrong name are a refusal in the plan, not an
-// error of the order.
+// host.
 func (s *Server) planBlock(ctx context.Context, action *helperv1.KernelRequest) *helperv1.HelperResponse {
 	state := s.readKernel(ctx, nil)
 	plan := kernel.PlanBlacklist(state, action.GetModule(), action.GetBlacklist())
@@ -239,9 +233,8 @@ func (s *Server) readKernel(ctx context.Context, extra []string) kernel.Snapshot
 		}
 	}
 
-	// The profile plus what the panel has already written plus what was asked
-	// for now. Enumerating the whole of /proc/sys would be a cost without an
-	// answer.
+	// The profile plus what the panel has already written plus what was asked for
+	// now.
 	keys := append([]string{}, kernel.DefaultProfile...)
 	for key := range written {
 		keys = append(keys, key)

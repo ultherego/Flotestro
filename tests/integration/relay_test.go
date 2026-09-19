@@ -24,8 +24,7 @@ import (
 )
 
 // defaultGateway points at the agent gateway of the test fleet. A relay
-// connects there just like an agent - only with a different kind of
-// identity.
+// connects there just like an agent - only with a different kind of identity.
 const defaultGateway = "https://192.168.56.10:8443"
 
 // testRelay holds the identity of a relay enrolled for the test.
@@ -37,20 +36,16 @@ type testRelay struct {
 	Names []string
 }
 
-// TestRelayRenewalKeepsTheNamesFromTheRegistry guards the property that
-// makes relay renewal a separate RPC: the network names are the trust
-// boundary towards the site's agents, so they come from the panel registry,
-// not from the request.
-//
-// If the relay could pick them at renewal, a single renewal would be enough
-// to appear to the agents under somebody else's name.
+// TestRelayRenewalKeepsTheNamesFromTheRegistry guards the property that makes
+// relay renewal a separate RPC: the network names are the trust boundary
+// towards the site's agents, so they come from the panel registry, not from
 func TestRelayRenewalKeepsTheNamesFromTheRegistry(t *testing.T) {
 	h := newHarness(t)
 	relay := h.enrollRelay(t, []string{"test-relay.flotestro.test", "192.168.56.99"})
 
-	// A relay certificate lives shorter than a host certificate: the relay
-	// sees the traffic of the whole site, so the window of using a stolen
-	// key is to be smaller.
+	// A relay certificate lives shorter than a host certificate: the relay sees
+	// the traffic of the whole site, so the window of using a stolen key is to be
+	// smaller.
 	lifetime := relay.Leaf.NotAfter.Sub(relay.Leaf.NotBefore)
 	if lifetime > 8*24*time.Hour {
 		t.Fatalf("the relay certificate lives %s; the document speaks of about seven days", lifetime)
@@ -97,14 +92,11 @@ func TestRevokedRelayDoesNotRenew(t *testing.T) {
 }
 
 // enrollRelay brings a relay that does not exist into the fleet.
-//
-// The lab relay disappears together with the test: the registry entry would
-// stay visible in the panel as a site that does not exist.
 func (h *harness) enrollRelay(t *testing.T, names []string) testRelay {
 	t.Helper()
-	// The connection pool must exist before the cleanup is registered:
-	// cleanups run in reverse order, so a pool opened later would close
-	// before the relay is deleted and the entry would stay in the fleet.
+	// The connection pool must exist before the cleanup is registered: cleanups
+	// run in reverse order, so a pool opened later would close before the relay
+	// is deleted and the entry would stay in the fleet.
 	h.database(context.Background())
 
 	var order struct {
@@ -276,10 +268,6 @@ func (h *harness) sendToEnrollment(t *testing.T, body []byte) ([]byte, int, []by
 }
 
 // sendToEnrollmentAt calls the enrollment at the given address.
-//
-// The address is a separate argument, because a host in an isolated site
-// does not know the address of the centre and enrolls through a relay - and
-// that is the same service exposed in a different place.
 func (h *harness) sendToEnrollmentAt(t *testing.T, base string, body []byte) ([]byte, int, []byte) {
 	t.Helper()
 	address := base + "/flotestro.agent.v1.EnrollmentService/Enroll"
@@ -303,13 +291,9 @@ func (h *harness) sendToEnrollmentAt(t *testing.T, base string, body []byte) ([]
 	return raw, response.StatusCode, raw
 }
 
-// TestEnrollmentThroughARelayInAnIsolatedSite guards the path that is the
-// only path of a host which does not see the centre: the token goes to the
-// relay, and the relay attests to the centre which site the request came
-// from.
-//
-// The relay signs nothing: the certificate is issued by the fleet CA in the
-// centre.
+// TestEnrollmentThroughARelayInAnIsolatedSite guards the path that is the only
+// path of a host which does not see the centre: the token goes to the relay,
+// and the relay attests to the centre which site the request came from.
 func TestEnrollmentThroughARelayInAnIsolatedSite(t *testing.T) {
 	h := newHarness(t)
 	relayID, address := h.labRelay(t)
@@ -339,9 +323,8 @@ func TestEnrollmentThroughARelayInAnIsolatedSite(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A token bound to a relay must not work outside its site. Otherwise
-	// the binding would mean nothing: carrying the token out would be
-	// enough.
+	// A token bound to a relay must not work outside its site. Otherwise the
+	// binding would mean nothing: carrying the token out would be enough.
 	_, status, body := h.sendToEnrollment(t, submission)
 	if status == http.StatusOK {
 		t.Fatal("a token bound to a relay enrolled a host directly")
@@ -408,12 +391,9 @@ type relayListItem struct {
 	} `json:"buffer"`
 }
 
-// TestRelayListCarriesTheStateAndTheAttestedHosts guards what the relay
-// page is made of: the list says which state each relay is in and how many
-// hosts come through it, the same way the metrics count them.
-//
-// The lab relay is not revoked here: it is the route of the ubuntu host,
-// and the other tests need it.
+// TestRelayListCarriesTheStateAndTheAttestedHosts guards what the relay page
+// is made of: the list says which state each relay is in and how many hosts
+// come through it, the same way the metrics count them.
 func TestRelayListCarriesTheStateAndTheAttestedHosts(t *testing.T) {
 	h := newHarness(t)
 	relayID, _ := h.labRelay(t)
@@ -460,8 +440,8 @@ func TestRelayListCarriesTheStateAndTheAttestedHosts(t *testing.T) {
 }
 
 // TestRelayPageListsTheAttestedHosts guards that the relay page names the
-// hosts behind the relay: the ubuntu host of the lab connects through it,
-// and the page is where an operator sees that.
+// hosts behind the relay: the ubuntu host of the lab connects through it, and
+// the page is where an operator sees that.
 func TestRelayPageListsTheAttestedHosts(t *testing.T) {
 	h := newHarness(t)
 	relayID, _ := h.labRelay(t)

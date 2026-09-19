@@ -14,15 +14,6 @@ import (
 
 // What an identity may read and write about itself without any permission
 // beyond being signed in: its preferences, its sessions and its tokens.
-//
-// The preferences are how one person likes the panel - the zone the
-// times are read in, the language, the theme, the page the panel opens
-// on - and follow the person from browser to browser, so they live on
-// the server under the identity rather than in one browser's storage.
-// The sessions and the tokens are listed here for the same identity
-// that owns them: the access screen shows them to whoever manages the
-// identities, but an operator is entitled to see where they are signed
-// in without holding that right.
 
 // preferences is the row of principal_preferences as the API shows it.
 // An empty field means the panel's default, never a value of its own.
@@ -44,18 +35,15 @@ type preferences struct {
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
 }
 
-// The bounds of a preference. They are checked here rather than left to
-// the screen: a preference is written by a script as well, and a page of
-// ten thousand rows or a landing page on another site is not a preference.
+// The bounds of a preference.
 const (
 	maxPreferredPageSize = 500
 	maxLandingPageLength = 200
 	maxTimeZoneLength    = 64
 )
 
-// requireIdentity is the gate of the routes about the caller: signed in
-// is enough, because the resource is the caller. A token without an
-// identity row cannot reach here - every token belongs to a principal.
+// requireIdentity is the gate of the routes about the caller: signed in is
+// enough, because the resource is the caller.
 func requireIdentity(w http.ResponseWriter, r *http.Request) (authz.Principal, bool) {
 	principal := authz.FromContext(r.Context())
 	if !principal.Authenticated() || principal.ID == "" {
@@ -66,9 +54,7 @@ func requireIdentity(w http.ResponseWriter, r *http.Request) (authz.Principal, b
 	return principal, true
 }
 
-// handleGetPreferences serves the caller's preferences. An identity
-// without a row is on the defaults, and the answer says so with empty
-// fields rather than with a 404: the screen has nothing to do differently.
+// handleGetPreferences serves the caller's preferences.
 func (s *Server) handleGetPreferences(w http.ResponseWriter, r *http.Request) {
 	principal, ok := requireIdentity(w, r)
 	if !ok {
@@ -90,11 +76,7 @@ func (s *Server) handleGetPreferences(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, stored)
 }
 
-// handleSetPreferences writes the caller's preferences whole. The body is
-// the whole row: a field left out goes back to the default, so a screen
-// sends what it read plus the change, as it does for the tags of a host.
-// The write is not audited: a preference changes nothing for anyone but
-// the person who set it.
+// handleSetPreferences writes the caller's preferences whole.
 func (s *Server) handleSetPreferences(w http.ResponseWriter, r *http.Request) {
 	principal, ok := requireIdentity(w, r)
 	if !ok {
@@ -148,8 +130,8 @@ func validatePreferences(p *preferences) (code, detail string) {
 		return "invalid_page_size", "the page size must be between 0 (the default) and 500"
 	}
 	// The landing page is a path of this panel, never another origin: a
-	// preference that sent the operator elsewhere after signing in would
-	// be a phishing hook stored under their own name.
+	// preference that sent the operator elsewhere after signing in would be a
+	// phishing hook stored under their own name.
 	if p.LandingPage != "" && (!strings.HasPrefix(p.LandingPage, "/") || strings.HasPrefix(p.LandingPage, "//") ||
 		len(p.LandingPage) > maxLandingPageLength || strings.ContainsAny(p.LandingPage, " \t\n\r")) {
 		return "invalid_landing_page", "the landing page must be a path of this panel, such as /hosts"
@@ -167,9 +149,8 @@ func validatePreferences(p *preferences) (code, detail string) {
 	return "", ""
 }
 
-// handleMySessions lists the caller's own live browser sessions: where
-// they are signed in, since when, from what. The same list the access
-// screen shows to the identity's manager, for the identity itself.
+// handleMySessions lists the caller's own live browser sessions: where they
+// are signed in, since when, from what.
 func (s *Server) handleMySessions(w http.ResponseWriter, r *http.Request) {
 	principal, ok := requireIdentity(w, r)
 	if !ok {
@@ -183,9 +164,8 @@ func (s *Server) handleMySessions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": sessions, "count": len(sessions)})
 }
 
-// handleMyTokens lists the caller's own live API tokens, without their
-// values: a value was shown once, at issue, and is nowhere to be read
-// again.
+// handleMyTokens lists the caller's own live API tokens, without their values:
+// a value was shown once, at issue, and is nowhere to be read again.
 func (s *Server) handleMyTokens(w http.ResponseWriter, r *http.Request) {
 	principal, ok := requireIdentity(w, r)
 	if !ok {

@@ -12,9 +12,9 @@ func (c *fakeClock) now() time.Time { return c.at }
 
 func (c *fakeClock) advance(d time.Duration) { c.at = c.at.Add(d) }
 
-// TestBucketStartsFullAndHoldsItsCapacity guards the burst: a bucket
-// starts with its capacity, gives up to that much at once, and no more
-// than that however long the fleet was quiet.
+// TestBucketStartsFullAndHoldsItsCapacity guards the burst: a bucket starts
+// with its capacity, gives up to that much at once, and no more than that
+// however long the fleet was quiet.
 func TestBucketStartsFullAndHoldsItsCapacity(t *testing.T) {
 	clock := &fakeClock{at: time.Unix(1_700_000_000, 0)}
 	bucket := NewBucket(100, 100, clock.now)
@@ -38,9 +38,9 @@ func TestBucketStartsFullAndHoldsItsCapacity(t *testing.T) {
 	}
 }
 
-// TestBucketRefillsAtItsRate guards the pacing itself: the tokens come
-// back at the rate per second, in fractions that add up, and a clock that
-// went back earns nothing.
+// TestBucketRefillsAtItsRate guards the pacing itself: the tokens come back at
+// the rate per second, in fractions that add up, and a clock that went back
+// earns nothing.
 func TestBucketRefillsAtItsRate(t *testing.T) {
 	clock := &fakeClock{at: time.Unix(1_700_000_000, 0)}
 	bucket := NewBucket(10, 20, clock.now)

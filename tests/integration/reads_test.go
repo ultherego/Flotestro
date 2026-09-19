@@ -89,10 +89,8 @@ func awaitRead(t *testing.T, h *harness, id string, timeout time.Duration) readV
 	return view
 }
 
-// snapshotsLanded says whether every host that succeeded has its snapshot
-// in the view. The result of the job and the inventory fragment it
-// refreshed travel separately, and the fragment can land a moment after
-// the result: a view read in that moment is finished but not yet whole.
+// snapshotsLanded says whether every host that succeeded has its snapshot in
+// the view.
 func snapshotsLanded(view readView) bool {
 	for _, host := range view.Hosts {
 		if host.State == "succeeded" && len(host.Snapshot) == 0 && len(host.Detail) == 0 && len(host.Lines) == 0 {
@@ -201,9 +199,9 @@ func TestProcessListFanOut(t *testing.T) {
 	}
 }
 
-// TestJournalFanOutMergesTimeline reads a few journal lines on every
-// connected host and checks the merged timeline: every line names its
-// host, and the lines with a timestamp stand in order.
+// TestJournalFanOutMergesTimeline reads a few journal lines on every connected
+// host and checks the merged timeline: every line names its host, and the
+// lines with a timestamp stand in order.
 func TestJournalFanOutMergesTimeline(t *testing.T) {
 	h := newHarness(t)
 	online := onlineHosts(t, h)
@@ -228,8 +226,8 @@ func TestJournalFanOutMergesTimeline(t *testing.T) {
 		byID[host.ID] = host.Hostname
 	}
 	// Every host brought at most five lines - six with the header an older
-	// journalctl prints - and the merge carries them all: on the timeline
-	// when the line names a moment, under its host when not.
+	// journalctl prints - and the merge carries them all: on the timeline when
+	// the line names a moment, under its host when not.
 	total := 0
 	for _, host := range view.Hosts {
 		if len(host.Lines) == 0 || len(host.Lines) > 6 {
@@ -304,10 +302,9 @@ func TestFanOutRefusesMutations(t *testing.T) {
 	}
 }
 
-// TestFanOutRefusesTooManyHosts checks the ceiling of a read: an order
-// naming more hosts than the process list fans out to is refused as a
-// list, before any of the hosts is looked up - so the identifiers need not
-// exist.
+// TestFanOutRefusesTooManyHosts checks the ceiling of a read: an order naming
+// more hosts than the process list fans out to is refused as a list, before
+// any of the hosts is looked up - so the identifiers need not exist.
 func TestFanOutRefusesTooManyHosts(t *testing.T) {
 	h := newHarness(t)
 

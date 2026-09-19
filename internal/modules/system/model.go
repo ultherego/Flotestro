@@ -1,16 +1,6 @@
-// Package system describes the platform of a host: the processor, the
-// memory, the machine identity from DMI, the firmware, the kernel, the
-// distribution, the timezone and the boot.
-//
-// The module gathers facts that change only when somebody changes the
-// machine - a kernel upgrade, a firmware update, a move to another
-// hypervisor. That is why it is read rarely and why the panel keeps a
-// history of what it saw: a host that came up on another kernel is a fact
-// worth a row, not a diff the operator has to remember.
-//
-// Every fact that could not be read is absent and named in Missing with
-// its reason. A machine without DMI - a container, an ARM board - is not
-// a machine with an empty serial number.
+// Package system describes the platform of a host: the processor, the memory,
+// the machine identity from DMI, the firmware, the kernel, the distribution,
+// the timezone and the boot.
 package system
 
 import (
@@ -18,9 +8,7 @@ import (
 	"time"
 )
 
-// The names of the facts that may be missing. They key the Missing map,
-// so the panel says which fact is unknown and why rather than "something
-// was not read".
+// The names of the facts that may be missing.
 const (
 	FactCPU            = "cpu"
 	FactMemory         = "memory"
@@ -46,16 +34,13 @@ const (
 type CPU struct {
 	Model  string `json:"model,omitempty"`
 	Vendor string `json:"vendor,omitempty"`
-	// Threads is the number of logical processors the kernel sees; Cores
-	// and Sockets are the physical layout when the file names it. A pointer
-	// that is nil is a layout the file does not describe - ARM cpuinfo has
-	// no core ids - not a machine with zero cores.
+	// Threads is the number of logical processors the kernel sees; Cores and
+	// Sockets are the physical layout when the file names it.
 	Threads *int `json:"threads,omitempty"`
 	Cores   *int `json:"cores,omitempty"`
 	Sockets *int `json:"sockets,omitempty"`
-	// Flags is the summary of the capability flags: the ones an operator
-	// asks about, not the whole list of two hundred. FlagCount is the size
-	// of the whole list.
+	// Flags is the summary of the capability flags: the ones an operator asks
+	// about, not the whole list of two hundred.
 	Flags     []string `json:"flags,omitempty"`
 	FlagCount int      `json:"flag_count"`
 	// MHz is the nominal frequency of the first processor.
@@ -69,10 +54,6 @@ type Memory struct {
 }
 
 // DMI describes the machine as its firmware tables name it.
-//
-// The vendor and the product are readable by everyone; the serial numbers
-// and the UUID only by root, so they come from the helper. A field that is
-// empty and not in Missing is a field the firmware left blank.
 type DMI struct {
 	Vendor        string `json:"vendor,omitempty"`
 	Product       string `json:"product,omitempty"`
@@ -118,9 +99,8 @@ type Distribution struct {
 
 // Virtualization says what the host runs on, as far as the host can tell.
 type Virtualization struct {
-	// Kind is the hypervisor or the container runtime - kvm, vmware,
-	// virtualbox, xen, hyperv, qemu, docker, lxc, systemd-nspawn - or
-	// "none" for bare metal. Empty means it was not determined.
+	// Kind is the hypervisor or the container runtime - kvm, vmware, virtualbox,
+	// xen, hyperv, qemu, docker, lxc, systemd-nspawn - or "none" for bare metal.
 	Kind string `json:"kind,omitempty"`
 	// Source names the evidence: the DMI product name, the hypervisor flag,
 	// the container marker.
@@ -152,9 +132,8 @@ type Snapshot struct {
 	ObservedAt time.Time `json:"observed_at"`
 }
 
-// Supplement is the part of the picture only root can read: the DMI
-// serial numbers and the UUID. The helper fills it in and the agent lays
-// it over its own picture.
+// Supplement is the part of the picture only root can read: the DMI serial
+// numbers and the UUID.
 type Supplement struct {
 	Serial        string `json:"serial,omitempty"`
 	UUID          string `json:"uuid,omitempty"`
@@ -165,9 +144,7 @@ type Supplement struct {
 	Missing map[string]string `json:"missing,omitempty"`
 }
 
-// Supplemented lays the privileged facts over the picture. A fact the
-// helper could not read stays missing with the helper's reason: the agent
-// has no better one.
+// Supplemented lays the privileged facts over the picture.
 func (s Snapshot) Supplemented(supplement Supplement) Snapshot {
 	result := s
 	result.Missing = cloneMissing(s.Missing)

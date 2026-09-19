@@ -416,7 +416,7 @@ func CheckSchema(ctx context.Context, pool *pgxpool.Pool) (SchemaReport, error) 
 	var present bool
 	// Unqualified on purpose: the table lives wherever the search path of the
 	// connection puts it, which is the same place the migrator wrote it, and
-	// naming a schema here would report an installation that uses another one as
+	// naming a schema here would report an installation that uses another one as.
 	if err := pool.QueryRow(ctx, "select to_regclass('schema_migrations') is not null").
 		Scan(&present); err != nil {
 		return SchemaReport{}, fmt.Errorf("reading the schema of the database: %w", err)
@@ -448,7 +448,7 @@ func CheckSchema(ctx context.Context, pool *pgxpool.Pool) (SchemaReport, error) 
 func compareSchema(embedded, applied []string) SchemaReport {
 	// The rename of a migration file is a rename, not a new migration: a database
 	// recorded under the former name is translated here, the same way the
-	// migrator translates it, so a check never calls it ahead of a binary that
+	// migrator translates it, so a check never calls it ahead of a binary that.
 	recorded := map[string]bool{}
 	for _, version := range applied {
 		if current, renamed := renamedMigrations[version]; renamed {

@@ -10,17 +10,7 @@ import (
 	"github.com/ultherego/flotestro/internal/agentconfig"
 )
 
-// migrateConfiguration turns the environment file into agent.yaml.
-//
-// A host set up before the YAML file was introduced keeps its settings in
-// the environment file of the service, and the daemon still reads them. The
-// conversion writes the same settings in the canonical form - without the
-// enrollment token, which has no place in a file that survives package
-// updates and ends up in backups.
-//
-// Without --write nothing is touched: the command shows the file it would
-// write. With it, the file is created and never overwritten - an existing
-// agent.yaml is the canonical configuration and is edited, not regenerated.
+// migrateConfiguration turns the environment file into agent. yaml.
 func migrateConfiguration(args []string, out, errOut io.Writer) int {
 	flags := flag.NewFlagSet("config migrate", flag.ContinueOnError)
 	flags.SetOutput(errOut)
@@ -89,18 +79,13 @@ func printMigrationNotes(out io.Writer, source string, values map[string]string)
 	if values["FLOTESTRO_ENROLLMENT_TOKEN"] != "" {
 		fmt.Fprintln(out, "The enrollment token was not copied: it is a one-time secret and has no place in the file.")
 	}
-	// The variables win over the file in the daemon, so the file decides
-	// nothing until they are emptied - and emptying them before the service
-	// runs on the file would cut a working host off.
+	// The variables win over the file in the daemon, so the file decides nothing
+	// until they are emptied - and emptying them before the service runs on the
+	// file would cut a working host off.
 	fmt.Fprintf(out, "The variables in %s still take precedence over the file: empty them once the service runs on it.\n", source)
 }
 
 // renderConfiguration writes the YAML form by hand.
-//
-// By hand rather than through a marshaller: the file is meant to be read and
-// edited by a person, and only the entries the environment gave are written
-// - the defaults stay defaults, so a later change of a default reaches the
-// host.
 func renderConfiguration(cfg agentconfig.Config, values map[string]string) string {
 	var b strings.Builder
 	b.WriteString("# Converted from the environment file of the service.\n")

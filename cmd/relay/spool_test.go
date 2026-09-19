@@ -33,9 +33,9 @@ func relayConfig(t *testing.T, spool relayconfig.Spool, buffer *int64) relayconf
 	return cfg
 }
 
-// A file that says nothing about the spool gets the directory under the
-// state directory and the defaults of relayconfig; the site of the relay
-// is carried into the options, because it is named on every record.
+// A file that says nothing about the spool gets the directory under the state
+// directory and the defaults of relayconfig; the site of the relay is carried
+// into the options, because it is named on every record.
 func TestTheSpoolSettingsFollowTheConfiguration(t *testing.T) {
 	cfg := relayConfig(t, relayconfig.Spool{}, nil)
 	dir, options := spoolSettings(cfg)
@@ -74,9 +74,9 @@ func TestTheSpoolSettingsFollowTheConfiguration(t *testing.T) {
 	}
 }
 
-// A file from before the spool names buffer_max_bytes alone: the spool
-// takes that limit, so an upgrade keeps the room the operator gave the
-// site instead of silently granting a gigabyte.
+// A file from before the spool names buffer_max_bytes alone: the spool takes
+// that limit, so an upgrade keeps the room the operator gave the site instead
+// of silently granting a gigabyte.
 func TestTheSpoolKeepsTheRoomOfAnOlderConfiguration(t *testing.T) {
 	buffer := int64(32 << 20)
 	_, options := spoolSettings(relayConfig(t, relayconfig.Spool{}, &buffer))
@@ -89,9 +89,9 @@ func TestTheSpoolKeepsTheRoomOfAnOlderConfiguration(t *testing.T) {
 	}
 }
 
-// The directory is created private, and one left wider by a previous
-// release or by a hand is narrowed: the records hold the results and the
-// inventories of a whole site.
+// The directory is created private, and one left wider by a previous release
+// or by a hand is narrowed: the records hold the results and the inventories
+// of a whole site.
 func TestTheSpoolDirectoryIsCreatedPrivate(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "state", "spool")
@@ -136,9 +136,7 @@ func TestTheSpoolDirectoryIsCreatedPrivate(t *testing.T) {
 	}
 }
 
-// The age of the backlog comes from the oldest segment still on disk. An
-// empty directory, or one without segments, gives no time at all rather
-// than the zero of the epoch dressed up as a date.
+// The age of the backlog comes from the oldest segment still on disk.
 func TestTheOldestSegmentDatesTheBacklog(t *testing.T) {
 	dir := t.TempDir()
 	if when := oldestSegmentWrite(dir); !when.IsZero() {

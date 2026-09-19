@@ -17,22 +17,14 @@ import (
 	"github.com/ultherego/flotestro/internal/relays"
 )
 
-// RelayService serves the relays of the sites.
-//
-// It is a separate service, because a relay is a separate trust boundary. The
-// certificate of a relay lives shorter than that of a host and has a server
-// role towards the agents of its site, so a renewal has to check something
-// other than the renewal of a host. A shared RPC would mean one set of
-// conditions for two different permissions.
+// RelayService serves the relays of the sites. It is a separate service,
+// because a relay is a separate trust boundary.
 type RelayService struct {
 	relays     *relays.Store
 	certIssuer issuer.Issuer
 	audit      *audit.Recorder
 	registry   *Registry
-	// enrollment serves the registrations of hosts from isolated sites. A
-	// relay signs nothing itself, so a registration goes to the same service
-	// that serves direct connections - with one difference: it is known which
-	// relay attests it.
+	// enrollment serves the registrations of hosts from isolated sites.
 	enrollment *EnrollmentService
 	log        *slog.Logger
 }
@@ -46,14 +38,8 @@ func NewRelayService(relayStore *relays.Store, certIssuer issuer.Issuer,
 	}
 }
 
-// ProxyEnroll accepts the registration of a host forwarded by a relay.
-//
-// A host in an isolated site does not see the centre and registers through a
-// relay. A relay terminates TLS, so it sees the token; that is why the
-// registration goes over its mTLS channel rather than over the public
-// endpoint. The centre then checks two things the public endpoint cannot:
-// whether the order belongs to the site of this relay and whether it is not
-// tied to another relay.
+// ProxyEnroll accepts the registration of a host forwarded by a relay. A host
+// in an isolated site does not see the centre and registers through a relay.
 func (s *RelayService) ProxyEnroll(ctx context.Context,
 	req *connect.Request[agentv1.ProxyEnrollRequest],
 ) (*connect.Response[agentv1.EnrollResponse], error) {
@@ -91,12 +77,8 @@ func (s *RelayService) ProxyEnroll(ctx context.Context,
 	})
 }
 
-// RenewCertificate exchanges the CSR of a relay for a new certificate.
-//
-// The identity comes from the current client certificate alone. The network
-// names come from the registry rather than from the request: could a relay
-// choose them itself, a renewal would be a way of presenting itself to the
-// agents under somebody else's name.
+// RenewCertificate exchanges the CSR of a relay for a new certificate. The
+// identity comes from the current client certificate alone.
 func (s *RelayService) RenewCertificate(ctx context.Context,
 	req *connect.Request[agentv1.RenewRelayCertificateRequest],
 ) (*connect.Response[agentv1.RenewRelayCertificateResponse], error) {
@@ -105,9 +87,9 @@ func (s *RelayService) RenewCertificate(ctx context.Context,
 		return nil, connect.NewError(connect.CodeUnauthenticated,
 			errors.New("no client certificate"))
 	}
-	// The certificate of a host will not pass here: the kind of the identity
-	// is in the URI SAN, so an agent will not renew itself a certificate with
-	// a server role.
+	// The certificate of a host will not pass here: the kind of the identity is
+	// in the URI SAN, so an agent will not renew itself a certificate with a
+	// server role.
 	relayID, err := pki.RelayIDFromCert(cert)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeUnauthenticated, err)
@@ -141,16 +123,13 @@ func (s *RelayService) RenewCertificate(ctx context.Context,
 	}
 	if len(names) == 0 {
 		// A relay without recorded names has nothing to attest to the agents.
-		// Silently issuing a certificate without names would give a relay no
-		// agent accepts - and nobody would know why.
 		s.refuse(ctx, relayID, "advertised_names_missing")
 		return nil, connect.NewError(connect.CodeFailedPrecondition,
 			errors.New("the relay has no recorded network names"))
 	}
 	// The wish of the relay is noted but not granted: a divergence means the
-	// configuration of the site has drifted apart from the registry of the
-	// panel and the operator is to see it before the agents start rejecting
-	// connections.
+	// configuration of the site has drifted apart from the registry of the panel
+	// and the operator is to see it before the agents start rejecting
 	if extra := extraNames(req.Msg.GetAdvertisedNames(), names); len(extra) > 0 {
 		s.log.Warn("the relay asks for names from outside the registry",
 			"relay_id", relayID, "names", extra, "issued", names)
@@ -178,9 +157,9 @@ func (s *RelayService) RenewCertificate(ctx context.Context,
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx))
 
-	// The previous certificate stops being the one the panel recognises the
-	// relay by, but stays valid until the end of its term: the relay switches
-	// the listener without tearing down the sessions of the agents.
+	// The previous certificate stops being the one the panel recognises the relay
+	// by, but stays valid until the end of its term: the relay switches the
+	// listener without tearing down the sessions of the agents.
 	if err := s.relays.SaveCertificate(ctx, tx, relayID, issued.Serial,
 		issued.Fingerprint, issued.NotAfter); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
@@ -215,10 +194,6 @@ func (s *RelayService) RenewCertificate(ctx context.Context,
 
 // Ping confirms the connectivity of a relay with the centre and refreshes its
 // presence.
-//
-// The answer carries the number of sessions the centre sees through this
-// relay. A divergence from the local number is the first symptom of a session
-// hanging on one side - and that cannot be seen from either side alone.
 func (s *RelayService) Ping(ctx context.Context,
 	req *connect.Request[agentv1.RelayPingRequest],
 ) (*connect.Response[agentv1.RelayPingResponse], error) {
@@ -241,9 +216,9 @@ func (s *RelayService) Ping(ctx context.Context,
 			fmt.Errorf("the relay %s is not active", relayID))
 	}
 	s.relays.MarkSeen(ctx, relayID)
-	// The numbers of the heartbeat are informational: the panel shows them
-	// next to the relay so that a site whose results stopped arriving is
-	// visible before anybody looks at the site itself.
+	// The numbers of the heartbeat are informational: the panel shows them next
+	// to the relay so that a site whose results stopped arriving is visible
+	// before anybody looks at the site itself.
 	heartbeat := relays.Heartbeat{
 		BufferBytes:     int64(req.Msg.GetBufferBytes()),
 		BufferMaxBytes:  int64(req.Msg.GetBufferMaxBytes()),
@@ -257,11 +232,7 @@ func (s *RelayService) Ping(ctx context.Context,
 		ReportedAt:      time.Now().UTC(),
 	}
 	s.relays.RecordHeartbeat(relayID, heartbeat)
-	// The same report goes into the history. A write that fails must not
-	// tear the heartbeat down: the relay would then look silent because
-	// the panel could not write a chart point, and a site would be
-	// declared cut off over a database hiccup. The failure is logged and
-	// the relay keeps its link.
+	// The same report goes into the history.
 	if err := s.relays.RecordSample(ctx, relays.SampleOf(relayID, heartbeat)); err != nil {
 		s.log.Warn("the buffer report of the relay was not recorded",
 			"relay_id", relayID, "err", err)

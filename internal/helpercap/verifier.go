@@ -11,16 +11,10 @@ import (
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 )
 
-// Verifier checks a capability against the host, the request and the
-// keyring. The order of the checks is part of the contract (chapter 3.2 of
-// the remediation document): the layout, the host, the action, the window,
-// the length of the window, the payload digest, the payload binding, the
-// signature, and the nonce last - so a capability that fails an earlier
-// check consumes nothing.
+// Verifier checks a capability against the host, the request and the keyring.
+// The order of the checks is part of the contract (chapter 3.
 type Verifier struct {
-	// hostID reads the root-owned host identity. It is read at every
-	// verification, because the identity is written by the trust update
-	// while the helper runs.
+	// hostID reads the root-owned host identity.
 	hostID func() (string, error)
 	// keyring loads the root-owned keys, for the same reason.
 	keyring func() (*Keyring, error)
@@ -59,8 +53,6 @@ func NewVerifierWith(hostID string, keyring *Keyring, replay *ReplayStore, now f
 }
 
 // Verify checks the capability the request carries against the request.
-// It returns a refusal with a stable code, or nil once the nonce has been
-// consumed.
 func (v *Verifier) Verify(request *helperv1.HelperRequest, expectation Expectation) error {
 	capability := request.GetCapability()
 	if capability == nil {
@@ -214,9 +206,8 @@ func (p *Policy) Decide(request *helperv1.HelperRequest) Decision {
 	}
 	code := CodeOf(err)
 	if code == "" {
-		// Not a refusal but a failure of the helper's own machinery - a
-		// keyring or a replay directory that cannot be read. Fail closed:
-		// a capability the helper cannot check is not a verified one.
+		// Not a refusal but a failure of the helper's own machinery - a keyring or a
+		// replay directory that cannot be read.
 		code = ErrorBadSignature
 	}
 	if p.Mode == ModeObserve {

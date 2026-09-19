@@ -2,11 +2,9 @@ package jobs
 
 import "testing"
 
-// The status an attempt has when its result arrives decides what the
-// result does: a lease the scheduler gave up on is settled and its
-// redelivery superseded, a superseded attempt takes nothing, and an
-// attempt without a status - or with a result already - is recorded as
-// it always was.
+// The status an attempt has when its result arrives decides what the result
+// does: a lease the scheduler gave up on is settled and its redelivery
+// superseded, a superseded attempt takes nothing, and an attempt without a
 func TestWhatALateResultDoesByTheStatusOfItsAttempt(t *testing.T) {
 	cases := []struct {
 		status             string
@@ -27,9 +25,9 @@ func TestWhatALateResultDoesByTheStatusOfItsAttempt(t *testing.T) {
 	}
 }
 
-// The typed reasons are part of the contract between the store, the
-// gateway and the guide of error codes; the guide test on the API side
-// enumerates them by these very strings.
+// The typed reasons are part of the contract between the store, the gateway
+// and the guide of error codes; the guide test on the API side enumerates them
+// by these very strings.
 func TestTheAttemptStatusesAreTheirOwnCodes(t *testing.T) {
 	if AttemptStatusLeaseExpired != "lease_expired" || AttemptStatusSuperseded != "superseded_by_result" {
 		t.Fatalf("the attempt statuses changed: %q, %q", AttemptStatusLeaseExpired, AttemptStatusSuperseded)

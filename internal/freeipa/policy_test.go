@@ -12,9 +12,7 @@ import (
 	"time"
 )
 
-// fakeDirectory stands in for the JSON-RPC endpoint of the directory. It
-// records every command with its arguments and answers from a table, so a
-// test checks what the adapter sends rather than what a directory would do.
+// fakeDirectory stands in for the JSON-RPC endpoint of the directory.
 type fakeDirectory struct {
 	t      *testing.T
 	server *httptest.Server
@@ -37,9 +35,9 @@ func newFakeDirectory(t *testing.T) (*fakeDirectory, *Client) {
 	fake.server = httptest.NewServer(http.HandlerFunc(fake.handle))
 	t.Cleanup(fake.server.Close)
 
-	// The client is built by hand: the constructor needs a keytab and a
-	// Kerberos configuration, and the session is marked as established so
-	// no login is attempted against the fake.
+	// The client is built by hand: the constructor needs a keytab and a Kerberos
+	// configuration, and the session is marked as established so no login is
+	// attempted against the fake.
 	client := &Client{
 		config:  Config{ServerURL: fake.server.URL, Principal: "flotestro/panel@TEST", CacheTTL: time.Minute},
 		http:    fake.server.Client(),
@@ -464,9 +462,7 @@ func TestDiffIgnoresOrderAndDuplicates(t *testing.T) {
 }
 
 // TestHBACTestParsesADenial mirrors the verdict test for the answer that
-// matters most to an operator: "no". A denial has to come back as denied
-// with the rules that were evaluated and did not match, so the screen can
-// say why - not as an empty success.
+// matters most to an operator: "no".
 func TestHBACTestParsesADenial(t *testing.T) {
 	fake, client := newFakeDirectory(t)
 	fake.answers["hbactest"] = func(call rpcCall) (any, *rpcError) {
@@ -507,12 +503,7 @@ func TestHBACTestParsesADenial(t *testing.T) {
 }
 
 // TestEnsureSudoRuleNeverEmitsACategoryForNamedMembers guards the boundary
-// between a rule for named hosts and commands and a rule for everything. A
-// category of "all" next to named members is the widest rule the directory
-// can hold, and it would arrive silently: the members would still be listed
-// and the screen would look narrow. So a spec with names must never send a
-// category, and a spec that narrows an ALL rule down to names must clear
-// the category before the names go in.
+// between a rule for named hosts and commands and a rule for everything.
 func TestEnsureSudoRuleNeverEmitsACategoryForNamedMembers(t *testing.T) {
 	t.Run("a new rule with names", func(t *testing.T) {
 		fake, client := newFakeDirectory(t)

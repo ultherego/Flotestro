@@ -11,15 +11,10 @@ import (
 	"time"
 )
 
-// The connection test of the provider. The panel discovered the provider
-// once, at start; a provider that has since gone away, rotated its keys
-// behind a broken address or moved realms still looks configured. The
-// setup checklist asks the provider now rather than reading what the
-// start remembered.
+// The connection test of the provider.
 
-// Probe is what one round trip to the provider found: the issuer the
-// discovery document names, where the signing keys are and how many of
-// them there were.
+// Probe is what one round trip to the provider found: the issuer the discovery
+// document names, where the signing keys are and how many of them there were.
 type Probe struct {
 	Issuer  string `json:"issuer"`
 	JWKSURL string `json:"jwks_url"`
@@ -38,8 +33,6 @@ const ProbeTimeout = 5 * time.Second
 const probeBodyLimit = 1 << 20
 
 // Probe fetches the discovery document and the signing keys it points at.
-// A typed reason comes back for every way the test can fail, so the
-// checklist can say what is wrong rather than that something is.
 func (p *Provider) Probe(ctx context.Context) (Probe, error) {
 	result, err := p.probe(ctx)
 	p.rememberProbe(result, err)
@@ -58,9 +51,9 @@ func (p *Provider) probe(ctx context.Context) (Probe, error) {
 	if err := p.fetchJSON(ctx, p.Issuer()+"/.well-known/openid-configuration", &discovery); err != nil {
 		return Probe{}, fmt.Errorf("discovery_unreachable: %w", err)
 	}
-	// The issuer of the document has to be the one the panel was told, or
-	// every token the provider signs is refused at login for the wrong
-	// issuer - the check go-oidc makes on every ID token.
+	// The issuer of the document has to be the one the panel was told, or every
+	// token the provider signs is refused at login for the wrong issuer - the
+	// check go-oidc makes on every ID token.
 	if strings.TrimSuffix(discovery.Issuer, "/") != p.Issuer() {
 		return Probe{}, fmt.Errorf("issuer_mismatch: the discovery document names %q, the panel is configured for %q",
 			discovery.Issuer, p.Issuer())
@@ -88,10 +81,8 @@ func (p *Provider) probe(ctx context.Context) (Probe, error) {
 	}, nil
 }
 
-// ProbeCached answers from the last probe when it is younger than maxAge,
-// and probes otherwise. The checklist is read on every visit of the setup
-// page and by the dashboard card; one round trip a minute is enough to
-// notice a provider that went away.
+// ProbeCached answers from the last probe when it is younger than maxAge, and
+// probes otherwise.
 func (p *Provider) ProbeCached(ctx context.Context, maxAge time.Duration) (Probe, error) {
 	p.probeMu.Lock()
 	fresh := !p.probeAt.IsZero() && time.Since(p.probeAt) < maxAge
@@ -109,9 +100,8 @@ func (p *Provider) rememberProbe(result Probe, err error) {
 	p.lastProbe, p.lastProbeErr, p.probeAt = result, err, time.Now()
 }
 
-// fetchJSON reads one JSON document over the provider's own HTTP client,
-// so a private CA or a proxy configured for the login applies to the
-// test as well.
+// fetchJSON reads one JSON document over the provider's own HTTP client, so a
+// private CA or a proxy configured for the login applies to the test as well.
 func (p *Provider) fetchJSON(ctx context.Context, address string, out any) error {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
 	if err != nil {

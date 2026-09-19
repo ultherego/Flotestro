@@ -1,19 +1,7 @@
 package monitoring
 
-// The lease of the alert evaluator: which control-plane instance is
-// allowed to judge the rules right now.
-//
-// Every instance runs the evaluator, and until now every one of them
-// evaluated every rule over every host on every tick. The unique index
-// over the open episodes made that look harmless: the second instance's
-// insert lost the race and was swallowed by "on conflict do nothing", so
-// the duplicate fire never became a duplicate row. An index is a poor
-// leader election. It guards the one statement that starts an episode and
-// nothing after it - firing, refreshing and resolving are plain updates -
-// so two instances a second apart can resolve an episode the other has
-// just refreshed, and each of them does the whole fleet's work to get
-// there. One holder at a time is the honest answer, and an instance that
-// finds the lease taken does nothing at all rather than a little.
+// The lease of the alert evaluator: which control-plane instance is allowed to
+// judge the rules right now.
 
 import (
 	"context"
@@ -24,11 +12,8 @@ import (
 )
 
 // ErrLeaseLost means the instance no longer holds the lease it was working
-// under: another instance took it, or this one stopped renewing long
-// enough for it to run out. The pass stops where it is. Nothing is written
-// after this, because the fleet is somebody else's to judge now, and a
-// half-finished pass by a former leader is how two panels end up
-// contradicting each other about one alert.
+// under: another instance took it, or this one stopped renewing long enough
+// for it to run out.
 var ErrLeaseLost = errors.New(ErrorEvaluatorLeaseLost +
 	": the instance no longer holds the lease of the alert evaluator")
 
@@ -74,15 +59,8 @@ func (s *Store) EvaluatorLease(ctx context.Context) (Lease, error) {
 	return lease, err
 }
 
-// acquireEvaluatorLease takes the lease for this instance, or renews it
-// when this instance holds it already, and says whether it holds it
-// afterwards.
-//
-// A lease is free when nobody holds it or when its holder stopped renewing
-// it for the term. The row is taken with skip locked: an instance that
-// finds it locked does not wait - the other one is either renewing or
-// taking it, and either way this instance has no business with the fleet
-// on this tick.
+// acquireEvaluatorLease takes the lease for this instance, or renews it when
+// this instance holds it already, and says whether it holds it afterwards.
 func (s *Store) acquireEvaluatorLease(ctx context.Context) (Lease, bool, error) {
 	lease := Lease{Name: evaluatorLeaseName, Holder: s.instanceID}
 	var until *time.Time
@@ -117,12 +95,7 @@ func (s *Store) acquireEvaluatorLease(ctx context.Context) (Lease, bool, error) 
 	return lease, true, nil
 }
 
-// renewEvaluatorLease moves the lease forward. It is conditional on the
-// holder and the token together, and on the lease not having run out: a
-// row that names anything else is somebody else's now, and the caller
-// learns it as ErrLeaseLost. A lease that ran out is not quietly taken
-// back here - it is taken by an acquire, which gives it a new token, so a
-// pass that was interrupted never carries on under the old one.
+// renewEvaluatorLease moves the lease forward.
 func (s *Store) renewEvaluatorLease(ctx context.Context, lease Lease) error {
 	tag, err := s.pool.Exec(ctx, `
 		update monitoring_leases
@@ -139,9 +112,8 @@ func (s *Store) renewEvaluatorLease(ctx context.Context, lease Lease) error {
 	return nil
 }
 
-// releaseEvaluatorLease gives the lease up at the end of a pass, so the
-// next instance may take it at once rather than waiting out the term. A
-// release by an instance that has since lost the lease changes nothing.
+// releaseEvaluatorLease gives the lease up at the end of a pass, so the next
+// instance may take it at once rather than waiting out the term.
 func (s *Store) releaseEvaluatorLease(ctx context.Context, lease Lease) error {
 	_, err := s.pool.Exec(ctx, `
 		update monitoring_leases

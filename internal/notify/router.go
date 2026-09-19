@@ -16,14 +16,7 @@ import (
 	"github.com/ultherego/flotestro/internal/outbox"
 )
 
-// Router is the consumer of the trail that feeds the queue. It takes a
-// batch of events, finds the channels each one is for, decides what a
-// silence or a maintenance window keeps back, and writes one row per
-// event and channel - pending for the worker, or suppressed with the
-// reason. It sends nothing itself: sending is the worker's, under a
-// lease, with the attempts counted on the row. A failed receiver is
-// therefore never an error of the batch, and the cursor of the trail
-// moves only once the rows are committed.
+// Router is the consumer of the trail that feeds the queue.
 type Router struct {
 	pool    *pgxpool.Pool
 	store   *Store
@@ -32,17 +25,15 @@ type Router struct {
 	// publicURL is the panel address the links point at; empty means
 	// messages without links.
 	publicURL string
-	// worker is woken when rows were written, so a message goes out
-	// within a moment rather than at the next poll; nil means the worker
-	// of another instance polls it up.
+	// worker is woken when rows were written, so a message goes out within a
+	// moment rather than at the next poll; nil means the worker of another
+	// instance polls it up.
 	worker *Worker
 	// now is replaced in tests.
 	now func() time.Time
 }
 
-// NewRouter creates the router with the three senders. The secret reader
-// is the store the mail passwords are read from; nil means a mail
-// channel with a username cannot send.
+// NewRouter creates the router with the three senders.
 func NewRouter(pool *pgxpool.Pool, store *Store, secrets SecretReader, publicURL string, log *slog.Logger) *Router {
 	client := &http.Client{Timeout: sendTimeout}
 	return &Router{
@@ -70,9 +61,7 @@ func (r *Router) Wake() {
 	}
 }
 
-// Deliver hands a batch of the trail to the queue. It is the
-// outbox.Receiver the consumer calls; it errs only when the database
-// does, so the cursor moves exactly when the rows are durable.
+// Deliver hands a batch of the trail to the queue. It is the outbox.
 func (r *Router) Deliver(ctx context.Context, events []outbox.Event) error {
 	channels, err := r.store.Enabled(ctx)
 	if err != nil {
@@ -115,9 +104,9 @@ func (r *Router) Deliver(ctx context.Context, events []outbox.Event) error {
 				row.SuppressionReason = verdict.Reason
 				row.LastError = verdict.Sentence
 			}
-			// A resolve is kept back for a channel whose fire was kept
-			// back: the two are decided per channel, because the same
-			// silence may have started between the fire and the resolve.
+			// A resolve is kept back for a channel whose fire was kept back: the two
+			// are decided per channel, because the same silence may have started
+			// between the fire and the resolve.
 			if !verdict.Suppressed && message.Subject == "alert.resolved" {
 				kept, err := r.fireWasKept(ctx, channel.ID, event.AggregateID)
 				if err != nil {
@@ -145,11 +134,7 @@ func (r *Router) Deliver(ctx context.Context, events []outbox.Event) error {
 	return nil
 }
 
-// scopeOf says where the event happened and how serious it is. The
-// triggers of the host events write the site and the environment; the
-// alert trigger names the host, and the host row says the rest. A host
-// that is gone since leaves the scope unknown - and an unknown scope
-// reaches the global channels alone.
+// scopeOf says where the event happened and how serious it is.
 func (r *Router) scopeOf(ctx context.Context, event outbox.Event) (Scope, error) {
 	scope, hostID := ScopeHint(event)
 	if hostID == "" || (scope.Site != "" && scope.Environment != "") {
@@ -192,9 +177,7 @@ type maintenance struct {
 }
 
 // suppression decides, before the row is written, whether a silence or a
-// maintenance window keeps the event back. The decision is written on
-// the row with the policy and the reason, so the history says both that
-// the alert fired and that nobody was told, and why.
+// maintenance window keeps the event back.
 func (r *Router) suppression(ctx context.Context, event outbox.Event, message Message) (Verdict, error) {
 	var fields payload
 	_ = json.Unmarshal(event.Payload, &fields)
@@ -219,12 +202,7 @@ func (r *Router) suppression(ctx context.Context, event outbox.Event, message Me
 	return Decide(message.Subject, hostID, silences, window), nil
 }
 
-// Decide is the suppression rule, without the database. A silence of the
-// host, of the rule, or of both keeps back the alerts of that host; a
-// maintenance window keeps back everything about the host. A security
-// alert of the installation is kept back by a global silence alone: a
-// silence bound to a host or a rule was written by somebody with a right
-// over that host, which is not a right to blind the installation.
+// Decide is the suppression rule, without the database.
 func Decide(subject, hostID string, silences []silence, window *maintenance) Verdict {
 	security := subject == SubjectSecurity
 	for _, s := range silences {
@@ -250,9 +228,8 @@ func Decide(subject, hostID string, silences []silence, window *maintenance) Ver
 	return Verdict{}
 }
 
-// activeSilences reads the silences in force that cover the host and the
-// rule, and the global ones. A silence that names no host covers every
-// host; one that names no rule covers every rule.
+// activeSilences reads the silences in force that cover the host and the rule,
+// and the global ones.
 func (r *Router) activeSilences(ctx context.Context, hostID, ruleID string) ([]silence, error) {
 	rows, err := r.pool.Query(ctx, `
 		select id, coalesce(host_id::text, ''), coalesce(rule_id::text, ''), until, reason, global
@@ -326,10 +303,8 @@ func ruleIDOf(raw json.RawMessage) string {
 	return strings.TrimSpace(*fields.RuleID)
 }
 
-// Test sends the test message at a channel once and returns the row of
-// the queue it wrote. One attempt, settled at once: the operator pressed
-// a button and waits for the answer, and a receiver that is down is told
-// at once rather than retried in the background.
+// Test sends the test message at a channel once and returns the row of the
+// queue it wrote.
 func (r *Router) Test(ctx context.Context, id string) (*Delivery, error) {
 	channel, err := r.store.get(ctx, id)
 	if err != nil {
@@ -354,9 +329,8 @@ func (r *Router) Test(ctx context.Context, id string) (*Delivery, error) {
 	}
 	if err != nil {
 		outcome := Classify(err, 1, 1)
-		// A test is not retried: a failure that would pass is settled
-		// as a dead letter of the test, with the transport code the
-		// operator reads.
+		// A test is not retried: a failure that would pass is settled as a dead
+		// letter of the test, with the transport code the operator reads.
 		delivery.State = StateDeadLetter
 		delivery.LastErrorCode = outcome.ErrorCode
 		delivery.LastError = outcome.Error

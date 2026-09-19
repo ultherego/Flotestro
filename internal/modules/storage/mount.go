@@ -5,14 +5,10 @@ import (
 	"strings"
 )
 
-// PanelMarker marks the fstab entries created by the panel. An entry found
-// on the host belongs to the host administrator and the panel does not
-// rewrite it.
+// PanelMarker marks the fstab entries created by the panel.
 const PanelMarker = "# flotestro"
 
 // systemTypes lists the kernel mounts that are not the host disk space.
-// Showing them would obscure the picture: an ordinary host has dozens of
-// them, and the operator asks about disks.
 var systemTypes = map[string]bool{
 	"sysfs": true, "proc": true, "devtmpfs": true, "devpts": true, "tmpfs": true,
 	"securityfs": true, "cgroup": true, "cgroup2": true, "pstore": true,
@@ -23,11 +19,6 @@ var systemTypes = map[string]bool{
 }
 
 // ParseMountinfo reads /proc/self/mountinfo.
-//
-// mountinfo is read, not /etc/mtab: mtab is at times a symlink to
-// mountinfo, but on some systems it is a plain file that drifts from the
-// kernel state. The question "what is mounted now" has only one
-// trustworthy answer and it is the kernel.
 func ParseMountinfo(content string) []Mount {
 	var mounts []Mount
 	for _, line := range strings.Split(content, "\n") {
@@ -61,9 +52,8 @@ func ParseMountinfo(content string) []Mount {
 	return mounts
 }
 
-// decode replaces the octal sequences the kernel writes special characters
-// in paths with. A path with a space would otherwise fall apart into two
-// fields at the first split.
+// decode replaces the octal sequences the kernel writes special characters in
+// paths with.
 var sequence = regexp.MustCompile(`\\([0-7]{3})`)
 
 func decode(path string) string {
@@ -111,9 +101,8 @@ func ParseFstab(content string) []FstabEntry {
 			managed = false
 			continue
 		}
-		// fstab writes special characters the same way the kernel does in
-		// mountinfo: in octal. Without decoding a path with a space would
-		// never match the mount that realises it.
+		// fstab writes special characters the same way the kernel does in mountinfo:
+		// in octal.
 		entry := FstabEntry{
 			Source: decode(fields[0]), Target: decode(fields[1]), FSType: fields[2],
 			Managed: managed, Line: number,
@@ -134,12 +123,6 @@ func ParseFstab(content string) []FstabEntry {
 }
 
 // MergeMounts joins the kernel state with the fstab content.
-//
-// Four combinations mean four different things and all matter to the
-// operator: an entry mounted as in fstab, an fstab entry not mounted (the
-// host brings it up after a reboot or not), a mount without an entry
-// (vanishes after a reboot) and a mount with different options than
-// written.
 func MergeMounts(fromKernel []Mount, fromFstab []FstabEntry) []Mount {
 	result := make([]Mount, 0, len(fromKernel)+len(fromFstab))
 	used := map[string]bool{}
@@ -162,9 +145,7 @@ func MergeMounts(fromKernel []Mount, fromFstab []FstabEntry) []Mount {
 		if used[entry.Target] || entry.Target == "none" || entry.Target == "swap" {
 			continue
 		}
-		// An entry nobody mounted. Mounting on demand (noauto) is normal
-		// here, but a mandatory entry means a host that after a reboot may
-		// not come up the way it stands now.
+		// An entry nobody mounted.
 		result = append(result, Mount{
 			Target: entry.Target, Source: entry.Source, FSType: entry.FSType,
 			FstabOptions: entry.Options, InFstab: true, Managed: entry.Managed,

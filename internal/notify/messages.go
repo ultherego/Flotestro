@@ -38,10 +38,6 @@ type payload struct {
 }
 
 // Compose turns an event of the trail into the words a channel carries.
-// The scope is what the event says about where it happened; the router
-// fills the site and the environment of a host the payload does not name
-// before matching the filters. The second result is false for an event
-// no channel carries.
 func Compose(event outbox.Event, publicURL string) (Message, bool) {
 	subject, ok := SubjectOf(event.Type)
 	if !ok {
@@ -141,9 +137,8 @@ func Compose(event outbox.Event, publicURL string) (Message, bool) {
 }
 
 // SummaryMessage is the one message a channel gets when a silence with
-// send_summary ends: how many messages the silence kept back and their
-// titles, so the on-call knows what happened without the flood of every
-// one of them. The kept messages themselves are never sent.
+// send_summary ends: how many messages the silence kept back and their titles,
+// so the on-call knows what happened without the flood of every one of them.
 func SummaryMessage(kept []string, until time.Time, reason string, publicURL string) Message {
 	message := Message{
 		Subject:    "alert.summary",
@@ -181,9 +176,9 @@ func alertText(fields payload) string {
 	return text
 }
 
-// ScopeHint is what the payload alone says about the scope: the site and
-// the environment when the trigger wrote them, the host to look up when
-// it did not, and the severity of an alert.
+// ScopeHint is what the payload alone says about the scope: the site and the
+// environment when the trigger wrote them, the host to look up when it did
+// not, and the severity of an alert.
 func ScopeHint(event outbox.Event) (scope Scope, hostID string) {
 	var fields payload
 	_ = json.Unmarshal(event.Payload, &fields)
@@ -196,8 +191,8 @@ func ScopeHint(event outbox.Event) (scope Scope, hostID string) {
 }
 
 // TestMessage is what the test button sends: a sentence that says which
-// channel it is and when it was pressed, so a receiver that shows it is
-// known to be the right one.
+// channel it is and when it was pressed, so a receiver that shows it is known
+// to be the right one.
 func TestMessage(channel Channel, now time.Time) Message {
 	return Message{
 		Subject:    "test",

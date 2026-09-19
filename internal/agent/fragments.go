@@ -37,11 +37,6 @@ const (
 
 // Fragment is the state of one module of the host together with its own
 // revision.
-//
-// A revision computed separately for every module has two effects. A change in
-// one module does not rewrite the whole inventory, and the interface knows how
-// fresh the very tab the operator is looking at is - until now all the tabs
-// shared one marker and one date.
 type Fragment struct {
 	Module            string          `json:"module"`
 	Revision          string          `json:"revision"`
@@ -71,9 +66,9 @@ func (f Facts) Fragments() ([]Fragment, error) {
 		reason  string
 		content any
 	}{
-		// The basic facts travel in every report; the platform picture is
-		// laid over them when it was read, flattened into the same object,
-		// so the panel reads one shape for the machine.
+		// The basic facts travel in every report; the platform picture is laid over
+		// them when it was read, flattened into the same object, so the panel reads
+		// one shape for the machine.
 		{ModuleSystem, "agent/os-release+procfs+dmi", "", struct {
 			OS       OSInfo   `json:"os"`
 			Hardware Hardware `json:"hardware"`
@@ -82,9 +77,8 @@ func (f Facts) Fragments() ([]Fragment, error) {
 			*system.Snapshot
 		}{f.OS, f.Hardware, f.Hostname, f.BootID, f.System}},
 
-		// The package tab asks about two things at once: what is installed and
-		// where it came from. The sources therefore travel in the same fragment
-		// and not in a separate module.
+		// The package tab asks about two things at once: what is installed and where
+		// it came from.
 		{ModulePackages, manager, f.Packages.UnavailableReason, struct {
 			Packages
 			Repositories *packages.RepositoryImage `json:"repositories,omitempty"`
@@ -164,8 +158,7 @@ func containersReason(f Facts) string {
 }
 
 // containersSummary returns the state of the engine or an empty one when there
-// is no engine. A missing engine and an engine that was not queried are told
-// apart by the reason, not by the content.
+// is no engine.
 func containersSummary(f Facts) any {
 	if f.Containers == nil {
 		return struct{}{}

@@ -8,16 +8,9 @@ import (
 )
 
 // ForcedRenewalFile records when the operator last forced a renewal.
-//
-// It lies in the state directory next to the identity: the limit is a
-// property of the machine, and a reinstall of the tool must not reset it.
 const ForcedRenewalFile = "renew-forced-at"
 
 // ForcedRenewalInterval is the least time between two forced renewals.
-//
-// The gateway rate-limits renewals as well, but the refusal has to come
-// before the network: a renewal repeated in a loop by a script is exactly
-// what the limit is for, and every attempt costs a new key pair.
 const ForcedRenewalInterval = 10 * time.Minute
 
 // Throttle keeps the record of forced renewals in a state directory.
@@ -26,10 +19,6 @@ type Throttle struct {
 }
 
 // Last reads the time of the previous forced renewal.
-//
-// An unreadable record counts as none: the file is a courtesy to the
-// operator, not a lock, and a damaged one must not block the renewal for
-// good.
 func (t Throttle) Last() (time.Time, bool) {
 	content, err := os.ReadFile(filepath.Join(t.StateDir, ForcedRenewalFile))
 	if err != nil {

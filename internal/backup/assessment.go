@@ -2,14 +2,10 @@ package backup
 
 import "time"
 
-// The freshness thresholds of a copy. The assessment is made in the panel,
-// exactly like the assessment of conformance and of certificate deadlines: it
-// is policy rather than a fact about the host. The host says when the last
-// copy succeeded; the panel says whether that is already a problem.
+// The freshness thresholds of a copy.
 const (
-	// WarningThreshold is the age of a copy at which it is worth asking why
-	// there is no newer one. A day and a bit fits a daily schedule plus one
-	// stumble.
+	// WarningThreshold is the age of a copy at which it is worth asking why there
+	// is no newer one.
 	WarningThreshold = 26 * time.Hour
 	// CriticalThreshold is the age at which a copy stops being a safeguard.
 	CriticalThreshold = 72 * time.Hour
@@ -28,10 +24,6 @@ const (
 )
 
 // State assesses the age of the last successful copy.
-//
-// No copy at all is a separate state rather than "an old copy": a host
-// without any copy and a host with a copy from a week ago are two different
-// situations and two different decisions.
 func State(last *time.Time, now time.Time) string {
 	if last == nil {
 		return StateNever
@@ -55,9 +47,7 @@ var severity = map[string]int{
 	StateOK:       0,
 }
 
-// Worse returns the worse of two states. A host is described by its worst
-// definition: one copy that does not exist is enough for data to be
-// unprotected.
+// Worse returns the worse of two states.
 func Worse(a, b string) string {
 	if a == "" {
 		return b

@@ -40,8 +40,8 @@ func TestAValidConfigurationGoesThrough(t *testing.T) {
 	}
 }
 
-// TestATypoIsNotADetail guards the property this parser is strict for: a
-// relay that comes up despite an unrecognised field looks configured and works
+// TestATypoIsNotADetail guards the property this parser is strict for: a relay
+// that comes up despite an unrecognised field looks configured and works
 // differently than the file says.
 func TestATypoIsNotADetail(t *testing.T) {
 	_, err := Read(strings.NewReader(strings.Replace(validConfig,
@@ -98,7 +98,6 @@ func TestTheConfigurationRejectsErrors(t *testing.T) {
 // TestNoBufferIsAChoice guards the difference between "nothing was written"
 // and "zero was written": a relay without a buffer loses results while the
 // link is down, and that is to be a decision of the operator rather than the
-// result of a skipped entry.
 func TestNoBufferIsAChoice(t *testing.T) {
 	without := strings.Replace(validConfig, "  buffer_max_bytes: 268435456\n", "", 1)
 	cfg, err := Read(strings.NewReader(without))
@@ -126,11 +125,9 @@ func TestASecondDocumentIsAnError(t *testing.T) {
 	}
 }
 
-// TestTheHealthListenerHasADefaultAndCanBeTurnedOff guards the
-// difference between a file that says nothing about the health listener
-// and one that turns it off: an installation upgraded from a release
-// without the listener gets it on the loopback, and only an operator who
-// wrote an empty entry loses the answers a container runtime asks for.
+// TestTheHealthListenerHasADefaultAndCanBeTurnedOff guards the difference
+// between a file that says nothing about the health listener and one that
+// turns it off: an installation upgraded from a release without the listener
 func TestTheHealthListenerHasADefaultAndCanBeTurnedOff(t *testing.T) {
 	cfg, err := Read(strings.NewReader(validConfig))
 	if err != nil {
@@ -163,9 +160,8 @@ func TestTheHealthListenerHasADefaultAndCanBeTurnedOff(t *testing.T) {
 }
 
 // TestTheHealthListenerIsNotThePortOfTheFleet guards the one mistake that
-// would turn a convenience into a leak: the health answer goes out
-// without a client certificate, and on the port of the agents it would
-// hand the state of the site to whoever reaches the relay.
+// would turn a convenience into a leak: the health answer goes out without a
+// client certificate, and on the port of the agents it would hand the state of
 func TestTheHealthListenerIsNotThePortOfTheFleet(t *testing.T) {
 	cases := []struct {
 		name    string

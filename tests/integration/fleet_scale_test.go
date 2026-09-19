@@ -11,39 +11,25 @@ import (
 	"time"
 )
 
-// The fleet screens used to read the first five hundred hosts and add
-// them up in the panel. The numbers looked right and were not: on a
-// bigger fleet the screen showed a plausible count of a part of it, with
-// nothing to say so. This test builds a fleet larger than that old bound
-// and asks the four screens - security, backups, certificates and
-// vulnerabilities - the two questions an operator's trust rests on: how
-// many hosts are in scope, and how many of them the answer really
-// describes.
-//
-// The fleet is synthetic and goes straight into the database in one
-// statement: enrolling a thousand agents would test the enrollment, not
-// the counting, and would take minutes. It carries a site of its own and
-// disappears with the test.
+// The fleet screens used to read the first five hundred hosts and add them up
+// in the panel.
 
 const (
 	// scaleSite and scaleEnvironment place the synthetic fleet apart from
 	// the lab hosts, so a principal can be scoped to it exactly.
 	scaleSite        = "scale-test"
 	scaleEnvironment = "test"
-	// scaleHosts is one host past the five hundred the old screens read
-	// and past the five hundred a page may hold, so a screen that still
-	// counted a page would be caught by both bounds.
+	// scaleHosts is one host past the five hundred the old screens read and past
+	// the five hundred a page may hold, so a screen that still counted a page
+	// would be caught by both bounds.
 	scaleHosts = 1001
-	// scaleFacts is how many of them report the fact each screen judges
-	// by. The rest are the hosts nobody has heard from - the ones a wrong
-	// answer counts as clean.
+	// scaleFacts is how many of them report the fact each screen judges by.
 	scaleFacts = 300
 )
 
-// fleetCoverageView is the head every fleet view answers with: the fleet
-// in scope, the part of it the numbers describe, and the part nothing is
-// known about. A view that cannot answer for the whole fleet says so
-// outright rather than passing a part off as the whole.
+// fleetCoverageView is the head every fleet view answers with: the fleet in
+// scope, the part of it the numbers describe, and the part nothing is known
+// about.
 type fleetCoverageView struct {
 	TotalHosts     int            `json:"total_hosts"`
 	EvaluatedHosts int            `json:"evaluated_hosts"`
@@ -70,15 +56,8 @@ var fleetViews = []struct {
 	{name: "vulnerabilities", path: "/api/v1/vulnerabilities"},
 }
 
-// insertScaleFleet brings the synthetic fleet into the database and gives
-// the first scaleFacts hosts of it, by name, the fact each screen judges
-// by. The hosts are inserted by one statement over a generated series;
-// every fact is one statement too, so the whole setup is five round trips
-// rather than a thousand.
-//
-// The health signals stay undetermined: a host that has not said how many
-// security updates it has is a host the checks cannot judge, which is
-// exactly the state this test needs the silent hosts to be in.
+// insertScaleFleet brings the synthetic fleet into the database and gives the
+// first scaleFacts hosts of it, by name, the fact each screen judges by.
 func insertScaleFleet(t *testing.T, ctx context.Context, h *harness) {
 	t.Helper()
 	pool := h.database(ctx)
@@ -153,19 +132,17 @@ func insertScaleFleet(t *testing.T, ctx context.Context, h *harness) {
 	}
 }
 
-// TestFleetViewsCountTheWholeFleet is the guard of chapter 5: a fleet
-// past the old five-hundred bound is counted whole, the hosts nothing is
-// known about are counted apart rather than as clean ones, the scope of
-// the reader bounds every number, and the file carries as many rows as
-// the screen says it will.
+// TestFleetViewsCountTheWholeFleet is the guard of chapter 5: a fleet past the
+// old five-hundred bound is counted whole, the hosts nothing is known about
+// are counted apart rather than as clean ones, the scope of the reader bounds
 func TestFleetViewsCountTheWholeFleet(t *testing.T) {
 	h := newHarness(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
 
-	// What the administrator sees before the synthetic fleet arrives: the
-	// lab has hosts of its own, so the fleet-wide number is read as a
-	// difference rather than as an absolute.
+	// What the administrator sees before the synthetic fleet arrives: the lab has
+	// hosts of its own, so the fleet-wide number is read as a difference rather
+	// than as an absolute.
 	before := map[string]int{}
 	for _, view := range fleetViews {
 		var head fleetCoverageView
@@ -175,9 +152,9 @@ func TestFleetViewsCountTheWholeFleet(t *testing.T) {
 
 	insertScaleFleet(t, ctx, h)
 
-	// A viewer bound to the synthetic site alone, and one bound to a site
-	// with nothing in it: the first must see the fleet exactly, the second
-	// must see nothing at all.
+	// A viewer bound to the synthetic site alone, and one bound to a site with
+	// nothing in it: the first must see the fleet exactly, the second must see
+	// nothing at all.
 	scoped := h.withToken(h.createPrincipal(uniqueSubject("scale-viewer"), []map[string]string{
 		{"role": "viewer", "site": scaleSite, "environment": scaleEnvironment},
 	}))
@@ -251,9 +228,8 @@ func TestFleetViewsCountTheWholeFleet(t *testing.T) {
 }
 
 // fleetListJoinsUpAcrossPages walks the certificate list of the synthetic
-// fleet with the cursor and checks that the pages join up: no row twice,
-// none missing, and as many in the end as the screen counted. It runs
-// inside the scale test so the thousand hosts are built once.
+// fleet with the cursor and checks that the pages join up: no row twice, none
+// missing, and as many in the end as the screen counted.
 func fleetListJoinsUpAcrossPages(t *testing.T, scoped *harness) {
 	type page struct {
 		fleetCoverageView
@@ -293,9 +269,7 @@ func fleetListJoinsUpAcrossPages(t *testing.T, scoped *harness) {
 	scoped.do(http.MethodGet, "/api/v1/certificates?cursor=not-a-cursor", nil, nil, http.StatusBadRequest)
 }
 
-// readExportRows reads a CSV export and returns its data rows. A file cut
-// short says so in its last row and in the partial trailer, and both are
-// a failure here: the screen counted a number the file has to carry.
+// readExportRows reads a CSV export and returns its data rows.
 func readExportRows(t *testing.T, h *harness, path string) [][]string {
 	t.Helper()
 	body := h.text(path)

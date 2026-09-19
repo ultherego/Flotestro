@@ -12,12 +12,6 @@ import (
 
 // Plan describes the difference between the sshd configuration the host
 // applies and the requested one.
-//
-// The same change ordered on two hosts is almost never the same change: one
-// already has PasswordAuthentication no, another has it in an administrator
-// file that shadows the panel's file, a third would have no login method
-// left after the change. The operator's approval is meant to cover those
-// differences.
 type Plan struct {
 	// Action names what would happen: update or no_change.
 	Action string `json:"action"`
@@ -29,15 +23,15 @@ type Plan struct {
 	// Changes lists in human terms what will change.
 	Changes []string `json:"changes,omitempty"`
 
-	// ManagedPresent and ManagedHash describe the panel's file on the host:
-	// the write overwrites it whole, so a file changed after planning is a
-	// different change than the one viewed.
+	// ManagedPresent and ManagedHash describe the panel's file on the host: the
+	// write overwrites it whole, so a file changed after planning is a different
+	// change than the one viewed.
 	ManagedPresent bool   `json:"managed_present"`
 	ManagedHash    string `json:"managed_hash,omitempty"`
 
-	// Refusal names the reason the change will not land on this host: no
-	// sshd, a configuration the server will not accept, or cutting off all
-	// login methods without explicit consent.
+	// Refusal names the reason the change will not land on this host: no sshd, a
+	// configuration the server will not accept, or cutting off all login methods
+	// without explicit consent.
 	Refusal string `json:"refusal,omitempty"`
 
 	PlanHash string `json:"plan_hash"`
@@ -106,10 +100,9 @@ func Compute(state Snapshot, desired Settings, allowLockout bool) Plan {
 	compareList("AllowGroups", desired.AllowGroups, state.AllowGroups)
 	compareList("DenyUsers", desired.DenyUsers, state.DenyUsers)
 
-	// The panel's file is overwritten whole: different content is a change
-	// even when the server already applies the requested values - because
-	// after the write it applies them for a different reason, and the
-	// settings from the previous file vanish.
+	// The panel's file is overwritten whole: different content is a change even
+	// when the server already applies the requested values - because after the
+	// write it applies them for a different reason, and the settings from the
 	switch {
 	case !state.ManagedPresent:
 		plan.Changes = append(plan.Changes, "the panel's file will be created")
@@ -125,9 +118,9 @@ func Compute(state Snapshot, desired Settings, allowLockout bool) Plan {
 	return plan
 }
 
-// Refuse records a refusal reason learned after the differences were
-// computed and recomputes the fingerprint: a plan with a refusal is a
-// different answer than a plan without one.
+// Refuse records a refusal reason learned after the differences were computed
+// and recomputes the fingerprint: a plan with a refusal is a different answer
+// than a plan without one.
 func (p *Plan) Refuse(reason string) {
 	p.Refusal = reason
 	p.PlanHash = planFingerprint(*p)
@@ -167,8 +160,7 @@ func textFingerprint(text string) string {
 }
 
 // planFingerprint computes the plan fingerprint excluding the fingerprint
-// itself. It covers the state found together with the requested one: a host
-// changed since planning yields a different fingerprint.
+// itself.
 func planFingerprint(plan Plan) string {
 	stripped := plan
 	stripped.PlanHash = ""

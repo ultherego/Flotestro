@@ -488,7 +488,7 @@ func (c *Commands) expire(ctx context.Context) {
 type SessionClose struct {
 	// Where is local for a session this instance held, remote for one ended by
 	// the instance that held it, none for a host with no live session anywhere,
-	// and unconfirmed when the owner was asked and has not answered within the
+	// and unconfirmed when the owner was asked and has not answered within the.
 	Where string `json:"session_close"`
 	// Closed says whether a session was really ended. False under none, and false
 	// under unconfirmed: the panel does not claim what it has not been told.

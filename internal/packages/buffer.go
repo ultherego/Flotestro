@@ -5,17 +5,10 @@ import (
 	"sync"
 )
 
-// maxOutput limits the output of a tool that is kept. A transaction on
-// several hundred packages prints megabytes; only the description of the error
-// reaches the result anyway, so the rest is a cost without a benefit.
+// maxOutput limits the output of a tool that is kept.
 const maxOutput = 256 << 10
 
-// limitedBuffer gathers the output up to a limit and remembers that it cut
-// it.
-//
-// The cut counts from the beginning rather than from the end: the cause of an
-// error is usually near the end of the output, so it is the beginning that can
-// be given up.
+// limitedBuffer gathers the output up to a limit and remembers that it cut it.
 type limitedBuffer struct {
 	mu    sync.Mutex
 	lines []string

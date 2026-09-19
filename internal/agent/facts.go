@@ -50,9 +50,7 @@ type OSInfo struct {
 	Kernel       string `json:"kernel"`
 	Architecture string `json:"architecture"`
 	PrettyName   string `json:"pretty_name"`
-	// Codename is the name of the release (bookworm, trixie, noble). The
-	// security trackers of Debian and Ubuntu speak in it and not in numbers -
-	// without it there is no telling which findings concern this host.
+	// Codename is the name of the release (bookworm, trixie, noble).
 	Codename string `json:"codename,omitempty"`
 }
 
@@ -74,15 +72,13 @@ type Packages struct {
 	SecurityUpgradable *uint32 `json:"security_upgradable,omitempty"`
 	// InstalledDigest and InstalledCount describe the full package list the
 	// inventory does not carry: the panel compares the digest with its own copy
-	// and knows when its list stopped describing the host. Without it a missing
-	// row in the panel database would look like a host without vulnerabilities.
+	// and knows when its list stopped describing the host.
 	InstalledDigest string  `json:"installed_digest,omitempty"`
 	InstalledCount  *uint32 `json:"installed_count,omitempty"`
 	InstalledReason string  `json:"installed_unavailable_reason,omitempty"`
-	// Holds names the packages the host will not upgrade: the ones the panel
-	// held and the ones held by hand alike, because a held package takes no
-	// security fix whoever held it. HoldsKnown says whether the list was
-	// read; an unread list is not a host without holds.
+	// Holds names the packages the host will not upgrade: the ones the panel held
+	// and the ones held by hand alike, because a held package takes no security
+	// fix whoever held it.
 	Holds             []string `json:"holds,omitempty"`
 	HoldsKnown        bool     `json:"holds_known"`
 	HoldsReason       string   `json:"holds_unavailable_reason,omitempty"`
@@ -109,9 +105,7 @@ type Facts struct {
 	OS        OSInfo   `json:"os"`
 	Hardware  Hardware `json:"hardware"`
 	Packages  Packages `json:"packages"`
-	// Repositories is the list of the package sources. An empty list and a list
-	// that was not read are two different answers, so the picture carries its own
-	// marker and reason.
+	// Repositories is the list of the package sources.
 	Repositories *packages.RepositoryImage `json:"repositories,omitempty"`
 	Capabilities Capabilities              `json:"capabilities"`
 	FailedUnits  []string                  `json:"failed_units"`
@@ -121,9 +115,7 @@ type Facts struct {
 	Identity         IdentityState  `json:"identity"`
 	LocalAccounts    []LocalAccount `json:"local_accounts,omitempty"`
 	Interfaces       []string       `json:"network_interfaces"`
-	// Containers is the summary of the container engine. Empty means a host
-	// without an engine or an engine that was not queried - unavailable_reason
-	// tells them apart.
+	// Containers is the summary of the container engine.
 	Containers *docker.Summary `json:"containers,omitempty"`
 	// Network is the picture of the interfaces and the routes from the kernel. A
 	// missing value means a cycle in which the state was not collected.
@@ -136,20 +128,15 @@ type Facts struct {
 	// and what the host exposes to the outside.
 	Security *security.Snapshot `json:"security,omitempty"`
 	// Backup is what can be said about the copies without credentials: what the
-	// host can make them with. The state of the repository needs a password, so
-	// it is an operation and not inventory.
+	// host can make them with.
 	Backup *BackupState `json:"backup,omitempty"`
 	// Certificates is the picture of the certificates the panel asked about and
-	// of those the host watches on its own. The module does not search the disk,
-	// so an empty list means the named files are missing, not a host without
-	// certificates.
+	// of those the host watches on its own.
 	Certificates *certificates.Snapshot `json:"certificates,omitempty"`
 	// Power is the boot state of the host: the boot_id, the uptime and what holds
 	// a shutdown back.
 	Power *power.Snapshot `json:"power,omitempty"`
-	// Time is the time of the host and the state of its synchronization. A
-	// shifted clock breaks Kerberos and mTLS, so it is a fact about the host and
-	// not a curiosity.
+	// Time is the time of the host and the state of its synchronization.
 	Time *hosttime.Snapshot `json:"time,omitempty"`
 	// SSH is the configuration of the sshd server.
 	SSH *sshmodule.Snapshot `json:"ssh,omitempty"`
@@ -159,25 +146,17 @@ type Facts struct {
 	Firewall *firewall.Snapshot `json:"firewall,omitempty"`
 	// DNS is the state of the resolver of the host.
 	DNS *dnsmodul.Snapshot `json:"dns,omitempty"`
-	// Schedules are the recurring jobs of the host. A missing value means a host
-	// without cron or a read that failed - the unavailable_reason field inside
-	// the snapshot tells them apart.
+	// Schedules are the recurring jobs of the host.
 	Schedules *schedules.Snapshot `json:"schedules,omitempty"`
 	// System is the platform picture: the processor, the memory, the DMI
-	// identity, the firmware, the kernel, the distribution and the boot. It
-	// changes when somebody changes the machine, so it is read rarely, and
-	// the panel keeps the history of the kernels and releases it saw.
+	// identity, the firmware, the kernel, the distribution and the boot.
 	System *system.Snapshot `json:"system,omitempty"`
-	// Sudoers is the local sudo policy as the helper read it. A missing
-	// value is a policy that was not read, never a host without sudo - the
-	// unavailable_reason inside the snapshot tells them apart.
+	// Sudoers is the local sudo policy as the helper read it.
 	Sudoers     *sudoers.Snapshot `json:"sudoers,omitempty"`
 	CollectedAt time.Time         `json:"collected_at"`
 }
 
-// Revision computes a stable revision from the content of the report. An
-// identical host state gives an identical revision, so the server does not
-// store another row without changes.
+// Revision computes a stable revision from the content of the report.
 func (f Facts) Revision() (string, []byte, error) {
 	// The timestamp must not affect the revision.
 	stable := f
@@ -319,10 +298,7 @@ func ReadHealth(cached Facts) Health {
 	return health
 }
 
-// runtimeDir is a directory writable for the user of the agent. System tools
-// such as dnf need HOME and the XDG directories; the agent has no home
-// directory, so without it they end with an error that is easy to mistake for a
-// substantive result.
+// runtimeDir is a directory writable for the user of the agent.
 var runtimeDir = os.TempDir()
 
 // SetRuntimeDir points at the working directory for the tools that are started.
@@ -361,9 +337,8 @@ func (r commandResult) Reason() string {
 	}
 }
 
-// runCommand starts a process with a fixed path and an array of arguments.
-// sh -c is never used, so the content of the data cannot become a command.
-// LC_ALL=C stabilizes the output that has to be parsed.
+// runCommand starts a process with a fixed path and an array of arguments. sh
+// -c is never used, so the content of the data cannot become a command.
 func runCommand(ctx context.Context, timeout time.Duration, path string, args ...string) commandResult {
 	if !isExecutable(path) {
 		return commandResult{ExitCode: -1, Err: fmt.Errorf("%s: %w", path, os.ErrNotExist)}

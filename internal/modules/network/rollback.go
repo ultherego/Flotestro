@@ -8,21 +8,12 @@ import (
 	"time"
 )
 
-// RollbackDir holds the rollback plans of network changes.
-//
-// The directory belongs to root and only root has access to it. A plan
-// contains no commands to run, only profile settings - the arguments are
-// assembled from them by the same code that assembles them at write time. A
-// file that could steer the execution would be a door to root even for a
-// root that made a mistake.
+// RollbackDir holds the rollback plans of network changes. The directory
+// belongs to root and only root has access to it.
 const RollbackDir = "/var/lib/flotestro-helper/rollbacks"
 
-// RollbackPlan describes the state the host returns to when a network
-// change cuts it off from the panel.
-//
-// The rollback is armed before the change and disarmed only after the agent
-// confirms it still talks to the panel. The reverse order would leave a
-// window in which the host is already cut off and nothing rescues it.
+// RollbackPlan describes the state the host returns to when a network change
+// cuts it off from the panel.
 type RollbackPlan struct {
 	ID string `json:"id"`
 	// Profile is the state before the change, read from NetworkManager.
@@ -42,15 +33,14 @@ type RollbackPlan struct {
 	// Kind names the change (mtu, routes, profile, dns) for the mechanisms
 	// that undo a document rather than rewrite a profile.
 	Kind string `json:"kind,omitempty"`
-	// PreviousExists says, for netplan, whether the panel's file existed
-	// before the change: a rollback of a first change removes the file
-	// instead of restoring an empty one.
+	// PreviousExists says, for netplan, whether the panel's file existed before
+	// the change: a rollback of a first change removes the file instead of
+	// restoring an empty one.
 	PreviousExists bool `json:"previous_exists,omitempty"`
 }
 
-// The files kept next to a plan for the mechanisms that apply documents:
-// the state from before the change and the state applied. Both are state
-// documents the mechanism reads, not commands the helper runs.
+// The files kept next to a plan for the mechanisms that apply documents: the
+// state from before the change and the state applied.
 const (
 	previousStateSuffix = ".previous.yaml"
 	desiredStateSuffix  = ".desired.yaml"
@@ -159,11 +149,6 @@ func LoadPlan(dir, id string) (RollbackPlan, error) {
 }
 
 // SetAsideFailedPlan sets aside a plan whose rollback failed.
-//
-// A plan whose clock has already struck is dead regardless of the result:
-// nobody runs it again. Left in the plans directory it would look like a
-// rollback still waiting for its moment, so it is set aside next to it - as
-// a trace of what the host could not restore.
 func SetAsideFailedPlan(dir, id string) error {
 	path, err := PlanPath(dir, id)
 	if err != nil {
@@ -190,12 +175,6 @@ func RemovePlan(dir, id string) error {
 
 // RollbackSteps assembles the NetworkManager commands restoring the state
 // before the change.
-//
-// The arguments are made from the profile settings by the same code that
-// assembles them at write time: the plan cannot express a command this
-// module does not know. The other mechanisms restore a state document kept
-// next to the plan instead: nmstate applies it (see NmstateRestoreArguments),
-// netplan gets its file back and regenerates.
 func RollbackSteps(plan RollbackPlan) ([][]string, error) {
 	if plan.Adapter != "" && plan.Adapter != AdapterNetworkManager {
 		return nil, fmt.Errorf("a %s plan restores a state document, not a NetworkManager profile", plan.Adapter)
@@ -216,8 +195,7 @@ func RollbackSteps(plan RollbackPlan) ([][]string, error) {
 }
 
 // RollbackUnitName returns the name of the transient systemd unit that runs
-// the rollback. One unit per plan: a second change must not silently take
-// over the clock of the first.
+// the rollback.
 func RollbackUnitName(id string) string {
 	return "flotestro-rollback-" + id
 }

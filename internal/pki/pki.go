@@ -37,21 +37,13 @@ type CA struct {
 	Certificate *x509.Certificate
 	PrivateKey  *ecdsa.PrivateKey
 	PEM         []byte
-	// AgentTTL overrides the lifetime of an agent certificate. Zero means the
-	// default value; a shorter term shortens the window in which a stolen key
-	// can be used, a longer one lowers the renewal traffic in a large
-	// fleet.
+	// AgentTTL overrides the lifetime of an agent certificate.
 	AgentTTL time.Duration
-	// ReservedNames are the names and addresses the panel itself is seen
-	// under. A relay certificate never carries one of them: a relay acts as
-	// a server towards the agents of its site, and one named like the panel
-	// could stand in for it.
+	// ReservedNames are the names and addresses the panel itself is seen under.
 	ReservedNames []string
 }
 
-// The refusals of a CSR that the requester can act on. The message starts
-// with a stable code, so the trail and the installation screen can tell a
-// weak key from a name the panel keeps for itself.
+// The refusals of a CSR that the requester can act on.
 var (
 	// ErrKeyPolicy means a public key below the policy: EC P-256 or P-384,
 	// or RSA of at least 3072 bits.
@@ -66,9 +58,7 @@ var (
 const minimumRSABits = 3072
 
 // checkKeyPolicy refuses the keys the fleet does not trust. The policy is
-// short on purpose: two curves and a floor for RSA. Anything else - a
-// smaller curve, a shorter modulus, an algorithm the agents do not
-// generate - is refused rather than judged case by case.
+// short on purpose: two curves and a floor for RSA.
 func checkKeyPolicy(key any) error {
 	switch k := key.(type) {
 	case *ecdsa.PublicKey:
@@ -88,9 +78,8 @@ func checkKeyPolicy(key any) error {
 	}
 }
 
-// checkRelayNames refuses a relay certificate that would carry a name of
-// the panel or of the loopback. The comparison folds case and a trailing
-// dot, because a certificate name matches that way too.
+// checkRelayNames refuses a relay certificate that would carry a name of the
+// panel or of the loopback.
 func (ca *CA) checkRelayNames(dnsNames []string, addresses []net.IP) error {
 	reserved := map[string]bool{"localhost": true}
 	var reservedIPs []net.IP
@@ -131,9 +120,7 @@ func (ca *CA) agentCertTTL() time.Duration {
 	return AgentCertTTL
 }
 
-// NotAfter returns the end of validity of the CA certificate. An expiring CA
-// immobilises the whole fleet at once, so this time has to be visible in the
-// metrics.
+// NotAfter returns the end of validity of the CA certificate.
 func (ca *CA) NotAfter() time.Time {
 	if ca == nil || ca.Certificate == nil {
 		return time.Time{}
@@ -151,28 +138,22 @@ const (
 // are stable: they are what the log shows and what the runbook names.
 var (
 	// ErrNoMaterial means a state directory with no CA at all: neither a
-	// certificate nor a key, nothing pending and nothing retired. It is
-	// the one state in which creating a CA is allowed.
+	// certificate nor a key, nothing pending and nothing retired.
 	ErrNoMaterial = errors.New("pki_no_material")
-	// ErrIssuerKeyUnavailable means the certificate of the CA is there
-	// and its private key is not. The fleet trusts that certificate, so
-	// a new CA would cut every host off; the key has to come back from
-	// the backup.
+	// ErrIssuerKeyUnavailable means the certificate of the CA is there and its
+	// private key is not.
 	ErrIssuerKeyUnavailable = errors.New("issuer_key_unavailable")
-	// ErrStateMismatch means material that does not fit together: a key
-	// without a certificate, a pair whose key does not match the
-	// certificate, or a file that does not parse.
+	// ErrStateMismatch means material that does not fit together: a key without a
+	// certificate, a pair whose key does not match the certificate, or a file
+	// that does not parse.
 	ErrStateMismatch = errors.New("pki_state_mismatch")
 	// ErrMaterialExists refuses an initialisation over a directory that
 	// already holds something.
 	ErrMaterialExists = errors.New("pki_material_exists")
 )
 
-// HasAnyMaterial says whether the state directory holds any CA material:
-// the signing pair or a part of it, a pending CA or a retired one. It is
-// what decides between opening and initialising, and a single stray file
-// counts, because a stray file is a sign of an installation whose rest is
-// missing.
+// HasAnyMaterial says whether the state directory holds any CA material: the
+// signing pair or a part of it, a pending CA or a retired one.
 func HasAnyMaterial(dir string) bool {
 	for _, name := range []string{caCertFile, caKeyFile, pendingCertFile, pendingKeyFile, retiredDir} {
 		if _, err := os.Lstat(filepath.Join(dir, name)); err == nil {
@@ -182,13 +163,8 @@ func HasAnyMaterial(dir string) bool {
 	return false
 }
 
-// EnsureCA reads the CA from the state directory when it holds material
-// and creates one only when the directory holds nothing at all.
-//
-// A partial set - a certificate without its key, or a key without its
-// certificate - is an error rather than a reason to create a new CA: the
-// fleet's certificates were issued by the one that is missing, and a new
-// one would leave every host outside.
+// EnsureCA reads the CA from the state directory when it holds material and
+// creates one only when the directory holds nothing at all.
 func EnsureCA(dir string) (*CA, error) {
 	if HasAnyMaterial(dir) {
 		return Open(dir)
@@ -230,11 +206,8 @@ func Open(dir string) (*CA, error) {
 	}
 }
 
-// Init creates the first CA of an installation in a directory that holds
-// no material. The key is written before the certificate, and the pair is
-// read back and verified: a crash between the two files leaves a key
-// without a certificate, which Open reports as a mismatch rather than
-// silently starting over.
+// Init creates the first CA of an installation in a directory that holds no
+// material.
 func Init(dir string) (*CA, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("state directory: %w", err)
@@ -256,10 +229,7 @@ func Init(dir string) (*CA, error) {
 	return Open(dir)
 }
 
-// VerifyPair checks that the private key is the one the certificate
-// describes. A CA whose key belongs to another certificate signs
-// certificates no host can verify, and nothing before the first failed
-// renewal would say so.
+// VerifyPair checks that the private key is the one the certificate describes.
 func (ca *CA) VerifyPair() error {
 	if ca == nil || ca.Certificate == nil || ca.PrivateKey == nil {
 		return fmt.Errorf("%w: the CA is incomplete", ErrStateMismatch)
@@ -272,10 +242,9 @@ func (ca *CA) VerifyPair() error {
 	return nil
 }
 
-// IssuerID is the stable identifier of this CA as an issuer: a UUID
-// derived from the certificate, so every panel of an installation derives
-// the same one without a table to agree through, and a certificate row
-// can name its issuer without a join on subject and serial.
+// IssuerID is the stable identifier of this CA as an issuer: a UUID derived
+// from the certificate, so every panel of an installation derives the same one
+// without a table to agree through, and a certificate row can name its issuer
 func (ca *CA) IssuerID() string {
 	if ca == nil || ca.Certificate == nil {
 		return ""
@@ -284,10 +253,6 @@ func (ca *CA) IssuerID() string {
 }
 
 // IssuerIDOf derives the issuer identifier of a CA certificate.
-//
-// The first sixteen bytes of the certificate's SHA-256 make the UUID, with
-// the version and variant bits set as for a name-based one. Two CAs never
-// share an identifier unless they share a certificate.
 func IssuerIDOf(cert *x509.Certificate) string {
 	sum := sha256.Sum256(cert.Raw)
 	var id [16]byte
@@ -415,41 +380,27 @@ type IssuedCert struct {
 	IPAddresses []string
 }
 
-// relayCertTTL is shorter than the lifetime of an agent certificate. A relay
-// stands between the fleet and the centre and sees the traffic of a whole
-// site, so the window in which its stolen key can be used is to be smaller.
+// relayCertTTL is shorter than the lifetime of an agent certificate.
 const relayCertTTL = 7 * 24 * time.Hour
 
-// SignRelayCSR signs a relay's CSR. A relay's identity is separate from a
-// host's: a relay is not an agent and cannot impersonate a host with the
-// certificate alone, because the panel reads the kind of identity from the
-// URI SAN.
+// SignRelayCSR signs a relay's CSR.
 func (ca *CA) SignRelayCSR(csrPEM []byte, relayID string) (*IssuedCert, error) {
 	return ca.signCSR(csrPEM, "relay", relayID, relayCertTTL, nil)
 }
 
-// SignRelayCSRWithNames issues a relay certificate with the names given by
-// the panel instead of those from the CSR.
-//
-// A renewal goes this way: the network names are the boundary of trust
-// towards the site's agents, so on a renewal they come from the registry
-// rather than from the request. A relay that wants to act under a new name
-// needs an operator's decision.
+// SignRelayCSRWithNames issues a relay certificate with the names given by the
+// panel instead of those from the CSR.
 func (ca *CA) SignRelayCSRWithNames(csrPEM []byte, relayID string, names []string) (*IssuedCert, error) {
 	return ca.signCSR(csrPEM, "relay", relayID, relayCertTTL, names)
 }
 
 // SignAgentCSR signs an agent's CSR, embedding the host's identity in the URI
-// SAN. Every subject field coming from the CSR is ignored apart from the
-// public key: the identity is granted by the control plane, not by the host
-// that asks for it.
+// SAN.
 func (ca *CA) SignAgentCSR(csrPEM []byte, hostID string) (*IssuedCert, error) {
 	return ca.signCSR(csrPEM, "host", hostID, ca.agentCertTTL(), nil)
 }
 
-// signCSR issues a certificate of a fleet identity. The kind of identity goes
-// into the URI SAN, so a relay certificate cannot be used as a host
-// certificate or the other way round.
+// signCSR issues a certificate of a fleet identity.
 func (ca *CA) signCSR(csrPEM []byte, kind, id string, ttl time.Duration,
 	names []string) (*IssuedCert, error) {
 	block, _ := pem.Decode(csrPEM)
@@ -483,23 +434,18 @@ func (ca *CA) signCSR(csrPEM []byte, kind, id string, ttl time.Duration,
 		URIs:         []*url.URL{identity},
 	}
 	if kind == "relay" {
-		// A relay acts in both roles: as a server towards the agents of its
-		// site and as a client towards the centre. We take the network names
-		// from the CSR, because it is the relay that knows the address it is
-		// seen at; the identity remains the URI SAN granted by the panel
-		// rather than those names.
+		// A relay acts in both roles: as a server towards the agents of its site and
+		// as a client towards the centre.
 		template.ExtKeyUsage = append(template.ExtKeyUsage, x509.ExtKeyUsageServerAuth)
 		template.DNSNames = csr.DNSNames
 		template.IPAddresses = csr.IPAddresses
 		if names != nil {
-			// The names imposed by the panel replace those from the CSR in
-			// full. Adding them alongside would leave the relay able to give
-			// itself a name the operator never approved.
+			// The names imposed by the panel replace those from the CSR in full.
 			template.DNSNames, template.IPAddresses = splitNames(names)
 		}
-		// The names are checked after the choice between the request and
-		// the registry: a reserved name recorded at an earlier registration
-		// must not be renewed either.
+		// The names are checked after the choice between the request and the
+		// registry: a reserved name recorded at an earlier registration must not be
+		// renewed either.
 		if err := ca.checkRelayNames(template.DNSNames, template.IPAddresses); err != nil {
 			return nil, err
 		}
@@ -529,10 +475,6 @@ func (ca *CA) signCSR(csrPEM []byte, kind, id string, ttl time.Duration,
 }
 
 // splitNames divides network names into IP addresses and DNS names.
-//
-// A name that is an IP address has to land in the SAN as an address: browsers
-// and TLS libraries do not match an address against a DNS entry, so such a
-// certificate would look correct and the agent would reject it anyway.
 func splitNames(names []string) ([]string, []net.IP) {
 	var dns []string
 	var addresses []net.IP
@@ -558,10 +500,6 @@ func RelayIDFromCert(cert *x509.Certificate) (string, error) {
 }
 
 // IdentityFromCert returns the kind and the identifier from the URI SAN.
-//
-// The kind is returned rather than checked: there are places that accept both
-// fleet identities - the generation store is the same for an agent and for a
-// relay, because it records a key and a certificate rather than a role.
 func IdentityFromCert(cert *x509.Certificate) (kind, id string, err error) {
 	for _, uri := range cert.URIs {
 		if uri.Scheme != identityScheme {

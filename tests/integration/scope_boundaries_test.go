@@ -11,18 +11,15 @@ import (
 	"time"
 )
 
-// The scope of an identity is a boundary of every list, preview and
-// order, not only of a direct read: the operator of one site must not
-// count, preview, list or revoke what lives in another. The tests here
-// enroll a machine into a site of its own - "elsewhere" - next to the lab
-// hosts, and look at the fleet as an operator bound to the lab alone.
+// The scope of an identity is a boundary of every list, preview and order, not
+// only of a direct read: the operator of one site must not count, preview,
+// list or revoke what lives in another.
 
 // scopeReason is the reason the tests give for what they create.
 const scopeReason = "scope boundary integration test"
 
-// enrollSyntheticHostAt brings a machine that does not exist into the
-// fleet at the given placement. It disappears with the test, straight in
-// the database, as the plain helper does it.
+// enrollSyntheticHostAt brings a machine that does not exist into the fleet at
+// the given placement.
 func (h *harness) enrollSyntheticHostAt(t *testing.T, site, environment string) hostView {
 	t.Helper()
 	var order struct {
@@ -62,12 +59,9 @@ func (p targetsProblem) reasonOf(hostID string) string {
 	return ""
 }
 
-// TestCampaignPreviewAndOrderShareTheCallersScope guards the invariant of
-// the RBAC chapter: for the same caller and selector the preview counts
-// what the order would carry. A site-scoped operator previewing the whole
-// fleet sees the lab without the host elsewhere, and naming that host
-// explicitly is a 422 with the reason per host rather than a quiet gap;
-// the administrator sees both.
+// TestCampaignPreviewAndOrderShareTheCallersScope guards the invariant of the
+// RBAC chapter: for the same caller and selector the preview counts what the
+// order would carry.
 func TestCampaignPreviewAndOrderShareTheCallersScope(t *testing.T) {
 	h := newHarness(t)
 	labHost := h.hostByFamily("debian")
@@ -101,9 +95,9 @@ func TestCampaignPreviewAndOrderShareTheCallersScope(t *testing.T) {
 			withAction.Count, scoped.Count)
 	}
 
-	// An explicit list naming the host elsewhere is refused with its
-	// reason, in the preview and in the order alike, and the lab host on
-	// the same list is not the reason.
+	// An explicit list naming the host elsewhere is refused with its reason, in
+	// the preview and in the order alike, and the lab host on the same list is
+	// not the reason.
 	query := url.Values{}
 	query.Add("host_id", labHost.ID)
 	query.Add("host_id", elsewhere.ID)
@@ -150,11 +144,9 @@ func TestCampaignPreviewAndOrderShareTheCallersScope(t *testing.T) {
 	}
 }
 
-// TestEnrollmentOrdersStayWithinTheCallersScope guards the enrollment
-// chapter of the RBAC document: a site-scoped operator lists only the
-// orders of their site, with the filters and the paging of the list, and
-// cannot revoke an order placed for another site - the order is read
-// first and the right judged by its placement.
+// TestEnrollmentOrdersStayWithinTheCallersScope guards the enrollment chapter
+// of the RBAC document: a site-scoped operator lists only the orders of their
+// site, with the filters and the paging of the list, and cannot revoke an
 func TestEnrollmentOrdersStayWithinTheCallersScope(t *testing.T) {
 	h := newHarness(t)
 	operator := h.labOperator(t, "operator-lab-enrollment")
@@ -248,11 +240,9 @@ func TestEnrollmentOrdersStayWithinTheCallersScope(t *testing.T) {
 	}
 }
 
-// TestNotificationChannelsAreVisibleInTheirScope guards the notification
-// part of the RBAC chapter: a channel filtered to a site is the business
-// of that site's operators, a fleet-wide one of somebody with a right over
-// the whole fleet, and the address of an incoming webhook - the
-// credential that posts to the channel - never comes back.
+// TestNotificationChannelsAreVisibleInTheirScope guards the notification part
+// of the RBAC chapter: a channel filtered to a site is the business of that
+// site's operators, a fleet-wide one of somebody with a right over the whole
 func TestNotificationChannelsAreVisibleInTheirScope(t *testing.T) {
 	h := newHarness(t)
 	operator := h.labOperator(t, "operator-lab-notifications")

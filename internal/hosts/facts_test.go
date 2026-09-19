@@ -34,9 +34,9 @@ func TestNormalizeOwner(t *testing.T) {
 	}
 }
 
-// A manual management address is an IP address or a host name, spelled
-// one way whatever the operator typed; anything else is refused before it
-// reaches the row, because an address nobody can dial is worse than none.
+// A manual management address is an IP address or a host name, spelled one way
+// whatever the operator typed; anything else is refused before it reaches the
+// row, because an address nobody can dial is worse than none.
 func TestNormalizeManagementAddress(t *testing.T) {
 	cases := []struct {
 		in, want string
@@ -67,9 +67,9 @@ func TestNormalizeManagementAddress(t *testing.T) {
 	}
 }
 
-// The list filters on facts a host may not have reported: a host that has
-// not said whether it needs a reboot is in neither the "yes" nor the "no"
-// list, and the SQL has to say so rather than treat null as false.
+// The list filters on facts a host may not have reported: a host that has not
+// said whether it needs a reboot is in neither the "yes" nor the "no" list,
+// and the SQL has to say so rather than treat null as false.
 func TestFilterConditionsLeaveUnknownFactsOut(t *testing.T) {
 	yes, no := true, false
 	conditions, _, err := ListFilter{RebootRequired: &yes, SecurityUpdates: &yes, IdentityDomain: "corp.example"}.conditions()

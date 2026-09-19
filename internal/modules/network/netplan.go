@@ -53,7 +53,7 @@ func ParseNetplan(document string) (NetplanConfig, error) {
 
 // MergeNetplanDocuments merges files the way netplan does when "netplan get"
 // is not there to do it: in the given order, a later document amends an
-// earlier one key by key and a scalar or a list in a later file replaces the
+// earlier one key by key and a scalar or a list in a later file replaces the.
 func MergeNetplanDocuments(documents ...string) (NetplanConfig, error) {
 	merged := map[string]any{}
 	for _, document := range documents {
@@ -173,7 +173,7 @@ func netplanInterface(section, name string, definition map[string]any) NetplanIn
 	}
 	// The second family is read to the same depth as the first: the router
 	// advertisements and the privacy extensions are settings netplan does
-	// express, and a plan that could not see them would offer to set what the
+	// express, and a plan that could not see them would offer to set what the.
 	if accept, ok := definition["accept-ra"].(bool); ok {
 		profile.AcceptRA = AcceptRAOff
 		if accept {

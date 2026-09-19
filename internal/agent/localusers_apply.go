@@ -12,11 +12,6 @@ import (
 
 // applyLocalUser performs an operation on a local account through the root
 // helper.
-//
-// The state of the account is read before the change and after it. That lets
-// the result tell a real change from an agreement with the requested state, and
-// the panel gets the actual state of the host instead of a repetition of the
-// content of the task.
 func (e *TaskExecutor) applyLocalUser(ctx context.Context, task *agentv1.TaskEnvelope,
 	action opspec.ActionType, payload *opspec.LocalUserPayload) *agentv1.TaskResult {
 	timeout := timeoutOf(task, action)
@@ -26,8 +21,7 @@ func (e *TaskExecutor) applyLocalUser(ctx context.Context, task *agentv1.TaskEnv
 	before := e.readSingleAccount(callCtx, payload.Name)
 
 	// The refusal concerning a system account belongs to the helper, which sees
-	// /etc/passwd and NSS. The agent does not repeat that decision so that there
-	// are not two different security boundaries for the same operation.
+	// /etc/passwd and NSS.
 	keys := make([]*helperv1.LocalSSHKeyInput, 0, len(payload.Keys))
 	for _, key := range payload.Keys {
 		keys = append(keys, &helperv1.LocalSSHKeyInput{PublicKey: key.PublicKey, Comment: key.Comment})
@@ -77,9 +71,9 @@ func (e *TaskExecutor) applyLocalUser(ctx context.Context, task *agentv1.TaskEnv
 	if after != nil {
 		detail.Account = localAccountsToProto([]LocalAccount{*after})[0]
 	}
-	// The result of a key operation names the keys on both sides of the
-	// change and the difference, as the host reads them back - not as the
-	// order described them. An idempotent repeat shows an empty difference.
+	// The result of a key operation names the keys on both sides of the change
+	// and the difference, as the host reads them back - not as the order
+	// described them.
 	if keyOperation(action) {
 		detail.FingerprintsBefore = fingerprintsOrEmpty(before)
 		detail.FingerprintsAfter = fingerprintsOrEmpty(after)
@@ -87,9 +81,9 @@ func (e *TaskExecutor) applyLocalUser(ctx context.Context, task *agentv1.TaskEnv
 		detail.KeysRemoved = difference(detail.FingerprintsBefore, detail.FingerprintsAfter)
 	}
 
-	// An account created with no way in is confirmed as such: the plan
-	// and the panel name the outcome "no login" rather than "created",
-	// because an account nobody can enter is the point of such an order.
+	// An account created with no way in is confirmed as such: the plan and the
+	// panel name the outcome "no login" rather than "created", because an account
+	// nobody can enter is the point of such an order.
 	message := localUserMessages[action]
 	if action == opspec.ActionLocalUserCreate && payload.Inactive {
 		message = "the local account was created locked, with no way to log in"
@@ -112,9 +106,8 @@ func keyOperation(action opspec.ActionType) bool {
 	return false
 }
 
-// fingerprintsOrEmpty lists the keys of an account; a missing account
-// has none. The list is never nil so the result says "no keys" in so
-// many words rather than leaving the field out.
+// fingerprintsOrEmpty lists the keys of an account; a missing account has
+// none.
 func fingerprintsOrEmpty(account *LocalAccount) []string {
 	if account == nil {
 		return []string{}
@@ -139,8 +132,7 @@ func difference(left, right []string) []string {
 }
 
 // readSingleAccount returns the state of one account together with the
-// privileged part. A missing account gives nil: non-existence is information
-// here and not an error.
+// privileged part.
 func (e *TaskExecutor) readSingleAccount(ctx context.Context, name string) *LocalAccount {
 	accounts := ReadLocalAccounts()
 	index := -1

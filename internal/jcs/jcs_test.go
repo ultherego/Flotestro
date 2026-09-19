@@ -59,10 +59,7 @@ func TestNumbersFollowTheRFCTable(t *testing.T) {
 	}
 }
 
-// TestStringsAreEscapedAsTheRFCRequires checks section 3.2.2.2: only the
-// quotation mark, the reverse solidus and the controls are escaped, the
-// controls with their short forms where JSON has them and as lowercase
-// \u00xx otherwise; everything above U+001F is written as it is.
+// TestStringsAreEscapedAsTheRFCRequires checks section 3. 2. 2.
 func TestStringsAreEscapedAsTheRFCRequires(t *testing.T) {
 	vectors := []struct {
 		in   string
@@ -124,9 +121,7 @@ func TestTheAppendixDocumentCanonicalises(t *testing.T) {
 	}
 }
 
-// TestKeysSortByUTF16CodeUnits is the sorting sample of section 3.2.3: the
-// emoji, a supplementary character, comes before U+FB33 because its
-// surrogates are smaller, although its code point is larger.
+// TestKeysSortByUTF16CodeUnits is the sorting sample of section 3. 2.
 func TestKeysSortByUTF16CodeUnits(t *testing.T) {
 	input := `{
   "\u20ac": "Euro Sign",
@@ -150,8 +145,8 @@ func TestKeysSortByUTF16CodeUnits(t *testing.T) {
 }
 
 // TestStructsKeepTheirTagsAndSortTheirFields: a struct goes through
-// encoding/json first, so the tags decide the names and omitempty decides
-// the presence; the canonical form then orders what came out.
+// encoding/json first, so the tags decide the names and omitempty decides the
+// presence; the canonical form then orders what came out.
 func TestStructsKeepTheirTagsAndSortTheirFields(t *testing.T) {
 	type inner struct {
 		Zulu  int     `json:"zulu"`
@@ -195,8 +190,8 @@ func TestMoreThanOneDocumentIsRefused(t *testing.T) {
 }
 
 // TestCanonicalIsStableAndIdempotent renders random documents: the same
-// document rendered twice gives the same bytes, and the canonical text
-// parsed and rendered again is unchanged.
+// document rendered twice gives the same bytes, and the canonical text parsed
+// and rendered again is unchanged.
 func TestCanonicalIsStableAndIdempotent(t *testing.T) {
 	random := rand.New(rand.NewSource(8785))
 	for i := 0; i < 500; i++ {
@@ -234,9 +229,9 @@ func TestCanonicalIsStableAndIdempotent(t *testing.T) {
 	}
 }
 
-// TestNumbersRoundTrip checks the number format on random doubles: the
-// printed text parses back to the same value, and integers below 2^53 are
-// printed plain.
+// TestNumbersRoundTrip checks the number format on random doubles: the printed
+// text parses back to the same value, and integers below 2^53 are printed
+// plain.
 func TestNumbersRoundTrip(t *testing.T) {
 	random := rand.New(rand.NewSource(1))
 	for i := 0; i < 10000; i++ {
@@ -313,8 +308,8 @@ func randomNumber(random *rand.Rand) float64 {
 	}
 }
 
-// randomString draws from the characters that exercise the escaping and
-// the sorting: controls, the quotation mark, the reverse solidus, ASCII,
+// randomString draws from the characters that exercise the escaping and the
+// sorting: controls, the quotation mark, the reverse solidus, ASCII,
 // characters of the BMP above the surrogates and a supplementary one.
 func randomString(random *rand.Rand) string {
 	alphabet := []rune{'a', 'z', 'A', '0', '9', ' ', '"', '\\', '/', '\n', '\t', '\x01', '\x1f',

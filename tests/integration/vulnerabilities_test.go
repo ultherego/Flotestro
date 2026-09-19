@@ -121,11 +121,6 @@ func hostVulnerabilities(h *harness, hostID string) vulnerabilityReportView {
 }
 
 // hostOfDistribution looks for a host by distribution, not by family.
-//
-// Ubuntu is in the Debian family, but has its own tracker, its own pockets
-// and its own versions: a test that takes "the first host of the debian
-// family" would ask Debian one time and Ubuntu another - and stay quiet
-// about which one it really checked.
 func hostOfDistribution(h *harness, distribution string) (hostView, vulnerabilityReportView) {
 	h.t.Helper()
 	for _, host := range h.hosts() {
@@ -141,16 +136,8 @@ func hostOfDistribution(h *harness, distribution string) (hostView, vulnerabilit
 	return hostView{}, vulnerabilityReportView{}
 }
 
-// withFreshList settles an assessment that describes the state before the
-// last change.
-//
-// The assessment is computed from the package list recorded in the panel,
-// not from the host. Every package transaction - also one ordered by
-// another test - leaves that list older than the digest reported by the
-// host, and the panel says so outright (package_list_stale). The panel
-// orders the read itself, but does so in its own cycle, half an hour longer
-// than the whole test run: here it is ordered at once and the recomputation
-// awaited, instead of asking for an assessment from before the change.
+// withFreshList settles an assessment that describes the state before the last
+// change.
 func withFreshList(h *harness, hostID string, report vulnerabilityReportView) vulnerabilityReportView {
 	h.t.Helper()
 	if report.State.CoverageReason != "package_list_stale" {
@@ -163,10 +150,8 @@ func withFreshList(h *harness, hostID string, report vulnerabilityReportView) vu
 		h.t.Fatalf("reading the package list: state = %s, %s",
 			job.State, lastMessage(attempts))
 	}
-	// The correlator gathers recomputation requests for a dozen seconds, so
-	// as not to compute the same host twice. The result is awaited, not
-	// only the end of the job: the recorded assessment is one cycle later
-	// than the host's answer.
+	// The correlator gathers recomputation requests for a dozen seconds, so as
+	// not to compute the same host twice.
 	deadline := time.Now().Add(90 * time.Second)
 	for {
 		fresh := hostVulnerabilities(h, hostID)
@@ -180,14 +165,9 @@ func withFreshList(h *harness, hostID string, report vulnerabilityReportView) vu
 	}
 }
 
-// TestVulnerabilityAssessmentDescribesCoverage guards the property this
-// module makes sense for at all: zero findings must not mean "clean host"
-// when it really means "there was nothing to assess with".
-//
-// The test does not let an incomplete assessment through. The test fleet
-// has the Debian feed and the Fedora metadata, so the assessment must
-// succeed; "incomplete, but with a reason" was convenient for the test and
-// useless as a check.
+// TestVulnerabilityAssessmentDescribesCoverage guards the property this module
+// makes sense for at all: zero findings must not mean "clean host" when it
+// really means "there was nothing to assess with".
 func TestVulnerabilityAssessmentDescribesCoverage(t *testing.T) {
 	h := newHarness(t)
 	for _, distribution := range []string{"debian", "ubuntu", "fedora"} {
@@ -215,9 +195,7 @@ func TestVulnerabilityAssessmentDescribesCoverage(t *testing.T) {
 		if report.CoveragePercent <= 0 {
 			t.Errorf("%s: coverage = %.1f%%", distribution, report.CoveragePercent)
 		}
-		// "Everything checked" is to mean everything. A host where the feed
-		// did not cover even one package is not fully assessed - even when
-		// nothing blocked that assessment.
+		// "Everything checked" is to mean everything.
 		full := state.PackagesCovered == state.PackagesTotal && state.Unknown == 0
 		if report.FullyAssessed != full {
 			t.Errorf("%s: full assessment = %v with %d/%d packages and %d undetermined",
@@ -232,8 +210,8 @@ func TestVulnerabilityAssessmentDescribesCoverage(t *testing.T) {
 }
 
 // TestFindingIsBoundToDataAndVersions guards that every finding can be
-// reproduced: it says what was installed, what was really compared, what
-// fixes it, which data and which comparison rule decided it.
+// reproduced: it says what was installed, what was really compared, what fixes
+// it, which data and which comparison rule decided it.
 func TestFindingIsBoundToDataAndVersions(t *testing.T) {
 	h := newHarness(t)
 	// Every family has its own comparison basis: Debian tracks security by
@@ -250,15 +228,14 @@ func TestFindingIsBoundToDataAndVersions(t *testing.T) {
 			if finding.State == "unknown" && finding.ReasonCode == "" {
 				t.Errorf("%s: undetermined state without a reason code: %+v", distribution, finding)
 			}
-			// Every finding says whose package it is: without that a
-			// package from a foreign repository would count as covered by
-			// the distribution vendor's advisories.
+			// Every finding says whose package it is: without that a package from a
+			// foreign repository would count as covered by the distribution vendor's
+			// advisories.
 			if finding.PackageOrigin == "" {
 				t.Errorf("%s: finding without a package origin: %+v", distribution, finding)
 			}
-			// The third axis belongs to the package plan, and nobody
-			// computed a plan here - the panel has no right to promise that
-			// the transaction will pass.
+			// The third axis belongs to the package plan, and nobody computed a plan
+			// here - the panel has no right to promise that the transaction will pass.
 			if finding.Transaction != "unknown" {
 				t.Errorf("%s: transaction = %q without a plan: %+v",
 					distribution, finding.Transaction, finding)
@@ -305,12 +282,8 @@ func TestFindingIsBoundToDataAndVersions(t *testing.T) {
 	}
 }
 
-// TestDebianAssessmentHasConcreteCVEs guards that the Debian assessment
-// really carries the tracker's findings, not only the structure.
-//
-// Trixie has open vulnerabilities without a fix in the base packages - a
-// dozen of them concern every installation. Zero findings would mean the
-// feed arrived empty or the correlation did not catch the source package.
+// TestDebianAssessmentHasConcreteCVEs guards that the Debian assessment really
+// carries the tracker's findings, not only the structure.
 func TestDebianAssessmentHasConcreteCVEs(t *testing.T) {
 	h := newHarness(t)
 	_, report := hostOfDistribution(h, "debian")
@@ -340,8 +313,8 @@ func TestDebianAssessmentHasConcreteCVEs(t *testing.T) {
 			"trixie has such, so something is not seen")
 	}
 	// The tracker's findings concern source packages, and one source gives
-	// several binaries: correlating by the binary name alone would lose
-	// most of them.
+	// several binaries: correlating by the binary name alone would lose most of
+	// them.
 	if len(packages) < 2 {
 		t.Errorf("the assessment concerns %d source packages", len(packages))
 	}
@@ -355,9 +328,9 @@ func TestDebianAssessmentHasConcreteCVEs(t *testing.T) {
 	}
 }
 
-// TestFedoraReadsAdvisoriesFromTheHostMetadata guards that for the RPM
-// family the panel has its own, separate read cycle of the vendor
-// advisories - and says when it read them.
+// TestFedoraReadsAdvisoriesFromTheHostMetadata guards that for the RPM family
+// the panel has its own, separate read cycle of the vendor advisories - and
+// says when it read them.
 func TestFedoraReadsAdvisoriesFromTheHostMetadata(t *testing.T) {
 	h := newHarness(t)
 	_, report := hostOfDistribution(h, "fedora")
@@ -386,12 +359,6 @@ func TestFedoraReadsAdvisoriesFromTheHostMetadata(t *testing.T) {
 
 // TestUbuntuAssessmentCarriesVendorFixes guards that the Canonical OVAL data
 // reaches the assessment as findings, not only as structure.
-//
-// What the test does not check: the number of vulnerabilities with a fix.
-// The lab host installs security updates itself, so that number drops to
-// zero with every full patching - and then a zero counter is the correct
-// answer, not a symptom of losing data. That the states with a fixed
-// version are read is guarded by the parser's unit test.
 func TestUbuntuAssessmentCarriesVendorFixes(t *testing.T) {
 	h := newHarness(t)
 	_, report := hostOfDistribution(h, "ubuntu")
@@ -427,9 +394,9 @@ func TestUbuntuAssessmentCarriesVendorFixes(t *testing.T) {
 					finding.VendorFix, finding)
 			}
 		}
-		// Ubuntu tracks security by source package, just like Debian:
-		// comparing a binary version with a source advisory can classify a
-		// vulnerability the opposite way to what is needed.
+		// Ubuntu tracks security by source package, just like Debian: comparing a
+		// binary version with a source advisory can classify a vulnerability the
+		// opposite way to what is needed.
 		if finding.ComparisonBasis != "source" {
 			t.Fatalf("Ubuntu compares on the basis of %q: %+v",
 				finding.ComparisonBasis, finding)
@@ -446,10 +413,8 @@ func TestUbuntuAssessmentCarriesVendorFixes(t *testing.T) {
 		t.Error("the Ubuntu assessment without a single vulnerability without a fix - " +
 			"the tests without a state did not arrive")
 	}
-	// A vulnerability with a fix and without one are two different answers
-	// and must not swap places. How many of each there are depends on
-	// whether the host is patched - but the consistency of both axes must
-	// hold always.
+	// A vulnerability with a fix and without one are two different answers and
+	// must not swap places.
 	if withFix+withoutFix == 0 {
 		t.Fatal("the Ubuntu assessment without a single finding")
 	}
@@ -473,9 +438,9 @@ func TestFleetCountsUniquesSeparately(t *testing.T) {
 	if view.Affected == 0 {
 		t.Fatal("the whole fleet without a single vulnerability - that is not a result")
 	}
-	// One advisory carries several CVEs and touches several packages, so
-	// these numbers never agree - but none may be empty or greater than the
-	// number of findings.
+	// One advisory carries several CVEs and touches several packages, so these
+	// numbers never agree - but none may be empty or greater than the number of
+	// findings.
 	for name, count := range map[string]int{
 		"unique CVEs":                view.UniqueCVEs,
 		"vendor advisories":          view.UniqueAdvisories,
@@ -510,11 +475,6 @@ func TestFleetCountsUniquesSeparately(t *testing.T) {
 
 // TestEnrichmentAddsAScoreButDoesNotDecide guards that the upstream data
 // reaches the host tab and that it changes nothing in the assessment.
-//
-// The vendor severity and the CVSS score are two different answers: the
-// vendor knows its distribution, and CVSS speaks of the vulnerability
-// itself. The panel is to show both and not let the second replace the
-// first.
 func TestEnrichmentAddsAScoreButDoesNotDecide(t *testing.T) {
 	h := newHarness(t)
 	_, report := hostOfDistribution(h, "debian")
@@ -558,8 +518,8 @@ func TestEnrichmentAddsAScoreButDoesNotDecide(t *testing.T) {
 }
 
 // TestVulnerabilityAssessmentRequiresAPermission guards that the fleet
-// vulnerability list is not public: it is reconnaissance material about
-// this installation.
+// vulnerability list is not public: it is reconnaissance material about this
+// installation.
 func TestVulnerabilityAssessmentRequiresAPermission(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")

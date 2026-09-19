@@ -15,8 +15,8 @@ func (c *clock) advance(d time.Duration) time.Time {
 }
 
 // TestEveryModuleHasACadenceClass guards the table: a module added to the
-// collection order without a class would silently become a static one and
-// be read once a day.
+// collection order without a class would silently become a static one and be
+// read once a day.
 func TestEveryModuleHasACadenceClass(t *testing.T) {
 	for _, name := range ModuleOrder {
 		if _, ok := moduleCadence[name]; !ok {
@@ -71,9 +71,9 @@ func TestCadenceReadsTheClassesAtTheirOwnPace(t *testing.T) {
 	}
 }
 
-// TestCadenceSendsTheFullReportOnceADayInTheHostsHour: the full report goes
-// in the hour derived from the host identifier and no more than once a day,
-// even when several cycles fall into that hour.
+// TestCadenceSendsTheFullReportOnceADayInTheHostsHour: the full report goes in
+// the hour derived from the host identifier and no more than once a day, even
+// when several cycles fall into that hour.
 func TestCadenceSendsTheFullReportOnceADayInTheHostsHour(t *testing.T) {
 	tick := &clock{at: time.Date(2026, 9, 14, 0, 0, 0, 0, time.UTC)}
 	cadence := newCadence(15*time.Minute, "host-b")
@@ -115,8 +115,8 @@ func TestCadenceDoesNotRepeatTheOpeningReport(t *testing.T) {
 }
 
 // TestCadenceCatchesUpAMissedWindow: a host whose cycle is longer than the
-// window never hits its hour; the report goes at the first cycle after it,
-// and still once a day.
+// window never hits its hour; the report goes at the first cycle after it, and
+// still once a day.
 func TestCadenceCatchesUpAMissedWindow(t *testing.T) {
 	tick := &clock{at: time.Date(2026, 9, 14, 0, 30, 0, 0, time.UTC)}
 	cadence := newCadence(2*time.Hour, "host-d")
@@ -197,9 +197,9 @@ func TestRemoteCadenceOverridesOnlyWhatItNames(t *testing.T) {
 	}
 }
 
-// TestCadenceReadsTheSlowModulesEverySixHours: the platform picture and
-// the sudo policy go with the opening report, then every six hours, and
-// never split from each other.
+// TestCadenceReadsTheSlowModulesEverySixHours: the platform picture and the
+// sudo policy go with the opening report, then every six hours, and never
+// split from each other.
 func TestCadenceReadsTheSlowModulesEverySixHours(t *testing.T) {
 	tick := &clock{at: time.Date(2026, 9, 14, 8, 0, 0, 0, time.UTC)}
 	cadence := newCadence(15*time.Minute, "host-g")

@@ -196,7 +196,7 @@ func (o *Orchestrator) keep(ctx context.Context, keeper *leaseKeeper) error {
 func (o *Orchestrator) advance(ctx context.Context, campaign Campaign) error {
 	// A campaign that has not started is watched for the age of its plans before
 	// its targets are read: a campaign waiting for an approval is looked at on
-	// every pass, and a thousand target rows read every five seconds to learn
+	// every pass, and a thousand target rows read every five seconds to learn.
 	if campaign.State == StateAwaitingApproval || (campaign.State == StatePlanned && campaign.StartedAt == nil) {
 		oldest, err := o.store.OldestPlan(ctx, campaign.ID)
 		if err != nil {
@@ -396,7 +396,7 @@ func (o *Orchestrator) launchWave(ctx context.Context, campaign Campaign,
 		}
 		// The creator's right is checked again, per host, right before the dispatch:
 		// the approval was given hours ago, and a role withdrawn since then must not
-		// carry a change onto the host through a campaign that was ordered while it
+		// carry a change onto the host through a campaign that was ordered while it.
 		if refused, detail := o.creatorMayDispatch(ctx, campaign, host); refused {
 			o.finishTarget(ctx, campaign, target, TargetSkipped, "out_of_scope", detail)
 			continue
@@ -612,7 +612,7 @@ func (o *Orchestrator) startRemediation(ctx context.Context, campaign Campaign,
 
 	// The plan, its audit record, the transition and the step go in one
 	// transaction under the campaign's lock, like the task of an ordinary host: a
-	// pause committed a moment earlier is seen, and no plan comes into being for
+	// pause committed a moment earlier is seen, and no plan comes into being for.
 	tx, err := o.remediation.Pool().Begin(ctx)
 	if err != nil {
 		return err

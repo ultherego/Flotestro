@@ -8,9 +8,8 @@ import (
 	"testing"
 )
 
-// A panel that can write an arbitrary path can replace /etc/shadow and
-// private keys. The ban is checked before the allowlist and cannot be
-// bypassed by an administrator entry.
+// A panel that can write an arbitrary path can replace /etc/shadow and private
+// keys.
 func TestForbiddenPathsAreRejectedDespiteAllowlist(t *testing.T) {
 	allowlist := Allowlist{Patterns: []string{"/etc/*", "/etc/ssh/*", "/root/*"}, Source: "test"}
 
@@ -53,9 +52,9 @@ func TestPathOutsideAllowlistIsRejected(t *testing.T) {
 	}
 }
 
-// The permissions and the owner are set on the new file before it takes
-// the place of the old one: otherwise a window remains in which the file
-// already sits in place with default permissions.
+// The permissions and the owner are set on the new file before it takes the
+// place of the old one: otherwise a window remains in which the file already
+// sits in place with default permissions.
 func TestAtomicWriteSetsPermissionsBeforeReplacement(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "app.conf")

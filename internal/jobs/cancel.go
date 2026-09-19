@@ -12,27 +12,16 @@ import (
 )
 
 // The cancel protocol of a task the host holds.
-//
-// A cancel of a delivered task is a question put to the host, not a state
-// the panel writes on its own: the panel does not know whether the host
-// has started, whether what it started can be stopped, or whether it has
-// already finished and the result is on its way. The job stands
-// cancel_requested with its budget tokens until the agent answers
-// (CancelAck in agent.proto) or the operation's own timeout passes with
-// no answer. Only then is the capacity the task held given back: a
-// "canceled" written before the answer would hand the tokens of a host
-// still running a transaction to the next task.
 
-// The outcomes the agent answers a cancel with, as they are stored on the
-// job. They are the names of CancelAck.Outcome in lower case, so a screen
-// and the trail read the same word the protocol uses.
+// The outcomes the agent answers a cancel with, as they are stored on the job.
+// They are the names of CancelAck.
 const (
 	// CancelOutcomeNotStarted: the task had not begun on the host and
 	// will not; the job is canceled.
 	CancelOutcomeNotStarted = "not_started"
-	// CancelOutcomeInterrupted: the task was under way in a phase the
-	// agent may cut short, and was; the job is canceled, and the host's
-	// own account of the interrupted work follows as an unapplied result.
+	// CancelOutcomeInterrupted: the task was under way in a phase the agent may
+	// cut short, and was; the job is canceled, and the host's own account of the
+	// interrupted work follows as an unapplied result.
 	CancelOutcomeInterrupted = "interrupted"
 	// CancelOutcomeNotInterruptible: the task is in a phase that must
 	// run to its end; the job is running again and its result settles it.
@@ -52,21 +41,15 @@ func KnownCancelOutcome(outcome string) bool {
 	}
 }
 
-// CancelAckTimeoutCode is the error code of a job whose cancel request got
-// no answer within the operation's timeout. The outcome on the host is
-// unknown: the host may have run the operation to its end, interrupted it
-// or never started it, and only reading the host tells which.
+// CancelAckTimeoutCode is the error code of a job whose cancel request got no
+// answer within the operation's timeout.
 const CancelAckTimeoutCode = "cancel_ack_timeout"
 
-// ResultStatusUnknown is the result status of a job settled without a
-// result from the host - by the cancel sweep. It is not a failure of the
-// change and not a success: the panel does not know, and says so.
+// ResultStatusUnknown is the result status of a job settled without a result
+// from the host - by the cancel sweep.
 const ResultStatusUnknown = "unknown_needs_reconciliation"
 
-// EventCancelRequested is the type of the trail event a cancel request
-// leaves. The instance holding the host's session sends the request to
-// the agent on it; the row on the job is what the instance reads, so a
-// missed notification loses nothing.
+// EventCancelRequested is the type of the trail event a cancel request leaves.
 const EventCancelRequested = "job.cancel_requested"
 
 // CancelRequest is a cancel the host has not answered yet: what the relay
@@ -75,9 +58,9 @@ type CancelRequest struct {
 	JobID      string
 	HostID     string
 	CampaignID string
-	// AttemptID is the delivery the request is about - the attempt the
-	// agent knows the task by - and Revision its number, which the
-	// request carries as its revision.
+	// AttemptID is the delivery the request is about - the attempt the agent
+	// knows the task by - and Revision its number, which the request carries as
+	// its revision.
 	AttemptID string
 	Revision  uint64
 	Reason    string
@@ -88,8 +71,7 @@ type CancelRequest struct {
 }
 
 // requestCancel moves a dispatched or running job to cancel_requested and
-// records the request on the trail, inside the caller's transaction. The
-// caller holds the row locked and has checked the state.
+// records the request on the trail, inside the caller's transaction.
 func requestCancel(ctx context.Context, tx pgx.Tx, jobID, actor, reason string) error {
 	var hostID, campaignID, attemptID string
 	var attemptNumber int64
@@ -125,11 +107,8 @@ func requestCancel(ctx context.Context, tx pgx.Tx, jobID, actor, reason string) 
 }
 
 // RequestCancelOf asks the hosts carrying the tasks of a campaign to stop:
-// every dispatched or running task of the campaign not named in keep
-// moves to cancel_requested, with a request on the trail for each. The
-// tasks in keep - the reboot and the verification owed to a host whose
-// change landed - are left to finish, the way CancelQueuedOf leaves them.
-// It returns the identifiers of the tasks asked.
+// every dispatched or running task of the campaign not named in keep moves to
+// cancel_requested, with a request on the trail for each.
 func RequestCancelOf(ctx context.Context, tx pgx.Tx, campaignID, actor, reason string,
 	keep []string) ([]string, error) {
 	if keep == nil {
@@ -154,10 +133,7 @@ func RequestCancelOf(ctx context.Context, tx pgx.Tx, campaignID, actor, reason s
 }
 
 // PendingCancels lists the cancel requests of the given hosts that no
-// acknowledgement has answered yet. The relay of the instance holding a
-// host's session reads its own hosts and sends the request to each; a
-// request already acknowledged as already_done waits for the result and
-// is not asked again.
+// acknowledgement has answered yet.
 func (s *Store) PendingCancels(ctx context.Context, hostIDs []string) ([]CancelRequest, error) {
 	if len(hostIDs) == 0 {
 		return nil, nil
@@ -199,28 +175,14 @@ func (s *Store) PendingCancels(ctx context.Context, hostIDs []string) ([]CancelR
 type CancelSettlement struct {
 	JobID      string
 	CampaignID string
-	// Previous is the state the job was in when the answer arrived, and
-	// State the one it is in now. The two are equal for an answer to a
-	// job that was settled already - by its result, or by the sweep.
+	// Previous is the state the job was in when the answer arrived, and State the
+	// one it is in now.
 	Previous State
 	State    State
 }
 
-// RecordCancelAck records the agent's answer to a cancel request and
-// settles the job by it.
-//
-// The first answer is the one that settled the job and the one the
-// record keeps: the request may reach the host twice - from the instance
-// that took the order and from the relay - and the second answer, given
-// after the interruption, would read "already done" over an "interrupted"
-// that was the truth of the moment. An answer that arrives for a job
-// already settled is a note on the record, not a transition. The job
-// moves only from cancel_requested: canceled on not_started and
-// interrupted, with the tokens given back now that the host has said it
-// holds nothing; back to running on not_interruptible, where the result
-// settles it; nowhere on already_done, where the result is on its way or
-// has arrived. An unknown outcome is refused: the panel does not guess
-// what a word it does not know means for the host.
+// RecordCancelAck records the agent's answer to a cancel request and settles
+// the job by it.
 func (s *Store) RecordCancelAck(ctx context.Context, jobID, outcome, phase string) (CancelSettlement, error) {
 	if !KnownCancelOutcome(outcome) {
 		return CancelSettlement{}, fmt.Errorf("%w: unknown cancel outcome %q", ErrConflict, outcome)
@@ -259,11 +221,8 @@ func (s *Store) RecordCancelAck(ctx context.Context, jobID, outcome, phase strin
 		if err := StateCancelRequested.Validate(StateCanceled); err != nil {
 			return settlement, err
 		}
-		// The host holds nothing it will finish: the job is canceled and
-		// the capacity is free. The attempt stays open for the host's own
-		// account of the interruption, which the result path closes as a
-		// late result; an attempt nobody ever reports on is closed by
-		// the sweep of leases like any other.
+		// The host holds nothing it will finish: the job is canceled and the
+		// capacity is free.
 		message := "the host acknowledged the cancel: " + outcome
 		if phase != "" {
 			message += " while " + phase
@@ -295,15 +254,9 @@ func (s *Store) RecordCancelAck(ctx context.Context, jobID, outcome, phase strin
 	return settlement, tx.Commit(ctx)
 }
 
-// SettleCancelTimeouts ends the cancel requests nobody answered within
-// the operation's timeout: the job fails with cancel_ack_timeout and an
-// unknown outcome, its open attempt is closed with the same code, and its
-// tokens go back. It returns the identifiers of the jobs it settled.
-//
-// The timeout is the operation's own: a request the host did not answer
-// within the time the operation was allowed to take is a host that is not
-// answering at all - offline, or an agent from before the protocol - and
-// what it did with the task is a question to read off the host.
+// SettleCancelTimeouts ends the cancel requests nobody answered within the
+// operation's timeout: the job fails with cancel_ack_timeout and an unknown
+// outcome, its open attempt is closed with the same code, and its tokens go
 func (s *Store) SettleCancelTimeouts(ctx context.Context) ([]string, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {

@@ -6,15 +6,6 @@ import (
 
 // Protected packages are the ones whose removal cuts the host off from
 // management or makes booting it impossible.
-//
-// The list is not complete and is not meant to be: what settles the matter is
-// the Essential flag from the package database, which the distribution
-// maintains better than we do. These names cover the things the distribution
-// does not consider essential and which are no less important in a managed
-// fleet: the agent that will carry a repair out, and the access one can come
-// in through when the panel fails.
-// AgentPackage is the name of the package that carries this agent. An ordinary
-// package upgrade deliberately skips it.
 const AgentPackage = "flotestro-agent"
 
 var protectedNames = []string{
@@ -70,8 +61,6 @@ func Protected(name string) bool {
 }
 
 // ProtectedInSet returns the ones of the given packages that are protected.
-// We return a list rather than a plain "yes/no": the operator is to know which
-// package blocks the operation rather than only that something blocks it.
 func ProtectedInSet(pkgs []string) []string {
 	var result []string
 	for _, pkg := range pkgs {

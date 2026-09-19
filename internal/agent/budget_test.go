@@ -9,8 +9,7 @@ import (
 )
 
 // The heart of the split into classes: a long package read must not stop the
-// operations that take milliseconds. Without it the host looks hung from the
-// panel.
+// operations that take milliseconds.
 func TestPackageOperationsDoNotBlockTheRest(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -81,9 +81,9 @@ func TestParseDNFRemovalPlanAlsoReadsTheOlderFormat(t *testing.T) {
 	if !found {
 		t.Errorf("the dependent package did not land on the list: %v", removals)
 	}
-	// The number from the summary is the only guard against an incomplete
-	// read, so it has to be read in the older format as well - the line there
-	// says "Remove  3 Packages", without a colon.
+	// The number from the summary is the only guard against an incomplete read,
+	// so it has to be read in the older format as well - the line there says
+	// "Remove 3 Packages", without a colon.
 	if announced != 3 {
 		t.Fatalf("dnf4 announced %d packages", announced)
 	}

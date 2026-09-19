@@ -10,19 +10,8 @@ import (
 	"time"
 )
 
-// Team scopes: the boundary the security document allows a role binding
-// to be drawn on.
-//
-// The gap this test reproduces negatively is a scope leak. Before teams,
-// a binding could only name a site, so an operator of one group of
-// machines was given a whole site - or the work was done by somebody who
-// has everything. A team binding narrows that, and it is worth nothing
-// unless the narrowing holds in every direction at once: the fleet list
-// must show exactly the team's hosts, a direct read of another team's
-// host must be refused, a host nobody placed must be refused as well, and
-// all three must follow a host that changes hands. The test therefore
-// checks the list and the single reads against each other - a list that
-// showed more than the reads allow would be the leak itself.
+// Team scopes: the boundary the security document allows a role binding to be
+// drawn on.
 
 // teamView is a team as the register returns it.
 type teamView struct {
@@ -113,10 +102,9 @@ func visibleHostIDs(t *testing.T, h *harness) map[string]string {
 	return seen
 }
 
-// TestTeamScopeBoundsTheFleet is the whole boundary in one run: a
-// principal bound only to a team sees and touches that team's hosts and
-// nothing else, the boundary follows a host between teams, and deleting
-// the team leaves the hosts standing and takes the access away.
+// TestTeamScopeBoundsTheFleet is the whole boundary in one run: a principal
+// bound only to a team sees and touches that team's hosts and nothing else,
+// the boundary follows a host between teams, and deleting the team leaves the
 func TestTeamScopeBoundsTheFleet(t *testing.T) {
 	h := newHarness(t)
 	fleet := h.hosts()
@@ -162,10 +150,7 @@ func TestTeamScopeBoundsTheFleet(t *testing.T) {
 		fmt.Sprintf("integration-team-operator-%d", stamp), "operator", teamMine.ID)
 	scoped := h.withToken(token)
 
-	// The list is exactly the team, and nothing else. This is the check
-	// the leak would fail: a binding whose site and environment are the
-	// wildcards its constraint gives it, read with the site columns
-	// alone, would show the whole fleet here.
+	// The list is exactly the team, and nothing else.
 	visible := visibleHostIDs(t, scoped)
 	if _, ok := visible[mine.ID]; !ok {
 		t.Errorf("the team's own host %s is not in the list", mine.Hostname)
@@ -198,9 +183,8 @@ func TestTeamScopeBoundsTheFleet(t *testing.T) {
 	scoped.do(http.MethodPut, "/api/v1/hosts/"+nobodys.ID+"/tags",
 		map[string]any{"tags": []string{}}, nil, http.StatusForbidden)
 
-	// Moving a host between teams is not something an operator of a team
-	// may do: it is the one operation that would let them widen their own
-	// boundary.
+	// Moving a host between teams is not something an operator of a team may do:
+	// it is the one operation that would let them widen their own boundary.
 	scoped.do(http.MethodPut, "/api/v1/hosts/"+theirs.ID+"/team", map[string]any{
 		"team": teamMine.ID, "reason": "an operator must not widen their own scope",
 	}, nil, http.StatusForbidden)
@@ -218,9 +202,7 @@ func TestTeamScopeBoundsTheFleet(t *testing.T) {
 	scoped.do(http.MethodGet, "/api/v1/hosts/"+mine.ID, nil, nil, http.StatusForbidden)
 	scoped.do(http.MethodGet, "/api/v1/hosts/"+theirs.ID, nil, nil, http.StatusOK)
 
-	// Deleting the team leaves the hosts standing and takes the access
-	// away. The hosts become unassigned - the column is on delete set
-	// null - and the binding that named the team goes with the team.
+	// Deleting the team leaves the hosts standing and takes the access away.
 	var deleted struct {
 		Deleted       string        `json:"deleted"`
 		ReleasedHosts []teamHostRow `json:"released_hosts"`
@@ -245,17 +227,16 @@ func TestTeamScopeBoundsTheFleet(t *testing.T) {
 	if survivor.TeamID != "" || survivor.TeamName != "" {
 		t.Errorf("the released host still reads team %q/%q", survivor.TeamID, survivor.TeamName)
 	}
-	// The identity has no binding at all now, so the fleet is refused as
-	// a whole rather than answered with an empty page: no scope is no
-	// host, never every host.
+	// The identity has no binding at all now, so the fleet is refused as a whole
+	// rather than answered with an empty page: no scope is no host, never every
+	// host.
 	scoped.do(http.MethodGet, "/api/v1/hosts?limit=500", nil, nil, http.StatusForbidden)
 	scoped.do(http.MethodGet, "/api/v1/hosts/"+theirs.ID, nil, nil, http.StatusForbidden)
 }
 
-// TestTeamBindingRefusesTwoVocabularies guards the rule that keeps the
-// two ways of scoping a binding readable: a binding names a team, or a
-// site and an environment, and a request naming both is refused with a
-// code of its own rather than silently resolved one way.
+// TestTeamBindingRefusesTwoVocabularies guards the rule that keeps the two
+// ways of scoping a binding readable: a binding names a team, or a site and an
+// environment, and a request naming both is refused with a code of its own
 func TestTeamBindingRefusesTwoVocabularies(t *testing.T) {
 	h := newHarness(t)
 	stamp := time.Now().UnixNano()
@@ -291,9 +272,8 @@ func TestTeamBindingRefusesTwoVocabularies(t *testing.T) {
 		}
 	}
 
-	// A team that does not exist is not a scope either: a binding over it
-	// would start granting the moment somebody created a team with that
-	// identifier.
+	// A team that does not exist is not a scope either: a binding over it would
+	// start granting the moment somebody created a team with that identifier.
 	h.do(http.MethodPost, path, map[string]any{
 		"role": "operator", "team": "00000000-0000-0000-0000-000000000000",
 		"reason": "a binding over a team nobody created",

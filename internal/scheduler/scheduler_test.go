@@ -36,11 +36,9 @@ func TestTheAmbiguityCheckNamesEachHostOnceAndNeedsNoDatabaseToPass(t *testing.T
 	}
 }
 
-// A task goes out only to the session the host's ownership row names,
-// with the token it claimed: a host nobody owns, a host whose lease ran
-// out, and a host a newer session claimed on another instance all hold
-// the task, each under its own reason. The registry is not asked - it is
-// the memory of one process, and the row decides.
+// A task goes out only to the session the host's ownership row names, with the
+// token it claimed: a host nobody owns, a host whose lease ran out, and a host
+// a newer session claimed on another instance all hold the task, each under
 func TestATaskGoesOutOnlyToTheLiveOwnerWithItsToken(t *testing.T) {
 	now := time.Now()
 	session := gateway.NewSession("session-b", "h1", "0.53.0", "boot", "203.0.113.9", 1)

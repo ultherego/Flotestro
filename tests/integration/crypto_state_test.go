@@ -11,15 +11,9 @@ import (
 
 var uuidShape = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
-// TestTheInstallationHasARecordedCryptographicState checks that the
-// panel started through the startup guard: the status screen shows the
-// installation identifier, the active key and the issuer, the sentinel
-// row in the database says the same, and a secret written now is sealed
-// in an envelope under the active key.
-//
-// The lab either initialised itself on its first start or, when its
-// database predates the guard, adopted the key file it had under the
-// name "legacy"; both are a usable state, and the test accepts either.
+// TestTheInstallationHasARecordedCryptographicState checks that the panel
+// started through the startup guard: the status screen shows the installation
+// identifier, the active key and the issuer, the sentinel row in the database
 func TestTheInstallationHasARecordedCryptographicState(t *testing.T) {
 	h := newHarness(t)
 	var status struct {

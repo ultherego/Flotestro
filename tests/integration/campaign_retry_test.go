@@ -38,17 +38,8 @@ func (h *harness) retryLinks(id string) retryView {
 	return view
 }
 
-// TestARetryRunsTheFailedHostsAgainUnderANewApproval guards the retry of
-// a finished campaign.
-//
-// A restart of a unit no host has, stopped by the absolute threshold
-// after the first failure and then canceled: one host failed, the rest
-// never started. The retry is refused while the campaign is paused, and
-// once it is canceled it creates a new campaign on exactly the host that
-// failed - not the canceled ones - with the same order, waiting for its
-// own approval, and the two records point at each other. A campaign with
-// no failed host has nothing to retry, and every refusal carries its
-// code.
+// TestARetryRunsTheFailedHostsAgainUnderANewApproval guards the retry of a
+// finished campaign.
 func TestARetryRunsTheFailedHostsAgainUnderANewApproval(t *testing.T) {
 	h := newHarness(t)
 	campaign := h.createCampaign(labCampaign("retry source", "non-existent-unit.service",
@@ -154,10 +145,9 @@ func TestARetryRunsTheFailedHostsAgainUnderANewApproval(t *testing.T) {
 	}
 }
 
-// TestCampaignListFiltersAndCountsProgress guards the list: the filters
-// on state, operation, requester and creation time run on the server,
-// the page says how many rows the whole list has, and every row carries
-// the tally of its hosts.
+// TestCampaignListFiltersAndCountsProgress guards the list: the filters on
+// state, operation, requester and creation time run on the server, the page
+// says how many rows the whole list has, and every row carries the tally of
 func TestCampaignListFiltersAndCountsProgress(t *testing.T) {
 	h := newHarness(t)
 	campaign := h.createCampaign(labCampaign("listed and counted", "cron.service", nil))

@@ -11,9 +11,7 @@ import (
 // SmartctlPath is where the SMART tool lives. Fixed, not looked up in PATH.
 const SmartctlPath = "/usr/sbin/smartctl"
 
-// smartDevice allows only a device node path. The value lands on the
-// command line of a root tool, so the shape is a security boundary rather
-// than cosmetics: no spaces, no options, no path outside /dev.
+// smartDevice allows only a device node path.
 var smartDevice = regexp.MustCompile(`^/dev/[a-z0-9/]+$`)
 
 // ValidateSmartDevice rejects a device path the SMART read must not take.
@@ -35,11 +33,8 @@ const (
 	SmartUnknown = "unknown"
 )
 
-// SmartReport is what the panel shows of one device's SMART state.
-//
-// Every number comes from the tool. A field the tool did not report stays
-// nil: a device without a temperature sensor is not a device at zero
-// degrees, and a virtual disk has no wear to report.
+// SmartReport is what the panel shows of one device's SMART state. Every
+// number comes from the tool.
 type SmartReport struct {
 	Device string `json:"device"`
 	Model  string `json:"model,omitempty"`
@@ -51,14 +46,11 @@ type SmartReport struct {
 	PowerOnHours       *uint64 `json:"power_on_hours,omitempty"`
 	ReallocatedSectors *uint64 `json:"reallocated_sectors,omitempty"`
 	PendingSectors     *uint64 `json:"pending_sectors,omitempty"`
-	// WearPercent is the NVMe percentage used. ATA wear indicators stay in
-	// the attribute table under their own names, because vendors disagree
-	// on what they mean.
+	// WearPercent is the NVMe percentage used.
 	WearPercent *uint32          `json:"wear_percent,omitempty"`
 	Attributes  []SmartAttribute `json:"attributes,omitempty"`
-	// Unsupported marks a device the tool cannot read: a virtual disk, a
-	// USB bridge without passthrough, a device the tool does not know. The
-	// reason is the tool's own message.
+	// Unsupported marks a device the tool cannot read: a virtual disk, a USB
+	// bridge without passthrough, a device the tool does not know.
 	Unsupported       bool   `json:"unsupported,omitempty"`
 	UnsupportedReason string `json:"unsupported_reason,omitempty"`
 	// Output is the beginning of what the tool printed when its JSON could
@@ -80,9 +72,7 @@ type SmartAttribute struct {
 }
 
 // SmartRunner runs the SMART tool and returns its output together with the
-// exit code. The exit code matters: smartctl encodes what went wrong in
-// bits, and a non-zero code with a full JSON is a device with findings, not
-// a failed read.
+// exit code.
 type SmartRunner func(ctx context.Context, path string, args ...string) (stdout string, exitCode int, err error)
 
 // The bits of smartctl's exit status (see smartctl(8), EXIT STATUS).
@@ -97,12 +87,8 @@ const (
 	smartExitSelfTestFail = 1 << 7
 )
 
-// ReadSmart runs smartctl on the device and turns its JSON into a report.
-//
-// The tool is asked for the health and the attributes in JSON. Its exit
-// status is read bit by bit: a device the tool cannot open or talk to
-// reports unsupported with the tool's message, a device that is failing
-// reports failed - and only a device the tool vouched for reports passed.
+// ReadSmart runs smartctl on the device and turns its JSON into a report. The
+// tool is asked for the health and the attributes in JSON.
 func ReadSmart(ctx context.Context, run SmartRunner, device string) SmartReport {
 	report := SmartReport{Device: device, Health: SmartUnknown}
 	if err := ValidateSmartDevice(device); err != nil {
@@ -119,9 +105,7 @@ func ReadSmart(ctx context.Context, run SmartRunner, device string) SmartReport 
 	return ParseSmart(device, stdout, code)
 }
 
-// smartctlOutput is the part of the tool's JSON the report reads. The tool
-// prints more; what is not listed here is not carried, so an unknown field
-// cannot be mistaken for a fact.
+// smartctlOutput is the part of the tool's JSON the report reads.
 type smartctlOutput struct {
 	Smartctl struct {
 		ExitStatus int `json:"exit_status"`
@@ -177,11 +161,6 @@ type smartctlOutput struct {
 }
 
 // ParseSmart reads the tool's JSON and its exit status into a report.
-//
-// The two are read together: the JSON says what the tool saw, the status
-// says whether it could see at all. A status with the "device open" or
-// "command failed" bit means unsupported even when some JSON came out,
-// because the tool prints the header before it gives up.
 func ParseSmart(device, stdout string, exitCode int) SmartReport {
 	report := SmartReport{Device: device, Health: SmartUnknown}
 
@@ -287,9 +266,9 @@ func ParseSmart(device, stdout string, exitCode int) SmartReport {
 				}
 			case 9:
 				if report.PowerOnHours == nil {
-					// Some vendors count minutes or pack the hours with the
-					// milliseconds; the low 32 bits are the hours on the
-					// devices that follow the common convention.
+					// Some vendors count minutes or pack the hours with the milliseconds; the
+					// low 32 bits are the hours on the devices that follow the common
+					// convention.
 					hours := raw & 0xffffffff
 					report.PowerOnHours = &hours
 				}

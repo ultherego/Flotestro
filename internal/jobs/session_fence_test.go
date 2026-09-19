@@ -6,10 +6,9 @@ import (
 	"testing"
 )
 
-// A delivery over a session the host has left is refused with a typed
-// reason the scheduler recognises, and the reason carries the code the
-// error guide documents, so a released attempt reads the same on the
-// screen as on the trail.
+// A delivery over a session the host has left is refused with a typed reason
+// the scheduler recognises, and the reason carries the code the error guide
+// documents, so a released attempt reads the same on the screen as on the
 func TestAStaleSessionRefusalIsTyped(t *testing.T) {
 	wrapped := errors.Join(ErrSessionStale, errors.New("recording the delivery"))
 	if !errors.Is(wrapped, ErrSessionStale) {
@@ -20,10 +19,9 @@ func TestAStaleSessionRefusalIsTyped(t *testing.T) {
 	}
 }
 
-// A closed session row and a superseded owner are two refusals with two
-// codes: the first sends the task back for the host's current session,
-// the second says the instance that wrote no longer owns the host. A
-// screen and the trail must never show one for the other.
+// A closed session row and a superseded owner are two refusals with two codes:
+// the first sends the task back for the host's current session, the second
+// says the instance that wrote no longer owns the host.
 func TestAStaleSessionAndAStaleFenceAreDifferentRefusals(t *testing.T) {
 	if errors.Is(ErrSessionStale, ErrStaleFence) || errors.Is(ErrStaleFence, ErrSessionStale) {
 		t.Fatal("the two refusals read as one")

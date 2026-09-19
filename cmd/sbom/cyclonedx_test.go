@@ -24,9 +24,9 @@ func fixture(t *testing.T) []Binary {
 	return binaries
 }
 
-// TestParseModulesReadsWhatTheToolchainPrints: the header opens a binary,
-// the records fill it in, a replacement follows the module it replaces, and
-// a second header opens a second binary.
+// TestParseModulesReadsWhatTheToolchainPrints: the header opens a binary, the
+// records fill it in, a replacement follows the module it replaces, and a
+// second header opens a second binary.
 func TestParseModulesReadsWhatTheToolchainPrints(t *testing.T) {
 	binaries := fixture(t)
 	if len(binaries) != 2 {
@@ -101,9 +101,8 @@ type bill struct {
 }
 
 // TestWriteRendersCycloneDX: the bill names the format and version, the
-// application with the release version, one library per module with a
-// golang package URL, the toolchain, and the dependency edge from the
-// application to every one of them.
+// application with the release version, one library per module with a golang
+// package URL, the toolchain, and the dependency edge from the application to
 func TestWriteRendersCycloneDX(t *testing.T) {
 	agent := fixture(t)[0]
 	var out bytes.Buffer

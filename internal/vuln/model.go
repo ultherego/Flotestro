@@ -2,12 +2,8 @@ package vuln
 
 import "time"
 
-// The state of the assessment of a single package against one tracker
-// finding.
-//
-// Three states, not two. "Unknown" is an answer rather than a missing
-// answer: a host whose distribution the feed does not cover is not a safe
-// host - it is a host the panel has no right to say anything about.
+// The state of the assessment of a single package against one tracker finding.
+// Three states, not two.
 type AssessmentState string
 
 const (
@@ -16,18 +12,8 @@ const (
 	StateUnknown     AssessmentState = "unknown"
 )
 
-// A fix has three axes, because these are three different questions with
-// three different sources of answers. Glued into one word they promised more
-// than the panel had checked: "available" only meant that the vendor had
-// released a newer version somewhere.
-//
-// VendorFix says whether the vendor released a fix at all. The advisory
-// answers that. RepositoryCandidate says whether that version is visible in
-// the repositories of the host. The repository metadata answer that - and
-// only for the hosts we have them for. Transaction says whether it can be
-// installed right now. Only the package plan of the host answers that: it is
-// the first to see holds, exclusions, module conflicts and the dependency
-// resolution.
+// A fix has three axes, because these are three different questions with three
+// different sources of answers.
 type VendorFixState string
 
 const (
@@ -52,9 +38,7 @@ const (
 	TransactionUnknown     TransactionState = "unknown"
 )
 
-// Classes of package origin. A distribution vendor has the right to speak
-// only about its own packages: one rebuilt locally or taken from a foreign
-// repository has a version its findings do not describe.
+// Classes of package origin.
 const (
 	OriginDistribution = "vendor_distribution"
 	OriginThirdParty   = "third_party_repository"
@@ -62,36 +46,23 @@ const (
 	OriginUnknown      = "origin_unknown"
 )
 
-// Reason codes for an undetermined state. Every "unknown" has to carry a
-// reason: without one there is no telling a hole in the data from a hole in
-// the host.
+// Reason codes for an undetermined state.
 const (
 	// ReasonFeedMissing means there is no snapshot for this distribution.
 	ReasonFeedMissing = "feed_missing"
 	// ReasonFamilyUnsupported means a system family no tracker of the panel
-	// speaks about at all. Arch and its derivatives have no release and no
-	// feed of fixed versions the panel could read, so there is nothing to
-	// wait for: the assessment cannot be made rather than is not made yet.
+	// speaks about at all.
 	ReasonFamilyUnsupported = "family_unsupported"
 	// ReasonFeedStale means a snapshot older than the policy allows.
 	ReasonFeedStale = "feed_stale"
-	// ReasonFeedEmpty means a fetch that carried no findings where the
-	// previous one did. It is written as the error of the active snapshot,
-	// which stays in force: an empty feed replacing a full one would turn
-	// every host clean in one sweep.
+	// ReasonFeedEmpty means a fetch that carried no findings where the previous
+	// one did.
 	ReasonFeedEmpty = "feed_empty"
-	// ReasonFeedShrank means a fetch whose finding count fell against the
-	// active snapshot by more than the installation allows. "Empty" is the
-	// easy case of a broken download; a fetch that came back with a
-	// fraction of the findings is the same accident with a number in it,
-	// and it would assess most of the fleet as clean. The fetch is kept as
-	// a candidate and the previous snapshot stays in force.
+	// ReasonFeedShrank means a fetch whose finding count fell against the active
+	// snapshot by more than the installation allows.
 	ReasonFeedShrank = "feed_shrank"
-	// ReasonFeedReleaseMissing means a fetch that lost a whole release -
-	// or a whole distribution family - the active snapshot covered. The
-	// count alone does not catch it: a feed that drops trixie and gains
-	// findings for bookworm can keep its total and still make every trixie
-	// host look clean.
+	// ReasonFeedReleaseMissing means a fetch that lost a whole release - or a
+	// whole distribution family - the active snapshot covered.
 	ReasonFeedReleaseMissing = "feed_release_missing"
 	// ReasonReleaseUnsupported means a release outside the feed.
 	ReasonReleaseUnsupported = "release_unsupported"
@@ -107,21 +78,17 @@ const (
 	ReasonVendorInvestigating = "vendor_investigating"
 	// ReasonVersionUnparseable means a version that cannot be compared.
 	ReasonVersionUnparseable = "version_unparseable"
-	// ReasonDistributionEOL means a release past the end of support: the
-	// vendor no longer issues fixes, so a missing finding does not mean
-	// "safe".
+	// ReasonDistributionEOL means a release past the end of support: the vendor
+	// no longer issues fixes, so a missing finding does not mean "safe".
 	ReasonDistributionEOL = "distribution_eol"
-	// ReasonPackageListMissing means a host whose package list the panel has
-	// not fetched yet. It is the most common reason for an empty assessment
-	// and the most dangerous one to pass over in silence.
+	// ReasonPackageListMissing means a host whose package list the panel has not
+	// fetched yet.
 	ReasonPackageListMissing = "package_list_missing"
 	// ReasonPackageListStale means a list older than the state the host
 	// reported in the inventory.
 	ReasonPackageListStale = "package_list_stale"
 	// ReasonHostAdvisoriesMissing means a host whose repository metadata the
-	// panel has not read yet. For the RPM family it is those metadata that
-	// settle the matter, so their absence is a missing assessment rather
-	// than a clean host.
+	// panel has not read yet.
 	ReasonHostAdvisoriesMissing = "host_advisories_missing"
 	// ReasonHostAdvisoriesUnreadable means metadata that could not be
 	// recognised. A read error must not look like a host without findings.
@@ -135,11 +102,8 @@ const (
 // host against one finding of a tracker.
 type Assessment struct {
 	HostID string `json:"host_id"`
-	// InventoryDigest binds the finding to a specific image of the package
-	// list, and AdvisoryDigest - to a specific set of vendor findings. Two
-	// digests, because these are two independent sources: the set of
-	// findings changes also when not a single package on the host has
-	// changed.
+	// InventoryDigest binds the finding to a specific image of the package list,
+	// and AdvisoryDigest - to a specific set of vendor findings.
 	InventoryDigest string `json:"inventory_digest,omitempty"`
 	AdvisoryDigest  string `json:"advisory_digest,omitempty"`
 
@@ -160,21 +124,15 @@ type Assessment struct {
 	// operator sees on the host.
 	InstalledVersion string `json:"installed_version,omitempty"`
 	// ComparisonVersion is the version that was really compared against the
-	// finding, and ComparisonBasis says where it came from. Debian tracks
-	// security by the source package, and the binary version is sometimes
-	// different from the source one (a binary rebuild appends a suffix) -
-	// comparing a binary version against a source one can classify a
-	// vulnerability the wrong way round.
+	// finding, and ComparisonBasis says where it came from.
 	ComparisonVersion string `json:"comparison_version,omitempty"`
 	ComparisonBasis   string `json:"comparison_basis,omitempty"`
 	FixedVersion      string `json:"fixed_version,omitempty"`
 
 	State      AssessmentState `json:"state"`
 	ReasonCode string          `json:"reason_code,omitempty"`
-	// The three axes of a fix: what the vendor released, what is visible in
-	// the repositories of the host and what can really be installed. Only
-	// the package plan settles the last one, so until there is one it stays
-	// undetermined.
+	// The three axes of a fix: what the vendor released, what is visible in the
+	// repositories of the host and what can really be installed.
 	VendorFix           VendorFixState           `json:"vendor_fix"`
 	RepositoryCandidate RepositoryCandidateState `json:"repository_candidate"`
 	Transaction         TransactionState         `json:"transaction"`
@@ -194,12 +152,8 @@ func (a Assessment) Resolved() bool { return a.State != StateUnknown }
 // NeedsAction says whether the finding calls for action.
 func (a Assessment) NeedsAction() bool { return a.State == StateAffected }
 
-// Advisory is one finding of a distribution tracker.
-//
-// It is the distribution vendor that says which version is fixed - and only
-// it. An upstream feed may later add a CVSS and a description, but it cannot
-// change that answer: backported fixes have version numbers no range from
-// NVD covers.
+// Advisory is one finding of a distribution tracker. It is the distribution
+// vendor that says which version is fixed - and only it.
 type Advisory struct {
 	Provider   string   `json:"provider"`
 	AdvisoryID string   `json:"advisory_id"`
@@ -213,9 +167,7 @@ type Advisory struct {
 	// BinaryPackage narrows the finding to one binary package; empty means
 	// the whole source.
 	BinaryPackage string `json:"binary_package,omitempty"`
-	// Architecture narrows the finding to one architecture. The vendor
-	// releases separate packages for each, and a fix for i686 does not fix
-	// the x86_64 package - and must not be attached to it.
+	// Architecture narrows the finding to one architecture.
 	Architecture string `json:"architecture,omitempty"`
 	// An empty FixedVersion means a finding without a fix: the package is
 	// vulnerable and there is nothing to fix it with.
@@ -226,9 +178,8 @@ type Advisory struct {
 	Title          string     `json:"title,omitempty"`
 	URL            string     `json:"url,omitempty"`
 	PublishedAt    *time.Time `json:"published_at,omitempty"`
-	// FromHostRepositories marks a finding read from the repository metadata
-	// of the host itself. The fix is then reachable by definition: the host
-	// sees it in a repository it takes packages from.
+	// FromHostRepositories marks a finding read from the repository metadata of
+	// the host itself.
 	FromHostRepositories bool `json:"from_host_repositories,omitempty"`
 }
 
@@ -251,28 +202,18 @@ const (
 )
 
 // Snapshot is one fetch of a feed.
-//
-// A snapshot has a digest and an age: an assessment that does not name the
-// data which settled it can be neither repeated nor defended.
 type Snapshot struct {
 	ID       string `json:"id,omitempty"`
 	Provider string `json:"provider"`
-	// Digest is the digest of the canonical form of the data. A repeated
-	// fetch of the same data gives the same digest and creates no new
-	// snapshot.
+	// Digest is the digest of the canonical form of the data. A repeated fetch of
+	// the same data gives the same digest and creates no new snapshot.
 	Digest string `json:"digest"`
-	// GenerationID names this fetch of the feed and GenerationAt says when
-	// it was taken. Every verdict of a host carries them, so an operator
-	// can tell a host judged against yesterday's feed from one judged just
-	// now, and a re-assessment after a new fetch is visible rather than
-	// silent. The generation belongs to the data: a repeated fetch of the
-	// same digest confirms the snapshot and keeps its generation.
+	// GenerationID names this fetch of the feed and GenerationAt says when it was
+	// taken.
 	GenerationID string    `json:"generation_id,omitempty"`
 	GenerationAt time.Time `json:"generation_at"`
-	// CandidateReason is the typed reason the gate refused to activate
-	// this fetch: ReasonFeedShrank or ReasonFeedReleaseMissing. A snapshot
-	// with one is kept with its findings and is not in force; an operator
-	// who has looked at it accepts it deliberately.
+	// CandidateReason is the typed reason the gate refused to activate this
+	// fetch: ReasonFeedShrank or ReasonFeedReleaseMissing.
 	CandidateReason string     `json:"candidate_reason,omitempty"`
 	CandidateAt     *time.Time `json:"candidate_at,omitempty"`
 	// Releases lists the releases covered by this snapshot. That is where
@@ -281,17 +222,14 @@ type Snapshot struct {
 	AdvisoryCount int       `json:"advisory_count"`
 	FetchedAt     time.Time `json:"fetched_at"`
 	// CheckedAt says when the panel last confirmed that these data are still
-	// current. A feed that changes once a day is not stale because it has
-	// not changed - it is stale only once the panel cannot confirm that.
+	// current.
 	CheckedAt *time.Time `json:"checked_at,omitempty"`
 	// SourceModifiedAt is the date the feed server gave.
 	SourceModifiedAt *time.Time `json:"source_modified_at,omitempty"`
 	// ETag makes it possible not to fetch data that have not changed.
 	ETag   string `json:"etag,omitempty"`
 	Active bool   `json:"active"`
-	// Error describes a failed fetch. A snapshot with an error does not
-	// replace the previous one: better to assess with older data and say
-	// they are older than not to assess at all.
+	// Error describes a failed fetch.
 	Error string `json:"error,omitempty"`
 }
 
@@ -300,11 +238,6 @@ type Snapshot struct {
 func (s Snapshot) Candidate() bool { return s.CandidateReason != "" }
 
 // Stale says whether the snapshot is older than the policy allows.
-//
-// What counts is the last confirmation rather than the last change: data
-// from a day ago that the panel asked about a quarter of an hour ago
-// describe the current state. Stale is only a feed the panel has lost
-// contact with.
 func (s Snapshot) Stale(maxAge time.Duration, now time.Time) bool {
 	reference := s.FetchedAt
 	if s.CheckedAt != nil && s.CheckedAt.After(reference) {

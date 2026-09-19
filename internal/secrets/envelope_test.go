@@ -115,9 +115,8 @@ func TestAnEnvelopeIsBoundToItsRowAndItsKey(t *testing.T) {
 	if _, err := forged.Open(ctx, keys, associated); err == nil {
 		t.Error("the data key unwrapped under a key that did not wrap it")
 	}
-	// A key the provider does not hold is the key's error, not a
-	// decryption failure: the operator has to look for the key, not for
-	// a corrupted row.
+	// A key the provider does not hold is the key's error, not a decryption
+	// failure: the operator has to look for the key, not for a corrupted row.
 	gone := envelope
 	gone.KeyID = "k-gone"
 	if _, err := gone.Open(ctx, keys, associated); !errors.Is(err, ErrKeyUnavailable) {

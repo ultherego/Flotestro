@@ -16,12 +16,6 @@ import (
 )
 
 // Webhook delivers batches of events to one HTTP endpoint.
-//
-// The body is signed with HMAC-SHA256 over its exact bytes, so the receiver
-// can tell the panel from anybody who learned the address. The receiver
-// answers 2xx for a delivery it has taken; anything else, a timeout
-// included, means the batch goes out again later - the receiver has to
-// deduplicate by the event identifier.
 type Webhook struct {
 	URL    string
 	Secret string
@@ -44,9 +38,7 @@ type Delivery struct {
 const (
 	SignatureHeader = "X-Flotestro-Signature"
 	DeliveryHeader  = "X-Flotestro-Delivery"
-	// TimestampHeader is the moment of the delivery in Unix seconds. It is
-	// under the signature, so a receiver can refuse a delivery captured
-	// and replayed later - the body alone would verify for ever.
+	// TimestampHeader is the moment of the delivery in Unix seconds.
 	TimestampHeader = "X-Flotestro-Timestamp"
 )
 
@@ -112,9 +104,8 @@ func (w Webhook) matches(eventType string) bool {
 	return false
 }
 
-// Sign computes the signature of a delivery: "sha256=" and the hex HMAC
-// over the timestamp, a dot and the exact bytes of the body. The timestamp
-// is the value of X-Flotestro-Timestamp.
+// Sign computes the signature of a delivery: "sha256=" and the hex HMAC over
+// the timestamp, a dot and the exact bytes of the body.
 func Sign(secret string, body []byte, timestamp string) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write([]byte(timestamp))
@@ -131,11 +122,8 @@ func signBodyOnly(secret string, body []byte) string {
 	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
 }
 
-// Verify checks a signature against the body and the timestamp; a
-// receiver uses it. A signature of the previous form, over the body
-// alone, still verifies for one release so that receivers can move at
-// their own pace; a receiver that wants replays refused checks the
-// timestamp against its clock as well.
+// Verify checks a signature against the body and the timestamp; a receiver
+// uses it.
 func Verify(secret string, body []byte, timestamp, signature string) bool {
 	if hmac.Equal([]byte(Sign(secret, body, timestamp)), []byte(signature)) {
 		return true

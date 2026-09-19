@@ -1,14 +1,5 @@
 // Package certificates keeps the scope of the observation of certificates and
 // the history of their deployments.
-//
-// The panel keeps what the host will not say by itself: which file is the
-// certificate of a service, which service reads it and at which address the
-// effect of a deployment can be seen. Without that the module would have to
-// guess - or search the whole disk, which ends with a list of authorities from
-// the trust store instead of an answer.
-//
-// The private key is not here in any form: only the name of the secret
-// remains.
 package certificates
 
 import (
@@ -30,8 +21,7 @@ type Target struct {
 	HostID string `json:"host_id"`
 	Path   string `json:"path"`
 	// KeyPath and KeySecret describe the private key: where it is to lie and
-	// where it comes from. The panel does not know the value of the key and
-	// must not know it.
+	// where it comes from.
 	KeyPath   string `json:"key_path,omitempty"`
 	KeySecret string `json:"key_secret,omitempty"`
 	// ReloadUnit is the service that reads this file; ProbeTarget the address
@@ -55,8 +45,6 @@ type Deployment struct {
 	Issuer            string     `json:"issuer,omitempty"`
 	NotAfter          *time.Time `json:"not_after,omitempty"`
 	// Certificate is public content: the certificate together with its chain.
-	// The panel keeps it so that it can show exactly what was sent - and so
-	// that one can come back to it.
 	Certificate string    `json:"certificate,omitempty"`
 	KeySecret   string    `json:"key_secret,omitempty"`
 	KeyVersion  int       `json:"key_secret_version,omitempty"`
@@ -137,9 +125,7 @@ func (s *Store) Set(ctx context.Context, target Target) (Target, error) {
 	return target, err
 }
 
-// Delete ends the observation of a file. The history of the deployments
-// stays: the fact that the panel once put something there is not undone by
-// removing the target.
+// Delete ends the observation of a file.
 func (s *Store) Delete(ctx context.Context, hostID, path string) error {
 	const query = `delete from certificate_targets where host_id = $1 and path = $2`
 	tag, err := s.pool.Exec(ctx, query, hostID, path)
@@ -199,10 +185,6 @@ func (s *Store) Deployments(ctx context.Context, hostID, path string, limit int)
 }
 
 // Latest returns the newest deployment of every file on a host.
-//
-// It answers the question "did the panel put there what lies on the host": the
-// fingerprint from the deployment compared with the one from the inventory
-// tells a deployed certificate from one replaced outside the panel.
 func (s *Store) Latest(ctx context.Context, hostID string) (map[string]Deployment, error) {
 	const query = `
 		select distinct on (path) path, fingerprint_sha256, subject, issuer, not_after,

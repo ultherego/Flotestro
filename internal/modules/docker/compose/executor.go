@@ -15,16 +15,6 @@ type Executor struct {
 var ErrPlanMismatch = fmt.Errorf("the deployment plan changed since approval")
 
 // Deploy deploys the manifest, but only the one the operator approved.
-//
-// The plan is computed again right before the deployment, tags included:
-// every tag is resolved once more, and the digest of the whole plan is
-// compared with the approved one. A match means the manifest and the
-// images are the same the operator viewed; a difference means the
-// deployment would bring something else - and then a refusal is the right
-// reaction, not running something nobody approved. Where the order names
-// the digests per service, each is compared too, so the refusal can say
-// which image moved. The containers are started from the pinned
-// references, never from the tag as the registry serves it at that moment.
 func (e Executor) Deploy(ctx context.Context, project, manifest, expectedDigest string,
 	approvedDigests map[string]string) (Result, error) {
 	result := Result{Project: project}
@@ -61,10 +51,7 @@ func (e Executor) Deploy(ctx context.Context, project, manifest, expectedDigest 
 	}
 	defer cleanupOverride()
 
-	// --remove-orphans removes the containers the manifest no longer
-	// describes. Without it the project drifts from its description after
-	// every change, and the operator approved a desired state, not an
-	// addition to the current one.
+	// --remove-orphans removes the containers the manifest no longer describes.
 	stdout, stderr, err := e.Planner.Runner(ctx,
 		"-p", project, "-f", path, "-f", override, "up", "-d", "--remove-orphans")
 	result.Applied = changesFromDryRun(stdout + "\n" + stderr)
@@ -76,9 +63,7 @@ func (e Executor) Deploy(ctx context.Context, project, manifest, expectedDigest 
 	return result, nil
 }
 
-// projectState reads the project services running on the host. A failed
-// read returns nothing, not an error: the state before and after is an
-// addition to the result, not a condition of its existence.
+// projectState reads the project services running on the host.
 func (e Executor) projectState(ctx context.Context, project string) []Service {
 	stdout, _, err := e.Planner.Runner(ctx, "-p", project, "ps", "--format", "json", "--all")
 	if err != nil {

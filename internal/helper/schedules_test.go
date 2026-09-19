@@ -9,9 +9,9 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/schedules"
 )
 
-// hostWith points the helper at a host made of temporary directories: the
-// cron directory, the unit directory and the marker of a running systemd,
-// each of them there or not. The real paths come back when the test ends.
+// hostWith points the helper at a host made of temporary directories: the cron
+// directory, the unit directory and the marker of a running systemd, each of
+// them there or not.
 func hostWith(t *testing.T, cron, systemd bool) (string, string) {
 	t.Helper()
 	root := t.TempDir()
@@ -37,9 +37,7 @@ func hostWith(t *testing.T, cron, systemd bool) (string, string) {
 	return cronDir, unitDir
 }
 
-// The mechanism is a visible decision. An order that names one gets it or a
-// refusal that says why - never the other one quietly - and an order that
-// leaves the choice to the host takes cron where the host has it.
+// The mechanism is a visible decision.
 func TestChooseMechanismKeepsTheDecisionVisible(t *testing.T) {
 	t.Run("a host with both", func(t *testing.T) {
 		hostWith(t, true, true)
@@ -62,9 +60,9 @@ func TestChooseMechanismKeepsTheDecisionVisible(t *testing.T) {
 
 	t.Run("a host with systemd only", func(t *testing.T) {
 		cron, _ := hostWith(t, false, true)
-		// An order without a kind is a cron entry, which is what every
-		// order meant before timers could be written: the host says what it
-		// does not have and what it does.
+		// An order without a kind is a cron entry, which is what every order meant
+		// before timers could be written: the host says what it does not have and
+		// what it does.
 		mechanism, refusal := chooseMechanism("")
 		if refusal == nil {
 			t.Fatalf("a host without %s wrote a cron entry as %q", cron, mechanism)
@@ -111,9 +109,8 @@ func TestChooseMechanismKeepsTheDecisionVisible(t *testing.T) {
 }
 
 // The units are staged and renamed into place, as the files module writes a
-// managed file: systemd reads the directory whenever it is told to, and a
-// file written in place could be read half-way - with a timer nobody
-// ordered.
+// managed file: systemd reads the directory whenever it is told to, and a file
+// written in place could be read half-way - with a timer nobody ordered.
 func TestWriteUnitPairPutsBothUnitsInPlace(t *testing.T) {
 	_, units := hostWith(t, false, true)
 	plan, err := schedules.RenderTimer(units, schedules.Schedule{
@@ -153,9 +150,7 @@ func TestWriteUnitPairPutsBothUnitsInPlace(t *testing.T) {
 }
 
 // systemd answers about a unit in records, and the order of the properties
-// inside a record is not the order they were asked in. A record is read
-// whole before it is filed, or a state would be attributed to the previous
-// unit.
+// inside a record is not the order they were asked in.
 func TestParseUnitFileStatesReadsWholeRecords(t *testing.T) {
 	states := parseUnitFileStates("UnitFileState=enabled\nId=flotestro-a.timer\n\n" +
 		"Id=flotestro-b.timer\nUnitFileState=disabled\n\n" +
@@ -170,9 +165,7 @@ func TestParseUnitFileStatesReadsWholeRecords(t *testing.T) {
 	}
 }
 
-// The runs of a timer are computed by systemd from its calendar
-// expression. A timer the panel wrote also carries the cron expression it
-// was ordered with, and systemd knows nothing of that language.
+// The runs of a timer are computed by systemd from its calendar expression.
 func TestTimerCalendarAsksSystemdInItsOwnLanguage(t *testing.T) {
 	managed := schedules.Schedule{Expression: "15 3 * * *", Calendar: "*-*-* 03:15:00"}
 	if got := timerCalendar(managed); got != "*-*-* 03:15:00" {

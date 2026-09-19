@@ -59,9 +59,9 @@ func TestFirstBundleBootstrapsTheKeyring(t *testing.T) {
 	}
 }
 
-// Once a keyring exists, a bundle signed by a stranger is refused, a
-// damaged one is refused, and a bundle for another host is refused unless
-// the panel that is trusted signed it.
+// Once a keyring exists, a bundle signed by a stranger is refused, a damaged
+// one is refused, and a bundle for another host is refused unless the panel
+// that is trusted signed it.
 func TestLaterBundlesMustBeSignedByATrustedKey(t *testing.T) {
 	store := newStore(t)
 	signer := newSigner(t)
@@ -98,9 +98,8 @@ func TestLaterBundlesMustBeSignedByATrustedKey(t *testing.T) {
 	}
 }
 
-// A rotation: the bundle signed by the retired key introduces the new
-// key; a bundle with the new key alone, signed by the new key, retires
-// the old one.
+// A rotation: the bundle signed by the retired key introduces the new key; a
+// bundle with the new key alone, signed by the new key, retires the old one.
 func TestRotationOverlapsTwoKeys(t *testing.T) {
 	store := newStore(t)
 	old := newSigner(t)
@@ -136,9 +135,8 @@ func TestRotationOverlapsTwoKeys(t *testing.T) {
 	}
 }
 
-// A host whose keys went away but whose identity stays is not taken back
-// on trust: an emptied keyring must not be an opening for another panel.
-// The operator removes the identity file, and the next bundle bootstraps.
+// A host whose keys went away but whose identity stays is not taken back on
+// trust: an emptied keyring must not be an opening for another panel.
 func TestEmptyKeyringWithAnIdentityIsNotBootstrapped(t *testing.T) {
 	store := newStore(t)
 	if err := os.MkdirAll(filepath.Dir(store.HostIDPath), 0o755); err != nil {

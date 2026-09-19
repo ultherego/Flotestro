@@ -30,11 +30,9 @@ func TestScriptletFailuresAreNamedFromTheOutput(t *testing.T) {
 	}
 }
 
-// TestHoldNeedsTheVersionlockPlugin guards the declaration of the dnf
-// adapter: a host without the plugin has no hold, says which package brings
-// it back, and refuses the operation with its own code before dnf is
-// started. A hold attempted and failed would leave a package the panel
-// considers held and the next campaign upgrades.
+// TestHoldNeedsTheVersionlockPlugin guards the declaration of the dnf adapter:
+// a host without the plugin has no hold, says which package brings it back,
+// and refuses the operation with its own code before dnf is started.
 func TestHoldNeedsTheVersionlockPlugin(t *testing.T) {
 	restore := versionlockPaths
 	versionlockPaths = []string{filepath.Join(t.TempDir(), "nothing-here")}
@@ -70,9 +68,9 @@ func TestHoldNeedsTheVersionlockPlugin(t *testing.T) {
 	}
 }
 
-// TestVersionlockIsFoundByItsFile guards the detection itself: the registry
-// is built without starting a process, so the plugin is recognised by the
-// files a distribution installs it as.
+// TestVersionlockIsFoundByItsFile guards the detection itself: the registry is
+// built without starting a process, so the plugin is recognised by the files a
+// distribution installs it as.
 func TestVersionlockIsFoundByItsFile(t *testing.T) {
 	directory := t.TempDir()
 	plugin := filepath.Join(directory, "versionlock.so")

@@ -8,9 +8,7 @@ import (
 )
 
 // The directory writes the rights it grants as letters, per attribute and -
-// where it reports them at all - for the entry as a whole. A deployment that
-// reports none leaves the move unproven, and unproven is not the same as
-// refused.
+// where it reports them at all - for the entry as a whole.
 func TestTheRightsOnAnEntryAreReadAsTheDirectoryWritesThem(t *testing.T) {
 	record := map[string]any{
 		"attributelevelrights": map[string]any{
@@ -38,9 +36,9 @@ func TestTheRightsOnAnEntryAreReadAsTheDirectoryWritesThem(t *testing.T) {
 	}
 }
 
-// What blocks a preserve is a proven impediment, never an unknown: a
-// directory that does not report entry rights has not refused anything, and
-// the operation now asks it first anyway.
+// What blocks a preserve is a proven impediment, never an unknown: a directory
+// that does not report entry rights has not refused anything, and the
+// operation now asks it first anyway.
 func TestOnlyAProvenImpedimentBlocksAPreserve(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -72,8 +70,7 @@ func TestOnlyAProvenImpedimentBlocksAPreserve(t *testing.T) {
 }
 
 // The plan names where the entry is, which entry it is and when it last
-// changed. Any of the three moving means the plan was made against a state
-// the directory no longer holds.
+// changed.
 func TestAnEntryIsTheOneThePlanNamedOnlyWhenAllThreeStillAgree(t *testing.T) {
 	planned := EntryReference{
 		DN:              "uid=alice,cn=users,cn=accounts,dc=ipa,dc=example,dc=test",
@@ -103,8 +100,7 @@ func TestAnEntryIsTheOneThePlanNamedOnlyWhenAllThreeStillAgree(t *testing.T) {
 	}
 
 	// A value the plan recorded and the directory no longer reports is a
-	// difference: not being told is not the same as being told it is
-	// unchanged.
+	// difference: not being told is not the same as being told it is unchanged.
 	silent := planned
 	silent.ModifyTimestamp = ""
 	if _, moved := planned.Moved(silent); !moved {
@@ -122,9 +118,9 @@ func TestAnEntryIsTheOneThePlanNamedOnlyWhenAllThreeStillAgree(t *testing.T) {
 	}
 }
 
-// The directory returns the identity of an entry under the names it uses:
-// the DN beside the attributes, and its own unique identifier rather than
-// the one the schema calls entryUUID.
+// The directory returns the identity of an entry under the names it uses: the
+// DN beside the attributes, and its own unique identifier rather than the one
+// the schema calls entryUUID.
 func TestTheIdentityOfAnEntryIsReadUnderTheNamesTheDirectoryUses(t *testing.T) {
 	entry := entryFromRecord(map[string]any{
 		"dn":              "uid=alice,cn=users,cn=accounts,dc=ipa,dc=example,dc=test",
@@ -166,10 +162,7 @@ func rightsOn(uid, entryRights string) func(rpcCall) (any, *rpcError) {
 	}
 }
 
-// The preflight of an operation asks about the entry that operation will
-// move. An ACI can be written against a container, a filter or a group, so
-// the rights on some other account answer a different question - and the
-// answer that decides is the one about this entry.
+// The preflight of an operation asks about the entry that operation will move.
 func TestThePreflightReadsTheRightsOnTheEntryTheOperationIsAbout(t *testing.T) {
 	fake, client := newFakeDirectory(t)
 	fake.answers["dnszone_find"] = answerList(false)
@@ -200,10 +193,9 @@ func TestThePreflightReadsTheRightsOnTheEntryTheOperationIsAbout(t *testing.T) {
 	}
 }
 
-// A directory that reports the rights and does not grant the move refuses
-// the preserve here, before anything local is touched, and says what lifts
-// the refusal. A directory that reports no rights at all is a different
-// answer: unknown is not a refusal, and it is reported as an unknown.
+// A directory that reports the rights and does not grant the move refuses the
+// preserve here, before anything local is touched, and says what lifts the
+// refusal.
 func TestADirectoryThatRefusesTheMoveComesWithTheInstructionToProvision(t *testing.T) {
 	fake, client := newFakeDirectory(t)
 	fake.answers["dnszone_find"] = answerList(false)
@@ -247,12 +239,9 @@ func TestADirectoryThatRefusesTheMoveComesWithTheInstructionToProvision(t *testi
 	}
 }
 
-// The preflight asks two bounded questions - is there a container of
-// preserved accounts, is there an account to read the rights on - and a
-// directory that holds more than the one record it was asked for marks the
-// answer truncated. That flag is the answer, not a failure: reading it as
-// one is what left the rights unproven and let a preserve run into an ACI
-// the directory would refuse. An ordinary listing keeps refusing it.
+// The preflight asks two bounded questions - is there a container of preserved
+// accounts, is there an account to read the rights on - and a directory that
+// holds more than the one record it was asked for marks the answer truncated.
 func TestABoundedSearchIsNotATruncatedList(t *testing.T) {
 	fake, client := newFakeDirectory(t)
 	fake.answers["dnszone_find"] = answerList(false)
@@ -282,19 +271,16 @@ func TestABoundedSearchIsNotATruncatedList(t *testing.T) {
 		t.Fatalf("the rights were not read at all: %+v", capabilities)
 	}
 
-	// The rule the bound does not touch: a list the panel shows is refused
-	// when the directory cut it short, because a truncated list read as a
-	// complete one is the worse mistake.
+	// The rule the bound does not touch: a list the panel shows is refused when
+	// the directory cut it short, because a truncated list read as a complete one
+	// is the worse mistake.
 	if _, err := client.Users(context.Background()); err == nil ||
 		!strings.Contains(err.Error(), "paging is required") {
 		t.Fatalf("a truncated listing was accepted: %v", err)
 	}
 }
 
-// The plan says which of the three values it bound to. The strength of the
-// check differs between directories, and an operator approving a change is
-// entitled to know that this one cannot tell an entry somebody edited in
-// the meantime from one nobody touched.
+// The plan says which of the three values it bound to.
 func TestThePlanSaysWhichOfTheThreeValuesItBoundTo(t *testing.T) {
 	full := EntryReference{
 		DN:              "uid=alice,cn=users,cn=accounts,dc=ipa,dc=example,dc=test",
@@ -308,9 +294,7 @@ func TestThePlanSaysWhichOfTheThreeValuesItBoundTo(t *testing.T) {
 		t.Fatalf("a full reference reads %q", full.Binding())
 	}
 
-	// The laboratory's directory reports no modify timestamp. What it does
-	// not report is not invented: the plan binds to the other two and says
-	// which one is missing.
+	// The laboratory's directory reports no modify timestamp.
 	quiet := full
 	quiet.ModifyTimestamp = ""
 	if got := quiet.BoundTo(); !slices.Equal(got, []string{bindingDN, bindingUUID}) {

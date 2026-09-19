@@ -14,14 +14,8 @@ import (
 	"time"
 )
 
-// The host trust store: the anchor directory and the tool that assembles
-// the bundle from them.
-//
-// The panel writes neither to the bundle itself nor to the distribution
-// directory: the bundle is a result, not a source, and rewritten by hand it
-// returns to its previous form at the next package update. The source is
-// the local anchor directory - the only place where the host administrator
-// adds their own authorities.
+// The host trust store: the anchor directory and the tool that assembles the
+// bundle from them.
 const (
 	AdapterDebian = "update-ca-certificates"
 	AdapterRHEL   = "update-ca-trust"
@@ -33,22 +27,17 @@ const (
 	UpdateCACertificatesPath = "/usr/sbin/update-ca-certificates"
 	UpdateCATrustPath        = "/usr/bin/update-ca-trust"
 
-	// AnchorPrefix tells the panel anchors from those the host
-	// administrator placed there themselves. The panel does not remove
-	// foreign authorities.
+	// AnchorPrefix tells the panel anchors from those the host administrator
+	// placed there themselves.
 	AnchorPrefix = "flotestro-"
 )
 
 var anchorName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 
 // Anchor is an authority trusted on the host.
-//
-// There is no private key here and there cannot be: an anchor is public
-// material - it is the authority certificate, not the host identity.
 type Anchor struct {
-	// ID is the name the panel gave the anchor. The file on the host is
-	// named after it, so that is how the panel recognises its anchor after
-	// a reboot.
+	// ID is the name the panel gave the anchor. The file on the host is named
+	// after it, so that is how the panel recognises its anchor after a reboot.
 	ID   string `json:"id"`
 	Path string `json:"path"`
 	// Managed tells a panel anchor from an authority placed there by hand.
@@ -68,9 +57,8 @@ type TrustStore struct {
 	Directory string   `json:"directory,omitempty"`
 	Tool      string   `json:"tool,omitempty"`
 	Anchors   []Anchor `json:"anchors,omitempty"`
-	// UnavailableReason says why the store was not read. A host without
-	// the tool and a host with an empty directory are two different
-	// answers.
+	// UnavailableReason says why the store was not read. A host without the tool
+	// and a host with an empty directory are two different answers.
 	UnavailableReason string    `json:"unavailable_reason,omitempty"`
 	ObservedAt        time.Time `json:"observed_at"`
 }
@@ -83,10 +71,6 @@ func Exists(p string) bool {
 }
 
 // DetectStore recognises the host trust store.
-//
-// The tool decides, not the distribution name: the same package is found
-// in different systems, and the panel is meant to work also where it does
-// not know the system by name.
 func DetectStore(exists func(string) bool) TrustStore {
 	switch {
 	case exists(UpdateCACertificatesPath) && exists(AnchorDirDebian):
@@ -104,12 +88,8 @@ func DetectStore(exists func(string) bool) TrustStore {
 	}
 }
 
-// AnchorPath assembles the file path of a panel anchor.
-//
-// The extension is part of the agreement with the tool:
-// update-ca-certificates considers only ".crt" files, and update-ca-trust
-// only ".pem". An anchor with the wrong extension lies in the directory and
-// does nothing.
+// AnchorPath assembles the file path of a panel anchor. The extension is part
+// of the agreement with the tool: update-ca-certificates considers only ".
 func AnchorPath(store TrustStore, id string) string {
 	if store.Directory == "" || id == "" {
 		return ""
@@ -191,14 +171,8 @@ func anchorIdentifier(name string) string {
 	return strings.TrimPrefix(name, AnchorPrefix)
 }
 
-// TrustPlan describes the difference between the anchors the host has and
-// the requested ones.
-//
-// An authority rotation is a sequence of states, not one change: first
-// every host trusts the old and the new authority at once, then it gets a
-// new leaf certificate, and only at the end does the old authority vanish.
-// The plan describes one step of that sequence and says what the host is
-// not ready to do yet.
+// TrustPlan describes the difference between the anchors the host has and the
+// requested ones.
 type TrustPlan struct {
 	Kind     string `json:"kind"`
 	AnchorID string `json:"anchor_id"`
@@ -219,9 +193,8 @@ type TrustPlan struct {
 	DesiredFingerprint string     `json:"desired_fingerprint,omitempty"`
 	DesiredNotAfter    *time.Time `json:"desired_not_after,omitempty"`
 
-	// InUseBy lists the host certificates issued by this anchor. Removing
-	// an authority that still signs something breaks trust in a running
-	// service.
+	// InUseBy lists the host certificates issued by this anchor. Removing an
+	// authority that still signs something breaks trust in a running service.
 	InUseBy []string `json:"in_use_by,omitempty"`
 
 	Changes []string `json:"changes,omitempty"`
@@ -281,10 +254,6 @@ func ComputeAnchor(store TrustStore, id, material string, now time.Time) TrustPl
 }
 
 // ComputeAnchorRemoval computes the difference for withdrawing trust.
-//
-// Host certificates issued by this anchor are a refusal here, not a note:
-// removing an authority while a service still shows its certificate breaks
-// trust for clients that changed nothing.
 func ComputeAnchorRemoval(store TrustStore, id string,
 	certificates []Certificate) TrustPlan {
 	plan := TrustPlan{Kind: KindTrust, AnchorID: id, Adapter: store.Adapter,

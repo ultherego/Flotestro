@@ -121,8 +121,7 @@ Normalized form: *-02-30 00:00:00
 }
 
 // A specification that is already in its normalized form has no "Original
-// form" line, and systemd 257 numbers the runs "Iteration #n". A timer's
-// expression is such a specification, and the runs must still find it.
+// form" line, and systemd 257 numbers the runs "Iteration #n".
 func TestANormalizedSpecificationIsKeyedByItsOnlyForm(t *testing.T) {
 	output := `Normalized form: Sun *-*-* 03:10:00
     Next elapse: Sun 2026-09-20 03:10:00 UTC

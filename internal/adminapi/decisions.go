@@ -6,42 +6,32 @@ import (
 	"github.com/ultherego/flotestro/internal/authz"
 )
 
-// PendingDecisions is the part of the fleet summary that counts what waits
-// for a person: an order nobody has approved, a campaign standing at a gate,
-// a directory change with a plan and no signature, a host the declared
-// state disagrees with. The dashboard's "waiting for approval" tile and the
-// sidebar's badges read these, so an operator sees the queue of decisions
-// without opening each list in turn.
-//
-// Every counter is missing, not zero, for a reader without the right to
-// see the list it counts: a badge of zero on a list they may not open would
-// say "nothing waits" about a queue they cannot check.
+// PendingDecisions is the part of the fleet summary that counts what waits for
+// a person: an order nobody has approved, a campaign standing at a gate, a
+// directory change with a plan and no signature, a host the declared state
 type PendingDecisions struct {
 	// JobsAwaitingApproval counts the jobs on the visible hosts that wait
 	// for an operator's approval.
 	JobsAwaitingApproval *int `json:"jobs_awaiting_approval,omitempty"`
-	// CampaignsAwaitingApproval counts the campaigns with a visible target
-	// that wait for their approval, and CampaignsManualGate those that
-	// have stopped at a manual gate between waves.
+	// CampaignsAwaitingApproval counts the campaigns with a visible target that
+	// wait for their approval, and CampaignsManualGate those that have stopped at
+	// a manual gate between waves.
 	CampaignsAwaitingApproval *int `json:"campaigns_awaiting_approval,omitempty"`
 	CampaignsManualGate       *int `json:"campaigns_manual_gate,omitempty"`
 	// DirectoryChangesPending counts the directory changes that wait for
-	// approval. The directory has no site or environment, so the counter
-	// exists only for a reader with the fleet-wide identity right.
+	// approval.
 	DirectoryChangesPending *int `json:"directory_changes_pending,omitempty"`
 	// HostsDrifted counts the visible hosts on which at least one rule of
 	// a published policy found drift at its last evaluation.
 	HostsDrifted *int `json:"hosts_drifted,omitempty"`
 }
 
-// countPendingDecisions fills the decision counters of the summary, each
-// with one aggregated query over the rows the principal may see - the
-// narrowing is the same one the lists apply, so a badge never counts a row
-// the list behind it would not show.
+// countPendingDecisions fills the decision counters of the summary, each with
+// one aggregated query over the rows the principal may see - the narrowing is
+// the same one the lists apply, so a badge never counts a row the list behind
 func (s *Server) countPendingDecisions(ctx context.Context, principal authz.Principal, decisions *PendingDecisions) error {
-	// The visibility of a row that belongs to a host - a job, a policy
-	// verdict - is the visibility of the host, under the permission that
-	// reads the row.
+	// The visibility of a row that belongs to a host - a job, a policy verdict -
+	// is the visibility of the host, under the permission that reads the row.
 	hostCondition := func(permission authz.Permission) (string, []any, bool) {
 		scopes := principal.ScopesFor(permission)
 		if len(scopes) == 0 {

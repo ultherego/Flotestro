@@ -10,9 +10,8 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// enrollDomain asks the helper to check the preconditions and join the
-// domain. The change touches SSSD, Kerberos and PAM, so it belongs to root
-// in full.
+// enrollDomain asks the helper to check the preconditions and join the domain.
+// The change touches SSSD, Kerberos and PAM, so it belongs to root in full.
 func (e *TaskExecutor) enrollDomain(ctx context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.DomainEnrollPayload, preflightOnly bool) *agentv1.TaskResult {
 	action := opspec.ActionDomainEnroll

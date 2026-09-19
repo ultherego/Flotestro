@@ -204,7 +204,7 @@ func (s *Server) openAPI() map[string]any {
 	describe(schemas, "BudgetHolder", "since", "When the lease was first taken; renewals keep it.")
 	// The fleet summary grew additively as well: the attention counters of the
 	// lifecycle document are computed in the database, and a counter the server
-	// cannot answer honestly for the reader's view is left out rather than sent
+	// cannot answer honestly for the reader's view is left out rather than sent.
 	register("FleetSummary", FleetSummary{})
 	describe(schemas, "FleetSummary", "relays_buffer_high",
 		"Relays whose buffer of results waiting for the centre is at least 70 % full by their latest heartbeat. "+

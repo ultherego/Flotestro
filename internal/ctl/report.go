@@ -1,13 +1,6 @@
-// Package ctl holds what the operator tools of a host share: the report of
-// a diagnosis, the network checks against the panel, the forced-renewal
-// limit and a few helpers for the text they print.
-//
-// The agent and the relay each have a tool of their own, because they are
-// two trust boundaries with two configurations and two identities. The
-// checks that do not depend on which of the two is asking - whether a name
-// resolves, whether the handshake with the gateway completes, how far the
-// clock is off - live here, so that both tools answer the same question with
-// the same code.
+// Package ctl holds what the operator tools of a host share: the report of a
+// diagnosis, the network checks against the panel, the forced-renewal limit
+// and a few helpers for the text they print.
 package ctl
 
 import (
@@ -17,10 +10,6 @@ import (
 )
 
 // The outcomes of a single check.
-//
-// "warn" is a finding that does not stop the component from working;
-// "not_run" says that an earlier failure made the check meaningless, and the
-// detail says which one.
 const (
 	StatusPass   = "pass"
 	StatusFail   = "fail"
@@ -29,10 +18,6 @@ const (
 )
 
 // Check is the result of one diagnostic step.
-//
-// The error code is the part that matters: a person reads the detail, but
-// the code is what a support bundle or a playbook compares, and it is stable
-// across releases and translations.
 type Check struct {
 	Name      string `json:"name"`
 	Status    string `json:"status"`
@@ -60,9 +45,6 @@ type Check struct {
 }
 
 // Report is the complete outcome of a diagnosis.
-//
-// Both renderers work from this one value: what the operator reads in the
-// terminal and what a playbook reads from the JSON must not drift apart.
 type Report struct {
 	OK     bool    `json:"ok"`
 	Checks []Check `json:"checks"`
@@ -89,9 +71,6 @@ func NotRun(name, why string) Check {
 }
 
 // Add appends a check and keeps the overall verdict current.
-//
-// A warning leaves the verdict alone: the component works, and somebody has
-// to look at it - those are different answers.
 func (r *Report) Add(check Check) {
 	if check.Status == StatusFail {
 		r.OK = false

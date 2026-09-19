@@ -8,13 +8,6 @@ import (
 
 // The patch status report: where the fleet stands with its updates at the
 // moment of reading, and what was done about them in the period.
-//
-// The standing facts - pending updates, the reboot flag, the agent version
-// - are the host's latest report, not a value at the end of the period:
-// the panel keeps the current facts, and a report on an old period says
-// what the fleet looks like now and what happened then. The period
-// applies to the work: the last successful upgrade of each host and the
-// campaigns that ran on it.
 
 // PatchHost is one host of the patch status report.
 type PatchHost struct {
@@ -33,15 +26,11 @@ type PatchHost struct {
 	// LastUpgradeAt is when the host's last successful packages.upgrade
 	// task of the period finished; nil when none did.
 	LastUpgradeAt *time.Time `json:"last_upgrade_at,omitempty"`
-	// Campaigns counts the campaigns that started work on the host in the
-	// period. Nil when the reader may not read campaigns: the column is
-	// left out rather than shown as zero.
+	// Campaigns counts the campaigns that started work on the host in the period.
 	Campaigns *int `json:"campaigns,omitempty"`
 }
 
 // PatchCounts are the totals of the patch status over a set of hosts.
-// Every fact has its unknown count next to it: a host that never said
-// whether it needs a reboot is in neither the backlog nor the clear.
 type PatchCounts struct {
 	Hosts int `json:"hosts"`
 	// FullyPatched counts the hosts that reported zero pending security
@@ -67,20 +56,18 @@ type PatchGroup struct {
 	PatchCounts
 }
 
-// PatchStatus is the patch status report without its host rows; the rows
-// are read separately, because a fleet of ten thousand hosts is streamed
-// into a file rather than held in one answer.
+// PatchStatus is the patch status report without its host rows; the rows are
+// read separately, because a fleet of ten thousand hosts is streamed into a
+// file rather than held in one answer.
 type PatchStatus struct {
 	Totals        PatchCounts  `json:"totals"`
 	BySite        []PatchGroup `json:"by_site"`
 	ByEnvironment []PatchGroup `json:"by_environment"`
 }
 
-// patchSetsSQL prepares the sets every query of the report reads: the
-// visible hosts under the filter, each host's last successful upgrade of
-// the period, and the campaigns that started work on it in the period.
-// The period comes first in the parameters; the clause is numbered from
-// $3.
+// patchSetsSQL prepares the sets every query of the report reads: the visible
+// hosts under the filter, each host's last successful upgrade of the period,
+// and the campaigns that started work on it in the period.
 const patchSetsSQL = `
 	with visible as (
 		select h.* from hosts h where %s
@@ -131,9 +118,8 @@ func (s *Store) PatchStatus(ctx context.Context, period Period, filter Filter) (
 	return report, nil
 }
 
-// patchGroups counts the report by the given key; an empty key gives one
-// row of totals. A fleet with no visible host gives no row at all, and
-// the caller reads that as zeros - the honest zeros of an empty set.
+// patchGroups counts the report by the given key; an empty key gives one row
+// of totals.
 func (s *Store) patchGroups(ctx context.Context, period Period, filter Filter, key string) ([]PatchGroup, error) {
 	column := "''::text"
 	if key != "" {
@@ -169,10 +155,8 @@ func (s *Store) patchGroups(ctx context.Context, period Period, filter Filter, k
 	return groups, rows.Err()
 }
 
-// PatchHosts reads the host rows of the report in the order of the host
-// list and hands each to yield, until yield says false or the rows end.
-// The rows come straight from the query: a file of the whole fleet costs
-// the memory of one row.
+// PatchHosts reads the host rows of the report in the order of the host list
+// and hands each to yield, until yield says false or the rows end.
 func (s *Store) PatchHosts(ctx context.Context, period Period, filter Filter, yield func(PatchHost) bool) error {
 	clause, args := hostClause(filter, 2)
 	args = append([]any{period.From, period.To}, args...)

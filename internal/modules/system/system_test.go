@@ -93,9 +93,9 @@ func TestParseCPUInfoCountsTheLayoutAcrossSockets(t *testing.T) {
 	}
 }
 
-// An ARM cpuinfo names no sockets and no core ids: the layout stays
-// unknown rather than becoming zero, and the model comes from the board
-// lines at the end of the file.
+// An ARM cpuinfo names no sockets and no core ids: the layout stays unknown
+// rather than becoming zero, and the model comes from the board lines at the
+// end of the file.
 func TestParseCPUInfoLeavesAnUnknownLayoutUnknown(t *testing.T) {
 	cpu := ParseCPUInfo(cpuinfoARM)
 	if cpu.Threads == nil || *cpu.Threads != 2 {
@@ -183,8 +183,7 @@ func TestTimezoneFromLocaltime(t *testing.T) {
 }
 
 // hostTree builds the file system of a virtual machine the way the kernel
-// exposes it. The serial number and the UUID are marked refused: that is
-// what the unprivileged agent sees once the tree is wrapped in refusingFS.
+// exposes it.
 func hostTree() fstest.MapFS {
 	return fstest.MapFS{
 		"proc/cpuinfo":                      {Data: []byte(cpuinfoTwoSockets)},

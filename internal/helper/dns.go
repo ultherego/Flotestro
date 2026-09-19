@@ -10,15 +10,8 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/network"
 )
 
-// applyDNS changes the host resolver through the connection profile.
-//
-// It does not write to /etc/resolv.conf: a file owned by resolved or by
-// NetworkManager gets overwritten at the next network event, so a write into it
-// would be a change that disappears on its own - and without a trace.
-//
-// The change is armed with a rollback just like an address change: a host
-// without a working resolver loses the directory, Kerberos and logins, so the
-// effect of a mistake reaches further than one unresolved name.
+// applyDNS changes the host resolver through the connection profile. It does
+// not write to /etc/resolv.
 func (s *Server) applyDNS(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.DnsRequest) *helperv1.HelperResponse {
 	planning := action.GetOperation() == helperv1.DnsRequest_OPERATION_PLAN
@@ -63,9 +56,8 @@ func (s *Server) applyDNS(ctx context.Context, request *helperv1.HelperRequest,
 	if planning {
 		return resolverPlanResponse(s.readProfiles(actionCtx), resolverPlan(action, profile))
 	}
-	// A change approved on the basis of a plan is to enter the state the
-	// operator looked at. A different digest means the profile changed since the
-	// planning - and that is a refusal, not a warning.
+	// A change approved on the basis of a plan is to enter the state the operator
+	// looked at.
 	if expected := action.GetPlanHash(); expected != "" {
 		if now := resolverPlan(action, profile); now.PlanHash != expected {
 			return reject(ErrorPreconditionFailed,

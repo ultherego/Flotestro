@@ -14,18 +14,11 @@ import (
 	"github.com/ultherego/flotestro/internal/notify"
 )
 
-// Notification channels.
-//
-// A channel is where the fleet reports to when nobody is looking at the
-// panel. Reading the channels goes with reading what they carry - the
-// alerts, the campaigns - so operators see them; writing one names an
-// address the whole fleet talks to, so it is the platform administrator's
-// alone, with a reason on every write and a test button that says at
-// once whether the address answers.
+// Notification channels. A channel is where the fleet reports to when nobody
+// is looking at the panel.
 
 // SetNotifications attaches the channel store and the router that sends
-// through them. Without them the routes answer that the installation
-// runs without notifications.
+// through them.
 func (s *Server) SetNotifications(store *notify.Store, router *notify.Router) {
 	s.notifications = store
 	s.notifier = router
@@ -33,8 +26,7 @@ func (s *Server) SetNotifications(store *notify.Store, router *notify.Router) {
 
 // SetNotificationQueue attaches the worker of this instance, so a row an
 // operator put back in the queue is taken at once rather than at the next
-// round. A panel without one still queues: the worker of another instance
-// picks the row up.
+// round.
 func (s *Server) SetNotificationQueue(worker *notify.Worker) {
 	s.notificationQueue = worker
 }
@@ -124,10 +116,8 @@ func (s *Server) channelProblem(w http.ResponseWriter, err error) bool {
 	return true
 }
 
-// channelDetail is what the trail records about a channel: the address
-// without its secret, the subjects and the filter. The address of an
-// incoming webhook is the credential itself, so the trail keeps only that
-// one is set.
+// channelDetail is what the trail records about a channel: the address without
+// its secret, the subjects and the filter.
 func channelDetail(channel notify.Channel) map[string]any {
 	var config map[string]any
 	_ = json.Unmarshal(channel.Config, &config)
@@ -141,11 +131,8 @@ func channelDetail(channel notify.Channel) map[string]any {
 	}
 }
 
-// channelScope is where a channel's news comes from, as a scope: the site
-// and the environment its filter names, and the whole fleet where it names
-// none. A channel of one site is the business of that site's operators; a
-// fleet-wide channel carries every site's alerts and is the business of
-// somebody with a right over the whole fleet.
+// channelScope is where a channel's news comes from, as a scope: the site and
+// the environment its filter names, and the whole fleet where it names none.
 func channelScope(channel notify.Channel) authz.Scope {
 	scope := authz.GlobalScope
 	if channel.Filter.Site != "" {
@@ -170,9 +157,9 @@ func (s *Server) handleListNotificationChannels(w http.ResponseWriter, r *http.R
 		s.fail(w, err)
 		return
 	}
-	// The list is narrowed to the channels of the caller's scope, the
-	// way a direct read of each would be answered: a channel of another
-	// site tells where its alerts go, which is not the caller's to know.
+	// The list is narrowed to the channels of the caller's scope, the way a
+	// direct read of each would be answered: a channel of another site tells
+	// where its alerts go, which is not the caller's to know.
 	visible := make([]notify.Channel, 0, len(channels))
 	for _, channel := range channels {
 		if principal.Can(authz.PermNotificationRead, channelScope(channel)) {
@@ -182,8 +169,6 @@ func (s *Server) handleListNotificationChannels(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusOK, map[string]any{
 		"items": visible, "count": len(visible),
 		// The vocabulary of a channel, so the form does not carry a copy.
-		// The states of the queue go with it: the log filter offers what
-		// the queue really has rather than a list written twice.
 		"kinds": notify.Kinds, "subjects": notify.Subjects, "severities": notify.Severities,
 		"states": notify.States,
 	})
@@ -200,9 +185,9 @@ func (s *Server) handleGetNotificationChannel(w http.ResponseWriter, r *http.Req
 	if s.channelProblem(w, err) {
 		return
 	}
-	// The channel is read in its own scope, after it is known: the
-	// refusal is a 403 with the scope on the trail, not a 404 that would
-	// say there is no such channel.
+	// The channel is read in its own scope, after it is known: the refusal is a
+	// 403 with the scope on the trail, not a 404 that would say there is no such
+	// channel.
 	if _, ok := s.authorize(w, r, authz.PermNotificationRead, channelScope(*channel),
 		"notification_channel", channel.ID); !ok {
 		return
@@ -301,10 +286,8 @@ func (s *Server) handleDeleteNotificationChannel(w http.ResponseWriter, r *http.
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleTestNotificationChannel sends the test message once and answers
-// with the row of the log: sent, or failed with the typed reason. The
-// request takes as long as the receiver takes, up to the sender's
-// timeout - the operator is waiting for exactly that answer.
+// handleTestNotificationChannel sends the test message once and answers with
+// the row of the log: sent, or failed with the typed reason.
 func (s *Server) handleTestNotificationChannel(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	principal, ok := s.authorize(w, r, authz.PermNotificationManage, authz.GlobalScope, "notification_channel", id)
@@ -330,12 +313,6 @@ func (s *Server) handleTestNotificationChannel(w http.ResponseWriter, r *http.Re
 }
 
 // handleRetryNotificationDelivery puts a dead letter back in the queue.
-//
-// A delivery goes to the dead letter when the recipient refused the
-// credentials or when the attempts ran out; neither is mended by trying
-// again on its own, so the panel never does it by itself. Once the
-// operator has mended the channel, this is how the message goes out - the
-// event was never marked delivered, and the row still carries it.
 func (s *Server) handleRetryNotificationDelivery(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	principal, ok := s.authorize(w, r, authz.PermNotificationManage, authz.GlobalScope, "notification_delivery", id)
@@ -370,16 +347,7 @@ func (s *Server) handleRetryNotificationDelivery(w http.ResponseWriter, r *http.
 	writeJSON(w, http.StatusOK, delivery)
 }
 
-// deliveryFilterOf reads the query of the delivery list. The second and
-// third results are the code and the sentence of a refusal; both are
-// empty when the query reads.
-//
-// Two vocabularies narrow the list. status is the previous release's -
-// sent or failed - and stays because the exports and the links written
-// under it still say it; state is the queue's own, and is the one that
-// tells a row waiting for its next attempt from a row nobody will ever
-// receive. A query may carry either, and an unknown word in either is a
-// refusal rather than a filter that quietly matches nothing.
+// deliveryFilterOf reads the query of the delivery list.
 func deliveryFilterOf(query url.Values) (notify.DeliveryFilter, string, string) {
 	filter := notify.DeliveryFilter{
 		ChannelID: query.Get("channel_id"),
@@ -410,13 +378,8 @@ var deliveriesCSVColumns = []string{
 	"id", "channel_name", "channel_id", "event_id", "event_type", "attempt", "status", "error_code", "error", "sent_at",
 }
 
-// handleListNotificationDeliveries returns the queue, newest first,
-// narrowed by channel, state and a moment; as CSV on request.
-//
-// The answer carries the number of dead letters of the whole
-// installation beside the page, not only of the rows in it: a message
-// nobody received is work waiting for an operator, and the screen has to
-// say so even when the filter of the moment hides it.
+// handleListNotificationDeliveries returns the queue, newest first, narrowed
+// by channel, state and a moment; as CSV on request.
 func (s *Server) handleListNotificationDeliveries(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorizeCollection(w, r, authz.PermNotificationRead, "notification_delivery"); !ok {
 		return

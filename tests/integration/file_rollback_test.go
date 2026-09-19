@@ -24,9 +24,6 @@ type keptVersionView struct {
 }
 
 // observedFileView is what the host really has, as the files tab shows it.
-// The mode kept in the panel is the one the order named ("640"); the one
-// the host reports is the one on the inode ("0640"), and only the second
-// answers whether the permissions came back.
 type observedFileView struct {
 	Path           string `json:"path"`
 	ObservedSHA256 string `json:"observed_sha256"`
@@ -47,11 +44,8 @@ const rollbackReason = "integration test of the file version store"
 const rollbackPath = "/etc/flotestro-rollback-test.conf"
 
 // TestFileRollbackRestoresAVersionTheHostKept closes the half of the file
-// module that was missing: the panel could name a version, but nothing on
-// the host kept one, so a return was a write of whatever the panel
-// happened to still hold. The host now copies the content aside before
-// every write, reports what it keeps, and puts back exactly the copy the
-// order names - with the permissions that copy had.
+// module that was missing: the panel could name a version, but nothing on the
+// host kept one, so a return was a write of whatever the panel happened to
 func TestFileRollbackRestoresAVersionTheHostKept(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")

@@ -61,17 +61,14 @@ func (e *TaskExecutor) applyFile(ctx context.Context, task *agentv1.TaskEnvelope
 	case opspec.ActionFileRemove:
 		operation = helperv1.FileRequest_OPERATION_REMOVE
 	case opspec.ActionFilePlan:
-		// A plan without a path is a read of the state of all the panel files:
-		// that is how the host tab works and how it is to keep working. A plan
-		// with a path computes the difference for that one file.
+		// A plan without a path is a read of the state of all the panel files: that
+		// is how the host tab works and how it is to keep working.
 		if strings.TrimSpace(payload.Path) != "" {
 			operation = helperv1.FileRequest_OPERATION_PLAN
 		}
 	}
 
 	// The content from the store is fetched only now, right before the write.
-	// The value lives for a moment in the memory of the agent and of the helper
-	// - it is not in the envelope of the task, in the journal or in the result.
 	content := []byte(payload.Content)
 	if !payload.ContentSecret.Empty() {
 		if e.secrets == nil {
@@ -107,9 +104,9 @@ func (e *TaskExecutor) applyFile(ctx context.Context, task *agentv1.TaskEnvelope
 				// The flag travels with the order; the grant that makes it
 				// count travels in the capability the client attaches.
 				AllowMissingValidator: payload.AllowMissingValidator,
-				// A return to a version the panel does not have travels as
-				// the digest of that version: the content lies on the host,
-				// which is the only place it survived.
+				// A return to a version the panel does not have travels as the digest of
+				// that version: the content lies on the host, which is the only place it
+				// survived.
 				VersionSha256: payload.VersionSHA256,
 			},
 		},

@@ -26,9 +26,7 @@ func TestAScopeLimitsAPermission(t *testing.T) {
 }
 
 func TestAnAsteriskInTheTargetDoesNotWidenPermissions(t *testing.T) {
-	// A global operation has a target with an asterisk. A narrow assignment
-	// must not cover it, because otherwise the operator of one environment
-	// would manage the whole system.
+	// A global operation has a target with an asterisk.
 	operator := principalWith(Binding{
 		Role:  RolePlatformAdmin,
 		Scope: Scope{Site: "warsaw", Environment: "staging"},
@@ -114,10 +112,7 @@ func TestAnEmptyAssignmentScopeDoesNotMatch(t *testing.T) {
 }
 
 // TestScopeSQLHasTheSameSemanticsAsMatches guards that narrowing lists agrees
-// with authorisation. The two rules drifting apart produced a panel in which
-// an administrator with a global scope saw an empty fleet while an operator
-// limited to one environment saw their hosts correctly: the asterisk reached
-// the query as an ordinary value and matched nothing.
+// with authorisation.
 func TestScopeSQLHasTheSameSemanticsAsMatches(t *testing.T) {
 	global := []Scope{{Site: Wildcard, Environment: Wildcard}}
 	if condition, args := ScopeSQL(global, "site", "environment", 0); condition != "" || args != nil {

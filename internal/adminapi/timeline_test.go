@@ -9,8 +9,8 @@ import (
 )
 
 // A cursor that did not come from the timeline is refused as a bad request
-// rather than handed to the database: the identifier of a task row is a
-// UUID, of a trail row a number, and a kind is one of the sources.
+// rather than handed to the database: the identifier of a task row is a UUID,
+// of a trail row a number, and a kind is one of the sources.
 func TestTimelineCursorIsValidated(t *testing.T) {
 	at := time.Date(2026, 9, 14, 8, 0, 0, 0, time.UTC)
 	accepted := []timelineCursor{

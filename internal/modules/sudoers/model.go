@@ -1,17 +1,5 @@
-// Package sudoers reads the local sudo policy of a host: /etc/sudoers and
-// the files it includes.
-//
-// The directory's sudo rules are read centrally; the local files are what
-// an administrator wrote on the host itself, and they apply next to the
-// directory's rules - or instead of them on a host outside the domain.
-// The panel shows both and marks the grants that amount to root, because
-// "who can become root on this host" is the question the operator asks.
-//
-// The parser resolves the aliases and follows the includes, but it does
-// not decide who is allowed what: it reports the rules as written, with
-// their file and line, and the judgement is made in the panel. A line it
-// does not understand is reported as a problem rather than dropped, so a
-// rule the panel does not show is a rule the operator knows it missed.
+// Package sudoers reads the local sudo policy of a host: /etc/sudoers and the
+// files it includes.
 package sudoers
 
 import (
@@ -24,9 +12,9 @@ import (
 type Snapshot struct {
 	Rules    []Rule    `json:"rules"`
 	Defaults []Default `json:"defaults"`
-	// Files lists every file the parser opened, with the reason where the
-	// read failed: a drop-in the helper could not read is a policy the
-	// panel does not know rather than an absent one.
+	// Files lists every file the parser opened, with the reason where the read
+	// failed: a drop-in the helper could not read is a policy the panel does not
+	// know rather than an absent one.
 	Files []File `json:"files"`
 	// Problems lists the lines the parser did not understand.
 	Problems []Problem `json:"problems,omitempty"`
@@ -35,14 +23,10 @@ type Snapshot struct {
 	ObservedAt        time.Time `json:"observed_at"`
 }
 
-// Rule is one grant: who may run what, where and as whom. A user
-// specification with several command lists gives several rules, one per
-// run-as and tag combination, so every rule has one answer to "without a
-// password?".
+// Rule is one grant: who may run what, where and as whom.
 type Rule struct {
-	// Users are the grantees as written: user names, %group, %#gid,
-	// +netgroup, #uid, with the aliases resolved. A leading "!" is a
-	// negation.
+	// Users are the grantees as written: user names, %group, %#gid, +netgroup,
+	// #uid, with the aliases resolved.
 	Users []string `json:"users"`
 	Hosts []string `json:"hosts"`
 	// RunAs and RunAsGroups are the identities the commands may run as.
@@ -63,9 +47,8 @@ type Rule struct {
 	AllHosts     bool `json:"all_hosts"`
 	AllCommands  bool `json:"all_commands"`
 	RunAsAnyUser bool `json:"run_as_any_user"`
-	// RootEquivalent says the rule lets its grantees become root: every
-	// command, or a shell, as root or as anyone. A rule granted to root
-	// itself is not root-equivalent - root gains nothing.
+	// RootEquivalent says the rule lets its grantees become root: every command,
+	// or a shell, as root or as anyone.
 	RootEquivalent bool `json:"root_equivalent"`
 	// Critical marks a rule of raised risk, with the reasons.
 	Critical        bool     `json:"critical"`
@@ -119,8 +102,8 @@ func (s Snapshot) PasswordlessGlobally() bool {
 }
 
 // RootWithoutPassword lists the rules that make somebody root without a
-// password: root-equivalent rules tagged NOPASSWD, and every
-// root-equivalent rule when a global default turns authentication off.
+// password: root-equivalent rules tagged NOPASSWD, and every root-equivalent
+// rule when a global default turns authentication off.
 func (s Snapshot) RootWithoutPassword() []Rule {
 	global := s.PasswordlessGlobally()
 	var result []Rule
@@ -144,8 +127,7 @@ func (s Snapshot) RootEquivalentRules() []Rule {
 }
 
 // judge fills in the categories and the risk of a rule from its resolved
-// lists. It is the only place the module says anything beyond what the
-// file says, and what it says is one word: whether the grant is root.
+// lists.
 func (r *Rule) judge() {
 	r.AllUsers = slices.Contains(r.Users, "ALL")
 	r.AllHosts = slices.Contains(r.Hosts, "ALL")
@@ -187,9 +169,8 @@ func (r *Rule) judge() {
 	r.CriticalReasons = reasons
 }
 
-// isShellOrSu says whether a command is a way to a root shell: a shell
-// itself, su, or sudo. The arguments do not matter - "/bin/bash -c" is
-// still a shell.
+// isShellOrSu says whether a command is a way to a root shell: a shell itself,
+// su, or sudo.
 func isShellOrSu(command string) bool {
 	if strings.HasPrefix(command, "!") {
 		return false

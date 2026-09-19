@@ -26,11 +26,6 @@ const (
 )
 
 // Checks is the panel's hardening profile.
-//
-// The list is short, and deliberately so: every check has to be explainable
-// in one sentence, point at evidence and - where a remediation exists - at
-// one specific typed operation. A check that does not meet those three
-// conditions is an opinion rather than a check.
 var Checks = []Check{
 	{
 		ID: "mac.enforcing", Version: 1, Severity: SeverityHigh, Module: moduleSecurity,
@@ -159,10 +154,9 @@ func evaluateMAC(input Input) Result {
 	}
 
 	result := Result{Observed: describeMAC(state.MAC), Evidence: state.MAC.Reason}
-	// A remediation exists only where the change takes effect at once:
-	// SELinux in permissive returns to enforcing with one command, AppArmor
-	// without enforced profiles needs profiles, and the panel does not write
-	// those.
+	// A remediation exists only where the change takes effect at once: SELinux in
+	// permissive returns to enforcing with one command, AppArmor without enforced
+	// profiles needs profiles, and the panel does not write those.
 	if state.MAC.System == security.SystemSELinux && state.MAC.Mode == security.ModePermissive {
 		result.Remediation = &Remediation{
 			Action:  "selinux.mode.set",
@@ -202,9 +196,9 @@ func evaluateMACPersistence(input Input) Result {
 		Observed: "now " + state.MAC.Mode + ", after a reboot " + state.MAC.ConfiguredMode,
 		Evidence: security.MACConfiguration,
 	}
-	// Changing the mode through the panel also writes the configuration, so
-	// the same operation removes the drift - as long as SELinux runs in the
-	// kernel at all.
+	// Changing the mode through the panel also writes the configuration, so the
+	// same operation removes the drift - as long as SELinux runs in the kernel at
+	// all.
 	if state.MAC.Mode == security.ModeEnforcing || state.MAC.Mode == security.ModePermissive {
 		result.Remediation = &Remediation{
 			Action:  "selinux.mode.set",
@@ -295,16 +289,15 @@ func evaluateExposure(input Input) Result {
 		descriptions = append(descriptions, description)
 	}
 	evidence := strings.Join(descriptions, ", ")
-	// Without the owners of the sockets the list is complete but nameless -
-	// and the operator is to know that before they start looking for what
-	// service it is.
+	// Without the owners of the sockets the list is complete but nameless - and
+	// the operator is to know that before they start looking for what service it
+	// is.
 	if !state.OwnersKnown {
 		evidence += "; the owners of the sockets are unknown"
 	}
 
 	// The panel does not declare that a service is visible from the internet:
-	// that cannot be seen from an address. It says what the socket stands on
-	// and leaves the decision to a human.
+	// that cannot be seen from an address.
 	return Result{
 		Observed: fmt.Sprintf("%d on every interface, %d on the host's address",
 			counts[security.ReachAllInterfaces], counts[security.ReachHostNetwork]),
@@ -508,11 +501,9 @@ func evaluateReboot(input Input) Result {
 	}
 }
 
-// evaluateRootWithoutPassword judges the local sudo policy: the helper
-// parsed the files and marked the grants, and the panel says whether any
-// of them makes somebody root without a password. The rule of the
-// distribution's default file - the sudo or wheel group with every
-// command, with a password - passes.
+// evaluateRootWithoutPassword judges the local sudo policy: the helper parsed
+// the files and marked the grants, and the panel says whether any of them
+// makes somebody root without a password.
 func evaluateRootWithoutPassword(input Input) Result {
 	fragment, ok := input.Fragment(moduleSudoers)
 	if !ok {
@@ -530,11 +521,8 @@ func evaluateRootWithoutPassword(input Input) Result {
 	}
 	passwordless := policy.RootWithoutPassword()
 	if len(passwordless) == 0 {
-		// A line the parser skipped or an included file it could not open
-		// may hold the very grant the check looks for. The absence of a
-		// finding in what was read says nothing about what was not, so the
-		// policy is undetermined rather than clean - a parser problem must
-		// never read as a host without a dangerous rule.
+		// A line the parser skipped or an included file it could not open may hold
+		// the very grant the check looks for.
 		if note := sudoParseProblems(policy); note != "" {
 			return unknown(ReasonParseError, "the sudo policy was not fully understood: "+note)
 		}
@@ -562,9 +550,8 @@ func evaluateRootWithoutPassword(input Input) Result {
 	}
 }
 
-// sudoParseProblems names what the sudoers parser did not read: the lines
-// it skipped and the files it could not open. Empty means the whole policy
-// was understood.
+// sudoParseProblems names what the sudoers parser did not read: the lines it
+// skipped and the files it could not open.
 func sudoParseProblems(policy sudoers.Snapshot) string {
 	var notes []string
 	for _, file := range policy.Files {
@@ -625,16 +612,13 @@ func describeMAC(mac security.Mandatory) string {
 	return "none"
 }
 
-// unknown returns an undetermined state together with a reason code. The code
-// is mandatory: without it the operator does not know whether to wait for a
-// read, repair the agent or grant permissions.
+// unknown returns an undetermined state together with a reason code.
 func unknown(code, reason string) Result {
 	return Result{Unknown: true, ReasonCode: code, Observed: reason}
 }
 
-// notApplicable returns the "not applicable" state: the host does not have
-// the component the check asks about. That is neither a pass nor a
-// failure.
+// notApplicable returns the "not applicable" state: the host does not have the
+// component the check asks about.
 func notApplicable(reason string) Result {
 	return Result{NotApplicable: true, ReasonCode: ReasonUnsupported, Observed: reason}
 }

@@ -72,7 +72,6 @@ func TestAnUnknownDeadlineIsAReason(t *testing.T) {
 // TestTheSwapIsVisibleAtOnce guards what this identity is live for: the
 // listener reaches for the certificate at every handshake, so a renewal
 // requires no restart of the process and does not tear down the sessions of
-// the agents of the site.
 func TestTheSwapIsVisibleAtOnce(t *testing.T) {
 	old := certificateFrom(t, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
 	fresh := certificateFrom(t, time.Now(), time.Now().Add(7*24*time.Hour))
@@ -109,8 +108,7 @@ func TestTheIntervalStaysWithinTheLimits(t *testing.T) {
 }
 
 // TestTheNetworkNames guards that an IP address lands in the SAN as an
-// address. Written as a DNS name it would look correct, and an agent
-// connecting by the address would reject the certificate anyway.
+// address.
 func TestTheNetworkNames(t *testing.T) {
 	dns, addresses := splitNames([]string{"relay-waw-01.example.com", "192.168.56.70"})
 	if len(dns) != 1 || dns[0] != "relay-waw-01.example.com" {

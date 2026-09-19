@@ -36,12 +36,6 @@ type groupMembersRequest struct {
 }
 
 // handleListGroups lists the saved groups with their sizes.
-//
-// A static group is counted in the database; a dynamic one is counted
-// against the caller's scope, because its size is the answer of its
-// selector for whoever asks. A dynamic group whose selector no longer
-// resolves - a referenced group was deleted - is listed with the reason
-// rather than with a zero.
 func (s *Server) handleListGroups(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermHostRead, "host_group")
 	if !ok {
@@ -65,23 +59,21 @@ func (s *Server) handleListGroups(w http.ResponseWriter, r *http.Request) {
 type groupView struct {
 	selector.SavedGroup
 	Unresolvable string `json:"unresolvable,omitempty"`
-	// UsedBy names the campaigns and the policies whose selector refers to
-	// the group. It is read for one group, not for the list: the answer is
-	// two searches over recorded selectors, and the list asks for none.
+	// UsedBy names the campaigns and the policies whose selector refers to the
+	// group.
 	UsedBy *groupUsage `json:"used_by,omitempty"`
 }
 
-// groupUsage is where a group is named: the campaigns and the policies
-// whose recorded selector refers to it. An operator about to delete or
-// reshape a group reads it to know what the change reaches.
+// groupUsage is where a group is named: the campaigns and the policies whose
+// recorded selector refers to it.
 type groupUsage struct {
 	Campaigns []groupReference `json:"campaigns"`
 	Policies  []groupReference `json:"policies"`
 }
 
-// groupReference is one record that names a group, with the state that
-// says whether the reference is live: a completed campaign keeps its
-// selector for the trail, an enabled policy resolves it at every check.
+// groupReference is one record that names a group, with the state that says
+// whether the reference is live: a completed campaign keeps its selector for
+// the trail, an enabled policy resolves it at every check.
 type groupReference struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
@@ -141,10 +133,8 @@ func (s *Server) handleGetGroup(w http.ResponseWriter, r *http.Request) {
 }
 
 // groupUsedBy searches the recorded selectors of the campaigns and the
-// policies for a reference to the group, by name or by identifier - a
-// selector may name it either way. The search walks the whole selector
-// document, because a reference sits wherever the operator put it: under
-// `all`, under `not`, three levels down.
+// policies for a reference to the group, by name or by identifier - a selector
+// may name it either way.
 func (s *Server) groupUsedBy(ctx context.Context, group *selector.SavedGroup) (*groupUsage, error) {
 	vars, err := json.Marshal(map[string]string{"name": group.Name, "id": group.ID})
 	if err != nil {
@@ -189,10 +179,8 @@ func (s *Server) scanGroupReferences(ctx context.Context, query, path string, va
 }
 
 // handleGroupPreview answers what a selector resolves to before a group is
-// saved with it: the count against the caller's scope and a sample of
-// names, evaluated the way the group page and a campaign evaluate it. The
-// selector travels in the query as JSON, like the campaign preview: a
-// read with a body is a read nobody can link to.
+// saved with it: the count against the caller's scope and a sample of names,
+// evaluated the way the group page and a campaign evaluate it.
 func (s *Server) handleGroupPreview(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermHostRead, "host_group")
 	if !ok {
@@ -235,10 +223,7 @@ func (s *Server) handleGroupPreview(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleCreateGroup records a group. A static group may come with its
-// members; a dynamic one has to come with a selector, which is validated
-// and resolved once here, so a group that can never answer is refused at
-// creation rather than at the first campaign.
+// handleCreateGroup records a group.
 func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermHostGroupWrite, "host_group")
 	if !ok {
@@ -343,9 +328,9 @@ func (s *Server) handleUpdateGroup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// The members are read before the write, as part of the state the
-	// change started from; an update does not touch them, so the same
-	// list stands on both sides of the event.
+	// The members are read before the write, as part of the state the change
+	// started from; an update does not touch them, so the same list stands on
+	// both sides of the event.
 	members := s.groupMembers(r.Context(), current)
 	updated, err := s.groups.Update(r.Context(), current.ID, selector.SavedGroup{
 		Name:        strings.TrimSpace(orDefault(request.Name, current.Name)),
@@ -397,10 +382,6 @@ func (s *Server) handleDeleteGroup(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSetGroupMembers replaces the member list of a static group.
-//
-// Every named host has to exist and be visible to the caller: a group is
-// a way of naming campaign targets, and it must not let anybody name a
-// host they could not see on the list.
 func (s *Server) handleSetGroupMembers(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermHostGroupWrite, "host_group")
 	if !ok {
@@ -424,11 +405,8 @@ func (s *Server) handleSetGroupMembers(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// The list replaces the whole membership, the members outside the
-	// caller's scope included. Those the caller cannot see they cannot
-	// mean to remove, so the write is refused rather than quietly dropping
-	// them - a group shared between two sites would otherwise lose the
-	// other site's hosts at the first edit from this one.
+	// The list replaces the whole membership, the members outside the caller's
+	// scope included.
 	previous, ok := s.requireMembersInScope(w, r, principal, group.ID)
 	if !ok {
 		return
@@ -497,8 +475,7 @@ func (s *Server) handleGroupHosts(w http.ResponseWriter, r *http.Request) {
 }
 
 // requireMembersInScope refuses a rewrite of a group whose current members
-// include hosts the caller cannot see. The answer has been written when
-// the result is false.
+// include hosts the caller cannot see.
 func (s *Server) requireMembersInScope(w http.ResponseWriter, r *http.Request,
 	principal authz.Principal, groupID string) ([]string, bool) {
 	current, err := s.groups.Members(r.Context(), groupID)
@@ -533,10 +510,7 @@ func (s *Server) requireMembersInScope(w http.ResponseWriter, r *http.Request,
 	return current, true
 }
 
-// groupMembers reads the member list of a static group for the trail. A
-// dynamic group has no list, and a list that could not be read is left
-// out rather than recorded as empty: the trail must not say "no members"
-// when the truth is "not known".
+// groupMembers reads the member list of a static group for the trail.
 func (s *Server) groupMembers(ctx context.Context, group *selector.SavedGroup) []string {
 	if group.Kind != selector.KindStatic {
 		return nil
@@ -550,9 +524,9 @@ func (s *Server) groupMembers(ctx context.Context, group *selector.SavedGroup) [
 	return members
 }
 
-// groupState renders a group for the two sides of an audit event: the
-// fields an operator sets, keyed by name, and the member identifiers where
-// the list is known. A nil list leaves the key out.
+// groupState renders a group for the two sides of an audit event: the fields
+// an operator sets, keyed by name, and the member identifiers where the list
+// is known.
 func groupState(group *selector.SavedGroup, members []string) map[string]any {
 	state := map[string]any{
 		"name": group.Name, "description": group.Description, "kind": string(group.Kind),
@@ -581,10 +555,7 @@ func sortedIDs(ids []string) []string {
 	return sorted
 }
 
-// visibleHosts reads the named hosts, narrowed to the caller's scope. A
-// host that is missing or out of scope ends the request with the names of
-// what was not found; the caller must not learn which of the two it was.
-// The answer has already been written when the second result is false.
+// visibleHosts reads the named hosts, narrowed to the caller's scope.
 func (s *Server) visibleHosts(w http.ResponseWriter, r *http.Request, principal authz.Principal,
 	ids []string) ([]hosts.Host, bool) {
 	if len(ids) > selector.MaxMembers {
@@ -632,9 +603,9 @@ func (s *Server) visibleHosts(w http.ResponseWriter, r *http.Request, principal 
 	return found, true
 }
 
-// pageHosts reads every host matching the filter, page by page and with
-// the explicit bound of one campaign: a list bigger than that is usually
-// a wrong selector, and it ends in an error rather than a trimmed list.
+// pageHosts reads every host matching the filter, page by page and with the
+// explicit bound of one campaign: a list bigger than that is usually a wrong
+// selector, and it ends in an error rather than a trimmed list.
 func (s *Server) pageHosts(ctx context.Context, filter hosts.ListFilter) ([]hosts.Host, error) {
 	result := make([]hosts.Host, 0, hosts.PageSize)
 	afterName, afterID := "", ""
@@ -686,9 +657,9 @@ func (s *Server) groupProblem(w http.ResponseWriter, err error) bool {
 	return true
 }
 
-// selectorProblem answers a selector that does not resolve: a shape that
-// does not hold together, a group that does not exist, or a group that
-// refers to itself.
+// selectorProblem answers a selector that does not resolve: a shape that does
+// not hold together, a group that does not exist, or a group that refers to
+// itself.
 func (s *Server) selectorProblem(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, selector.ErrCycle):
@@ -702,10 +673,9 @@ func (s *Server) selectorProblem(w http.ResponseWriter, err error) {
 	}
 }
 
-// groupsWithout resolves references as the store does, except that the
-// group being edited answers with the selector under review rather than
-// with the one recorded. Without it a group could be edited into a cycle:
-// the check would read the old, harmless definition from the database.
+// groupsWithout resolves references as the store does, except that the group
+// being edited answers with the selector under review rather than with the one
+// recorded.
 func groupsWithout(store selector.Groups, id string, pending *selector.Expression) selector.Groups {
 	return groupOverlay{Groups: store, id: id, pending: pending}
 }

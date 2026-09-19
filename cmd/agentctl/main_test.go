@@ -80,9 +80,9 @@ func TestConfigValidateReportsAnError(t *testing.T) {
 }
 
 func TestConfigValidateWatchesThePermissionsOfTheFile(t *testing.T) {
-	// The right to write to the configuration is the right to redirect the
-	// host to somebody else's panel: a file that is syntactically correct but
-	// open to everybody must not pass as correct.
+	// The right to write to the configuration is the right to redirect the host
+	// to somebody else's panel: a file that is syntactically correct but open to
+	// everybody must not pass as correct.
 	open := configurationFile(t, goodConfiguration, 0o666)
 	var out, errOut bytes.Buffer
 	if code := run([]string{"config", "validate", "--config", open}, &out, &errOut); code != 1 {
@@ -131,8 +131,7 @@ func TestStatusSaysThatTheIdentityIsMissing(t *testing.T) {
 
 func TestEnrollRefusesWhenTheIdentityIsValid(t *testing.T) {
 	// Registering a host that is already in the fleet would be a silent
-	// replacement of the identity. That is a separate decision and goes
-	// through a request in the panel.
+	// replacement of the identity.
 	directory := t.TempDir()
 	path := filepath.Join(directory, "agent.yaml")
 	content := strings.Replace(goodConfiguration, `  state_dir: "/var/lib/flotestro-agent"`,

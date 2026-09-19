@@ -12,18 +12,6 @@ const firewallProofReason = "integration test of the management channel proof"
 
 // TestAnIdempotentRuleStillProvesTheManagementChannel checks the proof that
 // disarms the rescue plan of a firewall change.
-//
-// The rule is created and then ordered again unchanged. The second order
-// changes nothing on the host - and it still has to prove that the host talks
-// to the panel, because the helper arms the rescue plan before it touches the
-// rules whether the change turns out to be a difference or not. A proof that
-// only ran when something changed would be a proof nobody could rely on: the
-// interesting case is the change that looks like nothing and cuts the host
-// off anyway.
-//
-// The proof itself is a call the host makes with its own certificate and the
-// panel acknowledges, so a rule that admits a handshake and kills the session
-// cannot pass it.
 func TestAnIdempotentRuleStillProvesTheManagementChannel(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -71,8 +59,8 @@ func TestAnIdempotentRuleStillProvesTheManagementChannel(t *testing.T) {
 		t.Fatalf("a change that changed nothing carries no proof: %q", message)
 	}
 	// The proof says who acknowledged it and that the rescue plan was let go
-	// afterwards, in that order: an operator reading the result is to see
-	// what disarmed the rollback.
+	// afterwards, in that order: an operator reading the result is to see what
+	// disarmed the rollback.
 	if !strings.Contains(message, "acknowledged a control call over mTLS") ||
 		!strings.Contains(message, "the rollback was disarmed") {
 		t.Fatalf("the proof does not say what it was: %q", message)

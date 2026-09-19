@@ -8,30 +8,21 @@ import (
 	"time"
 )
 
-// RegistryDir holds the state of the panel rules and their rollback plans.
-//
-// The directory belongs to root. The registry is a list of rules in a form
-// the panel understands - not an nft script. A file that could steer the
-// execution would be a door to root even for a root that made a mistake.
+// RegistryDir holds the state of the panel rules and their rollback plans. The
+// directory belongs to root.
 const (
 	RegistryDir  = "/var/lib/flotestro-helper/firewall"
 	RegistryFile = "rules.json"
 )
 
 // Registry holds the rules the panel considers its own.
-//
-// The handle is assigned by the kernel and changes at every table reload,
-// so it is not fit for a rule identity. The registry is the source of truth
-// about what the panel created and allows rebuilding the table from scratch
-// - also on rollback.
 type Registry struct {
 	Rules     []RuleSpec `json:"rules"`
 	UpdatedAt time.Time  `json:"updated_at"`
 }
 
-// LoadRegistry reads the nftables rule registry. A missing file means a
-// host on which the panel has not created anything yet - and that is not
-// an error.
+// LoadRegistry reads the nftables rule registry. A missing file means a host
+// on which the panel has not created anything yet - and that is not an error.
 func LoadRegistry(dir string) (Registry, error) {
 	return LoadNamedRegistry(dir, RegistryFile)
 }
@@ -77,10 +68,8 @@ func SaveNamedRegistry(dir, file string, registry Registry) error {
 	return os.Rename(temporary, path)
 }
 
-// Set adds or replaces the rule with the same name.
-//
-// The same name means the same rule: repeating the operation with the same
-// payload duplicates nothing.
+// Set adds or replaces the rule with the same name. The same name means the
+// same rule: repeating the operation with the same payload duplicates nothing.
 func (r Registry) Set(rule RuleSpec) Registry {
 	updated := Registry{Rules: make([]RuleSpec, 0, len(r.Rules)+1)}
 	replaced := false
@@ -112,17 +101,12 @@ func (r Registry) Remove(id string) (Registry, bool) {
 	return updated, found
 }
 
-// RebuildArguments assembles the commands recreating the panel table from
-// the registry.
-//
-// The table is built from scratch, not patched: the rule order decides
-// which one acts first, so appending at the end would give a different
-// effect than what the operator saw in the plan.
+// RebuildArguments assembles the commands recreating the panel table from the
+// registry.
 func RebuildArguments(registry Registry) ([][]string, error) {
 	steps := TableSetupArguments()
-	// Flush clears the rules, leaving the chains: a chain removed and
-	// recreated loses its hook in the packet path for the duration of the
-	// rebuild.
+	// Flush clears the rules, leaving the chains: a chain removed and recreated
+	// loses its hook in the packet path for the duration of the rebuild.
 	steps = append(steps, []string{NftPath, "flush", "table", FlotestroFamily, FlotestroTable})
 	for _, rule := range registry.Rules {
 		arguments, err := RuleArguments(rule)
@@ -135,9 +119,6 @@ func RebuildArguments(registry Registry) ([][]string, error) {
 }
 
 // TableRemovalArguments deletes the whole panel table.
-//
-// Used when the panel has no rule left: an empty table with hooked chains
-// filters nothing, but leaves an object nobody needs in the listing.
 func TableRemovalArguments() []string {
 	return []string{NftPath, "delete", "table", FlotestroFamily, FlotestroTable}
 }

@@ -12,11 +12,6 @@ import (
 )
 
 // Plan describes the copy that will be made on this host.
-//
-// The same order on two hosts is two different copies: one has all the
-// named directories, another has half of them not at all, a third has no
-// repository yet. The operator's approval is meant to cover what really
-// leaves this host - and how much it costs it.
 type Plan struct {
 	ID         string `json:"id"`
 	Tool       string `json:"tool"`
@@ -47,8 +42,8 @@ type Plan struct {
 	ReadData bool `json:"read_data,omitempty"`
 
 	Changes []string `json:"changes,omitempty"`
-	// Refusal names the reason the copy is not made on this host: no tool,
-	// an unread repository without consent to create one, none of the named
+	// Refusal names the reason the copy is not made on this host: no tool, an
+	// unread repository without consent to create one, none of the named
 	// directories present.
 	Refusal string `json:"refusal,omitempty"`
 
@@ -61,12 +56,8 @@ const (
 	PlanVerify = "verify"
 )
 
-// Compute computes the plan of a copy or a verification against the
-// repository state.
-//
-// The scope size is computed by the given function: the module does not
-// walk the disk itself, because the same structure serves the tests and
-// the panel.
+// Compute computes the plan of a copy or a verification against the repository
+// state.
 func Compute(state State, order Definition, verification, readData bool,
 	size func(string) (uint64, bool)) Plan {
 	plan := Plan{
@@ -86,9 +77,8 @@ func Compute(state State, order Definition, verification, readData bool,
 
 	plan.RepositoryReady = state.UnavailableReason == ""
 	if !plan.RepositoryReady {
-		// An unread repository and an empty repository are two different
-		// answers. The former allows creating a new one only with explicit
-		// consent.
+		// An unread repository and an empty repository are two different answers.
+		// The former allows creating a new one only with explicit consent.
 		if plan.Action == PlanVerify {
 			return plan.withRefusal("the repository did not answer: " + state.UnavailableReason)
 		}
@@ -189,8 +179,8 @@ func PathSize(path string) (uint64, bool) {
 }
 
 // Refuse records a refusal reason learned after the plan was computed and
-// recomputes the fingerprint: a plan with a refusal is a different answer
-// than a plan without one.
+// recomputes the fingerprint: a plan with a refusal is a different answer than
+// a plan without one.
 func (p *Plan) Refuse(reason string) {
 	p.Refusal = reason
 	p.PlanHash = backupPlanFingerprint(*p)
@@ -233,8 +223,7 @@ func sizeInChange(bytes *uint64) string {
 }
 
 // backupPlanFingerprint computes the plan fingerprint excluding the
-// fingerprint itself. The repository password is not in the plan, so it is
-// not in the fingerprint either.
+// fingerprint itself.
 func backupPlanFingerprint(plan Plan) string {
 	stripped := plan
 	stripped.PlanHash = ""

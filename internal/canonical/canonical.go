@@ -1,17 +1,6 @@
 // Package canonical is the one library every side of Flotestro hashes
-// documents with: the panel that records a consent, the agent that checks
-// a task against it, and the root helper that checks a capability against
-// the payload it carries. A digest compared across a trust boundary is only
-// worth something when both sides computed it over the same bytes, and the
-// bytes here are the canonical JSON of RFC 8785 - so the digest depends on
-// the document alone, never on which implementation, in which language,
-// printed it.
-//
-// A schema change never changes a digest quietly: it raises the schema
-// version of the envelope and keeps the verifier of the previous version
-// for the length of the migration. A hash is not an authorization either;
-// where it crosses a trust boundary it travels inside a signed capability
-// bound to a nonce and an expiry (package helpercap).
+// documents with: the panel that records a consent, the agent that checks a
+// task against it, and the root helper that checks a capability against the
 package canonical
 
 import (
@@ -36,10 +25,7 @@ type Envelope struct {
 	Payload       json.RawMessage `json:"payload"`
 }
 
-// emptyObject is the one canonical form of "no content". A zero envelope
-// and an envelope whose payload is an empty document hash the same: the
-// two describe the same thing, and a digest that told them apart was the
-// cause of a payload_hash_mismatch nobody could explain.
+// emptyObject is the one canonical form of "no content".
 var emptyObject = json.RawMessage("{}")
 
 // Normalized returns the envelope with its payload in the one form an
@@ -58,10 +44,7 @@ func (e Envelope) SHA256() ([32]byte, []byte, error) {
 
 // NormalizeRFC8785 renders a value as the canonical JSON of RFC 8785: the
 // members sorted by the UTF-16 code units of their names, no whitespace,
-// numbers as ECMAScript prints them, strings escaped only where the
-// grammar requires it. The value goes through encoding/json first, so
-// struct tags and custom marshalers keep their meaning; a json.RawMessage
-// is taken as the document it holds and canonicalized again.
+// numbers as ECMAScript prints them, strings escaped only where the grammar
 func NormalizeRFC8785(v any) ([]byte, error) {
 	normalized, err := jcs.Canonical(v)
 	if err != nil {
@@ -70,9 +53,9 @@ func NormalizeRFC8785(v any) ([]byte, error) {
 	return normalized, nil
 }
 
-// SHA256 returns the digest of a value over its canonical bytes, together
-// with the bytes, so a caller that stores or signs the document keeps
-// exactly what was hashed.
+// SHA256 returns the digest of a value over its canonical bytes, together with
+// the bytes, so a caller that stores or signs the document keeps exactly what
+// was hashed.
 func SHA256(v any) ([32]byte, []byte, error) {
 	normalized, err := NormalizeRFC8785(v)
 	if err != nil {

@@ -17,22 +17,10 @@ import (
 )
 
 // heartbeatInterval says how often the relay reports itself to the centre.
-//
-// The sessions of the agents mark the relay as seen only when they open,
-// and a site that works steadily opens none for hours. Without a heartbeat
-// of its own such a relay would look silent to the panel exactly when it
-// works best. One call a minute is well inside the ten minutes after which
-// the panel counts a relay as silent, and costs the centre nothing.
 const heartbeatInterval = time.Minute
 
-// heartbeat reports the state of the relay to the centre and to the state
-// file on the machine.
-//
-// The call carries the fill of the buffer: the panel is the place where the
-// operator looks for a site whose results do not arrive, and a growing
-// buffer is the first sign of that. The answer carries how many sessions
-// the centre sees through this relay; a divergence from the local count
-// means a session hanging on one side, which neither side can see alone.
+// heartbeat reports the state of the relay to the centre and to the state file
+// on the machine.
 func heartbeat(ctx context.Context, proxy *relay.Relay, live *relay.Live,
 	state *ctl.RelayStateWriter, log *slog.Logger) {
 	ticker := time.NewTicker(heartbeatInterval)
@@ -52,9 +40,9 @@ func sendHeartbeat(ctx context.Context, proxy *relay.Relay, live *relay.Live,
 	state *ctl.RelayStateWriter, log *slog.Logger) {
 	sessions, buffer, upstreamOK := proxy.Stats()
 	now := time.Now().UTC()
-	// The buffer is observed before the call: the state file is to show
-	// the fill even when the centre does not answer - that is when the
-	// operator on the site looks at it.
+	// The buffer is observed before the call: the state file is to show the fill
+	// even when the centre does not answer - that is when the operator on the
+	// site looks at it.
 	state.Update(func(s *ctl.RelayState) {
 		s.Gateway = proxy.Gateway()
 		s.Sessions = sessions
@@ -81,11 +69,8 @@ func sendHeartbeat(ctx context.Context, proxy *relay.Relay, live *relay.Live,
 		BufferMaxBytes:     uint64(buffer.MaxBytes),
 		BufferDroppedTotal: uint64(buffer.Dropped),
 		Sessions:           uint32(sessions),
-		// The panel reads a restart of the relay off a change of the
-		// instance, and an outage off the state of the link. Neither can
-		// be recovered from the numbers alone: the drop counter starts
-		// again with the process, and a full buffer looks the same whether
-		// the link is down or the centre is slow.
+		// The panel reads a restart of the relay off a change of the instance, and
+		// an outage off the state of the link.
 		InstanceId:      proxy.InstanceID(),
 		UpstreamState:   proxy.UpstreamState(),
 		SpoolBytesLimit: uint64(buffer.MaxBytes),
@@ -115,12 +100,8 @@ func sendHeartbeat(ctx context.Context, proxy *relay.Relay, live *relay.Live,
 	}
 }
 
-// relayCentre assembles the client of the relay service in the centre with
-// the current identity.
-//
-// Built for every call rather than once: the certificate changes at a
-// renewal, and the heartbeat is to go with the one the panel recognises the
-// relay by.
+// relayCentre assembles the client of the relay service in the centre with the
+// current identity.
 func relayCentre(identity relay.Identity, gateway string) agentv1connect.RelayServiceClient {
 	return agentv1connect.NewRelayServiceClient(
 		&http.Client{

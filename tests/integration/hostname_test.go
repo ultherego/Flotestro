@@ -9,10 +9,9 @@ import (
 
 const hostnameReason = "integration test of the hostname operation"
 
-// TestHostnameSetIsGuarded checks the gates of a rename without renaming a
-// lab host: a name the host would refuse is refused when the order is
-// placed, the target name is typed by hand, and the catalogue declares
-// the contract the interface draws its buttons from.
+// TestHostnameSetIsGuarded checks the gates of a rename without renaming a lab
+// host: a name the host would refuse is refused when the order is placed, the
+// target name is typed by hand, and the catalogue declares the contract the
 func TestHostnameSetIsGuarded(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")

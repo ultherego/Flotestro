@@ -12,12 +12,6 @@ import (
 )
 
 // applyShutdown powers the host off after the given delay.
-//
-// The delay is necessary for the same reason as with a restart: without it the
-// host disappears before the agent sends the result back, and the operation
-// would look broken instead of done. There is one difference from a restart,
-// but a fundamental one - after this operation nobody will see the host come
-// back.
 func (s *Server) applyShutdown(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.ShutdownRequest) *helperv1.HelperResponse {
 	if err := power.ValidateShutdownReason(action.GetReason()); err != nil {
@@ -38,9 +32,8 @@ func (s *Server) applyShutdown(ctx context.Context, request *helperv1.HelperRequ
 	actionCtx, cancel := deadline(ctx, request, 2*time.Minute, 10*time.Minute)
 	defer cancel()
 
-	// A logind inhibitor is the answer of the host to the question "is it
-	// allowed now": an update in flight or a session with open work. The panel
-	// does not go around it without an operator decision.
+	// A logind inhibitor is the answer of the host to the question "is it allowed
+	// now": an update in flight or a session with open work.
 	inhibitors := shutdownInhibitors(actionCtx)
 	if len(inhibitors) > 0 && !action.GetIgnoreInhibitors() {
 		refusal := reject(ErrorPreconditionFailed,
@@ -83,10 +76,8 @@ func (s *Server) applyShutdown(ctx context.Context, request *helperv1.HelperRequ
 	}
 }
 
-// shutdownInhibitors returns the inhibitors that do not allow a shutdown.
-//
-// A delay is not an obstacle: logind waits it out on its own. A block is, and
-// it is the one that has to stop the operation.
+// shutdownInhibitors returns the inhibitors that do not allow a shutdown. A
+// delay is not an obstacle: logind waits it out on its own.
 func shutdownInhibitors(ctx context.Context) []power.Inhibitor {
 	if !exists(power.InhibitPath) {
 		return nil

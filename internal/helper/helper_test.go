@@ -177,11 +177,9 @@ func scheduleRequest(mutate func(*helperv1.ScheduleRequest)) *helperv1.HelperReq
 	}
 }
 
-// The user of a cron line is separated from the command by whitespace
-// only, and the helper used to put whatever the request said into that
-// field, root by default. A value with a space, a newline or a comment
-// sign is refused before anything on the host is read, as is a name the
-// host has no account for and an entry that names no account at all.
+// The user of a cron line is separated from the command by whitespace only,
+// and the helper used to put whatever the request said into that field, root
+// by default.
 func TestTheHelperRefusesAScheduleUserThatIsNotAnAccount(t *testing.T) {
 	cases := map[string]string{
 		"":                             ErrorUserRequired,
@@ -204,9 +202,9 @@ func TestTheHelperRefusesAScheduleUserThatIsNotAnAccount(t *testing.T) {
 	}
 }
 
-// The account has to exist under exactly the name asked for: a resolver
-// that answers a lookup of one spelling with another account would put
-// the spelling on the line, not the account.
+// The account has to exist under exactly the name asked for: a resolver that
+// answers a lookup of one spelling with another account would put the spelling
+// on the line, not the account.
 func TestTheScheduleUserCheckAcceptsAnExistingAccount(t *testing.T) {
 	current, err := user.Current()
 	if err != nil {
@@ -224,9 +222,7 @@ func TestTheScheduleUserCheckAcceptsAnExistingAccount(t *testing.T) {
 	}
 }
 
-// Root needs its grant once the request carries a capability. A request
-// without one is judged by the panel alone, as before the capability
-// existed; a capability without the grant refuses root and root only.
+// Root needs its grant once the request carries a capability.
 func TestRootScheduleNeedsTheGrantWhenGrantsAreKnown(t *testing.T) {
 	if refusal := checkScheduleUser("root", nil); refusal != nil {
 		t.Fatalf("root without a capability was refused: %s", refusal.GetErrorCode())

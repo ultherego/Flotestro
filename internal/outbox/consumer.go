@@ -15,9 +15,7 @@ type Receiver interface {
 	Deliver(ctx context.Context, events []Event) error
 }
 
-// Consumer moves one external receiver along the trail. Its position lives
-// in the database, so any instance of the panel can carry on where another
-// stopped, and only one of them does it at a time.
+// Consumer moves one external receiver along the trail.
 type Consumer struct {
 	pool     *pgxpool.Pool
 	name     string
@@ -76,9 +74,7 @@ func (c *Consumer) Run(ctx context.Context) {
 const maxBackoff = 5 * time.Minute
 
 // Deliver runs one round: it locks the cursor, reads the events after it,
-// hands them to the receiver and moves the cursor on success. It returns
-// how many events went out. A locked cursor - another instance at work -
-// or a cursor held back after a failure both count as nothing to do.
+// hands them to the receiver and moves the cursor on success.
 func (c *Consumer) Deliver(ctx context.Context) (int, error) {
 	tx, err := c.pool.Begin(ctx)
 	if err != nil {
@@ -130,9 +126,9 @@ func (c *Consumer) Deliver(ctx context.Context) (int, error) {
 	}
 
 	if err := c.receiver.Deliver(ctx, events); err != nil {
-		// The cursor stays; the failure and the pause before the next
-		// attempt are recorded so that the receiver being down is visible
-		// and does not turn into a tight loop.
+		// The cursor stays; the failure and the pause before the next attempt are
+		// recorded so that the receiver being down is visible and does not turn into
+		// a tight loop.
 		failures++
 		backoff := time.Duration(1<<uint(min(failures, 8))) * time.Second
 		if backoff > maxBackoff {

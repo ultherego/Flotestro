@@ -8,8 +8,7 @@ import (
 )
 
 // The verdicts the panel reaches about logins on a host cut off from the
-// directory. The host reports the facts - the SSSD policy and the cache age -
-// and the panel says what they mean; the host never judges itself.
+// directory.
 const (
 	// VerdictCachedLoginsUntil: users who logged in before the outage can keep
 	// logging in, but no later than the Until timestamp.
@@ -32,8 +31,6 @@ type OfflineVerdict struct {
 	// cached credential can still be accepted.
 	Until *time.Time `json:"until,omitempty"`
 	// InForce says whether the host is cut off from the directory right now.
-	// The verdict is a projection of the policy either way; in force means
-	// the outage is happening, not that it may happen.
 	InForce bool `json:"in_force"`
 	// Reason is the one sentence behind the verdict, meant for the operator.
 	Reason string `json:"reason"`
@@ -60,14 +57,8 @@ type IdentityFacts struct {
 	PolicyUnavailableReason string
 }
 
-// JudgeOfflineLogins decides what happens to directory logins on the host
-// when the directory is unreachable.
-//
-// The cache age is an upper bound for the age of any cached credential: the
-// cache database is written on every refresh, so no credential in it was
-// obtained after the last write. The expiry of the freshest credential is
-// therefore no later than the last write plus the expiration window, and
-// that is the timestamp the verdict names.
+// JudgeOfflineLogins decides what happens to directory logins on the host when
+// the directory is unreachable.
 func JudgeOfflineLogins(facts IdentityFacts) OfflineVerdict {
 	verdict := OfflineVerdict{
 		Verdict: VerdictUnknown,
@@ -142,10 +133,7 @@ type identityFragment struct {
 	UnavailableReason string `json:"unavailable_reason"`
 }
 
-// judgeFromFragment builds the verdict from the stored identity module. A
-// host that has not reported the module gets an unknown verdict with that
-// reason; a broken payload likewise, because a payload the panel cannot
-// read is not a host without a cache.
+// judgeFromFragment builds the verdict from the stored identity module.
 func judgeFromFragment(sssdOnline *bool, payload []byte, observedAt *time.Time) *OfflineVerdict {
 	facts := IdentityFacts{SSSDOnline: sssdOnline}
 	if len(payload) == 0 || observedAt == nil {
@@ -191,9 +179,8 @@ type OfflineHost struct {
 }
 
 // OfflineFromDirectory lists the enrolled hosts whose SSSD last reported
-// itself offline, retired hosts excluded, each with the panel's verdict on
-// its logins. The identity module comes along in the same query so the
-// fleet view does not fetch it host by host.
+// itself offline, retired hosts excluded, each with the panel's verdict on its
+// logins.
 func (s *Store) OfflineFromDirectory(ctx context.Context) ([]OfflineHost, error) {
 	const query = `
 		select h.id, h.hostname, h.site, h.environment, h.identity_checked_at,

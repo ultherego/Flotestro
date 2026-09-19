@@ -31,13 +31,10 @@ const DefaultDirectory = "/var/lib/flotestro/vuln/redhat"
 
 // The limits of a fetch.
 const (
-	// MaxArchive limits a full fetch. The archive is around three hundred
-	// megabytes; a substantially larger one means we are fetching something
-	// other than we think.
+	// MaxArchive limits a full fetch.
 	MaxArchive = 2 << 30
 	// MaxFile limits a single VEX document. CVE documents that touch every
-	// product of the vendor are dozens of megabytes each - and they are
-	// genuine.
+	// product of the vendor are dozens of megabytes each - and they are genuine.
 	MaxFile = 256 << 20
 	// MaxDocuments limits the number of files in the archive.
 	MaxDocuments = 500000
@@ -50,26 +47,17 @@ const (
 var ErrNotModified = fmt.Errorf("the feed has not changed since the last fetch")
 
 // Source reads the CSAF/VEX data of Red Hat and keeps them between cycles.
-//
-// It is the only source of the panel that has a memory, and it has one out of
-// necessity: the full data are a three hundred megabyte archive and some
-// sixty thousand files, while the vendor publishes changes by the dozen a
-// day. Fetching the whole thing every cycle would be a cost the other side
-// bears as well.
 type Source struct {
 	Base      string
 	Directory string
 	Client    *http.Client
 
-	// loaded says whether the memory of the source is already filled. Source
-	// is called from a single goroutine of the scheduler, so there is no lock
-	// here.
+	// loaded says whether the memory of the source is already filled. Source is
+	// called from a single goroutine of the scheduler, so there is no lock here.
 	loaded  bool
 	mark    time.Time
 	archive string
-	// releases says which releases the records were built for. The data are
-	// filtered while reading, so a fleet that has gained a new release has to
-	// read it again - otherwise its hosts would look clean.
+	// releases says which releases the records were built for.
 	releases map[string]bool
 }
 
@@ -117,9 +105,8 @@ func (z *Source) Fetch(ctx context.Context, releases []string,
 	if err != nil {
 		return snapshot, nil, err
 	}
-	// A full fetch in the same call rules out a second one: otherwise an
-	// archive older than the change threshold would have itself fetched over
-	// and over.
+	// A full fetch in the same call rules out a second one: otherwise an archive
+	// older than the change threshold would have itself fetched over and over.
 	changedCount, err := z.increment(ctx, !full)
 	if err != nil {
 		return snapshot, nil, err
@@ -165,9 +152,7 @@ func intersection(covered map[string]bool, releases []string) []string {
 type sourceState struct {
 	Archive string    `json:"archive"`
 	Mark    time.Time `json:"mark"`
-	// Releases says which releases the findings were written for. A memory
-	// built for a narrower set is not an incomplete memory - it is a memory
-	// of something else, and it has to be built again.
+	// Releases says which releases the findings were written for.
 	Releases []string `json:"releases"`
 }
 
@@ -207,8 +192,6 @@ func releaseList(set map[string]bool) []string {
 
 // load fills the memory of the source: from disk, and when there is none -
 // from the archive.
-//
-// It returns whether it reached for the full archive.
 func (z *Source) load(ctx context.Context) (bool, error) {
 	if z.loaded {
 		return false, nil
@@ -255,10 +238,7 @@ func (z *Source) fullFetch(ctx context.Context) error {
 		return fmt.Errorf("archive_latest.txt points at %q", name)
 	}
 
-	// The archive is from the day it carries in its name rather than from
-	// today. A mark taken from the moment of the fetch would call everything
-	// the vendor published since the archive was assembled read - that is,
-	// pass over a week of changes in silence. The increment pulls the rest.
+	// The archive is from the day it carries in its name rather than from today.
 	before := ArchiveDate(name)
 
 	// A full fetch starts from a clean directory: a document the vendor has
@@ -322,11 +302,7 @@ func (z *Source) fullFetch(ctx context.Context) error {
 }
 
 // ArchiveDate reads the date out of the name of an archive
-// ("csaf_vex_2026-08-30.tar.zst").
-//
-// When the name does not carry one we return the zero time: the increment
-// then walks the whole list of changes, which is an expensive but true
-// answer.
+// ("csaf_vex_2026-08-30.
 func ArchiveDate(name string) time.Time {
 	for _, part := range strings.FieldsFunc(name, func(c rune) bool {
 		return c == '_' || c == '.'
@@ -389,10 +365,6 @@ func (z *Source) increment(ctx context.Context, mayArchive bool) (int, error) {
 }
 
 // accept translates one document and writes its findings to disk.
-//
-// To disk rather than into memory: the findings for one RHEL release alone
-// are close to a million and keeping them between cycles would cost the panel
-// several hundred megabytes only for something to change once a day.
 func (z *Source) accept(path string, content []byte) error {
 	advisories, err := Advisories(content, z.releases)
 	if err != nil {
@@ -508,12 +480,7 @@ func Changes(source io.Reader, after time.Time) ([]string, time.Time, error) {
 }
 
 // documentPath reduces a path from the archive or the listing to the form
-// "year/cve-....json".
-//
-// The name comes from outside, so we accept nothing that does not look
-// exactly like a VEX document: a year and a CVE file. Everything else is
-// rejected rather than straightened out - a path we do not understand is not
-// a path we are allowed to guess at.
+// "year/cve-.
 func documentPath(name string) string {
 	name = filepath.ToSlash(strings.TrimSpace(name))
 	parts := strings.Split(name, "/")
@@ -618,9 +585,8 @@ func (z *Source) saveState() error {
 	if err != nil {
 		return err
 	}
-	// The state is written through a temporary file and a rename: an
-	// interrupted write must not leave the panel with a state it cannot
-	// read.
+	// The state is written through a temporary file and a rename: an interrupted
+	// write must not leave the panel with a state it cannot read.
 	temporary := filepath.Join(z.Directory, "state.json.tmp")
 	if err := os.WriteFile(temporary, state, 0o640); err != nil {
 		return err

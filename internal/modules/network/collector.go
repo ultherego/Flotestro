@@ -123,8 +123,7 @@ func ParseRoutes(output, family string) ([]Route, error) {
 }
 
 // SupplementFromSys adds what "ip" does not report: the link speed and the
-// driver name. Reading /sys is cheap and does not require starting a
-// process.
+// driver name.
 func SupplementFromSys(dir string, interfaces []Interface) {
 	for i := range interfaces {
 		path := filepath.Join(dir, interfaces[i].Name)
@@ -156,14 +155,8 @@ func numberFromFile(path string) (int64, bool) {
 	return value, true
 }
 
-// MarkManagementChannel points at the interface and the address the host
-// talks to the panel through.
-//
-// The address comes from the agent's actual connection, not from the first
-// position of the list: the host usually has several addresses, and only
-// one of them is the one the panel sees it through. A mistake in this
-// direction ends in changing the configuration of the interface the order
-// has just arrived through.
+// MarkManagementChannel points at the interface and the address the host talks
+// to the panel through.
 func MarkManagementChannel(snapshot *Snapshot, localAddress string) {
 	if localAddress == "" {
 		return

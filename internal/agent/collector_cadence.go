@@ -9,26 +9,19 @@ import (
 )
 
 // CadenceClass says how often a module is read in the periodic cycle.
-//
-// One clock for every module made the inventory cycle as expensive as its
-// heaviest read: the package summary walks the whole database, the security
-// state starts half a dozen tools - and both travelled every fifteen minutes
-// next to a list of failed units that costs nothing. The classes split the
-// cycle by how fast the truth about a module changes.
 type CadenceClass string
 
 const (
-	// CadenceFast marks a module read in every cycle: a unit fails, a
-	// container stops, an inhibitor appears - the operator wants to see it at
-	// the next cycle, and the read is cheap.
+	// CadenceFast marks a module read in every cycle: a unit fails, a container
+	// stops, an inhibitor appears - the operator wants to see it at the next
+	// cycle, and the read is cheap.
 	CadenceFast CadenceClass = "fast"
 	// CadenceNormal marks a module read in every fourth cycle: the state
 	// changes on its own, but slowly, and the read starts tools.
 	CadenceNormal CadenceClass = "normal"
 	// CadenceSlow marks a module read every six hours and at the start of a
-	// session, which is where a reboot lands: the platform facts and the
-	// sudo policy change when somebody changes the machine, and the
-	// document sets their pace at six hours and a boot.
+	// session, which is where a reboot lands: the platform facts and the sudo
+	// policy change when somebody changes the machine, and the document sets
 	CadenceSlow CadenceClass = "slow"
 	// CadenceStatic marks a module read once a day, at the full report, or on
 	// demand: the state changes only when somebody changes it, and then the
@@ -39,10 +32,7 @@ const (
 // slowInterval is the pace of the slow class.
 const slowInterval = 6 * time.Hour
 
-// moduleCadence assigns every module of ModuleOrder to a class. The basic
-// facts - the system, the hardware, the identity of the machine - are always
-// collected with the cycle; they are cheap and decide which modules make
-// sense, so they have no class here.
+// moduleCadence assigns every module of ModuleOrder to a class.
 var moduleCadence = map[string]CadenceClass{
 	ModuleSystem:  CadenceSlow,
 	ModuleSudoers: CadenceSlow,
@@ -94,26 +84,20 @@ func ModulesOfCadence(classes ...CadenceClass) []string {
 const (
 	// defaultNormalEvery says every which cycle the normal modules go.
 	defaultNormalEvery = 4
-	// cadenceJitter is the spread of one interval around its base: ten per
-	// cent either way, so that a fleet started by one reboot does not report
-	// in step for the rest of its life.
+	// cadenceJitter is the spread of one interval around its base: ten per cent
+	// either way, so that a fleet started by one reboot does not report in step
+	// for the rest of its life.
 	cadenceJitter = 0.10
 )
 
 // Cadence decides what the periodic inventory cycle collects and when.
-//
-// The decision is a function of the tick count and of the moment the caller
-// passes in, so it can be tested without waiting: the tests move a clock by
-// hand and ask which modules are due.
 type Cadence struct {
 	// Interval is the base interval of the cycle; every wait is jittered
 	// around it.
 	Interval time.Duration
 	// NormalEvery says every which cycle the normal modules are read.
 	NormalEvery int
-	// FullHourUTC is the hour of the daily full report. It is derived from
-	// the host identifier, so the fleet spreads over the day instead of
-	// reporting at once, and the same host always lands in the same hour.
+	// FullHourUTC is the hour of the daily full report.
 	FullHourUTC int
 
 	random   func(n int64) int64
@@ -152,9 +136,7 @@ func (c *Cadence) applyRemote(intervalSeconds, normalEvery int32, fullHourUTC *i
 	}
 }
 
-// started records the full report that opens a session. The daily one is
-// counted from it: a host reconnecting at the top of its window must not
-// report the whole inventory twice within minutes.
+// started records the full report that opens a session.
 func (c *Cadence) started(at time.Time) {
 	c.lastFull = at
 	c.lastSlow = at
@@ -172,10 +154,6 @@ func (c *Cadence) next() time.Duration {
 
 // due says what the cycle collects at the given moment. A nil list with full
 // set means the whole inventory; otherwise the list names the modules due.
-//
-// The static modules are never on the list: they are read with the full
-// report once a day, and on demand when the panel asks for them. The slow
-// ones join the list once six hours have passed since they last went.
 func (c *Cadence) due(at time.Time) (modules []string, full bool) {
 	c.ticks++
 	if c.fullDue(at) {
@@ -191,12 +169,9 @@ func (c *Cadence) due(at time.Time) (modules []string, full bool) {
 	if c.ticks%every == 0 {
 		classes = append(classes, CadenceNormal)
 	}
-	// The slow read goes two cycles before the six hours are up rather
-	// than the first cycle after: the panel judges a fact older than six
-	// hours as stale, and a read landing a jittered cycle late would leave
-	// the sudo check unknown for a quarter of an hour four times a day.
-	// The mark advances by the pace itself, so the reads keep six hours
-	// between them rather than six hours less two cycles.
+	// The slow read goes two cycles before the six hours are up rather than the
+	// first cycle after: the panel judges a fact older than six hours as stale,
+	// and a read landing a jittered cycle late would leave the sudo check unknown
 	switch next := c.lastSlow.Add(slowInterval); {
 	case c.lastSlow.IsZero():
 		c.lastSlow = at
@@ -215,12 +190,6 @@ func (c *Cadence) due(at time.Time) (modules []string, full bool) {
 
 // fullDue decides the daily full report: the report is due when the most
 // recent window of the host has opened and no full report covers it.
-//
-// The window is an hour wide. A report from just before it - one cycle at
-// most - covers it too: a session that opened with a full report ten minutes
-// before the hour must not send the whole inventory again ten minutes later.
-// A window the cycle missed, because the cycle is longer than the window, is
-// caught up at the first cycle after it.
 func (c *Cadence) fullDue(at time.Time) bool {
 	if c.lastFull.IsZero() {
 		return true

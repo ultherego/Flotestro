@@ -69,9 +69,7 @@ connection:
 	}
 }
 
-// TestTheFileRejectsErrors goes through the cases from the document. Each of
-// them once ended in a silent start with a setting other than the one the
-// operator wrote - and that is worse than a host that does not come up.
+// TestTheFileRejectsErrors goes through the cases from the document.
 func TestTheFileRejectsErrors(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -226,9 +224,9 @@ func TestTheBootstrapCAHasToBeAnOrdinaryFile(t *testing.T) {
 	if err := os.WriteFile(writable, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// We set the permissions after writing: the process umask would trim the
-	// mode given at creation anyway, and the test is to check a file that is
-	// really open.
+	// We set the permissions after writing: the process umask would trim the mode
+	// given at creation anyway, and the test is to check a file that is really
+	// open.
 	if err := os.Chmod(writable, 0o666); err != nil {
 		t.Fatal(err)
 	}

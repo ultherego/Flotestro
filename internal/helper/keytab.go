@@ -10,21 +10,12 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// hostKeytabPath is the one keytab the renewal writes into: the host's
-// own. The request names no path, so a renewal cannot be pointed at a
-// file a service reads that the panel does not manage.
+// hostKeytabPath is the one keytab the renewal writes into: the host's own.
 const hostKeytabPath = "/etc/krb5.keytab"
 
-// renewKeytab fetches a new key of a service principal into the host's
-// keytab with ipa-getkeytab, authenticated with the host's own keytab (-k
-// on a joined host makes the tool take the host credential the way kinit
-// -k does; readHostKeytab reads that same file for the probe). The
-// directory has already retired the old key, so this fetch is the only
-// thing that brings the service back - and the proof it did is the key
-// version number of the principal going up in klist -k, read before and
-// after. The number before is reported as unknown, not zero, when the
-// listing could not be read: a fresh principal has no entry, and that is a
-// different fact from a listing that failed.
+// renewKeytab fetches a new key of a service principal into the host's keytab
+// with ipa-getkeytab, authenticated with the host's own keytab (-k on a joined
+// host makes the tool take the host credential the way kinit -k does;
 func (s *Server) renewKeytab(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.KeytabRenewRequest) *helperv1.HelperResponse {
 	principal := strings.TrimSpace(action.GetPrincipal())
@@ -51,12 +42,9 @@ func (s *Server) renewKeytab(ctx context.Context, request *helperv1.HelperReques
 		result.KvnoBefore = before
 	}
 
-	// ipa-getkeytab adds the new key to the file and leaves the older
-	// entries in place, so a ticket issued under the old key still
-	// decrypts until it expires; the directory alone retired the old key.
-	// The runner is the lenient one, which forgives a non-zero exit: the
-	// verdict here is not the exit code but the key version read below,
-	// and a fetch that failed leaves the version where it was.
+	// ipa-getkeytab adds the new key to the file and leaves the older entries in
+	// place, so a ticket issued under the old key still decrypts until it
+	// expires; the directory alone retired the old key.
 	if _, stderr, err := s.tool()(actionCtx, timeLimit(request, 2*time.Minute, 5*time.Minute),
 		"ipa-getkeytab", "-k", hostKeytabPath, "-p", principal); err != nil {
 		response := reject(ErrorExecFailed, "ipa-getkeytab: "+firstLineOf(stderr))
@@ -74,9 +62,9 @@ func (s *Server) renewKeytab(ctx context.Context, request *helperv1.HelperReques
 	}
 	result.KvnoAfter = after
 	if result.KvnoBeforeKnown && after <= result.KvnoBefore {
-		// The tool said nothing was wrong and the file says nothing
-		// changed: the service still holds the key the directory retired,
-		// and reporting a success would hide exactly that.
+		// The tool said nothing was wrong and the file says nothing changed: the
+		// service still holds the key the directory retired, and reporting a success
+		// would hide exactly that.
 		response := reject(ErrorExecFailed,
 			"ipa-getkeytab returned, but the key version of "+principal+" is still "+
 				strconv.FormatUint(uint64(after), 10))
@@ -91,10 +79,7 @@ func (s *Server) renewKeytab(ctx context.Context, request *helperv1.HelperReques
 }
 
 // principalKVNO reads the highest key version number of a principal in the
-// host's keytab from klist -k. The second value says whether a number was
-// read at all: no entry, no file and a listing that failed all come back
-// as not known, because the caller compares versions and a zero it did not
-// read would compare like a real one.
+// host's keytab from klist -k.
 func (s *Server) principalKVNO(ctx context.Context, principal string) (uint32, bool) {
 	stdout, _, err := s.tool()(ctx, 15*time.Second, "klist", "-k", hostKeytabPath)
 	if err != nil {
@@ -103,12 +88,8 @@ func (s *Server) principalKVNO(ctx context.Context, principal string) (uint32, b
 	return highestKVNO(stdout, principal)
 }
 
-// highestKVNO takes the highest key version of a principal out of a klist
-// -k listing. The listing names one entry per key, "KVNO Principal", and
-// a principal with several keys - one per encryption type, or the old and
-// the new one side by side - is listed once per key. The realm is part of
-// the name the listing prints, so a request without one matches the name
-// before the at sign.
+// highestKVNO takes the highest key version of a principal out of a klist -k
+// listing.
 func highestKVNO(listing, principal string) (uint32, bool) {
 	wanted := strings.ToLower(principal)
 	name, _, hasRealm := strings.Cut(wanted, "@")

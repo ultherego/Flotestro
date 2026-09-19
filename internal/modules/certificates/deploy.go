@@ -24,11 +24,6 @@ const (
 const ProbeWindow = 10 * time.Second
 
 // Deployment describes one certificate replacement on the host.
-//
-// The key is in this structure as bytes and only here: it comes from the
-// store right before the operation, lives in the process memory for its
-// duration and goes neither into the result, nor the log, nor any file but
-// the one that is to be created.
 type Deployment struct {
 	Path        string
 	KeyPath     string
@@ -43,11 +38,6 @@ type Deployment struct {
 }
 
 // Check verifies the material before the replacement.
-//
-// The order of the questions is the whole point here: a certificate that
-// does not match the key stops the service only at start - after the old
-// file has already ceased to exist. That is why everything that can be
-// checked without touching the disk is checked before the first write.
 func Check(deployment Deployment, now time.Time) ([]*x509.Certificate, error) {
 	if err := ValidatePath(deployment.Path); err != nil {
 		return nil, err
@@ -82,9 +72,7 @@ func Check(deployment Deployment, now time.Time) ([]*x509.Certificate, error) {
 			return nil, err
 		}
 	}
-	// The probe is meant to check this certificate, not any. A target name
-	// outside the certificate means the test would not confirm the
-	// deployment anyway.
+	// The probe is meant to check this certificate, not any.
 	if deployment.Target != "" {
 		if host, _, err := net.SplitHostPort(deployment.Target); err == nil {
 			if net.ParseIP(host) == nil && !Covers(certs[0], host) {
@@ -95,12 +83,7 @@ func Check(deployment Deployment, now time.Time) ([]*x509.Certificate, error) {
 	return certs, nil
 }
 
-// Backup holds the previous file content for the duration of the
-// operation.
-//
-// The backup lives in memory, not next to the file: writing the old key to
-// a second file would leave a key nobody watches any more on the disk -
-// also when the deployment succeeds.
+// Backup holds the previous file content for the duration of the operation.
 type Backup struct {
 	Path     string
 	Existed  bool
@@ -136,10 +119,6 @@ func Remember(path string) (Backup, error) {
 }
 
 // Restore returns to the remembered file content.
-//
-// A file that did not exist before the operation vanishes: returning to
-// the state before the change also means the absence of the file the
-// change created.
 func (b Backup) Restore() error {
 	if b.Path == "" {
 		return nil
@@ -154,11 +133,6 @@ func (b Backup) Restore() error {
 }
 
 // Write puts the certificate and the key in their places.
-//
-// The key goes first: a service reloaded between one write and the other
-// sees the old certificate with the new key or the new certificate with the
-// old key, and only the first of these pairs does not end in a handshake
-// error.
 func Write(deployment Deployment, uid, gid int) error {
 	if len(deployment.Key) > 0 {
 		mode, err := filesmodule.ValidateMode(valueOr(deployment.KeyMode, KeyMode))
@@ -198,12 +172,6 @@ type ProbeResult struct {
 }
 
 // Probe asks the service what it presents itself as now.
-//
-// The connection does not check trust and should not: the question is
-// "does the service present the certificate we have just deployed", not
-// "does this host trust this authority". Chain verification against the
-// host trust store would reject every certificate from a private CA - that
-// is most of those the panel deploys.
 func Probe(ctx context.Context, target string) ProbeResult {
 	result := ProbeResult{Target: target}
 	if err := ValidateTarget(target); err != nil || target == "" {
@@ -216,9 +184,8 @@ func Probe(ctx context.Context, target string) ProbeResult {
 	dialer := &tls.Dialer{
 		NetDialer: &net.Dialer{Timeout: ProbeWindow},
 		Config: &tls.Config{
-			// The name is given so the server picks the right certificate
-			// for SNI; the verification is done by us, comparing the
-			// fingerprint.
+			// The name is given so the server picks the right certificate for SNI; the
+			// verification is done by us, comparing the fingerprint.
 			ServerName:         host,
 			InsecureSkipVerify: true,
 			MinVersion:         tls.VersionTLS12,

@@ -323,13 +323,8 @@ func TestCheckSecretFile(t *testing.T) {
 	}
 }
 
-// A package ships an environment file that lists every variable the
-// product knows, most of them with nothing after the equals sign. For a
-// secret the installation may leave out, such a line says "not
-// configured" - and a panel that refused to start over one of its own
-// default lines would be refusing its own packaging. A required secret
-// keeps refusing it, because there the empty value is a statement that
-// something went wrong on the way in.
+// A package ships an environment file that lists every variable the product
+// knows, most of them with nothing after the equals sign.
 func TestAnEmptyVariableIsNoStatementForAnOptionalSecret(t *testing.T) {
 	t.Setenv("FLOTESTRO_TEST_SECRET", "")
 	value, err := OptionalSecretValue("FLOTESTRO_TEST_SECRET")

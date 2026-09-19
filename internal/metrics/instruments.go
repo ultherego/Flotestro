@@ -7,22 +7,16 @@ import (
 	"sync"
 )
 
-// The instruments measured at the point of the event, as opposed to the
-// series computed from the database at scrape time. A histogram cannot be
-// reconstructed after the fact: buckets computed from a table would describe
-// a distribution nobody measured. So the code that dispatches, plans and
-// grants records the observation itself, and the collector renders it.
-//
-// The instruments live in the process, hence per panel instance; the
-// gateway label of the build info tells the instances apart.
+// The instruments measured at the point of the event, as opposed to the series
+// computed from the database at scrape time.
 
 // DurationBuckets covers everything from a sub-second dispatch to an
 // hour-long transaction.
 var DurationBuckets = []float64{0.1, 0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600, 1800, 3600}
 
-// AckBuckets covers an acknowledgement: a round trip on a healthy stream
-// is well under a second, and the dispatch lease is a minute, so the
-// buckets are dense below a second and end where the lease does.
+// AckBuckets covers an acknowledgement: a round trip on a healthy stream is
+// well under a second, and the dispatch lease is a minute, so the buckets are
+// dense below a second and end where the lease does.
 var AckBuckets = []float64{0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60}
 
 // Registry keeps the instruments of one process.
@@ -80,9 +74,8 @@ func (r *Registry) NewHistogram(name, help string, buckets []float64, labels ...
 // Inc adds one to the series of the given label values.
 func (c *Counter) Inc(values ...string) { c.Add(1, values...) }
 
-// Add adds a count to the series of the given label values: one event
-// that stands for many, like a pass that held back a batch. A count of
-// zero or less is no event - a counter only goes up.
+// Add adds a count to the series of the given label values: one event that
+// stands for many, like a pass that held back a batch.
 func (c *Counter) Add(count float64, values ...string) {
 	if count <= 0 {
 		return
@@ -220,11 +213,8 @@ var (
 	TargetStateDuration = Default.NewHistogram("flotestro_target_state_duration_seconds",
 		"Time a campaign target spent in a state before leaving it, by state and operation.",
 		DurationBuckets, "state", "action")
-	// DispatchThrottled counts the queued jobs a pass of the scheduler
-	// left in the queue because the dispatch rate had no token for them.
-	// A rising counter is a queue draining at the rate rather than a
-	// fault; a counter that never rises with a full queue is a rate set
-	// too high to matter.
+	// DispatchThrottled counts the queued jobs a pass of the scheduler left in
+	// the queue because the dispatch rate had no token for them.
 	DispatchThrottled = Default.NewCounter("flotestro_dispatch_throttled_total",
 		"Queued jobs held back by the dispatch rate, by gateway.", "gateway")
 	// DuplicateIdentity counts the sessions opened while another session
@@ -235,86 +225,51 @@ var (
 	BudgetWait = Default.NewHistogram("flotestro_budget_wait_seconds",
 		"Wait for budget capacity that ended in a grant, by class and site.",
 		DurationBuckets, "class", "site")
-	// TaskAck measures the time from handing a task to the agent to the
-	// agent's word that it holds it. The dispatch lease (internal/jobs
-	// DispatchLease) is sized against this: an acknowledgement that takes
-	// longer than the lease means a redelivery of a task the host had.
+	// TaskAck measures the time from handing a task to the agent to the agent's
+	// word that it holds it.
 	TaskAck = Default.NewHistogram("flotestro_task_ack_seconds",
 		"Time from handing a task to the agent to its acceptance, by operation.",
 		AckBuckets, "action")
-	// ResourceLockWait measures how long a task waited on its host for a
-	// resource another task held, from the acceptance to the start. Only
-	// the waits the agent reported are counted.
+	// ResourceLockWait measures how long a task waited on its host for a resource
+	// another task held, from the acceptance to the start.
 	ResourceLockWait = Default.NewHistogram("flotestro_resource_lock_wait_seconds",
 		"Time a task waited on its host for a resource held by another task, by operation.",
 		DurationBuckets, "action")
 
-	// AgentReconnect counts the sessions opened by a host whose previous
-	// session ended within the last ten minutes: a link that flaps or an
-	// agent that crashes, which the connection state alone never shows.
-	// The gateway increments it at session open (agent_service.go), once
-	// it has looked up when the host's last session ended; the family of
-	// the host is the label, because the fleet grows and a host name must
-	// not become a time series.
+	// AgentReconnect counts the sessions opened by a host whose previous session
+	// ended within the last ten minutes: a link that flaps or an agent that
+	// crashes, which the connection state alone never shows.
 	AgentReconnect = Default.NewCounter("flotestro_agent_reconnect_total",
 		"Agent sessions opened within ten minutes of the host's previous session ending, by host family.",
 		"host_family")
-	// RelaySessionIdentity counts the sessions opened through a relay by
-	// how the host was identified: end_to_end, when the host signed its
-	// envelope and the gateway verified the signature against the
-	// certificate on record; attested, when the relay named the
-	// certificate the host presented and the gateway checked it; or weak,
-	// when the relay named the host alone. The gateway increments it once
-	// the strength of a session is settled (agent_service.go); a fleet
-	// with weak or attested sessions has relays or agents to upgrade
-	// before the mode can be enforced.
+	// RelaySessionIdentity counts the sessions opened through a relay by how the
+	// host was identified: end_to_end, when the host signed its envelope and the
+	// gateway verified the signature against the certificate on record; attested,
 	RelaySessionIdentity = Default.NewCounter("flotestro_relay_session_identity_total",
 		"Agent sessions opened through a relay, by the strength of the host's identity.",
 		"strength")
-	// RelayEnvelopeRefusal counts the relayed messages and calls whose
-	// identity envelope was refused, by the refusal code:
-	// relay_envelope_invalid, relay_body_hash_mismatch,
-	// relay_sequence_replayed, relay_host_signature_invalid. A steady
-	// count of replays is a relay retrying honestly after a broken link;
-	// anything else on this counter is a relay or a path to inspect.
+	// RelayEnvelopeRefusal counts the relayed messages and calls whose identity
+	// envelope was refused, by the refusal code: relay_envelope_invalid,
+	// relay_body_hash_mismatch, relay_sequence_replayed,
 	RelayEnvelopeRefusal = Default.NewCounter("flotestro_relay_envelope_refusal_total",
 		"Relayed messages whose identity envelope was refused, by code.",
 		"code")
-	// RelayEnvelopeRedelivery counts the relayed messages the panel had
-	// consumed already and the relay carried a second time because it
-	// never saw the acknowledgement - a link that broke while the spool
-	// was draining. The message is dropped and acknowledged again, and
-	// nothing is written on the host: an honest retry of a relay is not a
-	// refusal of the host. The counter rising with every reconnect is the
-	// spool doing its work; rising while the link holds means the
-	// acknowledgements do not reach the relay.
+	// RelayEnvelopeRedelivery counts the relayed messages the panel had consumed
+	// already and the relay carried a second time because it never saw the
+	// acknowledgement - a link that broke while the spool was draining.
 	RelayEnvelopeRedelivery = Default.NewCounter("flotestro_relay_envelope_redelivery_total",
 		"Relayed messages carried again after the panel had already consumed them.")
-	// AgentRenewal counts the certificate renewals by how they ended. The
-	// gateway increments it where the renewal is settled (renewal.go):
-	// renewed, refused, or failed - a refusal is the panel's decision, a
-	// failure is something that broke. A renewal that never arrives shows
-	// in the expiry gauges, not here.
+	// AgentRenewal counts the certificate renewals by how they ended. The gateway
+	// increments it where the renewal is settled (renewal.
 	AgentRenewal = Default.NewCounter("flotestro_agent_renewal_total",
 		"Agent certificate renewals, by outcome.", "outcome")
-	// SessionFence counts what the session ownership fence refused or
-	// held, by outcome: delivery_held when the scheduler kept a task in
-	// the queue because the host had no live owner or another instance's
-	// session owned it; dispatch_refused and result_refused when the
-	// database refused a delivery or a result written under a superseded
-	// token; renewal_lost when a session found at its renewal that the
-	// host is no longer its own and closed. A steady trickle is hosts
-	// moving between instances; a stream from one instance is an instance
-	// that keeps streams it no longer owns.
+	// SessionFence counts what the session ownership fence refused or held, by
+	// outcome: delivery_held when the scheduler kept a task in the queue because
+	// the host had no live owner or another instance's session owned it;
 	SessionFence = Default.NewCounter("flotestro_session_fence_total",
 		"Writes refused and tasks held by the session ownership fence, by outcome.", "outcome")
-	// NotificationDeliveries counts the settled attempts of the
-	// notification queue by the state they settled in: delivered,
-	// retry_wait, dead_letter. The worker increments it once per attempt
-	// (internal/notify worker.go); a rising retry_wait is a receiver that
-	// is down, a rising dead_letter is a channel to mend. The dead
-	// letters waiting for an operator are a gauge of the collector,
-	// flotestro_notification_dead_letters, read from the table.
+	// NotificationDeliveries counts the settled attempts of the notification
+	// queue by the state they settled in: delivered, retry_wait, dead_letter.
 	NotificationDeliveries = Default.NewCounter("flotestro_notification_deliveries_total",
 		"Settled attempts of the notification queue, by the state they settled in.", "state")
 )

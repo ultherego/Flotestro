@@ -5,12 +5,8 @@ import (
 	"time"
 )
 
-// The enrollment endpoint answers strangers: it is the one door open
-// without a client certificate, and the token that opens it is short. A
-// limiter on the source address and on the machine identifier makes
-// guessing a token a matter of years rather than of hours, and keeps a
-// misconfigured installer from filling the trail with one refusal a
-// second.
+// The enrollment endpoint answers strangers: it is the one door open without a
+// client certificate, and the token that opens it is short.
 const (
 	enrollPerIPPerMinute      = 10
 	enrollPerMachinePerMinute = 3
@@ -19,10 +15,8 @@ const (
 	limiterIdle = 10 * time.Minute
 )
 
-// rateLimiter is a set of token buckets keyed by a string, filling at a
-// fixed rate up to a burst. It lives in memory: a limit that has to hold
-// across a restart of the panel would be a wrong limit, and a limit per
-// instance is enough to keep the endpoint from being hammered.
+// rateLimiter is a set of token buckets keyed by a string, filling at a fixed
+// rate up to a burst.
 type rateLimiter struct {
 	mu      sync.Mutex
 	rate    float64 // tokens per second
@@ -48,9 +42,7 @@ func newRateLimiter(perMinute int) *rateLimiter {
 	}
 }
 
-// allow takes one token of the key. The second result says whether a
-// refusal of this key is worth an audit event: the first refusal in a
-// minute is, the rest of the minute repeats it.
+// allow takes one token of the key.
 func (l *rateLimiter) allow(key string) (allowed, recordRefusal bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -78,11 +70,7 @@ func (l *rateLimiter) allow(key string) (allowed, recordRefusal bool) {
 	return false, false
 }
 
-// refund gives the key its token back. The limit is there to price a
-// guess, and a registration the panel accepted was no guess: a rack of
-// machines behind one address is to register as fast as the panel can
-// issue certificates, while a source that keeps producing refusals is
-// held to the rate all the same.
+// refund gives the key its token back.
 func (l *rateLimiter) refund(key string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -96,8 +84,6 @@ func (l *rateLimiter) refund(key string) {
 }
 
 // sweep forgets the keys that have been idle long enough to be full again.
-// It runs at most once a minute, so a busy endpoint does not scan the map
-// on every call.
 func (l *rateLimiter) sweep(now time.Time) {
 	if now.Sub(l.swept) < time.Minute {
 		return

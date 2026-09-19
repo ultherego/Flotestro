@@ -78,7 +78,6 @@ func testCertificate(t *testing.T) (pemBytes []byte, certificate *x509.Certifica
 // fakeBundleSources describes a host that exists only in the test: a valid
 // configuration, an environment file with a lingering token, a journal that
 // quotes a password, a helper journal that cannot be read, and an identity
-// whose key lies next to the certificate.
 func fakeBundleSources(t *testing.T, certPEM []byte) bundleSources {
 	t.Helper()
 	files := map[string][]byte{}
@@ -306,8 +305,7 @@ func TestSupportBundleWritesTheArchiveWhereAsked(t *testing.T) {
 
 // Every collector says what it produces before it produces it: no field
 // without a sensitivity, and no secret field without a reason for leaving it
-// out. The declaration is the policy of the bundle, so an undeclared field is
-// a gap in the policy rather than a detail.
+// out.
 func TestEveryCollectorDeclaresTheSensitivityOfItsFields(t *testing.T) {
 	certPEM, _ := testCertificate(t)
 	sources := fakeBundleSources(t, certPEM)

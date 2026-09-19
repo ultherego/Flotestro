@@ -10,14 +10,7 @@ import (
 )
 
 // The key of a repository is public material, so the panel may send it in an
-// order - unlike a password, which goes through the secret store. Public does
-// not mean arbitrary, though: it is that key that settles whose packages the
-// host will install. That is why, before it lands on disk, we check that it
-// really is an OpenPGP key and compute its fingerprint - so that a person has
-// something to compare with the fingerprint given by the supplier.
-//
-// We compute it ourselves, without an OpenPGP library: what is needed is one
-// packet from an ASCII frame and one digest, not a whole trust model.
+// order - unlike a password, which goes through the secret store.
 
 // KeyFingerprint checks the key material and returns the fingerprint of the
 // primary key.
@@ -34,9 +27,6 @@ func KeyFingerprint(material string) (string, error) {
 }
 
 // unwrapFrame removes the ASCII frame and decodes the content.
-//
-// A key given in binary is a key as well: we recognise it by the missing frame
-// header and pass it on without decoding.
 func unwrapFrame(material string) ([]byte, error) {
 	trimmed := strings.TrimSpace(material)
 	if trimmed == "" {
@@ -157,12 +147,6 @@ func firstPublicKey(data []byte) ([]byte, error) {
 }
 
 // keyPacketFingerprint computes the fingerprint of the primary key.
-//
-// Version 4 computes SHA-1 over the prefix 0x99 and a two-byte length; version
-// 6 - SHA-256 over the prefix 0x9b and a four-byte length. A version we do not
-// know is not guessed at: a wrong fingerprint is worse than no fingerprint,
-// because a person would compare it with the one of the supplier and call it a
-// match.
 func keyPacketFingerprint(packet []byte) (string, error) {
 	if len(packet) == 0 {
 		return "", fmt.Errorf("the packet of the key is empty")

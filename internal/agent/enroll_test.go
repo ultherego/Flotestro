@@ -27,11 +27,9 @@ const enrollTestHost = "3f2a9c1e-0000-4000-8000-000000000001"
 
 var enrollTestClock = time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
 
-// fakeIssuer behaves like the enrollment service of the panel: it keeps
-// every attempt under its number and the digest of its request, answers a
-// repeated attempt with the certificate it has already issued, and refuses a
-// known number with another request. On top of that it loses answers on
-// demand - after the certificate came into being, the way a network does.
+// fakeIssuer behaves like the enrollment service of the panel: it keeps every
+// attempt under its number and the digest of its request, answers a repeated
+// attempt with the certificate it has already issued, and refuses a known
 type fakeIssuer struct {
 	ca       *pki.CA
 	requests []*agentv1.EnrollRequest
@@ -129,8 +127,7 @@ func existingGeneration(t *testing.T, store *identitystore.Store, ca *pki.CA) *i
 
 // TestARetryRepeatsTheSameAttempt is the reason the pending record exists:
 // after a lost answer the host asks again under the same number and with the
-// same request, and gets the certificate that was already issued - instead
-// of generating a new identity and being refused as a reuse of the request.
+// same request, and gets the certificate that was already issued - instead of
 func TestARetryRepeatsTheSameAttempt(t *testing.T) {
 	issuer := newFakeIssuer(t)
 	issuer.lose = 1
@@ -260,9 +257,8 @@ func TestAStaleAttemptIsAbandoned(t *testing.T) {
 }
 
 // TestAFinishedAttemptIsNotRepeated covers an interruption after the commit
-// and before the removal of the record: the record then describes the key
-// the host already works with, and repeating it would ask for what the host
-// has.
+// and before the removal of the record: the record then describes the key the
+// host already works with, and repeating it would ask for what the host has.
 func TestAFinishedAttemptIsNotRepeated(t *testing.T) {
 	issuer := newFakeIssuer(t)
 	enrollment, _ := testEnrollment(t, issuer)
@@ -296,10 +292,9 @@ func TestAFinishedAttemptIsNotRepeated(t *testing.T) {
 	}
 }
 
-// TestARejectedCertificateSwitchesNothing is the invariant of a recovery:
-// the current generation works until the new one has been received and
-// verified, and a certificate the gateway does not accept leaves the host
-// as it was.
+// TestARejectedCertificateSwitchesNothing is the invariant of a recovery: the
+// current generation works until the new one has been received and verified,
+// and a certificate the gateway does not accept leaves the host as it was.
 func TestARejectedCertificateSwitchesNothing(t *testing.T) {
 	issuer := newFakeIssuer(t)
 	enrollment, _ := testEnrollment(t, issuer)
@@ -357,9 +352,9 @@ func TestARejectedCertificateSwitchesNothing(t *testing.T) {
 	}
 }
 
-// TestAnAnswerForAnotherKeyIsRejected: the panel signs what it was sent,
-// but a bug or somebody in the middle could answer with a certificate for
-// another key. Such an answer must not reach the disk.
+// TestAnAnswerForAnotherKeyIsRejected: the panel signs what it was sent, but a
+// bug or somebody in the middle could answer with a certificate for another
+// key.
 func TestAnAnswerForAnotherKeyIsRejected(t *testing.T) {
 	issuer := newFakeIssuer(t)
 	enrollment, _ := testEnrollment(t, issuer)

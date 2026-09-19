@@ -171,10 +171,9 @@ func TestRenewalPlanRefusesWithoutDaemonAndWithoutRequest(t *testing.T) {
 	}
 }
 
-// Three different plans of the module come back the same way, so the
-// receiver must tell them apart without guessing from empty fields: a
-// refused plan has everything empty but the reason and still names its
-// kind.
+// Three different plans of the module come back the same way, so the receiver
+// must tell them apart without guessing from empty fields: a refused plan has
+// everything empty but the reason and still names its kind.
 func TestPlansNameTheirKind(t *testing.T) {
 	now := time.Now()
 	good := testCertificate(t, "panel.flotestro.test", now.Add(-time.Hour), now.Add(time.Hour))

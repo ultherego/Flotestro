@@ -5,9 +5,7 @@ import (
 	"testing"
 )
 
-// Dnf prints progress bars on stderr. Taking the first line gave the operator
-// a message that was true, useless and indistinguishable from a success -
-// exactly what could be seen in the panel after a failed upgrade.
+// Dnf prints progress bars on stderr.
 func TestAProgressBarIsNotTheCauseOfAnError(t *testing.T) {
 	stderr := strings.Join([]string{
 		"[ 1/36] Verify package files            100% |  33.0   B/s |  16.0   B |  00m00s",

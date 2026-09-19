@@ -17,9 +17,9 @@ type hostTopologyView struct {
 	FailureDomain string `json:"failure_domain"`
 }
 
-// placeInFailureDomain records the failure domain of a host through the
-// API and takes it away again after the test: a lab host left in a rack
-// would carry the rack's budget into every later run.
+// placeInFailureDomain records the failure domain of a host through the API
+// and takes it away again after the test: a lab host left in a rack would
+// carry the rack's budget into every later run.
 func (h *harness) placeInFailureDomain(hostID, domain string) hostTopologyView {
 	h.t.Helper()
 	response, body := h.request(http.MethodPut, "/api/v1/hosts/"+hostID+"/failure-domain",
@@ -38,16 +38,9 @@ func (h *harness) placeInFailureDomain(hostID, domain string) hostTopologyView {
 	return host
 }
 
-// TestFailureDomainBudgetHoldsTheSecondChange guards the topology budget
-// of the document: two hosts placed in one rack share the rack's token of
-// the units family, so a restart ordered on each asks for the same
-// domain budget, says so while it waits, and the two never run side by
-// side under a capacity of one - whatever the site budget allows.
-//
-// The token is held first by the test itself, through the table the
-// budgets live in: the proof is about the wait, and a wait that depends
-// on winning a race against a restart that takes a second would prove
-// nothing on a fast fleet.
+// TestFailureDomainBudgetHoldsTheSecondChange guards the topology budget of
+// the document: two hosts placed in one rack share the rack's token of the
+// units family, so a restart ordered on each asks for the same domain budget,
 func TestFailureDomainBudgetHoldsTheSecondChange(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -136,9 +129,8 @@ func TestFailureDomainBudgetHoldsTheSecondChange(t *testing.T) {
 		t.Errorf("the rack's budget counts %d waiting jobs while two stand in the queue", held.WaitingJobs)
 	}
 
-	// The token goes back. One token, two jobs: the second must not start
-	// before the first has finished, and while one runs the other still
-	// names the rack.
+	// The token goes back. One token, two jobs: the second must not start before
+	// the first has finished, and while one runs the other still names the rack.
 	if _, err := pool.Exec(ctx, `delete from budget_leases where owner = $1`, holder); err != nil {
 		t.Fatalf("giving the token back: %v", err)
 	}

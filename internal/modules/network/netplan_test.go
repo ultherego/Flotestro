@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-// Output of "netplan get" copied from the Ubuntu host of the test fleet:
-// the cloud-init uplink and the host-only interface written by the
-// virtualisation tool.
+// Output of "netplan get" copied from the Ubuntu host of the test fleet: the
+// cloud-init uplink and the host-only interface written by the virtualisation
+// tool.
 const netplanGetOutput = `network:
   version: 2
   renderer: networkd
@@ -106,8 +106,7 @@ func TestNetplanFilesAreMergedInOrder(t *testing.T) {
 }
 
 // The panel's file carries only the keys of the change for the touched
-// interface. The distribution's definition is not copied into it: a copy
-// would freeze the rest of the definition at today's values.
+// interface.
 func TestNetplanManagedFileCarriesOnlyTheChange(t *testing.T) {
 	config, _ := ParseNetplan(netplanGetOutput)
 	current, _ := config.Profile("enp0s8")
@@ -152,9 +151,9 @@ func TestNetplanManagedFileCarriesOnlyTheChange(t *testing.T) {
 	}
 }
 
-// A list in a later file replaces the earlier one, so a route change has
-// to carry the default route along - otherwise the host would lose its
-// gateway together with the static routes.
+// A list in a later file replaces the earlier one, so a route change has to
+// carry the default route along - otherwise the host would lose its gateway
+// together with the static routes.
 func TestNetplanRouteListKeepsTheGateway(t *testing.T) {
 	config, _ := ParseNetplan(netplanGetOutput)
 	current, _ := config.Profile("enp0s8")
@@ -165,10 +164,9 @@ func TestNetplanRouteListKeepsTheGateway(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The default route is written with the destination of its own family
-	// rather than the word "default", which netplan reads from the family
-	// of the gateway: on a host with both families that word would make a
-	// v6 default route look like a v4 one.
+	// The default route is written with the destination of its own family rather
+	// than the word "default", which netplan reads from the family of the
+	// gateway: on a host with both families that word would make a v6 default
 	if !strings.Contains(document, "to: "+defaultRouteIPv4) || !strings.Contains(document, "via: 192.168.56.1") {
 		t.Errorf("the route list dropped the gateway: %s", document)
 	}

@@ -14,9 +14,7 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/accounts"
 )
 
-// effectiveSSHDConfig reads what sshd applies, as sshd -T prints it. The
-// managed key file counts only when the server lists it; a test replaces
-// the read with a fixed configuration.
+// effectiveSSHDConfig reads what sshd applies, as sshd -T prints it.
 var effectiveSSHDConfig = func(ctx context.Context) (string, error) {
 	if !exists(sshdPath) {
 		return "", errors.New("this host has no sshd server")
@@ -24,18 +22,8 @@ var effectiveSSHDConfig = func(ctx context.Context) (string, error) {
 	return toolOutput(ctx, sshdPath, "-T")
 }
 
-// editLocalUserKeys changes the keys of an account one operation at a
-// time (security remediation, chapter 14.1): an add appends what the file
-// does not carry, a remove takes the named fingerprints away and nothing
-// else, a replace writes the list anew and only when the account still
-// has the list the operator saw.
-//
-// Every variant reads the file under the account lock, edits it line by
-// line - the options in front of a key and the lines that are not keys
-// stay as they were - and writes it back atomically. The guards run here,
-// root-side, on what the host has now: a replace approved on a stale
-// picture is refused, and so is the removal of the last key of an account
-// that has no other way in, unless the order says the lockout is meant.
+// editLocalUserKeys changes the keys of an account one operation at a time
+// (security remediation, chapter 14.
 func (s *Server) editLocalUserKeys(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.LocalUserActionRequest) *helperv1.HelperResponse {
 	name := action.GetName()
@@ -46,9 +34,7 @@ func (s *Server) editLocalUserKeys(ctx context.Context, request *helperv1.Helper
 
 	managed := action.GetManagedFile()
 	if managed {
-		// A managed file sshd does not open grants nothing. The check is
-		// part of the plan: the operator learns it before the write, with
-		// the code, not after a key that "was added" opens no door.
+		// A managed file sshd does not open grants nothing.
 		effective, err := effectiveSSHDConfig(ctx)
 		if err != nil {
 			return reject(ErrorManagedFileNotRead, "the sshd configuration could not be read: "+err.Error())
@@ -97,10 +83,7 @@ func (s *Server) editLocalUserKeys(ctx context.Context, request *helperv1.Helper
 
 	case helperv1.LocalUserActionRequest_OPERATION_REPLACE_SSH_KEYS,
 		helperv1.LocalUserActionRequest_OPERATION_SET_SSH_KEYS:
-		// The replace is bound to the list the operator saw. The new
-		// operation always carries it; the old name carries it when the
-		// panel that issued the order knew to, and runs blind otherwise -
-		// that was its contract, kept for one release.
+		// The replace is bound to the list the operator saw.
 		expected := action.GetExpectedFingerprints()
 		verify := action.GetOperation() == helperv1.LocalUserActionRequest_OPERATION_REPLACE_SSH_KEYS || len(expected) > 0
 		if current := accounts.Fingerprints(lines); verify && !accounts.SameFingerprints(current, expected) {
@@ -127,10 +110,9 @@ func (s *Server) editLocalUserKeys(ctx context.Context, request *helperv1.Helper
 		return reject(ErrorMalformed, err.Error())
 	}
 
-	// The lockout guard: the edit leaves the account with no key in either
-	// file, and the account has no password login - none set, a locked
-	// one, or a state the host could not read, which is not "a password"
-	// either. The same explicit consent the sshd module asks for.
+	// The lockout guard: the edit leaves the account with no key in either file,
+	// and the account has no password login - none set, a locked one, or a state
+	// the host could not read, which is not "a password" either.
 	if len(change.After) == 0 && len(change.Before) > 0 && other == 0 && !action.GetAllowLockout() {
 		if reason := noPasswordLogin(name); reason != "" {
 			return reject(ErrorLastKeyLockout, fmt.Sprintf(
@@ -157,10 +139,9 @@ func (s *Server) editLocalUserKeys(ctx context.Context, request *helperv1.Helper
 	return &helperv1.HelperResponse{Accepted: true}
 }
 
-// readKeyFiles returns the content of the file the order edits and the
-// number of keys in the other one - the managed file when the user's is
-// edited and the other way round - so the lockout guard counts every way
-// in the account has.
+// readKeyFiles returns the content of the file the order edits and the number
+// of keys in the other one - the managed file when the user's is edited and
+// the other way round - so the lockout guard counts every way in the account
 func (s *Server) readKeyFiles(name string, account accountRecord, managed bool) ([]byte, int, *helperv1.HelperResponse) {
 	userFile, err := readAuthorizedKeysFile(account.Home)
 	if err != nil {
@@ -200,8 +181,7 @@ func rejectKeyFileError(err error) *helperv1.HelperResponse {
 }
 
 // noPasswordLogin says why the account cannot log in with a password, or
-// nothing when it can. An unreadable shadow file is a reason too: a state
-// the host cannot read is not "a password is set".
+// nothing when it can.
 func noPasswordLogin(name string) string {
 	states, err := shadowReader()
 	if err != nil {
@@ -230,10 +210,8 @@ func describeFingerprints(fingerprints []string) string {
 // directory of its own.
 var managedKeysRoot = accounts.ManagedKeysDir
 
-// readManagedKeysFile returns the content of the account's managed file,
-// or nothing when there is none. The directory belongs to root, but the
-// read still follows no link: the discipline is the same for every key
-// file the helper opens.
+// readManagedKeysFile returns the content of the account's managed file, or
+// nothing when there is none.
 func readManagedKeysFile(name string) ([]byte, error) {
 	path := filepath.Join(managedKeysRoot, name, accounts.ManagedKeysFileName)
 	fd, err := unix.Openat2(unix.AT_FDCWD, path, &unix.OpenHow{
@@ -269,12 +247,9 @@ func readManagedKeysFile(name string) ([]byte, error) {
 	return content[:n], nil
 }
 
-// writeManagedKeysFile replaces the account's managed file atomically:
-// a temporary file created exclusively next to it and renamed over it,
-// root-owned and world-readable as sshd requires of a file outside the
-// user's home (StrictModes refuses a key file writable by anybody but its
-// owner or root). An empty content removes the file: sshd reads a missing
-// file as no keys, and an empty file left behind would look managed.
+// writeManagedKeysFile replaces the account's managed file atomically: a
+// temporary file created exclusively next to it and renamed over it,
+// root-owned and world-readable as sshd requires of a file outside the user's
 func writeManagedKeysFile(name, content string) error {
 	root := filepath.Clean(managedKeysRoot)
 	if err := os.MkdirAll(root, 0o755); err != nil {

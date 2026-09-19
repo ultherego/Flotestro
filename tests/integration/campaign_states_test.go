@@ -2,26 +2,8 @@
 
 package integration
 
-// The states of a campaign and of its hosts that the campaigns document
-// names and the engine did not have until now.
-//
-// What the product promises, as read from the code:
-//
-//   - A host whose plan finds nothing to do ends no_change - a success
-//     without a mutation - before anything is approved, and a campaign of
-//     such hosts completes without a task ever running the change
-//     (internal/campaigns/planning.go settleNoChange, finishPlanning).
-//   - A campaign that got through its threshold with hosts that failed or
-//     ended unknown ends completed_with_issues, not completed; a skipped
-//     host is a decision, not an issue (internal/campaigns/model.go
-//     settleCampaignState).
-//   - A cancel ordered while a host still carries its task leaves the
-//     campaign canceling until the host settles, then canceled with its
-//     report (internal/campaigns/store.go Cancel, orchestrator.go drain).
-//     A host whose task waits for a resource of the host is awaiting_lock
-//     meanwhile, with the blocker (progress.go followJob).
-//   - A planning phase that leaves no host to run on ends the campaign
-//     plan_failed rather than pausing it (planning.go failPlanning).
+// The states of a campaign and of its hosts that the campaigns document names
+// and the engine did not have until now.
 
 import (
 	"context"
@@ -63,9 +45,7 @@ func campaignReport(h *harness, campaignID string) campaignReportView {
 	return report
 }
 
-// fileCampaign orders a file.ensure campaign on the given hosts with no
-// canary and no threshold, so the states under test are the only thing
-// that decides how it ends.
+// fileCampaign orders a file.
 func fileCampaign(name, path, content string, hostIDs []string) map[string]any {
 	return map[string]any{
 		"name": name, "action": "file.ensure",
@@ -82,11 +62,8 @@ func fileCampaign(name, path, content string, hostIDs []string) map[string]any {
 	}
 }
 
-// TestAHostAlreadyInTheDesiredStateEndsNoChange: a file the host already
-// holds with the same content gives a plan with nothing to do. The host
-// ends no_change without approval and without a task running the change,
-// the campaign completes, and the report counts the host under no_change -
-// not under succeeded, which is the count of hosts that changed.
+// TestAHostAlreadyInTheDesiredStateEndsNoChange: a file the host already holds
+// with the same content gives a plan with nothing to do.
 func TestAHostAlreadyInTheDesiredStateEndsNoChange(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -176,16 +153,7 @@ func TestAHostAlreadyInTheDesiredStateEndsNoChange(t *testing.T) {
 	}
 }
 
-// TestAFailureUnderTheThresholdEndsCompletedWithIssues: a restart of
-// cron.service on a host that has that unit and on one that names it
-// differently fails on the second. The threshold is not crossed, so the
-// campaign gets through - and says so as completed_with_issues, with the
-// failed host in the report.
-//
-// The threshold is the absolute one. The percentage counts from the
-// finished hosts, so with two hosts the first one to settle decides alone:
-// a failure first is a hundred percent, and a threshold of fifty would
-// pause the campaign or not by the order the results came in.
+// TestAFailureUnderTheThresholdEndsCompletedWithIssues: a restart of cron.
 func TestAFailureUnderTheThresholdEndsCompletedWithIssues(t *testing.T) {
 	h := newHarness(t)
 	var withCron, withoutCron *hostView
@@ -243,13 +211,8 @@ func TestAFailureUnderTheThresholdEndsCompletedWithIssues(t *testing.T) {
 	}
 }
 
-// TestACancelDrainsTheHostUnderWay: a run of a schedule entry holds the
-// units lock of the host, so the campaign's restart of cron.service is
-// accepted by the agent and waits - the host is awaiting_lock with the
-// blocker named. A cancel then finds a host carrying its task: the
-// campaign is canceling, not canceled, the task is left to finish, and
-// once the lock frees and the restart succeeds the campaign ends canceled
-// with the host's real outcome in its report.
+// TestACancelDrainsTheHostUnderWay: a run of a schedule entry holds the units
+// lock of the host, so the campaign's restart of cron.
 func TestACancelDrainsTheHostUnderWay(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -321,9 +284,8 @@ func TestACancelDrainsTheHostUnderWay(t *testing.T) {
 	h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/cancel",
 		map[string]any{"reason": "again"}, nil, http.StatusConflict)
 
-	// The run ends with its sleep, the restart takes the lock and succeeds,
-	// and only then is the campaign canceled. The wait is bounded by the
-	// sleep plus the restart and a few passes of the orchestrator.
+	// The run ends with its sleep, the restart takes the lock and succeeds, and
+	// only then is the campaign canceled.
 	final := h.awaitCampaign(campaign.ID, map[string]bool{"canceled": true}, 2*time.Minute)
 	if final.State != "canceled" {
 		t.Fatalf("the campaign ended %s, expected canceled", final.State)
@@ -346,10 +308,8 @@ func TestACancelDrainsTheHostUnderWay(t *testing.T) {
 	}
 }
 
-// TestAPlanRefusedEverywhereEndsPlanFailed: a file outside the allowlist
-// is refused by every host at planning. The campaign has no host to run
-// on, nothing to approve and nothing a resume could start, so it ends
-// plan_failed - a terminal state with a report - rather than paused.
+// TestAPlanRefusedEverywhereEndsPlanFailed: a file outside the allowlist is
+// refused by every host at planning.
 func TestAPlanRefusedEverywhereEndsPlanFailed(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")

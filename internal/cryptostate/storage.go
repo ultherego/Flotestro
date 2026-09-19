@@ -13,8 +13,8 @@ import (
 )
 
 // Record is the installation's row: which key seals the secrets, which CA
-// issues the certificates, and the sentinel that proves the key on disk
-// is the one the row was written with.
+// issues the certificates, and the sentinel that proves the key on disk is the
+// one the row was written with.
 type Record struct {
 	InstallationID string
 	Provider       string
@@ -29,9 +29,7 @@ type Record struct {
 	Revision          int64
 }
 
-// Facts is what the database holds that binds it to key material. A
-// database with any of these is an installation, and an installation is
-// never initialised anew.
+// Facts is what the database holds that binds it to key material.
 type Facts struct {
 	// SecretVersions counts the live versions of the secret store: each
 	// is unreadable without the key it was sealed under.
@@ -54,9 +52,8 @@ var ErrNoRecord = errors.New("no installation record")
 // Storage is the seam between the guard and the database, so the startup
 // table can be exercised without one.
 type Storage interface {
-	// Lock takes the installation lock and holds it until the returned
-	// function runs. A second panel of the same installation waits here
-	// and reads the record the first one wrote.
+	// Lock takes the installation lock and holds it until the returned function
+	// runs.
 	Lock(ctx context.Context) (func(), error)
 	Load(ctx context.Context) (*Record, error)
 	Insert(ctx context.Context, record Record) error
@@ -69,9 +66,6 @@ type Storage interface {
 }
 
 // installationLockID is the advisory lock of the initialisation: "FCRY".
-// It is distinct from the migration lock so that a panel migrating and a
-// panel initialising do not hold each other up for nothing, and it is
-// session-level on a connection of its own, held for the whole guard.
 const installationLockID = 0x46435259
 
 // Postgres is the Storage over the fleet database.

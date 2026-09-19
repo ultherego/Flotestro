@@ -9,14 +9,7 @@ import (
 	"strings"
 )
 
-// Plan describes the difference between the file found and the desired
-// state.
-//
-// Two hosts with the same desired state almost never have the same diff:
-// one has a file with different content, another has none at all, a third
-// has it with different permissions. The operator's approval is meant to
-// cover those differences, not the intent alone - and that is why the plan
-// is made separately on every host.
+// Plan describes the difference between the file found and the desired state.
 type Plan struct {
 	Path string `json:"path"`
 	// Action names what would happen: create, update, no_change, remove or
@@ -40,26 +33,20 @@ type Plan struct {
 	DesiredGroup  string `json:"desired_group,omitempty"`
 
 	// Whether each part of the inode changes, separately from the sentences
-	// below. The sentences are for a person; these are for a panel that has
-	// to colour a row or refuse an approval without reading English.
+	// below.
 	ContentChanges bool `json:"content_changes,omitempty"`
 	ModeChanges    bool `json:"mode_changes,omitempty"`
 	OwnerChanges   bool `json:"owner_changes,omitempty"`
 	GroupChanges   bool `json:"group_changes,omitempty"`
 
-	// Changes lists in human terms what will change. A content fingerprint
-	// tells the operator nothing; "content" and "permissions from 0644 to
-	// 0600" do.
+	// Changes lists in human terms what will change. A content fingerprint tells
+	// the operator nothing; "content" and "permissions from 0644 to 0600" do.
 	Changes []string `json:"changes,omitempty"`
 
-	// SymlinkPolicy names the rule that applied to this path. A write that
-	// followed a link would land somewhere else entirely, so the plan says
-	// which rule it was computed under rather than leaving it implied.
+	// SymlinkPolicy names the rule that applied to this path.
 	SymlinkPolicy string `json:"symlink_policy"`
 
-	// Validator says what would check the content, and in which version. A
-	// verdict without the identity of who gave it is not something an
-	// operator can weigh.
+	// Validator says what would check the content, and in which version.
 	Validator ValidatorIdentity `json:"validator"`
 
 	// ValidatorOutput is the result of checking the desired content. A plan
@@ -67,9 +54,9 @@ type Plan struct {
 	ValidatorOutput string `json:"validator_output,omitempty"`
 	ValidatorFailed bool   `json:"validator_failed,omitempty"`
 
-	// Consumers are the services that read this file and would need a
-	// reload or a restart afterwards; ConsumersReason says why there are
-	// none, because an empty list is not "nothing to do".
+	// Consumers are the services that read this file and would need a reload or a
+	// restart afterwards; ConsumersReason says why there are none, because an
+	// empty list is not "nothing to do".
 	Consumers       []Consumer `json:"consumers,omitempty"`
 	ConsumersReason string     `json:"consumers_reason,omitempty"`
 
@@ -77,9 +64,7 @@ type Plan struct {
 	// to. Zero is an answer too: a rollback of this file would refuse.
 	KeptVersions int `json:"kept_versions"`
 
-	// PlanHash binds the plan to this specific difference. It enters the
-	// approval fingerprint, and at write time the host checks once more
-	// whether the file still looks as it did at plan time.
+	// PlanHash binds the plan to this specific difference.
 	PlanHash string `json:"plan_hash"`
 }
 
@@ -93,11 +78,6 @@ const (
 )
 
 // Desired describes the state the order asks for.
-//
-// It is a structure rather than a row of arguments because the plan
-// describes a whole intended state - the bytes, the inode and what would
-// have to happen afterwards - and a call whose meaning depends on the
-// position of the sixth boolean is a call somebody will get wrong.
 type Desired struct {
 	Content []byte
 	Mode    string
@@ -108,17 +88,16 @@ type Desired struct {
 	FromSecret bool
 	// Removal marks a plan for taking the file away.
 	Removal bool
-	// Validator is the check that applies to this path on this host,
-	// already identified by the caller: only the host can say whether the
-	// tool is installed and which version it is.
+	// Validator is the check that applies to this path on this host, already
+	// identified by the caller: only the host can say whether the tool is
+	// installed and which version it is.
 	Validator ValidatorIdentity
 	// KeptVersions is how many copies of the file the host kept.
 	KeptVersions int
 }
 
-// Symlink policies. There is one rule and one exception, and the plan
-// names which of the two applied rather than leaving the operator to
-// assume.
+// Symlink policies. There is one rule and one exception, and the plan names
+// which of the two applied rather than leaving the operator to assume.
 const (
 	// SymlinkPolicyNoFollow: the path is opened refusing to pass through
 	// any symbolic link, so a link planted in the directory leads nowhere.
@@ -130,11 +109,6 @@ const (
 
 // Compute computes the difference between the file found and the desired
 // state.
-//
-// The desired content is explicit here, because the panel sent it. A file
-// from a secret is the exception: its content is not in the plan and not in
-// the fingerprint - otherwise the plan itself would be the place of the
-// leak.
 func Compute(current File, desired Desired) Plan {
 	plan := Plan{
 		Path: current.Path, Exists: current.Exists, Mode: current.Mode,
@@ -152,9 +126,7 @@ func Compute(current File, desired Desired) Plan {
 	if desired.Removal {
 		plan.Action = PlanRemove
 		if !current.Exists {
-			// Removing a file that does not exist is not an error and not a
-			// change. The operator is meant to see it before approving, not
-			// to learn it from the report.
+			// Removing a file that does not exist is not an error and not a change.
 			plan.Action = PlanRemoveAbsent
 		}
 		plan.DesiredMode, plan.DesiredOwner, plan.DesiredGroup = "", "", ""
@@ -188,14 +160,8 @@ func Compute(current File, desired Desired) Plan {
 	return plan
 }
 
-// markDifferences fills in which parts of the inode a write over an
-// existing file touches.
-//
-// Content that comes from the secret store is not compared, so it is not
-// marked as changing and not marked as staying: the plan says in words
-// that it is not compared, and a boolean here would have to lie one way or
-// the other. A file being created is the one case with no doubt - its
-// content changes from nothing to something, whatever the source.
+// markDifferences fills in which parts of the inode a write over an existing
+// file touches.
 func (p *Plan) markDifferences(fromSecret bool) {
 	p.ContentChanges = !fromSecret && p.SHA256 != p.DesiredSHA256
 	p.ModeChanges = p.DesiredMode != "" && p.Mode != "" && p.DesiredMode != p.Mode
@@ -204,10 +170,6 @@ func (p *Plan) markDifferences(fromSecret bool) {
 }
 
 // differences lists the changes visible to a human.
-//
-// It reads the flags markDifferences set rather than comparing again: one
-// place decides what changes, so the sentences and the flags can never
-// disagree.
 func differences(plan Plan, fromSecret bool) []string {
 	var changes []string
 	switch {
@@ -237,23 +199,16 @@ func differences(plan Plan, fromSecret bool) []string {
 
 // planFingerprint computes the fingerprint of the whole plan excluding the
 // fingerprint itself.
-//
-// It covers the found and the desired state together: a plan computed on a
-// host that changed in the meantime must yield a different fingerprint -
-// because it is a different change by then.
 func planFingerprint(plan Plan) string {
 	stripped := plan
 	stripped.PlanHash = ""
 	// The validator output can be long and does not describe the difference
-	// itself, so it does not enter the fingerprint: the same diff must give
-	// the same fingerprint.
+	// itself, so it does not enter the fingerprint: the same diff must give the
+	// same fingerprint.
 	stripped.ValidatorOutput = ""
 	// The same goes for what surrounds the change rather than being it: the
-	// version of the tool that checks the content, the services installed
-	// on the host and the number of copies kept. They belong in the plan,
-	// because the operator approves with them in view, but a package
-	// upgrade between the plan and the write must not turn an approved
-	// change into a different one.
+	// version of the tool that checks the content, the services installed on the
+	// host and the number of copies kept.
 	stripped.Validator.Version = ""
 	stripped.Validator.VersionUnavailableReason = ""
 	stripped.Consumers = nil

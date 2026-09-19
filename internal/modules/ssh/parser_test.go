@@ -60,8 +60,7 @@ func TestHostKeyFingerprintWithoutPrivateKey(t *testing.T) {
 }
 
 // Only what the operator asked for is written: printing the whole
-// configuration would freeze on the host the defaults of the day of the
-// write.
+// configuration would freeze on the host the defaults of the day of the write.
 func TestDropInContainsOnlyOrderedSettings(t *testing.T) {
 	content, err := ComposeDropIn(Settings{
 		PermitRootLogin: "prohibit-password",
@@ -128,9 +127,9 @@ func TestChangeCuttingOffAllMethodsIsRecognised(t *testing.T) {
 	}
 }
 
-// In sshd the first value wins, and included files are in alphabetical
-// order: an earlier administrator file shadows ours and the change looks
-// done although it changes nothing.
+// In sshd the first value wins, and included files are in alphabetical order:
+// an earlier administrator file shadows ours and the change looks done
+// although it changes nothing.
 func TestDivergenceBetweenOrderAndStateIsNamed(t *testing.T) {
 	state := ParseEffective(effectiveOutput)
 

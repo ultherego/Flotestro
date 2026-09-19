@@ -10,11 +10,6 @@ import (
 )
 
 // The SNTP query is our own code here, not a tool call, for three reasons.
-// First, it needs no root and changes nothing on the host, so a server test
-// can go without the helper. Second, no host is sure to have ntpdate or
-// sntp, and chronyd -Q works only where chrony is. Third, exactly what the
-// operator asks is measured: whether this server answers and by how much
-// the host clock differs from it.
 const (
 	ntpPort = "123"
 	// ntpEpoch is the difference between the NTP epoch (1900) and the Unix
@@ -25,18 +20,10 @@ const (
 )
 
 // queryAttempts is how many questions a server gets before it counts as
-// silent. NTP runs over UDP and a single datagram is lost now and then,
-// on the way out or back; a time daemon asks again as a matter of
-// course, and so does the probe - otherwise one lost packet would refuse
-// a change of the time source or report a working server as unreachable.
-// Only a question without any answer is repeated: a refusal or a
-// malformed reply is an answer.
+// silent.
 const queryAttempts = 3
 
 // Query asks one SNTP question and describes the answer.
-//
-// The result never lies about what it did not measure: an unreachable
-// server has an empty offset, not a zero one.
 func Query(ctx context.Context, server string, timeout time.Duration) Probe {
 	probe := Probe{Server: server}
 	if err := ValidateServer(server); err != nil {
@@ -82,9 +69,8 @@ func queryOnce(ctx context.Context, server, port string, timeout time.Duration) 
 	request := make([]byte, 48)
 	// LI = 0, version 4, mode 3 (client).
 	request[0] = 0x23
-	// The transmit timestamp is random, not clock-based: the reply echoes
-	// it untouched, so only we can recognise our own question. The host
-	// clock stays on our side, where it is more precise anyway.
+	// The transmit timestamp is random, not clock-based: the reply echoes it
+	// untouched, so only we can recognise our own question.
 	transmit := make([]byte, 8)
 	if _, err := rand.Read(transmit); err != nil {
 		probe.Error = err.Error()
@@ -109,9 +95,7 @@ func queryOnce(ctx context.Context, server, port string, timeout time.Duration) 
 		probe.Error = "the reply is shorter than an NTP packet"
 		return probe
 	}
-	// The reply must echo our transmit timestamp. Without this check a
-	// packet from the side would be enough for the panel to believe
-	// somebody else's time.
+	// The reply must echo our transmit timestamp.
 	for i := 0; i < 8; i++ {
 		if reply[24+i] != transmit[i] {
 			probe.Error = "the reply does not match the question"
@@ -124,9 +108,8 @@ func queryOnce(ctx context.Context, server, port string, timeout time.Duration) 
 	}
 	stratum := uint32(reply[1])
 	if stratum == 0 {
-		// Stratum 0 carries a refusal message ("kiss of death") in the
-		// reference field: the server answered, but tells us to stop
-		// asking.
+		// Stratum 0 carries a refusal message ("kiss of death") in the reference
+		// field: the server answered, but tells us to stop asking.
 		probe.Error = "the server refused service: " + string(reply[12:16])
 		return probe
 	}
@@ -172,10 +155,6 @@ func Reachable(probes []Probe) int {
 }
 
 // BestProbe picks the reply with the shortest path.
-//
-// An offset measured over a slow link is less trustworthy than the same
-// offset measured over a fast one, so the time step is judged by the
-// measurement with the smallest delay, not by the first at hand.
 func BestProbe(probes []Probe) *Probe {
 	var best *Probe
 	for i := range probes {
@@ -206,10 +185,6 @@ func Steps(probe *Probe) bool {
 }
 
 // timestamp turns a 64-bit NTP timestamp into a time.
-//
-// The seconds counter overflows in 2036 and then the eras will have to be
-// told apart; until then subtracting the epoch is enough and no more is
-// pretended.
 func timestamp(field []byte) time.Time {
 	seconds := binary.BigEndian.Uint32(field[0:4])
 	fraction := binary.BigEndian.Uint32(field[4:8])

@@ -11,9 +11,9 @@ import (
 	"time"
 )
 
-// The lifecycle of a directory account and of a host group membership, as
-// the panel carries them out: plan, a second person, execution phase by
-// phase, and the directory read back afterwards.
+// The lifecycle of a directory account and of a host group membership, as the
+// panel carries them out: plan, a second person, execution phase by phase, and
+// the directory read back afterwards.
 
 const directoryLifecycleReason = "integration test of the directory lifecycle"
 
@@ -69,13 +69,9 @@ func orderAndRun(t *testing.T, h, approver *harness, action string, payload map[
 	return final
 }
 
-// TestDirectoryUserLifecycleExpiresResetsAndPreservesAnAccount walks a
-// test account through the lifecycle the document names: creation, an
-// expiration set and cleared, a password reset whose one-time value the
-// requester reads once, and the removal that keeps the entry.
-//
-// The preserved entry stays in the lab directory: that is the point of
-// preserving, and the adapter has no command that would erase it.
+// TestDirectoryUserLifecycleExpiresResetsAndPreservesAnAccount walks a test
+// account through the lifecycle the document names: creation, an expiration
+// set and cleared, a password reset whose one-time value the requester reads
 func TestDirectoryUserLifecycleExpiresResetsAndPreservesAnAccount(t *testing.T) {
 	h := newHarness(t)
 	if !directoryAvailable(t, h) {
@@ -224,11 +220,9 @@ func TestDirectoryUserLifecycleExpiresResetsAndPreservesAnAccount(t *testing.T) 
 	}
 	final := approveAndRun(t, h, approver, change)
 	if final.State == "partially_applied" && preserveRefusedByTheDirectory(t, h, final.ID) {
-		// Moving an entry into the preserved container is a "moddn" right
-		// that FreeIPA grants to no built-in privilege below admin, and
-		// the connector role of the lab has only the built-in ones. The
-		// product answered truthfully - partially applied, the directory's
-		// words in the phase - and that is what the assertion checks here.
+		// Moving an entry into the preserved container is a "moddn" right that
+		// FreeIPA grants to no built-in privilege below admin, and the connector
+		// role of the lab has only the built-in ones.
 		t.Logf("the directory refused the preservation to the connector role: %s", final.ResultMessage)
 		return
 	}
@@ -244,9 +238,8 @@ func TestDirectoryUserLifecycleExpiresResetsAndPreservesAnAccount(t *testing.T) 
 	}
 }
 
-// labHostGroup picks a host group the test may change: never the group of
-// the directory servers, whose membership decides where the directory
-// itself runs.
+// labHostGroup picks a host group the test may change: never the group of the
+// directory servers, whose membership decides where the directory itself runs.
 func labHostGroup(t *testing.T, h *harness) directoryHostGroupView {
 	t.Helper()
 	var groups struct {
@@ -264,9 +257,9 @@ func labHostGroup(t *testing.T, h *harness) directoryHostGroupView {
 	return candidates[0]
 }
 
-// TestDirectoryHostGroupMembershipRoundTrip moves the joined lab host into
-// a host group and out again - or out and back in when it already belongs
-// - and reads the group back from the directory after each half.
+// TestDirectoryHostGroupMembershipRoundTrip moves the joined lab host into a
+// host group and out again - or out and back in when it already belongs - and
+// reads the group back from the directory after each half.
 func TestDirectoryHostGroupMembershipRoundTrip(t *testing.T) {
 	h := newHarness(t)
 	if !directoryAvailable(t, h) {
@@ -319,9 +312,9 @@ func TestDirectoryHostGroupMembershipRoundTrip(t *testing.T) {
 
 	first := move(!member)
 	if len(first.Plan.Conflicts) > 0 {
-		// Taking the host out of this group would leave the administrator
-		// without a way in; the lab is then not in a shape the test may
-		// change, and it says so instead of forcing it.
+		// Taking the host out of this group would leave the administrator without a
+		// way in; the lab is then not in a shape the test may change, and it says so
+		// instead of forcing it.
 		h.do(http.MethodPost, "/api/v1/identity/changes/"+first.ID+"/cancel",
 			map[string]any{"reason": "the lab refuses the change"}, nil, 0)
 		t.Skipf("the plan refuses to move %s: %v", host, first.Plan.Conflicts)
@@ -358,9 +351,9 @@ func TestDirectoryHostGroupMembershipRoundTrip(t *testing.T) {
 	}
 }
 
-// TestDirectoryServicesAndHealthAreReadable checks the two read-only
-// views added for the panel: the service principals, and the connector's
-// account of itself.
+// TestDirectoryServicesAndHealthAreReadable checks the two read-only views
+// added for the panel: the service principals, and the connector's account of
+// itself.
 func TestDirectoryServicesAndHealthAreReadable(t *testing.T) {
 	h := newHarness(t)
 	if !directoryAvailable(t, h) {
@@ -412,10 +405,8 @@ func TestDirectoryServicesAndHealthAreReadable(t *testing.T) {
 	}
 }
 
-// preserveRefusedByTheDirectory says whether the preservation failed on
-// the directory's "moddn" right, the one phase the lab role cannot pass.
-// The phases are read from the change again: the view the approval
-// returns carries the summary alone.
+// preserveRefusedByTheDirectory says whether the preservation failed on the
+// directory's "moddn" right, the one phase the lab role cannot pass.
 func preserveRefusedByTheDirectory(t *testing.T, h *harness, changeID string) bool {
 	t.Helper()
 	var detail struct {
@@ -434,17 +425,8 @@ func preserveRefusedByTheDirectory(t *testing.T, h *harness, changeID string) bo
 }
 
 // TestServiceKeytabRotationIsASeparateRightAndRunsOnTheHost guards the
-// rotation the architecture document names as "keytab rotation per
-// separate permission": an operator of the fleet is refused with the
-// permission named, the plan names the two halves and the host, and - on
-// a fleet with a service principal to rotate - the directory retires the
-// keytab while the host of that name fetches a new one and reports the
-// key version going up.
-//
-// The lab rarely has such a principal on a fleet host: the directory's own
-// services live on the directory server, and the panel's principal is the
-// connector's, which the test must not retire from under itself. The test
-// then ends after the refusal and the plan, with the reason.
+// rotation the architecture document names as "keytab rotation per separate
+// permission": an operator of the fleet is refused with the permission named,
 func TestServiceKeytabRotationIsASeparateRightAndRunsOnTheHost(t *testing.T) {
 	h := newHarness(t)
 	if !directoryAvailable(t, h) {

@@ -1,12 +1,5 @@
-// Package security describes the protective state of a host: mandatory
-// access control, auditing, the boot mode and what the host exposes to the
-// outside.
-//
-// The module gathers facts, not judgements. The judgement - compliance with
-// a profile - is made in the panel, because the checks are versioned there
-// and the whole fleet is visible there. A host that judged itself would need
-// new rules on every policy change, and nobody could say whether two hosts
-// were judged the same way.
+// Package security describes the protective state of a host: mandatory access
+// control, auditing, the boot mode and what the host exposes to the outside.
 package security
 
 import (
@@ -28,9 +21,8 @@ const (
 	EFIDir           = "/sys/firmware/efi"
 	EFIVarsDir       = "/sys/firmware/efi/efivars"
 	SetenforcePath   = "/usr/sbin/setenforce"
-	// Augenrules assembles the rules from the rules.d directory and loads
-	// them into the kernel. This is the path auditd itself provides: the
-	// daemon unit on some distributions refuses a manual restart.
+	// Augenrules assembles the rules from the rules. d directory and loads them
+	// into the kernel.
 	AugenrulesPath = "/usr/sbin/augenrules"
 	AuditctlPath   = "/usr/sbin/auditctl"
 	// Audit rules live in files only root can read - and a file written
@@ -59,11 +51,6 @@ const (
 )
 
 // Mandatory describes the host's mandatory access control.
-//
-// The running mode and the configured mode are two fields, because they
-// differ at times: a host switched by hand to permissive returns to
-// enforcing after a reboot, and a host with "SELINUX=enforcing" in the file
-// and SELinux disabled in the kernel looks protected but is not.
 type Mandatory struct {
 	System         string `json:"system,omitempty"`
 	Mode           string `json:"mode,omitempty"`
@@ -90,28 +77,17 @@ func (m Mandatory) Protects() bool {
 }
 
 // Audit describes the state of the audit daemon.
-//
-// Loaded rules and configured rules are two fields, because they differ at
-// times: a rules file written but not loaded describes an audit that does
-// not exist, and the rule count alone does not say whether the kernel knows
-// them.
 type Audit struct {
 	Present bool  `json:"present"`
 	Active  *bool `json:"active"`
-	// RulesLoaded is the number of rules the kernel knows; RulesConfigured -
-	// the number of rules in files. A nil pointer means a read that failed,
-	// not an absence of rules.
+	// RulesLoaded is the number of rules the kernel knows; RulesConfigured - the
+	// number of rules in files.
 	RulesLoaded     *int   `json:"rules_loaded"`
 	RulesConfigured *int   `json:"rules_configured"`
 	Reason          string `json:"reason,omitempty"`
 }
 
-// Socket reach. The panel does not rule whether a service is visible from
-// the internet - neither the host nor the panel knows that: a private
-// address may be reachable across the whole company network, and a public
-// one may sit behind an edge firewall. So what is visible gets named:
-// whether the socket stands on the loopback, on a specific host address, or
-// on all interfaces at once.
+// Socket reach.
 const (
 	ReachLoopback      = "loopback"
 	ReachHostNetwork   = "host-network"
@@ -125,9 +101,7 @@ type Listener struct {
 	Port     int    `json:"port"`
 	Process  string `json:"process,omitempty"`
 	PID      uint32 `json:"pid,omitempty"`
-	// Reach names the socket reach. A service on the loopback and the same
-	// service on a host address are two different situations - but neither
-	// is automatically "visible from the internet".
+	// Reach names the socket reach.
 	Reach string `json:"reach"`
 }
 
@@ -150,12 +124,9 @@ type Snapshot struct {
 	Listening      []Listener `json:"listening,omitempty"`
 	ListeningKnown bool       `json:"listening_known"`
 	// OwnersKnown says whether the sockets carry an owner. Without root the
-	// socket list is complete but nameless - and those are two different
-	// answers.
+	// socket list is complete but nameless - and those are two different answers.
 	OwnersKnown bool `json:"owners_known"`
 	// Missing lists the facts that could not be gathered, with the reason.
-	// The checks turn them into an undetermined state with a reason code
-	// instead of guessing a value.
 	Missing map[string]string `json:"missing,omitempty"`
 
 	ObservedAt        time.Time `json:"observed_at"`
@@ -183,12 +154,6 @@ func (s Snapshot) ByReach() map[string]int {
 }
 
 // ValidateMode checks the SELinux mode ordered by the panel.
-//
-// The panel switches between enforcing and permissive, because both changes
-// work immediately and both can be reverted the same way. It does not set
-// SELinux to disabled: to come back, the host needs the whole filesystem
-// relabelled and a reboot, and that is not an operation the panel can
-// promise.
 func ValidateMode(mode string) error {
 	switch mode {
 	case ModeEnforcing, ModePermissive:
@@ -231,11 +196,8 @@ func ParseSELinuxConfiguration(content string) (mode, policy string) {
 	return mode, policy
 }
 
-// ParseAppArmorProfiles reads /sys/kernel/security/apparmor/profiles.
-//
-// A row has the form "name (mode)". A profile in complain mode does not
-// protect, it only records violations, so both modes are counted
-// separately.
+// ParseAppArmorProfiles reads /sys/kernel/security/apparmor/profiles. A row
+// has the form "name (mode)".
 func ParseAppArmorProfiles(content string) (enforcing, complain int) {
 	for _, line := range strings.Split(content, "\n") {
 		line = strings.TrimSpace(line)
@@ -258,9 +220,6 @@ func ParseAppArmorProfiles(content string) (enforcing, complain int) {
 }
 
 // ParseRulesFromFile counts the rules written in a file.
-//
-// Comments and empty lines are not rules; "-D" deletes all of them and is
-// not one either, although it looks like an entry.
 func ParseRulesFromFile(content string) int {
 	rules := 0
 	for _, line := range strings.Split(content, "\n") {
@@ -286,10 +245,8 @@ func ParseRules(output string) int {
 	return rules
 }
 
-// ParseLockdown reads /sys/kernel/security/lockdown.
-//
-// The file lists all the modes, and the one in effect is in square
-// brackets.
+// ParseLockdown reads /sys/kernel/security/lockdown. The file lists all the
+// modes, and the one in effect is in square brackets.
 func ParseLockdown(content string) string {
 	for _, field := range strings.Fields(content) {
 		if strings.HasPrefix(field, "[") && strings.HasSuffix(field, "]") {
@@ -299,9 +256,8 @@ func ParseLockdown(content string) string {
 	return ""
 }
 
-// ParseSecureBoot reads the SecureBoot EFI variable.
-//
-// The variable has five bytes: four are attributes, the last is the value.
+// ParseSecureBoot reads the SecureBoot EFI variable. The variable has five
+// bytes: four are attributes, the last is the value.
 func ParseSecureBoot(data []byte) *bool {
 	if len(data) < 5 {
 		return nil
@@ -311,10 +267,6 @@ func ParseSecureBoot(data []byte) *bool {
 }
 
 // ParseListeners reads the output of "ss -tulpnH".
-//
-// The columns are fixed: protocol, state, queues, local address, remote
-// address and optionally the process. The local address carries the port
-// after the last colon, because an IPv6 address contains colons itself.
 func ParseListeners(output string) []Listener {
 	var sockets []Listener
 	for _, line := range strings.Split(output, "\n") {
@@ -362,11 +314,8 @@ func splitAddress(field string) (string, int, bool) {
 	return address, port, true
 }
 
-// Reach classifies the address a socket stands on.
-//
-// The classification ends at what the host knows about itself. "Visible
-// from the internet" is a conclusion about routes and edge firewalls that
-// neither the host nor the panel can draw from the address alone.
+// Reach classifies the address a socket stands on. The classification ends at
+// what the host knows about itself.
 func Reach(address string) string {
 	switch {
 	case address == "":
@@ -385,9 +334,8 @@ func SocketKey(protocol, address string, port int) string {
 	return protocol + "|" + address + "|" + strconv.Itoa(port)
 }
 
-// Names of the facts that cannot be read without root. The helper receives
-// a list of them, not a command to run: the scope of its work is
-// enumerated.
+// Names of the facts that cannot be read without root. The helper receives a
+// list of them, not a command to run: the scope of its work is enumerated.
 const (
 	FactAppArmorProfiles = "apparmor_profiles"
 	FactAuditRules       = "audit_rules"
@@ -402,9 +350,6 @@ type Owner struct {
 }
 
 // Supplement holds the facts gathered by the helper on explicit request.
-//
-// A nil field means a fact that was not asked for or could not be read -
-// the reason is then in Errors, under the fact name.
 type Supplement struct {
 	ProfilesEnforcing *int              `json:"profiles_enforcing,omitempty"`
 	ProfilesComplain  *int              `json:"profiles_complain,omitempty"`

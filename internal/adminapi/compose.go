@@ -19,15 +19,8 @@ type projectVersion struct {
 	Applied   bool      `json:"applied"`
 }
 
-// handleComposeVersions returns the manifest history of a project on a
-// host.
-//
-// The history has no table of its own. Every deployment is an operation,
-// and an operation already carries the manifest, the author, the time and
-// the result - a separate record would be a second source of truth about
-// the same thing and would sooner or later drift from the first. Reverting
-// a change is deploying an earlier version, so it needs no operation of its
-// own.
+// handleComposeVersions returns the manifest history of a project on a host.
+// The history has no table of its own.
 func (s *Server) handleComposeVersions(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
 	_, scope, ok := s.hostScope(w, r, hostID)

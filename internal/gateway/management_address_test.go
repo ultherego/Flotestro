@@ -18,9 +18,7 @@ func TestTheAddressFromADirectConnection(t *testing.T) {
 	}
 }
 
-// Behind a relay the panel sees the address of the relay. Giving it as the
-// address of the host would be a falsehood, so only the declaration of the
-// host counts.
+// Behind a relay the panel sees the address of the relay.
 func TestBehindARelayTheDeclarationOfTheHostCounts(t *testing.T) {
 	address, source := managementAddress("192.168.56.60:9000", "10.20.4.17", "b7c0-relay")
 	if address != "10.20.4.17" {

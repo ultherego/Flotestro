@@ -9,10 +9,7 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// Reasons a host from the snapshot will not run the operation. Each is a
-// separate answer: a host in a maintenance window comes back on its own, a
-// host without an adapter never comes back, and a host the panel knows
-// nothing about needs a read, not a decision.
+// Reasons a host from the snapshot will not run the operation.
 const (
 	// ReasonMaintenance means a host in a maintenance window: somebody is
 	// working on it.
@@ -22,25 +19,19 @@ const (
 	ReasonCapabilityMissing = "capability_missing"
 	// ReasonQuarantined means a host cut off from management.
 	ReasonQuarantined = "quarantined"
-	// ReasonCapabilityUnknown means a host that has not reported its
-	// adapter registry yet. That is not a missing capability - it is
-	// missing knowledge, and the cure is an inventory read, not exclusion
-	// from the campaign.
+	// ReasonCapabilityUnknown means a host that has not reported its adapter
+	// registry yet.
 	ReasonCapabilityUnknown = "capability_unknown"
 	// ReasonOutOfScope means a host outside the operator's permission
 	// scope.
 	ReasonOutOfScope = "out_of_scope"
-	// ReasonConflict means a host that is already the target of another
-	// running campaign. It does not block the order - the resource locks
-	// queue the operations anyway - but the operator is meant to know
-	// before the start.
+	// ReasonConflict means a host that is already the target of another running
+	// campaign.
 	ReasonConflict = "conflict"
 	// ReasonOffline means a disconnected host. The campaign waits for it
 	// instead of excluding it: the host comes back and does its part.
 	ReasonOffline = "offline"
-	// ReasonExcluded means a host the operator left out by name. It is
-	// the one exclusion that is a decision rather than a finding, and the
-	// target carries who took it and why.
+	// ReasonExcluded means a host the operator left out by name.
 	ReasonExcluded = "excluded"
 )
 
@@ -51,19 +42,15 @@ type hostGroup struct {
 	Sample []string `json:"sample"`
 }
 
-// qualification is the decision which hosts of the snapshot really move.
-//
-// One function computes it for the preview and for creating the campaign. A
-// drift between them would be the worst kind of bug: the operator would see
-// a different campaign on the screen than the one they approve.
+// qualification is the decision which hosts of the snapshot really move. One
+// function computes it for the preview and for creating the campaign.
 type qualification struct {
 	Ready []hosts.Host
 	// Closed are the hosts that enter the snapshot already closed. The
 	// order matches Ready: it is one target list, not two campaigns.
 	Closed []closedHost
-	// Notes do not exclude a host - they describe what the operator is
-	// meant to know before approving. An offline host comes back, a
-	// conflicting host waits for the lock.
+	// Notes do not exclude a host - they describe what the operator is meant to
+	// know before approving.
 	Notes []hostGroup
 }
 
@@ -75,11 +62,8 @@ type closedHost struct {
 	Message string
 }
 
-// assessCandidates decides every host against the operation.
-//
-// The order matters: the most serious obstacle is reported, not the first
-// one met. Quarantine comes before the maintenance window, because a host
-// cut off from management does not come back on its own after an hour.
+// assessCandidates decides every host against the operation. The order
+// matters: the most serious obstacle is reported, not the first one met.
 func assessCandidates(candidates []hosts.Host, action opspec.ActionType,
 	conflicts map[string]string, now time.Time) qualification {
 	result := qualification{}
@@ -106,9 +90,8 @@ func assessCandidates(candidates []hosts.Host, action opspec.ActionType,
 			continue
 		}
 
-		// A host that has not reported its adapter registry yet is not a
-		// host without adapters. It is let in and said so directly: the
-		// preflight on the host itself decides.
+		// A host that has not reported its adapter registry yet is not a host
+		// without adapters.
 		if requirement != "" && len(host.Capabilities) == 0 {
 			add(&unknown, host)
 		} else if requirement != "" && !host.Capabilities.Satisfies(requirement) {
@@ -134,11 +117,8 @@ func assessCandidates(candidates []hosts.Host, action opspec.ActionType,
 	return result
 }
 
-// Uncertain lists the hosts that will not apply the change now: closed in
-// the snapshot and those the campaign only waits for.
-//
-// For most operations these are only notes. For a change that binds the
-// whole fleet at once they are a reason not to start it.
+// Uncertain lists the hosts that will not apply the change now: closed in the
+// snapshot and those the campaign only waits for.
 func (q qualification) Uncertain() []hostGroup {
 	groups := q.Exclusions()
 	for _, note := range q.Notes {
@@ -192,10 +172,6 @@ func (q qualification) Targets() []campaigns.TargetHost {
 }
 
 // add appends a host to a group, keeping the sample short.
-//
-// The sample is a sample and that is what it is called: the count talks
-// about the whole, and the names are there for the operator to recognise
-// which machines are meant.
 func add(group *hostGroup, host hosts.Host) {
 	group.Count++
 	if len(group.Sample) < previewSampleSize {

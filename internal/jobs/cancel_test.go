@@ -3,9 +3,8 @@ package jobs
 import "testing"
 
 // A cancel of a task the host holds is a question, not a verdict: the job
-// enters cancel_requested from the two states in which a host has the
-// task, and from nowhere else - a task still in the panel is canceled
-// outright and never asks anybody.
+// enters cancel_requested from the two states in which a host has the task,
+// and from nowhere else - a task still in the panel is canceled outright and
 func TestACancelRequestIsAskedOnlyOfAHostThatHoldsTheTask(t *testing.T) {
 	for _, from := range []State{StateDispatched, StateRunning} {
 		if !from.CanTransition(StateCancelRequested) {
@@ -24,11 +23,8 @@ func TestACancelRequestIsAskedOnlyOfAHostThatHoldsTheTask(t *testing.T) {
 }
 
 // The answer of the host settles the request the way the protocol says:
-// canceled when nothing started or the work was cut short, running again
-// when the phase has to finish, the result when the host had it already.
-// A requested cancel never goes back to the queue - the task is not
-// delivered again after somebody asked to stop it - and never to the
-// states before the hand-over.
+// canceled when nothing started or the work was cut short, running again when
+// the phase has to finish, the result when the host had it already.
 func TestTheAnswerOfTheHostSettlesTheCancelRequest(t *testing.T) {
 	for _, to := range []State{StateCanceled, StateRunning, StateSucceeded, StateFailed, StateTimedOut} {
 		if !StateCancelRequested.CanTransition(to) {
@@ -42,9 +38,9 @@ func TestTheAnswerOfTheHostSettlesTheCancelRequest(t *testing.T) {
 	}
 }
 
-// The outcomes stored on the job are the protocol's words in lower case,
-// and nothing else is one: an agent that answers with a word the panel
-// does not know is not guessed at.
+// The outcomes stored on the job are the protocol's words in lower case, and
+// nothing else is one: an agent that answers with a word the panel does not
+// know is not guessed at.
 func TestTheCancelOutcomesAreTheProtocolsWords(t *testing.T) {
 	for _, outcome := range []string{"not_started", "interrupted", "not_interruptible", "already_done"} {
 		if !KnownCancelOutcome(outcome) {

@@ -14,9 +14,9 @@ import (
 
 const directoryPreserveReason = "integration test of the preserve order of operations"
 
-// preserveChangeView is the change as this test reads it: the plan has to
-// name the entry it would move, and the phases have to say what happened
-// where and in which order.
+// preserveChangeView is the change as this test reads it: the plan has to name
+// the entry it would move, and the phases have to say what happened where and
+// in which order.
 type preserveChangeView struct {
 	ID          string `json:"id"`
 	State       string `json:"state"`
@@ -97,8 +97,8 @@ func runPreserve(t *testing.T, h, approver *harness, change preserveChangeView) 
 }
 
 // deniedLocally reads the local denial marker of a panel identity straight
-// from the fleet database: whether the host half of a preserve happened is
-// not something the change view is allowed to guess at.
+// from the fleet database: whether the host half of a preserve happened is not
+// something the change view is allowed to guess at.
 func deniedLocally(t *testing.T, h *harness, subject string) bool {
 	t.Helper()
 	ctx := context.Background()
@@ -112,13 +112,7 @@ func deniedLocally(t *testing.T, h *harness, subject string) bool {
 }
 
 // TestThePreserveAsksTheDirectoryFirstAndBindsItsPlanToTheEntry is the
-// negative side of chapter 14.3. A preserve used to lock the account locally
-// before the directory was asked, so a move the directory refused left the
-// user denied on every host and still present in the directory - locked out
-// everywhere, removed nowhere.
-//
-// The lab directory answers or the test does not run: this is about the
-// order between two real systems, and a fake directory would not tell it.
+// negative side of chapter 14.
 func TestThePreserveAsksTheDirectoryFirstAndBindsItsPlanToTheEntry(t *testing.T) {
 	h := newHarness(t)
 	if !directoryAvailable(t, h) {
@@ -144,9 +138,8 @@ func TestThePreserveAsksTheDirectoryFirstAndBindsItsPlanToTheEntry(t *testing.T)
 		t.Fatalf("the identity %s is denied before anything happened", uid)
 	}
 
-	// The plan names the entry it would move: where it is, which entry it is
-	// and when it last changed. Without that there is nothing to bind the
-	// execution to.
+	// The plan names the entry it would move: where it is, which entry it is and
+	// when it last changed.
 	planned := planPreserve(t, h, uid)
 	if len(planned.Plan.Conflicts) > 0 {
 		t.Fatalf("the plan of the preserve has conflicts: %v", planned.Plan.Conflicts)
@@ -160,9 +153,7 @@ func TestThePreserveAsksTheDirectoryFirstAndBindsItsPlanToTheEntry(t *testing.T)
 	}
 
 	// An entry somebody changed between the plan and the approval is refused
-	// where the directory reports when an entry last changed. Where it does
-	// not, the plan binds to the DN and the identifier alone, and the case
-	// below - the same user preserved twice - is what catches it.
+	// where the directory reports when an entry last changed.
 	if planned.Plan.PreserveEntry.ModifyTimestamp != "" {
 		orderAndRun(t, h, approver, "identity.user.posix", map[string]any{
 			"posix": map[string]any{"uid": uid, "shell": "/usr/sbin/nologin"},
@@ -188,9 +179,7 @@ func TestThePreserveAsksTheDirectoryFirstAndBindsItsPlanToTheEntry(t *testing.T)
 			"the plan binds to the DN and the identifier")
 	}
 
-	// A plan made before the account moved. It is kept aside and approved
-	// after the account has been preserved through a plan of its own, which
-	// is what two operators preserving the same user look like to the panel.
+	// A plan made before the account moved.
 	kept := planPreserve(t, h, uid)
 
 	final := runPreserve(t, h, approver, planned)
@@ -208,10 +197,8 @@ func TestThePreserveAsksTheDirectoryFirstAndBindsItsPlanToTheEntry(t *testing.T)
 		t.Fatalf("the phases ran in the order %+v; the directory has to confirm "+
 			"before the local account is touched", phases)
 	}
-	// The preflight reports what it verified, including what it could not:
-	// a directory that does not report the rights on an entry has not
-	// granted them. It is a read rather than a change, so it does not count
-	// towards the state of the change - but it does have to say something.
+	// The preflight reports what it verified, including what it could not: a
+	// directory that does not report the rights on an entry has not granted them.
 	if phases[preflight].Status == "failed" || phases[preflight].Message == "" {
 		t.Errorf("the preflight phase is %s (%q) and says nothing about the directory",
 			phases[preflight].Status, phases[preflight].Message)
@@ -223,10 +210,7 @@ func TestThePreserveAsksTheDirectoryFirstAndBindsItsPlanToTheEntry(t *testing.T)
 		t.Errorf("the local denial marker was not set after the directory confirmed")
 	}
 
-	// The second operator arrives with the plan made before the move. The
-	// entry is not where that plan named it any more, so the execution is
-	// refused instead of preserving the same account a second time - and it
-	// stops before either half of the operation runs.
+	// The second operator arrives with the plan made before the move.
 	second := runPreserve(t, h, approver, kept)
 	if second.State == "succeeded" {
 		t.Fatalf("the same account was preserved twice: %s", second.ResultMessage)

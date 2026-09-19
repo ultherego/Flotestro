@@ -18,13 +18,8 @@ const systemctlPath = "/usr/bin/systemctl"
 // families, so there is nothing to detect here.
 const auditUnit = "auditd.service"
 
-// Collect reads what can be read without root.
-//
-// The module does not go through root as a whole. The SELinux mode, the
-// AppArmor switch, FIPS, lockdown, the socket list and the audit unit state
-// are readable by everyone - and that is most of the picture. Root is
-// needed for four things the agent asks the helper for separately and by
-// name.
+// Collect reads what can be read without root. The module does not go through
+// root as a whole.
 func Collect(ctx context.Context, run Runner) Snapshot {
 	snapshot := Snapshot{ObservedAt: time.Now().UTC(), Missing: map[string]string{}}
 	snapshot.MAC = MACState()
@@ -38,8 +33,7 @@ func Collect(ctx context.Context, run Runner) Snapshot {
 		snapshot.Lockdown = ParseLockdown(string(content))
 	}
 	// Secure boot needs the EFI variables, and only root reads those. A host
-	// without EFI answers right away, because the question makes no sense
-	// then.
+	// without EFI answers right away, because the question makes no sense then.
 	if !exists(EFIDir) {
 		snapshot.SecureBootReason = "the host boots in BIOS mode, so secure boot does not apply"
 	} else {
@@ -70,10 +64,6 @@ func (s Snapshot) MissingFacts() []string {
 }
 
 // Supplemented adds the facts gathered by the helper to the picture.
-//
-// A fact that was asked for and could not be read stays on the missing
-// list together with the reason: the check turns it into an undetermined
-// state, not into a default value.
 func (s Snapshot) Supplemented(extra Supplement) Snapshot {
 	if s.Missing == nil {
 		s.Missing = map[string]string{}
@@ -116,16 +106,11 @@ func (s Snapshot) Supplemented(extra Supplement) Snapshot {
 	return s
 }
 
-// MACState determines which mandatory access control system protects the
-// host.
-//
-// The read needs no root: the SELinux mode, its configuration and the
-// AppArmor switch are readable by everyone. The AppArmor profile count is
-// not - that is a separate fact the helper is asked for.
+// MACState determines which mandatory access control system protects the host.
 func MACState() Mandatory {
-	// SELinux is recognised by its filesystem, not by the configuration
-	// file: the configuration is sometimes left on a host where SELinux is
-	// disabled in the kernel, and would look like protection.
+	// SELinux is recognised by its filesystem, not by the configuration file: the
+	// configuration is sometimes left on a host where SELinux is disabled in the
+	// kernel, and would look like protection.
 	configuration, _ := os.ReadFile(MACConfiguration)
 	configuredMode, policy := ParseSELinuxConfiguration(string(configuration))
 
@@ -281,11 +266,8 @@ func CollectSupplement(ctx context.Context, run Runner, facts []string) Suppleme
 	return extra
 }
 
-// rulesFromFiles counts the rules written in the audit configuration.
-//
-// The source is the rules.d directory if it exists: augenrules assembles
-// the audit.rules file from it, so counting both would count the same rules
-// twice.
+// rulesFromFiles counts the rules written in the audit configuration. The
+// source is the rules.
 func rulesFromFiles() (int, error) {
 	entries, err := os.ReadDir(AuditRulesDir)
 	if err == nil {

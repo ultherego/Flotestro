@@ -11,32 +11,13 @@ import (
 )
 
 // The CSV exports of the list screens.
-//
-// Every list the panel shows answers the same request with format=csv as
-// a file: the same filters, the same scope the caller may read, and no
-// page - the file is the whole list, because a spreadsheet is where an
-// operator takes a list that does not fit on a screen. The columns of an
-// export are fixed and named in snake_case, so a sheet or a script built
-// against one file reads the next one; timestamps are RFC 3339 in UTC and
-// a cell that holds several values joins them with a semicolon.
-//
-// The rows go from the store straight to the socket, page by page where
-// the store pages, so an export of the whole fleet costs the panel the
-// memory of one page. Two things end a file early, and both are said in
-// the file itself, in its last row, because the status line is long sent
-// by then: the cap on rows, and an error reading the store. A script that
-// reads an export checks the first cell of the last row against the two
-// markers before it trusts the file.
 
-// exportRowLimit is the most rows one export carries. Beyond it the file
-// ends with a truncation row rather than growing without bound: the panel
-// is not a data warehouse, and an operator who needs more narrows the
-// filter or asks the database.
+// exportRowLimit is the most rows one export carries.
 const exportRowLimit = 50000
 
-// exportFlushEvery is how many rows accumulate before they are handed to
-// the socket: a file of the whole fleet reaches the browser as it is
-// written, not once it is complete.
+// exportFlushEvery is how many rows accumulate before they are handed to the
+// socket: a file of the whole fleet reaches the browser as it is written, not
+// once it is complete.
 const exportFlushEvery = 500
 
 // The markers in the first cell of the last row of a file that did not
@@ -47,16 +28,14 @@ const (
 )
 
 // exportFileName names a file after the list and the day it was taken:
-// flotestro-hosts-2026-09-15.csv. The day is enough; two exports of one
-// list on one day are told apart by the browser, which numbers them.
+// flotestro-hosts-2026-09-15.
 func exportFileName(list string, now time.Time) string {
 	return "flotestro-" + list + "-" + now.UTC().Format("2006-01-02") + ".csv"
 }
 
-// exportFormat reads the format parameter of a list request: JSON by
-// default, CSV on request, and a refusal for anything else - a typo in
-// the format is not a reason to answer with JSON as if nothing was asked.
-// The second result says whether the caller may go on.
+// exportFormat reads the format parameter of a list request: JSON by default,
+// CSV on request, and a refusal for anything else - a typo in the format is
+// not a reason to answer with JSON as if nothing was asked.
 func exportFormat(w http.ResponseWriter, r *http.Request) (asCSV bool, ok bool) {
 	switch format := r.URL.Query().Get("format"); format {
 	case "", "json":
@@ -69,12 +48,9 @@ func exportFormat(w http.ResponseWriter, r *http.Request) (asCSV bool, ok bool) 
 	}
 }
 
-// exportPartialError is what rows returns when the list behind the file
-// ended before its last row for a reason the list itself named - a sweep
-// out of its time budget. The file then ends with the truncation marker
-// and the reason, and carries the partial trailer, rather than with the
-// error marker of a broken read: the rows written are right, there are
-// only fewer of them.
+// exportPartialError is what rows returns when the list behind the file ended
+// before its last row for a reason the list itself named - a sweep out of its
+// time budget.
 type exportPartialError struct {
 	reason string
 }
@@ -83,35 +59,17 @@ func (e exportPartialError) Error() string {
 	return "the export stops before the last row: " + e.reason
 }
 
-// partialHeader says that an export does not describe the whole list it
-// stands for. A caller that already knows - the fleet view behind the
-// file was itself partial - sets it with markPartial before the first
-// row, and it travels as an ordinary header. What is discovered while
-// writing - the cap, a read error, a sweep out of its time budget -
-// travels as a trailer, because the status line is long sent by then. A
-// script that reads an export checks both, and the marker in the first
-// cell of the last row, before it trusts the file.
+// partialHeader says that an export does not describe the whole list it stands
+// for.
 const partialHeader = "X-Flotestro-Partial"
 
-// markPartial says, before the first row is written, that the numbers in
-// the file describe a part of the fleet. It is for a view that knows its
-// own answer was partial: the rows are all there, and they still do not
-// add up to the fleet.
+// markPartial says, before the first row is written, that the numbers in the
+// file describe a part of the fleet.
 func markPartial(w http.ResponseWriter) {
 	w.Header().Set(partialHeader, "true")
 }
 
-// writeCSV streams one export. The columns are the header row; rows
-// produces the file's rows and hands each to yield, and stops when yield
-// says false - the cap is reached or the socket is gone. An error rows
-// returns is written as the last row of the file and logged: the file is
-// already on its way, so the caller cannot get a problem document any
-// more, and a file cut short without a word would pass for a complete
-// one.
-//
-// Every cell goes through the formula guard: a host name, a message, a
-// reason - anything a host or a person typed - may begin with a character
-// a spreadsheet takes as a formula.
+// writeCSV streams one export.
 func (s *Server) writeCSV(w http.ResponseWriter, r *http.Request, filename string, columns []string,
 	rows func(yield func(cells []string) bool) error) {
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
@@ -169,18 +127,17 @@ func (s *Server) writeCSV(w http.ResponseWriter, r *http.Request, filename strin
 		stopped = true
 	}
 	writer.Flush()
-	// The trailer travels after the last chunk: a file that ended with a
-	// marker row is flagged for a reader that looks at the headers rather
-	// than at the last row. The prefix is what makes it a trailer on a
-	// header set after the body began.
+	// The trailer travels after the last chunk: a file that ended with a marker
+	// row is flagged for a reader that looks at the headers rather than at the
+	// last row.
 	if stopped {
 		w.Header().Set(http.TrailerPrefix+partialHeader, "true")
 	}
 }
 
-// exportMarkerRow is the last row of a file that did not reach its end:
-// the marker in the first cell, the explanation in the second, and the
-// width of an ordinary row so the file still parses.
+// exportMarkerRow is the last row of a file that did not reach its end: the
+// marker in the first cell, the explanation in the second, and the width of an
+// ordinary row so the file still parses.
 func exportMarkerRow(width int, marker, message string) []string {
 	row := make([]string, width)
 	row[0] = marker
@@ -190,11 +147,7 @@ func exportMarkerRow(width int, marker, message string) []string {
 	return row
 }
 
-// csvText keeps a cell from becoming a formula. A host name or a message
-// comes from the host, and a spreadsheet runs a cell that starts with =,
-// +, - or @; a leading apostrophe makes it text again. A number is left
-// alone: a negative count of days is a value, and an apostrophe would
-// turn every one of them into text.
+// csvText keeps a cell from becoming a formula.
 func csvText(value string) string {
 	if value == "" {
 		return value

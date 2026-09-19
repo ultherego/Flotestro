@@ -26,9 +26,7 @@ import (
 	"github.com/ultherego/flotestro/internal/agentconfig"
 )
 
-// The units the bundle reads the journal and the status of. The socket goes
-// with the helper: a helper that never starts is usually a socket that never
-// listens, and the journal of the service alone does not show that.
+// The units the bundle reads the journal and the status of.
 var bundleUnits = []string{"flotestro-agent.service", "flotestro-helper.service", "flotestro-helper.socket"}
 
 // journalLines bounds what the bundle takes from the journal: enough to see
@@ -39,19 +37,8 @@ const journalLines = "500"
 const redactedValue = "[redacted]"
 
 // secretPattern finds a "key: value" or "key=value" line whose key names a
-// token, a password or a secret, in YAML, in an environment file, in JSON
-// and in a journal line alike.
-//
-// The configuration carries no secrets by design, but the environment file
-// used to carry the enrollment token, and a journal line may quote a
-// variable. The pattern is broad on purpose: a value redacted for nothing
-// costs a question to the operator; a value that slips through costs a
-// secret. Group 1 is the key with its separator, 2 and 4 the quotes of the
-// value, 3 the value itself.
-//
-// Only blanks may stand around the separator: a newline there would make
-// the value the whole next line, and "token:" with nothing after it would
-// swallow the entry below.
+// token, a password or a secret, in YAML, in an environment file, in JSON and
+// in a journal line alike.
 var secretPattern = regexp.MustCompile(`(?i)("?[\w.-]*(?:token|password|secret)[\w.-]*"?[ \t]*[:=][ \t]*)("?)([^"\s,]*)("?)`)
 
 // redact hides the values of the keys that name a secret and counts what it
@@ -71,11 +58,7 @@ func redact(content []byte) ([]byte, int) {
 	return redacted, count
 }
 
-// bundleSources gathers everything a support bundle reads outside the
-// process.
-//
-// Every source is a field rather than a call, so that a test can build a
-// bundle of a host that does not exist and check what ended up inside it.
+// bundleSources gathers everything a support bundle reads outside the process.
 type bundleSources struct {
 	ConfigPath      string
 	EnvironmentPath string
@@ -141,27 +124,17 @@ func newBundleSources(configPath, environmentPath string) bundleSources {
 }
 
 // sensitivity says how a thing a collector produces may travel.
-//
-// The three answers are the whole policy of the bundle: what is public
-// travels, what is sensitive travels in a file nobody but the operator can
-// read, and what is secret does not travel at all. A collector says which of
-// the three every field of it is before it collects anything, so that the
-// decision is made where the field is known and not by a pattern looking at
-// the text afterwards.
 type sensitivity string
 
 const (
-	// fieldPublic: it says nothing about this host that is not already known
-	// to whoever asked for the bundle - a version, the name of a unit, the
-	// code of a check.
+	// fieldPublic: it says nothing about this host that is not already known to
+	// whoever asked for the bundle - a version, the name of a unit, the code of a
+	// check.
 	fieldPublic sensitivity = "public"
 	// fieldSensitive: it describes this host - its addresses, its paths, its
-	// journal. It travels, and it is why the bundle is written 0600 and goes
-	// nowhere on its own.
+	// journal.
 	fieldSensitive sensitivity = "sensitive"
-	// fieldSecret: whoever reads it can act as this host. It never travels:
-	// the collector does not even read it, and the manifest says what was
-	// left out and why.
+	// fieldSecret: whoever reads it can act as this host.
 	fieldSecret sensitivity = "secret"
 )
 
@@ -182,9 +155,7 @@ type collector struct {
 	Name   string
 	Source string
 	Fields []field
-	// Collect returns the content. An error is recorded in the manifest
-	// rather than returned: a host whose journal cannot be read is exactly
-	// the host somebody needs a bundle of.
+	// Collect returns the content.
 	Collect func(ctx context.Context, sources bundleSources) ([]byte, error)
 }
 
@@ -216,15 +187,13 @@ type bundleEntry struct {
 	Fields []field `json:"fields,omitempty"`
 	// Redactions counts the values hidden in this file.
 	Redactions int `json:"redactions,omitempty"`
-	// Error says why the file is empty or partial; the bundle is still
-	// written, because a host whose journal cannot be read is still a host
-	// that needs help.
+	// Error says why the file is empty or partial; the bundle is still written,
+	// because a host whose journal cannot be read is still a host that needs
+	// help.
 	Error string `json:"error,omitempty"`
 }
 
 // redactionPolicy is the version of what the bundle takes out and leaves out.
-// A bundle read months later is read against the policy it was made under,
-// not the one in the reader's head.
 const redactionPolicy = "2"
 
 // bundleManifest is the first file to read: what is inside, what was taken
@@ -241,10 +210,8 @@ type bundleManifest struct {
 	// Omitted names what the collectors refused to put in and why. A bundle
 	// that is silent about what it left out reads like a complete one.
 	Omitted []omission `json:"omitted,omitempty"`
-	// Scanned says the assembled bundle was held against the scanner before
-	// it was written. A bundle that failed the scan was not written at all,
-	// so the field is true in every bundle that exists - and a reader can
-	// check it with --verify rather than take its word.
+	// Scanned says the assembled bundle was held against the scanner before it
+	// was written.
 	Scanned bool `json:"scanned"`
 }
 
@@ -266,12 +233,6 @@ type identityMetadata struct {
 
 // supportBundleCommand writes everything a support engineer asks for first
 // into one archive.
-//
-// The bundle is made only on an explicit command and the operator sees the
-// path it went to: nothing of the host leaves it by itself. Every collector
-// says beforehand what it produces and how sensitive it is, the secret parts
-// are never read, and the assembled archive is held against the scanner
-// before it is written: a bundle that leaks is worse than no bundle.
 func supportBundleCommand(args []string, out, errOut io.Writer) int {
 	flags := flag.NewFlagSet("support-bundle", flag.ContinueOnError)
 	flags.SetOutput(errOut)
@@ -294,19 +255,17 @@ func supportBundleCommand(args []string, out, errOut io.Writer) int {
 	if target == "" {
 		target = filepath.Join(os.TempDir(), name+".tar.gz")
 	}
-	// O_EXCL and 0600: the default lands in a shared directory, where a
-	// file that already exists may be somebody else's link, and the bundle
-	// holds the journal of a service. The name is taken now, before the
-	// archive is assembled, so that two bundles started at once do not write
-	// over each other.
+	// O_EXCL and 0600: the default lands in a shared directory, where a file that
+	// already exists may be somebody else's link, and the bundle holds the
+	// journal of a service.
 	file, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		fmt.Fprintf(errOut, "the bundle was not written: %v\n", err)
 		return 1
 	}
-	// The archive is assembled in memory and only then written: an archive
-	// that turns out to hold a secret must not exist on disk even for the
-	// moment it takes to notice.
+	// The archive is assembled in memory and only then written: an archive that
+	// turns out to hold a secret must not exist on disk even for the moment it
+	// takes to notice.
 	var assembled bytes.Buffer
 	manifest, err := writeSupportBundle(ctx, sources, name, &assembled)
 	if err == nil {
@@ -349,9 +308,6 @@ func supportBundleCommand(args []string, out, errOut io.Writer) int {
 
 // verifyBundle holds an existing bundle against the same scanner the
 // generation uses, so that an operator can prove what they are about to send.
-//
-// It names the file and the kind of the finding and never the finding itself:
-// a report of a leak that quotes the secret is one more copy of it.
 func verifyBundle(path string, out, errOut io.Writer) int {
 	content, err := os.ReadFile(path)
 	if err != nil {
@@ -394,9 +350,9 @@ func verifyBundle(path string, out, errOut io.Writer) int {
 // anything a shell or a file system could trip over.
 var unsafeInName = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 
-// bundleName names the archive and the directory inside it after the host
-// and the moment, so that bundles of many hosts do not overwrite each other
-// on the desk of the person who reads them.
+// bundleName names the archive and the directory inside it after the host and
+// the moment, so that bundles of many hosts do not overwrite each other on the
+// desk of the person who reads them.
 func bundleName(sources bundleSources) string {
 	host, err := sources.Hostname()
 	if err != nil || host == "" {
@@ -407,12 +363,7 @@ func bundleName(sources bundleSources) string {
 }
 
 // bundleCollectors lists what a bundle is made of, in the order it is read.
-//
-// Every collector declares its fields. What is declared secret is not
-// collected at all - the private key is never opened, the value of an
-// enrollment token never reaches the archive - and the manifest says so under
-// "omitted": a bundle silent about what it left out reads like a complete
-// one.
+// Every collector declares its fields.
 func bundleCollectors(sources bundleSources) []collector {
 	collectors := []collector{
 		{
@@ -504,9 +455,8 @@ func bundleCollectors(sources bundleSources) []collector {
 			},
 			Collect: func(ctx context.Context, sources bundleSources) ([]byte, error) {
 				content, err := sources.Command(ctx, "systemctl", statusArgs...)
-				// systemctl status exits non-zero for a unit that is not
-				// running, which is not a failure to read it; only an empty
-				// answer is.
+				// systemctl status exits non-zero for a unit that is not running, which is
+				// not a failure to read it; only an empty answer is.
 				if err != nil && len(content) > 0 {
 					err = nil
 				}
@@ -542,11 +492,6 @@ func bundleCollectors(sources bundleSources) []collector {
 }
 
 // writeSupportBundle gathers the files and writes the archive.
-//
-// Every file lands in the archive whether its source answered or not; the
-// manifest says which did not and why. The manifest goes in last, because it
-// describes what was written, and stands first in the listing of the archive
-// only by name.
 func writeSupportBundle(ctx context.Context, sources bundleSources, name string, w io.Writer) (bundleManifest, error) {
 	host, _ := sources.Hostname()
 	manifest := bundleManifest{
@@ -612,9 +557,6 @@ func writeSupportBundle(ctx context.Context, sources bundleSources, name string,
 }
 
 // describeIdentity reads the certificate of the host and nothing else.
-//
-// The key lies next to the certificate and is never opened: a bundle goes
-// to people who must not be able to impersonate the host.
 func describeIdentity(sources bundleSources) (identityMetadata, error) {
 	cfg, err := agentconfig.Read(bytes.NewReader(readOrEmpty(sources, sources.ConfigPath)))
 	if err != nil {
@@ -669,18 +611,11 @@ func readOrEmpty(sources bundleSources, path string) []byte {
 }
 
 // enrollmentTokenPrefix is what the panel puts in front of an enrollment
-// token. It is written out here rather than taken from the package of the
-// control plane: that package carries a database driver with it, and the tool
-// that runs on every host stays small.
+// token.
 const enrollmentTokenPrefix = "flt_"
 
-// The kinds of secret that fail the generation of a bundle.
-//
-// The redaction hides the values of keys that name a secret. These are the
-// things no key names: a key block pasted into a journal line, a token in a
-// header, a password written into a URL. A bundle carrying one of them is not
-// redacted and made safe - it is refused, because a bundle that leaks is
-// worse than no bundle at all.
+// The kinds of secret that fail the generation of a bundle. The redaction
+// hides the values of keys that name a secret.
 type secretKind struct {
 	// Kind names what was found, for the person reading the refusal.
 	Kind string
@@ -700,9 +635,7 @@ var bundleSecretKinds = []secretKind{
 		Pattern: regexp.MustCompile(`\b` + enrollmentTokenPrefix + `[A-Za-z0-9_+/=-]{8,}`)},
 }
 
-// finding is what the scanner found: which file and what kind of thing. The
-// value itself is deliberately absent - a report of a leak that quotes the
-// secret is one more copy of it.
+// finding is what the scanner found: which file and what kind of thing.
 type finding struct {
 	File string
 	Kind string
@@ -727,9 +660,6 @@ func (e *leakError) advice() string {
 }
 
 // scanAssembled holds the finished archive against the scanner.
-//
-// The scan is over the assembled bundle rather than over each file as it is
-// made: what matters is what would be sent, and that is the archive.
 func scanAssembled(archive []byte) error {
 	files, err := readArchive(bytes.NewReader(archive))
 	if err != nil {

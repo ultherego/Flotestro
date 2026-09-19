@@ -1,11 +1,5 @@
-// Package local lets a feed be read from the panel's own disk.
-//
-// An installation cut off from the Internet still has to assess its hosts.
-// The feeds the vendors publish can be copied onto the panel by hand or by
-// a job on another machine, and every source then reads them from a
-// file:// address exactly the way it reads the remote one: the same parser,
-// the same conditional fetch, the same staleness marking. Nothing changes
-// in the sources themselves - they see an HTTP answer.
+// Package local lets a feed be read from the panel's own disk. An installation
+// cut off from the Internet still has to assess its hosts.
 package local
 
 import (
@@ -44,8 +38,7 @@ func (t *Transport) RoundTrip(request *http.Request) (*http.Response, error) {
 	}
 
 	// A file address keeps its path in the URL; a host part, as in
-	// file://localhost/..., is ignored the way browsers ignore it. The path
-	// is cleaned so ".." cannot climb out of what was named.
+	// file://localhost/.
 	path := filepath.Clean(request.URL.Path)
 	if path == "" || path == "." {
 		return reply(request, http.StatusNotFound, nil, nil), nil
@@ -58,10 +51,9 @@ func (t *Transport) RoundTrip(request *http.Request) (*http.Response, error) {
 		return nil, err
 	}
 	if info.IsDir() {
-		// A directory answers like a plain listing of names, one per line:
-		// the sources that walk a tree read the index the vendor serves,
-		// and a copied tree has none. The Red Hat source keeps its own
-		// index, so this is for the operator's convenience.
+		// A directory answers like a plain listing of names, one per line: the
+		// sources that walk a tree read the index the vendor serves, and a copied
+		// tree has none.
 		entries, err := os.ReadDir(path)
 		if err != nil {
 			return nil, err
@@ -76,9 +68,9 @@ func (t *Transport) RoundTrip(request *http.Request) (*http.Response, error) {
 		}), nil
 	}
 
-	// The tag is the size and the modification time: the same file gives the
-	// same tag, so a conditional fetch of an unchanged copy costs nothing,
-	// exactly as with the remote feed.
+	// The tag is the size and the modification time: the same file gives the same
+	// tag, so a conditional fetch of an unchanged copy costs nothing, exactly as
+	// with the remote feed.
 	tag := fmt.Sprintf(`"%x-%x"`, info.Size(), info.ModTime().UnixNano())
 	if match := request.Header.Get("If-None-Match"); match != "" && match == tag {
 		return reply(request, http.StatusNotModified, nil, map[string]string{"ETag": tag}), nil

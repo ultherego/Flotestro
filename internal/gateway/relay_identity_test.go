@@ -10,11 +10,7 @@ import (
 	"github.com/ultherego/flotestro/internal/hosts"
 )
 
-// A relay attests the certificate of the host with its fingerprint and
-// serial. A relay from before the attestation sends neither and is read
-// as saying nothing; a relay that sends a fingerprint sends a whole one,
-// and a serial without a fingerprint names nothing the gateway can look
-// up.
+// A relay attests the certificate of the host with its fingerprint and serial.
 func TestTheRelayAttestationIsReadWhole(t *testing.T) {
 	fingerprint := strings.Repeat("ab", 32)
 	headers := http.Header{}
@@ -42,11 +38,9 @@ func TestTheRelayAttestationIsReadWhole(t *testing.T) {
 	}
 }
 
-// The record carries the validity of a certificate the gateway never sees
-// - one presented to a relay - and the refusal reads it the way the
-// handshake reads the certificate itself. A record without the validity
-// filled in, as the direct path passes it, refuses nothing on that
-// account.
+// The record carries the validity of a certificate the gateway never sees -
+// one presented to a relay - and the refusal reads it the way the handshake
+// reads the certificate itself.
 func TestTheValidityOfAnAttestedCertificateComesFromTheRecord(t *testing.T) {
 	now := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
 	live := hosts.CertificateStatus{Known: true, HostID: testHostID, LifecycleState: hosts.StateActive,

@@ -10,17 +10,13 @@ import (
 )
 
 // The effective access of a host is a projection: the host's groups, the
-// access rules that reach it and the sudo rules that reach it, read from
-// the directory and resolved through the group memberships. Nothing here
-// decides anything - the host's own SSSD applies the rules - so the panel
-// shows what the directory holds and says plainly when it could not read it.
+// access rules that reach it and the sudo rules that reach it, read from the
+// directory and resolved through the group memberships.
 
 // HostAccess is the effective access of one host.
 type HostAccess struct {
 	Hostname string `json:"hostname"`
-	// Known says whether the directory has an entry for the host. Without
-	// one nothing below is determined: rules may still reach the host under
-	// a name the panel does not know, so the view says "unknown", not "none".
+	// Known says whether the directory has an entry for the host.
 	Known  bool   `json:"known"`
 	Detail string `json:"detail,omitempty"`
 	FQDN   string `json:"fqdn,omitempty"`
@@ -84,9 +80,7 @@ func loadDirectoryView(ctx context.Context, directory Directory) (*directoryView
 	return &view, nil
 }
 
-// EffectiveAccess computes the projection for one host. The host is looked
-// up by its name and, when the name is short, by the name completed with the
-// domain the host reported.
+// EffectiveAccess computes the projection for one host.
 func EffectiveAccess(ctx context.Context, directory Directory, hostname, domain string) (HostAccess, error) {
 	result := HostAccess{
 		Hostname:   hostname,
@@ -135,9 +129,7 @@ func EffectiveAccess(ctx context.Context, directory Directory, hostname, domain 
 	return result, nil
 }
 
-// findHost matches a host name against the directory entries. Names are
-// compared without regard to case; a short name is completed with the
-// domain the host reported, because the directory knows hosts by FQDN.
+// findHost matches a host name against the directory entries.
 func (v *directoryView) findHost(hostname, domain string) *freeipa.Host {
 	candidates := []string{strings.ToLower(strings.TrimSuffix(hostname, "."))}
 	if !strings.Contains(hostname, ".") && domain != "" {
@@ -151,9 +143,7 @@ func (v *directoryView) findHost(hostname, domain string) *freeipa.Host {
 	return nil
 }
 
-// reachesHost says how a rule's host side reaches the host. The host's
-// memberships come from the directory, which lists nested groups as well,
-// so a rule on a parent group reaches the hosts of the groups nested in it.
+// reachesHost says how a rule's host side reaches the host.
 func reachesHost(host *freeipa.Host, ruleHosts, ruleHostGroups []string, allHosts bool) []string {
 	var via []string
 	if allHosts {
@@ -185,9 +175,7 @@ func (v *directoryView) hostsReached(ruleHosts, ruleHostGroups []string, allHost
 	return slices.Compact(hosts)
 }
 
-// usersReached resolves the user side of a rule to account names. Group
-// membership comes from the accounts' own memberships, which the directory
-// lists with nesting resolved.
+// usersReached resolves the user side of a rule to account names.
 func (v *directoryView) usersReached(ruleUsers, ruleGroups []string, allUsers bool) []string {
 	var users []string
 	for _, user := range v.users {

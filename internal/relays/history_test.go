@@ -5,11 +5,7 @@ import (
 	"time"
 )
 
-// The drop counter of a relay starts again with the process. Everything
-// the history says about drops is therefore a difference within one
-// process, and a difference taken across a restart is not a small error -
-// it is a negative number where results were lost, or a silence where a
-// whole process's losses were.
+// The drop counter of a relay starts again with the process.
 func TestTheHistoryReadsDropsWithinOneProcessOnly(t *testing.T) {
 	base := time.Date(2026, 9, 18, 8, 0, 0, 0, time.UTC)
 	at := func(minutes int) time.Time { return base.Add(time.Duration(minutes) * time.Minute) }
@@ -43,9 +39,8 @@ func TestTheHistoryReadsDropsWithinOneProcessOnly(t *testing.T) {
 	}
 }
 
-// A relay too old to name its process still restarts, and the only trace
-// it leaves is a counter that went backwards. That is read as a restart
-// rather than as a negative number of drops.
+// A relay too old to name its process still restarts, and the only trace it
+// leaves is a counter that went backwards.
 func TestACounterGoingBackwardsIsReadAsARestart(t *testing.T) {
 	points := markPoints([]BufferPoint{
 		{DroppedTotal: 9},
@@ -56,9 +51,8 @@ func TestACounterGoingBackwardsIsReadAsARestart(t *testing.T) {
 	}
 }
 
-// The fill of the buffer is a share of its limit, and a relay that
-// reported no limit has no share. Unknown is not zero here either: a rule
-// must not fire on it and must not resolve on it.
+// The fill of the buffer is a share of its limit, and a relay that reported no
+// limit has no share.
 func TestAnUnknownLimitMakesTheFillUnknown(t *testing.T) {
 	known := BufferPoint{BytesUsed: 800, BytesLimit: 1000}
 	share, ok := known.UsedPercent()
@@ -83,10 +77,8 @@ func TestAnUnknownLimitMakesTheFillUnknown(t *testing.T) {
 	}
 }
 
-// The growth of the drop counter is an answer only when there is a
-// difference to take. Without one the rule is not evaluated at all: a
-// relay that has just started has not "dropped nothing", it has said
-// nothing yet.
+// The growth of the drop counter is an answer only when there is a difference
+// to take.
 func TestTheGrowthOfTheDropCounterIsUnknownWithoutADifference(t *testing.T) {
 	if _, _, ok := (Reading{}).Value(MetricBufferDroppedIncrease); ok {
 		t.Fatal("a rule was given a growth although no difference could be taken")
@@ -102,10 +94,7 @@ func TestTheGrowthOfTheDropCounterIsUnknownWithoutADifference(t *testing.T) {
 	}
 }
 
-// The built-in rules are three steps on the fill and one on the drops. The
-// comparison behind them is plain, but an operator it reads wrongly is an
-// operator who stops trusting the page, and an unknown operator never
-// holds.
+// The built-in rules are three steps on the fill and one on the drops.
 func TestTheComparisonOfARuleHoldsOnlyWhenItShould(t *testing.T) {
 	cases := []struct {
 		operator string
@@ -124,9 +113,8 @@ func TestTheComparisonOfARuleHoldsOnlyWhenItShould(t *testing.T) {
 }
 
 // The limit of a relay that reports a spool is the spool's; a relay from
-// before the spool reported only its memory buffer, and its history has to
-// be readable on the same chart rather than as a relay with no limit at
-// all.
+// before the spool reported only its memory buffer, and its history has to be
+// readable on the same chart rather than as a relay with no limit at all.
 func TestTheSampleTakesTheLimitTheRelayActuallyReported(t *testing.T) {
 	reported := time.Date(2026, 9, 18, 8, 0, 0, 0, time.UTC)
 	spooled := SampleOf("r1", Heartbeat{
@@ -148,10 +136,8 @@ func TestTheSampleTakesTheLimitTheRelayActuallyReported(t *testing.T) {
 	}
 }
 
-// The windows are the ones the retention can answer, and one of them is
-// the default. A window nobody recognises is refused rather than silently
-// turned into three hours: a chart of the wrong period is worse than an
-// error message.
+// The windows are the ones the retention can answer, and one of them is the
+// default.
 func TestTheWindowsOfTheChartAreTheOnesTheRetentionCanAnswer(t *testing.T) {
 	window, err := ParseBufferRange("")
 	if err != nil || window.Name != "24h" || window.Rollup() {
@@ -174,9 +160,9 @@ func TestTheWindowsOfTheChartAreTheOnesTheRetentionCanAnswer(t *testing.T) {
 	}
 }
 
-// The defaults of the retention are the ones the documentation names, and
-// an installation that sets nothing gets them rather than a sweep that
-// deletes everything at once.
+// The defaults of the retention are the ones the documentation names, and an
+// installation that sets nothing gets them rather than a sweep that deletes
+// everything at once.
 func TestTheRetentionFallsBackToTheDefaults(t *testing.T) {
 	store := &Store{}
 	retention := store.Retention()

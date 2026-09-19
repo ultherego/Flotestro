@@ -8,32 +8,23 @@ import (
 	"github.com/ultherego/flotestro/internal/vuln/version"
 )
 
-// ComparatorRule describes the version comparison rule used in an
-// assessment.
-//
-// It is written down with every finding, because a change of the rule
-// changes the answer: without it there is no telling whether an old finding
-// was computed the same way.
+// ComparatorRule describes the version comparison rule used in an assessment.
 const ComparatorRule = "deb/dpkg-1,rpm/rpmvercmp-1"
 
 // Input is everything the assessment of one host is computed from.
 type Input struct {
 	HostID   string
 	Hostname string
-	// Distribution and Release describe the host the way its vendor names
-	// it: "debian"/"trixie", "fedora"/"42". The feed speaks the same
-	// language.
+	// Distribution and Release describe the host the way its vendor names it:
+	// "debian"/"trixie", "fedora"/"42".
 	Distribution string
 	Release      string
 	Packages     []packages.InstalledPackage
-	// InventoryDigest binds the assessment to a specific image of the
-	// package list, and AdvisoryDigest - to a specific set of vendor
-	// findings.
+	// InventoryDigest binds the assessment to a specific image of the package
+	// list, and AdvisoryDigest - to a specific set of vendor findings.
 	InventoryDigest string
 	AdvisoryDigest  string
-	// AdvisoriesReason says why there are no vendor findings or why they are
-	// old. It applies to the distributions where the repository metadata of
-	// the host itself settle the matter.
+	// AdvisoriesReason says why there are no vendor findings or why they are old.
 	AdvisoriesReason string
 	// ListStale means the host reports a package list digest other than the
 	// one the panel holds.
@@ -50,21 +41,6 @@ type Evaluation struct {
 
 // Evaluate correlates the packages of a host with the findings of the
 // distribution vendor.
-//
-// There are three rules and all of them serve one purpose: the panel must
-// not say "safe" when it really means "I do not know".
-//
-// First, missing data is not a missing vulnerability - a host without a
-// feed, with a stale feed or with a release outside the feed gets an
-// undetermined state with a reason code rather than zero findings.
-//
-// Second, the vendor settles the matter: its "not affected" is an answer,
-// its "under investigation" is a missing answer, and the fixed version is a
-// version from its own numbering, not from upstream.
-//
-// Third, the assessment only says whether a package is vulnerable. Whether
-// the fix can be installed right now is settled by the package plan of the
-// host - not by an advisory.
 func Evaluate(input Input, snapshot Snapshot, advisories map[string][]Advisory,
 	maxFeedAge time.Duration, now time.Time) Evaluation {
 	state := HostState{
@@ -77,9 +53,6 @@ func Evaluate(input Input, snapshot Snapshot, advisories map[string][]Advisory,
 		PackagesTotal:    len(input.Packages),
 		EvaluatedAt:      &now,
 		// The verdict names the generation of the data that settled it.
-		// The digest says which data; the generation says which data and
-		// when they were taken, and that is what lets an operator tell a
-		// host judged against yesterday's feed from one judged just now.
 		GenerationID: snapshot.GenerationID,
 	}
 	if !snapshot.GenerationAt.IsZero() {
@@ -96,10 +69,8 @@ func Evaluate(input Input, snapshot Snapshot, advisories map[string][]Advisory,
 	var findings []Assessment
 	for _, pkg := range input.Packages {
 		if reason := SkipReason(pkg, input.Distribution); reason != "" {
-			// A package from outside the distribution: rebuilt locally or
-			// taken from a foreign repository. The vendor says nothing about
-			// it and has no right to - this is an undetermined state rather
-			// than a safe package.
+			// A package from outside the distribution: rebuilt locally or taken from a
+			// foreign repository.
 			findings = append(findings, unknownFinding(input, snapshot, pkg, reason, now))
 			continue
 		}
@@ -117,18 +88,17 @@ func Evaluate(input Input, snapshot Snapshot, advisories map[string][]Advisory,
 			}
 			assessment := evaluatePackage(input, snapshot, pkg, advisory, now)
 			if assessment.State == StateNotAffected {
-				// "Not affected" findings are not written down: there would
-				// be millions of them and they carry as much as their
-				// absence does under full coverage.
+				// "Not affected" findings are not written down: there would be millions of
+				// them and they carry as much as their absence does under full coverage.
 				continue
 			}
 			findings = append(findings, assessment)
 		}
 	}
 
-	// Counters of unique items: one advisory carries several CVEs and
-	// several packages, so "1354 findings" does not say how many genuinely
-	// different matters that is.
+	// Counters of unique items: one advisory carries several CVEs and several
+	// packages, so "1354 findings" does not say how many genuinely different
+	// matters that is.
 	affectedPackages := map[string]bool{}
 	matters := map[string]bool{}
 	cves := map[string]bool{}
@@ -144,10 +114,8 @@ func Evaluate(input Input, snapshot Snapshot, advisories map[string][]Advisory,
 			for _, number := range finding.CVEIDs {
 				cves[number] = true
 			}
-			// A vulnerability with a fix can be installed today; one without
-			// a fix is a matter of risk assessment. Glued into one number
-			// they give a wall nobody reads - and the ones that really can
-			// be closed are lost in it.
+			// A vulnerability with a fix can be installed today; one without a fix is a
+			// matter of risk assessment.
 			if finding.VendorFix == VendorFixKnown {
 				state.AffectedWithVendorFix++
 			} else {
@@ -163,25 +131,16 @@ func Evaluate(input Input, snapshot Snapshot, advisories map[string][]Advisory,
 	return Evaluation{Findings: findings, State: state}
 }
 
-// CoverageReasonFor says what stands in the way of a full assessment of a
-// host and whether that obstacle stops the assessment.
-//
-// One function, because the same reckoning is done in two places: the
-// assessment itself and the decision whether the host has to be recomputed
-// at all. A divergence between them would freeze an assessment in a state
-// that had stopped being true.
-//
-// The order of the reasons matters: we name the most serious obstacle rather
-// than the first one encountered.
+// CoverageReasonFor says what stands in the way of a full assessment of a host
+// and whether that obstacle stops the assessment.
 func CoverageReasonFor(input Input, snapshot Snapshot,
 	maxFeedAge time.Duration, now time.Time) (string, bool) {
 	switch {
 	case input.ListMissing:
 		return ReasonPackageListMissing, true
 	case input.AdvisoriesReason != "" && input.AdvisoriesReason != ReasonHostAdvisoriesStale:
-		// A host whose repository metadata the panel has not read is not a
-		// host without vendor findings: it is a host nobody has checked for
-		// any.
+		// A host whose repository metadata the panel has not read is not a host
+		// without vendor findings: it is a host nobody has checked for any.
 		return input.AdvisoriesReason, true
 	case FamilyWithoutFeed(input.Distribution):
 		// No feed for the family is a different answer than a feed not yet
@@ -192,9 +151,8 @@ func CoverageReasonFor(input Input, snapshot Snapshot,
 	case !CoversRelease(snapshot, input.Release):
 		return ReasonReleaseUnsupported, true
 	}
-	// A stale feed does not stop the assessment: data from a day ago are
-	// better than none. But the operator is to know they are looking at
-	// yesterday's picture.
+	// A stale feed does not stop the assessment: data from a day ago are better
+	// than none.
 	if snapshot.Stale(maxFeedAge, now) {
 		return ReasonFeedStale, false
 	}
@@ -208,9 +166,7 @@ func CoverageReasonFor(input Input, snapshot Snapshot,
 }
 
 // FamilyWithoutFeed says whether the distribution belongs to a family no
-// vulnerability feed of the panel describes. Arch and the distributions
-// built on it are rolling: they have no release a finding could name a fixed
-// version for, and the panel reads no feed for them.
+// vulnerability feed of the panel describes.
 func FamilyWithoutFeed(distribution string) bool {
 	switch strings.ToLower(strings.TrimSpace(distribution)) {
 	case "arch", "archlinux", "archarm", "cachyos", "manjaro", "endeavouros", "artix", "garuda":
@@ -238,10 +194,8 @@ func evaluatePackage(input Input, snapshot Snapshot, pkg packages.InstalledPacka
 		PackageOrigin:       OriginClassOf(pkg, input.Distribution),
 		VendorFix:           VendorFixUnknown,
 		RepositoryCandidate: CandidateUnknown,
-		// Only the package plan of the host knows whether the transaction
-		// can be carried out: it is the one that sees holds, exclusions and
-		// conflicts. Until there is one, the panel has no right to promise
-		// anything.
+		// Only the package plan of the host knows whether the transaction can be
+		// carried out: it is the one that sees holds, exclusions and conflicts.
 		Transaction: TransactionUnknown,
 	}
 
@@ -256,9 +210,8 @@ func evaluatePackage(input Input, snapshot Snapshot, pkg packages.InstalledPacka
 		assessment.ReasonCode = ReasonVendorInvestigating
 		return assessment
 	case StatusOpen, StatusDeferred:
-		// A vulnerability without a fix: the package is vulnerable and there
-		// is nothing to fix it with. That is a more important message than a
-		// vulnerability with a fix.
+		// A vulnerability without a fix: the package is vulnerable and there is
+		// nothing to fix it with.
 		assessment.State = StateAffected
 		assessment.VendorFix = VendorFixUnavailable
 		assessment.RepositoryCandidate = CandidateAbsent
@@ -280,10 +233,8 @@ func evaluatePackage(input Input, snapshot Snapshot, pkg packages.InstalledPacka
 	assessment.VendorFix = VendorFixKnown
 	if result < 0 {
 		assessment.State = StateAffected
-		// A finding read from the metadata of the host itself means the fix
-		// is visible in a repository the host takes packages from. That
-		// still does not mean the transaction will go through - the plan
-		// says that.
+		// A finding read from the metadata of the host itself means the fix is
+		// visible in a repository the host takes packages from.
 		if advisory.FromHostRepositories {
 			assessment.RepositoryCandidate = CandidateVisible
 		}
@@ -312,12 +263,8 @@ func unknownFinding(input Input, snapshot Snapshot, pkg packages.InstalledPackag
 	}
 }
 
-// OriginClassOf says whose package this is.
-//
-// A distribution vendor has the right to speak only about its own packages.
-// A package from a foreign repository or built locally has a version its
-// findings do not describe - counting such a package as covered would give
-// "a hundred per cent" coverage where the panel knows nothing.
+// OriginClassOf says whose package this is. A distribution vendor has the
+// right to speak only about its own packages.
 func OriginClassOf(pkg packages.InstalledPackage, distribution string) string {
 	if isRPMFamily(distribution) {
 		// RPM carries the vendor in the package metadata.
@@ -366,13 +313,7 @@ func isDistributionVendor(vendor, distribution string) bool {
 	return false
 }
 
-// CorrelationKey returns the key the findings for a package are looked up
-// by.
-//
-// Debian and Ubuntu track security by the source package: one finding covers
-// every binary package from the same source. Fedora speaks about binary
-// packages in updateinfo, because a finding there is a list of specific
-// versions to install.
+// CorrelationKey returns the key the findings for a package are looked up by.
 func CorrelationKey(pkg packages.InstalledPackage, distribution string) string {
 	if isRPMFamily(distribution) {
 		return pkg.Name
@@ -397,17 +338,8 @@ func PackageVersion(pkg packages.InstalledPackage, distribution string) string {
 	return pkg.DebVersion()
 }
 
-// ComparisonVersionFor returns the version that has to be compared against
-// the finding, along with where it came from.
-//
-// Debian and Ubuntu track security by the source package and give the source
-// version - and the binary version is sometimes different: a binary rebuild
-// appends a suffix ("+b9"), so the binary one is higher than the source one
-// for the same code. Comparing a binary version against a source finding can
-// therefore call a package fixed although it does not carry the fix.
-//
-// When the source version is unknown, we compare the binary one and say so
-// outright: this is an approximation rather than the same answer.
+// ComparisonVersionFor returns the version that has to be compared against the
+// finding, along with where it came from.
 func ComparisonVersionFor(pkg packages.InstalledPackage, distribution string) (string, string) {
 	if isRPMFamily(distribution) {
 		return pkg.EVR(), BasisBinary

@@ -7,10 +7,9 @@ import (
 	"testing"
 )
 
-// TestStatusJudgesEveryPartOfThePanel checks that the status screen names
-// the database as reachable, the schema at its level, the build by its
-// version and the durable trail by its queue - and that a block the panel
-// cannot judge is unknown rather than fine.
+// TestStatusJudgesEveryPartOfThePanel checks that the status screen names the
+// database as reachable, the schema at its level, the build by its version and
+// the durable trail by its queue - and that a block the panel cannot judge is
 func TestStatusJudgesEveryPartOfThePanel(t *testing.T) {
 	h := newHarness(t)
 	var status struct {
@@ -92,9 +91,9 @@ func TestStatusJudgesEveryPartOfThePanel(t *testing.T) {
 	viewer.do(http.MethodGet, "/api/v1/status", nil, nil, http.StatusForbidden)
 }
 
-// TestSettingsShowTheRetentionsAndTheSwitches checks that the settings
-// screen shows the retentions of the working record next to the trail's
-// and the switches the gateway and the scheduler run with.
+// TestSettingsShowTheRetentionsAndTheSwitches checks that the settings screen
+// shows the retentions of the working record next to the trail's and the
+// switches the gateway and the scheduler run with.
 func TestSettingsShowTheRetentionsAndTheSwitches(t *testing.T) {
 	h := newHarness(t)
 	var settings struct {

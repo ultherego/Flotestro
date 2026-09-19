@@ -17,15 +17,7 @@ import (
 
 // The global search answers the command palette of the panel: the operator
 // types a few characters and gets the things of the fleet those characters
-// name, whatever their kind, each with the address of its page. It is one
-// route rather than a search field per list, because the operator does not
-// always know which list a name belongs to; a host, a campaign and a
-// secret may all be called "vault".
-//
-// The answer is scoped per kind with the same rights the lists use, so
-// a search cannot show a name its list would refuse: a kind the principal
-// may not read is left out, not refused - a refusal for the whole search
-// would hide the hosts because of the identities.
+// name, whatever their kind, each with the address of its page.
 
 // searchItem is one hit of the search: what it is, what it is called and
 // where its page is.
@@ -48,9 +40,9 @@ const (
 	searchLimitMaximum = 25
 )
 
-// jobIDPrefixMinimum is the shortest identifier prefix the search takes
-// for a job: the first group of the identifier is eight characters, and
-// a shorter one matches thousands of jobs in a fleet of any size.
+// jobIDPrefixMinimum is the shortest identifier prefix the search takes for a
+// job: the first group of the identifier is eight characters, and a shorter
+// one matches thousands of jobs in a fleet of any size.
 const jobIDPrefixMinimum = 8
 
 // cvePattern is a CVE identifier as the operator types it, in any case.
@@ -74,18 +66,16 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		limit = searchLimitDefault
 	}
 	items := []searchItem{}
-	// A query too short to mean anything is answered with nothing rather
-	// than refused: the palette asks on every keystroke, and an empty
-	// answer is what an empty field deserves.
+	// A query too short to mean anything is answered with nothing rather than
+	// refused: the palette asks on every keystroke, and an empty answer is what
+	// an empty field deserves.
 	if len([]rune(query)) < searchMinimum {
 		writeJSON(w, http.StatusOK, map[string]any{"items": items})
 		return
 	}
 	ctx := r.Context()
-	// The kinds are asked in the order the palette shows them; each one is
-	// one bounded query, and a kind the principal may not read costs
-	// nothing. The queries run in sequence on the request's context: the
-	// palette waits for the whole answer anyway, and a search is short.
+	// The kinds are asked in the order the palette shows them; each one is one
+	// bounded query, and a kind the principal may not read costs nothing.
 	for _, kind := range []func(context.Context, authz.Principal, string, int) ([]searchItem, error){
 		s.searchHosts, s.searchCampaigns, s.searchJobs, s.searchPolicies, s.searchGroups,
 		s.searchRelays, s.searchSecrets, s.searchPrincipals, s.searchCVEs,
@@ -100,11 +90,8 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
-// namePrefixes returns the two LIKE patterns a name is matched with: the
-// name begins with the text, or one of its words does. An operator who
-// remembers "budget" of a campaign called "restart with a budget" should
-// find it; a fragment inside a word is not asked for, because that would
-// scan every name in the table.
+// namePrefixes returns the two LIKE patterns a name is matched with: the name
+// begins with the text, or one of its words does.
 func namePrefixes(query string) (string, string) {
 	escaped := escapeLike(strings.ToLower(query))
 	return escaped + "%", "% " + escaped + "%"
@@ -122,11 +109,9 @@ func nameCondition(column string, offset int) string {
 	return fmt.Sprintf("(lower(%[1]s) like $%[2]d or lower(%[1]s) like $%[3]d)", column, offset+1, offset+2)
 }
 
-// searchHosts finds the hosts by the beginning of the hostname, of the
-// machine identifier or of the management address, in the scopes the
-// principal reads hosts in. The hostname and the machine identifier are
-// compared in lower case, because that is how the agent reports them;
-// the address is compared as typed, an address has no case.
+// searchHosts finds the hosts by the beginning of the hostname, of the machine
+// identifier or of the management address, in the scopes the principal reads
+// hosts in.
 func (s *Server) searchHosts(ctx context.Context, principal authz.Principal, query string, limit int) ([]searchItem, error) {
 	if !principal.CanAnywhere(authz.PermHostRead) {
 		return nil, nil
@@ -216,11 +201,9 @@ func (s *Server) searchCampaigns(ctx context.Context, principal authz.Principal,
 	})
 }
 
-// jobIDRange turns the beginning of a job identifier into the two
-// identifiers it lies between, so the primary key answers the question
-// instead of a scan over the text of every identifier. The prefix is
-// padded with zeros for the lower bound and with f for the upper one; a
-// prefix that is not the beginning of an identifier gives no range.
+// jobIDRange turns the beginning of a job identifier into the two identifiers
+// it lies between, so the primary key answers the question instead of a scan
+// over the text of every identifier.
 func jobIDRange(query string) (string, string, bool) {
 	if !jobIDPrefixPattern.MatchString(query) {
 		return "", "", false
@@ -348,7 +331,6 @@ func (s *Server) searchGroups(ctx context.Context, principal authz.Principal, qu
 // relayScopeSQL renders the visibility of a relay the way the relay list
 // decides it: a binding to the relay's site sees it, and a relay without an
 // environment serves its whole site, so a binding to any environment of the
-// site sees it too. An empty list of bindings sees nothing.
 func relayScopeSQL(scopes []authz.Scope, offset int) (string, []any) {
 	if len(scopes) == 0 {
 		return "false", nil
@@ -455,9 +437,8 @@ func (s *Server) searchSecrets(ctx context.Context, principal authz.Principal, q
 }
 
 // searchPrincipals finds the identities by subject or display name, for
-// whoever manages access - the identity list is read with the global
-// right, and the search follows it. The page is the identity tab with the
-// subject in its filter: an identity has no page of its own.
+// whoever manages access - the identity list is read with the global right,
+// and the search follows it.
 func (s *Server) searchPrincipals(ctx context.Context, principal authz.Principal, query string, limit int) ([]searchItem, error) {
 	if !principal.Can(authz.PermPrincipalManage, authz.GlobalScope) {
 		return nil, nil
@@ -500,9 +481,7 @@ func (s *Server) searchPrincipals(ctx context.Context, principal authz.Principal
 }
 
 // searchCVEs answers a CVE identifier typed in full with the entry of the
-// vulnerability feed, if the feed has it. The feed is fleet-wide data, so
-// the right to read vulnerabilities anywhere is enough; the page then
-// narrows the hosts to the reader's scope.
+// vulnerability feed, if the feed has it.
 func (s *Server) searchCVEs(ctx context.Context, principal authz.Principal, query string, _ int) ([]searchItem, error) {
 	if s.vulnerabilities == nil || !cvePattern.MatchString(query) || !principal.CanAnywhere(authz.PermVulnerabilityRead) {
 		return nil, nil

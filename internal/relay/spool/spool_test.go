@@ -73,8 +73,8 @@ func appendMessage(t *testing.T, spool *Spool, hostID string, message *agentv1.A
 }
 
 // TestARecordSurvivesAReopen guards the point of the spool: what the relay
-// took before a restart is what it holds after it, envelope and payload
-// as they were.
+// took before a restart is what it holds after it, envelope and payload as
+// they were.
 func TestARecordSurvivesAReopen(t *testing.T) {
 	dir := t.TempDir()
 	spool := open(t, dir, Options{})
@@ -107,9 +107,9 @@ func TestARecordSurvivesAReopen(t *testing.T) {
 	}
 }
 
-// TestAnAcknowledgementDeletesExactlyOnce guards the contract with the
-// panel: a record leaves the spool on the acknowledgement of its session
-// and sequence, and a second acknowledgement finds nothing.
+// TestAnAcknowledgementDeletesExactlyOnce guards the contract with the panel:
+// a record leaves the spool on the acknowledgement of its session and
+// sequence, and a second acknowledgement finds nothing.
 func TestAnAcknowledgementDeletesExactlyOnce(t *testing.T) {
 	dir := t.TempDir()
 	spool := open(t, dir, Options{})
@@ -187,10 +187,9 @@ func TestATornLastRecordIsCutOff(t *testing.T) {
 	}
 }
 
-// TestTheSendOrderIsPriorityThenSequence guards the requirement that a
-// full stream of metrics does not starve a job result: the result goes
-// first whatever arrived before it, and within a class the sequence
-// holds.
+// TestTheSendOrderIsPriorityThenSequence guards the requirement that a full
+// stream of metrics does not starve a job result: the result goes first
+// whatever arrived before it, and within a class the sequence holds.
 func TestTheSendOrderIsPriorityThenSequence(t *testing.T) {
 	spool := open(t, t.TempDir(), Options{})
 	for i := int64(1); i <= 5; i++ {
@@ -217,9 +216,9 @@ func TestTheSendOrderIsPriorityThenSequence(t *testing.T) {
 	}
 }
 
-// TestInflightIsBoundedAndResentAfterTheTimeout guards the backpressure
-// per host and the resend: a record sent and not acknowledged is sent
-// again once the timeout passes, and not before.
+// TestInflightIsBoundedAndResentAfterTheTimeout guards the backpressure per
+// host and the resend: a record sent and not acknowledged is sent again once
+// the timeout passes, and not before.
 func TestInflightIsBoundedAndResentAfterTheTimeout(t *testing.T) {
 	now := clock
 	spool := open(t, t.TempDir(), Options{
@@ -245,8 +244,7 @@ func TestInflightIsBoundedAndResentAfterTheTimeout(t *testing.T) {
 
 // TestTheReserveIsKeptForTheDurableClasses guards the quota by class: a
 // metrics sample is refused once the room outside the reserve is spent,
-// evicting an older sample first, while a job result still fits; and the
-// whole quota spent refuses the result as critical.
+// evicting an older sample first, while a job result still fits; and the whole
 func TestTheReserveIsKeptForTheDurableClasses(t *testing.T) {
 	spool := open(t, t.TempDir(), Options{MaxBytes: 2000, CriticalReserveBytes: 800})
 	for i := int64(1); i <= 100; i++ {
@@ -296,9 +294,9 @@ func TestTheReserveIsKeptForTheDurableClasses(t *testing.T) {
 	}
 }
 
-// TestAFullInventoryCoalescesTheEarlierOnes guards the policy of the
-// inventory class: a full report says everything the earlier waiting
-// reports said, so they go and it stays.
+// TestAFullInventoryCoalescesTheEarlierOnes guards the policy of the inventory
+// class: a full report says everything the earlier waiting reports said, so
+// they go and it stays.
 func TestAFullInventoryCoalescesTheEarlierOnes(t *testing.T) {
 	spool := open(t, t.TempDir(), Options{})
 	appendMessage(t, spool, "host-1", signed(inventory("r1", true), "session-a", 1))
@@ -318,9 +316,9 @@ func TestAFullInventoryCoalescesTheEarlierOnes(t *testing.T) {
 	}
 }
 
-// TestTheIndexIsRebuiltAcrossSegments guards the rebuild over more than
-// one segment file, with tombstones in a later segment deleting records
-// of an earlier one and a dead segment removed.
+// TestTheIndexIsRebuiltAcrossSegments guards the rebuild over more than one
+// segment file, with tombstones in a later segment deleting records of an
+// earlier one and a dead segment removed.
 func TestTheIndexIsRebuiltAcrossSegments(t *testing.T) {
 	dir := t.TempDir()
 	spool := open(t, dir, Options{SegmentBytes: 300})
@@ -371,9 +369,8 @@ func TestAnExpiredRecordIsCut(t *testing.T) {
 }
 
 // TestAMessageWithoutAnEnvelopeIsConfirmedByItsIdentifier guards the
-// compatibility with an agent from before the envelope: its message has
-// no sequence for the panel to acknowledge, and the relay confirms it by
-// the record identifier after the send.
+// compatibility with an agent from before the envelope: its message has no
+// sequence for the panel to acknowledge, and the relay confirms it by the
 func TestAMessageWithoutAnEnvelopeIsConfirmedByItsIdentifier(t *testing.T) {
 	spool := open(t, t.TempDir(), Options{})
 	record := appendMessage(t, spool, "host-1", result("job-1"))
@@ -428,20 +425,13 @@ func TestARecordKeepsItsIdentifier(t *testing.T) {
 	}
 }
 
-// TestEveryDurableClassIsOnTheDiskBeforeItIsAccepted guards the promise
-// the relay makes when it takes a message of a durable class: the record
-// is on the disk before the caller goes on, so a power failure a
-// millisecond later costs the site nothing.
-//
-// The classes written ahead of the live forward are control, job results
-// and inventory. An inventory report accepted into the batch of the light
-// classes would be a report the relay answers for and does not hold - the
-// window is short, and a site that loses its inventory over a power
-// failure has no way of telling.
+// TestEveryDurableClassIsOnTheDiskBeforeItIsAccepted guards the promise the
+// relay makes when it takes a message of a durable class: the record is on the
+// disk before the caller goes on, so a power failure a millisecond later costs
 func TestEveryDurableClassIsOnTheDiskBeforeItIsAccepted(t *testing.T) {
-	// The batch of the light classes is pushed out of the way, so that
-	// what the test observes is the sync of the append and not a tick
-	// that happened to arrive.
+	// The batch of the light classes is pushed out of the way, so that what the
+	// test observes is the sync of the append and not a tick that happened to
+	// arrive.
 	spool := open(t, t.TempDir(), Options{FlushInterval: time.Hour})
 	durable := []struct {
 		name    string
@@ -474,7 +464,6 @@ func TestEveryDurableClassIsOnTheDiskBeforeItIsAccepted(t *testing.T) {
 // TestASpoolThatCannotReachTheDiskSaysSo guards what the readiness of the
 // relay is built on: a failed sync of the batch is remembered rather than
 // swallowed, so a relay whose disk stopped taking writes stops reporting
-// itself able to carry the results of the site.
 func TestASpoolThatCannotReachTheDiskSaysSo(t *testing.T) {
 	spool := open(t, t.TempDir(), Options{FlushInterval: 5 * time.Millisecond})
 	appendMessage(t, spool, "host-1", signed(metric(1), "session-a", 1))

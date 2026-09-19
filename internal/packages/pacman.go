@@ -194,7 +194,7 @@ func (p *Pacman) plan(ctx context.Context, options Options) (Plan, error) {
 
 // pacmanPlanDatabase is the database directory a plan on this host is read
 // from: the one checkupdates syncs for itself where pacman-contrib is
-// installed, the copy the helper keeps where it is not, and the host's own
+// installed, the copy the helper keeps where it is not, and the host's own.
 func pacmanPlanDatabase() string {
 	if fileExists(checkupdatesPath) {
 		return checkupdatesDB()

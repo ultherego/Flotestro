@@ -10,9 +10,8 @@ func smtpRule() RuleSpec {
 		Ports: []string{"25"}, Sources: []string{"10.10.0.0/16"}}
 }
 
-// TestPlanDistinguishesMissingRuleFromDifferentRule guards the essence of
-// the per-host plan: the same rule ordered on two hosts is two different
-// changes.
+// TestPlanDistinguishesMissingRuleFromDifferentRule guards the essence of the
+// per-host plan: the same rule ordered on two hosts is two different changes.
 func TestPlanDistinguishesMissingRuleFromDifferentRule(t *testing.T) {
 	missing := ComputeRule(Registry{}, smtpRule(), "aaa", AdapterNftables)
 	if missing.Action != PlanCreate || missing.Current != nil {
@@ -33,9 +32,9 @@ func TestPlanDistinguishesMissingRuleFromDifferentRule(t *testing.T) {
 	}
 }
 
-// TestNoChangePlanIgnoresOrder guards that the order of ports and sources
-// is not the operator's decision - the same rule written differently is
-// still the same.
+// TestNoChangePlanIgnoresOrder guards that the order of ports and sources is
+// not the operator's decision - the same rule written differently is still the
+// same.
 func TestNoChangePlanIgnoresOrder(t *testing.T) {
 	current := smtpRule()
 	current.Ports = []string{"25", "465"}
@@ -51,8 +50,8 @@ func TestNoChangePlanIgnoresOrder(t *testing.T) {
 }
 
 // TestPlanFingerprintDependsOnRuleset guards that the same diff against a
-// different ruleset is a different change: it enters a different
-// neighbourhood of rules.
+// different ruleset is a different change: it enters a different neighbourhood
+// of rules.
 func TestPlanFingerprintDependsOnRuleset(t *testing.T) {
 	first := ComputeRule(Registry{}, smtpRule(), "ruleset-a", AdapterNftables)
 	second := ComputeRule(Registry{}, smtpRule(), "ruleset-b", AdapterNftables)

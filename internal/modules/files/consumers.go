@@ -6,23 +6,15 @@ import (
 	"strings"
 )
 
-// Consumer is a service that reads a configuration file and therefore has
-// to be told when the file changes.
-//
-// A written file is not an applied change: nginx reads its configuration at
-// a reload, systemd reads a unit only after a daemon reload, and a service
-// that is not told anything keeps running on the content from before. The
-// plan says it before the operator approves, instead of leaving them to
-// find out that the change had no effect.
+// Consumer is a service that reads a configuration file and therefore has to
+// be told when the file changes.
 type Consumer struct {
 	// Unit is the systemd unit; "systemd" itself stands for the manager,
 	// which re-reads unit files only on a daemon reload.
 	Unit string `json:"unit"`
 	// Action is reload, restart or daemon-reload.
 	Action string `json:"action"`
-	// Installed says whether the unit file is on this host. Two hosts with
-	// the same path have different answers here, which is exactly why the
-	// question is asked on the host.
+	// Installed says whether the unit file is on this host.
 	Installed bool `json:"installed"`
 }
 
@@ -33,21 +25,14 @@ const (
 	ConsumerDaemonReload = "daemon-reload"
 )
 
-// unitDirectories are the places a unit file lives. The order is the one
-// systemd itself uses: what an administrator put in /etc wins over what a
-// package shipped.
+// unitDirectories are the places a unit file lives.
 var unitDirectories = []string{
 	"/etc/systemd/system", "/run/systemd/system",
 	"/usr/lib/systemd/system", "/lib/systemd/system",
 }
 
-// Consumers says which services read the file at the given path, and what
-// they need after a change.
-//
-// The second return value is the reason there are none: an empty list says
-// "the panel knows of no consumer", which is not the same as "nothing has
-// to be done", and the difference belongs in the plan rather than in the
-// operator's head.
+// Consumers says which services read the file at the given path, and what they
+// need after a change.
 func Consumers(path string) ([]Consumer, string) {
 	switch {
 	case strings.HasPrefix(path, "/etc/nginx/"):
@@ -55,9 +40,9 @@ func Consumers(path string) ([]Consumer, string) {
 
 	case strings.HasPrefix(path, "/etc/systemd/system/") &&
 		(strings.HasSuffix(path, ".service") || strings.HasSuffix(path, ".timer")):
-		// The manager has to re-read the unit file, and the unit itself has
-		// to be restarted: a daemon reload alone leaves the running instance
-		// on the settings it started with.
+		// The manager has to re-read the unit file, and the unit itself has to be
+		// restarted: a daemon reload alone leaves the running instance on the
+		// settings it started with.
 		return installed([]Consumer{
 			{Unit: "systemd", Action: ConsumerDaemonReload},
 			{Unit: filepath.Base(path), Action: ConsumerRestart},
@@ -98,8 +83,7 @@ func Consumers(path string) ([]Consumer, string) {
 }
 
 // installed fills in, for each consumer, whether this host has the unit at
-// all. A unit that is not there is not silently dropped: the operator is to
-// see that the panel expected it and the host does not have it.
+// all.
 func installed(consumers []Consumer) []Consumer {
 	for i := range consumers {
 		if consumers[i].Unit == "systemd" {
@@ -111,13 +95,8 @@ func installed(consumers []Consumer) []Consumer {
 	return consumers
 }
 
-// unitExists says whether a unit file of that name lies in one of the
-// places systemd reads.
-//
-// The question is answered by looking at the file system rather than by
-// asking systemd: the plan must not start a tool to describe a change, and
-// a missing unit file is the only case that matters here - a unit that
-// exists but is masked or disabled still reads the file when it runs.
+// unitExists says whether a unit file of that name lies in one of the places
+// systemd reads.
 func unitExists(unit string) bool {
 	if unit == "" || strings.ContainsRune(unit, '/') {
 		return false

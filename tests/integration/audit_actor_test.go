@@ -30,10 +30,9 @@ type actorPage struct {
 	Items []actorEventView `json:"items"`
 }
 
-// TestAuditKeepsTheActorsNameAsItWas checks that an event carries the
-// actor as it was when the event was written - the immutable identifier,
-// the subject, the display name and the kind - and that a later rename or
-// removal of the identity changes nothing the trail says about the past.
+// TestAuditKeepsTheActorsNameAsItWas checks that an event carries the actor as
+// it was when the event was written - the immutable identifier, the subject,
+// the display name and the kind - and that a later rename or removal of the
 func TestAuditKeepsTheActorsNameAsItWas(t *testing.T) {
 	h := newHarness(t)
 	subject := uniqueSubject("renamed-auditor")
@@ -84,9 +83,7 @@ func TestAuditKeepsTheActorsNameAsItWas(t *testing.T) {
 		}
 	}
 
-	// The identity is renamed under the trail. The panel has no rename
-	// call - a name comes from the identity provider - so the row is
-	// changed where the provider's mapping would change it.
+	// The identity is renamed under the trail.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if _, err := h.database(ctx).Exec(ctx,

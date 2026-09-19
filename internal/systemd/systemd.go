@@ -1,6 +1,5 @@
 // Package systemd is the adapter for systemd units. The root helper uses it,
-// so the code is deliberately small and accepts no data it has not
-// validated.
+// so the code is deliberately small and accepts no data it has not validated.
 package systemd
 
 import (
@@ -47,15 +46,12 @@ var (
 	// ErrInvalidUnit means a name that is not a valid unit name.
 	ErrInvalidUnit = errors.New("invalid unit name")
 
-	// A unit name per systemd.unit(5): letters, digits and : _ . \ - @ plus
-	// the required type suffix. The pattern rejects paths and shell
-	// characters.
+	// A unit name per systemd. unit(5): letters, digits and : _ . \ - @ plus the
+	// required type suffix.
 	unitPattern = regexp.MustCompile(
 		`^[A-Za-z0-9:_.\\@-]+\.(service|socket|timer|target|path|mount|automount|swap|slice|scope)$`)
 
-	// protectedUnits are the units a typed operation must not touch. Stopping
-	// the agent would cut off the remote repair of the consequences, and
-	// stopping sshd or the network would cut off the emergency way in.
+	// protectedUnits are the units a typed operation must not touch.
 	protectedUnits = map[string]struct{}{
 		"flotestro-agent.service":         {},
 		"flotestro-helper.service":        {},
@@ -185,26 +181,20 @@ func Apply(ctx context.Context, unit string, operation Operation, timeout time.D
 	return out, errOut, code, err
 }
 
-// applyArgs builds the arguments of the call. We deliberately do not pass
-// --no-block: the operation is to finish before we read the unit's state,
-// because otherwise the result would describe the state from before the
-// change.
+// applyArgs builds the arguments of the call.
 func applyArgs(unit string, operation Operation) []string {
 	return []string{string(operation), unit, "--no-pager"}
 }
 
 // The stable error codes of unit operations. They come from systemctl's exit
-// code, which is a stable interface, rather than from a translated
-// message.
+// code, which is a stable interface, rather than from a translated message.
 const (
 	ErrorUnitNotFound   = "unit_not_found"
 	ErrorUnitNotActive  = "unit_not_active"
 	ErrorUnitActionFail = "unit_action_failed"
 )
 
-// ErrorCodeForExit translates systemctl's exit code into a stable error
-// code. systemctl returns 4 and 5 for a unit that does not exist and 3 for an
-// inactive unit; the rest is a general failure of the operation.
+// ErrorCodeForExit translates systemctl's exit code into a stable error code.
 func ErrorCodeForExit(exitCode int) string {
 	switch exitCode {
 	case 0:
@@ -219,34 +209,17 @@ func ErrorCodeForExit(exitCode int) string {
 }
 
 // ScheduleReboot schedules a reboot of the host after the given delay.
-// We use a transient systemd timer, because shutdown takes whole minutes and
-// a campaign needs a dozen or so seconds to send the result back before the
-// host disappears from the network.
 func ScheduleReboot(ctx context.Context, delay time.Duration, reason string) (stdout, stderr string, exitCode int, err error) {
 	return SchedulePower(ctx, delay, reason, "reboot")
 }
 
 // SchedulePower schedules a reboot or a shutdown of the host.
-//
-// The unit carries the panel's name, so on the host the operator sees that
-// the order comes from here rather than being somebody's "shutdown -h" from a
-// console.
-//
-// The logind inhibitors are checked higher up, in the helper: it is the one
-// that knows whether the operator agreed to skip them, and it is the one to
-// speak about them in the result.
 func SchedulePower(ctx context.Context, delay time.Duration, reason, operation string) (stdout, stderr string, exitCode int, err error) {
 	if delay < time.Second {
 		delay = time.Second
 	}
-	// We aim at the target unit rather than at "systemctl poweroff": the
-	// latter goes through logind, and logind asks polkit for consent. A
-	// process in a systemd unit has no session, so polkit has nobody to ask
-	// and answers "Access denied" - the unit dies a dozen seconds after the
-	// panel has already reported success. Starting the target unit goes
-	// straight to the manager, which trusts root, and performs the same
-	// shutdown of the system. The logind inhibitors are checked by the helper
-	// before we schedule anything.
+	// We aim at the target unit rather than at "systemctl poweroff": the latter
+	// goes through logind, and logind asks polkit for consent.
 	args := []string{
 		"--collect",
 		"--on-active=" + strconv.Itoa(int(delay.Seconds())) + "s",
@@ -299,10 +272,8 @@ func parseUint32(value string) uint32 {
 	return uint32(parsed)
 }
 
-// OperationEnable and OperationMask are separate from start/stop, because
-// they change what the host will do after a reboot rather than its state now.
-// A unit that is enabled and a unit that is running are two different things;
-// each has its own permission.
+// OperationEnable and OperationMask are separate from start/stop, because they
+// change what the host will do after a reboot rather than its state now.
 const (
 	OperationEnable    Operation = "enable"
 	OperationDisable   Operation = "disable"
@@ -311,9 +282,7 @@ const (
 	OperationResetFail Operation = "reset-failed"
 )
 
-// maxUnits bounds the full list. A host with a thousand units is not an
-// error, but moving all of them into the panel helps nobody more than the
-// first few hundred do.
+// maxUnits bounds the full list.
 const maxUnits = 500
 
 // Unit describes a unit on the list.
@@ -329,19 +298,14 @@ type Unit struct {
 }
 
 // List returns the units loaded on the host.
-//
-// The list is fetched at the operator's request rather than in the inventory
-// cycle: it changes often, it is long and it interests only whoever is
-// looking at the tab right now.
 func List(ctx context.Context) ([]Unit, bool, error) {
 	stdout, _, err := run(ctx, 30*time.Second,
 		"list-units", "--all", "--no-pager", "--no-legend", "--plain", "--type=service,socket,timer,target,path,mount")
 	if err != nil {
 		return nil, false, err
 	}
-	// The state of the unit files is a separate query: list-units does not
-	// give it, and without it what the host will do after a reboot is not
-	// visible.
+	// The state of the unit files is a separate query: list-units does not give
+	// it, and without it what the host will do after a reboot is not visible.
 	files := unitFileStates(ctx)
 
 	var units []Unit
@@ -369,9 +333,7 @@ func List(ctx context.Context) ([]Unit, bool, error) {
 	return units, false, nil
 }
 
-// unitFileStates reads what the host will do after a reboot. A failed read
-// returns an empty map: not knowing about a unit file does not invalidate the
-// unit's current state.
+// unitFileStates reads what the host will do after a reboot.
 func unitFileStates(ctx context.Context) map[string]string {
 	stdout, _, err := run(ctx, 30*time.Second, "list-unit-files", "--no-pager", "--no-legend", "--plain")
 	if err != nil {

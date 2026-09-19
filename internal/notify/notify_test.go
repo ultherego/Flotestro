@@ -41,10 +41,9 @@ func TestSubjectsAndFilters(t *testing.T) {
 		{Scope{Severity: "critical", Site: "krakow"}, true},
 		{Scope{Severity: "info", Site: "krakow"}, false},
 		{Scope{Severity: "warning", Site: "warsaw"}, false},
-		// The place is fail-closed: an event that names no site is not
-		// known to be this site's, and a channel of one site is told only
-		// what is known to be its own. An event without a severity is not
-		// an alert and passes the severity filter.
+		// The place is fail-closed: an event that names no site is not known to be
+		// this site's, and a channel of one site is told only what is known to be
+		// its own.
 		{Scope{}, false},
 		{Scope{Site: "krakow"}, true},
 		{Scope{Severity: "critical"}, false},
@@ -54,9 +53,9 @@ func TestSubjectsAndFilters(t *testing.T) {
 			t.Errorf("Matches(%+v) = %v, want %v", c.scope, got, c.want)
 		}
 	}
-	// The explicitly global channel - no site, no environment - is the one
-	// an event of unknown place reaches; an environment filter is as
-	// closed as a site filter.
+	// The explicitly global channel - no site, no environment - is the one an
+	// event of unknown place reaches; an environment filter is as closed as a
+	// site filter.
 	global := Filter{}
 	if !global.Global() || !global.Matches(Scope{}) || !global.Matches(Scope{Site: "warsaw", Environment: "prod"}) {
 		t.Error("the global channel does not carry an event of unknown place or of any place")
@@ -159,9 +158,9 @@ func TestWebhookSenderSignsAndTypesTheRefusal(t *testing.T) {
 		t.Errorf("a closed port was typed as %v", err)
 	}
 
-	// The signing key comes from the secret store with the channel; a
-	// row that carries it in the configuration is one from before the
-	// move, and both sign the same way.
+	// The signing key comes from the secret store with the channel; a row that
+	// carries it in the configuration is one from before the move, and both sign
+	// the same way.
 	status = http.StatusOK
 	fromStore := Channel{ID: "c", Name: "hook", Kind: KindWebhook,
 		Config: json.RawMessage(`{"url":"` + server.URL + `"}`)}.WithSecret("secret")
@@ -170,9 +169,9 @@ func TestWebhookSenderSignsAndTypesTheRefusal(t *testing.T) {
 	}
 }
 
-// The sentence of a transport failure never carries the address: the
-// address of an incoming webhook is the credential, and the log is read
-// by people the credential is kept from.
+// The sentence of a transport failure never carries the address: the address
+// of an incoming webhook is the credential, and the log is read by people the
+// credential is kept from.
 func TestTheFailureSentenceKeepsTheAddressOut(t *testing.T) {
 	channel := Channel{ID: "c", Name: "room", Kind: KindSlackWebhook, Config: json.RawMessage(`{}`)}.
 		WithSecret("http://127.0.0.1:1/services/T0/B0/the-token")
@@ -192,10 +191,9 @@ func TestTheFailureSentenceKeepsTheAddressOut(t *testing.T) {
 	}
 }
 
-// The classification of an attempt is the document's table: 2xx is
-// delivered, 408/429/5xx and a network error pass to the next attempt
-// until the attempts run out, 401/403 are the credential's fault, and
-// any other status is permanent. A mail relay is read by its reply code.
+// The classification of an attempt is the document's table: 2xx is delivered,
+// 408/429/5xx and a network error pass to the next attempt until the attempts
+// run out, 401/403 are the credential's fault, and any other status is
 func TestClassifyFollowsTheTable(t *testing.T) {
 	status := func(code int) error {
 		return SendError{Code: CodeReceiverStatus, Status: code, Err: errors.New("the receiver answered")}
@@ -238,10 +236,9 @@ func TestClassifyFollowsTheTable(t *testing.T) {
 	}
 }
 
-// The pause before the next attempt doubles from the base up to the cap,
-// and the jitter draws anywhere below it: attempt one waits at most the
-// base, attempt seven at most the cap of an hour, and a draw of zero is
-// an attempt at once.
+// The pause before the next attempt doubles from the base up to the cap, and
+// the jitter draws anywhere below it: attempt one waits at most the base,
+// attempt seven at most the cap of an hour, and a draw of zero is an attempt
 func TestBackoffIsExponentialWithFullJitter(t *testing.T) {
 	base, ceiling := 30*time.Second, time.Hour
 	for attempt, want := range map[int]time.Duration{
@@ -260,10 +257,9 @@ func TestBackoffIsExponentialWithFullJitter(t *testing.T) {
 	}
 }
 
-// The suppression: a silence of the host, the rule or both keeps back
-// the alerts of the host; a maintenance window keeps back everything of
-// the host; a security alert of the installation is kept back by a
-// global silence alone, whatever silences the hosts carry.
+// The suppression: a silence of the host, the rule or both keeps back the
+// alerts of the host; a maintenance window keeps back everything of the host;
+// a security alert of the installation is kept back by a global silence alone,
 func TestDecideAppliesSilencesAndMaintenance(t *testing.T) {
 	until := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
 	scoped := silence{ID: "s1", HostID: "h1", RuleID: "r1", Until: until, Reason: "disk swap"}
@@ -333,11 +329,7 @@ func asSendError(err error, target *SendError) bool {
 
 // The address of an incoming webhook is the credential that posts to the
 // channel: the store shows only that it is set, and an edit that says so
-// without typing one keeps the stored address. A new channel has nothing
-// stored, so "set" without an address is refused at the store, not here.
-// A stored channel holds the address in the secret store, and the flag
-// comes from the reference; a row from before the move is redacted the
-// same way.
+// without typing one keeps the stored address.
 func TestTheSlackAddressIsRedactedLikeASecret(t *testing.T) {
 	shown := redact(KindSlackWebhook, json.RawMessage(`{"url":"https://hooks.example.com/T0/B0/secret"}`), false)
 	var config map[string]any
@@ -360,9 +352,8 @@ func TestTheSlackAddressIsRedactedLikeASecret(t *testing.T) {
 		t.Errorf("a webhook with its secret in the store does not say so: %s", hook)
 	}
 
-	// What goes to the store and what goes to the row: the credential
-	// leaves the configuration, and the public summary names the host
-	// alone.
+	// What goes to the store and what goes to the row: the credential leaves the
+	// configuration, and the public summary names the host alone.
 	credential, stored := credentialOf(SlackConfig{URL: "https://hooks.example.com/T0/B0/secret"})
 	if credential != "https://hooks.example.com/T0/B0/secret" || stored.(SlackConfig).URL != "" {
 		t.Errorf("the address was not moved out: %q %+v", credential, stored)

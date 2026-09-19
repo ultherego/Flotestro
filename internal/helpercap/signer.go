@@ -19,27 +19,18 @@ import (
 // NonceSize is the length of a capability nonce.
 const NonceSize = 32
 
-// Signer holds the control plane's capability key. The key lives in a file
-// of the panel's state directory and nowhere else: not in the database,
-// whose copy must not be enough to mint an authorization, and never on a
-// host.
+// Signer holds the control plane's capability key.
 type Signer struct {
 	key    ed25519.PrivateKey
 	public ed25519.PublicKey
 	keyID  string
-	// previous is the key retired by a rotation, kept for the overlap: the
-	// hosts trust it, so the bundle that introduces the new key is signed
-	// with it. Nil outside a rotation.
+	// previous is the key retired by a rotation, kept for the overlap: the hosts
+	// trust it, so the bundle that introduces the new key is signed with it.
 	previous *Signer
 }
 
-// LoadOrGenerateSigner reads the signing key from a file, generating one
-// when the file is missing. The second value says whether a key came into
-// being: an operator has to know that a new key exists and that hosts will
-// learn it at their next renewal.
-//
-// A file named like the key with the suffix "-previous.key" beside it is
-// the key retired by a rotation and is loaded for the overlap.
+// LoadOrGenerateSigner reads the signing key from a file, generating one when
+// the file is missing.
 func LoadOrGenerateSigner(path string) (*Signer, bool, error) {
 	signer, err := loadSigner(path)
 	created := false
@@ -109,9 +100,9 @@ func writeKey(path string, private ed25519.PrivateKey) error {
 		return err
 	}
 	encoded := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
-	// The file is created with the final mode and never widened: a key
-	// readable by another user of the panel host is a key that user can
-	// mint root operations with.
+	// The file is created with the final mode and never widened: a key readable
+	// by another user of the panel host is a key that user can mint root
+	// operations with.
 	temporary := path + ".new"
 	if err := os.WriteFile(temporary, encoded, 0o600); err != nil {
 		return err
@@ -156,9 +147,7 @@ type Mint struct {
 	Now            time.Time
 }
 
-// Issue mints and signs a capability. The window starts ClockSkew before
-// now, so a host whose clock sits a little behind takes the capability as
-// current, and ends after the class window of the action.
+// Issue mints and signs a capability.
 func (s *Signer) Issue(mint Mint) (*helperv1.HelperCapability, []byte, error) {
 	if mint.HostID == "" || mint.TaskID == "" || mint.ActionType == "" {
 		return nil, nil, errors.New("a capability needs a host, a task and an action")
@@ -191,11 +180,7 @@ func (s *Signer) Issue(mint Mint) (*helperv1.HelperCapability, []byte, error) {
 	return capability, Sign(s.key, capability), nil
 }
 
-// TrustBundle is the signed keyring for one host. During a rotation the
-// bundle is signed by the retired key, because that is the one the hosts
-// trust; the new key rides inside. Outside a rotation the active key
-// signs, which a host with an empty keyring takes on trust at enrollment
-// and a host with a keyring verifies against it.
+// TrustBundle is the signed keyring for one host.
 func (s *Signer) TrustBundle(hostID string, now time.Time) *helperv1.HelperTrustBundle {
 	if now.IsZero() {
 		now = time.Now()

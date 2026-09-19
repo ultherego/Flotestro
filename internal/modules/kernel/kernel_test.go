@@ -32,11 +32,8 @@ func TestKeysOutsideScopeAreRejected(t *testing.T) {
 			t.Errorf("rejected key %q: %v", key, err)
 		}
 	}
-	// "net.ipv4" is a branch, not a setting, but syntactically it looks the
-	// same as "vm.swappiness". The host settles it by checking before the
-	// write whether the key exists at all - and that is how it should be,
-	// because the key list depends on the kernel version and the loaded
-	// modules.
+	// "net. ipv4" is a branch, not a setting, but syntactically it looks the same
+	// as "vm.
 	if err := ValidateKey("net.ipv4"); err != nil {
 		t.Errorf("branch syntax rejected by the validator: %v", err)
 	}

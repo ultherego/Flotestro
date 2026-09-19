@@ -12,15 +12,6 @@ import (
 )
 
 // fetchSecret fetches the value of a secret for one task.
-//
-// The request carries the host's own proof whenever the session can sign:
-// the identity envelope over the request, and a one-time X25519 key signed
-// by the host key for this task and this secret. On a direct connection
-// the gateway ignores both and answers with the value as it is; through a
-// relay it answers sealed to the one-time key, and the value exists in
-// the clear only here, after the cipher text authenticated. A relay on
-// the way carries the routing and the cipher text, never the plaintext.
-// The one-time key lives for this call and is written nowhere.
 func fetchSecret(ctx context.Context, client agentv1connect.AgentServiceClient,
 	signer *relayproof.Signer, taskID, name string, version int) ([]byte, error) {
 	request := &agentv1.FetchSecretRequest{
@@ -65,9 +56,7 @@ func fetchSecret(ctx context.Context, client agentv1connect.AgentServiceClient,
 	return value, nil
 }
 
-// openSealedSecret opens a sealed answer with the one-time key of the
-// call. A scheme this release does not know is refused by name rather than
-// tried: the host must not guess at a cipher.
+// openSealedSecret opens a sealed answer with the one-time key of the call.
 func openSealedSecret(ephemeral *relayproof.EphemeralKey, answer *agentv1.FetchSecretResponse,
 	taskID, name string) ([]byte, error) {
 	if answer.GetSealing() != relayproof.Sealing {

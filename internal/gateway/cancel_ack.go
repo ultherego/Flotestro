@@ -15,19 +15,8 @@ import (
 	"github.com/ultherego/flotestro/internal/jobs"
 )
 
-// The cancel protocol on the gateway side.
-//
-// A cancel of a task the host holds is a request the panel records on the
-// job (jobs.Store.Cancel) and a question the agent answers (CancelAck in
-// agent.proto). Two things happen here. The request reaches the host: the
-// instance holding the host's session reads the open requests of its own
-// hosts and sends each as a CancelTask - on the trail's notification, so
-// a request goes out within a round trip, and on a tick, so a request
-// made while the notification was lost or the session was elsewhere goes
-// out anyway. And the answer settles the job: the acknowledgement names
-// the attempt, the attempt names the job, and the store moves the job by
-// what the host said. A request nobody answers within the operation's
-// timeout is settled by the sweep as unknown.
+// The cancel protocol on the gateway side. A cancel of a task the host holds
+// is a request the panel records on the job (jobs.
 
 // cancelOutcomeName translates the protocol's outcome into the word the
 // store keeps: the enum name in lower case.
@@ -35,14 +24,8 @@ func cancelOutcomeName(outcome agentv1.CancelAck_Outcome) string {
 	return strings.ToLower(outcome.String())
 }
 
-// recordCancelAck settles a cancel request by the agent's answer. Called
-// from the message switch of the session for AgentMessage_CancelAck.
-//
-// The attempt must belong to the host that answers: a host that learned
-// another host's attempt identifier must not cancel that host's job. The
-// hash of the result the agent observed - with already_done - goes on the
-// trail: the panel keeps the parsed result, not the encoding, so the
-// hash is a fact for the record rather than something to compare here.
+// recordCancelAck settles a cancel request by the agent's answer. Called from
+// the message switch of the session for AgentMessage_CancelAck.
 func (s *AgentService) recordCancelAck(ctx context.Context, session *Session, ack *agentv1.CancelAck) error {
 	hostID := session.HostID
 	attemptID := ack.GetTaskId()
@@ -88,20 +71,15 @@ func (s *AgentService) recordCancelAck(ctx context.Context, session *Session, ac
 }
 
 // cancelResendInterval is how long the relay waits before sending an
-// unanswered request to the same attempt again. A request is answered
-// within a round trip; one still open after this long was sent into a
-// stream that died, or to an agent from before the protocol, which never
-// answers and is settled by the sweep.
+// unanswered request to the same attempt again.
 const cancelResendInterval = 30 * time.Second
 
 // cancelRelayInterval is the tick of the relay: how long a request waits
 // at most when the trail's notification did not reach this instance.
 const cancelRelayInterval = 5 * time.Second
 
-// cancelSends remembers, per attempt, when the relay last sent the
-// request, so a tick does not send the same request every five seconds.
-// An answered request leaves the pending list and is never looked up
-// again; the entry is bounded away, not cleaned.
+// cancelSends remembers, per attempt, when the relay last sent the request, so
+// a tick does not send the same request every five seconds.
 type cancelSends struct {
 	mu   sync.Mutex
 	sent map[string]time.Time
@@ -133,17 +111,15 @@ func (c *cancelSends) forget(attemptID string) {
 	delete(c.sent, attemptID)
 }
 
-// cancelRelay is the relay of one instance: the service it sends through
-// and the sends it remembers. It is a value of its own rather than a
-// field of the service so that it is created where it runs.
+// cancelRelay is the relay of one instance: the service it sends through and
+// the sends it remembers.
 type cancelRelay struct {
 	service *AgentService
 	sends   cancelSends
 }
 
-// RunCancelRelay delivers the open cancel requests of the hosts connected
-// to this instance and settles the requests nobody answered. It runs
-// until the context ends; one goroutine per instance.
+// RunCancelRelay delivers the open cancel requests of the hosts connected to
+// this instance and settles the requests nobody answered.
 func (s *AgentService) RunCancelRelay(ctx context.Context) {
 	relay := &cancelRelay{service: s}
 	ticker := time.NewTicker(cancelRelayInterval)
@@ -197,9 +173,9 @@ func (r *cancelRelay) send(ctx context.Context) int {
 			},
 		}
 		if _, err := s.registry.Dispatch(request.HostID, message, 5*time.Second); err != nil {
-			// The host left between the listing and the send: the next
-			// instance to hold it sends, and the send is tried again here
-			// on the next tick should it come back.
+			// The host left between the listing and the send: the next instance to hold
+			// it sends, and the send is tried again here on the next tick should it
+			// come back.
 			r.sends.forget(request.AttemptID)
 			s.log.Debug("the cancel request was not sent",
 				"job_id", request.JobID, "host_id", request.HostID, "err", err)
@@ -213,10 +189,9 @@ func (r *cancelRelay) send(ctx context.Context) int {
 	return sent
 }
 
-// cancelTaskOf is the message the request goes out as: the attempt the
-// agent knows the task by, the reason for its log, the revision the
-// answer is read against and the deadline after which the panel stops
-// waiting.
+// cancelTaskOf is the message the request goes out as: the attempt the agent
+// knows the task by, the reason for its log, the revision the answer is read
+// against and the deadline after which the panel stops waiting.
 func cancelTaskOf(request jobs.CancelRequest) *agentv1.CancelTask {
 	reason := request.Reason
 	if reason == "" {
@@ -230,9 +205,9 @@ func cancelTaskOf(request jobs.CancelRequest) *agentv1.CancelTask {
 	}
 }
 
-// settleCancelTimeouts ends the requests nobody answered in time and puts
-// each on the trail: the outcome on the host is unknown, and the operator
-// reads it off the host.
+// settleCancelTimeouts ends the requests nobody answered in time and puts each
+// on the trail: the outcome on the host is unknown, and the operator reads it
+// off the host.
 func (s *AgentService) settleCancelTimeouts(ctx context.Context) {
 	settled, err := s.jobs.SettleCancelTimeouts(ctx)
 	if err != nil {

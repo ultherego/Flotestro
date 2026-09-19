@@ -15,14 +15,8 @@ import (
 	"path/filepath"
 )
 
-// Key is the private key of a fleet identity.
-//
-// An interface rather than bytes, because a key cannot always be exported.
-// Today the agent generates it in software and writes it as PEM; in the
-// hardware profile the key comes into being inside a TPM and never leaves it
-// - only a handle then goes to disk. The generation store must assume neither
-// of those, because such an assumption would travel from here into the
-// enrollment and into the renewal.
+// Key is the private key of a fleet identity. An interface rather than bytes,
+// because a key cannot always be exported.
 type Key interface {
 	// Public returns the public key. That is enough to build a certificate
 	// request and to check that a certificate matches the key.
@@ -35,9 +29,6 @@ type Key interface {
 }
 
 // KeySource creates and loads identity keys.
-//
-// The source is replaceable: a hardware profile replaces it in full, and the
-// rest of the agent does not change at all.
 type KeySource interface {
 	New() (Key, error)
 	Load(dir string) (Key, error)
@@ -47,11 +38,8 @@ type KeySource interface {
 // in itself: that is exactly how a hardware key behaves.
 var ErrKeyNotExportable = errors.New("key_not_exportable")
 
-// Software returns the source of a key kept in a file.
-//
-// The default and the only one today. The name says outright that the key is
-// in software, so that a hardware profile does not have to be called "the
-// other one".
+// Software returns the source of a key kept in a file. The default and the
+// only one today.
 func Software() KeySource { return softwareSource{} }
 
 type softwareSource struct{}
@@ -128,12 +116,6 @@ func (k *softwareKey) materialPEM() ([]byte, error) {
 }
 
 // Request builds a CSR signed with the given key.
-//
-// The subject and the names are a hint: the panel grants the identity on the
-// strength of a token or of the current certificate rather than on what the
-// host writes about itself. The exception is a relay's network names, which
-// the panel takes from the request at the first registration - because they
-// are not in the registry yet.
 func Request(key Key, name string, dns []string, addresses []net.IP) ([]byte, error) {
 	der, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
 		Subject:     pkix.Name{CommonName: name},

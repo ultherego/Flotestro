@@ -10,25 +10,15 @@ import (
 	"time"
 )
 
-// InstalledPackage describes one installed package in the form that is
-// enough to correlate it with the security tracker of a distribution.
-//
-// The name of the binary package alone is not enough. Debian tracks security
-// by source packages - one source gives more than a dozen binaries - and RPM
-// requires the full NEVRA together with the epoch, because without it "1.0"
-// and "1:1.0" look the same and mean different things. That is why we gather
-// both sets of fields, even when some of them are empty on a given host.
+// InstalledPackage describes one installed package in the form that is enough
+// to correlate it with the security tracker of a distribution.
 type InstalledPackage struct {
 	Name string `json:"name"`
-	// SourceName and SourceVersion are the source package. For apt they come
-	// straight from the dpkg database, for rpm - from the name of the source
-	// file.
+	// SourceName and SourceVersion are the source package.
 	SourceName    string `json:"source_name,omitempty"`
 	SourceVersion string `json:"source_version,omitempty"`
 
-	// Epoch is empty when the package has none. Zero and a missing epoch mean
-	// the same for a comparison, but in the record they are different and we
-	// leave them that way.
+	// Epoch is empty when the package has none.
 	Epoch        string `json:"epoch,omitempty"`
 	Version      string `json:"version"`
 	Release      string `json:"release,omitempty"`
@@ -36,23 +26,17 @@ type InstalledPackage struct {
 
 	SourceRPM string `json:"source_rpm,omitempty"`
 	Vendor    string `json:"vendor,omitempty"`
-	// RepositoryID says where the package came from. Empty means the host did
-	// not record it - not that the package comes from outside the
-	// repositories.
+	// RepositoryID says where the package came from. Empty means the host did not
+	// record it - not that the package comes from outside the repositories.
 	RepositoryID string `json:"repository_id,omitempty"`
 	ModuleStream string `json:"module_stream,omitempty"`
-	// Origin is the address of the repository the installed version comes
-	// from, and OriginClass is its classification. APT does not record the
-	// vendor with the package, so without this a package from a foreign
-	// repository would look like a package of the distribution and would count
-	// as covered by its findings.
+	// Origin is the address of the repository the installed version comes from,
+	// and OriginClass is its classification.
 	Origin      string `json:"origin,omitempty"`
 	OriginClass string `json:"origin_class,omitempty"`
 }
 
-// The classes of the origin of a package. The correlator reads the same
-// values: a package from outside the distribution is not subject to the
-// findings of its vendor.
+// The classes of the origin of a package.
 const (
 	OriginDistribution = "vendor_distribution"
 	OriginThirdParty   = "third_party_repository"
@@ -73,9 +57,6 @@ func (p InstalledPackage) EVR() string {
 }
 
 // DebVersion assembles the version in the form the Debian comparison uses.
-//
-// In dpkg the revision is part of one version string, so we put it back
-// together only when it has been split apart.
 func (p InstalledPackage) DebVersion() string {
 	version := p.Version
 	if p.Epoch != "" {
@@ -91,31 +72,17 @@ func (p InstalledPackage) DebVersion() string {
 type InstalledList struct {
 	Manager  string             `json:"manager"`
 	Packages []InstalledPackage `json:"packages,omitempty"`
-	// Digest identifies the content of the list. The panel keeps it next to
-	// the rows and compares it with the digest from the inventory: a
-	// divergence means the list in the database describes a state other than
-	// the host rather than that the host is clean.
+	// Digest identifies the content of the list.
 	Digest string `json:"digest"`
 	Count  int    `json:"count"`
-	// ObservedAt is the moment of the read; a correlation without the age of
-	// the data makes no sense, because there is no telling what the answer
-	// concerns.
+	// ObservedAt is the moment of the read; a correlation without the age of the
+	// data makes no sense, because there is no telling what the answer concerns.
 	ObservedAt time.Time `json:"observed_at"`
-	// UnavailableReason says why the list is missing. An empty list and a
-	// list that was not read are two different answers - and only one of them
-	// allows saying anything about vulnerabilities.
+	// UnavailableReason says why the list is missing.
 	UnavailableReason string `json:"unavailable_reason,omitempty"`
 }
 
 // Digest computes the digest of the package list in its canonical form.
-//
-// The canonicalisation is explicit and versioned: without it the same list
-// would give different digests after a change in the order of the fields, and
-// the panel would fetch it anew every cycle.
-//
-// Version 2 added the origin of the package: a change of the repository a
-// package came from changes what the panel has the right to say about it -
-// even when the version stays the same.
 const listCanonicalisationVersion = 2
 
 // Digest computes the digest of a package list.
@@ -145,12 +112,8 @@ func Digest(pkgs []InstalledPackage) string {
 	return hex.EncodeToString(sum.Sum(nil))
 }
 
-// Installed reads the full package list of a host.
-//
-// The read does not require root: the dpkg database and the RPM database are
-// readable by everyone. The list is large, so it is fetched on demand rather
-// than in every inventory cycle - the inventory carries the digest and the
-// number of packages alone.
+// Installed reads the full package list of a host. The read does not require
+// root: the dpkg database and the RPM database are readable by everyone.
 func Installed(ctx context.Context, manager string) InstalledList {
 	list := InstalledList{Manager: manager, ObservedAt: time.Now().UTC()}
 	switch manager {
@@ -170,9 +133,9 @@ func Installed(ctx context.Context, manager string) InstalledList {
 
 // installedAPT reads the dpkg database together with the source packages.
 func installedAPT(ctx context.Context) ([]InstalledPackage, string) {
-	// The source:Version field is empty when the source version equals the
-	// binary one; dpkg-query fills it in only when they differ, so we fill it
-	// in ourselves.
+	// The source:Version field is empty when the source version equals the binary
+	// one; dpkg-query fills it in only when they differ, so we fill it in
+	// ourselves.
 	format := `${db:Status-Status}\t${Package}\t${Version}\t${Architecture}\t` +
 		`${source:Package}\t${source:Version}\n`
 	result := run(ctx, 2*time.Minute, "/usr/bin/dpkg-query", "-W", "-f", format)
@@ -186,9 +149,8 @@ func installedAPT(ctx context.Context) ([]InstalledPackage, string) {
 		if len(fields) < 6 {
 			continue
 		}
-		// A package removed with its configuration left behind is not
-		// installed: its code no longer lies on the host, so it is not
-		// vulnerable either.
+		// A package removed with its configuration left behind is not installed: its
+		// code no longer lies on the host, so it is not vulnerable either.
 		if strings.TrimSpace(fields[0]) != "installed" {
 			continue
 		}
@@ -221,11 +183,6 @@ func installedAPT(ctx context.Context) ([]InstalledPackage, string) {
 
 // FillAPTOrigin writes to the packages the repository the installed version
 // came from.
-//
-// APT does not record that in the dpkg database: it knows it only from the
-// package lists, and "policy" is the only place that ties an installed version
-// to its source. A package whose version comes from the dpkg state file alone
-// arrived from outside the repositories - by hand or from a local build.
 func FillAPTOrigin(ctx context.Context, pkgs []InstalledPackage) {
 	if len(pkgs) == 0 {
 		return
@@ -236,9 +193,9 @@ func FillAPTOrigin(ctx context.Context, pkgs []InstalledPackage) {
 	}
 	result := run(ctx, 3*time.Minute, "/usr/bin/apt-cache", append([]string{"policy"}, names...)...)
 	if !result.Ran || result.ExitCode != 0 {
-		// Missing knowledge about the origin stays missing knowledge: the
-		// correlator treats such packages as undetermined rather than as
-		// packages of the distribution.
+		// Missing knowledge about the origin stays missing knowledge: the correlator
+		// treats such packages as undetermined rather than as packages of the
+		// distribution.
 		return
 	}
 	origin := ParseAPTPolicy(result.Stdout)
@@ -259,19 +216,6 @@ type OriginEntry struct {
 }
 
 // ParseAPTPolicy reads the output of "apt-cache policy" for many packages.
-//
-// The block of a package carries the installed version and a table of sources
-// with priorities. The installed version is marked with three asterisks; the
-// lines under it say where it came from.
-//
-// A version known from the dpkg state file alone does not yet mean a package
-// built locally. A version withdrawn from a repository looks the same - an old
-// kernel lying on disk after an upgrade. That is why, when the version itself
-// has no source, we ask about the package: if its other versions come from the
-// repositories of the distribution, it is a package of the distribution with a
-// version it no longer releases. Exactly such packages matter most for the
-// vulnerability assessment - pushing them outside the coverage would hide
-// unpatched kernels.
 func ParseAPTPolicy(wyjscie string) map[string]OriginEntry {
 	result := map[string]OriginEntry{}
 	name := ""
@@ -287,9 +231,8 @@ func ParseAPTPolicy(wyjscie string) map[string]OriginEntry {
 		case fromVersion.Class != "" && fromVersion.Class != OriginLocal:
 			result[name] = fromVersion
 		case fromPackage.Class != "":
-			// A withdrawn version: the package still belongs to the repository
-			// it came from, even though that version of it is no longer
-			// there.
+			// A withdrawn version: the package still belongs to the repository it came
+			// from, even though that version of it is no longer there.
 			result[name] = fromPackage
 		case fromVersion.Class != "":
 			result[name] = fromVersion
@@ -362,10 +305,6 @@ func onlyDigits(s string) bool {
 }
 
 // distributionAddresses recognises the repositories of the vendor.
-//
-// The list is short and explicit: everything outside it is a foreign
-// repository rather than a package of the distribution. An error in this
-// direction gives "unknown" rather than a false "covered by the findings".
 var distributionAddresses = []string{
 	"debian.org", "debian.net", "ubuntu.com", "canonical.com", "raspbian.org",
 }
@@ -416,9 +355,8 @@ func installedRPM(ctx context.Context) ([]InstalledPackage, string) {
 		if pkg.Name == "" || pkg.Version == "" {
 			continue
 		}
-		// EPOCHNUM gives "0" also when the package has no epoch; we record
-		// that as a missing epoch, because that is how the advisories speak
-		// about it.
+		// EPOCHNUM gives "0" also when the package has no epoch; we record that as a
+		// missing epoch, because that is how the advisories speak about it.
 		if pkg.Epoch == "0" || pkg.Epoch == "(none)" {
 			pkg.Epoch = ""
 		}
@@ -436,9 +374,6 @@ func installedRPM(ctx context.Context) ([]InstalledPackage, string) {
 
 // SourceFromSourceRPM extracts the name and the version of the source out of
 // the name of the source file.
-//
-// The file has the form "name-version-release.src.rpm". The name may contain
-// dashes, so we cut from the end: first the release, then the version.
 func SourceFromSourceRPM(sourceRPM string) (name, version string) {
 	file := strings.TrimSuffix(strings.TrimSpace(sourceRPM), ".src.rpm")
 	if file == "" || file == "(none)" {

@@ -16,11 +16,6 @@ import (
 )
 
 // Progress describes the progress of a package transaction.
-//
-// The step and the percentage are separate, because the tools give different
-// things: apt knows the percentage of the whole operation, dnf numbers the
-// steps. An undetermined value is not turned into zero - zero steps would look
-// like no work at all.
 type Progress struct {
 	Step    uint32
 	Total   uint32
@@ -32,28 +27,18 @@ type Progress struct {
 // frequency, so the receiver does not have to throttle them.
 type ProgressFunc func(Progress)
 
-// minimumProgressInterval limits the stream to a pace a person can read. Apt
-// can print several hundred changes of the percentage per second; each of them
-// would cost a notification all the way to the browser.
+// minimumProgressInterval limits the stream to a pace a person can read.
 const minimumProgressInterval = 400 * time.Millisecond
 
-// dnfStep recognises the progress lines of dnf. The description column is
-// padded to a fixed width, so between the description and the percentage there
-// is sometimes one space and sometimes a dozen - the pattern anchors on the
-// percentage column rather than on the gap:
-//
-//	[1/6] Verify package files              100% | 166.0   B/s | ...
-//	[3/6] Upgrading tcpdump-14:4.99.6-2.fc4 100% |  36.0 MiB/s | ...
+// dnfStep recognises the progress lines of dnf.
 var dnfStep = regexp.MustCompile(`^\[\s*(\d+)/(\d+)\]\s+(.+?)\s+\d{1,3}%`)
 
 // dnfStepWithoutPercent handles the steps printed without a progress column.
 var dnfStepWithoutPercent = regexp.MustCompile(`^\[\s*(\d+)/(\d+)\]\s+(.+?)\s*$`)
 
-// pacmanStep recognises the steps of pacman, which numbers them in
-// parentheses and, without a progress bar, prints the description alone:
-//
-//	(3/12) upgrading glibc
-//	(1/5) Arming ConditionNeedsUpdate...
+// pacmanStep recognises the steps of pacman, which numbers them in parentheses
+// and, without a progress bar, prints the description alone: (3/12) upgrading
+// glibc (1/5) Arming ConditionNeedsUpdate.
 var pacmanStep = regexp.MustCompile(`^\(\s*(\d+)/(\d+)\)\s+(.+?)\s*$`)
 
 // throttler lets the progress through no more often than every
@@ -77,11 +62,8 @@ func (d *throttler) send(p Progress, now time.Time) {
 	d.receiver(p)
 }
 
-// runWithProgress starts a tool and reports the progress along the way.
-//
-// Apt gets a status descriptor of its own (APT::Status-Fd). That is its own
-// machine channel of progress - parsing the bars from a terminal would give a
-// result that depends on the width of the window and on the locale.
+// runWithProgress starts a tool and reports the progress along the way. Apt
+// gets a status descriptor of its own (APT::Status-Fd).
 func runWithProgress(ctx context.Context, timeout time.Duration, progress ProgressFunc,
 	statusFd bool, path string, args ...string) commandResult {
 	info, err := os.Stat(path)
@@ -206,11 +188,8 @@ func dnfStepFrom(line string) (Progress, bool) {
 	}, true
 }
 
-// readAPTStatus reads the machine progress channel of apt.
-//
-// The format is "kind:package:percentage:description". The dlstatus kind
-// covers the download, pmstatus the installation itself; the operator cares
-// about both, because both phases can take a while.
+// readAPTStatus reads the machine progress channel of apt. The format is
+// "kind:package:percentage:description".
 func readAPTStatus(r io.Reader, throttle *throttler) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 8<<10), 256<<10)

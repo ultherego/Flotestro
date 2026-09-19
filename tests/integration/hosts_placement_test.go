@@ -37,11 +37,9 @@ func readPlacement(t *testing.T, h *harness, hostID string) (hostPlacementView, 
 	return host, response.Header.Get("ETag")
 }
 
-// TestHostPlacementRoundTrip guards moving a host between sites: the
-// placement route moves a lab host to another site, the host reads back
-// there with the moment of the move, the trail keeps both sides with the
-// reason, a move without a reason or to nowhere is refused, and the host
-// goes back where it stood.
+// TestHostPlacementRoundTrip guards moving a host between sites: the placement
+// route moves a lab host to another site, the host reads back there with the
+// moment of the move, the trail keeps both sides with the reason, a move
 func TestHostPlacementRoundTrip(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -148,11 +146,9 @@ type bulkResponse struct {
 	Failed  int           `json:"failed"`
 }
 
-// TestBulkMetadataAnswersEveryHost guards the bulk edit: one call adds a
-// tag and sets the owner on two lab hosts and answers for each; the hosts
-// read back changed; a host id the caller may not touch is answered with a
-// code of its own, not with a refusal of the whole call; and a value the
-// single route would refuse is refused before the first host.
+// TestBulkMetadataAnswersEveryHost guards the bulk edit: one call adds a tag
+// and sets the owner on two lab hosts and answers for each; the hosts read
+// back changed; a host id the caller may not touch is answered with a code of
 func TestBulkMetadataAnswersEveryHost(t *testing.T) {
 	h := newHarness(t)
 	lab := h.hosts()

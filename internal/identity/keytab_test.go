@@ -9,10 +9,9 @@ import (
 	"github.com/ultherego/flotestro/internal/freeipa"
 )
 
-// A keytab rotation is a known change of access with a permission of its
-// own - the architecture document's "keytab rotation per separate
-// permission" - and its payload names a service principal, never the
-// host's own.
+// A keytab rotation is a known change of access with a permission of its own -
+// the architecture document's "keytab rotation per separate permission" - and
+// its payload names a service principal, never the host's own.
 func TestKeytabRotationIsAnAccessChangeWithItsOwnPermission(t *testing.T) {
 	if !ActionKeytabRotate.Known() || !ActionKeytabRotate.ChangesAccess() {
 		t.Error("a keytab rotation is not a known change of access")
@@ -49,8 +48,8 @@ func TestKeytabRotationIsAnAccessChangeWithItsOwnPermission(t *testing.T) {
 }
 
 // The plan names the two halves and the gap between them, and refuses a
-// principal the directory does not know or a host that could not fetch the
-// new keytab - before the approval, not after the retirement.
+// principal the directory does not know or a host that could not fetch the new
+// keytab - before the approval, not after the retirement.
 func TestKeytabRotationPlanNamesBothHalvesAndTheGap(t *testing.T) {
 	yes, no := true, false
 	directory := labDirectory()
@@ -128,9 +127,9 @@ func (f *fakeFleet) OrderKeytabRenewal(_ context.Context, host FleetHost, princi
 	return "job-" + host.ID, nil
 }
 
-// The execution keeps the safe order: the host is checked before the
-// keytab is retired, so a host that could not fetch a new one leaves the
-// old one in place; once retired, the renewal is ordered on that host.
+// The execution keeps the safe order: the host is checked before the keytab is
+// retired, so a host that could not fetch a new one leaves the old one in
+// place; once retired, the renewal is ordered on that host.
 func TestKeytabRotationRetiresOnlyWithAHostToRenew(t *testing.T) {
 	var retired []string
 	fleet := &fakeFleet{hosts: map[string]FleetHost{

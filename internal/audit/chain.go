@@ -11,17 +11,9 @@ import (
 	"io"
 )
 
-// An export of the trail is a file of JSON lines linked by a hash chain:
-// every line carries the digest of the line before it, and a final line
-// carries the count and the digest of the last event. A file kept outside
-// the panel - on write-once storage, with an auditor - can then be checked
-// without the panel: a line changed, removed or inserted breaks the digest
-// of every line after it, and a file cut short has no closing line.
-//
-// The digest is taken over the bytes of the line as written, without the
-// newline. That is the canonical form: the verifier hashes what it reads
-// and never re-encodes, so it cannot disagree with the writer about the
-// order of keys or the spelling of a number.
+// An export of the trail is a file of JSON lines linked by a hash chain: every
+// line carries the digest of the line before it, and a final line carries the
+// count and the digest of the last event.
 
 // ChainEntry is one event as the export writes it.
 type ChainEntry struct {

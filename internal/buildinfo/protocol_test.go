@@ -41,8 +41,7 @@ func TestMinimumProtocolFollowsTheTable(t *testing.T) {
 }
 
 // TestCheckProtocolRefusesANewerAgent: a panel speaking protocol 1 may order
-// any release on protocol 1, and refuses one on protocol 2 with its own
-// code. The other way round is fine.
+// any release on protocol 1, and refuses one on protocol 2 with its own code.
 func TestCheckProtocolRefusesANewerAgent(t *testing.T) {
 	if err := checkProtocol(testTable, 1, "0.41.0"); err != nil {
 		t.Fatalf("a compatible release was refused: %v", err)
@@ -101,10 +100,8 @@ func TestOnlyANewAgentAcknowledgesTasks(t *testing.T) {
 }
 
 // TestTheAnnouncedRangeDecidesBeforeTheTable: an agent that says what it
-// speaks is judged by that - a release the table has never heard of talks
-// when its range overlaps the panel's, and a release the table would let
-// in is refused when its announced range does not. An agent that
-// announces nothing is judged by the table as before.
+// speaks is judged by that - a release the table has never heard of talks when
+// its range overlaps the panel's, and a release the table would let in is
 func TestTheAnnouncedRangeDecidesBeforeTheTable(t *testing.T) {
 	// The panel of the test speaks protocols 1 to 2.
 	check := func(version string, min, max int) error {

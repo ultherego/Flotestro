@@ -8,9 +8,8 @@ type contextKey string
 
 const principalKey contextKey = "flotestro.principal"
 
-// GlobalScope is the target of operations not assigned to any particular
-// part of the fleet. Only an assignment with an asterisk matches it, so the
-// operator of one environment does not manage the whole system.
+// GlobalScope is the target of operations not assigned to any particular part
+// of the fleet.
 var GlobalScope = Scope{Site: Wildcard, Environment: Wildcard}
 
 // Anonymous is an identity without any permissions.
@@ -30,11 +29,9 @@ func (p Principal) Authenticated() bool {
 	return p.ID != ""
 }
 
-// ContextWithPrincipal attaches an identity outside the middleware: a
-// loop placing a stored order carries it through the same handlers a
-// request goes through, under the identity the order is placed as. The
-// identity is whatever the caller resolved; the handlers judge it the way
-// they judge one the middleware established.
+// ContextWithPrincipal attaches an identity outside the middleware: a loop
+// placing a stored order carries it through the same handlers a request goes
+// through, under the identity the order is placed as.
 func ContextWithPrincipal(ctx context.Context, principal Principal) context.Context {
 	return context.WithValue(ctx, principalKey, principal)
 }

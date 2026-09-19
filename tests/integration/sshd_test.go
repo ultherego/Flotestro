@@ -33,9 +33,9 @@ type sshSnapshot struct {
 
 const sshReason = "integration test of the sshd module"
 
-// TestSSHConfigurationComesFromTheServer checks that the panel shows what
-// the server really applies, together with the key fingerprints - and never
-// a private key.
+// TestSSHConfigurationComesFromTheServer checks that the panel shows what the
+// server really applies, together with the key fingerprints - and never a
+// private key.
 func TestSSHConfigurationComesFromTheServer(t *testing.T) {
 	h := newHarness(t)
 
@@ -77,10 +77,7 @@ func TestChangeCuttingOffLoginIsRejected(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
-	// The rule is about every method, and the panel sets only three of
-	// them. A host whose sshd still offers GSSAPI - a domain-joined one -
-	// keeps a way in that this order does not touch, so turning the three
-	// off is not a lockout there and the host is right not to call it one.
+	// The rule is about every method, and the panel sets only three of them.
 	if state := hostSSHSnapshot(t, h, host.ID); strings.EqualFold(state.GSSAPIAuthentication, "yes") {
 		t.Skip("the host offers GSSAPI, which the panel does not set, so no order of this module can cut off every method")
 	}
@@ -88,10 +85,8 @@ func TestChangeCuttingOffLoginIsRejected(t *testing.T) {
 	job, attempts := h.runOperation(host.ID, map[string]any{
 		"action": "ssh.config.apply", "reason": sshReason,
 		// Every method the panel can set goes off in one order: with
-		// keyboard-interactive left as the server has it - and OpenSSH
-		// leaves it on - a password still gets somebody in through PAM, so
-		// turning off two of the three is not a lockout and the host is
-		// right not to call it one.
+		// keyboard-interactive left as the server has it - and OpenSSH leaves it on
+		// - a password still gets somebody in through PAM, so turning off two of the
 		"payload": map[string]any{"ssh": map[string]any{
 			"password_authentication": "no", "pubkey_authentication": "no",
 			"kbd_interactive_authentication": "no"}},
@@ -104,9 +99,8 @@ func TestChangeCuttingOffLoginIsRejected(t *testing.T) {
 	}
 }
 
-// TestSettingShadowed is about what tells a write from its effect: in sshd
-// the first value wins, so an earlier administrator file shadows the panel
-// file. Silence here would be a false success.
+// TestSettingShadowed is about what tells a write from its effect: in sshd the
+// first value wins, so an earlier administrator file shadows the panel file.
 func TestSettingShadowed(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")

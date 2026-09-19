@@ -16,11 +16,6 @@ import (
 )
 
 // handleListBudgets shows the fleet capacity and how much of it is taken.
-//
-// Without this screen a host waiting on a budget looks like a forgotten
-// host: the campaign does not move forward, and nothing says why. The
-// number of waiting hosts matters here as much as the usage - it explains
-// why the free tokens do not go to one campaign.
 func (s *Server) handleListBudgets(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorizeCollection(w, r, authz.PermBudgetRead, "budget"); !ok {
 		return
@@ -47,9 +42,7 @@ type budgetLimit struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// configuredBudget reads one configured budget. A missing row is a budget
-// nobody configured - the patterns of the installation still apply to it,
-// but there is no record to tag.
+// configuredBudget reads one configured budget.
 func (s *Server) configuredBudget(ctx context.Context, key string) (*budgetLimit, error) {
 	var limit budgetLimit
 	err := s.pool.QueryRow(ctx,
@@ -89,20 +82,15 @@ func (s *Server) handleGetBudget(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSetBudget changes the capacity of one budget.
-//
-// The capacity is an installation policy, not a constant in the code: a
-// site with one link carries something else than a server room. The change
-// is a separate permission and goes to the audit log, because raised
-// quietly it takes the meaning away from every limit below.
 func (s *Server) handleSetBudget(w http.ResponseWriter, r *http.Request) {
 	key := r.PathValue("key")
 	if key == "" {
 		problem(w, http.StatusBadRequest, "invalid_request", "budget key is required")
 		return
 	}
-	// The scope of the budget is the scope of the change: a site budget is
-	// the site's, everything else - the fleet-wide ones, the backends, a
-	// pattern over every site - moves the whole fleet.
+	// The scope of the budget is the scope of the change: a site budget is the
+	// site's, everything else - the fleet-wide ones, the backends, a pattern over
+	// every site - moves the whole fleet.
 	principal, ok := s.authorize(w, r, authz.PermBudgetWrite, budgetScope(key), "budget", key)
 	if !ok {
 		return
@@ -121,9 +109,8 @@ func (s *Server) handleSetBudget(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
-	// A zero capacity is not a policy, only stopping everything without
-	// saying so directly. A budget that is to let nothing through is a
-	// campaign pause - and that is what it is called.
+	// A zero capacity is not a policy, only stopping everything without saying so
+	// directly.
 	if request.Capacity < 1 {
 		problem(w, http.StatusBadRequest, "invalid_request",
 			"capacity must be at least 1; to stop work, pause the campaign")
@@ -149,9 +136,7 @@ func (s *Server) handleSetBudget(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	// The event carries both sides of the policy. A budget configured for
-	// the first time has no side before: nil says there was no record,
-	// which is the truth, rather than an invented zero.
+	// The event carries both sides of the policy.
 	var before map[string]any
 	if current != nil {
 		before = map[string]any{"capacity": current.Capacity, "note": current.Note}
@@ -173,15 +158,6 @@ func (s *Server) handleSetBudget(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDeleteBudget takes a configured budget away.
-//
-// A deleted budget is not a budget of zero: the key falls back to the
-// pattern of its family, or to no limit at all when no pattern describes
-// it - which is why the deletion has the write permission and goes to
-// the trail like a raise. A budget somebody holds tokens of is refused:
-// the leases were admitted under this capacity, and taking the ceiling
-// away from under a running campaign is a decision for after it has
-// finished, not a side effect of tidying the list. A pattern key counts
-// the leases of every key it describes.
 func (s *Server) handleDeleteBudget(w http.ResponseWriter, r *http.Request) {
 	key := r.PathValue("key")
 	if key == "" {
@@ -260,18 +236,15 @@ func (s *Server) handleDeleteBudget(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// likeOfPattern renders a budget key as a LIKE pattern: the asterisk of
-// a pattern key stands for any site, and the other characters stand for
-// themselves. An exact key has no asterisk and matches only itself,
-// which the equality beside it already does.
+// likeOfPattern renders a budget key as a LIKE pattern: the asterisk of a
+// pattern key stands for any site, and the other characters stand for
+// themselves.
 func likeOfPattern(key string) string {
 	escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(key)
 	return strings.ReplaceAll(escaped, "*", "%")
 }
 
-// budgetScope is the authorisation scope of a budget key. A key of the
-// form site:<name>:<family> belongs to the site; a wildcard site and every
-// other family of key belong to the fleet.
+// budgetScope is the authorisation scope of a budget key.
 func budgetScope(key string) authz.Scope {
 	parts := strings.Split(key, ":")
 	if len(parts) == 3 && parts[0] == "site" && parts[1] != "" && parts[1] != "*" {

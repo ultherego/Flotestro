@@ -25,9 +25,7 @@ const (
 	MaxLogBytes = 1 << 20
 )
 
-// containerReference allows an identifier or a name. The value lands in the
-// path of an Engine API request, so it must not carry anything that changes
-// that path: no slash, no query character, no dot sequence.
+// containerReference allows an identifier or a name.
 var containerReference = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
 
 // ValidateContainerReference rejects a target that is neither an identifier
@@ -44,8 +42,7 @@ func ValidateContainerReference(reference string) error {
 var logsSince = regexp.MustCompile(`^(\d+)(s|m|h|d)$`)
 
 // ParseLogsSince turns the "since" of an order into a moment. An empty value
-// means no lower bound. The duration shapes are the ones an operator types:
-// 15m, 2h, 1d - the engine itself takes a timestamp.
+// means no lower bound.
 func ParseLogsSince(since string, now time.Time) (time.Time, error) {
 	since = strings.TrimSpace(since)
 	if since == "" {
@@ -93,16 +90,9 @@ type Logs struct {
 }
 
 // StderrMarker opens every line the container wrote to its error stream.
-// The two streams are merged in the order the engine kept, because that is
-// the order the operator wants to read; the marker keeps them apart.
 const StderrMarker = "[stderr] "
 
 // Logs reads the tail of a container's log.
-//
-// The engine multiplexes the two streams of a container without a TTY into
-// frames; a container with a TTY writes one raw stream. The container is
-// inspected first to learn which, and to turn a name into the identifier
-// the result reports.
 func (c *Client) Logs(ctx context.Context, reference string, options LogsOptions) (Logs, error) {
 	if err := ValidateContainerReference(reference); err != nil {
 		return Logs{}, err
@@ -214,11 +204,6 @@ func rawLines(body io.Reader) ([]string, error) {
 }
 
 // demultiplexedLines reads the frames of a container without a TTY.
-//
-// Every frame opens with eight bytes: the stream (1 stdout, 2 stderr),
-// three bytes of padding and the big-endian size of the payload. A frame
-// can carry part of a line or several lines; the remainder of every stream
-// waits for the next frame of that stream.
 func demultiplexedLines(body io.Reader) ([]string, error) {
 	var lines []string
 	remainders := map[byte]string{}

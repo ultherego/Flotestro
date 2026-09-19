@@ -110,10 +110,8 @@ func makeCSR(t *testing.T, commonName string) []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der})
 }
 
-// A certificate without its key is the state of a restore that forgot the
-// key, or of a key removed by hand. The fleet trusts that certificate, so
-// a fresh CA in its place would cut every host off: the panel has to
-// refuse to start and say which file is missing.
+// A certificate without its key is the state of a restore that forgot the key,
+// or of a key removed by hand.
 func TestAMissingKeyNextToTheCertificateIsNotANewCA(t *testing.T) {
 	dir := t.TempDir()
 	first, err := EnsureCA(dir)
@@ -157,9 +155,9 @@ func TestAMissingKeyNextToTheCertificateIsNotANewCA(t *testing.T) {
 	}
 }
 
-// A key that belongs to another certificate is detected at open: a CA
-// signing with somebody else's key issues certificates no host can
-// verify, and nothing before the first failed renewal would say so.
+// A key that belongs to another certificate is detected at open: a CA signing
+// with somebody else's key issues certificates no host can verify, and nothing
+// before the first failed renewal would say so.
 func TestAMismatchedPairIsDetected(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := Init(dir); err != nil {
@@ -193,8 +191,8 @@ func TestAMismatchedPairIsDetected(t *testing.T) {
 }
 
 // The issuer identifier is derived from the certificate: the same on every
-// panel, different for every CA, and shaped like the UUID column that
-// records it.
+// panel, different for every CA, and shaped like the UUID column that records
+// it.
 func TestTheIssuerIDIsStableAndUnique(t *testing.T) {
 	ca, err := Init(t.TempDir())
 	if err != nil {

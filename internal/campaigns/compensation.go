@@ -13,16 +13,9 @@ import (
 )
 
 // A compensation is a new campaign that runs the declared reverse of a
-// finished one on the hosts it changed. The document calls the way back
-// for most operations exactly that: not an undo of the record, but a new
-// plan and a new approval that neutralise the effect while the history
-// stays. The rules below say when such a campaign may be ordered; the
-// engine then writes a compensate step on the original's targets as the
-// reverse change runs on their hosts.
+// finished one on the hosts it changed.
 
-// The codes a refused compensation answers with. A refusal without a code
-// is a sentence the panel cannot act on; a code without a sentence is a
-// riddle for the operator.
+// The codes a refused compensation answers with.
 const (
 	// CodeCompensatedCampaignNotSettled: the original still runs, waits or
 	// is paused, so the set of hosts it changed is not final yet.
@@ -56,24 +49,8 @@ func CompensationCode(err error) string {
 	return ""
 }
 
-// CheckCompensation says whether a campaign running the given operation on
-// the given hosts may be ordered as the compensation of the original.
-//
-// The original has to be settled: completed, failed or canceled. A paused
-// campaign can be resumed and a running one is still changing hosts, so
-// the set of changed hosts is not final - a compensation ordered against
-// it would race the change it undoes. A canceled campaign counts: the
-// hosts it changed before the stop stay changed, and that is exactly what
-// the operator wants back.
-//
-// The operation has to be the declared reverse of the original's, from
-// the registry's table: a campaign that "compensates" a file write with a
-// service restart is not a compensation, whatever its name says.
-//
-// Every host of the order has to be one the original changed. A host that
-// did not change - skipped, ineligible, refused by its plan, or one whose
-// change never landed - has nothing to compensate, and running the reverse
-// on it would change it for the first time.
+// CheckCompensation says whether a campaign running the given operation on the
+// given hosts may be ordered as the compensation of the original.
 func CheckCompensation(original Campaign, action opspec.ActionType, changed []Target, hosts []string) error {
 	if !original.State.Terminal() {
 		return &CompensationError{
@@ -123,16 +100,9 @@ func CheckCompensation(original Campaign, action opspec.ActionType, changed []Ta
 	return nil
 }
 
-// ChangedTargets returns the targets of a campaign whose change landed on
-// the host: the ones that succeeded, and the ones that failed only after
-// the change - in the reboot or the verification - which the execute step
-// records as succeeded. A host whose change failed, or whose session broke
-// mid-task, is left out: what it holds is unknown, and unknown is not
-// "unchanged" - it is a question for the operator on that host, not for a
-// campaign. A host that reported no change is left out too: its change
-// step ran to the end and changed nothing, so there is nothing to bring
-// back. A target from before the step ledger existed has no execute row;
-// its state alone decides.
+// ChangedTargets returns the targets of a campaign whose change landed on the
+// host: the ones that succeeded, and the ones that failed only after the
+// change - in the reboot or the verification - which the execute step records
 func (s *Store) ChangedTargets(ctx context.Context, campaignID string) ([]Target, error) {
 	const query = `
 		select t.id, t.campaign_id, t.host_id, coalesce(h.hostname, ''), t.wave, t.position,
@@ -161,12 +131,9 @@ func (s *Store) ChangedTargets(ctx context.Context, campaignID string) ([]Target
 	return targets, rows.Err()
 }
 
-// compensatedTarget finds the target of the original campaign for the
-// host, on the caller's connection: the compensate step is written next
-// to the compensating target's transition, in the same transaction. The
-// second result is false when the original has no target for the host -
-// the order was checked against the original's snapshot, so that means the
-// host row is gone, not that the check was skipped.
+// compensatedTarget finds the target of the original campaign for the host, on
+// the caller's connection: the compensate step is written next to the
+// compensating target's transition, in the same transaction.
 func (s *Store) compensatedTarget(ctx context.Context, q stepQuerier, campaignID, hostID string) (Target, bool, error) {
 	const query = `
 		select id, campaign_id, host_id, wave, position, state
@@ -185,11 +152,7 @@ func (s *Store) compensatedTarget(ctx context.Context, q stepQuerier, campaignID
 }
 
 // compensationOutcome maps the end of the compensating target onto the
-// compensate step of the original's target. Only a change that succeeded
-// compensates; everything else leaves the original host as it was, and the
-// step says why. The reason is never empty for a step that did not
-// succeed - the table refuses one, and rightly: a compensation that
-// silently did not happen is worse than none.
+// compensate step of the original's target.
 func compensationOutcome(state TargetState, code, message string) (StepState, string) {
 	reason := stepReason(code, message)
 	switch state {

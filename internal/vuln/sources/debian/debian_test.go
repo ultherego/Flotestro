@@ -140,8 +140,8 @@ func TestTheDigestDependsOnTheContent(t *testing.T) {
 
 func TestWeTrimTheDescriptionByCharactersNotBytes(t *testing.T) {
 	// Cutting by bytes splits a multi-byte character in half and leaves a
-	// sequence that cannot be written to the database - and then the whole
-	// import is lost.
+	// sequence that cannot be written to the database - and then the whole import
+	// is lost.
 	long := strings.Repeat("ą", 400)
 	result := shortened(long)
 	if !utf8.ValidString(result) {
@@ -158,11 +158,6 @@ func TestWeTrimTheDescriptionByCharactersNotBytes(t *testing.T) {
 
 // TestACutDumpIsNotTheFullThing guards the property without which half a dump
 // would look like the whole feed.
-//
-// A stream cut in half ends with no further key - the loop then exits
-// silently and the panel treats the missing findings as non-existent. A
-// finding that is not there means "the package is not vulnerable", so such an
-// import turns a network failure into a false "the host is clean".
 func TestACutDumpIsNotTheFullThing(t *testing.T) {
 	cases := map[string]string{
 		"cut in the middle of an entry": `{"openssl": {"CVE-2026-1": {"releases": {"trixie": {"stat`,
@@ -189,9 +184,9 @@ func TestACutDumpIsNotTheFullThing(t *testing.T) {
 	}
 }
 
-// A dump copied onto the panel is read through the same fetch as the
-// remote one: an installation without Internet access points the source at
-// a file:// address and gets the findings, the tag and a 304 on a repeat.
+// A dump copied onto the panel is read through the same fetch as the remote
+// one: an installation without Internet access points the source at a file://
+// address and gets the findings, the tag and a 304 on a repeat.
 func TestFetchReadsACopiedDump(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "debian.json")
 	if err := os.WriteFile(path, []byte(testDump), 0o600); err != nil {

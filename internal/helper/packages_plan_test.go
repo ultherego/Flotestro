@@ -14,9 +14,9 @@ import (
 	"github.com/ultherego/flotestro/internal/plan"
 )
 
-// fakePlanner stands in for the package manager: it answers every plan
-// with the content it was given, under the header of the request, and
-// records what it was asked to execute.
+// fakePlanner stands in for the package manager: it answers every plan with
+// the content it was given, under the header of the request, and records what
+// it was asked to execute.
 type fakePlanner struct {
 	content packages.Plan
 	applied []string
@@ -69,9 +69,9 @@ func approvedContent() packages.Plan {
 	}
 }
 
-// approvedRequest is the order as the agent hands it to the helper: the
-// digest the agent computed at planning under the given header, and the
-// header itself.
+// approvedRequest is the order as the agent hands it to the helper: the digest
+// the agent computed at planning under the given header, and the header
+// itself.
 func approvedRequest(t *testing.T, content packages.Plan, header packages.PlanHeader) *helperv1.HelperRequest {
 	t.Helper()
 	planner := &fakePlanner{content: content}
@@ -228,9 +228,9 @@ func TestTheHelperRefusesAnExpiredPlan(t *testing.T) {
 	}
 }
 
-// A digest the agent could have tampered with is not a match: the hash
-// the helper expects comes from the panel's order, and a plan that does
-// not hash to it does not run.
+// A digest the agent could have tampered with is not a match: the hash the
+// helper expects comes from the panel's order, and a plan that does not hash
+// to it does not run.
 func TestTheHelperRefusesATamperedDigest(t *testing.T) {
 	request := approvedRequest(t, approvedContent(), testHeader())
 	request.GetPackageAction().PlanHash[0] ^= 0xff

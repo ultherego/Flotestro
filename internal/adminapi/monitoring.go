@@ -42,9 +42,8 @@ func (s *Server) monitoringRoutes(mux *http.ServeMux) {
 	s.route(mux, "DELETE /api/v1/hosts/{id}/monitoring/silences/{silence}", s.handleExpireSilence)
 }
 
-// monitoringEnabled refuses the request when the installation runs without
-// the monitoring store. That is a configuration of the panel rather than a
-// failure, so the answer says so instead of an internal error.
+// monitoringEnabled refuses the request when the installation runs without the
+// monitoring store.
 func (s *Server) monitoringEnabled(w http.ResponseWriter) bool {
 	if s.monitoring == nil {
 		problem(w, http.StatusServiceUnavailable, "monitoring_disabled",
@@ -57,9 +56,9 @@ func (s *Server) monitoringEnabled(w http.ResponseWriter) bool {
 // hostMetricsView is the answer of the chart endpoint.
 type hostMetricsView struct {
 	HostID string `json:"host_id"`
-	// Range is the window the points cover, and StepSeconds the distance
-	// between them: the sampling interval for the short windows, a
-	// quarter-hour for the long ones.
+	// Range is the window the points cover, and StepSeconds the distance between
+	// them: the sampling interval for the short windows, a quarter-hour for the
+	// long ones.
 	Range       string             `json:"range"`
 	StepSeconds int                `json:"step_seconds"`
 	Points      []monitoring.Point `json:"points"`
@@ -165,9 +164,7 @@ type alertCounts struct {
 	// Silenced counts the firing alerts an active silence covers; they are
 	// counted in their severity as well.
 	Silenced int `json:"silenced"`
-	// Acknowledged counts the firing alerts somebody took. They are not
-	// counted in their severity: the severities are what waits for a
-	// person, and a taken alert has one.
+	// Acknowledged counts the firing alerts somebody took.
 	Acknowledged int `json:"acknowledged"`
 	// Pending counts the episodes whose window is still filling.
 	Pending int `json:"pending"`
@@ -177,9 +174,9 @@ type alertCounts struct {
 type fleetMonitoringView struct {
 	Firing []monitoring.Alert `json:"firing"`
 	Counts alertCounts        `json:"counts"`
-	// HostsReporting counts the hosts that sent a sample within the last
-	// three intervals, HostsSilent those that did not - a silent host has
-	// no charts and no sample rules, only host_offline.
+	// HostsReporting counts the hosts that sent a sample within the last three
+	// intervals, HostsSilent those that did not - a silent host has no charts and
+	// no sample rules, only host_offline.
 	HostsReporting int `json:"hosts_reporting"`
 	HostsSilent    int `json:"hosts_silent"`
 	// Rules counts the enabled rules.
@@ -191,11 +188,6 @@ type fleetMonitoringView struct {
 }
 
 // handleFleetMonitoring returns the firing alerts of the visible fleet.
-//
-// Alerts work fleet-wide by nature: one bad change is visible at once on
-// dozens of hosts. The view is narrowed to the hosts this operator may
-// see, so the operator of one environment reads their own alarms rather
-// than the whole fleet's.
 func (s *Server) handleFleetMonitoring(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermMonitoringRead, "fleet")
 	if !ok {
@@ -319,9 +311,7 @@ func (s *Server) handleGetAlertRule(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, rule)
 }
 
-// ruleProblem answers a store error of the rules; true when it did. A
-// selector the store cannot resolve - a group nobody created, a cycle -
-// is refused in the same words the campaign page uses.
+// ruleProblem answers a store error of the rules; true when it did.
 func (s *Server) ruleProblem(w http.ResponseWriter, err error) bool {
 	switch {
 	case err == nil:
@@ -337,9 +327,7 @@ func (s *Server) ruleProblem(w http.ResponseWriter, err error) bool {
 	return true
 }
 
-// handleCreateAlertRule records a rule. A rule is fleet-wide policy, so it
-// takes the write permission in the global scope: a rule scoped to one
-// site by its selector still decides what that site alarms on.
+// handleCreateAlertRule records a rule.
 func (s *Server) handleCreateAlertRule(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorize(w, r, authz.PermMonitoringRulesWrite, authz.GlobalScope, "alert_rule", "")
 	if !ok {
@@ -455,11 +443,9 @@ func (s *Server) handleListAlerts(w http.ResponseWriter, r *http.Request) {
 	}
 	limit, _ := strconv.Atoi(query.Get("limit"))
 	if asCSV {
-		// The file takes the most the store hands out at once, whatever the
-		// screen asked for: the alert history has no cursor, so the export
-		// is the newest alertHistoryCeiling alerts of the filter and no
-		// truncation row is needed - the bound is the store's, not the
-		// export's, and a longer history is narrowed by state or host.
+		// The file takes the most the store hands out at once, whatever the screen
+		// asked for: the alert history has no cursor, so the export is the newest
+		// alertHistoryCeiling alerts of the filter and no truncation row is needed -
 		limit = alertHistoryCeiling
 	}
 	var acknowledged *bool
@@ -524,10 +510,7 @@ func alertCSVRow(alert monitoring.Alert) []string {
 	}
 }
 
-// alertNoteRequest is the body of an acknowledgement or a note. The
-// acknowledgement takes the note as its reason: "I am on it" is not
-// enough for the trail, so it wants the same eight characters a silence
-// does. A note on its own may be empty - that is how one is removed.
+// alertNoteRequest is the body of an acknowledgement or a note.
 type alertNoteRequest struct {
 	Note string `json:"note"`
 	// Reason is accepted in place of the note, so a client that sends
@@ -545,11 +528,8 @@ func (request alertNoteRequest) text() string {
 // maxAlertNote bounds a note: a longer one is a report, not a note.
 const maxAlertNote = 2000
 
-// alertForWrite reads the alert and checks the permission of taking it
-// in the scope of its host. The permission is the one of a silence:
-// both are a decision about a sensor of one host, and whoever may switch
-// it off may say they are looking at it. The answer has been written
-// when the second result is false.
+// alertForWrite reads the alert and checks the permission of taking it in the
+// scope of its host.
 func (s *Server) alertForWrite(w http.ResponseWriter, r *http.Request) (*monitoring.Alert, authz.Principal, bool) {
 	id := r.PathValue("id")
 	alert, err := s.monitoring.Alert(r.Context(), id)
@@ -699,12 +679,6 @@ type silenceRequest struct {
 const defaultSilence = time.Hour
 
 // handleCreateSilence creates a silence of the host alerts.
-//
-// This is not an operation on the host and does not go through opspec: it
-// changes what the panel thinks about the host, not the machine state -
-// just like a maintenance window. But it is a decision to switch a sensor
-// off, so it has its own permission, a mandatory end, a mandatory reason
-// and an audit trail.
 func (s *Server) handleCreateSilence(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
 	_, scope, ok := s.hostScope(w, r, hostID)

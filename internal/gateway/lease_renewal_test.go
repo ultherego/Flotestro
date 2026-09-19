@@ -8,11 +8,8 @@ import (
 )
 
 // TestASignOfLifeRenewsTheLeaseOncePerInterval guards the pacing of the
-// renewal: a package transaction reports several times a second, and the
-// lease is minutes long, so the first report writes and the ones within
-// the interval do not - while a report after the interval writes again.
-// An attempt this gateway has not translated, or one reported by another
-// host under a learned identifier, renews nothing.
+// renewal: a package transaction reports several times a second, and the lease
+// is minutes long, so the first report writes and the ones within the interval
 func TestASignOfLifeRenewsTheLeaseOncePerInterval(t *testing.T) {
 	service := &AgentService{attempts: map[string]attemptContextEntry{
 		"attempt-1": {jobID: "job-1", hostID: "host-1"},
@@ -43,10 +40,8 @@ func TestASignOfLifeRenewsTheLeaseOncePerInterval(t *testing.T) {
 }
 
 // TestTheRenewalOutpacesTheReclaim guards the relation between the three
-// durations the mechanism rests on: a renewal buys more time than the
-// pause between renewals plus the housekeeping pass that reclaims
-// expired leases (every thirty seconds in the scheduler), so an attempt
-// that keeps reporting is never reclaimed between two of its reports.
+// durations the mechanism rests on: a renewal buys more time than the pause
+// between renewals plus the housekeeping pass that reclaims expired leases
 func TestTheRenewalOutpacesTheReclaim(t *testing.T) {
 	const housekeeping = 30 * time.Second
 	if progressLeaseExtension <= leaseRenewalInterval+housekeeping {
@@ -55,11 +50,9 @@ func TestTheRenewalOutpacesTheReclaim(t *testing.T) {
 	}
 }
 
-// TestTheDispatchLeaseSitsBetweenTheReclaimAndTheExecutionLease guards the
-// two ends of the short lease an envelope gets at the hand-over: it has to
-// outlast a housekeeping pass, or a healthy acknowledgement races the
-// reclaim; and it has to be shorter than the execution lease the
-// acceptance extends it to, or the extension changes nothing.
+// TestTheDispatchLeaseSitsBetweenTheReclaimAndTheExecutionLease guards the two
+// ends of the short lease an envelope gets at the hand-over: it has to outlast
+// a housekeeping pass, or a healthy acknowledgement races the reclaim; and it
 func TestTheDispatchLeaseSitsBetweenTheReclaimAndTheExecutionLease(t *testing.T) {
 	const housekeeping = 30 * time.Second
 	if jobs.DispatchLease <= housekeeping {
@@ -72,9 +65,8 @@ func TestTheDispatchLeaseSitsBetweenTheReclaimAndTheExecutionLease(t *testing.T)
 	}
 }
 
-// TestTheStagesMatchTheProtocol pins the stage names the gateway reads to
-// the ones agent.proto documents: a renamed constant on one side would
-// silently turn every acknowledgement into an ordinary progress line.
+// TestTheStagesMatchTheProtocol pins the stage names the gateway reads to the
+// ones agent.
 func TestTheStagesMatchTheProtocol(t *testing.T) {
 	for name, want := range map[string]string{
 		stageAccepted: "accepted", stageAwaitingLock: "awaiting_lock",

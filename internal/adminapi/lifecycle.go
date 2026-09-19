@@ -17,10 +17,7 @@ type lifecycleChange struct {
 	// Reason is always required. A host cut off without a reason is a host
 	// nobody will know in a week why it is not working.
 	Reason string `json:"reason"`
-	// RevokeCertificates applies on a suspected key leak. Without it the
-	// certificate stays cryptographically valid and is blocked by the state
-	// in the database alone - that is enough as long as the key is with its
-	// owner.
+	// RevokeCertificates applies on a suspected key leak.
 	RevokeCertificates bool `json:"revoke_certificates"`
 	// TypedConfirmation is the explicit retyping of the hostname at
 	// decommissioning.
@@ -37,8 +34,7 @@ func (s *Server) handleQuarantineHost(w http.ResponseWriter, r *http.Request) {
 		To:         hosts.StateQuarantined,
 		Action:     "host.quarantine",
 		// Tasks already delivered stay: the agent may be half-way through an
-		// operation that cannot be interrupted, and the panel has no way to
-		// undo it.
+		// operation that cannot be interrupted, and the panel has no way to undo it.
 		CancelJobs:   true,
 		CloseSession: true,
 	})
@@ -51,9 +47,9 @@ func (s *Server) handleReleaseHost(w http.ResponseWriter, r *http.Request) {
 		FromStates: []string{hosts.StateQuarantined},
 		To:         hosts.StateActive,
 		Action:     "host.quarantine.release",
-		// A release with a revoked certificate would be a release in name
-		// only - the host cannot connect - and would hide that the
-		// identity is still to be recovered.
+		// A release with a revoked certificate would be a release in name only - the
+		// host cannot connect - and would hide that the identity is still to be
+		// recovered.
 		RequiresLiveCertificate: true,
 	})
 }
@@ -61,29 +57,15 @@ func (s *Server) handleReleaseHost(w http.ResponseWriter, r *http.Request) {
 // decommissionRequest is the body of a decommission order.
 type decommissionRequest struct {
 	lifecycleChange
-	// LocalIdentityWipe asks the agent to remove its identity and journal
-	// and to disable its service once the panel has revoked the
-	// certificates. Default true: a host leaving the fleet is not to keep a
-	// key that used to open the panel.
+	// LocalIdentityWipe asks the agent to remove its identity and journal and to
+	// disable its service once the panel has revoked the certificates.
 	LocalIdentityWipe *bool `json:"local_identity_wipe"`
-	// RevokeImmediatelyIfOffline revokes the certificates of a host that
-	// has no session, without waiting for it. Default true. Off, the
-	// certificates are revoked at the host's first contact instead.
+	// RevokeImmediatelyIfOffline revokes the certificates of a host that has no
+	// session, without waiting for it.
 	RevokeImmediatelyIfOffline *bool `json:"revoke_immediately_if_offline"`
 }
 
 // handleDecommissionHost ends the trust in a host on the panel side.
-//
-// A connected host is asked to stop first: it finishes what it started,
-// drops its secret leases, reports it is ready, and only then are its
-// certificates revoked and its identity wiped. A host without a session, or
-// one that does not answer in time, is retired all the same - with the
-// cleanup marked as unconfirmed, in the answer and in the audit trail, so
-// nobody takes a machine on a shelf for a machine that wiped itself.
-//
-// The host record, the inventory and the audit log stay: decommissioning is
-// a loss of trust, not deleting history. Physically removing the data is a
-// separate matter of the retention policy.
 func (s *Server) handleDecommissionHost(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
 	host, scope, ok := s.hostScope(w, r, hostID)
@@ -120,9 +102,9 @@ func (s *Server) handleDecommissionHost(w http.ResponseWriter, r *http.Request) 
 
 	outcome, err := s.decommissioner.Run(r.Context(), gateway.Decommission{
 		HostID: hostID, Reason: req.Reason, Actor: principal.Subject,
-		// A host in recovery is decommissioned like any other: the recovery
-		// order it had becomes moot, and the token issued for it is refused
-		// at enrollment as the token of a retired host.
+		// A host in recovery is decommissioned like any other: the recovery order it
+		// had becomes moot, and the token issued for it is refused at enrollment as
+		// the token of a retired host.
 		FromStates: []string{hosts.StateActive, hosts.StateQuarantined,
 			hosts.StateRecovery, hosts.StateRetiring},
 		LocalIdentityWipe:          defaultTrue(req.LocalIdentityWipe),
@@ -147,10 +129,9 @@ func (s *Server) handleDecommissionHost(w http.ResponseWriter, r *http.Request) 
 		"jobs_canceled":              outcome.JobsCanceled,
 		"certificates_revoked":       outcome.CertificatesRevoked,
 		"session_closed":             outcome.SessionClosed,
-		// Whether the handshake ran here or on the instance holding the
-		// host's session, and - when that instance has not answered yet -
-		// which order the operator can follow it by. A host is never
-		// retired as unreachable while another instance is talking to it.
+		// Whether the handshake ran here or on the instance holding the host's
+		// session, and - when that instance has not answered yet - which order the
+		// operator can follow it by.
 		"handed_over": outcome.HandedOver,
 	}
 	if outcome.CommandID != "" {
@@ -182,9 +163,6 @@ type lifecycleTransition struct {
 }
 
 // changeLifecycle performs the transition together with its side effects.
-//
-// Everything in one transaction: a host that is already in quarantine but
-// has tasks waiting in the queue is a host cut off in name only.
 func (s *Server) changeLifecycle(w http.ResponseWriter, r *http.Request, transition lifecycleTransition) {
 	hostID := r.PathValue("id")
 	host, scope, ok := s.hostScope(w, r, hostID)
@@ -209,24 +187,23 @@ func (s *Server) changeLifecycle(w http.ResponseWriter, r *http.Request, transit
 			"a lifecycle change must state its reason")
 		return
 	}
-	// Retyping the hostname is the only place where the operator has to
-	// look at which host they decommission. A click in a list easily lands
-	// next to the target.
+	// Retyping the hostname is the only place where the operator has to look at
+	// which host they decommission.
 	if transition.RequiresConfirmation && req.TypedConfirmation != host.Hostname {
 		problem(w, http.StatusBadRequest, "confirmation_mismatch",
 			"type the hostname to confirm this change")
 		return
 	}
-	// Every lifecycle decision is taken with fresh authentication: cutting
-	// a host off, letting it back in and ending the trust in it are the
-	// decisions an attacker with a stolen session would want most.
+	// Every lifecycle decision is taken with fresh authentication: cutting a host
+	// off, letting it back in and ending the trust in it are the decisions an
+	// attacker with a stolen session would want most.
 	evidence, ok := s.requireStepUp(w, r, principal, req.Reason, transition.Action, "host", hostID)
 	if !ok {
 		return
 	}
-	// A host whose certificates were revoked does not return by lifting
-	// the quarantine: the key was suspect, and the state in the database
-	// was never what kept it out. Its return is identity recovery.
+	// A host whose certificates were revoked does not return by lifting the
+	// quarantine: the key was suspect, and the state in the database was never
+	// what kept it out.
 	if transition.RequiresLiveCertificate {
 		live, err := s.hosts.HasLiveCertificate(r.Context(), hostID)
 		if err != nil {
@@ -275,11 +252,7 @@ func (s *Server) changeLifecycle(w http.ResponseWriter, r *http.Request, transit
 			return
 		}
 	}
-	// The host may be connected to another instance of the panel. Cutting
-	// it off is then an order for that instance, written in the same
-	// transaction as the decision that calls for it: a quarantine that does
-	// not commit ends no session, and a host held elsewhere is no longer
-	// left connected because this instance sees no session of it.
+	// The host may be connected to another instance of the panel.
 	sessionClose := gateway.SessionClose{Where: gateway.SessionCloseNone}
 	if transition.CloseSession {
 		sessionClose, err = gateway.PlanSessionClose(r.Context(), tx, s.registry, s.jobs,
@@ -308,11 +281,8 @@ func (s *Server) changeLifecycle(w http.ResponseWriter, r *http.Request, transit
 		return
 	}
 
-	// The session ends only after the write: had the transaction failed,
-	// the host would be disconnected without a reason recorded in the
-	// panel. On this instance that is one call; on another it is the wait
-	// for the order written above, bounded so that a dead instance does not
-	// hold the operator's request.
+	// The session ends only after the write: had the transaction failed, the host
+	// would be disconnected without a reason recorded in the panel.
 	if transition.CloseSession && s.registry != nil {
 		sessionClose = gateway.FinishSessionClose(r.Context(), s.pool, s.registry, s.log,
 			sessionClose, hostID, transition.Action)
@@ -323,9 +293,9 @@ func (s *Server) changeLifecycle(w http.ResponseWriter, r *http.Request, transit
 		"session_closed": sessionClose.Closed,
 	}
 	if transition.CloseSession {
-		// Where the session was ended - here, on the instance holding it,
-		// nowhere, or asked and not confirmed - is the operator's business:
-		// "not closed" and "closed somewhere else" are different answers.
+		// Where the session was ended - here, on the instance holding it, nowhere,
+		// or asked and not confirmed - is the operator's business: "not closed" and
+		// "closed somewhere else" are different answers.
 		answer["session_close"] = sessionClose.Where
 		if sessionClose.CommandID != "" {
 			answer["command_id"] = sessionClose.CommandID

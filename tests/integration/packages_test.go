@@ -90,8 +90,7 @@ func (h *harness) planHash(hostID string) string {
 }
 
 // TestTransactionWithAStalePlanIsRejected protects against applying a
-// different package set than the approved one. The repository metadata may
-// change between the plan and the execution.
+// different package set than the approved one.
 func TestTransactionWithAStalePlanIsRejected(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("rhel")
@@ -120,8 +119,8 @@ func TestTransactionWithAStalePlanIsRejected(t *testing.T) {
 }
 
 // TestTransactionRecordsVersionsBeforeAndAfter checks that the transaction
-// report carries what the document requires: the versions before and after
-// and the reboot state.
+// report carries what the document requires: the versions before and after and
+// the reboot state.
 func TestTransactionRecordsVersionsBeforeAndAfter(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("rhel")
@@ -224,9 +223,7 @@ func TestBrokenPackageDatabaseBlocksOperations(t *testing.T) {
 			"payload": map[string]any{"package_upgrade": map[string]any{}}},
 		nil, http.StatusConflict)
 
-	// Repair must be allowed in exactly this state. Blocking it locked the
-	// host in a loop with no exit: the only operation able to clear the
-	// flag was blocked by it.
+	// Repair must be allowed in exactly this state.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 		map[string]any{"action": "packages.repair", "reason": "unblocking the package database",
 			"payload": map[string]any{"package_repair": map[string]any{}}},
@@ -259,11 +256,8 @@ func TestInvalidPackageNameIsRejected(t *testing.T) {
 	}
 }
 
-// TestRepairRequiresAnAdapterWithThatFeature checks that a host without
-// repair learns about it when ordered, not after the job is delivered.
-// Repair answers debconf questions and exists only for apt; earlier the
-// operation was accepted on every host and rejected only by the helper on
-// Fedora.
+// TestRepairRequiresAnAdapterWithThatFeature checks that a host without repair
+// learns about it when ordered, not after the job is delivered.
 func TestRepairRequiresAnAdapterWithThatFeature(t *testing.T) {
 	h := newHarness(t)
 
@@ -286,10 +280,8 @@ func TestRepairRequiresAnAdapterWithThatFeature(t *testing.T) {
 		nil, http.StatusCreated)
 }
 
-// TestHostReportsTheAdapterRegistry checks that the host says not only what
-// it has, but also why it lacks something. The reason is a fact about the
-// host and the host is to give it - the interface is to repeat it, not
-// guess in its own code.
+// TestHostReportsTheAdapterRegistry checks that the host says not only what it
+// has, but also why it lacks something.
 func TestHostReportsTheAdapterRegistry(t *testing.T) {
 	h := newHarness(t)
 
@@ -335,9 +327,7 @@ func TestHostReportsTheAdapterRegistry(t *testing.T) {
 	}
 }
 
-// TestPackageRemovalRequiresAnApprovedSet checks the boundary from chapter
-// 3. One package can pull dozens of dependants, so the operator approves a
-// set, not a name - and the host recomputes it before the operation.
+// TestPackageRemovalRequiresAnApprovedSet checks the boundary from chapter 3.
 func TestPackageRemovalRequiresAnApprovedSet(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -362,10 +352,8 @@ func TestPackageRemovalRequiresAnApprovedSet(t *testing.T) {
 		}, nil, http.StatusBadRequest)
 }
 
-// TestProtectedPackagesAreRejectedWhenOrdered guards that the operator
-// learns about the block when ordering, not after the job is delivered.
-// Removing the agent would cut the host off from the panel, and thus from
-// the repair too.
+// TestProtectedPackagesAreRejectedWhenOrdered guards that the operator learns
+// about the block when ordering, not after the job is delivered.
 func TestProtectedPackagesAreRejectedWhenOrdered(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -407,10 +395,7 @@ func TestRemovalPlanShowsDependencies(t *testing.T) {
 }
 
 // TestHoldIsReversible checks that the operation describes a desired state,
-// not a toggle: repeating it does not reverse the change. The hold is also
-// a fact of the inventory: after the change the packages module names the
-// package among the holds, and after the release it does not - an operator
-// reading the tab is to see which packages will take no upgrade.
+// not a toggle: repeating it does not reverse the change.
 func TestHoldIsReversible(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -449,8 +434,8 @@ type packageHoldsView struct {
 }
 
 // packageHolds refreshes the packages module and reads the holds out of it:
-// the facts after a hold have to come from after the change, not from the
-// last inventory cycle.
+// the facts after a hold have to come from after the change, not from the last
+// inventory cycle.
 func (h *harness) packageHolds(hostID string) packageHoldsView {
 	h.t.Helper()
 	job, attempts := h.runOperation(hostID, map[string]any{
@@ -467,11 +452,9 @@ func (h *harness) packageHolds(hostID string) packageHoldsView {
 	return fragment.Payload
 }
 
-// TestHostPackageListIsServedWithItsState checks that the installed
-// packages the panel holds for a host are readable as a list, with the
-// state of the copy beside them: the moment of the read and the job that
-// made it. The list is what the Packages tab draws, and a row without a
-// name or a version would be a row about nothing.
+// TestHostPackageListIsServedWithItsState checks that the installed packages
+// the panel holds for a host are readable as a list, with the state of the
+// copy beside them: the moment of the read and the job that made it.
 func TestHostPackageListIsServedWithItsState(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -522,16 +505,13 @@ type listedPackage struct {
 }
 
 // labBrokenPackage is the package of the lab repository whose maintainer
-// script fails by design. Vagrant/lab-broken-package.sh builds it for every
-// family and adds it to the repository served by the panel VM.
+// script fails by design.
 const labBrokenPackage = "flotestro-lab-broken"
 
 const labBrokenReason = "integration test of a failing maintainer script"
 
 // brokenScriptExpectation says what the product reports about a failed
-// maintainer script on one family. The failure looks different on each of
-// them, and the assertions follow the manager rather than pretend the
-// families behave the same.
+// maintainer script on one family.
 type brokenScriptExpectation struct {
 	// attentionNamed: the transaction report names the package among the
 	// packages needing attention.
@@ -544,32 +524,9 @@ type brokenScriptExpectation struct {
 	scriptletDefect bool
 }
 
-// TestAFailingMaintainerScriptIsATypedFailure is the scenario of chapter
-// 23 in which a maintainer script fails half-way: the transaction ends as
+// TestAFailingMaintainerScriptIsATypedFailure is the scenario of chapter 23 in
+// which a maintainer script fails half-way: the transaction ends as
 // transaction_failed rather than as an opaque error, the report says what
-// needs attention, the host flag package_database_broken follows the
-// family, a repair clears it where the family has one, and the package can
-// be removed afterwards.
-//
-// The families differ, and the test says how:
-//
-//   - Debian: dpkg leaves the package half-configured. The attention list
-//     names it, the host flag is raised, the dashboard counts the host, and
-//     packages.repair (dpkg --configure -a) finishes the configuration.
-//   - RHEL: rpm runs %post after the files are in place and keeps the
-//     package installed when it fails; the database stays consistent, so
-//     there is nothing to repair and no attention list. dnf5 finishes the
-//     transaction with exit status 0 and a "non-critical error" line, so
-//     the product reports a success with a defect: the job succeeds and
-//     the report names the package under scriptlet_errors. The adapter
-//     reports no repair feature and the panel refuses a repair when ordered.
-//   - Arch: pacman treats a scriptlet failure like rpm does. The pacman
-//     adapter reports no install feature today, so the family is skipped
-//     until it does.
-//
-// A lab that has not run Vagrant/lab-broken-package.sh does not carry the
-// package; the host then answers that the package is unknown and the test
-// skips instead of failing.
 func TestAFailingMaintainerScriptIsATypedFailure(t *testing.T) {
 	for _, tc := range []struct {
 		family string
@@ -593,11 +550,8 @@ func TestAFailingMaintainerScriptIsATypedFailure(t *testing.T) {
 func brokenMaintainerScriptScenario(t *testing.T, h *harness, host hostView, expect brokenScriptExpectation) {
 	t.Helper()
 
-	// The host has to see the current repository index: the package is
-	// added to the lab repository after the hosts were set up. A refresh is
-	// the side effect of a plan; the plan itself may refuse on a host that
-	// cannot plan (Arch without checkupdates) and that is not the subject
-	// here.
+	// The host has to see the current repository index: the package is added to
+	// the lab repository after the hosts were set up.
 	if plan, attempts := h.runOperation(host.ID, map[string]any{
 		"action": "packages.plan", "reason": labBrokenReason,
 		"payload": planPayload(true),
@@ -612,9 +566,9 @@ func brokenMaintainerScriptScenario(t *testing.T, h *harness, host hostView, exp
 	}
 	counterBefore := h.packageDatabaseBrokenCounter()
 
-	// The lab is cleaned up whatever happens after this point: a repair
-	// where the family has one, so that the flag does not block the removal,
-	// and then the removal itself.
+	// The lab is cleaned up whatever happens after this point: a repair where the
+	// family has one, so that the flag does not block the removal, and then the
+	// removal itself.
 	t.Cleanup(func() {
 		if hostHasPackageRepair(host) {
 			h.runOperation(host.ID, map[string]any{
@@ -701,9 +655,8 @@ func brokenMaintainerScriptScenario(t *testing.T, h *harness, host hostView, exp
 	}
 
 	if hostHasPackageRepair(host) {
-		// The repair finishes the configuration. On Debian that is exactly
-		// what the maintainer script needs: it fails the first time and
-		// passes the second.
+		// The repair finishes the configuration. On Debian that is exactly what the
+		// maintainer script needs: it fails the first time and passes the second.
 		repair, repairAttempts := h.runOperation(host.ID, map[string]any{
 			"action": "packages.repair", "reason": labBrokenReason,
 			"payload": map[string]any{"package_repair": map[string]any{}},
@@ -728,8 +681,8 @@ func brokenMaintainerScriptScenario(t *testing.T, h *harness, host hostView, exp
 	}
 
 	// After the repair - or without one, where the family keeps the package
-	// installed and the database sound - the host reports no attention
-	// packages and the flag is down.
+	// installed and the database sound - the host reports no attention packages
+	// and the flag is down.
 	if h.hostPackageDatabaseBroken(host.ID) {
 		t.Error("the host still has package_database_broken raised")
 	}
@@ -756,8 +709,7 @@ func brokenMaintainerScriptScenario(t *testing.T, h *harness, host hostView, exp
 }
 
 // packageAttempt is the last attempt of a package job with the fields the
-// scenario reads. The shared attemptView keeps the common fields; the
-// attention list, the manager output and the repair report are read here.
+// scenario reads.
 type packageAttempt struct {
 	Number    int    `json:"attempt_number"`
 	Status    string `json:"status"`
@@ -795,8 +747,8 @@ func (h *harness) lastPackageAttempt(jobID string) packageAttempt {
 	return result.Items[len(result.Items)-1]
 }
 
-// unknownToRepositories recognises the answer "there is no such package"
-// of every manager: apt's "Unable to locate package", dnf's "No match for
+// unknownToRepositories recognises the answer "there is no such package" of
+// every manager: apt's "Unable to locate package", dnf's "No match for
 // argument" and "Unable to find a match", pacman's "target not found".
 func (a packageAttempt) unknownToRepositories() bool {
 	text := strings.ToLower(a.Message)
@@ -836,9 +788,7 @@ func (h *harness) packageDatabaseBrokenCounter() int {
 }
 
 // hostHasPackageRepair says whether any package adapter of the host reports
-// the repair feature. An adapter silent about the feature is taken at its
-// word only when it says yes: the refusal of the panel is what the test
-// checks otherwise.
+// the repair feature.
 func hostHasPackageRepair(host hostView) bool {
 	for _, adapter := range []string{"packages.apt", "packages.dnf", "packages.pacman"} {
 		if capabilityFeature(host, adapter, "repair") {
@@ -874,9 +824,7 @@ func (h *harness) blockedPackages(t *testing.T, hostID string) []string {
 }
 
 // removeLabPackage removes the lab package with an approved set: the removal
-// plan gives the set, the removal names it, and two people approve. It
-// returns the final state of the removal, or an empty string when the
-// package was not installed and there was nothing to remove.
+// plan gives the set, the removal names it, and two people approve.
 func (h *harness) removeLabPackage(t *testing.T, host hostView) string {
 	t.Helper()
 	plan, planAttempts := h.runOperation(host.ID, map[string]any{

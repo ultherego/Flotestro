@@ -9,13 +9,11 @@ import (
 )
 
 // The mapping between the model of the agent and the contract of the protocol
-// lives in one place, so a change of the contract does not spill over the logic
-// of collecting facts.
+// lives in one place, so a change of the contract does not spill over the
+// logic of collecting facts.
 
 // capabilitiesToProto sends the registry and - for an older server - the
-// boolean fields
-// from before the registry. A fleet upgrades gradually, so both sides have to
-// understand each other for a while.
+// boolean fields from before the registry.
 func capabilitiesToProto(c Capabilities) *agentv1.Capabilities {
 	registry := make([]*agentv1.Capability, 0, len(c))
 	for _, cap := range c {

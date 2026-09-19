@@ -8,9 +8,7 @@ import (
 )
 
 // The process name is in parentheses and may contain spaces and parentheses
-// themselves. Splitting the whole line on spaces would give wrong fields for
-// such names - and the start time, which guards against PID reuse, depends
-// on them.
+// themselves.
 func TestParseStatHandlesNameWithSpaces(t *testing.T) {
 	line := "1234 (my program (test)) S 1 1234 1234 0 -1 4194304 100 0 0 0 " +
 		"11 22 0 0 20 0 7 0 987654 12345678 1000 " + strings.Repeat("0 ", 20)

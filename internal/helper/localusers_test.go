@@ -15,10 +15,7 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/accounts"
 )
 
-// TestMain makes the shadow tools look present for the tests of this
-// package. The handlers check the tool of an operation before they touch the
-// host, and the machine running the tests is not the host: without this the
-// result of a test would depend on whether the developer's system has chage.
+// TestMain makes the shadow tools look present for the tests of this package.
 func TestMain(m *testing.M) {
 	accountToolPresent = func(string) bool { return true }
 	os.Exit(m.Run())
@@ -26,9 +23,7 @@ func TestMain(m *testing.M) {
 
 // TestAccountMutationsNeedTheirTool guards that a missing shadow tool takes
 // away exactly one operation, with a refusal that names the tool, and that
-// nothing is attempted on the host. A module that advertised the mutation
-// and failed inside chage would leave the operator with a transaction
-// failure instead of an answer.
+// nothing is attempted on the host.
 func TestAccountMutationsNeedTheirTool(t *testing.T) {
 	restore := accountToolPresent
 	accountToolPresent = func(tool string) bool { return tool != toolChage }
@@ -81,8 +76,8 @@ func TestAccountMutationsNeedTheirTool(t *testing.T) {
 }
 
 // TestLocalAccountsReasonIsEmptyOnACompleteHost guards that a host with the
-// tools gets no sentence: a reason on an adapter that works would show in
-// the panel as a limitation nobody has.
+// tools gets no sentence: a reason on an adapter that works would show in the
+// panel as a limitation nobody has.
 func TestLocalAccountsReasonIsEmptyOnACompleteHost(t *testing.T) {
 	if missing := MissingLocalAccountTools(); len(missing) != 0 {
 		t.Fatalf("the stub of the tools reports %v as missing", missing)
@@ -96,8 +91,6 @@ func TestLocalAccountsReasonIsEmptyOnACompleteHost(t *testing.T) {
 }
 
 // TestShadowSemantics guards the separation of a lock from a missing password.
-// An account created by the panel has no password and logs in with an SSH key;
-// showing it as locked would be false information about access being cut off.
 func TestShadowSemantics(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "shadow")
 	content := "" +
@@ -189,9 +182,9 @@ func (f *fakeAccountTool) run(_ context.Context, _ time.Duration, tool string, a
 	return "", "", nil
 }
 
-// accountServer is a helper whose account lookups and shadow tools are
-// fakes: the handlers can be checked without an account on the machine
-// running the tests.
+// accountServer is a helper whose account lookups and shadow tools are fakes:
+// the handlers can be checked without an account on the machine running the
+// tests.
 func accountServer(tool *fakeAccountTool, records map[string]accountRecord) *Server {
 	server := testServer()
 	// The agent's identifier is put out of everybody's way: the tests
@@ -236,9 +229,8 @@ func userRangeUID(t *testing.T) int {
 	return os.Getuid()
 }
 
-// The group list is exact: usermod -G replaces the membership, so nothing
-// the account collected earlier survives unseen. An empty list takes every
-// supplementary group away.
+// The group list is exact: usermod -G replaces the membership, so nothing the
+// account collected earlier survives unseen.
 func TestSetGroupsReplacesTheMembership(t *testing.T) {
 	tool := &fakeAccountTool{}
 	server := accountServer(tool, map[string]accountRecord{
@@ -308,8 +300,8 @@ func TestSetExpiryUsesChage(t *testing.T) {
 	}
 }
 
-// Deleting removes the home only when the order says so, and never through
-// a symbolic link: userdel -r would follow it as root and empty whatever it
+// Deleting removes the home only when the order says so, and never through a
+// symbolic link: userdel -r would follow it as root and empty whatever it
 // points at.
 func TestDeleteRefusesASymlinkedHome(t *testing.T) {
 	root := t.TempDir()
@@ -402,9 +394,8 @@ func TestAccountChangesRefuseProtectedAccounts(t *testing.T) {
 	}
 }
 
-// The helper runs as root in a directory the user controls. A link planted
-// as ~/.ssh must not turn a key write into a write of root's own key file:
-// the write is refused, and nothing is created behind the link.
+// The helper runs as root in a directory the user controls. A link planted as
+// ~/.
 func TestWritingKeysRefusesASymlinkedKeyDirectory(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "smith")

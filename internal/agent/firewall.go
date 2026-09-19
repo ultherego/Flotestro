@@ -50,10 +50,6 @@ func (e *TaskExecutor) ProbeFirewall(ctx context.Context) (firewall.Snapshot, er
 
 // applyFirewall changes the firewall and proves that the host still talks to
 // the panel.
-//
-// The proof is a call the host makes as itself and the panel acknowledges, not
-// a connection that opens: a firewall rule is exactly the kind of change that
-// leaves a port open and the management channel dead.
 func (e *TaskExecutor) applyFirewall(ctx context.Context, task *agentv1.TaskEnvelope,
 	action opspec.ActionType, payload *opspec.FirewallPayload) *agentv1.TaskResult {
 	if payload == nil {
@@ -67,8 +63,7 @@ func (e *TaskExecutor) applyFirewall(ctx context.Context, task *agentv1.TaskEnve
 	switch action {
 	case opspec.ActionFirewallPlan:
 		// A plan without a rule is a read of the set: that is how the host tab
-		// works. A plan with a rule computes the difference for that one rule -
-		// that is the planning phase of a campaign.
+		// works.
 		operation = helperv1.FirewallRequest_OPERATION_READ
 		if strings.TrimSpace(payload.RuleID) != "" || strings.TrimSpace(payload.Zone) != "" {
 			operation = helperv1.FirewallRequest_OPERATION_PLAN
@@ -143,10 +138,7 @@ func (e *TaskExecutor) applyFirewall(ctx context.Context, task *agentv1.TaskEnve
 	}
 
 	// The rescue plan is disarmed only after the panel acknowledged a call the
-	// host made as itself. A rule can admit a TCP handshake and still end the
-	// management session - by dropping long-lived connections, or by blocking
-	// the protocol they are carried on - and a handshake would have called that
-	// a success and left the host unmanageable.
+	// host made as itself.
 	deadline := rollbackDeadline(result.GetRollbackDeadline())
 	proof := proveManagementChannel(ctx, panelAddressOf, deadline.Add(-confirmationMargin))
 	if !proof.Proved {
@@ -185,10 +177,6 @@ func (e *TaskExecutor) applyFirewall(ctx context.Context, task *agentv1.TaskEnve
 
 // managementChannel returns the address and the port the host talks to the
 // panel with.
-//
-// It is the agent that knows which way the traffic really goes: the panel sees
-// only the address the connection came from, and the helper does not see it at
-// all.
 func managementChannel() (string, int) {
 	parsed, err := url.Parse(panelAddressOf)
 	if err != nil || parsed.Hostname() == "" {

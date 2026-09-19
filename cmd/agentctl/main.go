@@ -1,12 +1,5 @@
-// Command agentctl operates the Flotestro agent on a host.
-//
-// The tool is deliberately separate from the daemon. An operator who is
-// setting a host up or looking for the cause of silence needs an answer at
-// once and without the panel - and the daemon at that moment either does not
-// come up or is just trying to connect.
-//
-// No command changes the state of the host beyond an explicit command of the
-// operator, and none prints secrets.
+// Command agentctl operates the Flotestro agent on a host. The tool is
+// deliberately separate from the daemon.
 package main
 
 import (
@@ -48,9 +41,8 @@ func runWithInput(args []string, in_ io.Reader, out, errOut io.Writer) int {
 	case "helper-trust":
 		return helperTrustCommands(args[1:], out, errOut)
 	case "version":
-		// The version number alone is not enough when a package behaves
-		// differently than it should: the first question is "which commit is
-		// this from".
+		// The version number alone is not enough when a package behaves differently
+		// than it should: the first question is "which commit is this from".
 		fmt.Fprintln(out, buildinfo.Describe("flotestro-agentctl"))
 		return 0
 	case "help", "-h", "--help":

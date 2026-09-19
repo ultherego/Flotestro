@@ -8,12 +8,6 @@ import (
 )
 
 // Validator describes a content check before the write.
-//
-// A check makes sense only when it concerns what the file really means:
-// JSON with a syntax error is not loaded by any service, and a systemd unit
-// file with a typo in a section name is silently ignored. A validator the
-// host does not have is not a reason to write without checking - it is a
-// reason to say so directly.
 type Validator struct {
 	Name string
 	// Command checks the file on the host. Empty means a built-in
@@ -21,24 +15,16 @@ type Validator struct {
 	Command []string
 	// BuiltIn checks the content in memory.
 	BuiltIn func(content string) error
-	// NeedsName marks a tool that reads the kind of file from its name: it
-	// gets a named staging file that keeps the suffix of the target, never
-	// an anonymous one.
+	// NeedsName marks a tool that reads the kind of file from its name: it gets a
+	// named staging file that keeps the suffix of the target, never an anonymous
+	// one.
 	NeedsName bool
-	// VersionCommand asks the tool what it is. "The content was checked"
-	// says nothing about what checked it: nginx 1.18 and nginx 1.24 accept
-	// different directives, so the identity of the checker belongs in the
-	// plan next to its verdict. Empty means a check built into the agent,
-	// which has no separate version.
+	// VersionCommand asks the tool what it is. "The content was checked" says
+	// nothing about what checked it: nginx 1.
 	VersionCommand []string
 }
 
 // ValidatorIdentity describes the check that ran, or the one that did not.
-//
-// A plan that says only "the content is valid" hides the question the
-// operator would ask next: valid according to what. This says which tool
-// answered, from where and in which version - and, when there was no
-// answer, why there was none.
 type ValidatorIdentity struct {
 	// Known says the panel has a check for this path at all. False is not
 	// a passed check; it is the absence of one.
@@ -122,9 +108,6 @@ func validateJSON(content string) error {
 }
 
 // validateINI checks the basic syntax of key-value files.
-//
-// No full parser is pretended: what breaks files most often is checked - a
-// row that is neither a section, nor a comment, nor an assignment.
 func validateINI(content string) error {
 	for number, line := range strings.Split(content, "\n") {
 		trimmed := strings.TrimSpace(line)

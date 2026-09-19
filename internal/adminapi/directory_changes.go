@@ -49,9 +49,9 @@ func (s *Server) handleCreateDirectoryChange(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// A change of access in the directory reaches every host that trusts
-	// it, so it is taken with fresh authentication, like the same change
-	// on one host - and all the more.
+	// A change of access in the directory reaches every host that trusts it, so
+	// it is taken with fresh authentication, like the same change on one host -
+	// and all the more.
 	var stepUpEvidence map[string]any
 	if action.ChangesAccess() {
 		evidence, ok := s.requireStepUp(w, r, principal, request.Reason,
@@ -282,12 +282,9 @@ func (s *Server) handleGetDirectoryChange(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, change)
 }
 
-// handleRevealDirectoryChangeSecret hands the one-time value of a change -
-// the password the directory generated on a reset - to the person who
-// ordered the change, once. The value was never written anywhere: it waits
-// in the memory of the process that carried the change out, for a short
-// while, and this read consumes it. The audit trail records that it was
-// read and by whom, never what it was.
+// handleRevealDirectoryChangeSecret hands the one-time value of a change - the
+// password the directory generated on a reset - to the person who ordered the
+// change, once.
 func (s *Server) handleRevealDirectoryChangeSecret(w http.ResponseWriter, r *http.Request) {
 	change, principal, ok := s.changeFor(w, r, authz.PermIdentityUserWrite)
 	if !ok {

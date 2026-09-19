@@ -1,6 +1,5 @@
-// Command agent connects a host to the Flotestro control plane.
-// The process runs without root privileges; mutations are handed over to the
-// helper.
+// Command agent connects a host to the Flotestro control plane. The process
+// runs without root privileges; mutations are handed over to the helper.
 package main
 
 import (
@@ -21,13 +20,7 @@ import (
 	"github.com/ultherego/flotestro/internal/packages"
 )
 
-// heapSoftLimit is the point past which the collector runs eagerly. The
-// agent's budget is 30 MiB of resident memory; the heap is most of it, and
-// without a limit the collector lets it grow to twice its live size before
-// it bothers, which is how an inventory read of a few megabytes pushed a
-// host past the budget for a minute. A limit is not a cap - the runtime
-// exceeds it rather than thrash - so the agent keeps working on a host
-// with a large inventory and merely collects more often there.
+// heapSoftLimit is the point past which the collector runs eagerly.
 const heapSoftLimit = 20 << 20
 
 func main() {
@@ -50,9 +43,8 @@ func main() {
 		maxTasks = flag.Int("max-concurrent-tasks",
 			config.EnvInt("FLOTESTRO_MAX_CONCURRENT_TASKS", 2), "the limit of concurrent jobs")
 		once = flag.Bool("collect-once", false, "print the collected facts and finish")
-		// The YAML file is the canonical source of the settings; the flags and
-		// the environment variables stay as an override for images and
-		// tests.
+		// The YAML file is the canonical source of the settings; the flags and the
+		// environment variables stay as an override for images and tests.
 		configPath = flag.String("config",
 			config.Env("FLOTESTRO_AGENT_CONFIG", agentconfig.DefaultPath),
 			"the configuration file of the agent")
@@ -61,19 +53,16 @@ func main() {
 	)
 	flag.Parse()
 
-	// What the operator set and what came from the defaults - that
-	// distinction is the whole content of the precedence: a file must not
-	// override what somebody gave explicitly, and the default value of a flag
-	// must not pretend to be a decision.
+	// What the operator set and what came from the defaults - that distinction is
+	// the whole content of the precedence: a file must not override what somebody
+	// gave explicitly, and the default value of a flag must not pretend to be a
 	explicit := map[string]bool{}
 	flag.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
 
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(log)
 
-	// The gateways in order of priority. An empty list means "only what was
-	// given by a flag or a variable" - and it is then filled in below with a
-	// single address.
+	// The gateways in order of priority.
 	var gateways []string
 
 	cfg, fromFile, err := readConfiguration(*configPath)
@@ -90,10 +79,8 @@ func main() {
 		log.Info("the configuration was read", "file", *configPath,
 			"gateways", len(cfg.Connection.GatewayURLs), "mode", *mode)
 	} else {
-		// Backwards compatibility: a host set up before the YAML file was
-		// introduced goes on working with the environment variables. It has
-		// to know it is taking the old path, though - otherwise it stays on
-		// it for good.
+		// Backwards compatibility: a host set up before the YAML file was introduced
+		// goes on working with the environment variables.
 		log.Warn("no configuration file, using the environment variables",
 			"file", *configPath)
 	}
@@ -101,9 +88,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// The system tools need a writable HOME. The agent has no home directory,
-	// so we point them at the state directory; without that dnf ends with an
-	// error that is easy to mistake for a result.
+	// The system tools need a writable HOME.
 	runtimeDir := filepath.Join(*stateDir, "run")
 	if err := agent.SetRuntimeDir(runtimeDir); err != nil {
 		log.Error("the working directory was not prepared", "err", err)
@@ -130,10 +115,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// The daemon does not enroll. A token in its environment is a leftover
-	// of the old flow - it is ignored, and said so: a secret that stays in
-	// a file that survives package updates is worth a word at every start
-	// until somebody removes it.
+	// The daemon does not enroll.
 	if os.Getenv("FLOTESTRO_ENROLLMENT_TOKEN") != "" {
 		log.Warn("FLOTESTRO_ENROLLMENT_TOKEN is ignored: the daemon does not enroll; " +
 			"enroll with flotestro-agentctl enroll and remove the line from /etc/flotestro/agent.env")
@@ -150,8 +132,8 @@ func main() {
 		"host_id", identity.HostID, "cert_not_after", identity.NotAfter.Format(time.RFC3339))
 
 	// The idempotency journal survives a restart of the agent: a job delivered
-	// again has to return the previous result rather than carry the mutation
-	// out a second time.
+	// again has to return the previous result rather than carry the mutation out
+	// a second time.
 	journal, err := agent.NewIdempotencyJournal(filepath.Join(*stateDir, "tasks"), 24*time.Hour)
 	if err != nil {
 		log.Error("the idempotency journal was not opened", "err", err)
@@ -163,29 +145,24 @@ func main() {
 	// The rename preflight compares what the certificate names with the
 	// hostname: an identity bound to the identifier survives a rename.
 	executor.SetHostIdentity(identity.HostID)
-	// The observation mode is a decision of the owner of the host rather than
-	// a missing capability: the agent reports facts but carries out no
-	// change.
+	// The observation mode is a decision of the owner of the host rather than a
+	// missing capability: the agent reports facts but carries out no change.
 	if *mode == agentconfig.ModeReadOnly {
 		executor.SetReadOnlyMode(true)
 		log.Info("the agent works in the observation mode", "mode", *mode)
 	}
 
-	// The privileged part of the domain state goes through the helper; the
-	// agent has access neither to the keytab of the host nor to the cache
-	// database of SSSD.
+	// The privileged part of the domain state goes through the helper; the agent
+	// has access neither to the keytab of the host nor to the cache database of
+	// SSSD.
 	agent.SetPrivilegedIdentityProbe(executor.ProbePrivilegedIdentity)
 	agent.SetPrivilegedAccountProbe(executor.ProbeLocalAccounts)
 	agent.SetDockerProbe(executor.ProbeDocker)
 	agent.SetScheduleProbe(executor.ProbeSchedules)
-	// The network module checks after a change whether the host still reaches
-	// the panel. One gateway is enough: the question is whether the host has
-	// a path to the centre at all, not which of them serves the current
-	// session.
+	// The network module checks after a change whether the host still reaches the
+	// panel.
 	agent.SetGatewayURL(gateways[0])
-	// The proof after a network or a firewall change goes out as the host
-	// itself. The identity is the session's own, so a renewal reaches the
-	// proof without a restart.
+	// The proof after a network or a firewall change goes out as the host itself.
 	agent.SetManagementIdentity(identity)
 	agent.SetFirewallProbe(executor.ProbeFirewall)
 	agent.SetLVMProbe(executor.ProbeLVM)
@@ -194,23 +171,18 @@ func main() {
 	agent.SetFileProbe(executor.ProbeFiles)
 	agent.SetSecurityProbe(executor.ProbeSecurity)
 	agent.SetCertificateProbe(executor.ProbeCertificates)
-	// The DMI serial numbers and the sudo policy are root's: the platform
-	// picture asks the helper for the first, the sudoers module for the
-	// second.
+	// The DMI serial numbers and the sudo policy are root's: the platform picture
+	// asks the helper for the first, the sudoers module for the second.
 	agent.SetSystemProbe(executor.ProbeSystem)
 	agent.SetSudoersProbe(executor.ProbeSudoers)
 
-	// The certificate of the agent is short-lived. Without renewal the whole
-	// host would drop out of the fleet on the day it expires, because the
-	// enrollment token is no longer on it.
+	// The certificate of the agent is short-lived.
 	renewals := make(chan struct{}, 1)
 	go agent.KeepCertificateFresh(ctx, identity, agent.RenewalOptions{
 		StateDir: *stateDir,
-		// The renewal takes the same list as the session, in the same order
-		// of priority: the first gateway is asked first, and when it is not
-		// there the next one renews. A host must not lose its place in the
-		// fleet because the instance of the panel it prefers is down for the
-		// week its certificate runs out.
+		// The renewal takes the same list as the session, in the same order of
+		// priority: the first gateway is asked first, and when it is not there the
+		// next one renews.
 		Gateways: gateways,
 		Log:      log,
 		OnRenewed: func() {
@@ -221,10 +193,9 @@ func main() {
 		},
 	})
 
-	// The service is ready once it has something to introduce itself with
-	// and its background work is running; the connection itself is not a
-	// readiness condition - a host waiting out an outage is a healthy
-	// service. From here the watchdog is fed as long as the process lives.
+	// The service is ready once it has something to introduce itself with and its
+	// background work is running; the connection itself is not a readiness
+	// condition - a host waiting out an outage is a healthy service.
 	agent.Notify("READY=1\nSTATUS=identity ready, connecting to the fleet")
 	go agent.KeepWatchdogFed(ctx, agent.WatchdogInterval())
 
@@ -239,15 +210,14 @@ func main() {
 		// The state on disk is the only source agentctl on a host without the
 		// panel learns from whether the agent really speaks to the gateway.
 		State: agent.NewStateWriter(*stateDir, identity.HostID),
-		// The samples the panel has not acknowledged are kept under the
-		// state directory, so a broken session costs a second delivery
-		// rather than a hole in the host's chart.
+		// The samples the panel has not acknowledged are kept under the state
+		// directory, so a broken session costs a second delivery rather than a hole
+		// in the host's chart.
 		StateDir: *stateDir,
 	}); err != nil {
-		// A decommission is the panel ending this host's membership: the
-		// helper has wiped the identity and disabled the service, and the
-		// process leaves cleanly rather than as a failed unit for systemd
-		// to restart.
+		// A decommission is the panel ending this host's membership: the helper has
+		// wiped the identity and disabled the service, and the process leaves
+		// cleanly rather than as a failed unit for systemd to restart.
 		if errors.Is(err, agent.ErrDecommissioned) {
 			log.Warn("the host was decommissioned; the agent ends", "host_id", identity.HostID)
 			return
@@ -283,12 +253,8 @@ type settings struct {
 	mode             *string
 }
 
-// readConfiguration reads the YAML file if it exists.
-//
-// A missing file is not an error: a host set up before it was introduced is to
-// go on working. A file that is there and is wrong is an error - an agent that
-// started with the default settings instead of the recorded ones would connect
-// somewhere other than the operator wrote down.
+// readConfiguration reads the YAML file if it exists. A missing file is not an
+// error: a host set up before it was introduced is to go on working.
 func readConfiguration(path string) (agentconfig.Config, bool, error) {
 	if path == "" {
 		return agentconfig.Config{}, false, nil
@@ -310,9 +276,6 @@ func readConfiguration(path string) (agentconfig.Config, bool, error) {
 }
 
 // apply writes the values from the file wherever nobody gave their own.
-//
-// The precedence: an explicit flag > an environment variable > the file > the
-// defaults.
 func apply(cfg agentconfig.Config, explicit map[string]bool, target settings) {
 	set := func(flagName, variable string, value string, destination *string) {
 		if value == "" || explicit[flagName] || os.Getenv(variable) != "" {
@@ -324,9 +287,7 @@ func apply(cfg agentconfig.Config, explicit map[string]bool, target settings) {
 	set("enrollment-url", "FLOTESTRO_ENROLLMENT_URL", cfg.Connection.EnrollmentURL, target.enrollmentURL)
 	// The list of gateways is ordered by priority and goes to the agent as a
 	// whole: switching to a backup gateway must not be a manual act of the
-	// operator at the moment the centre fails. An explicit flag or an
-	// environment variable replaces the whole list - whoever gives one address
-	// wants exactly that one.
+	// operator at the moment the centre fails.
 	if len(cfg.Connection.GatewayURLs) > 0 {
 		set("gateway-url", "FLOTESTRO_GATEWAY_URL", cfg.Connection.GatewayURLs[0], target.gatewayURL)
 		if !explicit["gateway-url"] && os.Getenv("FLOTESTRO_GATEWAY_URL") == "" {

@@ -38,9 +38,8 @@ type queryView struct {
 	TookMillis int64    `json:"took_millis"`
 }
 
-// TestResolverHasAnOwnerAndAReadOnlyReason checks the thing that decides
-// every DNS change: who writes the resolver file. A file owned by a service
-// gets overwritten, so a write into it would vanish on its own.
+// TestResolverHasAnOwnerAndAReadOnlyReason checks the thing that decides every
+// DNS change: who writes the resolver file.
 func TestResolverHasAnOwnerAndAReadOnlyReason(t *testing.T) {
 	h := newHarness(t)
 
@@ -69,8 +68,7 @@ func TestResolverHasAnOwnerAndAReadOnlyReason(t *testing.T) {
 }
 
 // TestResolveTestAsksFromTheHost checks that the answer comes from the host
-// and carries a reason when a name cannot be resolved. Silence in place of
-// an answer would look like a name without an address.
+// and carries a reason when a name cannot be resolved.
 func TestResolveTestAsksFromTheHost(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("rhel")
@@ -115,9 +113,8 @@ func TestResolveTestAsksFromTheHost(t *testing.T) {
 	}
 }
 
-// TestBadResolverDoesNotReachTheHost guards that a configuration which
-// would cut the host off from the directory and Kerberos is rejected when
-// ordered.
+// TestBadResolverDoesNotReachTheHost guards that a configuration which would
+// cut the host off from the directory and Kerberos is rejected when ordered.
 func TestBadResolverDoesNotReachTheHost(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("rhel")
@@ -165,9 +162,8 @@ func hostDNSSnapshot(t *testing.T, h *harness, hostID string) dnsSnapshot {
 	return state
 }
 
-// jobQueries reads the test result from the last attempt. The result
-// belongs to the attempt, because it is what knows what the host answered
-// and when.
+// jobQueries reads the test result from the last attempt. The result belongs
+// to the attempt, because it is what knows what the host answered and when.
 func jobQueries(t *testing.T, h *harness, jobID string) []queryView {
 	t.Helper()
 	var response struct {

@@ -14,33 +14,16 @@ import (
 )
 
 // The thresholds of the local checks.
-//
-// The buffer alert of the document fires at seventy percent: from there a
-// cut-off site has minutes of results left, not hours. The free space is
-// what the state directory needs for a new generation of the identity and
-// the state file - a handful of kilobytes - with a margin for the machine
-// as a whole.
 const (
 	bufferWarnAbove    = 0.7
 	freeSpaceWarnBelow = 64 << 20
 )
 
-// silentAfter is how long without a contact makes the panel count the
-// relay as silent. The same ten minutes as in the panel: the tool is to
-// say the same thing the dashboard says.
+// silentAfter is how long without a contact makes the panel count the relay as
+// silent.
 const silentAfter = 10 * time.Minute
 
-// diagnoseCommand checks the path from the relay to the centre step by
-// step.
-//
-// The steps are deliberately separate and independent, as with the agent:
-// one thing is fixed when a name does not resolve, another when a port is
-// closed, and another still when the chain of certificates does not match.
-// A failed step stops the rest only when it makes them meaningless - and
-// then they say so instead of failing a second time for the same reason.
-//
-// Nothing here changes the machine. The diagnosis reads, connects and
-// reports; the fix is always a separate, explicit command.
+// diagnoseCommand checks the path from the relay to the centre step by step.
 func diagnoseCommand(args []string, out, errOut io.Writer) int {
 	flags := flag.NewFlagSet("diagnose", flag.ContinueOnError)
 	flags.SetOutput(errOut)
@@ -68,10 +51,6 @@ func diagnoseCommand(args []string, out, errOut io.Writer) int {
 }
 
 // diagnostics gathers everything a diagnosis touches outside the process.
-//
-// The clock, the paths and the network are fields rather than calls to the
-// packages, so that a test can run the whole diagnosis on a temporary
-// directory without a network and without a daemon.
 type diagnostics struct {
 	ConfigPath string
 	Now        func() time.Time
@@ -131,10 +110,9 @@ func (d diagnostics) run(ctx context.Context) ctl.Report {
 	pool, poolErr := ctl.TrustPool(identity.TrustPEM, cfg.Upstream.BootstrapCA, d.ReadFile)
 	endpoints := endpointsOf(cfg)
 
-	// The names are resolved first: a name that does not resolve makes
-	// every dial to it meaningless, and the checks that would dial say so
-	// instead of failing a second time for the same reason. The report
-	// still lists the clock before the names, as read.
+	// The names are resolved first: a name that does not resolve makes every dial
+	// to it meaningless, and the checks that would dial say so instead of failing
+	// a second time for the same reason.
 	resolved := map[string]bool{}
 	dns := make([]ctl.Check, 0, len(endpoints))
 	for _, target := range endpoints {
@@ -167,10 +145,6 @@ func (d diagnostics) run(ctx context.Context) ctl.Report {
 }
 
 // checkConfiguration reads the file and its permissions.
-//
-// The relay has no environment file and no legacy layout to fall back to:
-// the YAML is the only source, so a file that does not load is the end of
-// the diagnosis of everything that depends on it.
 func (d diagnostics) checkConfiguration() (relayconfig.Config, ctl.Check, bool) {
 	cfg, err := relayconfig.Load(d.ConfigPath)
 	if err != nil {
@@ -202,9 +176,9 @@ func (d diagnostics) checkIdentity(identity storedIdentity) ctl.Check {
 	days := int(left.Hours() / 24)
 	detail := fmt.Sprintf("relay/%s, the certificate until %s (%s)", identity.RelayID, until, ctl.Rounded(left))
 	check := ctl.Pass("identity", detail)
-	// A relay certificate lives about a week and renews at a third left,
-	// so one with less than a day is a renewal that has been failing since
-	// yesterday - and a site about to be cut off.
+	// A relay certificate lives about a week and renews at a third left, so one
+	// with less than a day is a renewal that has been failing since yesterday -
+	// and a site about to be cut off.
 	if left < 24*time.Hour {
 		check = ctl.Warn("identity", "identity_expiring", detail+"; the renewal is late: see the journal of the relay")
 	}
@@ -212,13 +186,8 @@ func (d diagnostics) checkIdentity(identity storedIdentity) ctl.Check {
 	return check
 }
 
-// checkStateDir makes sure the relay can write where it keeps its identity
-// and its state.
-//
-// A new generation of the identity is written next to the old one, and a
-// directory the relay cannot write to means the next renewal fails - at a
-// moment nobody is looking. The check runs as the caller, so it says
-// something only when the caller is the service user or root.
+// checkStateDir makes sure the relay can write where it keeps its identity and
+// its state.
 func (d diagnostics) checkStateDir(dir string) ctl.Check {
 	info, err := os.Stat(dir)
 	if err != nil {
@@ -244,10 +213,6 @@ func (d diagnostics) checkStateDir(dir string) ctl.Check {
 }
 
 // checkBuffer judges the fill of the buffer from the state file.
-//
-// The buffer lives in the memory of the relay, so the tool sees it only
-// through what the daemon wrote down. A full buffer is an operational
-// event: from that moment the site loses results.
 func (d diagnostics) checkBuffer(cfg relayconfig.Config, state ctl.RelayState, stateErr error) ctl.Check {
 	if stateErr != nil {
 		return ctl.NotRun("buffer", fmt.Sprintf("no state file in %s: the relay has not run yet", cfg.Relay.StateDir))
@@ -275,8 +240,8 @@ func (d diagnostics) checkBuffer(cfg relayconfig.Config, state ctl.RelayState, s
 }
 
 // checkUpstream says whether the relay reaches the centre, from the state
-// file: the daemon holds the mTLS identity, and the tool asks it rather
-// than the centre.
+// file: the daemon holds the mTLS identity, and the tool asks it rather than
+// the centre.
 func (d diagnostics) checkUpstream(state ctl.RelayState, stateErr error) ctl.Check {
 	if stateErr != nil {
 		return ctl.NotRun("upstream", "no state file: the relay has not run yet")

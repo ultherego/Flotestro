@@ -127,9 +127,8 @@ func TestDamagedRecordsDoNotPretendToBeTheFullThing(t *testing.T) {
 		[]byte("[{cut"), 0o640); err != nil {
 		t.Fatal(err)
 	}
-	// Half the data would look like the whole thing and the host would come
-	// out clean, so damaged records are a fetch error rather than a smaller
-	// set.
+	// Half the data would look like the whole thing and the host would come out
+	// clean, so damaged records are a fetch error rather than a smaller set.
 	if _, _, err := source.collect(); err == nil {
 		t.Fatal("damaged records went through as the whole thing")
 	}

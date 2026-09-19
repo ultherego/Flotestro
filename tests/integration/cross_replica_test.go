@@ -13,28 +13,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// A lifecycle order that lands on a control-plane instance which does not
-// hold the host's session.
-//
-// The lab runs one panel, and an installation with two is not something a
-// test can conjure. What the tests do instead is put the order where the
-// second instance would have put it: a row in gateway_commands addressed
-// to the session the running panel holds, with the fencing token of that
-// claim. From the panel's side there is no difference - it did not write
-// the row, it reads it, checks that the session is still its own and
-// carries the order out - so the machinery under test is the whole of it:
-// the claim by owner and token, the check against the registry, the
-// outcome written back.
-//
-// The negative scenes are the ones that matter most. A command carrying a
-// token the host has grown past must never be carried out, and a command
-// for a session nobody holds must end saying so rather than pretending the
-// host cooperated.
-//
-// The decommission handshake itself is exercised here only through its
-// refusals and its handover: carrying it out needs a host with a live
-// agent session, and a fleet host must not be retired - retirement is
-// irreversible and takes the machine away from every other test.
+// A lifecycle order that lands on a control-plane instance which does not hold
+// the host's session.
 
 // ownership is the owner row of a host as host_session_owners holds it.
 type ownership struct {
@@ -137,12 +117,8 @@ func connectedHost(t *testing.T, h *harness) hostView {
 }
 
 // TestAnOrderForTheOwningInstanceIsCarriedOut is the scene of the gap: the
-// request landed elsewhere, the order was written for the instance holding
-// the host, and that instance carries it out on the host's real session.
-// Ending the session is the order used here because it is reversible - the
-// agent reconnects on its own backoff - while it goes through exactly the
-// same claim, the same fencing check and the same write-back as the final
-// task of a decommission.
+// request landed elsewhere, the order was written for the instance holding the
+// host, and that instance carries it out on the host's real session.
 func TestAnOrderForTheOwningInstanceIsCarriedOut(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -164,10 +140,7 @@ func TestAnOrderForTheOwningInstanceIsCarriedOut(t *testing.T) {
 	h.awaitConnection(host.ID, 3*time.Minute)
 }
 
-// TestAnOrderWithAStaleFencingTokenIsNeverCarriedOut guards the fence. A
-// token the host has grown past belongs to a claim that was superseded -
-// an instance that lost the host and still believes it holds it. Such an
-// order must not be claimed at all, whatever it asks for.
+// TestAnOrderWithAStaleFencingTokenIsNeverCarriedOut guards the fence.
 func TestAnOrderWithAStaleFencingTokenIsNeverCarriedOut(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -175,9 +148,8 @@ func TestAnOrderWithAStaleFencingTokenIsNeverCarriedOut(t *testing.T) {
 	host := connectedHost(t, h)
 	owner := ownerOf(t, ctx, pool, host.ID)
 
-	// A token one past the host's own is a token no claim ever had; a
-	// session identifier nobody holds is the other half of the same
-	// mistake.
+	// A token one past the host's own is a token no claim ever had; a session
+	// identifier nobody holds is the other half of the same mistake.
 	stale := writeCommand(t, ctx, pool, host.ID, owner.SessionID, owner.Token+1, "session_close",
 		`{"reason":"cross_replica_test stale token","actor":"integration-test"}`, 2*time.Minute)
 	foreign := writeCommand(t, ctx, pool, host.ID, uuid.NewString(), owner.Token, "session_close",
@@ -201,18 +173,13 @@ func TestAnOrderWithAStaleFencingTokenIsNeverCarriedOut(t *testing.T) {
 }
 
 // TestAnOrderForASessionThatIsGoneEndsAsNoSession guards the second check.
-// The ownership row may still name a session the instance no longer holds
-// - the stream ended a moment ago, the release has not been written - and
-// the order is then claimed by the right instance and carried out by none
-// of them. The answer says no_session rather than reporting a handshake
-// nobody answered.
 func TestAnOrderForASessionThatIsGoneEndsAsNoSession(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 	pool := h.database(ctx)
-	// The instance identifier of the running panel is read off a host it
-	// really holds; the synthetic host is then given an ownership row
-	// naming that instance and a session that exists nowhere.
+	// The instance identifier of the running panel is read off a host it really
+	// holds; the synthetic host is then given an ownership row naming that
+	// instance and a session that exists nowhere.
 	live := connectedHost(t, h)
 	instance := ownerOf(t, ctx, pool, live.ID).InstanceID
 	host := h.enrollSyntheticHost(t)
@@ -235,17 +202,9 @@ func TestAnOrderForASessionThatIsGoneEndsAsNoSession(t *testing.T) {
 	}
 }
 
-// TestADecommissionIsHandedToTheInstanceHoldingTheHost guards what the gap
-// is about from the operator's side: a host connected to another instance
-// is no longer retired as if it were offline. The decision is recorded,
-// the order is written for the owner, and the answer says where the
-// handshake is - rather than claiming a cleanup nobody confirmed.
-//
-// The owner here is an instance that does not exist, so it never answers:
-// that is the worst case, and it is the one that used to end with a host
-// retired behind the back of the instance talking to it. Afterwards the
-// ownership row is removed and the order repeated - a host nobody holds is
-// retired without the confirmation, which is the behaviour that stays.
+// TestADecommissionIsHandedToTheInstanceHoldingTheHost guards what the gap is
+// about from the operator's side: a host connected to another instance is no
+// longer retired as if it were offline.
 func TestADecommissionIsHandedToTheInstanceHoldingTheHost(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -290,9 +249,8 @@ func TestADecommissionIsHandedToTheInstanceHoldingTheHost(t *testing.T) {
 		t.Fatalf("the order is addressed elsewhere: %+v", wrote)
 	}
 
-	// The owner disappears - the instance is gone for good - and the order
-	// is repeated. A host with no live owner is retired the way it always
-	// was, with the cleanup unconfirmed.
+	// The owner disappears - the instance is gone for good - and the order is
+	// repeated.
 	if _, err := pool.Exec(ctx, `delete from host_session_owners where host_id = $1::uuid`,
 		host.ID); err != nil {
 		t.Fatalf("the ownership row was not removed: %v", err)
@@ -312,9 +270,8 @@ func TestADecommissionIsHandedToTheInstanceHoldingTheHost(t *testing.T) {
 	}
 }
 
-// claimFor gives a host an ownership row naming a session and an instance,
-// the way a gateway's claim does, and returns the fencing token. The row is
-// removed afterwards: it describes a session that never existed.
+// claimFor gives a host an ownership row naming a session and an instance, the
+// way a gateway's claim does, and returns the fencing token.
 func claimFor(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 	hostID, sessionID, instanceID string) int64 {
 	t.Helper()

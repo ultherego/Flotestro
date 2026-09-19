@@ -8,14 +8,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// CVEDetails are what an upstream source says about the vulnerability
-// itself.
-//
-// This is enrichment, not a verdict. Whether a package is vulnerable and
-// which version closes the matter is said by the distribution vendor alone:
-// its fixes are backported, so no version range from NVD covers them. What
-// comes from here is only what the vendor does not say - how dangerous the
-// vulnerability itself is and what it concerns.
+// CVEDetails are what an upstream source says about the vulnerability itself.
+// This is enrichment, not a verdict.
 type CVEDetails struct {
 	CVE          string     `json:"cve"`
 	Source       string     `json:"source"`
@@ -29,10 +23,6 @@ type CVEDetails struct {
 }
 
 // DetailSource is the adapter of an enrichment source.
-//
-// Fetch hands the results back page by page rather than as a whole: the set
-// has close to four hundred thousand entries and there is no reason for it to
-// sit in the memory of the panel all at once.
 type DetailSource interface {
 	Name() string
 	Fetch(ctx context.Context, since time.Time,
@@ -76,9 +66,6 @@ func (s *Store) SaveDetails(ctx context.Context, details []CVEDetails) error {
 }
 
 // Details reads the descriptions of the named vulnerabilities.
-//
-// A missing description is not an error: the enrichment may be incomplete or
-// absent altogether, and the assessment of a host is not to use it.
 func (s *Store) Details(ctx context.Context, numbers []string) (map[string]CVEDetails, error) {
 	result := map[string]CVEDetails{}
 	if len(numbers) == 0 {
@@ -143,11 +130,6 @@ func (s *Store) SaveEnrichmentState(ctx context.Context, source string, mark tim
 
 // Enricher keeps the descriptions of vulnerabilities in the database of the
 // panel.
-//
-// A cycle separate from the correlator and deliberately rarer: these data do
-// not change a single answer about hosts. When they are missing, the
-// assessment is the same - only the upstream severity next to the vendor
-// severity is absent.
 type Enricher struct {
 	store    *Store
 	source   DetailSource
@@ -195,9 +177,8 @@ func (w *Enricher) Cycle(ctx context.Context) {
 		return nil
 	})
 	if err != nil {
-		// A failed fetch does not erase what is already there: descriptions
-		// from a day ago are better than none, and the assessment does not
-		// use them anyway.
+		// A failed fetch does not erase what is already there: descriptions from a
+		// day ago are better than none, and the assessment does not use them anyway.
 		w.log.Error("the vulnerability descriptions were not fetched", "source", w.source.Name(), "err", err)
 		_ = w.store.SaveEnrichmentState(ctx, w.source.Name(), time.Time{}, saved, err.Error())
 		return

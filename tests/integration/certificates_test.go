@@ -115,9 +115,8 @@ func TestCertificateDeploymentFromTheStore(t *testing.T) {
 	t.Cleanup(func() {
 		h.do(http.MethodDelete,
 			"/api/v1/hosts/"+host.ID+"/certificates/targets?path="+path, nil, nil, 0)
-		// The file stays on the host unless removed: the next runs fill the
-		// target registry and push the certificates the host really has out
-		// of the read.
+		// The file stays on the host unless removed: the next runs fill the target
+		// registry and push the certificates the host really has out of the read.
 		for _, toRemove := range []string{path, keyPath} {
 			h.runOperation(host.ID, map[string]any{
 				"action": "file.remove", "reason": certificateReason,
@@ -224,9 +223,8 @@ func TestCertificateOutsideTheScopeFallsOutWhenOrdered(t *testing.T) {
 	}, nil, http.StatusBadRequest)
 }
 
-// TestCertificateScanDoesNotGuessTheState guards that missing knowledge has
-// a reason, and an empty result does not pose as a host without
-// certificates.
+// TestCertificateScanDoesNotGuessTheState guards that missing knowledge has a
+// reason, and an empty result does not pose as a host without certificates.
 func TestCertificateScanDoesNotGuessTheState(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -259,17 +257,15 @@ func TestCertificateScanDoesNotGuessTheState(t *testing.T) {
 }
 
 // TestRenewalWithoutTrackingRefuses guards the renewal boundary: the panel
-// does not supply the certificate content, it only asks the host daemon -
-// and a host without a request has nothing to renew and must say so
-// outright.
+// does not supply the certificate content, it only asks the host daemon - and
+// a host without a request has nothing to renew and must say so outright.
 func TestRenewalWithoutTrackingRefuses(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("rhel")
 	path := fmt.Sprintf("/etc/pki/tls/certs/flotestro-untracked-%d.crt", time.Now().UnixNano())
 
-	// A campaign renewing the same certificate across the fleet can point
-	// only at the path: the certmonger request identifier differs on every
-	// host. That is why the path is an allowed way of pointing here.
+	// A campaign renewing the same certificate across the fleet can point only at
+	// the path: the certmonger request identifier differs on every host.
 	job, attempts := h.runOperation(host.ID, map[string]any{
 		"action": "certificate.renew", "reason": certificateReason,
 		"payload": map[string]any{"certificate": map[string]any{"path": path}},
@@ -411,9 +407,8 @@ func leafFromAuthority(t *testing.T, name, authorityPEM, authorityKeyPEM string)
 	}
 }
 
-// TestFleetViewHasAnExpiryTimeline checks what the sorted list does not
-// say: when the next wave of renewals comes. The list answers "what is on
-// fire now", the timeline - "what to plan".
+// TestFleetViewHasAnExpiryTimeline checks what the sorted list does not say:
+// when the next wave of renewals comes.
 func TestFleetViewHasAnExpiryTimeline(t *testing.T) {
 	h := newHarness(t)
 	var view struct {
@@ -463,10 +458,8 @@ func TestFleetViewHasAnExpiryTimeline(t *testing.T) {
 }
 
 // TestPrivateKeyDoesNotReachTheHostJournal guards the property the secret
-// store exists for in the first place - and which is not visible in the
-// API: the key material passes through the agent and the helper at
-// deployment, so one careless log line would leave it in the host journal
-// forever.
+// store exists for in the first place - and which is not visible in the API:
+// the key material passes through the agent and the helper at deployment, so
 func TestPrivateKeyDoesNotReachTheHostJournal(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("rhel")
@@ -497,9 +490,8 @@ func TestPrivateKeyDoesNotReachTheHostJournal(t *testing.T) {
 		t.Fatalf("deployment: state = %s, %s", job.State, lastMessage(attempts))
 	}
 
-	// The journal is searched for a fragment of the key in the form it
-	// passes through the panel in: one base64 line from the middle of the
-	// material.
+	// The journal is searched for a fragment of the key in the form it passes
+	// through the panel in: one base64 line from the middle of the material.
 	fragment := strings.Split(strings.TrimSpace(keyPEM), "\n")[1]
 	for _, unit := range []string{"flotestro-agent", "flotestro-helper"} {
 		read, attempts := h.runOperation(host.ID, map[string]any{
@@ -515,9 +507,8 @@ func TestPrivateKeyDoesNotReachTheHostJournal(t *testing.T) {
 			if strings.Contains(attempt.Stdout, fragment) {
 				t.Fatalf("the %s journal carries private key material", unit)
 			}
-			// The secret name alone in the journal is fine - it is a
-			// reference, not a value. The value must not be there in any
-			// form.
+			// The secret name alone in the journal is fine - it is a reference, not a
+			// value.
 			if strings.Contains(attempt.Stdout, "BEGIN PRIVATE KEY") {
 				t.Fatalf("the %s journal carries the key in PEM form", unit)
 			}

@@ -22,9 +22,9 @@ import (
 	"github.com/ultherego/flotestro/internal/outbox"
 )
 
-// Message is what a channel carries: a subject, a one-line title, the
-// lines under it, a link into the panel, and the event of the trail it
-// reports for a receiver that wants the facts rather than the words.
+// Message is what a channel carries: a subject, a one-line title, the lines
+// under it, a link into the panel, and the event of the trail it reports for a
+// receiver that wants the facts rather than the words.
 type Message struct {
 	Subject string `json:"event"`
 	Title   string `json:"title"`
@@ -45,12 +45,7 @@ type Message struct {
 	OccurredAt  time.Time       `json:"occurred_at"`
 }
 
-// SendError is a failure with a code the log keeps. The code is the kind
-// of failure - the address refused, the name unknown, the receiver
-// answering with a status - so an operator reading the log knows what to
-// fix without the sentence. Status is the HTTP status of a receiver that
-// answered, or the reply code of a mail relay; zero when nothing
-// answered. The worker classifies the outcome by it.
+// SendError is a failure with a code the log keeps.
 type SendError struct {
 	Code   string
 	Status int
@@ -74,15 +69,7 @@ const (
 	CodeInvalidConfig     = "invalid_config"
 )
 
-// classify names a transport error. The order matters: a timeout is a
-// timeout whatever wrapped it, a DNS failure says the name was wrong
-// before any connection, and a refusal says the name was right and the
-// port closed.
-//
-// The sentence of the error is kept without the address: the HTTP client
-// puts the whole URL into its errors, and the URL of an incoming webhook
-// is the credential. The log shows the operation and the cause, never
-// the address.
+// classify names a transport error.
 func classify(err error) SendError {
 	var sendErr SendError
 	if errors.As(err, &sendErr) {
@@ -154,11 +141,9 @@ func (w WebhookSender) Send(ctx context.Context, channel Channel, message Messag
 	return post(ctx, w.Client, config.URL, body, headers)
 }
 
-// deliveryIdentifier is what the receiver deduplicates by: the event of
-// the trail, which is the same on every attempt of the same row, so a
-// receiver that took the first attempt and answered too late drops the
-// second. A message without an event - a test, a summary - carries its
-// own identifier.
+// deliveryIdentifier is what the receiver deduplicates by: the event of the
+// trail, which is the same on every attempt of the same row, so a receiver
+// that took the first attempt and answered too late drops the second.
 func deliveryIdentifier(message Message) string {
 	if message.EventID > 0 {
 		return "notification-" + strconv.FormatInt(message.EventID, 10)
@@ -169,9 +154,9 @@ func deliveryIdentifier(message Message) string {
 	return "notification-test-" + strconv.FormatInt(message.OccurredAt.UnixNano(), 10)
 }
 
-// SlackSender posts the message in the shape of an incoming webhook: a
-// text for the notification and one block with the same words, which
-// every service that reads Slack's shape shows.
+// SlackSender posts the message in the shape of an incoming webhook: a text
+// for the notification and one block with the same words, which every service
+// that reads Slack's shape shows.
 type SlackSender struct {
 	Client *http.Client
 }
@@ -210,9 +195,7 @@ func (s SlackSender) Send(ctx context.Context, channel Channel, message Message)
 	return post(ctx, s.Client, address, body, nil)
 }
 
-// post sends one body and reads the status. The answer is read and
-// dropped so the connection can be reused; a status outside 2xx is a
-// refusal of the receiver, with the status in the code's sentence.
+// post sends one body and reads the status.
 func post(ctx context.Context, client *http.Client, address string, body []byte, headers http.Header) error {
 	ctx, cancel := context.WithTimeout(ctx, sendTimeout)
 	defer cancel()
@@ -243,17 +226,14 @@ func post(ctx context.Context, client *http.Client, address string, body []byte,
 	return nil
 }
 
-// SecretReader hands the sender the value of a secret of the store. The
-// panel reads it for its own client, so no lease is issued: the value
-// goes to the mail relay and nowhere else.
+// SecretReader hands the sender the value of a secret of the store.
 type SecretReader interface {
 	ReadCurrent(ctx context.Context, name string) ([]byte, error)
 }
 
-// EmailSender delivers over SMTP with the standard library alone: a
-// plain connection, STARTTLS when the channel asks for it, PLAIN
-// authentication over the encrypted connection. A password is read from
-// the secret store at the moment of sending and is not kept.
+// EmailSender delivers over SMTP with the standard library alone: a plain
+// connection, STARTTLS when the channel asks for it, PLAIN authentication over
+// the encrypted connection.
 type EmailSender struct {
 	Secrets SecretReader
 	// Dialer is replaced in tests; nil means a dialer with sendTimeout.
@@ -267,9 +247,9 @@ func (e EmailSender) Send(ctx context.Context, channel Channel, message Message)
 	}
 	password := channel.secret
 	if config.Username != "" && password == "" {
-		// The worker hands the password over with the channel; a channel
-		// read without it - the test button of an older path - reads the
-		// named secret here, at the moment of sending.
+		// The worker hands the password over with the channel; a channel read
+		// without it - the test button of an older path - reads the named secret
+		// here, at the moment of sending.
 		if e.Secrets == nil {
 			return SendError{Code: CodeSecretUnavailable, Err: errors.New("this installation has no secret store")}
 		}
@@ -342,9 +322,9 @@ func (e EmailSender) Send(ctx context.Context, channel Channel, message Message)
 	return nil
 }
 
-// smtpRejected types a refusal of the mail relay with its reply code, so
-// the worker tells a relay that asks for another try (4xx) from one that
-// refuses the message for good (5xx).
+// smtpRejected types a refusal of the mail relay with its reply code, so the
+// worker tells a relay that asks for another try (4xx) from one that refuses
+// the message for good (5xx).
 func smtpRejected(err error) SendError {
 	var protocol *textproto.Error
 	if errors.As(err, &protocol) {
@@ -353,10 +333,8 @@ func smtpRejected(err error) SendError {
 	return SendError{Code: CodeSMTPRejected, Err: err}
 }
 
-// mailBody renders the message as a plain-text mail. The subject carries
-// the title; the body the lines and the link. Line endings are CRLF as
-// the protocol wants; the writer of net/smtp dot-stuffs the lines and
-// ends the message, so nothing of that is done here.
+// mailBody renders the message as a plain-text mail. The subject carries the
+// title; the body the lines and the link.
 func mailBody(config EmailConfig, message Message) []byte {
 	var out bytes.Buffer
 	fmt.Fprintf(&out, "From: %s\r\n", config.From)

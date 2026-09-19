@@ -1,9 +1,4 @@
 // Package debian reads the security tracker of Debian.
-//
-// This is the settling source for Debian hosts: it says which version of a
-// source package carries the fix in a given release. Those versions are
-// backported, so by the upstream numbering they look vulnerable - and no
-// range from an upstream feed covers them.
 package debian
 
 import (
@@ -29,9 +24,8 @@ const Provider = "debian"
 // DefaultURL points at the full dump of the tracker.
 const DefaultURL = "https://security-tracker.debian.org/tracker/data/json"
 
-// MaxSize limits the fetch. The dump is a few dozen megabytes; a
-// substantially larger answer means we are fetching something other than we
-// think.
+// MaxSize limits the fetch. The dump is a few dozen megabytes; a substantially
+// larger answer means we are fetching something other than we think.
 const MaxSize = 512 << 20
 
 // ErrNotModified means a feed unchanged since the last fetch.
@@ -75,10 +69,6 @@ type cveEntry struct {
 }
 
 // Fetch pulls the dump and turns it into findings for the named releases.
-//
-// We filter by the releases of the fleet, because the full dump describes
-// more than a dozen releases and several hundred thousand findings - and the
-// panel needs the ones that concern the hosts it really has.
 func (z *Source) Fetch(ctx context.Context, releases []string,
 	etag string) (vuln.Snapshot, []vuln.Advisory, error) {
 	snapshot := vuln.Snapshot{Provider: Provider, Releases: releases}
@@ -87,16 +77,14 @@ func (z *Source) Fetch(ctx context.Context, releases []string,
 	if err != nil {
 		return snapshot, nil, err
 	}
-	// A conditional fetch: the dump changes a few times a day and is a few
-	// dozen megabytes. Fetching it every cycle without need is a cost the
-	// other side bears as well.
+	// A conditional fetch: the dump changes a few times a day and is a few dozen
+	// megabytes.
 	if etag != "" {
 		request.Header.Set("If-None-Match", etag)
 	}
-	// We do not set the Accept-Encoding header ourselves: when the client
-	// does, the library stops decompressing the answer and a gzip stream
-	// reaches the parser. Left to the library, the compression works and is
-	// decompressed transparently.
+	// We do not set the Accept-Encoding header ourselves: when the client does,
+	// the library stops decompressing the answer and a gzip stream reaches the
+	// parser.
 	request.Header.Set("User-Agent", "flotestro-vuln/1")
 
 	response, err := z.Client.Do(request)
@@ -119,10 +107,8 @@ func (z *Source) Fetch(ctx context.Context, releases []string,
 		}
 	}
 
-	// We read one byte more than allowed: were the answer larger, the cut
-	// stream would end in the middle of the data. The parser would report an
-	// error then, but not every error can be told from a syntax error - and a
-	// dump trimmed in half is to look like what it is.
+	// We read one byte more than allowed: were the answer larger, the cut stream
+	// would end in the middle of the data.
 	counter := &byteCounter{source: io.LimitReader(response.Body, MaxSize+1)}
 	advisories, err := Parse(counter, releases)
 	if counter.read > MaxSize {
@@ -153,9 +139,6 @@ func (l *byteCounter) Read(buffer []byte) (int, error) {
 
 // Parse reads the dump as a stream and returns the findings for the named
 // releases.
-//
-// As a stream, because the dump is a few dozen megabytes: read into memory as
-// a whole it would cost a multiple of that size once decoded.
 func Parse(source io.Reader, releases []string) ([]vuln.Advisory, error) {
 	wanted := map[string]bool{}
 	for _, release := range releases {
@@ -195,10 +178,7 @@ func Parse(source io.Reader, releases []string) ([]vuln.Advisory, error) {
 		}
 	}
 
-	// The closing of the object and the end of the stream are checked
-	// explicitly. A stream cut in half simply ends with no further key - the
-	// loop exits silently, and the panel gets half the dump as the full thing
-	// and treats the missing findings as non-existent.
+	// The closing of the object and the end of the stream are checked explicitly.
 	closing, err := decoder.Token()
 	if err != nil {
 		return nil, fmt.Errorf("the tracker dump was cut before the closing: %w", err)
@@ -241,11 +221,6 @@ func advisoryFromEntry(pkg, cveName, release string, description releaseEntry, e
 }
 
 // Status translates the state of a tracker entry into the state of a finding.
-//
-// The tracker has three states and one trap: "resolved" with the fixed
-// version "0" does not mean "fixed in version zero" but "this release was
-// never vulnerable". Treating that as a version would give a vulnerability on
-// every host, because every version is greater than zero.
 func Status(description releaseEntry) (string, string) {
 	switch description.Status {
 	case "resolved":
@@ -255,9 +230,7 @@ func Status(description releaseEntry) (string, string) {
 		return vuln.StatusFixed, description.FixedVersion
 	case "open":
 		if description.NoDSA != "" || description.NoDSAReason != "" {
-			// The vendor settled that it will not release a fix in this
-			// release. That is an answer rather than a missing answer - and
-			// the host is still vulnerable.
+			// The vendor settled that it will not release a fix in this release.
 			return vuln.StatusDeferred, ""
 		}
 		return vuln.StatusOpen, ""
@@ -287,10 +260,6 @@ func Severity(urgency string) string {
 }
 
 // Digest computes the digest of the canonical form of the findings.
-//
-// The canonicalisation is explicit: the same data have to give the same
-// digest, otherwise the panel would start a new snapshot on every fetch and
-// recompute the whole fleet.
 func Digest(advisories []vuln.Advisory) string {
 	sum := sha256.New()
 	sum.Write([]byte("flotestro/vuln/debian/v1\n"))
@@ -305,12 +274,6 @@ func Digest(advisories []vuln.Advisory) string {
 }
 
 // shortened trims a description to 300 characters rather than bytes.
-//
-// Cutting by bytes splits a multi-byte character in half and leaves a
-// sequence that cannot be written to the database: the whole import then
-// ended with an encoding error and the panel was left without a feed. The
-// descriptions of the tracker are in English, but they quote names and
-// punctuation from outside ASCII.
 func shortened(description string) string {
 	description = strings.ToValidUTF8(strings.TrimSpace(description), "")
 	runes := []rune(description)

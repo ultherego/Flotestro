@@ -16,10 +16,8 @@ func frame(stream byte, text string) []byte {
 	return append(header, text...)
 }
 
-// The two streams of a container without a TTY arrive as frames, in the
-// order the engine kept. The read keeps that order and marks the error
-// stream, so a line that came from stderr can be told from one that did
-// not - without a second list that would lose the order.
+// The two streams of a container without a TTY arrive as frames, in the order
+// the engine kept.
 func TestDemultiplexedLinesKeepsOrderAndMarksStderr(t *testing.T) {
 	var body bytes.Buffer
 	body.Write(frame(1, "starting\nlisten"))
@@ -38,8 +36,8 @@ func TestDemultiplexedLinesKeepsOrderAndMarksStderr(t *testing.T) {
 }
 
 // A frame cut by the byte limit does not turn into a made-up line: the
-// complete lines stand, the cut one is held back and the caller learns of
-// the cut.
+// complete lines stand, the cut one is held back and the caller learns of the
+// cut.
 func TestDemultiplexedLinesReportsACutFrame(t *testing.T) {
 	full := append(frame(1, "first\n"), frame(1, "second line that is cut\n")...)
 	lines, err := demultiplexedLines(bytes.NewReader(full[:len(full)-5]))
@@ -61,9 +59,7 @@ func TestRawLinesSplitsATTYStream(t *testing.T) {
 	}
 }
 
-// The reference lands in the path of an Engine API request. A name is
-// allowed - this is a read and the name is what the operator sees - but
-// nothing that changes the path.
+// The reference lands in the path of an Engine API request.
 func TestContainerReferenceIsChecked(t *testing.T) {
 	for _, good := range []string{"5c5b63d3119a", "web", "shop_web-1", "a.b"} {
 		if err := ValidateContainerReference(good); err != nil {

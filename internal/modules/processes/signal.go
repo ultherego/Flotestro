@@ -11,8 +11,7 @@ import (
 )
 
 // Signals allowed by the module. The list is closed: there is no "send any
-// signal" operation. Signals that stop a process or change its behaviour in
-// a way that is hard to undo do not belong to diagnostics.
+// signal" operation.
 const (
 	SignalTERM = "TERM"
 	SignalKILL = "KILL"
@@ -43,18 +42,11 @@ func KnownSignal(name string) bool {
 
 // Protected describes the processes that must not be touched.
 type Protected struct {
-	// PIDs of our own processes: the agent and the helper. Killing either
-	// would cut the host off from the panel, and therefore also from
-	// repairing what has just been broken.
+	// PIDs of our own processes: the agent and the helper.
 	Own []int32
 }
 
 // Send sends a signal to a process bound to its start time.
-//
-// The PID alone does not identify a process: the kernel reuses numbers, so a
-// signal sent a moment after viewing the list may hit something entirely
-// different from what the operator intended. That is why the start time is
-// checked right before sending.
 func Send(root string, pid int32, expectedStart uint64, signal string, protected Protected) error {
 	number, ok := signalNumbers[signal]
 	if !ok {
@@ -97,8 +89,7 @@ func processStart(root string, pid int32) (uint64, error) {
 }
 
 // OwnPIDs returns the PIDs of the processes the module must not kill: itself
-// and its parent. The helper is started by systemd, so its parent is pid 1 -
-// protected separately.
+// and its parent.
 func OwnPIDs() []int32 {
 	return []int32{int32(os.Getpid()), int32(os.Getppid())}
 }

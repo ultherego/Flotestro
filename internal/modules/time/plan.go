@@ -9,14 +9,8 @@ import (
 	"strings"
 )
 
-// Plan describes the difference between the time sources the panel has on
-// the host and the requested ones.
-//
-// The same server list on two hosts is two changes: one has chrony with a
-// sources directory and reloads without a restart, another has timesyncd
-// and restarts the daemon, a third includes no directory and needs a line
-// appended to somebody else's file. The operator is meant to see that
-// before approving, not half-way through the fleet.
+// Plan describes the difference between the time sources the panel has on the
+// host and the requested ones.
 type Plan struct {
 	// Service names the host time daemon; Action - what would happen:
 	// update or no_change.
@@ -31,9 +25,9 @@ type Plan struct {
 	// has nowhere to accept the change without enabling a directory.
 	ManagedPath string `json:"managed_path,omitempty"`
 	ManagedHash string `json:"managed_hash,omitempty"`
-	// EnablesSourceDir says the change appends the panel directory to the
-	// main chrony file - the only place where the panel touches somebody
-	// else's configuration.
+	// EnablesSourceDir says the change appends the panel directory to the main
+	// chrony file - the only place where the panel touches somebody else's
+	// configuration.
 	EnablesSourceDir bool `json:"enables_source_dir,omitempty"`
 	// Restart says whether the daemon is restarted or only reloads its
 	// sources. A restart is a moment without synchronisation.
@@ -138,9 +132,9 @@ func Compute(state Snapshot, servers []string, allowSourceDir bool) Plan {
 	return plan
 }
 
-// Refuse records a refusal reason learned after the differences were
-// computed and recomputes the fingerprint: a plan with a refusal is a
-// different answer than a plan without one.
+// Refuse records a refusal reason learned after the differences were computed
+// and recomputes the fingerprint: a plan with a refusal is a different answer
+// than a plan without one.
 func (p *Plan) Refuse(reason string) {
 	p.Refusal = reason
 	p.PlanHash = planFingerprint(*p)

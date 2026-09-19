@@ -20,8 +20,7 @@ func testCipher(t *testing.T) *Cipher {
 }
 
 // The key lies in a file outside the database: it, and not a column, decides
-// whether anything can be read out of the ciphertext. It comes into being
-// only through the explicit initialisation; an open never creates one.
+// whether anything can be read out of the ciphertext.
 func TestTheKeyLivesInAFileAndComesBackTheSame(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "key")
 	if _, err := OpenCipher(path); !errors.Is(err, ErrKeyMissing) {
@@ -152,9 +151,8 @@ func TestWhetherASecretIsIssuable(t *testing.T) {
 	}
 }
 
-// A ciphertext is bound to its row: moved to another secret or another
-// version it does not open. A version written before the binding still
-// opens, so an installation upgrades without re-entering its secrets.
+// A ciphertext is bound to its row: moved to another secret or another version
+// it does not open.
 func TestACiphertextIsBoundToItsRow(t *testing.T) {
 	c := testCipher(t)
 	nonce, ciphertext, err := c.Encrypt([]byte("value"), "secret-a", 2)

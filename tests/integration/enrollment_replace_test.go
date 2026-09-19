@@ -16,12 +16,9 @@ type replacedOrderView struct {
 	RelayID     string   `json:"relay_id"`
 }
 
-// TestAnEnrollmentOrderCanBeReplacedWithinItsScope checks that "revoke
-// and replace" closes the order in hand and places one like it - the same
+// TestAnEnrollmentOrderCanBeReplacedWithinItsScope checks that "revoke and
+// replace" closes the order in hand and places one like it - the same
 // placement, owner, tags and pool of uses - with a token of its own, shown
-// once; that the old token comes back on no read afterwards; and that the
-// right to do so is judged where the machine was to live, so an operator
-// of another site neither replaces the order nor closes it by trying.
 func TestAnEnrollmentOrderCanBeReplacedWithinItsScope(t *testing.T) {
 	h := newHarness(t)
 	reason := "integration test of the enrollment replacement"

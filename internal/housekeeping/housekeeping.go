@@ -1,12 +1,4 @@
 // Package housekeeping deletes what the panel no longer needs to keep.
-//
-// Most tables of the panel grow with the fleet and stop; a few grow with
-// time: every session an agent opens leaves a row, and every request leaves
-// an event on the trail. Without a sweep a fleet that changes nothing still
-// fills the database, and a host that reconnects in a loop fills it fast.
-// The sweep runs in the panel rather than in a cron job next to it, because
-// the retention is a policy of the installation and belongs where the
-// other policies are set.
 package housekeeping
 
 import (
@@ -21,45 +13,29 @@ import (
 	"github.com/ultherego/flotestro/internal/audit"
 )
 
-// SessionRetention is how long an ended agent session stays on record. The
-// timeline of a host shows its sessions; a month of them is what an
-// operator looks back at.
+// SessionRetention is how long an ended agent session stays on record.
 const SessionRetention = 30 * 24 * time.Hour
 
-// The retentions of the records that grow with the work of the fleet: a
-// job per host per change, a campaign per change, an event of the trail
-// per state a target passes through. A quarter of finished jobs covers
-// every investigation of a host's recent past; a year of campaigns keeps
-// the history of the fleet's changes for a review; a month of delivered
-// events is the replay window a consumer that lost its cursor could ask
-// for.
+// The retentions of the records that grow with the work of the fleet: a job
+// per host per change, a campaign per change, an event of the trail per state
+// a target passes through.
 const (
 	JobRetention      = 90 * 24 * time.Hour
 	CampaignRetention = 365 * 24 * time.Hour
 	OutboxRetention   = 30 * 24 * time.Hour
 )
 
-// SweepBatch bounds what one sweep deletes of one kind. A sweep that
-// deletes a year of jobs in one statement holds the locks and bloats the
-// log for minutes; five thousand rows an hour drains a backlog of a
-// hundred thousand in a day without anybody noticing the sweep.
+// SweepBatch bounds what one sweep deletes of one kind.
 const SweepBatch = 5000
 
 // Options describes what the sweep deletes.
 type Options struct {
-	// Sessions is the retention of ended agent sessions. Zero means the
-	// default of SessionRetention; the sessions are always swept, because
-	// nothing in the panel reads a session older than that.
+	// Sessions is the retention of ended agent sessions.
 	Sessions time.Duration
-	// Audit is the retention of the audit trail. Zero keeps the trail
-	// forever: the trail is evidence, and throwing it away is a decision the
-	// installation has to take explicitly.
+	// Audit is the retention of the audit trail.
 	Audit time.Duration
-	// Jobs is the retention of finished jobs, Campaigns of finished
-	// campaigns and Outbox of the delivered events of the durable trail.
-	// Zero means the default of each; unlike the trail they are always
-	// swept, because they are the working record of the fleet and not its
-	// evidence - the trail keeps who ordered what.
+	// Jobs is the retention of finished jobs, Campaigns of finished campaigns and
+	// Outbox of the delivered events of the durable trail.
 	Jobs      time.Duration
 	Campaigns time.Duration
 	Outbox    time.Duration
@@ -67,9 +43,8 @@ type Options struct {
 	Interval time.Duration
 }
 
-// Report is what the last sweep did, for the status screen: when it ran,
-// what it removed by kind and whether it failed. A panel whose sweep has
-// not run since it started says so rather than showing zeros.
+// Report is what the last sweep did, for the status screen: when it ran, what
+// it removed by kind and whether it failed.
 type Report struct {
 	LastSweepAt *time.Time        `json:"last_sweep_at,omitempty"`
 	LastError   string            `json:"last_error,omitempty"`
@@ -102,9 +77,8 @@ type namedSweep struct {
 	run  func(ctx context.Context) error
 }
 
-// Also adds a sweep of another store to the same schedule: a store that
-// knows what of its own is stale says so here rather than run a ticker of
-// its own.
+// Also adds a sweep of another store to the same schedule: a store that knows
+// what of its own is stale says so here rather than run a ticker of its own.
 func (s *Sweeper) Also(name string, run func(ctx context.Context) error) *Sweeper {
 	s.extra = append(s.extra, namedSweep{name: name, run: run})
 	return s
@@ -187,9 +161,7 @@ func (s *Sweeper) finish(err error) {
 	s.mu.Unlock()
 }
 
-// Run sweeps at the interval until the context ends. The first sweep runs
-// at once: an installation that has just set a retention is not to wait an
-// hour to see it take effect.
+// Run sweeps at the interval until the context ends.
 func (s *Sweeper) Run(ctx context.Context) {
 	ticker := time.NewTicker(s.options.Interval)
 	defer ticker.Stop()
@@ -221,8 +193,6 @@ func (s *Sweeper) Sweep(ctx context.Context) (err error) {
 			"agent_sessions", sessions, "audit_events", events)
 	}
 	// The working record of the fleet, oldest first and a batch at a time.
-	// The order matters: a campaign gone takes its plans with it, and the
-	// jobs those plans pointed at become free for the job sweep.
 	for _, kind := range []struct {
 		name string
 		run  func(context.Context) (int64, error)
@@ -263,8 +233,6 @@ func (s *Sweeper) sweep(ctx context.Context) {
 }
 
 // SweepSessions deletes the agent sessions that ended before the retention.
-// An open session is never deleted, however old: it is the record of a
-// connection that still exists.
 func (s *Sweeper) SweepSessions(ctx context.Context) (int64, error) {
 	tag, err := s.pool.Exec(ctx, `
 		delete from agent_sessions
@@ -278,10 +246,6 @@ func (s *Sweeper) SweepSessions(ctx context.Context) (int64, error) {
 
 // SweepAudit deletes the audit events older than the retention. With no
 // retention set nothing is deleted.
-//
-// The trail is append-only by a trigger that refuses updates and deletes
-// through the ordinary path, so the sweep goes through the function the
-// schema provides for exactly this purpose.
 func (s *Sweeper) SweepAudit(ctx context.Context) (int64, error) {
 	if s.options.Audit <= 0 {
 		return 0, nil
@@ -294,14 +258,8 @@ func (s *Sweeper) SweepAudit(ctx context.Context) (int64, error) {
 	return deleted, nil
 }
 
-// SweepJobs deletes the finished jobs older than the retention, a batch at
-// a time. A job in flight is never deleted, however old: its state is the
-// only record of a task a host may still be carrying. A job of a campaign
-// stays as long as the campaign does - the campaign's report is read
-// through its jobs - and a job a campaign plan points at stays until the
-// plan goes with its campaign, because the reference has no cascade. The
-// attempts, the approvals and the secret leases go with the job by their
-// own cascades.
+// SweepJobs deletes the finished jobs older than the retention, a batch at a
+// time.
 func (s *Sweeper) SweepJobs(ctx context.Context) (int64, error) {
 	tag, err := s.pool.Exec(ctx, `
 		delete from jobs where id in (
@@ -320,16 +278,9 @@ func (s *Sweeper) SweepJobs(ctx context.Context) (int64, error) {
 	return tag.RowsAffected(), nil
 }
 
-// SweepCampaigns deletes the finished campaigns older than the retention,
-// a batch at a time, with their targets, steps, plans, approvals and
-// report by the cascades of the schema. A campaign under way is never
-// deleted. A campaign another campaign retries or compensates stays until
-// that one goes: the reference has no cascade, and the newer campaign's
-// page names the older one.
-//
-// The approvals and the report are append-only by triggers that refuse a
-// delete through the ordinary path, so the sweep goes through the
-// function the schema provides for exactly this purpose, like the trail.
+// SweepCampaigns deletes the finished campaigns older than the retention, a
+// batch at a time, with their targets, steps, plans, approvals and report by
+// the cascades of the schema.
 func (s *Sweeper) SweepCampaigns(ctx context.Context) (int64, error) {
 	var deleted int64
 	if err := s.pool.QueryRow(ctx, `select campaigns_expire($1::interval, $2)`,
@@ -339,12 +290,8 @@ func (s *Sweeper) SweepCampaigns(ctx context.Context) (int64, error) {
 	return deleted, nil
 }
 
-// SweepOutbox deletes the delivered events of the durable trail older than
-// the retention, a batch at a time. Delivered means published by the panel
-// and taken by every external consumer: an event a consumer has not
-// reached yet stays whatever its age, because the consumer's cursor is a
-// promise that it will get every event in order. An unpublished event is
-// never deleted.
+// SweepOutbox deletes the delivered events of the durable trail older than the
+// retention, a batch at a time.
 func (s *Sweeper) SweepOutbox(ctx context.Context) (int64, error) {
 	tag, err := s.pool.Exec(ctx, `
 		delete from outbox_events where id in (
@@ -367,10 +314,7 @@ func interval(d time.Duration) string {
 }
 
 // NoteExpiredBindings writes one audit event for every role binding whose
-// validity has passed since the last sweep. The binding stops granting
-// anything the moment it expires, whether or not the sweep has run; the
-// sweep only makes the expiry visible on the trail, once, which the flag
-// on the row guarantees. The flag and the event are committed together.
+// validity has passed since the last sweep.
 func (s *Sweeper) NoteExpiredBindings(ctx context.Context) (int, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {

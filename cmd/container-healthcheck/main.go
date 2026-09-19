@@ -84,7 +84,7 @@ func connect(ctx context.Context, target string) error {
 
 // askHealthz asks the control plane the question it answers itself: the
 // endpoint pings the database, so a panel whose database is gone reports
-// service unavailable and this check fails - which is what an operator means
+// service unavailable and this check fails - which is what an operator means.
 func askHealthz(ctx context.Context, target string, timeout time.Duration) error {
 	url := "http://" + target + "/healthz"
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)

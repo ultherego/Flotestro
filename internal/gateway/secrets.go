@@ -17,9 +17,6 @@ import (
 
 // SecretIssuing describes what the gateway has to be able to do with the
 // secret store.
-//
-// An interface rather than a concrete store: the gateway is to release a value
-// on the basis of a lease rather than know how the secrets are kept.
 type SecretIssuing interface {
 	Redeem(ctx context.Context, jobID, hostID, name string, version int) ([]byte, int, error)
 }
@@ -37,23 +34,8 @@ func (s *AgentService) SetSecrets(store SecretIssuing) { s.secrets = store }
 // SetSecretLeases connects the reading of the leases.
 func (s *AgentService) SetSecretLeases(store SecretLeases) { s.leases = store }
 
-// FetchSecret releases the value of a secret for the duration of one job.
-//
-// The value does not travel in the envelope of the job. The host gets a
-// reference and reaches for the content only when it starts the operation -
-// and the release is possible only when the panel itself issued a lease: for
-// this host, for this job and for a short moment. A lease is one-time.
-//
-// The identity of the host comes from the client certificate, never from the
-// content of the job: otherwise knowing somebody else's attempt identifier
-// would be enough.
-//
-// Through a relay the certificate is the relay's, so the request carries
-// the host's own proof - the identity envelope - and a one-time X25519 key
-// signed by the host key; the value then goes back sealed to that key and
-// the relay, which forwards the call without spooling it, sees routing
-// metadata and cipher text. A relayed fetch without the proof is refused
-// under every mode: it was never possible without one.
+// FetchSecret releases the value of a secret for the duration of one job. The
+// value does not travel in the envelope of the job.
 func (s *AgentService) FetchSecret(ctx context.Context,
 	req *connect.Request[agentv1.FetchSecretRequest],
 ) (*connect.Response[agentv1.FetchSecretResponse], error) {
@@ -62,11 +44,9 @@ func (s *AgentService) FetchSecret(ctx context.Context,
 		return nil, err
 	}
 	hostID := who.HostID
-	// A direct caller was checked against the record of the certificate
-	// it presented, the way Connect checks it: a revoked or unknown one,
-	// or one of a host that is no longer active, fetches nothing - even
-	// with a lease issued before the revocation. A relayed caller is
-	// checked against the certificate its envelope names, here.
+	// A direct caller was checked against the record of the certificate it
+	// presented, the way Connect checks it: a revoked or unknown one, or one of a
+	// host that is no longer active, fetches nothing - even with a lease issued
 	var sealTo []byte
 	if who.RelayID != "" {
 		verified, problem := s.verifySecretEnvelope(ctx, who, req.Msg)
@@ -86,8 +66,7 @@ func (s *AgentService) FetchSecret(ctx context.Context,
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("the name of the secret is missing"))
 	}
 	// A host that is not active does not get secrets - also when the lease was
-	// issued before the quarantine. A secret released to a machine we have
-	// just stopped trusting is exactly what a quarantine is to prevent.
+	// issued before the quarantine.
 	host, err := s.hosts.Get(ctx, hostID)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
@@ -120,8 +99,7 @@ func (s *AgentService) FetchSecret(ctx context.Context,
 	}
 
 	// The audit notes the fact of the release: who, what, which version and
-	// within which operation, and whether it went out sealed. The value is
-	// neither here nor in any other record.
+	// within which operation, and whether it went out sealed.
 	s.audit.Record(ctx, audit.Event{
 		ActorType: audit.ActorAgent, ActorID: hostID,
 		Action: "secret.fetch", TargetType: "secret", TargetID: name,
@@ -137,10 +115,9 @@ func (s *AgentService) FetchSecret(ctx context.Context,
 			Value: value, Version: uint32(version), Sha256: secrets.Fingerprint(value),
 		}), nil
 	}
-	// Sealed to the host's one-time key under the lease as associated data:
-	// the plaintext leaves this process only inside the cipher text, and
-	// the digest stays out - the cipher authenticates the content, and a
-	// digest of a short value in a relay's journal would be a hint.
+	// Sealed to the host's one-time key under the lease as associated data: the
+	// plaintext leaves this process only inside the cipher text, and the digest
+	// stays out - the cipher authenticates the content, and a digest of a short
 	sealed, nonce, serverPublic, err := relayproof.Seal(sealTo, value,
 		relayproof.SecretAAD(req.Msg.GetTaskId(), name, uint32(version)))
 	if err != nil {
@@ -156,9 +133,8 @@ func (s *AgentService) FetchSecret(ctx context.Context,
 }
 
 // verifySecretEnvelope checks the host's proof on a relayed fetch: the
-// envelope over the request with its identity cleared, then the one-time
-// key under the certificate the envelope named, for this task and this
-// secret.
+// envelope over the request with its identity cleared, then the one-time key
+// under the certificate the envelope named, for this task and this secret.
 func (s *AgentService) verifySecretEnvelope(ctx context.Context, who peer,
 	request *agentv1.FetchSecretRequest) (*Verified, error) {
 	hostID := who.HostID

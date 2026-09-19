@@ -19,9 +19,8 @@ func writeSSSDFile(t *testing.T, path, content string) {
 }
 
 // The parser never fills a hole with a number that looks measured: a missing
-// file or section leaves everything unknown with a reason, an absent key
-// takes the SSSD default and is named as defaulted, and a value that does
-// not parse is unknown rather than false or zero.
+// file or section leaves everything unknown with a reason, an absent key takes
+// the SSSD default and is named as defaulted, and a value that does not parse
 func TestParseSSSDOfflinePolicy(t *testing.T) {
 	cases := []struct {
 		name       string

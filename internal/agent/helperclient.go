@@ -19,11 +19,7 @@ type HelperClient struct {
 	socketPath string
 
 	// capabilities holds, by task, the panel's authorization of the task in
-	// flight: the capability, its signature and the canonical payload. The
-	// agent attaches it to every request it makes for that task, in one
-	// place, so no handler can forget it and none can alter it - the agent
-	// forwards what the envelope carried and holds no key to do anything
-	// else with it.
+	// flight: the capability, its signature and the canonical payload.
 	capabilities sync.Map
 	// mode is what the helper last said about its capability mode; empty
 	// until the helper has answered once.
@@ -43,9 +39,7 @@ func NewHelperClient(socketPath string) *HelperClient {
 }
 
 // Attach remembers the capability of a task for the requests made on its
-// behalf. A task without a capability - a read, or a task from a panel
-// without a signing key - attaches nothing, and its requests go out as
-// they did before.
+// behalf.
 func (c *HelperClient) Attach(taskID string, capability *helperv1.HelperCapability, signature, canonical []byte) {
 	if c == nil || taskID == "" || capability == nil {
 		return
@@ -62,9 +56,7 @@ func (c *HelperClient) Detach(taskID string) {
 }
 
 // CapabilityMode is the mode the helper reported with its last answer:
-// observe, prefer or enforce. Empty means the helper has not answered yet
-// or is from before the capability - an unknown, which the panel shows as
-// such rather than as a helper without the check.
+// observe, prefer or enforce.
 func (c *HelperClient) CapabilityMode() string {
 	if c == nil {
 		return ""
@@ -75,10 +67,7 @@ func (c *HelperClient) CapabilityMode() string {
 	return ""
 }
 
-// ProbeCapabilityMode asks the helper which mode it runs in. The question
-// is a request without an action: the helper refuses it, as it refuses
-// every request it does not know, and the refusal carries the mode like
-// every other answer. Nothing runs on the host.
+// ProbeCapabilityMode asks the helper which mode it runs in.
 func (c *HelperClient) ProbeCapabilityMode(ctx context.Context) string {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -86,12 +75,8 @@ func (c *HelperClient) ProbeCapabilityMode(ctx context.Context) string {
 	return c.CapabilityMode()
 }
 
-// DeliverTrust hands the helper the panel's trust bundle: the host
-// identifier and the keys that sign capabilities. The helper decides
-// whether to take it - on trust at enrollment, by signature afterwards.
-// A helper from before the bundle answers unknown_action, which is
-// reported as ErrHelperWithoutTrust so the caller can log a helper to
-// upgrade rather than a broken bundle.
+// DeliverTrust hands the helper the panel's trust bundle: the host identifier
+// and the keys that sign capabilities.
 func (c *HelperClient) DeliverTrust(ctx context.Context, bundle *helperv1.HelperTrustBundle) (*helperv1.HelperTrustResult, error) {
 	if bundle == nil {
 		return nil, errors.New("no trust bundle to deliver")
@@ -122,11 +107,7 @@ func (c *HelperClient) Call(ctx context.Context, request *helperv1.HelperRequest
 }
 
 // CallWithProgress sends a request and passes on the progress the helper
-// reports along the way. The connection is single-use: the helper is activated
-// on demand and ends its work after an idle period.
-//
-// A nil progress receiver means no interest - the helper then sends no
-// intermediate message at all.
+// reports along the way.
 func (c *HelperClient) CallWithProgress(ctx context.Context, request *helperv1.HelperRequest,
 	timeout time.Duration, progress func(*helperv1.TaskProgress)) (*helperv1.HelperResponse, error) {
 	dialer := net.Dialer{Timeout: 10 * time.Second}
@@ -144,9 +125,7 @@ func (c *HelperClient) CallWithProgress(ctx context.Context, request *helperv1.H
 
 	request.ProtocolVersion = helper.ProtocolVersion
 	request.WantProgress = progress != nil
-	// The capability of the task rides on every request made for it. It
-	// is set here and nowhere else: the handlers name the task, the client
-	// attaches the proof.
+	// The capability of the task rides on every request made for it.
 	if request.GetCapability() == nil && request.GetTaskId() != "" {
 		if attached, ok := c.capabilities.Load(request.GetTaskId()); ok {
 			bound := attached.(*taskCapability)
@@ -159,9 +138,7 @@ func (c *HelperClient) CallWithProgress(ctx context.Context, request *helperv1.H
 		return nil, fmt.Errorf("sending the request to the helper: %w", err)
 	}
 
-	// The progress messages precede the final answer. The read continues until
-	// that answer arrives instead of taking the first message: progress is not
-	// the result of the operation.
+	// The progress messages precede the final answer.
 	for {
 		var response helperv1.HelperResponse
 		if err := helper.ReadMessage(conn, &response); err != nil {
@@ -178,18 +155,15 @@ func (c *HelperClient) CallWithProgress(ctx context.Context, request *helperv1.H
 		if mode := response.GetCapabilityMode(); mode != "" {
 			c.mode.Store(&mode)
 		}
-		// The helper guards its resources by class, as the agent guards its
-		// own claims. A refusal on a busy class is the same answer as the
-		// agent's - "wait for that task", not a failure of the operation -
-		// and travels under the same code, whichever module asked.
+		// The helper guards its resources by class, as the agent guards its own
+		// claims.
 		if !response.GetAccepted() && response.GetErrorCode() == helper.ErrorLocked &&
 			helper.BusyResource(response.GetMessage()) != "" {
 			response.ErrorCode = RejectResourceBusy
 		}
-		// A refusal at the helper's own check of the contract is the same
-		// answer whichever module asked: the helper did not understand the
-		// request and ran nothing. It travels under one code, with the
-		// helper's word kept in the message.
+		// A refusal at the helper's own check of the contract is the same answer
+		// whichever module asked: the helper did not understand the request and ran
+		// nothing.
 		if !response.GetAccepted() && helperRefusedContract(response.GetErrorCode()) {
 			response.Message = response.GetErrorCode() + ": " + response.GetMessage()
 			response.ErrorCode = RejectHelperRejected
@@ -198,11 +172,9 @@ func (c *HelperClient) CallWithProgress(ctx context.Context, request *helperv1.H
 	}
 }
 
-// helperRefusedContract says whether a helper code is a refusal of the
-// request itself - its shape, its protocol version or its action - rather
-// than an outcome of the operation. Only those become helper_rejected; a
-// locked resource, a failed precondition or an exec failure keep their own
-// codes, because the operator does different things about each.
+// helperRefusedContract says whether a helper code is a refusal of the request
+// itself - its shape, its protocol version or its action - rather than an
+// outcome of the operation.
 func helperRefusedContract(code string) bool {
 	switch code {
 	case helper.ErrorMalformed, helper.ErrorUnsupportedVersion, helper.ErrorUnknownAction:

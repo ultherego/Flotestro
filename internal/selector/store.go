@@ -27,9 +27,8 @@ var (
 	ErrUnknownHosts = errors.New("the member list names unknown hosts")
 )
 
-// NamePattern is the shape of a group name: something an operator types
-// into a selector and reads in an audit line. Spaces are out, because a
-// selector names a group in a string and a name with spaces reads like two.
+// NamePattern is the shape of a group name: something an operator types into a
+// selector and reads in an audit line.
 var NamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$`)
 
 // MaxMembers bounds a static group. It matches the bound of one campaign:
@@ -47,9 +46,6 @@ type SavedGroup struct {
 	CreatedAt   time.Time   `json:"created_at"`
 	UpdatedAt   time.Time   `json:"updated_at"`
 	// MemberCount is the size of a static group, counted in the database.
-	// A dynamic group has no count of its own here: its size depends on
-	// the moment and on who asks, so the handler counts it against the
-	// caller's scope and fills the field in or leaves it empty.
 	MemberCount *int `json:"member_count,omitempty"`
 }
 
@@ -190,10 +186,8 @@ func (s *Store) Create(ctx context.Context, g SavedGroup) (*SavedGroup, error) {
 	return s.Get(ctx, created)
 }
 
-// Update changes the name, the description and - for a dynamic group -
-// the selector. The kind does not change: a static group turned dynamic
-// would keep a member list nobody sees, and the other way round would lose
-// a selector somebody wrote.
+// Update changes the name, the description and - for a dynamic group - the
+// selector.
 func (s *Store) Update(ctx context.Context, id string, g SavedGroup) (*SavedGroup, error) {
 	current, err := s.Get(ctx, id)
 	if err != nil {
@@ -225,9 +219,7 @@ func (s *Store) Update(ctx context.Context, id string, g SavedGroup) (*SavedGrou
 	return s.Get(ctx, current.ID)
 }
 
-// Delete removes a group together with its member list. A selector that
-// names the group by reference will fail to expand from now on and say so;
-// nothing is rewritten in silence.
+// Delete removes a group together with its member list.
 func (s *Store) Delete(ctx context.Context, id string) error {
 	tag, err := s.pool.Exec(ctx, `delete from host_groups where id = $1::uuid`, id)
 	if err != nil {
@@ -239,12 +231,8 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// SetMembers replaces the member list of a static group. The list is the
-// whole list: a member left out is a member removed.
-//
-// The caller has already checked that every host exists and may be seen;
-// the store checks it again against the table, because a host removed
-// between the two steps must not leave a dangling reference.
+// SetMembers replaces the member list of a static group. The list is the whole
+// list: a member left out is a member removed.
 func (s *Store) SetMembers(ctx context.Context, id string, hostIDs []string) error {
 	group, err := s.Get(ctx, id)
 	if err != nil {
@@ -272,9 +260,9 @@ func (s *Store) SetMembers(ctx context.Context, id string, hostIDs []string) err
 	if _, err := tx.Exec(ctx, `delete from host_group_members where group_id = $1::uuid`, group.ID); err != nil {
 		return fmt.Errorf("clearing the member list: %w", err)
 	}
-	// The identifiers travel as text and are cast in the query: the caller
-	// has checked their shape, so the cast cannot fail, and the text form
-	// needs no guesswork about how the driver encodes an identifier list.
+	// The identifiers travel as text and are cast in the query: the caller has
+	// checked their shape, so the cast cannot fail, and the text form needs no
+	// guesswork about how the driver encodes an identifier list.
 	tag, err := tx.Exec(ctx, `
 		insert into host_group_members (group_id, host_id)
 		select $1::uuid, h.id from hosts h

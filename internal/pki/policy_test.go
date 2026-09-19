@@ -25,10 +25,9 @@ func csrWithKey(t *testing.T, key crypto.Signer, dns []string, addresses []net.I
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der})
 }
 
-// The key in a CSR is the one thing the requester decides, so it is the
-// one thing the policy has to check: a small curve or a short modulus
-// would weaken the identity of a host for the whole life of the
-// certificate.
+// The key in a CSR is the one thing the requester decides, so it is the one
+// thing the policy has to check: a small curve or a short modulus would weaken
+// the identity of a host for the whole life of the certificate.
 func TestSignCSREnforcesTheKeyPolicy(t *testing.T) {
 	ca, err := EnsureCA(t.TempDir())
 	if err != nil {
@@ -52,9 +51,7 @@ func TestSignCSREnforcesTheKeyPolicy(t *testing.T) {
 	}
 }
 
-// A relay is a server towards the agents of its site. One certified under
-// a name of the panel could stand in for the panel, so those names - and
-// the loopback, which every agent resolves to itself - are never issued.
+// A relay is a server towards the agents of its site.
 func TestRelayCertificateNeverCarriesAReservedName(t *testing.T) {
 	ca, err := EnsureCA(t.TempDir())
 	if err != nil {

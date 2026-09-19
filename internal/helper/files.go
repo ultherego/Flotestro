@@ -23,38 +23,24 @@ import (
 )
 
 // FileRegistryPath holds the paths the panel has written on this host.
-//
-// The registry is local, because it is the host that has to be able to answer
-// what the files managed by the panel look like now - also when the panel is
-// not asking. Without it a drift would show only at the next operation.
 const FileRegistryPath = "/var/lib/flotestro-helper/files.json"
 
 // ErrorValidatorUnavailable means a content check the order relies on that
-// this host cannot run: the tool is not installed. The write does not
-// happen, because a write nobody checked is not the write that was ordered.
+// this host cannot run: the tool is not installed.
 const ErrorValidatorUnavailable = "validator_unavailable"
 
 // ErrorFileVersionUnknown means a rollback to content this host never kept.
-// It refuses instead of putting back the newest copy: the operator named a
-// content, and another one is not it.
 const ErrorFileVersionUnknown = "file_version_unknown"
 
-// ErrorFileVersionNotKept means the content about to be replaced could not
-// be copied aside. The write does not happen: a change that cannot be
-// undone is not the change the contract of this operation promises.
+// ErrorFileVersionNotKept means the content about to be replaced could not be
+// copied aside.
 const ErrorFileVersionNotKept = "file_version_not_kept"
 
-// fileVersionRoot is the store of previous contents. It is a variable so a
-// test can point it at a directory of its own; a host always runs with the
-// directory under the helper's state.
+// fileVersionRoot is the store of previous contents.
 var fileVersionRoot = files.VersionDir
 
-// fileVersions returns the store of previous contents with the bounds the
-// host administrator set.
-//
-// The bounds are read at every use rather than kept in the server: the
-// helper is started for a task and exits when it goes idle, so there is no
-// long-lived process for a cached value to grow stale in.
+// fileVersions returns the store of previous contents with the bounds the host
+// administrator set.
 func fileVersions() files.VersionStore {
 	return files.VersionStore{
 		Root:        config.Env("FLOTESTRO_HELPER_FILE_VERSION_DIR", fileVersionRoot),
@@ -64,21 +50,17 @@ func fileVersions() files.VersionStore {
 }
 
 // PermissionFileWriteUnvalidated is the grant that, together with an order
-// saying so, lets a file be written when its validator is missing. The name
-// repeats the panel's permission.
+// saying so, lets a file be written when its validator is missing.
 const PermissionFileWriteUnvalidated = "file.write.unvalidated"
 
 // allowsMissingValidator says whether an order may go on without its
 // validator: the order has to say so and the capability has to carry the
-// grant. A request without a capability carries no grant, so a missing
-// validator refuses the write - the safe side - whatever the order says.
+// grant.
 func allowsMissingValidator(request *helperv1.HelperRequest, action *helperv1.FileRequest) bool {
 	return action.GetAllowMissingValidator() && hasGrant(grantsOf(request), PermissionFileWriteUnvalidated)
 }
 
-// errValidatorUnavailable marks a validator whose tool the host lacks. The
-// caller tells it from a failed check: one refuses with its own code, the
-// other reports the tool's verdict.
+// errValidatorUnavailable marks a validator whose tool the host lacks.
 var errValidatorUnavailable = errors.New("the validator is not installed on this host")
 
 // applyFile handles the operations on configuration files.
@@ -157,19 +139,6 @@ func (s *Server) readFile(allowlist files.Allowlist, action *helperv1.FileReques
 }
 
 // writeFile writes the content of a file.
-//
-// The order is the whole content of the operation: the scope is checked, then
-// the state of the host against what the operator looked at, then the content
-// is checked with a validator, then the content being replaced is copied
-// aside - and only then is it written, atomically. A write before the check
-// would leave a file on the host that no service can load; a write before the
-// copy would leave a change nothing can undo.
-//
-// An order naming a kept version is the same operation with the content
-// taken from the host's own store instead of from the envelope: the same
-// staging, the same validator, the same atomic rename. A rollback that took
-// a shorter path would be a second way of writing files, with its own
-// mistakes.
 func (s *Server) writeFile(ctx context.Context, request *helperv1.HelperRequest,
 	allowlist files.Allowlist, action *helperv1.FileRequest) *helperv1.HelperResponse {
 	path := action.GetPath()
@@ -188,8 +157,8 @@ func (s *Server) writeFile(ctx context.Context, request *helperv1.HelperRequest,
 		}
 		restored, content = &version, kept
 		// The inode is restored together with the bytes unless the order says
-		// otherwise: putting back old content under the permissions of the
-		// newer file restores a state that never existed on this host.
+		// otherwise: putting back old content under the permissions of the newer
+		// file restores a state that never existed on this host.
 		if requestedMode == "" {
 			requestedMode = version.Mode
 		}
@@ -252,16 +221,15 @@ func (s *Server) writeFile(ctx context.Context, request *helperv1.HelperRequest,
 			unvalidated = "; the validator " + validator.Name + " is not installed on this host, " +
 				"so the content was written unchecked as the order allows"
 		case errors.Is(err, errValidatorUnavailable):
-			// A tool the host does not have is not faked and is not skipped:
-			// the write was ordered with a check, so without the check it is
-			// a different write than the one ordered.
+			// A tool the host does not have is not faked and is not skipped: the write
+			// was ordered with a check, so without the check it is a different write
+			// than the one ordered.
 			return reject(ErrorValidatorUnavailable, "the validator "+validator.Name+
 				" is not installed on this host ("+validator.Command[0]+"); nothing was written")
 		case err != nil:
-			// A version the validator accepted when it was written can be
-			// content the validator refuses now - the service was upgraded,
-			// or another file it includes changed. Putting it back anyway
-			// would leave a configuration nothing can load.
+			// A version the validator accepted when it was written can be content the
+			// validator refuses now - the service was upgraded, or another file it
+			// includes changed.
 			return reject(ErrorMalformed, "the validator "+validator.Name+": "+err.Error()+
 				" "+validatorOutput)
 		}
@@ -321,9 +289,8 @@ func (s *Server) writeFile(ctx context.Context, request *helperv1.HelperRequest,
 	change.Consumers, change.ConsumersReason = files.Consumers(path)
 
 	// The digest of what was written answers this one job and is what the
-	// verifier compares the host against a moment later; the standing
-	// record of a file from the secret store still carries no digest, which
-	// is what the snapshot of the managed files takes care of.
+	// verifier compares the host against a moment later; the standing record of a
+	// file from the secret store still carries no digest, which is what the
 	response := fileResponse(s.fileState(), message, nil, files.Fingerprint(content))
 	if response.GetFileResult() != nil {
 		if encoded, err := json.Marshal(change); err == nil {
@@ -331,10 +298,9 @@ func (s *Server) writeFile(ctx context.Context, request *helperv1.HelperRequest,
 		}
 		response.FileResult.ValidatorOutput = validatorOutput
 		if restored != nil && !restored.FromSecret {
-			// The content that was put back travels with the result: the
-			// panel keeps a history of what it sent itself, and a version
-			// only the host had would otherwise stay a digest the panel
-			// cannot show or record.
+			// The content that was put back travels with the result: the panel keeps a
+			// history of what it sent itself, and a version only the host had would
+			// otherwise stay a digest the panel cannot show or record.
 			response.FileResult.Content = content
 		}
 	}
@@ -343,11 +309,6 @@ func (s *Server) writeFile(ctx context.Context, request *helperv1.HelperRequest,
 
 // versionToRestore reads the version an order names out of the host's own
 // store.
-//
-// The refusal is deliberate in both directions: a digest the host never
-// kept is refused rather than answered with the newest copy, and a copy
-// whose bytes no longer match the digest it is filed under is refused
-// rather than written.
 func (s *Server) versionToRestore(path, digest string, ordered []byte) (files.KeptVersion,
 	[]byte, *helperv1.HelperResponse) {
 	store := fileVersions()
@@ -364,9 +325,7 @@ func (s *Server) versionToRestore(path, digest string, ordered []byte) (files.Ke
 	case err != nil:
 		return files.KeptVersion{}, nil, reject(ErrorExecFailed, err.Error())
 	}
-	// An order that carries both a version and content has to agree with
-	// itself. Writing one while the operator approved the other is the kind
-	// of difference nobody notices until the service is down.
+	// An order that carries both a version and content has to agree with itself.
 	if len(ordered) > 0 && files.Fingerprint(ordered) != digest {
 		return files.KeptVersion{}, nil, reject(ErrorMalformed,
 			"the order names the version "+shorten(digest)+
@@ -376,8 +335,7 @@ func (s *Server) versionToRestore(path, digest string, ordered []byte) (files.Ke
 }
 
 // describeKeptVersions names the versions a host has, for the refusal of a
-// rollback to one it does not. A refusal that says only "no" leaves the
-// operator guessing what they may ask for instead.
+// rollback to one it does not.
 func describeKeptVersions(versions []files.KeptVersion) string {
 	if len(versions) == 0 {
 		return "no version of this file at all"
@@ -394,12 +352,8 @@ func describeKeptVersions(versions []files.KeptVersion) string {
 	return strings.Join(names, ", ")
 }
 
-// keepPreviousVersion copies the content about to be replaced into the
-// store of versions.
-//
-// It happens before the rename and not after: after the rename the previous
-// content is gone, and a copy made from what the file holds then is a copy
-// of the new content under the name of the old one.
+// keepPreviousVersion copies the content about to be replaced into the store
+// of versions.
 func (s *Server) keepPreviousVersion(path string, current files.File,
 	orderedBy string) (files.KeptVersion, error) {
 	content, err := readFileContent(path)
@@ -416,36 +370,19 @@ func (s *Server) keepPreviousVersion(path string, current files.File,
 
 // planFile computes the difference between the file found and the desired
 // state.
-//
-// It changes nothing and cannot change anything: it is the answer to the
-// question of what would happen. The host is the only place where it can be
-// computed - the panel does not know what really lies on this machine, and two
-// machines with the same desired state have two different diffs.
-//
-// The input checks are the same as during a write. A plan that passed and a
-// write that falls out on the mode validation would be an untrue plan.
 func (s *Server) planFile(ctx context.Context, request *helperv1.HelperRequest,
 	allowlist files.Allowlist, action *helperv1.FileRequest) *helperv1.HelperResponse {
 	path := action.GetPath()
 	if response := checkScope(allowlist, path); response != nil {
 		return response
 	}
-	// A plan without content and without a mode is a removal plan. The kind of
-	// change does not travel in the envelope as a separate field, because the
-	// planner for a write, a return and a removal is the same operation - they
-	// are told apart by the payload, which the panel passes through unchanged.
-	// There is no guessing here: a write always carries content or a reference
-	// to a secret, a removal never does.
-	//
-	// The result names this directly in the action field of the plan, so an
-	// operator who asked about something else sees what the panel really
-	// computed.
+	// A plan without content and without a mode is a removal plan.
 	removal := len(action.GetContent()) == 0 && action.GetMode() == "" &&
 		!action.GetFromSecret() && action.GetVersionSha256() == ""
 
-	// A plan for a return to a kept version describes that version: the
-	// content lies on this host, so the difference is computed against it
-	// rather than against the empty order the panel could send.
+	// A plan for a return to a kept version describes that version: the content
+	// lies on this host, so the difference is computed against it rather than
+	// against the empty order the panel could send.
 	content := action.GetContent()
 	mode, owner, group := action.GetMode(), action.GetOwner(), action.GetGroup()
 	if digest := action.GetVersionSha256(); digest != "" {
@@ -489,9 +426,9 @@ func (s *Server) planFile(ctx context.Context, request *helperv1.HelperRequest,
 		}
 	}
 
-	// The identity of the check is part of the plan, not a detail of the
-	// answer: "the content is valid" invites the question valid according to
-	// what, and only the host can say which tool it has and in which version.
+	// The identity of the check is part of the plan, not a detail of the answer:
+	// "the content is valid" invites the question valid according to what, and
+	// only the host can say which tool it has and in which version.
 	validator, hasValidator := files.Validator{}, false
 	if !removal {
 		var err error
@@ -516,17 +453,14 @@ func (s *Server) planFile(ctx context.Context, request *helperv1.HelperRequest,
 			plan.ValidatorOutput = output
 			switch {
 			case errors.Is(err, errValidatorUnavailable):
-				// A missing tool is not a passed check. The plan says so in
-				// the same place a failed check would, because the write that
-				// follows this plan will refuse for the same reason - unless
-				// the order allows an unchecked write and the grant is there.
+				// A missing tool is not a passed check.
 				plan.ValidatorFailed = !allowsMissingValidator(request, action)
 				plan.ValidatorOutput = "validator: unavailable; " + validator.Name +
 					" is not installed on this host (" + validator.Command[0] + ")"
 			case err != nil:
-				// Content the validator does not accept is a result of the plan
-				// and not a failure: the operator is to see it before approving,
-				// instead of finding out during a write on half the fleet.
+				// Content the validator does not accept is a result of the plan and not a
+				// failure: the operator is to see it before approving, instead of finding
+				// out during a write on half the fleet.
 				plan.ValidatorFailed = true
 				plan.ValidatorOutput = err.Error() + " " + output
 			}
@@ -580,11 +514,9 @@ func (s *Server) removeFile(allowlist files.Allowlist, action *helperv1.FileRequ
 				"the file changed since the plan; a removal would take away content nobody looked at")
 		}
 	}
-	// The content is copied aside before it is taken away, for the same
-	// reason as before a write: a removal nothing can undo is a removal the
-	// operator has to be certain about, and certainty is not something this
-	// module can hand out. The copies stay after the file stops being
-	// managed - they are what a decision to bring it back would need.
+	// The content is copied aside before it is taken away, for the same reason as
+	// before a write: a removal nothing can undo is a removal the operator has to
+	// be certain about, and certainty is not something this module can hand out.
 	kept := ""
 	current := files.Describe(path)
 	if current.Exists && current.UnavailableReason == "" {
@@ -605,12 +537,6 @@ func (s *Server) removeFile(allowlist files.Allowlist, action *helperv1.FileRequ
 
 // checkContent runs the validator on the content staged next to the target
 // file.
-//
-// The validator gets a temporary file in the same directory, because some
-// tools read relative paths relative to the file they check. The staging is
-// what makes this safe to do as root: the directory is opened without
-// following symlinks, and the file is created where nobody could have put a
-// link in advance - it has no name at all, or a name nobody can guess.
 func (s *Server) checkContent(ctx context.Context, validator files.Validator,
 	path string, content []byte) (string, error) {
 	if validator.BuiltIn != nil {
@@ -637,9 +563,9 @@ func (s *Server) checkContent(ctx context.Context, validator files.Validator,
 	cmd := exec.CommandContext(ctx, arguments[0], arguments[1:]...)
 	cmd.Env = toolEnvironment()
 	if staged.Anonymous {
-		// The file has no name, so the tool gets the descriptor: it lands as
-		// the first descriptor after the standard three and the path names it
-		// in the tool's own process, not in the helper's.
+		// The file has no name, so the tool gets the descriptor: it lands as the
+		// first descriptor after the standard three and the path names it in the
+		// tool's own process, not in the helper's.
 		cmd.ExtraFiles = []*os.File{staged.File}
 		cmd.Args = append(cmd.Args, "/proc/self/fd/3")
 	} else {
@@ -659,9 +585,7 @@ type stagedContent struct {
 	Anonymous bool
 }
 
-// Discard removes the staged content. An anonymous file disappears with its
-// descriptor; a named one is unlinked through the same directory descriptor
-// it was created in, so a directory swapped in the meantime is not touched.
+// Discard removes the staged content.
 func (c *stagedContent) Discard(dirfd int) {
 	if c == nil || c.File == nil {
 		return
@@ -672,19 +596,8 @@ func (c *stagedContent) Discard(dirfd int) {
 	}
 }
 
-// stageForValidation puts the content into the directory for a validator
-// to read.
-//
-// The file used to be written under a name derived from the target, with a
-// call that follows symlinks: anyone able to plant a link under that name
-// in the directory had the helper overwrite a file of their choosing, as
-// root. Now the file is created relative to an already-opened directory
-// descriptor and either has no name at all - O_TMPFILE - or gets a random
-// 128-bit name, created with O_EXCL and O_NOFOLLOW, so a link planted in
-// advance is refused instead of followed. The content is synced before the
-// tool reads it. A tool that infers the kind of file from its name gets a
-// named file that keeps the suffix of the target; a file system without
-// O_TMPFILE gets the named file too.
+// stageForValidation puts the content into the directory for a validator to
+// read.
 func stageForValidation(dirfd int, content []byte, mode uint32,
 	suffix string, anonymousAllowed bool) (*stagedContent, error) {
 	if anonymousAllowed {
@@ -706,8 +619,7 @@ func stageForValidation(dirfd int, content []byte, mode uint32,
 }
 
 // stageNamed creates the staging file under the given name in the opened
-// directory. The name has to be new: an entry already there, a symlink
-// above all, is refused rather than opened.
+// directory.
 func stageNamed(dirfd int, name string, content []byte, mode uint32) (*stagedContent, error) {
 	fd, err := unix.Openat(dirfd, name,
 		unix.O_CREAT|unix.O_EXCL|unix.O_RDWR|unix.O_CLOEXEC|unix.O_NOFOLLOW, mode)
@@ -754,17 +666,16 @@ func (s *Server) fileState() files.Snapshot {
 		description := files.Describe(entry.Path)
 		description.Managed = true
 		description.FromSecret = entry.FromSecret
-		// The versions the host kept are reported with the file: the panel
-		// can then offer a content to go back to, instead of asking the
-		// operator for the digest of something they have never seen.
+		// The versions the host kept are reported with the file: the panel can then
+		// offer a content to go back to, instead of asking the operator for the
+		// digest of something they have never seen.
 		description.Versions = store.Reported(entry.Path)
 		switch {
 		case !description.Exists || description.UnavailableReason != "":
 		case entry.FromSecret:
-			// The digest of content from the store is never reported: for a short
-			// value the digest alone is a hint, and the store is to leave no
-			// hints outside itself. The panel knows which version of the secret
-			// was deployed, and that is all it has to know.
+			// The digest of content from the store is never reported: for a short value
+			// the digest alone is a hint, and the store is to leave no hints outside
+			// itself.
 			description.UnavailableReason = "the content comes from the secret store; the digest is not reported"
 		default:
 			if digest, err := fileDigest(entry.Path); err == nil {
@@ -794,9 +705,7 @@ func (s *Server) fileRegistry() []registryEntry {
 	if err := json.Unmarshal(data, &entries); err == nil {
 		return entries
 	}
-	// The registry from before secrets were introduced was a bare list of
-	// paths. The older format is still read: the helper must not forget after
-	// an upgrade which files the panel has written.
+	// The registry from before secrets were introduced was a bare list of paths.
 	var paths []string
 	if err := json.Unmarshal(data, &paths); err != nil {
 		return nil
@@ -876,9 +785,6 @@ func fileDigest(path string) (string, error) {
 }
 
 // readFileContent reads a file without passing through a symbolic link.
-//
-// One byte more than the boundary is read, so that a file above it is seen
-// as above it instead of looking like a whole file cut to the boundary.
 func readFileContent(path string) ([]byte, error) {
 	file, err := files.OpenWithoutSymlinks(path, unix.O_RDONLY, 0)
 	if err != nil {
@@ -888,9 +794,8 @@ func readFileContent(path string) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(file, files.MaxSize+1))
 }
 
-// managedFromSecret says whether the content of a file the panel manages
-// came from the secret store. The registry is the only place that knows:
-// the file on the disk looks like any other.
+// managedFromSecret says whether the content of a file the panel manages came
+// from the secret store.
 func (s *Server) managedFromSecret(path string) bool {
 	for _, entry := range s.fileRegistry() {
 		if entry.Path == path {
@@ -902,12 +807,6 @@ func (s *Server) managedFromSecret(path string) bool {
 
 // validatorIdentity describes the check that applies to a file: which tool,
 // from where, and in which version it answers.
-//
-// The version matters because the same content is valid for one version of
-// a service and invalid for the next, and an operator who reads "checked"
-// without knowing by what has been told very little. A tool that cannot be
-// asked says so rather than leaving the field empty, which would read as a
-// tool without a version.
 func (s *Server) validatorIdentity(ctx context.Context, validator files.Validator,
 	known bool) files.ValidatorIdentity {
 	if !known {
@@ -934,9 +833,9 @@ func (s *Server) validatorIdentity(ctx context.Context, validator files.Validato
 	defer cancel()
 	cmd := exec.CommandContext(versionCtx, validator.VersionCommand[0], validator.VersionCommand[1:]...)
 	cmd.Env = toolEnvironment()
-	// Several of these tools print their version on the error output and
-	// leave with a non-zero status, so the output decides and the status
-	// only explains an empty one.
+	// Several of these tools print their version on the error output and leave
+	// with a non-zero status, so the output decides and the status only explains
+	// an empty one.
 	output, err := cmd.CombinedOutput()
 	identity.Version = firstLine(string(output))
 	if identity.Version == "" {
@@ -948,9 +847,7 @@ func (s *Server) validatorIdentity(ctx context.Context, validator files.Validato
 	return identity
 }
 
-// firstLine takes the first line of a tool's answer and keeps it short. A
-// version is one line; anything longer is the tool talking about something
-// else, and it is not going into the plan.
+// firstLine takes the first line of a tool's answer and keeps it short.
 func firstLine(output string) string {
 	line := strings.TrimSpace(output)
 	if index := strings.IndexByte(line, '\n'); index >= 0 {

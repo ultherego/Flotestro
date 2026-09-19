@@ -24,9 +24,8 @@ func samplePlan() Plan {
 	}
 }
 
-// The digest is the digest of the envelope: the architecture, the origin
-// and the direction of every element enter it, the order of the elements
-// does not.
+// The digest is the digest of the envelope: the architecture, the origin and
+// the direction of every element enter it, the order of the elements does not.
 func TestPlanHashCoversArchitectureOriginAndDirection(t *testing.T) {
 	reference := hex.EncodeToString(samplePlan().Hash())
 	if reference == "" {
@@ -200,12 +199,9 @@ SHA-256 Sum     : None
 	}
 }
 
-// TestAnInstalledPackageIsFoundUnderEitherSpelling guards the settlement of
-// an effect: dpkg prints a package that may be installed for more than one
-// architecture as name:arch, rpm answers name.arch, and a plan names it
-// without the suffix. A lookup by the plan's name has to find what the
-// database holds - otherwise a package that is installed reads as absent
-// and a transaction that did its work reports effects_partial.
+// TestAnInstalledPackageIsFoundUnderEitherSpelling guards the settlement of an
+// effect: dpkg prints a package that may be installed for more than one
+// architecture as name:arch, rpm answers name.
 func TestAnInstalledPackageIsFoundUnderEitherSpelling(t *testing.T) {
 	debian := parseInstalledDebian("bind9-libs amd64 1:9.20.29-1~deb13u1 installed\n" +
 		"bind9-host amd64 1:9.20.29-1~deb13u1 installed\n" +

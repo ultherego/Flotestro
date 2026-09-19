@@ -5,10 +5,9 @@ import (
 	"testing"
 )
 
-// TestEveryOperationDeclaresAnOfflinePolicy guards that no operation is
-// left without an answer for a disconnected host: an unknown answer would
-// silently become "wait forever", which is the behaviour the policy
-// replaces.
+// TestEveryOperationDeclaresAnOfflinePolicy guards that no operation is left
+// without an answer for a disconnected host: an unknown answer would silently
+// become "wait forever", which is the behaviour the policy replaces.
 func TestEveryOperationDeclaresAnOfflinePolicy(t *testing.T) {
 	for _, action := range AllActions() {
 		policy := action.OfflinePolicy()
@@ -28,9 +27,9 @@ func TestEveryOperationDeclaresAnOfflinePolicy(t *testing.T) {
 	}
 }
 
-// TestACampaignMayOnlyTightenTheOfflinePolicy guards the boundary the
-// registry draws: a campaign may skip a host the operation would have
-// waited for, but never wait for a host the operation requires online.
+// TestACampaignMayOnlyTightenTheOfflinePolicy guards the boundary the registry
+// draws: a campaign may skip a host the operation would have waited for, but
+// never wait for a host the operation requires online.
 func TestACampaignMayOnlyTightenTheOfflinePolicy(t *testing.T) {
 	if _, err := ResolveOfflinePolicy(ActionSystemReboot, OfflineWait); !errors.Is(err, ErrOfflinePolicyLoosened) {
 		t.Errorf("a reboot waiting for an offline host was accepted: %v", err)

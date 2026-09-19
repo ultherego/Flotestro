@@ -4,26 +4,6 @@ package integration
 
 // The identity of a resource sample and what the panel does with a second
 // delivery of it (security remediation, chapters 12 and 16).
-//
-// The panel is the only alerting channel of this product. A sample that is
-// silently lost is a page that never happens, and a sample counted twice
-// is a chart that lies about a host. Since the agent now keeps every
-// reading until the panel says it holds it, and a relay keeps a message
-// until the same, a second delivery is not the exception any more: it is
-// the normal way a reading survives a broken link, and it has to be a
-// no-op.
-//
-// Three things are proved here negatively, each of which the panel used to
-// get wrong:
-//
-//   - the same sample delivered twice was two rows whenever the host's
-//     clock had moved between the deliveries, because the host and the
-//     moment were the identity;
-//   - a sample carrying a sequence the panel already held was answered by
-//     nothing at all, so the copy on the host was carried for ever;
-//   - a reading that arrived late for a quarter-hour the rollup had
-//     already finished was never folded into it, because one global mark
-//     said that quarter was done.
 
 import (
 	"context"
@@ -88,9 +68,9 @@ func TestASampleDeliveredTwiceIsStoredOnce(t *testing.T) {
 	}
 	defer session.close()
 
-	// A moment inside a quarter-hour that has already finished, so the
-	// rollup may compute it: forty minutes back is at least one whole
-	// quarter behind the one running now.
+	// A moment inside a quarter-hour that has already finished, so the rollup may
+	// compute it: forty minutes back is at least one whole quarter behind the one
+	// running now.
 	taken := time.Now().UTC().Add(-40 * time.Minute).Truncate(time.Second)
 	sample := syntheticSample(bootID, 1, taken)
 
@@ -124,10 +104,9 @@ func TestASampleDeliveredTwiceIsStoredOnce(t *testing.T) {
 			"all the same, so the host may drop its copy", ack)
 	}
 
-	// A sequence the panel already holds, carrying another moment: the
-	// host's clock moved between the deliveries, which is exactly what
-	// identity by the clock could not survive. It is the same reading and
-	// must write nothing.
+	// A sequence the panel already holds, carrying another moment: the host's
+	// clock moved between the deliveries, which is exactly what identity by the
+	// clock could not survive.
 	moved := taken.Add(7 * time.Minute)
 	if err := session.stream.Send(&agentv1.AgentMessage{
 		Payload: &agentv1.AgentMessage_MetricsSample{MetricsSample: syntheticSample(bootID, 1, moved)},
@@ -180,9 +159,8 @@ func TestALateSampleIsRolledUpIntoItsOwnQuarter(t *testing.T) {
 	defer session.close()
 
 	// The store the test drives the rollup with is the panel's own, on the
-	// panel's own database: the rollup runs every quarter of an hour in
-	// the control plane, which is longer than this test may take, so the
-	// same code is called directly here.
+	// panel's own database: the rollup runs every quarter of an hour in the
+	// control plane, which is longer than this test may take, so the same code is
 	store := monitoring.NewStore(pool, slog.New(slog.NewTextHandler(io.Discard, nil)), monitoring.Options{})
 
 	taken := time.Now().UTC().Add(-40 * time.Minute).Truncate(time.Second)
@@ -228,9 +206,9 @@ func TestALateSampleIsRolledUpIntoItsOwnQuarter(t *testing.T) {
 			mark.UTC(), bucket)
 	}
 
-	// A second reading of the same quarter, arriving after that quarter
-	// was declared finished: a relay draining its spool, or a host whose
-	// link came back. Its bucket has to be recomputed, not skipped.
+	// A second reading of the same quarter, arriving after that quarter was
+	// declared finished: a relay draining its spool, or a host whose link came
+	// back.
 	sendSample(2, taken.Add(time.Minute))
 
 	var owed, already int
@@ -244,9 +222,9 @@ func TestALateSampleIsRolledUpIntoItsOwnQuarter(t *testing.T) {
 		host.ID, bucket).Scan(&already); err != nil {
 		t.Fatal(err)
 	}
-	// The panel's own quarter-hourly pass may have drained the mark
-	// already, recomputing the quarter on its way: the recomputation is
-	// what is proved here, and the queue is how it happens.
+	// The panel's own quarter-hourly pass may have drained the mark already,
+	// recomputing the quarter on its way: the recomputation is what is proved
+	// here, and the queue is how it happens.
 	if owed == 0 && already < 2 {
 		t.Fatal("the late reading neither marked its quarter for recomputation nor was folded into one")
 	}
@@ -278,10 +256,9 @@ func quarterOf(at time.Time) time.Time {
 	return time.Date(at.Year(), at.Month(), at.Day(), at.Hour(), at.Minute()/15*15, 0, 0, time.UTC)
 }
 
-// TestOnlyOneInstanceJudgesTheRules proves the lease: an instance that
-// finds it held evaluates nothing at all, rather than judging the same
-// fleet a second time and relying on a unique index to swallow the parts
-// of its verdict that happen to be inserts.
+// TestOnlyOneInstanceJudgesTheRules proves the lease: an instance that finds
+// it held evaluates nothing at all, rather than judging the same fleet a
+// second time and relying on a unique index to swallow the parts of its
 func TestOnlyOneInstanceJudgesTheRules(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -289,10 +266,8 @@ func TestOnlyOneInstanceJudgesTheRules(t *testing.T) {
 	store := monitoring.NewStore(pool, slog.New(slog.NewTextHandler(io.Discard, nil)),
 		monitoring.Options{})
 
-	// Another instance holds the lease. It is written straight into the
-	// database because that is all one control-plane instance ever knows
-	// about another. The term is short and it is given back at the end, so
-	// the panel's own evaluator misses at most one pass.
+	// Another instance holds the lease. It is written straight into the database
+	// because that is all one control-plane instance ever knows about another.
 	stranger := uuid.NewString()
 	if _, err := pool.Exec(ctx, `
 		update monitoring_leases

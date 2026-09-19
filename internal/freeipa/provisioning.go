@@ -22,7 +22,7 @@ const (
 	PreserveReadPermission = "System: Read Preserved Users"
 	// And the fourth: the directory's own command clears the password of the
 	// entry it preserves, so without the write on the container the move happens
-	// and the call fails afterwards - the account ends up preserved while the
+	// and the call fails afterwards - the account ends up preserved while the.
 	PreserveModifyPermission = "System: Modify Preserved Users"
 	// PreservePrivilege is the privilege the connector's role holds.
 	PreservePrivilege = "Flotestro Preserve Users"
@@ -474,7 +474,7 @@ func (c *Client) findPreservePermission(ctx context.Context) (string, error) {
 
 // preserveCompanions are the three rights the move needs beside the moddn
 // itself: the change of the entry's relative name, the read of the container
-// it lands in, and the write on that container - the directory's own command
+// it lands in, and the write on that container - the directory's own command.
 var preserveCompanions = []string{
 	PreserveRDNPermission, PreserveReadPermission, PreserveModifyPermission,
 }

@@ -13,10 +13,7 @@ import (
 	"github.com/ultherego/flotestro/internal/plan"
 )
 
-// planPackages computes what would be upgraded. The simulation needs neither
-// root nor a lock, so it does not collide with the manual work of the
-// administrator. Refreshing the metadata needs root and goes through the
-// helper.
+// planPackages computes what would be upgraded.
 func (e *TaskExecutor) planPackages(ctx context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.PackagePlanPayload) *agentv1.TaskResult {
 	manager, err := packages.Detect()
@@ -29,11 +26,9 @@ func (e *TaskExecutor) planPackages(ctx context.Context, task *agentv1.TaskEnvel
 	defer cancel()
 
 	refreshed := false
-	// On Arch without pacman-contrib the plan reads a copy of the sync
-	// database that only the helper can refresh; a copy that is missing
-	// or old is refreshed first, whether or not the order asked for it,
-	// because a plan against stale repositories would promise the wrong
-	// versions.
+	// On Arch without pacman-contrib the plan reads a copy of the sync database
+	// that only the helper can refresh; a copy that is missing or old is
+	// refreshed first, whether or not the order asked for it, because a plan
 	if payload.RefreshMetadata || packages.NeedsSyncCopy(manager) {
 		response, err := e.helper.Call(planCtx, &helperv1.HelperRequest{
 			TaskId:         task.GetTaskId(),
@@ -63,9 +58,9 @@ func (e *TaskExecutor) planPackages(ctx context.Context, task *agentv1.TaskEnvel
 	})
 	if err != nil {
 		status := agentv1.TaskResult_STATUS_FAILED
-		// A refusal of the host - a lock, a distribution that does not do
-		// partial upgrades, a missing planning tool - is a rejection rather
-		// than a failed attempt: nothing was tried.
+		// A refusal of the host - a lock, a distribution that does not do partial
+		// upgrades, a missing planning tool - is a rejection rather than a failed
+		// attempt: nothing was tried.
 		if packages.Refused(err) {
 			status = agentv1.TaskResult_STATUS_REJECTED
 		}
@@ -80,11 +75,8 @@ func (e *TaskExecutor) planPackages(ctx context.Context, task *agentv1.TaskEnvel
 	}
 }
 
-// planHeader is the identity the agent gives a plan it computes: this
-// host, the picture of it the panel holds now, and an expiry a day away.
-// The helper rebuilds the same header from the approved reference when it
-// computes the plan again, so the two envelopes hash the same over the
-// same state.
+// planHeader is the identity the agent gives a plan it computes: this host,
+// the picture of it the panel holds now, and an expiry a day away.
 func (e *TaskExecutor) planHeader() packages.PlanHeader {
 	header := packages.PlanHeader{
 		HostID:    e.hostID,
@@ -98,14 +90,8 @@ func (e *TaskExecutor) planHeader() packages.PlanHeader {
 	return header
 }
 
-// approvedReference turns the plan reference of an order into the fields
-// the helper request carries. The digest always goes to the helper, which
-// decides: an order that binds a digest without its envelope is one the
-// host cannot compute the same way - the digest was made over a header
-// the host does not have - and the helper refuses it as stale. The planner
-// version and the expiry are checked here already: neither needs the plan
-// computed, and an order that cannot pass is not worth a transaction's
-// lock.
+// approvedReference turns the plan reference of an order into the fields the
+// helper request carries.
 func approvedReference(hash string, reference *opspec.PlanReference,
 	request *helperv1.PackageActionRequest) *agentv1.TaskResult {
 	if hash == "" {
@@ -149,11 +135,7 @@ func approvedReference(hash string, reference *opspec.PlanReference,
 	return nil
 }
 
-// upgradePackages performs the transaction through the helper. An order
-// bound to an approved plan carries the plan's reference to the helper,
-// which computes the plan again under the package lock right before the
-// transaction and compares the digest: the agent hands the reference
-// over as the panel signed it and cannot change what the helper expects.
+// upgradePackages performs the transaction through the helper.
 func (e *TaskExecutor) upgradePackages(ctx context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.PackageUpgradePayload) *agentv1.TaskResult {
 	if _, err := packages.Detect(); err != nil {
@@ -229,10 +211,8 @@ func planToProto(computed packages.Plan) *agentv1.PackagePlanResult {
 		changes = append(changes, changeToProto(change))
 	}
 	envelope := computed.Envelope()
-	// The canonical bytes are what the digest was computed over; the panel
-	// keeps them as the plan body next to the approval. A plan whose
-	// envelope cannot be rendered has no digest either, and a plan without
-	// a digest cannot be approved.
+	// The canonical bytes are what the digest was computed over; the panel keeps
+	// them as the plan body next to the approval.
 	canonical, err := envelope.Canonical()
 	if err != nil {
 		canonical = nil
@@ -301,8 +281,7 @@ func spaceToProto(facts []packages.SpaceFact) []*agentv1.SpaceFact {
 }
 
 // blockedPlanToProto carries the blocks together with the configuration
-// questions. The operator is to see them already at the plan stage and not
-// after a failed transaction.
+// questions.
 func blockedPlanToProto(blocked []packages.Blocked) []*agentv1.BlockedPackage {
 	result := make([]*agentv1.BlockedPackage, 0, len(blocked))
 	for _, pkg := range blocked {
@@ -331,9 +310,9 @@ func applyToProto(result *helperv1.PackageActionResult) *agentv1.PackageApplyRes
 			CandidateVersion: change.GetVersionAfter(),
 		})
 	}
-	// The settled effects of the approved plan ride in the same list, each
-	// marked achieved or missed with what was found: the operator reads
-	// which effect the host reached and which it did not.
+	// The settled effects of the approved plan ride in the same list, each marked
+	// achieved or missed with what was found: the operator reads which effect the
+	// host reached and which it did not.
 	for _, outcomes := range [][]*helperv1.PackageEffectOutcome{result.GetEffectsAchieved(), result.GetEffectsMissed()} {
 		for _, outcome := range outcomes {
 			effect := "missed"
@@ -362,8 +341,8 @@ func applyToProto(result *helperv1.PackageActionResult) *agentv1.PackageApplyRes
 }
 
 // ProbePrivilegedIdentity reads through the helper the parts of the domain
-// state that need root: the host keytab, the SSSD cache database and the
-// SSSD offline policy.
+// state that need root: the host keytab, the SSSD cache database and the SSSD
+// offline policy.
 func (e *TaskExecutor) ProbePrivilegedIdentity(ctx context.Context, domain string) (PrivilegedIdentity, error) {
 	response, err := e.helper.Call(ctx, &helperv1.HelperRequest{
 		TaskId:         "identity-probe",
@@ -410,11 +389,8 @@ func (e *TaskExecutor) applyPackageLifecycle(ctx context.Context, task *agentv1.
 		operation = helperv1.PackageActionRequest_OPERATION_HOLD
 	}
 
-	// An installation or a removal approved on the basis of a plan is to do
-	// what the operator looked at. The reference of the plan goes to the
-	// helper, which computes the plan again right before the transaction;
-	// repository metadata changed since the planning gives a different
-	// plan - and that is a refusal, not a warning.
+	// An installation or a removal approved on the basis of a plan is to do what
+	// the operator looked at.
 	request := &helperv1.PackageActionRequest{
 		Operation:        operation,
 		Packages:         payload.Packages,

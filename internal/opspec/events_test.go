@@ -3,8 +3,7 @@ package opspec
 import "testing"
 
 // TestAnEventReadHasBoundaries guards that the panel refuses an order outside
-// the window instead of silently trimming it on the host. An operator who
-// asked for a day of following is to learn that no such operation exists.
+// the window instead of silently trimming it on the host.
 func TestAnEventReadHasBoundaries(t *testing.T) {
 	cases := map[string]DockerEventsPayload{
 		"window back":   {SinceSeconds: maxEventWindow + 1},

@@ -47,9 +47,9 @@ func TestMissingByIDIsRefused(t *testing.T) {
 	if code := refusalCodeOf(t, ValidateDestructiveTarget(plan, observed)); code != CodeStableIdentityRequired {
 		t.Errorf("a plan without a by-id link: %s", code)
 	}
-	// A by-id link without a WWN or a serial behind it names nothing
-	// either - unless it carries the UUID of a volume, which is the
-	// identity a logical volume has.
+	// A by-id link without a WWN or a serial behind it names nothing either -
+	// unless it carries the UUID of a volume, which is the identity a logical
+	// volume has.
 	nameOnly := DevicePlan{Device: "/dev/mapper/vg-data", ByID: "/dev/disk/by-id/dm-name-vg-data"}
 	if code := refusalCodeOf(t, ValidateDestructiveTarget(nameOnly, Device{Path: "/dev/mapper/vg-data",
 		ByID: "/dev/disk/by-id/dm-name-vg-data"})); code != CodeStableIdentityRequired {

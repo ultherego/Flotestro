@@ -124,9 +124,9 @@ func TestAFixCarriesTheSourceVersionAndTheRelease(t *testing.T) {
 	if advisory.Status != vuln.StatusFixed {
 		t.Fatalf("status = %q, we want %q", advisory.Status, vuln.StatusFixed)
 	}
-	// Of two pockets the lower version wins: it is from that one that the
-	// package carries the fix, so a host with the main version must not come
-	// out as vulnerable.
+	// Of two pockets the lower version wins: it is from that one that the package
+	// carries the fix, so a host with the main version must not come out as
+	// vulnerable.
 	if advisory.FixedVersion != "23.13.9-2ubuntu6.1~esm1" {
 		t.Fatalf("fixed version = %q", advisory.FixedVersion)
 	}

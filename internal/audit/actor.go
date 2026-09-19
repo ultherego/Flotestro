@@ -11,14 +11,6 @@ import (
 )
 
 // The actor of an event is remembered as it was when the event happened.
-// The actor_id column carries a subject or a host identifier and nothing
-// else; a person renamed, a token reissued under another description or
-// a host decommissioned later would then be read through a live join and
-// the history would change under the reviewer. The snapshot below is
-// written once with the row and never joined: the immutable identifier
-// says who, the name says what they were called, and the kind says which
-// table the identifier belongs to, so a machine identifier is never read
-// as a host and a host never as a person.
 
 // The kinds of actor the trail distinguishes.
 const (
@@ -40,9 +32,7 @@ const (
 	ActorKindSystem = "system"
 )
 
-// ActorSnapshot is the actor of an event as it was at the moment of the
-// event. The fields the actor does not have are left out of the answer: a
-// campaign has no principal, a person has no resource.
+// ActorSnapshot is the actor of an event as it was at the moment of the event.
 type ActorSnapshot struct {
 	// PrincipalID is the immutable identifier of the identity, for a
 	// person, a service or a token.
@@ -53,11 +43,8 @@ type ActorSnapshot struct {
 	DisplayName string `json:"display_name,omitempty"`
 	// Kind is one of the ActorKind constants.
 	Kind string `json:"kind,omitempty"`
-	// ResourceType and ResourceID name the object that acted for a
-	// non-person: a host for an agent, a relay, a campaign, a policy. The
-	// interface links to a resource by these two, never by the text of
-	// actor_id: a machine identifier has no page, and a host identifier
-	// pasted where a name belongs must not become one.
+	// ResourceType and ResourceID name the object that acted for a non-person: a
+	// host for an agent, a relay, a campaign, a policy.
 	ResourceType string `json:"resource_type,omitempty"`
 	ResourceID   string `json:"resource_id,omitempty"`
 	// ResourceName is what the resource was called, as it was.
@@ -73,10 +60,8 @@ func (a ActorSnapshot) empty() bool {
 	return a == ActorSnapshot{}
 }
 
-// machineIDPattern is the form of a machine identifier: thirty-two hex
-// digits without dashes. A host identifier is a dashed UUID; the two are
-// told apart by their spelling, because a machine identifier parses as a
-// UUID too and would otherwise be looked up as a host.
+// machineIDPattern is the form of a machine identifier: thirty-two hex digits
+// without dashes.
 var machineIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 // systemPrefixes maps the prefix of a system actor to the resource type
@@ -98,12 +83,6 @@ type principalSnapshot struct {
 }
 
 // actorSnapshot resolves the actor of the event at the moment of writing.
-// What the request already knows about its identity is used as it is; the
-// rest is read from the tables the identifier belongs to, inside the same
-// transaction as the event, so it sees what the event saw. A row that is
-// not there - an event about a machine that never became a host, an
-// identity removed a moment ago - leaves the name empty rather than
-// failing the event: the trail records what it can and never refuses to.
 func (r *Recorder) actorSnapshot(ctx context.Context, q queryExecutor,
 	request *requestContext, event Event) ActorSnapshot {
 	switch event.ActorType {
@@ -118,10 +97,7 @@ func (r *Recorder) actorSnapshot(ctx context.Context, q queryExecutor,
 	}
 }
 
-// userSnapshot names a person, a service or a token by its principal. The
-// request that authenticated the identity knows it best; an event written
-// away from a request - a worker acting on somebody's earlier order -
-// reads the identity by its subject.
+// userSnapshot names a person, a service or a token by its principal.
 func (r *Recorder) userSnapshot(ctx context.Context, q queryExecutor,
 	request *requestContext, subject string) ActorSnapshot {
 	if subject == "" || subject == "anonymous" {
@@ -162,10 +138,8 @@ func (r *Recorder) userSnapshot(ctx context.Context, q queryExecutor,
 }
 
 // agentSnapshot names what acted as an agent: the host behind a dashed
-// identifier, the relay behind one or behind a name, or a machine that
-// is not a host yet. A machine identifier is recorded as such and gets no
-// resource identifier: the trail must not turn it into a host that the
-// same digits would parse as.
+// identifier, the relay behind one or behind a name, or a machine that is not
+// a host yet.
 func (r *Recorder) agentSnapshot(ctx context.Context, q queryExecutor,
 	request *requestContext, id string) ActorSnapshot {
 	snapshot := ActorSnapshot{Subject: id, Kind: ActorKindAgent}
@@ -194,9 +168,8 @@ func (r *Recorder) agentSnapshot(ctx context.Context, q queryExecutor,
 		if !errors.Is(err, pgx.ErrNoRows) {
 			r.log.Warn("the relay behind an audit event was not read", "relay", id, "err", err)
 		}
-		// A host identifier the panel does not know: the agent of a host
-		// removed a moment ago. The kind and the identifier stay; the
-		// resource is not named, because the name cannot be known.
+		// A host identifier the panel does not know: the agent of a host removed a
+		// moment ago.
 		snapshot.ResourceType = "host"
 		snapshot.ResourceID = id
 		return snapshot
@@ -217,10 +190,8 @@ func (r *Recorder) agentSnapshot(ctx context.Context, q queryExecutor,
 	return snapshot
 }
 
-// systemSnapshot names the part of the panel that acted: a campaign, a
-// policy, a schedule by its row; the gateway or a sweep by its name. A
-// campaign keeps its name as it was, because the campaign list is where a
-// reviewer goes next and campaigns get renamed.
+// systemSnapshot names the part of the panel that acted: a campaign, a policy,
+// a schedule by its row; the gateway or a sweep by its name.
 func (r *Recorder) systemSnapshot(ctx context.Context, q queryExecutor, id string) ActorSnapshot {
 	snapshot := ActorSnapshot{Subject: id, Kind: ActorKindSystem}
 	prefix, rest, found := strings.Cut(id, ":")
@@ -246,9 +217,9 @@ func (r *Recorder) systemSnapshot(ctx context.Context, q queryExecutor, id strin
 	return snapshot
 }
 
-// nullableUUID renders an identifier for a uuid column: empty stays null,
-// and a value that is not an identifier stays null too rather than
-// failing the insert - the text of it is still in actor_id.
+// nullableUUID renders an identifier for a uuid column: empty stays null, and
+// a value that is not an identifier stays null too rather than failing the
+// insert - the text of it is still in actor_id.
 func nullableUUID(value string) any {
 	if value == "" {
 		return nil

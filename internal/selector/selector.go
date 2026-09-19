@@ -1,15 +1,4 @@
 // Package selector describes which hosts an order concerns.
-//
-// A selector is a small typed structure rather than a query language: a
-// campaign records it for the audit trail, the panel shows it to the
-// approver, and both have to read it without a parser. The structure is
-// compiled to SQL over the hosts table, so a selector never pulls the fleet
-// into memory to filter it - the same rule the host list follows.
-//
-// The one-line text form ("site = warsaw and not tag = role=db") exists
-// for the places where an operator types a scope by hand - an alert rule,
-// a search box. Parse turns it into the same structure; nothing is
-// evaluated from text.
 package selector
 
 import (
@@ -22,13 +11,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// Expression is one node of a selector: exactly one field is set. A
-// combinator (all, any, not) holds other nodes; a leaf names one fact
-// about the host.
-//
-// Nothing here is a wildcard. A leaf compares a value for equality, and
-// "everything" is written as the absence of a selector, not as a selector
-// that happens to match everything.
+// Expression is one node of a selector: exactly one field is set. A combinator
+// (all, any, not) holds other nodes; a leaf names one fact about the host.
 type Expression struct {
 	// All holds when every child holds; Any when at least one does; Not
 	// when its child does not.
@@ -53,61 +37,45 @@ type Expression struct {
 	// Channel is the release channel the host follows: stable or beta. An
 	// agent upgrade in waves names the beta hosts first.
 	Channel string `json:"channel,omitempty"`
-	// OSVersion is a prefix of the version the host reports: '12' names
-	// every Debian 12.x and '12.4' one point release. A prefix rather than
-	// equality, because a family writes its version in more digits than an
-	// operator means when naming a release.
+	// OSVersion is a prefix of the version the host reports: '12' names every
+	// Debian 12.
 	OSVersion string `json:"os_version,omitempty"`
-	// SecurityUpdates, RebootRequired and FailedUnits are 'true' or
-	// 'false': whether the host has pending security updates, needs a
-	// reboot, has a failed unit. A host that has not reported the fact is
-	// in neither list - unknown is not "no".
+	// SecurityUpdates, RebootRequired and FailedUnits are 'true' or 'false':
+	// whether the host has pending security updates, needs a reboot, has a failed
+	// unit.
 	SecurityUpdates string `json:"security_updates,omitempty"`
 	RebootRequired  string `json:"reboot_required,omitempty"`
 	FailedUnits     string `json:"failed_units,omitempty"`
-	// AgentVersion is a comparison with a version: '< 0.49.0', '>= 0.49.0',
-	// '= 0.49.0'; a bare version means equality. Versions compare part by
-	// part, so 0.10.0 is newer than 0.9.0. A host whose version does not
-	// parse is on neither side of any comparison.
+	// AgentVersion is a comparison with a version: '< 0. 49. 0', '>= 0. 49. 0',
+	// '= 0.
 	AgentVersion string `json:"agent_version,omitempty"`
-	// Relay names the relay, by identifier or by name, whose open session
-	// the host connects through. The session says which route the host
-	// took; a host that connects directly today is behind no relay.
+	// Relay names the relay, by identifier or by name, whose open session the
+	// host connects through.
 	Relay string `json:"relay,omitempty"`
 	// FailureDomain is the domain an operator placed the host in.
 	FailureDomain string `json:"failure_domain,omitempty"`
 
 	// MemberOf is the expanded form of a reference to a static group: the
-	// identifier whose member list decides. Expand produces it; a selector
-	// that arrives from a client with it set is refused, so a client cannot
-	// bypass the lookup by name.
+	// identifier whose member list decides.
 	MemberOf string `json:"group_id,omitempty"`
 }
 
-// The bounds of a selector. A selector deeper or larger than this is not
-// something anybody reads before approving; refusing it is kinder than
-// compiling it.
+// The bounds of a selector.
 const (
 	MaxDepth = 8
 	MaxNodes = 64
-	// MaxExpansion bounds how many dynamic groups may stand inside one
-	// another. The chain is checked for cycles separately; the bound keeps
-	// an honest chain readable.
+	// MaxExpansion bounds how many dynamic groups may stand inside one another.
 	MaxExpansion = 4
 	// maxValue bounds a leaf value; a site or a tag longer than this is a
 	// mistake, not a name.
 	maxValue = 128
 )
 
-// TagPattern is the shape of a tag: a lower-case key, optionally with a
-// value after '='. The key side is deliberately narrow, so that tags sort
-// and group predictably; the value side allows what versions, paths and
-// names of teams need.
+// TagPattern is the shape of a tag: a lower-case key, optionally with a value
+// after '='.
 var TagPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]*(=[a-zA-Z0-9_.:/-]+)?$`)
 
-// The values a state leaf may name. The list is the same one the host
-// table constrains; a selector naming a state no host can be in would
-// silently match nothing.
+// The values a state leaf may name.
 var (
 	connectionStates = []string{"online", "offline", "stale", "unknown"}
 	lifecycleStates  = []string{"active", "quarantined", "recovery", "retiring", "retired"}
@@ -115,10 +83,8 @@ var (
 	booleans         = []string{"true", "false"}
 )
 
-// versionPattern is the shape of a version an agent reports, as far as
-// the comparison reads it: up to four numeric parts, an optional 'v' in
-// front. A suffix such as '-rc1' is not part of the order and is refused
-// in a selector rather than silently dropped.
+// versionPattern is the shape of a version an agent reports, as far as the
+// comparison reads it: up to four numeric parts, an optional 'v' in front.
 var versionPattern = regexp.MustCompile(`^v?(\d+(?:\.\d+){0,3})$`)
 
 // versionOperators are the comparisons a version leaf may make, longest
@@ -138,9 +104,8 @@ func (v VersionComparison) String() string {
 	return v.Operator + " " + v.Version
 }
 
-// ParseVersionComparison reads an agent_version leaf: an operator among
-// <, <=, >, >=, = followed by a version, or a bare version, which means
-// equality.
+// ParseVersionComparison reads an agent_version leaf: an operator among <, <=,
+// >, >=, = followed by a version, or a bare version, which means equality.
 func ParseVersionComparison(value string) (VersionComparison, error) {
 	text := strings.TrimSpace(value)
 	comparison := VersionComparison{Operator: "="}
@@ -167,12 +132,9 @@ var (
 	// ErrUnknownGroup means a reference to a group that does not exist.
 	ErrUnknownGroup = errors.New("unknown group")
 	// ErrCycle means a dynamic group that, through other groups, refers to
-	// itself. Such a group has no answer and is refused rather than
-	// resolved partially.
+	// itself.
 	ErrCycle = errors.New("the group refers to itself")
-	// ErrUnexpanded means a group reference reached the compiler. Groups
-	// are resolved before compilation, so this is a programming error, not
-	// an operator's.
+	// ErrUnexpanded means a group reference reached the compiler.
 	ErrUnexpanded = errors.New("the selector still holds a group reference; expand it first")
 )
 
@@ -342,22 +304,15 @@ type Groups interface {
 }
 
 // Expand resolves every group reference in the selector: a static group
-// becomes a membership test by identifier, a dynamic one is replaced by
-// its own selector, expanded in turn. The input is not changed.
-//
-// Expansion happens at read time, so a group edited after a campaign was
-// recorded does not change what that campaign did - the snapshot of
-// targets binds, and the recorded selector says what was asked for.
+// becomes a membership test by identifier, a dynamic one is replaced by its
+// own selector, expanded in turn.
 func Expand(ctx context.Context, e *Expression, groups Groups) (*Expression, error) {
 	if e == nil {
 		return nil, fmt.Errorf("%w: the selector is empty", ErrInvalid)
 	}
-	// The bound on the size holds after the expansion as before it: a
-	// handful of references to large dynamic groups would otherwise turn a
-	// selector that passed validation into one the database has to chew
-	// through unbounded. The count runs along with the expansion, so a
-	// chain of groups that widened after they were saved is refused at the
-	// bound and not after every group behind it was looked up and copied.
+	// The bound on the size holds after the expansion as before it: a handful of
+	// references to large dynamic groups would otherwise turn a selector that
+	// passed validation into one the database has to chew through unbounded.
 	nodes := 0
 	expanded, err := expand(ctx, e, groups, nil, &nodes)
 	if err != nil {
@@ -386,10 +341,7 @@ func (e *Expression) count() int {
 	return nodes
 }
 
-// expand copies the selector with every group reference resolved. nodes
-// counts what the copy holds so far: a reference is counted by what
-// replaces it, every other node as it is copied, which is the same count
-// the finished tree gives - reached one node at a time.
+// expand copies the selector with every group reference resolved.
 func expand(ctx context.Context, e *Expression, groups Groups, chain []string, nodes *int) (*Expression, error) {
 	if e.Group == "" {
 		if err := countNode(nodes); err != nil {
@@ -470,12 +422,8 @@ func countNode(nodes *int) error {
 	return nil
 }
 
-// Compile renders an expanded selector as an SQL condition over the alias
-// h of the hosts table. offset is the number of parameters the enclosing
-// query already uses; the condition numbers its own from the next one.
-//
-// The result is one parenthesised condition, so the caller can join it
-// with its own by "and" without thinking about precedence.
+// Compile renders an expanded selector as an SQL condition over the alias h of
+// the hosts table.
 func Compile(e *Expression, offset int) (string, []any, error) {
 	if e == nil {
 		return "", nil, fmt.Errorf("%w: the selector is empty", ErrInvalid)
@@ -553,9 +501,9 @@ func (c *compiler) node(e *Expression) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		// The version is ordered numerically part by part, the same way
-		// the host list orders it; a host whose version does not parse is
-		// left out of every comparison rather than compared as text.
+		// The version is ordered numerically part by part, the same way the host
+		// list orders it; a host whose version does not parse is left out of every
+		// comparison rather than compared as text.
 		return "(h.agent_version ~ '^v?\\d+(\\.\\d+)*' and " + VersionParts("h") + " " + comparison.Operator +
 			" string_to_array(" + c.param(comparison.Version) + ", '.')::int[])", nil
 	case e.Relay != "":
@@ -579,10 +527,8 @@ func (c *compiler) node(e *Expression) (string, error) {
 	}
 }
 
-// VersionParts renders the agent version of the aliased host row as an
-// array of integers, so two versions compare part by part rather than as
-// text - '0.10.0' after '0.9.0', not before it. It reads only a version
-// the caller has already matched against the same pattern.
+// VersionParts renders the agent version of the aliased host row as an array
+// of integers, so two versions compare part by part rather than as text - '0.
 func VersionParts(alias string) string {
 	return "string_to_array(substring(" + alias + ".agent_version from '^v?(\\d+(?:\\.\\d+)*)'), '.')::int[]"
 }

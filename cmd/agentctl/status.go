@@ -25,8 +25,8 @@ func statusCommand(args []string, out, errOut io.Writer) int {
 	if err != nil {
 		fmt.Fprintf(out, "Config:       ERROR (%s): %v\n", path, err)
 		// Without the configuration we do not even know where to look for the
-		// identity - guessing the directory would give an answer about
-		// somebody else's state.
+		// identity - guessing the directory would give an answer about somebody
+		// else's state.
 		return 1
 	}
 	fmt.Fprintf(out, "Config:       correct (%s)\n", path)
@@ -50,9 +50,9 @@ func statusCommand(args []string, out, errOut io.Writer) int {
 		}
 	}
 
-	// An attempt that has not ended is a state of its own: the host is
-	// between "no identity" and "registered", and the operator is to see
-	// that the next enrollment repeats it rather than starts anew.
+	// An attempt that has not ended is a state of its own: the host is between
+	// "no identity" and "registered", and the operator is to see that the next
+	// enrollment repeats it rather than starts anew.
 	if pending := agent.ReadPendingAttempt(cfg.Agent.StateDir, time.Now()); pending != nil {
 		fmt.Fprintf(out, "Pending:      %s\n", describePending(pending))
 		if pending.Err != "" || pending.Stale {
@@ -107,10 +107,6 @@ func statusCommand(args []string, out, errOut io.Writer) int {
 }
 
 // describePending puts an unfinished attempt into one line.
-//
-// The attempt number, its age and whether the token is known by its
-// opening: what the operator needs to match it with an order in the panel.
-// Never the key and never the request.
 func describePending(pending *agent.PendingAttempt) string {
 	if pending.Err != "" {
 		return fmt.Sprintf("DAMAGED record of an enrollment attempt (%s); discard it: flotestro-agentctl identity reset --discard-pending", pending.Err)

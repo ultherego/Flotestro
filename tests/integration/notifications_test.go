@@ -26,8 +26,8 @@ type channelView struct {
 	CreatedBy string `json:"created_by"`
 	Reason    string `json:"reason"`
 	// The newest row of the queue for this channel: the queue's own state
-	// (delivered, retry_wait, dead_letter) and the reason of the last
-	// attempt, not the status of a single send.
+	// (delivered, retry_wait, dead_letter) and the reason of the last attempt,
+	// not the status of a single send.
 	LastDelivery *struct {
 		ID        string `json:"id"`
 		State     string `json:"state"`
@@ -36,9 +36,9 @@ type channelView struct {
 }
 
 type deliveryView struct {
-	// The identifier of a row of the queue is a UUID: a delivery is a
-	// durable row an operator can point at and send again, not the
-	// sequence number the log of the previous release had.
+	// The identifier of a row of the queue is a UUID: a delivery is a durable row
+	// an operator can point at and send again, not the sequence number the log of
+	// the previous release had.
 	ID          string    `json:"id"`
 	ChannelID   string    `json:"channel_id"`
 	ChannelName string    `json:"channel_name"`
@@ -59,9 +59,9 @@ type webhookConfigView struct {
 	SecretSet bool    `json:"secret_set"`
 }
 
-// connectionFailure says whether a code names a receiver that could not
-// be reached at all - the answer a closed port or an unknown name gets,
-// whichever the lab's resolver gives first.
+// connectionFailure says whether a code names a receiver that could not be
+// reached at all - the answer a closed port or an unknown name gets, whichever
+// the lab's resolver gives first.
 func connectionFailure(code string) bool {
 	switch code {
 	case "connection_refused", "dns_failure", "timeout", "unreachable":
@@ -85,13 +85,9 @@ func createChannel(h *harness, body map[string]any) channelView {
 	return channel
 }
 
-// TestNotificationChannelKeepsItsSecretAndLogsTypedFailures guards what
-// a channel promises: a reason on every write, a secret that goes in and
-// is never shown again, and a receiver that cannot be reached recorded
-// in the log with a typed reason rather than lost. The receivers are
-// addresses nothing answers at - a closed port on the panel's own host,
-// a name that never resolves - because the panel runs on another
-// machine than the test and cannot reach a server the test would start.
+// TestNotificationChannelKeepsItsSecretAndLogsTypedFailures guards what a
+// channel promises: a reason on every write, a secret that goes in and is
+// never shown again, and a receiver that cannot be reached recorded in the log
 func TestNotificationChannelKeepsItsSecretAndLogsTypedFailures(t *testing.T) {
 	h := newHarness(t)
 	name := fmt.Sprintf("integration-webhook-%d", time.Now().UnixNano())
@@ -168,9 +164,9 @@ func TestNotificationChannelKeepsItsSecretAndLogsTypedFailures(t *testing.T) {
 	h.do(http.MethodGet, "/api/v1/notifications/deliveries?status=lost", nil, nil, http.StatusBadRequest)
 	var fetched channelView
 	h.get("/api/v1/notifications/channels/"+webhook.ID, &fetched)
-	// Nothing answered at that port, so the queue gave up on the row: the
-	// state says so and the code is the transport's own reason, which is
-	// what an operator acts on.
+	// Nothing answered at that port, so the queue gave up on the row: the state
+	// says so and the code is the transport's own reason, which is what an
+	// operator acts on.
 	if fetched.LastDelivery == nil || fetched.LastDelivery.State != "dead_letter" ||
 		!connectionFailure(fetched.LastDelivery.ErrorCode) {
 		t.Errorf("the channel does not carry its last delivery: %+v", fetched.LastDelivery)
@@ -200,9 +196,9 @@ func TestNotificationChannelKeepsItsSecretAndLogsTypedFailures(t *testing.T) {
 		t.Errorf("the edit did not clear the secret or disable the channel: %+v %s", edited, edited.Config)
 	}
 
-	// A mailbox behind a name that never resolves fails the same typed
-	// way; a mailbox whose password names a secret nobody created is
-	// refused before it is written.
+	// A mailbox behind a name that never resolves fails the same typed way; a
+	// mailbox whose password names a secret nobody created is refused before it
+	// is written.
 	email := createChannel(h, map[string]any{
 		"name": name + "-mail", "kind": "email",
 		"config": map[string]any{
@@ -252,9 +248,8 @@ func TestNotificationChannelKeepsItsSecretAndLogsTypedFailures(t *testing.T) {
 }
 
 // TestAcknowledgedAlertLeavesTheWaitingCounts guards the meaning of an
-// acknowledgement: the alert keeps firing, but it no longer counts among
-// what waits for a person - on the dashboard and in the fleet view - and
-// the row says who took it and what they wrote.
+// acknowledgement: the alert keeps firing, but it no longer counts among what
+// waits for a person - on the dashboard and in the fleet view - and the row
 func TestAcknowledgedAlertLeavesTheWaitingCounts(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")

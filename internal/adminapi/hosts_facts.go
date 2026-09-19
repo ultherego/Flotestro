@@ -11,21 +11,10 @@ import (
 	"github.com/ultherego/flotestro/internal/hosts"
 )
 
-// The facts an operator records about a host by hand: who answers for it,
-// how it is reached and what it goes down with. Like the tags, they are the panel's knowledge
-// about the machine rather than the machine's about itself - nothing runs
-// on the host and it is not asked - so they share the tag permission and
-// go straight to the row, not through the task queue.
-//
-// Two operators may correct the same host at once, so the reads and the
-// writes carry an entity tag over these facts: a write with a stale
-// If-Match is refused with the current tag rather than silently undoing
-// the other correction.
+// The facts an operator records about a host by hand: who answers for it, how
+// it is reached and what it goes down with.
 
-// hostFactsTag is the version of the hand-recorded facts of a host. It
-// covers only them, not the whole row: the row changes at every heartbeat,
-// and a tag that changed under an operator's hands every ten seconds would
-// refuse every honest write.
+// hostFactsTag is the version of the hand-recorded facts of a host.
 func hostFactsTag(host *hosts.Host) string {
 	return etagOf("facts", host.Owner, host.ManagementAddress, host.ManagementAddressSource,
 		host.FailureDomain, host.Site, host.Environment, host.Notes)
@@ -138,9 +127,9 @@ func (s *Server) handleSetHostManagementAddress(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// The trail keeps the source with the address on both sides: an
-	// address that went from 'manual' back to 'session' is a different
-	// event from one that changed its digits.
+	// The trail keeps the source with the address on both sides: an address that
+	// went from 'manual' back to 'session' is a different event from one that
+	// changed its digits.
 	s.audit.Record(r.Context(), audit.Event{
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
 		Action: "host.management_address", TargetType: "host", TargetID: host.ID,
@@ -169,11 +158,6 @@ type hostFailureDomainRequest struct {
 }
 
 // handleSetHostFailureDomain records the failure domain of a host.
-//
-// The domain is a budget key from the moment it is written: the next change
-// on the host asks for a token of domain:<domain>:<family>, next to the
-// site's. That is why it is a fact recorded by hand and not a tag - a tag
-// says something about the host, the domain limits what may happen to it.
 func (s *Server) handleSetHostFailureDomain(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
 	host, scope, ok := s.hostScope(w, r, hostID)

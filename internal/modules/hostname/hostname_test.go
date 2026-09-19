@@ -10,9 +10,7 @@ func TestValidateAcceptsLabelsAndFullyQualifiedNames(t *testing.T) {
 	}
 }
 
-// The name goes into hostnamectl and into /etc/hosts. Upper-case letters
-// are refused rather than folded: the host would end up with a name other
-// than the one the operator approved.
+// The name goes into hostnamectl and into /etc/hosts.
 func TestValidateRejectsWhatCannotBeAHostname(t *testing.T) {
 	for _, name := range []string{
 		"", "Web01", "-web", "web-", "web_01", "web 01", "web.", ".web",

@@ -13,13 +13,6 @@ import (
 )
 
 // Runbook runs a script prepared by the host administrator.
-//
-// This is the only place in the whole system where the panel runs something
-// it does not know itself - and that is why it is fenced with three rules.
-// The panel does not send the script content, only its name. The script
-// must already lie in a directory only root writes to. And it must answer
-// with an agreed contract, not arbitrary text: otherwise a "runbook" would
-// be remote execution of arbitrary code under a prettier name.
 type Runbook struct{}
 
 func (r *Runbook) Name() string { return ToolRunbook }
@@ -33,10 +26,6 @@ func (r *Runbook) Available() bool {
 func (r *Runbook) Version(context.Context) string { return "" }
 
 // Path checks the script and returns its full path.
-//
-// The owner and the permissions are checked, not only existence: a script
-// writable by an ordinary user would mean every user of the host can plant
-// code for the panel to run with root privileges.
 func (r *Runbook) Path(name string) (string, error) {
 	if !runbookName.MatchString(name) {
 		return "", fmt.Errorf("invalid runbook name %q", name)
@@ -69,10 +58,6 @@ func (r *Runbook) Path(name string) (string, error) {
 }
 
 // environment assembles the variables describing the order.
-//
-// Everything goes through the environment, not the arguments: the
-// arguments are seen by every user of the host through /proc, and the
-// variables include the repository password.
 func (r *Runbook) environment(order Order, operation string) []string {
 	environment := append(toolEnvironment(order, "FLOTESTRO_BACKUP_PASSWORD"),
 		"FLOTESTRO_BACKUP_OPERATION="+operation,
@@ -98,10 +83,6 @@ func (r *Runbook) environment(order Order, operation string) []string {
 
 // invoke runs the runbook and returns the last line of its output and the
 // whole of it.
-//
-// The contract is deliberately narrow: the runbook may write what it wants,
-// but the last line must be a JSON document. The panel reads only that -
-// the rest is a log for a human, not data.
 func (r *Runbook) invoke(ctx context.Context, order Order,
 	operation string, progress ProgressFunc) (string, commandResult, error) {
 	path, err := r.Path(order.Runbook)
@@ -245,9 +226,6 @@ func (r *Runbook) operationResult(ctx context.Context, order Order,
 }
 
 // ListRunbooks lists the scripts the panel may run on this host.
-//
-// Whether the directory could be read is returned too: a directory without
-// runbooks and an unread directory are two different answers.
 func ListRunbooks() ([]string, bool) {
 	entries, err := os.ReadDir(RunbookDir)
 	if err != nil {

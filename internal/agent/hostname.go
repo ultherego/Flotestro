@@ -15,9 +15,7 @@ import (
 )
 
 // RejectHostnameConflict marks a rename refused because the new name already
-// points somewhere else in DNS. The host reports the finding and changes
-// nothing: a name that resolves to another machine is somebody else's name
-// until the record says otherwise.
+// points somewhere else in DNS.
 const RejectHostnameConflict = "hostname_conflict"
 
 // Names of the rename preflight checks. They are part of the result, so the
@@ -32,15 +30,8 @@ const (
 // answer in this time is reported as unknown, not waited for.
 const dnsLookupTimeout = 10 * time.Second
 
-// setHostname renames the host through the helper, after a preflight the
-// agent runs itself.
-//
-// The preflight answers two questions the operator cannot answer from the
-// panel: whether the new name resolves in DNS to something else than this
-// host, and whether the agent's own certificate is bound to the name. The
-// first refuses the rename; the second is information - the panel knows
-// the host by identifier, so the certificate survives. Both go into the
-// result, whether the rename happened or not.
+// setHostname renames the host through the helper, after a preflight the agent
+// runs itself.
 func (e *TaskExecutor) setHostname(ctx context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.HostnamePayload) *agentv1.TaskResult {
 	if payload == nil {
@@ -92,10 +83,8 @@ func (e *TaskExecutor) setHostname(ctx context.Context, task *agentv1.TaskEnvelo
 	if !result.Changed {
 		message = "the host already had the name " + result.Current
 	}
-	// The panel learns the new name from the inventory, not from the result:
-	// the name is a fact of the host, and the system module carries it. A
-	// fresh picture goes out right away rather than at the next cycle, so
-	// the host is not listed under a name it no longer answers to.
+	// The panel learns the new name from the inventory, not from the result: the
+	// name is a fact of the host, and the system module carries it.
 	if result.Changed && e.inventoryRefresh != nil {
 		e.refresh(callCtx, []string{ModuleSystem})
 	}
@@ -121,14 +110,8 @@ func hostnamePreflight(ctx context.Context, requested, current, hostID string) [
 	return checks
 }
 
-// dnsCheck asks the resolver about the new name and compares the answer
-// with the addresses this host has.
-//
-// A name that does not resolve passes: the record is not there yet, and
-// creating it is the operator's next step. A name that resolves to one of
-// this host's addresses passes: the record is already right. A name that
-// resolves elsewhere fails and blocks the rename. A resolver that does not
-// answer leaves the check unknown - the agent does not guess.
+// dnsCheck asks the resolver about the new name and compares the answer with
+// the addresses this host has.
 func dnsCheck(ctx context.Context, name string, own map[string]bool) *agentv1.PreflightCheck {
 	check := &agentv1.PreflightCheck{Name: CheckHostnameDNS, Blocking: true}
 	lookupCtx, cancel := context.WithTimeout(ctx, dnsLookupTimeout)
@@ -168,9 +151,7 @@ func dnsCheck(ctx context.Context, name string, own map[string]bool) *agentv1.Pr
 }
 
 // certificateCheck says whether the rename touches the agent's identity
-// towards the panel. The panel issues the certificate for the host
-// identifier, not for the name - so as long as the identifier is what the
-// agent presents, no re-enrollment is needed.
+// towards the panel.
 func certificateCheck(hostID, current string) *agentv1.PreflightCheck {
 	check := &agentv1.PreflightCheck{Name: CheckHostnameCertificate, Blocking: false}
 	switch {
@@ -205,8 +186,6 @@ func ownAddresses() map[string]bool {
 }
 
 // SetHostIdentity tells the executor what the agent's certificate names.
-// The rename preflight compares it with the hostname: a certificate issued
-// for the identifier survives a rename, one issued for the name does not.
 func (e *TaskExecutor) SetHostIdentity(hostID string) {
 	e.hostID = hostID
 }

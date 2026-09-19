@@ -11,16 +11,11 @@ import (
 const lifecycleReason = "integration test of the package lifecycle"
 
 // testPackage is small, has no dependencies beyond the base system and does
-// not belong to anything the host runs. The choice matters: the test
-// installs and removes it on a live machine.
+// not belong to anything the host runs.
 const testPackage = "tree"
 
 // TestPackageLifecycleOnDNF guards that installation, the removal plan,
 // removal and hold also work where the manager is dnf.
-//
-// The packages chapter promises APT and DNF adapters; for a long time only
-// apt had the full cycle, and Fedora got the refusal "supported only for
-// apt".
 func TestPackageLifecycleOnDNF(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("rhel")
@@ -63,9 +58,8 @@ func TestPackageLifecycleOnDNF(t *testing.T) {
 		t.Fatalf("the plan does not cover the package asked about: %+v", plan.Removals)
 	}
 
-	// Removal requires a second person's approval in a production
-	// environment and typing in the target name: it is an irreversible
-	// operation.
+	// Removal requires a second person's approval in a production environment and
+	// typing in the target name: it is an irreversible operation.
 	removal := h.createOperation(host.ID, map[string]any{
 		"action": "packages.remove", "reason": lifecycleReason,
 		"target_confirmation": host.Hostname,
@@ -126,9 +120,8 @@ func TestPackageHoldOnDNF(t *testing.T) {
 }
 
 // TestRemovalPlanDoesNotStayQuietAboutARefusal guards the most dangerous
-// mistake this module could make: an empty plan reads as "nothing goes
-// away", while a refusal from the manager means something entirely
-// different.
+// mistake this module could make: an empty plan reads as "nothing goes away",
+// while a refusal from the manager means something entirely different.
 func TestRemovalPlanDoesNotStayQuietAboutARefusal(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("rhel")

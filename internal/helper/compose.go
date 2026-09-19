@@ -28,17 +28,12 @@ func (s *Server) composeDirectory() string {
 	return filepath.Join(directory, "compose")
 }
 
-// composeRunner runs compose with a fixed set of arguments. The wrapper, when
-// given, puts the argument array under a resource scope; it changes nothing
-// in the array itself.
+// composeRunner runs compose with a fixed set of arguments.
 func composeRunner(ctx context.Context, wrap func([]string) []string) compose.Runner {
 	return dockerRunner(ctx, wrap, "compose")
 }
 
-// dockerRunner runs the Docker client with a fixed prefix of arguments. The
-// plan resolves image tags with it ("docker manifest inspect", "docker
-// image inspect"); the client runs with a bare environment and no
-// credential store, so it reaches what an anonymous pull would.
+// dockerRunner runs the Docker client with a fixed prefix of arguments.
 func dockerRunner(ctx context.Context, wrap func([]string) []string, prefix ...string) compose.Runner {
 	return func(callCtx context.Context, args ...string) (string, string, error) {
 		argv := append([]string{dockerCLI}, prefix...)
@@ -69,9 +64,8 @@ func (s *Server) applyCompose(ctx context.Context, request *helperv1.HelperReque
 	}
 
 	// Compose projects share the same resource with the other container
-	// operations: a deployment and a restart of the same project at once give
-	// an unpredictable result. The plan takes the guard as well - it writes
-	// the manifest of the project into the same directory the deployment uses.
+	// operations: a deployment and a restart of the same project at once give an
+	// unpredictable result.
 	release, busy := s.hold(GuardContainers, request)
 	if busy != nil {
 		return busy
@@ -118,9 +112,7 @@ func (s *Server) applyCompose(ctx context.Context, request *helperv1.HelperReque
 	return reject(ErrorUnknownAction, "unknown Compose project operation")
 }
 
-// composeErrorCode names the refusal. A plan that moved since the approval
-// and a tag nobody can resolve are typed answers the panel acts on; the rest
-// is a failed tool.
+// composeErrorCode names the refusal.
 func composeErrorCode(err error) string {
 	switch {
 	case errors.Is(err, compose.ErrPlanMismatch):

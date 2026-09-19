@@ -101,9 +101,8 @@ func TestSampleReadsTheKernelCounters(t *testing.T) {
 		t.Errorf("uptime = %d", sample.GetUptimeSeconds())
 	}
 
-	// The pseudo filesystems, the overlay and the tmpfs are left out; the
-	// mount that does not answer statfs too. The root mounted twice is one
-	// entry, and the escaped space in the path is decoded.
+	// The pseudo filesystems, the overlay and the tmpfs are left out; the mount
+	// that does not answer statfs too.
 	filesystems := sample.GetFilesystems()
 	if len(filesystems) != 2 {
 		t.Fatalf("filesystems = %v", filesystems)

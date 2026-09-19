@@ -9,26 +9,23 @@ import (
 )
 
 func TestLocalPathRejectsExternalRedirects(t *testing.T) {
-	// The redirect target after login comes from a query parameter. Without
-	// validation the login would become an open redirect used in phishing:
-	// the user sees the trusted panel address and lands somewhere else.
+	// The redirect target after login comes from a query parameter.
 	rejected := []string{
 		"https://evil.example.com/",
 		"//evil.example.com/",
 		"http://evil.example.com",
 		"javascript:alert(1)",
 		"evil.example.com/path",
-		// A backslash is read as a slash by browsers, so this is
-		// //evil.example.com in disguise; the rest are characters no
-		// route of the panel has.
+		// A backslash is read as a slash by browsers, so this is //evil. example.
+		// com in disguise; the rest are characters no route of the panel has.
 		`/\evil.example.com/`,
 		`\\evil.example.com`,
 		"/hosts\n",
 		"/hosts<script>",
 		"/hosts;id",
-		// Percent-encoded, the same characters pass the raw check and come
-		// out of the decoder as the backslash, the double slash, or the
-		// tab a browser strips before it reads "//evil" as a host.
+		// Percent-encoded, the same characters pass the raw check and come out of
+		// the decoder as the backslash, the double slash, or the tab a browser
+		// strips before it reads "//evil" as a host.
 		"/%5Cevil.example.com",
 		"/%5c%5cevil.example.com",
 		"/%2F%2Fevil.example.com",
@@ -63,9 +60,8 @@ func TestLocalPathAcceptsLocalPaths(t *testing.T) {
 }
 
 // TestCollectionsDoNotRequireGlobalScope guards against the regression that
-// gave an operator limited to one environment a refusal on half the panel:
-// the dashboard, campaigns and tasks checked the permission in the global
-// scope, which a narrow binding never satisfies.
+// gave an operator limited to one environment a refusal on half the panel: the
+// dashboard, campaigns and tasks checked the permission in the global scope,
 func TestCollectionsDoNotRequireGlobalScope(t *testing.T) {
 	operator := authz.Principal{
 		Subject: "jsmith", Kind: "user",
@@ -97,8 +93,7 @@ func TestCollectionsDoNotRequireGlobalScope(t *testing.T) {
 }
 
 // TestPrincipalPermissionsAreComplete checks the list the interface hides
-// sections by. Guessing by role names in the browser drifts from the policy
-// at every change of it.
+// sections by.
 func TestPrincipalPermissionsAreComplete(t *testing.T) {
 	principal := authz.Principal{
 		Bindings: []authz.Binding{
@@ -123,9 +118,7 @@ func TestPrincipalPermissionsAreComplete(t *testing.T) {
 }
 
 // TestBudgetScopeFollowsTheKey: a site budget is the site's to change, a
-// fleet-wide one - and a pattern over every site - is the fleet's. An
-// operator of one site raising the global mutation budget would move every
-// campaign of every other site.
+// fleet-wide one - and a pattern over every site - is the fleet's.
 func TestBudgetScopeFollowsTheKey(t *testing.T) {
 	siteOperator := authz.Principal{
 		Subject: "waw-admin", Kind: "user",
@@ -146,9 +139,8 @@ func TestBudgetScopeFollowsTheKey(t *testing.T) {
 	}
 }
 
-// TestLoginStateIsBoundToTheBrowser: the callback of the provider is
-// accepted only in the browser that started the login. A state somebody
-// else started, replayed here, would log this browser into their account.
+// TestLoginStateIsBoundToTheBrowser: the callback of the provider is accepted
+// only in the browser that started the login.
 func TestLoginStateIsBoundToTheBrowser(t *testing.T) {
 	s := &Server{}
 	recorder := httptest.NewRecorder()

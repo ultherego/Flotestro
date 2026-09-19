@@ -14,12 +14,8 @@ import (
 )
 
 // TestMappedRightsHoldAwayFromTheRequest guards the person who signs in
-// through the identity provider: their rights come from the group mapping
-// and not from bindings of their own, so a check made away from any
-// request - the orchestrator before a dispatch - has to map the groups of
-// their newest session the way a request does. Without it, an
-// administrator's campaign stopped at the first host with "no longer
-// holds campaign.create", although nothing had been taken from them.
+// through the identity provider: their rights come from the group mapping and
+// not from bindings of their own, so a check made away from any request - the
 func TestMappedRightsHoldAwayFromTheRequest(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

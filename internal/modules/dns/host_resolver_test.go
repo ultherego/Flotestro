@@ -25,9 +25,8 @@ Link 3 (enp0s8)
                     DNSSEC=no/unsupported
      Default Route: no`
 
-// A domain-joined host has the directory server on one link and the
-// provider's server on the other. Merging them into one list would hide
-// which server answers.
+// A domain-joined host has the directory server on one link and the provider's
+// server on the other.
 func TestResolverSeparatesServersPerLink(t *testing.T) {
 	snapshot := ParseResolvectl(resolvectlOutput)
 

@@ -8,9 +8,8 @@ import (
 	"time"
 )
 
-// Cron runs the command through a shell, so an argument with a
-// metacharacter stops being an argument and becomes a second command. The
-// basic module does not accept an arbitrary shell line.
+// Cron runs the command through a shell, so an argument with a metacharacter
+// stops being an argument and becomes a second command.
 func TestCommandRejectsShellCharacters(t *testing.T) {
 	bad := [][]string{
 		{"/usr/bin/backup; reboot"},
@@ -32,8 +31,7 @@ func TestCommandRejectsShellCharacters(t *testing.T) {
 }
 
 // A relative path depends on cron's PATH, which is often different from the
-// operator's PATH. An entry working by hand and not from cron is the
-// hardest failure to diagnose in this module.
+// operator's PATH.
 func TestCommandRequiresAbsolutePath(t *testing.T) {
 	if _, err := ComposeCommand([]string{"backup.sh"}); err == nil {
 		t.Error("accepted a relative path")
@@ -55,9 +53,8 @@ func TestIdentifierMustBeValidFileName(t *testing.T) {
 			t.Errorf("accepted identifier %q", id)
 		}
 	}
-	// Underscore and upper-case letters are allowed by cron itself, so the
-	// panel allows them too: otherwise the "e2scrub_all" entry could not be
-	// taken over.
+	// Underscore and upper-case letters are allowed by cron itself, so the panel
+	// allows them too: otherwise the "e2scrub_all" entry could not be taken over.
 	for _, id := range []string{"backup", "backup-nightly", "b", "copy-2", "e2scrub_all", "Backup"} {
 		if !ValidIdentifier(id) {
 			t.Errorf("rejected identifier %q", id)
@@ -66,9 +63,8 @@ func TestIdentifierMustBeValidFileName(t *testing.T) {
 }
 
 // The user stands between the expression and the command, separated by
-// whitespace only: a value with a space or a newline would end the field
-// early and run the rest as root. Such a value never reaches the line, and
-// neither does an entry that names no user at all - root is not a default.
+// whitespace only: a value with a space or a newline would end the field early
+// and run the rest as root.
 func TestWriteEntryRefusesAUserThatWouldNotStayInItsField(t *testing.T) {
 	dir := t.TempDir()
 	for _, user := range []string{
@@ -210,9 +206,8 @@ func TestTimersLandInTheSameTable(t *testing.T) {
 		"systemd-tmpfiles-clean.timer   loaded inactive dead  Cleanup",
 	}, "\n")
 
-	// Order as on the host: records are separated by an empty line, and
-	// systemd prints TimersCalendar before Id. A timer without a calendar
-	// (monotonic) has only Id in its record.
+	// Order as on the host: records are separated by an empty line, and systemd
+	// prints TimersCalendar before Id.
 	calendars := strings.Join([]string{
 		"Id=systemd-tmpfiles-clean.timer",
 		"",
@@ -236,9 +231,8 @@ func TestTimersLandInTheSameTable(t *testing.T) {
 	if logrotate.NextRun == nil || logrotate.NextRun.Hour() != 6 {
 		t.Errorf("logrotate date = %v", logrotate.NextRun)
 	}
-	// A timer shows its OnCalendar, not a fixed "systemd timer" label:
-	// without the expression the row does not explain where the next date
-	// came from.
+	// A timer shows its OnCalendar, not a fixed "systemd timer" label: without
+	// the expression the row does not explain where the next date came from.
 	if logrotate.Expression != "*-*-* 06:00:00" {
 		t.Errorf("logrotate expression = %q", logrotate.Expression)
 	}

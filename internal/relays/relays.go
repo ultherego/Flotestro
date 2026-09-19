@@ -1,9 +1,4 @@
 // Package relays keeps the identities of the relays of the sites.
-//
-// A relay terminates the connection of an agent and attests to the panel whose
-// traffic it is, so it is a separate trust boundary. The panel has to know
-// which relay attested the identity of a host and whether it was allowed to do
-// so.
 package relays
 
 import (
@@ -44,9 +39,7 @@ const (
 	StateRevoked   = "revoked"
 )
 
-// SilentAfter is how long without a contact makes a relay silent. The
-// relay reports itself every minute, so ten minutes of silence is not a
-// slow link but a relay that stopped reaching the centre.
+// SilentAfter is how long without a contact makes a relay silent.
 const SilentAfter = 10 * time.Minute
 
 // StateAt classifies a relay at a given moment.
@@ -63,30 +56,20 @@ func (r Relay) StateAt(now time.Time) string {
 }
 
 // Heartbeat is what a relay reports about itself when it calls the centre.
-//
-// The latest one is kept in memory, because that is what the list reads:
-// one map lookup per row rather than a query per relay. The same report
-// also goes into the history table, where it answers the questions a
-// single latest value cannot - whether the site was cut off last night,
-// whether the spool has been filling for a week, when the relay last
-// restarted.
 type Heartbeat struct {
 	BufferBytes    int64 `json:"buffer_bytes"`
 	BufferMaxBytes int64 `json:"buffer_max_bytes"`
 	BufferedItems  int   `json:"buffered_items"`
 	BufferDropped  int64 `json:"buffer_dropped"`
 	Sessions       int   `json:"sessions"`
-	// SpoolBytesLimit is the room the durable spool of the relay may take
-	// on disk. Zero for a relay from before the spool, which reported the
-	// memory buffer in BufferMaxBytes alone.
+	// SpoolBytesLimit is the room the durable spool of the relay may take on
+	// disk.
 	SpoolBytesLimit int64 `json:"spool_bytes_limit,omitempty"`
-	// InstanceID names the process of the relay: a fresh identifier at
-	// every start. A change of it is a restart, which neither the version
-	// nor the address shows.
+	// InstanceID names the process of the relay: a fresh identifier at every
+	// start.
 	InstanceID string `json:"instance_id,omitempty"`
-	// UpstreamState is connected, buffering or reconnecting, as the relay
-	// saw its link at the moment of the report. Empty for a relay that
-	// does not say - and an empty state is not "connected".
+	// UpstreamState is connected, buffering or reconnecting, as the relay saw its
+	// link at the moment of the report.
 	UpstreamState string    `json:"upstream_state,omitempty"`
 	RelayVersion  string    `json:"relay_version,omitempty"`
 	ReportedAt    time.Time `json:"reported_at"`
@@ -124,9 +107,7 @@ func (s *Store) LastHeartbeat(id string) (Heartbeat, bool) {
 
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
-// Upsert registers a relay or refreshes its identity at a repeated
-// enrollment. The name is the natural key: reinstalling the same relay is not
-// to create a second entry.
+// Upsert registers a relay or refreshes its identity at a repeated enrollment.
 func (s *Store) Upsert(ctx context.Context, tx pgx.Tx, name, site, environment string) (string, error) {
 	const query = `
 		insert into relays (id, name, site, environment)
@@ -152,11 +133,6 @@ func (s *Store) SaveCertificate(ctx context.Context, tx pgx.Tx, id, serial strin
 }
 
 // SaveNames writes the network names the relay is visible under.
-//
-// The names stay in the registry, because they are what goes into the server
-// certificate at every renewal. Were they to come from the request, a relay
-// could take the name of somebody else's service at a renewal and become
-// something else to the agents.
 func (s *Store) SaveNames(ctx context.Context, tx pgx.Tx, id string, names []string) error {
 	if names == nil {
 		names = []string{}
@@ -209,9 +185,7 @@ func (s *Store) LookupCertificate(ctx context.Context, fingerprint []byte) (Stat
 	return status, nil
 }
 
-// MarkSeen records the contact of a relay. A write error must not tear the
-// session down: the mark is operational information rather than a condition of
-// working.
+// MarkSeen records the contact of a relay.
 func (s *Store) MarkSeen(ctx context.Context, id string) {
 	_, _ = s.pool.Exec(ctx, "update relays set last_seen_at = now() where id = $1", id)
 }
@@ -241,9 +215,7 @@ func (s *Store) List(ctx context.Context) ([]Relay, error) {
 	return list, rows.Err()
 }
 
-// Get returns one relay, revoked or not. The caller decides what a revoked
-// relay means for it: a route for a new host it is not, a row in history it
-// still is.
+// Get returns one relay, revoked or not.
 func (s *Store) Get(ctx context.Context, id string) (*Relay, error) {
 	const query = `
 		select id, name, site, coalesce(environment, ''), coalesce(serial, ''),
@@ -262,9 +234,7 @@ func (s *Store) Get(ctx context.Context, id string) (*Relay, error) {
 	return &relay, nil
 }
 
-// Revoke takes the right to mediate away from a relay. The sessions of the
-// agents then go directly or do not go at all - that is a deliberate decision
-// of the operator.
+// Revoke takes the right to mediate away from a relay.
 func (s *Store) Revoke(ctx context.Context, id, reason string) error {
 	tag, err := s.pool.Exec(ctx,
 		"update relays set revoked_at = now(), revocation_reason = $2 where id = $1 and revoked_at is null",
@@ -291,10 +261,6 @@ type AttestedHost struct {
 }
 
 // AttestedHosts lists the hosts with an open session attested by the relay.
-//
-// The session, not the host, says which route it took: the same host
-// connects directly one day and through the relay the next, and only the
-// open session says which is true now.
 func (s *Store) AttestedHosts(ctx context.Context, id string) ([]AttestedHost, error) {
 	const query = `
 		select h.id, h.hostname, h.site, coalesce(h.environment, ''), h.lifecycle_state,

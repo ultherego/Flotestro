@@ -6,9 +6,8 @@ import (
 	"unicode"
 )
 
-// ErrSyntax means a text expression that does not parse; the message
-// says where. It is a kind of invalid selector, so a handler that answers
-// ErrInvalid answers this too.
+// ErrSyntax means a text expression that does not parse; the message says
+// where.
 var ErrSyntax = fmt.Errorf("%w: the expression does not parse", ErrInvalid)
 
 // Key describes one fact a text expression may name, for the parser and
@@ -25,9 +24,8 @@ type Key struct {
 	Ordered bool
 }
 
-// Keys lists what a text expression may name, in the order the panel
-// offers them. The names are the JSON fields of the selector, so a
-// selector read back from an audit line parses under the same names.
+// Keys lists what a text expression may name, in the order the panel offers
+// them.
 var Keys = []Key{
 	{Name: "site"},
 	{Name: "environment", Aliases: []string{"env"}},
@@ -59,18 +57,8 @@ func keyByName(name string) *Key {
 	return nil
 }
 
-// Parse reads the one-line text form of a selector:
-//
-//	site = warsaw and (tag = role=db or not environment = prod)
-//	agent_version < 0.49.0 and security_updates = true
-//
-// A condition is a key, an operator and a value. The operators are =,
-// != and, for agent_version, <, <=, > and >=. A value runs to the next
-// space or parenthesis; one with spaces stands in double quotes. The
-// keywords and, or and not bind in that order from the loosest, as in
-// most languages, and parentheses override them. The result is validated
-// like a selector that arrived as JSON, so a value no host can carry is
-// refused with the same words.
+// Parse reads the one-line text form of a selector: site = warsaw and (tag =
+// role=db or not environment = prod) agent_version < 0.
 func Parse(text string) (*Expression, error) {
 	tokens, err := tokenize(text)
 	if err != nil {
@@ -112,22 +100,15 @@ type token struct {
 	at int
 }
 
-// operatorRunes are the characters an operator is made of. A value may
-// contain '=' (a tag reads key=value), so the operator is cut only where
-// the grammar expects one: right after a key.
+// operatorRunes are the characters an operator is made of.
 const operatorRunes = "=!<>"
 
 // tokenize cuts the text into words, operators, parentheses and quoted
-// strings. A key runs over letters, digits and '_' and ends at its
-// operator; the value after an operator runs to the next space,
-// parenthesis or quote whatever it contains, so that "tag=role=db" is the
-// key tag, the operator = and the value role=db.
+// strings.
 func tokenize(text string) ([]token, error) {
 	var tokens []token
-	// afterKey is true right after a word naming a key: the operator
-	// characters that follow are an operator. valueNext is true right
-	// after an operator: the word that follows is a value, whatever it
-	// looks like.
+	// afterKey is true right after a word naming a key: the operator characters
+	// that follow are an operator.
 	afterKey, valueNext := false, false
 	runes := []rune(text)
 	for i := 0; i < len(runes); {
@@ -176,9 +157,9 @@ func tokenize(text string) ([]token, error) {
 				end++
 			}
 			if end == i {
-				// An operator where no key stands before it: cut it as
-				// one anyway, so the parser can say what is missing in
-				// front of it rather than the tokenizer saying "unexpected".
+				// An operator where no key stands before it: cut it as one anyway, so the
+				// parser can say what is missing in front of it rather than the tokenizer
+				// saying "unexpected".
 				for end < len(runes) && strings.ContainsRune(operatorRunes, runes[end]) {
 					end++
 				}
@@ -205,9 +186,8 @@ func isKeyRune(r rune) bool {
 	return r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
 }
 
-// isKeyWord says whether the word names a key of the grammar, in any of
-// its spellings. Only such a word is followed by an operator; "and",
-// "or" and a value are not.
+// isKeyWord says whether the word names a key of the grammar, in any of its
+// spellings.
 func isKeyWord(word string) bool {
 	return keyByName(strings.ToLower(word)) != nil
 }

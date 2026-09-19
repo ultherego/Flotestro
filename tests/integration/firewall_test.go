@@ -47,10 +47,7 @@ type firewallSnapshot struct {
 
 const firewallReason = "integration test of the firewall module"
 
-// TestFirewallTellsForeignTablesApart checks the ownership boundary. The
-// docker and firewalld tables are rewritten without the panel, so a rule in
-// them is neither ours nor persistent - and the operator is to see that
-// before starting to fix it.
+// TestFirewallTellsForeignTablesApart checks the ownership boundary.
 func TestFirewallTellsForeignTablesApart(t *testing.T) {
 	h := newHarness(t)
 
@@ -82,8 +79,7 @@ func TestFirewallTellsForeignTablesApart(t *testing.T) {
 }
 
 // TestRuleCuttingOffThePanelIsRejected guards the one rule that must not be
-// lost. Without the management channel the host stops answering and there
-// is nothing to undo the change with.
+// lost.
 func TestRuleCuttingOffThePanelIsRejected(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -104,8 +100,7 @@ func TestRuleCuttingOffThePanelIsRejected(t *testing.T) {
 }
 
 // TestPanelRuleLifecycle walks the whole path of a rule: creation,
-// connectivity confirmation and removal. After the test the host is left
-// without panel rules, as before it.
+// connectivity confirmation and removal.
 func TestPanelRuleLifecycle(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -310,15 +305,9 @@ func hostCapabilityOf(host hostView, name string) *hostCapability {
 	return nil
 }
 
-// TestUFWHostKeepsOwnershipInComments finds the host with ufw installed -
-// the Ubuntu host of the lab - and checks the adapter the way the doctrine
-// wants it. An active ufw holds the rules: the plan lists the ufw commands
-// the change will run, the rule goes in with the panel's marker in its
-// comment, the change is confirmed by connectivity, and the rule comes out
-// again by the same marker. An inactive ufw holds nothing: the host is
-// then to say so and name what the panel writes through instead - or why
-// nothing - and the lifecycle is skipped, because enabling ufw is the
-// operator's decision, not the test's.
+// TestUFWHostKeepsOwnershipInComments finds the host with ufw installed - the
+// Ubuntu host of the lab - and checks the adapter the way the doctrine wants
+// it.
 func TestUFWHostKeepsOwnershipInComments(t *testing.T) {
 	h := newHarness(t)
 
@@ -334,9 +323,9 @@ func TestUFWHostKeepsOwnershipInComments(t *testing.T) {
 			continue
 		}
 		if !capability.Available {
-			// A host with an inactive ufw and no nft has no firewall module to
-			// read: the capability itself carries the reason, and the host tab
-			// shows it instead of an empty rule list.
+			// A host with an inactive ufw and no nft has no firewall module to read:
+			// the capability itself carries the reason, and the host tab shows it
+			// instead of an empty rule list.
 			if strings.Contains(capability.Reason, "ufw") {
 				if !capability.ReadOnly || !strings.Contains(capability.Reason, "inactive") {
 					t.Errorf("host %s: an inactive ufw without nft is not read-only with a reason: %+v",
@@ -358,9 +347,7 @@ func TestUFWHostKeepsOwnershipInComments(t *testing.T) {
 
 	capability := hostCapabilityOf(host, "firewall")
 	if !state.UFW.Active {
-		// An installed but inactive ufw holds nothing. The host says so next
-		// to the adapter, and the adapter is the panel's own table - or, on
-		// a host without nft, nothing, with the reason.
+		// An installed but inactive ufw holds nothing.
 		if state.Adapter == "ufw" || capability.Features["ufw"] {
 			t.Errorf("an inactive ufw was taken for the adapter: %q, features %v", state.Adapter, capability.Features)
 		}
@@ -400,9 +387,9 @@ func TestUFWHostKeepsOwnershipInComments(t *testing.T) {
 		}, 2*time.Minute)
 	})
 
-	// The plan names the adapter and lists the ufw commands as the operator
-	// would type them: ufw is driven by its command line, and that is what
-	// the operator consents to.
+	// The plan names the adapter and lists the ufw commands as the operator would
+	// type them: ufw is driven by its command line, and that is what the operator
+	// consents to.
 	plan := firewallPlan(t, h, host.ID, rule)
 	if plan.Refusal != "" {
 		t.Fatalf("the plan refused the rule: %s", plan.Refusal)
@@ -430,9 +417,9 @@ func TestUFWHostKeepsOwnershipInComments(t *testing.T) {
 		t.Errorf("change without a connectivity confirmation: %s", lastMessage(attempts))
 	}
 
-	// The rule is read back the way ufw would delete it, with the panel's
-	// marker at the front of the comment: the marker is the only durable
-	// sign of ownership, because ufw numbers shift with every deletion.
+	// The rule is read back the way ufw would delete it, with the panel's marker
+	// at the front of the comment: the marker is the only durable sign of
+	// ownership, because ufw numbers shift with every deletion.
 	after := panelRule(t, h, host.ID, name)
 	if after.Table != "ufw" || after.Chain != "input" {
 		t.Errorf("the rule landed outside ufw: %+v", after)
@@ -470,10 +457,8 @@ func TestUFWHostKeepsOwnershipInComments(t *testing.T) {
 
 func hostFirewallSnapshot(t *testing.T, h *harness, hostID string) firewallSnapshot {
 	t.Helper()
-	// A rule change is settled by the ruleset fingerprint, so the snapshot
-	// must come from this moment, not from the last inventory cycle. The
-	// previous test run leaves the host in a state other than the recorded
-	// image and the plan bounces off precondition_failed.
+	// A rule change is settled by the ruleset fingerprint, so the snapshot must
+	// come from this moment, not from the last inventory cycle.
 	h.runOperation(hostID, map[string]any{
 		"action": "inventory.refresh", "reason": firewallReason,
 		"payload": map[string]any{"inventory": map[string]any{"modules": []string{"firewall"}}},

@@ -1,10 +1,5 @@
 // Package logs reads the logs of the host: the system journal and the files
 // from the allowlist.
-//
-// Reading a file is not a general "read this path" operation. A panel that can
-// read any file of root can read private keys and /etc/shadow - which is why
-// the scope is enumerated by the administrator of the host and not given in the
-// task.
 package logs
 
 import (
@@ -24,11 +19,6 @@ import (
 const AllowlistPath = "/etc/flotestro/logfiles.allow"
 
 // defaultPatterns apply when the administrator named none of their own.
-//
-// The list is deliberately narrow: it covers the places where distributions
-// keep their logs and nothing beyond them. Extending it is a decision of the
-// administrator of the host and needs a write in /etc, not a change in the
-// panel.
 var defaultPatterns = []string{
 	"/var/log/*.log",
 	"/var/log/syslog",
@@ -87,10 +77,8 @@ func LoadAllowlist(path string) Allowlist {
 	return Allowlist{Patterns: patterns, Source: path}
 }
 
-// Allows checks whether the path fits within the scope.
-//
-// The path is cleaned first: a ".." inside would allow leaving the directory
-// the pattern describes even though the text matches the pattern.
+// Allows checks whether the path fits within the scope. The path is cleaned
+// first: a ".
 func (a Allowlist) Allows(path string) bool {
 	if !strings.HasPrefix(path, "/") {
 		return false
@@ -177,9 +165,6 @@ func Read(allowlist Allowlist, path string, lines uint32) (Fragment, error) {
 
 // openWithoutSymlinks opens a file while refusing to follow symbolic links at
 // any level of the path.
-//
-// A symlink in the log directory would allow any file of root to be read despite
-// a correct allowlist: a pattern describes the path, not where it really leads.
 func openWithoutSymlinks(path string) (*os.File, error) {
 	fd, err := unix.Openat2(unix.AT_FDCWD, path, &unix.OpenHow{
 		Flags:   unix.O_RDONLY | unix.O_CLOEXEC,

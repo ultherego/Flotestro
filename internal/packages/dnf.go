@@ -321,7 +321,7 @@ var ErrVersionlockMissing = errors.New("this host has no dnf versionlock plugin,
 
 // versionlockPaths are the files a distribution installs the plugin as: dnf4
 // loads it as a Python module next to the other commands of dnf-plugins-core,
-// dnf5 as a shared library of libdnf5, and both keep the configuration of the
+// dnf5 as a shared library of libdnf5, and both keep the configuration of the.
 var versionlockPaths = []string{
 	"/usr/lib/python3*/site-packages/dnf-plugins/versionlock.py",
 	"/usr/lib64/python3*/site-packages/dnf-plugins/versionlock.py",

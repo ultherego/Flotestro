@@ -2,13 +2,9 @@ package gateway
 
 import "testing"
 
-// TestCloneReactionFollowsThePolicy guards the decision on a copied
-// identity: the report policy records and lets the newer session stand,
-// the quarantine policy cuts the host off with both sessions, and no
-// detection is no reaction under either. A sighting from the host's own
-// address is never a quarantine - a machine back from a crash looks like
-// that. The audit trail names the policy applied in every case, and an
-// unset policy is the packaged default.
+// TestCloneReactionFollowsThePolicy guards the decision on a copied identity:
+// the report policy records and lets the newer session stand, the quarantine
+// policy cuts the host off with both sessions, and no detection is no reaction
 func TestCloneReactionFollowsThePolicy(t *testing.T) {
 	elsewhere := cloneSighting{Detected: true}
 	here := cloneSighting{Detected: true, SameAddress: true}
@@ -36,9 +32,8 @@ func TestCloneReactionFollowsThePolicy(t *testing.T) {
 }
 
 // TestSameAddressIgnoresThePort guards the comparison of two sessions'
-// addresses: the port is the connection's and differs every time, an
-// unknown older address matches nothing, and a bare address without a
-// port is compared as it is.
+// addresses: the port is the connection's and differs every time, an unknown
+// older address matches nothing, and a bare address without a port is compared
 func TestSameAddressIgnoresThePort(t *testing.T) {
 	cases := []struct {
 		a, b string
@@ -57,9 +52,9 @@ func TestSameAddressIgnoresThePort(t *testing.T) {
 	}
 }
 
-// TestClonePolicyIsReadStrictly guards the configuration: the two words
-// are accepted in any case and spacing, empty is the default, and a word
-// the gateway does not know is refused rather than taken for one of them.
+// TestClonePolicyIsReadStrictly guards the configuration: the two words are
+// accepted in any case and spacing, empty is the default, and a word the
+// gateway does not know is refused rather than taken for one of them.
 func TestClonePolicyIsReadStrictly(t *testing.T) {
 	for value, want := range map[string]ClonePolicy{
 		"": CloneQuarantine, "report": CloneReport, " Quarantine ": CloneQuarantine, "REPORT": CloneReport,

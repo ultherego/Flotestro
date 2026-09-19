@@ -20,10 +20,8 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// fakeHelper answers requests over a unix socket the way the real helper
-// does, so the executor reaches it through the unchanged client. The answer
-// is decided by the test, which lets it look at the journal at the exact
-// moment the helper would be acting on the host.
+// fakeHelper answers requests over a unix socket the way the real helper does,
+// so the executor reaches it through the unchanged client.
 type fakeHelper struct {
 	calls  atomic.Int32
 	answer func(*helperv1.HelperRequest) *helperv1.HelperResponse
@@ -82,9 +80,9 @@ func restartEnvelope(taskID, key string) *agentv1.TaskEnvelope {
 	return task
 }
 
-// progressLog records the reports an executor sends, from whichever
-// goroutine sends them: the acknowledgement of a task goes out on the
-// goroutine of its delivery while the test reads on its own.
+// progressLog records the reports an executor sends, from whichever goroutine
+// sends them: the acknowledgement of a task goes out on the goroutine of its
+// delivery while the test reads on its own.
 type progressLog struct {
 	mu      sync.Mutex
 	reports []*agentv1.TaskProgress
@@ -131,10 +129,9 @@ func inFlightFiles(t *testing.T, dir string) []string {
 	return markers
 }
 
-// TestTheMarkerIsDownBeforeTheHelperActsAndGoneWithTheResult guards the
-// order the scenario depends on: at the moment the helper is touching the
-// host the journal already says so, and once the result is stored nothing
-// is left that could be judged as a restart.
+// TestTheMarkerIsDownBeforeTheHelperActsAndGoneWithTheResult guards the order
+// the scenario depends on: at the moment the helper is touching the host the
+// journal already says so, and once the result is stored nothing is left that
 func TestTheMarkerIsDownBeforeTheHelperActsAndGoneWithTheResult(t *testing.T) {
 	dir := t.TempDir()
 	journal, err := NewIdempotencyJournal(dir, time.Hour)
@@ -176,10 +173,8 @@ func TestTheMarkerIsDownBeforeTheHelperActsAndGoneWithTheResult(t *testing.T) {
 }
 
 // TestARestartInFlightAnswersWithAnUnknownOutcome is the scenario itself: the
-// agent went down between the order and the result, and the task comes back
-// to a new process over the same journal. The answer names what was started
-// and when, the helper is not asked again, and the next delivery replays the
-// same answer instead of judging the host once more.
+// agent went down between the order and the result, and the task comes back to
+// a new process over the same journal.
 func TestARestartInFlightAnswersWithAnUnknownOutcome(t *testing.T) {
 	dir := t.TempDir()
 	journal, err := NewIdempotencyJournal(dir, time.Hour)
@@ -254,9 +249,8 @@ func TestARestartInFlightAnswersWithAnUnknownOutcome(t *testing.T) {
 }
 
 // TestAnUnknownPackageOutcomeCarriesWhatTheAdapterCanSay guards the panel's
-// view of the package database: a result that knows the state carries it
-// under the same field as a transaction would, and a result that does not
-// carries no package detail at all.
+// view of the package database: a result that knows the state carries it under
+// the same field as a transaction would, and a result that does not carries no
 func TestAnUnknownPackageOutcomeCarriesWhatTheAdapterCanSay(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -315,8 +309,8 @@ func TestAnUnknownPackageOutcomeCarriesWhatTheAdapterCanSay(t *testing.T) {
 }
 
 // TestAReadLeavesNoMarker guards the boundary of the marker: a read changes
-// nothing, so repeating it after a restart is right, and the journal must
-// not make it look like an interrupted change.
+// nothing, so repeating it after a restart is right, and the journal must not
+// make it look like an interrupted change.
 func TestAReadLeavesNoMarker(t *testing.T) {
 	dir := t.TempDir()
 	journal, err := NewIdempotencyJournal(dir, time.Hour)
@@ -347,10 +341,7 @@ func TestAReadLeavesNoMarker(t *testing.T) {
 
 // TestARedeliveryDuringTheOperationIsAcknowledgedNotRefused guards the other
 // reading of a marker: while the first delivery is still inside the helper,
-// the marker means "in progress here". The redelivered attempt is answered
-// with a progress report that names the running attempt - neither run
-// again, nor declared unknown, nor refused, because a refusal would make
-// the panel fail a job the host is carrying out.
+// the marker means "in progress here".
 func TestARedeliveryDuringTheOperationIsAcknowledgedNotRefused(t *testing.T) {
 	dir := t.TempDir()
 	journal, err := NewIdempotencyJournal(dir, time.Hour)
@@ -385,9 +376,8 @@ func TestARedeliveryDuringTheOperationIsAcknowledgedNotRefused(t *testing.T) {
 	if second.GetTaskId() != "task-2" {
 		t.Errorf("the placeholder does not point at the attempt: %q", second.GetTaskId())
 	}
-	// The redelivered attempt is acknowledged as in progress and nothing
-	// else: it is neither accepted nor started on its own, the execution
-	// it waits on was.
+	// The redelivered attempt is acknowledged as in progress and nothing else: it
+	// is neither accepted nor started on its own, the execution it waits on was.
 	if stages := reports.stagesOf("task-2"); len(stages) != 1 || stages[0] != StageInProgress {
 		t.Fatalf("the redelivery produced the stages %v, expected one in_progress", stages)
 	}
@@ -414,9 +404,8 @@ func TestARedeliveryDuringTheOperationIsAcknowledgedNotRefused(t *testing.T) {
 		t.Fatal("the first delivery did not finish")
 	}
 
-	// The result is owed to both attempts: the one that did the work, and
-	// the newest one the panel delivered while it ran. The copy is a replay
-	// of the same result under the other identifier.
+	// The result is owed to both attempts: the one that did the work, and the
+	// newest one the panel delivered while it ran.
 	copied := executor.RedeliveredCopy(result)
 	if copied == nil {
 		t.Fatal("no copy of the result for the redelivered attempt")
@@ -451,12 +440,9 @@ func TestARedeliveryDuringTheOperationIsAcknowledgedNotRefused(t *testing.T) {
 	}
 }
 
-// TestTheNewestRedeliveredAttemptGetsTheResult guards what the agent
-// remembers when the panel gives up more than once during one operation:
-// each reclaim closes the previous attempt on the panel, so only the newest
-// one is still open there, and only it is owed the copy. The check that
-// sits in front of the locks of the session records the attempt the same
-// way as Execute does.
+// TestTheNewestRedeliveredAttemptGetsTheResult guards what the agent remembers
+// when the panel gives up more than once during one operation: each reclaim
+// closes the previous attempt on the panel, so only the newest one is still
 func TestTheNewestRedeliveredAttemptGetsTheResult(t *testing.T) {
 	dir := t.TempDir()
 	journal, err := NewIdempotencyJournal(dir, time.Hour)
@@ -530,8 +516,8 @@ func TestTheNewestRedeliveredAttemptGetsTheResult(t *testing.T) {
 }
 
 // TestTheJournalKeepsMarkersApartFromResults guards the file discipline: the
-// marker has its own name next to the result, a result closes it, and the
-// list at startup sees only markers that are still open.
+// marker has its own name next to the result, a result closes it, and the list
+// at startup sees only markers that are still open.
 func TestTheJournalKeepsMarkersApartFromResults(t *testing.T) {
 	dir := t.TempDir()
 	journal, err := NewIdempotencyJournal(dir, time.Hour)
@@ -571,10 +557,8 @@ func TestTheJournalKeepsMarkersApartFromResults(t *testing.T) {
 }
 
 // TestATaskIsAcceptedThenStartedAroundTheModuleCall guards the order the
-// panel's leases rest on: "accepted" goes out before the task queues for
-// the resources of the host, "started" once it holds them and the marker
-// is down - at the moment the helper acts both have been sent - and the
-// result is the only thing that follows.
+// panel's leases rest on: "accepted" goes out before the task queues for the
+// resources of the host, "started" once it holds them and the marker is down -
 func TestATaskIsAcceptedThenStartedAroundTheModuleCall(t *testing.T) {
 	dir := t.TempDir()
 	journal, err := NewIdempotencyJournal(dir, time.Hour)
@@ -619,8 +603,8 @@ func TestATaskIsAcceptedThenStartedAroundTheModuleCall(t *testing.T) {
 }
 
 // TestAReadIsAcceptedAndStartedWithoutClaims: a read takes no resource and
-// leaves no marker, and still tells the panel where it stands - the
-// dispatch lease of a read is as short as any other.
+// leaves no marker, and still tells the panel where it stands - the dispatch
+// lease of a read is as short as any other.
 func TestAReadIsAcceptedAndStartedWithoutClaims(t *testing.T) {
 	journal, err := NewIdempotencyJournal(t.TempDir(), time.Hour)
 	if err != nil {
@@ -650,7 +634,6 @@ func TestAReadIsAcceptedAndStartedWithoutClaims(t *testing.T) {
 // TestAWaitForABusyLockIsReportedBetweenAcceptedAndStarted: the executor
 // passes the blocker the locks name on to the panel as an awaiting_lock
 // report, after accepted and before started, so that the host is shown as
-// waiting and on what.
 func TestAWaitForABusyLockIsReportedBetweenAcceptedAndStarted(t *testing.T) {
 	journal, err := NewIdempotencyJournal(t.TempDir(), time.Hour)
 	if err != nil {
@@ -703,10 +686,8 @@ func TestAWaitForABusyLockIsReportedBetweenAcceptedAndStarted(t *testing.T) {
 	}
 }
 
-// TestARefusalByTheLockIsNotRemembered: a task that did not get its
-// resource is refused for this delivery, not for the key. The next
-// delivery of the same key finds the resource free and runs - it must not
-// be answered with the old refusal from the journal.
+// TestARefusalByTheLockIsNotRemembered: a task that did not get its resource
+// is refused for this delivery, not for the key.
 func TestARefusalByTheLockIsNotRemembered(t *testing.T) {
 	dir := t.TempDir()
 	journal, err := NewIdempotencyJournal(dir, time.Hour)
@@ -749,12 +730,8 @@ func TestARefusalByTheLockIsNotRemembered(t *testing.T) {
 	}
 }
 
-// TestAChangedPreconditionAfterTheWaitIsRefusedWithoutTouchingTheHost:
-// the preconditions are checked again once the task holds its resources.
-// A task accepted on one boot that waited behind a lock into the next
-// boot is refused with its own code, the helper is never asked, and
-// nothing is remembered under the key - the panel plans again, and the
-// new plan is a new delivery.
+// TestAChangedPreconditionAfterTheWaitIsRefusedWithoutTouchingTheHost: the
+// preconditions are checked again once the task holds its resources.
 func TestAChangedPreconditionAfterTheWaitIsRefusedWithoutTouchingTheHost(t *testing.T) {
 	dir := t.TempDir()
 	journal, err := NewIdempotencyJournal(dir, time.Hour)
@@ -824,9 +801,9 @@ func TestAChangedPreconditionAfterTheWaitIsRefusedWithoutTouchingTheHost(t *test
 	if files := inFlightFiles(t, dir); len(files) != 0 {
 		t.Errorf("a task refused before the host was touched left a marker: %v", files)
 	}
-	// The refusal is the answer to this plan, like a precondition refused
-	// before the wait: a redelivery of the same plan meets the same host
-	// and replays it rather than judging again. A new plan is a new key.
+	// The refusal is the answer to this plan, like a precondition refused before
+	// the wait: a redelivery of the same plan meets the same host and replays it
+	// rather than judging again.
 	if stored := journal.Lookup("key-1"); stored == nil || stored.GetErrorCode() != RejectPreconditionChanged {
 		t.Errorf("the refusal was not stored as the result of the key: %+v", stored)
 	}
@@ -847,18 +824,15 @@ func TestAChangedPreconditionAfterTheWaitIsRefusedWithoutTouchingTheHost(t *test
 
 // TestAJournalThatCannotTakeTheMarkerStartsNothing is the full disk of the
 // document's scenario list: the state directory refuses the write of the
-// marker, so the helper is never asked and the refusal is typed - the
-// operator reads a cause, not an internal error, and a delivery after the
-// disk is freed runs the operation as if for the first time.
+// marker, so the helper is never asked and the refusal is typed - the operator
 func TestAJournalThatCannotTakeTheMarkerStartsNothing(t *testing.T) {
 	dir := t.TempDir()
 	journal, err := NewIdempotencyJournal(dir, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A file where the journal expects its directory: every write under it
-	// fails the way a full or read-only file system fails, whoever runs the
-	// test.
+	// A file where the journal expects its directory: every write under it fails
+	// the way a full or read-only file system fails, whoever runs the test.
 	blocked := filepath.Join(dir, "blocked")
 	if err := os.WriteFile(blocked, nil, 0o600); err != nil {
 		t.Fatal(err)

@@ -839,7 +839,7 @@ func hostHasCapability(host *hosts.Host, capability string) bool {
 
 // planReferenceConflict says whether a package change is bound to a plan the
 // host no longer computes: plan_expired when the envelope is past its expiry,
-// replan_required when the newest plan the host computed names another planner
+// replan_required when the newest plan the host computed names another
 func (s *Server) planReferenceConflict(ctx context.Context, hostID string,
 	action opspec.ActionType, payload opspec.Payload) (string, string) {
 	var reference *opspec.PlanReference

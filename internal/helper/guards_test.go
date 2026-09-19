@@ -190,9 +190,7 @@ func TestReadsAndPlansTakeNoGuard(t *testing.T) {
 }
 
 func TestAnAuthoritativeCertificateFactsReadTakesTheGuard(t *testing.T) {
-	// An ordinary facts read looks and takes nothing. An authoritative one
-	// replaces the registry, so it is a write and must not run next to a
-	// deployment that writes the registry as well.
+	// An ordinary facts read looks and takes nothing.
 	facts := &helperv1.CertificateRequest{Operation: helperv1.CertificateRequest_OPERATION_FACTS}
 	if class := certificateGuard(facts); class != "" {
 		t.Errorf("an ordinary facts read takes %q", class)

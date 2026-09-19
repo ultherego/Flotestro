@@ -127,8 +127,7 @@ func TestCompareAppliesTheOperator(t *testing.T) {
 
 // TestSelectorTreeIsACampaignSelector: the scope of a rule is the same
 // structure a campaign selector is, so the two compile into the same host
-// query. Every set field is one condition, all of them hold at once, and
-// the groups are alternatives.
+// query.
 func TestSelectorTreeIsACampaignSelector(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -268,10 +267,8 @@ func TestPointsCarryRatesBetweenConsecutiveSamples(t *testing.T) {
 	}
 }
 
-// A "for" window says the condition held that long, and holding is
-// something somebody watched. These check the two halves of that: a hole
-// in the samples restarts the window, and a rule left without readings
-// holds its episode instead of letting the window run on to firing.
+// A "for" window says the condition held that long, and holding is something
+// somebody watched.
 func TestAGapInTheSamplesRestartsTheWindow(t *testing.T) {
 	started := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
 	gap := maxSampleGap
@@ -286,9 +283,9 @@ func TestAGapInTheSamplesRestartsTheWindow(t *testing.T) {
 		t.Errorf("an unbroken run counts from %s rather than from the start of the episode", since)
 	}
 
-	// The host went quiet after the third sample and came back at the
-	// eighth minute: the window counts from the reading that came back,
-	// not from the condition nobody was watching.
+	// The host went quiet after the third sample and came back at the eighth
+	// minute: the window counts from the reading that came back, not from the
+	// condition nobody was watching.
 	broken := []time.Time{
 		started.Add(1 * time.Minute), started.Add(2 * time.Minute), started.Add(3 * time.Minute),
 		started.Add(8 * time.Minute), started.Add(9 * time.Minute), started.Add(10 * time.Minute),
@@ -342,9 +339,9 @@ func TestARuleWithoutDataHoldsItsEpisodeRatherThanFiring(t *testing.T) {
 	if noDataHold(pending, started.Add(time.Minute)) {
 		t.Error("a late sample restarted the window")
 	}
-	// Past it the episode is held: the window restarts, so however long
-	// the host stays silent the episode cannot reach its firing point on
-	// the strength of that silence.
+	// Past it the episode is held: the window restarts, so however long the host
+	// stays silent the episode cannot reach its firing point on the strength of
+	// that silence.
 	if !noDataHold(pending, started.Add(5*time.Minute)) {
 		t.Error("an episode without data for five minutes was not held")
 	}

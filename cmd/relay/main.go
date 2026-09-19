@@ -293,7 +293,7 @@ func runCommand(args []string, log *slog.Logger) error {
 	}
 	// The accepts of the listener are watched, because that is what the liveness
 	// answer is about: a relay that has stopped taking the connections of its
-	// site is the wedged one a runtime should restart, and a dial of the socket
+	// site is the wedged one a runtime should restart, and a dial of the socket.
 	watched := relay.WatchListener(listener)
 	health := relay.NewHealth(relay.HealthOptions{
 		Relay:    proxy,

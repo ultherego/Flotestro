@@ -7,13 +7,8 @@ import (
 	"strings"
 )
 
-// ModulePlan describes the difference between the module block found and
-// the one requested on a single host.
-//
-// "Block module X" is a file entry on one host, already present on another,
-// and on a third the module happens to be running and holding other modules
-// - then the entry takes effect only after a reboot. The operator is meant
-// to see this before approving.
+// ModulePlan describes the difference between the module block found and the
+// one requested on a single host.
 type ModulePlan struct {
 	Module string `json:"module"`
 	// Blacklist says whether the order blocks or unblocks.
@@ -30,9 +25,9 @@ type ModulePlan struct {
 	Action  string   `json:"action"`
 	Changes []string `json:"changes,omitempty"`
 
-	// ManagedHash is the fingerprint of the panel's blacklist file: the
-	// write overwrites it whole, so a file changed after planning is a
-	// different change.
+	// ManagedHash is the fingerprint of the panel's blacklist file: the write
+	// overwrites it whole, so a file changed after planning is a different
+	// change.
 	ManagedHash string `json:"managed_hash,omitempty"`
 	Refusal     string `json:"refusal,omitempty"`
 
@@ -91,9 +86,9 @@ func PlanBlacklist(state Snapshot, module string, block bool) ModulePlan {
 	return plan
 }
 
-// Refuse records a refusal reason learned after the differences were
-// computed and recomputes the fingerprint: a plan with a refusal is a
-// different answer than a plan without one.
+// Refuse records a refusal reason learned after the differences were computed
+// and recomputes the fingerprint: a plan with a refusal is a different answer
+// than a plan without one.
 func (p *ModulePlan) Refuse(reason string) {
 	p.Refusal = reason
 	p.PlanHash = modulePlanFingerprint(*p)

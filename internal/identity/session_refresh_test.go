@@ -244,9 +244,8 @@ func TestATickWalksEveryDueSession(t *testing.T) {
 }
 
 func TestTheRefresherIsIdleWithoutAProviderOrAnInterval(t *testing.T) {
-	// A token-only deployment has no provider; a zero interval turns the
-	// loop off. Either way Run returns rather than waiting on a ticker that
-	// would never do anything.
+	// A token-only deployment has no provider; a zero interval turns the loop
+	// off.
 	store := &fakeGroupStore{due: []authz.RefreshableSession{testSession}}
 	done := make(chan struct{})
 	go func() {

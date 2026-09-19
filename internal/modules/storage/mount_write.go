@@ -12,9 +12,8 @@ import (
 const FstabPath = "/etc/fstab"
 
 var (
-	// The mount source allows what can be checked and what does not depend
-	// on the disk detection order: durable identifiers and paths in /dev. A
-	// network name is a separate form here, because it is not a path.
+	// The mount source allows what can be checked and what does not depend on the
+	// disk detection order: durable identifiers and paths in /dev.
 	durableIdentifier = regexp.MustCompile(`^(UUID|PARTUUID|LABEL|PARTLABEL)=[A-Za-z0-9._:-]{1,64}$`)
 	devicePath        = regexp.MustCompile(`^/dev/[A-Za-z0-9/._-]{1,120}$`)
 	mountOptions      = regexp.MustCompile(`^[A-Za-z0-9=,._:/@%+-]{0,256}$`)
@@ -22,11 +21,6 @@ var (
 )
 
 // ValidateSource checks a mount source.
-//
-// The panel prefers a durable identifier to /dev/sdX: the device name
-// depends on the detection order and after a reboot can point at a
-// different disk. A path in /dev is allowed, because LVM volumes and arrays
-// have stable names in /dev/mapper and /dev/md.
 func ValidateSource(source string) error {
 	if durableIdentifier.MatchString(source) || devicePath.MatchString(source) {
 		return nil
@@ -68,10 +62,6 @@ func ValidateOptions(options, fsType string) error {
 }
 
 // FstabLine composes an entry for /etc/fstab.
-//
-// Special characters are written in octal, the way fstab itself does it: a
-// path with a space written directly would fall apart into two fields and
-// the entry would point at an entirely different place.
 func FstabLine(source, target, fsType, options string) string {
 	if options == "" {
 		options = "defaults"
@@ -93,10 +83,6 @@ func encode(path string) string {
 }
 
 // WriteFstabEntry adds or replaces the panel entry.
-//
-// The write is atomic: the file is created next to the target and replaces
-// the previous one only when complete. An fstab read half-way by systemd
-// at a reboot would mean a host that does not come up.
 func WriteFstabEntry(path, source, target, fsType, options string) error {
 	content, err := os.ReadFile(path)
 	if err != nil {
@@ -168,9 +154,8 @@ func writeAtomically(path, content string) error {
 	if err := os.WriteFile(temporary, []byte(content), 0o644); err != nil {
 		return err
 	}
-	// fsync of the file and the directory: without it the change may not
-	// survive a power failure, and fstab is a file read precisely after
-	// such an event.
+	// fsync of the file and the directory: without it the change may not survive
+	// a power failure, and fstab is a file read precisely after such an event.
 	file, err := os.Open(temporary)
 	if err == nil {
 		_ = file.Sync()

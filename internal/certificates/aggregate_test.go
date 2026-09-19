@@ -10,10 +10,8 @@ import (
 	"github.com/ultherego/flotestro/internal/paging"
 )
 
-// The fleet list is keyed on the expiry, the host and the path, and the
-// key is read back out of the certificate the way the query reads it. If
-// the two ever disagree a page boundary either skips a certificate or
-// shows one twice - which on this screen means a deadline nobody sees.
+// The fleet list is keyed on the expiry, the host and the path, and the key is
+// read back out of the certificate the way the query reads it.
 
 const sampleHostID = "9b1c0e1a-4d3f-4a90-8b2c-77e6f5a4d3c2"
 
@@ -70,9 +68,9 @@ func TestCursorAfterReadsTheRowTheQuerySorted(t *testing.T) {
 	}
 }
 
-// Every bucket the screen shows has a name here, in the order the screen
-// shows them: the nearest deadline first and the certificates nobody
-// could date last, apart rather than as "valid for long".
+// Every bucket the screen shows has a name here, in the order the screen shows
+// them: the nearest deadline first and the certificates nobody could date
+// last, apart rather than as "valid for long".
 func TestTimelineBucketsAreNamedInOrder(t *testing.T) {
 	want := []string{"expired", "7 days", "30 days", "90 days", "later", "no expiry"}
 	if len(TimelineBuckets) != len(want) {

@@ -1,10 +1,4 @@
 // Package kernel describes the kernel settings and modules of a host.
-//
-// The module does not enumerate the whole of /proc/sys: it holds a few
-// thousand keys about which the panel can say nothing sensible, and reading
-// them every cycle would be a cost without an answer. The panel shows a
-// profile - the set of keys somebody actually asks about - and lets the rest
-// be read on request.
 package kernel
 
 import (
@@ -20,9 +14,8 @@ const (
 	SysctlPath   = "/usr/sbin/sysctl"
 	ModprobePath = "/usr/sbin/modprobe"
 	LsmodPath    = "/usr/sbin/lsmod"
-	// SysctlDir holds the panel's persistent settings. A file of its own,
-	// not a shared one: a change by the panel must not rewrite what somebody
-	// else set.
+	// SysctlDir holds the panel's persistent settings. A file of its own, not a
+	// shared one: a change by the panel must not rewrite what somebody else set.
 	SysctlDir     = "/etc/sysctl.d"
 	SysctlFile    = SysctlDir + "/90-flotestro.conf"
 	ModprobeDir   = "/etc/modprobe.d"
@@ -31,11 +24,6 @@ const (
 )
 
 // DefaultProfile lists the keys the panel shows without being asked.
-//
-// This is not a list of everything that may be changed - it is a list of
-// what the operator asks about most often: memory, network and process
-// limits. The rest is available on request, as long as it lies within the
-// allowed namespaces.
 var DefaultProfile = []string{
 	"vm.swappiness",
 	"vm.dirty_ratio",
@@ -53,11 +41,6 @@ var DefaultProfile = []string{
 }
 
 // allowedNamespaces lists the /proc/sys branches the panel changes.
-//
-// Forbidding arbitrary writes matters here: /proc/sys also holds switches
-// that disable kernel protections or stop the host. The panel changes what
-// can be described and reverted, and leaves the rest to the host
-// administrator.
 var allowedNamespaces = []string{"vm.", "net.", "fs.", "kernel.", "user."}
 
 // forbiddenKeys lists the settings the panel does not touch even though they
@@ -86,9 +69,7 @@ var keyName = regexp.MustCompile(`^[a-z0-9_]+(\.[a-z0-9_*-]+){1,8}$`)
 // Setting is a single sysctl value.
 type Setting struct {
 	Key string `json:"key"`
-	// Current is the value in effect now, Desired - the one written by the
-	// panel. Different values mean a setting that waits for a reboot or was
-	// changed outside the panel.
+	// Current is the value in effect now, Desired - the one written by the panel.
 	Current string `json:"current,omitempty"`
 	Desired string `json:"desired,omitempty"`
 	// Source says which file sets the value persistently. Empty means the
@@ -148,10 +129,6 @@ func ValidateKey(key string) error {
 }
 
 // ValidateValue checks a setting value.
-//
-// sysctl values are numbers or short lists of numbers; anything else points
-// to an attempt to write something the kernel will not accept - or to smuggle
-// a newline into the configuration file.
 func ValidateValue(value string) error {
 	if value == "" {
 		return fmt.Errorf("the setting requires a value")
@@ -223,9 +200,8 @@ func ParseValues(output string) map[string]string {
 		if !ok {
 			continue
 		}
-		// The kernel separates values with tabs; they are normalised to
-		// spaces so that the comparison with the written value does not
-		// depend on whitespace.
+		// The kernel separates values with tabs; they are normalised to spaces so
+		// that the comparison with the written value does not depend on whitespace.
 		result[strings.TrimSpace(key)] = strings.Join(strings.Fields(value), " ")
 	}
 	return result

@@ -1,17 +1,5 @@
 // Package jcs renders JSON in the canonical form of RFC 8785, the JSON
 // Canonicalization Scheme.
-//
-// A fingerprint is a hash over a document, and two sides compare it: the
-// panel that recorded a consent and the agent that received the task, or
-// the panel today and the panel after an upgrade. encoding/json is stable
-// for a given struct, but it is not a contract: it keeps the declaration
-// order of fields, escapes HTML characters and formats floats in its own
-// way. None of that is what another implementation would produce. The
-// canonical form is: object members sorted by the UTF-16 code units of
-// their names, no whitespace, numbers as ECMAScript prints them, strings
-// escaped only where the grammar requires it. Any implementation of the
-// RFC produces the same bytes for the same document, so a hash over them
-// is a hash over the document rather than over one library's habits.
 package jcs
 
 import (
@@ -29,12 +17,6 @@ import (
 )
 
 // Canonical renders a value as canonical JSON.
-//
-// The value goes through encoding/json first, so struct tags, omitempty and
-// custom marshalers keep their meaning; the result is then rendered anew in
-// the canonical form. A json.RawMessage is taken as the document it holds.
-// Numbers are IEEE 754 doubles, as the RFC requires: an integer beyond 2^53
-// is rounded the way every JSON parser rounds it.
 func Canonical(v any) ([]byte, error) {
 	encoded, err := json.Marshal(v)
 	if err != nil {
@@ -118,10 +100,8 @@ func write(out *bytes.Buffer, value any) error {
 	return nil
 }
 
-// lessUTF16 orders two member names by their UTF-16 code units, the order
-// the RFC prescribes. It is the order of the code points for the Basic
-// Multilingual Plane; a supplementary character sorts by its surrogates,
-// so an emoji comes before U+FB33 although its code point is higher.
+// lessUTF16 orders two member names by their UTF-16 code units, the order the
+// RFC prescribes.
 func lessUTF16(a, b string) bool {
 	if isASCII(a) && isASCII(b) {
 		return a < b
@@ -144,11 +124,7 @@ func isASCII(s string) bool {
 	return true
 }
 
-// writeString escapes a string the way RFC 8785 section 3.2.2.2 requires:
-// the quotation mark, the reverse solidus and the control characters below
-// U+0020, the latter with their short forms where JSON has them and with a
-// lowercase \u00xx otherwise. Everything else, non-ASCII included, is
-// written as it is.
+// writeString escapes a string the way RFC 8785 section 3. 2. 2.
 func writeString(out *bytes.Buffer, s string) {
 	out.WriteByte('"')
 	start := 0
@@ -187,10 +163,8 @@ func writeString(out *bytes.Buffer, s string) {
 const hexDigits = "0123456789abcdef"
 
 // FormatNumber prints a double the way ECMAScript's Number::toString does,
-// which is what the RFC prescribes for numbers: the shortest digits that
-// read back as the same value, plain for magnitudes from 1e-6 up to 1e21,
-// with an exponent outside that range. NaN and the infinities are not JSON
-// and are refused; a negative zero prints as 0.
+// which is what the RFC prescribes for numbers: the shortest digits that read
+// back as the same value, plain for magnitudes from 1e-6 up to 1e21, with an
 func FormatNumber(f float64) (string, error) {
 	if math.IsNaN(f) || math.IsInf(f, 0) {
 		return "", fmt.Errorf("jcs: %v is not a JSON number", f)
@@ -202,9 +176,8 @@ func FormatNumber(f float64) (string, error) {
 		positive, err := FormatNumber(-f)
 		return "-" + positive, err
 	}
-	// The shortest round-trip digits and the decimal exponent come from
-	// the 'e' format: d.ddde±xx. With k digits and the value s × 10^(n-k)
-	// the exponent n of the specification is the printed one plus one.
+	// The shortest round-trip digits and the decimal exponent come from the 'e'
+	// format: d.
 	shortest := strconv.FormatFloat(f, 'e', -1, 64)
 	mantissa, exponent, _ := strings.Cut(shortest, "e")
 	digits := strings.Replace(mantissa, ".", "", 1)

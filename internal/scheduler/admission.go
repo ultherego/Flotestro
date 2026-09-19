@@ -12,9 +12,6 @@ import (
 )
 
 // Budgets is the part of the capacity budgets the scheduler asks.
-//
-// An interface rather than the store itself: the decision is to be checked
-// without a database, and the scheduler needs the answer, not the tables.
 type Budgets interface {
 	Acquire(ctx context.Context, owner, claimant string, class budgets.Class,
 		needs []budgets.Need) (budgets.Refusal, error)
@@ -27,20 +24,14 @@ type WaitRecorder interface {
 	SetWaitReason(ctx context.Context, jobID, reason string) error
 }
 
-// Topology tells where the hosts of the queued tasks stand: the failure
-// domain the budgets are keyed by, which the queue does not carry. The
-// budget store answers it; a scheduler without one places no host in a
-// domain, and loads no domain budget.
+// Topology tells where the hosts of the queued tasks stand: the failure domain
+// the budgets are keyed by, which the queue does not carry.
 type Topology interface {
 	FailureDomains(ctx context.Context, hostIDs []string) (map[string]string, error)
 }
 
-// admission decides, task by task, whether the fleet has room for it.
-//
-// A campaign asks the same question for every one of its hosts. A task
-// ordered by hand used to walk past it: fifty restarts clicked host by host
-// were fifty mutations nobody admitted, and the limit the fleet decided on
-// held only for those who went through a campaign.
+// admission decides, task by task, whether the fleet has room for it. A
+// campaign asks the same question for every one of its hosts.
 type admission struct {
 	budgets  Budgets
 	topology Topology
@@ -50,9 +41,7 @@ type admission struct {
 }
 
 // failureDomains reads the domains of the hosts behind the candidates that
-// will be asked about, once per pass. A lookup that fails stops the pass
-// rather than admitting the tasks as if no host had a domain: a limit the
-// operator set must not lapse because a query did.
+// will be asked about, once per pass.
 func (a admission) failureDomains(ctx context.Context, candidates []jobs.Candidate) (map[string]string, error) {
 	if a.topology == nil || a.budgets == nil {
 		return map[string]string{}, nil
@@ -73,22 +62,11 @@ func (a admission) failureDomains(ctx context.Context, candidates []jobs.Candida
 }
 
 // admit asks the budgets whether the task can start now.
-//
-// False is not an error: the task stays in the queue as it was, with the
-// budget that had no room written next to it, and asks again on the next
-// pass. The wait itself does the rest - the budgets promote a claimant by
-// how long it has waited, so a task refused for its fair share stops being
-// bound by the share after the promotion age of its class.
-//
-// The domain is the host's failure domain as the pass read it; the gateway
-// of the session is this one, because the queue is read for the hosts
-// connected here.
 func (a admission) admit(ctx context.Context, candidate jobs.Candidate, domain string) (bool, error) {
 	job := candidate.Job
 	// A campaign's task and a fan-out's task already hold their tokens: the
-	// orchestrator took them for the target before it created the job, and
-	// the fan-out took its reads before it ordered them. Asking once more
-	// here would count the same work twice.
+	// orchestrator took them for the target before it created the job, and the
+	// fan-out took its reads before it ordered them.
 	if job.CampaignID != nil || job.FanoutID != nil || a.budgets == nil {
 		return true, nil
 	}
@@ -97,10 +75,8 @@ func (a admission) admit(ctx context.Context, candidate jobs.Candidate, domain s
 	where := budgets.Topology{Site: candidate.Site, FailureDomain: domain, Gateway: a.gateway}
 	needs := budgets.Needs(action, where, repositoryOf(job.Payload))
 	class := budgets.JobClass(action, job.CreatedBy, budgets.Class(job.BudgetClass))
-	// The owner is the job, so an attempt that comes back to the queue and
-	// asks again replaces its own grant rather than adding to it. The
-	// claimant is the one who ordered the work: that is what the fair share
-	// is divided between.
+	// The owner is the job, so an attempt that comes back to the queue and asks
+	// again replaces its own grant rather than adding to it.
 	refusal, err := a.budgets.Acquire(ctx, budgets.JobOwner(job.ID),
 		budgets.JobClaimant(job.CreatedBy), class, needs)
 	if err != nil {
@@ -110,9 +86,8 @@ func (a admission) admit(ctx context.Context, candidate jobs.Candidate, domain s
 		return true, nil
 	}
 
-	// Silence is the worst answer here: a task standing in the queue with
-	// nothing said looks like a forgotten task. The reason is written once
-	// per change, not once per pass.
+	// Silence is the worst answer here: a task standing in the queue with nothing
+	// said looks like a forgotten task.
 	reason := budgets.WaitReason(refusal)
 	if job.WaitReason != reason {
 		if err := a.waits.SetWaitReason(ctx, job.ID, reason); err != nil {
@@ -126,9 +101,7 @@ func (a admission) admit(ctx context.Context, candidate jobs.Candidate, domain s
 	return false, nil
 }
 
-// release gives the task's tokens back. A failure here does not stop
-// anything - the lease expires by itself - but it is not kept quiet either:
-// capacity held longer than needed slows the whole fleet down.
+// release gives the task's tokens back.
 func (a admission) release(ctx context.Context, jobID string) {
 	if a.budgets == nil {
 		return
@@ -139,8 +112,7 @@ func (a admission) release(ctx context.Context, jobID string) {
 }
 
 // untaken lists the admitted tasks that the lease did not reach: taken by
-// another gateway, canceled or expired between the decision and the
-// lease. Their tokens have to go back, because nothing will run under them.
+// another gateway, canceled or expired between the decision and the lease.
 func untaken(admitted []string, leased []jobs.LeasedJob) []string {
 	taken := make(map[string]bool, len(leased))
 	for _, item := range leased {
@@ -155,9 +127,7 @@ func untaken(admitted []string, leased []jobs.LeasedJob) []string {
 	return missing
 }
 
-// repositoryOf reads the backup repository named in a task's payload. An
-// unreadable payload names no repository; the envelope builder refuses the
-// task for the same reason a moment later.
+// repositoryOf reads the backup repository named in a task's payload.
 func repositoryOf(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""

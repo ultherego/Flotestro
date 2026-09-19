@@ -10,17 +10,8 @@ import (
 )
 
 // The CVE-centric reading of the findings.
-//
-// The host reading answers "which machine is in the worst shape"; this one
-// answers "which vulnerability touches the most of the fleet". They are
-// the same rows grouped the other way round, and the second question is
-// the one an operator asks when a number from the news lands on the desk.
 
-// The canonical severities the panel groups by. Every vendor speaks in its
-// own words - Red Hat says "important" and "moderate", Debian says
-// "unimportant", Ubuntu "negligible" - and a fleet with two distributions
-// needs one ladder to sort on. The vendor's own word travels next to the
-// rung, so nothing is lost in the translation.
+// The canonical severities the panel groups by.
 const (
 	SeverityCritical   = "critical"
 	SeverityHigh       = "high"
@@ -37,8 +28,7 @@ var severityLadder = []string{
 }
 
 // severityRankSQL renders the rank of a vendor severity for the aliased
-// finding. An unknown word ranks last: a severity the panel cannot read is
-// not a low one, it is an unrated one, and it must not sort above "low".
+// finding.
 func severityRankSQL(column string) string {
 	return "case lower(" + column + ")" +
 		" when 'critical' then 0" +
@@ -70,9 +60,7 @@ func SeverityRank(name string) int {
 
 // CVEFilter narrows the CVE list.
 type CVEFilter struct {
-	// Scopes narrow the result to the hosts the caller may read. Nil
-	// narrows nothing, which is right only for a caller with the global
-	// scope; an empty list matches nothing.
+	// Scopes narrow the result to the hosts the caller may read.
 	Scopes []authz.Scope
 	// Query is a prefix of a CVE number or of a package name.
 	Query string
@@ -95,15 +83,13 @@ type CVESummary struct {
 	// missing; it never decides anything.
 	CVSSScore    *float64 `json:"cvss_score,omitempty"`
 	CVSSSeverity string   `json:"cvss_severity,omitempty"`
-	// Hosts counts the affected hosts and HostsWithVendorFix those of them
-	// whose vendor has released a fix. Two counters, because they are two
-	// decisions: install today, or assess the risk.
+	// Hosts counts the affected hosts and HostsWithVendorFix those of them whose
+	// vendor has released a fix.
 	Hosts              int      `json:"hosts"`
 	HostsWithVendorFix int      `json:"hosts_with_vendor_fix"`
 	Packages           []string `json:"packages"`
-	// FirstSeen is the oldest assessment among the hosts that carry the
-	// finding now. An assessment is redone only when its inputs change, so
-	// this is when the panel first saw the CVE on a host still affected.
+	// FirstSeen is the oldest assessment among the hosts that carry the finding
+	// now.
 	FirstSeen time.Time `json:"first_seen"`
 }
 
@@ -121,10 +107,6 @@ func escapePattern(value string) string {
 
 // CVEs lists the distinct CVEs among the affected findings of the hosts in
 // scope, the gravest and the most widespread first.
-//
-// The search matches the CVE number or any affected package as a prefix,
-// but it does not narrow the host count: a CVE found by the package it
-// touches on one host still counts every host it touches.
 func (s *Store) CVEs(ctx context.Context, filter CVEFilter) (CVEPage, error) {
 	page := CVEPage{Items: []CVESummary{}}
 	var args []any
@@ -220,22 +202,18 @@ type CVEHost struct {
 	ReasonCode       string          `json:"reason_code,omitempty"`
 	VendorFix        VendorFixState  `json:"vendor_fix"`
 	// RepositoryCandidate says whether the fixed version is visible in the
-	// repositories of the host; only the package plan says whether it
-	// installs.
+	// repositories of the host; only the package plan says whether it installs.
 	RepositoryCandidate RepositoryCandidateState `json:"repository_candidate"`
 	VendorSeverity      string                   `json:"vendor_severity,omitempty"`
 	Severity            string                   `json:"severity"`
 	EvaluatedAt         time.Time                `json:"evaluated_at"`
 }
 
-// CVEHostsLimit caps the rows of one CVE page. A CVE in a base library
-// touches every host of the fleet, and the page names the first thousand
-// and says how many there are.
+// CVEHostsLimit caps the rows of one CVE page.
 const CVEHostsLimit = 1000
 
-// CVEHosts lists the findings of one CVE on the hosts in scope: the
-// affected ones and the ones the panel could not decide. A host the vendor
-// cleared is not listed - that is a settled answer, not a finding.
+// CVEHosts lists the findings of one CVE on the hosts in scope: the affected
+// ones and the ones the panel could not decide.
 func (s *Store) CVEHosts(ctx context.Context, cve string, scopes []authz.Scope) ([]CVEHost, int, error) {
 	args := []any{cve, CVEHostsLimit}
 	scope := ""
@@ -287,8 +265,7 @@ func (s *Store) CVEHosts(ctx context.Context, cve string, scopes []authz.Scope) 
 }
 
 // CVEReference is what a vendor published about the CVE: the advisory, its
-// title and where it is described. It is the feed's own material, shown as
-// it came.
+// title and where it is described.
 type CVEReference struct {
 	Provider    string     `json:"provider"`
 	AdvisoryID  string     `json:"advisory_id"`
@@ -303,9 +280,9 @@ type CVEReference struct {
 // kernel appears in one advisory per release, not in hundreds.
 const cveReferencesLimit = 50
 
-// CVEReferences gathers the vendor advisories that name the CVE: the ones
-// from the active feed snapshots and the ones read from the repository
-// metadata of the hosts in scope.
+// CVEReferences gathers the vendor advisories that name the CVE: the ones from
+// the active feed snapshots and the ones read from the repository metadata of
+// the hosts in scope.
 func (s *Store) CVEReferences(ctx context.Context, cve string, scopes []authz.Scope) ([]CVEReference, error) {
 	result := []CVEReference{}
 	const fromFeeds = `
@@ -334,9 +311,9 @@ func (s *Store) CVEReferences(ctx context.Context, cve string, scopes []authz.Sc
 		return nil, err
 	}
 
-	// The RPM family reads its advisories from the metadata of the host's
-	// own repositories, so they have no feed snapshot and no URL - only an
-	// identifier and a title. They are still the vendor's word.
+	// The RPM family reads its advisories from the metadata of the host's own
+	// repositories, so they have no feed snapshot and no URL - only an identifier
+	// and a title.
 	args := []any{cve, cveReferencesLimit}
 	scope := ""
 	if scopes != nil {

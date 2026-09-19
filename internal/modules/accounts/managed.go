@@ -5,14 +5,8 @@ import (
 	"strings"
 )
 
-// The file the panel manages apart from the user's own authorized_keys.
-//
-// A key the panel puts into ~/.ssh/authorized_keys sits next to keys the
-// user added by hand, and the two histories blur. An installation that
-// wants the panel's keys apart points sshd at a second file under a
-// root-owned directory: the user cannot edit it, the panel edits nothing
-// else, and a replace there touches nothing the user wrote. sshd expands
-// %u to the account name, so the file has a directory per account.
+// The file the panel manages apart from the user's own authorized_keys. A key
+// the panel puts into ~/.
 const (
 	ManagedKeysDir      = "/etc/ssh/authorized_keys.d"
 	ManagedKeysFileName = "60-flotestro.keys"
@@ -26,11 +20,9 @@ func ManagedKeysPath(account string) string {
 	return path.Join(ManagedKeysDir, account, ManagedKeysFileName)
 }
 
-// ManagedFileReadBySSHD says whether the effective sshd configuration
-// (the output of sshd -T) lists the managed file among the files it reads
-// keys from. A managed file sshd never opens grants nothing; writing keys
-// there and reporting them as access would be the panel lying about what
-// the host does.
+// ManagedFileReadBySSHD says whether the effective sshd configuration (the
+// output of sshd -T) lists the managed file among the files it reads keys
+// from.
 func ManagedFileReadBySSHD(effective string) bool {
 	for _, line := range strings.Split(effective, "\n") {
 		fields := strings.Fields(line)

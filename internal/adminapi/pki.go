@@ -9,11 +9,8 @@ import (
 	"github.com/ultherego/flotestro/internal/authz"
 )
 
-// handlePKIStatus describes the set of fleet CAs together with the number
-// of hosts that still have a certificate issued by each of them.
-//
-// Without this number retiring a CA would be guessing: the operator would
-// not know how many hosts they take access away from.
+// handlePKIStatus describes the set of fleet CAs together with the number of
+// hosts that still have a certificate issued by each of them.
 func (s *Server) handlePKIStatus(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorize(w, r, authz.PermPKIRead, authz.GlobalScope, "pki", ""); !ok {
 		return
@@ -57,13 +54,8 @@ type pkiRequest struct {
 	Reason string `json:"reason"`
 }
 
-// handlePrepareCA creates a new fleet CA and adds it to the trust set,
-// without the right to sign yet.
-//
-// This is the first of the two rotation phases. The new CA goes into the
-// bundle the agent receives at certificate renewal, so the fleet learns it
-// on its own - without a separate distribution and without a window in
-// which a host does not trust the panel.
+// handlePrepareCA creates a new fleet CA and adds it to the trust set, without
+// the right to sign yet.
 func (s *Server) handlePrepareCA(w http.ResponseWriter, r *http.Request) {
 	actor, ok := s.pkiActor(w, r)
 	if !ok {
@@ -99,12 +91,8 @@ func (s *Server) handlePrepareCA(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, prepared)
 }
 
-// handleActivateCA hands signing over to the prepared CA.
-//
-// The panel refuses while a host exists that has not received the new CA
-// yet. Such a host would not accept the server certificate after a panel
-// restart and would drop out of the fleet - and a CA rotation is meant to
-// be invisible to operations.
+// handleActivateCA hands signing over to the prepared CA. The panel refuses
+// while a host exists that has not received the new CA yet.
 func (s *Server) handleActivateCA(w http.ResponseWriter, r *http.Request) {
 	actor, ok := s.pkiActor(w, r)
 	if !ok {

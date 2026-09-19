@@ -11,10 +11,6 @@ import (
 )
 
 // storedIdentity describes the identity of the relay stored on the machine.
-//
-// Also when the certificate has expired or is unreadable: the status is to
-// say so and not to fall silent. Silence looks the same as a relay without a
-// problem.
 type storedIdentity struct {
 	Present bool
 	RelayID string

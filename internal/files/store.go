@@ -1,10 +1,5 @@
 // Package files keeps the desired state of configuration files and the history
 // of their changes.
-//
-// The panel keeps the desired state itself, because without it the two
-// questions an operator asks most often cannot be answered: did somebody
-// change the file outside the panel, and how does one get back to the content
-// from before the change.
 package files
 
 import (
@@ -56,9 +51,7 @@ type Version struct {
 }
 
 // executor allows calling the same queries inside a transaction and outside
-// one. An entry of the history has to see the job created in the same
-// transaction, so the write must not go next to it over a connection of its
-// own.
+// one.
 type executor interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 }
@@ -71,9 +64,6 @@ type Store struct {
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
 // SaveVersion writes content addressed by its digest.
-//
-// The same content on a hundred hosts takes space once: the primary key is the
-// digest, so a repeated write does not create a second row.
 func (s *Store) SaveVersion(ctx context.Context, q executor, content []byte) (string, error) {
 	digest := filesmodule.Fingerprint(content)
 	const query = `
@@ -167,9 +157,9 @@ func (s *Store) History(ctx context.Context, hostID, path string, limit int) ([]
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
-	// An entry with a secret has no content in the store of versions, so the
-	// join has to be an outer one: otherwise the history of a file with a
-	// secret would be empty.
+	// An entry with a secret has no content in the store of versions, so the join
+	// has to be an outer one: otherwise the history of a file with a secret would
+	// be empty.
 	const query = `
 		select coalesce(h.sha256, ''), coalesce(v.size_bytes, 0),
 		       coalesce(h.secret_name, ''), coalesce(h.secret_version, 0),

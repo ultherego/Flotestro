@@ -127,9 +127,6 @@ func TestOldGenerationsAreCleanedUp(t *testing.T) {
 
 // TestAnInterruptedWriteDoesNotDestroyTheIdentity replays the failure points
 // from the document.
-//
-// Each of them once ended with a host that has the key of one pair and the
-// certificate of another - that is, a host to be recovered by hand.
 func TestAnInterruptedWriteDoesNotDestroyTheIdentity(t *testing.T) {
 	store, ca, _ := storeWithIdentity(t)
 	first, err := store.Current()
@@ -285,11 +282,9 @@ func TestMigrationFromTheOldLayout(t *testing.T) {
 	}
 }
 
-// TestARepeatedWriteNeverReplacesAGenerationInPlace guards the rule of
-// the document: the name of a generation has to be free, and the active
-// one is never deleted to make room. A repeat of the same certificate
-// after an interrupted start meets either the active generation, which
-// stays, or a complete copy nobody switched to, which is set aside.
+// TestARepeatedWriteNeverReplacesAGenerationInPlace guards the rule of the
+// document: the name of a generation has to be free, and the active one is
+// never deleted to make room.
 func TestARepeatedWriteNeverReplacesAGenerationInPlace(t *testing.T) {
 	store, ca, _ := storeWithIdentity(t)
 	first, err := store.Current()

@@ -19,10 +19,7 @@ import (
 // ErrNotFound says the rule, alert or silence does not exist.
 var ErrNotFound = errors.New("not found")
 
-// The metrics a rule may watch. Every one of them is computed from a sample
-// of the host, except host_offline, which is computed from the absence of
-// samples. The two agent_ metrics are the agent's own footprint: what the
-// agent costs the host, as it read from /proc/self.
+// The metrics a rule may watch.
 const (
 	MetricCPUPercent            = "cpu_percent"
 	MetricLoad1PerCore          = "load1_per_core"
@@ -45,10 +42,8 @@ type MetricInfo struct {
 	Description string `json:"description"`
 }
 
-// Catalogue lists the metrics a rule may watch with their units, in the
-// order the panel shows them. The sample fields the agent reports but no
-// rule watches - goroutines, descriptors, the helper's memory - are on the
-// host page and not here: they are read next to a chart, not alarmed on.
+// Catalogue lists the metrics a rule may watch with their units, in the order
+// the panel shows them.
 var Catalogue = []MetricInfo{
 	{MetricCPUPercent, "percent", "busy time of the host across all cores"},
 	{MetricLoad1PerCore, "ratio", "load average over one minute divided by the core count"},
@@ -77,10 +72,7 @@ var Operators = []string{"gt", "lt", "gte", "lte"}
 // Severities lists the severities from the most urgent.
 var Severities = []string{"critical", "warning", "info"}
 
-// Selector names the hosts a rule covers, in the shape of a campaign
-// selector. Empty fields do not narrow - an empty host list included - so
-// an empty selector covers the whole fleet. The fields that are set all
-// have to hold: a site and a tag name the tagged hosts of that site.
+// Selector names the hosts a rule covers, in the shape of a campaign selector.
 type Selector struct {
 	Site        string `json:"site,omitempty"`
 	Environment string `json:"environment,omitempty"`
@@ -88,15 +80,12 @@ type Selector struct {
 	// Tags keeps the hosts carrying every one of the tags, 'key' or
 	// 'key=value' as recorded on the host.
 	Tags []string `json:"tags,omitempty"`
-	// Groups keeps the hosts of any of the saved groups, named by
-	// identifier or by name. A rule on the databases and the caches
-	// watches both; a host has to be in one of them, not in all.
+	// Groups keeps the hosts of any of the saved groups, named by identifier or
+	// by name.
 	Groups []string `json:"groups,omitempty"`
 	Owner  string   `json:"owner,omitempty"`
-	// Expression is the text form of a campaign selector, for a scope the
-	// flat fields cannot say: "agent_version < 0.49.0 or reboot_required =
-	// true". It is parsed when the rule is written and again when it is
-	// evaluated, never evaluated from text.
+	// Expression is the text form of a campaign selector, for a scope the flat
+	// fields cannot say: "agent_version < 0.
 	Expression string   `json:"expression,omitempty"`
 	HostIDs    []string `json:"host_ids,omitempty"`
 }
@@ -107,12 +96,9 @@ func (sel Selector) Narrows() bool {
 		len(sel.Groups) > 0 || sel.Owner != "" || sel.Expression != "" || len(sel.HostIDs) > 0
 }
 
-// Tree renders the selector as the campaign selector package reads it,
-// the host list aside: every set field is one condition and all of them
-// hold at once. Nil means nothing narrows but the host list, if any. The
-// tree is what the evaluator compiles into the host query, so a rule
-// scoped by a tag and a campaign scoped by the same tag pick the same
-// hosts.
+// Tree renders the selector as the campaign selector package reads it, the
+// host list aside: every set field is one condition and all of them hold at
+// once.
 func (sel Selector) Tree() (*selector.Expression, error) {
 	var all []selector.Expression
 	if sel.Site != "" {
@@ -156,9 +142,9 @@ func (sel Selector) Tree() (*selector.Expression, error) {
 	}
 }
 
-// validate checks the selector as the operator wrote it: the shape of
-// every field, and the whole as one selector, so that a scope the campaign
-// page would refuse is refused here in the same words.
+// validate checks the selector as the operator wrote it: the shape of every
+// field, and the whole as one selector, so that a scope the campaign page
+// would refuse is refused here in the same words.
 func (sel Selector) validate() error {
 	for _, tag := range sel.Tags {
 		if !selector.TagPattern.MatchString(tag) {
@@ -302,17 +288,14 @@ func scanRule(rows pgx.Rows) (Rule, error) {
 	return rule, nil
 }
 
-// groupDirectory resolves the group references of a selector against
-// the saved groups. The directory is a view over the same pool, so it is
-// made where it is used rather than kept.
+// groupDirectory resolves the group references of a selector against the saved
+// groups.
 func (s *Store) groupDirectory() selector.Groups {
 	return selector.NewStore(s.pool)
 }
 
 // resolveSelector checks that the selector of a rule resolves: a group it
-// names exists and the expansion stays within bounds. A rule naming a
-// group nobody created is refused with the name rather than recorded as a
-// rule that quietly watches nobody.
+// names exists and the expansion stays within bounds.
 func (s *Store) resolveSelector(ctx context.Context, sel Selector) error {
 	expression, err := sel.Tree()
 	if err != nil || expression == nil {
@@ -346,10 +329,7 @@ func (s *Store) CreateRule(ctx context.Context, rule Rule) (*Rule, error) {
 	return s.GetRule(ctx, id)
 }
 
-// UpdateRule replaces the settings of a rule. A rule that changes its
-// metric or its condition starts its episodes afresh: the open alerts of
-// the old condition are closed, because they answer a question nobody asks
-// any more.
+// UpdateRule replaces the settings of a rule.
 func (s *Store) UpdateRule(ctx context.Context, id string, rule Rule) (*Rule, error) {
 	if err := rule.Validate(); err != nil {
 		return nil, err
@@ -449,9 +429,8 @@ type Alert struct {
 	Silenced bool   `json:"silenced"`
 	HostID   string `json:"host_id"`
 	Hostname string `json:"hostname"`
-	// AcknowledgedBy and AcknowledgedAt say somebody took the alert: it
-	// keeps firing, and the counts of what waits for a person leave it
-	// out. Note is what the operator wrote on it.
+	// AcknowledgedBy and AcknowledgedAt say somebody took the alert: it keeps
+	// firing, and the counts of what waits for a person leave it out.
 	AcknowledgedBy string     `json:"acknowledged_by,omitempty"`
 	AcknowledgedAt *time.Time `json:"acknowledged_at,omitempty"`
 	Note           string     `json:"note,omitempty"`
@@ -533,9 +512,8 @@ func (s *Store) ListAlerts(ctx context.Context, filter AlertFilter) ([]Alert, er
 		limit $`+fmt.Sprint(len(args)), args...)
 }
 
-// Firing reads the firing alerts of the visible hosts: the ones nobody
-// took first, then the most severe, then the oldest, as on-call reads
-// them.
+// Firing reads the firing alerts of the visible hosts: the ones nobody took
+// first, then the most severe, then the oldest, as on-call reads them.
 func (s *Store) Firing(ctx context.Context, scopes []authz.Scope) ([]Alert, error) {
 	condition, args := authz.ScopeSQL(scopes, "h.site", "h.environment", 0)
 	if condition == "" {
@@ -554,10 +532,7 @@ func (s *Store) Firing(ctx context.Context, scopes []authz.Scope) ([]Alert, erro
 // pending one is not yet an alert, a resolved one is history.
 var ErrNotFiring = errors.New("the alert is not firing")
 
-// Acknowledge marks a firing alert as taken by somebody, with what they
-// wrote. The alert keeps firing: the condition on the host has not
-// ended, and only the host ends it. A second acknowledgement replaces
-// the first - the alert changed hands - and the trail says so.
+// Acknowledge marks a firing alert as taken by somebody, with what they wrote.
 func (s *Store) Acknowledge(ctx context.Context, id, by, note string) (*Alert, error) {
 	if _, err := uuid.Parse(id); err != nil {
 		return nil, ErrNotFound
@@ -641,12 +616,6 @@ func (s *Store) HostAlerts(ctx context.Context, hostID string) ([]Alert, error) 
 }
 
 // RulesMatching counts the enabled rules whose selector covers the host.
-//
-// Every selector is compiled the way the evaluator compiles it and asked
-// of this one host in a single query, so the count on the host page and
-// the rules that fire on the host cannot disagree. A rule whose selector
-// does not resolve any more - a group deleted since - covers nobody here,
-// as it evaluates nobody.
 func (s *Store) RulesMatching(ctx context.Context, hostID string) (int, error) {
 	if _, err := uuid.Parse(hostID); err != nil {
 		return 0, nil
@@ -688,10 +657,9 @@ func (s *Store) RulesMatching(ctx context.Context, hostID string) (int, error) {
 	return count + covered, nil
 }
 
-// compileSelector renders a selector that narrows as one SQL condition
-// over the alias h of the hosts table, group references resolved and the
-// host list included. offset is the number of parameters the enclosing
-// query already uses.
+// compileSelector renders a selector that narrows as one SQL condition over
+// the alias h of the hosts table, group references resolved and the host list
+// included.
 func (s *Store) compileSelector(ctx context.Context, sel Selector, offset int) (string, []any, error) {
 	var conditions []string
 	var args []any
@@ -835,9 +803,8 @@ func (s *Store) GetSilence(ctx context.Context, id string) (*Silence, error) {
 	return &list[0], nil
 }
 
-// ExpireSilence ends a silence of the host early. A silence of another
-// host is not found: the path names the host, and the silence has to be
-// its own.
+// ExpireSilence ends a silence of the host early. A silence of another host is
+// not found: the path names the host, and the silence has to be its own.
 func (s *Store) ExpireSilence(ctx context.Context, hostID, id string) error {
 	if _, err := uuid.Parse(id); err != nil {
 		return ErrNotFound

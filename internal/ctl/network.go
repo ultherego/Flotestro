@@ -14,11 +14,6 @@ import (
 )
 
 // The bounds of the clock check.
-//
-// Kerberos and the certificates tolerate minutes; a TLS handshake fails when
-// the certificate "is not yet valid" by the clock of the host. Half a minute
-// is worth a word, five minutes is the point at which the enrollment stops
-// working.
 const (
 	ClockWarnAbove = 30 * time.Second
 	ClockFailAbove = 5 * time.Minute
@@ -34,8 +29,6 @@ type Endpoint struct {
 }
 
 // ParseEndpoint turns an address from the configuration into an endpoint.
-// An address that does not parse is left out: the configuration parser has
-// already refused it, and a check on it would name the wrong problem.
 func ParseEndpoint(name, raw string) (Endpoint, bool) {
 	address, err := url.Parse(raw)
 	if err != nil || address.Host == "" {
@@ -49,8 +42,6 @@ func ParseEndpoint(name, raw string) (Endpoint, bool) {
 }
 
 // GatewayEndpoints names the gateways in the order the component uses them.
-// The further ones are backups: they get a number rather than a name of
-// their own.
 func GatewayEndpoints(urls []string) []Endpoint {
 	var endpoints []Endpoint
 	for i, raw := range urls {
@@ -66,9 +57,6 @@ func GatewayEndpoints(urls []string) []Endpoint {
 }
 
 // Network gathers what the network checks touch outside the process.
-//
-// The clock and the dialers are fields rather than calls to the packages,
-// so that a test can run the checks without a network.
 type Network struct {
 	Now     func() time.Time
 	Timeout time.Duration
@@ -89,12 +77,6 @@ func RealNetwork() Network {
 }
 
 // CheckClock compares the clock of the host with the one of the endpoint.
-//
-// The endpoint answers every request with a Date header, so a HEAD request
-// is enough - nothing is sent and nothing is read beyond the headers. When
-// the verified handshake fails the header is read without verification: a
-// skewed clock is itself the commonest reason a certificate is refused, and
-// the offset is the only thing this check is after.
 func (n Network) CheckClock(ctx context.Context, target Endpoint, pool *x509.CertPool) Check {
 	start := n.Now()
 	header, verified, err := n.FetchHeaders(ctx, target, pool)
@@ -112,11 +94,8 @@ func (n Network) CheckClock(ctx context.Context, target Endpoint, pool *x509.Cer
 	return check
 }
 
-// ClockCheck judges the offset from the Date header alone.
-//
-// Separate from the request so that a test can hand it a time and a header
-// without a network. The header carries whole seconds, so an offset below a
-// second is noise rather than a measurement.
+// ClockCheck judges the offset from the Date header alone. Separate from the
+// request so that a test can hand it a time and a header without a network.
 func ClockCheck(local time.Time, date string) Check {
 	if date == "" {
 		return Warn("clock", "clock_unverified", "the endpoint sent no Date header")
@@ -157,10 +136,7 @@ func DescribeOffset(offset time.Duration) string {
 }
 
 // FetchHeaders sends a HEAD request to the endpoint and returns the headers.
-//
 // The second value says whether the certificate of the server was verified.
-// The first attempt verifies; only when that fails on the certificate does
-// the second go without, and the caller marks the result accordingly.
 func (n Network) FetchHeaders(ctx context.Context, target Endpoint, pool *x509.CertPool) (http.Header, bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, n.Timeout)
 	defer cancel()
@@ -171,9 +147,8 @@ func (n Network) FetchHeaders(ctx context.Context, target Endpoint, pool *x509.C
 			TLSClientConfig: &tls.Config{
 				RootCAs:    pool,
 				MinVersion: tls.VersionTLS12,
-				// The fallback reads a Date header and nothing else: no
-				// secret goes out and no answer is trusted, and the caller
-				// marks the result as unverified.
+				// The fallback reads a Date header and nothing else: no secret goes out
+				// and no answer is trusted, and the caller marks the result as unverified.
 				InsecureSkipVerify: insecure,
 			},
 		}
@@ -240,10 +215,6 @@ func (n Network) CheckDNS(ctx context.Context, target Endpoint) Check {
 }
 
 // CheckTLS opens the connection and completes the handshake.
-//
-// The verification is not turned off even in diagnostics: the check names
-// the error of the chain and the expected name, but it does not pretend the
-// connection is good.
 func (n Network) CheckTLS(ctx context.Context, target Endpoint, pool *x509.CertPool,
 	poolErr error, resolved bool) Check {
 	name := "tls." + target.Name
@@ -279,9 +250,6 @@ func (n Network) CheckTLS(ctx context.Context, target Endpoint, pool *x509.CertP
 
 // TLSError maps a handshake error onto a stable code and a detail that says
 // what to fix.
-//
-// The codes are the ones of the enrollment document: a playbook compares the
-// code, a person reads the detail.
 func TLSError(host string, err error) (code, detail string) {
 	var unknown x509.UnknownAuthorityError
 	var hostname x509.HostnameError
@@ -320,13 +288,9 @@ func TLSVersion(version uint16) string {
 	return fmt.Sprintf("0x%04x", version)
 }
 
-// TrustPool assembles the trust for checking the connections out of PEM
-// files: the trust bundle of the identity when the component has one, and
-// the bootstrap CA from the configuration.
-//
-// Nothing configured means the system roots, which is the public-CA variant
-// of the bootstrap. A configured bundle that cannot be read or parsed is an
-// error of its own, not a silent fall back to the system roots.
+// TrustPool assembles the trust for checking the connections out of PEM files:
+// the trust bundle of the identity when the component has one, and the
+// bootstrap CA from the configuration.
 func TrustPool(identityTrust []byte, bootstrapCA string, read func(string) ([]byte, error)) (*x509.CertPool, error) {
 	pool := x509.NewCertPool()
 	added := false

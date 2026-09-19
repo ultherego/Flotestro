@@ -12,17 +12,6 @@ import (
 
 // settleAgentUpgrade closes the jobs of an agent replacement once the agent is
 // back.
-//
-// An agent that replaces itself has no way of sending a result back: the
-// process that carried the job out was replaced halfway. What settles the
-// matter is therefore what the panel sees with its own eyes - the version
-// reported at the new connection. The exit code of the package manager could
-// be zero also when the host never came back.
-//
-// This is the verification of the operation in a campaign as well: a wave
-// of replacements is settled host by host as each one comes back, and the
-// campaign engine reads the job states the way it does for every other
-// operation.
 func (s *AgentService) settleAgentUpgrade(ctx context.Context,
 	hostID, version string, fence jobs.Fence) {
 	jobsOpen, err := s.jobs.OpenTasksOfAction(ctx, hostID, string(opspec.ActionAgentUpgrade))
@@ -35,19 +24,14 @@ func (s *AgentService) settleAgentUpgrade(ctx context.Context,
 		if target == "" {
 			continue
 		}
-		// A job without an attempt never reached the host: it waits in its
-		// campaign wave, or for its approval. A reconnect settles nothing
-		// about it - the version the host reports is the version from
-		// before, and a failure written here would fail a wave that has not
-		// started.
+		// A job without an attempt never reached the host: it waits in its campaign
+		// wave, or for its approval.
 		if job.AttemptID == "" {
 			continue
 		}
 		if target != version {
-			// The host is back, but not in this version: the transaction went
-			// through and the host works, only not the way it was ordered.
-			// That is a failure of the job rather than a failure of the
-			// host.
+			// The host is back, but not in this version: the transaction went through
+			// and the host works, only not the way it was ordered.
 			s.closeUpgrade(ctx, hostID, job, jobs.StateFailed, "agent_version_mismatch",
 				fmt.Sprintf("the host came back in version %s, expected %s", version, target), fence)
 			continue

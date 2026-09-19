@@ -174,7 +174,7 @@ func ComputeProfile(iface string, current Profile, want ProfileRequest, ipv6 IPv
 	}
 	// The shape is checked here, without any one mechanism's limits: the plan is
 	// computed the same way on every host, and which mechanism can express which
-	// setting is that mechanism's own answer, attached to the plan together with
+	// setting is that mechanism's own answer, attached to the plan together with.
 	if err := ValidateProfile(desired); err != nil {
 		return plan.withRefusal(err.Error())
 	}

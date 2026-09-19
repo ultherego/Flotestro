@@ -10,9 +10,6 @@ import (
 var moduleName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
 // ParseModules reads /proc/modules.
-//
-// The kernel file is read, not the lsmod output: lsmod is only a formatting
-// of it, and the panel needs fields lsmod does not show anyway.
 func ParseModules(content string) []Module {
 	var modules []Module
 	for _, line := range strings.Split(content, "\n") {
@@ -51,13 +48,8 @@ func ParseBlacklist(content string) []string {
 	return names
 }
 
-// ComposeBlacklist composes the content of the blacklist file.
-//
-// A blacklist entry in modprobe.d works for modules loaded on demand. A
-// module pulled in by the initramfs is loaded before this file even exists
-// in the filesystem - that is why a complete block needs the initramfs
-// rebuilt, and the panel says so directly instead of pretending the entry
-// is enough.
+// ComposeBlacklist composes the content of the blacklist file. A blacklist
+// entry in modprobe.
 func ComposeBlacklist(names []string) (string, error) {
 	if len(names) == 0 {
 		return FileHeader + "\n", nil
@@ -99,9 +91,6 @@ var protectedModules = map[string]string{
 }
 
 // InitramfsRequired says whether the block needs the initramfs rebuilt.
-//
-// A reason is returned, not a flag: the operator is meant to read why the
-// entry in modprobe.d alone is not enough.
 func InitramfsRequired(name string, loaded bool) string {
 	if !loaded {
 		return ""

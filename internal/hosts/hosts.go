@@ -209,7 +209,7 @@ type Host struct {
 	TeamName string `json:"team_name,omitempty"`
 	// FailureDomain is what the host goes down with - a rack, an availability
 	// zone, a cluster whose members keep a service alive - recorded by an
-	// operator, and keyed on by the budgets that keep a campaign from taking a
+	// operator, and keyed on by the budgets that keep a campaign from taking a.
 	FailureDomain  string `json:"failure_domain,omitempty"`
 	LifecycleState string `json:"lifecycle_state"`
 	// LifecycleReason and LifecycleChangedAt are the decision behind a state
@@ -265,7 +265,7 @@ type Host struct {
 	LastConnectionRefusal *ConnectionRefusal `json:"last_connection_refusal,omitempty"`
 	// RelayIdentity says how the host's last session through a relay was
 	// identified: end_to_end when the host's own signature on the envelope
-	// verified, attested when the relay named the certificate and the gateway
+	// verified, attested when the relay named the certificate and the gateway.
 	RelayIdentity string       `json:"relay_identity,omitempty"`
 	Identity      HostIdentity `json:"identity"`
 	EnrolledAt    time.Time    `json:"enrolled_at"`
@@ -313,7 +313,7 @@ const (
 	RefusalRelayScopeMismatch = "relay_scope_mismatch"
 	// RefusalRelayEnvelopeInvalid is a relayed message whose identity envelope
 	// the gateway could not accept for a reason other than the three below:
-	// another schema, a relay other than the one that forwarded it, a host other
+	// another schema, a relay other than the one that forwarded it, a host other.
 	RefusalRelayEnvelopeInvalid = "relay_envelope_invalid"
 	// RefusalRelayBodyHashMismatch is a payload other than the one the host
 	// signed: changed on the way, or carrying a field this panel does not know,
@@ -750,7 +750,7 @@ type Executor interface {
 
 // RecordCertificatePublicKey writes the public key of an issued certificate on
 // its record, once: a key already on record is not replaced, because the
-// record is what the envelopes of the host are checked against and a
+// record is what the envelopes of the host are checked against and a.
 func (s *Store) RecordCertificatePublicKey(ctx context.Context, db Executor, serial string, der []byte) error {
 	if db == nil {
 		db = s.pool
@@ -935,7 +935,7 @@ type ListFilter struct {
 	SSSDOffline *bool
 	// AgentBehind keeps the hosts whose agent is older (true) or as new (false)
 	// as the newest version any visible host reports - the same yardstick the
-	// dashboard's "agents behind" tile counts by, since the panel has no release
+	// dashboard's "agents behind" tile counts by, since the panel has no release.
 	AgentBehind *bool
 	// Relay keeps the hosts whose open session the named relay attested.
 	Relay string
@@ -1019,7 +1019,7 @@ func (s Sort) String() string {
 
 // sortColumn is one column the list can be ordered by: the SQL expression that
 // carries its order, the type the cursor's value is cast back to, the
-// rendering of a row's value for the cursor and the check of a value that came
+// rendering of a row's value for the cursor and the check of a value that
 type sortColumn struct {
 	expression string
 	kind       string
@@ -1076,7 +1076,7 @@ func SortColumns() []string {
 
 // The cursor value of each kind of key, rendered from the row the way the
 // database renders the expression, and checked on the way back so that a token
-// somebody edited fails as an invalid cursor rather than as a query the
+// somebody edited fails as an invalid cursor rather than as a query the.
 
 func anyText(string) bool { return true }
 
@@ -1226,7 +1226,7 @@ func (f ListFilter) conditions() ([]string, []any, error) {
 	if f.AgentBehind != nil {
 		// The version is ordered numerically part by part, the way the dashboard
 		// orders it, and the newest one is taken over the hosts the caller may see:
-		// a scoped operator's fleet has a newest of its own, and the tile they
+		// a scoped operator's fleet has a newest of its own, and the tile they.
 		newest := "select max(" + versionParts("n") + ") from hosts n" +
 			" where n.lifecycle_state <> 'retired' and n.agent_version ~ '^v?\\d+(\\.\\d+)*'"
 		if f.Scopes != nil {
@@ -1598,7 +1598,7 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 		}
 		// The verdict on the configuration is judged here, against the schema this
 		// panel ships with: a host that reported a schema is on the legacy
-		// configuration when it runs on no file (zero) or on a file older than the
+		// configuration when it runs on no file (zero) or on a file older than the.
 		if h.ConfigSchemaVersion != nil {
 			legacy := *h.ConfigSchemaVersion < agentconfig.SchemaVersion
 			h.ConfigLegacy = &legacy

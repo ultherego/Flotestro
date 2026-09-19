@@ -11,12 +11,8 @@ import (
 	"github.com/ultherego/flotestro/internal/hosts"
 )
 
-// The notes of a host: what an operator wrote about the machine that fits
-// no other field. Like the owner and the tags they are the panel's
-// knowledge about the host - nothing runs on it and it is not asked - so
-// they share the tag permission and go straight to the row. Unlike the
-// owner they are prose, and the trail keeps both texts: a note that was
-// rewritten is a warning somebody else may have relied on.
+// The notes of a host: what an operator wrote about the machine that fits no
+// other field.
 
 type hostNotesRequest struct {
 	// Notes is the whole text; empty clears it.
@@ -27,10 +23,6 @@ type hostNotesRequest struct {
 }
 
 // handleSetHostNotes records the notes of a host.
-//
-// The write carries the entity tag of the host's hand-recorded facts when
-// the editor has one, like the owner's: two operators writing the same
-// note at once would otherwise lose one of the texts without a word.
 func (s *Server) handleSetHostNotes(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
 	host, scope, ok := s.hostScope(w, r, hostID)

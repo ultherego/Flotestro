@@ -1,9 +1,5 @@
-// Package compose handles Docker Compose projects.
-//
-// The manifest describes the desired state of the project, not a command
-// to run. The plan computes the difference between what runs and what the
-// manifest describes; the deployment is bound to a specific plan and
-// refuses when the base state changed since approval.
+// Package compose handles Docker Compose projects. The manifest describes the
+// desired state of the project, not a command to run.
 package compose
 
 import "time"
@@ -22,11 +18,9 @@ type Change struct {
 type Service struct {
 	Name  string `json:"name"`
 	Image string `json:"image"`
-	// ImageDigest is the digest the tag resolved to when the plan was
-	// computed - from the reference itself when it is pinned, from the
-	// registry, or from the image already on the host. A plan is not
-	// computed without it: a tag says what the operator meant, the digest
-	// says what will run.
+	// ImageDigest is the digest the tag resolved to when the plan was computed -
+	// from the reference itself when it is pinned, from the registry, or from the
+	// image already on the host.
 	ImageDigest string `json:"image_digest,omitempty"`
 	// DigestSource names where the digest came from: reference, registry
 	// or local.
@@ -47,9 +41,7 @@ const (
 // Plan describes what the deployment changes on the host.
 type Plan struct {
 	Project string `json:"project"`
-	// Digest binds the deployment to this plan. Computed from the
-	// normalised manifest and the image digests, so a change of either
-	// invalidates the approval.
+	// Digest binds the deployment to this plan.
 	Digest   string    `json:"digest"`
 	Services []Service `json:"services"`
 	Changes  []Change  `json:"changes"`

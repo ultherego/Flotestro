@@ -3,9 +3,8 @@ package opspec
 import "testing"
 
 // A keytab renewal replaces the credential a service authenticates with:
-// critical, the identity lock, the rotation's own permission, never in
-// bulk, and a payload that names a service principal and never the host's
-// own.
+// critical, the identity lock, the rotation's own permission, never in bulk,
+// and a payload that names a service principal and never the host's own.
 func TestKeytabRenewContract(t *testing.T) {
 	action := ActionIdentityKeytabRenew
 	if !action.Known() || !action.Mutating() || action.RequiredCapability() != "systemd" {

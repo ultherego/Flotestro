@@ -16,9 +16,8 @@ func TestStateAssessesTheAgeOfACopy(t *testing.T) {
 		last  *time.Time
 		state string
 	}{
-		// No copy at all is a separate state rather than a very old copy:
-		// those are two different situations and two different decisions by
-		// the operator.
+		// No copy at all is a separate state rather than a very old copy: those are
+		// two different situations and two different decisions by the operator.
 		{"never", nil, StateNever},
 		{"an hour ago", moment(-time.Hour), StateOK},
 		{"a day ago", moment(-24 * time.Hour), StateOK},

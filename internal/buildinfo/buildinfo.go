@@ -1,14 +1,4 @@
 // Package buildinfo says what this binary was made of.
-//
-// The version alone is not enough when a package behaves differently than it
-// should: the first question is then "which commit is this from" and it has to
-// be answerable on the host, without access to the release machine. That is
-// why the commit and the build date are written into the binary just like the
-// version.
-//
-// The version of the protocol sits next to them deliberately: it settles
-// whether an old agent can talk to the panel at all, and an operator looking
-// at a host should see the whole set in one place.
 package buildinfo
 
 import (
@@ -17,27 +7,19 @@ import (
 	"strings"
 )
 
-// The values written in when building a release through -ldflags -X.
-//
-// The defaults say outright that nobody wrote them in. "unknown" is better
-// than a made-up value: a package built by hand is to look different from a
-// release.
+// The values written in when building a release through -ldflags -X. The
+// defaults say outright that nobody wrote them in.
 var (
 	Version = "0.1.0"
 	Commit  = ""
 	Date    = ""
 )
 
-// AgentProtocol changes with every incompatible change of the contract
-// between the agent and the centre. It is the newest protocol this binary
-// speaks.
+// AgentProtocol changes with every incompatible change of the contract between
+// the agent and the centre.
 const AgentProtocol = 1
 
-// AgentProtocolMin is the oldest protocol this binary still speaks. The two
-// make the range an agent announces in its Hello and the range the panel
-// accepts: the sides can talk when the ranges overlap. The floor moves up
-// only when a release drops the support for an old protocol, which is a
-// decision to write here, not a consequence of raising AgentProtocol.
+// AgentProtocolMin is the oldest protocol this binary still speaks.
 const AgentProtocolMin = 1
 
 // Describe assembles one line for the "version" command.
@@ -54,10 +36,6 @@ func Describe(name string) string {
 }
 
 // ShortCommit shortens the commit digest into a form readable in one line.
-//
-// When the release did not write the commit in, we try to read it from the
-// build metadata: with a plain "go build" it is there and is enough to say
-// what this binary was made of.
 func ShortCommit() string {
 	commit := Commit
 	if commit == "" {
@@ -70,9 +48,8 @@ func ShortCommit() string {
 }
 
 // FullCommit returns the whole commit digest, for the record the panel keeps
-// of a host: the short form is for a line on a screen, the full one is what
-// a build is looked up by. Empty when nobody wrote it in and the build
-// metadata has none - a binary built outside a checkout.
+// of a host: the short form is for a line on a screen, the full one is what a
+// build is looked up by.
 func FullCommit() string {
 	if Commit != "" {
 		return Commit

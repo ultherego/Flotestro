@@ -12,15 +12,8 @@ import (
 	"github.com/ultherego/flotestro/internal/paging"
 )
 
-// The fleet screen, counted by the database.
-//
-// The certificates a host reports live in its inventory fragment as a
-// JSON list. The screen used to read the fragments of the first five
-// hundred hosts and count in the panel; on a bigger fleet it showed a
-// wrong number with nothing to say it was wrong. The queries here unnest
-// the lists of every host in scope and let the database count the
-// states, the timeline and the hosts, and hand the rows out a page at a
-// time by a key that does not move under the reader.
+// The fleet screen, counted by the database. The certificates a host reports
+// live in its inventory fragment as a JSON list.
 
 // Module is the inventory module the certificate facts come from.
 const Module = "certificates"
@@ -37,14 +30,13 @@ type FleetSummary struct {
 	// Hosts is the number of hosts in scope.
 	Hosts int
 	// Observed counts the hosts with a readable certificates fragment;
-	// Unavailable those whose fragment says the module could not be read;
-	// Stale the observed ones whose fragment is older than MaxReadAge.
+	// Unavailable those whose fragment says the module could not be read; Stale
+	// the observed ones whose fragment is older than MaxReadAge.
 	Observed    int
 	Unavailable int
 	Stale       int
-	// WithoutCertificates counts the observed hosts that report an empty
-	// list: a host nobody has pointed at a path yet, not a host without
-	// certificates.
+	// WithoutCertificates counts the observed hosts that report an empty list: a
+	// host nobody has pointed at a path yet, not a host without certificates.
 	WithoutCertificates int
 	// Certificates is the number of rows the list has across every page.
 	Certificates int
@@ -69,9 +61,7 @@ func scopeCondition(scopes []authz.Scope, offset int) (string, []any) {
 	return condition, args
 }
 
-// leafSQL unnests the certificate lists of the hosts in scope. Every row
-// is one certificate of one host with the date and the reason the
-// assessment reads; the host columns come along for the list.
+// leafSQL unnests the certificate lists of the hosts in scope.
 const leafSQL = `
 	with scoped as (
 		select h.id, h.hostname from hosts h where %s
@@ -92,9 +82,7 @@ const leafSQL = `
 		where o.reason = ''
 	)`
 
-// FleetSummary counts the certificates of the visible fleet at the
-// moment now. The thresholds are the ones of State, so a certificate
-// counted here as critical is the one the host tab calls critical.
+// FleetSummary counts the certificates of the visible fleet at the moment now.
 func (s *Store) FleetSummary(ctx context.Context, scopes []authz.Scope, now time.Time) (FleetSummary, error) {
 	args := []any{
 		now, now.Add(CriticalThreshold), now.Add(WarningThreshold),
@@ -147,19 +135,17 @@ func (s *Store) FleetSummary(ctx context.Context, scopes []authz.Scope, now time
 	return summary, nil
 }
 
-// FleetRow is one certificate of the fleet list: the host it stands on
-// and the certificate as the host reported it, for the caller to read
-// with the module's own type.
+// FleetRow is one certificate of the fleet list: the host it stands on and the
+// certificate as the host reported it, for the caller to read with the
+// module's own type.
 type FleetRow struct {
 	HostID      string
 	Hostname    string
 	Certificate json.RawMessage
 }
 
-// FleetCursor is the key of the last row of a page: the expiry, the host
-// and the path, in the order of the list. A certificate without an expiry
-// sorts last, under the key "infinity", which the database reads as the
-// timestamp after every other.
+// FleetCursor is the key of the last row of a page: the expiry, the host and
+// the path, in the order of the list.
 type FleetCursor struct {
 	NotAfter string
 	Hostname string
@@ -171,9 +157,8 @@ type FleetCursor struct {
 // noExpiryKey is the sort key of a certificate without a date.
 const noExpiryKey = "infinity"
 
-// ParseFleetCursor reads a cursor issued by FleetPage; an empty value is
-// the first page. A key that is not a timestamp or a host identifier is
-// refused before it reaches the database.
+// ParseFleetCursor reads a cursor issued by FleetPage; an empty value is the
+// first page.
 func ParseFleetCursor(value string) (FleetCursor, error) {
 	parts, err := paging.Decode(value, 4)
 	if err != nil {
@@ -198,13 +183,12 @@ func (c FleetCursor) String() string {
 	return paging.Encode(c.NotAfter, c.Hostname, c.HostID, c.Path)
 }
 
-// FleetPage reads one page of the certificates of the visible fleet,
-// the nearest expiry first and the certificates without a date last. The
-// next cursor is empty on the last page.
+// FleetPage reads one page of the certificates of the visible fleet, the
+// nearest expiry first and the certificates without a date last.
 func (s *Store) FleetPage(ctx context.Context, scopes []authz.Scope, cursor FleetCursor, limit int) ([]FleetRow, string, error) {
 	// A caller asking for more than a page may hold gets the page, not the
-	// default: it then pages on with the cursor rather than quietly
-	// receiving a fifth of what it asked for.
+	// default: it then pages on with the cursor rather than quietly receiving a
+	// fifth of what it asked for.
 	limit = paging.Limit(limit, DefaultPage, MaxPage)
 	condition, args := scopeCondition(scopes, 0)
 	query := fmt.Sprintf(leafSQL, condition) + `
@@ -242,9 +226,9 @@ func (s *Store) FleetPage(ctx context.Context, scopes []authz.Scope, cursor Flee
 	return result, cursorAfter(result[limit-1]).String(), nil
 }
 
-// cursorAfter is the key of a row, read from the certificate the way
-// the query reads it: the date cast from the same text and the same
-// path, so the next page starts right after this row.
+// cursorAfter is the key of a row, read from the certificate the way the query
+// reads it: the date cast from the same text and the same path, so the next
+// page starts right after this row.
 func cursorAfter(row FleetRow) FleetCursor {
 	var certificate struct {
 		NotAfter *time.Time `json:"not_after"`

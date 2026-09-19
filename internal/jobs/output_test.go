@@ -5,9 +5,7 @@ import (
 	"testing"
 )
 
-// The bound of the output is the task's, not the agent's word. An agent
-// that sends more than the task allows gets its result cut here, and the
-// cut is visible as a truncation.
+// The bound of the output is the task's, not the agent's word.
 func TestOutputIsClampedToTheTaskBound(t *testing.T) {
 	stdout := bytes.Repeat([]byte("o"), 60)
 	stderr := bytes.Repeat([]byte("e"), 60)

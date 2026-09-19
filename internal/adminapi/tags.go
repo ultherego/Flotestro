@@ -12,17 +12,9 @@ import (
 )
 
 // The tag catalogue: every tag the fleet carries, in one place.
-//
-// A tag lives on a host, and the host page is where one is set; but the
-// question "which tags does this fleet use, and is 'web' the same thing
-// as 'www'" cannot be answered host by host. The catalogue answers it,
-// and the rename mends what it finds: a tag spelled two ways is a
-// selector that matches half the hosts it should.
 
-// handleListTags lists the tags of the visible hosts with the number of
-// hosts carrying each. The catalogue is narrowed the way the host list
-// is: a tag on a host the caller may not read is not the caller's to
-// know about.
+// handleListTags lists the tags of the visible hosts with the number of hosts
+// carrying each.
 func (s *Server) handleListTags(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermHostRead, "tag")
 	if !ok {
@@ -45,20 +37,9 @@ type renameTagRequest struct {
 }
 
 // hostsListedInTrail bounds the hosts a rename names in its own event.
-// Every touched host gets an event of its own on its trail; the summary
-// event names the first few so a reader sees what kind of hosts moved
-// without a trail entry the size of the fleet.
 const hostsListedInTrail = 50
 
 // handleRenameTag replaces one tag by another on every visible host.
-//
-// The permission is the tag permission, held in every scope the rename
-// reaches: the hosts are those the caller may write tags on, and a host
-// outside those scopes keeps the old tag. A rename that would touch no
-// host is refused rather than recorded as done: the operator misspelled
-// the tag, or somebody renamed it a minute ago, and either way the trail
-// must not say a rename happened. The whole rename is one transaction
-// with the trail entries in it, so a fleet is never left half renamed.
 func (s *Server) handleRenameTag(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermHostTagWrite, "tag")
 	if !ok {

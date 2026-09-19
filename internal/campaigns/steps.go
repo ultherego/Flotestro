@@ -10,13 +10,6 @@ import (
 )
 
 // StepKey names one executable step of a target.
-//
-// A host in a campaign does not run "the campaign": it computes a plan,
-// carries the change, reboots when the policy asks, verifies its units and
-// - after a failure - runs the approved way back. Every one of those is a
-// step of its own with its own task, its own attempts and its own reason
-// for not running. The target's state says where the host stands; the
-// steps say how it got there.
 type StepKey string
 
 const (
@@ -59,9 +52,7 @@ type Step struct {
 	// DependsOn is the step this one waited for; empty for the first step
 	// of the host.
 	DependsOn StepKey `json:"depends_on,omitempty"`
-	// PlanHash is the digest of the plan the step ran under. The plan step
-	// has none - it is what computes the digest - and neither has a
-	// campaign without a planner.
+	// PlanHash is the digest of the plan the step ran under.
 	PlanHash string    `json:"plan_hash,omitempty"`
 	State    StepState `json:"state"`
 	// JobID is the task of the latest attempt; absent for a step settled
@@ -82,8 +73,7 @@ type Step struct {
 }
 
 // stepQuerier is what the step statements need; both the pool and a
-// transaction provide it. A step is written next to the target's
-// transition, so the statement must run on the caller's connection.
+// transaction provide it.
 type stepQuerier interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
@@ -102,12 +92,8 @@ type StepRecord struct {
 	Reason string
 }
 
-// RecordStep writes a step that comes into being already settled or waiting:
-// a step the engine decided not to run, with the reason, or one it queued.
-//
-// A step recorded again for the same target and plan is the same step; the
-// record then replaces its state and reason, and the attempt count stays,
-// because nothing was ordered.
+// RecordStep writes a step that comes into being already settled or waiting: a
+// step the engine decided not to run, with the reason, or one it queued.
 func (s *Store) RecordStep(ctx context.Context, q stepQuerier, record StepRecord) error {
 	if err := record.validate(); err != nil {
 		return err
@@ -133,13 +119,8 @@ func (s *Store) RecordStep(ctx context.Context, q stepQuerier, record StepRecord
 	return nil
 }
 
-// StartStep records that a step was ordered: the task exists and the host
-// is about to carry it.
-//
-// The same step ordered again - a plan computed once more after a
-// reconnect - is the next attempt of the same row: the task changes, the
-// count grows, the outcome opens again. Two rows for one step would make
-// the unique index a lie and the strip on the screen a puzzle.
+// StartStep records that a step was ordered: the task exists and the host is
+// about to carry it.
 func (s *Store) StartStep(ctx context.Context, q stepQuerier, record StepRecord) error {
 	record.State = StepRunning
 	if err := record.validate(); err != nil {
@@ -169,11 +150,6 @@ func (s *Store) StartStep(ctx context.Context, q stepQuerier, record StepRecord)
 
 // FinishStep settles the open step of the given kind on a target. It says
 // whether there was one.
-//
-// Only an open step is settled: a step already closed keeps its outcome,
-// so a pass of the orchestrator repeated after a crash changes nothing. A
-// target with no open step of that kind is not an error either - the
-// step was never ordered, and the caller records that fact separately.
 func (s *Store) FinishStep(ctx context.Context, q stepQuerier, targetID string, key StepKey,
 	state StepState, reason string) (bool, error) {
 	if state.Open() {
@@ -228,9 +204,7 @@ func (s *Store) StepsOfTarget(ctx context.Context, targetID string) ([]Step, err
 	return scanSteps(rows)
 }
 
-// StepPage is one page of a campaign's steps. The page is cut by target,
-// never in the middle of a host: a strip of steps torn between two pages
-// would show a host with half its course.
+// StepPage is one page of a campaign's steps.
 type StepPage struct {
 	Items []Step `json:"items"`
 	// NextCursor is empty on the last page.
@@ -240,10 +214,9 @@ type StepPage struct {
 // maxStepTargets bounds the targets one page of steps covers.
 const maxStepTargets = 1000
 
-// StepsOfCampaign reads the steps of a campaign page by page in the order
-// of the rollout - wave, position, then the dependency order of the steps
-// within a host. The limit counts targets, not steps: a page holds whole
-// hosts. An empty host identifier means every host.
+// StepsOfCampaign reads the steps of a campaign page by page in the order of
+// the rollout - wave, position, then the dependency order of the steps within
+// a host.
 func (s *Store) StepsOfCampaign(ctx context.Context, campaignID, hostID string,
 	cursor TargetCursor, limit int) (StepPage, error) {
 	if limit <= 0 || limit > maxStepTargets {
@@ -340,8 +313,6 @@ type stepOutcome struct {
 }
 
 // stepReason joins an error code and a message into the reason of a step.
-// The code alone is a reason: it names what happened even when the
-// message is empty.
 func stepReason(code, message string) string {
 	switch {
 	case code == "":
@@ -373,9 +344,7 @@ func runningStep(state TargetState) StepKey {
 }
 
 // nextStep says which step a waiting target would have run next: the plan
-// while the campaign plans, the change otherwise. A target settled while
-// waiting gets that step recorded with the reason, so the strip on the
-// screen says "skipped because ..." rather than showing nothing at all.
+// while the campaign plans, the change otherwise.
 func nextStep(campaign Campaign) StepKey {
 	if campaign.State == StatePlanning {
 		return StepPlan
@@ -383,13 +352,8 @@ func nextStep(campaign Campaign) StepKey {
 	return StepExecute
 }
 
-// stepStateOf maps the state a target is settled into onto the state of
-// the step that carried it. A host ruled ineligible by its own plan ran
-// the plan step to the end: the answer was "no", which is an outcome of the
-// plan rather than a failure of the read; a host that found nothing to
-// change ran it to the end too. A host that ended unknown has a step that
-// did not end well - the step ledger has no unknown of its own, and the
-// reason on the step carries the code that says which kind of "not well".
+// stepStateOf maps the state a target is settled into onto the state of the
+// step that carried it.
 func stepStateOf(state TargetState) StepState {
 	switch state {
 	case TargetSucceeded, TargetNoChange, TargetIneligible:
@@ -405,10 +369,8 @@ func stepStateOf(state TargetState) StepState {
 	}
 }
 
-// settledOutcomes derives the outcome of the target's step from the state
-// it is settled into. A target with a running step settles that step; a
-// waiting target settles the step it would have run next, which never
-// ran and says why.
+// settledOutcomes derives the outcome of the target's step from the state it
+// is settled into.
 func settledOutcomes(campaign Campaign, target *Target, state TargetState,
 	code, message string) []stepOutcome {
 	reason := stepReason(code, message)
@@ -428,9 +390,7 @@ func settledOutcomes(campaign Campaign, target *Target, state TargetState,
 }
 
 // dependencyOf says which step a step of the given kind followed on this
-// target. The plan is first; the change follows the plan where the
-// campaign has one; the reboot follows the change; the verification
-// follows the reboot where there was one and the change otherwise.
+// target.
 func dependencyOf(key StepKey, planned, rebooted bool) StepKey {
 	switch key {
 	case StepExecute:

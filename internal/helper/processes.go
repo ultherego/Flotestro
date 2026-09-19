@@ -8,11 +8,6 @@ import (
 )
 
 // signalProcess sends a signal to a process.
-//
-// The limits are checked here even though the panel already checked them: the
-// helper runs as root and cannot trust the content of the message. The start
-// time binds the request to one concrete process, because the kernel reuses
-// PID numbers.
 func (s *Server) signalProcess(_ context.Context, _ *helperv1.HelperRequest,
 	action *helperv1.ProcessSignalRequest) *helperv1.HelperResponse {
 	err := processes.Send("/proc", action.GetPid(), action.GetExpectedStartTicks(),

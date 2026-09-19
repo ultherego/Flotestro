@@ -10,11 +10,9 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// ErrStaleFence means a write on a session that no longer owns its host:
-// the host's ownership row names a newer session, a newer token, or a
-// lease that ran out. The database refused the write, nothing was
-// changed, and the write is never repeated as a plain update - the
-// instance that owns the host now carries on with the host's answers.
+// ErrStaleFence means a write on a session that no longer owns its host: the
+// host's ownership row names a newer session, a newer token, or a lease that
+// ran out.
 var ErrStaleFence = errors.New("session_fence_stale: the session no longer owns the host")
 
 // ErrorSessionFenceStale is the code of ErrStaleFence, as the error guide
@@ -22,22 +20,13 @@ var ErrStaleFence = errors.New("session_fence_stale: the session no longer owns 
 const ErrorSessionFenceStale = "session_fence_stale"
 
 // The lease of a session's ownership and how often the gateway renews it.
-// Three renewals fit in one lease: a renewal that fails once - a slow
-// query, a pool with no free connection for a moment - does not lose the
-// host, and an instance that stops renewing loses it within a minute,
-// which is how long the scheduler of the other instances holds its tasks
-// at most.
 const (
 	OwnerLeaseTTL   = 45 * time.Second
 	OwnerRenewEvery = 15 * time.Second
 )
 
-// Fence names the session a write is made on and the token that session
-// got when it claimed the host. Every write of a delivery or a result
-// carries one; the database compares it with the host's ownership row and
-// refuses a write from a session that has been superseded. An empty fence
-// is refused as well: a write that names no session is a write nobody
-// owns, and the machinery fails closed.
+// Fence names the session a write is made on and the token that session got
+// when it claimed the host.
 type Fence struct {
 	SessionID string
 	Token     uint64
@@ -54,28 +43,20 @@ type Owner struct {
 }
 
 // Live says whether the owner may be delivered to at the given moment: it
-// names a session and its lease has not run out. The scheduler delivers
-// nothing to a host without a live owner.
+// names a session and its lease has not run out.
 func (o Owner) Live(now time.Time) bool {
 	return o.SessionID != "" && o.LeaseUntil.After(now)
 }
 
-// processInstanceID names this control-plane process among the instances
-// that share the database. It is drawn once at start and is the only thing
-// about ownership the process keeps in memory: it says who wrote a row,
-// never who owns a host - that is read from the row every time.
+// processInstanceID names this control-plane process among the instances that
+// share the database.
 var processInstanceID = uuid.NewString()
 
 // InstanceID returns the identifier of this control-plane process.
 func InstanceID() string { return processInstanceID }
 
-// ClaimSession makes the given session the owner of the host and returns
-// the fencing token it got. The claim is one upsert: the token of the host
-// grows by one whatever the row said before, so a new connection never
-// has to guess whether the previous instance really died - it takes the
-// host, and the previous instance's writes fail against the new token.
-// Two claims for one host at the same moment are serialised by the row,
-// and each gets its own number.
+// ClaimSession makes the given session the owner of the host and returns the
+// fencing token it got.
 func (s *Store) ClaimSession(ctx context.Context, hostID, sessionID, instanceID string,
 	ttl time.Duration) (uint64, error) {
 	if hostID == "" || sessionID == "" || instanceID == "" {
@@ -102,10 +83,7 @@ func (s *Store) ClaimSession(ctx context.Context, hostID, sessionID, instanceID 
 	return uint64(token), nil
 }
 
-// RenewOwnership moves the lease of the owner forward. The renewal is
-// conditional on the instance, the session and the token together: a row
-// that names any other owner is somebody else's, and the caller learns it
-// as ErrStaleFence - its session has been superseded and is to close.
+// RenewOwnership moves the lease of the owner forward.
 func (s *Store) RenewOwnership(ctx context.Context, hostID, sessionID, instanceID string,
 	token uint64, ttl time.Duration) error {
 	tag, err := s.pool.Exec(ctx, `
@@ -125,12 +103,9 @@ func (s *Store) RenewOwnership(ctx context.Context, hostID, sessionID, instanceI
 	return nil
 }
 
-// ReleaseOwnership gives the host up when its session closes: the row
-// keeps its token and forgets the session, so the scheduler holds the
-// host's tasks until a session claims it again. The release is
-// conditional on the session and the token: a session that was superseded
-// releases nothing, because the row is the newer session's now, and the
-// caller learns it as ErrStaleFence.
+// ReleaseOwnership gives the host up when its session closes: the row keeps
+// its token and forgets the session, so the scheduler holds the host's tasks
+// until a session claims it again.
 func (s *Store) ReleaseOwnership(ctx context.Context, hostID, sessionID string, token uint64) error {
 	tag, err := s.pool.Exec(ctx, `
 		update host_session_owners
@@ -149,9 +124,7 @@ func (s *Store) ReleaseOwnership(ctx context.Context, hostID, sessionID string, 
 	return nil
 }
 
-// OwnerOf reads the ownership row of a host. A host without a row has no
-// owner and is returned as a zero Owner; the caller asks Live before it
-// delivers anything.
+// OwnerOf reads the ownership row of a host.
 func (s *Store) OwnerOf(ctx context.Context, hostID string) (Owner, error) {
 	owners, err := s.OwnersOf(ctx, []string{hostID})
 	if err != nil {
@@ -160,9 +133,8 @@ func (s *Store) OwnerOf(ctx context.Context, hostID string) (Owner, error) {
 	return owners[hostID], nil
 }
 
-// OwnersOf reads the ownership rows of the given hosts in one query, for
-// the scheduler's pass over a batch. A host without a row is missing from
-// the answer, which reads as no owner.
+// OwnersOf reads the ownership rows of the given hosts in one query, for the
+// scheduler's pass over a batch.
 func (s *Store) OwnersOf(ctx context.Context, hostIDs []string) (map[string]Owner, error) {
 	owners := make(map[string]Owner, len(hostIDs))
 	if len(hostIDs) == 0 {
@@ -199,11 +171,8 @@ func (s *Store) OwnersOf(ctx context.Context, hostIDs []string) (map[string]Owne
 }
 
 // SweepExpiredOwners forgets the sessions of the owner rows whose lease ran
-// out: an instance that died without releasing its hosts leaves them
-// named as owners, and while the expired lease already refuses every
-// write, the rows would say the host is held by a process that is gone.
-// The tokens stay - a token never goes back - so a write from the dead
-// instance stays refused after the sweep as before it.
+// out: an instance that died without releasing its hosts leaves them named as
+// owners, and while the expired lease already refuses every write, the rows
 func (s *Store) SweepExpiredOwners(ctx context.Context) (int64, error) {
 	tag, err := s.pool.Exec(ctx, `
 		update host_session_owners
@@ -216,12 +185,8 @@ func (s *Store) SweepExpiredOwners(ctx context.Context) (int64, error) {
 	return tag.RowsAffected(), nil
 }
 
-// fenceHolds checks, inside a transaction that already holds the job's
-// row, that the fence names the live owner of the job's host. The owner
-// row is locked for share: a claim in flight waits for this write to
-// commit rather than racing it, and the token it then takes is the one
-// that refuses the next write of this session. A fence that names no
-// session is refused without asking the database.
+// fenceHolds checks, inside a transaction that already holds the job's row,
+// that the fence names the live owner of the job's host.
 func fenceHolds(ctx context.Context, tx pgx.Tx, jobID string, fence Fence) error {
 	if fence.SessionID == "" {
 		return ErrStaleFence

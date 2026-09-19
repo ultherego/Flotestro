@@ -9,9 +9,7 @@ import (
 )
 
 // keyPacket assembles a minimal public key packet in version 4: the version,
-// the timestamp, the algorithm and the key material. Nothing more is needed to
-// compute the fingerprint, and a packet of our own allows checking the
-// reckoning without pasting somebody else's key into the test.
+// the timestamp, the algorithm and the key material.
 func keyPacket() []byte {
 	content := []byte{4, 0x66, 0x00, 0x00, 0x00, 1}
 	content = append(content, make([]byte, 20)...)

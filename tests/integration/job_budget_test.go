@@ -23,16 +23,9 @@ func (h *harness) waitingJob(jobID string) waitingJobView {
 	return job
 }
 
-// TestJobWaitsForTheMutationBudget guards the rule that a budget is
-// admission for every change, not only for a campaign: a restart ordered
-// by hand asks for the fleet's mutation token like a campaign target does,
-// says which budget holds it while it waits, and starts once the token is
-// free - while a state read walks past the mutation budget untouched.
-//
-// The token is held first by the test itself, through the table the
-// budgets live in: the proof is about the wait, and a wait that depends on
-// winning a race against a restart that takes a second would prove
-// nothing on a fast fleet.
+// TestJobWaitsForTheMutationBudget guards the rule that a budget is admission
+// for every change, not only for a campaign: a restart ordered by hand asks
+// for the fleet's mutation token like a campaign target does, says which
 func TestJobWaitsForTheMutationBudget(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -100,10 +93,9 @@ func TestJobWaitsForTheMutationBudget(t *testing.T) {
 		}
 	}
 
-	// The budget screen says who holds the token and who waits for it
-	// while it is held: the stand-in as a holder the panel cannot place,
-	// two jobs in the queue. A page that showed only the numbers would
-	// leave the operator guessing whom to wait for.
+	// The budget screen says who holds the token and who waits for it while it is
+	// held: the stand-in as a holder the panel cannot place, two jobs in the
+	// queue.
 	held := h.budgetState(key)
 	if held.WaitingJobs != 2 {
 		t.Errorf("the budget counts %d waiting jobs while two stand in the queue", held.WaitingJobs)
@@ -129,18 +121,13 @@ func TestJobWaitsForTheMutationBudget(t *testing.T) {
 		}
 	}
 
-	// The token goes back. One token, two jobs: the second must not start
-	// before the first has finished. The second job is read before the
-	// first on purpose - the first finishing between the two reads then
-	// shows as a finished first, never as a second that jumped the queue.
+	// The token goes back. One token, two jobs: the second must not start before
+	// the first has finished.
 	if _, err := pool.Exec(ctx, `delete from budget_leases where owner = $1`, holder); err != nil {
 		t.Fatalf("giving the token back: %v", err)
 	}
-	// While the first job holds the token, the budget names it as the
-	// holder by its job id and still counts the second in the queue. The
-	// window is the job's run, so the screen is read as soon as the first
-	// job has left the queue; a run too short to be caught proves nothing
-	// either way and is not a failure.
+	// While the first job holds the token, the budget names it as the holder by
+	// its job id and still counts the second in the queue.
 	shown := false
 	deadline := time.Now().Add(3 * time.Minute)
 	for time.Now().Before(deadline) {

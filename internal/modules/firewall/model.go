@@ -1,8 +1,4 @@
 // Package firewall describes the firewall rules of a host.
-//
-// The module reads the kernel state, not the configuration files of
-// services: what the host really filters and what somebody wrote into the
-// configuration can drift apart - and a packet bounces off the former.
 package firewall
 
 import "time"
@@ -25,21 +21,12 @@ const (
 )
 
 // FlotestroTable is the only table the panel creates and changes.
-//
-// The panel rules live in a table of their own, because the host firewall
-// usually belongs to somebody already: docker rewrites its chains at every
-// container start, and firewalld at every reload. Entering somebody else's
-// chains ends in a rule that vanishes without a trace.
 const (
 	FlotestroFamily = "inet"
 	FlotestroTable  = "flotestro"
 )
 
 // Rule is one rule in the form nft shows it.
-//
-// The text is the text from nft, not assembled by the panel: the operator
-// knows this notation from the command line, and our own rendering would
-// drift from what the host really has.
 type Rule struct {
 	Family string `json:"family"`
 	Table  string `json:"table"`
@@ -97,11 +84,6 @@ type Zone struct {
 
 // Drift is a difference between two views of the same firewall: what the host
 // filters with now, and what it keeps for its next start.
-//
-// The two are not the same picture. A rule in one and not in the other either
-// does nothing while looking enforced, or enforces something no file keeps -
-// and vanishes at the next reload. The panel names which, and never guesses
-// when the two notations cannot be compared.
 type Drift struct {
 	// Reason is the stable code of the difference.
 	Reason string `json:"reason"`
@@ -120,22 +102,19 @@ type Drift struct {
 type Snapshot struct {
 	// Adapter names the mechanism that holds the rules on this host.
 	Adapter string `json:"adapter,omitempty"`
-	// Hash is the fingerprint of the whole ruleset. A change ordered
-	// against a different ruleset is not the same change the operator
-	// viewed.
+	// Hash is the fingerprint of the whole ruleset. A change ordered against a
+	// different ruleset is not the same change the operator viewed.
 	Hash   string  `json:"hash,omitempty"`
 	Tables []Table `json:"tables,omitempty"`
 	Chains []Chain `json:"chains,omitempty"`
 	Rules  []Rule  `json:"rules,omitempty"`
 	Zones  []Zone  `json:"zones,omitempty"`
-	// UFW is the header of "ufw status" on a host where ufw holds the
-	// rules: the default policy is what a packet meets when no rule
-	// matches, and no rule list says that.
+	// UFW is the header of "ufw status" on a host where ufw holds the rules: the
+	// default policy is what a packet meets when no rule matches, and no rule
+	// list says that.
 	UFW *UFWStatus `json:"ufw,omitempty"`
-	// Drift lists the differences between what the host filters with and
-	// what it keeps for its next start. An empty list on a host that was
-	// compared means agreement; a host nothing compared has no list at all,
-	// which is not the same answer.
+	// Drift lists the differences between what the host filters with and what it
+	// keeps for its next start.
 	Drift []Drift `json:"drift,omitempty"`
 	// Writable says whether the panel can change anything here and why not.
 	Writable       bool      `json:"writable"`

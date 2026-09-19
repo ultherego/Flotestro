@@ -7,17 +7,13 @@ import (
 	"strings"
 )
 
-// The files ufw keeps its user rules in. They are what the host filters with
-// after the next reload or reboot; what it filters with right now is in the
-// kernel, and the two are not the same thing.
+// The files ufw keeps its user rules in.
 const (
 	UFWUserRulesFile  = "/etc/ufw/user.rules"
 	UFWUser6RulesFile = "/etc/ufw/user6.rules"
 )
 
-// The ufw chains the user rules live in. Everything else ufw builds - the
-// before and after chains, the logging and the limit chains - is the tool's
-// own scaffolding and is rebuilt from scratch at every reload.
+// The ufw chains the user rules live in.
 const (
 	ufwUserInputChain   = "ufw-user-input"
 	ufwUserOutputChain  = "ufw-user-output"
@@ -35,29 +31,19 @@ const (
 // The reasons a ufw host drifts. A rule is either in both views or it is a
 // fact the operator has to know before depending on it.
 const (
-	// DriftUFWNotLoaded: ufw keeps the rule for the next start, and the
-	// kernel is not filtering with it. Nothing enforces it until somebody
-	// reloads ufw - and then it appears without anyone ordering it.
+	// DriftUFWNotLoaded: ufw keeps the rule for the next start, and the kernel is
+	// not filtering with it.
 	DriftUFWNotLoaded = "ufw_rule_not_loaded"
 	// DriftUFWNotPersisted: the kernel filters with a rule ufw does not keep.
-	// It disappears at the next reload or reboot, quietly opening or closing
-	// a port nobody touched.
 	DriftUFWNotPersisted = "ufw_rule_not_persisted"
-	// DriftUFWNotComparable: the rule is written in a notation the two views
-	// do not share - an application profile, a rate limit, an address set -
-	// so the panel cannot say whether it is loaded. Unknown is reported as
-	// unknown rather than passed off as agreement.
+	// DriftUFWNotComparable: the rule is written in a notation the two views do
+	// not share - an application profile, a rate limit, an address set - so the
+	// panel cannot say whether it is loaded.
 	DriftUFWNotComparable = "ufw_rule_not_comparable"
 )
 
-// UFWFileRules reads the user rules ufw keeps in one of its files.
-//
-// Only the tuple lines are read. The iptables lines below them are what ufw
-// generates from the tuples, and reading them would be reading the same fact
-// twice - in a notation that changes with the version of the tool.
-//
-// The family is the caller's word, because the file says nothing about it:
-// user.rules holds the IPv4 rules and user6.rules the IPv6 ones.
+// UFWFileRules reads the user rules ufw keeps in one of its files. Only the
+// tuple lines are read.
 func UFWFileRules(family, content string) []Rule {
 	var rules []Rule
 	for _, raw := range strings.Split(content, "\n") {
@@ -87,9 +73,8 @@ func UFWFileRules(family, content string) []Rule {
 				kept = append(kept, field)
 				continue
 			}
-			// ufw stores the comment hex-encoded, because blanks separate the
-			// fields of its own format. The encoded form says nothing to a
-			// person, so the rule carries the text and the decoded comment.
+			// ufw stores the comment hex-encoded, because blanks separate the fields of
+			// its own format.
 			if decoded, err := hex.DecodeString(value); err == nil {
 				rule.Comment = string(decoded)
 			}
@@ -118,19 +103,6 @@ func UFWLoadedRules(rules []Rule) []Rule {
 
 // UFWDrift compares what ufw keeps in its files with what the kernel filters
 // with now.
-//
-// The panel used to read the rules through "ufw show added" alone - the
-// tool's own account of itself. A rule written into user.rules by hand and
-// never loaded, and a rule loaded into the kernel that no file keeps, are
-// both invisible that way: the first does nothing while looking enforced,
-// the second stops doing anything at the next reload. Both are reported here,
-// each with its own reason.
-//
-// A rule neither view can express in the other's notation is reported as
-// exactly that. When there is one, the rules of the kernel that found no
-// counterpart are left unreported: an application profile the file names by
-// its name and the kernel by its ports would otherwise look like two drifts
-// at once, and a firewall that cries drift is one nobody reads.
 func UFWDrift(filed, loaded []Rule) []Drift {
 	var drift []Drift
 	filedMatches, filedUnreadable := ufwMatches(filed, ufwFiledMatch,
@@ -150,9 +122,8 @@ func UFWDrift(filed, loaded []Rule) []Drift {
 		})
 	}
 	if filedUnreadable > 0 {
-		// With a rule the files spell in their own way, a rule of the kernel
-		// without a counterpart may well be that very rule. The panel does not
-		// name a drift it cannot prove.
+		// With a rule the files spell in their own way, a rule of the kernel without
+		// a counterpart may well be that very rule.
 		return drift
 	}
 	for index, rule := range loaded {
@@ -192,11 +163,6 @@ func ufwMatches(rules []Rule, read func(Rule) (ufwMatch, bool), detail string,
 }
 
 // ufwMatch is the part of a rule both views can express.
-//
-// What ufw writes into its files and what nft prints out of the kernel are
-// two notations of one rule. These fields survive the translation in both
-// directions; anything else - the counters, the order, the way an address is
-// spelled - is the notation rather than the rule.
 type ufwMatch struct {
 	family    string
 	direction string
@@ -208,9 +174,6 @@ type ufwMatch struct {
 }
 
 // compatible says whether two matches describe the same rule.
-//
-// A rule without a protocol covers every protocol: "ufw allow 22" is one line
-// in the file and two rules in the kernel, and neither of them is a drift.
 func (m ufwMatch) compatible(other ufwMatch) bool {
 	if m.family != other.family || m.direction != other.direction ||
 		m.verdict != other.verdict || m.ports != other.ports ||
@@ -232,11 +195,6 @@ func ufwMatched(match ufwMatch, against map[int]ufwMatch) bool {
 // ufwTupleExtras reads the fields ufw writes after the addresses: the
 // direction, the interface the rule is bound to, and whether it names an
 // application profile.
-//
-// The direction is written twice by different versions of the tool - as a
-// suffix of the action, and as a field of its own - so the action is read
-// first and a field of its own wins over it. A tuple that says neither is an
-// incoming rule, which is what ufw meant before it had the other kind.
 func ufwTupleExtras(fields []string) (direction, iface string, profile bool) {
 	direction = ufwTupleDirection(fields[0])
 	for _, extra := range fields[6:] {
@@ -256,9 +214,7 @@ func ufwTupleExtras(fields []string) (direction, iface string, profile bool) {
 	return direction, iface, profile
 }
 
-// ufwTupleDirection reads the direction out of the action of a tuple. ufw
-// wrote no direction before it had per-direction rules, and that meant
-// incoming.
+// ufwTupleDirection reads the direction out of the action of a tuple.
 func ufwTupleDirection(action string) string {
 	_, suffix, found := strings.Cut(action, "_")
 	if !found {
@@ -321,9 +277,7 @@ var (
 	nftPortValue = regexp.MustCompile(`dport (?:\{([^}]*)\}|([0-9]+(?:-[0-9]+)?))`)
 	nftSource    = regexp.MustCompile(`\bip6? saddr (?:\{([^}]*)\}|([^\s]+))`)
 	nftInterface = regexp.MustCompile(`\b[io]ifname "([^"]*)"`)
-	// The verdicts and the ways out of a chain. The last one in the rule is
-	// the one that decides the packet; a jump or a return decides nothing the
-	// file could be compared with.
+	// The verdicts and the ways out of a chain.
 	nftVerdict = regexp.MustCompile(`\b(accept|drop|reject|return|queue|jump|goto)\b`)
 )
 

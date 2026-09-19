@@ -7,27 +7,18 @@ import (
 )
 
 // The ufw tool and its files.
-//
-// ufw keeps the rules in its own files and loads them into iptables-nft
-// itself; the panel speaks to it through its command line, not to the
-// tables underneath. A rule written straight into the tables would vanish
-// at the next "ufw reload".
 const (
 	UFWPath       = "/usr/sbin/ufw"
 	UFWConfigFile = "/etc/ufw/ufw.conf"
 	// UFWTable is the table name the panel shows for ufw rules: ufw has
 	// no tables of its own the operator would name.
 	UFWTable = "ufw"
-	// UFWRegistryFile holds the ufw rules the panel created. It is a
-	// separate registry from the nftables one: the same rule is written
-	// differently by each mechanism, and a host switching from one to the
-	// other must not rebuild nftables rules through ufw.
+	// UFWRegistryFile holds the ufw rules the panel created.
 	UFWRegistryFile = "ufw-rules.json"
 )
 
-// UFWEnabled reads /etc/ufw/ufw.conf. It is what the agent can check
-// without starting a process; the helper asks "ufw status" for the running
-// answer.
+// UFWEnabled reads /etc/ufw/ufw. conf. It is what the agent can check without
+// starting a process; the helper asks "ufw status" for the running answer.
 func UFWEnabled(config string) bool {
 	for _, line := range strings.Split(config, "\n") {
 		key, value, ok := strings.Cut(strings.TrimSpace(line), "=")
@@ -45,15 +36,13 @@ type UFWStatus struct {
 	// (incoming), allow (outgoing), disabled (routed)".
 	Defaults string `json:"defaults,omitempty"`
 	Logging  string `json:"logging,omitempty"`
-	// Reason says, for an inactive ufw, what the panel does instead: an
-	// installed ufw the operator sees on the host is not the mechanism the
-	// panel writes through, and the operator is to know where the rules go.
+	// Reason says, for an inactive ufw, what the panel does instead: an installed
+	// ufw the operator sees on the host is not the mechanism the panel writes
+	// through, and the operator is to know where the rules go.
 	Reason string `json:"reason,omitempty"`
 }
 
-// UFW's answers about an inactive firewall. The panel does not enable ufw
-// on its own: enabling it installs a default policy of its own on the
-// host, and that is the operator's decision.
+// UFW's answers about an inactive firewall.
 const (
 	UFWInactiveWithNftables = "ufw is installed but inactive; the panel writes its own nftables table on this host"
 	UFWInactiveReadOnly     = "ufw is installed but inactive, and this host has no nft binary for the panel's own table"
@@ -87,19 +76,14 @@ func UFWActive(output string) bool {
 
 var (
 	ufwComment = regexp.MustCompile(`\s+comment\s+'((?:[^']|'\\'')*)'\s*$`)
-	// ufw accepts a narrow set of characters in a comment; a quote inside
-	// one would have to be escaped through its shell quoting, and the
-	// panel does not go there.
+	// ufw accepts a narrow set of characters in a comment; a quote inside one
+	// would have to be escaped through its shell quoting, and the panel does not
+	// go there.
 	ufwCommentText = regexp.MustCompile(`^[A-Za-z0-9 ._:@/,-]*$`)
 )
 
 // ParseUFWAdded reads the output of "ufw show added": the user rules in the
 // form of the commands that created them.
-//
-// This form is read rather than "ufw status", because it is the one the
-// rules can be deleted by: "ufw delete" takes the same specification the
-// rule was added with, and the numbers of "ufw status numbered" shift with
-// every deletion.
 func ParseUFWAdded(output string) []Rule {
 	var rules []Rule
 	for _, raw := range strings.Split(output, "\n") {
@@ -169,10 +153,6 @@ func (r RuleSpec) ValidateUFW() error {
 }
 
 // UFWArguments assembles the commands adding a rule.
-//
-// ufw takes one source per rule, so a rule with several sources becomes
-// several ufw rules that share the marker. Deleting the panel rule deletes
-// all of them.
 func UFWArguments(rule RuleSpec) ([][]string, error) {
 	if err := rule.ValidateUFW(); err != nil {
 		return nil, err
@@ -258,13 +238,8 @@ func ufwAction(action string) string {
 }
 
 // UFWTransition assembles the commands carrying the ufw rules from one
-// registry to another: the rules that changed or vanished are deleted by
-// their old specification, the rules that appeared or changed are added.
-//
-// ufw has no "rebuild from scratch" short of a reset that drops every rule
-// on the host, the operator's included - so the transition is computed
-// from the registries, and the rollback is the same function the other way
-// round.
+// registry to another: the rules that changed or vanished are deleted by their
+// old specification, the rules that appeared or changed are added.
 func UFWTransition(from, to Registry) ([][]string, error) {
 	var steps [][]string
 	for _, old := range from.Rules {

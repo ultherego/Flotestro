@@ -7,9 +7,7 @@ import (
 )
 
 // A container log read takes a name as well as an identifier: it is a read,
-// and the name is what the operator has in front of them. The value still
-// lands in the path of an Engine API request, so nothing that changes the
-// path passes.
+// and the name is what the operator has in front of them.
 func TestContainerLogsValidation(t *testing.T) {
 	for _, target := range []string{"web", "5c5b63d3119a", "shop_web-1"} {
 		payload := Payload{DockerLogs: &DockerLogsPayload{ContainerID: target, Lines: 200, Since: "15m"}}
@@ -42,9 +40,9 @@ func TestContainerLogsValidation(t *testing.T) {
 	}
 }
 
-// A rename changes the identity of the host towards everything that knows
-// it by name: critical, the whole host as the lock, the target name typed
-// by hand, and in bulk only as a mapping that names every host by itself.
+// A rename changes the identity of the host towards everything that knows it
+// by name: critical, the whole host as the lock, the target name typed by
+// hand, and in bulk only as a mapping that names every host by itself.
 func TestHostnameSetContract(t *testing.T) {
 	if err := Validate(ActionSystemHostnameSet, Payload{Hostname: &HostnamePayload{Hostname: "web02.example.internal", Pretty: "Web 02"}}); err != nil {
 		t.Fatalf("a valid rename was rejected: %v", err)
@@ -72,8 +70,8 @@ func TestHostnameSetContract(t *testing.T) {
 		t.Errorf("a rename locks %q, expected the whole host", ActionSystemHostnameSet.LockClass())
 	}
 	// In bulk the order is split host by host in the panel: the mode is a
-	// per-host plan, and the plan comes from the mapping, not from a read
-	// on the host.
+	// per-host plan, and the plan comes from the mapping, not from a read on the
+	// host.
 	if ActionSystemHostnameSet.CampaignMode() != CampaignPerHostPlan || !PanelPlanned(ActionSystemHostnameSet) {
 		t.Error("a rename in bulk is a per-host plan split from the order")
 	}
@@ -90,9 +88,9 @@ func TestHostnameSetContract(t *testing.T) {
 	}
 }
 
-// The risk of a groups change depends on its content: a membership in sudo
-// or docker is root by another name, so such an order needs fresh
-// authentication like every critical change of access.
+// The risk of a groups change depends on its content: a membership in sudo or
+// docker is root by another name, so such an order needs fresh authentication
+// like every critical change of access.
 func TestPrivilegedGroupsRaiseTheRisk(t *testing.T) {
 	plain := Payload{LocalUser: &LocalUserPayload{Name: "smith", Groups: []string{"developers", "audio"}}}
 	if err := Validate(ActionLocalUserGroupsSet, plain); err != nil {
@@ -121,10 +119,9 @@ func TestPrivilegedGroupsRaiseTheRisk(t *testing.T) {
 	if err := Validate(ActionLocalUserGroupsSet, Payload{LocalUser: &LocalUserPayload{Name: "smith", Groups: []string{"su do"}}}); err == nil {
 		t.Error("an invalid group name was accepted")
 	}
-	// An account created straight into a privileged group is the same
-	// grant of root as moving one into it, so the create carries the
-	// raised risk too; a create without such a group keeps the risk of
-	// the operation.
+	// An account created straight into a privileged group is the same grant of
+	// root as moving one into it, so the create carries the raised risk too; a
+	// create without such a group keeps the risk of the operation.
 	if risk := PayloadRisk(ActionLocalUserCreate, Payload{LocalUser: &LocalUserPayload{Name: "smith", Groups: []string{"sudo"}}}); risk != RiskCritical {
 		t.Errorf("creating an account in sudo has the risk %s, expected critical", risk)
 	}
@@ -154,9 +151,8 @@ func TestExpiryValidation(t *testing.T) {
 	}
 }
 
-// Deleting an account is destructive: the operator types the account name
-// and two people approve, the way every destructive operation goes. The
-// accounts the panel never deletes are refused when the order is placed.
+// Deleting an account is destructive: the operator types the account name and
+// two people approve, the way every destructive operation goes.
 func TestAccountDeletionIsDestructive(t *testing.T) {
 	payload := Payload{LocalUser: &LocalUserPayload{Name: "smith", RemoveHome: true}}
 	if err := Validate(ActionLocalUserDelete, payload); err != nil {
@@ -211,8 +207,8 @@ func TestSmartReadValidation(t *testing.T) {
 }
 
 // The account operations keep separate permissions: granting a group is a
-// different decision from deleting an account, and both differ from
-// creating one.
+// different decision from deleting an account, and both differ from creating
+// one.
 func TestAccountOperationsHaveSeparatePermissions(t *testing.T) {
 	seen := map[string]ActionType{}
 	for _, action := range []ActionType{

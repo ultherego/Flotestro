@@ -8,9 +8,9 @@ import (
 	"github.com/ultherego/flotestro/internal/buildinfo"
 )
 
-// helloView is the part of the host record the Hello of the agent fills
-// in beyond the version: the sources of the binary, the protocols it
-// speaks and the configuration it runs on.
+// helloView is the part of the host record the Hello of the agent fills in
+// beyond the version: the sources of the binary, the protocols it speaks and
+// the configuration it runs on.
 type helloView struct {
 	ID                  string `json:"id"`
 	Hostname            string `json:"hostname"`
@@ -25,14 +25,8 @@ type helloView struct {
 }
 
 // TestEveryOnlineHostReportsItsBuildAndConfiguration: once an agent of a
-// release that introduces itself fully has reconnected, the panel knows
-// which commit it runs, which protocols it speaks, and what configuration
-// it is on - and the lab hosts, provisioned with agent.yaml, are on the
-// current schema with a fingerprint. A host on an agent from before the
-// report is skipped with the reason: it says nothing, and nothing is what
-// the panel has to show for it. A host that reports a schema of zero runs
-// on the environment file; that is a legacy configuration, not a missing
-// fingerprint, and it is reported as such.
+// release that introduces itself fully has reconnected, the panel knows which
+// commit it runs, which protocols it speaks, and what configuration it is on -
 func TestEveryOnlineHostReportsItsBuildAndConfiguration(t *testing.T) {
 	h := newHarness(t)
 	var listing struct {
@@ -67,9 +61,8 @@ func TestEveryOnlineHostReportsItsBuildAndConfiguration(t *testing.T) {
 				t.Fatalf("no configuration schema; the agent %s reports one", host.AgentVersion)
 			}
 			if *host.ConfigSchemaVersion == 0 {
-				// The environment file of the old flow: no file, no
-				// fingerprint, and the panel says so rather than showing a
-				// blank as the current configuration.
+				// The environment file of the old flow: no file, no fingerprint, and the
+				// panel says so rather than showing a blank as the current configuration.
 				if !*host.ConfigLegacy {
 					t.Error("a host on no configuration file is not shown as a legacy configuration")
 				}

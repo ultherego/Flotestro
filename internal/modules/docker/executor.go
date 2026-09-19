@@ -11,10 +11,6 @@ import (
 )
 
 // Result describes the result of an operation on the container engine.
-//
-// The state before and after is always recorded, also on error: without it
-// the operator does not know what managed to change before the operation
-// failed.
 type Result struct {
 	Before *Container `json:"before,omitempty"`
 	After  *Container `json:"after,omitempty"`
@@ -53,9 +49,7 @@ func (c *Client) RestartContainer(ctx context.Context, id string, timeoutSeconds
 	return c.post(ctx, "/containers/"+id+"/restart", query)
 }
 
-// RemoveContainer removes a container. Volumes vanish only when the
-// operator explicitly asked for it: a volume outlives the container so that
-// the data survives.
+// RemoveContainer removes a container.
 func (c *Client) RemoveContainer(ctx context.Context, id string, removeVolumes bool) error {
 	query := url.Values{}
 	if removeVolumes {
@@ -68,10 +62,8 @@ func (c *Client) RemoveContainer(ctx context.Context, id string, removeVolumes b
 func (c *Client) PullImage(ctx context.Context, reference string) (string, error) {
 	query := url.Values{}
 	query.Set("fromImage", reference)
-	// The engine streams the pull progress as a sequence of JSON objects;
-	// the content is not needed, so it is read to the end and discarded.
-	// Reading to the end matters: breaking the connection half-way aborts
-	// the pull.
+	// The engine streams the pull progress as a sequence of JSON objects; the
+	// content is not needed, so it is read to the end and discarded.
 	if err := c.post(ctx, "/images/create", query); err != nil {
 		return "", err
 	}
@@ -91,9 +83,6 @@ func (c *Client) PullImage(ctx context.Context, reference string) (string, error
 }
 
 // RemoveImage removes an image.
-//
-// The engine returns the list of layers that vanished, but not their size -
-// the reclaimed space is computed from the sizes gathered before removal.
 func (c *Client) RemoveImage(ctx context.Context, id string) error {
 	return c.call(ctx, http.MethodDelete, "/images/"+url.PathEscape(id), nil, nil)
 }
@@ -134,19 +123,12 @@ func (c *Client) post(ctx context.Context, path string, query url.Values) error 
 }
 
 // Prune removes only the named objects.
-//
-// A prune by filter removes what matches at execution time - so also an
-// object created after the operator viewed the preview. The list is
-// therefore explicit: exactly what was shown is removed.
 func Prune(ctx context.Context, client *Client, images, volumes, networks []string) (Result, error) {
 	result := Result{}
 	var reclaimed int64
 	var sizesKnown bool
 
-	// The host state is read before removal - and in order to be able to
-	// refuse. The engine would refuse itself, but with an HTTP conflict
-	// message; the operator is meant to get the names of the containers
-	// that use the object.
+	// The host state is read before removal - and in order to be able to refuse.
 	state := Snapshot{}
 	if len(volumes) > 0 || len(networks) > 0 {
 		var err error
@@ -246,10 +228,6 @@ func pruneState(ctx context.Context, client *Client) (Snapshot, error) {
 }
 
 // checkPrune refuses before anything vanishes.
-//
-// A prune is one operation: if the first volume vanished and the second
-// turned out to be busy, the operator would be left with a half-way state.
-// That is why the whole list is checked up front.
 func checkPrune(state Snapshot, volumes, networks []string) error {
 	for _, name := range volumes {
 		volume := volumeByName(state.Volumes, name)

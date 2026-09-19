@@ -199,7 +199,7 @@ func (s *Scheduler) dispatchOnce(ctx context.Context) {
 	}
 	// Every task is admitted on its own, oldest first, before any is taken: a
 	// task the budgets refuse stays queued as it was, with no attempt opened, and
-	// the tasks behind it in the queue still get their turn - a restart in one
+	// the tasks behind it in the queue still get their turn - a restart in one.
 	admitted := make([]string, 0, len(candidates))
 	for i, candidate := range candidates {
 		if len(admitted) >= room {
@@ -600,7 +600,7 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 
 	// The resource scope comes from the registry by family: the host wraps the
 	// tools of a package transaction or a backup in a transient scope with these
-	// controls, so a heavy operation slows itself down on a busy host rather than
+	// controls, so a heavy operation slows itself down on a busy host rather
 	scope := opspec.ActionType(item.Job.ActionType).ResourceLimits()
 	envelope := &agentv1.TaskEnvelope{
 		TaskId:         item.AttemptID,
@@ -1276,7 +1276,7 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			network.PlanHash = payload.Network.PlanHash
 			// The second family and the layering travel in the envelope as well: a
 			// field the envelope does not carry is a field the host would hash
-			// differently, and the change would be refused for a reason nobody could
+			// differently, and the change would be refused for a reason nobody could.
 			network.Method6 = payload.Network.Method6
 			network.Addresses6 = payload.Network.Addresses6
 			network.Gateway6 = payload.Network.Gateway6
@@ -1607,7 +1607,7 @@ func dockerEnsureEnvelope(action opspec.ActionType,
 
 // planReferenceToProto carries the approved plan envelope reference of an
 // order to the agent: the header the host rebuilds the envelope with and the
-// elements the operator approved, verbatim - the agent rebuilds the payload
+// elements the operator approved, verbatim - the agent rebuilds the payload.
 func planReferenceToProto(reference *opspec.PlanReference) *agentv1.PackagePlanReference {
 	if reference == nil {
 		return nil

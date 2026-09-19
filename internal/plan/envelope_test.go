@@ -46,8 +46,8 @@ func sample() Envelope {
 }
 
 // The digest covers every field but the description: a change of the
-// architecture or of the origin of one artifact is another plan, the
-// wording of the description is not.
+// architecture or of the origin of one artifact is another plan, the wording
+// of the description is not.
 func TestHashCoversArchitectureAndOriginButNotTheDescription(t *testing.T) {
 	base := sample()
 	reference := base.HashHex()
@@ -78,9 +78,8 @@ func TestHashCoversArchitectureAndOriginButNotTheDescription(t *testing.T) {
 	if other.HashHex() != reference {
 		t.Error("the description entered the digest")
 	}
-	// The identity header is outside the digest: the same state on
-	// another host, under another picture of it, read an hour later, is
-	// the same plan.
+	// The identity header is outside the digest: the same state on another host,
+	// under another picture of it, read an hour later, is the same plan.
 	other = sample()
 	other.HostID = "another-host"
 	other.InventoryRevision = "another-revision"
@@ -149,9 +148,8 @@ func TestVerifyTellsTheRefusalsApart(t *testing.T) {
 		t.Errorf("another origin: %v, want stale_plan", err)
 	}
 
-	// A planner mismatch is reported as such even when the content moved
-	// too: the operator is to look for a new planner, not for a change of
-	// the host.
+	// A planner mismatch is reported as such even when the content moved too: the
+	// operator is to look for a new planner, not for a change of the host.
 	if err := changed.Verify(moved, now); !errors.Is(err, ErrReplanRequired) {
 		t.Errorf("planner and content moved: %v, want replan_required first", err)
 	}
@@ -209,9 +207,9 @@ func TestParseHash(t *testing.T) {
 	}
 }
 
-// The vectors are the contract: the agent, the helper and the panel have
-// to produce these bytes and these digests for these envelopes, and so
-// has any other implementation of the scheme.
+// The vectors are the contract: the agent, the helper and the panel have to
+// produce these bytes and these digests for these envelopes, and so has any
+// other implementation of the scheme.
 func TestEnvelopeVectors(t *testing.T) {
 	raw, err := os.ReadFile("testdata/vectors.json")
 	if err != nil {

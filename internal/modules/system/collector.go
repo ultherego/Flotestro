@@ -9,9 +9,8 @@ import (
 	"time"
 )
 
-// The paths the picture is read from, relative to the root of the file
-// system the collector was given. They are relative so that a test can
-// hand the collector a tree of its own instead of the machine it runs on.
+// The paths the picture is read from, relative to the root of the file system
+// the collector was given.
 const (
 	cpuInfoPath       = "proc/cpuinfo"
 	memInfoPath       = "proc/meminfo"
@@ -31,12 +30,8 @@ const (
 	containerPath     = "run/systemd/container"
 )
 
-// Collect reads the platform picture from the given root. The root is the
-// file system of the host - os.DirFS("/") - or a tree a test built.
-//
-// Everything here is readable without root except the DMI serial numbers
-// and the UUID; those are tried, and when the read is refused they land in
-// Missing for the helper to supply.
+// Collect reads the platform picture from the given root. The root is the file
+// system of the host - os.
 func Collect(root fs.FS, now time.Time) Snapshot {
 	snapshot := Snapshot{Missing: map[string]string{}, ObservedAt: now.UTC()}
 	missing := func(fact string, err error) {
@@ -94,9 +89,9 @@ func Collect(root fs.FS, now time.Time) Snapshot {
 	readDMI(root, &snapshot)
 	readFirmware(root, &snapshot)
 
-	// The container marker and the hypervisor type are read only when they
-	// exist: a bare-metal host has neither, and their absence is evidence,
-	// not a failed read.
+	// The container marker and the hypervisor type are read only when they exist:
+	// a bare-metal host has neither, and their absence is evidence, not a failed
+	// read.
 	snapshot.Virtualization = DetectVirtualization(
 		readTrimmed(root, containerPath), readTrimmed(root, hypervisorPath),
 		snapshot.DMI.Vendor, snapshot.DMI.Product,
@@ -108,9 +103,7 @@ func Collect(root fs.FS, now time.Time) Snapshot {
 	return snapshot
 }
 
-// readDMI reads the machine identity from the DMI tables. The public
-// fields go into the picture; the serial numbers and the UUID are tried,
-// and a refusal is recorded as such rather than as an empty serial.
+// readDMI reads the machine identity from the DMI tables.
 func readDMI(root fs.FS, snapshot *Snapshot) {
 	if _, err := fs.Stat(root, dmiDir); err != nil {
 		snapshot.Missing[FactDMI] = "the host has no DMI tables (" + dmiDir + " is absent)"
@@ -134,9 +127,8 @@ func readDMI(root fs.FS, snapshot *Snapshot) {
 	}
 }
 
-// ReadSupplement reads the DMI facts that belong to root: the serial
-// numbers and the UUID. The helper calls it as root; the agent calls it
-// too and gets the refusal it then asks the helper about.
+// ReadSupplement reads the DMI facts that belong to root: the serial numbers
+// and the UUID.
 func ReadSupplement(root fs.FS) Supplement {
 	supplement := Supplement{Missing: map[string]string{}}
 	if _, err := fs.Stat(root, dmiDir); err != nil {
@@ -165,9 +157,7 @@ func ReadSupplement(root fs.FS) Supplement {
 	return supplement
 }
 
-// readFirmware reads the BIOS identity and decides the boot mode. A host
-// without /sys/firmware at all - a container - has no firmware to speak
-// of, which is recorded as such.
+// readFirmware reads the BIOS identity and decides the boot mode.
 func readFirmware(root fs.FS, snapshot *Snapshot) {
 	snapshot.Firmware = Firmware{
 		Vendor:  readTrimmed(root, dmiDir+"/bios_vendor"),
@@ -191,8 +181,8 @@ func readFirmware(root fs.FS, snapshot *Snapshot) {
 	}
 }
 
-// readTimezone reads the zone from /etc/timezone, where Debian writes it,
-// and otherwise from the target of the /etc/localtime link, where every
+// readTimezone reads the zone from /etc/timezone, where Debian writes it, and
+// otherwise from the target of the /etc/localtime link, where every
 // distribution keeps it.
 func readTimezone(root fs.FS) string {
 	if zone := readTrimmed(root, timezonePath); zone != "" {
@@ -230,9 +220,7 @@ func blankToEmpty(value string) string {
 	return value
 }
 
-// describe turns a read error into a reason the operator can act on. A
-// refused read says so in those words, because the panel tells a refusal
-// from a missing file when it decides what is unknown.
+// describe turns a read error into a reason the operator can act on.
 func describe(err error) string {
 	var pathErr *fs.PathError
 	if errors.As(err, &pathErr) {

@@ -20,9 +20,9 @@ var ranges = [cronFields]struct{ min, max int }{
 type Expression struct {
 	// allowed[i] holds the values permitted in field i.
 	allowed [cronFields]map[int]bool
-	// dayOfMonthStar and dayOfWeekStar are needed because cron treats these
-	// two fields differently from the rest: when both are restricted, the
-	// job runs when either matches, not both at once.
+	// dayOfMonthStar and dayOfWeekStar are needed because cron treats these two
+	// fields differently from the rest: when both are restricted, the job runs
+	// when either matches, not both at once.
 	dayOfMonthStar bool
 	dayOfWeekStar  bool
 }
@@ -39,12 +39,6 @@ var shortcuts = map[string]string{
 }
 
 // ParseExpression reads a cron expression.
-//
-// The parser is our own, because the expression has to be checked before
-// the write on the host and the next runs computed from it for the
-// operator. An expression the panel does not understand is not written: an
-// entry that never runs is worse than none, because it looks like a working
-// one.
 func ParseExpression(expression string) (Expression, error) {
 	expression = strings.TrimSpace(expression)
 	if expanded, ok := shortcuts[strings.ToLower(expression)]; ok {
@@ -115,9 +109,8 @@ func parseField(field string, min, max int) (map[int]bool, error) {
 		if from < min || to > max || from > to {
 			return nil, fmt.Errorf("value outside the range %d-%d", min, max)
 		}
-		// The step is bounded by the range: "59/9223372036854775806" wrapped
-		// the sum around the largest integer and let negative values into
-		// the set. A step beyond the range means one run, the first value.
+		// The step is bounded by the range: "59/9223372036854775806" wrapped the sum
+		// around the largest integer and let negative values into the set.
 		if step > max-min {
 			step = max - min + 1
 		}
@@ -131,15 +124,10 @@ func parseField(field string, min, max int) (map[int]bool, error) {
 	return allowed, nil
 }
 
-// maxSearch bounds the search for the next run. An expression like
-// "0 0 30 2 *" never matches - instead of searching forever, it is said
-// directly that there is no date.
+// maxSearch bounds the search for the next run.
 const maxSearch = 4 * 365 * 24 * time.Hour
 
 // NextRuns returns the consecutive dates after the given moment.
-//
-// The dates are computed on the host and in its time zone: the panel knows
-// neither, and "03:00" without a zone means nothing specific.
 func (e Expression) NextRuns(after time.Time, count int) []time.Time {
 	if count <= 0 {
 		count = 1
@@ -170,8 +158,7 @@ func (e Expression) matches(moment time.Time) bool {
 	dayOfWeek := e.allowed[4][int(moment.Weekday())]
 
 	// Cron treats both day fields differently from the rest: when both are
-	// restricted, the job runs when either matches. Treating them as a
-	// conjunction would skip most dates.
+	// restricted, the job runs when either matches.
 	switch {
 	case e.dayOfMonthStar && e.dayOfWeekStar:
 		return true

@@ -9,8 +9,7 @@ import (
 
 // A cancel is refused only where it could do nothing: an operation the
 // contract says cannot be stopped once started, and only after the host
-// reported the start. Everything before the start, and every operation
-// the agent can interrupt or checkpoint, is still cancelled.
+// reported the start.
 func TestACancelIsRefusedOnlyForAStartedNonCancelableOperation(t *testing.T) {
 	mode, refused := nonCancelable(jobs.StateRunning, opspec.ActionPackageUpgrade)
 	if !refused || mode != opspec.CancelImpossibleAfterStart {

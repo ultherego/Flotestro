@@ -4,8 +4,7 @@ import "testing"
 
 func TestLookupIgnoresLetterCase(t *testing.T) {
 	// The directory returns krbLastPwdChange one time and krblastpwdchange
-	// another, depending on the response mode. Pinning to one spelling ends
-	// in silently missing data rather than in an error.
+	// another, depending on the response mode.
 	record := map[string]any{"krbLastPwdChange": []any{"20260822144537Z"}}
 	if got := first(record, "krblastpwdchange"); got != "20260822144537Z" {
 		t.Fatalf("read %q, expected the value despite the different spelling", got)
@@ -102,10 +101,8 @@ func TestAllowedMethodIsAClosedList(t *testing.T) {
 			t.Errorf("the read command %s should be allowed", method)
 		}
 	}
-	// Unsupported commands cover deleting objects, changing the configuration
-	// of the directory itself and managing permissions. Their absence is
-	// deliberate: the panel cannot delete an account or grant itself wider
-	// rights.
+	// Unsupported commands cover deleting objects, changing the configuration of
+	// the directory itself and managing permissions.
 	for _, method := range []string{
 		"user_del", "group_del", "host_del", "config_mod",
 		"permission_add", "privilege_add", "role_add_member",

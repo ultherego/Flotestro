@@ -43,13 +43,9 @@ type LocalAccount struct {
 	Groups []string      `json:"groups,omitempty"`
 	Locked *bool         `json:"locked,omitempty"`
 	// PasswordSet tells an account without a password from one with a password.
-	// Nil means a state that was not determined and must not be shown as "no
-	// password".
 	PasswordSet *bool        `json:"password_set,omitempty"`
 	SSHKeys     []SSHKeyInfo `json:"ssh_keys,omitempty"`
 	// ExpiresAt is the expiry date as YYYY-MM-DD from the shadow record.
-	// Empty means no expiry, or a record the helper did not read - the
-	// difference is in UnavailableReason.
 	ExpiresAt string `json:"expires_at,omitempty"`
 
 	UnavailableReason string `json:"unavailable_reason,omitempty"`
@@ -57,22 +53,11 @@ type LocalAccount struct {
 
 // ReadLocalAccounts reads the accounts from /etc/passwd. The file is readable
 // by everyone, so this part needs no helper.
-//
-// The accounts from the directory are not visible here: NSS resolves them only
-// on request, and fetching the full list of domain users from every host would
-// be exactly the load on the directory the document guards against.
-//
-// The UID range that tells a person's account from the system's is the
-// one classifier of the accounts module, read from /etc/login.defs; the
-// helper reads the same file before it writes, so the panel never lists
-// as a person an account the host then refuses as the system's.
 func ReadLocalAccounts() []LocalAccount {
 	return parsePasswd("/etc/passwd", accounts.LoadUIDRange(), groupsOf)
 }
 
-// parsePasswd reads the accounts from the given file. The path and the source
-// of the groups are parameters so that the classification can be checked
-// without changing the system.
+// parsePasswd reads the accounts from the given file.
 func parsePasswd(path string, uidRange accounts.UIDRange, groups func(string) []string) []LocalAccount {
 	var found []LocalAccount
 	for line := range iterLines(path) {
@@ -96,8 +81,7 @@ func parsePasswd(path string, uidRange accounts.UIDRange, groups func(string) []
 			Source: SourceLocal,
 		}
 		// An account outside the range of the accounts of people belongs to a
-		// service. The lower bound alone is not enough: "nobody" has UID 65534,
-		// which lies above the range, and is not the account of a person.
+		// service.
 		if uidRange.IsSystem(int64(uid)) {
 			account.Source = SourceSystem
 		}
@@ -107,9 +91,7 @@ func parsePasswd(path string, uidRange accounts.UIDRange, groups func(string) []
 	return found
 }
 
-// groupsOf returns the groups of an account. A read error gives an empty list
-// and not a missing entry: the account exists regardless of whether its groups
-// are known.
+// groupsOf returns the groups of an account.
 func groupsOf(name string) []string {
 	account, err := user.Lookup(name)
 	if err != nil {

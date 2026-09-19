@@ -16,8 +16,7 @@ type certificate struct{ end time.Time }
 func (c certificate) NotAfter() time.Time { return c.end }
 
 // TestTheExpositionFormat checks conformance with the Prometheus text format:
-// every metric has HELP and TYPE before its values, and the labels are
-// sorted.
+// every metric has HELP and TYPE before its values, and the labels are sorted.
 func TestTheExpositionFormat(t *testing.T) {
 	result := render([]metric{{
 		name: "flotestro_hosts", kind: "gauge", help: "The fleet's hosts.",
@@ -59,12 +58,10 @@ func TestLabelsDoNotBreakTheFormat(t *testing.T) {
 }
 
 // TestAnUndeterminedStateIsSkipped guards the rule that a metric which could
-// not be determined disappears from the answer instead of showing zero. Zero
-// means a measured zero and would fire alerts describing something untrue.
+// not be determined disappears from the answer instead of showing zero.
 func TestAnUndeterminedStateIsSkipped(t *testing.T) {
 	// A collector without a database, without a session counter and without a
-	// certificate: only the metrics that can be computed in the process
-	// remain.
+	// certificate: only the metrics that can be computed in the process remain.
 	collector := NewCollector(nil, nil, nil, "panel")
 	text := string(collector.Gather(context.Background()))
 
@@ -84,9 +81,8 @@ func TestAnUndeterminedStateIsSkipped(t *testing.T) {
 		}
 	}
 
-	// A certificate without a determined expiry date must not give zero
-	// either: zero would mean "expires now" and would raise an alarm for no
-	// reason.
+	// A certificate without a determined expiry date must not give zero either:
+	// zero would mean "expires now" and would raise an alarm for no reason.
 	withCert := NewCollector(nil, sessionCounter{count: 7}, certificate{}, "panel")
 	text = string(withCert.Gather(context.Background()))
 	if strings.Contains(text, "flotestro_ca_certificate_expires_in_seconds") {
@@ -99,12 +95,6 @@ func TestAnUndeterminedStateIsSkipped(t *testing.T) {
 
 // TestTwoLabelsHaveAFixedOrder guards the series in which the state alone is
 // not enough.
-//
-// A campaign host held back by a lack of capacity and a host without the
-// required adapter are both "did not start". The reason code is what tells
-// them apart, so it travels in the metric together with the state - and the
-// order of the series has to be repeatable, because otherwise consecutive
-// scrapes differ for no reason.
 func TestTwoLabelsHaveAFixedOrder(t *testing.T) {
 	result := string(render([]metric{{
 		name: "flotestro_campaign_targets", kind: "gauge", help: "Campaign hosts.",
@@ -125,9 +115,7 @@ func TestTwoLabelsHaveAFixedOrder(t *testing.T) {
 }
 
 // TestCapacityAndUsageAreSeparateSeries guards that a budget says at once how
-// much it has and how much is taken. Usage alone does not answer the question
-// whether the budget is at its limit - and that is the only question an
-// operator asks when a campaign is stopped.
+// much it has and how much is taken.
 func TestCapacityAndUsageAreSeparateSeries(t *testing.T) {
 	result := string(render([]metric{{
 		name: "flotestro_budget_tokens", kind: "gauge", help: "Budget tokens.",
@@ -146,9 +134,8 @@ func TestCapacityAndUsageAreSeparateSeries(t *testing.T) {
 }
 
 // TestTheLifecycleCountersAreExposed guards the names of the lifecycle
-// document: a reconnect and a renewal are counted at the point of the event
-// by the gateway, and the collector renders them with the labels the
-// document names - never a host name, which would grow with the fleet.
+// document: a reconnect and a renewal are counted at the point of the event by
+// the gateway, and the collector renders them with the labels the document
 func TestTheLifecycleCountersAreExposed(t *testing.T) {
 	AgentReconnect.Inc("debian")
 	AgentRenewal.Inc("renewed")
@@ -166,9 +153,9 @@ func TestTheLifecycleCountersAreExposed(t *testing.T) {
 			t.Errorf("missing line %q in:\n%s", line, text)
 		}
 	}
-	// The relay buffers come from the heartbeats the panel keeps; a
-	// collector without that source, or without a database to name the
-	// relays, says nothing about them rather than reporting empty buffers.
+	// The relay buffers come from the heartbeats the panel keeps; a collector
+	// without that source, or without a database to name the relays, says nothing
+	// about them rather than reporting empty buffers.
 	if strings.Contains(text, "flotestro_relay_buffer") {
 		t.Errorf("relay buffer metrics appeared without a relay source:\n%s", text)
 	}

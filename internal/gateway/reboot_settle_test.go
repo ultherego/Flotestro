@@ -8,10 +8,7 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// Only a different boot identifier proves a restart. An agent that came
-// back on the same boot restarted itself, not the host; an order whose
-// boot the panel never recorded proves nothing either. Neither settles a
-// job succeeded - the wait ends in reboot_not_observed instead.
+// Only a different boot identifier proves a restart.
 func TestOnlyANewBootIdentifierSettlesARestart(t *testing.T) {
 	cases := []struct {
 		name             string
@@ -38,9 +35,9 @@ func TestOnlyANewBootIdentifierSettlesARestart(t *testing.T) {
 	}
 }
 
-// The observation of a settled restart names the boot the host came back
-// on and the boot it was ordered under: an operator reading the attempt
-// sees what proved the return rather than the bare word "succeeded".
+// The observation of a settled restart names the boot the host came back on
+// and the boot it was ordered under: an operator reading the attempt sees what
+// proved the return rather than the bare word "succeeded".
 func TestTheSettledRestartCarriesTheBootIdentifiers(t *testing.T) {
 	verdict := rebootReturn("boot-before", "boot-after")
 	if !verdict.Returned {
@@ -59,9 +56,9 @@ func TestTheSettledRestartCarriesTheBootIdentifiers(t *testing.T) {
 	}
 }
 
-// The verification is written as the host reported it, with every field
-// the panel shows: an operation that reported none writes none, and that
-// is not the same as a change nobody confirmed.
+// The verification is written as the host reported it, with every field the
+// panel shows: an operation that reported none writes none, and that is not
+// the same as a change nobody confirmed.
 func TestTheVerificationIsStoredAsItCame(t *testing.T) {
 	if verificationJSON(nil) != nil {
 		t.Fatal("an absent verification was written as a verification")

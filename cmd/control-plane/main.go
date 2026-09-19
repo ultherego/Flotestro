@@ -91,7 +91,7 @@ func run() error {
 	cfg := config.ControlPlane{}
 	// The secrets are read before the flags are defined, so that an installation
 	// can mount each of them as a file instead of putting the value into the
-	// environment of the process - where the container engine's inspection, the
+	// environment of the process - where the container engine's inspection, the.
 	databaseURL, err := config.OptionalSecretValue("FLOTESTRO_DATABASE_URL")
 	if err != nil {
 		return err
@@ -181,7 +181,7 @@ func run() error {
 		"end a disabled user's sessions at the identity provider through the Keycloak admin API")
 	// The name of the variable has to match the configuration file the
 	// installation gets in the package: a divergence meant that a filled in
-	// FLOTESTRO_IPA_URL enabled nothing while the panel said nothing about the
+	// FLOTESTRO_IPA_URL enabled nothing while the panel said nothing about the.
 	ipaServer := flag.String("ipa-server",
 		config.Env("FLOTESTRO_IPA_URL", config.Env("FLOTESTRO_IPA_SERVER", "")),
 		"the address of the FreeIPA server, e.g. https://ipa.example.org")
@@ -294,13 +294,13 @@ func run() error {
 		"what to do with the same identity alive on two boots: report or quarantine (the default)")
 	// What the gateway does with a session through a relay that names the host
 	// without the certificate it presented: observe and prefer let it in - prefer
-	// marks the host as weakly identified - and enforce refuses it until the
+	// marks the host as weakly identified - and enforce refuses it until the.
 	relayIdentityValue := flag.String("relay-identity",
 		config.Env("FLOTESTRO_RELAY_IDENTITY", ""),
 		"a relayed session without the host's certificate: observe, prefer (the default) or enforce")
 	// How strictly a campaign order is held to the preview it was placed from:
 	// observe records the difference, prefer refuses an order whose preview no
-	// longer describes what the order resolves, enforce also refuses an order
+	// longer describes what the order resolves, enforce also refuses an order.
 	campaignPreviewValue := flag.String("campaign-preview",
 		config.Env("FLOTESTRO_CAMPAIGN_PREVIEW", ""),
 		"how a campaign order is held to its preview: observe, prefer (the default) or enforce")
@@ -309,7 +309,7 @@ func run() error {
 		"whether an API token may carry out the operations of the greatest impact: allow or refuse")
 	// The rollout stage of the root helper's signed capability on the panel's
 	// side: observe and prefer dispatch to every host, prefer reports a host
-	// whose agent forwards no capability, enforce holds a mutating task back from
+	// whose agent forwards no capability, enforce holds a mutating task back
 	helperCapabilityModeValue := flag.String("helper-capability-mode",
 		config.Env("FLOTESTRO_HELPER_CAPABILITY_MODE", "prefer"),
 		"the stage of the helper capability rollout: observe, prefer (the default) or enforce")
@@ -993,7 +993,7 @@ func run() error {
 
 	// The notification channels: a second consumer of the durable trail, with a
 	// cursor of its own beside the webhook from the environment, so the legacy
-	// webhook keeps working as an implicit channel and neither holds the other
+	// webhook keeps working as an implicit channel and neither holds the other.
 	notificationStore := notify.NewStore(pool, secretStore)
 	// The credentials of the channels written by the previous release are moved
 	// into the secret store once, here: only this process holds the key that

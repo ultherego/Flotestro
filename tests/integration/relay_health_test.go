@@ -13,23 +13,9 @@ import (
 )
 
 // The containerisation document asks a relay for two answers, not one.
-// Liveness says the process works and its own listener accepts, and it
-// says nothing about the link to the centre: a relay whose WAN is down is
-// the relay that must keep running, because it holds the spool of the
-// site. Readiness says whether the relay can carry work right now and
-// names which of its conditions is false - the session upstream, the
-// bound of the spool, the validity of the certificate.
-//
-// Before the health listener existed, nothing inside the container could
-// tell a relay that is up from one that is wedged: the only port was the
-// one that terminates TLS and demands a certificate of the fleet. These
-// tests ask the real relay of the laboratory for both answers.
 
-// defaultRelayHealth points at the health listener of the relay of the
-// test fleet. The relay of the laboratory carries
-// health_listen: 0.0.0.0:8454 so that the probe may come from outside its
-// machine; an installation that keeps the default answers on its own
-// loopback and is asked by the health check inside its container.
+// defaultRelayHealth points at the health listener of the relay of the test
+// fleet.
 const defaultRelayHealth = "http://192.168.56.60:8454"
 
 // relayHealthAnswer is what both endpoints answer, as far as this test
@@ -101,9 +87,8 @@ func TestTheRelayAnswersLivenessAndReadinessApart(t *testing.T) {
 		if ready.Status != "not_ready" || len(ready.Reasons) == 0 {
 			t.Fatalf("readiness refused without naming what is false: %+v", ready)
 		}
-		// The whole point of the two answers: whatever readiness says
-		// about the link, liveness stays true. A relay restarted during
-		// an outage of the WAN loses the spool of its site.
+		// The whole point of the two answers: whatever readiness says about the
+		// link, liveness stays true.
 		if status != http.StatusOK {
 			t.Fatalf("liveness followed readiness down: %+v", live)
 		}
@@ -132,11 +117,8 @@ func TestTheRelayAnswersLivenessAndReadinessApart(t *testing.T) {
 	}
 }
 
-// TestTheHealthListenerOfTheRelayCarriesNothingElse guards what the
-// listener is allowed to be. It takes no client certificate, so it
-// answers the two health questions and is not a second way into the
-// relay; and the port of the agents keeps carrying TLS alone, so the
-// health answer is not served to whoever reaches the site.
+// TestTheHealthListenerOfTheRelayCarriesNothingElse guards what the listener
+// is allowed to be.
 func TestTheHealthListenerOfTheRelayCarriesNothingElse(t *testing.T) {
 	relayURL := envOr("FLOTESTRO_TEST_RELAY", defaultRelay)
 	address := strings.TrimPrefix(relayURL, "https://")
@@ -161,9 +143,9 @@ func TestTheHealthListenerOfTheRelayCarriesNothingElse(t *testing.T) {
 		}
 	}
 
-	// The port of the agents answers no health question in plain HTTP:
-	// the state of the site is not something the network of the site
-	// gets to read without a certificate.
+	// The port of the agents answers no health question in plain HTTP: the state
+	// of the site is not something the network of the site gets to read without a
+	// certificate.
 	response, err := client.Get("http://" + address + "/healthz")
 	if err == nil {
 		defer response.Body.Close()

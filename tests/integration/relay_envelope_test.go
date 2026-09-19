@@ -33,12 +33,8 @@ import (
 )
 
 // Chapter 4 of the security document, the inner identity envelope: a relay
-// proves itself in its handshake, the host proves itself with a signature
-// over every message, and the gateway checks the second against the
-// certificate on record. The tests play the relay with an identity
-// enrolled for the test, so the gateway sees exactly what a relay
-// forwarding a host would send - the attestation in the headers and the
-// host's envelope inside the message.
+// proves itself in its handshake, the host proves itself with a signature over
+// every message, and the gateway checks the second against the certificate on
 
 // relayClient is the agent service reached with the relay's identity: what
 // a relay speaks to the centre with.
@@ -79,16 +75,12 @@ type relayedStream struct {
 	stream *connect.BidiStreamForClient[agentv1.AgentMessage, agentv1.ServerMessage]
 	signer *relayproof.Signer
 	cancel context.CancelFunc
-	// server carries what the centre sends down after the session
-	// configuration. A real relay reads this stream the same way: the
-	// acknowledgements of the messages the panel consumed come down it,
-	// and a record leaves the relay's spool on nothing else.
+	// server carries what the centre sends down after the session configuration.
 	server chan *agentv1.ServerMessage
 }
 
 // awaitAck waits for the panel's acknowledgement of the message of the
-// envelope. Whatever else the centre sends meanwhile - an inventory
-// request, a task - is stepped over.
+// envelope.
 func (r *relayedStream) awaitAck(envelope *agentv1.RelayedEnvelope, limit time.Duration) (*agentv1.MessageAck, error) {
 	deadline := time.After(limit)
 	for {
@@ -125,9 +117,9 @@ func (r *relayedStream) send(msg *agentv1.AgentMessage) error {
 	return r.stream.Send(msg)
 }
 
-// openRelayedStream opens the session of a host through the played relay
-// with the given Hello, already signed or altered as the test wants, and
-// waits for the session configuration. The error is the gateway's refusal.
+// openRelayedStream opens the session of a host through the played relay with
+// the given Hello, already signed or altered as the test wants, and waits for
+// the session configuration.
 func openRelayedStream(ctx context.Context, gateway string, relay testRelay, hostID string,
 	leaf *x509.Certificate, signer *relayproof.Signer, hello *agentv1.AgentMessage) (*relayedStream, error) {
 	streamCtx, cancel := context.WithCancel(ctx)
@@ -147,9 +139,8 @@ func openRelayedStream(ctx context.Context, gateway string, relay testRelay, hos
 		session.close()
 		return nil, errors.New("the server answered Hello with something other than the session configuration")
 	}
-	// From here the test reads the downward stream the way a relay does:
-	// one reader, everything the centre sends buffered for whoever waits
-	// for it.
+	// From here the test reads the downward stream the way a relay does: one
+	// reader, everything the centre sends buffered for whoever waits for it.
 	session.server = make(chan *agentv1.ServerMessage, 64)
 	go func() {
 		defer close(session.server)
@@ -181,8 +172,8 @@ func signedHello(t *testing.T, signer *relayproof.Signer, capabilities *agentv1.
 }
 
 // awaitRefusal waits for the gateway to write the refusal on the host: the
-// stream is handled asynchronously, and the record follows the message by
-// a moment.
+// stream is handled asynchronously, and the record follows the message by a
+// moment.
 func (h *harness) awaitRefusal(hostID, code string, limit time.Duration) bool {
 	h.t.Helper()
 	deadline := time.Now().Add(limit)
@@ -195,18 +186,9 @@ func (h *harness) awaitRefusal(hostID, code string, limit time.Duration) bool {
 	return false
 }
 
-// TestARelayedSessionCarriesTheHostsOwnSignature plays a relay that
-// attests the host and a host that signs its envelope: the session is
-// end_to_end on the host. A payload changed after the signature is
-// refused as relay_body_hash_mismatch. Every message the panel consumes
-// is acknowledged over the same session, which is what lets a record
-// leave the durable spool of the relay; a message carried a second time
-// is a redelivery - acknowledged again, applied no second time, and held
-// against nobody. A Hello of an earlier session replayed as a new one is
-// no redelivery: a relay never spools a Hello, so it is refused as
-// relay_sequence_replayed. A session in which the host did not sign is
-// still let in on the relay's attestation under the packaged mode,
-// visibly.
+// TestARelayedSessionCarriesTheHostsOwnSignature plays a relay that attests
+// the host and a host that signs its envelope: the session is end_to_end on
+// the host.
 func TestARelayedSessionCarriesTheHostsOwnSignature(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -230,10 +212,8 @@ func TestARelayedSessionCarriesTheHostsOwnSignature(t *testing.T) {
 		t.Fatalf("the host says its session was %q, expected end_to_end", strength)
 	}
 
-	// A heartbeat signed and sent: the panel applies it and only then
-	// says it has it. That acknowledgement is what a relay waits for
-	// before it deletes the record from its durable spool, so it names
-	// the session and the sequence of the envelope the message carried.
+	// A heartbeat signed and sent: the panel applies it and only then says it has
+	// it.
 	heartbeat := &agentv1.AgentMessage{Payload: &agentv1.AgentMessage_Heartbeat{Heartbeat: &agentv1.Heartbeat{}}}
 	if err := session.send(heartbeat); err != nil {
 		t.Fatalf("the signed heartbeat was not sent: %v", err)
@@ -246,12 +226,8 @@ func TestARelayedSessionCarriesTheHostsOwnSignature(t *testing.T) {
 		t.Fatalf("the acknowledgement names host %q, the session is the one of %s", ack.GetHostId(), host.ID)
 	}
 
-	// The same message once more: a relay whose link broke while its
-	// spool was draining never saw the acknowledgement and carries the
-	// record again. The panel has that message already - it is not
-	// applied a second time - and answers with the acknowledgement once
-	// more, so the record can finally go. Nothing is written on the host:
-	// an honest retry of a relay is not a refusal of a machine.
+	// The same message once more: a relay whose link broke while its spool was
+	// draining never saw the acknowledgement and carries the record again.
 	refusalBefore := fmt.Sprintf("%+v", h.hostRefusal(host.ID))
 	if err := session.stream.Send(heartbeat); err != nil {
 		t.Fatalf("the redelivered heartbeat was not sent: %v", err)
@@ -329,11 +305,8 @@ func TestARelayedSessionCarriesTheHostsOwnSignature(t *testing.T) {
 }
 
 // TestARelayedRenewalIsBoundToTheOldKey plays the relay on a renewal: the
-// challenge is asked through the relay, the proof is signed with the key
-// the host holds, and the panel issues the certificate for the host of
-// the registry. Without the proof the relayed renewal is refused as
-// blocked_upgrade_required; with a proof by another key, or a spent
-// challenge, it is refused with its code.
+// challenge is asked through the relay, the proof is signed with the key the
+// host holds, and the panel issues the certificate for the host of the
 func TestARelayedRenewalIsBoundToTheOldKey(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -423,11 +396,8 @@ func TestARelayedRenewalIsBoundToTheOldKey(t *testing.T) {
 }
 
 // TestASecretFetchedThroughARelayIsSealed drives a whole path: a relayed
-// session of a synthetic host receives a task that names a secret, and
-// the fetch through the relay answers sealed to the host's one-time key -
-// no value in the clear anywhere the relay could read it. The test opens
-// the sealed value with the key it made, and checks that the same fetch
-// without the host's proof is refused.
+// session of a synthetic host receives a task that names a secret, and the
+// fetch through the relay answers sealed to the host's one-time key - no value
 func TestASecretFetchedThroughARelayIsSealed(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -455,8 +425,8 @@ func TestASecretFetchedThroughARelayIsSealed(t *testing.T) {
 	defer session.close()
 
 	// The task arrives on the stream the session already reads: the
-	// acknowledgements of the panel come down the same one, and a second
-	// reader would take the task off it.
+	// acknowledgements of the panel come down the same one, and a second reader
+	// would take the task off it.
 	awaitTask := func(limit time.Duration) *agentv1.TaskEnvelope {
 		deadline := time.After(limit)
 		for {
@@ -543,11 +513,9 @@ func TestASecretFetchedThroughARelayIsSealed(t *testing.T) {
 	}
 }
 
-// TestARenewalThroughTheLabRelayWorks walks the whole path: a host of the
-// lab asks the relay on the Ubuntu machine for a challenge and renews with
-// the proof, and the panel issues the certificate. A relay that does not
-// forward the challenge is a relay from before the envelope, which the
-// upgrade order rules out, so that is a failure rather than a skip.
+// TestARenewalThroughTheLabRelayWorks walks the whole path: a host of the lab
+// asks the relay on the Ubuntu machine for a challenge and renews with the
+// proof, and the panel issues the certificate.
 func TestARenewalThroughTheLabRelayWorks(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

@@ -9,17 +9,11 @@ import (
 	"github.com/ultherego/flotestro/internal/freeipa"
 )
 
-// The impact of a rule change. A rule reaches hosts through host groups and
-// users through groups, so the plan resolves both to names before anybody
-// approves it; a rule that replaces an existing one carries the member diff;
-// and a rule that would leave the administrator without a way into a host is
-// a conflict rather than a warning.
+// The impact of a rule change.
 
-// guardedAccounts are the accounts whose access to a host the plan refuses
-// to remove with the last rule: the directory administrator, and the panel's
-// own principal when it is a user rather than a service. A service principal
-// does not sign in through HBAC, so it is left out on purpose rather than
-// checked wrongly.
+// guardedAccounts are the accounts whose access to a host the plan refuses to
+// remove with the last rule: the directory administrator, and the panel's own
+// principal when it is a user rather than a service.
 func (p *Planner) guardedAccounts() []string {
 	accounts := []string{"admin"}
 	principal, _, _ := strings.Cut(p.directory.Principal(), "@")
@@ -225,8 +219,7 @@ func (p *Planner) planSudoRuleRemoval(ctx context.Context, name string) (Plan, e
 }
 
 // sudoWarnings names what makes a sudo rule dangerous: no password, every
-// command, every host, acting as root or as anybody. Each is said
-// separately, because an operator approving "critical" learns nothing.
+// command, every host, acting as root or as anybody.
 func sudoWarnings(spec *SudoRulePayload) []string {
 	var warnings []string
 	for _, option := range spec.Options {
@@ -250,17 +243,14 @@ func sudoWarnings(spec *SudoRulePayload) []string {
 		warnings = append(warnings, "the rule runs commands as root")
 	}
 	if spec.AllCommands && (spec.RunAsAnyUser || slices.Contains(spec.RunAsUsers, "root") || len(spec.RunAsUsers) == 0) {
-		// A rule with every command and no run-as restriction is root on
-		// the hosts it reaches; with !authenticate it is root without a
-		// password.
+		// A rule with every command and no run-as restriction is root on the hosts
+		// it reaches; with !
 		warnings = append(warnings, "the rule is equivalent to full root access on the hosts it reaches")
 	}
 	return warnings
 }
 
-// missingMembers names the members the directory does not know. The
-// directory would refuse them at execution time; the plan says so before
-// anybody approves it.
+// missingMembers names the members the directory does not know.
 func (v *directoryView) missingMembers(users, groups, hosts, hostGroups []string) []string {
 	var conflicts []string
 	for _, user := range users {
@@ -287,8 +277,7 @@ func (v *directoryView) missingMembers(users, groups, hosts, hostGroups []string
 }
 
 // memberDiffSteps describes the difference between the current and the
-// declared members of one kind. The full diff is part of what the second
-// person approves.
+// declared members of one kind.
 func memberDiffSteps(kind string, current, wanted []string) []string {
 	var steps []string
 	var added, removed []string
@@ -344,11 +333,8 @@ func replaceHBACRule(rules []freeipa.HBACRule, rule freeipa.HBACRule, remove boo
 	return after
 }
 
-// guardAdministratorAccess compares the hosts the guarded accounts may
-// enter before and after the change. A host that loses its last rule for
-// such an account is a conflict: the change would cut off the way to fix it.
-// When an account cannot be found, the plan says that it could not check
-// rather than staying silent.
+// guardAdministratorAccess compares the hosts the guarded accounts may enter
+// before and after the change.
 func (p *Planner) guardAdministratorAccess(view *directoryView, after []freeipa.HBACRule, plan *Plan) {
 	for _, account := range p.guardedAccounts() {
 		user := slices.IndexFunc(view.users, func(candidate freeipa.User) bool { return candidate.UID == account })

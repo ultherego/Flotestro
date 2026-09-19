@@ -11,9 +11,9 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// fakeTables answers the lookups the snapshot makes from fixed rows, so
-// the resolution is tested without a database: which table an identifier
-// is looked up in, and what is kept when the row is not there.
+// fakeTables answers the lookups the snapshot makes from fixed rows, so the
+// resolution is tested without a database: which table an identifier is looked
+// up in, and what is kept when the row is not there.
 type fakeTables struct {
 	principals map[string][3]string // subject -> id, display name, kind
 	hosts      map[string][2]string // id -> hostname, address
@@ -124,9 +124,8 @@ func TestTheRequestsOwnIdentityIsSnapshottedWithoutALookup(t *testing.T) {
 }
 
 // An event written away from the request that authenticated the actor - a
-// worker carrying out an earlier order - resolves the identity by its
-// subject, once per request, and carries no credential: the worker holds
-// none.
+// worker carrying out an earlier order - resolves the identity by its subject,
+// once per request, and carries no credential: the worker holds none.
 func TestAnIdentityIsResolvedBySubjectOncePerRequest(t *testing.T) {
 	db := tables()
 	ctx := WithActor(context.Background(), Actor{RequestID: "r1"})
@@ -160,10 +159,9 @@ func TestAnIdentityIsResolvedBySubjectOncePerRequest(t *testing.T) {
 	}
 }
 
-// What acts as an agent is told apart by the spelling and the tables: a
-// dashed identifier is a host or a relay, a bare name is a relay at its
-// enrollment, and thirty-two hex digits are a machine - which is a row of
-// nothing and must never become a host by parsing as one.
+// What acts as an agent is told apart by the spelling and the tables: a dashed
+// identifier is a host or a relay, a bare name is a relay at its enrollment,
+// and thirty-two hex digits are a machine - which is a row of nothing and must
 func TestAnAgentActorNamesItsHostRelayOrMachine(t *testing.T) {
 	db := tables()
 	recorder := testRecorder()
@@ -201,9 +199,9 @@ func TestAnAgentActorNamesItsHostRelayOrMachine(t *testing.T) {
 	}
 }
 
-// The panel acting by itself names the part that acted; a campaign keeps
-// the name it had, because campaigns get renamed and the list is where a
-// reviewer goes next.
+// The panel acting by itself names the part that acted; a campaign keeps the
+// name it had, because campaigns get renamed and the list is where a reviewer
+// goes next.
 func TestASystemActorNamesItsPart(t *testing.T) {
 	db := tables()
 	recorder := testRecorder()

@@ -112,8 +112,8 @@ func TestShutdownRequiresAReasonAndTheTargetName(t *testing.T) {
 		nil, http.StatusBadRequest)
 }
 
-// TestIrreversibleOperationDoesNotRunInBulk guards the campaign boundary:
-// the target name is the only gate of an operation with no way back, and a
+// TestIrreversibleOperationDoesNotRunInBulk guards the campaign boundary: the
+// target name is the only gate of an operation with no way back, and a
 // campaign has no single target to type in.
 func TestIrreversibleOperationDoesNotRunInBulk(t *testing.T) {
 	h := newHarness(t)

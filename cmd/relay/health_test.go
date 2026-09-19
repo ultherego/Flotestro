@@ -40,13 +40,12 @@ func testHealth(t *testing.T) *relay.Health {
 	})
 }
 
-// TestTheHealthListenerAnswersOnTheConfiguredAddress guards the wiring:
-// what the configuration names is where the answers are, and they are
-// the answers of this relay rather than a page of any kind.
+// TestTheHealthListenerAnswersOnTheConfiguredAddress guards the wiring: what
+// the configuration names is where the answers are, and they are the answers
+// of this relay rather than a page of any kind.
 func TestTheHealthListenerAnswersOnTheConfiguredAddress(t *testing.T) {
-	// A port from the operating system, so that two runs of the tests do
-	// not fight over one number. The listener is closed again at once:
-	// the health listener binds it a moment later.
+	// A port from the operating system, so that two runs of the tests do not
+	// fight over one number.
 	probe, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -87,9 +86,9 @@ func TestTheHealthListenerAnswersOnTheConfiguredAddress(t *testing.T) {
 	}
 }
 
-// TestAHealthListenerTurnedOffIsNoError guards the choice of the
-// operator: an installation that wants no unauthenticated listener at all
-// writes an empty address, and the relay comes up all the same.
+// TestAHealthListenerTurnedOffIsNoError guards the choice of the operator: an
+// installation that wants no unauthenticated listener at all writes an empty
+// address, and the relay comes up all the same.
 func TestAHealthListenerTurnedOffIsNoError(t *testing.T) {
 	server, err := startHealthListener("", testHealth(t), quietLog())
 	if err != nil {
@@ -102,9 +101,8 @@ func TestAHealthListenerTurnedOffIsNoError(t *testing.T) {
 }
 
 // TestAHealthAddressThatCannotBeBoundStopsTheRelay guards the fail-closed
-// start: an operator who asked for a health answer and would get none has
-// a relay that says so at the start, rather than a container the runtime
-// keeps restarting over a probe nobody answers.
+// start: an operator who asked for a health answer and would get none has a
+// relay that says so at the start, rather than a container the runtime keeps
 func TestAHealthAddressThatCannotBeBoundStopsTheRelay(t *testing.T) {
 	// An address of the documentation range: it belongs to no interface
 	// of this machine, so the bind fails without touching a network.

@@ -35,10 +35,8 @@ func readHostFacts(t *testing.T, h *harness, hostID string) (hostFactsView, stri
 }
 
 // TestOwnerAndManualAddressRoundTrip guards the facts an operator records
-// about a host by hand: the owner and the management address go in with
-// the entity tag of the host, a stale tag is refused with the current
-// one, the address is marked manual, and an empty address takes the
-// manual value away again.
+// about a host by hand: the owner and the management address go in with the
+// entity tag of the host, a stale tag is refused with the current one, the
 func TestOwnerAndManualAddressRoundTrip(t *testing.T) {
 	h := newHarness(t)
 	host := h.enrollSyntheticHost(t)
@@ -112,11 +110,7 @@ func TestOwnerAndManualAddressRoundTrip(t *testing.T) {
 	h.do(http.MethodPut, path+"/management-address", map[string]any{"address": "http://db01"}, nil, http.StatusBadRequest)
 	h.do(http.MethodPut, path+"/management-address", map[string]any{"address": "10.0.0.1:22"}, nil, http.StatusBadRequest)
 
-	// An empty address forgets the manual one. The synthetic host never
-	// connected, so nothing observed stands behind it and the field is
-	// empty rather than a leftover.
-	// Fresh variables: a cleared field is absent from the answer, and a
-	// decode into the earlier struct would keep the old value in it.
+	// An empty address forgets the manual one.
 	var forgotten hostFactsView
 	h.do(http.MethodPut, path+"/management-address", map[string]any{"address": ""}, &forgotten, http.StatusOK)
 	if forgotten.ManagementAddress != "" || forgotten.ManagementAddressSource != "" {
@@ -150,10 +144,9 @@ func TestOwnerAndManualAddressRoundTrip(t *testing.T) {
 	}
 }
 
-// TestHostListFactFilters guards the filters over what the hosts
-// reported: a host that has not said whether it needs a reboot or how
-// many security updates wait is in neither the "yes" nor the "no" list,
-// and a domain filter answers with the hosts of that domain alone.
+// TestHostListFactFilters guards the filters over what the hosts reported: a
+// host that has not said whether it needs a reboot or how many security
+// updates wait is in neither the "yes" nor the "no" list, and a domain filter
 func TestHostListFactFilters(t *testing.T) {
 	h := newHarness(t)
 	host := h.enrollSyntheticHost(t)
@@ -235,10 +228,9 @@ func TestHostListFactFilters(t *testing.T) {
 	h.do(http.MethodGet, "/api/v1/hosts?security_updates=some", nil, nil, http.StatusBadRequest)
 }
 
-// TestEnrollmentOrderCarriesOwnerAndTags guards the facts an order
-// carries onto the host: the owner and the tags typed when ordering the
-// installation are on the host the moment it enrolls, and an order with
-// a tag the tag editor would refuse is refused at ordering time.
+// TestEnrollmentOrderCarriesOwnerAndTags guards the facts an order carries
+// onto the host: the owner and the tags typed when ordering the installation
+// are on the host the moment it enrolls, and an order with a tag the tag
 func TestEnrollmentOrderCarriesOwnerAndTags(t *testing.T) {
 	h := newHarness(t)
 

@@ -11,11 +11,6 @@ import (
 )
 
 // applyProbe runs a probe from the host.
-//
-// A probe changes nothing and needs no root, so it does not go through the
-// helper: every trip through root has to be justified. The result belongs to
-// the task and not to the inventory - it is an answer from one moment, about a
-// service that may answer differently a minute later.
 func (e *TaskExecutor) applyProbe(ctx context.Context, task *agentv1.TaskEnvelope,
 	action opspec.ActionType, payload *opspec.MonitoringPayload) *agentv1.TaskResult {
 	if payload == nil {
@@ -37,8 +32,7 @@ func (e *TaskExecutor) applyProbe(ctx context.Context, task *agentv1.TaskEnvelop
 	}
 
 	// A probe that did not reach the service is a successful operation with the
-	// answer "it does not work". A failed task would mean the panel did not do
-	// something - and it did exactly what was asked.
+	// answer "it does not work".
 	message := "the service answers"
 	switch {
 	case !result.Reachable:

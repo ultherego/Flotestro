@@ -23,9 +23,7 @@ saw - and this test holds the whole path, from the panel's order to the
 file on the host, to what they promise.
 */
 
-// The keys of this test. They are public material with no private half
-// anywhere: nothing here opens a door, and the cleanup deletes the account
-// they were put on regardless.
+// The keys of this test.
 const (
 	sshkeysFirst  = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHZ8Kx3vQOZKq0M0hDPuJHf5Zx1kJHgqRqYqGZ6XxLm1 first@flotestro"
 	sshkeysSecond = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAdequH1cbHejJuOve5gez7fGXR0S6KLEza3hAMskJHR second@flotestro"
@@ -104,10 +102,8 @@ func refusalCode(job jobView, attempts []attemptView) string {
 }
 
 // TestSSHKeysEditedOneAtATime walks the key operations of one account on a
-// real host: an add that leaves the key already there untouched, a removal
-// by fingerprint, the refusal to take the last key of an account that has
-// no other way in, and the refusal of a replace composed on a list the
-// account no longer has.
+// real host: an add that leaves the key already there untouched, a removal by
+// fingerprint, the refusal to take the last key of an account that has no
 func TestSSHKeysEditedOneAtATime(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -135,16 +131,13 @@ func TestSSHKeysEditedOneAtATime(t *testing.T) {
 	if first[0].Comment != "first@flotestro" {
 		t.Errorf("the comment of the key is %q, expected first@flotestro", first[0].Comment)
 	}
-	// The key of an account created by the panel goes into the user's own
-	// file; the panel's managed file is a choice of the order, not the
-	// default.
+	// The key of an account created by the panel goes into the user's own file;
+	// the panel's managed file is a choice of the order, not the default.
 	if first[0].Source != "authorized_keys" {
 		t.Errorf("the key source is %q, expected authorized_keys", first[0].Source)
 	}
 
-	// An add appends. The key that was there keeps its fingerprint, its
-	// type and its comment: an add that rewrote the line would be the very
-	// defect this operation exists to remove.
+	// An add appends.
 	added, attempts := keysOperation(h, host.ID, "localuser.sshkeys.add", "", map[string]any{
 		"name": name,
 		"keys": []map[string]any{{"public_key": sshkeysSecond}},
@@ -194,8 +187,6 @@ func TestSSHKeysEditedOneAtATime(t *testing.T) {
 	}
 
 	// The last key of an account with no password login is the last way in.
-	// The host refuses to take it away unless the order says the lockout is
-	// what the operator means.
 	lockout, attempts := keysOperation(h, host.ID, "localuser.sshkeys.remove", "", map[string]any{
 		"name": name, "fingerprints": []string{first[0].Fingerprint},
 	})
@@ -209,10 +200,7 @@ func TestSSHKeysEditedOneAtATime(t *testing.T) {
 		t.Errorf("the refused removal changed the keys: %v", keyFingerprints(still))
 	}
 
-	// A replace is bound to the list the operator saw. The list below names
-	// the key that has just been removed, so it is the picture of a moment
-	// that has passed: the host refuses it rather than write over what
-	// nobody reviewed.
+	// A replace is bound to the list the operator saw.
 	stale, attempts := keysOperation(h, host.ID, "localuser.sshkeys.replace_all", sshkeysReason, map[string]any{
 		"name":                  name,
 		"ssh_keys":              []string{sshkeysThird},
@@ -248,8 +236,7 @@ func TestSSHKeysEditedOneAtATime(t *testing.T) {
 
 // TestKeyRemovalOfAMissingKeyIsRefused checks that a removal of a key the
 // account does not carry is a refusal rather than a quiet success: the
-// operator may be looking at another host's list, and the key they meant
-// is still in place there.
+// operator may be looking at another host's list, and the key they meant is
 func TestKeyRemovalOfAMissingKeyIsRefused(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -294,10 +281,7 @@ func TestKeyRemovalOfAMissingKeyIsRefused(t *testing.T) {
 }
 
 // TestPrivilegedGroupNeedsItsOwnPermission checks the compound grant of
-// chapter 14.1: putting an account into a group that is root by another
-// name asks for accounts.privileged_groups on top of the permission of the
-// operation itself, in the scope of the host. An operator may change the
-// groups of an account; that alone does not let them hand out root.
+// chapter 14.
 func TestPrivilegedGroupNeedsItsOwnPermission(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -338,9 +322,8 @@ func TestPrivilegedGroupNeedsItsOwnPermission(t *testing.T) {
 		t.Errorf("the refusal does not name the permission that is missing: %q", refusal.Detail)
 	}
 
-	// The same operator creating an account straight into sudo is refused
-	// as well. Creating accounts and granting root are two levels of trust,
-	// and this identity has neither.
+	// The same operator creating an account straight into sudo is refused as
+	// well.
 	operator.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations", map[string]any{
 		"action": "localuser.create", "reason": sshkeysReason,
 		"payload": map[string]any{"local_user": map[string]any{

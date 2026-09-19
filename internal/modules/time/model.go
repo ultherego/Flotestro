@@ -1,15 +1,4 @@
 // Package hosttime describes the host clock and its synchronisation.
-//
-// The package name deliberately differs from the directory: the directory
-// names the module the way the document does (internal/modules/time), and
-// the package cannot be called "time", because it would shadow the standard
-// library in every file that uses it - including this one.
-//
-// Time is an assumption the rest of the panel stands on: Kerberos rejects
-// tickets outside the window, mTLS rejects certificates not yet valid, and
-// a journal from a host with a skewed clock sorts in the wrong order. That
-// is why the module measures the offset instead of only showing that the
-// time daemon runs.
 package hosttime
 
 import (
@@ -30,17 +19,14 @@ const (
 	TimesyncdDir  = "/etc/systemd/timesyncd.conf.d"
 	TimesyncdFile = TimesyncdDir + "/90-flotestro.conf"
 
-	// PanelSourceDir is the directory the panel creates on a host where
-	// chrony includes none of its own. A sources directory, not a
-	// configuration one: it accepts only servers, so the panel file cannot
-	// change anything else about chrony.
+	// PanelSourceDir is the directory the panel creates on a host where chrony
+	// includes none of its own.
 	PanelSourceDir = "/etc/chrony/sources.d"
 	// EnableHeader marks the line the panel appends to the main file.
 	EnableHeader = "# Added by Flotestro: time sources directory managed by the panel."
 
-	// FileHeader marks the panel file. Without it the next operation would
-	// not know which servers the panel set and which the host
-	// administrator.
+	// FileHeader marks the panel file. Without it the next operation would not
+	// know which servers the panel set and which the host administrator.
 	FileHeader = "# Managed by Flotestro. Manual changes will not survive the next operation."
 )
 
@@ -50,33 +36,24 @@ const (
 	DaemonTimesyncd = "systemd-timesyncd"
 )
 
-// Kinds of the directory chrony includes. The difference is not cosmetic:
-// any directive may be written into a configuration directory and the
-// daemon must be reloaded, while a sources directory accepts only servers
-// and can be reloaded without breaking synchronisation.
+// Kinds of the directory chrony includes.
 const (
 	KindConfiguration = "confdir"
 	KindSources       = "sourcedir"
 )
 
-// ChronyMainConfigurations lists the places where distributions keep the
-// main chrony file. The panel does not rewrite it - it reads it to learn
-// which directory the daemon really includes.
+// ChronyMainConfigurations lists the places where distributions keep the main
+// chrony file.
 var ChronyMainConfigurations = []string{
 	"/etc/chrony/chrony.conf",
 	"/etc/chrony.conf",
 }
 
-// ServerLimit bounds the number of servers in one change. A few sources
-// give resilience against one bad one; a few dozen give nothing but
-// traffic.
+// ServerLimit bounds the number of servers in one change. A few sources give
+// resilience against one bad one; a few dozen give nothing but traffic.
 const ServerLimit = 8
 
 // StepThresholdSeconds sets the offset the panel treats as a time step.
-//
-// A second is a practical boundary, not a theoretical one: below it the
-// time daemons slew the clock smoothly, above it they step it - and then
-// databases, tokens and certificates see a clock that went backwards.
 const StepThresholdSeconds = 1.0
 
 // Source is one time server seen by the daemon.
@@ -96,11 +73,6 @@ type Source struct {
 }
 
 // Server is a configuration entry, not a working source.
-//
-// The distinction matters in diagnosis: a server written into the
-// configuration that does not answer does not appear on the daemon's source
-// list - and without this list it would look non-existent instead of
-// unreachable.
 type Server struct {
 	Address string `json:"address"`
 	// Source names the file the entry comes from.
@@ -158,9 +130,8 @@ type Snapshot struct {
 	Configured []Server `json:"configured_servers,omitempty"`
 	Probes     []Probe  `json:"probes,omitempty"`
 
-	// Managed is the content of the panel file, ManagedPath its path. An
-	// empty path means a host on which the panel has nowhere to write the
-	// change.
+	// Managed is the content of the panel file, ManagedPath its path. An empty
+	// path means a host on which the panel has nowhere to write the change.
 	Managed     string `json:"managed_config,omitempty"`
 	ManagedPath string `json:"managed_path,omitempty"`
 	// WriteReason says why the panel will not change the time
@@ -169,18 +140,15 @@ type Snapshot struct {
 	// ConfigPath is the daemon's main file. The panel does not rewrite it;
 	// it is shown so the operator knows what the change does not concern.
 	ConfigPath string `json:"config_path,omitempty"`
-	// CanAddSourceDir says the host can be brought to a writable state
-	// with one appended line - but only with the operator's explicit
-	// consent.
+	// CanAddSourceDir says the host can be brought to a writable state with one
+	// appended line - but only with the operator's explicit consent.
 	CanAddSourceDir bool `json:"can_add_source_dir,omitempty"`
 
 	ObservedAt        time.Time `json:"observed_at"`
 	UnavailableReason string    `json:"unavailable_reason,omitempty"`
 }
 
-// IsSynchronized says whether the host is synchronised. An unknown state is
-// not false here: no answer from the daemon is a different situation than
-// its "no".
+// IsSynchronized says whether the host is synchronised.
 func (s Snapshot) IsSynchronized() bool {
 	return s.Synchronized != nil && *s.Synchronized
 }
@@ -189,9 +157,6 @@ var zoneName = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+_-]*(/[A-Za-z0-9+_.-]+){0
 var hostName = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.?$`)
 
 // ValidateZone checks a time zone name.
-//
-// The name goes to the command and to a path in /usr/share/zoneinfo, so it
-// cannot be a relative path or contain anything but a zone name.
 func ValidateZone(zone string) error {
 	if zone == "" {
 		return fmt.Errorf("the time zone is empty")
@@ -214,10 +179,6 @@ func ZonePath(zone string) string {
 }
 
 // ValidateServer checks a time server address.
-//
-// The address goes into the configuration file as a whole line, so it must
-// not contain whitespace or a newline: the entry "a\niburst offline" would
-// be a different directive than the one the operator approved.
 func ValidateServer(address string) error {
 	if address == "" {
 		return fmt.Errorf("the time server address is empty")
@@ -264,9 +225,6 @@ func ComposeTimesyncd(servers []string) (string, error) {
 }
 
 // ComposeChrony composes the file with servers for chrony.
-//
-// A sources directory accepts only server directives, so no header is
-// written there: the file is then owned by its name, not by a comment.
 func ComposeChrony(servers []string, kind string) (string, error) {
 	if err := ValidateServers(servers); err != nil {
 		return "", err
@@ -276,9 +234,9 @@ func ComposeChrony(servers []string, kind string) (string, error) {
 		lines = append(lines, FileHeader)
 	}
 	for _, server := range servers {
-		// iburst shortens the first synchronisation from many minutes to a
-		// few seconds; without it the operator stares at "not synchronised"
-		// and does not know whether the change worked.
+		// iburst shortens the first synchronisation from many minutes to a few
+		// seconds; without it the operator stares at "not synchronised" and does not
+		// know whether the change worked.
 		lines = append(lines, "server "+server+" iburst")
 	}
 	return strings.Join(lines, "\n") + "\n", nil
@@ -286,12 +244,6 @@ func ComposeChrony(servers []string, kind string) (string, error) {
 
 // EnableEntry composes the lines the panel appends to the main chrony file
 // when the host includes no directory.
-//
-// This is the only place where the panel touches somebody else's
-// configuration, and it touches it only by appending: it changes or removes
-// nothing already there, and the appended directory accepts servers only.
-// The operator must consent to this separately - without consent the host
-// stays read-only and says why.
 func EnableEntry() string {
 	return "\n" + EnableHeader + "\nsourcedir " + PanelSourceDir + "\n"
 }

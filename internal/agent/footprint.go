@@ -14,26 +14,13 @@ import (
 	"time"
 )
 
-// The agent measures itself the way it measures the host: from procfs,
-// once a minute, into the same sample. The numbers answer the release gate
-// of the agent - how much memory and CPU it costs on a real fleet - and
-// feed a rule that catches a leak before the operator does.
-//
-// A value that cannot be read is left out of the sample. Zero goroutines
-// or zero bytes of memory is not a possible state of a running process,
-// and a zero written for a failed read would make the gate pass on a host
-// it never measured.
+// The agent measures itself the way it measures the host: from procfs, once a
+// minute, into the same sample.
 
 const (
-	// helperUnit is the systemd unit of the root helper. Its main PID is
-	// asked from systemd rather than the helper itself: the helper is
-	// socket-activated and exits when idle, and a question over the socket
-	// would wake it every minute to measure a process that would otherwise
-	// not be running.
+	// helperUnit is the systemd unit of the root helper.
 	helperUnit = "flotestro-helper.service"
-	// userHz is the unit of the CPU times in /proc/[pid]/stat. The kernel
-	// reports them in USER_HZ, which is fixed at 100 on every architecture
-	// the agent is built for, whatever the scheduler tick.
+	// userHz is the unit of the CPU times in /proc/[pid]/stat.
 	userHz = 100
 )
 
@@ -74,22 +61,8 @@ type processCPU struct {
 	at    time.Time
 }
 
-// releaseThreshold is the resident size past which the agent hands the
-// pages it no longer uses back to the host.
-//
-// A package plan or a full inventory allocates for a moment and frees at
-// once; the Go runtime keeps those pages for a while, and the host sees
-// an agent that holds twenty-odd megabytes it is not using. The agent is
-// a guest on somebody's server: it gives them back rather than wait for
-// the scavenger, and it reports what the host sees afterwards. The
-// release costs a collection - milliseconds.
-//
-// It happens in two places, because a minute is a long time on a busy
-// host: after a task, which is what allocates, and before a sample, which
-// is what the host's owner reads. releaseEvery is the shortest interval
-// between two of them, so a campaign of small tasks does not turn into a
-// collection per task; taskReleaseEvery is shorter, because a task that
-// has just finished is exactly the moment the pages are free.
+// releaseThreshold is the resident size past which the agent hands the pages
+// it no longer uses back to the host.
 const (
 	releaseThreshold = 24 << 20
 	releaseEvery     = 5 * time.Minute
@@ -113,9 +86,7 @@ var taskRelease struct {
 	at time.Time
 }
 
-// releaseAfterTask hands back what a finished task no longer needs. A host
-// that runs one package transaction an hour should not carry its peak for
-// the rest of that hour.
+// releaseAfterTask hands back what a finished task no longer needs.
 func releaseAfterTask() {
 	if !pagesHeld("/proc") {
 		return
@@ -131,9 +102,7 @@ func releaseAfterTask() {
 	debug.FreeOSMemory()
 }
 
-// footprint reads the agent's own numbers. The CPU percentage covers the
-// interval since the previous call; the first call has no interval and no
-// percentage.
+// footprint reads the agent's own numbers.
 func (s *Sampler) footprint(ctx context.Context) Footprint {
 	var fp Footprint
 	self := filepath.Join(s.ProcRoot, "self")
@@ -175,9 +144,8 @@ func (s *Sampler) footprint(ctx context.Context) Footprint {
 	return fp
 }
 
-// readProcessCPU returns the busy percentage of the process since the
-// previous snapshot, as a share of one core, and stores the current one.
-// Nil without a previous snapshot or when the counter cannot be read.
+// readProcessCPU returns the busy percentage of the process since the previous
+// snapshot, as a share of one core, and stores the current one.
 func (s *Sampler) readProcessCPU(statPath string) *float64 {
 	data, err := os.ReadFile(statPath)
 	if err != nil {
@@ -195,9 +163,9 @@ func (s *Sampler) readProcessCPU(statPath string) *float64 {
 	}
 	seconds := current.at.Sub(previous.at).Seconds()
 	if seconds <= 0 || current.ticks < previous.ticks {
-		// A clock that went backwards or a counter that did: the process
-		// did not restart - the counter belongs to this process - so this
-		// is a reading nothing can be made of.
+		// A clock that went backwards or a counter that did: the process did not
+		// restart - the counter belongs to this process - so this is a reading
+		// nothing can be made of.
 		return nil
 	}
 	value := float64(current.ticks-previous.ticks) / userHz / seconds * 100
@@ -227,11 +195,6 @@ func parseVmRSS(status string) (uint64, bool) {
 }
 
 // parseProcessTicks reads utime plus stime out of /proc/[pid]/stat.
-//
-// The command name in the second field is in parentheses and may itself
-// contain spaces and parentheses, so the fields are counted from the last
-// closing parenthesis: the state comes first after it, utime and stime are
-// the twelfth and thirteenth.
 func parseProcessTicks(stat string) (uint64, bool) {
 	end := strings.LastIndex(stat, ")")
 	if end < 0 {
@@ -249,10 +212,7 @@ func parseProcessTicks(stat string) (uint64, bool) {
 	return utime + stime, true
 }
 
-// countOpenFDs counts the entries of /proc/[pid]/fd. The count includes
-// the descriptor the directory is read through: one on a number read for
-// a leak is noise, and subtracting it would make an empty fixture count
-// below zero.
+// countOpenFDs counts the entries of /proc/[pid]/fd.
 func countOpenFDs(dir string) (uint32, bool) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -261,11 +221,7 @@ func countOpenFDs(dir string) (uint32, bool) {
 	return uint32(len(entries)), true
 }
 
-// helperMainPID asks systemd for the main PID of the helper. Zero means
-// the helper is not running - it sleeps between orders - and is not a
-// PID; the caller then reports nothing about it. The agent already asks
-// systemctl for its facts, so this is the same tool and the same
-// environment.
+// helperMainPID asks systemd for the main PID of the helper.
 func helperMainPID(ctx context.Context) (int, bool) {
 	result := runCommand(ctx, 10*time.Second, "/usr/bin/systemctl", "show", "-p", "MainPID", helperUnit)
 	if !result.Ran || result.ExitCode != 0 {

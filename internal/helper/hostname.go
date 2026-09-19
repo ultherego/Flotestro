@@ -17,15 +17,8 @@ import (
 // panel supports; hostnamectl writes it.
 const hostnameFile = "/etc/hostname"
 
-// applyHostname renames the host.
-//
-// The static and the transient name are set together, so the host answers
-// to the new name at once and after a reboot. The pretty name is set only
-// when the order carries one: hostnamectl without a flag would set it to
-// the static name as well, and a pretty name nobody asked for is not a
-// change the operator approved. The entries of /etc/hosts that name the old
-// hostname follow the rename, with the file from before the first rename
-// kept next to it.
+// applyHostname renames the host. The static and the transient name are set
+// together, so the host answers to the new name at once and after a reboot.
 func (s *Server) applyHostname(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.HostnameRequest) *helperv1.HelperResponse {
 	current := strings.TrimSpace(action.GetHostname())
@@ -61,10 +54,7 @@ func (s *Server) applyHostname(ctx context.Context, request *helperv1.HelperRequ
 		}
 	}
 
-	// The hosts file follows the name. A failure here does not undo the
-	// rename - the host already answers to the new name - but it is not
-	// passed over either: the operator is to know the file still names the
-	// old one.
+	// The hosts file follows the name.
 	updated, err := rewriteHostsFile(s.hostsPath(), s.hostsPath()+".flotestro-before", previous, current)
 	if err != nil {
 		response := reject(ErrorExecFailed, "the host was renamed, but /etc/hosts was not updated: "+err.Error())
@@ -87,9 +77,7 @@ func (s *Server) hostsPath() string {
 	return hostname.HostsPath
 }
 
-// staticHostname reads the name the host will have after a reboot. The
-// kernel's name is the fallback: on a host without the file the two are the
-// same thing.
+// staticHostname reads the name the host will have after a reboot.
 func staticHostname() string {
 	if content, err := os.ReadFile(hostnameFile); err == nil {
 		if name := strings.TrimSpace(string(content)); name != "" {
@@ -100,14 +88,8 @@ func staticHostname() string {
 	return name
 }
 
-// rewriteHostsFile replaces the old hostname with the new one in the
-// entries that name it.
-//
-// The file from before the first rename by the panel is kept as the backup
-// and never overwritten: it is the file the administrator wants back. The
-// write is atomic - a half-written hosts file breaks name resolution for
-// every local service. A hosts file that is a symbolic link is left alone
-// and reported: the helper runs as root and does not write through links.
+// rewriteHostsFile replaces the old hostname with the new one in the entries
+// that name it.
 func rewriteHostsFile(path, backup, previous, current string) (bool, error) {
 	info, err := os.Lstat(path)
 	if err != nil {

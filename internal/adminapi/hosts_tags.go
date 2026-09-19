@@ -16,12 +16,6 @@ type hostTagsRequest struct {
 }
 
 // handleSetHostTags replaces the tags of a host.
-//
-// Tags are facts an operator records about a host in the panel; the host
-// itself is not asked and nothing runs on it, so this is not an operation
-// and does not go through the task queue - the same reasoning as for a
-// maintenance window. It has its own permission, because a tag decides
-// which campaigns reach the host.
 func (s *Server) handleSetHostTags(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
 	host, scope, ok := s.hostScope(w, r, hostID)
@@ -58,11 +52,7 @@ func (s *Server) handleSetHostTags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The trail keeps both lists: what the host carried and what it
-	// carries now. A diff would be shorter, but the question asked of the
-	// trail is "what was on this host on Tuesday", not "what changed".
-	// The detail keeps the lists under their old keys for the readers that
-	// already know them; the two sides of the event are the same lists.
+	// The trail keeps both lists: what the host carried and what it carries now.
 	s.audit.Record(r.Context(), audit.Event{
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
 		Action: "host.tags", TargetType: "host", TargetID: host.ID,
@@ -80,11 +70,6 @@ type hostChannelRequest struct {
 }
 
 // handleSetHostChannel moves a host to a release channel.
-//
-// The channel is a policy of the panel, like a tag: nothing runs on the host
-// and the host is not asked. It shares the tag permission, because it
-// decides the same thing a tag does - which campaigns reach the host, here
-// which agent releases reach it first.
 func (s *Server) handleSetHostChannel(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
 	host, scope, ok := s.hostScope(w, r, hostID)

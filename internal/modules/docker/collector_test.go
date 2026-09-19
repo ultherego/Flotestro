@@ -2,9 +2,8 @@ package docker
 
 import "testing"
 
-// The summary is meant to answer "does something need attention", not to
-// count everything one by one. A container coming up over and over is fine
-// at every single moment and broken nevertheless.
+// The summary is meant to answer "does something need attention", not to count
+// everything one by one.
 func TestSummaryDetectsRestartLoops(t *testing.T) {
 	snapshot := Snapshot{Containers: []Container{
 		{Name: "calm", State: "running", RestartCount: 1},

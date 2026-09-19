@@ -93,10 +93,8 @@ func hostLayeredNetwork(t *testing.T, h *harness, hostID string) layeredNetworkV
 	return state
 }
 
-// hostThatBuildsLayers finds a host whose write mechanism can build a
-// bond, a bridge or a VLAN. NetworkManager on its own cannot: this module
-// drives it by changing the profile an interface already has, and a
-// half-built bond there has no way back through the rescue plan.
+// hostThatBuildsLayers finds a host whose write mechanism can build a bond, a
+// bridge or a VLAN.
 func hostThatBuildsLayers(t *testing.T, h *harness) (hostView, layeredNetworkView) {
 	t.Helper()
 	for _, host := range h.hosts() {
@@ -116,9 +114,9 @@ func hostThatBuildsLayers(t *testing.T, h *harness) (hostView, layeredNetworkVie
 	return hostView{}, layeredNetworkView{}
 }
 
-// TestALayerOnAHostThatCannotBuildOneIsRefusedByMechanism is the other
-// side of the same question: a host driven by NetworkManager alone says so
-// by name instead of leaving the operator with a half-built bond.
+// TestALayerOnAHostThatCannotBuildOneIsRefusedByMechanism is the other side of
+// the same question: a host driven by NetworkManager alone says so by name
+// instead of leaving the operator with a half-built bond.
 func TestALayerOnAHostThatCannotBuildOneIsRefusedByMechanism(t *testing.T) {
 	h := newHarness(t)
 	var chosen *hostView
@@ -151,9 +149,7 @@ func TestALayerOnAHostThatCannotBuildOneIsRefusedByMechanism(t *testing.T) {
 	}
 }
 
-// networkPlanOf orders a plan and returns the plan the host computed. The
-// plan is a read: it walks the host, works out the difference and writes
-// nothing, so it is safe to ask about a change that must never be applied.
+// networkPlanOf orders a plan and returns the plan the host computed.
 func networkPlanOf(t *testing.T, h *harness, hostID string, change map[string]any) map[string]any {
 	t.Helper()
 	job, attempts := h.runOperation(hostID, map[string]any{
@@ -193,9 +189,7 @@ func planRefusal(plan map[string]any) (string, string) {
 }
 
 // TestLayeringIsReportedFromTheHost checks that the inventory says what the
-// host is made of and not only what it carries. A snapshot that reported no
-// layering and no reason would read as a host with none - and every refusal
-// about a relation would then be silence.
+// host is made of and not only what it carries.
 func TestLayeringIsReportedFromTheHost(t *testing.T) {
 	h := newHarness(t)
 
@@ -212,9 +206,9 @@ func TestLayeringIsReportedFromTheHost(t *testing.T) {
 				t.Skipf("the host cannot read its layering: %s", state.LayeringUnavailableReason)
 			}
 			for _, iface := range state.Interfaces {
-				// A member names the layer that owns it, and that layer has
-				// to be an interface the host also reports: a dangling
-				// owner would make every membership refusal unresolvable.
+				// A member names the layer that owns it, and that layer has to be an
+				// interface the host also reports: a dangling owner would make every
+				// membership refusal unresolvable.
 				if iface.Master == "" {
 					continue
 				}
@@ -241,16 +235,13 @@ func TestLayeringIsReportedFromTheHost(t *testing.T) {
 	}
 }
 
-// TestLayeredRefusalsComeBackNamedFromTheHost walks the refusals that only
-// the host can give, because every one of them is about a relation on that
-// host. None of these plans writes anything: they are the panel asking what
-// would happen, and the answer is the point.
+// TestLayeredRefusalsComeBackNamedFromTheHost walks the refusals that only the
+// host can give, because every one of them is about a relation on that host.
 func TestLayeredRefusalsComeBackNamedFromTheHost(t *testing.T) {
 	h := newHarness(t)
-	// The host has to have a mechanism that builds layers at all: on a
-	// machine driven by NetworkManager alone every one of these orders is
-	// refused for the mechanism before any relation is looked at, which is
-	// its own test below.
+	// The host has to have a mechanism that builds layers at all: on a machine
+	// driven by NetworkManager alone every one of these orders is refused for the
+	// mechanism before any relation is looked at, which is its own test below.
 	host, state := hostThatBuildsLayers(t, h)
 	management := state.ManagementInterface
 	if management == "" {
@@ -263,10 +254,9 @@ func TestLayeredRefusalsComeBackNamedFromTheHost(t *testing.T) {
 		code   string
 	}{
 		{
-			// The one refusal that matters most: a bond over the interface
-			// the panel comes through would take its address before the
-			// bond was finished, and the host would be gone with the rescue
-			// plan still armed.
+			// The one refusal that matters most: a bond over the interface the panel
+			// comes through would take its address before the bond was finished, and
+			// the host would be gone with the rescue plan still armed.
 			why: "a bond over the management interface",
 			change: map[string]any{
 				"interface": "flotestbond",
@@ -309,9 +299,8 @@ func TestLayeredRefusalsComeBackNamedFromTheHost(t *testing.T) {
 			code: "vlan_parent_missing",
 		},
 		{
-			// A plain network card is not a layer this panel built, and a
-			// removal that looked like it worked would leave it where it
-			// was after the next boot.
+			// A plain network card is not a layer this panel built, and a removal that
+			// looked like it worked would leave it where it was after the next boot.
 			why:    "removing an interface that is not a layer",
 			change: map[string]any{"interface": management, "link_remove": true},
 			code:   "link_not_layered",
@@ -324,11 +313,8 @@ func TestLayeredRefusalsComeBackNamedFromTheHost(t *testing.T) {
 			if code != tc.code {
 				t.Fatalf("refusal code = %q (%s), wanted %q", code, reason, tc.code)
 			}
-			// A code without a reason leaves the operator guessing which of
-			// several interfaces was in the way. The name that matters is
-			// whichever the refusal is about: the layer, the management
-			// interface, or the member that is missing or taken - the
-			// refusal names one of them, never none.
+			// A code without a reason leaves the operator guessing which of several
+			// interfaces was in the way.
 			named := strings.Contains(reason, tc.change["interface"].(string)) ||
 				strings.Contains(reason, management)
 			if link, ok := tc.change["link"].(map[string]any); ok && !named {
@@ -387,9 +373,8 @@ func TestBondOfOneMemberIsRefusedBeforeItLeavesThePanel(t *testing.T) {
 }
 
 // TestIPv6OrderIsRefusedOnAHostWithoutTheFamily checks that an IPv6 address
-// ordered onto a host that has the second family switched off comes back as
-// a named refusal rather than as a change that seemed to work. The plan
-// writes nothing, so the check is safe on any host.
+// ordered onto a host that has the second family switched off comes back as a
+// named refusal rather than as a change that seemed to work.
 func TestIPv6OrderIsRefusedOnAHostWithoutTheFamily(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -419,10 +404,8 @@ func TestIPv6OrderIsRefusedOnAHostWithoutTheFamily(t *testing.T) {
 		}
 		return
 	}
-	// A host that has the family plans the change instead, and the plan
-	// says what it would do with the second family. The change itself is
-	// not applied here: this test is not the place to rewrite the
-	// addressing of the interface the suite talks over.
+	// A host that has the family plans the change instead, and the plan says what
+	// it would do with the second family.
 	if code != "" {
 		t.Fatalf("a host with IPv6 refused the plan: %q (%s)", code, reason)
 	}
@@ -440,13 +423,6 @@ func TestIPv6OrderIsRefusedOnAHostWithoutTheFamily(t *testing.T) {
 
 // TestVLANOnAFreeInterfaceIsBuiltAndRemoved is the one layered change this
 // suite applies.
-//
-// It is safe because a VLAN adds an interface and takes nothing away: the
-// parent keeps its address, its routes and its traffic, so the host stays
-// reachable whatever the VLAN does. The parent is chosen only if the host
-// reports it as free - not the management interface, with no address, owned
-// by no layer, carrying no VLAN already - and the VLAN is removed in
-// t.Cleanup whether the test passes or fails.
 func TestVLANOnAFreeInterfaceIsBuiltAndRemoved(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("rhel")
@@ -502,18 +478,16 @@ func TestVLANOnAFreeInterfaceIsBuiltAndRemoved(t *testing.T) {
 	if job.State != "succeeded" {
 		t.Fatalf("building the VLAN: state = %s, %s", job.State, lastMessage(attempts))
 	}
-	// A layered change goes under the same rescue plan as an address
-	// change: armed before anything is written and disarmed only after the
-	// host proved it still talks to the panel. A quiet success would be
-	// indistinguishable from a change that had no rescue plan at all.
+	// A layered change goes under the same rescue plan as an address change:
+	// armed before anything is written and disarmed only after the host proved it
+	// still talks to the panel.
 	if !strings.Contains(lastMessage(attempts), "the rollback was disarmed") {
 		t.Errorf("a layered change without a connectivity confirmation: %s", lastMessage(attempts))
 	}
 
-	// The verifier is what decides the job succeeded, so the host really
-	// has the VLAN by now; the inventory is waited for as well, because the
-	// panel is what an operator looks at, and it learns on the host's own
-	// cycle rather than at the moment the job ends.
+	// The verifier is what decides the job succeeded, so the host really has the
+	// VLAN by now; the inventory is waited for as well, because the panel is what
+	// an operator looks at, and it learns on the host's own cycle rather than at
 	deadline := time.Now().Add(3 * time.Minute)
 	for {
 		after := hostLayeredNetwork(t, h, host.ID)

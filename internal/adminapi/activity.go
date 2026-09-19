@@ -10,9 +10,8 @@ import (
 )
 
 // FleetActivity feeds the widgets of the fleet screens: the operations
-// finished per hour by outcome, and the composition of the fleet the
-// viewer may see. Every count is computed in the database over the
-// visible hosts; nothing is estimated in the browser.
+// finished per hour by outcome, and the composition of the fleet the viewer
+// may see.
 type FleetActivity struct {
 	// Hours are the buckets, oldest first, each the start of the hour.
 	Hours []time.Time `json:"hours"`

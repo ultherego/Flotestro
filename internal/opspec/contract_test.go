@@ -6,10 +6,8 @@ import (
 	"testing"
 )
 
-// TestEveryMutatingOperationDeclaresItsContract guards the start-up check:
-// the table is complete and no declaration contradicts the rest of the
-// registry. A new mutating operation without a row here fails this test
-// before it fails the control plane.
+// TestEveryMutatingOperationDeclaresItsContract guards the start-up check: the
+// table is complete and no declaration contradicts the rest of the registry.
 func TestEveryMutatingOperationDeclaresItsContract(t *testing.T) {
 	if err := ValidateContracts(); err != nil {
 		t.Fatalf("the contract table is incomplete or inconsistent: %v", err)
@@ -59,9 +57,9 @@ func TestTheContractClassesAgree(t *testing.T) {
 		ActionFileEnsure: {CancelMode: CancelCheckpointOnly, RetryClass: RetryAfterReplan,
 			Rollback: RollbackExactRestore, Verification: VerifyPlanRecheck,
 			ResourceClaims: []ResourceClaim{{Class: ClaimFile, Mode: ClaimExclusive, Weight: 1}}},
-		// The wipe is verified: its own specification names a verifier that
-		// reads the device back, and a catalogue saying "not verified" told
-		// the operator less than the host actually does.
+		// The wipe is verified: its own specification names a verifier that reads
+		// the device back, and a catalogue saying "not verified" told the operator
+		// less than the host actually does.
 		ActionDiskWipe: {CancelMode: CancelImpossibleAfterStart, RetryClass: RetryNever,
 			Rollback: RollbackNone, Verification: VerifyCustom,
 			ResourceClaims: []ResourceClaim{{Class: LockStorage, Mode: ClaimExclusive, Weight: 3}}},
@@ -134,8 +132,8 @@ func TestTheContractClassesAgree(t *testing.T) {
 }
 
 // TestAnUndeclaredMutationFailsTheStart guards the shape of the refusal: one
-// error naming every operation without a decision, wrapped so the caller
-// can tell it from a broken configuration.
+// error naming every operation without a decision, wrapped so the caller can
+// tell it from a broken configuration.
 func TestAnUndeclaredMutationFailsTheStart(t *testing.T) {
 	undeclared := ActionType("test.undeclared.change")
 	actionSpecs[undeclared] = actionSpec{mutating: true, permission: "test.change", risk: RiskHigh, lockClass: LockUnits}
@@ -165,8 +163,8 @@ func TestAnUndeclaredMutationFailsTheStart(t *testing.T) {
 }
 
 // TestCancellableInFollowsTheCancelMode guards what the job page draws: a
-// cancel button before the start for everything, after the start only for
-// an operation that stops cleanly.
+// cancel button before the start for everything, after the start only for an
+// operation that stops cleanly.
 func TestCancellableInFollowsTheCancelMode(t *testing.T) {
 	for _, action := range AllActions() {
 		declared := action.Contract()
@@ -180,13 +178,9 @@ func TestCancellableInFollowsTheCancelMode(t *testing.T) {
 	}
 }
 
-// TestEveryCampaignReadyActionDeclaresClaims guards what the agent relies
-// on: the claims a task takes come from the contract, and the agent's own
-// fallback list serves only a mutation whose row declares nothing. An
-// operation a campaign may order across the fleet is exactly the one two
-// campaigns can put on the same host at once, so its row has to say what
-// it takes - a change a campaign orders without a claim would run next to
-// anything.
+// TestEveryCampaignReadyActionDeclaresClaims guards what the agent relies on:
+// the claims a task takes come from the contract, and the agent's own fallback
+// list serves only a mutation whose row declares nothing.
 func TestEveryCampaignReadyActionDeclaresClaims(t *testing.T) {
 	for _, action := range AllActions() {
 		if CampaignExclusionReason(action) != "" || !ExecutableMode(action) {
@@ -205,10 +199,9 @@ func TestEveryCampaignReadyActionDeclaresClaims(t *testing.T) {
 	}
 }
 
-// TestTheSharedClassesHaveACapacity spells out the ration of the two
-// weighted classes of the document, and that a lock class read shared has
-// none: the reads of the package database are kept off a transaction by
-// the exclusive claim, not counted against each other.
+// TestTheSharedClassesHaveACapacity spells out the ration of the two weighted
+// classes of the document, and that a lock class read shared has none: the
+// reads of the package database are kept off a transaction by the exclusive
 func TestTheSharedClassesHaveACapacity(t *testing.T) {
 	if SharedCapacity(ClaimLogsRead) < 1 || SharedCapacity(ClaimInventoryHeavy) < 1 {
 		t.Errorf("the weighted classes have the capacities logs %d and inventory %d",

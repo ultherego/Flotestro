@@ -6,9 +6,7 @@ import (
 )
 
 // A container identifier goes into the path of an Engine API request, so it
-// must not carry anything that changes that path. A container name is
-// deliberately not allowed: it is a label and can be assigned to a different
-// object between the plan and the execution.
+// must not carry anything that changes that path.
 func TestAContainerTargetHasToBeAnIdentifier(t *testing.T) {
 	bad := []string{
 		"", "my-container", "../../images/json", "abc", "ABCDEF012345",
@@ -29,8 +27,6 @@ func TestAContainerTargetHasToBeAnIdentifier(t *testing.T) {
 }
 
 // A volume outlives its container precisely so that the data outlives it.
-// Removing volumes is allowed only when removing a container, and only
-// explicitly.
 func TestRemovingVolumesOnlyWhenRemovingAContainer(t *testing.T) {
 	payload := Payload{DockerContainer: &DockerContainerPayload{
 		ContainerID:   "5c5b63d3119a59ac7a7a7f2a18342dbd01f459a88ca81487ba987ddcc5c4bc00",

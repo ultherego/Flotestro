@@ -1,18 +1,5 @@
 // Package certificates describes the certificates lying on a host: their
 // dates, issuers, the names they cover and the service that uses them.
-//
-// The module gathers facts about named files, it does not search the host.
-// A panel that walks the whole filesystem looking for certificates finds
-// above all the trust store - a few hundred authority certificates that
-// belong to no service - and looks into directories with nothing to find.
-// The scope is therefore enumerated: the paths named in the panel and what
-// the host knows about itself, because certmonger watches it.
-//
-// The module never reads the private key when reading the state. It knows
-// about the key only what is visible from the outside: whether the file
-// exists, what permissions it has and whom it belongs to. The match of the
-// key with the certificate is checked exactly once - at deployment, when
-// the key is in the host's hands for a moment anyway.
 package certificates
 
 import (
@@ -52,9 +39,8 @@ const (
 	// RenewalManual means a certificate nobody on the host watches - the
 	// renewal is a decision of a human or the panel.
 	RenewalManual = "manual"
-	// RenewalUnknown means an undetermined state: it could not be read
-	// whether anything watches this certificate. That is not the same as
-	// "manual".
+	// RenewalUnknown means an undetermined state: it could not be read whether
+	// anything watches this certificate.
 	RenewalUnknown = "unknown"
 )
 
@@ -64,25 +50,14 @@ const (
 	GetcertPathAlt = "/usr/sbin/getcert"
 )
 
-// MaxFileSize bounds a file the module opens at all.
-//
-// A certificate with a chain has a few kilobytes. A file bigger than this
-// is not a certificate, and loading it would only be a way to take up
-// memory.
+// MaxFileSize bounds a file the module opens at all. A certificate with a
+// chain has a few kilobytes.
 const MaxFileSize = 256 << 10
 
 // MaxCertificates bounds one read.
-//
-// The bound applies to a single file too: somebody may name the trust
-// store as a path to look at, and then the host answer would be a list of
-// a few hundred authorities instead of the state of its services.
 const MaxCertificates = 64
 
 // KeyMetadata describes a private key without its content.
-//
-// The panel does not need the key to say what matters about it: whether it
-// lies where the service looks for it and whether it is not readable by
-// everyone.
 type KeyMetadata struct {
 	Path   string `json:"path"`
 	Exists bool   `json:"exists"`
@@ -118,9 +93,7 @@ type Certificate struct {
 	Issuer  string   `json:"issuer,omitempty"`
 	Serial  string   `json:"serial,omitempty"`
 	SANs    []string `json:"sans,omitempty"`
-	// The dates are pointers, because an unread file has no date at all. A
-	// zero date here would look like a certificate issued in the first year
-	// of our era - that is, like an expired one.
+	// The dates are pointers, because an unread file has no date at all.
 	NotBefore         *time.Time `json:"not_before,omitempty"`
 	NotAfter          *time.Time `json:"not_after,omitempty"`
 	FingerprintSHA256 string     `json:"fingerprint_sha256,omitempty"`
@@ -130,8 +103,6 @@ type Certificate struct {
 	SelfSigned        bool       `json:"self_signed,omitempty"`
 	IsCA              bool       `json:"is_ca,omitempty"`
 	// ChainLength counts the certificates in the file including the leaf.
-	// One means a certificate without a chain - and that is the most common
-	// reason a client rejects the connection despite a valid certificate.
 	ChainLength int `json:"chain_length,omitempty"`
 
 	// The private key described from the outside; the module does not read
@@ -140,16 +111,13 @@ type Certificate struct {
 
 	// Relations: what this file is for the host.
 	Source string `json:"source"`
-	// OwnerService is the unit that reads this file. The panel does not
-	// guess it from the directory name: a human who knows what reads what
-	// enters it.
+	// OwnerService is the unit that reads this file. The panel does not guess it
+	// from the directory name: a human who knows what reads what enters it.
 	OwnerService string    `json:"owner_service,omitempty"`
 	Renewal      string    `json:"renewal"`
 	Tracking     *Tracking `json:"tracking,omitempty"`
 
-	// UnavailableReason describes a file that could not be read or
-	// recognised. An empty certificate list in such a file is not the
-	// answer "there is no certificate here".
+	// UnavailableReason describes a file that could not be read or recognised.
 	UnavailableReason string `json:"unavailable_reason,omitempty"`
 }
 
@@ -166,29 +134,22 @@ func (c Certificate) DaysToExpiry(now time.Time) *int {
 // Snapshot is the picture of the certificates on the host.
 type Snapshot struct {
 	Certificates []Certificate `json:"certificates,omitempty"`
-	// Scanned lists the paths the panel asked about. Without it an empty
-	// certificate list would not tell a host without certificates from a
-	// host nobody has configured yet.
+	// Scanned lists the paths the panel asked about.
 	Scanned []string `json:"scanned,omitempty"`
 	// TrackingKnown says whether it could be determined what watches the
 	// certificates.
 	TrackingKnown bool `json:"tracking_known"`
 	// TrackingReason says why it could not be determined.
 	TrackingReason string `json:"tracking_reason,omitempty"`
-	// KeysKnown says whether the certificates carry the key state. Without
-	// root the key directory is at times closed and then the answer is
-	// "unknown", not "there is no key".
+	// KeysKnown says whether the certificates carry the key state.
 	KeysKnown bool `json:"keys_known"`
 	// Missing lists the facts not gathered, with the reason.
 	Missing map[string]string `json:"missing,omitempty"`
-	// Trust describes the host trust store: which authorities the host
-	// trusts and which of them the panel created. Without it an authority
-	// rotation is invisible from the panel: it cannot be seen who already
-	// trusts the new one and who does not yet.
+	// Trust describes the host trust store: which authorities the host trusts and
+	// which of them the panel created.
 	Trust *TrustStore `json:"trust,omitempty"`
 	// Truncated counts the targets skipped by the limit of one read, and
-	// TruncatedReason says so directly. A list cut off quietly would look
-	// like a full answer.
+	// TruncatedReason says so directly.
 	Truncated       int    `json:"truncated,omitempty"`
 	TruncatedReason string `json:"truncated_reason,omitempty"`
 
@@ -196,9 +157,8 @@ type Snapshot struct {
 	UnavailableReason string    `json:"unavailable_reason,omitempty"`
 }
 
-// Names of the facts the agent cannot read without root. The helper
-// receives a list of them, not a command to run: the scope of its work is
-// enumerated.
+// Names of the facts the agent cannot read without root. The helper receives a
+// list of them, not a command to run: the scope of its work is enumerated.
 const (
 	FactKeyMetadata      = "key_metadata"
 	FactTracking         = "renewal_tracking"
@@ -215,9 +175,6 @@ func (s Snapshot) MissingFacts() []string {
 }
 
 // Supplement holds the facts gathered by the helper on explicit request.
-//
-// A nil field means a fact that was not asked for or could not be read -
-// the reason is then in Errors, under the fact name.
 type Supplement struct {
 	// Keys is the key metadata, by key path.
 	Keys map[string]KeyMetadata `json:"keys,omitempty"`
@@ -226,31 +183,22 @@ type Supplement struct {
 	Tracking       map[string]Tracking `json:"tracking,omitempty"`
 	TrackingKnown  bool                `json:"tracking_known,omitempty"`
 	TrackingReason string              `json:"tracking_reason,omitempty"`
-	// Targets is the list of targets the host knows on its own: those
-	// entered by the panel earlier and those watched by certmonger. Thanks
-	// to it the inventory describes the same scope as the last scan.
+	// Targets is the list of targets the host knows on its own: those entered by
+	// the panel earlier and those watched by certmonger.
 	Targets []Target `json:"targets,omitempty"`
-	// Files is the content of the files the agent could not open: a
-	// certificate is at times kept in a directory closed to everyone but
-	// the service.
+	// Files is the content of the files the agent could not open: a certificate
+	// is at times kept in a directory closed to everyone but the service.
 	Files  map[string]string `json:"files,omitempty"`
 	Errors map[string]string `json:"errors,omitempty"`
 }
 
 // Fingerprint computes the digest of a certificate in DER form.
-//
-// It is the same fingerprint a browser and openssl show, so it can be
-// compared with what is visible on the other side of the connection.
 func Fingerprint(cert *x509.Certificate) string {
 	sum := sha256.Sum256(cert.Raw)
 	return hex.EncodeToString(sum[:])
 }
 
 // ParsePEM extracts the certificates from a PEM file in the order they lie.
-//
-// The order matters: the first is the service leaf, the following ones are
-// the chain. A file with a private key inside is not an error - blocks
-// other than CERTIFICATE are simply skipped and copied nowhere.
 func ParsePEM(data []byte) ([]*x509.Certificate, error) {
 	var certs []*x509.Certificate
 	rest := data
@@ -304,10 +252,6 @@ func Describe(path string, certs []*x509.Certificate) Certificate {
 }
 
 // AlternativeNames gathers all the names the certificate covers.
-//
-// Addresses, names and URIs stand in one list with a type prefix: the
-// operator asks "does this certificate cover this address", not "in which
-// extension field is this name".
 func AlternativeNames(cert *x509.Certificate) []string {
 	var names []string
 	names = append(names, cert.DNSNames...)
@@ -334,20 +278,13 @@ func KeyDescription(key crypto.PublicKey) (string, int) {
 	return "", 0
 }
 
-// Covers says whether the certificate covers the given name.
-//
-// The check goes through the library name verification, so the wildcard
-// "*.example.com" works the same as it does for a client.
+// Covers says whether the certificate covers the given name. The check goes
+// through the library name verification, so the wildcard "*.
 func Covers(cert *x509.Certificate, name string) bool {
 	return cert.VerifyHostname(name) == nil
 }
 
 // MatchKey checks whether the private key belongs to the certificate.
-//
-// This is the only place in the module where the key is read - and it
-// happens right before deployment, when the key has to pass through the
-// host's hands anyway. The result is the bare answer "matches or not": the
-// key content is neither in the error message nor in the operation result.
 func MatchKey(cert *x509.Certificate, keyPEM []byte) error {
 	key, err := ParsePrivateKey(keyPEM)
 	if err != nil {
@@ -379,10 +316,9 @@ func ParsePrivateKey(data []byte) (crypto.PrivateKey, error) {
 		if !strings.Contains(block.Type, "PRIVATE KEY") {
 			continue
 		}
-		// An encrypted key is recognised by the header and said so
-		// directly: the panel has nowhere to ask for the passphrase, and
-		// "key not recognised" would be a misleading answer to a different
-		// question.
+		// An encrypted key is recognised by the header and said so directly: the
+		// panel has nowhere to ask for the passphrase, and "key not recognised"
+		// would be a misleading answer to a different question.
 		if _, encrypted := block.Headers["DEK-Info"]; encrypted {
 			return nil, fmt.Errorf("the key is encrypted with a passphrase; the store keeps keys without a passphrase")
 		}
@@ -403,12 +339,8 @@ func ParsePrivateKey(data []byte) (crypto.PrivateKey, error) {
 	return nil, fmt.Errorf("the data contains no private key in PEM format")
 }
 
-// CheckChain checks whether the certificates in the file go from the leaf
-// to the root and whether each is signed by the next.
-//
-// A wrong chain order is an error visible only at the client: the server
-// starts, and every other program rejects the connection. That is why it
-// is checked before the replacement, not after.
+// CheckChain checks whether the certificates in the file go from the leaf to
+// the root and whether each is signed by the next.
 func CheckChain(certs []*x509.Certificate) error {
 	for i := 0; i+1 < len(certs); i++ {
 		if err := certs[i].CheckSignatureFrom(certs[i+1]); err != nil {
@@ -432,21 +364,15 @@ func CheckDates(cert *x509.Certificate, now time.Time) error {
 	return nil
 }
 
-// Directories the panel deploys certificates and keys into.
-//
-// The list is narrow on purpose. Writing a certificate anywhere in the
-// filesystem is writing an arbitrary file - and for that there is the files
-// module with its own safeguards, which does not touch keys and
-// certificates anyway.
+// Directories the panel deploys certificates and keys into. The list is narrow
+// on purpose.
 var allowedPrefixes = []string{
 	"/etc/pki/tls/",
 	"/etc/pki/flotestro/",
 	"/etc/ssl/private/",
 	"/etc/ssl/local/",
-	// Debian keeps the server certificate in the same directory as the
-	// trust store. A file lying there by itself makes nothing trusted yet
-	// - trust comes from the generated bundle and the hash symlinks. That
-	// is why the directory is allowed, and those two things are not.
+	// Debian keeps the server certificate in the same directory as the trust
+	// store.
 	"/etc/ssl/certs/",
 	"/etc/nginx/",
 	"/etc/httpd/",
@@ -458,13 +384,8 @@ var allowedPrefixes = []string{
 	"/opt/flotestro/certs/",
 }
 
-// forbiddenPrefixes lists the places the panel never touches - even when
-// they lie inside an allowed directory.
-//
-// The trust store answers a different question than a service certificate:
-// it says whom the host trusts, not what it presents itself as. Adding an
-// authority there is a change of a different weight and must not look like
-// a certificate deployment.
+// forbiddenPrefixes lists the places the panel never touches - even when they
+// lie inside an allowed directory.
 var forbiddenPrefixes = []string{
 	"/etc/pki/ca-trust/",
 	"/etc/pki/tls/certs/ca-bundle.crt",
@@ -472,23 +393,18 @@ var forbiddenPrefixes = []string{
 	"/etc/ca-certificates/",
 	"/usr/share/ca-certificates/",
 	"/usr/local/share/ca-certificates/",
-	// The agent identity is a separate subsystem with its own renewal:
-	// replacing its certificate by an ordinary operation would cut the
-	// panel off from the host at the moment the host stopped being itself.
+	// The agent identity is a separate subsystem with its own renewal: replacing
+	// its certificate by an ordinary operation would cut the panel off from the
+	// host at the moment the host stopped being itself.
 	"/etc/flotestro/agent/",
 	"/var/lib/flotestro/agent/",
 }
 
 // hashSymlink recognises the name OpenSSL looks an authority up by in the
-// trust directory: eight hex digits and a sequence number. A file under
-// such a name is not a service certificate - it is a trust store entry.
+// trust directory: eight hex digits and a sequence number.
 var hashSymlink = regexp.MustCompile(`^[0-9a-f]{8}\.[0-9]+$`)
 
 // ValidatePath checks whether the panel may name this file.
-//
-// The same rule binds reading and writing: a path the panel does not write
-// is not a path whose content it asks about either. Otherwise "look at
-// this file" would be a way to read any file of the host.
 func ValidatePath(p string) error {
 	if p == "" {
 		return fmt.Errorf("the path is empty")
@@ -525,11 +441,8 @@ func ValidatePath(p string) error {
 	return fmt.Errorf("the path %q lies outside the certificate directories", p)
 }
 
-// ValidateTarget checks the address the panel checks the deployed
-// certificate at.
-//
-// The probe connects from the host, so an address without a port or with a
-// name that cannot be split would turn the test into a random connection.
+// ValidateTarget checks the address the panel checks the deployed certificate
+// at.
 func ValidateTarget(target string) error {
 	if target == "" {
 		return nil
@@ -582,13 +495,8 @@ func ValidateRequest(request string) error {
 	return nil
 }
 
-// ParseGetcert reads the output of "getcert list".
-//
-// The entries are indented "Request ID 'name':" blocks. Four things are of
-// interest: where the certificate lies, where the key, what state the
-// request is in and whether the daemon renews it itself. The result is
-// mapped by certificate path, because that is what links the request to
-// the file the panel sees.
+// ParseGetcert reads the output of "getcert list". The entries are indented
+// "Request ID 'name':" blocks.
 func ParseGetcert(output string) map[string]Tracking {
 	trackings := map[string]Tracking{}
 	var current Tracking

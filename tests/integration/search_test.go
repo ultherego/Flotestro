@@ -39,11 +39,9 @@ func hitOf(hits []searchHit, kind, id string) *searchHit {
 	return nil
 }
 
-// TestSearchFindsAHostByThePrefixOfItsName types the beginning of a lab
-// host's name into the global search and expects the host among the hits,
-// with the address of its overview; the full name is a prefix of itself,
-// so it finds the host too. A query of one character is answered with
-// nothing rather than with a screenful.
+// TestSearchFindsAHostByThePrefixOfItsName types the beginning of a lab host's
+// name into the global search and expects the host among the hits, with the
+// address of its overview; the full name is a prefix of itself, so it finds
 func TestSearchFindsAHostByThePrefixOfItsName(t *testing.T) {
 	h := newHarness(t)
 	hosts := h.hosts()
@@ -74,10 +72,9 @@ func TestSearchFindsAHostByThePrefixOfItsName(t *testing.T) {
 	}
 }
 
-// TestSearchFindsACampaignByAWordOfItsName orders a campaign and expects
-// the search to find it by the beginning of its name and by one of its
-// later words: an operator remembers a word of a name, not always the
-// first one.
+// TestSearchFindsACampaignByAWordOfItsName orders a campaign and expects the
+// search to find it by the beginning of its name and by one of its later
+// words: an operator remembers a word of a name, not always the first one.
 func TestSearchFindsACampaignByAWordOfItsName(t *testing.T) {
 	h := newHarness(t)
 	campaign := h.createCampaign(labCampaign("palette lookup rehearsal", "cron.service", nil))
@@ -94,12 +91,9 @@ func TestSearchFindsACampaignByAWordOfItsName(t *testing.T) {
 	}
 }
 
-// TestSearchKeepsTheIdentitiesFromAViewer creates a viewer bound to one
-// scope and expects the search to answer them with the hosts of that scope
-// and with no identity at all: the identities are read with the right to
-// manage access, and the viewer has none. The administrator, asked the
-// same, gets the identity - so it is the right, not the query, that hides
-// it. A request without a token is refused.
+// TestSearchKeepsTheIdentitiesFromAViewer creates a viewer bound to one scope
+// and expects the search to answer them with the hosts of that scope and with
+// no identity at all: the identities are read with the right to manage access,
 func TestSearchKeepsTheIdentitiesFromAViewer(t *testing.T) {
 	h := newHarness(t)
 	hosts := h.hosts()

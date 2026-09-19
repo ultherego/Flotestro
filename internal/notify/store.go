@@ -16,11 +16,9 @@ import (
 	"github.com/ultherego/flotestro/internal/secrets"
 )
 
-// SecretStore is the part of the secret store the channels use: a
-// credential goes in as a secret of the panel's own, is replaced as a
-// new version of it, is retired with the channel, and is read at the
-// moment of sending. The value never leaves the process in any other
-// direction.
+// SecretStore is the part of the secret store the channels use: a credential
+// goes in as a secret of the panel's own, is replaced as a new version of it,
+// is retired with the channel, and is read at the moment of sending.
 type SecretStore interface {
 	SecretReader
 	Create(ctx context.Context, name, description string, value []byte, author string) (*secrets.Secret, error)
@@ -35,9 +33,7 @@ type Store struct {
 }
 
 // NewStore creates the store over the pool and the secret store the
-// credentials live in. A nil secret store refuses every channel with a
-// credential: the panel runs without a secret store only when it has no
-// key, and a credential written anywhere else would be plaintext.
+// credentials live in.
 func NewStore(pool *pgxpool.Pool, secretStore SecretStore) *Store {
 	return &Store{pool: pool, secrets: secretStore}
 }
@@ -77,8 +73,6 @@ func (s *Store) Get(ctx context.Context, id string) (*Channel, error) {
 }
 
 // get returns a channel with its whole configuration, for the senders.
-// The credential is not read here: the sender gets it through
-// withSecret, at the moment of sending.
 func (s *Store) get(ctx context.Context, id string) (*Channel, error) {
 	if _, err := uuid.Parse(id); err != nil {
 		return nil, ErrNotFound
@@ -135,11 +129,8 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Channe
 	return channels, rows.Err()
 }
 
-// withSecret returns the channel with its credential read from the
-// store, for one send. A channel without a reference comes back as it
-// is: a webhook may be unsigned, a mailbox may take mail without a
-// login, and a row from before the move still carries its credential in
-// the configuration until the move runs.
+// withSecret returns the channel with its credential read from the store, for
+// one send.
 func (s *Store) withSecret(ctx context.Context, channel Channel) (Channel, error) {
 	if channel.secretRef == "" {
 		return channel, nil
@@ -163,12 +154,8 @@ func (s *Store) withSecret(ctx context.Context, channel Channel) (Channel, error
 	return channel, nil
 }
 
-// redact replaces the credential of a configuration with the fact that
-// it is set: what leaves the store towards the API. A webhook's secret
-// is the signing key; an incoming webhook's address is the whole
-// credential, so it is treated the same way. The configuration of a
-// stored channel holds neither any more; the flags come from the
-// reference, and a row from before the move is redacted the same way.
+// redact replaces the credential of a configuration with the fact that it is
+// set: what leaves the store towards the API.
 func redact(kind string, raw json.RawMessage, configured bool) json.RawMessage {
 	switch kind {
 	case KindWebhook:
@@ -200,9 +187,9 @@ func redact(kind string, raw json.RawMessage, configured bool) json.RawMessage {
 	}
 }
 
-// credentialOf is the credential a configuration carries on the way in,
-// and the configuration without it: what the secret store gets and what
-// the row gets.
+// credentialOf is the credential a configuration carries on the way in, and
+// the configuration without it: what the secret store gets and what the row
+// gets.
 func credentialOf(config any) (credential string, stored any) {
 	switch c := config.(type) {
 	case WebhookConfig:
@@ -219,12 +206,7 @@ func credentialOf(config any) (credential string, stored any) {
 	return "", config
 }
 
-// Create records a channel. The configuration is checked for its kind
-// and a mail password has to name a secret that exists and can be
-// issued: a channel that could never send is refused now rather than
-// found in the log later. The credential of a webhook goes to the
-// secret store under the channel's name before the row can be read by
-// anybody, and the row never holds it.
+// Create records a channel.
 func (s *Store) Create(ctx context.Context, channel Channel) (*Channel, error) {
 	config, err := channel.Validate()
 	if err != nil {
@@ -289,10 +271,9 @@ func (s *Store) Create(ctx context.Context, channel Channel) (*Channel, error) {
 	return s.Get(ctx, id)
 }
 
-// putCredential seals the credential as a version of the channel's own
-// secret - a new secret for a channel without one, a new version for a
-// channel that has one - and points the row at it. The row's revision
-// rises with it.
+// putCredential seals the credential as a version of the channel's own secret
+// - a new secret for a channel without one, a new version for a channel that
+// has one - and points the row at it.
 func (s *Store) putCredential(ctx context.Context, channelID, credential, author string) error {
 	name := ChannelSecretName(channelID)
 	if author == "" {
@@ -314,10 +295,9 @@ func (s *Store) putCredential(ctx context.Context, channelID, credential, author
 	return err
 }
 
-// dropCredential retires the channel's own secret and clears the
-// reference: what "the secret is not set" on an edit means, and what a
-// deleted channel leaves behind. A retired secret stays in the store's
-// history as the trace that it existed.
+// dropCredential retires the channel's own secret and clears the reference:
+// what "the secret is not set" on an edit means, and what a deleted channel
+// leaves behind.
 func (s *Store) dropCredential(ctx context.Context, channelID string) error {
 	if s.secrets != nil {
 		if err := s.secrets.Retire(ctx, ChannelSecretName(channelID)); err != nil && !errors.Is(err, secrets.ErrNotFound) {
@@ -331,13 +311,7 @@ func (s *Store) dropCredential(ctx context.Context, channelID string) error {
 	return err
 }
 
-// Update replaces a channel. A webhook edited without retyping its
-// secret keeps the one it has: the API never showed it, so the editor
-// cannot send it back. secret_set false with no secret clears it. An
-// incoming webhook edited without its address keeps the stored one the
-// same way; there is no clearing it, because a channel without an address
-// cannot send. A typed credential becomes a new version of the channel's
-// secret, and the moment is recorded as the rotation.
+// Update replaces a channel.
 func (s *Store) Update(ctx context.Context, id string, channel Channel) (*Channel, error) {
 	existing, err := s.get(ctx, id)
 	if err != nil {
@@ -360,9 +334,9 @@ func (s *Store) Update(ctx context.Context, id string, channel Channel) (*Channe
 	}
 	if slack, ok := config.(SlackConfig); ok && slack.URL == "" {
 		if existing.Kind != KindSlackWebhook || !existing.SecretConfigured {
-			// A row from before the move may still carry the address in
-			// its configuration; the move takes it to the store, and
-			// until then the row keeps it.
+			// A row from before the move may still carry the address in its
+			// configuration; the move takes it to the store, and until then the row
+			// keeps it.
 			var kept SlackConfig
 			_ = json.Unmarshal(existing.Config, &kept)
 			if existing.Kind != KindSlackWebhook || kept.URL == "" {
@@ -467,11 +441,9 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// checkSecret refuses a mail configuration whose password names a secret
-// the store does not have or cannot issue, and returns the identifier of
-// the secret for the channel's reference. The check reads the metadata
-// of the secret alone: the value is read by the sender, at the moment of
-// sending.
+// checkSecret refuses a mail configuration whose password names a secret the
+// store does not have or cannot issue, and returns the identifier of the
+// secret for the channel's reference.
 func (s *Store) checkSecret(ctx context.Context, config any) (string, error) {
 	email, ok := config.(EmailConfig)
 	if !ok || email.PasswordSecret == "" {
@@ -510,18 +482,9 @@ func isUniqueViolation(err error) bool {
 // is recorded under.
 const SecretMigrationName = "channel_secrets_to_store"
 
-// MigrateSecrets moves the plaintext credentials of the channels written
-// by the previous release into the secret store: the address of every
-// incoming webhook, the signing key of every webhook, and the reference
-// of every mailbox to its named password secret. It runs at the start of
-// the panel, once the migrations have added the columns, because only
-// the process holds the key that seals a version; the schema could add
-// the columns but not fill them. It is idempotent - a row already moved
-// carries no plaintext - and records that it ran, with the count, in
-// notification_backfills. The panel of the previous release, should it
-// start against this database, still reads the configuration column and
-// sends nothing for a moved channel; that is the N-1 rule for a
-// credential: it is not left where the old release could read it.
+// MigrateSecrets moves the plaintext credentials of the channels written by
+// the previous release into the secret store: the address of every incoming
+// webhook, the signing key of every webhook, and the reference of every
 func (s *Store) MigrateSecrets(ctx context.Context) (moved int, err error) {
 	if s.secrets == nil {
 		return 0, errors.New("the credentials of the channels cannot be moved without a secret store")
@@ -596,9 +559,9 @@ func (s *Store) MigrateSecrets(ctx context.Context) (moved int, err error) {
 			if err := json.Unmarshal(p.config, &config); err != nil {
 				return moved, fmt.Errorf("channel %s: %w", p.id, err)
 			}
-			// A mailbox whose named secret is gone keeps sending without
-			// a login failing, as it did; the reference is left empty and
-			// the log says secret_unavailable.
+			// A mailbox whose named secret is gone keeps sending without a login
+			// failing, as it did; the reference is left empty and the log says
+			// secret_unavailable.
 			var secretID *string
 			_ = s.pool.QueryRow(ctx, `select id from secrets where name = $1`, config.PasswordSecret).Scan(&secretID)
 			if _, err := s.pool.Exec(ctx, `
@@ -619,11 +582,7 @@ func (s *Store) MigrateSecrets(ctx context.Context) (moved int, err error) {
 }
 
 // Enqueue writes the rows of a batch of events in one transaction: every
-// channel's row for every event, pending or suppressed, all or none. The
-// consumer of the trail moves its cursor only after this commits, so an
-// event is either still before the cursor or in the queue - never
-// between. A row that is there already - the cursor was not moved after
-// an earlier commit - is left alone, so the retry writes nothing twice.
+// channel's row for every event, pending or suppressed, all or none.
 func (s *Store) Enqueue(ctx context.Context, rows []Delivery) error {
 	if len(rows) == 0 {
 		return nil
@@ -652,11 +611,9 @@ func (s *Store) Enqueue(ctx context.Context, rows []Delivery) error {
 	return tx.Commit(ctx)
 }
 
-// Claim takes up to limit due rows under a lease of the owner, the way
-// the document writes it: the due rows in the order they are due, locked
-// and skipped when another worker holds them, moved to leased with the
-// attempt counted. The rows come back with their message, so the worker
-// sends without reading the trail.
+// Claim takes up to limit due rows under a lease of the owner, the way the
+// document writes it: the due rows in the order they are due, locked and
+// skipped when another worker holds them, moved to leased with the attempt
 func (s *Store) Claim(ctx context.Context, owner string, lease time.Duration, limit int) ([]Delivery, error) {
 	rows, err := s.pool.Query(ctx, `
 		with picked as (
@@ -693,9 +650,7 @@ func (s *Store) Claim(ctx context.Context, owner string, lease time.Duration, li
 	return claimed, rows.Err()
 }
 
-// Renew extends the lease of a row the owner holds. False means the row
-// is not the owner's any more - the lease ran out and another worker
-// took it - and the owner is to stop.
+// Renew extends the lease of a row the owner holds.
 func (s *Store) Renew(ctx context.Context, id, owner string, lease time.Duration) (bool, error) {
 	tag, err := s.pool.Exec(ctx, `
 		update notification_deliveries
@@ -707,9 +662,8 @@ func (s *Store) Renew(ctx context.Context, id, owner string, lease time.Duration
 	return tag.RowsAffected() == 1, nil
 }
 
-// ReclaimStale returns the rows whose lease ran out to the queue: the
-// worker that held them died, or hung past its lease. The attempt they
-// were on stays counted; they are due at once.
+// ReclaimStale returns the rows whose lease ran out to the queue: the worker
+// that held them died, or hung past its lease.
 func (s *Store) ReclaimStale(ctx context.Context) (int64, error) {
 	tag, err := s.pool.Exec(ctx, `
 		update notification_deliveries
@@ -731,9 +685,7 @@ type Outcome struct {
 	NextAttempt time.Duration
 }
 
-// Settle writes the outcome of an attempt on a row the owner holds. A row
-// that is not the owner's any more is left alone: the other worker that
-// holds it settles it.
+// Settle writes the outcome of an attempt on a row the owner holds.
 func (s *Store) Settle(ctx context.Context, id, owner string, outcome Outcome) error {
 	var err error
 	switch outcome.State {
@@ -764,10 +716,8 @@ func (s *Store) Settle(ctx context.Context, id, owner string, outcome Outcome) e
 	return err
 }
 
-// Retry returns a dead letter to the queue: an operator corrected the
-// channel and wants the message sent. The attempts start again from
-// zero, so the cap applies to the new run; the code of the failure stays
-// on the row until the next attempt replaces it.
+// Retry returns a dead letter to the queue: an operator corrected the channel
+// and wants the message sent.
 func (s *Store) Retry(ctx context.Context, id string) (*Delivery, error) {
 	if _, err := uuid.Parse(id); err != nil {
 		return nil, ErrDeliveryNotFound
@@ -923,9 +873,7 @@ func (s *Store) DeadLetterCount(ctx context.Context) (int, error) {
 	return count, err
 }
 
-// SweepDeliveries deletes the settled rows older than the retention. A
-// row that still waits - pending, leased, in retry, a dead letter - is
-// never swept: a dead letter is an operator's to settle, however old.
+// SweepDeliveries deletes the settled rows older than the retention.
 func (s *Store) SweepDeliveries(ctx context.Context) error {
 	_, err := s.pool.Exec(ctx, `
 		delete from notification_deliveries
@@ -950,8 +898,8 @@ type SummaryWork struct {
 }
 
 // EndedSilences reads the silences with send_summary that ended and have
-// suppressed rows nobody summarized, with the titles those rows kept,
-// one entry per silence and channel.
+// suppressed rows nobody summarized, with the titles those rows kept, one
+// entry per silence and channel.
 func (s *Store) EndedSilences(ctx context.Context) ([]SummaryWork, error) {
 	rows, err := s.pool.Query(ctx, `
 		select s.id, s.until, s.reason, d.channel_id, max(d.channel_revision),
@@ -977,9 +925,9 @@ func (s *Store) EndedSilences(ctx context.Context) ([]SummaryWork, error) {
 	return work, rows.Err()
 }
 
-// EnqueueSummary writes the summary row of one channel for one ended
-// silence and marks the rows it names as summarized, together: the
-// summary goes once or not at all.
+// EnqueueSummary writes the summary row of one channel for one ended silence
+// and marks the rows it names as summarized, together: the summary goes once
+// or not at all.
 func (s *Store) EnqueueSummary(ctx context.Context, work SummaryWork, message Message) error {
 	encoded, err := json.Marshal(message)
 	if err != nil {

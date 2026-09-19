@@ -3,8 +3,7 @@ package agent
 import "testing"
 
 // The address towards the panel is picked by the routing table, not by a list
-// of interfaces. The loopback is always reachable, so the test does not depend
-// on the lab network.
+// of interfaces.
 func TestPanelAddressPicksTheRouteAddress(t *testing.T) {
 	if got := panelAddress("https://127.0.0.1:8443"); got != "127.0.0.1" {
 		t.Errorf("address = %q, expected 127.0.0.1", got)

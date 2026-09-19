@@ -6,10 +6,7 @@ import (
 )
 
 // The sanity gate is what stands between a broken download and a fleet
-// reported as clean. "Empty" was the easy half of it: a fetch that came
-// back with a fifth of the findings, or one that quietly stopped covering
-// a release, is the same accident and would have been activated without a
-// word.
+// reported as clean.
 func TestTheGateRefusesAFetchThatLostMostOfWhatIsInForce(t *testing.T) {
 	inForce := Snapshot{AdvisoryCount: 12000, Releases: []string{"bookworm", "trixie"}}
 	cases := []struct {
@@ -28,10 +25,8 @@ func TestTheGateRefusesAFetchThatLostMostOfWhatIsInForce(t *testing.T) {
 			releases: []string{"bookworm", "trixie"}, want: ReasonFeedShrank,
 		},
 		{
-			// Exactly at the allowance: two fifths lost is still allowed,
-			// so the fetch passes. A gate that fired here would fire on
-			// ordinary movement at the vendor and teach the operator to
-			// accept candidates without reading them.
+			// Exactly at the allowance: two fifths lost is still allowed, so the fetch
+			// passes.
 			name: "a fetch at the edge of the allowance", count: 7200,
 			releases: []string{"bookworm", "trixie"}, want: "",
 		},
@@ -70,9 +65,8 @@ func TestTheGateRefusesAFetchThatLostMostOfWhatIsInForce(t *testing.T) {
 }
 
 // A provider with nothing in force has no previous answer to protect: the
-// first fetch of a feed is a fact the panel starts from, however small,
-// and it is the coverage next to the assessment that says how much such a
-// feed covers.
+// first fetch of a feed is a fact the panel starts from, however small, and it
+// is the coverage next to the assessment that says how much such a feed
 func TestTheGateLetsTheFirstFetchOfAProviderThrough(t *testing.T) {
 	var nothing Snapshot
 	if got := feedRefusal(nothing, 0, nil, 0); got != "" {
@@ -83,9 +77,7 @@ func TestTheGateLetsTheFirstFetchOfAProviderThrough(t *testing.T) {
 	}
 }
 
-// A feed that does not enumerate its releases is not a feed that lost
-// them. An absent list is an unknown, and an unknown must not be read as
-// a statement about coverage - in either direction.
+// A feed that does not enumerate its releases is not a feed that lost them.
 func TestAnAbsentReleaseListIsNotALostRelease(t *testing.T) {
 	inForce := Snapshot{AdvisoryCount: 100, Releases: []string{"9", "10"}}
 	if got := feedRefusal(inForce, 100, nil, 0); got != "" {
@@ -96,10 +88,7 @@ func TestAnAbsentReleaseListIsNotALostRelease(t *testing.T) {
 	}
 }
 
-// The refusal is typed on both counts: errors.Is recognises the family so
-// the scheduler can tell it from an ordinary failure, and the code travels
-// in a field rather than in the sentence, because the scheduler writes it
-// onto the source and the panel shows it next to the candidate.
+// The refusal is typed on both counts: errors.
 func TestTheGateRefusalIsTyped(t *testing.T) {
 	err := shrinkError(ReasonFeedReleaseMissing, "debian",
 		Snapshot{AdvisoryCount: 12000, Releases: []string{"bookworm", "trixie"}},
@@ -127,9 +116,9 @@ func TestTheGateRefusalIsTyped(t *testing.T) {
 	}
 }
 
-// A share outside the sensible range is not an invitation to refuse
-// everything or nothing: it falls back to the default, so a mistyped
-// setting cannot switch the gate off.
+// A share outside the sensible range is not an invitation to refuse everything
+// or nothing: it falls back to the default, so a mistyped setting cannot
+// switch the gate off.
 func TestAnImpossibleShareFallsBackToTheDefault(t *testing.T) {
 	for _, share := range []float64{0, -1, 1, 7} {
 		if !feedShrankTooFar(1000, 100, share) {

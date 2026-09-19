@@ -9,12 +9,8 @@ import (
 	"strings"
 )
 
-// SPAHandler serves the built panel. Paths unknown to the router go to
-// index.html, because the panel routes exist only on the browser side.
-//
-// The handler deliberately does not serve paths starting with /api, /auth
-// or /healthz: those belong to the API and must return an error, not an
-// HTML page.
+// SPAHandler serves the built panel. Paths unknown to the router go to index.
+// html, because the panel routes exist only on the browser side.
 func SPAHandler(root string) http.Handler {
 	if root == "" {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -50,11 +46,8 @@ func SPAHandler(root string) http.Handler {
 	})
 }
 
-// inlineScriptHashes reads index.html once and returns the CSP source
-// expressions of its inline scripts. The theme script must run before the
-// first paint, so it cannot be a file; the hash lets the policy admit
-// exactly that script and nothing else, and a rebuilt index.html changes
-// the hash with it rather than breaking the theme.
+// inlineScriptHashes reads index. html once and returns the CSP source
+// expressions of its inline scripts.
 func inlineScriptHashes(root string) []string {
 	if root == "" {
 		return nil

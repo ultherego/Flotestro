@@ -16,12 +16,8 @@ import (
 	"github.com/ultherego/flotestro/internal/secrets"
 )
 
-// definitionView joins a backup definition with what is known about it
-// from the runs.
-//
-// The definition alone does not answer the operator's question. The
-// question is: is the copy current, has anybody ever checked it and how
-// much does it take. Only the run history answers that.
+// definitionView joins a backup definition with what is known about it from
+// the runs.
 type definitionView struct {
 	backupstore.Definition
 	// Status is the panel's judgement, not a fact from the host.
@@ -66,9 +62,8 @@ func (s *Server) handleHostBackups(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	// The tag covers the definitions of the host as a set: a write names
-	// one of them by its name in the body, and what an editor read was the
-	// whole list.
+	// The tag covers the definitions of the host as a set: a write names one of
+	// them by its name in the body, and what an editor read was the whole list.
 	setETag(w, backupDefinitionsTag(definitions))
 	latest, err := s.backups.Latest(r.Context(), hostID)
 	if err != nil {
@@ -82,9 +77,9 @@ func (s *Server) handleHostBackups(w http.ResponseWriter, r *http.Request) {
 		view := definitionView{Definition: definition}
 		runs := latest[definition.Name]
 
-		// The time of the last successful copy is taken from the plan,
-		// because the plan reads the repository: a copy may also be made
-		// outside the panel, from cron.
+		// The time of the last successful copy is taken from the plan, because the
+		// plan reads the repository: a copy may also be made outside the panel, from
+		// cron.
 		if plan, known := runs[backupmodule.OperationPlan]; known {
 			view.LastSuccessAt = plan.LastSuccessAt
 			view.Snapshots = plan.Snapshots
@@ -123,9 +118,8 @@ func (s *Server) handleHostBackups(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, report)
 }
 
-// backupDefinitionsTag is the entity tag of a host's backup definitions:
-// it moves when a definition is added, changed or removed. The list comes
-// ordered by name, so the same set gives the same tag.
+// backupDefinitionsTag is the entity tag of a host's backup definitions: it
+// moves when a definition is added, changed or removed.
 func backupDefinitionsTag(definitions []backupstore.Definition) string {
 	parts := make([]string, 0, len(definitions)*2)
 	for _, definition := range definitions {
@@ -177,11 +171,6 @@ type definitionRequest struct {
 }
 
 // handleSetBackupDefinition creates or changes a backup definition.
-//
-// This is not an operation on the host and does not go through opspec: it
-// describes what the panel is to back up, it does not change the machine
-// state. The host learns about the definition only when somebody orders a
-// copy.
 func (s *Server) handleSetBackupDefinition(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
 	_, scope, ok := s.hostScope(w, r, hostID)
@@ -335,9 +324,7 @@ func (s *Server) handleBackupRuns(w http.ResponseWriter, r *http.Request) {
 // fleetBackup describes one definition at fleet scale.
 type fleetBackup struct {
 	HostID string `json:"host_id"`
-	// LastRestoreAt is the date of the last successful restore attempt. No
-	// value means "never restored", not "the restore failed" - these are
-	// two different answers and both are worth seeing.
+	// LastRestoreAt is the date of the last successful restore attempt.
 	LastRestoreAt *time.Time `json:"last_restore_at,omitempty"`
 	Hostname      string     `json:"hostname"`
 	Definition    string     `json:"definition"`
@@ -366,9 +353,9 @@ func fleetBackupOf(row backupstore.FleetRow, now time.Time) fleetBackup {
 	return item
 }
 
-// fleetBackupsView is the answer of the fleet screen: the coverage of
-// the fleet, the counts over every definition in scope, the backends and
-// one page of the list.
+// fleetBackupsView is the answer of the fleet screen: the coverage of the
+// fleet, the counts over every definition in scope, the backends and one page
+// of the list.
 type fleetBackupsView struct {
 	fleetCoverage
 	Items      []fleetBackup  `json:"items"`
@@ -386,15 +373,8 @@ type fleetBackupsView struct {
 	Thresholds map[string]int `json:"thresholds"`
 }
 
-// handleFleetBackups returns the backup state of the whole visible fleet.
-//
-// This is the basic mode of this module. Backups break quietly: nobody
-// notices there has been no new copy for three weeks until it has to be
-// restored. The only defence is a list on which the age of all the copies
-// stands side by side. The ages are judged by the database over every
-// definition in scope, and the list comes a page at a time, the worst
-// first; a host without a definition is an unknown host - the panel does
-// not know whether anything copies it - not a host without backups.
+// handleFleetBackups returns the backup state of the whole visible fleet. This
+// is the basic mode of this module.
 func (s *Server) handleFleetBackups(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermBackupRead, "fleet")
 	if !ok {
@@ -473,11 +453,9 @@ var backupsCSVColumns = []string{
 	"unverified", "last_restore_at",
 }
 
-// writeBackupsCSV streams every backup definition of the visible fleet,
-// the worst first as the screen sorts them, a page at a time from the
-// same cursor the screen pages with, so the two agree; an empty
-// last_success_at is a copy that never ran, and an empty last_restore_at
-// one nobody has ever read back.
+// writeBackupsCSV streams every backup definition of the visible fleet, the
+// worst first as the screen sorts them, a page at a time from the same cursor
+// the screen pages with, so the two agree; an empty last_success_at is a copy
 func (s *Server) writeBackupsCSV(w http.ResponseWriter, r *http.Request, scopes []authz.Scope, now time.Time) {
 	s.writeCSV(w, r, exportFileName("backups", now), backupsCSVColumns, func(yield func([]string) bool) error {
 		cursor := backupstore.FleetCursor{}
@@ -522,22 +500,15 @@ type repositoryLoad struct {
 	// OldestAgeHours is the age of the oldest copy in this repository. A
 	// repository is as good as its worst copy.
 	OldestAgeHours *float64 `json:"oldest_age_hours,omitempty"`
-	// BudgetKey, Capacity and Used describe the budget of this backend. An
-	// unset capacity is a missing policy, not zero: then nothing bounds the
-	// concurrency here and that has to be visible.
+	// BudgetKey, Capacity and Used describe the budget of this backend.
 	BudgetKey string `json:"budget_key"`
 	Capacity  *int   `json:"capacity,omitempty"`
 	Used      *int   `json:"used,omitempty"`
 	Claimants *int   `json:"claimants,omitempty"`
 }
 
-// repositoryLoads attaches the budget of every backend the database
-// grouped the fleet copies by.
-//
-// The copy list says which host has an old copy. It does not say which
-// backend is the bottleneck - and that is what decides how many copies can
-// go at once. Without it the operator sees a slow campaign and does not
-// know what holds it.
+// repositoryLoads attaches the budget of every backend the database grouped
+// the fleet copies by.
 func (s *Server) repositoryLoads(ctx context.Context, grouped []backupstore.RepositoryLoad) []repositoryLoad {
 	loads := make([]repositoryLoad, 0, len(grouped))
 	for _, group := range grouped {

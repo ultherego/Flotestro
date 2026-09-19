@@ -60,9 +60,8 @@ func TestFleetIsEnrolled(t *testing.T) {
 	})
 }
 
-// TestHealthSignalsAreDeterminedOrEmpty guards that the agent does not turn
-// a read error into zero. An empty field is allowed, a made-up value is
-// not.
+// TestHealthSignalsAreDeterminedOrEmpty guards that the agent does not turn a
+// read error into zero.
 func TestHealthSignalsAreDeterminedOrEmpty(t *testing.T) {
 	h := newHarness(t)
 	for _, host := range h.hosts() {
@@ -216,10 +215,8 @@ func hasAdapter(host hostView, name string) bool {
 	return false
 }
 
-// TestInventoryIsSplitIntoModules checks that a tab can fetch exactly what
-// it shows, with its own revision and its own freshness. Earlier all the
-// tabs shared one observation date, so an operator looking at packages saw
-// the freshness of something else entirely.
+// TestInventoryIsSplitIntoModules checks that a tab can fetch exactly what it
+// shows, with its own revision and its own freshness.
 func TestInventoryIsSplitIntoModules(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -237,9 +234,8 @@ func TestInventoryIsSplitIntoModules(t *testing.T) {
 			if fragment.Revision == "" {
 				t.Error("module without its own revision")
 			}
-			// Data without a source cannot be assessed: the operator does
-			// not know whether they look at a read from the host or at an
-			// hour-old cache.
+			// Data without a source cannot be assessed: the operator does not know
+			// whether they look at a read from the host or at an hour-old cache.
 			if fragment.Source == "" {
 				t.Error("the module does not give the source of the read")
 			}
@@ -264,22 +260,20 @@ func TestInventoryIsSplitIntoModules(t *testing.T) {
 	}
 }
 
-// TestUnreportedModuleIsAMissingResource guards the boundary between an
-// empty module and a module the host did not report. These are two
-// different answers.
+// TestUnreportedModuleIsAMissingResource guards the boundary between an empty
+// module and a module the host did not report.
 func TestUnreportedModuleIsAMissingResource(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 	// The name deliberately matches no module and never will: the boundary
-	// concerns the answer for an unreported module, not a specific module
-	// that appears next week and topples this test.
+	// concerns the answer for an unreported module, not a specific module that
+	// appears next week and topples this test.
 	h.do(http.MethodGet, "/api/v1/hosts/"+host.ID+"/inventory/module-that-does-not-exist",
 		nil, nil, http.StatusNotFound)
 }
 
-// TestContainersModuleIsReportedOnlyWithAnEngine checks that a host without
-// a container engine does not pose as a host on which simply nothing runs.
-// An empty module and an unavailable module are two different answers.
+// TestContainersModuleIsReportedOnlyWithAnEngine checks that a host without a
+// container engine does not pose as a host on which simply nothing runs.
 func TestContainersModuleIsReportedOnlyWithAnEngine(t *testing.T) {
 	h := newHarness(t)
 
@@ -308,8 +302,8 @@ func TestContainersModuleIsReportedOnlyWithAnEngine(t *testing.T) {
 }
 
 // TestContainerReadOnDemand checks the path the operator triggers by opening
-// the tab: the full lists are fetched by an operation, not in every
-// inventory cycle.
+// the tab: the full lists are fetched by an operation, not in every inventory
+// cycle.
 func TestContainerReadOnDemand(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -340,8 +334,7 @@ func TestContainerReadOnDemand(t *testing.T) {
 }
 
 // TestHostWithoutAnEngineRejectsTheContainerRead guards that an operation
-// without backing in an adapter is rejected when ordered, not after
-// delivery.
+// without backing in an adapter is rejected when ordered, not after delivery.
 func TestHostWithoutAnEngineRejectsTheContainerRead(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("rhel")
@@ -355,8 +348,7 @@ func TestHostWithoutAnEngineRejectsTheContainerRead(t *testing.T) {
 }
 
 // TestDestructiveOperationRequiresTargetConfirmation checks the gate from
-// chapter 6.1: a change that cannot be undone must not be ordered with a
-// click. The operator must give a reason and type in the hostname.
+// chapter 6.
 func TestDestructiveOperationRequiresTargetConfirmation(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -392,8 +384,7 @@ func TestDestructiveOperationRequiresTargetConfirmation(t *testing.T) {
 }
 
 // TestReversibleOperationRequiresNoTypedName guards that the gate did not
-// spill over everything. A container restart is reversible and is to go
-// with one click, like any other operation.
+// spill over everything.
 func TestReversibleOperationRequiresNoTypedName(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -409,9 +400,7 @@ func TestReversibleOperationRequiresNoTypedName(t *testing.T) {
 		}, nil, http.StatusCreated)
 }
 
-// TestInvalidContainerTargetIsRejected checks the validation on the API
-// side. The identifier goes into the Engine API request path, so it must
-// not carry anything that changes that path.
+// TestInvalidContainerTargetIsRejected checks the validation on the API side.
 func TestInvalidContainerTargetIsRejected(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -427,10 +416,9 @@ func TestInvalidContainerTargetIsRejected(t *testing.T) {
 	}
 }
 
-// TestProjectDeploymentRequiresAnApprovedPlan checks the boundary from
-// chapter 7: deploying a manifest starts the images named by the operator
-// on the host, so it must not be ordered without a plan that operator
-// looked at.
+// TestProjectDeploymentRequiresAnApprovedPlan checks the boundary from chapter
+// 7: deploying a manifest starts the images named by the operator on the host,
+// so it must not be ordered without a plan that operator looked at.
 func TestProjectDeploymentRequiresAnApprovedPlan(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -496,9 +484,8 @@ func TestInvalidProjectIsRejected(t *testing.T) {
 }
 
 // TestBudgetWriteHonoursIfMatch guards the entity tags of the settings two
-// operators may edit at once: a budget read carries its ETag, a write
-// with a stale If-Match is refused with the current tag, and the fresh
-// tag lets the write through.
+// operators may edit at once: a budget read carries its ETag, a write with a
+// stale If-Match is refused with the current tag, and the fresh tag lets the
 func TestBudgetWriteHonoursIfMatch(t *testing.T) {
 	h := newHarness(t)
 	const key = "global:reads"
@@ -558,9 +545,9 @@ func TestBudgetWriteHonoursIfMatch(t *testing.T) {
 	}
 }
 
-// request performs a call with extra headers and hands back the response
-// with its body read, for the tests that look at headers rather than at
-// the JSON alone.
+// request performs a call with extra headers and hands back the response with
+// its body read, for the tests that look at headers rather than at the JSON
+// alone.
 func (h *harness) request(method, path string, body any, headers map[string]string) (*http.Response, []byte) {
 	h.t.Helper()
 	var payload io.Reader

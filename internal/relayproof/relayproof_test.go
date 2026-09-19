@@ -30,9 +30,9 @@ func helloMessage() *agentv1.AgentMessage {
 	}}}
 }
 
-// A signed message verifies under the host's public key, the kind is the
-// name of the payload field, and the sequence counts up from one across
-// the messages of a session.
+// A signed message verifies under the host's public key, the kind is the name
+// of the payload field, and the sequence counts up from one across the
+// messages of a session.
 func TestASignedMessageVerifiesAndCountsUp(t *testing.T) {
 	key := testKey(t)
 	signer := NewSigner(key, "host-1", "42", "relay-1", "session-1")
@@ -70,10 +70,9 @@ func TestASignedMessageVerifiesAndCountsUp(t *testing.T) {
 	}
 }
 
-// A payload changed after the signature no longer matches the digest, and
-// the digest is the same whatever the order a map was filled in: the
-// encoding is deterministic, so the gateway's re-encoding agrees with the
-// agent's.
+// A payload changed after the signature no longer matches the digest, and the
+// digest is the same whatever the order a map was filled in: the encoding is
+// deterministic, so the gateway's re-encoding agrees with the agent's.
 func TestATamperedPayloadDoesNotMatchTheDigest(t *testing.T) {
 	key := testKey(t)
 	signer := NewSigner(key, "host-1", "42", "relay-1", "session-1")
@@ -102,9 +101,9 @@ func TestATamperedPayloadDoesNotMatchTheDigest(t *testing.T) {
 	}
 }
 
-// A signature made with another key, or an envelope with one field
-// changed after the signature, does not verify; an envelope of another
-// shape is refused before the key is consulted.
+// A signature made with another key, or an envelope with one field changed
+// after the signature, does not verify; an envelope of another shape is
+// refused before the key is consulted.
 func TestATamperedEnvelopeDoesNotVerify(t *testing.T) {
 	key := testKey(t)
 	other := testKey(t)
@@ -216,8 +215,7 @@ func TestTheRenewalProofBindsTheCSRTheChallengeAndTheRelay(t *testing.T) {
 }
 
 // A value sealed to the host's one-time key opens with that key and the
-// panel's public key, under the same associated data - and under nothing
-// else.
+// panel's public key, under the same associated data - and under nothing else.
 func TestASealedValueOpensOnlyForItsKeyAndItsLease(t *testing.T) {
 	hostKey := testKey(t)
 	ephemeral, err := NewEphemeralKey()

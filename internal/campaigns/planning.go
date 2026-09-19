@@ -272,7 +272,7 @@ func (o *Orchestrator) collectPlan(ctx context.Context, campaign Campaign,
 
 // settleNoChange ends a host whose plan found nothing to do as no_change: the
 // plan step succeeded with that answer, and the change step is recorded
-// skipped so the strip says why the host never ran rather than showing a
+// skipped so the strip says why the host never ran rather than showing a.
 func (o *Orchestrator) settleNoChange(ctx context.Context, campaign Campaign, target *Target, hash string) {
 	why := "the host already has the desired state; the plan found nothing to change"
 	o.finishTargetSteps(ctx, campaign, target, TargetNoChange, "", why,
@@ -336,7 +336,7 @@ func jsonListEmpty(raw json.RawMessage) bool {
 
 // acceptPlan records a host's plan, closes its plan step and returns the host
 // to the queue - in one transaction, because a plan on record with the host
-// still planning, or a host queued without its plan, is a state the next pass
+// still planning, or a host queued without its plan, is a state the next pass.
 func (o *Orchestrator) acceptPlan(ctx context.Context, campaign Campaign, target *Target,
 	hash string, plan json.RawMessage, message string) error {
 	tx, err := o.store.Pool().Begin(ctx)
@@ -411,7 +411,7 @@ func hostFingerprint(detail json.RawMessage) string {
 
 // planReference reads off a package plan the header of its envelope and the
 // elements the operator approved, so the change carries them back to the host:
-// the host rebuilds the envelope with the same header, and a refusal names the
+// the host rebuilds the envelope with the same header, and a refusal names
 func planReference(plan json.RawMessage) *opspec.PlanReference {
 	if len(plan) == 0 {
 		return nil

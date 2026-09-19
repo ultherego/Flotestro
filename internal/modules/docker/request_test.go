@@ -5,11 +5,8 @@ import (
 	"testing"
 )
 
-// The compact words an operator writes are read in one place, and the
-// panel and the host read them with this code. So these tests are about
-// one thing: that the text means on the host what it looked like on the
-// screen - and that text which means nothing is refused by name rather
-// than turned into a container nobody described.
+// The compact words an operator writes are read in one place, and the panel
+// and the host read them with this code.
 
 func TestAPublishedPortIsReadTheWayItIsWritten(t *testing.T) {
 	cases := map[string]PortSpec{
@@ -63,9 +60,9 @@ func TestAMountSaysWhatKindItIsBeforeAnythingElse(t *testing.T) {
 	if tmpfs.Type != "tmpfs" || tmpfs.Target != "/run" || tmpfs.SizeBytes != 67108864 {
 		t.Errorf("a tmpfs mount reads as %+v", tmpfs)
 	}
-	// A path that is not marked as one of the three kinds is not guessed
-	// at: a volume name and a host path look alike enough that a guess
-	// would sooner or later bind-mount a directory nobody meant to share.
+	// A path that is not marked as one of the three kinds is not guessed at: a
+	// volume name and a host path look alike enough that a guess would sooner or
+	// later bind-mount a directory nobody meant to share.
 	if mount, err := ParseMount("/srv/www:/usr/share/nginx/html"); err == nil {
 		t.Errorf("a mount without a kind was read as %+v", mount)
 	}

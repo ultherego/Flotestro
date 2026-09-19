@@ -121,9 +121,9 @@ func TestEnforceRefusesAnUnsignedMutationBeforeAnythingRuns(t *testing.T) {
 	}
 }
 
-// Under prefer the same request passes as a legacy one, and the answer
-// names the mode; a request with a capability is verified and the answer
-// echoes the capability.
+// Under prefer the same request passes as a legacy one, and the answer names
+// the mode; a request with a capability is verified and the answer echoes the
+// capability.
 func TestPreferLetsALegacyRequestThroughAndVerifiesASignedOne(t *testing.T) {
 	lab := newCapabilityLab(t, helpercap.ModePrefer)
 	lab.enroll(t, "host-1")

@@ -16,20 +16,17 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// A service keytab rotation is one consent over two halves in two places:
-// the directory retires the principal's current keytab, and the fleet host
-// that carries the service fetches a new one into its own keytab file with
-// the credentials it holds. The panel carries no key material in either
-// direction; it orders, records and links.
+// A service keytab rotation is one consent over two halves in two places: the
+// directory retires the principal's current keytab, and the fleet host that
+// carries the service fetches a new one into its own keytab file with the
 
 var (
-	// ErrHostNotInFleet means the host the principal names is not a host
-	// of the panel: nobody could fetch the new keytab, so the old one must
-	// not be retired.
+	// ErrHostNotInFleet means the host the principal names is not a host of the
+	// panel: nobody could fetch the new keytab, so the old one must not be
+	// retired.
 	ErrHostNotInFleet = errors.New("the host the principal names is not a host of the fleet")
-	// ErrHostOffline means the fleet host is not connected: the retirement
-	// would leave the service without a keytab for as long as the host
-	// stays away.
+	// ErrHostOffline means the fleet host is not connected: the retirement would
+	// leave the service without a keytab for as long as the host stays away.
 	ErrHostOffline = errors.New("the host the principal names is not connected")
 )
 
@@ -42,9 +39,8 @@ type FleetHost struct {
 	Online   bool
 }
 
-// HostOrderer finds the fleet host of a principal and orders the host's
-// half of the rotation on it. The executor holds it as an interface so
-// the rotation can be checked without a fleet database.
+// HostOrderer finds the fleet host of a principal and orders the host's half
+// of the rotation on it.
 type HostOrderer interface {
 	// FleetHost resolves the FQDN of the principal to a host of the panel,
 	// or ErrHostNotInFleet.
@@ -54,9 +50,7 @@ type HostOrderer interface {
 	OrderKeytabRenewal(ctx context.Context, host FleetHost, principal string, change Change) (string, error)
 }
 
-// FleetOrderer is the HostOrderer over the panel's own tables. It is built
-// from the pool the change store already has, so the executor needs no
-// wiring beyond what it holds.
+// FleetOrderer is the HostOrderer over the panel's own tables.
 type FleetOrderer struct {
 	hosts *hosts.Store
 	jobs  *jobs.Store
@@ -68,9 +62,7 @@ func NewFleetOrderer(pool *pgxpool.Pool, recorder *audit.Recorder) *FleetOrderer
 }
 
 // FleetHost matches the FQDN the principal names to a fleet host by its
-// hostname, case aside. The search filter finds by substring, so the match
-// is confirmed here: web1.example.test must not stand in for
-// web10.example.test.
+// hostname, case aside.
 func (o *FleetOrderer) FleetHost(ctx context.Context, fqdn string) (FleetHost, error) {
 	if o == nil || o.hosts == nil {
 		return FleetHost{}, fmt.Errorf("this panel has no fleet store to order the renewal through")
@@ -94,10 +86,9 @@ func (o *FleetOrderer) FleetHost(ctx context.Context, fqdn string) (FleetHost, e
 	return FleetHost{}, fmt.Errorf("%w: %s", ErrHostNotInFleet, fqdn)
 }
 
-// OrderKeytabRenewal creates the renewal task under the change's consent:
-// the change was approved with fresh authentication, and the task carries
-// that approval rather than asking for a second one. The task is
-// idempotent on the change, so a repeated execution does not fetch twice.
+// OrderKeytabRenewal creates the renewal task under the change's consent: the
+// change was approved with fresh authentication, and the task carries that
+// approval rather than asking for a second one.
 func (o *FleetOrderer) OrderKeytabRenewal(ctx context.Context, host FleetHost, principal string,
 	change Change) (string, error) {
 	if o == nil || o.jobs == nil {
@@ -149,9 +140,7 @@ func (o *FleetOrderer) OrderKeytabRenewal(ctx context.Context, host FleetHost, p
 }
 
 // planKeytabRotate describes the rotation before anything happens: which
-// principal, which host, and the gap in between. The principal has to
-// exist in the directory; a principal the directory does not know is a
-// conflict, because service_disable on it would fail after the approval.
+// principal, which host, and the gap in between.
 func (p *Planner) planKeytabRotate(ctx context.Context, spec *KeytabPayload) (Plan, error) {
 	host := spec.Host()
 	plan := Plan{
@@ -183,18 +172,16 @@ func (p *Planner) planKeytabRotate(ctx context.Context, spec *KeytabPayload) (Pl
 		return plan, nil
 	}
 	if found.HasKeytab != nil && !*found.HasKeytab {
-		// Nothing to retire is not a refusal: the host fetches a first key
-		// the same way. The operator is told, because "rotation" then
-		// promises more than happens.
+		// Nothing to retire is not a refusal: the host fetches a first key the same
+		// way.
 		plan.Warnings = append(plan.Warnings, "the directory reports no keytab for this principal; the host fetches a first key rather than replacing one")
 	}
 	if found.HasKeytab == nil {
 		plan.Warnings = append(plan.Warnings, "the directory did not say whether the principal has a keytab")
 	}
 	if len(found.ManagedBy) > 0 && !containsFold(found.ManagedBy, host) {
-		// ipa-getkeytab with the host credential works when the host
-		// manages the entry. A host that does not is a refusal the
-		// directory makes after the retirement - too late.
+		// ipa-getkeytab with the host credential works when the host manages the
+		// entry.
 		plan.Conflicts = append(plan.Conflicts, fmt.Sprintf("the host %s does not manage the entry of %s (managed by %s); it could not fetch the new keytab",
 			host, spec.Principal, strings.Join(found.ManagedBy, ", ")))
 	}
@@ -221,12 +208,9 @@ func containsFold(values []string, wanted string) bool {
 	return false
 }
 
-// rotateKeytab carries out the two halves, in the only safe order: the
-// host is resolved and checked first, because a keytab retired with
-// nobody to fetch a new one is an outage until somebody joins the host
-// anew; then the directory retires the keytab; then the renewal task is
-// ordered on the host. The task's own result - the key version numbers -
-// is read on the task, not here: the executor does not wait on a host.
+// rotateKeytab carries out the two halves, in the only safe order: the host is
+// resolved and checked first, because a keytab retired with nobody to fetch a
+// new one is an outage until somebody joins the host anew; then the directory
 func (e *Executor) rotateKeytab(ctx context.Context, change Change, spec *KeytabPayload) []Phase {
 	resolving := startPhase("finding the fleet host " + spec.Host())
 	if e.fleet == nil {

@@ -41,10 +41,6 @@ func configurationPath(name string, args []string, errOut io.Writer) (string, bo
 }
 
 // checkConfiguration reads the file and says what is wrong with it.
-//
-// Every error carries a code of its own rather than a description alone: it
-// is the code that reaches a report from a host that does not speak to the
-// panel yet.
 func checkConfiguration(args []string, out, errOut io.Writer, show bool) int {
 	path, ok := configurationPath("config", args, errOut)
 	if !ok {
@@ -96,7 +92,4 @@ func checkConfiguration(args []string, out, errOut io.Writer, show bool) int {
 
 // filePermissions makes sure that not just anybody can swap the configuration
 // out.
-//
-// The file names the address of the panel and the CA bundle, so the right to
-// write to it is the right to redirect the host to somebody else's panel.
 func filePermissions(path string) error { return ctl.FilePermissions(path) }

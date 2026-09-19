@@ -19,14 +19,10 @@ import (
 
 // The timing of the handshake.
 const (
-	// FinalReadyTimeout is how long the panel waits for the agent to report
-	// that it stopped working. After it the host is retired anyway, with the
-	// cleanup marked as unconfirmed: a host that does not answer in two
-	// minutes is a host the operator has to look at, not one to wait for.
+	// FinalReadyTimeout is how long the panel waits for the agent to report that
+	// it stopped working.
 	FinalReadyTimeout = 2 * time.Minute
-	// finalGrace is what the agent is told it may spend on the tasks under
-	// way. Shorter than the panel's wait, so an agent that honours it always
-	// answers in time.
+	// finalGrace is what the agent is told it may spend on the tasks under way.
 	finalGrace = 90 * time.Second
 	// finalLeaveTimeout is how long the panel lets the agent leave on its
 	// own after the commit before the session is cut from this side.
@@ -43,14 +39,11 @@ type Decommission struct {
 	// FromStates are the states the host may be in when the order arrives.
 	// The handler decides them; the coordinator only carries them out.
 	FromStates []string
-	// LocalIdentityWipe asks the agent to remove its identity and journal
-	// and to disable its service at the commit. Without it the agent only
-	// stops.
+	// LocalIdentityWipe asks the agent to remove its identity and journal and to
+	// disable its service at the commit.
 	LocalIdentityWipe bool
-	// RevokeImmediatelyIfOffline revokes the certificates of a host that
-	// has no session. Without it the certificates stay valid until the host
-	// makes contact, and the gateway revokes them then: the operator who
-	// knows the host is on a shelf may prefer to see it knock once.
+	// RevokeImmediatelyIfOffline revokes the certificates of a host that has no
+	// session.
 	RevokeImmediatelyIfOffline bool
 	// StepUp is the proof of fresh authentication, kept in the audit detail
 	// next to the decision.
@@ -60,9 +53,8 @@ type Decommission struct {
 // DecommissionOutcome is what the order ended with.
 type DecommissionOutcome struct {
 	State string `json:"lifecycle_state"`
-	// RemoteCleanupUnconfirmed says the host did not confirm it stopped: it
-	// had no session here, or it did not answer the final task in time. The
-	// host is retired all the same; what is on its disk is unknown.
+	// RemoteCleanupUnconfirmed says the host did not confirm it stopped: it had
+	// no session here, or it did not answer the final task in time.
 	RemoteCleanupUnconfirmed bool `json:"remote_cleanup_unconfirmed"`
 	// Phase names how the handshake ended: committed, no_session, timeout.
 	Phase string `json:"phase"`
@@ -73,11 +65,8 @@ type DecommissionOutcome struct {
 	JobsCanceled        int      `json:"jobs_canceled"`
 	CertificatesRevoked int      `json:"certificates_revoked"`
 	SessionClosed       bool     `json:"session_closed"`
-	// HandedOver says the handshake was carried out by the instance that
-	// holds the host's session rather than by the one that took the
-	// request. CommandID names the order it travelled on and
-	// OwnerInstanceID the instance it went to, so the operator reading two
-	// panels can follow one decision across them.
+	// HandedOver says the handshake was carried out by the instance that holds
+	// the host's session rather than by the one that took the request.
 	HandedOver      bool   `json:"handed_over"`
 	CommandID       string `json:"command_id,omitempty"`
 	OwnerInstanceID string `json:"owner_instance_id,omitempty"`
@@ -91,26 +80,16 @@ const (
 	PhaseCommitted = "committed"
 	PhaseNoSession = "no_session"
 	PhaseTimeout   = "timeout"
-	// PhaseHandoverPending: the host is connected to another instance, the
-	// order is with that instance, and it had not answered within the
-	// wait. The host stands in retiring; the owner finishes the handshake,
-	// and a repeated order picks the host up from there.
+	// PhaseHandoverPending: the host is connected to another instance, the order
+	// is with that instance, and it had not answered within the wait.
 	PhaseHandoverPending = "handover_pending"
-	// PhaseHandoverFailed: the owner took the order and could not finish
-	// it. The host stands in retiring and nothing was decided about its
-	// disk.
+	// PhaseHandoverFailed: the owner took the order and could not finish it. The
+	// host stands in retiring and nothing was decided about its disk.
 	PhaseHandoverFailed = "handover_failed"
 )
 
 // Decommissioner drives the handshake that ends a host's membership in the
 // fleet.
-//
-// Online, the host is told to stop, waits for its running work, reports it
-// is ready, has its certificates revoked and is told to wipe itself. Offline,
-// or silent for too long, it is retired without the confirmation - and the
-// audit says so. Either way the panel ends with the host retired: the loss of
-// trust is the panel's decision, and the host's cooperation only settles what
-// is left on its disk.
 type Decommissioner struct {
 	pool     *pgxpool.Pool
 	hosts    *hosts.Store
@@ -119,14 +98,11 @@ type Decommissioner struct {
 	registry *Registry
 	log      *slog.Logger
 	// commands carries the handshake to the instance that holds the host's
-	// session when this one does not. Writing an order and waiting for it
-	// needs the database alone, so the queue is opened here rather than
-	// wired in: the loop that carries the orders out lives on every
-	// instance and is started with the rest of the background work.
+	// session when this one does not.
 	commands *Commands
 	// readyTimeout and leaveTimeout are fields so a test does not wait two
-	// minutes for an agent that never answers, and handoverWait so it does
-	// not wait a minute for an owner that does not exist.
+	// minutes for an agent that never answers, and handoverWait so it does not
+	// wait a minute for an owner that does not exist.
 	readyTimeout time.Duration
 	leaveTimeout time.Duration
 	handoverWait time.Duration
@@ -143,23 +119,9 @@ func NewDecommissioner(pool *pgxpool.Pool, hostStore *hosts.Store, jobStore *job
 }
 
 // Run carries the order out and returns how it ended.
-//
-// The host moves to retiring first, in a transaction with the cancellation
-// of its queued jobs and the audit of the decision: from that moment nothing
-// new is ordered for it whatever happens to the handshake. A failure after
-// that leaves the host in retiring, and a repeated order picks it up from
-// there.
-//
-// The handshake needs the host's session, and in an installation of
-// several instances the session may be on another one. The same
-// transaction that records the decision then leaves an order for the
-// instance that holds it, and this one waits for the answer instead of
-// taking a connected host for an offline one. A host with no live owner
-// anywhere is retired without the confirmation, as before.
 func (d *Decommissioner) Run(ctx context.Context, order Decommission) (DecommissionOutcome, error) {
-	// The handshake outlives the request that ordered it: a browser that
-	// gave up waiting must not leave the host half-way between retiring and
-	// retired. Its own clock bounds it instead.
+	// The handshake outlives the request that ordered it: a browser that gave up
+	// waiting must not leave the host half-way between retiring and retired.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), d.readyTimeout+d.leaveTimeout+time.Minute)
 	defer cancel()
 	outcome := DecommissionOutcome{RunningTasks: []string{}}
@@ -176,10 +138,7 @@ func (d *Decommissioner) Run(ctx context.Context, order Decommission) (Decommiss
 }
 
 // CarryOut runs the part of the order that needs the host's session and
-// retires the host. The command loop calls it for an order it claimed: the
-// decision is recorded already - the host stands in retiring - and this
-// instance is the one holding the session. It never hands the order on,
-// because it is where the order was handed to.
+// retires the host.
 func (d *Decommissioner) CarryOut(ctx context.Context, order Decommission) (DecommissionOutcome, error) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), d.readyTimeout+d.leaveTimeout+time.Minute)
 	defer cancel()
@@ -194,9 +153,7 @@ func (d *Decommissioner) carryOut(ctx context.Context, order Decommission,
 		return d.retireOffline(ctx, order, outcome)
 	}
 
-	// The final task goes out over the session. A session that does not
-	// take the message is a session that is not listening; it is treated
-	// as silence rather than as a reason to keep the host in retiring.
+	// The final task goes out over the session.
 	err := session.Send(&agentv1.ServerMessage{
 		Payload: &agentv1.ServerMessage_FinalTask{FinalTask: &agentv1.FinalTask{
 			Reason:            order.Reason,
@@ -242,10 +199,7 @@ func (d *Decommissioner) carryOut(ctx context.Context, order Decommission,
 			LocalIdentityWipe: order.LocalIdentityWipe, Reason: order.Reason,
 		}},
 	}, finalSendTimeout); err != nil {
-		// The host is ready and revoked; the commit did not get through. It
-		// is retired with the cleanup unconfirmed - the agent will find its
-		// certificate refused at the next connection, but its disk is as it
-		// was.
+		// The host is ready and revoked; the commit did not get through.
 		d.log.Warn("the final commit was not delivered", "host_id", order.HostID, "err", err)
 		outcome.RemoteCleanupUnconfirmed = true
 		outcome.Phase = PhaseTimeout
@@ -253,9 +207,7 @@ func (d *Decommissioner) carryOut(ctx context.Context, order Decommission,
 		return d.retire(ctx, order, outcome)
 	}
 
-	// The agent leaves on its own after the commit. The session is cut from
-	// this side only when it lingers: cutting it at once could take the
-	// commit out of the buffer before it was sent.
+	// The agent leaves on its own after the commit.
 	leave := time.NewTimer(d.leaveTimeout)
 	defer leave.Stop()
 	select {
@@ -270,18 +222,15 @@ func (d *Decommissioner) carryOut(ctx context.Context, order Decommission,
 }
 
 // handover names the order left for the instance that holds the host's
-// session, and that instance. Both are empty when the handshake is this
-// instance's to run.
+// session, and that instance.
 type handover struct {
 	CommandID       string
 	OwnerInstanceID string
 }
 
-// beginRetiring moves the host to retiring, cancels what was queued and -
-// when the host's session is held elsewhere - leaves the order for the
-// instance that holds it. All in one transaction: a decision that does not
-// commit leaves no order behind, and an order that is written is written
-// only for a host the panel really put into retiring.
+// beginRetiring moves the host to retiring, cancels what was queued and - when
+// the host's session is held elsewhere - leaves the order for the instance
+// that holds it.
 func (d *Decommissioner) beginRetiring(ctx context.Context, order Decommission) (int, handover, error) {
 	var handed handover
 	tx, err := d.pool.Begin(ctx)
@@ -319,14 +268,8 @@ func (d *Decommissioner) beginRetiring(ctx context.Context, order Decommission) 
 	return canceled, handed, tx.Commit(ctx)
 }
 
-// planHandover decides whether the handshake belongs to another instance
-// and writes the order when it does.
-//
-// The question is not "is the host connected here" but "who owns its
-// session": the registry of this process answers the first, and
-// host_session_owners - the one place that sees every instance - answers
-// the second. A host with no live owner is a host nobody can talk to, and
-// the order is carried out here, offline, as it always was.
+// planHandover decides whether the handshake belongs to another instance and
+// writes the order when it does.
 func (d *Decommissioner) planHandover(ctx context.Context, tx pgx.Tx,
 	order Decommission) (handover, error) {
 	var handed handover
@@ -361,13 +304,6 @@ func (d *Decommissioner) planHandover(ctx context.Context, tx pgx.Tx,
 
 // awaitHandover waits for the instance that holds the host to carry the
 // handshake out, and answers with what it reported.
-//
-// An order nobody claimed - the owner died between the decision and the
-// claim, the host left it - ends as the panel has always ended a
-// decommission of a host it cannot reach: retired, with the cleanup
-// unconfirmed. An order claimed and not yet answered is neither: the host
-// stands in retiring, the owner is finishing it, and saying anything else
-// would mean two instances deciding the same host's end at once.
 func (d *Decommissioner) awaitHandover(ctx context.Context, order Decommission,
 	outcome DecommissionOutcome, handed handover) (DecommissionOutcome, error) {
 	outcome.HandedOver = true
@@ -445,8 +381,7 @@ func (d *Decommissioner) retireOffline(ctx context.Context, order Decommission,
 }
 
 // retireSilent ends the order for a host that had a session but did not
-// answer. The certificates are always revoked here: the host is alive and
-// did not cooperate, and that is the case the revocation exists for.
+// answer.
 func (d *Decommissioner) retireSilent(ctx context.Context, order Decommission,
 	outcome DecommissionOutcome) (DecommissionOutcome, error) {
 	outcome.RemoteCleanupUnconfirmed = true

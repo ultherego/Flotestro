@@ -7,10 +7,8 @@ import (
 	"testing"
 )
 
-// TestChangingAccessRulesRequiresAReason checks the condition of the
-// operation with the greatest impact. A group-to-role mapping decides whom
-// the identity provider lets in and with which permissions, so it cannot be
-// carried out without a justification recorded in the audit log.
+// TestChangingAccessRulesRequiresAReason checks the condition of the operation
+// with the greatest impact.
 func TestChangingAccessRulesRequiresAReason(t *testing.T) {
 	h := newHarness(t)
 	group := uniqueSubject("flotestro-test-group")
@@ -57,9 +55,8 @@ func TestChangingAccessRulesRequiresAReason(t *testing.T) {
 		t.Errorf("deletion without a reason: code = %q", problem.Code)
 	}
 
-	// The audit trail must carry the reason and the basis on which the
-	// operation passed. An automated identity cannot be described as
-	// re-authenticated, because there is no human behind it.
+	// The audit trail must carry the reason and the basis on which the operation
+	// passed.
 	var audit struct {
 		Items []struct {
 			Action  string         `json:"action"`

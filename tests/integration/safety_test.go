@@ -105,9 +105,7 @@ func TestOperationCatalogueHasNoShell(t *testing.T) {
 }
 
 // TestRedeliveryDoesNotRepeatTheMutation is a test of the most important
-// at-least-once property. A lease expiry is simulated by returning the job
-// to the queue, and the agent is checked to return the recorded result
-// instead of restarting the service a second time.
+// at-least-once property.
 func TestRedeliveryDoesNotRepeatTheMutation(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -220,9 +218,7 @@ func TestDenialIsAuditedToo(t *testing.T) {
 	}
 }
 
-// TestFileReadOnlyFromTheAllowlist checks the boundary from chapter 6. A
-// panel that can read any root file can read private keys and /etc/shadow -
-// the scope belongs to the host, not to the job.
+// TestFileReadOnlyFromTheAllowlist checks the boundary from chapter 6.
 func TestFileReadOnlyFromTheAllowlist(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -243,8 +239,6 @@ func TestFileReadOnlyFromTheAllowlist(t *testing.T) {
 }
 
 // TestInvalidLogPathIsRejected checks the validation on the API side.
-// Climbing up a directory would allow matching an allowlist pattern and
-// still reading a file outside it.
 func TestInvalidLogPathIsRejected(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -258,9 +252,8 @@ func TestInvalidLogPathIsRejected(t *testing.T) {
 	}
 }
 
-// TestFullUnitListingIsOrderedExplicitly guards that an empty name list
-// does not mean "all". Reading a few units and listing the whole host cost
-// differently, so they must be different requests.
+// TestFullUnitListingIsOrderedExplicitly guards that an empty name list does
+// not mean "all".
 func TestFullUnitListingIsOrderedExplicitly(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -293,9 +286,8 @@ func TestFullUnitListingIsOrderedExplicitly(t *testing.T) {
 	}
 }
 
-// TestMaskingRequiresAJustification checks that a critical operation does
-// not go with one click. Masking takes away the unit's ability to start
-// even manually and survives a host reboot.
+// TestMaskingRequiresAJustification checks that a critical operation does not
+// go with one click.
 func TestMaskingRequiresAJustification(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -315,9 +307,7 @@ func TestMaskingRequiresAJustification(t *testing.T) {
 }
 
 // TestJournalPreviewEndsOnItsOwn checks the boundary from chapter 6: the
-// stream is short-lived and bounded from above. A preview without an upper
-// bound would hold a process on the host also when the operator closed the
-// tab long ago.
+// stream is short-lived and bounded from above.
 func TestJournalPreviewEndsOnItsOwn(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -352,9 +342,7 @@ func TestPreviewCannotLastForever(t *testing.T) {
 		}, nil, http.StatusBadRequest)
 }
 
-// TestJournalTimeRangeIsValidated checks the validation of the "since"
-// filter. The value goes into a journalctl argument - not into a shell, but
-// a narrower validation is still cheaper than trust.
+// TestJournalTimeRangeIsValidated checks the validation of the "since" filter.
 func TestJournalTimeRangeIsValidated(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -380,10 +368,7 @@ func TestJournalTimeRangeIsValidated(t *testing.T) {
 	}
 }
 
-// TestSignalRequiresTheStartTime checks the boundary from chapter 5. A PID
-// alone does not identify a process: the kernel reuses the numbers, so a
-// signal sent a moment after viewing the list could hit something entirely
-// different.
+// TestSignalRequiresTheStartTime checks the boundary from chapter 5.
 func TestSignalRequiresTheStartTime(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")

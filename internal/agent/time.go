@@ -13,16 +13,10 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// queryTimeout limits a single query to a time server. A server that does not
-// answer within a few seconds is useless to the host regardless of whether it
-// answers within thirty.
+// queryTimeout limits a single query to a time server.
 const queryTimeout = 5 * time.Second
 
 // CollectTime reads the time state of the host.
-//
-// The read needs no root: timedatectl asks the services over the system bus,
-// chronyc talks to the daemon over the loopback, and the time configuration
-// files are readable by everyone.
 func CollectTime(ctx context.Context) hosttime.Snapshot {
 	return hosttime.Collect(ctx, commandOutput)
 }
@@ -41,10 +35,7 @@ func (e *TaskExecutor) applyTime(ctx context.Context, task *agentv1.TaskEnvelope
 		return e.testTime(callCtx, task, payload)
 	}
 
-	// The servers are checked before the host gives up a working source. The
-	// test is here and not in the helper, because it needs no root - the helper
-	// checks what concerns the safety of the write, that is the shape of the
-	// entries themselves.
+	// The servers are checked before the host gives up a working source.
 	var probes []hosttime.Probe
 	if action == opspec.ActionTimeConfigApply {
 		probes = hosttime.QueryMany(callCtx, payload.Servers, queryTimeout)
@@ -66,9 +57,9 @@ func (e *TaskExecutor) applyTime(ctx context.Context, task *agentv1.TaskEnvelope
 	case opspec.ActionTimezoneSet:
 		operation = helperv1.TimeRequest_OPERATION_TIMEZONE_SET
 	case opspec.ActionTimePlan:
-		// The plan computes the difference against the panel file without
-		// touching the host; the reachability of the servers is checked only by
-		// the change itself.
+		// The plan computes the difference against the panel file without touching
+		// the host; the reachability of the servers is checked only by the change
+		// itself.
 		operation = helperv1.TimeRequest_OPERATION_PLAN
 	}
 	response, err := e.helper.Call(callCtx, &helperv1.HelperRequest{
@@ -113,9 +104,6 @@ func (e *TaskExecutor) applyTime(ctx context.Context, task *agentv1.TaskEnvelope
 }
 
 // testTime measures the offset against the given servers.
-//
-// Without any given, the panel asks the servers the host uses: that answers the
-// question "is my clock right" and not only "is the daemon running".
 func (e *TaskExecutor) testTime(ctx context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.TimePayload) *agentv1.TaskResult {
 	snapshot := CollectTime(ctx)
@@ -147,10 +135,6 @@ func (e *TaskExecutor) testTime(ctx context.Context, task *agentv1.TaskEnvelope,
 }
 
 // serversFromConfiguration picks the addresses to query.
-//
-// A pool expands into many addresses and is not a server itself, so the sources
-// the daemon really picked are asked; only when there is none do the
-// configuration entries come into play.
 func serversFromConfiguration(snapshot hosttime.Snapshot) []string {
 	var servers []string
 	seen := map[string]bool{}

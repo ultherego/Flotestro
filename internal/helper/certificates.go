@@ -15,19 +15,11 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/files"
 )
 
-// CertificateRegistryPath holds the targets the panel asked about on this host.
-//
-// The registry is local for the same reason as with managed files: it is the
-// host that has to be able to say what the certificates of its services look
-// like now - also when the panel is not asking. Without it the tab would show
-// the state from before the last scan, and an expiring certificate would be
-// noticed only by whoever asks about it.
+// CertificateRegistryPath holds the targets the panel asked about on this
+// host.
 const CertificateRegistryPath = "/var/lib/flotestro-helper/certificates.json"
 
 // certificateFactNames translates the protocol enumeration into fact names.
-//
-// The translation exists so that the helper does not accept an arbitrary
-// string: the scope of its work is a closed list, not a text from the agent.
 var certificateFactNames = map[helperv1.CertificateRequest_Fact]string{
 	helperv1.CertificateRequest_FACT_KEY_METADATA:      certificates.FactKeyMetadata,
 	helperv1.CertificateRequest_FACT_RENEWAL_TRACKING:  certificates.FactTracking,
@@ -69,12 +61,8 @@ func (s *Server) applyCertificate(ctx context.Context, request *helperv1.HelperR
 	return reject(ErrorUnknownAction, "unknown operation of the certificate module")
 }
 
-// certificateGuard names the guard of a certificate operation.
-//
-// The plans change nothing and take none. A facts read takes the guard only
-// when the panel sends an authoritative target list: that read replaces the
-// registry, and a deployment writing the registry at the same time would lose
-// its target.
+// certificateGuard names the guard of a certificate operation. The plans
+// change nothing and take none.
 func certificateGuard(action *helperv1.CertificateRequest) string {
 	switch action.GetOperation() {
 	case helperv1.CertificateRequest_OPERATION_DEPLOY,
@@ -131,17 +119,13 @@ func (s *Server) certificateFacts(ctx context.Context,
 		return refusal
 	}
 	// The list from the panel replaces the registry only when the panel says it
-	// is complete. An ordinary inventory read erases nothing: the agent then
-	// asks for facts without targets and gets what the host already knows.
+	// is complete.
 	if action.GetAuthoritative() {
 		s.writeCertificateRegistry(targets)
 	}
 	knownTargets := mergeTargets(s.certificateRegistry(), targets)
 	// The registry remembers deployment targets, and their files are sometimes
-	// deleted outside the panel. A target without a file is not knowledge - it
-	// is litter that takes up room in the read and pushes out of it the
-	// certificates the host really has. It is forgotten only when the file is
-	// gone: an unreadable file is a different answer than a missing one.
+	// deleted outside the panel.
 	if alive := targetsWithAnExistingFile(knownTargets); len(alive) != len(knownTargets) {
 		knownTargets = alive
 		s.writeCertificateRegistry(alive)
@@ -160,9 +144,7 @@ func (s *Server) certificateFacts(ctx context.Context,
 }
 
 // planCertificate computes the difference between the certificate the host has
-// under the path and the one from the order. It touches no files and does not
-// reach for the private key: the plan lands in the panel database, so it must
-// not carry any material.
+// under the path and the one from the order.
 func (s *Server) planCertificate(ctx context.Context,
 	action *helperv1.CertificateRequest) *helperv1.HelperResponse {
 	plan := s.certificatePlan(action)
@@ -213,12 +195,6 @@ func (s *Server) certificatePlan(action *helperv1.CertificateRequest) certificat
 
 // deployCertificate replaces the certificate and the key, and then checks the
 // effect.
-//
-// The order is the whole content here: everything that can be checked without
-// touching the disk is checked before the first write; the previous content is
-// kept in memory; and if the service does not show the new certificate after a
-// reload, the previous one comes back and this is said directly. A deployment
-// that leaves a service dead is not a deployment.
 func (s *Server) deployCertificate(ctx context.Context,
 	action *helperv1.CertificateRequest) *helperv1.HelperResponse {
 	// A deployment approved on the basis of a plan is to enter the state the
@@ -321,10 +297,6 @@ func (s *Server) deployCertificate(ctx context.Context,
 }
 
 // renewCertificate asks certmonger for a new certificate on the same request.
-//
-// The panel gives no material here: the renewal is done by the host daemon,
-// which has its own key and its own arrangement with the authority. The job of
-// the panel is to ask and to check whether anything came of it.
 func (s *Server) renewCertificate(ctx context.Context,
 	action *helperv1.CertificateRequest) *helperv1.HelperResponse {
 	tool := certificates.ToolPath()
@@ -342,10 +314,7 @@ func (s *Server) renewCertificate(ctx context.Context,
 		}
 	}
 
-	// The panel names the request by an identifier or by a file path. The
-	// identifier differs on every host, so a campaign renewing the same
-	// certificate across the whole fleet can give only the path - and the host
-	// finds the request itself.
+	// The panel names the request by an identifier or by a file path.
 	request := action.GetRequest()
 	if request == "" {
 		path := action.GetPath()
@@ -513,16 +482,10 @@ func (s *Server) trustStore() certificates.TrustStore {
 
 // trustPlan assembles the plan of a rotation step against the state of the
 // store.
-//
-// A removal also looks at the host certificates: an authority that still signs
-// something must not disappear from the store, because that would break the
-// trust of clients who changed nothing.
 func (s *Server) trustPlan(ctx context.Context, action *helperv1.CertificateRequest,
 	store certificates.TrustStore) certificates.TrustPlan {
 	// A plan without material is a withdrawal plan: trust always carries the
-	// certificate of the authority, a withdrawal never does. The planning
-	// operation is one for both rotation steps, so the kind is recognized by the
-	// fields.
+	// certificate of the authority, a withdrawal never does.
 	removal := action.GetOperation() == helperv1.CertificateRequest_OPERATION_TRUST_REMOVE ||
 		(action.GetOperation() == helperv1.CertificateRequest_OPERATION_TRUST_PLAN &&
 			len(action.GetCertificate()) == 0)
@@ -556,11 +519,6 @@ func (s *Server) planTrust(ctx context.Context,
 }
 
 // changeTrust adds or withdraws a panel anchor and recomputes the store.
-//
-// The order is the whole content here: the file enters the anchor directory,
-// the tool recomputes the bundle, and only the finished bundle is the answer.
-// The file alone without the recomputation changes nothing - and would look
-// like a change that is not there.
 func (s *Server) changeTrust(ctx context.Context,
 	action *helperv1.CertificateRequest) *helperv1.HelperResponse {
 	store := s.trustStore()
@@ -571,9 +529,9 @@ func (s *Server) changeTrust(ctx context.Context,
 	if plan.Refusal != "" {
 		return reject(ErrorPreconditionFailed, plan.Refusal)
 	}
-	// A change approved on the basis of a plan is to enter the state the
-	// operator looked at: a different anchor under that name than at planning
-	// time is a refusal.
+	// A change approved on the basis of a plan is to enter the state the operator
+	// looked at: a different anchor under that name than at planning time is a
+	// refusal.
 	if expected := action.GetPlanHash(); expected != "" && plan.PlanHash != expected {
 		return reject(ErrorPreconditionFailed,
 			"the trust store changed since the planning; the step needs a new plan")
@@ -614,8 +572,7 @@ func (s *Server) changeTrust(ctx context.Context,
 
 	if output, err := runTool(ctx, recomputeCommand(store)); err != nil {
 		// A store that cannot be recomputed would leave the host with the bundle
-		// from before the change and an anchor nobody saw. The previous file
-		// comes back and the recomputation is tried once more.
+		// from before the change and an anchor nobody saw.
 		_ = previous.Restore()
 		_, _ = runTool(ctx, recomputeCommand(store))
 		return reject(ErrorExecFailed, "recomputing the trust store: "+err.Error()+": "+output)
@@ -722,9 +679,6 @@ func (s *Server) renewalPlan(ctx context.Context,
 }
 
 // targetsWithAnExistingFile filters out the targets whose file is gone.
-//
-// A missing file is decided by the ENOENT error and not by every read error: a
-// file in a directory closed to the helper still exists and is still a target.
 func targetsWithAnExistingFile(targets []certificates.Target) []certificates.Target {
 	alive := make([]certificates.Target, 0, len(targets))
 	for _, target := range targets {

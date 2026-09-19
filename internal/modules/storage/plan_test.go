@@ -15,8 +15,8 @@ func snapshotWithDisk(uuid string, mounts ...Mount) Snapshot {
 }
 
 // TestPlanResolvesSourceToHostUUID guards the essence of the per-host plan:
-// the same path on two hosts is two different filesystems, and the change
-// is meant to carry the one the host really has.
+// the same path on two hosts is two different filesystems, and the change is
+// meant to carry the one the host really has.
 func TestPlanResolvesSourceToHostUUID(t *testing.T) {
 	first := ComputeMount(snapshotWithDisk("aaaa-1111"), "/dev/sdb", "/mnt/data", "ext4", "", true)
 	second := ComputeMount(snapshotWithDisk("bbbb-2222"), "/dev/sdb", "/mnt/data", "ext4", "", true)
@@ -32,9 +32,9 @@ func TestPlanResolvesSourceToHostUUID(t *testing.T) {
 	}
 }
 
-// TestPlanRefusesSourceWithoutUUID guards that a change with nothing to
-// bind to is a refusal, not a mount by a path that points at a different
-// disk after a reboot.
+// TestPlanRefusesSourceWithoutUUID guards that a change with nothing to bind
+// to is a refusal, not a mount by a path that points at a different disk after
+// a reboot.
 func TestPlanRefusesSourceWithoutUUID(t *testing.T) {
 	plan := ComputeMount(snapshotWithDisk(""), "/dev/sdb", "/mnt/data", "ext4", "", true)
 	if plan.Refusal == "" || !strings.Contains(plan.Refusal, "UUID") {

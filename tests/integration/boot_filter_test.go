@@ -10,12 +10,9 @@ import (
 	"time"
 )
 
-// TestABootFilterNeedsTheCapability checks that a journal read narrowed to
-// one boot is refused before dispatch, with its own code, on a host whose
-// agent does not announce the boot filter - an older agent would ignore
-// the field and answer with every boot under the name of one - and that
-// the same read goes through once the adapter names the feature. A host
-// of the lab with the feature then reads its current boot for real.
+// TestABootFilterNeedsTheCapability checks that a journal read narrowed to one
+// boot is refused before dispatch, with its own code, on a host whose agent
+// does not announce the boot filter - an older agent would ignore the field
 func TestABootFilterNeedsTheCapability(t *testing.T) {
 	h := newHarness(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

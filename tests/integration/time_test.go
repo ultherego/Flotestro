@@ -55,8 +55,7 @@ type timeResult struct {
 const timeReason = "integration test of the time module"
 
 // TestTimeShowsTheClockStateNotJustTheDaemon checks that the module answers
-// the question "is this host's clock good", not only "is the daemon
-// running".
+// the question "is this host's clock good", not only "is the daemon running".
 func TestTimeShowsTheClockStateNotJustTheDaemon(t *testing.T) {
 	h := newHarness(t)
 
@@ -132,9 +131,8 @@ func TestTimeSourceTestMeasuresFromTheHost(t *testing.T) {
 	}
 }
 
-// TestChangingSourcesRequiresAWorkingSource guards the rule from the
-// document: the servers are tested before the host gives up a working
-// source.
+// TestChangingSourcesRequiresAWorkingSource guards the rule from the document:
+// the servers are tested before the host gives up a working source.
 func TestChangingSourcesRequiresAWorkingSource(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -161,8 +159,8 @@ func TestChangingSourcesRequiresAWorkingSource(t *testing.T) {
 }
 
 // TestTimeZoneChangesAfterACheck checks the whole path of a zone change
-// together with the refusals for names the host does not know or that are
-// not names.
+// together with the refusals for names the host does not know or that are not
+// names.
 func TestTimeZoneChangesAfterACheck(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -221,8 +219,8 @@ func TestTimeZoneChangesAfterACheck(t *testing.T) {
 	}
 }
 
-// TestPanelDoesNotAppendToSomeoneElsesConfigurationWithoutConsent guards
-// the boundary: a host that includes no directory stays read-only until the
+// TestPanelDoesNotAppendToSomeoneElsesConfigurationWithoutConsent guards the
+// boundary: a host that includes no directory stays read-only until the
 // operator agrees to append one line.
 func TestPanelDoesNotAppendToSomeoneElsesConfigurationWithoutConsent(t *testing.T) {
 	h := newHarness(t)
@@ -272,9 +270,7 @@ func hostTimeSnapshot(t *testing.T, h *harness, hostID string) timeSnapshot {
 	return state
 }
 
-// jobTimeResult reads the measurements from the last attempt. The
-// measurement belongs to the attempt, because it is what knows what the
-// host measured and when - the host state will not say that any more.
+// jobTimeResult reads the measurements from the last attempt.
 func jobTimeResult(t *testing.T, h *harness, jobID string) timeResult {
 	t.Helper()
 	var response struct {

@@ -72,9 +72,7 @@ func (f *fakeDirectory) Services(context.Context) ([]freeipa.Service, error) {
 	return f.services, nil
 }
 
-// The two reads a preserve plan binds itself to. The fake answers what a
-// directory that can do the move would: an entry with its own identity and
-// a connector allowed to rename it.
+// The two reads a preserve plan binds itself to.
 func (f *fakeDirectory) UserEntry(_ context.Context, uid string) (freeipa.EntryReference, error) {
 	return freeipa.EntryReference{
 		DN:              "uid=" + uid + ",cn=users,cn=accounts,dc=lab,dc=test",

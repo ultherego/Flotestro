@@ -16,11 +16,8 @@ import (
 	"github.com/jcmturner/gokrb5/v8/keytab"
 )
 
-// countingDirectory stands in for the two doors of the directory: the
-// Kerberos session door and the JSON-RPC door. It counts the knocks on each
-// and answers the RPC door with whatever status and body the test set, so
-// the test sees how many times the adapter came back rather than what it
-// asked.
+// countingDirectory stands in for the two doors of the directory: the Kerberos
+// session door and the JSON-RPC door.
 type countingDirectory struct {
 	server    *httptest.Server
 	logins    atomic.Int64
@@ -59,10 +56,8 @@ func newCountingDirectory(t *testing.T, rpcStatus int) *countingDirectory {
 	return fake
 }
 
-// clientWithoutATicket builds a client whose keytab has no keys: the only
-// way to exercise the login path without a KDC. Kerberos refuses to issue a
-// ticket from an empty keytab before any packet leaves the process, which is
-// exactly the failure of a missing or unreadable keytab in production.
+// clientWithoutATicket builds a client whose keytab has no keys: the only way
+// to exercise the login path without a KDC.
 func (f *countingDirectory) clientWithoutATicket(logged bool) *Client {
 	return &Client{
 		config:     Config{ServerURL: f.server.URL, Principal: "flotestro/panel@FLOTESTRO.TEST", CacheTTL: time.Minute},
@@ -91,9 +86,9 @@ func writeKRB5Conf(t *testing.T) string {
 	return path
 }
 
-// TestTheConstructorRefusesAKeytabItCannotUse checks that the connector
-// does not come up half-configured: a keytab that is missing or is not a
-// keytab is an error at start, not a surprise at the first query.
+// TestTheConstructorRefusesAKeytabItCannotUse checks that the connector does
+// not come up half-configured: a keytab that is missing or is not a keytab is
+// an error at start, not a surprise at the first query.
 func TestTheConstructorRefusesAKeytabItCannotUse(t *testing.T) {
 	krb5 := writeKRB5Conf(t)
 	garbage := filepath.Join(t.TempDir(), "panel.keytab")
@@ -119,9 +114,9 @@ func TestTheConstructorRefusesAKeytabItCannotUse(t *testing.T) {
 	}
 }
 
-// TestLoginWithoutAUsableKeytabFailsClosed is the fail-closed guarantee of
-// the design: no ticket means no session, and in particular no attempt with
-// any other credential. The directory doors are not even knocked on.
+// TestLoginWithoutAUsableKeytabFailsClosed is the fail-closed guarantee of the
+// design: no ticket means no session, and in particular no attempt with any
+// other credential.
 func TestLoginWithoutAUsableKeytabFailsClosed(t *testing.T) {
 	fake := newCountingDirectory(t, http.StatusOK)
 	client := fake.clientWithoutATicket(false)
@@ -142,10 +137,8 @@ func TestLoginWithoutAUsableKeytabFailsClosed(t *testing.T) {
 	}
 }
 
-// TestTheConfigurationHasNoPasswordField pins the contract at compile
-// level: the connector authenticates with a keytab only. A password field
-// would be the beginning of a fallback the design forbids, and it would
-// sooner or later reach the database or the settings screen.
+// TestTheConfigurationHasNoPasswordField pins the contract at compile level:
+// the connector authenticates with a keytab only.
 func TestTheConfigurationHasNoPasswordField(t *testing.T) {
 	typ := reflect.TypeOf(Config{})
 	for i := 0; i < typ.NumField(); i++ {
@@ -160,12 +153,7 @@ func TestTheConfigurationHasNoPasswordField(t *testing.T) {
 }
 
 // TestACallReLogsInOnceAfterA401AndThenGivesUp checks the normal path of an
-// expired session and its bound. After a 401 the adapter tries to log in
-// exactly once; when that fails the error comes back instead of a second
-// query with a dead session or a loop of retries. A successful re-login
-// needs a KDC, so the test observes the bound through the failing one: the
-// query is not repeated and the session is left marked as gone, so the next
-// call goes through the login again instead of trusting a stale cookie.
+// expired session and its bound.
 func TestACallReLogsInOnceAfterA401AndThenGivesUp(t *testing.T) {
 	fake := newCountingDirectory(t, http.StatusUnauthorized)
 	client := fake.clientWithoutATicket(true)
@@ -198,11 +186,8 @@ func TestACallReLogsInOnceAfterA401AndThenGivesUp(t *testing.T) {
 	}
 }
 
-// TestACallDoesNotReLogInOnAnErrorThatMerelyMentions401 pins the signal
-// of an expired session to the status of the answer. A command the
-// directory refuses on a live session comes back as the refusal, whatever
-// its text says - a message with "401" in it is not a dead session, and a
-// re-login would hide the real error behind a Kerberos one.
+// TestACallDoesNotReLogInOnAnErrorThatMerelyMentions401 pins the signal of an
+// expired session to the status of the answer.
 func TestACallDoesNotReLogInOnAnErrorThatMerelyMentions401(t *testing.T) {
 	fake := newCountingDirectory(t, http.StatusOK)
 	fake.rpcBody.Store(`{"result":null,"error":{"code":4001,"message":"web401.flotestro.test: host not found","name":"NotFound"}}`)
@@ -223,9 +208,9 @@ func TestACallDoesNotReLogInOnAnErrorThatMerelyMentions401(t *testing.T) {
 	}
 }
 
-// TestACallWithALiveSessionDoesNotLogInAgain guards the other bound: a
-// session that works is used as it is, so the directory does not see a
-// Kerberos exchange per query.
+// TestACallWithALiveSessionDoesNotLogInAgain guards the other bound: a session
+// that works is used as it is, so the directory does not see a Kerberos
+// exchange per query.
 func TestACallWithALiveSessionDoesNotLogInAgain(t *testing.T) {
 	fake := newCountingDirectory(t, http.StatusOK)
 	client := fake.clientWithoutATicket(true)

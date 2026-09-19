@@ -12,9 +12,8 @@ import (
 )
 
 // The tests of this file check the system module of the host management
-// document: the platform picture every online host reports, the history
-// of kernels the panel keeps, the local sudo policy the helper reads, and
-// the judgement the panel makes of it.
+// document: the platform picture every online host reports, the history of
+// kernels the panel keeps, the local sudo policy the helper reads, and the
 
 // systemPayload mirrors the system fragment: the basic facts every agent
 // sends and the platform picture laid over them.
@@ -101,8 +100,8 @@ func connectedHosts(t *testing.T, h *harness) []hostView {
 }
 
 // TestEveryOnlineHostReportsItsPlatform guards the rule of the module: the
-// picture names the kernel, the release and the machine, and what it could
-// not read it names as unknown with a reason rather than leaving blank.
+// picture names the kernel, the release and the machine, and what it could not
+// read it names as unknown with a reason rather than leaving blank.
 func TestEveryOnlineHostReportsItsPlatform(t *testing.T) {
 	h := newHarness(t)
 	for _, host := range connectedHosts(t, h) {
@@ -125,9 +124,8 @@ func TestEveryOnlineHostReportsItsPlatform(t *testing.T) {
 			if payload.Distribution.ID == "" {
 				t.Errorf("no distribution: %+v", payload.Distribution)
 			}
-			// A rolling release carries no VERSION_ID in os-release; Arch is
-			// the one in the lab. Its empty version is the fact, and the host
-			// reports facts - an invented "rolling" would be the panel's word.
+			// A rolling release carries no VERSION_ID in os-release; Arch is the one in
+			// the lab.
 			if payload.Distribution.Version == "" && payload.Distribution.ID != "arch" {
 				t.Errorf("no distribution version: %+v", payload.Distribution)
 			}
@@ -152,17 +150,15 @@ func TestEveryOnlineHostReportsItsPlatform(t *testing.T) {
 					t.Error("no uptime and no reason for it")
 				}
 			}
-			// The DMI identity: either the machine is named, or the reason it
-			// is not is. A blank serial without a reason would be a fact the
-			// panel made up.
+			// The DMI identity: either the machine is named, or the reason it is not
+			// is.
 			if payload.DMI.Vendor == "" && payload.DMI.Product == "" {
 				if reason := payload.Missing["dmi"]; reason == "" {
 					t.Error("no DMI vendor or product and no reason for it")
 				}
 			}
-			// The UUID of a virtual machine the firmware always fills in, so
-			// an empty one without a reason is a fact the panel made up. The
-			// serial number it may leave blank.
+			// The UUID of a virtual machine the firmware always fills in, so an empty
+			// one without a reason is a fact the panel made up.
 			if payload.DMI.UUID == "" && payload.Missing["dmi.uuid"] == "" && payload.Missing["dmi"] == "" {
 				t.Error("dmi.uuid is empty without a reason")
 			}
@@ -187,9 +183,9 @@ func TestEveryOnlineHostReportsItsPlatform(t *testing.T) {
 	}
 }
 
-// TestThePanelKeepsThePlatformHistory: a host that reported its inventory
-// has at least one row in its history, and the newest row is the platform
-// the system module names now.
+// TestThePanelKeepsThePlatformHistory: a host that reported its inventory has
+// at least one row in its history, and the newest row is the platform the
+// system module names now.
 func TestThePanelKeepsThePlatformHistory(t *testing.T) {
 	h := newHarness(t)
 	for _, host := range connectedHosts(t, h) {
@@ -238,11 +234,8 @@ func TestThePanelKeepsThePlatformHistory(t *testing.T) {
 }
 
 // TestLocalSudoersReachTheAccessView: the helper reads the distribution's
-// default sudoers, the fragment lists the sudo or wheel group rule with
-// every command, and the access view shows it as a local rule that
-// amounts to root - with a password, so the check passes. A lab host with
-// a passwordless drop-in (cloud-init, Vagrant) fails the check instead,
-// and the test accepts either as long as the verdict matches the files.
+// default sudoers, the fragment lists the sudo or wheel group rule with every
+// command, and the access view shows it as a local rule that amounts to root -
 func TestLocalSudoersReachTheAccessView(t *testing.T) {
 	h := newHarness(t)
 	for _, host := range connectedHosts(t, h) {
@@ -268,11 +261,8 @@ func TestLocalSudoersReachTheAccessView(t *testing.T) {
 				t.Errorf("the main file is not among the files read: %+v", policy.Files)
 			}
 
-			// The distribution's default: the sudo group on Debian and
-			// Ubuntu, wheel on Fedora, with every command as root. Arch
-			// ships the wheel line commented out, so its only root-equivalent
-			// rule is the one the lab image adds for its own user; the proof
-			// is the same - a rule with every command is marked as such.
+			// The distribution's default: the sudo group on Debian and Ubuntu, wheel on
+			// Fedora, with every command as root.
 			groupRule := -1
 			for index, rule := range policy.Rules {
 				if !rule.AllCommands || rule.Source != "/etc/sudoers" {
@@ -301,9 +291,9 @@ func TestLocalSudoersReachTheAccessView(t *testing.T) {
 				t.Errorf("the group rule is not marked root-equivalent: %+v", policy.Rules[groupRule])
 			}
 
-			// The access view carries the same rule as a local one, with the
-			// flag and the file it comes from; the directory half does not
-			// decide whether the local half is shown.
+			// The access view carries the same rule as a local one, with the flag and
+			// the file it comes from; the directory half does not decide whether the
+			// local half is shown.
 			var access struct {
 				Known        bool `json:"known"`
 				LocalSudoers struct {

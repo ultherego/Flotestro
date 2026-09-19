@@ -12,6 +12,7 @@ import (
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/buildinfo"
 	"github.com/ultherego/flotestro/internal/cryptostate"
+	"github.com/ultherego/flotestro/internal/database"
 	"github.com/ultherego/flotestro/internal/housekeeping"
 	"github.com/ultherego/flotestro/internal/relays"
 	"github.com/ultherego/flotestro/internal/secrets"
@@ -24,7 +25,7 @@ var processStarted = time.Now()
 
 // Process gathers what the process resolved at start that the effective
 // configuration does not carry: the loops with a state of their own and the
-// switches read by the gateway and the scheduler rather than by the API
+// switches read by the gateway and the scheduler rather than by the API.
 type Process struct {
 	// Crypto is the cryptographic state of the installation as the startup guard
 	// left it; nil means a panel started without the guard, which the status
@@ -98,6 +99,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	blocks := map[string]statusBlock{
 		"database":            s.databaseStatus(ctx),
+		"replicas":            s.replicasStatus(ctx),
 		"migrations":          s.migrationsStatus(ctx),
 		"outbox":              s.outboxStatus(ctx),
 		"scheduler":           s.schedulerStatus(ctx),
@@ -155,7 +157,7 @@ func (s *Server) databaseStatus(ctx context.Context) statusBlock {
 	facts["pool_max"] = stat.MaxConns()
 	// The shape of the pool, not only how much of it is in use: a replica allowed
 	// to open more connections than the server answers is an outage waiting for
-	// the next restart, and this is the number an operator compares with
+	// the next restart, and this is the number an operator compares with.
 	poolConfig := s.pool.Config()
 	facts["pool_min"] = poolConfig.MinConns
 	facts["pool_idle"] = stat.IdleConns()
@@ -207,6 +209,82 @@ func (s *Server) databaseStatus(ctx context.Context) statusBlock {
 		block.Attention = "the server is near its connection limit"
 	} else if oldest != nil && *oldest > 600 {
 		block.Attention = "a transaction has been open for more than ten minutes"
+	}
+	return block
+}
+
+// replicasStatus is the number an operator reads before they scale rather than
+// after: which replicas are alive, what each of them may open against the
+// database, and what the server answers in total.
+func (s *Server) replicasStatus(ctx context.Context) statusBlock {
+	budget, err := database.ReadBudget(ctx, s.pool)
+	if err != nil {
+		return statusUnknown("the replicas of the control plane could not be read: "+err.Error(), nil)
+	}
+	type replica struct {
+		GatewayID           string    `json:"gateway_id"`
+		InstanceID          string    `json:"instance_id"`
+		Hostname            string    `json:"hostname,omitempty"`
+		Version             string    `json:"version,omitempty"`
+		PoolMaxConns        int32     `json:"pool_max_conns"`
+		StartedAt           time.Time `json:"started_at"`
+		HeartbeatSecondsAgo float64   `json:"heartbeat_seconds_ago"`
+		// This marks the replica that answered this request, so a screen
+		// opened through a load balancer says which one it reached.
+		This bool `json:"this,omitempty"`
+	}
+	ours := ""
+	if s.settings != nil {
+		ours = s.settings.GatewayID
+	}
+	replicas := []replica{}
+	for _, instance := range budget.Instances {
+		replicas = append(replicas, replica{
+			GatewayID:           instance.GatewayID,
+			InstanceID:          instance.InstanceID,
+			Hostname:            instance.Hostname,
+			Version:             instance.Version,
+			PoolMaxConns:        instance.PoolMaxConns,
+			StartedAt:           instance.StartedAt.UTC(),
+			HeartbeatSecondsAgo: instance.SinceHeartbeat.Seconds(),
+			This:                ours != "" && instance.GatewayID == ours,
+		})
+	}
+	facts := map[string]any{
+		"gateway_id":                  ours,
+		"replicas":                    replicas,
+		"replicas_seen":               budget.Replicas,
+		"connections_per_replica":     budget.PoolMaxConns,
+		"connections_claimed":         budget.Claimed,
+		"server_max_connections":      budget.ServerMaxConns,
+		"server_reserved_connections": budget.Reserved,
+		"connections_available":       budget.Available,
+		"connections_in_use":          budget.InUse,
+		"connections_headroom":        budget.Headroom,
+		"next_replica_fits":           budget.NextReplicaFits,
+		"next_replica_shortfall":      budget.Shortfall,
+		"instance_stale_after":        database.InstanceStaleAfter.String(),
+	}
+	if budget.Unreported > 0 {
+		facts["replicas_without_a_pool"] = budget.Unreported
+	}
+	if budget.Replicas == 0 {
+		// Not a green light: a panel that claims no identifier is a panel whose
+		// budget nobody can compute, and the second replica would be invisible here
+		// as well.
+		return statusUnknown("no control plane records itself under a gateway identifier; "+
+			"this panel started without claiming one, and the budget below counts nothing", facts)
+	}
+	if budget.Overcommitted() {
+		return statusFailed(budget.Summary(), facts)
+	}
+	block := statusOK(facts)
+	switch {
+	case !budget.NextReplicaFits:
+		block.Attention = budget.Summary()
+	case budget.Unreported > 0:
+		block.Attention = strconv.Itoa(budget.Unreported) + " replica(s) do not say how large a pool " +
+			"they may open; their share of the budget is unknown, not zero"
 	}
 	return block
 }

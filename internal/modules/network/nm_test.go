@@ -172,9 +172,8 @@ func TestProfileReadsAndWritesRestOfResolver(t *testing.T) {
 		t.Fatal(err)
 	}
 	write := strings.Join(steps[0], " ")
-	// The rollback recreates the profile with the same code: the search
-	// domains and the DHCP server rejection must come back with the
-	// servers.
+	// The rollback recreates the profile with the same code: the search domains
+	// and the DHCP server rejection must come back with the servers.
 	if !strings.Contains(write, "ipv4.dns-search flotestro.test,lab.test") ||
 		!strings.Contains(write, "ipv4.ignore-auto-dns yes") {
 		t.Errorf("the profile write loses the rest of the resolver: %s", write)

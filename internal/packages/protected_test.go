@@ -6,9 +6,8 @@ import (
 	"testing"
 )
 
-// Removing the agent cuts the host off from the panel, and therefore also
-// from repairing what has just been broken. Removing the kernel or the
-// bootloader leaves a machine that will not come up.
+// Removing the agent cuts the host off from the panel, and therefore also from
+// repairing what has just been broken.
 func TestProtectedPackagesAreRecognised(t *testing.T) {
 	protected := []string{
 		"flotestro-agent", "openssh-server", "systemd", "sudo",
@@ -52,8 +51,6 @@ func TestTheProtectedOnesInASetNameTheCulprit(t *testing.T) {
 // TestTheEnvironmentSuspendsNeedrestart guards the boundary that cost a job in
 // the laboratory: needrestart restarted the helper in the middle of the
 // transaction the helper was running, and the result ended with "the answer of
-// the helper: EOF". A restart is a decision of the panel rather than a side
-// effect of an upgrade.
 func TestTheEnvironmentSuspendsNeedrestart(t *testing.T) {
 	testEnvironment := environment()
 	wanted := map[string]bool{
@@ -74,9 +71,7 @@ func TestTheEnvironmentSuspendsNeedrestart(t *testing.T) {
 
 // TestAnAbandonedHoldReleasesOnlyOurOwn guards the boundary of the cleanup: a
 // hold placed by the administrator of the host stays, and our own - left by a
-// transaction that died with its process - disappears. Without that a host
-// with an interrupted upgrade had the agent package held for good and no later
-// replacement of the agent could go through.
+// transaction that died with its process - disappears.
 func TestAnAbandonedHoldReleasesOnlyOurOwn(t *testing.T) {
 	directory := t.TempDir()
 	if err := SetRuntimeDir(directory); err != nil {

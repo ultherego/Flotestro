@@ -5,10 +5,7 @@ import (
 	"time"
 )
 
-// TestTheRenewalThreshold guards the margin for a failure of the centre. The
-// renewal is to start long before the expiry and not in the last hour: an agent
-// without a valid certificate has no way back into the fleet, because the
-// enrollment token is no longer on the host.
+// TestTheRenewalThreshold guards the margin for a failure of the centre.
 func TestTheRenewalThreshold(t *testing.T) {
 	now := time.Now()
 	issued := now.Add(-20 * 24 * time.Hour)

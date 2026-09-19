@@ -23,9 +23,8 @@ func (s *Server) handleWhoami(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusUnauthorized, "unauthenticated", "no valid token")
 		return
 	}
-	// The identifier goes with the subject: it is what the principal
-	// routes are keyed by, and the profile screen needs it to name its
-	// own identity there.
+	// The identifier goes with the subject: it is what the principal routes are
+	// keyed by, and the profile screen needs it to name its own identity there.
 	writeJSON(w, http.StatusOK, map[string]any{
 		"id":           principal.ID,
 		"subject":      principal.Subject,
@@ -57,18 +56,18 @@ func (s *Server) handleListRoles(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "count": len(items)})
 }
 
-// principalView is an identity as the access screen shows it: with the
-// live tokens, so that one of them can be revoked by its identifier, and
-// with the moment it was disabled when it was.
+// principalView is an identity as the access screen shows it: with the live
+// tokens, so that one of them can be revoked by its identifier, and with the
+// moment it was disabled when it was.
 type principalView struct {
 	authz.Principal
 	Tokens     []authz.Token `json:"tokens"`
 	DisabledAt *time.Time    `json:"disabled_at,omitempty"`
 }
 
-// handleListPrincipals lists the enabled identities, or with disabled=true
-// the disabled ones: the two are different questions - who can act, and
-// who could be let back in - and a screen asks one at a time.
+// handleListPrincipals lists the enabled identities, or with disabled=true the
+// disabled ones: the two are different questions - who can act, and who could
+// be let back in - and a screen asks one at a time.
 func (s *Server) handleListPrincipals(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorize(w, r, authz.PermPrincipalManage, authz.GlobalScope, "principal", ""); !ok {
 		return
@@ -105,9 +104,7 @@ func (s *Server) handleListPrincipals(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "count": len(items)})
 }
 
-// principalTarget resolves the identity named in the path. A missing one is
-// a 404 whatever the caller's permission - the permission was checked
-// before, so the answer does not reveal anything to a stranger.
+// principalTarget resolves the identity named in the path.
 func (s *Server) principalTarget(w http.ResponseWriter, r *http.Request) (*authz.Principal, bool) {
 	id := r.PathValue("id")
 	if _, err := uuid.Parse(id); err != nil {
@@ -126,9 +123,7 @@ func (s *Server) principalTarget(w http.ResponseWriter, r *http.Request) (*authz
 	return principal, true
 }
 
-// handleDisablePrincipal takes the access of an identity away. The row
-// stays: the trail names the identity, and a deleted one would leave
-// events pointing at nothing. The sessions and the tokens end with it.
+// handleDisablePrincipal takes the access of an identity away.
 func (s *Server) handleDisablePrincipal(w http.ResponseWriter, r *http.Request) {
 	actor, ok := s.authorize(w, r, authz.PermPrincipalManage, authz.GlobalScope, "principal", r.PathValue("id"))
 	if !ok {
@@ -185,11 +180,7 @@ func (s *Server) handleDisablePrincipal(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleEnablePrincipal gives a disabled identity its access back. The
-// bindings it had are still on the row, so it holds what it held; the
-// sessions and the tokens that ended with the disabling stay ended, and
-// the identity is issued new ones. Enabling what is not disabled is a
-// conflict, not a no-op: the caller believed something that is not so.
+// handleEnablePrincipal gives a disabled identity its access back.
 func (s *Server) handleEnablePrincipal(w http.ResponseWriter, r *http.Request) {
 	actor, ok := s.authorize(w, r, authz.PermPrincipalManage, authz.GlobalScope, "principal", r.PathValue("id"))
 	if !ok {
@@ -242,9 +233,7 @@ func (s *Server) handleEnablePrincipal(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleListSessions lists the live browser sessions of an identity. A
-// token is not a session: an identity that only ever used tokens has none,
-// and the empty list says so.
+// handleListSessions lists the live browser sessions of an identity.
 func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorize(w, r, authz.PermPrincipalManage, authz.GlobalScope, "principal", r.PathValue("id")); !ok {
 		return
@@ -263,9 +252,8 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleRevokeSession ends one browser session of an identity. The
-// identity in the path has to own it; a session identifier alone ends
-// nothing. The next request on that cookie is refused.
+// handleRevokeSession ends one browser session of an identity. The identity in
+// the path has to own it; a session identifier alone ends nothing.
 func (s *Server) handleRevokeSession(w http.ResponseWriter, r *http.Request) {
 	actor, ok := s.authorize(w, r, authz.PermPrincipalManage, authz.GlobalScope, "principal", r.PathValue("id"))
 	if !ok {
@@ -464,9 +452,8 @@ type revokeRoleRequest struct {
 	Reason      string `json:"reason"`
 }
 
-// handleRevokeRole removes one binding: the role in the path, the scope
-// from the body. The scope is part of the key, because an operator of two
-// sites loses one and keeps the other.
+// handleRevokeRole removes one binding: the role in the path, the scope from
+// the body.
 func (s *Server) handleRevokeRole(w http.ResponseWriter, r *http.Request) {
 	actor, ok := s.authorize(w, r, authz.PermPrincipalManage, authz.GlobalScope, "principal", r.PathValue("id"))
 	if !ok {
@@ -539,9 +526,8 @@ type createPrincipalRequest struct {
 	// is visible only in this response.
 	IssueToken    bool `json:"issue_token"`
 	TokenTTLHours int  `json:"token_ttl_hours"`
-	// Reason describes what the access is granted for. The operation moves
-	// the access rules of the whole fleet, so the reason is part of the
-	// audit trail.
+	// Reason describes what the access is granted for. The operation moves the
+	// access rules of the whole fleet, so the reason is part of the audit trail.
 	Reason string `json:"reason"`
 }
 
@@ -551,9 +537,7 @@ type roleRequest struct {
 	Role        string `json:"role"`
 	Site        string `json:"site"`
 	Environment string `json:"environment"`
-	// ValidUntil is an RFC 3339 moment; empty means until revoked. A moment
-	// already past is accepted and means "expired at once": a way to end
-	// an access without removing its record.
+	// ValidUntil is an RFC 3339 moment; empty means until revoked.
 	ValidUntil string `json:"valid_until"`
 }
 
@@ -604,9 +588,8 @@ type grantRoleRequest struct {
 	Reason string `json:"reason"`
 }
 
-// handleGrantRole adds one binding to an identity, or changes the validity
-// of one it already has. The same operation of the greatest impact as
-// creating the identity with roles: it moves who can do what.
+// handleGrantRole adds one binding to an identity, or changes the validity of
+// one it already has.
 func (s *Server) handleGrantRole(w http.ResponseWriter, r *http.Request) {
 	actor, ok := s.authorize(w, r, authz.PermPrincipalManage, authz.GlobalScope, "principal", r.PathValue("id"))
 	if !ok {
@@ -805,9 +788,7 @@ func (s *Server) handleListGroupMappings(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]any{"items": mappings, "count": len(mappings)})
 }
 
-// groupMappingsTag is the entity tag of the access mappings as a set. A
-// mapping is created or removed, never edited, so the set of identifiers
-// is its version. The list comes in a fixed order from the store.
+// groupMappingsTag is the entity tag of the access mappings as a set.
 func groupMappingsTag(mappings []authz.GroupMapping) string {
 	parts := make([]string, 0, len(mappings))
 	for _, mapping := range mappings {
@@ -817,8 +798,8 @@ func groupMappingsTag(mappings []authz.GroupMapping) string {
 }
 
 // requireGroupMappingsMatch enforces If-Match against the current set of
-// mappings: an administrator who adds or removes a rule decides against
-// the list they read, and the list may have changed under them.
+// mappings: an administrator who adds or removes a rule decides against the
+// list they read, and the list may have changed under them.
 func (s *Server) requireGroupMappingsMatch(w http.ResponseWriter, r *http.Request) bool {
 	if r.Header.Get("If-Match") == "" {
 		return true
@@ -838,9 +819,8 @@ func (s *Server) setGroupMappingsTag(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleCreateGroupMapping adds a mapping of a group to a role in a scope.
-// The group grants only a candidate role; the scope remains the panel
-// policy.
+// handleCreateGroupMapping adds a mapping of a group to a role in a scope. The
+// group grants only a candidate role; the scope remains the panel policy.
 func (s *Server) handleCreateGroupMapping(w http.ResponseWriter, r *http.Request) {
 	actor, ok := s.authorize(w, r, authz.PermPrincipalManage, authz.GlobalScope, "group_mapping", "")
 	if !ok {
@@ -860,9 +840,8 @@ func (s *Server) handleCreateGroupMapping(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// The mapping of a group to a role decides whom the identity provider
-	// lets in and with what permissions; it is a change of the access rule
-	// itself.
+	// The mapping of a group to a role decides whom the identity provider lets in
+	// and with what permissions; it is a change of the access rule itself.
 	evidence, ok := s.requireStepUp(w, r, actor, request.Reason,
 		"group_mapping.create", "group_mapping", request.GroupName)
 	if !ok {
@@ -967,8 +946,6 @@ var accessReviewColumns = []string{
 }
 
 // accessReviewRow renders one identity in the order of accessReviewColumns.
-// A role is written with its scope and, where it has one, its end, so the
-// sheet says not only what an identity may do but for how long.
 func accessReviewRow(principal authz.ReviewedPrincipal) []string {
 	roles := make([]string, 0, len(principal.Bindings))
 	for _, binding := range principal.Bindings {
@@ -989,10 +966,8 @@ func accessReviewRow(principal authz.ReviewedPrincipal) []string {
 	}
 }
 
-// handleAccessReview lists every enabled identity with what it can do,
-// when it was last used and what the reviewer should look at. The review
-// is a compliance artefact, so making one is on the trail: an auditor asks
-// "when was access last reviewed, and by whom" before anything else.
+// handleAccessReview lists every enabled identity with what it can do, when it
+// was last used and what the reviewer should look at.
 func (s *Server) handleAccessReview(w http.ResponseWriter, r *http.Request) {
 	actor, ok := s.authorize(w, r, authz.PermPrincipalManage, authz.GlobalScope, "principal", "")
 	if !ok {

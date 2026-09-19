@@ -10,10 +10,9 @@ import (
 	"github.com/ultherego/flotestro/internal/hosts"
 )
 
-// The head of a fleet view is the part an operator reads before anything
-// else, so the arithmetic behind it is checked here rather than through a
-// screen: a host nobody has heard from has to stay visible as unknown,
-// and a view that answered with a part of the fleet has to say so.
+// The head of a fleet view is the part an operator reads before anything else,
+// so the arithmetic behind it is checked here rather than through a screen: a
+// host nobody has heard from has to stay visible as unknown, and a view that
 
 func TestModuleCoverageCountsAnUnknownHostUnderItsReason(t *testing.T) {
 	head := moduleCoverage(hosts.ModuleCoverage{Hosts: 1001, Observed: 400, Unavailable: 25, Stale: 40})
@@ -52,9 +51,9 @@ func TestModuleCoverageNamesOnlyTheReasonsItHas(t *testing.T) {
 	}
 }
 
-// A sweep that stopped at its time budget must not pass the hosts it
-// reached off as the fleet: the hosts it never opened are unknown, under
-// a reason of their own, and the whole answer is marked partial.
+// A sweep that stopped at its time budget must not pass the hosts it reached
+// off as the fleet: the hosts it never opened are unknown, under a reason of
+// their own, and the whole answer is marked partial.
 func TestSweepCoverageCountsTheHostsItNeverReached(t *testing.T) {
 	head := sweepCoverage(1001, fleetSweep{Swept: 600, Partial: true, Reason: partialTimeBudget}, 550)
 	if head.TotalHosts != 1001 || head.EvaluatedHosts != 550 || head.UnknownHosts != 451 {
@@ -72,8 +71,8 @@ func TestSweepCoverageCountsTheHostsItNeverReached(t *testing.T) {
 }
 
 // A complete sweep over a fleet where nothing reported anything is not a
-// complete answer about the fleet: every host is unknown, and none of
-// them is a zero.
+// complete answer about the fleet: every host is unknown, and none of them is
+// a zero.
 func TestSweepCoverageOverASilentFleet(t *testing.T) {
 	head := sweepCoverage(7, fleetSweep{Swept: 7}, 0)
 	if head.EvaluatedHosts != 0 || head.UnknownHosts != 7 {
@@ -152,8 +151,8 @@ func TestParseFleetPageBoundsWhatACallerMayAskFor(t *testing.T) {
 }
 
 // An export says in a trailer that it does not carry the whole list: the
-// status line is long sent by the time a sweep runs out of its budget, so
-// a reader that only looks at the headers still learns the file is short.
+// status line is long sent by the time a sweep runs out of its budget, so a
+// reader that only looks at the headers still learns the file is short.
 func TestWriteCSVFlagsAFileThatStopsEarly(t *testing.T) {
 	server := &Server{}
 	columns := []string{"hostname", "status"}

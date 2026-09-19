@@ -90,10 +90,8 @@ func TestOperationKnown(t *testing.T) {
 			t.Errorf("%s should be known", op)
 		}
 	}
-	// The list of operations is closed: there is no "arbitrary systemctl
-	// command" operation. Isolate changes the target of the whole system,
-	// kill sends an arbitrary signal, daemon-reexec restarts pid 1 - none of
-	// them is an operation on a unit.
+	// The list of operations is closed: there is no "arbitrary systemctl command"
+	// operation.
 	for _, op := range []Operation{"", "daemon-reexec", "isolate", "kill", "set-property"} {
 		if Operation(op).Known() {
 			t.Errorf("the unsupported operation %q was accepted", op)
@@ -131,8 +129,7 @@ func TestShownPropertiesAreComplete(t *testing.T) {
 
 func TestApplyArgsPassesNoArgumentToNoBlock(t *testing.T) {
 	// A regression: "--no-block=false" is rejected by systemctl, because that
-	// option takes no value. The whole call then ended with code 1, although
-	// the unit was fine.
+	// option takes no value.
 	args := applyArgs("nginx.service", OperationRestart)
 	for _, arg := range args {
 		if strings.HasPrefix(arg, "--no-block=") {

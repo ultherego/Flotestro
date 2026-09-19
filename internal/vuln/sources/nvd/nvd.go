@@ -1,11 +1,5 @@
-// Package nvd reads the descriptions of vulnerabilities from the NVD
-// database.
-//
-// This source settles nothing. Version ranges from NVD do not cover the
-// fixes backported by a distribution vendor, so used to assess a host they
-// would speak about something other than the installed package. The panel
-// takes from here only what the vendor does not say: the CVSS score and the
-// description of the vulnerability.
+// Package nvd reads the descriptions of vulnerabilities from the NVD database.
+// This source settles nothing.
 package nvd
 
 import (
@@ -38,9 +32,7 @@ const MaxWindow = 120 * 24 * time.Hour
 // MaxResponse limits a single page of results.
 const MaxResponse = 128 << 20
 
-// The intervals between requests. NVD asks for five requests per thirty
-// seconds without a key and fifty with one; exceeding that ends in being cut
-// off.
+// The intervals between requests.
 const (
 	IntervalWithoutKey = 6 * time.Second
 	IntervalWithKey    = 700 * time.Millisecond
@@ -80,10 +72,7 @@ func (c *Reader) interval() time.Duration {
 }
 
 // Fetch pulls the descriptions changed since the given moment, page by page.
-//
-// It returns the moment the data are read up to. When the previous read is
-// older than the window one is allowed to ask about, we take the whole set:
-// that takes longer, but it is the only thing that gives the full picture.
+// It returns the moment the data are read up to.
 func (c *Reader) Fetch(ctx context.Context, since time.Time,
 	accept func([]vuln.CVEDetails) error) (time.Time, error) {
 	now := time.Now().UTC()
@@ -185,10 +174,6 @@ type cveEntry struct {
 }
 
 // metric is one CVSS score given by NVD.
-//
-// The severity in version two stands next to the data rather than inside
-// them: that is what an NVD answer looks like, and without it the scores
-// from before CVSS 3 would be left without a word.
 type metric struct {
 	Type         string `json:"type"`
 	BaseSeverity string `json:"baseSeverity"`
@@ -241,10 +226,6 @@ func detailsFromEntry(entry cveEntry) vuln.CVEDetails {
 }
 
 // MetricOrder says which score wins when there are several.
-//
-// A newer version of CVSS describes the same vulnerability more precisely,
-// so we take the newest one the source gave - rather than the first one at
-// hand.
 var MetricOrder = []string{"cvssMetricV40", "cvssMetricV31", "cvssMetricV30", "cvssMetricV2"}
 
 // BestScore picks the CVSS score out of the metrics of an entry.

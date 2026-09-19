@@ -175,9 +175,8 @@ func TestBackupFullCycle(t *testing.T) {
 		t.Errorf("the panel does not know the number of copies: %+v", view)
 	}
 
-	// A restore into a working directory. The panel does not restore
-	// straight into system trees and does not restore into the helper's
-	// private /tmp.
+	// A restore into a working directory. The panel does not restore straight
+	// into system trees and does not restore into the helper's private /tmp.
 	restore := map[string]any{}
 	for key, value := range order {
 		restore[key] = value
@@ -248,8 +247,8 @@ func TestBackupGuardsTheRestoreTarget(t *testing.T) {
 }
 
 // TestBackupDefinitionRequiresAnExistingSecret guards that a typo in the
-// secret name falls out when the definition is saved, not at the first copy
-// - that is at the worst moment.
+// secret name falls out when the definition is saved, not at the first copy -
+// that is at the worst moment.
 func TestBackupDefinitionRequiresAnExistingSecret(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -286,8 +285,7 @@ func backupDetail(t *testing.T, h *harness, jobID string) backupDetailView {
 }
 
 // TestBackupViewShowsTheBackendLoad checks what the copy list does not say:
-// which backend is the bottleneck. Copies go from many hosts to one
-// repository, and that is what decides how many of them go at once.
+// which backend is the bottleneck.
 func TestBackupViewShowsTheBackendLoad(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -351,9 +349,7 @@ func TestBackupViewShowsTheBackendLoad(t *testing.T) {
 		t.Fatalf("the backup view does not know the repository %s: %+v", repository, view.Repositories)
 	}
 
-	// A copy nobody has ever restored is hope, not a copy. The definition
-	// created a moment ago has never been restored and the view is to say
-	// so outright, not stay quiet.
+	// A copy nobody has ever restored is hope, not a copy.
 	var described bool
 	for _, item := range view.Items {
 		if item.Definition != name {

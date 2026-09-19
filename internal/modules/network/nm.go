@@ -331,7 +331,7 @@ func ValidateProfile(profile Profile) error {
 
 // validateIPv6Profile checks the second family of a profile to the same
 // standard as the first, and no further: which mechanism can express which of
-// its settings is the mechanism's own answer, given where the document is
+// its settings is the mechanism's own answer, given where the document is.
 func validateIPv6Profile(profile Profile) error {
 	switch profile.Method6 {
 	case "", "auto", "dhcp", "manual", "disabled", "ignore", "link-local", "shared":

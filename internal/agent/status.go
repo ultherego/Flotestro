@@ -18,11 +18,6 @@ const StateFileName = "status.json"
 
 // AgentState is the picture of the work of the agent as seen from outside the
 // process.
-//
-// Without it a diagnostic tool can say only as much as the file system shows:
-// that the certificate exists and that the service is running. An operator on
-// the host without the panel needs an answer to a different question - whether
-// the agent really talks to the panel and when it last sent anything.
 type AgentState struct {
 	AgentVersion string `json:"agent_version"`
 	HostID       string `json:"host_id,omitempty"`
@@ -45,9 +40,7 @@ type StateWriter struct {
 	state AgentState
 }
 
-// NewStateWriter creates a writer in the state directory of the agent. An empty
-// directory turns the write off: the fleet simulator has no reason to write a
-// thousand files.
+// NewStateWriter creates a writer in the state directory of the agent.
 func NewStateWriter(stateDir, hostID string) *StateWriter {
 	if stateDir == "" {
 		return nil
@@ -101,10 +94,6 @@ func (w *StateWriter) Inventory(revision string, moment time.Time) {
 }
 
 // write persists the state through a temporary file and a rename.
-//
-// An interrupted write must not leave half a file: a diagnostic tool would then
-// read a syntax error instead of a state, and that would look like a failure of
-// the agent that is not there.
 func (w *StateWriter) write() {
 	w.state.UpdatedAt = time.Now().UTC()
 	content, err := json.MarshalIndent(w.state, "", "  ")
@@ -132,10 +121,6 @@ func ReadState(stateDir string) (AgentState, error) {
 }
 
 // StoredIdentity describes the identity stored on the host.
-//
-// Also when the certificate has expired or is unreadable: the status is to say
-// so and not to fall silent. Silence looks the same as a host without a
-// problem.
 type StoredIdentity struct {
 	Paths    IdentityPaths
 	Present  bool
@@ -147,9 +132,6 @@ type StoredIdentity struct {
 
 // ReadIdentity reads the identity from the state directory without any
 // connection.
-//
-// First the generation store, then the old file layout: the tool on the host is
-// to answer the same way before a migration and after it.
 func ReadIdentity(stateDir string) StoredIdentity {
 	store := identitystore.New(stateDir)
 	if identity, err := store.Current(); err == nil {

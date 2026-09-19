@@ -15,8 +15,8 @@ import (
 func TestAPlainUserDelNeverReachesTheDirectory(t *testing.T) {
 	fake, client := newFakeDirectory(t)
 	// The closed list does not know user_del, and the guard admits it with
-	// preserve alone: without the flag the call is refused before any
-	// request is built, so the fake sees nothing.
+	// preserve alone: without the flag the call is refused before any request is
+	// built, so the fake sees nothing.
 	for name, options := range map[string]map[string]any{
 		"no options":     nil,
 		"empty options":  {},
@@ -58,9 +58,9 @@ func TestPreserveUserSendsTheGuardedUserDel(t *testing.T) {
 	}
 }
 
-// The adapter is the last place before the directory, so it binds the move
-// to the entry itself: every value the plan carries is read again and
-// compared, and a plan the world moved under orders nothing at all.
+// The adapter is the last place before the directory, so it binds the move to
+// the entry itself: every value the plan carries is read again and compared,
+// and a plan the world moved under orders nothing at all.
 func TestPreserveUserAtChecksEveryValueThePlanCarries(t *testing.T) {
 	planned := EntryReference{
 		DN:        "uid=jane,cn=users,cn=accounts,dc=test",
@@ -129,9 +129,8 @@ func TestSetUserExpirySendsGeneralizedTimeAndClearsWithNull(t *testing.T) {
 	if got := call.Options["krbprincipalexpiration"]; got != "20261231235959Z" {
 		t.Fatalf("the principal expiration was sent as %v", got)
 	}
-	// The zero time clears: the directory reads null as "remove the
-	// attribute", and "never expires" is then an ordered state rather
-	// than an omission.
+	// The zero time clears: the directory reads null as "remove the attribute",
+	// and "never expires" is then an ordered state rather than an omission.
 	if value, present := call.Options["krbpasswordexpiration"]; !present || value != nil {
 		t.Fatalf("the password expiration was sent as %v (present %v)", value, present)
 	}
@@ -380,10 +379,8 @@ func TestHealthReportsTheCallsWithoutAskingTheDirectory(t *testing.T) {
 }
 
 // TestRetireServiceKeytabSendsServiceDisableAndNothingElse checks the one
-// write the rotation makes in the directory: service_disable on the
-// principal named, with no option that could issue or export key material,
-// and a refusal for the host's own principal and for shapes that are not a
-// service principal - before any request is built.
+// write the rotation makes in the directory: service_disable on the principal
+// named, with no option that could issue or export key material, and a refusal
 func TestRetireServiceKeytabSendsServiceDisableAndNothingElse(t *testing.T) {
 	fake, client := newFakeDirectory(t)
 	if err := client.RetireServiceKeytab(context.Background(), "HTTP/web1.example.test@EXAMPLE.TEST"); err != nil {

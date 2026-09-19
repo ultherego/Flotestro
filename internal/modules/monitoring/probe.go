@@ -1,13 +1,5 @@
-// Package monitoring runs probes from the host.
-//
-// A probe answers the question central monitoring cannot ask: "what does this
-// host see". An alert may say a service does not answer while it answers from
-// the host - and then the problem is in the network between them, not in the
-// service. That is why a probe is a per-host task and not another query to
-// Prometheus.
-//
-// A probe changes nothing and needs no root, so it does not go through the
-// helper: every trip through root has to be justified.
+// Package monitoring runs probes from the host. A probe answers the question
+// central monitoring cannot ask: "what does this host see".
 package monitoring
 
 import (
@@ -147,10 +139,6 @@ func probeTCP(ctx context.Context, request Request, result Result) Result {
 }
 
 // probeHTTP checks what the service answers.
-//
-// The certificate is checked against the trust store of the host and not of the
-// panel: the question is "can this host use this service", not "do I trust
-// it".
 func probeHTTP(ctx context.Context, request Request, result Result) Result {
 	client := &http.Client{
 		// Redirects are followed, but not forever: a redirect loop is a failure
@@ -224,8 +212,6 @@ func describeMismatch(code int, request Request, result Result) string {
 	return ""
 }
 
-// The tls import is here only to say that there is no "skip verification":
-// the probe does not switch the certificate check off. A service with a
-// certificate the host does not trust is a service this host will not use -
-// and that is the answer of the probe, not a detail to skip.
+// The tls import is here only to say that there is no "skip verification": the
+// probe does not switch the certificate check off.
 var _ = tls.Config{}

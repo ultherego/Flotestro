@@ -53,10 +53,8 @@ func account(h *harness, hostID, name string) *accountView {
 
 func accountOperation(h *harness, hostID, action string, payload map[string]any) (jobView, []attemptView) {
 	h.t.Helper()
-	// Replacing the keys of an account decides who may log into the host,
-	// so the panel asks for a reason as it does for every change of that
-	// weight. The order carries one here for the same reason an operator
-	// would: without it the request is refused before a job exists.
+	// Replacing the keys of an account decides who may log into the host, so the
+	// panel asks for a reason as it does for every change of that weight.
 	return h.runOperation(hostID, map[string]any{
 		"action":  action,
 		"reason":  "integration test of the local accounts module",
@@ -64,9 +62,8 @@ func accountOperation(h *harness, hostID, action string, payload map[string]any)
 	}, 120*time.Second)
 }
 
-// TestLocalAccountLifecycle checks the local accounts module from creation
-// to revoking access. The module is meant for installations without an
-// identity directory, so it must work without any external integration.
+// TestLocalAccountLifecycle checks the local accounts module from creation to
+// revoking access.
 func TestLocalAccountLifecycle(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -89,9 +86,8 @@ func TestLocalAccountLifecycle(t *testing.T) {
 		t.Fatalf("creating the account ended in state %s", job.State)
 	}
 
-	// The state must be visible right after the operation, without waiting
-	// for the next inventory report: the agent reads the account after the
-	// change.
+	// The state must be visible right after the operation, without waiting for
+	// the next inventory report: the agent reads the account after the change.
 	created := account(h, host.ID, name)
 	if created == nil {
 		t.Fatal("the account did not appear in the panel after creation")
@@ -102,9 +98,8 @@ func TestLocalAccountLifecycle(t *testing.T) {
 	if created.UID < 1000 {
 		t.Errorf("the account got UID %d from the system range", created.UID)
 	}
-	// An account created by the panel has no password, but is not locked:
-	// the SSH key gives access. Showing it as locked would be false
-	// information about access being cut off.
+	// An account created by the panel has no password, but is not locked: the SSH
+	// key gives access.
 	if created.Locked == nil || *created.Locked {
 		t.Errorf("an SSH key account cannot be locked: locked=%v", created.Locked)
 	}
@@ -146,11 +141,9 @@ func TestLocalAccountLifecycle(t *testing.T) {
 		t.Errorf("the account stayed locked after the unlock: %+v", state)
 	}
 
-	// An empty key list takes the last key of an account that has no
-	// password, so it cuts the account off entirely - and the host refuses
-	// it unless the order says that is the intention. The refusal comes
-	// first, by name, because an operator tidying keys must not lock
-	// somebody out by accident.
+	// An empty key list takes the last key of an account that has no password, so
+	// it cuts the account off entirely - and the host refuses it unless the order
+	// says that is the intention.
 	refused, attempts := accountOperation(h, host.ID, "localuser.sshkeys.set", map[string]any{
 		"name": name, "ssh_keys": []string{},
 	})
@@ -186,9 +179,9 @@ func TestSystemAccountsAreProtected(t *testing.T) {
 			if job.State == "succeeded" {
 				t.Fatalf("locking the system account %s succeeded", name)
 			}
-			// root has a refusal of its own: it is not merely a service
-			// account, it is the one the panel never changes, and the
-			// operator is to read which of the two rules stopped them.
+			// root has a refusal of its own: it is not merely a service account, it is
+			// the one the panel never changes, and the operator is to read which of the
+			// two rules stopped them.
 			want := "system_account"
 			if name == "root" {
 				want = "protected_account"
@@ -199,9 +192,9 @@ func TestSystemAccountsAreProtected(t *testing.T) {
 		})
 	}
 
-	// System accounts are outside the default view, but must be reachable
-	// with an explicit filter: sometimes one has to confirm that a service
-	// account exists.
+	// System accounts are outside the default view, but must be reachable with an
+	// explicit filter: sometimes one has to confirm that a service account
+	// exists.
 	defaultView := accounts(h, host.ID, "")
 	for _, a := range defaultView {
 		if a.Source == "system" {
@@ -220,8 +213,7 @@ func TestSystemAccountsAreProtected(t *testing.T) {
 }
 
 // TestPrivateKeyIsRejected checks that the panel does not accept private
-// material even by an operator's mistake. The rejection happens at plan
-// validation, so the secret reaches neither the database nor the host.
+// material even by an operator's mistake.
 func TestPrivateKeyIsRejected(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -248,11 +240,9 @@ func TestPrivateKeyIsRejected(t *testing.T) {
 
 const accountsReason = "integration test of the local accounts module"
 
-// TestAccountGroupsExpiryAndDeletion checks the operations that change what
-// an existing account may do and when it stops: the group list, the expiry
-// date and the deletion. Every change is read back from the host right
-// after the operation, and a deleted account is gone from the panel without
-// waiting for the next full report.
+// TestAccountGroupsExpiryAndDeletion checks the operations that change what an
+// existing account may do and when it stops: the group list, the expiry date
+// and the deletion.
 func TestAccountGroupsExpiryAndDeletion(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -266,9 +256,8 @@ func TestAccountGroupsExpiryAndDeletion(t *testing.T) {
 		}
 	})
 
-	// An account with no key and no password could not be logged into, and
-	// the panel refuses to create one without being told that is the
-	// intention. This test is about groups and expiry, so it says so.
+	// An account with no key and no password could not be logged into, and the
+	// panel refuses to create one without being told that is the intention.
 	created, _ := accountOperation(h, host.ID, "localuser.create", map[string]any{
 		"name": name, "gecos": "Groups and expiry test", "shell": "/bin/bash",
 		"create_home": true, "inactive": true,
@@ -319,8 +308,7 @@ func TestAccountGroupsExpiryAndDeletion(t *testing.T) {
 	}, nil, http.StatusBadRequest)
 
 	// Deletion is destructive: the operator types the account name, gives a
-	// reason and two people approve. Without the typed name the order does
-	// not exist.
+	// reason and two people approve.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations", map[string]any{
 		"action": "localuser.delete", "reason": accountsReason,
 		"payload": map[string]any{"local_user": map[string]any{"name": name, "remove_home": true}},
@@ -342,8 +330,8 @@ func TestAccountGroupsExpiryAndDeletion(t *testing.T) {
 }
 
 // TestSystemAccountDeletionIsRefused checks that the host, which sees the
-// identifiers, refuses to delete a service account - and says so with the
-// code the panel shows.
+// identifiers, refuses to delete a service account - and says so with the code
+// the panel shows.
 func TestSystemAccountDeletionIsRefused(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")

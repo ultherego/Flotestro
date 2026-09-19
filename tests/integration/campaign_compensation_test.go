@@ -12,7 +12,6 @@ import (
 // compensationView is the campaign as the link between an original and its
 // compensation shows on it: the compensating side names the original, the
 // original lists what was ordered to undo it and counts the hosts a
-// compensation would run on.
 type compensationView struct {
 	ID                      string `json:"id"`
 	Name                    string `json:"name"`
@@ -37,8 +36,7 @@ func (h *harness) compensationLinks(id string) compensationView {
 }
 
 // runFileCampaign orders a one-host file campaign, waits for its plan,
-// approves it and waits for its end. The refusals of the compensation are
-// tested elsewhere; this is the way through.
+// approves it and waits for its end.
 func (h *harness) runFileCampaign(body map[string]any) campaignView {
 	h.t.Helper()
 	campaign := h.createCampaign(body)
@@ -50,9 +48,7 @@ func (h *harness) runFileCampaign(body map[string]any) campaignView {
 	if planned.State != "awaiting_approval" {
 		h.t.Fatalf("planning of %s ended in state %s (%s)", campaign.Name, planned.State, planned.PauseReason)
 	}
-	// Nothing landed yet. The count stays zero even while hosts run: it
-	// is the number a compensation runs on, and that is known only once
-	// the campaign settles.
+	// Nothing landed yet.
 	if view := h.compensationLinks(campaign.ID); view.ChangedHosts != 0 {
 		h.t.Errorf("the campaign %s counts %d changed hosts before it ran", campaign.Name, view.ChangedHosts)
 	}
@@ -67,14 +63,6 @@ func (h *harness) runFileCampaign(body map[string]any) campaignView {
 
 // TestACompensatingCampaignLinksToTheOriginalAndMarksItsTargets guards the
 // link between a campaign and the campaign that undoes it.
-//
-// A file write in a campaign, then its declared reverse - a rollback to
-// the previous version - ordered as the compensation. The two records
-// point at each other; the original's target keeps its state and its
-// outcome and gains a compensate step carried by the compensating
-// campaign's task; the original's report is what it was. The refusals:
-// a host the original did not change, an operation that is not the
-// reverse, and an original still under way.
 func TestACompensatingCampaignLinksToTheOriginalAndMarksItsTargets(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -238,17 +226,17 @@ func TestACompensatingCampaignLinksToTheOriginalAndMarksItsTargets(t *testing.T)
 	if originalLinks.ApprovalFingerprint != original.ApprovalFingerprint {
 		t.Error("the original's approval fingerprint changed with the compensation")
 	}
-	// The count is what the original changed, not what is left to undo:
-	// a second compensation is still the operator's decision, and the
-	// compensating campaign counts its own change the same way.
+	// The count is what the original changed, not what is left to undo: a second
+	// compensation is still the operator's decision, and the compensating
+	// campaign counts its own change the same way.
 	if originalLinks.ChangedHosts != 1 || links.ChangedHosts != 1 {
 		t.Errorf("after the compensation the original counts %d changed hosts and the compensation %d, expected 1 and 1",
 			originalLinks.ChangedHosts, links.ChangedHosts)
 	}
 
-	// The original's target: the same state, the same outcome, and a
-	// compensate step carried by the compensating campaign's task under
-	// the compensating campaign's plan.
+	// The original's target: the same state, the same outcome, and a compensate
+	// step carried by the compensating campaign's task under the compensating
+	// campaign's plan.
 	targets := h.campaignTargets(original.ID)
 	if len(targets) != 1 || targets[0].State != originalTarget.State ||
 		targets[0].ErrorCode != originalTarget.ErrorCode || targets[0].Message != originalTarget.Message ||
@@ -311,9 +299,9 @@ func TestACompensatingCampaignLinksToTheOriginalAndMarksItsTargets(t *testing.T)
 		t.Errorf("the strip of the compensated host ends with %s, expected the compensation", last.StepKey)
 	}
 
-	// A second compensation of a campaign already compensated is still a
-	// decision for the operator, not for the panel: the rules allow it,
-	// and the link lists both. Nothing runs here - the check is enough.
+	// A second compensation of a campaign already compensated is still a decision
+	// for the operator, not for the panel: the rules allow it, and the link lists
+	// both.
 	h.get("/api/v1/campaigns/preview?action=file.rollback&compensates="+original.ID, &preview)
 	if preview.Compensates.Changed != 1 {
 		t.Errorf("after the compensation the original changed %d hosts, expected still 1", preview.Compensates.Changed)

@@ -18,18 +18,15 @@ import (
 	"github.com/google/uuid"
 )
 
-// The tests of this file check the closing of the review findings: the
-// bounds an agent cannot move, the management of tokens and identities,
-// the key policy of the fleet, the replacement of a certificate, and the
-// scope of the global resources.
+// The tests of this file check the closing of the review findings: the bounds
+// an agent cannot move, the management of tokens and identities, the key
+// policy of the fleet, the replacement of a certificate, and the scope of the
 
 const hardeningReason = "integration test of the security hardening"
 
-// TestIdentityTokensAreIssuedRevokedAndDisabled walks the life of an
-// automated identity: a token issued later than the identity, revoked by
-// its identifier, a role taken away by its scope, and the identity
-// disabled with every credential ending at once. Every step asks for a
-// reason; a token that was revoked stops working on the next request.
+// TestIdentityTokensAreIssuedRevokedAndDisabled walks the life of an automated
+// identity: a token issued later than the identity, revoked by its identifier,
+// a role taken away by its scope, and the identity disabled with every
 func TestIdentityTokensAreIssuedRevokedAndDisabled(t *testing.T) {
 	h := newHarness(t)
 	subject := uniqueSubject("token-life")
@@ -163,15 +160,12 @@ func TestAnIdentityCannotDisableItself(t *testing.T) {
 
 // TestEnrollmentDoorIsThrottledPerMachine: the public endpoint answers a
 // machine three times a minute, then refuses without looking at the token.
-// The refusal is recorded once on the trail rather than once per knock.
 func TestEnrollmentDoorIsThrottledPerMachine(t *testing.T) {
 	h := newHarness(t)
 	machine := uniqueSubject("throttled-machine")
 	csr := testCSR(t, machine)
 
-	// Four knocks: the burst of three and one over it. The door also has
-	// a limit per source address, ten a minute, that the other tests of
-	// this package share - so the test stays well under it.
+	// Four knocks: the burst of three and one over it.
 	statuses := make([]int, 0, 4)
 	for i := 0; i < 4; i++ {
 		status, _ := h.enrollAttempt(t, "flte_not-a-token", machine, csr)
@@ -219,8 +213,7 @@ func TestEnrollmentOrderHasABoundOnUses(t *testing.T) {
 }
 
 // TestEnrollmentRefusesAWeakKey: the key is the one thing the requester
-// decides, so it is the one thing the policy refuses. A 2048-bit RSA key
-// is below the floor; the order records the refusal for the operator.
+// decides, so it is the one thing the policy refuses.
 func TestEnrollmentRefusesAWeakKey(t *testing.T) {
 	h := newHarness(t)
 	var order struct {
@@ -272,12 +265,7 @@ func TestEnrollmentRefusesAWeakKey(t *testing.T) {
 }
 
 // TestSupersededCertificateIsRevokedWhenTheNewOneConnects: a host has one
-// identity at a time. An older certificate still valid when the host
-// opens a session with a newer one - the one a recovery replaced - is
-// revoked at that moment with the reason "replaced". The older one is
-// staged in the database, because the lab agents renew on their own
-// schedule; the reconnect is forced through a quarantine, the only way to
-// break a session through the API.
+// identity at a time.
 func TestSupersededCertificateIsRevokedWhenTheNewOneConnects(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -335,10 +323,8 @@ func TestSupersededCertificateIsRevokedWhenTheNewOneConnects(t *testing.T) {
 	}
 }
 
-// TestInventoryHistoryIsCapped: the revisions of a host are kept for the
-// diff of the last few reports, not as an archive. Older ones are staged
-// in the database and the current one is taken away, so the next report
-// of the agent is a new revision and the cap is applied with it.
+// TestInventoryHistoryIsCapped: the revisions of a host are kept for the diff
+// of the last few reports, not as an archive.
 func TestInventoryHistoryIsCapped(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -398,9 +384,9 @@ func TestInventoryHistoryIsCapped(t *testing.T) {
 	}
 }
 
-// TestSecretChangesAskForAReason: a secret can land on every host, so a
-// change to it is a change of the highest weight - with a reason on the
-// trail, like the access rules.
+// TestSecretChangesAskForAReason: a secret can land on every host, so a change
+// to it is a change of the highest weight - with a reason on the trail, like
+// the access rules.
 func TestSecretChangesAskForAReason(t *testing.T) {
 	h := newHarness(t)
 	var problem struct {
@@ -449,10 +435,9 @@ func TestBudgetScopeFollowsTheKey(t *testing.T) {
 	})
 }
 
-// TestAGroupWithHiddenMembersIsNotRewritten: replacing the member list of
-// a group means removing the members left out, and members the caller
-// cannot see they cannot mean to remove. The write is refused rather than
-// quietly dropping the other site's hosts.
+// TestAGroupWithHiddenMembersIsNotRewritten: replacing the member list of a
+// group means removing the members left out, and members the caller cannot see
+// they cannot mean to remove.
 func TestAGroupWithHiddenMembersIsNotRewritten(t *testing.T) {
 	h := newHarness(t)
 	lab := h.hosts()

@@ -8,14 +8,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// FuzzRead feeds the configuration reader what an operator, a template or
-// a broken editor may leave in agent.yaml.
-//
-// The reader is the first thing the daemon runs and the first thing the
-// tool of the host runs when the daemon is silent; a panic there hides the
-// real fault behind a stack trace. The property: every input is refused
-// with an error or read into a configuration that passes its own check and
-// survives being written out and read again unchanged.
+// FuzzRead feeds the configuration reader what an operator, a template or a
+// broken editor may leave in agent.
 func FuzzRead(f *testing.F) {
 	f.Add(`
 schema_version: 1

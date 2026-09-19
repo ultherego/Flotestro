@@ -6,9 +6,9 @@ import (
 	"time"
 )
 
-// TestTheDefaultsAreTheOnesTheDocumentAsksFor pins the numbers an
-// installation gets without saying anything: a week of readings at full
-// resolution and a quarter of a year of quarter-hours.
+// TestTheDefaultsAreTheOnesTheDocumentAsksFor pins the numbers an installation
+// gets without saying anything: a week of readings at full resolution and a
+// quarter of a year of quarter-hours.
 func TestTheDefaultsAreTheOnesTheDocumentAsksFor(t *testing.T) {
 	filled := Options{}.withDefaults()
 	if filled.RawRetention != 7*24*time.Hour {
@@ -26,10 +26,9 @@ func TestTheDefaultsAreTheOnesTheDocumentAsksFor(t *testing.T) {
 	}
 }
 
-// TestARetentionThatDeletesWhatIsStillArrivingIsRefused: a configuration
-// whose raw retention is shorter than the window it offers plus the
-// longest a sample may take to arrive throws readings away by definition,
-// and the panel says so at start rather than from a missing week.
+// TestARetentionThatDeletesWhatIsStillArrivingIsRefused: a configuration whose
+// raw retention is shorter than the window it offers plus the longest a sample
+// may take to arrive throws readings away by definition, and the panel says so
 func TestARetentionThatDeletesWhatIsStillArrivingIsRefused(t *testing.T) {
 	options := Options{
 		RawRetention:   24 * time.Hour,
@@ -59,9 +58,8 @@ func TestAnAbsurdMarginOfPartitionsIsRefused(t *testing.T) {
 }
 
 // TestAPartitionIsNamedAfterTheDayItBegins, and the name reads back: the
-// retention derives the end of a partition's range from its name, so a
-// name that does not round-trip is a partition that is dropped at the
-// wrong moment or never.
+// retention derives the end of a partition's range from its name, so a name
+// that does not round-trip is a partition that is dropped at the wrong moment
 func TestAPartitionIsNamedAfterTheDayItBegins(t *testing.T) {
 	at := time.Date(2026, 9, 18, 0, 0, 0, 0, time.UTC)
 	name := partitionName(at)

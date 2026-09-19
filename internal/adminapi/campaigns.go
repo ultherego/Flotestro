@@ -96,7 +96,7 @@ const (
 func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 	// Whoever asks must at least be somebody who may create campaigns somewhere,
 	// before the selector is read: the answers about the snapshot - how many
-	// hosts, in what state, which groups exist - are facts about the fleet, not
+	// hosts, in what state, which groups exist - are facts about the fleet, not.
 	if _, ok := s.authorizeCollection(w, r, authz.PermCampaignCreate, "campaign"); !ok {
 		return
 	}
@@ -888,7 +888,7 @@ func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
 
 	// Without an operation the answer is a count and a sample, from the same
 	// filter the order would page through - in the caller's scopes - but counted
-	// in the database, so a selector wider than one campaign may carry is
+	// in the database, so a selector wider than one campaign may carry is.
 	if action == "" && len(chosen.HostIDs) == 0 {
 		filter, err := s.selectorFilter(r, principal, permission, chosen)
 		if err != nil {
@@ -942,7 +942,7 @@ func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
 	response["distribution"] = distribution(assessment.Ready, action)
 	// An order the panel splits host by host needs every ready host in view
 	// before the order, not a sample: the mapping names them by identifier, and
-	// the wizard shows a host it does not name as ineligible before anything is
+	// the wizard shows a host it does not name as ineligible before anything is.
 	if opspec.PanelPlanned(action) {
 		response["hosts"] = hostEntries(assessment.Ready)
 	}
@@ -1091,7 +1091,7 @@ func (s *Server) handleCampaignTargets(w http.ResponseWriter, r *http.Request) {
 	}
 	// The targets go page by page in the order of the rollout, filtered on the
 	// server: a campaign on ten thousand hosts must not become ten thousand rows
-	// in the browser, and "the failed ones" is a question the database answers
+	// in the browser, and "the failed ones" is a question the database answers.
 	query := r.URL.Query()
 	filter := campaigns.TargetFilter{State: query.Get("state"), Search: query.Get("q")}
 	if wave, err := strconv.Atoi(query.Get("wave")); err == nil && wave >= 0 {

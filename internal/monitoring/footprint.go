@@ -5,15 +5,8 @@ import (
 	"fmt"
 )
 
-// The agent's footprint budget from the architecture document (chapter 8:
-// RSS at most 30 MiB, CPU below 0.2 % of a core, both at the 95th
-// percentile): the cost the agent may have on a host before a release
-// ships. The release gate asserts it on every host of the lab; the fleet
-// view lists the hosts over it, so a leak on the production fleet is seen
-// on the same page that says the fleet is healthy. The seeded alert rules
-// fire well above the budget: a rule is for a host that needs attention
-// now, the budget for what the agent is meant to cost. The idle agent
-// measures 19-25 MiB and a few hundredths of a percent.
+// The agent's footprint budget from the architecture document (chapter 8: RSS
+// at most 30 MiB, CPU below 0.
 const (
 	FootprintRSSBudgetBytes = 30 << 20
 	FootprintCPUBudget      = 0.2
@@ -28,9 +21,8 @@ type FootprintHost struct {
 	AgentCPUPercent *float64 `json:"agent_cpu_percent,omitempty"`
 }
 
-// FleetFootprint summarises the agents' own cost across the reporting
-// hosts, from the newest sample of each. A nil figure means no host
-// reported the value: an older agent sends none.
+// FleetFootprint summarises the agents' own cost across the reporting hosts,
+// from the newest sample of each.
 type FleetFootprint struct {
 	// HostsMeasured counts the reporting hosts whose newest sample
 	// carries the agent's memory.
@@ -49,10 +41,8 @@ type FleetFootprint struct {
 	OverBudget []FootprintHost `json:"over_budget"`
 }
 
-// latestFootprints is the newest sample of every reporting host that is
-// not retired and within the visibility condition over the alias h. The
-// hosts silent for three intervals are left out: an old reading of the
-// agent says nothing about the agent running now.
+// latestFootprints is the newest sample of every reporting host that is not
+// retired and within the visibility condition over the alias h.
 func latestFootprints(cutoffParam int, visible string) string {
 	return `
 	with latest as (
@@ -78,9 +68,8 @@ func (s *Store) FleetFootprint(ctx context.Context, visible string, args []any) 
 	params := append(append([]any{}, args...), silentAfter.Seconds())
 	prelude := latestFootprints(len(params), visible)
 
-	// The aggregates skip the hosts without a reading, so the median is
-	// the median of what was measured rather than of a list padded with
-	// zeros.
+	// The aggregates skip the hosts without a reading, so the median is the
+	// median of what was measured rather than of a list padded with zeros.
 	var rssMax, helperMax *int64
 	var rssMedian, cpuMedian *float64
 	var cpuMax *float32

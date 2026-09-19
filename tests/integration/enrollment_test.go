@@ -86,12 +86,8 @@ type commandView struct {
 	Command string `json:"command"`
 }
 
-// TestEnrollmentOrderShowsTheTokenOnce guards that the plain token exists
-// only in the response to creating the order.
-//
-// The token is a one-time secret. If it could be read from the list or from
-// a single order, anybody with the right to read installations would hold
-// the key to bringing their own machine into the fleet.
+// TestEnrollmentOrderShowsTheTokenOnce guards that the plain token exists only
+// in the response to creating the order.
 func TestEnrollmentOrderShowsTheTokenOnce(t *testing.T) {
 	h := newHarness(t)
 	var created orderView
@@ -155,8 +151,8 @@ func TestRevokedOrderStopsWorkingAtOnce(t *testing.T) {
 		t.Fatalf("status after revocation = %q", after.Status)
 	}
 	// Revocation is idempotent: a second attempt must not end with a server
-	// error, because the operator has no way to check whether the first one
-	// got through.
+	// error, because the operator has no way to check whether the first one got
+	// through.
 	h.do(http.MethodPost, "/api/v1/enrollment-requests/"+created.ID+"/revoke",
 		nil, nil, http.StatusNoContent)
 	h.do(http.MethodPost,
@@ -231,11 +227,8 @@ func TestOrderHasATimeLimit(t *testing.T) {
 	}, nil, http.StatusBadRequest)
 }
 
-// TestQuarantineCutsTheHostOffAndDoesNotLockIt guards that the cut-off
-// works at once and can be lifted.
-//
-// The test runs on a test fleet host and restores it at the end: a host
-// left in quarantine would topple all the remaining tests.
+// TestQuarantineCutsTheHostOffAndDoesNotLockIt guards that the cut-off works
+// at once and can be lifted.
 func TestQuarantineCutsTheHostOffAndDoesNotLockIt(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("rhel")
@@ -248,9 +241,7 @@ func TestQuarantineCutsTheHostOffAndDoesNotLockIt(t *testing.T) {
 	t.Cleanup(func() {
 		h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/quarantine/release",
 			map[string]any{"reason": "end of the test"}, nil, http.StatusOK)
-		// The agent comes back only after its backoff. Without waiting the
-		// next tests find the host offline and fall over for a reason that
-		// has nothing to do with what they check.
+		// The agent comes back only after its backoff.
 		h.awaitConnection(host.ID, time.Minute)
 	})
 
@@ -292,9 +283,9 @@ func TestDecommissionRequiresTypingTheName(t *testing.T) {
 	// checked. Full decommissioning has its own test on a synthetic machine.
 }
 
-// TestDecommissionedHostDoesNotComeBackWithAToken guards that a loss of
-// trust is a panel decision, not a state that can be undone with a token on
-// the host.
+// TestDecommissionedHostDoesNotComeBackWithAToken guards that a loss of trust
+// is a panel decision, not a state that can be undone with a token on the
+// host.
 func TestDecommissionedHostDoesNotComeBackWithAToken(t *testing.T) {
 	h := newHarness(t)
 	// The synthetic machine is not in the fleet, so it can really be
@@ -356,9 +347,8 @@ func TestDecommissionedHostDoesNotComeBackWithAToken(t *testing.T) {
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 		map[string]any{"action": "inventory.refresh", "reason": "return attempt"}, nil, http.StatusConflict)
 
-	// The machine itself is held back: a "new host" token does not fit it
-	// for the retention period. The refusal reaches the order, with the
-	// reason that names the retired host rather than a duplicate.
+	// The machine itself is held back: a "new host" token does not fit it for the
+	// retention period.
 	var order orderView
 	h.do(http.MethodPost, "/api/v1/enrollment-requests", map[string]any{
 		"description": "retired machine comes back", "site": "lab", "environment": "test",
@@ -390,9 +380,8 @@ func TestDecommissionedHostDoesNotComeBackWithAToken(t *testing.T) {
 }
 
 // TestIdentityRecoveryPutsTheHostIntoRecovery guards the state between the
-// recovery order and the first session of the new certificate: the host
-// takes no operation, like a quarantined one, and the panel says which "no"
-// this is.
+// recovery order and the first session of the new certificate: the host takes
+// no operation, like a quarantined one, and the panel says which "no" this is.
 func TestIdentityRecoveryPutsTheHostIntoRecovery(t *testing.T) {
 	h := newHarness(t)
 	host := h.enrollSyntheticHost(t)
@@ -427,9 +416,9 @@ func TestIdentityRecoveryPutsTheHostIntoRecovery(t *testing.T) {
 		t.Errorf("code = %q, expected host_recovery", denial.Code)
 	}
 
-	// A second order while the first is pending changes nothing about the
-	// state; revoking both leaves the host nothing to wait for, and it
-	// comes back to active with the old key still its identity.
+	// A second order while the first is pending changes nothing about the state;
+	// revoking both leaves the host nothing to wait for, and it comes back to
+	// active with the old key still its identity.
 	var second orderView
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/identity-recovery", map[string]any{
 		"reason": "planned key replacement, second try", "ttl_seconds": 600,
@@ -467,11 +456,6 @@ func TestIdentityRecoveryPutsTheHostIntoRecovery(t *testing.T) {
 
 // TestInstallationProgressDescribesTheSteps guards that the installation
 // screen gets the truth about what the host has already done.
-//
-// The steps are separate because each fails for a different reason: the
-// token may expire, the certificate may be rejected on a CSR error, the
-// session may not get through a firewall, and the inventory may not arrive
-// when the agent lacks a capability.
 func TestInstallationProgressDescribesTheSteps(t *testing.T) {
 	h := newHarness(t)
 	var created orderView
@@ -495,8 +479,8 @@ func TestInstallationProgressDescribesTheSteps(t *testing.T) {
 	}
 
 	// The synthetic machine enrolls and stops there: it neither connects a
-	// session nor sends an inventory, so the first two steps are to be done
-	// and the next two still waiting.
+	// session nor sends an inventory, so the first two steps are to be done and
+	// the next two still waiting.
 	host := h.enrollSyntheticHostWithToken(t, created.Token)
 	var after orderView
 	h.get("/api/v1/enrollment-requests/"+created.ID, &after)
@@ -519,13 +503,8 @@ func TestInstallationProgressDescribesTheSteps(t *testing.T) {
 }
 
 // TestAgentReplacementEndsWithTheHostComingBack guards the property this
-// operation exists separately for in the first place: success is a host
-// that came back with the expected version, not the exit status of the
-// package manager.
-//
-// The agent replaces itself, so the process accounting for the job dies
-// halfway. If the panel waited for its result, every replacement would end
-// with a timeout - also when the host came back healthy.
+// operation exists separately for in the first place: success is a host that
+// came back with the expected version, not the exit status of the package
 func TestAgentReplacementEndsWithTheHostComingBack(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -535,10 +514,7 @@ func TestAgentReplacementEndsWithTheHostComingBack(t *testing.T) {
 	}
 	h.get("/api/v1/hosts/"+host.ID, &before)
 	// The target comes from the test fleet repository: it must be there,
-	// otherwise the package manager has nothing to install. By default it
-	// is the newest version - a test that moved the host back to an old
-	// release would leave the fleet on code from before the change and
-	// could not be repeated.
+	// otherwise the package manager has nothing to install.
 	target := os.Getenv("FLOTESTRO_TEST_AGENT_VERSION")
 	if target == "" {
 		target = h.newestAgentVersion()
@@ -554,17 +530,15 @@ func TestAgentReplacementEndsWithTheHostComingBack(t *testing.T) {
 	if job.ID == "" {
 		t.Fatal("no agent replacement job was created")
 	}
-	// An agent replacement is a high-risk operation: it cuts the host off
-	// from management for the duration of the restart, so it requires
-	// approval.
+	// An agent replacement is a high-risk operation: it cuts the host off from
+	// management for the duration of the restart, so it requires approval.
 	if !job.RequiresApproval {
 		t.Fatal("the agent replacement requires no approval")
 	}
 	job = h.approve(job.ID, job.PayloadHash)
 
-	// The replacement takes a while: the package, the service restart and
-	// the session coming back. The panel decides only after a Hello with
-	// the new version.
+	// The replacement takes a while: the package, the service restart and the
+	// session coming back.
 	deadline := time.Now().Add(4 * time.Minute)
 	var state jobView
 	for time.Now().Before(deadline) {
@@ -588,14 +562,8 @@ func TestAgentReplacementEndsWithTheHostComingBack(t *testing.T) {
 	h.awaitConnection(host.ID, time.Minute)
 }
 
-// newestAgentVersion reads the highest version of the agent package from
-// the test fleet repository.
-//
-// The version is not guessed from a constant in the test: the lab
-// repository grows with every release, and a hard-coded version would move
-// the host back the further the longer the project lives. No answer ends
-// the test with a skip and a reason - replacing the agent with a version
-// the repository does not have is not a test.
+// newestAgentVersion reads the highest version of the agent package from the
+// test fleet repository.
 func (h *harness) newestAgentVersion() string {
 	h.t.Helper()
 	address := envOr("FLOTESTRO_TEST_REPO", defaultRepo)
@@ -631,10 +599,9 @@ func (h *harness) newestAgentVersion() string {
 	return newest
 }
 
-// TestRevokedHostIsNotReleasedWithoutRecovery guards that lifting a
-// quarantine imposed with a revocation does not pretend to bring the host
-// back: without a live certificate the host cannot connect, and its return
-// is identity recovery.
+// TestRevokedHostIsNotReleasedWithoutRecovery guards that lifting a quarantine
+// imposed with a revocation does not pretend to bring the host back: without a
+// live certificate the host cannot connect, and its return is identity
 func TestRevokedHostIsNotReleasedWithoutRecovery(t *testing.T) {
 	h := newHarness(t)
 	host := h.enrollSyntheticHost(t)
@@ -675,10 +642,9 @@ func TestRevokedHostIsNotReleasedWithoutRecovery(t *testing.T) {
 		map[string]any{"reason": "again"}, nil, http.StatusBadRequest)
 }
 
-// TestEnrollmentOrderIsIdempotent guards the contract an automation relies
-// on: the same order under the same key returns the order already placed,
-// without a second token - and without repeating the token, which was
-// shown once.
+// TestEnrollmentOrderIsIdempotent guards the contract an automation relies on:
+// the same order under the same key returns the order already placed, without
+// a second token - and without repeating the token, which was shown once.
 func TestEnrollmentOrderIsIdempotent(t *testing.T) {
 	h := newHarness(t)
 	key := uuid.NewString()
@@ -714,9 +680,8 @@ func TestEnrollmentOrderIsIdempotent(t *testing.T) {
 }
 
 // TestInstallationProfileNamesTheTrust guards that the profile gives a host
-// everything it needs before it holds a token: the addresses to connect
-// to, in a configuration the agent reads as it is, and the CA with a
-// fingerprint the operator can compare on the host.
+// everything it needs before it holds a token: the addresses to connect to, in
+// a configuration the agent reads as it is, and the CA with a fingerprint the
 func TestInstallationProfileNamesTheTrust(t *testing.T) {
 	h := newHarness(t)
 	var profile profileView
@@ -767,9 +732,9 @@ func TestInstallationProfileNamesTheTrust(t *testing.T) {
 		uuid.NewString(), nil, nil, http.StatusNotFound)
 }
 
-// TestOrderCarriesItsConfiguration guards that an order points at its
-// ready configuration, and that the configuration repeats no token: it can
-// be fetched as often as the installation needs, the token cannot.
+// TestOrderCarriesItsConfiguration guards that an order points at its ready
+// configuration, and that the configuration repeats no token: it can be
+// fetched as often as the installation needs, the token cannot.
 func TestOrderCarriesItsConfiguration(t *testing.T) {
 	h := newHarness(t)
 	var created orderView
@@ -798,10 +763,8 @@ func TestOrderCarriesItsConfiguration(t *testing.T) {
 	}
 }
 
-// TestRevokedOrderNamesTheRefusal guards that the installation screen
-// learns why a host did not get in. The agent gets a uniform answer, so
-// that tokens cannot be probed; the operator who placed the order sees the
-// reason on the order.
+// TestRevokedOrderNamesTheRefusal guards that the installation screen learns
+// why a host did not get in.
 func TestRevokedOrderNamesTheRefusal(t *testing.T) {
 	h := newHarness(t)
 	var created orderView
@@ -841,8 +804,7 @@ func TestRevokedOrderNamesTheRefusal(t *testing.T) {
 }
 
 // enrollmentAttemptStatus makes one enrollment attempt with a token and
-// returns the HTTP status alone. The lifecycle helper fails the test on a
-// refusal; here the refusal is the point.
+// returns the HTTP status alone.
 func enrollmentAttemptStatus(t *testing.T, token string) int {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -896,12 +858,8 @@ func enrollmentAttemptStatus(t *testing.T, token string) int {
 }
 
 // TestBatchTokenNeedsItsOwnPermission guards the rule of the lifecycle
-// chapter: a token good for many machines is a standing door, and opening
-// it is a right on top of inviting one host. The operator of a site orders
-// a token per host; a pool of uses is refused with the permission named,
-// so what is missing is a right, not a reason or a session. The
-// administrator holds the right and, with the reason the step-up asks for,
-// gets the pool.
+// chapter: a token good for many machines is a standing door, and opening it
+// is a right on top of inviting one host.
 func TestBatchTokenNeedsItsOwnPermission(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")

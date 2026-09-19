@@ -15,21 +15,12 @@ import (
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 )
 
-// The readiness criterion of the security document: a relay restarted in
-// the middle of the work loses no result. The relay keeps what it carries
-// in a spool on disk and deletes a record only when the panel says the
-// transaction that consumed it committed, so a restart is a pause and not
-// a loss - and the redelivery that follows is acknowledged rather than
-// recorded as a replay on the host.
-//
-// The host of this test is synthetic: it enrols, opens a session through
-// the real relay of the laboratory, takes a task and answers it. What is
-// real is the relay - the process on the Ubuntu machine - and the path the
-// answer takes through it.
+// The readiness criterion of the security document: a relay restarted in the
+// middle of the work loses no result.
 
-// TestARelayRestartLosesNoResult restarts the relay through the panel
-// while a host connected through it holds a task, and asserts the result
-// still settles the job exactly once.
+// TestARelayRestartLosesNoResult restarts the relay through the panel while a
+// host connected through it holds a task, and asserts the result still settles
+// the job exactly once.
 func TestARelayRestartLosesNoResult(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -40,9 +31,9 @@ func TestARelayRestartLosesNoResult(t *testing.T) {
 	} else {
 		_ = conn.Close()
 	}
-	// The machine the relay runs on takes the order to restart it; without
-	// it the test would need a shell on that host, which the product does
-	// not give anybody.
+	// The machine the relay runs on takes the order to restart it; without it the
+	// test would need a shell on that host, which the product does not give
+	// anybody.
 	relayHost := h.hostByName(relayHostName(t, h))
 	host, identity := h.enrollSyntheticHostWithIdentity(t)
 	pool := h.database(ctx)
@@ -85,15 +76,11 @@ func TestARelayRestartLosesNoResult(t *testing.T) {
 		t.Fatalf("the relay was not restarted: %s %s", final.State, final.ResultMessage)
 	}
 
-	// The host answers. Its first session died with the relay, so it opens
-	// another one - what a real agent does - and reports the result of the
-	// task it was given before the restart.
+	// The host answers.
 	session.close()
-	// A relay that has just been restarted is not listening the instant
-	// the job that restarted it reports success: the unit is started, the
-	// process opens its listener a moment later, and a real agent retries
-	// exactly like this. What the test is about is that the result still
-	// settles, not how fast the socket comes back.
+	// A relay that has just been restarted is not listening the instant the job
+	// that restarted it reports success: the unit is started, the process opens
+	// its listener a moment later, and a real agent retries exactly like this.
 	var again *syntheticSession
 	deadline := time.Now().Add(90 * time.Second)
 	for {
@@ -124,9 +111,8 @@ func TestARelayRestartLosesNoResult(t *testing.T) {
 		t.Fatalf("the result did not settle the job across the relay restart: %s %s %s",
 			settled.State, settled.ResultErrorCode, settled.ResultMessage)
 	}
-	// Exactly once: a resend after a reconnect must not write a second
-	// attempt, and the relay's redelivery must not be recorded as a replay
-	// on the host.
+	// Exactly once: a resend after a reconnect must not write a second attempt,
+	// and the relay's redelivery must not be recorded as a replay on the host.
 	attempts := h.attempts(job.ID)
 	if len(attempts) != 1 {
 		t.Errorf("the job carries %d attempts after one delivery and one answer", len(attempts))
@@ -136,10 +122,8 @@ func TestARelayRestartLosesNoResult(t *testing.T) {
 	}
 }
 
-// relayHostName finds the machine the relay runs on: the one whose
-// hostname the laboratory gave it. The test says so rather than guessing
-// silently, because a fleet where the relay moved would otherwise restart
-// something else.
+// relayHostName finds the machine the relay runs on: the one whose hostname
+// the laboratory gave it.
 func relayHostName(t *testing.T, h *harness) string {
 	t.Helper()
 	name := envOr("FLOTESTRO_TEST_RELAY_HOST", "agent-ubuntu")
@@ -153,8 +137,7 @@ func relayHostName(t *testing.T, h *harness) string {
 }
 
 // openRelayedAgent opens a session at the relay with the host's own
-// certificate. The relay attests the certificate to the panel; the panel
-// decides as it would for any host of that site.
+// certificate.
 func openRelayedAgent(ctx context.Context, relayURL string, identity tls.Certificate) (*syntheticSession, error) {
 	return openSyntheticSession(ctx, relayURL, identity, uuid.NewString())
 }

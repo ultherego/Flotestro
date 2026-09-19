@@ -8,9 +8,9 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/backup"
 )
 
-// planningAdapter answers with the repository state a case wants and
-// counts nothing else: the binding of a plan is decided by the state the
-// host reads again, not by the tool that reads it.
+// planningAdapter answers with the repository state a case wants and counts
+// nothing else: the binding of a plan is decided by the state the host reads
+// again, not by the tool that reads it.
 type planningAdapter struct {
 	state backup.State
 	err   error
@@ -45,10 +45,7 @@ func backupOrder() backup.Order {
 	}}
 }
 
-// The digest of backup.plan binds the copy, the check and the restore: the
-// host computes the plan again under the guard of the family right before
-// the change, and a digest that no longer describes the host is refused
-// with stale_plan. Nothing runs on a refusal.
+// The digest of backup.
 func TestABackupIsBoundToThePlanItWasApprovedWith(t *testing.T) {
 	ctx := context.Background()
 	order := backupOrder()
@@ -78,17 +75,16 @@ func TestABackupIsBoundToThePlanItWasApprovedWith(t *testing.T) {
 		t.Error("the digest of a copy let a check through")
 	}
 
-	// The single-host convenience that is left: an order without a digest
-	// is the operator ordering a copy from the host's own screen, and it
-	// is not refused. Every panel plan screen and every campaign binds one.
+	// The single-host convenience that is left: an order without a digest is the
+	// operator ordering a copy from the host's own screen, and it is not refused.
 	if refusal := checkBackupPlanDigest(ctx, adapter, order, &helperv1.BackupRequest{}, false); refusal != nil {
 		t.Errorf("an order without a plan was refused: %s", refusal.GetErrorCode())
 	}
 }
 
 // A repository that answers differently than at the planning gives another
-// digest: the operator approved unpacking out of the repository as it was,
-// and a repository with another copy in it is not that repository.
+// digest: the operator approved unpacking out of the repository as it was, and
+// a repository with another copy in it is not that repository.
 func TestARepositoryThatMovedRefusesTheApprovedPlan(t *testing.T) {
 	ctx := context.Background()
 	order := backupOrder()

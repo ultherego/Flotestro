@@ -7,10 +7,7 @@ import (
 )
 
 // TestThePackageStatesFromTheDpkgDatabase guards the recognition of the
-// packages that will block every following transaction. The typical case from
-// a fleet: a package unpacked but not configured, because its configuration
-// question has no answer. As long as it stands like that, the upgrades on this
-// host do not go through - also when there is nothing to upgrade.
+// packages that will block every following transaction.
 func TestThePackageStatesFromTheDpkgDatabase(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "status")
 	content := `Package: bash

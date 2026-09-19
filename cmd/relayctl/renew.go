@@ -23,13 +23,6 @@ import (
 )
 
 // renewCommand forces a renewal of the certificate of the relay.
-//
-// The daemon renews on its own when a third of the validity is left; this
-// is for the moment the operator does not want to wait - after a rotation
-// of the CA, or when the key is to be replaced today. The path is the same
-// one the daemon takes: the current certificate proves the identity over
-// mTLS to the relay service of the centre, the enrollment token takes no
-// part, and the names come from the registry of the panel.
 func renewCommand(args []string, out, errOut io.Writer) int {
 	flags := flag.NewFlagSet("renew", flag.ContinueOnError)
 	flags.SetOutput(errOut)
@@ -50,8 +43,8 @@ func renewCommand(args []string, out, errOut io.Writer) int {
 	r := renewal{
 		StateDir: cfg.Relay.StateDir,
 		// Every gateway of the configuration, in its order of priority: the
-		// certificate of a relay carries a whole site, and its renewal must
-		// not depend on one instance of the centre being up.
+		// certificate of a relay carries a whole site, and its renewal must not
+		// depend on one instance of the centre being up.
 		Gateways: cfg.Upstream.GatewayURLs,
 		Names:    cfg.Relay.AdvertisedNames,
 		Now:      time.Now,
@@ -75,9 +68,6 @@ type renewal struct {
 }
 
 // run carries the renewal out.
-//
-// The exit codes follow the tool: 0 renewed, 1 a problem to fix, 2 a
-// refusal of the request itself - too soon after the previous one.
 func (r renewal) run(ctx context.Context, out, errOut io.Writer) int {
 	now := r.Now()
 	throttle := ctl.Throttle{StateDir: r.StateDir}
@@ -107,17 +97,17 @@ func (r renewal) run(ctx context.Context, out, errOut io.Writer) int {
 		return 1
 	}
 
-	// The attempt is recorded before it is made: a refusal by the gateway
-	// counts as much as a success, and a script must not be able to hammer
-	// the gateway by retrying a failure.
+	// The attempt is recorded before it is made: a refusal by the gateway counts
+	// as much as a success, and a script must not be able to hammer the gateway
+	// by retrying a failure.
 	if err := throttle.Record(now); err != nil {
 		fmt.Fprintf(errOut, "the renewal record was not written: %v\n", err)
 		return 1
 	}
 
-	// The addresses of the centre are tried in order until one answers, and
-	// the one that did is printed: a site whose relay renewed against the
-	// standby is a fact the operator reads here.
+	// The addresses of the centre are tried in order until one answers, and the
+	// one that did is printed: a site whose relay renewed against the standby is
+	// a fact the operator reads here.
 	var renewed *identitystore.Identity
 	answered, err := endpoints.New(r.Gateways, 0, 0).Try(ctx,
 		func(ctx context.Context, gatewayURL string) error {
@@ -135,18 +125,15 @@ func (r renewal) run(ctx context.Context, out, errOut io.Writer) int {
 	fmt.Fprintf(out, "Renewed:      relay/%s\n", renewed.HostID)
 	fmt.Fprintf(out, "Centre:       %s\n", answered)
 	fmt.Fprintf(out, "Certificate:  valid until %s\n", renewed.NotAfter.UTC().Format(time.RFC3339))
-	// The daemon has no local channel to be told about the new generation,
-	// and the previous certificate stays valid until its term - so the
-	// sessions of the site go on, and the switch happens at the next start.
+	// The daemon has no local channel to be told about the new generation, and
+	// the previous certificate stays valid until its term - so the sessions of
+	// the site go on, and the switch happens at the next start.
 	fmt.Fprintln(out, "The running relay keeps the previous certificate; to switch: systemctl restart flotestro-relay.service")
 	return 0
 }
 
 // renewNow exchanges a new key pair for a certificate and writes it
 // atomically, the way the daemon does.
-//
-// The names are a wish: the centre issues what it has in the registry, and
-// a divergence shows in the panel rather than here.
 func renewNow(ctx context.Context, stateDir, gatewayURL string, names []string) (*identitystore.Identity, error) {
 	store := identitystore.New(stateDir)
 	current, err := store.Current()
@@ -186,8 +173,6 @@ func renewNow(ctx context.Context, stateDir, gatewayURL string, names []string) 
 	}
 
 	// The trust bundle changes only at a rotation of the CA of the fleet.
-	// When the centre did not send one, the one in force goes into the
-	// generation: a generation has to be a complete set.
 	bundle := response.Msg.GetClientCaBundlePem()
 	if len(bundle) == 0 {
 		bundle = current.TrustPEM
@@ -201,9 +186,8 @@ func renewNow(ctx context.Context, stateDir, gatewayURL string, names []string) 
 		TrustPEM:       bundle,
 	})
 	if err != nil {
-		// A rejected generation does not touch what the relay works with:
-		// better to stay on the old certificate than to be left with half
-		// a pair.
+		// A rejected generation does not touch what the relay works with: better to
+		// stay on the old certificate than to be left with half a pair.
 		return nil, fmt.Errorf("the new identity was rejected: %w", err)
 	}
 	return saved, nil

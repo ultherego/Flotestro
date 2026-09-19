@@ -19,20 +19,14 @@ import (
 // SocketPaths are the places where the engine socket is looked for.
 var SocketPaths = []string{"/run/docker.sock", "/var/run/docker.sock"}
 
-// apiVersion is pinned deliberately. Without pinning the engine answers
-// with the default version, which changes with a Docker update - and then
-// the meaning of the fields being read changes and nobody notices.
+// apiVersion is pinned deliberately.
 const apiVersion = "v1.41"
 
 // ErrUnavailable means an engine that cannot be queried.
 var ErrUnavailable = errors.New("the container engine is unavailable")
 
-// Client talks to the Engine API over a unix socket.
-//
-// The client does not accept an arbitrary path. Every operation has its
-// own method and its own parameters: passing a path from outside would mean
-// any engine API could be called through the helper, and that is
-// equivalent to root.
+// Client talks to the Engine API over a unix socket. The client does not
+// accept an arbitrary path.
 type Client struct {
 	http   *http.Client
 	socket string
@@ -113,9 +107,8 @@ func (c *Client) call(ctx context.Context, method, path string, query url.Values
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<20))
 		return nil
 	}
-	// Engine responses can be big: the image list on a build host can run
-	// to megabytes. The limit protects the memory of the agent and the
-	// helper.
+	// Engine responses can be big: the image list on a build host can run to
+	// megabytes.
 	return json.NewDecoder(io.LimitReader(response.Body, 8<<20)).Decode(out)
 }
 
@@ -123,11 +116,6 @@ func (c *Client) call(ctx context.Context, method, path string, query url.Values
 var errSizeLimit = errors.New("the read size limit was reached")
 
 // stream reads the response line by line and hands each to the callback.
-//
-// It serves the only query that answers with a stream instead of one value:
-// the event log. The byte limit is hard - a host on which something comes
-// up in a loop can produce events faster than the panel can read them. The
-// callback returning false ends the read.
 func (c *Client) stream(ctx context.Context, path string, query url.Values,
 	next func(line []byte) bool, byteLimit int64) error {
 	target := "http://docker/" + apiVersion + path
@@ -250,9 +238,9 @@ func (c *Client) Containers(ctx context.Context, all bool) ([]Container, error) 
 				Destination: mount.Destination, ReadOnly: !mount.RW,
 			})
 		}
-		// Network membership is read from here, not from the network list:
-		// the engine returns an empty container map in the network list, so
-		// every network would look unused.
+		// Network membership is read from here, not from the network list: the
+		// engine returns an empty container map in the network list, so every
+		// network would look unused.
 		for name, network := range entry.NetworkSettings.Networks {
 			container.Networks = append(container.Networks, ContainerNetwork{
 				Name: name, ID: network.NetworkID, IPv4: network.IPAddress,
@@ -268,9 +256,7 @@ func (c *Client) Containers(ctx context.Context, all bool) ([]Container, error) 
 }
 
 // Inspect supplements a container with data the list does not report: the
-// health state and the restart counter. Only the containers for which it
-// matters are queried - a full inspect of the whole list at every cycle
-// would load the host.
+// health state and the restart counter.
 func (c *Client) Inspect(ctx context.Context, id string) (health string, restarts int, err error) {
 	var details struct {
 		RestartCount int `json:"RestartCount"`
@@ -307,9 +293,7 @@ func (c *Client) Images(ctx context.Context) ([]Image, error) {
 		images = append(images, Image{
 			ID: entry.ID, Tags: skipUntagged(entry.RepoTags), Digests: entry.RepoDig,
 			SizeBytes: entry.Size, CreatedAt: time.Unix(entry.Created, 0).UTC(),
-			// The engine returns -1 when the container count was not
-			// computed. Unknown usage must not look like an unused image,
-			// because that is the one that goes under the prune.
+			// The engine returns -1 when the container count was not computed.
 			InUse: entry.Containers != 0,
 		})
 	}
@@ -317,10 +301,6 @@ func (c *Client) Images(ctx context.Context) ([]Image, error) {
 }
 
 // Networks returns the Docker networks.
-//
-// Network usage does not come from here: the engine returns an empty
-// container map in the network list, so every network would look unused.
-// The collector derives it from the container list.
 func (c *Client) Networks(ctx context.Context) ([]Network, error) {
 	var raw []struct {
 		ID         string    `json:"Id"`
@@ -367,9 +347,8 @@ func (c *Client) Networks(ctx context.Context) ([]Network, error) {
 	return networks, nil
 }
 
-// predefinedNetwork says whether the network belongs to the engine. The
-// engine does not allow removing it, so the panel must neither propose nor
-// try that.
+// predefinedNetwork says whether the network belongs to the engine. The engine
+// does not allow removing it, so the panel must neither propose nor try that.
 func predefinedNetwork(name string) bool {
 	switch name {
 	case "bridge", "host", "none":
@@ -379,11 +358,6 @@ func predefinedNetwork(name string) bool {
 }
 
 // Volumes returns the Docker volumes.
-//
-// Usage and size do not come from this query: the engine reports UsageData
-// only with a separate, expensive disk usage computation. The collector
-// derives usage from the container mounts, and the size stays unknown with
-// a stated reason - zero would suggest an empty volume ready to be deleted.
 func (c *Client) Volumes(ctx context.Context) ([]Volume, error) {
 	var response struct {
 		Volumes []struct {
@@ -460,11 +434,6 @@ func composeMembership(labels map[string]string) *ComposeMembership {
 }
 
 // labelsWithoutSecrets filters out labels whose name suggests a credential.
-//
-// The engine does not distinguish a plain label from a secret one, so it is
-// done by name. Environment variable values are not collected at all - that
-// is where passwords go, and the inventory is durable and visible more
-// widely than the host itself.
 func labelsWithoutSecrets(labels map[string]string) map[string]string {
 	if len(labels) == 0 {
 		return nil

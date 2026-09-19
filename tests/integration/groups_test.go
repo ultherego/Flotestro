@@ -52,9 +52,9 @@ type groupPreviewView struct {
 	Selector string   `json:"selector"`
 }
 
-// setTags replaces the tags of a host and puts the previous ones back when
-// the test ends: the lab fleet is shared, and a tag left behind would put
-// the host into the next test's campaign.
+// setTags replaces the tags of a host and puts the previous ones back when the
+// test ends: the lab fleet is shared, and a tag left behind would put the host
+// into the next test's campaign.
 func (h *harness) setTags(hostID string, tags []string) taggedHostView {
 	h.t.Helper()
 	var before taggedHostView
@@ -131,9 +131,9 @@ func sameIDs(a, b []string) bool {
 	return true
 }
 
-// TestHostTagsAreSetAndFoundByTag: a tag recorded on a host comes back in
-// its record, sorted and without repeats, and the host list finds the host
-// by the tag and by a search over the tag's text.
+// TestHostTagsAreSetAndFoundByTag: a tag recorded on a host comes back in its
+// record, sorted and without repeats, and the host list finds the host by the
+// tag and by a search over the tag's text.
 func TestHostTagsAreSetAndFoundByTag(t *testing.T) {
 	h := newHarness(t)
 	lab := h.hosts()
@@ -266,9 +266,9 @@ func TestADynamicGroupResolvesByTagAndByOSFamily(t *testing.T) {
 	}
 }
 
-// TestACampaignWithAnExpressionSelectorMaterialisesTheTaggedHosts: the
-// typed selector is compiled into the host query, so the snapshot holds
-// exactly the hosts the tag names.
+// TestACampaignWithAnExpressionSelectorMaterialisesTheTaggedHosts: the typed
+// selector is compiled into the host query, so the snapshot holds exactly the
+// hosts the tag names.
 func TestACampaignWithAnExpressionSelectorMaterialisesTheTaggedHosts(t *testing.T) {
 	h := newHarness(t)
 	lab := h.hosts()
@@ -314,9 +314,9 @@ func TestACampaignWithAnExpressionSelectorMaterialisesTheTaggedHosts(t *testing.
 	}), nil, http.StatusBadRequest)
 }
 
-// TestAnExcludedHostEndsExcludedWithTheReason: a host left out by name
-// stays in the snapshot, closed as excluded, with the reason and the
-// author in its message - and without a reason the order is refused.
+// TestAnExcludedHostEndsExcludedWithTheReason: a host left out by name stays
+// in the snapshot, closed as excluded, with the reason and the author in its
+// message - and without a reason the order is refused.
 func TestAnExcludedHostEndsExcludedWithTheReason(t *testing.T) {
 	h := newHarness(t)
 	lab := h.hosts()
@@ -359,9 +359,9 @@ func TestAnExcludedHostEndsExcludedWithTheReason(t *testing.T) {
 	}
 }
 
-// TestTheSelectorRefusesACyclicGroup: a group that, through another
-// group, refers to itself has no answer and is refused at the edit that
-// would close the cycle - not at the first campaign that tries it.
+// TestTheSelectorRefusesACyclicGroup: a group that, through another group,
+// refers to itself has no answer and is refused at the edit that would close
+// the cycle - not at the first campaign that tries it.
 func TestTheSelectorRefusesACyclicGroup(t *testing.T) {
 	h := newHarness(t)
 	first := h.createGroup(map[string]any{
@@ -388,11 +388,9 @@ func TestTheSelectorRefusesACyclicGroup(t *testing.T) {
 	}
 }
 
-// TestAGroupIsEditedInPlaceAndKnowsWhoNamesIt: a group's name, description
-// and selector change through one write that carries the tag the group
-// was read with - a stale tag is refused - and the group read back says
-// which campaign names it, so a typo is a correction, not a delete and a
-// recreation that would orphan every selector naming the old record.
+// TestAGroupIsEditedInPlaceAndKnowsWhoNamesIt: a group's name, description and
+// selector change through one write that carries the tag the group was read
+// with - a stale tag is refused - and the group read back says which campaign
 func TestAGroupIsEditedInPlaceAndKnowsWhoNamesIt(t *testing.T) {
 	h := newHarness(t)
 	lab := h.hosts()

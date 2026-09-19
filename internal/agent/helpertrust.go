@@ -11,16 +11,14 @@ import (
 )
 
 // The session and the renewal talk to the root helper about trust - the
-// panel's capability keys go down to it, its capability mode comes up to
-// the panel - through the one helper client the executor was built with.
-// The executor registers it, because the executor is the only place that
-// knows the socket; the session has no other handle on the helper.
+// panel's capability keys go down to it, its capability mode comes up to the
+// panel - through the one helper client the executor was built with.
 var (
 	sessionHelper       atomic.Pointer[HelperClient]
 	helperProbeDisabled atomic.Bool
-	// probeFailedAt is when the helper last failed to answer the question
-	// about its mode; the question is not repeated for a while, so a host
-	// without a helper does not stall every inventory cycle on it.
+	// probeFailedAt is when the helper last failed to answer the question about
+	// its mode; the question is not repeated for a while, so a host without a
+	// helper does not stall every inventory cycle on it.
 	probeFailedAt atomic.Int64
 )
 
@@ -36,12 +34,8 @@ func registerSessionHelper(client *HelperClient) {
 	}
 }
 
-// helperCapabilityMode is what the helper on this host does with a
-// capability: observe, prefer or enforce. The mode comes with every answer
-// of the helper; before the first answer the helper is asked once, with a
-// request that runs nothing. A host in read-only mode never wakes the
-// helper, and a host whose helper does not answer reports an unknown,
-// which is not a helper without the check.
+// helperCapabilityMode is what the helper on this host does with a capability:
+// observe, prefer or enforce.
 func helperCapabilityMode(ctx context.Context) string {
 	client := sessionHelper.Load()
 	if client == nil {
@@ -63,14 +57,7 @@ func helperCapabilityMode(ctx context.Context) string {
 	return mode
 }
 
-// deliverHelperTrust hands the panel's trust bundle to the helper. The
-// bundle comes with the session configuration, the enrollment and the
-// renewal, so a rotated key reaches the helper at the next connection at
-// the latest. A helper from before the bundle is logged once as such; a
-// refused bundle is logged as a refusal, because a helper that trusts
-// another panel than the one this agent talks to is a host the operator
-// has to look at - and one flotestro-agentctl helper-trust reset, run as
-// root, starts afresh when the host was deliberately re-enrolled.
+// deliverHelperTrust hands the panel's trust bundle to the helper.
 func deliverHelperTrust(ctx context.Context, bundle *helperv1.HelperTrustBundle, log *slog.Logger) {
 	if bundle == nil || helperProbeDisabled.Load() {
 		return

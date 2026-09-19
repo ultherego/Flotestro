@@ -41,11 +41,8 @@ func named(report ReadinessReport, code string) bool {
 	return false
 }
 
-// TestLivenessSurvivesAnOutageOfTheCentre is the whole point of two
-// answers instead of one. A relay whose link to the centre is down is
-// exactly the relay that must keep running: it holds the spool of the
-// site, and a restart throws away every result waiting in it. Liveness
-// stays true and says the link is down; readiness turns and names it.
+// TestLivenessSurvivesAnOutageOfTheCentre is the whole point of two answers
+// instead of one.
 func TestLivenessSurvivesAnOutageOfTheCentre(t *testing.T) {
 	relay := newTestRelay(t, spool.Options{})
 	// The link is down and the spool holds what the site produced
@@ -80,10 +77,9 @@ func TestLivenessSurvivesAnOutageOfTheCentre(t *testing.T) {
 	}
 }
 
-// TestReadinessIsTrueOnlyWhenTheRelayCanCarryWork guards the positive
-// answer: the link is up, the spool is inside its bound and the
-// certificate is valid, so the relay takes work and the document's
-// condition for a restart without a loss holds as well.
+// TestReadinessIsTrueOnlyWhenTheRelayCanCarryWork guards the positive answer:
+// the link is up, the spool is inside its bound and the certificate is valid,
+// so the relay takes work and the document's condition for a restart without a
 func TestReadinessIsTrueOnlyWhenTheRelayCanCarryWork(t *testing.T) {
 	relay := newTestRelay(t, spool.Options{})
 	relay.upstream.Store(true)
@@ -105,14 +101,12 @@ func TestReadinessIsTrueOnlyWhenTheRelayCanCarryWork(t *testing.T) {
 	}
 }
 
-// TestReadinessNamesTheSpoolAndTheCertificate guards the requirement that
-// a readiness answer says which of its questions is false rather than
-// only that something is. An operator reads the codes out of a container
-// that marked itself unready and has nothing else to go on.
+// TestReadinessNamesTheSpoolAndTheCertificate guards the requirement that a
+// readiness answer says which of its questions is false rather than only that
+// something is.
 func TestReadinessNamesTheSpoolAndTheCertificate(t *testing.T) {
-	// A spool whose reserve begins almost at once: one record puts it in
-	// its reserve, which is the state in which the relay refuses new
-	// sessions.
+	// A spool whose reserve begins almost at once: one record puts it in its
+	// reserve, which is the state in which the relay refuses new sessions.
 	relay := newTestRelay(t, spool.Options{MaxBytes: 4096, CriticalReserveBytes: 4000})
 	relay.upstream.Store(true)
 	if relay.keep("host-1", signed(heartbeat(1), "session-a", 1)) == nil {
@@ -130,17 +124,16 @@ func TestReadinessNamesTheSpoolAndTheCertificate(t *testing.T) {
 	if !named(ready, HealthSpoolCritical) || !named(ready, HealthCertificateExpired) {
 		t.Fatalf("readiness named %v, expected the spool and the certificate", ready.Reasons)
 	}
-	// The link is up, so nothing about it is named: a readiness answer
-	// that blamed the link here would send the operator to the WAN while
-	// the disk is what is full.
+	// The link is up, so nothing about it is named: a readiness answer that
+	// blamed the link here would send the operator to the WAN while the disk is
+	// what is full.
 	if named(ready, HealthUpstreamUnreachable) {
 		t.Fatalf("readiness blamed the link although it is up: %+v", ready)
 	}
 }
 
-// TestAnIdentityWithoutAnEndIsNotReady guards the doctrine: unknown is
-// never zero. A relay that cannot say when its certificate ends does not
-// report ready on the strength of not knowing.
+// TestAnIdentityWithoutAnEndIsNotReady guards the doctrine: unknown is never
+// zero.
 func TestAnIdentityWithoutAnEndIsNotReady(t *testing.T) {
 	relay := newTestRelay(t, spool.Options{})
 	relay.upstream.Store(true)
@@ -156,9 +149,9 @@ func TestAnIdentityWithoutAnEndIsNotReady(t *testing.T) {
 	}
 }
 
-// TestASpoolThatCannotWriteIsNotReady guards the property behind the
-// durable spool: a relay whose disk stopped taking the writes must not
-// keep collecting the results of the site as though it held them.
+// TestASpoolThatCannotWriteIsNotReady guards the property behind the durable
+// spool: a relay whose disk stopped taking the writes must not keep collecting
+// the results of the site as though it held them.
 func TestASpoolThatCannotWriteIsNotReady(t *testing.T) {
 	check := spoolCheck(Stats{Messages: 2, Bytes: 400, MaxBytes: 4096},
 		errors.New("sync /var/lib/flotestro-relay/spool/segment-1.log: input/output error"))
@@ -179,11 +172,8 @@ func (f failingListener) Accept() (net.Conn, error) { return nil, f.err }
 func (f failingListener) Close() error              { return nil }
 func (f failingListener) Addr() net.Addr            { return &net.TCPAddr{Port: 8453} }
 
-// TestLivenessTurnsWhenTheListenerStopsAccepting guards the other half of
-// the liveness answer. A relay that no longer takes the connections of
-// its site is the wedged process a runtime is meant to restart - and a
-// dial of its socket would say nothing, because the kernel accepts into
-// the backlog whether or not the process still calls Accept.
+// TestLivenessTurnsWhenTheListenerStopsAccepting guards the other half of the
+// liveness answer.
 func TestLivenessTurnsWhenTheListenerStopsAccepting(t *testing.T) {
 	relay := newTestRelay(t, spool.Options{})
 	relay.upstream.Store(true)
@@ -216,9 +206,9 @@ func TestLivenessTurnsWhenTheListenerStopsAccepting(t *testing.T) {
 	}
 }
 
-// TestAFailedAcceptThatPassesIsNotAWedgedRelay guards the grace period:
-// a single refused accept under load is not a reason to throw away the
-// spool of a site.
+// TestAFailedAcceptThatPassesIsNotAWedgedRelay guards the grace period: a
+// single refused accept under load is not a reason to throw away the spool of
+// a site.
 func TestAFailedAcceptThatPassesIsNotAWedgedRelay(t *testing.T) {
 	relay := newTestRelay(t, spool.Options{})
 	watched := WatchListener(failingListener{err: errors.New("too many open files")})
@@ -232,8 +222,8 @@ func TestAFailedAcceptThatPassesIsNotAWedgedRelay(t *testing.T) {
 }
 
 // TestTheHealthListenerAnswersTwoQuestionsAndNothingElse guards what the
-// listener is: it carries no client certificate, so it answers the two
-// health questions and refuses to be a second way into the relay.
+// listener is: it carries no client certificate, so it answers the two health
+// questions and refuses to be a second way into the relay.
 func TestTheHealthListenerAnswersTwoQuestionsAndNothingElse(t *testing.T) {
 	relay := newTestRelay(t, spool.Options{})
 	health := NewHealth(HealthOptions{Relay: relay, Identity: validIdentity})

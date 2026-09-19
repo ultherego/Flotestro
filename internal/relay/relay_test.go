@@ -24,9 +24,8 @@ func heartbeat(mark int64) *agentv1.AgentMessage {
 	}
 }
 
-// signed attaches an envelope of the given session and sequence, as a
-// host behind a relay does. The signature is not checked here: the relay
-// carries the envelope, it does not verify it.
+// signed attaches an envelope of the given session and sequence, as a host
+// behind a relay does.
 func signed(message *agentv1.AgentMessage, session string, sequence uint64) *agentv1.AgentMessage {
 	message.Envelope = &agentv1.RelayedEnvelope{
 		SchemaVersion: 2, HostId: "host-1", SessionId: session, Sequence: sequence,
@@ -35,8 +34,7 @@ func signed(message *agentv1.AgentMessage, session string, sequence uint64) *age
 }
 
 // newTestRelay assembles a relay over a temporary spool. It connects to
-// nothing: the tests below drive the spool through the relay's own
-// methods.
+// nothing: the tests below drive the spool through the relay's own methods.
 func newTestRelay(t *testing.T, options spool.Options) *Relay {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -65,10 +63,8 @@ func TestARelayWithoutASpoolDoesNotComeUp(t *testing.T) {
 	}
 }
 
-// TestTheSpoolHasALimit guards the requirement of the document: the spool
-// of a relay is bounded. A relay in a cut-off site must not grow until the
-// disk is exhausted, because that takes from the site what works locally
-// as well.
+// TestTheSpoolHasALimit guards the requirement of the document: the spool of a
+// relay is bounded.
 func TestTheSpoolHasALimit(t *testing.T) {
 	relay := newTestRelay(t, spool.Options{MaxBytes: 2000, CriticalReserveBytes: 500})
 
@@ -97,8 +93,7 @@ func TestTheSpoolHasALimit(t *testing.T) {
 }
 
 // TestTheSpoolSendsBackInTheSessionOfTheHost checks that the messages come
-// back to the right session. The centre binds a stream to one identity, so the
-// result of one host must not go in the session of another.
+// back to the right session.
 func TestTheSpoolSendsBackInTheSessionOfTheHost(t *testing.T) {
 	relay := newTestRelay(t, spool.Options{})
 	for _, entry := range []struct {
@@ -134,10 +129,8 @@ func TestTheSpoolSendsBackInTheSessionOfTheHost(t *testing.T) {
 }
 
 // TestAMessageDisappearsOnlyOnTheAcknowledgement guards the order of the
-// document: a record leaves the spool on the application acknowledgement
-// of the panel, not on a send. A broken link halfway, or a panel that
-// took the bytes and died before the commit, means another attempt
-// rather than a lost result.
+// document: a record leaves the spool on the application acknowledgement of
+// the panel, not on a send.
 func TestAMessageDisappearsOnlyOnTheAcknowledgement(t *testing.T) {
 	relay := newTestRelay(t, spool.Options{})
 	record := relay.keep("host-1", signed(heartbeat(1), "session-a", 4))
@@ -170,9 +163,6 @@ func TestAMessageDisappearsOnlyOnTheAcknowledgement(t *testing.T) {
 
 // TestAJobAfterItsTTLIsNotForwarded answers the requirement from the document:
 // the relay buffers results but does not carry a job out after its TTL.
-// Forwarding an expired job is ordering work nobody is asking for any more -
-// and the host would carry it out, because it does not know it waited on a
-// shelf.
 func TestAJobAfterItsTTLIsNotForwarded(t *testing.T) {
 	overdue := &agentv1.TaskEnvelope{
 		TaskId:    "job-1",
@@ -197,10 +187,9 @@ func TestAJobAfterItsTTLIsNotForwarded(t *testing.T) {
 	}
 }
 
-// TestHelloIsNeverSpooled guards that a session's opening is not carried
-// into another session: the centre rejects a stream that starts
-// otherwise, and a Hello from the spool would close the stream it was
-// sent on.
+// TestHelloIsNeverSpooled guards that a session's opening is not carried into
+// another session: the centre rejects a stream that starts otherwise, and a
+// Hello from the spool would close the stream it was sent on.
 func TestHelloIsNeverSpooled(t *testing.T) {
 	relay := newTestRelay(t, spool.Options{})
 	hello := &agentv1.AgentMessage{Payload: &agentv1.AgentMessage_Hello{Hello: &agentv1.Hello{AgentVersion: "test"}}}

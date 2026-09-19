@@ -22,14 +22,10 @@ import (
 )
 
 // renewalThreshold says when to start renewing: once less than a third of the
-// validity period is left. The certificate of a relay lives seven days, so
-// around two days are left for the retries - rather than the last hours before
-// the expiry, in which a failure of the centre cuts off a whole site.
+// validity period is left.
 const renewalThreshold = 1.0 / 3.0
 
-// The intervals of the checks. The short lifetime of the certificate of a
-// relay calls for looking more often than with an agent, but not for polling
-// in a loop.
+// The intervals of the checks.
 const (
 	minCheckInterval   = time.Minute
 	maxCheckInterval   = time.Hour
@@ -48,17 +44,10 @@ type Identity struct {
 
 // Live holds the current material of a relay and allows swapping it while the
 // relay works.
-//
-// The swap is atomic, because the listener of the relay reaches for the
-// certificate at every TLS handshake. A renewal must not require a restart of
-// the process: a restart tears down the sessions of every agent of the site at
-// once, while a renewal happens regularly and is not an operational event in
-// itself.
 type Live struct {
 	current atomic.Pointer[Identity]
 	// registration says whether the listener is to let connections without a
-	// client certificate in. It is enabled only when the relay mediates in the
-	// registration.
+	// client certificate in.
 	registration atomic.Bool
 }
 
@@ -83,15 +72,7 @@ func (z *Live) Certificate(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 }
 
 // ClientConfiguration returns the settings of the handshake for the agents of
-// the site. The trust set is read at every handshake: after a rotation of the
-// CA of the fleet the relay is to accept the new certificates of the agents
-// without a restart.
-//
-// Whether a client certificate is required depends on whether the relay
-// mediates in the registration as well. A host before its enrollment has
-// nothing to present itself with, so the handshake must not demand one; every
-// RPC then checks the certificate separately and refuses everything but the
-// registration itself without it.
+// the site.
 func (z *Live) ClientConfiguration(*tls.ClientHelloInfo) (*tls.Config, error) {
 	identity := z.current.Load()
 	requirement := tls.RequireAndVerifyClientCert
@@ -115,24 +96,15 @@ func (z *Live) MediatesRegistration(enabled bool) { z.registration.Store(enabled
 type RenewalOptions struct {
 	StateDir   string
 	GatewayURL string
-	// Names are a wish of the relay. The centre issues what it has in its
-	// registry; we send them so that a divergence between the configuration
-	// and the registry is visible in the panel rather than only in rejected
-	// connections of the agents.
+	// Names are a wish of the relay.
 	Names   []string
 	Version string
 	Log     *slog.Logger
-	// AfterRenewal is called once the identity has been swapped. The relay
-	// then refreshes its connection to the centre so that it goes with the new
-	// certificate.
+	// AfterRenewal is called once the identity has been swapped.
 	AfterRenewal func(Identity)
 }
 
 // KeepCertificate renews the certificate of the relay before it expires.
-//
-// A relay without a valid certificate is not only cut off itself: it stops
-// mediating for a whole site. That is why it renews earlier than an agent and
-// tries more often after an error.
 func KeepCertificate(ctx context.Context, live *Live, options RenewalOptions) {
 	log := options.Log
 	if log == nil {
@@ -154,9 +126,9 @@ func KeepCertificate(ctx context.Context, live *Live, options RenewalOptions) {
 					continue
 				}
 			}
-			// The swap first, the notification afterwards: the new handshakes
-			// are to go with the new certificate from the first moment rather
-			// than from the point where somebody finishes handling an event.
+			// The swap first, the notification afterwards: the new handshakes are to go
+			// with the new certificate from the first moment rather than from the point
+			// where somebody finishes handling an event.
 			live.Swap(renewed)
 			log.Info("the certificate of the relay was renewed",
 				"relay_id", renewed.RelayID,
@@ -197,9 +169,8 @@ func checkInterval(identity Identity) time.Duration {
 // period.
 func needsRenewal(identity Identity) bool {
 	if identity.NotAfter.IsZero() {
-		// An unknown date does not mean "still a long way off". An attempt to
-		// renew is cheap, and not knowing the validity is a reason in
-		// itself.
+		// An unknown date does not mean "still a long way off". An attempt to renew
+		// is cheap, and not knowing the validity is a reason in itself.
 		return true
 	}
 	whole := identity.NotAfter.Sub(startOf(identity))
@@ -233,9 +204,8 @@ func renew(ctx context.Context, current_ Identity, options RenewalOptions) (Iden
 		return Identity{}, err
 	}
 
-	// The renewal goes over mTLS with the current certificate: it is the proof
-	// of the identity of the relay. The enrollment token takes no part in
-	// it.
+	// The renewal goes over mTLS with the current certificate: it is the proof of
+	// the identity of the relay.
 	client_ := agentv1connect.NewRelayServiceClient(&http.Client{
 		Timeout: 60 * time.Second,
 		Transport: &http2.Transport{
@@ -257,10 +227,7 @@ func renew(ctx context.Context, current_ Identity, options RenewalOptions) (Iden
 		return Identity{}, fmt.Errorf("the renewal was rejected: %w", err)
 	}
 
-	// The trust bundle changes only at a rotation of the CA of the fleet. When
-	// the centre did not send one, the one in force goes into the generation:
-	// a generation has to be a complete set rather than a key without a named
-	// trust.
+	// The trust bundle changes only at a rotation of the CA of the fleet.
 	bundle := response.Msg.GetClientCaBundlePem()
 	if len(bundle) == 0 {
 		bundle = current_.TrustPEM
@@ -275,9 +242,9 @@ func renew(ctx context.Context, current_ Identity, options RenewalOptions) (Iden
 		TrustPEM:       bundle,
 	})
 	if err != nil {
-		// A rejected generation does not touch what the relay works with:
-		// better to stay on the old certificate and try again in a moment than
-		// to be left with half a pair and cut off a whole site.
+		// A rejected generation does not touch what the relay works with: better to
+		// stay on the old certificate and try again in a moment than to be left with
+		// half a pair and cut off a whole site.
 		return Identity{}, fmt.Errorf("the new identity was rejected: %w", err)
 	}
 	return Identity{

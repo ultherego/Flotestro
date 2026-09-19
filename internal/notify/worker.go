@@ -267,7 +267,7 @@ func (w *Worker) classify(err error, attempt int) Outcome {
 
 // Classify is the classification of the document, without the worker: nothing
 // wrong is delivered; a receiver that answered 408, 429 or 5xx, or that could
-// not be reached at all, gets another attempt until the attempts run out; 401
+// not be reached at all, gets another attempt until the attempts run out; 401.
 func Classify(err error, attempt, maxAttempts int) Outcome {
 	if err == nil {
 		return Outcome{State: StateDelivered}
@@ -315,7 +315,7 @@ func Classify(err error, attempt, maxAttempts int) Outcome {
 
 // Backoff is the pause before the next attempt after the given one:
 // exponential from the base, capped, with full jitter - a uniform draw between
-// nothing and the exponential pause, so a thousand rows that failed together
+// nothing and the exponential pause, so a thousand rows that failed together.
 func Backoff(attempt int, base, ceiling time.Duration, draw float64) time.Duration {
 	if attempt < 1 {
 		attempt = 1

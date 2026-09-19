@@ -14,9 +14,9 @@ import (
 	"github.com/ultherego/flotestro/internal/relays"
 )
 
-// relayView is a relay as the panel shows it: the registry row together
-// with what follows from it - the state, the hosts it attests and what it
-// last reported about itself.
+// relayView is a relay as the panel shows it: the registry row together with
+// what follows from it - the state, the hosts it attests and what it last
+// reported about itself.
 type relayView struct {
 	relays.Relay
 	// State is one of active, silent, never_seen and revoked: the same four
@@ -46,13 +46,6 @@ func (s *Server) relayView(relay relays.Relay, attested int, now time.Time) rela
 }
 
 // handleListRelays lists the relays with their state.
-//
-// The list serves two readers: the installation of a host, which needs a
-// route, and the relay page, which needs to know which site is about to be
-// cut off. Both read it with the right to prepare an installation, narrowed
-// to the sites the reader may prepare installations in. A relay without an
-// environment serves its whole site, so a binding to any environment of the
-// site sees it.
 func (s *Server) handleListRelays(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermHostEnrollRead, "relay")
 	if !ok {
@@ -156,17 +149,11 @@ func (s *Server) handleGetRelay(w http.ResponseWriter, r *http.Request) {
 }
 
 // relayBufferHistoryView is the answer of the buffer history endpoint.
-//
-// A relay page that shows only the last heartbeat answers "how full is the
-// buffer now" and nothing else. This is the rest: the fill against the
-// limit over a window, the items waiting, how many results were dropped
-// between two points, the stretches when the relay had no link upwards,
-// and the points at which the relay restarted.
 type relayBufferHistoryView struct {
 	RelayID string `json:"relay_id"`
-	// Range is the window the points cover, and StepSeconds the distance
-	// between them: a minute for the short windows, a quarter-hour for the
-	// long ones, which come from the rollups.
+	// Range is the window the points cover, and StepSeconds the distance between
+	// them: a minute for the short windows, a quarter-hour for the long ones,
+	// which come from the rollups.
 	Range       string               `json:"range"`
 	StepSeconds int                  `json:"step_seconds"`
 	Rollup      bool                 `json:"rollup"`
@@ -176,20 +163,15 @@ type relayBufferHistoryView struct {
 	Latest *relays.BufferPoint `json:"latest"`
 	// Alerts are the buffer rules firing on this relay right now.
 	Alerts []relays.BufferAlert `json:"alerts"`
-	// RetentionDays says how far back the history can reach at all, so a
-	// window that answers nothing is read as "not kept that long" rather
-	// than as "the relay was quiet".
+	// RetentionDays says how far back the history can reach at all, so a window
+	// that answers nothing is read as "not kept that long" rather than as "the
+	// relay was quiet".
 	RawRetentionHours   int `json:"raw_retention_hours"`
 	RollupRetentionDays int `json:"rollup_retention_days"`
 }
 
 // handleRelayBufferHistory answers the buffer reports of a relay over a
 // window.
-//
-// It is read with the same right as the relay list: an operator who may
-// see that the site has a relay may see how that relay has been doing. A
-// relay outside the caller's scope answers as one that does not exist -
-// a narrowed scope is not to learn which sites have relays.
 func (s *Server) handleRelayBufferHistory(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermHostEnrollRead, "relay")
 	if !ok {
@@ -234,21 +216,14 @@ type relayRevocation struct {
 }
 
 // handleRevokeRelay takes the right to mediate away from a relay.
-//
-// The relay stops being recognised at once: its heartbeat, its renewal and
-// every new session through it are refused from this moment, and the
-// sessions it attested are ended - the agents reconnect on their own, over
-// their remaining gateways or another relay, or not at all. That is a
-// deliberate decision about a whole site, so it is taken with fresh
-// authentication and a reason, and it leaves one entry on the trail.
 func (s *Server) handleRevokeRelay(w http.ResponseWriter, r *http.Request) {
 	relay, ok := s.loadRelay(w, r)
 	if !ok {
 		return
 	}
-	// A relay without an environment serves its whole site, so cutting it
-	// off needs a right over the whole site: an empty environment is
-	// matched only by a wildcard binding.
+	// A relay without an environment serves its whole site, so cutting it off
+	// needs a right over the whole site: an empty environment is matched only by
+	// a wildcard binding.
 	scope := authz.Scope{Site: relay.Site, Environment: relay.Environment}
 	principal, ok := s.authorize(w, r, authz.PermRelayManage, scope, "relay", relay.ID)
 	if !ok {
@@ -292,9 +267,9 @@ func (s *Server) handleRevokeRelay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The sessions end only after the write: had the revocation failed, the
-	// hosts would be disconnected from a relay the panel still trusts, and
-	// they would come straight back through it.
+	// The sessions end only after the write: had the revocation failed, the hosts
+	// would be disconnected from a relay the panel still trusts, and they would
+	// come straight back through it.
 	closed := 0
 	hostIDs := make([]string, 0, len(attested))
 	for _, host := range attested {

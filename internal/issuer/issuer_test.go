@@ -40,8 +40,7 @@ func newIssuer(t *testing.T) Issuer {
 
 // TestTheIssuerGrantsTheIdentityOfAHost guards the rule that must not
 // disappear when the place the key is kept in changes: the panel grants the
-// identity rather than the requester. Everything in the CSR but the public key
-// is ignored.
+// identity rather than the requester.
 func TestTheIssuerGrantsTheIdentityOfAHost(t *testing.T) {
 	w := newIssuer(t)
 	cert, err := w.SignHost(context.Background(),
@@ -66,8 +65,7 @@ func TestTheIssuerGrantsTheIdentityOfAHost(t *testing.T) {
 }
 
 // TestTheNamesOfARelayComeFromThePanel guards that the named ones replace the
-// ones from the request as a whole. Adding them next to each other would leave
-// the relay the possibility of adding a name the operator did not approve.
+// ones from the request as a whole.
 func TestTheNamesOfARelayComeFromThePanel(t *testing.T) {
 	w := newIssuer(t)
 	cert, err := w.SignRelay(context.Background(),

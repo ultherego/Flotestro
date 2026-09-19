@@ -25,9 +25,9 @@ func TestCheckupdatesLinesBecomeChanges(t *testing.T) {
 		changes[0].CandidateVersion != "6.16.6.arch1-1" {
 		t.Errorf("the first change was read as %+v", changes[0])
 	}
-	// Arch has no security metadata: nothing may be marked as a security
-	// update, and nothing as harmless either - the adapter says "unknown"
-	// through its own error rather than through this flag.
+	// Arch has no security metadata: nothing may be marked as a security update,
+	// and nothing as harmless either - the adapter says "unknown" through its own
+	// error rather than through this flag.
 	for _, change := range changes {
 		if change.Security {
 			t.Errorf("%s was marked as a security update without metadata", change.Name)
@@ -91,8 +91,7 @@ func TestPacmanQueryVersionsAreSplit(t *testing.T) {
 
 // A package from the AUR is a local package; a package from a custom sync
 // repository is a third-party one; the packages of core and extra belong to
-// the distribution. Without the sync databases nothing is known - and that
-// is an answer other than "the distribution's".
+// the distribution.
 func TestPacmanOriginsAreClassified(t *testing.T) {
 	pkgs := ParsePacmanQuery("acl 2.3.2-1\nyay-bin 12.5.0-1\nfoo-tool 1.0-1\nmystery 1.0-1\n")
 	foreign := map[string]bool{"yay-bin": true}
@@ -210,10 +209,8 @@ func TestSigLevelSaysWhetherSignaturesAreRequired(t *testing.T) {
 	}
 }
 
-// A source written by the panel is a marked section; writing it again
-// replaces it, and removing it takes the marker along. A section of the
-// same name that is not the panel's stays untouched - and the write is
-// refused rather than doubled.
+// A source written by the panel is a marked section; writing it again replaces
+// it, and removing it takes the marker along.
 func TestPacmanSourcesAreWrittenAndRemovedIdempotently(t *testing.T) {
 	repo := Repository{
 		ID: "internal", URL: "https://packages.example.test/arch/$arch",
@@ -299,10 +296,7 @@ func TestADisabledPacmanSourceIsCommentedOutAndStillVisible(t *testing.T) {
 	}
 }
 
-// The hold lives in one marked line of the options section. Holding again
-// changes nothing, releasing the last package removes the line, and a
-// package held by the administrator's own line is reported rather than
-// silently left held.
+// The hold lives in one marked line of the options section.
 func TestPacmanHoldsAreOneMarkedLine(t *testing.T) {
 	held, err := SetPacmanHolds(pacmanConfFixture, []string{"which"}, true)
 	if err != nil {
@@ -566,9 +560,6 @@ func TestPacmanEntriesAreSplit(t *testing.T) {
 // TestPacmanPlanDoesNotDependOnCheckupdates guards the declaration of the
 // adapter: the plan is computed from a database that is already on the host,
 // so a host without pacman-contrib reports the plan as available and really
-// makes one. A feature that said "plan" only where checkupdates is installed
-// hid an operation that works, and a plan that failed after the order would
-// be worse still.
 func TestPacmanPlanDoesNotDependOnCheckupdates(t *testing.T) {
 	features := PacmanFeatures(true)
 	for _, feature := range []string{"repair", "hold", "plan"} {
@@ -577,8 +568,8 @@ func TestPacmanPlanDoesNotDependOnCheckupdates(t *testing.T) {
 		}
 	}
 	// The repositories of Arch carry no security metadata, so the count of
-	// security updates is unknown rather than zero - that stays false
-	// whatever is installed.
+	// security updates is unknown rather than zero - that stays false whatever is
+	// installed.
 	if features["security"] {
 		t.Error("the security feature is reported on a distribution without security metadata")
 	}
@@ -599,8 +590,8 @@ func TestPacmanPlanDoesNotDependOnCheckupdates(t *testing.T) {
 }
 
 // TestPacmanDatabaseArgumentsLeaveTheHostDatabaseAlone guards the query
-// against the host's own database: an empty --dbpath would point pacman at
-// the root of the file system, so the argument is left out entirely.
+// against the host's own database: an empty --dbpath would point pacman at the
+// root of the file system, so the argument is left out entirely.
 func TestPacmanDatabaseArgumentsLeaveTheHostDatabaseAlone(t *testing.T) {
 	if args := pacmanDatabaseArgs(""); args != nil {
 		t.Errorf("args = %v, expected the query of the host's own database", args)
@@ -612,9 +603,8 @@ func TestPacmanDatabaseArgumentsLeaveTheHostDatabaseAlone(t *testing.T) {
 }
 
 // TestPlanMetadataMissingIsARefusal guards that a host with no repository
-// metadata at all says so with its own code instead of answering with an
-// empty plan - nothing pending and nothing read look the same to an
-// operator, and only one of them is true.
+// metadata at all says so with its own code instead of answering with an empty
+// plan - nothing pending and nothing read look the same to an operator, and
 func TestPlanMetadataMissingIsARefusal(t *testing.T) {
 	code, ok := ErrorCodeOf(ErrPlanMetadataMissing)
 	if !ok || code != ErrorPlanMetadataMissing {

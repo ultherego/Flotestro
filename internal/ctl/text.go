@@ -46,11 +46,8 @@ func Bytes(value int64) string {
 	return fmt.Sprintf("%.1f %s", scaled, suffixes[index])
 }
 
-// CodeOf takes the stable code out of an error of the configuration.
-//
-// The errors of the parsers start with their code ("config_decode: ..."),
-// so the text up to the first colon is the code - as long as it looks like
-// one.
+// CodeOf takes the stable code out of an error of the configuration. The
+// errors of the parsers start with their code ("config_decode: .
 func CodeOf(err error, fallback string) string {
 	text := err.Error()
 	code, _, _ := strings.Cut(text, ":")
@@ -61,12 +58,8 @@ func CodeOf(err error, fallback string) string {
 	return code
 }
 
-// FilePermissions makes sure that not just anybody can swap the
-// configuration out.
-//
-// The file names the address of the panel and the CA bundle, so the right
-// to write to it is the right to redirect the component to somebody else's
-// panel.
+// FilePermissions makes sure that not just anybody can swap the configuration
+// out.
 func FilePermissions(path string) error {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -80,13 +73,7 @@ func FilePermissions(path string) error {
 }
 
 // SameOwner refuses to write the identity as somebody other than its owner.
-//
-// The store writes the new generation as the calling user. Run as root, it
-// would leave a key the daemon cannot read - and the component would drop
-// out of the fleet at the next restart, not now, when the operator is
-// looking. The command is named in the hint so that the operator can repeat
-// it as the right user. A directory that does not exist yet has no owner to
-// compare with: the caller creates it as itself.
+// The store writes the new generation as the calling user.
 func SameOwner(stateDir, user, tool, command string) error {
 	info, err := os.Stat(stateDir)
 	if err != nil {
@@ -117,8 +104,6 @@ func FreeSpace(path string) (int64, error) {
 }
 
 // Writable says whether the process can create a file in the directory.
-// The probe is removed at once: the check is about the right, not about
-// leaving a trace.
 func Writable(dir string) error {
 	probe, err := os.CreateTemp(dir, ".probe-*")
 	if err != nil {

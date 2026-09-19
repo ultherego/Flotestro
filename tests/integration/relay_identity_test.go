@@ -23,14 +23,8 @@ import (
 	"github.com/ultherego/flotestro/internal/pki"
 )
 
-// The relay chapter of the security document: a relay is a buffer and a
-// gate of its site, not a substitute for the identity of the host. The
-// relay names the certificate the host presented, and the gateway checks
-// that certificate against its record as it would in a direct handshake -
-// a revoked host does not connect through a live relay, and the refusal
-// stands on the host with its code. A relay from before the attestation
-// names the host alone and is taken at its word under the packaged mode,
-// visibly: the host carries the weakness of its session.
+// The relay chapter of the security document: a relay is a buffer and a gate
+// of its site, not a substitute for the identity of the host.
 
 // defaultRelay points at the relay of the test fleet, on the Ubuntu host.
 const defaultRelay = "https://192.168.56.60:8453"
@@ -42,12 +36,9 @@ type relayHeaders struct {
 	Serial      string
 }
 
-// knockAs opens the agent stream at the given gateway with the given
-// identity and headers, sends Hello and waits for the session
-// configuration, then hangs up. Nil means a session opened; the error is
-// the gateway's refusal otherwise. An identity of a relay together with
-// the headers plays the relay's part: the gateway sees exactly what a
-// relay forwarding a host would send.
+// knockAs opens the agent stream at the given gateway with the given identity
+// and headers, sends Hello and waits for the session configuration, then hangs
+// up.
 func knockAs(ctx context.Context, gateway string, identity tls.Certificate, headers *relayHeaders) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -108,14 +99,9 @@ func (h *harness) relayIdentityOf(hostID string) string {
 	return view.RelayIdentity
 }
 
-// TestARelayedSessionIsCheckedAgainstTheCertificateRecord plays the relay
-// with an identity enrolled for the test: the gateway lets a host through
-// on a live certificate the relay names, refuses another host's
-// certificate under the name, a serial that does not belong to the
-// fingerprint, and - once the certificate is revoked through the panel -
-// the revoked host, with the same refusal a direct connection gets. A
-// relay that names the host alone is let in under the packaged mode, and
-// the host shows the weakness.
+// TestARelayedSessionIsCheckedAgainstTheCertificateRecord plays the relay with
+// an identity enrolled for the test: the gateway lets a host through on a live
+// certificate the relay names, refuses another host's certificate under the
 func TestARelayedSessionIsCheckedAgainstTheCertificateRecord(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -146,9 +132,9 @@ func TestARelayedSessionIsCheckedAgainstTheCertificateRecord(t *testing.T) {
 		t.Fatalf("the host says its session was %q, expected weak", strength)
 	}
 
-	// Another host's certificate under this host's name is an identity
-	// mismatch; a serial that is not the fingerprint's is an attestation
-	// the gateway cannot read. Both stand on the host.
+	// Another host's certificate under this host's name is an identity mismatch;
+	// a serial that is not the fingerprint's is an attestation the gateway cannot
+	// read.
 	if err := knockAs(ctx, gateway, relay.Cert, attestationOf(other.ID, leaf)); err == nil {
 		t.Fatal("the certificate of one host opened a session under the name of another")
 	}
@@ -164,10 +150,9 @@ func TestARelayedSessionIsCheckedAgainstTheCertificateRecord(t *testing.T) {
 		t.Fatalf("the refusal on the host = %+v, expected relay_identity_invalid", view)
 	}
 
-	// The certificate is revoked through the panel - a recovery ordered
-	// for a suspected copy cuts the old key off at once - and the relay
-	// can no longer carry the host: the refusal is the one a direct
-	// connection gets, and stands on the host with its code.
+	// The certificate is revoked through the panel - a recovery ordered for a
+	// suspected copy cuts the old key off at once - and the relay can no longer
+	// carry the host: the refusal is the one a direct connection gets, and stands
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/identity-recovery", map[string]any{
 		"reason": "key replaced after a suspected copy", "revoke_old_immediately": true, "ttl_seconds": 300,
 	}, nil, http.StatusCreated)
@@ -185,13 +170,9 @@ func TestARelayedSessionIsCheckedAgainstTheCertificateRecord(t *testing.T) {
 	}
 }
 
-// TestARevokedHostDoesNotConnectThroughTheLabRelay walks the whole path:
-// a host of the lab connects through the relay on the Ubuntu machine, is
-// revoked through the panel, and the relay - which knows nothing of the
-// revocation and still accepts the certificate in its own handshake -
-// cannot open the session at the centre. It needs a relay that attests
-// the certificate; a relay from before the attestation lets the revoked
-// host through under the packaged mode, and the test says so.
+// TestARevokedHostDoesNotConnectThroughTheLabRelay walks the whole path: a
+// host of the lab connects through the relay on the Ubuntu machine, is revoked
+// through the panel, and the relay - which knows nothing of the revocation and
 func TestARevokedHostDoesNotConnectThroughTheLabRelay(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

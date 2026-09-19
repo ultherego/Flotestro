@@ -44,7 +44,7 @@ const (
 	PermPrincipalManage       Permission = "principal.manage"
 	// Teams draw the boundary of what somebody may touch, so the two rights that
 	// move that boundary are their own, and both are global: moving a host into a
-	// team changes who may act on it, and binding a role to a team hands that
+	// team changes who may act on it, and binding a role to a team hands that.
 	PermHostScopeWrite   Permission = "host.scope.write"
 	PermTeamBindingWrite Permission = "team.binding.write"
 
@@ -249,7 +249,7 @@ const (
 	PermDockerPrune   Permission = "docker.prune"
 	// A declared object is its own decision, separate from starting a container
 	// or pruning what nobody uses: a declaration replaces what stands on the host
-	// when it differs, and the plan that says what differs is read with the plan
+	// when it differs, and the plan that says what differs is read with the plan.
 	PermDockerPlan            Permission = "docker.plan"
 	PermDockerContainerEnsure Permission = "docker.container.ensure"
 	PermDockerNetworkEnsure   Permission = "docker.network.ensure"
@@ -303,7 +303,7 @@ const (
 	PermLocalSSHKeyWrite Permission = "localuser.sshkeys.write"
 	// The keys edited one at a time: appending a key and taking a named one away
 	// are ordinary changes of access, while writing the whole list anew is the
-	// operation that has cut accounts off by accident and keeps a permission of
+	// operation that has cut accounts off by accident and keeps a permission of.
 	PermLocalSSHKeyAdd     Permission = "localuser.sshkeys.add"
 	PermLocalSSHKeyRemove  Permission = "localuser.sshkeys.remove"
 	PermLocalSSHKeyReplace Permission = "localuser.sshkeys.replace"

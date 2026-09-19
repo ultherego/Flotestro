@@ -9,13 +9,8 @@ import (
 	"golang.org/x/term"
 )
 
-// ReadToken takes an enrollment token without leaving it in the arguments
-// or in the environment of the process.
-//
-// Every user of the machine sees a command line argument in the process
-// list, and an environment variable stays in the file of the service. What
-// is left is a file with narrowed permissions, a pipe or a question with
-// the echo turned off.
+// ReadToken takes an enrollment token without leaving it in the arguments or
+// in the environment of the process.
 func ReadToken(path string, in_ io.Reader, errOut io.Writer) ([]byte, error) {
 	if path != "" {
 		content, err := os.ReadFile(path)
@@ -38,11 +33,6 @@ func ReadToken(path string, in_ io.Reader, errOut io.Writer) ([]byte, error) {
 }
 
 // Wipe overwrites a secret in memory.
-//
-// Without illusions: the runtime and the kernel may hold copies of their
-// own, and the only real protection is a short validity, a single use and a
-// revocation after the registration. This is cleaning up after oneself
-// rather than a guarantee.
 func Wipe(value []byte) {
 	for i := range value {
 		value[i] = 0

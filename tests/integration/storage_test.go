@@ -45,8 +45,8 @@ type storageSnapshot struct {
 
 const storageReason = "integration test of the storage module"
 
-// TestTopologyHasStableIdentifiers checks the thing that decides the safety
-// of every disk operation: a device is to be recognisable by UUID, not by
+// TestTopologyHasStableIdentifiers checks the thing that decides the safety of
+// every disk operation: a device is to be recognisable by UUID, not by
 // /dev/sdX, which points at something else after a reboot.
 func TestTopologyHasStableIdentifiers(t *testing.T) {
 	h := newHarness(t)
@@ -78,9 +78,8 @@ func TestTopologyHasStableIdentifiers(t *testing.T) {
 			if withFilesystem == 0 {
 				t.Error("the host reported no filesystem at all")
 			}
-			// A topology without parent references is not a topology, only a
-			// list - and in an extension plan the hierarchy is exactly what
-			// counts.
+			// A topology without parent references is not a topology, only a list - and
+			// in an extension plan the hierarchy is exactly what counts.
 			if withParent == 0 {
 				t.Error("no device points at a parent")
 			}
@@ -234,9 +233,8 @@ func TestDestructiveOperationRequiresTwoPeople(t *testing.T) {
 	}
 }
 
-// TestDestructiveOperationChecksTheDeviceIdentity guards that formatting
-// hits the disk the operator looked at. The /dev/sdX path points at
-// something else after a reboot.
+// TestDestructiveOperationChecksTheDeviceIdentity guards that formatting hits
+// the disk the operator looked at.
 func TestDestructiveOperationChecksTheDeviceIdentity(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -262,9 +260,7 @@ func TestDestructiveOperationChecksTheDeviceIdentity(t *testing.T) {
 		t.Skip("the host has no free disk")
 	}
 
-	// A wrong identity: the host is to refuse before doing anything. The
-	// by-id link is the disk's own; the WWN is not, and one wrong mark of
-	// identity is enough.
+	// A wrong identity: the host is to refuse before doing anything.
 	if empty.ByID == "" {
 		t.Skip("the free disk has no stable identity link")
 	}
@@ -329,11 +325,9 @@ type smartView struct {
 	UnsupportedReason string `json:"unsupported_reason"`
 }
 
-// TestSmartReportsHonestly checks the SMART read of the first disk: the
-// host either reports values it read from the device, or says the device
-// is unsupported and why. A virtual disk in the lab is the usual case of
-// the latter; what it must never do is report a healthy disk at zero
-// degrees with zero hours because the tool had nothing to say.
+// TestSmartReportsHonestly checks the SMART read of the first disk: the host
+// either reports values it read from the device, or says the device is
+// unsupported and why.
 func TestSmartReportsHonestly(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -385,9 +379,8 @@ func TestSmartReportsHonestly(t *testing.T) {
 	default:
 		t.Errorf("health = %q, expected passed, failed or unknown", report.Health)
 	}
-	// A device the tool vouched for has read something: hours, a
-	// temperature or attributes. All of them absent would mean the tool
-	// said nothing and the verdict was invented.
+	// A device the tool vouched for has read something: hours, a temperature or
+	// attributes.
 	if report.PowerOnHours == nil && report.TemperatureC == nil && len(report.Attributes) == 0 {
 		t.Errorf("a supported device reports no value at all: %+v", report)
 	}

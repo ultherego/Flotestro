@@ -32,8 +32,7 @@ const refreshReason = "integration test of the inventory refresh"
 
 // TestInventoryRefreshIsSettledByARevision guards the rule of the operation:
 // the job succeeds only once the panel holds the revision the agent talks
-// about. Merely accepting the job proves nothing - until now the operator
-// clicked "refresh" and did not know whether the panel received anything.
+// about.
 func TestInventoryRefreshIsSettledByARevision(t *testing.T) {
 	h := newHarness(t)
 
@@ -65,9 +64,9 @@ func TestInventoryRefreshIsSettledByARevision(t *testing.T) {
 			if after.Revision != result.Revision {
 				t.Errorf("the panel holds revision %s, the agent reported %s", after.Revision, result.Revision)
 			}
-			// The read is to be fresh, not an answer from memory: the revision
-			// may repeat when nothing changed, but the observation must come
-			// from after the order.
+			// The read is to be fresh, not an answer from memory: the revision may
+			// repeat when nothing changed, but the observation must come from after the
+			// order.
 			if !after.ObservedAt.After(ordered) {
 				t.Errorf("observation from %s, job ordered at %s", after.ObservedAt, ordered)
 			}
@@ -79,8 +78,8 @@ func TestInventoryRefreshIsSettledByARevision(t *testing.T) {
 }
 
 // TestScopedRefreshDoesNotLoseTheOtherModules guards the most dangerous
-// partial-read bug: a host that refreshed one module must not look like a
-// host without the rest of its inventory.
+// partial-read bug: a host that refreshed one module must not look like a host
+// without the rest of its inventory.
 func TestScopedRefreshDoesNotLoseTheOtherModules(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -115,8 +114,7 @@ func TestScopedRefreshDoesNotLoseTheOtherModules(t *testing.T) {
 }
 
 // TestConcurrentRefreshesEndWithARevision checks that jobs ordered side by
-// side share one read instead of cancelling each other out. Each is to get
-// the revision the panel really saved.
+// side share one read instead of cancelling each other out.
 func TestConcurrentRefreshesEndWithARevision(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")

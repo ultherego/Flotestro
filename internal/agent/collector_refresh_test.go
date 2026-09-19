@@ -16,9 +16,9 @@ func quietLog() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
-// TestARefreshWaitsForTheRevision guards the property this operation exists for
-// at all: the task ends after a new picture has been built, not at the moment
-// the order is accepted.
+// TestARefreshWaitsForTheRevision guards the property this operation exists
+// for at all: the task ends after a new picture has been built, not at the
+// moment the order is accepted.
 func TestARefreshWaitsForTheRevision(t *testing.T) {
 	k := newCollector()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -49,9 +49,7 @@ func TestARefreshWaitsForTheRevision(t *testing.T) {
 }
 
 // TestConcurrentRequestsShareTheRead guards the deduplication: the host must
-// not pay for a picture once per person who clicked at the same moment. The
-// requests that arrived after the read started share one next read - which is
-// why the boundary is two and not the number of requesters.
+// not pay for a picture once per person who clicked at the same moment.
 func TestConcurrentRequestsShareTheRead(t *testing.T) {
 	k := newCollector()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -157,7 +155,6 @@ func TestTheEndOfTheSessionEndsTheWaitOnRefresh(t *testing.T) {
 // TestARequestDuringACollectionWaitsForTheNextOne guards the most dangerous
 // shortcut of the deduplication: a request for a module that arrived after the
 // read started must not be settled with a picture that does not cover that
-// module.
 func TestARequestDuringACollectionWaitsForTheNextOne(t *testing.T) {
 	k := newCollector()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -221,8 +218,6 @@ func TestARequestDuringACollectionWaitsForTheNextOne(t *testing.T) {
 
 // TestEveryContractModuleHasACollector guards that the list of modules the
 // panel accepts in an order does not drift apart from what the agent can read.
-// The drift would not be visible: the task would end in success without
-// refreshing anything.
 func TestEveryContractModuleHasACollector(t *testing.T) {
 	for _, name := range opspec.InventoryModules {
 		if name == ModuleSystem {

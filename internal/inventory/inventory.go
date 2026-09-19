@@ -24,28 +24,22 @@ type Report struct {
 	Architecture   string
 	RawJSON        []byte
 
-	// The identity describes the integration of the host with a domain. Empty
-	// pointers mean an undetermined state and do not overwrite the previous
-	// knowledge.
+	// The identity describes the integration of the host with a domain.
 	IdentityEnrolled   bool
 	IdentityDomain     string
 	IdentityRealm      string
 	IdentitySSSDOnline *bool
 
-	// LocalAccounts is the full list of the accounts seen on the host. Nil
-	// means no data in this report and does not erase the previous
-	// observation.
+	// LocalAccounts is the full list of the accounts seen on the host. Nil means
+	// no data in this report and does not erase the previous observation.
 	LocalAccounts []LocalAccount
 
-	// Fragments is the report split into modules. An empty list means an agent
-	// from before the split and does not erase what is already known about the
-	// modules.
+	// Fragments is the report split into modules.
 	Fragments []Fragment
 }
 
 // covers says whether the report observed the module: a full report covers
-// everything, a partial one only the modules it carries. An agent from
-// before the split sends no fragments, and its report is a full one.
+// everything, a partial one only the modules it carries.
 func (r Report) covers(module string) bool {
 	if r.Full {
 		return true
@@ -84,8 +78,6 @@ type LocalAccount struct {
 	PasswordSet *bool           `json:"password_set"`
 	SSHKeys     json.RawMessage `json:"ssh_keys"`
 	// ExpiresAt is the expiry date as YYYY-MM-DD from the shadow record.
-	// Empty means no expiry, or a record the agent did not read - the
-	// difference is in UnavailableReason.
 	ExpiresAt         string    `json:"expires_at,omitempty"`
 	UnavailableReason string    `json:"unavailable_reason,omitempty"`
 	ObservedAt        time.Time `json:"observed_at"`
@@ -103,13 +95,7 @@ type Revision struct {
 }
 
 // The bounds an agent cannot move. A report of an ordinary host is a few
-// hundred kilobytes and a lab Debian with every module on reports 2.4 MB;
-// anything beyond MaxPayloadBytes is not an inventory, whatever the
-// certificate says. The gateway refuses a message above 8 MiB before it
-// is even decoded, so the cap here is the one that names the reason. The history of a host is kept for the diff
-// of the last few reports, not as an archive, so the older revisions go
-// when a new one arrives: without the cap a host reporting a new revision
-// every cycle fills the database on its own.
+// hundred kilobytes and a lab Debian with every module on reports 2.
 const (
 	MaxPayloadBytes     = 6 << 20
 	MaxRevisionsPerHost = 20
@@ -127,9 +113,7 @@ func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
 }
 
-// Save writes a revision and normalises the fields used in the selectors. A
-// repeated report about the same revision does not create a new row but still
-// refreshes the observation mark of the host.
+// Save writes a revision and normalises the fields used in the selectors.
 func (s *Store) Save(ctx context.Context, hostID string, report Report) (stored bool, err error) {
 	if len(report.RawJSON) > MaxPayloadBytes {
 		return false, fmt.Errorf("%w: %d bytes, the limit is %d", ErrOversized,
@@ -143,9 +127,7 @@ func (s *Store) Save(ctx context.Context, hostID string, report Report) (stored 
 
 	// A revision seen before is not written again, but its observation mark
 	// moves: a host that went back to an earlier picture - a partial cycle
-	// toggles a fast module and toggles it back - has that picture as its
-	// latest, and Latest orders by the mark. xmax tells an insert from an
-	// update, so the caller still learns whether the revision is new.
+	// toggles a fast module and toggles it back - has that picture as its latest,
 	const insert = `
 		insert into inventory_revisions
 			(id, host_id, revision, is_full, schema_version, payload, observed_at)
@@ -157,9 +139,8 @@ func (s *Store) Save(ctx context.Context, hostID string, report Report) (stored 
 		return false, fmt.Errorf("writing the inventory revision: %w", err)
 	}
 
-	// The older revisions go in the same transaction as the new one
-	// arrives: the cap holds at every commit rather than until the next
-	// sweep.
+	// The older revisions go in the same transaction as the new one arrives: the
+	// cap holds at every commit rather than until the next sweep.
 	if stored {
 		if err := pruneRevisions(ctx, tx, hostID); err != nil {
 			return false, err
@@ -181,9 +162,8 @@ func (s *Store) Save(ctx context.Context, hostID string, report Report) (stored 
 			updated_at                 = now()
 		where id = $1`
 	// A partial report carries the identity over from the last read, so the
-	// values are the same - but the date of the check moves only when the
-	// module was really read. Otherwise a domain that fell out an hour ago
-	// would look checked a minute ago.
+	// values are the same - but the date of the check moves only when the module
+	// was really read.
 	if _, err := tx.Exec(ctx, updateHost, hostID, report.Revision,
 		report.OSFamily, report.OSDistribution, report.OSVersion, report.Architecture,
 		report.IdentityEnrolled, report.IdentityDomain, report.IdentityRealm,
@@ -208,8 +188,7 @@ func (s *Store) Save(ctx context.Context, hostID string, report Report) (stored 
 }
 
 // pruneRevisions deletes the revisions of a host beyond the newest
-// MaxRevisionsPerHost. The current revision is always among the newest, so
-// the reference from the host row stays valid.
+// MaxRevisionsPerHost.
 func pruneRevisions(ctx context.Context, tx pgx.Tx, hostID string) error {
 	const query = `
 		delete from inventory_revisions
@@ -225,9 +204,7 @@ func pruneRevisions(ctx context.Context, tx pgx.Tx, hostID string) error {
 	return nil
 }
 
-// replaceLocalAccounts swaps the observation of the accounts of a host. The
-// accounts removed on the host disappear from the panel, because the list in
-// the report is full rather than incremental.
+// replaceLocalAccounts swaps the observation of the accounts of a host.
 func replaceLocalAccounts(ctx context.Context, tx pgx.Tx, hostID string, accounts []LocalAccount) error {
 	names := make([]string, 0, len(accounts))
 	for _, account := range accounts {
@@ -253,8 +230,6 @@ func replaceLocalAccounts(ctx context.Context, tx pgx.Tx, hostID string, account
 }
 
 // queueLocalAccount adds the write of an account observation to the batch.
-// The query is one for a full report and for the result of a single operation,
-// so both paths write exactly the same set of fields.
 func queueLocalAccount(batch *pgx.Batch, hostID string, account LocalAccount) {
 	const upsert = `
 		insert into host_local_accounts
@@ -283,20 +258,15 @@ func queueLocalAccount(batch *pgx.Batch, hostID string, account LocalAccount) {
 		account.Locked, account.PasswordSet, keys, account.UnavailableReason, account.ExpiresAt)
 }
 
-// DeleteLocalAccount removes the observation of an account the host no
-// longer has. It closes the loop after a deletion the same way an upsert
-// closes it after a change: the full report that would drop the row comes
-// only later, and until then the panel would show an account that is gone.
+// DeleteLocalAccount removes the observation of an account the host no longer
+// has.
 func (s *Store) DeleteLocalAccount(ctx context.Context, hostID, name string) error {
 	const query = `delete from host_local_accounts where host_id = $1 and name = $2`
 	_, err := s.pool.Exec(ctx, query, hostID, name)
 	return err
 }
 
-// UpsertLocalAccount writes the observation of a single account. It serves to
-// close the loop after an operation: the result of a job carries the state of
-// the account read from the host after the change, and the full inventory
-// report comes only later.
+// UpsertLocalAccount writes the observation of a single account.
 func (s *Store) UpsertLocalAccount(ctx context.Context, hostID string, account LocalAccount) error {
 	batch := &pgx.Batch{}
 	queueLocalAccount(batch, hostID, account)
@@ -356,11 +326,7 @@ func (s *Store) Latest(ctx context.Context, hostID string) (*Revision, error) {
 	return &rev, nil
 }
 
-// saveFragments writes the modules that have changed. A module with the same
-// revision is not rewritten: the data are the same, so moving updated_at would
-// pretend a change that did not happen. The observation mark is always
-// refreshed - the fact that the state has not changed was observed now as
-// well.
+// saveFragments writes the modules that have changed.
 func saveFragments(ctx context.Context, tx pgx.Tx, hostID string, fragments []Fragment) error {
 	const query = `
 		insert into host_module_inventory
@@ -393,10 +359,7 @@ func saveFragments(ctx context.Context, tx pgx.Tx, hostID string, fragments []Fr
 	return nil
 }
 
-// SaveFragment writes one module outside the inventory cycle. The on-demand
-// reads use it: the operator opens a tab, the host sends the state back, and
-// the state belongs to the host - not to the history of the jobs, where one
-// would have to look for it.
+// SaveFragment writes one module outside the inventory cycle.
 func (s *Store) SaveFragment(ctx context.Context, hostID string, fragment Fragment) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -458,10 +421,6 @@ func (s *Store) Fragments(ctx context.Context, hostID string) ([]Fragment, error
 }
 
 // HostFragments returns the modules of many hosts in one query.
-//
-// The fleet view computes the compliance for every host separately, but asking
-// the database once per host would turn one screen into hundreds of
-// queries.
 func (s *Store) HostFragments(ctx context.Context, hostIDs []string) (map[string][]Fragment, error) {
 	result := map[string][]Fragment{}
 	if len(hostIDs) == 0 {

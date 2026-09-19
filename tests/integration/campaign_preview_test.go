@@ -8,16 +8,6 @@ import (
 )
 
 // The binding between a campaign preview and the order placed from it.
-//
-// The gap it closes: the preview counted the fleet and the creation
-// resolved it again, and nothing held the two answers together. Between
-// them a host enrols, a role binding is withdrawn, a machine is retired -
-// and the campaign ran on a set of hosts nobody had approved, with the
-// record saying nothing about the difference.
-//
-// These tests order real campaigns against the laboratory fleet and check
-// what the refusals say. Every campaign is cancelled by the harness at the
-// end of its test, so nothing is left running on the hosts.
 
 // previewAnswer is the part of a preview the order carries back.
 type previewAnswer struct {
@@ -66,10 +56,9 @@ func restartOrder(name string, token previewAnswer) map[string]any {
 	return order
 }
 
-// TestAnOrderPlacedFromAPreviewCarriesItsTokenAndSpendsIt walks the
-// ordinary path: the preview answers with a token, the order names it and
-// is accepted, and the same token orders nothing a second time. One
-// approved picture of the fleet creates one campaign.
+// TestAnOrderPlacedFromAPreviewCarriesItsTokenAndSpendsIt walks the ordinary
+// path: the preview answers with a token, the order names it and is accepted,
+// and the same token orders nothing a second time.
 func TestAnOrderPlacedFromAPreviewCarriesItsTokenAndSpendsIt(t *testing.T) {
 	h := newHarness(t)
 	answer := restartPreview(t, h)
@@ -100,10 +89,9 @@ func TestAnOrderPlacedFromAPreviewCarriesItsTokenAndSpendsIt(t *testing.T) {
 	}
 }
 
-// TestAPreviewOfOneSelectorDoesNotOrderAnother reproduces the gap itself:
-// the operator reads a count for the whole fleet and the order names
-// something else. The panel resolves the order's own selector, sees it is
-// not what was shown, and refuses.
+// TestAPreviewOfOneSelectorDoesNotOrderAnother reproduces the gap itself: the
+// operator reads a count for the whole fleet and the order names something
+// else.
 func TestAPreviewOfOneSelectorDoesNotOrderAnother(t *testing.T) {
 	h := newHarness(t)
 	answer := restartPreview(t, h)
@@ -121,9 +109,9 @@ func TestAPreviewOfOneSelectorDoesNotOrderAnother(t *testing.T) {
 	}
 }
 
-// TestATokenWithAnotherFingerprintIsRefused guards the digest: the
-// identifier alone says nothing about what was shown with it, so an order
-// naming one preview and the fingerprint of another is refused.
+// TestATokenWithAnotherFingerprintIsRefused guards the digest: the identifier
+// alone says nothing about what was shown with it, so an order naming one
+// preview and the fingerprint of another is refused.
 func TestATokenWithAnotherFingerprintIsRefused(t *testing.T) {
 	h := newHarness(t)
 	answer := restartPreview(t, h)
@@ -174,8 +162,8 @@ func TestAPreviewOfAnotherOperationDoesNotOrderThisOne(t *testing.T) {
 }
 
 // TestAnOrderWithoutAPreviewIsStillAccepted: the rollout stands at prefer,
-// where a client from before the binding keeps working and one that
-// previews gets the binding. An installation moves to enforce by itself.
+// where a client from before the binding keeps working and one that previews
+// gets the binding.
 func TestAnOrderWithoutAPreviewIsStillAccepted(t *testing.T) {
 	h := newHarness(t)
 	restartPreview(t, h)

@@ -35,12 +35,8 @@ type packagesFragmentView struct {
 	} `json:"repositories"`
 }
 
-// sourceKey composes public key material in an ASCII armour.
-//
-// The packet is minimal but real: version 4, a timestamp, the algorithm and
-// the material. The host computes its fingerprint the same way it would for
-// a vendor key - and the test source is disabled, so nobody verifies
-// anything with this key.
+// sourceKey composes public key material in an ASCII armour. The packet is
+// minimal but real: version 4, a timestamp, the algorithm and the material.
 func sourceKey() string {
 	packet := append([]byte{4, 0x66, 0x00, 0x00, 0x00, 1}, make([]byte, 20)...)
 	frame := append([]byte{0xc0 | 6, byte(len(packet))}, packet...)
@@ -69,9 +65,8 @@ func findSource(sources []repositoryView, id string) *repositoryView {
 }
 
 // TestPackageSourceWithAPasswordFromTheStore walks the whole path of the
-// operation: writing a source together with a key and a password, reading
-// it from the inventory, the rollback after a failed metadata fetch and
-// removal.
+// operation: writing a source together with a key and a password, reading it
+// from the inventory, the rollback after a failed metadata fetch and removal.
 func TestPackageSourceWithAPasswordFromTheStore(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -127,9 +122,9 @@ func TestPackageSourceWithAPasswordFromTheStore(t *testing.T) {
 	}
 	assertValueAbsent(t, h, password)
 
-	// Enabling a source that cannot be fetched must leave the host in the
-	// state before the change: a source that does not answer would block
-	// every following package operation.
+	// Enabling a source that cannot be fetched must leave the host in the state
+	// before the change: a source that does not answer would block every
+	// following package operation.
 	broken := map[string]any{}
 	for key, value := range description {
 		broken[key] = value
@@ -162,12 +157,6 @@ func TestPackageSourceWithAPasswordFromTheStore(t *testing.T) {
 
 // TestUnreachableSourceRollsBackTheChange guards the rollback on both
 // families.
-//
-// Neither apt nor dnf reports a failed metadata fetch with the exit status:
-// both end with zero and a message about the cache being built. A source
-// that does not answer would nevertheless block every following package
-// operation - so the panel has to read what the tool wrote and undo the
-// change.
 func TestUnreachableSourceRollsBackTheChange(t *testing.T) {
 	for _, family := range []string{"debian", "rhel"} {
 		t.Run(family, func(t *testing.T) {
@@ -223,8 +212,8 @@ func TestUnreachableSourceRollsBackTheChange(t *testing.T) {
 }
 
 // TestPackageSourceGuardsTrust guards the boundaries of the operation: a
-// source is a decision about whose packages the host accepts, so a bad
-// order is to fall out when ordered, not on the host.
+// source is a decision about whose packages the host accepts, so a bad order
+// is to fall out when ordered, not on the host.
 func TestPackageSourceGuardsTrust(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")

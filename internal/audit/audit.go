@@ -38,12 +38,6 @@ const (
 )
 
 // Event describes a single audit event.
-//
-// The session, the authentication and the request identifier are not here:
-// the recorder takes them from the context the authentication layer
-// prepared (see WithActor), so a handler does not repeat them. RequestID
-// stays for the callers that have no such context - a worker recording on
-// behalf of a request it was handed the identifier of.
 type Event struct {
 	ActorType  ActorType
 	ActorID    string
@@ -56,9 +50,8 @@ type Event struct {
 	// ApprovalChain names, for an approval, who ordered the change and who
 	// approved it. Nil for everything else.
 	ApprovalChain *ApprovalChain
-	// Before and After describe, for a change, the state on both sides of
-	// it - where the handler has both at hand without an extra read. Nil
-	// means not recorded, not "empty".
+	// Before and After describe, for a change, the state on both sides of it -
+	// where the handler has both at hand without an extra read.
 	Before any
 	After  any
 }
@@ -96,9 +89,7 @@ func (r *Recorder) RecordTx(ctx context.Context, tx pgx.Tx, event Event) error {
 }
 
 // queryExecutor allows writing an event both through the pool and inside the
-// transaction of the caller. Both *pgxpool.Pool and pgx.Tx satisfy it. The
-// row read serves the snapshot of the target host, taken inside the same
-// transaction so that it sees what the change itself saw.
+// transaction of the caller.
 type queryExecutor interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
@@ -143,9 +134,9 @@ func (r *Recorder) record(ctx context.Context, q queryExecutor, event Event) err
 		}
 	}
 
-	// The snapshot of the host is taken at the moment of writing: a host
-	// renamed or retired later keeps the name and the address it had when
-	// the event happened.
+	// The snapshot of the host is taken at the moment of writing: a host renamed
+	// or retired later keeps the name and the address it had when the event
+	// happened.
 	var hostname, address any
 	if event.TargetType == "host" && event.TargetID != "" {
 		snapshot, ok := r.hostSnapshot(ctx, q, request, event.TargetID)
@@ -154,9 +145,8 @@ func (r *Recorder) record(ctx context.Context, q queryExecutor, event Event) err
 		}
 	}
 
-	// The actor is snapshotted the same way: the identity behind the
-	// event as it was called and identified at this moment, never joined
-	// later. actor_id stays as it was for the readers that know it.
+	// The actor is snapshotted the same way: the identity behind the event as it
+	// was called and identified at this moment, never joined later.
 	who := r.actorSnapshot(ctx, q, request, event)
 
 	const query = `
@@ -180,11 +170,8 @@ func (r *Recorder) record(ctx context.Context, q queryExecutor, event Event) err
 	return err
 }
 
-// hostSnapshot reads the name and the management address of a host, once
-// per request: the lookups made under one request are remembered in its
-// context. A host that does not exist - an event about a host that was
-// never enrolled, or a made-up identifier in a refused request - leaves
-// both columns empty rather than failing the event.
+// hostSnapshot reads the name and the management address of a host, once per
+// request: the lookups made under one request are remembered in its context.
 func (r *Recorder) hostSnapshot(ctx context.Context, q queryExecutor,
 	request *requestContext, hostID string) (hostSnapshot, bool) {
 	if snapshot, ok := request.cachedHost(hostID); ok {
@@ -208,9 +195,7 @@ func (r *Recorder) hostSnapshot(ctx context.Context, q queryExecutor,
 	return snapshot, true
 }
 
-// optionalJSON renders a value for a nullable jsonb column: nil stays
-// null. A nil pointer, map or slice handed over as a value is nil as well -
-// the column is to be null, not the JSON null the encoder would write.
+// optionalJSON renders a value for a nullable jsonb column: nil stays null.
 func optionalJSON(value any) (any, error) {
 	if value == nil {
 		return nil, nil
@@ -326,16 +311,11 @@ func dropNull(value json.RawMessage) json.RawMessage {
 type ListFilter struct {
 	TargetID   string
 	TargetType string
-	// HostID keeps the events of one host: those aimed at the host and
-	// those of its jobs, which name the host in their detail. The host's
-	// own trail reads with it; TargetID alone would show the host without
-	// what was done on it.
+	// HostID keeps the events of one host: those aimed at the host and those of
+	// its jobs, which name the host in their detail.
 	HostID string
-	// Actor is the identity that acted as actor_id spells it: a principal
-	// subject or an agent's host identifier. It stays for the readers
-	// that know it; the three below narrow by the snapshot, which is what
-	// a review groups by - a renamed person keeps one identifier across
-	// both names, and a machine identifier never matches a host.
+	// Actor is the identity that acted as actor_id spells it: a principal subject
+	// or an agent's host identifier.
 	Actor string
 	// ActorKind is one of the ActorKind constants.
 	ActorKind string
@@ -344,9 +324,7 @@ type ListFilter struct {
 	ActorPrincipalID string
 	ActorResourceID  string
 	Action           string
-	// ActionPrefix keeps a family of actions by the beginning of the name
-	// (job. is every event about a job), the way the job list narrows an
-	// operation family; Action keeps one action alone.
+	// ActionPrefix keeps a family of actions by the beginning of the name (job.
 	ActionPrefix string
 	Outcome      string
 	// Since and Until bound the time of the events; Until is exclusive.
@@ -438,9 +416,7 @@ type ListPage struct {
 	NextCursor string `json:"next_cursor,omitempty"`
 }
 
-// ListPaged reads the trail newest first, page by page. The key is
-// (occurred_at, id): two events written in the same microsecond still have
-// an order, so a page boundary between them loses neither.
+// ListPaged reads the trail newest first, page by page.
 func (r *Recorder) ListPaged(ctx context.Context, filter ListFilter, cursor Cursor, limit int) (ListPage, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
@@ -494,9 +470,8 @@ func (r *Recorder) List(ctx context.Context, targetID string, limit int) ([]Reco
 }
 
 // Each reads the trail oldest first and hands every event to fn, without
-// holding the whole range in memory: an export covers months, and a page
-// at a time is the wrong shape for a file. The first error of fn ends the
-// read and is returned.
+// holding the whole range in memory: an export covers months, and a page at a
+// time is the wrong shape for a file.
 func (r *Recorder) Each(ctx context.Context, filter ListFilter, fn func(Record) error) error {
 	conditions, args := filter.conditions(nil)
 	query := `select ` + recordColumns + ` from audit_events`

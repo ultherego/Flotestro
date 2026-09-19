@@ -13,11 +13,6 @@ import (
 )
 
 // Runner drives remediation plans through their steps.
-//
-// It carries out nothing itself: it creates the tasks the scheduler delivers
-// and waits for their result. A step starts only once the previous one
-// succeeded - that is the whole dependency between the steps and the whole
-// stop after a failure.
 type Runner struct {
 	store    *Store
 	jobs     *jobs.Store
@@ -74,10 +69,8 @@ func (r *Runner) advance(ctx context.Context, plan Plan) error {
 		return r.start(ctx, plan, step)
 	}
 
-	// The step is running: we wait for the task's result and, for a step with
-	// a reboot, also for the host to come back. A reboot command that was
-	// sent is not yet a host that came up - and that is the boundary where
-	// the plan ends.
+	// The step is running: we wait for the task's result and, for a step with a
+	// reboot, also for the host to come back.
 	task, err := r.jobs.Get(ctx, step.JobID)
 	if err != nil {
 		return err
@@ -150,9 +143,8 @@ func (r *Runner) start(ctx context.Context, plan Plan, step *Step) error {
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	// A plan a campaign started was approved with the campaign: the consent
-	// covered every step of every host, so the steps do not queue for a
-	// second consent one by one. The task is bound to the campaign, so its
-	// screens count it as their own.
+	// covered every step of every host, so the steps do not queue for a second
+	// consent one by one.
 	campaign := plan.Campaign()
 	task, err := r.jobs.Create(ctx, tx, jobs.Spec{
 		HostID:  plan.HostID,
@@ -206,9 +198,6 @@ func (r *Runner) abortStep(ctx context.Context, plan Plan, step *Step, reason st
 }
 
 // hostCameBack checks whether the host came up after the reboot.
-//
-// The boot identifier settles it rather than the mere fact of a connection: a
-// host that answers with the same boot_id has not restarted yet.
 func (r *Runner) hostCameBack(ctx context.Context, plan Plan) (bool, string) {
 	host, err := r.hosts.Get(ctx, plan.HostID)
 	if err != nil {

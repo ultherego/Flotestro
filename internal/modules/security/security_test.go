@@ -20,9 +20,8 @@ func TestRunningModeAndConfigurationAreTwoFields(t *testing.T) {
 	}
 }
 
-// A profile in complain mode does not protect, it only records - counting
-// it together with the enforced ones would turn no protection into
-// protection.
+// A profile in complain mode does not protect, it only records - counting it
+// together with the enforced ones would turn no protection into protection.
 func TestAppArmorProfilesAreCountedSeparately(t *testing.T) {
 	enforcing, complain := ParseAppArmorProfiles(
 		"docker-default (enforce)\nlibreoffice (complain)\nwike (unconfined)\nfoo (enforce)\n")

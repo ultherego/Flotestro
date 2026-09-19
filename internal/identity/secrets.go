@@ -5,14 +5,8 @@ import (
 	"time"
 )
 
-// A one-time value of a change - the password the directory generated on
-// a reset - is handed to the requester once and to nobody else. It is
-// never written to the change record, the audit trail or a log: the
-// document forbids a secret in a job output, and a value in the database
-// would be one. So it waits in the memory of the process that carried the
-// change out, for a short while, and goes away with the first read, with
-// the deadline, or with the process. A requester who missed it orders a
-// new reset; nothing can bring the old value back, which is the point.
+// A one-time value of a change - the password the directory generated on a
+// reset - is handed to the requester once and to nobody else.
 
 // secretLifetime is how long a one-time value waits for its requester.
 const secretLifetime = 15 * time.Minute
@@ -53,11 +47,7 @@ func (v *secretVault) keep(changeID, requester, value string) {
 	}
 }
 
-// take hands the value out once. The state says why there is nothing
-// when there is nothing: never kept or already gone, and read by
-// somebody else - a different requester gets the same answer as a
-// consumed value, so the endpoint tells nobody but the requester whether
-// a value ever existed.
+// take hands the value out once.
 func (v *secretVault) take(changeID, requester string) (string, secretState) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -72,9 +62,9 @@ func (v *secretVault) take(changeID, requester string) (string, secretState) {
 	if secret.consumed {
 		return "", secretConsumed
 	}
-	// The value leaves the map with the read; the record that it was read
-	// stays until the deadline, so a second read is told "consumed" rather
-	// than "never existed".
+	// The value leaves the map with the read; the record that it was read stays
+	// until the deadline, so a second read is told "consumed" rather than "never
+	// existed".
 	v.secrets[changeID] = oneTimeSecret{requester: requester, expiresAt: secret.expiresAt, consumed: true}
 	return secret.value, secretWaiting
 }
@@ -114,8 +104,6 @@ func (s *Store) vault() *secretVault {
 }
 
 // TakeSecret hands the one-time value of a change to its requester once.
-// The second result says whether a value was handed out, was already
-// consumed, or was never there for this requester.
 func (s *Store) TakeSecret(changeID, requester string) (value string, handedOut, consumed bool) {
 	value, state := s.vault().take(changeID, requester)
 	return value, state == secretWaiting, state == secretConsumed

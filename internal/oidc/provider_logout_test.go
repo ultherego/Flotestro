@@ -11,12 +11,8 @@ import (
 )
 
 // The scenario of the architecture document: a user disabled from the panel
-// must not stay logged into the other applications behind Keycloak until
-// the provider's own session runs out. The panel ends those sessions
-// through the admin API, with its own client credentials. The tests stand
-// a fake Keycloak up in the process: a realm under /realms/{name}, a token
-// endpoint that honours the client credentials grant, a user lookup and
-// the logout of one user.
+// must not stay logged into the other applications behind Keycloak until the
+// provider's own session runs out.
 
 // fakeKeycloak records what the panel asked of the admin API.
 type fakeKeycloak struct {

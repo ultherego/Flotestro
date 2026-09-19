@@ -190,8 +190,6 @@ func TestStepCountsFromOneSecondThreshold(t *testing.T) {
 }
 
 // Systemd answers "inactive" also about a unit the host does not have.
-// Without the load state the panel would name chrony on a host where it is
-// not installed.
 func TestDaemonUnitSkipsUnitsUnknownToHost(t *testing.T) {
 	output := "Id=chronyd.service\nLoadState=not-found\nActiveState=inactive\n\n" +
 		"Id=chrony.service\nLoadState=not-found\nActiveState=inactive\n\n" +

@@ -3,31 +3,7 @@
 package integration
 
 // An operation that outlasts the lease of its attempt. The lease is five
-// minutes (cmd/control-plane/main.go) and the scheduler reclaims an expired
-// one in a housekeeping pass every 30 s, then redelivers the job within a
-// dispatch pass. Before this behaviour was settled, the redelivery reached
-// an agent still carrying the operation, was refused as resource_busy, and
-// the panel failed a job the host was in the middle of.
-//
-// What the product promises now, as read from the code:
-//
-//   - A report from the host - a progress line or a preview line - moves
-//     the lease of its attempt forward (internal/gateway/agent_service.go
-//     keepAttemptAlive, internal/jobs/store.go RenewAttemptLease), so an
-//     attempt that talks is never reclaimed.
-//   - A redelivery of an operation the agent is still carrying is answered
-//     with a progress report of stage "in_progress" naming the running
-//     attempt (internal/agent/tasks.go Redelivered), not with a result; the
-//     report renews the lease of the redelivered attempt.
-//   - When the operation ends, the result goes to the attempt that did the
-//     work and then, as a replay, to the redelivered one. The first settles
-//     the job and closes the redelivered attempt as superseded_by_result
-//     (internal/jobs/store.go RecordResult); the copy changes nothing.
-//
-// Both tests here take about seven minutes: the lease has to run out for
-// real, there is no shortening it from the outside. They run in parallel
-// with each other, on different hosts so that neither fills the task
-// slots of the other's agent.
+// minutes (cmd/control-plane/main.
 
 import (
 	"context"
@@ -43,8 +19,7 @@ import (
 const leaseLength = 5 * time.Minute
 
 // silentUnit is a unit nothing logs under, so that a preview filtered by it
-// carries no lines and the attempt has nothing but its own liveness to
-// show. The name has to pass the unit name validation and match nothing.
+// carries no lines and the attempt has nothing but its own liveness to show.
 const silentUnit = "flotestro-nothing-logs-here.service"
 
 // attemptRow is what the tests read straight from job_attempts: the API
@@ -88,7 +63,7 @@ func attemptRows(ctx context.Context, t *testing.T, pool *pgxpool.Pool, jobID st
 
 // followingJournal orders a preview of the given unit (empty means the whole
 // journal) that keeps the agent busy for the given number of seconds, and
-// waits for the hand-over. The job is cleaned up whatever happens to it.
+// waits for the hand-over.
 func followingJournal(t *testing.T, h *harness, hostID, unit string, seconds int) jobView {
 	t.Helper()
 	journal := map[string]any{"lines": 3, "follow_seconds": seconds}
@@ -106,10 +81,8 @@ func followingJournal(t *testing.T, h *harness, hostID, unit string, seconds int
 	return h.awaitJobState(job.ID, 60*time.Second, "dispatched", "running")
 }
 
-// assertStillOpen fails the test the moment the job reaches a terminal
-// state before the operation on the host could have ended. It is the one
-// assertion both tests share: whatever the lease does, nobody fails a job
-// the host is carrying.
+// assertStillOpen fails the test the moment the job reaches a terminal state
+// before the operation on the host could have ended.
 func assertStillOpen(t *testing.T, job jobView) {
 	t.Helper()
 	switch job.State {
@@ -119,14 +92,8 @@ func assertStillOpen(t *testing.T, job jobView) {
 	}
 }
 
-// TestAnOperationOutlastingItsLeaseIsNotFailed lets a silent preview run
-// past the lease. Nothing renews the first attempt, so the scheduler gives
-// it up and redelivers the job; the agent, still on the preview, answers
-// the redelivery as in progress instead of refusing it, and at the end the
-// result of the first attempt settles the job while the second is closed
-// as superseded.
-//
-// Takes about seven minutes: 400 s of preview and the margins around it.
+// TestAnOperationOutlastingItsLeaseIsNotFailed lets a silent preview run past
+// the lease.
 func TestAnOperationOutlastingItsLeaseIsNotFailed(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
@@ -146,9 +113,7 @@ func TestAnOperationOutlastingItsLeaseIsNotFailed(t *testing.T) {
 	}
 
 	// After the lease: the reclaim (a housekeeping pass, every 30 s) and the
-	// redelivery (a dispatch pass) open a second attempt. The job must not
-	// end in the meantime - the earlier product refused the redelivery as
-	// resource_busy here and failed the job.
+	// redelivery (a dispatch pass) open a second attempt.
 	var attempts []attemptRow
 	for {
 		assertStillOpen(t, h.job(job.ID))
@@ -169,9 +134,9 @@ func TestAnOperationOutlastingItsLeaseIsNotFailed(t *testing.T) {
 		t.Errorf("the redelivered attempt is already closed: status=%q finished=%v", second.Status, second.FinishedAt)
 	}
 
-	// Minute six: the redelivery reached the agent, and the job is neither
-	// failed nor on its way to a second reclaim - the in-progress answer
-	// renewed the lease of the redelivered attempt, which is still alive.
+	// Minute six: the redelivery reached the agent, and the job is neither failed
+	// nor on its way to a second reclaim - the in-progress answer renewed the
+	// lease of the redelivered attempt, which is still alive.
 	for time.Since(dispatched) < 6*time.Minute {
 		assertStillOpen(t, h.job(job.ID))
 		time.Sleep(5 * time.Second)
@@ -190,9 +155,7 @@ func TestAnOperationOutlastingItsLeaseIsNotFailed(t *testing.T) {
 		t.Errorf("at minute six the redelivered attempt holds no live lease: %v", second.LeaseExpires)
 	}
 
-	// The preview ends at 400 s. The result belongs to the first attempt,
-	// which the panel had given up on: it settles the job all the same, and
-	// the redelivered attempt - which did no work - is closed by it.
+	// The preview ends at 400 s.
 	final := h.awaitTerminal(job.ID, followSeconds*time.Second+2*time.Minute-time.Since(dispatched))
 	if final.State != "succeeded" {
 		t.Fatalf("the job ended as %s (%s: %s)", final.State, final.ResultErrorCode, final.ResultMessage)
@@ -221,13 +184,9 @@ func TestAnOperationOutlastingItsLeaseIsNotFailed(t *testing.T) {
 	}
 }
 
-// TestAReportingAttemptKeepsItsLease is the other half: a preview of the
-// whole journal on a host that keeps logging - the test restarts a unit on
-// it every half minute - sends lines the whole time, and every line is a
-// sign of life. The lease moves with them, the scheduler never reclaims the
-// attempt, and the job ends on the one attempt it started on.
-//
-// Takes about seven minutes, for the same reason as the test above.
+// TestAReportingAttemptKeepsItsLease is the other half: a preview of the whole
+// journal on a host that keeps logging - the test restarts a unit on it every
+// half minute - sends lines the whole time, and every line is a sign of life.
 func TestAReportingAttemptKeepsItsLease(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
@@ -240,10 +199,8 @@ func TestAReportingAttemptKeepsItsLease(t *testing.T) {
 	dispatched := time.Now()
 	t.Logf("job %s handed over to %s at %s", job.ID, host.Hostname, dispatched.Format(time.RFC3339))
 
-	// The lines: systemd logs the stop and the start of the unit, and the
-	// agent logs the task, and the preview forwards both. A restart every
-	// 30 s until minute six keeps the journal talking for longer than the
-	// lease and the housekeeping pass together.
+	// The lines: systemd logs the stop and the start of the unit, and the agent
+	// logs the task, and the preview forwards both.
 	for time.Since(dispatched) < 6*time.Minute {
 		assertStillOpen(t, h.job(job.ID))
 		restart, _ := h.runOperation(host.ID, map[string]any{
@@ -257,8 +214,8 @@ func TestAReportingAttemptKeepsItsLease(t *testing.T) {
 	}
 
 	// Minute six: one attempt, still open, its lease later than the one the
-	// delivery gave it by more than a housekeeping pass - the renewals moved
-	// it, and the scheduler had nothing to reclaim.
+	// delivery gave it by more than a housekeeping pass - the renewals moved it,
+	// and the scheduler had nothing to reclaim.
 	atSix := h.job(job.ID)
 	assertStillOpen(t, atSix)
 	attempts := attemptRows(ctx, t, pool, job.ID)

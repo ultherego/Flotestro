@@ -32,26 +32,17 @@ type Answer struct {
 
 // BlockedPackages describes the packages that block a transaction, together
 // with the configuration questions without an answer.
-//
-// The name of a package alone says where to look; only the questions say which
-// decision has to be made. The panel does not settle them - it hands them to
-// the operator.
 func (a *APT) BlockedPackages(ctx context.Context) []Blocked {
 	blocked := a.blockedFromStatus()
 	for index := range blocked {
-		// Only root reads the configuration questions: the debconf database is
-		// not readable by the agent. Their absence in the plan therefore does
-		// not mean there are no questions - the operator sees them during the
-		// repair, which goes through the helper.
+		// Only root reads the configuration questions: the debconf database is not
+		// readable by the agent.
 		blocked[index].Questions = a.questions(ctx, blocked[index].Name)
 	}
 	return blocked
 }
 
-// questions reads the configuration questions of a package. An asterisk
-// before the name marks a question with an answer given; a missing debconf
-// tool gives an empty list rather than made-up information that there are no
-// questions.
+// questions reads the configuration questions of a package.
 func (a *APT) questions(ctx context.Context, pkg string) []Question {
 	result := run(ctx, 30*time.Second, debconfShowPath, pkg)
 	if !result.Ran || result.ExitCode != 0 {
@@ -78,11 +69,6 @@ func (a *APT) questions(ctx context.Context, pkg string) []Question {
 
 // Repair sets the answers of the operator and finishes the configuration of
 // the packages.
-//
-// The answers cover only the packages that really block the operation. Without
-// that limit the operation would be arbitrary configuration of an arbitrary
-// package on the host - exactly what the contract of typed operations is not
-// to allow.
 func (a *APT) Repair(ctx context.Context, answers []Answer) ([]string, []Blocked, error) {
 	blocking := map[string]bool{}
 	for _, pkg := range a.PackagesNeedingAttention(ctx) {
@@ -93,9 +79,8 @@ func (a *APT) Repair(ctx context.Context, answers []Answer) ([]string, []Blocked
 	var lines []string
 	for _, answer := range answers {
 		// An answer for a package that blocks nothing is skipped rather than
-		// rejected: the host may have been repaired in the meantime, and a
-		// campaign repeating the same repair must not fail because of that.
-		// The boundary stays the same - we set only what unblocks.
+		// rejected: the host may have been repaired in the meantime, and a campaign
+		// repeating the same repair must not fail because of that.
 		if !blocking[answer.Package] {
 			continue
 		}
@@ -105,8 +90,7 @@ func (a *APT) Repair(ctx context.Context, answers []Answer) ([]string, []Blocked
 		lines = append(lines, strings.Join(
 			[]string{answer.Package, answer.Question, answer.Type, answer.Value}, " "))
 		// The name of the question already carries the package, so gluing them
-		// together gave a label of the sort
-		// grub-pc/grub-pc/install_devices.
+		// together gave a label of the sort grub-pc/grub-pc/install_devices.
 		set_ = append(set_, answer.Question)
 	}
 

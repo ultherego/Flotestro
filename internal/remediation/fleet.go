@@ -13,20 +13,12 @@ import (
 )
 
 // A fleet remediation is the single-host plan carried over to a campaign.
-//
-// The operator picks checks and hosts; the panel computes every host's plan
-// from its own findings, the campaign records the whole set, and one
-// approval covers it. Nothing here runs anything: the runner drives the
-// plans once the campaign starts them, exactly as it drives a plan ordered
-// on one host.
 
 // HostPlanKind names the shape of a per-host remediation plan as the
 // campaign's plan set stores it.
 const HostPlanKind = "security_remediation"
 
-// campaignCreatorPrefix marks a plan a campaign created. The plan carries
-// no campaign column; the creator is the record of who ordered it, and a
-// campaign is a creator like any other.
+// campaignCreatorPrefix marks a plan a campaign created.
 const campaignCreatorPrefix = "campaign:"
 
 // CampaignCreator returns the creator recorded on a plan a campaign starts.
@@ -44,11 +36,6 @@ func (p Plan) Campaign() string {
 }
 
 // HostPlan is one host's remediation plan inside a campaign's plan set.
-//
-// The findings digest binds it to the state the host had when the plan was
-// computed, the way a single-host order is bound; the steps are what the
-// runner will carry out. The body is shaped like the plans the hosts
-// compute, so the campaign screens read it the same way.
 type HostPlan struct {
 	Kind                string   `json:"kind"`
 	FindingsHash        string   `json:"findings_hash"`
@@ -92,13 +79,6 @@ const (
 )
 
 // ArrangeForChecks computes one host's plan for the chosen checks.
-//
-// It is the single-host order made repeatable: the same findings and the
-// same choice give the same steps in the same order, so the digest can
-// group hosts and bind the consent. A check the host passed, does not
-// answer or is not concerned by gives no step and says why; a check the
-// report does not know is an error, because a typo must not turn into a
-// silent no-op on the whole fleet.
 func ArrangeForChecks(report compliance.Report, checkIDs []string) (Arrangement, error) {
 	byID := map[string]compliance.Finding{}
 	for _, finding := range report.Findings {
@@ -125,11 +105,8 @@ func ArrangeForChecks(report compliance.Report, checkIDs []string) (Arrangement,
 	return arrangeChosen(report, chosen, result)
 }
 
-// ArrangeFindings computes one host's plan from every finding of the
-// report that waits for action. It is the builder a desired-state policy
-// orders its remediation through: the policy judges its rules into
-// findings, and the plan, the digest and the grouping are the same ones a
-// fleet remediation gets - so one approval covers the set the same way.
+// ArrangeFindings computes one host's plan from every finding of the report
+// that waits for action.
 func ArrangeFindings(report compliance.Report) (Arrangement, error) {
 	result := Arrangement{Skipped: map[string]string{}}
 	chosen := make([]compliance.Finding, 0, len(report.Findings))
@@ -180,12 +157,6 @@ func arrangeChosen(report compliance.Report, chosen []compliance.Finding, result
 }
 
 // StepSetHash computes the digest of a plan's steps.
-//
-// It covers what the host will do - the order, the check and its version,
-// the operation and its payload, the reboot boundary - and nothing about
-// which host does it. Hosts with the same digest are one group in the plan
-// set, and a changed step on any host changes the set's digest and with it
-// the consent.
 func StepSetHash(steps []Step) string {
 	lines := make([]string, 0, len(steps))
 	for _, step := range steps {

@@ -6,8 +6,6 @@ import (
 )
 
 // The set of packages to remove is computed again right before the operation.
-// A difference means the host has changed since the plan - and a different set
-// would then be removed than the one the operator approved.
 func TestTheComparisonOfSetsFindsEveryDifference(t *testing.T) {
 	if difference := compareSets([]string{"a", "b"}, []string{"b", "a"}); difference != "" {
 		t.Errorf("equal sets were called different: %q", difference)
@@ -40,9 +38,7 @@ func TestAMissingPlanIsADifference(t *testing.T) {
 	}
 }
 
-// The "Remv" line is the only source of the list of packages to remove. The
-// format is stable under LC_ALL=C and does not depend on the language of the
-// interface.
+// The "Remv" line is the only source of the list of packages to remove.
 func TestParsingARemovalLine(t *testing.T) {
 	name, ok := parseAptRemvLine("Remv libfoo [1.0-1]")
 	if !ok || name != "libfoo" {

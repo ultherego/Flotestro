@@ -1,10 +1,4 @@
 // Package paging encodes the cursors of keyset-paged lists.
-//
-// A list of the fleet is paged by the key of its last row rather than by an
-// offset: hosts enroll and tasks arrive while the operator browses, and an
-// offset then skips rows or shows one twice. The key travels to the browser
-// and back as one opaque string, so a screen does not have to know that the
-// key of a task is a timestamp and an identifier.
 package paging
 
 import (
@@ -18,9 +12,8 @@ import (
 // ErrInvalidCursor means a cursor that did not come from this panel.
 var ErrInvalidCursor = errors.New("invalid cursor")
 
-// separator joins the parts of a key. A newline cannot appear in a
-// hostname, an identifier or a formatted timestamp, so it does not need
-// escaping.
+// separator joins the parts of a key. A newline cannot appear in a hostname,
+// an identifier or a formatted timestamp, so it does not need escaping.
 const separator = "\n"
 
 // Encode renders the parts of a key as one URL-safe token.
@@ -45,9 +38,7 @@ func Decode(token string, n int) ([]string, error) {
 	return parts, nil
 }
 
-// FormatTime renders a timestamp for a cursor. Nanoseconds keep the
-// microsecond precision of the database column, so the row the cursor
-// names compares equal to itself on the way back.
+// FormatTime renders a timestamp for a cursor.
 func FormatTime(value time.Time) string {
 	return value.UTC().Format(time.RFC3339Nano)
 }
@@ -61,9 +52,7 @@ func ParseTime(value string) (time.Time, error) {
 	return parsed, nil
 }
 
-// Limit bounds a page size requested by a caller. A request without a
-// limit gets the default; one asking for more than the maximum gets the
-// maximum rather than an error, because the caller then pages on.
+// Limit bounds a page size requested by a caller.
 func Limit(requested, fallback, maximum int) int {
 	if requested <= 0 {
 		return fallback

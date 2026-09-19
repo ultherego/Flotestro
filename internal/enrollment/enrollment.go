@@ -1,15 +1,4 @@
 // Package enrollment admits new hosts into the fleet.
-//
-// An enrollment request is a durable record of a pending installation: who
-// ordered it, for what purpose, in what scope and how it ended. The token is
-// only a secret authorising one attempt - its clear value exists solely in
-// the response to creating the request, and only its digest stays in the
-// database.
-//
-// The purpose of the request is the most important field here. "A new host"
-// and "restoring the identity of an existing host" are two different
-// decisions: without that distinction anybody with a token could silently
-// take over the identity of a running machine.
 package enrollment
 
 import (
@@ -41,16 +30,10 @@ var ErrInvalidToken = errors.New("the enrollment token is invalid")
 // ErrUnknownRequest means a request that does not exist.
 var ErrUnknownRequest = errors.New("the enrollment request does not exist")
 
-// Denial says why an attempt was refused.
-//
-// It exists for the audit trail and the installation screen alone. The agent
-// gets the same answer whatever the reason - it unwraps to ErrInvalidToken -
-// so that nothing about the orders can be probed from the outside. The
-// operator, who ordered the installation, may know why it does not go on.
+// Denial says why an attempt was refused. It exists for the audit trail and
+// the installation screen alone.
 type Denial struct {
-	// RequestID names the order the attempt was made against. Empty when
-	// the token matched no order at all: there is nothing to attach the
-	// refusal to then.
+	// RequestID names the order the attempt was made against.
 	RequestID string
 	Code      string
 }
@@ -96,9 +79,7 @@ const (
 	PurposeRelay = "relay"
 )
 
-// The statuses of a request. They are for the operator and the audit trail,
-// never a basis for authorisation - that is settled solely by the state of
-// the token checked inside the transaction.
+// The statuses of a request.
 const (
 	StatusPending  = "pending"
 	StatusEnrolled = "enrolled"
@@ -107,24 +88,18 @@ const (
 	StatusFailed   = "failed"
 )
 
-// MaxTTL bounds the lifetime of a request.
-//
-// A token that lies around for weeks is a secret waiting to leak. Longer
-// automations are to fetch short tokens on demand rather than keep one in
-// reserve.
+// MaxTTL bounds the lifetime of a request. A token that lies around for weeks
+// is a secret waiting to leak.
 const MaxTTL = 24 * time.Hour
 
-// MaxUses bounds how many hosts one request may register. A batch of
-// identical machines fits in it; a request good for thousands would be a
-// standing door rather than an order.
+// MaxUses bounds how many hosts one request may register.
 const MaxUses = 500
 
 // Request describes a pending installation.
 type Request struct {
 	ID string `json:"id"`
-	// Value is the clear token and appears solely in the response to creating
-	// the request. Nowhere else - neither in a listing nor in the audit
-	// trail.
+	// Value is the clear token and appears solely in the response to creating the
+	// request.
 	Value       string `json:"token,omitempty"`
 	Description string `json:"description,omitempty"`
 	Site        string `json:"site"`
@@ -137,9 +112,9 @@ type Request struct {
 	ExpectedHostID    string `json:"expected_host_id,omitempty"`
 	// RelayID limits the route of the request to one relay.
 	RelayID string `json:"relay_id,omitempty"`
-	// Owner and Tags are what the operator already knows about the machine
-	// when ordering its installation; they land on the host the moment it
-	// enrolls, so a new host is never an untagged host of nobody.
+	// Owner and Tags are what the operator already knows about the machine when
+	// ordering its installation; they land on the host the moment it enrolls, so
+	// a new host is never an untagged host of nobody.
 	Owner          string   `json:"owner,omitempty"`
 	Tags           []string `json:"tags"`
 	MaxUses        int      `json:"max_uses"`
@@ -165,9 +140,7 @@ type Scope struct {
 	Purpose           string
 	ExpectedMachineID string
 	ExpectedHostID    string
-	// RelayID limits the route of the request. Empty means "any": a token
-	// bound to a relay will not work outside its site, and a token without
-	// such a binding works as before.
+	// RelayID limits the route of the request.
 	RelayID string
 	// Owner and Tags are applied to the host that enrolls with the request.
 	Owner string
@@ -175,11 +148,6 @@ type Scope struct {
 }
 
 // Replay is the record of an attempt that has already succeeded.
-//
-// The answer can be lost in the network after the server recorded the host
-// and issued the certificate. The agent then retries and has to get exactly
-// what was already issued - otherwise the token is used up and the host is
-// left without an identity.
 type Replay struct {
 	HostID            string
 	CertificatePEM    []byte
@@ -219,9 +187,7 @@ type CreateInput struct {
 	Purpose           string
 	ExpectedMachineID string
 	ExpectedHostID    string
-	// RelayID closes the request within one site. A token taken outside it
-	// registers nothing: the centre checks which relay signed the request
-	// with its own mTLS channel.
+	// RelayID closes the request within one site.
 	RelayID string
 	// Owner and Tags go onto the host at enrollment. The tags are checked
 	// by the caller the way host tags are; the store records what it gets.
@@ -313,9 +279,8 @@ func (s *Store) Create(ctx context.Context, input CreateInput) (*Request, error)
 		input.Owner, tags).
 		Scan(&request.CreatedAt, &request.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) && input.IdempotencyKey != "" {
-		// The key was used before: the earlier order is the answer. Its
-		// token is not - it was shown once, and the store keeps only the
-		// hash.
+		// The key was used before: the earlier order is the answer. Its token is not
+		// - it was shown once, and the store keeps only the hash.
 		existing, err := s.byIdempotencyKey(ctx, input.CreatedBy, input.IdempotencyKey)
 		if err != nil {
 			return nil, err
@@ -372,9 +337,6 @@ func checkPurpose(kind, purpose, hostID string) error {
 
 // Redeem checks the token and decides whether this is a new attempt or a
 // replay.
-//
-// The row is locked, so a parallel enrollment will not exceed the limit of
-// uses. A replay uses none: it is the same attempt whose answer was lost.
 func (s *Store) Redeem(ctx context.Context, tx pgx.Tx, input AttemptInput) (Outcome, error) {
 	value := strings.TrimSpace(input.Token)
 	if value == "" {
@@ -410,8 +372,8 @@ func (s *Store) Redeem(ctx context.Context, tx pgx.Tx, input AttemptInput) (Outc
 	}
 
 	// We check the replay before the limits: an attempt that has already
-	// succeeded is to get its answer even when the request has used itself
-	// up in the meantime.
+	// succeeded is to get its answer even when the request has used itself up in
+	// the meantime.
 	replay, err := s.replay(ctx, tx, scope.TokenID, input)
 	if err != nil {
 		return Outcome{}, err
@@ -444,10 +406,6 @@ func (s *Store) Redeem(ctx context.Context, tx pgx.Tx, input AttemptInput) (Outc
 }
 
 // replay looks for an attempt that has already succeeded.
-//
-// We look by the attempt identifier and by the CSR digest: an agent that lost
-// the answer and retries with a new identifier but the same key is asking for
-// exactly the same identity.
 func (s *Store) replay(ctx context.Context, tx pgx.Tx, requestID string,
 	input AttemptInput) (*Replay, error) {
 	fingerprint := sha256.Sum256(input.CSR)
@@ -479,8 +437,7 @@ func (s *Store) replay(ctx context.Context, tx pgx.Tx, requestID string,
 		return nil, err
 	}
 	// The same attempt identifier with a different CSR is not a replay but a
-	// different attempt under somebody else's number. We refuse instead of
-	// issuing an identity.
+	// different attempt under somebody else's number.
 	if !bytes.Equal(storedCSR, fingerprint[:]) {
 		return nil, &Denial{RequestID: requestID, Code: DenialRequestReused}
 	}
@@ -492,10 +449,6 @@ func (s *Store) replay(ctx context.Context, tx pgx.Tx, requestID string,
 
 // RecordAttempt persists a successful attempt together with the issued
 // certificate.
-//
-// In the same transaction in which the host and the certificate come into
-// being: recording the attempt after the commit might never happen, and the
-// whole idempotency would be make-believe.
 func (s *Store) RecordAttempt(ctx context.Context, tx pgx.Tx, requestID string,
 	input AttemptInput, result Replay) error {
 	fingerprint := sha256.Sum256(input.CSR)
@@ -532,9 +485,6 @@ func (s *Store) RecordAttempt(ctx context.Context, tx pgx.Tx, requestID string,
 }
 
 // Revoke blocks the remaining uses of a request.
-//
-// It works also when part of the pool has already been used: revoking is to
-// close what is left rather than pretend nothing happened.
 func (s *Store) Revoke(ctx context.Context, id string) error {
 	const query = `
 		update enrollment_requests
@@ -566,9 +516,6 @@ func (s *Store) Request(ctx context.Context, id string) (*Request, error) {
 }
 
 // List returns the requests without the clear value.
-//
-// Settled and revoked ones too: the operator has to see what happened to the
-// installation they ordered, not only what is still waiting.
 func (s *Store) List(ctx context.Context) ([]Request, error) {
 	page, err := s.ListPaged(ctx, ListFilter{}, "", 200)
 	if err != nil {
@@ -577,9 +524,7 @@ func (s *Store) List(ctx context.Context) ([]Request, error) {
 	return page.Items, nil
 }
 
-// ListFilter narrows the orders listed. Scopes narrow to the placements
-// the caller may read; nil narrows nothing, which is right only for a
-// caller with the global scope or one that has checked the scope itself.
+// ListFilter narrows the orders listed.
 type ListFilter struct {
 	Status      string
 	Kind        string
@@ -597,13 +542,9 @@ type ListPage struct {
 // MaxListPage bounds one page of orders.
 const MaxListPage = 500
 
-// ListPaged lists the orders newest first, narrowed by the filter and
-// the caller's scopes in the query itself - a list must not show an
-// order a direct read of it would refuse. The page is keyed by the
-// creation time and the identifier, so an order placed while the operator
-// browses does not shift the rows under the cursor. The status "expired"
-// is a pending order past its deadline, as the reads spell it, so the
-// filter says so in SQL rather than after the fact.
+// ListPaged lists the orders newest first, narrowed by the filter and the
+// caller's scopes in the query itself - a list must not show an order a direct
+// read of it would refuse.
 func (s *Store) ListPaged(ctx context.Context, filter ListFilter, cursor string, limit int) (ListPage, error) {
 	if limit <= 0 || limit > MaxListPage {
 		limit = MaxListPage

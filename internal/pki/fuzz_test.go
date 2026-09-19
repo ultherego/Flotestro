@@ -12,12 +12,6 @@ import (
 )
 
 // FuzzSignAgentCSR feeds the CSR decoder what an enrolling host may send.
-//
-// The CSR is the first thing the control plane reads from a host that has
-// no identity yet, so it is read from anybody. The property is the one the
-// signer promises: whatever comes in, it either refuses with an error or
-// issues a certificate that carries the identity the panel granted - never
-// one taken from the request.
 func FuzzSignAgentCSR(f *testing.F) {
 	ca, err := EnsureCA(f.TempDir())
 	if err != nil {

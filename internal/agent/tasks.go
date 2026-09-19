@@ -69,7 +69,7 @@ const (
 	RejectInvalidRequest = "invalid_request"
 	// RejectPreconditionChanged marks a task whose preconditions held when it was
 	// accepted and no longer do after its wait for a resource of the host: the
-	// host rebooted, or changed under the plan, while another operation held the
+	// host rebooted, or changed under the plan, while another operation held the.
 	RejectPreconditionChanged = "precondition_changed"
 	// RejectUnsupported marks an agent that by design performs no tasks.
 	RejectUnsupported = "unsupported"
@@ -300,7 +300,7 @@ func (c *cancellations) lookup(taskID string) (context.CancelFunc, bool) {
 
 // CancelTask answers a cancel request for an attempt: the outcome and the
 // phase for the acknowledgement, the hash of the result when the task is done,
-// and the interruption to carry out once the acknowledgement went out - nil
+// and the interruption to carry out once the acknowledgement went out - nil.
 func (e *TaskExecutor) CancelTask(taskID string) (outcome agentv1.CancelAck_Outcome,
 	phase string, resultHash []byte, interrupt func()) {
 	if e == nil {

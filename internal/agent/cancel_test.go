@@ -12,10 +12,9 @@ import (
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 )
 
-// The answer to a cancel follows the phase the task is in, and nothing
-// else: before the start the task is refused and never starts; a read
-// with a registered interruption is interrupted; a mutation runs to its
-// end; a task that ended is already done, with the digest of its result.
+// The answer to a cancel follows the phase the task is in, and nothing else:
+// before the start the task is refused and never starts; a read with a
+// registered interruption is interrupted; a mutation runs to its end; a task
 func TestACancelIsAnsweredByThePhaseOfTheTask(t *testing.T) {
 	executor := &TaskExecutor{
 		log: slog.Default(), cancels: newCancellationTable(), phases: newTaskPhases(), running: newRunningKeys(),
@@ -104,10 +103,9 @@ func TestACancelIsAnsweredByThePhaseOfTheTask(t *testing.T) {
 	}
 }
 
-// A cancel that names a task the process was never handed is answered as
-// not started and remembered: the delivery, should it still arrive, is
-// refused without running. A cancel that names a redelivered attempt of
-// an operation under way is answered about the execution behind it.
+// A cancel that names a task the process was never handed is answered as not
+// started and remembered: the delivery, should it still arrive, is refused
+// without running.
 func TestACancelBeforeTheDeliveryRefusesTheDelivery(t *testing.T) {
 	executor := &TaskExecutor{
 		log: slog.Default(), cancels: newCancellationTable(), phases: newTaskPhases(), running: newRunningKeys(),

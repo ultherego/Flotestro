@@ -10,10 +10,7 @@ import (
 
 // The action preview of a host answers what the order would: a viewer is
 // refused every change with permission_denied, a host that announced no
-// adapter refuses every change that needs one with capability_missing, and
-// an administrator on a host of the lab is allowed the restart the
-// screens draw a button for. The preview is read with host.read, so the
-// viewer reads their own refusals.
+// adapter refuses every change that needs one with capability_missing, and an
 
 type hostActionView struct {
 	Action            string `json:"action"`

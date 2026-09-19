@@ -6,9 +6,6 @@ import (
 
 // CompareRPM compares full RPM versions in the EVR form
 // (epoch:version-release).
-//
-// It returns a negative number, zero or a positive one - just like rpmvercmp
-// from librpm.
 func CompareRPM(a, b string) int {
 	epochA, versionA, releaseA := splitEVR(a)
 	epochB, versionB, releaseB := splitEVR(b)
@@ -19,9 +16,8 @@ func CompareRPM(a, b string) int {
 	if result := CompareRPMSegment(versionA, versionB); result != 0 {
 		return result
 	}
-	// The release is compared only when both sides carry one: an advisory
-	// often gives the version alone, and then "2.4.6" and "2.4.6-1" mean the
-	// same question rather than two different versions.
+	// The release is compared only when both sides carry one: an advisory often
+	// gives the version alone, and then "2.
 	if releaseA == "" || releaseB == "" {
 		return 0
 	}
@@ -47,12 +43,6 @@ func splitEVR(evr string) (epoch, version, release string) {
 }
 
 // CompareRPMSegment implements rpmvercmp for one segment of a version.
-//
-// The librpm algorithm: strings are split into runs of digits, runs of
-// letters and the rest; separators are skipped, a run of digits is always
-// newer than a run of letters, and a tilde is smaller than everything. The
-// "^" character marks an intermediate version and is greater than the end of
-// the string but smaller than any other character.
 func CompareRPMSegment(a, b string) int {
 	i, j := 0, 0
 	for i < len(a) || j < len(b) {

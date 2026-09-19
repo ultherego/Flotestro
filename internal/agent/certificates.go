@@ -31,13 +31,7 @@ var certificateFactCodes = map[string]helperv1.CertificateRequest_Fact{
 }
 
 // CollectCertificates assembles the picture of the certificates of the host.
-//
-// The order follows from where the knowledge comes from. First the helper is
-// asked what the host watches on its own and which files the panel asked about
-// earlier - because only that sets the scope. Then the files are read without
-// root privileges, because a certificate is public. Finally the helper is asked
-// for what cannot be seen without root: the permissions of the keys and the
-// files closed to everyone but the service.
+// The order follows from where the knowledge comes from.
 func (e *TaskExecutor) CollectCertificates(ctx context.Context,
 	targets []certificates.Target, fullList bool) certificates.Snapshot {
 	scope, tracking := e.certificateScope(ctx, targets, fullList)
@@ -61,8 +55,7 @@ func (e *TaskExecutor) CollectCertificates(ctx context.Context,
 		snapshot = snapshot.Supplemented(*tracking)
 	}
 	// The trust store is read by the agent: the anchor directory is readable by
-	// everyone, so there is no reason to go to root for it. Without that read a
-	// rotation of the authority is invisible from the panel.
+	// everyone, so there is no reason to go to root for it.
 	store := certificates.ReadAnchors(certificates.DetectStore(certificates.Exists))
 	snapshot.Trust = &store
 	return snapshot
@@ -81,9 +74,7 @@ func (e *TaskExecutor) certificateScope(ctx context.Context,
 		scope = targets
 	}
 	// The certificates under the care of certmonger are added to the scope,
-	// because the host knows about them itself. Without that the tab would show
-	// emptiness on a host that has its own domain certificate and has been
-	// renewing it for months.
+	// because the host knows about them itself.
 	scope = certificates.AddTracked(scope, supplement.Tracking)
 	return scope, &supplement
 }
@@ -134,11 +125,6 @@ func (e *TaskExecutor) certificateFacts(ctx context.Context, names []string,
 }
 
 // ProbeCertificates reads the picture of the certificates for the inventory.
-//
-// The inventory brings no list of the panel with it: the scope comes from what
-// the host already knows - from the registry of the helper and from the
-// certmonger requests. That is why the list here is not the full list of the
-// panel and erases nothing in the registry.
 func (e *TaskExecutor) ProbeCertificates(ctx context.Context) (certificates.Snapshot, error) {
 	return e.CollectCertificates(ctx, nil, false), nil
 }
@@ -159,9 +145,9 @@ func (e *TaskExecutor) applyCertificate(ctx context.Context, task *agentv1.TaskE
 				})
 			}
 		}
-		// A scan ordered by the panel carries its full list of targets, so the
-		// host remembers exactly that one: a target deleted in the panel is to
-		// disappear from the inventory as well and not stay in it forever.
+		// A scan ordered by the panel carries its full list of targets, so the host
+		// remembers exactly that one: a target deleted in the panel is to disappear
+		// from the inventory as well and not stay in it forever.
 		snapshot := e.CollectCertificates(callCtx, targets, true)
 		return certificateResult(task, snapshot, "the certificates were read", nil)
 	}
@@ -219,9 +205,7 @@ func (e *TaskExecutor) applyCertificate(ctx context.Context, task *agentv1.TaskE
 		if !payload.KeySecret.Empty() {
 			request.KeySecretRef = payload.KeySecret.String()
 		}
-		// The key is fetched only now, right before the swap. The value lives
-		// for a moment in the memory of the agent and of the helper - it is not
-		// in the envelope of the task, in the journal or in the result.
+		// The key is fetched only now, right before the swap.
 		if !payload.KeySecret.Empty() {
 			if e.secrets == nil {
 				return rejected(agentv1.TaskResult_STATUS_FAILED, RejectInternalError,

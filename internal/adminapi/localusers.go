@@ -7,12 +7,8 @@ import (
 	"github.com/ultherego/flotestro/internal/authz"
 )
 
-// handleHostLocalAccounts returns the accounts seen on the host.
-//
-// The data comes from the last agent report, not from querying the host on
-// demand. The answer carries the observation timestamp so the operator
-// knows how fresh this knowledge is; the panel does not pretend to see the
-// host in real time.
+// handleHostLocalAccounts returns the accounts seen on the host. The data
+// comes from the last agent report, not from querying the host on demand.
 func (s *Server) handleHostLocalAccounts(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
 	_, scope, ok := s.hostScope(w, r, hostID)
@@ -29,9 +25,9 @@ func (s *Server) handleHostLocalAccounts(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// System accounts belong to services and clutter the view; they are
-	// available through an explicit filter, because at times it is necessary
-	// to confirm that a service account exists.
+	// System accounts belong to services and clutter the view; they are available
+	// through an explicit filter, because at times it is necessary to confirm
+	// that a service account exists.
 	filter := strings.TrimSpace(r.URL.Query().Get("source"))
 	filtered := accounts[:0:0]
 	for _, account := range accounts {

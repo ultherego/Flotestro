@@ -1,17 +1,10 @@
-// Package files manages the configuration files of a host.
-//
-// This is not a root file manager. A panel that can write an arbitrary path
-// can replace /etc/shadow and private keys - that is why the scope is
-// enumerated and every write has a known state before and after.
+// Package files manages the configuration files of a host. This is not a root
+// file manager.
 package files
 
 import "time"
 
 // Size above which the panel does not fetch the file content.
-//
-// The module is for configuration, not for moving data: a file bigger than
-// this is almost certainly not configuration, and its content in the panel
-// database would be a copy of something nobody wanted there.
 const MaxSize = 1 << 20
 
 // File describes one configuration file.
@@ -36,10 +29,8 @@ type File struct {
 	// Exists distinguishes a deleted file from an unread one.
 	Exists            bool   `json:"exists"`
 	UnavailableReason string `json:"unavailable_reason,omitempty"`
-	// Versions are the copies the host kept before the writes that
-	// displaced them, newest first. They are reported so that the panel can
-	// offer a specific content to go back to instead of asking the operator
-	// for a digest of something they cannot see.
+	// Versions are the copies the host kept before the writes that displaced
+	// them, newest first.
 	Versions []KeptVersion `json:"versions,omitempty"`
 }
 
@@ -47,9 +38,8 @@ type File struct {
 type Content struct {
 	File
 	Content string `json:"content"`
-	// Truncated says the content is cut off. Cut-off content without the
-	// mark would look like the whole file - and would go back to the host
-	// as such.
+	// Truncated says the content is cut off. Cut-off content without the mark
+	// would look like the whole file - and would go back to the host as such.
 	Truncated bool `json:"truncated"`
 }
 
@@ -69,9 +59,6 @@ type Write struct {
 	Owner   string `json:"owner,omitempty"`
 	Group   string `json:"group,omitempty"`
 	// ExpectedSHA256 binds the write to the content the operator viewed.
-	// Empty means a file that does not exist yet; a value that disagrees
-	// with the host state stops the write instead of overwriting somebody
-	// else's change.
 	ExpectedSHA256 string `json:"expected_sha256,omitempty"`
 	// Validator names the content check before the write.
 	Validator string `json:"validator,omitempty"`

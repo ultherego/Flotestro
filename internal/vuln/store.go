@@ -14,31 +14,20 @@ import (
 // ErrNoSnapshot means a provider without an active snapshot.
 var ErrNoSnapshot = errors.New("this provider has no active snapshot")
 
-// ErrFeedEmpty means a fetch with no findings offered in place of a
-// snapshot that had them. The store refuses it: the previous snapshot
-// stays active and the scheduler marks the source with ReasonFeedEmpty.
+// ErrFeedEmpty means a fetch with no findings offered in place of a snapshot
+// that had them.
 var ErrFeedEmpty = errors.New("the feed came back empty")
 
 // ErrFeedShrank means a fetch the sanity gate refused to activate: it lost
 // more findings than the installation allows, or it lost a whole release.
-// The fetch is kept as a candidate with its findings, the previous
-// snapshot stays active, and an operator may accept the candidate
-// deliberately.
 var ErrFeedShrank = errors.New("the feed shrank against the snapshot in force")
 
 // ErrNotCandidate means an acceptance aimed at a snapshot the gate never
 // held back.
 var ErrNotCandidate = errors.New("this snapshot is not a candidate")
 
-// DefaultShrinkShare is how much of the active snapshot a fetch may lose
-// and still be activated without anybody looking.
-//
-// Two fifths is deliberately loose. Vendors do retire findings in bulk
-// when a release goes out of support, and a gate that fired on every
-// ordinary movement would train the operator to accept candidates without
-// reading them - which is worse than no gate. What it catches is the
-// accident: a truncated download, a parser that stopped at the first
-// unexpected record, a mirror serving half a file.
+// DefaultShrinkShare is how much of the active snapshot a fetch may lose and
+// still be activated without anybody looking.
 const DefaultShrinkShare = 0.4
 
 // Store holds feed snapshots, vendor findings and the results of the
@@ -53,17 +42,7 @@ func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 // of their own.
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
-// SaveSnapshot writes a snapshot together with its findings and activates
-// it.
-//
-// Everything in one transaction and only at the very end: an import that
-// fails must not leave half the findings behind or take the previous
-// snapshot away from the panel. Better to assess with older data and say
-// they are older than not to assess at all.
-//
-// The sanity gate is applied on both paths: a fresh fetch and a repeat of
-// one that was refused before. A refusal by shrinking keeps the fetch as a
-// candidate with its findings, so accepting it later costs no download.
+// SaveSnapshot writes a snapshot together with its findings and activates it.
 func (s *Store) SaveSnapshot(ctx context.Context, snapshot Snapshot,
 	advisories []Advisory, shrinkShare float64) (string, error) {
 	tx, err := s.pool.Begin(ctx)
@@ -72,14 +51,7 @@ func (s *Store) SaveSnapshot(ctx context.Context, snapshot Snapshot,
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// A snapshot that lost its findings does not replace one that had
-	// them. The vendor trackers never go from thousands of findings to
-	// none, nor from thousands to a few hundred; such a fetch is a
-	// truncated download or a parser that stopped reading, and activating
-	// it would assess the whole fleet as clean. The active snapshot is
-	// what the fetch is judged against - its count and the releases it
-	// covers, because a feed can keep its total and still lose a whole
-	// release.
+	// A snapshot that lost its findings does not replace one that had them.
 	var active Snapshot
 	err = tx.QueryRow(ctx,
 		`select advisory_count, releases from vuln_snapshots where provider = $1 and active`,
@@ -112,9 +84,7 @@ func (s *Store) SaveSnapshot(ctx context.Context, snapshot Snapshot,
 			return "", err
 		}
 		if refusal != "" {
-			// The same refused data came again. It stays a candidate and
-			// the snapshot in force is not touched; the reason is written
-			// again so its date says when the panel last saw the fetch.
+			// The same refused data came again.
 			if err := markCandidate(ctx, tx, id, refusal); err != nil {
 				return "", err
 			}
@@ -123,11 +93,8 @@ func (s *Store) SaveSnapshot(ctx context.Context, snapshot Snapshot,
 			}
 			return id, shrinkError(refusal, snapshot.Provider, active, existingCount, existingReleases)
 		}
-		// A fetch that was held back before may pass the gate now - the
-		// snapshot in force has itself shrunk in the meantime, so the
-		// comparison has moved. It stops being a candidate: there is no
-		// decision left to ask the operator for, and a snapshot in force
-		// is never a candidate.
+		// A fetch that was held back before may pass the gate now - the snapshot in
+		// force has itself shrunk in the meantime, so the comparison has moved.
 		if _, err := tx.Exec(ctx,
 			`update vuln_snapshots set candidate_reason = '', candidate_at = null
 			 where id = $1::uuid and candidate_reason <> ''`, id); err != nil {
@@ -166,10 +133,9 @@ func (s *Store) SaveSnapshot(ctx context.Context, snapshot Snapshot,
 	}
 
 	if len(advisories) > 0 {
-		// The rows are handed over one at a time rather than from a ready
-		// array: the Red Hat feed carries close to a million findings per
-		// release and copying them into memory first would cost the panel
-		// more than the write itself.
+		// The rows are handed over one at a time rather than from a ready array: the
+		// Red Hat feed carries close to a million findings per release and copying
+		// them into memory first would cost the panel more than the write itself.
 		source := pgx.CopyFromSlice(len(advisories), func(i int) ([]any, error) {
 			advisory := advisories[i]
 			return []any{
@@ -189,10 +155,9 @@ func (s *Store) SaveSnapshot(ctx context.Context, snapshot Snapshot,
 	}
 
 	if refusal != "" {
-		// The candidate keeps its findings and is not activated: the
-		// snapshot in force stays in force and ages into stale, which the
-		// panel shows, instead of being replaced by a fetch nobody has
-		// looked at.
+		// The candidate keeps its findings and is not activated: the snapshot in
+		// force stays in force and ages into stale, which the panel shows, instead
+		// of being replaced by a fetch nobody has looked at.
 		if err := pruneSnapshots(ctx, tx, snapshot.Provider); err != nil {
 			return "", err
 		}
@@ -210,30 +175,14 @@ func (s *Store) SaveSnapshot(ctx context.Context, snapshot Snapshot,
 	return id, tx.Commit(ctx)
 }
 
-// feedReplacementRefused says whether a fetch of the given size may take
-// the place of the active snapshot with the given count. Only a fetch with
-// nothing in it is refused, and only when there was something to lose: a
-// first fetch of a provider with no findings for its releases is a fact
-// the panel can start from, and it is the assessment that says how much
-// the feed covers.
+// feedReplacementRefused says whether a fetch of the given size may take the
+// place of the active snapshot with the given count.
 func feedReplacementRefused(previousCount, fetched int) bool {
 	return fetched == 0 && previousCount > 0
 }
 
 // feedRefusal says whether a fetch may take the place of the snapshot in
 // force, and names the reason when it may not.
-//
-// Three questions in one order. Did the fetch carry anything at all - the
-// easy accident. Does it still cover every release the snapshot in force
-// covered - the accident a count hides, because a feed that drops trixie
-// and gains findings for bookworm keeps its total and makes every trixie
-// host look clean. And did it lose more than the installation allows -
-// the accident that is only visible as a proportion.
-//
-// An empty result means the fetch may be activated. A provider with
-// nothing in force refuses nothing: there is no previous answer to
-// protect, and it is the coverage next to the assessment that says how
-// much such a feed covers.
 func feedRefusal(active Snapshot, fetchedCount int, fetchedReleases []string,
 	shrinkShare float64) string {
 	if feedReplacementRefused(active.AdvisoryCount, fetchedCount) {
@@ -248,9 +197,8 @@ func feedRefusal(active Snapshot, fetchedCount int, fetchedReleases []string,
 	return ""
 }
 
-// feedShrankTooFar says whether a fetch lost more of the active snapshot
-// than the installation allows. A fetch that grew, or one that has nothing
-// to be measured against, never shrank.
+// feedShrankTooFar says whether a fetch lost more of the active snapshot than
+// the installation allows.
 func feedShrankTooFar(previousCount, fetched int, shrinkShare float64) bool {
 	if previousCount <= 0 || fetched >= previousCount {
 		return false
@@ -262,9 +210,7 @@ func feedShrankTooFar(previousCount, fetched int, shrinkShare float64) bool {
 }
 
 // missingReleases lists the releases the snapshot in force covered and the
-// fetch does not. A fetch that names no releases at all is not measured
-// this way: some providers do not enumerate them, and an absent list is
-// not the same statement as a list that lost an entry.
+// fetch does not.
 func missingReleases(active, fetched []string) []string {
 	if len(active) == 0 || len(fetched) == 0 {
 		return nil
@@ -283,11 +229,6 @@ func missingReleases(active, fetched []string) []string {
 }
 
 // FeedRefusal is what the sanity gate answers when it holds a fetch back.
-//
-// It carries the reason as a code rather than only in the sentence: the
-// scheduler writes that code onto the source and the panel shows it next
-// to the candidate, and neither of them is to read it back out of a
-// message. errors.Is still recognises it as ErrFeedShrank.
 type FeedRefusal struct {
 	// Reason is ReasonFeedShrank or ReasonFeedReleaseMissing.
 	Reason      string
@@ -330,12 +271,6 @@ func markCandidate(ctx context.Context, tx pgx.Tx, id, reason string) error {
 }
 
 // AcceptCandidate activates a fetch the gate held back.
-//
-// It is a deliberate act of the operator: the panel refused the fetch
-// because it looked like a broken download, and only somebody who has
-// looked at the numbers can say it was a real change at the vendor. The
-// candidacy is cleared in the same move, so the next fetch of the same
-// data is an ordinary one.
 func (s *Store) AcceptCandidate(ctx context.Context, id string) (Snapshot, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -416,21 +351,12 @@ func scanSnapshot(rows pgx.Rows) (Snapshot, error) {
 	return snapshot, err
 }
 
-// InactiveSnapshotsKept says how many previous fetches stay next to the
-// active one.
-//
-// They stay, because an assessment names the digest of the data that settled
-// it, and without them there is no saying why the panel said what it said.
-// Not all of them stay, because one fetch of a vendor feed is anything from
-// tens of thousands to a million findings a day.
+// InactiveSnapshotsKept says how many previous fetches stay next to the active
+// one.
 const InactiveSnapshotsKept = 2
 
-// pruneSnapshots deletes the fetches older than the last few.
-//
-// A candidate is never pruned by age. It is the fetch the gate is holding
-// back with its findings, waiting for an operator to look at it; deleting
-// it because two ordinary fetches came after would silently withdraw the
-// decision the operator was asked to make.
+// pruneSnapshots deletes the fetches older than the last few. A candidate is
+// never pruned by age.
 func pruneSnapshots(ctx context.Context, tx pgx.Tx, provider string) error {
 	const remove = `
 		delete from vuln_snapshots
@@ -454,10 +380,6 @@ func activate(ctx context.Context, tx pgx.Tx, provider, id string) error {
 }
 
 // ConfirmSnapshot records that the data are still current.
-//
-// A feed that has not changed is not a stale feed: the panel has just asked
-// about it and got the answer "no changes". Without this record a source
-// that changes once a day would look abandoned after a few hours.
 func (s *Store) ConfirmSnapshot(ctx context.Context, provider string) error {
 	const query = `
 		update vuln_snapshots set checked_at = now(), error = ''
@@ -495,9 +417,6 @@ func (s *Store) ActiveSnapshot(ctx context.Context, provider string) (Snapshot, 
 }
 
 // Snapshots returns the active snapshots of every provider.
-// HostRepositorySource sums up the advisories the given hosts read from
-// their own repositories - the source of a Fedora host's findings, which
-// no feed of the panel carries. Nil when none of the hosts has any.
 func (s *Store) HostRepositorySource(ctx context.Context, hostIDs []string) (*RepositorySource, error) {
 	if len(hostIDs) == 0 {
 		return nil, nil
@@ -549,10 +468,6 @@ func (s *Store) Snapshots(ctx context.Context) ([]Snapshot, error) {
 }
 
 // AdvisoriesForRelease returns the findings of a snapshot for one release.
-//
-// They come back gathered by the source package, because that is how the
-// correlation runs: a host has binary packages and a tracker speaks about
-// source ones.
 func (s *Store) AdvisoriesForRelease(ctx context.Context, snapshotID, distribution,
 	release string) (map[string][]Advisory, error) {
 	const query = `
@@ -597,9 +512,8 @@ func (s *Store) SaveAdvisories(ctx context.Context, hostID string,
 	if len(advisories) > 0 {
 		rows := make([][]any, 0, len(advisories))
 		for _, advisory := range advisories {
-			// A finding without a CVE is normal: the vendor does not always
-			// assign one and the column does not take a null. A missing list
-			// and an empty list mean the same thing here.
+			// A finding without a CVE is normal: the vendor does not always assign one
+			// and the column does not take a null.
 			cve := advisory.CVEIDs
 			if cve == nil {
 				cve = []string{}
@@ -723,40 +637,28 @@ type HostState struct {
 	Provider        string `json:"provider,omitempty"`
 	SnapshotDigest  string `json:"snapshot_digest,omitempty"`
 	InventoryDigest string `json:"inventory_digest,omitempty"`
-	// AdvisoryDigest binds the assessment to the set of vendor findings.
-	// That is a source separate from the package list and it changes
-	// independently of it.
+	// AdvisoryDigest binds the assessment to the set of vendor findings. That is
+	// a source separate from the package list and it changes independently of it.
 	AdvisoryDigest string `json:"advisory_digest,omitempty"`
 	// GenerationID names the feed snapshot that produced this verdict and
-	// GenerationAt says when that snapshot was taken. Without them a host
-	// with no findings says nothing about how old the answer is: "judged
-	// against yesterday's feed" and "judged a minute ago" look the same.
-	// Empty for a verdict written before generations were recorded - which
-	// is an unknown rather than "the generation in force".
+	// GenerationAt says when that snapshot was taken.
 	GenerationID    string     `json:"generation_id,omitempty"`
 	GenerationAt    *time.Time `json:"generation_at,omitempty"`
 	PackagesTotal   int        `json:"packages_total"`
 	PackagesCovered int        `json:"packages_covered"`
 	Affected        int        `json:"affected"`
-	// AffectedWithVendorFix and AffectedNoFix separate what the vendor
-	// released a fix for from what it has not fixed. These are two different
-	// decisions for the operator, and glued into one number they give a wall
-	// nobody reads. Note: "the vendor released a fix" does not yet mean the
-	// host sees it - a separate axis next to every finding says that.
+	// AffectedWithVendorFix and AffectedNoFix separate what the vendor released a
+	// fix for from what it has not fixed.
 	AffectedWithVendorFix int `json:"affected_with_vendor_fix"`
 	AffectedNoFix         int `json:"affected_no_fix"`
 	Unknown               int `json:"unknown"`
 	// Three counters of the same set, because these are three different
-	// questions: how many packages have to be touched, how many vendor
-	// matters closed and how many CVEs it concerns. One advisory carries
-	// several CVEs and several packages, so these numbers never agree - and
-	// that is the point.
+	// questions: how many packages have to be touched, how many vendor matters
+	// closed and how many CVEs it concerns.
 	AffectedPackages int `json:"affected_packages"`
 	UniqueAdvisories int `json:"unique_advisories"`
 	UniqueCVEs       int `json:"unique_cves"`
-	// CoverageReason says why the assessment is incomplete. Empty means full
-	// coverage; every other state has to be visible next to the number of
-	// findings.
+	// CoverageReason says why the assessment is incomplete.
 	CoverageReason string `json:"coverage_reason,omitempty"`
 	// AdvisoriesReason says why there are no vendor findings. An error
 	// reading the metadata must not look like a host without findings.
@@ -765,12 +667,6 @@ type HostState struct {
 }
 
 // FullAssessment says whether the assessment of this host is complete.
-//
-// Complete means three things at once: nothing stood in the way of coverage,
-// the feed covered every package of the host and none of them was left
-// undetermined. An empty reason alone is not enough - a host with a single
-// package from outside the distribution has an incomplete assessment even
-// though nothing blocked it.
 func (s HostState) FullAssessment() bool {
 	return s.EvaluatedAt != nil && s.CoverageReason == "" &&
 		s.PackagesTotal > 0 && s.PackagesCovered == s.PackagesTotal && s.Unknown == 0
@@ -785,10 +681,6 @@ func (s HostState) Coverage() float64 {
 }
 
 // UniqueCounts counts the distinct matters in a set of hosts.
-//
-// Distinct rather than summed: the same CVE on twenty hosts is one matter of
-// the vendor and twenty hosts to touch. A sum of per-host counters mixes one
-// with the other and gives a number that answers no question at all.
 type UniqueCounts struct {
 	CVE        int `json:"unique_cves"`
 	Advisories int `json:"unique_advisories"`

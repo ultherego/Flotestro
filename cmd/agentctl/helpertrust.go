@@ -39,9 +39,7 @@ func helperTrustStore(errOut io.Writer) (helpercap.TrustStore, helpercap.Setting
 	return helpercap.TrustStore{Dir: settings.TrustDir, HostIDPath: settings.HostIDPath}, settings, true
 }
 
-// helperTrustShowCommand prints the identity and the keys. The files
-// belong to root, so the command is run as root; without it the answer is
-// what an unprivileged process may see, which is nothing.
+// helperTrustShowCommand prints the identity and the keys.
 func helperTrustShowCommand(args []string, out, errOut io.Writer) int {
 	flags := flag.NewFlagSet("helper-trust show", flag.ContinueOnError)
 	flags.SetOutput(errOut)
@@ -89,12 +87,6 @@ func helperTrustShowCommand(args []string, out, errOut io.Writer) int {
 }
 
 // helperTrustResetCommand forgets the identity and the keys.
-//
-// This is the decision that the host is a new machine to the panel: it
-// was enrolled anew, and the panel that signed what the helper trusted may
-// be gone. The next session hands the helper the current panel's bundle,
-// and that one is taken on trust. Only root can do it, and a typed host
-// name stands in for the second person of the panel.
 func helperTrustResetCommand(args []string, out, errOut io.Writer) int {
 	flags := flag.NewFlagSet("helper-trust reset", flag.ContinueOnError)
 	flags.SetOutput(errOut)

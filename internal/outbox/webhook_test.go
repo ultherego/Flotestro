@@ -12,8 +12,7 @@ import (
 )
 
 // A delivery carries the selected events in order, signed over its exact
-// bytes; a receiver that refuses makes the delivery fail so the cursor
-// stays.
+// bytes; a receiver that refuses makes the delivery fail so the cursor stays.
 func TestWebhookSignsAndFiltersTheDelivery(t *testing.T) {
 	var got Delivery
 	var signature string

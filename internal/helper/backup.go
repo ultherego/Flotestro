@@ -160,7 +160,7 @@ func (s *Server) applyBackup(ctx context.Context, request *helperv1.HelperReques
 		}
 		// A restore is bound to its plan like a copy and a check: the operator
 		// approved unpacking out of the repository as the plan described it, and a
-		// repository that has taken another copy or lost one since is not that
+		// repository that has taken another copy or lost one since is not that.
 		if refusal := checkBackupPlanDigest(actionCtx, adapter, order, action, false); refusal != nil {
 			return refusal
 		}
@@ -173,7 +173,7 @@ func (s *Server) applyBackup(ctx context.Context, request *helperv1.HelperReques
 		response := backupResponse(result, err)
 		// The helper counts what now lies under the target, because it is the part
 		// of the host that may look: a restore writes as root into a directory the
-		// agent often cannot open, and a verifier reading "permission denied" would
+		// agent often cannot open, and a verifier reading "permission denied" would.
 		if response.GetBackupResult() != nil {
 			if entries, counted := countEntries(order.Restore.Target); counted {
 				response.BackupResult.TargetEntries = entries

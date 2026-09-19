@@ -23,9 +23,8 @@ func addressedCommand(session *Session) Command {
 	}
 }
 
-// TestACommandIsCarriedOutOnTheSessionItNames guards the ordinary case:
-// the instance that still holds the very session the order names carries
-// it out.
+// TestACommandIsCarriedOutOnTheSessionItNames guards the ordinary case: the
+// instance that still holds the very session the order names carries it out.
 func TestACommandIsCarriedOutOnTheSessionItNames(t *testing.T) {
 	session := heldSession("6f1b7b3e-0000-4000-8000-000000000010", "host-1", 7)
 	if ok, reason := addressedCommand(session).carriedBy(session, true, commandNow); !ok {
@@ -33,11 +32,9 @@ func TestACommandIsCarriedOutOnTheSessionItNames(t *testing.T) {
 	}
 }
 
-// TestACommandWhoseSessionIsGoneIsNotCarriedOut guards the property the
-// whole table exists for: the ownership row may still name a session the
-// registry no longer holds - the stream ended a moment ago, the release
-// has not been written yet - and a final task sent into it would be a
-// handshake nobody answered, recorded as if the host had cooperated.
+// TestACommandWhoseSessionIsGoneIsNotCarriedOut guards the property the whole
+// table exists for: the ownership row may still name a session the registry no
+// longer holds - the stream ended a moment ago, the release has not been
 func TestACommandWhoseSessionIsGoneIsNotCarriedOut(t *testing.T) {
 	session := heldSession("6f1b7b3e-0000-4000-8000-000000000010", "host-1", 7)
 	command := addressedCommand(session)
@@ -47,8 +44,8 @@ func TestACommandWhoseSessionIsGoneIsNotCarriedOut(t *testing.T) {
 }
 
 // TestACommandOfAnotherSessionIsNotCarriedOut guards against the host
-// reconnecting here in the meantime: the instance holds a session of the
-// host, but not the one the decision was taken on.
+// reconnecting here in the meantime: the instance holds a session of the host,
+// but not the one the decision was taken on.
 func TestACommandOfAnotherSessionIsNotCarriedOut(t *testing.T) {
 	command := addressedCommand(heldSession("6f1b7b3e-0000-4000-8000-000000000010", "host-1", 7))
 	newer := heldSession("6f1b7b3e-0000-4000-8000-000000000011", "host-1", 8)
@@ -59,8 +56,7 @@ func TestACommandOfAnotherSessionIsNotCarriedOut(t *testing.T) {
 
 // TestAStaleFencingTokenIsRefused guards the fence itself: the session
 // identifier may be reused in a row written by hand, and the token is what
-// says the claim is the same one. A token the host has grown past belongs
-// to a claim that was superseded.
+// says the claim is the same one.
 func TestAStaleFencingTokenIsRefused(t *testing.T) {
 	session := heldSession("6f1b7b3e-0000-4000-8000-000000000010", "host-1", 7)
 	command := addressedCommand(session)
@@ -70,10 +66,9 @@ func TestAStaleFencingTokenIsRefused(t *testing.T) {
 	}
 }
 
-// TestAnExpiredCommandIsNotCarriedOut guards the bound on the wait: an
-// order claimed after its moment has passed is a decision acted on late,
-// when the host may have moved on and the operator has long been told
-// something else.
+// TestAnExpiredCommandIsNotCarriedOut guards the bound on the wait: an order
+// claimed after its moment has passed is a decision acted on late, when the
+// host may have moved on and the operator has long been told something else.
 func TestAnExpiredCommandIsNotCarriedOut(t *testing.T) {
 	session := heldSession("6f1b7b3e-0000-4000-8000-000000000010", "host-1", 7)
 	command := addressedCommand(session)
@@ -84,8 +79,8 @@ func TestAnExpiredCommandIsNotCarriedOut(t *testing.T) {
 }
 
 // TestOnlyTheKnownKindsAreQueued guards that a kind this release does not
-// carry out is refused when the order is written rather than dropped when
-// it is read: the instance that gave the order has to learn at once.
+// carry out is refused when the order is written rather than dropped when it
+// is read: the instance that gave the order has to learn at once.
 func TestOnlyTheKnownKindsAreQueued(t *testing.T) {
 	for _, kind := range []string{CommandDecommissionFinal, CommandSessionClose} {
 		if !KnownCommandKind(kind) {

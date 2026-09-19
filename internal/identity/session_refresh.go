@@ -12,19 +12,9 @@ import (
 )
 
 // A session carries the groups of the moment of login and the roles are
-// recomputed from them on every request. That covers a change of the
-// mapping policy at once, but not a change of membership made behind the
-// panel's back - in Keycloak, in FreeIPA, by a script. The refresher closes
-// that gap: it renews the identity token with the stored refresh token,
-// compares the groups the provider gives now with the snapshot, and writes
-// the new set into the session. A provider that no longer honours the token
-// says the user is gone or disabled, and the session ends. Nothing here runs
-// on the path of a request; the loop works in the background and a request
-// never waits for it.
+// recomputed from them on every request.
 
-// GroupRefresher is the provider side of the check. The panel's OIDC client
-// satisfies it; the tests use a fake, because the decisions below must be
-// checkable without a provider on the network.
+// GroupRefresher is the provider side of the check.
 type GroupRefresher interface {
 	Refresh(ctx context.Context, refreshToken string) (*oidc.TokenSet, *oidc.Claims, error)
 }
@@ -61,9 +51,7 @@ const (
 // reads next to the reasons the executor writes when locking an account.
 const revokedGroupsReason = "the identity provider no longer honours the session"
 
-// sessionsPerTick bounds one pass of the loop. A large installation with
-// thousands of sessions is refreshed over several ticks rather than in one
-// burst against the provider.
+// sessionsPerTick bounds one pass of the loop.
 const sessionsPerTick = 200
 
 // SessionGroupRefresher renews the group snapshot of live sessions.
@@ -75,9 +63,7 @@ type SessionGroupRefresher struct {
 	interval time.Duration
 }
 
-// NewSessionGroupRefresher builds the loop. An interval of zero or less
-// disables it: Run returns at once, and a deployment without an identity
-// provider passes nil as the provider with the same effect.
+// NewSessionGroupRefresher builds the loop.
 func NewSessionGroupRefresher(sessions SessionGroupStore, provider GroupRefresher,
 	recorder auditor, log *slog.Logger, interval time.Duration) *SessionGroupRefresher {
 	return &SessionGroupRefresher{sessions: sessions, provider: provider,
@@ -146,9 +132,7 @@ func (r *SessionGroupRefresher) refreshOne(ctx context.Context, session authz.Re
 		return RefreshRevoked
 	}
 
-	// A renewal without an identity token carries no groups. The tokens are
-	// still recorded - a rotated refresh token must not be lost - and the
-	// snapshot stands until a renewal that says something about the groups.
+	// A renewal without an identity token carries no groups.
 	groups := session.Groups
 	outcome := RefreshUnchanged
 	if claims != nil && !sameGroupSet(session.Groups, claims.Groups) {
@@ -184,9 +168,7 @@ func (r *SessionGroupRefresher) refreshOne(ctx context.Context, session authz.Re
 	return outcome
 }
 
-// sameGroupSet compares two group lists as sets. The provider is free to
-// return the same groups in another order, and an order is not a change of
-// scope.
+// sameGroupSet compares two group lists as sets.
 func sameGroupSet(current, fresh []string) bool {
 	a := slices.Clone(current)
 	b := slices.Clone(fresh)

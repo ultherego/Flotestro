@@ -7,11 +7,6 @@ import (
 
 // FuzzParseHumanSize feeds the size reader what dnf and pacman print for
 // people.
-//
-// A size that is accepted is what the helper compares with the free space
-// before it writes the first byte, so an accepted size must be a real
-// number: printed as bytes and read again it is the same number (up to the
-// precision a float carries, which is where the parser gets it from).
 func FuzzParseHumanSize(f *testing.F) {
 	for _, seed := range []string{
 		"12 M", "1.2 GiB", "345 k", "512 B", "12M", "3.2 M", "45 MiB", "0", "", "M",
@@ -43,12 +38,8 @@ func FuzzParseHumanSize(f *testing.F) {
 	})
 }
 
-// FuzzParseDNFTransactionSizes feeds the transaction summary reader any
-// text, the way a new dnf may word it.
-//
-// The reader picks the lines it knows and passes over the rest; the
-// property is that an unknown number is unknown - a size that is not
-// marked known is zero - and that the reader never stops on the text.
+// FuzzParseDNFTransactionSizes feeds the transaction summary reader any text,
+// the way a new dnf may word it.
 func FuzzParseDNFTransactionSizes(f *testing.F) {
 	for _, seed := range []string{
 		"Transaction Summary\n===\nInstall  2 Packages\n\nTotal download size: 12 M\nInstalled size: 40 M\nOperation aborted.\n",

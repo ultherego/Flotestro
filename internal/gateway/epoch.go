@@ -12,22 +12,10 @@ import (
 
 // epochChannel is the channel of the notifications about a new session of a
 // host.
-//
-// The notification goes through the database, because the database is the only
-// point that sees both gateways. A gateway holding an older session has no
-// other way of learning that the host has switched somewhere else: its stream
-// still looks alive until it tries to send something over it.
-//
-// The name of the channel stays as it is until a migration renames it together
-// with the trigger that publishes on it.
 const epochChannel = "flotestro_sessions"
 
 // WatchEpochs closes the sessions that have been superseded on another
 // gateway.
-//
-// Without it two gateways would consider themselves the right one for the same
-// host and the same job would go out twice - and irreversible operations would
-// be carried out twice.
 func WatchEpochs(ctx context.Context, pool *pgxpool.Pool, registry *Registry,
 	gatewayID string, log interface {
 		Info(string, ...any)
@@ -65,9 +53,8 @@ func watchEpochs(ctx context.Context, pool *pgxpool.Pool, registry *Registry,
 		}
 		hostID, epoch, source, ok := splitNotification(notification.Payload)
 		if !ok || source == gatewayID {
-			// We do not handle our own notification: it is this gateway that
-			// has just opened the new session and closed the previous one
-			// itself.
+			// We do not handle our own notification: it is this gateway that has just
+			// opened the new session and closed the previous one itself.
 			continue
 		}
 		session, running := registry.Get(hostID)

@@ -116,9 +116,9 @@ func TestFamilyLimitsTable(t *testing.T) {
 	}
 }
 
-// TestScopeContextCarriesThePrefixOfTheRequest: the modules that start
-// their own tools read the same prefix out of the context, and a family
-// without limits leaves them a bare run.
+// TestScopeContextCarriesThePrefixOfTheRequest: the modules that start their
+// own tools read the same prefix out of the context, and a family without
+// limits leaves them a bare run.
 func TestScopeContextCarriesThePrefixOfTheRequest(t *testing.T) {
 	server := &Server{
 		log: slog.New(slog.DiscardHandler),

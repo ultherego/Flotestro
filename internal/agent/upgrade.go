@@ -15,42 +15,21 @@ import (
 
 // RejectMetadataStale means the repository metadata was not refreshed before
 // the replacement.
-//
-// The refresh is a step of the plan, not a courtesy: the version the order
-// names may have been published after the manager last looked at the
-// repository, and a manager working from yesterday's lists would either fail
-// to find it or install something else under the same request. A refresh the
-// helper did not accept therefore refuses the whole upgrade - carrying on
-// would mean acting on data whose freshness nobody confirmed.
 const RejectMetadataStale = "agent_upgrade_metadata_stale"
 
 // detectManager and readInstalledPackages are the two reads of the host a
 // replacement makes before it orders anything.
-//
-// They stand here as values so that the decisions of the replacement can be
-// exercised without the package manager of the machine that runs the test:
-// the decisions are what must not change, and they are the same whichever
-// manager answers.
 var (
 	detectManager         = packages.Detect
 	readInstalledPackages = packages.Installed
 )
 
-// upgradeAgent replaces the agent itself with the given version.
-//
-// This is the only operation that ends the process performing it. The agent
-// package is protected from an ordinary upgrade exactly for that reason: a host
-// must not cut itself off from management in the middle of a transaction whose
-// result it still has to send back. Here it is done deliberately and settled
-// differently - the success is the return of the host with the expected
-// version, not the exit code of the package manager.
+// upgradeAgent replaces the agent itself with the given version. This is the
+// only operation that ends the process performing it.
 func (e *TaskExecutor) upgradeAgent(ctx context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.AgentUpgradePayload) *agentv1.TaskResult {
-	// What the host runs and what its package database holds are two
-	// different facts, and only the second one survives a restart. A host
-	// running the target version whose database names another one is not
-	// where the order wants it: the next start of the service would bring
-	// the other version up, so the replacement runs.
+	// What the host runs and what its package database holds are two different
+	// facts, and only the second one survives a restart.
 	manager, detected := detectManager()
 	installed, installedReason := "", ""
 	if detected == nil {
@@ -62,11 +41,8 @@ func (e *TaskExecutor) upgradeAgent(ctx context.Context, task *agentv1.TaskEnvel
 		(installed == "" || versionIs(installed, payload.TargetVersion))
 
 	if atTarget && payload.PackageSHA256 == "" {
-		// A repeated order is not an error: the host is already where it was
-		// meant to be, and there is no point in restarting the agent a second
-		// time. It is settled before the manager is required, because a host
-		// whose manager the adapter does not know is still at the version it
-		// runs.
+		// A repeated order is not an error: the host is already where it was meant
+		// to be, and there is no point in restarting the agent a second time.
 		return &agentv1.TaskResult{
 			Status: agentv1.TaskResult_STATUS_SUCCEEDED, ExitCode: 0,
 			Message: "the agent is already at version " + Version + "; " +
@@ -87,9 +63,7 @@ func (e *TaskExecutor) upgradeAgent(ctx context.Context, task *agentv1.TaskEnvel
 	defer cancel()
 
 	// The result may never come back: installing the package restarts the agent
-	// and with it this process. The panel knows that and decides by the return of
-	// the host - which is why the report about the start matters more here than
-	// usual.
+	// and with it this process.
 	if e.progress != nil {
 		e.progress(&agentv1.TaskProgress{
 			TaskId: task.GetTaskId(), Step: 1, Total: 2,
@@ -97,10 +71,9 @@ func (e *TaskExecutor) upgradeAgent(ctx context.Context, task *agentv1.TaskEnvel
 		})
 	}
 
-	// The repository metadata has to be fresh: a version released a quarter of
-	// an hour ago does not exist for a manager that last looked at the repository
-	// yesterday. The refresh is a separate, cheap step and changes nothing on the
-	// host.
+	// The repository metadata has to be fresh: a version released a quarter of an
+	// hour ago does not exist for a manager that last looked at the repository
+	// yesterday.
 	refresh, err := e.helper.Call(upgradeCtx, &helperv1.HelperRequest{
 		TaskId:         task.GetTaskId(),
 		TimeoutSeconds: 300,
@@ -114,19 +87,14 @@ func (e *TaskExecutor) upgradeAgent(ctx context.Context, task *agentv1.TaskEnvel
 		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed, err.Error())
 	}
 	if !refresh.GetAccepted() {
-		// The answer of the refresh decides. Its own code stays in the
-		// message: the operation is refused for one reason - the plan rests
-		// on metadata nobody confirmed - and the panel reads one code for it.
+		// The answer of the refresh decides.
 		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectMetadataStale,
 			"the repository metadata was not refreshed ("+
 				firstNonEmptyText(refresh.GetErrorCode(), "refused")+"): "+refresh.GetMessage())
 	}
 
 	// A host already at the target version still has the order's artefact
-	// checked. Nothing is installed then - but an order naming a package the
-	// host cannot obtain, or one whose digest does not match what the
-	// repository holds, is a wrong order whatever the host's state, and it is
-	// better answered now than at the next release.
+	// checked.
 	if atTarget {
 		response, err := e.helper.Call(upgradeCtx,
 			replacementRequest(task, name, payload, timeout, true), timeout)
@@ -150,11 +118,9 @@ func (e *TaskExecutor) upgradeAgent(ctx context.Context, task *agentv1.TaskEnvel
 	response, err := e.helper.Call(upgradeCtx,
 		replacementRequest(task, name, payload, timeout, false), timeout)
 	if err != nil {
-		// A broken connection to the helper during this operation usually means
-		// the package managed to install and the restart is under way - together
-		// with the socket of the helper. Sending back an error would be untrue
-		// then: the success is decided by the return of the host with the new
-		// version.
+		// A broken connection to the helper during this operation usually means the
+		// package managed to install and the restart is under way - together with
+		// the socket of the helper.
 		return &agentv1.TaskResult{
 			Status: agentv1.TaskResult_STATUS_UNSPECIFIED, ErrorCode: StatusAfterReplacement,
 			Message: "the installation is in flight; the return of the agent decides the result",
@@ -169,8 +135,7 @@ func (e *TaskExecutor) upgradeAgent(ctx context.Context, task *agentv1.TaskEnvel
 
 	// Even when the installation went through without a broken connection, the
 	// success is not the exit code of the package manager: the agent may fail to
-	// come up or come up in a different version. The task stays open until the
-	// return.
+	// come up or come up in a different version.
 	return &agentv1.TaskResult{
 		Status: agentv1.TaskResult_STATUS_UNSPECIFIED, ErrorCode: StatusAfterReplacement,
 		Message: "the package was installed; waiting for the agent to come back at version " +
@@ -181,11 +146,6 @@ func (e *TaskExecutor) upgradeAgent(ctx context.Context, task *agentv1.TaskEnvel
 }
 
 // replacementRequest assembles the order for the helper.
-//
-// The digest and the rollback version travel with it: the helper is the one
-// with the rights to fetch the artefact, to check it and to keep a copy of
-// the version the host can go back to. verifyOnly asks for those three steps
-// and nothing else - no transaction is started.
 func replacementRequest(task *agentv1.TaskEnvelope, name string,
 	payload *opspec.AgentUpgradePayload, timeout time.Duration,
 	verifyOnly bool) *helperv1.HelperRequest {
@@ -197,9 +157,8 @@ func replacementRequest(task *agentv1.TaskEnvelope, name string,
 			PackageAction: &helperv1.PackageActionRequest{
 				Operation: helperv1.PackageActionRequest_OPERATION_INSTALL,
 				Packages:  []string{name},
-				// The version is given explicitly, so a downgrade is an operator
-				// decision as well - that is how the return after a failed
-				// release works.
+				// The version is given explicitly, so a downgrade is an operator decision
+				// as well - that is how the return after a failed release works.
 				AllowDowngrade:  true,
 				PackageSha256:   payload.PackageSHA256,
 				RollbackVersion: payload.RollbackVersion,
@@ -210,11 +169,6 @@ func replacementRequest(task *agentv1.TaskEnvelope, name string,
 }
 
 // replacementRefusal turns the helper's answer into the result of the task.
-//
-// A refusal over the artefact or the rollback copy is a rejection rather than
-// a failure: the host was not touched, so the operator may order again once
-// the release is corrected, and a campaign counting failures is not told the
-// host broke.
 func replacementRefusal(response *helperv1.HelperResponse) *agentv1.TaskResult {
 	status := agentv1.TaskResult_STATUS_FAILED
 	switch response.GetErrorCode() {
@@ -226,11 +180,6 @@ func replacementRefusal(response *helperv1.HelperResponse) *agentv1.TaskResult {
 
 // installedAgentVersion reads the version of the agent package from the
 // package database of the host.
-//
-// The read needs no root and is done once per replacement. An unreadable
-// database gives no version and a reason: not knowing which version is
-// installed is not the same as the host having none, and the result says
-// which of the two it is.
 func installedAgentVersion(ctx context.Context, manager string) (string, string) {
 	list := readInstalledPackages(ctx, manager)
 	if list.UnavailableReason != "" {
@@ -246,10 +195,6 @@ func installedAgentVersion(ctx context.Context, manager string) (string, string)
 
 // versionIs says whether the version from the package database is the version
 // the order names.
-//
-// The two are not written the same way: the panel names a release, the
-// database adds the epoch a manager keeps and the packaging revision a
-// distribution appends. "1:0.54.0-2" and "0.54.0" are the same release.
 func versionIs(installed, target string) bool {
 	if _, rest, found := strings.Cut(installed, ":"); found {
 		installed = rest
@@ -257,9 +202,7 @@ func versionIs(installed, target string) bool {
 	return installed == target || strings.HasPrefix(installed, target+"-")
 }
 
-// describeInstalled puts the package database's answer into the result. An
-// unknown version is named as unknown, with the reason: a result that simply
-// left it out would read as a host without the package.
+// describeInstalled puts the package database's answer into the result.
 func describeInstalled(version, reason string) string {
 	if version == "" {
 		return "the installed version is unknown (" + reason + ")"
@@ -295,11 +238,6 @@ func firstNonEmptyText(values ...string) string {
 
 // agentPackage assembles the package name with the version in the notation of
 // the given manager.
-//
-// Every manager selects a version differently and that cannot be hidden behind
-// a common notation: apt expects "package=version", dnf "package-version",
-// pacman a dependency spec "package=version" that its repository has to
-// satisfy exactly.
 func agentPackage(manager, version string) (string, error) {
 	switch manager {
 	case "apt", packages.PacmanName:

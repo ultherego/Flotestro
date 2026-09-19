@@ -54,9 +54,8 @@ func TestKernelShowsAProfileNotAllOfProcSys(t *testing.T) {
 				t.Errorf("settings = %d; the profile is to be a set, not the whole tree", len(state.Settings))
 			}
 			for _, setting := range state.Settings {
-				// A key with neither a current nor a desired value says
-				// nothing; shown, it would look like a setting with a zero
-				// value.
+				// A key with neither a current nor a desired value says nothing; shown, it
+				// would look like a setting with a zero value.
 				if setting.Current == "" && setting.Desired == "" {
 					t.Errorf("setting without a value: %+v", setting)
 				}
@@ -106,9 +105,8 @@ func TestKernelSettingIsWrittenAndPersistent(t *testing.T) {
 	}
 }
 
-// TestSettingsOutsideTheScopeDoNotReachTheHost guards the boundary:
-// /proc/sys holds switches that disable kernel protections or stop the
-// host.
+// TestSettingsOutsideTheScopeDoNotReachTheHost guards the boundary: /proc/sys
+// holds switches that disable kernel protections or stop the host.
 func TestSettingsOutsideTheScopeDoNotReachTheHost(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")

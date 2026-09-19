@@ -167,7 +167,7 @@ type Options struct {
 	StepUpRefuseTokens bool
 	// CampaignPreview is the stage of the preview-binding rollout: observe
 	// records what the binding would have decided, prefer refuses an order that
-	// does not match the preview it names, and enforce additionally refuses an
+	// does not match the preview it names, and enforce additionally refuses an.
 	CampaignPreview campaigns.PreviewMode
 	// Metrics exposes the panel state; nil disables the endpoint.
 	Metrics *metrics.Collector
@@ -619,7 +619,7 @@ type FleetSummary struct {
 	AgentCertificatesExpired *int `json:"agent_certificates_expired,omitempty"`
 	// DegradedRelays counts the relays in trouble: those that missed their
 	// renewal - a relay certificate lives seven days and renews at a third left,
-	// so one with less than a day is a site about to be cut off - and those
+	// so one with less than a day is a site about to be cut off - and those.
 	DegradedRelays *int `json:"degraded_relays,omitempty"`
 	// RelaysBufferHigh counts the relays whose buffer of results waiting for the
 	// centre is at least RelayBufferHighPercent full, by their latest heartbeat:
@@ -818,7 +818,7 @@ func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
 
 	// The security events of the lifecycle document that the built-in monitoring
 	// cannot watch, because they are not a sample of any host: a duplicate
-	// identity is the gateway's finding, and an enrollment refusal has no host
+	// identity is the gateway's finding, and an enrollment refusal has no host.
 	if principal.Can(authz.PermAuditRead, authz.GlobalScope) {
 		var duplicates, refusals int
 		err = s.pool.QueryRow(ctx, `

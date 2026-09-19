@@ -1,10 +1,5 @@
 // Package events broadcasts the changes of the state of operations to the open
 // screens of the panel.
-//
-// The source is a notification from PostgreSQL rather than a channel in the
-// memory of the process. The panel may run in several instances, and an agent
-// connects to the one that happened to accept it - an operator looking through
-// another instance has to see the same thing.
 package events
 
 import (
@@ -20,16 +15,7 @@ import (
 	"github.com/ultherego/flotestro/internal/outbox"
 )
 
-// The notification channels in the database. Progress has one of its own,
-// because it is transient: we do not record it and one must not infer the
-// result from it.
-//
-// The job and campaign channels are published by the database triggers, so
-// their names are bound to the migration that creates those triggers.
-//
-// The enrollment channel carries the turns of an installation order: the
-// screen that shows an order polls it otherwise, and a host that enrolls
-// in the night is seen the moment it does rather than at the next poll.
+// The notification channels in the database.
 const (
 	jobChannel        = "flotestro_jobs"
 	progressChannel   = "flotestro_progress"
@@ -49,26 +35,20 @@ type Event struct {
 	// Log is filled in for the live view of a log. The lines are transient:
 	// they are not recorded and cannot be read after the fact.
 	Log *LogLines `json:"log,omitempty"`
-	// Outbox points at a row of the durable trail that has just been
-	// published. It carries the identifiers only: a receiver reads the row
-	// from the table, so a missed notification loses nothing.
+	// Outbox points at a row of the durable trail that has just been published.
 	Outbox *OutboxRef `json:"outbox,omitempty"`
-	// Enrollment is filled in for a turn of an installation order. Like a
-	// job event it is a signal: the screen reads the order from the API,
-	// so what it shows is what is recorded.
+	// Enrollment is filled in for a turn of an installation order.
 	Enrollment *EnrollmentChange `json:"enrollment,omitempty"`
 }
 
 // EnrollmentChange says what happened to an installation order.
 type EnrollmentChange struct {
 	RequestID string `json:"request_id"`
-	// Change is one of created, redeemed, refused, revoked. An order
-	// expires by the clock, not by an act, so an expiry is seen as a
-	// refusal of the host that came too late.
+	// Change is one of created, redeemed, refused, revoked.
 	Change string `json:"change"`
-	// Site and Environment are where the order places the host; the
-	// stream lets the event through to whoever may read orders there,
-	// without a query per event.
+	// Site and Environment are where the order places the host; the stream lets
+	// the event through to whoever may read orders there, without a query per
+	// event.
 	Site        string `json:"site,omitempty"`
 	Environment string `json:"environment,omitempty"`
 	// Kind is agent or relay. HostID is set once the order is redeemed;
@@ -128,9 +108,7 @@ func NewBus(pool *pgxpool.Pool) *Bus {
 	return &Bus{pool: pool, subscriptions: map[int]subscription{}}
 }
 
-// Run listens for the notifications until the context ends. A broken
-// connection is recreated: losing the listener must not silently stop the
-// progress on the screens.
+// Run listens for the notifications until the context ends.
 func (b *Bus) Run(ctx context.Context, log interface{ Error(string, ...any) }) {
 	interval := time.Second
 	for ctx.Err() == nil {
@@ -205,9 +183,7 @@ func parse(payload string) Event {
 }
 
 // parseTarget reads the notification about a change of the state of a target
-// of a campaign. A target is not an operation: it goes through states of its
-// own that no job reflects, so its event carries no identifier of an
-// operation.
+// of a campaign.
 func parseTarget(payload string) Event {
 	parts := strings.SplitN(payload, " ", 2)
 	event := Event{}
@@ -244,9 +220,7 @@ func parseProgress(payload string) Event {
 	return event
 }
 
-// PublishLog broadcasts a piece of the live view of a log. The lines go over a
-// channel separate from the progress: the progress describes the operation and
-// the view is its content.
+// PublishLog broadcasts a piece of the live view of a log.
 func (b *Bus) PublishLog(ctx context.Context, event Event) error {
 	if event.JobID == "" {
 		return nil
@@ -260,17 +234,14 @@ func (b *Bus) PublishLog(ctx context.Context, event Event) error {
 }
 
 // Notifier is what a notification is sent through: the pool, or the
-// transaction the change is made in - a notification sent inside a
-// transaction leaves with its commit and not at all on a rollback, so a
-// screen never hears of an enrollment that did not happen.
+// transaction the change is made in - a notification sent inside a transaction
+// leaves with its commit and not at all on a rollback, so a screen never hears
 type Notifier interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 }
 
 // PublishEnrollment broadcasts a turn of an installation order through the
-// given notifier. A package function rather than a method: the enrollment
-// door of the gateway has no bus, only its transaction, and the event is
-// no different for having come from there.
+// given notifier.
 func PublishEnrollment(ctx context.Context, through Notifier, change EnrollmentChange) error {
 	if change.RequestID == "" || through == nil {
 		return nil
@@ -289,9 +260,7 @@ func (b *Bus) PublishEnrollment(ctx context.Context, change EnrollmentChange) er
 }
 
 // PublishProgress broadcasts the progress of an operation. The progress is not
-// recorded: it goes through a notification and disappears. A screen that has
-// just connected will see the next one - and that is enough, because the
-// result is in the database anyway.
+// recorded: it goes through a notification and disappears.
 func (b *Bus) PublishProgress(ctx context.Context, event Event) error {
 	if event.JobID == "" {
 		return nil
@@ -314,9 +283,7 @@ func (b *Bus) broadcast(event Event) {
 		select {
 		case sub.channel <- event:
 		default:
-			// A slow receiver must not hold the broadcasting back. A lost
-			// event does not lose the state: the screen reads it from the
-			// database anyway, and the next event catches up with it.
+			// A slow receiver must not hold the broadcasting back.
 		}
 	}
 }

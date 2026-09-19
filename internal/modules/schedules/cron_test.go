@@ -78,8 +78,7 @@ func TestStepGivesAllDates(t *testing.T) {
 }
 
 // Cron treats both day fields differently from the rest: when both are
-// restricted, the job runs when either matches. Treating them as a
-// conjunction would skip most dates.
+// restricted, the job runs when either matches.
 func TestDaysAreUnionedNotIntersected(t *testing.T) {
 	// The first day of the month or a Monday.
 	expression, err := ParseExpression("0 0 1 * 1")

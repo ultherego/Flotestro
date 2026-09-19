@@ -6,11 +6,8 @@ import (
 	"testing"
 )
 
-// The plan is what the operator approves, so these tests are about one
-// thing: that it says the truth about the host before anything moves. A
-// plan that called a matching container a replacement would restart a
-// service for nothing; a plan that called a changed container a match
-// would leave the host as it was and report success.
+// The plan is what the operator approves, so these tests are about one thing:
+// that it says the truth about the host before anything moves.
 
 const testDigest = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
 const otherDigest = "sha256:2222222222222222222222222222222222222222222222222222222222222222"
@@ -29,9 +26,9 @@ func sampleSpec() ContainerSpec {
 	}
 }
 
-// running builds the container the engine would report for a
-// specification, the way it would report it: the reference pinned to the
-// digest, the module's own labels in place, the defaults written out.
+// running builds the container the engine would report for a specification,
+// the way it would report it: the reference pinned to the digest, the module's
+// own labels in place, the defaults written out.
 func running(spec ContainerSpec, digest string) *ContainerDetail {
 	spec.ImageDigest = digest
 	normalized := spec.Normalized()

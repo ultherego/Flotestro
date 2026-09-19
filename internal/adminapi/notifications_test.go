@@ -9,10 +9,7 @@ import (
 )
 
 // The delivery list is narrowed by two vocabularies at once: the previous
-// release's status and the queue's own state. Both have to be read, and a
-// word neither knows has to be a refusal rather than a filter that
-// quietly matches nothing - an operator who mistypes dead-letter is owed
-// an answer, not an empty table that reads as "all clear".
+// release's status and the queue's own state.
 func TestDeliveryFilterReadsBothVocabulariesAndRefusesTheRest(t *testing.T) {
 	filter, code, _ := deliveryFilterOf(url.Values{
 		"channel_id": {"c1"}, "state": {notify.StateDeadLetter},

@@ -15,9 +15,9 @@ type channelHostView struct {
 	ReleaseChannel string `json:"release_channel"`
 }
 
-// setChannel moves a host to a release channel and moves it back when the
-// test ends: the lab fleet is shared, and a host left on beta would be the
-// first wave of somebody else's upgrade.
+// setChannel moves a host to a release channel and moves it back when the test
+// ends: the lab fleet is shared, and a host left on beta would be the first
+// wave of somebody else's upgrade.
 func (h *harness) setChannel(hostID, channel string) channelHostView {
 	h.t.Helper()
 	var before channelHostView
@@ -32,8 +32,8 @@ func (h *harness) setChannel(hostID, channel string) channelHostView {
 }
 
 // TestHostReleaseChannelIsSetAndFilteredOn: a host is on stable until an
-// operator moves it, the move comes back in the host record, the list
-// filters on it, and a channel that is not a channel is refused.
+// operator moves it, the move comes back in the host record, the list filters
+// on it, and a channel that is not a channel is refused.
 func TestHostReleaseChannelIsSetAndFilteredOn(t *testing.T) {
 	h := newHarness(t)
 	lab := h.hosts()
@@ -90,9 +90,9 @@ func TestHostReleaseChannelIsSetAndFilteredOn(t *testing.T) {
 		map[string]any{"channel": "beta"}, nil, http.StatusNotFound)
 }
 
-// TestAgentUpgradeIsCampaignReady: replacing the agent is offered in bulk
-// with the same payload everywhere, verified by the host coming back, and
-// the catalogue carries a template for it.
+// TestAgentUpgradeIsCampaignReady: replacing the agent is offered in bulk with
+// the same payload everywhere, verified by the host coming back, and the
+// catalogue carries a template for it.
 func TestAgentUpgradeIsCampaignReady(t *testing.T) {
 	h := newHarness(t)
 	var catalogue struct {

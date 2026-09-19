@@ -61,9 +61,7 @@ func TestProofSucceedsOnlyOnAnAcknowledgedCall(t *testing.T) {
 }
 
 // The case the old check called a success: the connection opens and nothing
-// answers on it. A rule that admits the handshake and kills the session looks
-// exactly like this, and disarming the rescue plan on it leaves the host
-// unmanageable.
+// answers on it.
 func TestAChannelThatOpensButNeverAcknowledgesFailsTheProof(t *testing.T) {
 	withPanel(t, func(context.Context, string) (panelAck, error) {
 		return panelAck{}, nil

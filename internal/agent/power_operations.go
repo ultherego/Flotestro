@@ -11,11 +11,6 @@ import (
 )
 
 // shutdownHost powers the host off through the helper.
-//
-// The result is sent back before the host disappears: the delay on the helper
-// side leaves time for that. Unlike with a restart, the panel will not see this
-// host come back - and that is the whole difference between the two
-// operations.
 func (e *TaskExecutor) shutdownHost(ctx context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.PowerPayload) *agentv1.TaskResult {
 	if payload == nil {

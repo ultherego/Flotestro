@@ -36,43 +36,12 @@ type openAlert struct {
 }
 
 // Evaluate runs every enabled rule over the matching hosts once.
-//
-// An episode starts pending the first time the condition holds, fires once
-// it has held for the rule's window, and resolves the first time it does
-// not. The window is measured from the start of the episode rather than
-// over a set of samples: the evaluator runs every sampling interval, so a
-// condition that stops holding in between clears the episode before it
-// fires. A rule with an empty window fires at the first sample.
-//
-// The window counts only the time the fleet was actually watched. A hole
-// in the samples longer than maxSampleGap - the agent was restarted, the
-// host was rebooted, the panel was down - is not a stretch of the
-// condition holding; it is a stretch of nobody looking. The episode's
-// timer therefore restarts after the hole, and an alert says "this held
-// for ten minutes" only when ten minutes of samples say so. Without that,
-// a host that goes quiet for an hour under a load spike and comes back
-// under the same spike fires at once for a window nobody observed.
-//
-// A host whose newest sample is older than three intervals is not
-// evaluated by the sample rules: a stale reading is not a reading, and
-// its silence is a matter for host_offline. A rule left without data that
-// way holds its pending episode in place - the no-data state - rather
-// than letting the timer run on to firing.
 func (s *Store) Evaluate(ctx context.Context, now time.Time) error {
 	return s.evaluate(ctx, now, nil)
 }
 
-// EvaluateLeased is the pass the running panel makes: one instance at a
-// time, under a lease taken from the database.
-//
-// An instance that does not get the lease evaluates nothing. It does not
-// evaluate a little, or evaluate and let an index swallow the second
-// insert: the rest of an episode - firing, refreshing, resolving - is
-// plain updates that no index guards, and two instances a second apart
-// would contradict each other about one alert. An instance that loses the
-// lease in the middle of a pass stops where it is for the same reason;
-// what it has written is a state the new holder reads and carries on
-// from, which is exactly what an open episode is for.
+// EvaluateLeased is the pass the running panel makes: one instance at a time,
+// under a lease taken from the database.
 func (s *Store) EvaluateLeased(ctx context.Context, now time.Time) error {
 	lease, held, err := s.acquireEvaluatorLease(ctx)
 	if err != nil {
@@ -83,11 +52,8 @@ func (s *Store) EvaluateLeased(ctx context.Context, now time.Time) error {
 		return nil
 	}
 	defer func() {
-		// The lease is given back at the end of the pass so that the next
-		// instance may take it at once instead of waiting out the term.
-		// The context of the run may already be cancelled - the panel is
-		// shutting down - and that is precisely when handing it back
-		// matters.
+		// The lease is given back at the end of the pass so that the next instance
+		// may take it at once instead of waiting out the term.
 		if err := s.releaseEvaluatorLease(context.WithoutCancel(ctx), lease); err != nil {
 			s.log.Warn("the lease of the alert evaluator was not given back; it runs out by itself",
 				"err", err)
@@ -118,9 +84,7 @@ func (s *Store) EvaluateLeased(ctx context.Context, now time.Time) error {
 	return nil
 }
 
-// evaluate is the pass itself. The guard, when there is one, is asked
-// between rules whether the caller may still write; without one - a test,
-// or a single-instance call - the pass simply runs.
+// evaluate is the pass itself.
 func (s *Store) evaluate(ctx context.Context, now time.Time, guard func(context.Context) error) error {
 	rules, err := s.ListRules(ctx)
 	if err != nil {
@@ -136,10 +100,9 @@ func (s *Store) evaluate(ctx context.Context, now time.Time, guard func(context.
 	}
 	scopes := s.scopes(ctx, rules)
 	for _, rule := range rules {
-		// Asked between rules rather than only at the start: a pass over a
-		// fleet takes time, and an instance that lost the fleet halfway
-		// must not write the second half of a verdict somebody else is
-		// already giving.
+		// Asked between rules rather than only at the start: a pass over a fleet
+		// takes time, and an instance that lost the fleet halfway must not write the
+		// second half of a verdict somebody else is already giving.
 		if guard != nil {
 			if err := guard(ctx); err != nil {
 				return err
@@ -157,12 +120,8 @@ func (s *Store) evaluate(ctx context.Context, now time.Time, guard func(context.
 			key := rule.ID + "/" + host.ID
 			episode, exists := open[key]
 			if !known {
-				// Nothing can be said: the episode is not cleared - the
-				// condition may well still hold - but it is not advanced
-				// either. A pending episode is held in its no-data state,
-				// its timer restarted, so that when the readings come back
-				// the window is counted from the reading rather than from
-				// a silence.
+				// Nothing can be said: the episode is not cleared - the condition may well
+				// still hold - but it is not advanced either.
 				if exists && noDataHold(episode, now) {
 					if err := s.restart(ctx, episode.ID, now); err != nil {
 						return err
@@ -205,9 +164,8 @@ func (s *Store) evaluate(ctx context.Context, now time.Time, guard func(context.
 			}
 		}
 	}
-	// The episodes of the rules that no longer cover their host - the
-	// selector changed, the host moved - end here rather than staying open
-	// for ever.
+	// The episodes of the rules that no longer cover their host - the selector
+	// changed, the host moved - end here rather than staying open for ever.
 	return s.closeOrphans(ctx, rules, scopes, hosts, open, now)
 }
 
@@ -226,14 +184,8 @@ func (sc *scope) covers(hostID string) bool {
 }
 
 // scopes resolves the selector of every enabled rule once per run, in the
-// database, through the same compiler the campaign preview uses: a rule
-// on a tag, a group or an expression picks exactly the hosts a campaign
-// on the same selector would.
-//
-// A rule whose selector does not resolve - a group deleted since the rule
-// was written - has no entry. Its episodes stay as they are, neither
-// advanced nor closed: nothing can be said about hosts nobody can name,
-// and a log line says which rule needs mending.
+// database, through the same compiler the campaign preview uses: a rule on a
+// tag, a group or an expression picks exactly the hosts a campaign on the same
 func (s *Store) scopes(ctx context.Context, rules []Rule) map[string]*scope {
 	scopes := make(map[string]*scope, len(rules))
 	for _, rule := range rules {
@@ -297,24 +249,13 @@ func (s *Store) startEpisode(ctx context.Context, rule Rule, host hostState,
 	return err
 }
 
-// maxSampleGap is the longest hole in a host's samples that still counts
-// as one continuous run of readings: twice the sampling interval, so a
-// single lost sample is a lost sample and two in a row are a gap. The
-// same limit answers both questions - how long a for-window may be
-// believed, and how long a rule may be without data before its pending
-// episode is held back.
+// maxSampleGap is the longest hole in a host's samples that still counts as
+// one continuous run of readings: twice the sampling interval, so a single
+// lost sample is a lost sample and two in a row are a gap.
 const maxSampleGap = 2 * SamplingInterval
 
-// observedSince returns the moment from which the rule's window is
-// counted for the episode: the start of the uninterrupted run of samples
-// that reaches now. A rule that fires at the first sample, and the
-// host_offline rule - whose subject is the absence of samples, so a gap
-// is its evidence rather than its blind spot - count from the episode.
-//
-// A run that starts later than the episode is written onto the episode,
-// so the history says when the condition began to be watched rather than
-// when it was first seen, and the next run of the evaluator does not read
-// the samples of the gap again.
+// observedSince returns the moment from which the rule's window is counted for
+// the episode: the start of the uninterrupted run of samples that reaches now.
 func (s *Store) observedSince(ctx context.Context, rule Rule, host hostState,
 	episode openAlert, now time.Time) (time.Time, error) {
 	if rule.ForMinutes == 0 || rule.Metric == MetricHostOffline {
@@ -333,10 +274,9 @@ func (s *Store) observedSince(ctx context.Context, rule Rule, host hostState,
 	return since, nil
 }
 
-// continuousSince walks the samples of an episode in order and returns
-// the start of the last uninterrupted run: the moment after the last hole
-// wider than gap. A last sample older than gap means no run reaches now
-// at all, and the run starts now - the condition has yet to be watched.
+// continuousSince walks the samples of an episode in order and returns the
+// start of the last uninterrupted run: the moment after the last hole wider
+// than gap.
 func continuousSince(started time.Time, samples []time.Time, now time.Time, gap time.Duration) time.Time {
 	since, last := started, started
 	for _, at := range samples {
@@ -354,11 +294,8 @@ func continuousSince(started time.Time, samples []time.Time, now time.Time, gap 
 	return since
 }
 
-// noDataHold says whether a pending episode without a reading has been
-// without one long enough to have its timer restarted. The check spares
-// the database a write on every run of the evaluator for a host that has
-// nothing to say - a rule on swap over a host without swap - while a
-// silence longer than a gap still cannot carry the episode to firing.
+// noDataHold says whether a pending episode without a reading has been without
+// one long enough to have its timer restarted.
 func noDataHold(episode openAlert, now time.Time) bool {
 	return episode.State == "pending" && now.Sub(episode.StartedAt) > maxSampleGap
 }
@@ -409,11 +346,8 @@ func (s *Store) refresh(ctx context.Context, episode openAlert, value float64, d
 	return err
 }
 
-// closeOrphans ends the open episodes whose rule no longer covers their
-// host or whose host is gone from the fleet.
-//
-// A rule whose selector did not resolve this run keeps its episodes: they
-// are not orphans, they are waiting for the rule to be mended.
+// closeOrphans ends the open episodes whose rule no longer covers their host
+// or whose host is gone from the fleet.
 func (s *Store) closeOrphans(ctx context.Context, rules []Rule, scopes map[string]*scope,
 	hosts []hostState, open map[string]openAlert, now time.Time) error {
 	covered := map[string]bool{}
@@ -455,15 +389,13 @@ func (s *Store) closeOrphans(ctx context.Context, rules []Rule, scopes map[strin
 	return nil
 }
 
-// measure computes the value of the rule's metric for the host and the
-// message an alert would carry. Known is false when the host gave nothing
-// the metric can be computed from.
+// measure computes the value of the rule's metric for the host and the message
+// an alert would carry.
 func measure(rule Rule, host hostState, now time.Time) (value float64, detail string, known bool) {
 	if rule.Metric == MetricHostOffline {
 		if host.LastSampleAt == nil {
-			// A host that never sent a sample runs an agent without the
-			// sampler or has not connected since it was enrolled; neither
-			// is a host that went quiet.
+			// A host that never sent a sample runs an agent without the sampler or has
+			// not connected since it was enrolled; neither is a host that went quiet.
 			return 0, "", false
 		}
 		minutes := now.Sub(*host.LastSampleAt).Minutes()

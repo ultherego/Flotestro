@@ -15,16 +15,10 @@ import (
 )
 
 // Source is the adapter of the security tracker of one distribution.
-//
-// The vendor settles the matter: the adapter translates its language into
-// the findings of the panel and nothing more. Enrichment with a CVSS score or
-// an upstream description may come later and has no right to change the
-// answer "vulnerable / not vulnerable".
 type Source interface {
 	Name() string
-	// Fetch pulls the findings for the named releases. It returns
-	// ErrNotModified when the feed has not changed since the fetch described
-	// by the etag.
+	// Fetch pulls the findings for the named releases. It returns ErrNotModified
+	// when the feed has not changed since the fetch described by the etag.
 	Fetch(ctx context.Context, releases []string, etag string) (Snapshot, []Advisory, error)
 }
 
@@ -35,28 +29,16 @@ var ErrNotModified = errors.New("the feed has not changed since the last fetch")
 type Settings struct {
 	// Interval says how often the panel asks the trackers about changes.
 	Interval time.Duration
-	// MaxSnapshotAge is the age above which we consider the data stale. It
-	// does not stop the assessment - data from a day ago are better than
-	// none - but it has to be visible next to the result.
+	// MaxSnapshotAge is the age above which we consider the data stale.
 	MaxSnapshotAge time.Duration
 	// Debounce says how long we gather requests to recompute a host before
-	// carrying them out. A host reports its package list and its findings
-	// separately, and several hosts can answer at once - one recomputation
-	// for the whole group costs as much as one for the first of them.
+	// carrying them out.
 	Debounce time.Duration
-	// MaxAdvisoryAge is the age after which the panel asks a host to read
-	// the metadata of its repositories again.
-	//
-	// Separate from the age of a snapshot, because it is a separate source
-	// and a separate cycle: the vendor releases fixes also when not a single
-	// package on the host has changed. A panel that tied the refresh of the
-	// findings to a change of the package list would sometimes refresh them
-	// never.
+	// MaxAdvisoryAge is the age after which the panel asks a host to read the
+	// metadata of its repositories again.
 	MaxAdvisoryAge time.Duration
-	// ShrinkShare is how much of the snapshot in force a fetch may lose
-	// and still be activated without anybody looking. A fetch that loses
-	// more is kept as a candidate with a typed reason and the previous
-	// snapshot stays in force. Zero means the default.
+	// ShrinkShare is how much of the snapshot in force a fetch may lose and still
+	// be activated without anybody looking.
 	ShrinkShare float64
 }
 
@@ -80,10 +62,7 @@ type Scheduler struct {
 	sources   []Source
 	settings  Settings
 	log       *slog.Logger
-	// refreshes carries the hosts that have just sent new data. The
-	// assessment is to keep up with what settles it: a host that answered a
-	// request for a read must not show up as a host without one for half an
-	// hour.
+	// refreshes carries the hosts that have just sent new data.
 	refreshes chan string
 }
 
@@ -111,11 +90,6 @@ func NewScheduler(store *Store, packageStore *PackageStore, hostStore *hosts.Sto
 }
 
 // Refresh asks for the assessment of a host to be recomputed out of turn.
-//
-// Called by the gateway when a host sends its package list or the findings of
-// its repositories. The request is only a request: when the queue is full the
-// host waits for the ordinary cycle - that is worse by a dozen minutes, not
-// by an answer.
 func (h *Scheduler) Refresh(hostID string) {
 	if hostID == "" {
 		return
@@ -130,17 +104,13 @@ func (h *Scheduler) Refresh(hostID string) {
 // Run carries the synchronisation and the assessment on until the context is
 // closed.
 func (h *Scheduler) Run(ctx context.Context) {
-	// The first pass at once: after a start the panel must not show an
-	// assessment from before the restart for half an hour without marking it
-	// as old.
+	// The first pass at once: after a start the panel must not show an assessment
+	// from before the restart for half an hour without marking it as old.
 	h.Cycle(ctx)
 	ticker := time.NewTicker(h.settings.Interval)
 	defer ticker.Stop()
 
-	// Requests to recompute are gathered for a moment and carried out
-	// together. A host answers about its package list and about its findings
-	// separately, and reading the feed findings for one release is up to a
-	// million rows - there is no reason to do that twice in a row.
+	// Requests to recompute are gathered for a moment and carried out together.
 	pending := map[string]bool{}
 	var delay *time.Timer
 	var signal <-chan time.Time
@@ -243,29 +213,12 @@ type HostDescription struct {
 
 // AdvisoriesFromHost says whether the findings for this distribution are read
 // from the repository metadata of the host rather than from a central feed.
-//
-// For now Fedora alone. Its updateinfo carries full security findings along
-// with the packages, so the host reads them from the same source it takes
-// the fixes from.
-//
-// RHEL, AlmaLinux and Rocky have a poorer or incomplete updateinfo, and their
-// settling source is the CSAF/VEX of the vendor - and until the panel reads
-// those, a host of these distributions is left with the reason "feed
-// missing". That is a more honest answer than an assessment from metadata
-// that do not describe everything.
 func AdvisoriesFromHost(distribution string) bool {
 	return strings.ToLower(distribution) == "fedora"
 }
 
-// ProviderFor returns the name of the tracker proper for the distribution of
-// a host.
-//
-// CentOS Stream, AlmaLinux and Rocky do not get the Red Hat tracker even
-// though their packages carry the same names: their versions are their own
-// (a rebuild appends a suffix of its own, Stream runs ahead of RHEL), so a
-// Red Hat finding would speak about something else. Until the panel reads
-// their own sources, their hosts are to get the reason "feed missing" - that
-// is a more honest answer than somebody else's assessment.
+// ProviderFor returns the name of the tracker proper for the distribution of a
+// host.
 func ProviderFor(distribution string) string {
 	switch strings.ToLower(distribution) {
 	case "debian":
@@ -280,13 +233,8 @@ func ProviderFor(distribution string) string {
 	return ""
 }
 
-// hostDescriptions gathers what the assessment needs about every host.
-//
-// The whole fleet, page by page. The list for the UI has a limit and with too
-// large a value it silently falls back to a hundred entries - a sweep that
-// relied on it assessed a hundred hosts and said nothing about the rest. An
-// unassessed host looks on the screen exactly like a host without
-// vulnerabilities, so silence is the worst answer here.
+// hostDescriptions gathers what the assessment needs about every host. The
+// whole fleet, page by page.
 func (h *Scheduler) hostDescriptions(ctx context.Context) ([]HostDescription, error) {
 	var (
 		descriptions []HostDescription
@@ -306,9 +254,9 @@ func (h *Scheduler) hostDescriptions(ctx context.Context) ([]HostDescription, er
 		for _, host := range page {
 			ids = append(ids, host.ID)
 		}
-		// The inventory fragments are taken for the page rather than for the
-		// whole fleet: they carry the full payloads of the modules and as a
-		// whole they do not fit in memory.
+		// The inventory fragments are taken for the page rather than for the whole
+		// fleet: they carry the full payloads of the modules and as a whole they do
+		// not fit in memory.
 		fragments, err := h.inventory.HostFragments(ctx, ids)
 		if err != nil {
 			return nil, err
@@ -334,9 +282,8 @@ func hostDistribution(host hosts.Summary, fragments []inventory.Fragment) (strin
 	distribution := strings.ToLower(host.OSDistribution)
 	release := host.OSVersion
 
-	// The Debian and Ubuntu trackers speak in the names of releases rather
-	// than in numbers. The name is in the inventory, because only the host
-	// knows what its release is called.
+	// The Debian and Ubuntu trackers speak in the names of releases rather than
+	// in numbers.
 	for _, fragment := range fragments {
 		if fragment.Module != "system" || len(fragment.Payload) == 0 {
 			continue
@@ -364,11 +311,7 @@ func hostDistribution(host hosts.Summary, fragments []inventory.Fragment) (strin
 }
 
 // TrackerRelease reduces the release of a host to the form the tracker knows.
-//
-// Red Hat speaks about the major release: a host reports 9.4 and the findings
-// concern the nine. Without this every RHEL host would come out as "a release
-// outside the feed". Debian, Ubuntu and Fedora name their releases the same
-// way their hosts do.
+// Red Hat speaks about the major release: a host reports 9.
 func TrackerRelease(distribution, release string) string {
 	if ProviderFor(distribution) != "redhat" {
 		return release
@@ -399,10 +342,6 @@ func digestFromInventory(fragments []inventory.Fragment) (string, string) {
 }
 
 // Synchronize fetches the feeds for the releases the fleet really has.
-//
-// We fetch only what concerns the hosts in this installation: a full dump
-// describes more than a dozen releases and several hundred thousand findings,
-// and the panel needs the ones it has something to answer about.
 func (h *Scheduler) Synchronize(ctx context.Context, descriptions []HostDescription) {
 	releases := map[string]map[string]bool{}
 	for _, description := range descriptions {
@@ -430,9 +369,8 @@ func (h *Scheduler) Synchronize(ctx context.Context, descriptions []HostDescript
 
 		etag := ""
 		if previous, err := h.store.ActiveSnapshot(ctx, source.Name()); err == nil {
-			// An etag makes sense only when we ask about the same range of
-			// releases: otherwise "no changes" would mean "no changes in a
-			// different range".
+			// An etag makes sense only when we ask about the same range of releases:
+			// otherwise "no changes" would mean "no changes in a different range".
 			if sameRange(previous.Releases, list) {
 				etag = previous.ETag
 			}
@@ -440,9 +378,8 @@ func (h *Scheduler) Synchronize(ctx context.Context, descriptions []HostDescript
 
 		snapshot, advisories, err := source.Fetch(ctx, list, etag)
 		if errors.Is(err, ErrNotModified) || (err != nil && strings.Contains(err.Error(), "has not changed")) {
-			// "No changes" is a confirmation rather than a missing answer:
-			// the data are still the ones in force. Without this record a
-			// feed that changes once a day would look abandoned.
+			// "No changes" is a confirmation rather than a missing answer: the data are
+			// still the ones in force.
 			if err := h.store.ConfirmSnapshot(ctx, source.Name()); err != nil {
 				h.log.Error("the confirmation of the feed was not recorded",
 					"provider", source.Name(), "err", err)
@@ -451,9 +388,8 @@ func (h *Scheduler) Synchronize(ctx context.Context, descriptions []HostDescript
 			continue
 		}
 		if err != nil {
-			// A failed fetch does not take the previous snapshot away from
-			// the panel: better to assess with older data and say they are
-			// older.
+			// A failed fetch does not take the previous snapshot away from the panel:
+			// better to assess with older data and say they are older.
 			h.log.Error("the feed was not fetched", "provider", source.Name(), "err", err)
 			_ = h.store.SaveFetchError(ctx, source.Name(), err.Error())
 			continue
@@ -461,12 +397,8 @@ func (h *Scheduler) Synchronize(ctx context.Context, descriptions []HostDescript
 		_, err = h.store.SaveSnapshot(ctx, snapshot, advisories, h.settings.ShrinkShare)
 		var refusal *FeedRefusal
 		if errors.As(err, &refusal) {
-			// The fetch lost more than the installation allows, or lost a
-			// whole release. It is kept as a candidate with its findings
-			// and the snapshot in force stays in force; without a
-			// confirmation it ages into a stale source the panel shows as
-			// such, so nobody mistakes "held back" for "up to date". An
-			// operator who has read the numbers accepts the candidate.
+			// The fetch lost more than the installation allows, or lost a whole
+			// release.
 			h.log.Error("the fetch of the feed did not pass the sanity gate; the previous snapshot stays in force",
 				"provider", source.Name(), "reason", refusal.Reason,
 				"findings", refusal.FetchedCount, "in_force", refusal.ActiveCount,
@@ -475,11 +407,8 @@ func (h *Scheduler) Synchronize(ctx context.Context, descriptions []HostDescript
 			continue
 		}
 		if errors.Is(err, ErrFeedEmpty) {
-			// A feed that answered with nothing where it used to carry
-			// findings is a broken fetch or a broken parser, not a vendor
-			// that fixed everything. The last good snapshot stays active
-			// and carries the reason; without a confirmation it ages into
-			// a stale source the panel shows as such.
+			// A feed that answered with nothing where it used to carry findings is a
+			// broken fetch or a broken parser, not a vendor that fixed everything.
 			h.log.Error("the feed came back empty; the previous snapshot stays in force",
 				"provider", source.Name(), "releases", list)
 			_ = h.store.SaveFetchError(ctx, source.Name(), ReasonFeedEmpty)
@@ -512,18 +441,6 @@ func sameRange(a, b []string) bool {
 
 // Recalculate assesses the hosts with the active snapshot of their
 // distribution.
-//
-// It recomputes only the ones whose input has changed. The assessment depends
-// on three digests - of the feed snapshot, of the package list and of the set
-// of findings of the host - and on what stands in the way of full coverage.
-// When none of them has moved, the result would be the same to the byte, and
-// the cost is reading several hundred packages and rewriting several thousand
-// rows per host.
-//
-// A safety net stays in place: an assessment older than the age allowed for a
-// feed is computed again regardless of the digests. An error in the reckoning
-// of "what has changed" is to cost a delay rather than an assessment frozen
-// for good.
 func (h *Scheduler) Recalculate(ctx context.Context, descriptions []HostDescription) {
 	snapshots := map[string]Snapshot{}
 	feedAdvisories := map[string]map[string][]Advisory{}
@@ -558,9 +475,9 @@ func (h *Scheduler) Recalculate(ctx context.Context, descriptions []HostDescript
 				description.InventoryDigest != listState.Digest,
 		}
 
-		// For Fedora the settling source is the repository metadata of the
-		// host itself: they say which version closes a finding and whether it
-		// lies in a repository this host takes packages from.
+		// For Fedora the settling source is the repository metadata of the host
+		// itself: they say which version closes a finding and whether it lies in a
+		// repository this host takes packages from.
 		set := map[string][]Advisory(nil)
 		refreshAdvisories := false
 		if AdvisoriesFromHost(description.Distribution) {
@@ -572,10 +489,8 @@ func (h *Scheduler) Recalculate(ctx context.Context, descriptions []HostDescript
 			}
 			fromHost, collected, err := h.packages.HostAdvisories(ctx, description.ID)
 			if err != nil {
-				// A read that failed is not an empty set of findings: an
-				// assessment made with nothing would say the host is clean.
-				// The previous findings stand until the next sweep reads
-				// the metadata.
+				// A read that failed is not an empty set of findings: an assessment made
+				// with nothing would say the host is clean.
 				h.log.Error("the findings of the host were not read; the previous assessment stands",
 					"host_id", description.ID, "err", err)
 				continue
@@ -592,22 +507,14 @@ func (h *Scheduler) Recalculate(ctx context.Context, descriptions []HostDescript
 				input.AdvisoriesReason = ReasonHostAdvisoriesMissing
 				refreshAdvisories = true
 			case now.Sub(*advisoryState.CollectedAt) > h.settings.MaxAdvisoryAge:
-				// The vendor releases fixes also when not a single package on
-				// the host has changed. The findings therefore have a refresh
-				// cycle of their own, independent of the digest of the
-				// package list.
+				// The vendor releases fixes also when not a single package on the host has
+				// changed.
 				input.AdvisoriesReason = ReasonHostAdvisoriesStale
 				refreshAdvisories = true
 			}
 
-			// The snapshot here belongs to the host: its digest is the digest
-			// of the set of findings, and its age - the moment the metadata
-			// were read.
-			//
-			// It carries no generation identifier: a generation names one
-			// fetch of a central feed, and these findings were read by the
-			// host itself. The moment they were read stands in its place,
-			// so the verdict still says how old the data behind it are.
+			// The snapshot here belongs to the host: its digest is the digest of the
+			// set of findings, and its age - the moment the metadata were read.
 			snapshot = Snapshot{
 				Provider: provider, Digest: advisoryState.Digest,
 				Releases: []string{description.Release}, AdvisoryCount: len(fromHost),
@@ -620,10 +527,8 @@ func (h *Scheduler) Recalculate(ctx context.Context, descriptions []HostDescript
 				fetched, err := h.store.AdvisoriesForRelease(ctx, snapshot.ID,
 					description.Distribution, description.Release)
 				if err != nil {
-					// The same rule as for the host's own findings: a feed
-					// that could not be read must not assess anybody as
-					// clean. Nothing is cached for the release, so the
-					// next host of it asks the database again.
+					// The same rule as for the host's own findings: a feed that could not be
+					// read must not assess anybody as clean.
 					h.log.Error("the findings of the feed were not read; the previous assessments stand",
 						"provider", provider, "release", description.Release, "err", err)
 					continue
@@ -633,10 +538,9 @@ func (h *Scheduler) Recalculate(ctx context.Context, descriptions []HostDescript
 			set = feedAdvisories[key]
 		}
 
-		// Ordering a read is independent of the recomputation: a host without
-		// a list is to get one just as well when its assessment has not
-		// changed since the last cycle. Otherwise a host skipped once would
-		// never ask for it again.
+		// Ordering a read is independent of the recomputation: a host without a list
+		// is to get one just as well when its assessment has not changed since the
+		// last cycle.
 		if input.ListMissing || input.ListStale || refreshAdvisories {
 			h.requestRead(ctx, description, now)
 		}
@@ -679,9 +583,8 @@ func (h *Scheduler) previousStates(ctx context.Context, descriptions []HostDescr
 		}
 		states, err := h.store.HostStates(ctx, ids)
 		if err != nil {
-			// Without the previous states we recompute everything. It costs
-			// more, but it does not leave an assessment frozen on an unknown
-			// input.
+			// Without the previous states we recompute everything. It costs more, but
+			// it does not leave an assessment frozen on an unknown input.
 			h.log.Error("the previous assessments were not read", "err", err)
 			return map[string]HostState{}
 		}
@@ -694,11 +597,6 @@ func (h *Scheduler) previousStates(ctx context.Context, descriptions []HostDescr
 
 // toRecalculate says whether the assessment of a host has to be computed
 // again.
-//
-// The input of an assessment is three digests and the reason for incomplete
-// coverage. When none of them has changed, a new assessment would be a copy
-// of the previous one - and computing it costs reading the whole package list
-// and rewriting every finding.
 func (h *Scheduler) toRecalculate(previous HostState, input Input,
 	snapshot Snapshot, now time.Time) bool {
 	if previous.EvaluatedAt == nil {
@@ -713,26 +611,21 @@ func (h *Scheduler) toRecalculate(previous HostState, input Input,
 		previous.Release != input.Release ||
 		previous.Provider != snapshot.Provider ||
 		previous.SnapshotDigest != snapshot.Digest ||
-		// The generation is compared as well as the digest. A verdict from
-		// before generations were recorded carries none, and it is to be
-		// computed again rather than left naming nothing for ever.
+		// The generation is compared as well as the digest.
 		previous.GenerationID != snapshot.GenerationID ||
 		previous.InventoryDigest != input.InventoryDigest ||
 		previous.AdvisoryDigest != input.AdvisoryDigest {
 		return true
 	}
-	// The coverage reason depends on time as well: a feed fresh in the
-	// morning is sometimes stale in the evening, and that changes the result
-	// without a change of a single digest.
+	// The coverage reason depends on time as well: a feed fresh in the morning is
+	// sometimes stale in the evening, and that changes the result without a
+	// change of a single digest.
 	reason, _ := CoverageReasonFor(input, snapshot, h.settings.MaxSnapshotAge, now)
 	return reason != previous.CoverageReason
 }
 
 // requestRead orders the full package list from a host together with the
 // vendor findings from the metadata of its repositories.
-//
-// We order it ourselves, because without it the assessment of this host is
-// empty - and an empty assessment looks like a host without vulnerabilities.
 func (h *Scheduler) requestRead(ctx context.Context, description HostDescription, now time.Time) {
 	if h.jobs == nil || description.InventoryReason != "" {
 		return
@@ -744,10 +637,6 @@ func (h *Scheduler) requestRead(ctx context.Context, description HostDescription
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	// The key carries a time bucket rather than the digest of the list alone.
-	// A key based on the digest stayed the same until the host changed - and
-	// a job that failed once never came back: the following cycles hit the
-	// same key and got the same failed order. A bucket closes that window
-	// after one interval, and within it still guards against a repetition.
 	bucket := now.Truncate(h.settings.Interval).UTC().Format(time.RFC3339)
 	key := "vuln:packages:" + description.ID + ":" + bucket
 	_, err = h.jobs.Create(ctx, tx, jobs.Spec{

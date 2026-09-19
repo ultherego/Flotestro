@@ -24,10 +24,9 @@ func keytabRequest(principal string) *helperv1.HelperRequest {
 	}
 }
 
-// keytabTool stands in for klist and ipa-getkeytab: the listing it prints
-// is the one before the fetch until the fetch ran, and the one after from
-// then on. A fetch that fails leaves the listing where it was, the way the
-// real tool leaves the file.
+// keytabTool stands in for klist and ipa-getkeytab: the listing it prints is
+// the one before the fetch until the fetch ran, and the one after from then
+// on.
 type keytabTool struct {
 	calls      [][]string
 	before     string
@@ -65,8 +64,7 @@ const listingAfter = listingBefore +
 	"   3 HTTP/web1.flotestro.test@FLOTESTRO.TEST\n"
 
 // The renewal fetches into the host's own keytab with the host's own
-// credentials, and the key version number going up is the proof. The
-// principal is the only thing the request contributes to argv.
+// credentials, and the key version number going up is the proof.
 func TestKeytabRenewalFetchesWithTheHostKeytabAndReportsTheVersions(t *testing.T) {
 	tool := &keytabTool{before: listingBefore, after: listingAfter}
 	server := testServer()
@@ -91,9 +89,9 @@ func TestKeytabRenewalFetchesWithTheHostKeytabAndReportsTheVersions(t *testing.T
 	}
 }
 
-// A principal with no key in the file yet is not a version of zero: the
-// number before is reported as unknown, and the fetch still counts when
-// the file lists the principal afterwards.
+// A principal with no key in the file yet is not a version of zero: the number
+// before is reported as unknown, and the fetch still counts when the file
+// lists the principal afterwards.
 func TestKeytabRenewalOfAFreshPrincipalReportsNoVersionBefore(t *testing.T) {
 	tool := &keytabTool{
 		before: "KVNO Principal\n---- ----\n   3 host/web1.flotestro.test@FLOTESTRO.TEST\n",
@@ -111,9 +109,9 @@ func TestKeytabRenewalOfAFreshPrincipalReportsNoVersionBefore(t *testing.T) {
 	}
 }
 
-// A fetch that left the version where it was is not a success, whatever
-// the tool's exit code said: the service would still hold the key the
-// directory retired.
+// A fetch that left the version where it was is not a success, whatever the
+// tool's exit code said: the service would still hold the key the directory
+// retired.
 func TestKeytabRenewalRefusesWhenTheVersionDidNotChange(t *testing.T) {
 	for name, tool := range map[string]*keytabTool{
 		"the tool failed":            {before: listingBefore, after: listingBefore, fetchFails: true},
@@ -137,9 +135,9 @@ func TestKeytabRenewalRefusesWhenTheVersionDidNotChange(t *testing.T) {
 	}
 }
 
-// A principal that is not a service's, or is the host's own, never reaches
-// a tool: the host keytab is replaced by a re-join, and a shape that is
-// not service/host cannot be a principal ipa-getkeytab would take.
+// A principal that is not a service's, or is the host's own, never reaches a
+// tool: the host keytab is replaced by a re-join, and a shape that is not
+// service/host cannot be a principal ipa-getkeytab would take.
 func TestKeytabRenewalRefusesABadPrincipalBeforeAnyTool(t *testing.T) {
 	tool := &keytabTool{before: listingBefore, after: listingAfter}
 	server := testServer()

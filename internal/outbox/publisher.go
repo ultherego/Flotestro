@@ -1,17 +1,4 @@
 // Package outbox publishes the durable trail of events.
-//
-// The events are written by database triggers in the same transaction as
-// the state change they describe, so a state cannot change without its
-// event. The publisher is the other half of the contract: it leases the
-// unpublished rows, hands them to a sink and marks them published, all in
-// one transaction. A crash between the hand-over and the commit leaves the
-// row unpublished and it goes out again - the delivery is at least once,
-// and a consumer deduplicates by the event identifier.
-//
-// The first sink is a PostgreSQL notification: every instance of the panel
-// listens to it and forwards the event to the open screens. A broker takes
-// the same place later without a change to the shape of the events or to
-// their identifiers.
 package outbox
 
 import (
@@ -52,9 +39,7 @@ type Publisher struct {
 	wake     chan struct{}
 }
 
-// NewPublisher creates a publisher polling at the given interval. The
-// interval is the ceiling of the latency; Wake shortens it to nothing when
-// the process learns of a change another way.
+// NewPublisher creates a publisher polling at the given interval.
 func NewPublisher(pool *pgxpool.Pool, sink Sink, log interface{ Error(string, ...any) },
 	interval time.Duration) *Publisher {
 	if interval <= 0 {
@@ -101,9 +86,8 @@ func (p *Publisher) Run(ctx context.Context) {
 	}
 }
 
-// Publish runs one round: it leases up to a batch of unpublished rows,
-// hands them to the sink and marks them published. It returns how many rows
-// went out.
+// Publish runs one round: it leases up to a batch of unpublished rows, hands
+// them to the sink and marks them published.
 func (p *Publisher) Publish(ctx context.Context) (int, error) {
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
@@ -156,11 +140,7 @@ func (p *Publisher) Publish(ctx context.Context) (int, error) {
 	return len(events), nil
 }
 
-// NotifySink publishes every event as a PostgreSQL notification. The
-// notification is a wake-up call rather than the content: it carries the
-// identifiers, and a receiver reads the rows from the table. That keeps it
-// far below the size limit of a notification, and a receiver that missed
-// one still finds the rows by their identifiers.
+// NotifySink publishes every event as a PostgreSQL notification.
 type NotifySink struct{}
 
 // notification is what travels in the channel.

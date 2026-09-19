@@ -14,18 +14,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// A schedule is a campaign order kept for a moment: the same body the
-// door takes, placed by the panel when the moment comes. The campaign it
-// places is an ordinary one - it goes through every check the order goes
-// through at the door, under the rights of the person who wrote the
-// schedule as they stand at that moment, and waits for its approval like
-// any other. The schedule places orders; it runs nothing by itself.
-//
-// The recurrence is the RRULE subset a maintenance calendar needs: a
-// monthly rule by day of the month or a weekly rule by weekdays, each at
-// an hour and a minute of the schedule's zone. A rule the panel cannot
-// read is refused at the door with its reason, never stored to fire at
-// some other moment.
+// A schedule is a campaign order kept for a moment: the same body the door
+// takes, placed by the panel when the moment comes.
 
 // Frequency is how often a rule repeats.
 type Frequency string
@@ -38,9 +28,7 @@ const (
 // Recurrence is a parsed rule.
 type Recurrence struct {
 	Freq Frequency
-	// ByMonthDay is the day of the month of a monthly rule, 1..31. A month
-	// without that day is skipped, as RRULE skips it: a rule for the 31st
-	// names nothing in April rather than the 1st of May.
+	// ByMonthDay is the day of the month of a monthly rule, 1. . 31.
 	ByMonthDay int
 	// ByDay lists the weekdays of a weekly rule, sorted, each once.
 	ByDay []time.Weekday
@@ -53,10 +41,7 @@ type Recurrence struct {
 // The weekday codes of RRULE, in the order Go numbers the weekdays.
 var weekdayCodes = [...]string{"SU", "MO", "TU", "WE", "TH", "FR", "SA"}
 
-// ParseRecurrence reads a rule. The keys are the RRULE keys, separated by
-// semicolons, in any order; a key the subset does not have is refused
-// rather than ignored, because a rule with an ignored key would fire at
-// moments its author did not write.
+// ParseRecurrence reads a rule.
 func ParseRecurrence(text string) (*Recurrence, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -172,10 +157,8 @@ func (r Recurrence) String() string {
 	return strings.Join(parts, ";")
 }
 
-// Next returns the first occurrence of the rule at or after the moment,
-// in the zone given. The answer is in UTC, as the row keeps it. A rule
-// that names nothing within four years - none does, but the loop must
-// end - gets the zero time.
+// Next returns the first occurrence of the rule at or after the moment, in the
+// zone given.
 func (r Recurrence) Next(from time.Time, loc *time.Location) time.Time {
 	local := from.In(loc)
 	switch r.Freq {
@@ -224,11 +207,7 @@ func daysIn(year int, month time.Month) int {
 	return time.Date(year, month+1, 0, 0, 0, 0, 0, time.UTC).Day()
 }
 
-// NextRun computes the moment a schedule fires next, from the moment
-// given. Without a rule the moment is the start when it lies ahead, and
-// nothing once it has passed. With a rule the start is the earliest
-// moment the rule may name: the first occurrence at or after the later
-// of the start and now. Nil means the schedule has nothing more to place.
+// NextRun computes the moment a schedule fires next, from the moment given.
 func NextRun(startAt *time.Time, rule *Recurrence, loc *time.Location, now time.Time) *time.Time {
 	if rule == nil {
 		if startAt != nil && startAt.After(now) {
@@ -311,10 +290,7 @@ type CheckedSchedule struct {
 	NextRunAt *time.Time
 }
 
-// CheckSchedule validates a spec against the clock. Everything that can
-// be wrong with the schedule itself is refused here, with its code; what
-// can be wrong with the order inside is the door's business at every run,
-// and the door's answer is kept on the row.
+// CheckSchedule validates a spec against the clock.
 func CheckSchedule(spec ScheduleSpec, now time.Time) (*CheckedSchedule, error) {
 	spec.Name = strings.TrimSpace(spec.Name)
 	spec.Reason = strings.TrimSpace(spec.Reason)
@@ -365,9 +341,7 @@ func CheckSchedule(spec ScheduleSpec, now time.Time) (*CheckedSchedule, error) {
 	return &CheckedSchedule{Spec: spec, Rule: rule, Location: loc, NextRunAt: NextRun(spec.StartAt, rule, loc, now)}, nil
 }
 
-// Location returns the schedule's zone. A zone the database holds is one
-// the check accepted; a name the host no longer knows falls back to UTC
-// rather than stopping the loop.
+// Location returns the schedule's zone.
 func (s Schedule) Location() *time.Location {
 	loc, err := time.LoadLocation(s.Timezone)
 	if err != nil {
@@ -390,7 +364,6 @@ func (s Schedule) Rule() *Recurrence {
 
 // Occurrences lists the moments the schedule fires in [from, to), at most
 // limit of them, from the row's next moment on: what the calendar draws.
-// A disabled schedule or one with nothing more to place has none.
 func (s Schedule) Occurrences(from, to time.Time, limit int) []time.Time {
 	if !s.Enabled || s.NextRunAt == nil || limit <= 0 {
 		return nil
@@ -487,11 +460,9 @@ func (s *Store) CreateSchedule(ctx context.Context, checked CheckedSchedule, cre
 	return s.GetSchedule(ctx, id)
 }
 
-// UpdateSchedule rewrites a schedule from a checked spec under the
-// subject given, who becomes its author: the orders are placed under the
-// rights of whoever last wrote the order, so nobody widens a colleague's
-// schedule onto hosts only the colleague may change. The next moment is
-// computed afresh from the new spec.
+// UpdateSchedule rewrites a schedule from a checked spec under the subject
+// given, who becomes its author: the orders are placed under the rights of
+// whoever last wrote the order, so nobody widens a colleague's schedule onto
 func (s *Store) UpdateSchedule(ctx context.Context, id string, checked CheckedSchedule, author string) (*Schedule, error) {
 	spec := checked.Spec
 	enabled := spec.Enabled == nil || *spec.Enabled
@@ -539,10 +510,8 @@ func (s *Store) DueSchedules(ctx context.Context, now time.Time) ([]Schedule, er
 		"where enabled and next_run_at is not null and next_run_at <= $1 order by next_run_at", now)
 }
 
-// ClaimSchedule moves a due schedule past its moment: the row's next
-// moment becomes the one given and the run is noted. The claim holds only
-// when the row still names the moment the caller read, so two panels
-// ticking at once place one order between them, not two.
+// ClaimSchedule moves a due schedule past its moment: the row's next moment
+// becomes the one given and the run is noted.
 func (s *Store) ClaimSchedule(ctx context.Context, id string, due time.Time, next *time.Time) (bool, error) {
 	tag, err := s.pool.Exec(ctx, `
 		update campaign_schedules
@@ -573,9 +542,9 @@ type CampaignWindow struct {
 	End   *time.Time `json:"end,omitempty"`
 }
 
-// CampaignWindows lists the campaigns whose maintenance window touches
-// [from, to), narrowed to the scopes the caller may read campaigns in -
-// the same narrowing the campaign list applies.
+// CampaignWindows lists the campaigns whose maintenance window touches [from,
+// to), narrowed to the scopes the caller may read campaigns in - the same
+// narrowing the campaign list applies.
 func (s *Store) CampaignWindows(ctx context.Context, from, to time.Time, scopes []Scope) ([]CampaignWindow, error) {
 	clause := `where (maintenance_start is not null or maintenance_end is not null)
 		 and coalesce(maintenance_end, maintenance_start) >= $1

@@ -16,20 +16,10 @@ import (
 	"github.com/ultherego/flotestro/internal/selector"
 )
 
-// Desired-state policies.
-//
-// A policy is edited as a draft, published as a version and judged by the
-// loop from the inventory. The publication is the approval the document
-// names: it asks for fresh authentication like the approval of a
-// campaign, and a policy that remediates automatically asks for the
-// separate permission besides. The handlers write nothing to a host; the
-// only change they can set in motion is a campaign, ordered by the
-// evaluator through the same path a fleet remediation takes, and that
-// campaign waits for its approval like any other.
+// Desired-state policies. A policy is edited as a draft, published as a
+// version and judged by the loop from the inventory.
 
-// policyStore opens the store on the panel's pool. The store is a view
-// on the pool, so opening it per request costs nothing and the server
-// keeps no field for it.
+// policyStore opens the store on the panel's pool.
 func (s *Server) policyStore() *policy.Store { return policy.NewStore(s.pool) }
 
 // policyEvaluator builds the evaluator with the stores the panel already
@@ -81,9 +71,8 @@ func (s *Server) readPolicySpec(w http.ResponseWriter, r *http.Request) (policy.
 		return spec, false
 	}
 	spec.Selector = chosen
-	// A draft may be half-written, but a rule of a kind the panel does
-	// not know is refused at once: the editor is to learn it now, not at
-	// the publication.
+	// A draft may be half-written, but a rule of a kind the panel does not know
+	// is refused at once: the editor is to learn it now, not at the publication.
 	for index, rule := range spec.Rules {
 		if rule.Kind != "" && !knownKind(rule.Kind) {
 			problem(w, http.StatusBadRequest, "unsupported_rule",
@@ -226,12 +215,6 @@ func (s *Server) handleDeletePolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 // handlePublishPolicy freezes the draft as the next version.
-//
-// The publication is where the rules are held to their kinds, where the
-// mode is held to the permission it needs and where the publisher
-// authenticates afresh: from this moment the loop judges the fleet by
-// this text, and in automatic mode changes it on the publisher's
-// authority.
 func (s *Server) handlePublishPolicy(w http.ResponseWriter, r *http.Request) {
 	found, ok := s.policyFor(w, r, authz.PermPolicyPublish)
 	if !ok {
@@ -282,9 +265,9 @@ func (s *Server) handlePublishPolicy(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// The automatic mode needs the separate permission somewhere in the
-	// fleet; the evaluator holds every host to the publisher's scope when
-	// the drift is found.
+	// The automatic mode needs the separate permission somewhere in the fleet;
+	// the evaluator holds every host to the publisher's scope when the drift is
+	// found.
 	if found.RemediationMode == policy.ModeAutomatic {
 		if _, ok := s.authorizeCollection(w, r, authz.PermPolicyRemediateAuto, "policy"); !ok {
 			return
@@ -403,12 +386,9 @@ var policyResultsCSVColumns = []string{
 	"version", "verdict", "reason", "observed_revision", "evaluated_at",
 }
 
-// writePolicyResultsCSV streams the verdicts of a policy as a file: the
-// same host and verdict filter as the JSON list, every page of it, in
-// the order of the list. The pages come one at a time from the store;
-// the file ends with a truncation row past exportRowLimit verdicts. The
-// file is named after the policy so two policies' exports do not collide
-// in a download folder.
+// writePolicyResultsCSV streams the verdicts of a policy as a file: the same
+// host and verdict filter as the JSON list, every page of it, in the order of
+// the list.
 func (s *Server) writePolicyResultsCSV(w http.ResponseWriter, r *http.Request, found *policy.Policy, filter policy.ResultFilter) {
 	s.writeCSV(w, r, exportFileName("policy-"+found.ID+"-results", time.Now()), policyResultsCSVColumns,
 		func(yield func([]string) bool) error {
@@ -432,9 +412,7 @@ func (s *Server) writePolicyResultsCSV(w http.ResponseWriter, r *http.Request, f
 }
 
 // policyResultCSVRow renders one verdict in the order of
-// policyResultsCSVColumns. The rule is named by its kind and subject - the
-// package, the unit, the path, the key or the account - as the screen
-// names it; the whole declaration is read on the policy page.
+// policyResultsCSVColumns.
 func policyResultCSVRow(result policy.Result) []string {
 	kind, subject := "", ""
 	if result.Rule != nil {
@@ -464,10 +442,8 @@ func (s *Server) handleHostPolicies(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": results, "count": len(results)})
 }
 
-// handleEvaluatePolicy runs one evaluation now: the same judgement the
-// loop runs at the interval, with the same consequences in the
-// policy's mode. The caller triggers it; the remediation, if any, is
-// ordered on the publisher's authority, not the caller's.
+// handleEvaluatePolicy runs one evaluation now: the same judgement the loop
+// runs at the interval, with the same consequences in the policy's mode.
 func (s *Server) handleEvaluatePolicy(w http.ResponseWriter, r *http.Request) {
 	found, ok := s.policyFor(w, r, authz.PermPolicyWrite)
 	if !ok {

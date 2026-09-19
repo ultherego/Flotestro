@@ -12,10 +12,6 @@ import (
 )
 
 // MaxWindow bounds the length of a maintenance window.
-//
-// A window without an end ends in a host everybody forgot: campaigns skip
-// it, its alerts wake nobody, and after half a year nobody remembers why
-// this machine gets no patches. The deadline forces a decision.
 const MaxWindow = 30 * 24 * time.Hour
 
 type maintenanceWindowRequest struct {
@@ -28,11 +24,6 @@ type maintenanceWindowRequest struct {
 }
 
 // handleSetMaintenance opens or closes the maintenance window of a host.
-//
-// This is not an operation on the host and does not go through the task
-// queue: it changes only what the panel thinks about the host. A task is
-// something the host executes, and the host has nothing to do here - hence
-// an entry point, a permission and an audit trail of its own.
 func (s *Server) handleSetMaintenance(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
 	host, scope, ok := s.hostScope(w, r, hostID)
@@ -86,9 +77,7 @@ func (s *Server) handleSetMaintenance(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, updated)
 }
 
-// windowState renders a maintenance window for one side of an audit
-// event. A host outside a window is a known state, not a missing one, so
-// it reads as a window without an end rather than as nothing recorded.
+// windowState renders a maintenance window for one side of an audit event.
 func windowState(window *hosts.MaintenanceWindow) map[string]any {
 	if window == nil {
 		return map[string]any{"until": nil, "reason": ""}

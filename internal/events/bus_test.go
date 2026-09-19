@@ -21,9 +21,8 @@ func (r *recorder) Exec(_ context.Context, _ string, args ...any) (pgconn.Comman
 	return pgconn.CommandTag{}, nil
 }
 
-// A turn of an installation order goes out on its own channel, comes back
-// as the same event, and reaches only the screen that watches that order.
-// A change without an order has nowhere to go and sends nothing.
+// A turn of an installation order goes out on its own channel, comes back as
+// the same event, and reaches only the screen that watches that order.
 func TestAnEnrollmentTurnTravelsAsOneEvent(t *testing.T) {
 	through := &recorder{}
 	change := EnrollmentChange{RequestID: "order-1", Change: EnrollmentRedeemed,

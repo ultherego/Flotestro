@@ -25,9 +25,6 @@ import (
 // The scenario of the architecture document: a FreeIPA user logs in through
 // Keycloak and the panel accepts the identity token only with the issuer, the
 // audience, the nonce and the signature checked, taking the roles from the
-// groups claim alone. The tests stand a fake Keycloak up in the process: a
-// discovery document, a JWKS with a key generated here, and a token endpoint
-// that hands out whatever identity token the test mints.
 
 const (
 	testClientID    = "flotestro-panel"
@@ -58,10 +55,7 @@ func signingKeys(t *testing.T) (issuer, rogue *rsa.PrivateKey) {
 	return testKeys.issuer, testKeys.rogue
 }
 
-// fakeIssuer stands in for Keycloak. The token endpoint answers every grant
-// with the identity token the test has set, or with the OAuth error the test
-// has set, and remembers the last request so a test can check what the
-// provider sent.
+// fakeIssuer stands in for Keycloak.
 type fakeIssuer struct {
 	server *httptest.Server
 	key    *rsa.PrivateKey
@@ -79,9 +73,9 @@ func newFakeIssuer(t *testing.T) *fakeIssuer {
 	issuer := &fakeIssuer{key: key, keyID: "keycloak-rs256-1"}
 
 	mux := http.NewServeMux()
-	// The issuer in the discovery document has to equal the address the
-	// provider was configured with: go-oidc refuses discovery otherwise, which
-	// is the first line of defence against a redirect to another provider.
+	// The issuer in the discovery document has to equal the address the provider
+	// was configured with: go-oidc refuses discovery otherwise, which is the
+	// first line of defence against a redirect to another provider.
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"issuer":                                issuer.server.URL,
@@ -183,10 +177,7 @@ func (f *fakeIssuer) lastTokenRequest() url.Values {
 	return f.lastForm
 }
 
-// signRS256 builds a compact JWS by hand. The go-jose library is only an
-// indirect dependency of the module and a test must not promote it; RS256 is
-// a SHA-256 digest of "header.payload" under PKCS#1 v1.5, which the standard
-// library does in a few lines.
+// signRS256 builds a compact JWS by hand.
 func signRS256(t *testing.T, key *rsa.PrivateKey, keyID string, claims map[string]any) string {
 	t.Helper()
 	header, err := json.Marshal(map[string]string{"alg": "RS256", "typ": "JWT", "kid": keyID})
@@ -243,8 +234,8 @@ func login(t *testing.T, provider *Provider, issuer *fakeIssuer, claims map[stri
 }
 
 // refused checks that a login failed, and failed for the stated reason: a
-// token refused for some other defect would make a negative test pass
-// without proving anything about the check under test.
+// token refused for some other defect would make a negative test pass without
+// proving anything about the check under test.
 func refused(t *testing.T, claims *Claims, err error, reason string) {
 	t.Helper()
 	if err == nil {
@@ -360,9 +351,7 @@ func TestAnExpiredTokenIsRefused(t *testing.T) {
 }
 
 func TestATokenSignedByAnotherKeyIsRefused(t *testing.T) {
-	// Every claim is right; only the key is not the one the issuer
-	// publishes. The verifier asks the JWKS again for the unknown key id, the
-	// way the spec prescribes for a rotation, and still finds nothing.
+	// Every claim is right; only the key is not the one the issuer publishes.
 	issuer := newFakeIssuer(t)
 	provider := discoverProvider(t, issuer, "")
 	_, rogue := signingKeys(t)
@@ -380,11 +369,7 @@ func TestTheGroupsClaimIsReadAsConfigured(t *testing.T) {
 	issuer := newFakeIssuer(t)
 
 	t.Run("a token without the claim yields no groups", func(t *testing.T) {
-		// The code yields nil rather than an empty slice. That is deliberate
-		// at this level - "the provider said nothing" - and the callers
-		// (CreateSession, RecordGroupRefresh) turn it into an empty list
-		// before the database sees it, so a user without groups can log in
-		// and simply holds no role.
+		// The code yields nil rather than an empty slice.
 		provider := discoverProvider(t, issuer, "")
 		claims := issuer.claims("")
 		delete(claims, "groups")
@@ -398,9 +383,9 @@ func TestTheGroupsClaimIsReadAsConfigured(t *testing.T) {
 	})
 
 	t.Run("the configured claim name is honoured", func(t *testing.T) {
-		// Keycloak can be set up to expose realm roles instead of groups;
-		// the flag names the claim, and the default one must then be ignored
-		// even when present.
+		// Keycloak can be set up to expose realm roles instead of groups; the flag
+		// names the claim, and the default one must then be ignored even when
+		// present.
 		provider := discoverProvider(t, issuer, "realm_roles")
 		claims := issuer.claims("")
 		claims["realm_roles"] = []string{"flotestro-operators"}
@@ -444,10 +429,8 @@ func TestTheGroupsClaimIsReadAsConfigured(t *testing.T) {
 }
 
 func TestARenewalYieldsTheGroupsOfTheNewToken(t *testing.T) {
-	// The group snapshot of a session follows the token of the renewal, so a
-	// user moved between groups in FreeIPA changes role without logging in
-	// again. A renewal carries no nonce: the token does not come from a new
-	// login of the user.
+	// The group snapshot of a session follows the token of the renewal, so a user
+	// moved between groups in FreeIPA changes role without logging in again.
 	issuer := newFakeIssuer(t)
 	provider := discoverProvider(t, issuer, "")
 
@@ -482,9 +465,8 @@ func TestARenewalYieldsTheGroupsOfTheNewToken(t *testing.T) {
 }
 
 func TestAnInvalidGrantAtTheRenewalIsRecognised(t *testing.T) {
-	// This is the answer the refresher ends a session on: the provider no
-	// longer honours the refresh token. Any other refusal must not look the
-	// same, or an outage at the provider would log everybody out.
+	// This is the answer the refresher ends a session on: the provider no longer
+	// honours the refresh token.
 	issuer := newFakeIssuer(t)
 	provider := discoverProvider(t, issuer, "")
 

@@ -13,10 +13,6 @@ import (
 
 // The cron entries directory and the prefix of the files belonging to the
 // panel.
-//
-// One file per entry, not a shared file with many lines: thanks to that a
-// change of one schedule does not rewrite the others, and removal is
-// deleting a file, not editing a line inside somebody else's content.
 const (
 	CronDDir    = "/etc/cron.d"
 	FilePrefix  = "flotestro-"
@@ -24,13 +20,8 @@ const (
 	CrontabPath = "/etc/crontab"
 )
 
-// entryIdentifier allows names that can be part of a file name in
-// /etc/cron.d. Cron skips files with a dot and other special characters, so
-// an entry with a bad name would silently never run.
-//
-// The character set is the one cron allows: letters, digits, underscore and
-// hyphen. A narrower set would make it impossible to take over a found
-// entry with a name like "e2scrub_all" - and exactly those stand on hosts.
+// entryIdentifier allows names that can be part of a file name in /etc/cron.
+// d.
 var entryIdentifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$`)
 
 // ValidIdentifier checks the name of a managed entry.
@@ -38,15 +29,8 @@ func ValidIdentifier(id string) bool {
 	return entryIdentifier.MatchString(id)
 }
 
-// userName allows the account names a cron line can carry safely.
-//
-// The user stands between the expression and the command in a /etc/cron.d
-// line, separated by whitespace only. A value with a space, a tab or a
-// newline would end the user field early and let the rest of it run as the
-// command - as root, because that is where the panel puts the user. The
-// character set is the conservative POSIX one: the panel does not need to
-// schedule jobs for accounts with unusual names, and an account that does
-// not fit is refused before the line is composed.
+// userName allows the account names a cron line can carry safely. The user
+// stands between the expression and the command in a /etc/cron.
 var userName = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
 
 // ValidUser checks the name of the account an entry runs as.
@@ -59,11 +43,7 @@ func EntryPath(dir, id string) string {
 	return filepath.Join(dir, FilePrefix+id)
 }
 
-// ReadCron gathers the cron entries from /etc/crontab and /etc/cron.d.
-//
-// User entries are not read in this module: they live in the spool
-// directory, belong to specific accounts and reading them is a separate
-// privacy decision.
+// ReadCron gathers the cron entries from /etc/crontab and /etc/cron. d.
 func ReadCron(crontab, dir string, now time.Time) []Schedule {
 	var entries []Schedule
 	entries = append(entries, readCronFile(crontab, true, now)...)
@@ -86,9 +66,8 @@ func ReadCron(crontab, dir string, now time.Time) []Schedule {
 	return entries
 }
 
-// readCronFile parses one file. withUser distinguishes the /etc/crontab
-// and /etc/cron.d format - there the user name follows the fifth field -
-// from a user crontab, where it is absent.
+// readCronFile parses one file. withUser distinguishes the /etc/crontab and
+// /etc/cron.
 func readCronFile(path string, withUser bool, now time.Time) []Schedule {
 	file, err := os.Open(path)
 	if err != nil {
@@ -115,10 +94,9 @@ func readCronFile(path string, withUser bool, now time.Time) []Schedule {
 		if disabled {
 			line = strings.TrimSpace(strings.TrimPrefix(line, "#@"))
 		} else if strings.HasPrefix(line, "#") {
-			// A comment is attributed only to our own entries: in somebody
-			// else's file the line above an entry is usually a format header
-			// or a note about something else, and shown next to the entry it
-			// would look like its description.
+			// A comment is attributed only to our own entries: in somebody else's file
+			// the line above an entry is usually a format header or a note about
+			// something else, and shown next to the entry it would look like its
 			if managed && line != FileHeader {
 				comment = strings.TrimSpace(strings.TrimPrefix(line, "#"))
 			}
@@ -192,12 +170,8 @@ func parseCronLine(line string, withUser bool) (Schedule, bool) {
 	return entry, true
 }
 
-// WriteEntry writes a managed entry.
-//
-// The write is atomic: the file is created next to the target and replaces
-// the previous one only when complete. Cron reads the directory at any
-// moment, so a file written in place could be read half-way - with an entry
-// nobody ordered.
+// WriteEntry writes a managed entry. The write is atomic: the file is created
+// next to the target and replaces the previous one only when complete.
 func WriteEntry(dir string, entry Schedule) error {
 	if !ValidIdentifier(entry.ID) {
 		return fmt.Errorf("invalid entry identifier %q", entry.ID)
@@ -209,10 +183,8 @@ func WriteEntry(dir string, entry Schedule) error {
 	if err != nil {
 		return err
 	}
-	// An entry without a user is not an entry for root: the account is a
-	// decision of the operator, and root is the one that needs a grant of its
-	// own. A name outside the allowed set would not stay in the user field
-	// of the line.
+	// An entry without a user is not an entry for root: the account is a decision
+	// of the operator, and root is the one that needs a grant of its own.
 	if entry.User == "" {
 		return fmt.Errorf("the entry has no user; the account it runs as has to be named")
 	}
@@ -253,11 +225,6 @@ func RemoveEntry(dir, id string) error {
 }
 
 // shellCharacters are disallowed in command arguments.
-//
-// Cron runs the command through a shell, so an argument with a
-// metacharacter stops being an argument and becomes a second command. The
-// basic module does not accept an arbitrary shell line - the command is an
-// argument array.
 const shellCharacters = "|&;<>()$`\\\"'\n\r\t*?[]{}~!#"
 
 // ComposeCommand assembles the arguments into a line for cron.
@@ -266,9 +233,8 @@ func ComposeCommand(arguments []string) (string, error) {
 		return "", fmt.Errorf("the command is empty")
 	}
 	if !strings.HasPrefix(arguments[0], "/") {
-		// A relative path depends on cron's PATH, which is often different
-		// from the operator's PATH. An entry working by hand and not from
-		// cron is the hardest failure to diagnose in this module.
+		// A relative path depends on cron's PATH, which is often different from the
+		// operator's PATH.
 		return "", fmt.Errorf("the command must be an absolute path, is %q", arguments[0])
 	}
 	for _, argument := range arguments {
@@ -287,12 +253,8 @@ func ComposeCommand(arguments []string) (string, error) {
 	return strings.Join(arguments, " "), nil
 }
 
-// HostTimezone returns the host time zone.
-//
-// The zone name comes from the system configuration, not from time.Local:
-// the latter is always called "Local" and does not answer at what time the
-// entry really runs. An undetermined zone stays empty - "UTC" written just
-// in case would be guessing.
+// HostTimezone returns the host time zone. The zone name comes from the system
+// configuration, not from time.
 func HostTimezone() string {
 	if data, err := os.ReadFile("/etc/timezone"); err == nil {
 		if name := strings.TrimSpace(string(data)); name != "" {

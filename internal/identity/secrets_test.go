@@ -12,9 +12,8 @@ func TestAOneTimeSecretIsHandedToTheRequesterOnce(t *testing.T) {
 	if !vault.waiting("change-1", "alice") {
 		t.Fatal("the value does not wait for its requester")
 	}
-	// Somebody else gets the same answer as for a value that never
-	// existed: the endpoint tells nobody but the requester whether a
-	// value is there.
+	// Somebody else gets the same answer as for a value that never existed: the
+	// endpoint tells nobody but the requester whether a value is there.
 	if vault.waiting("change-1", "bob") {
 		t.Fatal("the value waits for a different person")
 	}

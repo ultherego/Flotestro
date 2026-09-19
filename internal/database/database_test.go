@@ -42,9 +42,7 @@ func (r fakeRow) Scan(dest ...any) error {
 	return nil
 }
 
-// fakeConn stands in for the one connection the migrator holds. It records
-// what was executed, so a test can assert that a refusal happened before
-// anything was changed.
+// fakeConn stands in for the one connection the migrator holds.
 type fakeConn struct {
 	rows     func(sql string) fakeRow
 	executed []string
@@ -106,9 +104,9 @@ func TestAssumeRoleRefusesASuperuserLogin(t *testing.T) {
 	}
 }
 
-// The role that is in force after SET ROLE is read back rather than
-// assumed: a session that ended up as somebody else would own every object
-// the migration creates.
+// The role that is in force after SET ROLE is read back rather than assumed: a
+// session that ended up as somebody else would own every object the migration
+// creates.
 func TestAssumeRoleRefusesADifferentRoleInForce(t *testing.T) {
 	conn := roleConn("flotestro_migrator", false, "flotestro_migrator", true)
 	err := assumeRole(context.Background(), conn, "flotestro_owner", quietLog())
@@ -195,9 +193,7 @@ func TestCompareSchemaCallsAnEmptyDatabaseBehind(t *testing.T) {
 	}
 }
 
-// A database a newer control plane has already migrated is ahead. Swapping
-// the image back does not undo a schema, so this is a refusal rather than
-// something to migrate away.
+// A database a newer control plane has already migrated is ahead.
 func TestCompareSchemaCallsANewerDatabaseAhead(t *testing.T) {
 	report := compareSchema([]string{"0001_a"}, []string{"0001_a", "0002_b"})
 	if report.Code() != CodeSchemaAhead {

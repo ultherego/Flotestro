@@ -1,17 +1,10 @@
-// Package dns describes the host resolver.
-//
-// The module covers only how the host resolves names. Records in the
-// directory are a separate scope with separate permissions: a zone entry in
-// FreeIPA is seen by every client of the domain, the host resolver only by
-// this host.
+// Package dns describes the host resolver. The module covers only how the host
+// resolves names.
 package dns
 
 import "time"
 
-// Owners of the resolv.conf file. The owner decides whether the panel may
-// change anything at all: a file managed by a service will be overwritten
-// anyway, so writing into it would be a change that vanishes on the next
-// network event.
+// Owners of the resolv. conf file.
 const (
 	OwnerResolved       = "systemd-resolved"
 	OwnerNetworkManager = "networkmanager"
@@ -29,10 +22,6 @@ const (
 )
 
 // Link describes the resolver assigned to a single interface.
-//
-// Per-link DNS matters here: a domain-joined host usually has the directory
-// server on one interface and the provider's server on the other, and the
-// question "which of them answers" has a different answer for every name.
 type Link struct {
 	Name    string   `json:"name"`
 	Index   int      `json:"index,omitempty"`
@@ -68,9 +57,6 @@ type Snapshot struct {
 }
 
 // QueryResult describes a single name resolution test.
-//
-// The test is a fact from the host, not from the panel: the panel sits in a
-// different network and its answer says nothing about what the host sees.
 type QueryResult struct {
 	Name string `json:"name"`
 	// Addresses is an empty list when the name has no address - and then

@@ -9,11 +9,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// Line is one line of an authorized_keys file. A line that grants access
-// carries the fingerprint of its key; a comment, an empty line or a line
-// the parser does not understand carries none and is kept as it is. The
-// editor never rewrites a line it did not add: the options in front of a
-// key (command=, from=, no-pty) are part of the text and travel with it.
+// Line is one line of an authorized_keys file.
 type Line struct {
 	Text        string `json:"text"`
 	Fingerprint string `json:"fingerprint,omitempty"`
@@ -21,17 +17,15 @@ type Line struct {
 	Comment     string `json:"comment,omitempty"`
 }
 
-// KeyInput is a key the operator pasted: the public key in the form the
-// file takes, options included, and an optional comment appended when
-// the key carries none of its own.
+// KeyInput is a key the operator pasted: the public key in the form the file
+// takes, options included, and an optional comment appended when the key
+// carries none of its own.
 type KeyInput struct {
 	PublicKey string `json:"public_key"`
 	Comment   string `json:"comment,omitempty"`
 }
 
-// Change describes an edit by the fingerprints it touched. Before and
-// After are the keys of the file on each side of the edit; Added and
-// Removed are the difference, so an idempotent repeat shows empty ones.
+// Change describes an edit by the fingerprints it touched.
 type Change struct {
 	Before  []string `json:"before"`
 	After   []string `json:"after"`
@@ -44,10 +38,8 @@ func (c Change) NoOp() bool {
 	return len(c.Added) == 0 && len(c.Removed) == 0
 }
 
-// KeyNotFoundError names the fingerprints a removal asked for that the
-// file does not carry. A removal of what is not there is refused rather
-// than counted as done: the operator may be looking at another host's
-// list, and the key they meant is still in place.
+// KeyNotFoundError names the fingerprints a removal asked for that the file
+// does not carry.
 type KeyNotFoundError struct {
 	Fingerprints []string
 }
@@ -63,9 +55,7 @@ var ErrInvalidKey = errors.New("not a public key")
 // line beyond this is not one.
 const MaxKeyLineBytes = 16384
 
-// ParseKeyFile splits the content of a key file into lines. The trailing
-// newline is not a line; a file with a final line without a newline gets
-// one on the way back out.
+// ParseKeyFile splits the content of a key file into lines.
 func ParseKeyFile(content []byte) []Line {
 	text := strings.TrimSuffix(strings.ReplaceAll(string(content), "\r\n", "\n"), "\n")
 	if text == "" {
@@ -96,10 +86,7 @@ func describeLine(raw string) Line {
 	return line
 }
 
-// ParseKey turns pasted material into a line of the file. The text is
-// kept as pasted, trimmed of surrounding whitespace, so options in front
-// of the key survive; a comment given apart is appended only when the key
-// has none, because the comment in the file is the one people grep for.
+// ParseKey turns pasted material into a line of the file.
 func ParseKey(input KeyInput) (Line, error) {
 	text := strings.TrimSpace(input.PublicKey)
 	if text == "" {
@@ -148,9 +135,8 @@ func Fingerprints(lines []Line) []string {
 	return fingerprints
 }
 
-// Render writes the lines back as a file. Nothing is reordered and
-// nothing is reformatted; the file ends with a newline when it has any
-// line at all.
+// Render writes the lines back as a file. Nothing is reordered and nothing is
+// reformatted; the file ends with a newline when it has any line at all.
 func Render(lines []Line) string {
 	if len(lines) == 0 {
 		return ""
@@ -163,9 +149,7 @@ func Render(lines []Line) string {
 	return builder.String()
 }
 
-// AddKeys appends the keys the file does not carry yet. A key already
-// there - by fingerprint, whatever its comment or options - is left as it
-// is and not added twice; the same key twice in one order counts once.
+// AddKeys appends the keys the file does not carry yet.
 func AddKeys(lines []Line, keys []KeyInput) ([]Line, Change, error) {
 	before := Fingerprints(lines)
 	present := map[string]bool{}
@@ -190,9 +174,8 @@ func AddKeys(lines []Line, keys []KeyInput) ([]Line, Change, error) {
 	return result, change, nil
 }
 
-// RemoveKeys drops the lines that carry the named fingerprints and
-// nothing else. A fingerprint the file does not carry is a refusal unless
-// the order says it may be missing; then it is simply not there.
+// RemoveKeys drops the lines that carry the named fingerprints and nothing
+// else.
 func RemoveKeys(lines []Line, fingerprints []string, ignoreMissing bool) ([]Line, Change, error) {
 	before := Fingerprints(lines)
 	wanted := map[string]bool{}
@@ -229,12 +212,9 @@ func RemoveKeys(lines []Line, fingerprints []string, ignoreMissing bool) ([]Line
 	return result, change, nil
 }
 
-// ReplaceKeys writes the file anew with the given keys and nothing else:
-// the old semantics of the key operation, kept for the operator who
-// really wants the file to be exactly this list. Lines that are not keys
-// go with the rest - the caller has seen the full list of fingerprints
-// and approved it, and a comment left behind would suggest the file was
-// edited rather than replaced.
+// ReplaceKeys writes the file anew with the given keys and nothing else: the
+// old semantics of the key operation, kept for the operator who really wants
+// the file to be exactly this list.
 func ReplaceKeys(lines []Line, keys []KeyInput) ([]Line, Change, error) {
 	before := Fingerprints(lines)
 	var result []Line
@@ -265,9 +245,8 @@ func ReplaceKeys(lines []Line, keys []KeyInput) ([]Line, Change, error) {
 	return result, change, nil
 }
 
-// SameFingerprints says whether two lists name the same keys, whatever
-// their order. The comparison is what makes a replace stale: the list the
-// operator saw against the list the host has now.
+// SameFingerprints says whether two lists name the same keys, whatever their
+// order.
 func SameFingerprints(left, right []string) bool {
 	if len(left) != len(right) {
 		return false

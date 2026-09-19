@@ -33,8 +33,7 @@ type schedulesSnapshot struct {
 const scheduleReason = "integration test of the schedules module"
 
 // TestManagedEntryLifecycle walks the full path of a panel entry: creation,
-// disabling, an out-of-schedule run and removal. Every step is checked on
-// the host state, not on what the operation answered.
+// disabling, an out-of-schedule run and removal.
 func TestManagedEntryLifecycle(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -118,9 +117,7 @@ func TestManagedEntryLifecycle(t *testing.T) {
 	}
 }
 
-// TestPreExistingEntryIsNotOverwritten checks the ownership boundary. An
-// entry nobody brought into the panel belongs to the host administrator:
-// the first operation from the panel must not quietly replace it.
+// TestPreExistingEntryIsNotOverwritten checks the ownership boundary.
 func TestPreExistingEntryIsNotOverwritten(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -157,9 +154,8 @@ func TestPreExistingEntryIsNotOverwritten(t *testing.T) {
 	}
 }
 
-// TestBadScheduleBeforeSending checks that an entry cron would not
-// understand does not reach the host. An expression error is a defect of
-// the order, not an execution failure.
+// TestBadScheduleBeforeSending checks that an entry cron would not understand
+// does not reach the host.
 func TestBadScheduleBeforeSending(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -223,9 +219,7 @@ func schedulesOf(t *testing.T, h *harness, hostID string) schedulesSnapshot {
 	return state
 }
 
-// hostEntry waits for an entry in the host inventory. The operation returns
-// the state after the change, but the fragment write is asynchronous with
-// respect to the job finishing.
+// hostEntry waits for an entry in the host inventory.
 func hostEntry(t *testing.T, h *harness, hostID, id string) scheduleView {
 	t.Helper()
 	deadline := time.Now().Add(60 * time.Second)
@@ -252,7 +246,7 @@ func lastMessage(attempts []attemptView) string {
 
 // TestNextRunsComeFromTheHost checks that an active entry carries its coming
 // runs computed on the host: three of them, in order, the first of them the
-// single next run again. The timers get theirs from systemd itself.
+// single next run again.
 func TestNextRunsComeFromTheHost(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -348,9 +342,9 @@ func TestSchedulePreviewComesFromTheHost(t *testing.T) {
 		}
 	}
 
-	// The same preview reaches the panel typed, in the detail of the
-	// attempt, so the form does not parse stdout; stdout stays for one
-	// release for a panel from before the typed detail.
+	// The same preview reaches the panel typed, in the detail of the attempt, so
+	// the form does not parse stdout; stdout stays for one release for a panel
+	// from before the typed detail.
 	var typed struct {
 		Items []struct {
 			Detail struct {
@@ -378,13 +372,8 @@ func TestSchedulePreviewComesFromTheHost(t *testing.T) {
 		nil, http.StatusBadRequest)
 }
 
-// TestScheduleUserThatIsNotAnAccountNameIsRefusedBeforeSending guards the
-// user field of a cron line. The user is separated from the command by
-// whitespace only, and the panel used to pass it through unchecked: a value
-// like "root; /bin/sh" or one with a newline would have become a root cron
-// line of its own. Such an order is a defect of the order and never leaves
-// the panel - and neither does an entry that names no account, because
-// root is not a default.
+// TestScheduleUserThatIsNotAnAccountNameIsRefusedBeforeSending guards the user
+// field of a cron line.
 func TestScheduleUserThatIsNotAnAccountNameIsRefusedBeforeSending(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -411,9 +400,8 @@ func TestScheduleUserThatIsNotAnAccountNameIsRefusedBeforeSending(t *testing.T) 
 	}
 }
 
-// TestScheduleForAnUnknownUserIsRefusedByTheHost checks the second level:
-// the account has to exist on the host, and only the host knows that. The
-// refusal has its own code and nothing lands in /etc/cron.d.
+// TestScheduleForAnUnknownUserIsRefusedByTheHost checks the second level: the
+// account has to exist on the host, and only the host knows that.
 func TestScheduleForAnUnknownUserIsRefusedByTheHost(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -456,12 +444,7 @@ func TestScheduleForAnUnknownUserIsRefusedByTheHost(t *testing.T) {
 }
 
 // TestRootScheduleNeedsItsOwnPermission checks the gate between writing
-// schedules and putting a command into root's crontab. A principal without
-// schedule.root.exec is refused with a code naming the payload, not the
-// operation, and no job comes into being. With the built-in roles the
-// operator has no schedule.write either, so the first gate refuses them
-// with permission_denied; a role that holds schedule.write without the
-// root grant reaches the second gate and gets payload_permission_missing.
+// schedules and putting a command into root's crontab.
 func TestRootScheduleNeedsItsOwnPermission(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")

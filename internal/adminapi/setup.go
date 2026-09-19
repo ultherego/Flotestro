@@ -12,16 +12,9 @@ import (
 	"github.com/ultherego/flotestro/internal/oidc"
 )
 
-// The first run. A fresh installation has a bootstrap token, an empty
-// fleet and nothing that decides who may log in; the operator learns what
-// is missing one refusal at a time. The checklist says it in one place:
-// what the panel needs before a company fleet can be run from it, what is
-// already there, and where each missing piece is put in.
+// The first run.
 
-// The states of a step. A step is done or not; a step that is not done
-// and holds the fleet back is undone, one that is done badly - a token
-// that should have been revoked, a CA near its end - is a warning, and one
-// the installation can do without is optional.
+// The states of a step.
 const (
 	setupDone     = "done"
 	setupUndone   = "undone"
@@ -59,18 +52,15 @@ type setupChecklist struct {
 const setupProbeMaxAge = time.Minute
 
 // setupCAWarningDays is the margin before the fleet CA's end at which the
-// checklist starts to warn: a rotation needs every agent to renew once
-// under the new CA, and agent certificates live thirty days.
+// checklist starts to warn: a rotation needs every agent to renew once under
+// the new CA, and agent certificates live thirty days.
 const setupCAWarningDays = 30
 
 // bootstrapRecentUse is the window in which a use of the bootstrap token
-// counts as current. A token used yesterday is one somebody still works
-// with; one idle for a week is a key lying around.
+// counts as current.
 const bootstrapRecentUse = 24 * time.Hour
 
-// handleSetup returns the checklist. Any authenticated principal may read
-// it: the checklist describes the installation, not the fleet, and a
-// viewer who lands on an empty panel deserves to know why.
+// handleSetup returns the checklist.
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	principal := authz.FromContext(r.Context())
 	if !principal.Authenticated() {
@@ -86,9 +76,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, checklist)
 }
 
-// setupChecklist gathers the steps. Every count is one query over the
-// table the step is about; the identity provider and the fleet CA are
-// read from the panel's own state.
+// setupChecklist gathers the steps.
 func (s *Server) setupChecklist(ctx context.Context) (setupChecklist, error) {
 	var steps []setupStep
 
@@ -188,9 +176,8 @@ func (s *Server) countRows(ctx context.Context, query string) (int, error) {
 	return count, err
 }
 
-// identityProviderStep asks the provider, through the cache, whether it
-// still answers. A panel without a provider runs on API tokens, which is
-// a way to automate, not a way for a team to sign in.
+// identityProviderStep asks the provider, through the cache, whether it still
+// answers.
 func (s *Server) identityProviderStep(ctx context.Context) setupStep {
 	if s.oidc == nil {
 		return setupStep{Key: "identity_provider", State: setupUndone, Path: "/settings",
@@ -205,11 +192,8 @@ func (s *Server) identityProviderStep(ctx context.Context) setupStep {
 		Detail: fmt.Sprintf("%s answers with %d signing %s", probe.Issuer, probe.Keys, plural(probe.Keys, "key", "keys"))}
 }
 
-// bootstrapStep judges the token the installation started with. It is
-// done when the token no longer works. While it works it is a warning if
-// somebody used it in the last day, and undone otherwise; and while no
-// mapping exists yet, revoking it would lock everybody out, so the detail
-// says to make the mapping first.
+// bootstrapStep judges the token the installation started with. It is done
+// when the token no longer works.
 func (s *Server) bootstrapStep(ctx context.Context, mappingExists bool) (setupStep, bool, error) {
 	live, _, err := s.authz.BootstrapTokenState(ctx)
 	if err != nil {
@@ -248,9 +232,9 @@ func (s *Server) bootstrapStep(ctx context.Context, mappingExists bool) (setupSt
 	return step, true, nil
 }
 
-// directoryStep reads the connector's own account of itself, without a
-// round trip: the checklist must come back at once even when the
-// directory is down, and the test button makes the round trip on demand.
+// directoryStep reads the connector's own account of itself, without a round
+// trip: the checklist must come back at once even when the directory is down,
+// and the test button makes the round trip on demand.
 func (s *Server) directoryStep() setupStep {
 	if s.directory == nil {
 		return setupStep{Key: "directory", State: setupOptional, Path: "/settings",
@@ -296,9 +280,7 @@ func (s *Server) alertRuleStep(ctx context.Context) setupStep {
 		Detail: "no alert rule: the panel samples the hosts and raises nothing"}
 }
 
-// notificationStep looks for the channels table before counting it. A
-// release without the notifications module has no such table, and the
-// step is then optional rather than a failure to read.
+// notificationStep looks for the channels table before counting it.
 func (s *Server) notificationStep(ctx context.Context) setupStep {
 	var present bool
 	if err := s.pool.QueryRow(ctx,
@@ -319,9 +301,7 @@ func (s *Server) notificationStep(ctx context.Context) setupStep {
 		Detail: "no notification channel: an alert is seen only by whoever opens the panel"}
 }
 
-// fleetCAStep watches the end of the signing CA. Every agent certificate
-// is signed by it; a rotation takes a full renewal cycle of the fleet,
-// so the warning comes a month ahead.
+// fleetCAStep watches the end of the signing CA.
 func (s *Server) fleetCAStep() setupStep {
 	if s.trust == nil {
 		return setupStep{Key: "fleet_ca", State: setupOptional, Path: "/access?tab=ca",
@@ -361,9 +341,8 @@ type connectionTest struct {
 	ElapsedMS int64           `json:"elapsed_ms"`
 }
 
-// handleTestOIDC fetches the discovery document and the signing keys now,
-// past the cache. Whoever reads the settings may run it: the test reveals
-// the issuer, which the settings screen shows anyway.
+// handleTestOIDC fetches the discovery document and the signing keys now, past
+// the cache.
 func (s *Server) handleTestOIDC(w http.ResponseWriter, r *http.Request) {
 	principal := authz.FromContext(r.Context())
 	if !principal.Authenticated() || !principal.Can(authz.PermSettingsRead, authz.GlobalScope) {
@@ -385,10 +364,8 @@ func (s *Server) handleTestOIDC(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, connectionTest{OK: true, Provider: &probe, ElapsedMS: probe.Elapsed.Milliseconds()})
 }
 
-// handleTestDirectory pings the directory with the connector's own
-// identity and returns what the connector knows afterwards. The
-// permission is the one that reads the identity views: the test tells
-// whether they will work.
+// handleTestDirectory pings the directory with the connector's own identity
+// and returns what the connector knows afterwards.
 func (s *Server) handleTestDirectory(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorize(w, r, authz.PermIdentityRead, authz.GlobalScope, "setup", "directory"); !ok {
 		return

@@ -15,8 +15,7 @@ import (
 )
 
 // Binary is what the tool knows about one built binary: the same thing the
-// binary carries in its build metadata, no more. A dependency that is not in
-// the binary is not in the bill.
+// binary carries in its build metadata, no more.
 type Binary struct {
 	// Name is the file name of the binary, e.g. flotestro-agent.
 	Name string
@@ -44,9 +43,8 @@ type Module struct {
 	Replace *Module
 }
 
-// ReadBinary reads the build metadata of a binary file. The read works
-// across architectures: a bill of an arm64 binary is made on the amd64
-// build machine.
+// ReadBinary reads the build metadata of a binary file. The read works across
+// architectures: a bill of an arm64 binary is made on the amd64 build machine.
 func ReadBinary(file string) (Binary, error) {
 	info, err := buildinfo.ReadFile(file)
 	if err != nil {
@@ -72,9 +70,8 @@ func ReadBinary(file string) (Binary, error) {
 	return binary, nil
 }
 
-// ParseModules reads the output of "go version -m": one or more binaries,
-// each with a header line and tab-indented records. The format is the
-// toolchain's; the parser takes what the toolchain prints and nothing else.
+// ParseModules reads the output of "go version -m": one or more binaries, each
+// with a header line and tab-indented records.
 func ParseModules(r io.Reader) ([]Binary, error) {
 	var (
 		binaries []Binary
@@ -202,9 +199,7 @@ type dependency struct {
 // Options shapes the bill: the release version of the application, its
 // supplier and the timestamp.
 type Options struct {
-	// Version is the release version of the binary. The toolchain records
-	// "(devel)" for a build from a working tree, and the release script
-	// knows the real one.
+	// Version is the release version of the binary.
 	Version  string
 	Supplier string
 	// Timestamp is the time of the bill. Zero means now; the release script
@@ -214,11 +209,7 @@ type Options struct {
 	ToolVersion string
 }
 
-// Write renders the bill of one binary as CycloneDX 1.5 JSON.
-//
-// The serial number is derived from the content, so the same binary gives
-// the same bill: two builds of one release are told apart by their
-// provenance, not by a random number in the bill.
+// Write renders the bill of one binary as CycloneDX 1. 5 JSON.
 func Write(w io.Writer, binary Binary, options Options) error {
 	// The release version comes from the caller; a binary built from a tagged
 	// module carries it itself, and a build from a working tree carries
@@ -307,10 +298,7 @@ func Write(w io.Writer, binary Binary, options Options) error {
 	return encoder.Encode(doc)
 }
 
-// purl renders a package URL of the golang type. The path is the module or
-// package path and the version is the module version; a version of a Go
-// module already carries its "v", and a release version of the application
-// does not.
+// purl renders a package URL of the golang type.
 func purl(modulePath, version string) string {
 	escaped := strings.ReplaceAll(modulePath, "@", "%40")
 	if version == "" {

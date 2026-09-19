@@ -10,15 +10,12 @@ import (
 	"time"
 )
 
-// The plan envelope of chapter 7: a package plan names, for every element,
-// the exact version, the architecture, the origin and the direction; the
-// execution runs exactly that and settles every effect; a plan the host no
-// longer computes - or one whose digest was tampered with - is refused
-// with stale_plan and nothing is applied.
+// The plan envelope of chapter 7: a package plan names, for every element, the
+// exact version, the architecture, the origin and the direction; the execution
+// runs exactly that and settles every effect; a plan the host no longer
 
-// envelopePlan is the package plan as the API serves it, with the header
-// of the envelope. It is decoded apart from packageDetail so the test
-// reads exactly the fields the envelope adds.
+// envelopePlan is the package plan as the API serves it, with the header of
+// the envelope.
 type envelopePlan struct {
 	Kind              string          `json:"kind"`
 	Manager           string          `json:"manager"`
@@ -126,10 +123,8 @@ func planReference(plan envelopePlan) map[string]any {
 	}
 }
 
-// ensureAbsent removes the package when it is installed, so the
-// installation plan below has something to install. The removal goes
-// through the same door as the rest: a plan of the removal set, an
-// approval, a second person in production.
+// ensureAbsent removes the package when it is installed, so the installation
+// plan below has something to install.
 func ensureAbsent(t *testing.T, h *harness, host hostView, pkg string) {
 	t.Helper()
 	plan := dnfRemovalPlan(t, h, host.ID, pkg)
@@ -156,10 +151,9 @@ func ensureAbsent(t *testing.T, h *harness, host hostView, pkg string) {
 
 var planDigestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
-// TestPackagePlanCarriesTheEnvelope checks that a plan on Debian and on
-// the RHEL family names, per element, the origin, the architecture and
-// the direction, and carries the header of the envelope: the planner, the
-// expiry and the canonical body the digest was computed over.
+// TestPackagePlanCarriesTheEnvelope checks that a plan on Debian and on the
+// RHEL family names, per element, the origin, the architecture and the
+// direction, and carries the header of the envelope: the planner, the expiry
 func TestPackagePlanCarriesTheEnvelope(t *testing.T) {
 	for _, family := range []string{"debian", "rhel"} {
 		t.Run(family, func(t *testing.T) {
@@ -210,10 +204,9 @@ func TestPackagePlanCarriesTheEnvelope(t *testing.T) {
 	}
 }
 
-// TestLifecycleInstallExecutesTheApprovedPlanExactly installs a small
-// package through a plan bound to its envelope: the transaction runs on
-// the exact versions of the plan and the result lists every effect
-// reached.
+// TestLifecycleInstallExecutesTheApprovedPlanExactly installs a small package
+// through a plan bound to its envelope: the transaction runs on the exact
+// versions of the plan and the result lists every effect reached.
 func TestLifecycleInstallExecutesTheApprovedPlanExactly(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("rhel")
@@ -280,9 +273,9 @@ func TestLifecycleInstallExecutesTheApprovedPlanExactly(t *testing.T) {
 	}
 }
 
-// TestATamperedPlanHashIsRefusedByTheHost binds an installation to a
-// digest that is not the digest of the plan the host computes: the host
-// refuses with stale_plan and changes nothing.
+// TestATamperedPlanHashIsRefusedByTheHost binds an installation to a digest
+// that is not the digest of the plan the host computes: the host refuses with
+// stale_plan and changes nothing.
 func TestATamperedPlanHashIsRefusedByTheHost(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -320,9 +313,9 @@ func TestATamperedPlanHashIsRefusedByTheHost(t *testing.T) {
 	}
 }
 
-// TestAnExpiredPlanReferenceIsRefusedByTheAPI checks the panel's own
-// answer: an order bound to a plan past its expiry is refused with 409
-// plan_expired before a job is queued for it.
+// TestAnExpiredPlanReferenceIsRefusedByTheAPI checks the panel's own answer:
+// an order bound to a plan past its expiry is refused with 409 plan_expired
+// before a job is queued for it.
 func TestAnExpiredPlanReferenceIsRefusedByTheAPI(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")

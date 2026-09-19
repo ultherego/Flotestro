@@ -312,7 +312,7 @@ func checkLabels(labels map[string]string) error {
 		}
 		// The engine does not tell a plain label from one carrying a credential, so
 		// the inventory hides the value of a label whose name suggests one - and a
-		// description whose value could never be read back would be replaced at
+		// description whose value could never be read back would be replaced at.
 		if looksLikeSecret(key) {
 			return fmt.Errorf("the label %s looks like a credential; its value would be hidden "+
 				"in the inventory and could never be compared", key)

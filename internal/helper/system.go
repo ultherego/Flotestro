@@ -11,13 +11,8 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/system"
 )
 
-// readSystem reads the facts of the system module that belong to root:
-// the DMI serial numbers and the UUID, and the sudo policy files.
-//
-// The agent reads the rest of the platform picture itself. What lands
-// here is what the kernel refuses to an unprivileged reader, named fact
-// by fact - the helper has no "read a file" operation, and a request
-// naming a fact it does not know is refused rather than guessed.
+// readSystem reads the facts of the system module that belong to root: the DMI
+// serial numbers and the UUID, and the sudo policy files.
 func (s *Server) readSystem(_ context.Context, request *helperv1.HelperRequest,
 	action *helperv1.SystemRequest) *helperv1.HelperResponse {
 	facts := action.GetFacts()
@@ -31,9 +26,8 @@ func (s *Server) readSystem(_ context.Context, request *helperv1.HelperRequest,
 			return reject(ErrorMalformed, "unknown fact "+fact.String())
 		}
 	}
-	// The reads are file reads of sysfs and /etc: they start no tool and
-	// take no lock, so there is nothing for the deadline of the order to
-	// cut short.
+	// The reads are file reads of sysfs and /etc: they start no tool and take no
+	// lock, so there is nothing for the deadline of the order to cut short.
 	root := os.DirFS("/")
 	result := &helperv1.SystemResult{}
 	for _, fact := range facts {

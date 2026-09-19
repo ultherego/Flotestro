@@ -234,7 +234,7 @@ func (r *Relay) RenewCertificate(ctx context.Context,
 
 // RequestIdentityChallenge forwards the request for a renewal challenge to the
 // centre, the way the renewal itself goes: the centre binds the challenge to
-// the host the relay names and to this relay, and the host signs it into the
+// the host the relay names and to this relay, and the host signs it into the.
 func (r *Relay) RequestIdentityChallenge(ctx context.Context,
 	req *connect.Request[agentv1.IdentityChallengeRequest],
 ) (*connect.Response[agentv1.IdentityChallengeResponse], error) {
@@ -307,7 +307,7 @@ func (r *Relay) Connect(ctx context.Context,
 	}
 	// A spool in its reserve while the centre is out of reach takes no new
 	// session: the session would only bring what the spool cannot keep, and the
-	// records already there are worth more than a session that resumes on its
+	// records already there are worth more than a session that resumes on its.
 	if !r.upstream.Load() && r.spool.Critical() {
 		r.log.Warn("a session was refused: the spool is in its reserve and the centre is out of reach",
 			"host_id", hostID)

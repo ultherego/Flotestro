@@ -36,25 +36,13 @@ func Collect(ctx context.Context) (Facts, error) {
 }
 
 // CollectFrom gathers the inventory knowing the address the host talks to the
-// panel through. Without that address the network module cannot point at the
-// management interface, and guessing it from the first entry of the list ends
-// with a change to the configuration of the interface the command just came
-// through.
+// panel through.
 func CollectFrom(ctx context.Context, managementAddress string) (Facts, error) {
 	return CollectModules(ctx, managementAddress, Facts{}, nil)
 }
 
-// CollectModules gathers the inventory limited to the given modules.
-//
-// An empty list means the whole inventory. A non-empty list means a partial
-// refresh: only the given modules are collected and the rest is carried over
-// from the previous picture. Otherwise the inventory after refreshing one
-// module would be a picture of a host without all the rest - and that is not
-// the same as a host that does not have that rest.
-//
-// The basic facts - the identity of the machine, the system, the hardware, the
-// capabilities - are always collected. They are cheap and they are what decides
-// which modules make sense.
+// CollectModules gathers the inventory limited to the given modules. An empty
+// list means the whole inventory.
 func CollectModules(ctx context.Context, managementAddress string,
 	previous Facts, modules []string) (Facts, error) {
 	machineID, err := MachineID()
@@ -80,9 +68,7 @@ func CollectModules(ctx context.Context, managementAddress string,
 	for _, name := range ModuleOrder {
 		collector := moduleCollectors[name]
 		if len(selected) > 0 && !selected[name] {
-			// A module outside the scope of the refresh stays as it was. The
-			// carry-over is deliberate: missing data would mean the host does
-			// not have it, and it simply was not asked in this cycle.
+			// A module outside the scope of the refresh stays as it was.
 			collector.carry(&facts, previous)
 			continue
 		}
@@ -108,8 +94,7 @@ func moduleSet(modules []string) map[string]bool {
 }
 
 // failedUnits returns the names of the units in the failed state together with
-// whether they could be determined at all. A failed query must not look like
-// zero units in error.
+// whether they could be determined at all.
 func failedUnits(ctx context.Context) ([]string, bool) {
 	result := runCommand(ctx, 15*time.Second,
 		"/usr/bin/systemctl", "list-units", "--failed", "--no-legend", "--plain", "--no-pager")
@@ -162,8 +147,7 @@ func aptSummary(ctx context.Context) Packages {
 }
 
 // dnfSummary counts the updates without refreshing the metadata. check-update
-// returns 0 when there are no updates and 100 when there are some. Every other
-// code is an execution error, not the number zero.
+// returns 0 when there are no updates and 100 when there are some.
 func dnfSummary(ctx context.Context) Packages {
 	summary := Packages{Manager: "dnf"}
 
@@ -212,11 +196,7 @@ func rebootRequired(ctx context.Context, caps Capabilities) *bool {
 }
 
 // interpretNeedsRestarting translates the result of "dnf needs-restarting -r"
-// into an answer about a restart. The tool returns 0 when none is needed and 1
-// when a restart is required - but an execution error, for example a HOME that
-// is not writable, ends with the same code. Code 1 is therefore trusted only
-// when the tool printed something on stdout; on an error it stays silent there
-// and writes to stderr.
+// into an answer about a restart.
 func interpretNeedsRestarting(result commandResult) *bool {
 	switch {
 	case !result.Ran:

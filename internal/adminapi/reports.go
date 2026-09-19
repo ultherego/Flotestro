@@ -16,28 +16,17 @@ import (
 	"github.com/ultherego/flotestro/internal/reports"
 )
 
-// The management reports: the patch status of the fleet, the campaigns
-// of a period and the compliance with the policies, each as a document
-// the panel prints and as a file a spreadsheet opens.
-//
-// One route serves the three, by name. A report is a read over the
-// records the panel keeps, narrowed to a period and to what the reader
-// may see: the host scope of the reader's own right decides which hosts
-// the numbers count, and a section that rests on a right the reader does
-// not hold is left out of the document rather than refused as a whole -
-// a patch report without the campaign column is still a patch report.
+// The management reports: the patch status of the fleet, the campaigns of a
+// period and the compliance with the policies, each as a document the panel
+// prints and as a file a spreadsheet opens.
 
-// The bounds of a report period. The default is the last thirty days;
-// a year is the most one document covers, because a report over more is
-// a database question, not a page.
+// The bounds of a report period.
 const (
 	defaultReportPeriod = 30 * 24 * time.Hour
 	maxReportPeriod     = 366 * 24 * time.Hour
 )
 
-// The most host rows the patch status carries in JSON. The file carries
-// them all; the page shows a fleet of thousands as totals and a table
-// of the first rows, and says how many it left out.
+// The most host rows the patch status carries in JSON.
 const (
 	defaultReportHosts = 1000
 	maxReportHosts     = 5000
@@ -78,10 +67,7 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// parseReportRequest reads the period, the filter and the format. A
-// period given in part is refused rather than completed: a report on "from
-// Monday" with no end would silently run to now, and the page would print
-// a period nobody chose.
+// parseReportRequest reads the period, the filter and the format.
 func (s *Server) parseReportRequest(w http.ResponseWriter, r *http.Request) (reportRequest, bool) {
 	query := r.URL.Query()
 	request := reportRequest{
@@ -142,10 +128,8 @@ func (request reportRequest) filter(principal authz.Principal, permission authz.
 
 func (s *Server) reportStore() *reports.Store { return reports.NewStore(s.pool) }
 
-// The patch status of the fleet: every visible host with its pending
-// updates and the work of the period on it, and the totals by site and
-// by environment. The campaign column needs the right to read campaigns
-// and is left out without it.
+// The patch status of the fleet: every visible host with its pending updates
+// and the work of the period on it, and the totals by site and by environment.
 func (s *Server) handlePatchStatusReport(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermHostRead, "report")
 	if !ok {
@@ -225,9 +209,8 @@ func (s *Server) writePatchStatusCSV(w http.ResponseWriter, r *http.Request, req
 		})
 }
 
-// The campaigns that closed in the period, with their outcome and the
-// totals over them. Visible are the campaigns that touch a host in the
-// reader's campaign scope, like on the list.
+// The campaigns that closed in the period, with their outcome and the totals
+// over them.
 func (s *Server) handleCampaignsReport(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermCampaignRead, "report")
 	if !ok {
@@ -259,9 +242,7 @@ var campaignsCSVColumns = []string{
 	"success_rate", "by_site",
 }
 
-// writeCampaignsCSV writes the campaigns of the report, one per row. The
-// split by site is one cell, site=succeeded/targets joined with
-// semicolons, so a row stays a row.
+// writeCampaignsCSV writes the campaigns of the report, one per row.
 func (s *Server) writeCampaignsCSV(w http.ResponseWriter, r *http.Request, request reportRequest, report *reports.CampaignsReport) {
 	s.writeCSV(w, r, exportFileName("report-campaigns", request.generatedAt), campaignsCSVColumns,
 		func(yield func([]string) bool) error {
@@ -288,9 +269,8 @@ func (s *Server) writeCampaignsCSV(w http.ResponseWriter, r *http.Request, reque
 		})
 }
 
-// securityCounts tallies the findings of one check or one severity over
-// the visible hosts. Unknown and not applicable stand next to failed and
-// passed: a host that could not be judged is in neither.
+// securityCounts tallies the findings of one check or one severity over the
+// visible hosts.
 type securityCounts struct {
 	Failed        int `json:"failed"`
 	Passed        int `json:"passed"`
@@ -325,9 +305,9 @@ type checkSummary struct {
 	securityCounts
 }
 
-// securitySummary is the security part of the compliance report: the
-// findings of the built-in checks over the hosts the reader may read the
-// security of, judged now from the facts the hosts last reported.
+// securitySummary is the security part of the compliance report: the findings
+// of the built-in checks over the hosts the reader may read the security of,
+// judged now from the facts the hosts last reported.
 type securitySummary struct {
 	Hosts int `json:"hosts"`
 	// HostsWithFindings counts the hosts that fail at least one check.
@@ -335,9 +315,9 @@ type securitySummary struct {
 	BySeverity        []severityView `json:"by_severity"`
 	Checks            []checkSummary `json:"checks"`
 	EvaluatedAt       time.Time      `json:"evaluated_at"`
-	// Partial says the sweep did not reach every host of the filter
-	// within its time budget; the numbers then describe the hosts it
-	// reached, and PartialReason says why it stopped.
+	// Partial says the sweep did not reach every host of the filter within its
+	// time budget; the numbers then describe the hosts it reached, and
+	// PartialReason says why it stopped.
 	Partial       bool   `json:"partial"`
 	PartialReason string `json:"partial_reason,omitempty"`
 }
@@ -348,11 +328,8 @@ var severityRank = map[string]int{
 	compliance.SeverityHigh: 0, compliance.SeverityMedium: 1, compliance.SeverityLow: 2, compliance.SeverityInfo: 3,
 }
 
-// securityReport judges every host of the filter with the built-in
-// checks, a page of hosts at a time, and tallies the findings by check
-// and by severity. The sweep is the one of the fleet view, with its time
-// budget: a report that ran out of it says so rather than printing a
-// part of the fleet as the whole.
+// securityReport judges every host of the filter with the built-in checks, a
+// page of hosts at a time, and tallies the findings by check and by severity.
 func (s *Server) securityReport(ctx context.Context, request reportRequest, principal authz.Principal) (*securitySummary, error) {
 	filter := hosts.ListFilter{
 		Site: request.site, Environment: request.environment,
@@ -424,11 +401,9 @@ func sortBySeverity[T any](rows []T, severity func(T) string) {
 	sort.SliceStable(rows, func(i, j int) bool { return rank(rows[i]) < rank(rows[j]) })
 }
 
-// The compliance of the fleet: the policies with their hosts by verdict
-// at the end of the period, the hosts in drift, and the findings of the
-// security checks. The two parts rest on two rights, and each is left
-// out for a reader without its right; the hosts counted are the ones the
-// reader may read.
+// The compliance of the fleet: the policies with their hosts by verdict at the
+// end of the period, the hosts in drift, and the findings of the security
+// checks.
 func (s *Server) handleComplianceReport(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermHostRead, "report")
 	if !ok {
@@ -483,10 +458,8 @@ var (
 	}
 )
 
-// writeComplianceCSV writes one section of the compliance report as a
-// file: the policies by default, the hosts in drift, or the security
-// checks. A section the reader may not read is refused, not written
-// empty: an empty file would pass for a compliant fleet.
+// writeComplianceCSV writes one section of the compliance report as a file:
+// the policies by default, the hosts in drift, or the security checks.
 func (s *Server) writeComplianceCSV(w http.ResponseWriter, r *http.Request, request reportRequest,
 	principal authz.Principal, seesPolicies, seesSecurity bool) {
 	section := r.URL.Query().Get("section")
@@ -543,9 +516,9 @@ func (s *Server) writeComplianceCSV(w http.ResponseWriter, r *http.Request, requ
 			return
 		}
 		if summary.Partial {
-			// Every check has its row; the counts in them cover only the
-			// hosts the sweep reached, and a file that did not say so would
-			// be filed as the compliance of the whole fleet.
+			// Every check has its row; the counts in them cover only the hosts the
+			// sweep reached, and a file that did not say so would be filed as the
+			// compliance of the whole fleet.
 			markPartial(w)
 		}
 		s.writeCSV(w, r, exportFileName("report-compliance-security", request.generatedAt), complianceSecurityCSVColumns,

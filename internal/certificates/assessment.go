@@ -2,15 +2,10 @@ package certificates
 
 import "time"
 
-// The thresholds of expiry. The assessment is made in the panel for the same
-// reason as the compliance assessment: it is policy rather than a fact about
-// the host. The host reports the date, the panel says whether that date is
-// already a problem - and says it the same way about every host of the fleet,
-// also when the hosts run different versions of the agent.
+// The thresholds of expiry.
 const (
 	// CriticalThreshold is the date at which a renewal stops being a plan for
-	// next week. A certificate that expires at night stops a service in the
-	// morning.
+	// next week.
 	CriticalThreshold = 7 * 24 * time.Hour
 	// WarningThreshold is the moment at which a renewal can still be planned
 	// calmly - together with a maintenance window and the approval of a second
@@ -19,12 +14,6 @@ const (
 )
 
 // MaxReadAge says after how long the image stops describing the host.
-//
-// The metadata of the certificates are collected every few to a dozen or so
-// hours - a validity date does not change on its own. The file can change,
-// though: a certificate replaced by hand is visible only at the next read, so
-// an image older than a day and a bit is described as stale rather than as
-// current.
 const MaxReadAge = 36 * time.Hour
 
 // The states of a certificate as the panel sees them.
@@ -37,9 +26,6 @@ const (
 )
 
 // State assesses the validity date against a moment.
-//
-// A missing date is an unknown state rather than a valid one: a certificate
-// that could not be read is not a certificate in order.
 func State(notAfter *time.Time, now time.Time) string {
 	if notAfter == nil {
 		return StateUnknown
@@ -56,9 +42,7 @@ func State(notAfter *time.Time, now time.Time) string {
 	return StateValid
 }
 
-// weight orders the states from the worst. Unknown stands next to critical
-// rather than next to valid: not knowing about the certificate of a service is
-// not good news.
+// weight orders the states from the worst.
 var weight = map[string]int{
 	StateExpired:  4,
 	StateCritical: 3,
@@ -67,9 +51,7 @@ var weight = map[string]int{
 	StateValid:    0,
 }
 
-// Worse returns the worse of two states. A host is described by its worst
-// certificate: one expired certificate is enough for a service to stop
-// answering.
+// Worse returns the worse of two states.
 func Worse(a, b string) string {
 	if a == "" {
 		return b

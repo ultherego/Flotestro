@@ -60,8 +60,7 @@ const unitReason = "integration test of the unit detail"
 
 // TestUnitDetailReadsTheWholePicture checks the detail view of a unit: the
 // dependencies, the drop-ins, the journal tail and the cursor to continue
-// from. The read of one unit must not replace the full listing the tab
-// keeps.
+// from.
 func TestUnitDetailReadsTheWholePicture(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")

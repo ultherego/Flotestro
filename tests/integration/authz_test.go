@@ -156,9 +156,8 @@ func TestViewerChangesNothing(t *testing.T) {
 	viewer.do(http.MethodGet, "/api/v1/principals", nil, nil, http.StatusForbidden)
 }
 
-// TestPermissionIsPerOperation checks that the right to one operation gives
-// no right to another. A role without unit permissions may read the
-// journal.
+// TestPermissionIsPerOperation checks that the right to one operation gives no
+// right to another.
 func TestPermissionIsPerOperation(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -172,9 +171,8 @@ func TestPermissionIsPerOperation(t *testing.T) {
 	// The host audit log within their scope is readable.
 	auditor.do(http.MethodGet, "/api/v1/hosts/"+host.ID+"/audit", nil, nil, http.StatusOK)
 
-	// But the global log covers the whole fleet, so it requires the
-	// permission in the global scope, which an auditor of one environment
-	// does not have.
+	// But the global log covers the whole fleet, so it requires the permission in
+	// the global scope, which an auditor of one environment does not have.
 	auditor.do(http.MethodGet, "/api/v1/audit", nil, nil, http.StatusForbidden)
 
 	auditor.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
@@ -235,9 +233,8 @@ func TestProductionRequiresASecondPerson(t *testing.T) {
 	}
 }
 
-// TestDenialLeavesAnAuditTrail checks that an attempt without permissions
-// is recorded. An audit log showing only successes is useless in an
-// incident.
+// TestDenialLeavesAnAuditTrail checks that an attempt without permissions is
+// recorded.
 func TestDenialLeavesAnAuditTrail(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")

@@ -1,14 +1,6 @@
-// Package accounts holds what the inventory, the control plane and the
-// root helper have to agree on about local accounts: which identifiers
-// belong to people and which to the system, which groups are root by
-// another name, and how a key file is edited without touching what the
-// panel did not put there.
-//
-// The package is shared on purpose. Two classifiers of the UID range - one
-// in the agent, one in the helper - drifted apart once: the agent read
-// /etc/login.defs and the helper compared against a constant, so an
-// account the panel listed as a person's was refused by the host as a
-// system account. One classifier, read from one file, used on both sides.
+// Package accounts holds what the inventory, the control plane and the root
+// helper have to agree on about local accounts: which identifiers belong to
+// people and which to the system, which groups are root by another name, and
 package accounts
 
 import (
@@ -29,17 +21,12 @@ const (
 	DefaultSystemUIDMax = 999
 )
 
-// UIDRange is the range of identifiers that belong to the accounts of
-// people, as the host's login.defs states it. Anything outside it is a
-// system account: the lower bound alone is not enough, because "nobody"
-// sits at 65534, above the range, and is not a person either.
+// UIDRange is the range of identifiers that belong to the accounts of people,
+// as the host's login.
 type UIDRange struct {
 	Min int64
 	Max int64
-	// SystemMax is SYS_UID_MAX: useradd --system allocates below it. The
-	// classification does not use it - a system account is one outside
-	// the range of people - but the helper reports it so the operator sees
-	// what the host would give a service.
+	// SystemMax is SYS_UID_MAX: useradd --system allocates below it.
 	SystemMax int64
 	// Source says where the values came from: the path of the file, or
 	// "defaults" when the file was unreadable or silent.
@@ -56,9 +43,8 @@ func LoadUIDRange() UIDRange {
 	return ParseUIDRange(LoginDefsPath)
 }
 
-// ParseUIDRange reads the range from the given file. The path is a
-// parameter so the classification can be checked without touching the
-// system.
+// ParseUIDRange reads the range from the given file. The path is a parameter
+// so the classification can be checked without touching the system.
 func ParseUIDRange(path string) UIDRange {
 	file, err := os.Open(path)
 	if err != nil {
@@ -77,10 +63,8 @@ func ParseUIDRange(path string) UIDRange {
 	return uidRange
 }
 
-// ParseLoginDefs reads UID_MIN, UID_MAX and SYS_UID_MAX from the content
-// of a login.defs file. A value that is not a number is skipped; a range
-// that ends before it starts falls back to the defaults, because a host
-// with a broken login.defs is not a host with no people on it.
+// ParseLoginDefs reads UID_MIN, UID_MAX and SYS_UID_MAX from the content of a
+// login.
 func ParseLoginDefs(content string) UIDRange {
 	uidRange := DefaultUIDRange()
 	found := false

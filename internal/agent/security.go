@@ -11,9 +11,7 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// securityProbe assembles the protection state of the host. Most of the facts
-// the agent reads itself; the helper gets only those that cannot be seen
-// without root.
+// securityProbe assembles the protection state of the host.
 var securityProbe func(context.Context) (security.Snapshot, error)
 
 // SetSecurityProbe points at the function that assembles the protection state.
@@ -31,12 +29,6 @@ var helperFactCodes = map[string]helperv1.SecurityRequest_Fact{
 }
 
 // CollectSecurity reads the protection state of the host.
-//
-// First what can be seen without root - the SELinux mode, the AppArmor switch,
-// FIPS, lockdown, the state of the audit unit and the list of sockets. Only the
-// missing facts are ordered from the helper, by name and one at a time: the
-// module does not go through root as a whole just because part of its picture
-// needs it.
 func (e *TaskExecutor) CollectSecurity(ctx context.Context) security.Snapshot {
 	snapshot := security.Collect(ctx, commandOutput)
 	missing := snapshot.MissingFacts()

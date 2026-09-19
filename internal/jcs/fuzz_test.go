@@ -7,11 +7,6 @@ import (
 )
 
 // FuzzTransform feeds the canonicaliser arbitrary text.
-//
-// The canonical form is what gets signed and what the audit chain hashes,
-// so two properties matter: a text that is accepted comes out as valid
-// JSON, and the canonical form is a fixed point - canonicalising it again
-// changes nothing. Anything else is refused with an error, never a panic.
 func FuzzTransform(f *testing.F) {
 	f.Add([]byte(`{
   "numbers": [333333333.33333329, 1E30, 4.50, 2e-3, 0.000000000000000000000000001],

@@ -32,9 +32,6 @@ type SessionTokens struct {
 }
 
 // Authentication describes when and how the provider authenticated the user.
-// The panel does not reinterpret these values on its own: MFA belongs to the
-// provider, and the panel checks only the match with the required level and
-// the freshness.
 type Authentication struct {
 	// At is the moment of authentication. A zero time means an unknown state.
 	At  time.Time
@@ -103,9 +100,7 @@ func (s *Store) CreateSession(ctx context.Context, tx pgx.Tx, principalID string
 	return sessionID, cookieValue, nil
 }
 
-// AuthenticateSession turns a cookie into an identity together with its
-// roles. The roles come from manual assignments and from the mapping of the
-// groups stored in the session.
+// AuthenticateSession turns a cookie into an identity together with its roles.
 func (s *Store) AuthenticateSession(ctx context.Context, cookieValue string) (*Principal, *Session, error) {
 	if cookieValue == "" {
 		return nil, nil, ErrSessionInvalid
@@ -164,8 +159,6 @@ func (s *Store) AuthenticateSession(ctx context.Context, cookieValue string) (*P
 	principal.Bindings = mergeBindings(bindings, mapped)
 
 	// Refreshing the idle window; an error must not block the request.
-	// make_interval takes a number directly; concatenating text would require
-	// a cast and would silently break on the argument's type.
 	idle := s.sessionIdle
 	if idle <= 0 {
 		idle = defaultIdleWindow
@@ -186,9 +179,8 @@ func (s *Store) RevokeSession(ctx context.Context, sessionID, reason string) err
 	return err
 }
 
-// SessionView is a live browser session as the access screen lists it: when
-// it began, when it was last seen, when it ends by itself and where it
-// came from. The cookie digest and the provider tokens stay out of it.
+// SessionView is a live browser session as the access screen lists it: when it
+// began, when it was last seen, when it ends by itself and where it came from.
 type SessionView struct {
 	ID          string    `json:"id"`
 	PrincipalID string    `json:"principal_id"`
@@ -205,9 +197,8 @@ type SessionView struct {
 	AMR           []string   `json:"amr"`
 }
 
-// ListSessionsOf returns the live sessions of an identity, the most
-// recently seen first. A revoked or expired session is not a session any
-// more and is not listed: the screen offers to end what is running.
+// ListSessionsOf returns the live sessions of an identity, the most recently
+// seen first.
 func (s *Store) ListSessionsOf(ctx context.Context, principalID string) ([]SessionView, error) {
 	const query = `
 		select id, principal_id, created_at, last_seen_at, absolute_expires_at, idle_expires_at,
@@ -239,10 +230,7 @@ func (s *Store) ListSessionsOf(ctx context.Context, principalID string) ([]Sessi
 	return sessions, rows.Err()
 }
 
-// RevokeSessionOf ends one session of an identity. The identity is part of
-// the key, as with a token: a session identifier read off one identity
-// cannot end the session of another through a mistaken path. False means
-// the identity has no such live session.
+// RevokeSessionOf ends one session of an identity.
 func (s *Store) RevokeSessionOf(ctx context.Context, tx pgx.Tx, principalID, sessionID, reason string) (bool, error) {
 	tag, err := tx.Exec(ctx, `
 		update web_sessions set revoked_at = now(), revocation_reason = $3, refresh_token = null
@@ -255,9 +243,7 @@ func (s *Store) RevokeSessionOf(ctx context.Context, tx pgx.Tx, principalID, ses
 	return tag.RowsAffected() > 0, nil
 }
 
-// RevokeSessionsOf ends every session of an identity. Used when locking an
-// account: disabling it in the directory alone does not destroy an ongoing
-// panel session.
+// RevokeSessionsOf ends every session of an identity.
 func (s *Store) RevokeSessionsOf(ctx context.Context, principalID, reason string) (int64, error) {
 	tag, err := s.pool.Exec(ctx, `
 		update web_sessions set revoked_at = now(), revocation_reason = $2, refresh_token = null
@@ -268,9 +254,8 @@ func (s *Store) RevokeSessionsOf(ctx context.Context, principalID, reason string
 	return tag.RowsAffected(), nil
 }
 
-// RefreshableSession is a live session whose group snapshot is due for a
-// check with the provider. The refresh token is the only credential the
-// check needs; the subject is carried for the trail.
+// RefreshableSession is a live session whose group snapshot is due for a check
+// with the provider.
 type RefreshableSession struct {
 	ID           string
 	PrincipalID  string
@@ -279,12 +264,9 @@ type RefreshableSession struct {
 	RefreshToken string
 }
 
-// StaleGroupSnapshots lists the live sessions whose groups were confirmed
-// with the provider before the given moment - or never, in which case the
-// login counts as the confirmation. Only sessions with a refresh token are
-// listed: without one there is nothing to ask the provider with, and the
-// snapshot lasts until the session ends. Oldest first, so that a provider
-// that answers slowly does not starve the same sessions every tick.
+// StaleGroupSnapshots lists the live sessions whose groups were confirmed with
+// the provider before the given moment - or never, in which case the login
+// counts as the confirmation.
 func (s *Store) StaleGroupSnapshots(ctx context.Context, before time.Time, limit int) ([]RefreshableSession, error) {
 	if limit <= 0 {
 		limit = 100
@@ -318,13 +300,8 @@ func (s *Store) StaleGroupSnapshots(ctx context.Context, before time.Time, limit
 	return sessions, rows.Err()
 }
 
-// RecordGroupRefresh writes the outcome of a successful check: the groups
-// as the provider gives them now and the tokens that came back with them.
-// The refresh token is replaced whenever the provider rotated it - a
-// provider that revokes the old token on use would otherwise refuse the
-// next check as an invalid grant and the session would be ended for a
-// user who is still there. A session revoked in the meantime is left as
-// it is: the revocation wins over a check that started before it.
+// RecordGroupRefresh writes the outcome of a successful check: the groups as
+// the provider gives them now and the tokens that came back with them.
 func (s *Store) RecordGroupRefresh(ctx context.Context, sessionID string,
 	groups []string, tokens SessionTokens) error {
 	if groups == nil {
@@ -352,9 +329,7 @@ func (s *Store) PurgeExpired(ctx context.Context) error {
 	return err
 }
 
-// SaveAuthFlow records the state of a login that has started. The PKCE
-// verifier does not reach the browser, so intercepting the redirect is not
-// enough.
+// SaveAuthFlow records the state of a login that has started.
 func (s *Store) SaveAuthFlow(ctx context.Context, state, verifier, nonce, redirectAfter string,
 	ttl time.Duration) error {
 	if ttl <= 0 {
@@ -408,8 +383,6 @@ func (s *Store) MappedBindings(ctx context.Context, issuer string, groups []stri
 }
 
 // UpsertExternalPrincipal binds a provider account to a Flotestro identity.
-// The key is the pair issuer and subject: the user name can change, the
-// subject identifier cannot.
 func (s *Store) UpsertExternalPrincipal(ctx context.Context, tx pgx.Tx,
 	issuer, subjectID, username, displayName, email string) (string, error) {
 	if issuer == "" || subjectID == "" {
@@ -434,11 +407,9 @@ func (s *Store) UpsertExternalPrincipal(ctx context.Context, tx pgx.Tx,
 		return "", err
 	}
 
-	// An external identity never takes over a principal that exists under
-	// the same subject with another origin: a local or service principal
-	// (an API token holder, the bootstrap administrator) keeps its
-	// bindings to itself, and a provider user who happens to carry that
-	// name gets a principal of their own, named with the issuer.
+	// An external identity never takes over a principal that exists under the
+	// same subject with another origin: a local or service principal (an API
+	// token holder, the bootstrap administrator) keeps its bindings to itself,
 	err = tx.QueryRow(ctx, `
 		insert into principals (id, subject, display_name, kind, issuer, subject_id, email, last_login_at)
 		values ($1, $2, $3, 'user', $4, $5, $6, now())

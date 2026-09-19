@@ -7,12 +7,8 @@ import (
 	"github.com/ultherego/flotestro/internal/authz"
 )
 
-// The narrowing of a listing and the authorisation of a single read have
-// to answer the same question. They did once drift apart, because they
-// were written separately, and a team binding is exactly the shape that
-// punishes the drift: it carries the wildcard site and environment its
-// constraint gives it, so a listing that reads only the site columns
-// would answer "the whole fleet" where a direct read answers "no".
+// The narrowing of a listing and the authorisation of a single read have to
+// answer the same question.
 
 func TestScopeSQLReadsATeamOnTheTeamColumn(t *testing.T) {
 	team := "1e83b0e4-0000-4000-8000-000000000001"
@@ -32,9 +28,8 @@ func TestScopeSQLReadsATeamOnTheTeamColumn(t *testing.T) {
 			want:   "",
 		},
 		{
-			// The case the site columns alone would read as the whole
-			// fleet. The wildcards are what the binding carries; the team
-			// is what it means.
+			// The case the site columns alone would read as the whole fleet. The
+			// wildcards are what the binding carries; the team is what it means.
 			name:   "a team scope compares the team column alone",
 			scopes: []authz.Scope{{Site: authz.Wildcard, Environment: authz.Wildcard, Team: team}},
 			want:   "(h.team_id = $1::uuid)",
@@ -88,10 +83,9 @@ func TestScopeSQLNumbersAfterTheOffset(t *testing.T) {
 	}
 }
 
-// TestScopeSQLAgreesWithMatches is the guard that keeps the listing and
-// the single read from drifting apart: for every combination of binding
-// and host below, the condition either names the host's column value or
-// refuses, exactly as Scope.Matches decides.
+// TestScopeSQLAgreesWithMatches is the guard that keeps the listing and the
+// single read from drifting apart: for every combination of binding and host
+// below, the condition either names the host's column value or refuses,
 func TestScopeSQLAgreesWithMatches(t *testing.T) {
 	mine := "1e83b0e4-0000-4000-8000-00000000000a"
 	theirs := "1e83b0e4-0000-4000-8000-00000000000b"
@@ -114,9 +108,9 @@ func TestScopeSQLAgreesWithMatches(t *testing.T) {
 			scope := ScopeOf(&target.host)
 			matches := binding.Matches(scope)
 			condition, args := ScopeSQL([]authz.Scope{binding}, "h.site", "h.environment", "h.team_id", 0)
-			// The condition is read the way the database would read it:
-			// an empty condition is every row, "false" is none, and a
-			// comparison holds when its argument is the host's value.
+			// The condition is read the way the database would read it: an empty
+			// condition is every row, "false" is none, and a comparison holds when its
+			// argument is the host's value.
 			var selects bool
 			switch {
 			case condition == "":

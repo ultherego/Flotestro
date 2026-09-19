@@ -5,13 +5,8 @@ import (
 	"time"
 )
 
-// FuzzParseExpression feeds the cron parser what an operator may type into
-// the panel.
-//
-// An expression the parser accepts is written to a host, so an accepted
-// expression must also be one the planner can evaluate: every run the
-// planner computes from it satisfies it, and the planner terminates. A
-// refused expression is an error, never a panic.
+// FuzzParseExpression feeds the cron parser what an operator may type into the
+// panel.
 func FuzzParseExpression(f *testing.F) {
 	for _, seed := range []string{
 		"* * * * *", "0 3 * * *", "*/15 * * * *", "0 0 1 1 *", "0 9-17 * * 1-5",
@@ -55,10 +50,6 @@ func FuzzParseExpression(f *testing.F) {
 
 // FuzzParseCalendarPreview feeds the reader of "systemd-analyze calendar"
 // arbitrary output.
-//
-// The output comes from a tool on the host whose wording differs between
-// versions; the reader drops what it does not understand and must never
-// stop on it. Every date it does return is a real date in the given zone.
 func FuzzParseCalendarPreview(f *testing.F) {
 	for _, seed := range []string{
 		`  Original form: *-*-* 03:00:00

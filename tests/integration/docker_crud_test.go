@@ -10,20 +10,6 @@ import (
 )
 
 // Declared containers, networks and volumes on a real engine.
-//
-// The gap this reproduces is that the panel could start, stop and remove
-// what somebody else had created and could create nothing itself: there
-// was no way to say what is to stand on a host. So the test is written
-// the way an operator works - describe, read the plan, carry the plan out,
-// read the object back - and every step has to hold on its own: a plan
-// that says what would change, a change bound to that plan and refused
-// without it, and an object on the host afterwards that carries the
-// description it was created from.
-//
-// Nothing here pulls from a registry: the image is one the host already
-// has, because a lab without a way out must still run this test. Every
-// object is named with the run's own suffix and removed in t.Cleanup,
-// whatever the test did in between.
 
 const declarationReason = "integration test of declared engine objects"
 
@@ -64,10 +50,7 @@ type declarationAttempt struct {
 	Detail    *declarationDetail `json:"detail"`
 }
 
-// What the test reads back off the host. The labels are the point of the
-// container view: a container that carries the digest of the description
-// it was created from is the container that was declared, and a name alone
-// proves nothing about what stands under it.
+// What the test reads back off the host.
 type declaredContainer struct {
 	ID     string            `json:"id"`
 	Name   string            `json:"name"`
@@ -136,9 +119,9 @@ func TestDeclaredObjectsAreCreatedAgainstAPlanAndReadBack(t *testing.T) {
 				again.Action, again.Changes)
 		}
 
-		// A description that differs in something the engine cannot change
-		// in place is not carried out silently: recreating a volume empties
-		// it, and the order did not say it accepts that.
+		// A description that differs in something the engine cannot change in place
+		// is not carried out silently: recreating a volume empties it, and the order
+		// did not say it accepts that.
 		conflicting := map[string]any{
 			"volume": map[string]any{
 				"name": name, "driver": "local",
@@ -217,9 +200,8 @@ func TestDeclaredObjectsAreCreatedAgainstAPlanAndReadBack(t *testing.T) {
 		name := "flotestro-test-container-" + suffix
 		t.Cleanup(func() { removeDeclaredContainer(h, host, name) })
 
-		// The container is declared stopped: it exists, and nothing about
-		// the test depends on the entry point of whichever image the lab
-		// happens to hold.
+		// The container is declared stopped: it exists, and nothing about the test
+		// depends on the entry point of whichever image the lab happens to hold.
 		description := func(label string) map[string]any {
 			return map[string]any{
 				"container": map[string]any{
@@ -233,9 +215,9 @@ func TestDeclaredObjectsAreCreatedAgainstAPlanAndReadBack(t *testing.T) {
 		if plan.Action != "create" {
 			t.Fatalf("the plan of a container the host does not have says %q, expected create", plan.Action)
 		}
-		// The tag is bound to a digest before anything is approved: a
-		// deployment of "whatever the registry serves right now" is the one
-		// thing a plan must never authorise.
+		// The tag is bound to a digest before anything is approved: a deployment of
+		// "whatever the registry serves right now" is the one thing a plan must
+		// never authorise.
 		if plan.ImageDigest == "" || plan.PinnedImage == "" {
 			t.Fatalf("the plan did not bind the image to a digest: %+v", plan)
 		}
@@ -270,9 +252,9 @@ func TestDeclaredObjectsAreCreatedAgainstAPlanAndReadBack(t *testing.T) {
 				again.Action, again.Changes)
 		}
 
-		// A container that differs is replaced, and the plan says which
-		// setting brought that about: a verdict without the list behind it
-		// would ask the operator to approve a word.
+		// A container that differs is replaced, and the plan says which setting
+		// brought that about: a verdict without the list behind it would ask the
+		// operator to approve a word.
 		second := description("changed")
 		replacement := declarationPlanOf(t, h, host.ID, second)
 		if replacement.Action != "replace" {
@@ -282,9 +264,9 @@ func TestDeclaredObjectsAreCreatedAgainstAPlanAndReadBack(t *testing.T) {
 			t.Fatal("a replacement without a change list")
 		}
 
-		// The digest of the first plan no longer describes the host, and a
-		// change carrying it is refused rather than carried out against a
-		// state nobody approved.
+		// The digest of the first plan no longer describes the host, and a change
+		// carrying it is refused rather than carried out against a state nobody
+		// approved.
 		stale := declarationOrder(t, h, host, "docker.container.ensure", second, plan.Digest)
 		if stale.State == "succeeded" {
 			t.Fatal("a change bound to a plan that no longer holds was carried out")
@@ -361,9 +343,8 @@ func declarationRun(t *testing.T, h *harness, hostID string, section map[string]
 	return result.Items[len(result.Items)-1]
 }
 
-// declarationOrder carries a plan out and returns the finished job,
-// whatever it ended as. Every one of these is irreversible enough for the
-// panel to ask for the host name and, for the removals, for two people.
+// declarationOrder carries a plan out and returns the finished job, whatever
+// it ended as.
 func declarationOrder(t *testing.T, h *harness, host hostView,
 	action string, section map[string]any, digest string) jobView {
 	t.Helper()
@@ -391,10 +372,8 @@ func declarationOrder(t *testing.T, h *harness, host hostView,
 	return h.awaitTerminal(job.ID, 5*time.Minute)
 }
 
-// runDeclaration carries a plan out and requires that the host confirmed
-// the state afterwards. A change that ran is not a change that took hold:
-// only the verifier's read settles that, and a job that ends
-// applied_unverified is a failure here as it is on the screen.
+// runDeclaration carries a plan out and requires that the host confirmed the
+// state afterwards.
 func runDeclaration(t *testing.T, h *harness, host hostView,
 	action string, section map[string]any, digest string) {
 	t.Helper()
@@ -405,9 +384,7 @@ func runDeclaration(t *testing.T, h *harness, host hostView,
 	}
 }
 
-// imageOnHost picks an image the host already holds. Nothing is pulled: a
-// lab without a way out to a registry still runs this test, and the point
-// here is the declaration rather than the download.
+// imageOnHost picks an image the host already holds.
 func imageOnHost(t *testing.T, h *harness, hostID string) string {
 	t.Helper()
 	for _, image := range declaredEngineState(t, h, hostID).Images {
@@ -422,8 +399,6 @@ func imageOnHost(t *testing.T, h *harness, hostID string) string {
 }
 
 // removeEngineObject cleans up through the operation that exists for it.
-// A cleanup that fails is not a failure of the test: the object may well
-// be gone already, and that is the state the test wanted.
 func removeEngineObject(h *harness, host hostView, prune map[string]any) {
 	job := h.createOperation(host.ID, map[string]any{
 		"action": "docker.prune", "reason": declarationReason,
@@ -475,9 +450,7 @@ func removeDeclaredContainer(h *harness, host hostView, name string) {
 	h.awaitJobState(job.ID, 3*time.Minute, "succeeded", "failed", "timed_out", "canceled", "expired")
 }
 
-// declaredEngineState reads the host again and returns what it holds. The
-// read is an operation: the inventory from before the change says nothing
-// about what the change did.
+// declaredEngineState reads the host again and returns what it holds.
 func declaredEngineState(t *testing.T, h *harness, hostID string) declaredState {
 	t.Helper()
 	job, attempts := h.runOperation(hostID, map[string]any{

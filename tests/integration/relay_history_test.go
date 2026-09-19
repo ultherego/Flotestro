@@ -104,16 +104,8 @@ func (h *harness) pingRelay(t *testing.T, relay testRelay, beat relayHeartbeat) 
 	}
 }
 
-// TestTheBufferHistoryAnswersWhatTheRelayReported guards the gap this
-// endpoint exists for.
-//
-// Until now the panel kept exactly one heartbeat per relay, in memory. An
-// operator could see that the buffer is full now and never that the site
-// was cut off for two hours last night, that the spool has been filling
-// for a week, or that the relay restarted and started its counters again.
-// Three heartbeats are enough to prove that the history keeps all three
-// facts: the fill against the limit, the stretch without an upstream, and
-// the restart that explains a counter falling back.
+// TestTheBufferHistoryAnswersWhatTheRelayReported guards the gap this endpoint
+// exists for.
 func TestTheBufferHistoryAnswersWhatTheRelayReported(t *testing.T) {
 	h := newHarness(t)
 	relay := h.enrollRelay(t, []string{"history-relay.flotestro.test"})
@@ -127,9 +119,7 @@ func TestTheBufferHistoryAnswersWhatTheRelayReported(t *testing.T) {
 		SpoolBytesLimit: limit, Sessions: 2, InstanceID: "instance-one",
 		UpstreamState: "connected",
 	})
-	// The link went down: the spool takes the results and the relay says
-	// so. A report that says nothing about the link is not a report that
-	// the link is up, which is why the state travels at all.
+	// The link went down: the spool takes the results and the relay says so.
 	h.pingRelay(t, relay, relayHeartbeat{
 		BufferBytes: 48 << 20, BufferedItems: 900, BufferMaxBytes: limit,
 		SpoolBytesLimit: limit, BufferDroppedTotal: 7, Sessions: 2,
@@ -204,9 +194,8 @@ func TestTheBufferHistoryAnswersWhatTheRelayReported(t *testing.T) {
 }
 
 // TestTheBufferHistoryIsRefusedToACallerWhoMayNotReadTheRelay guards the
-// boundary the relay list already keeps: the buffer of a site is not
-// public inside the installation. A caller without the right to read
-// relays learns nothing about them - not even that this one exists.
+// boundary the relay list already keeps: the buffer of a site is not public
+// inside the installation.
 func TestTheBufferHistoryIsRefusedToACallerWhoMayNotReadTheRelay(t *testing.T) {
 	h := newHarness(t)
 	relay := h.enrollRelay(t, []string{"history-scope-relay.flotestro.test"})
@@ -215,9 +204,8 @@ func TestTheBufferHistoryIsRefusedToACallerWhoMayNotReadTheRelay(t *testing.T) {
 		InstanceID: "instance-one", UpstreamState: "connected",
 	})
 
-	// A viewer sees hosts and nothing of the enrollment machinery: the
-	// relay list asks for the right to prepare an installation, and so
-	// does its history.
+	// A viewer sees hosts and nothing of the enrollment machinery: the relay list
+	// asks for the right to prepare an installation, and so does its history.
 	viewer := h.createPrincipal(uniqueSubject("relay-history-viewer"),
 		[]map[string]string{{"role": "viewer", "site": "*", "environment": "*"}})
 	h.withToken(viewer).do(http.MethodGet,

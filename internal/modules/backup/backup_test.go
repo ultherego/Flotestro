@@ -39,10 +39,8 @@ func TestValidateRestoreRequiresTargetAndPlan(t *testing.T) {
 		t.Fatalf("a valid restore rejected: %v", err)
 	}
 
-	// A restore straight into the host filesystem unpacks an old state onto
-	// a running system - and that is a different operation than restoring
-	// a copy. The helper's private /tmp stands apart: there the operation
-	// ends in a success and an empty directory, the worst possible answer.
+	// A restore straight into the host filesystem unpacks an old state onto a
+	// running system - and that is a different operation than restoring a copy.
 	for _, target := range []string{
 		"/", "/etc", "/etc/nginx", "/usr/local", "/var", "/home", "/root",
 		"/tmp/copy", "/var/tmp/copy", "/var/lib/flotestro/data",
@@ -129,9 +127,8 @@ func TestMaskRemovesCredentialsFromOutput(t *testing.T) {
 		t.Fatalf("the address with credentials was not masked:\n%s", masked)
 	}
 
-	// Credentials in an address are masked also when the panel does not
-	// know them: the password may be written into the repository address
-	// itself.
+	// Credentials in an address are masked also when the panel does not know
+	// them: the password may be written into the repository address itself.
 	unknown := Mask("https://user:secret-from-address@host/repo", nil)
 	if strings.Contains(unknown, "secret-from-address") {
 		t.Fatalf("the password from the address stayed in the output: %s", unknown)
@@ -200,10 +197,9 @@ func TestRunbookRefusesScriptWritableOutsideRoot(t *testing.T) {
 	}
 }
 
-// A repository nobody has created yet is a state, not a failure to read
-// one: it holds no copies, so the first backup into it can be confirmed by
-// the copy that appears afterwards. Every other refusal leaves the state
-// unknown, and the panel must not read "unknown" as "empty".
+// A repository nobody has created yet is a state, not a failure to read one:
+// it holds no copies, so the first backup into it can be confirmed by the copy
+// that appears afterwards.
 func TestARepositoryThatIsNotThereYetIsNamedAsSuch(t *testing.T) {
 	for _, output := range []string{
 		"Fatal: unable to open config file: stat /srv/backups/config: no such file or directory",

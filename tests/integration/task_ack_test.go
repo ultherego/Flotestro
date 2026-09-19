@@ -2,26 +2,7 @@
 
 package integration
 
-// The acknowledgement of a task. Until the agent answered a delivery, the
-// panel knew a delivered task only by its result: an attempt was silent
-// between the hand-over and the end, a host queued behind a busy lock
-// looked like a lost one, and an envelope sent into a dead stream waited
-// out the whole five-minute lease before it was sent again.
-//
-// What the product promises now, as read from the code:
-//
-//   - The agent answers a delivery in stages of TaskProgress (agent.proto):
-//     "accepted" before it queues for the resources of the host, "started"
-//     once it holds them and the operation is starting, and "awaiting_lock"
-//     with the blocker while it waits (internal/agent/tasks.go run).
-//   - The panel stamps accepted_at on the attempt and moves the job from
-//     dispatched to running on "started", with started_at
-//     (internal/jobs/store.go AcceptAttempt, MarkRunning). A wait for a
-//     lock is the job's wait_reason, awaiting_lock:<blocker>, until the
-//     start clears it (SetLockWait).
-//   - The lease of a delivered attempt is the short dispatch lease
-//     (internal/jobs DispatchLease, a minute) until the acceptance moves
-//     it out to the execution lease.
+// The acknowledgement of a task.
 
 import (
 	"context"
@@ -32,9 +13,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// ackRow is what the tests read straight from the tables: the API view of
-// an attempt carries the times, but the wait reason of a job and the lease
-// are what the tests are about, and both are read from the same place.
+// ackRow is what the tests read straight from the tables: the API view of an
+// attempt carries the times, but the wait reason of a job and the lease are
+// what the tests are about, and both are read from the same place.
 type ackRow struct {
 	State        string
 	WaitReason   string
@@ -86,9 +67,7 @@ func awaitRow(ctx context.Context, t *testing.T, pool *pgxpool.Pool, jobID strin
 
 // TestADeliveredTaskIsAcknowledgedAndRunsWithinSeconds: a preview of the
 // journal is accepted and started by the agent within seconds of the
-// hand-over, so the job shows running - not dispatched - while the host
-// works, with the acceptance and the start on the attempt, and the lease
-// out at the execution length rather than the dispatch length.
+// hand-over, so the job shows running - not dispatched - while the host works,
 func TestADeliveredTaskIsAcknowledgedAndRunsWithinSeconds(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -140,12 +119,9 @@ func TestADeliveredTaskIsAcknowledgedAndRunsWithinSeconds(t *testing.T) {
 	}
 }
 
-// TestATaskWaitingForALockSaysSoAndThenRuns: a run of a schedule entry
-// holds the units lock of the host for as long as its command runs, and a
-// unit restart ordered meanwhile needs the same lock. The restart is
-// accepted, waits, and the job says on what - awaiting_lock and the
-// blocker - until the run ends; then it starts, the reason is gone, and
-// it succeeds on the attempt it was delivered on.
+// TestATaskWaitingForALockSaysSoAndThenRuns: a run of a schedule entry holds
+// the units lock of the host for as long as its command runs, and a unit
+// restart ordered meanwhile needs the same lock.
 func TestATaskWaitingForALockSaysSoAndThenRuns(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -240,9 +216,9 @@ func TestATaskWaitingForALockSaysSoAndThenRuns(t *testing.T) {
 	}
 }
 
-// holderAttempt is the attempt identifier of a job as the agent knows it:
-// the blocker names the task by the attempt, since that is what the
-// envelope carries.
+// holderAttempt is the attempt identifier of a job as the agent knows it: the
+// blocker names the task by the attempt, since that is what the envelope
+// carries.
 func holderAttempt(ctx context.Context, t *testing.T, pool *pgxpool.Pool, jobID string) string {
 	t.Helper()
 	var attemptID string

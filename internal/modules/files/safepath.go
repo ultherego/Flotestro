@@ -11,15 +11,11 @@ import (
 )
 
 // AllowlistPath points at the file with the scope set by the host
-// administrator. One pattern per line; empty lines and lines starting with
-// # are skipped.
+// administrator.
 const AllowlistPath = "/etc/flotestro/files.allow"
 
-// defaultPatterns apply when the administrator has not set their own.
-//
-// The list is narrow and deliberately avoids the directories where secrets
-// are kept. Extending it is the host administrator's decision and requires
-// a write in /etc, not a change in the panel.
+// defaultPatterns apply when the administrator has not set their own. The list
+// is narrow and deliberately avoids the directories where secrets are kept.
 var defaultPatterns = []string{
 	"/etc/*.conf",
 	"/etc/sysctl.d/*.conf",
@@ -40,11 +36,6 @@ var defaultPatterns = []string{
 
 // forbiddenPatterns list the paths the panel never touches - even when the
 // host administrator adds them to the allowlist.
-//
-// This is not caution just in case: the file with password hashes, a
-// private key or a sudo rule let anyone who can replace them into the
-// system. Changing each of these has its own module with its own
-// safeguards, not a text editor.
 var forbiddenPatterns = []string{
 	"/etc/shadow*",
 	"/etc/gshadow*",
@@ -58,9 +49,9 @@ var forbiddenPatterns = []string{
 	"/etc/pam.d/*",
 	"/etc/pam.conf",
 	"/etc/krb5.keytab",
-	// The loader, the login environment and the sudo front-end: a line in
-	// any of them runs code as every user or as root without a password
-	// hash ever changing.
+	// The loader, the login environment and the sudo front-end: a line in any of
+	// them runs code as every user or as root without a password hash ever
+	// changing.
 	"/etc/sudo.conf",
 	"/etc/ld.so.conf*",
 	"/etc/ld.so.conf.d/*",
@@ -116,10 +107,6 @@ func LoadAllowlist(path string) Allowlist {
 
 // Forbidden says whether the path belongs to another module and is not
 // editable.
-//
-// The check is separate from the allowlist, because it binds the panel
-// too: a task with such a path must not be created, even if the host
-// would refuse it anyway.
 func Forbidden(path string) error {
 	for _, pattern := range forbiddenPatterns {
 		if matches(pattern, path) {
@@ -137,9 +124,9 @@ func (a Allowlist) Allows(path string) error {
 	if path != filepath.Clean(path) {
 		return fmt.Errorf("%w: the path is not normalised", ErrOutsideAllowlist)
 	}
-	// The ban is checked first and cannot be bypassed by an allowlist
-	// entry: the file with password hashes or a private key has its own
-	// module, not a text editor.
+	// The ban is checked first and cannot be bypassed by an allowlist entry: the
+	// file with password hashes or a private key has its own module, not a text
+	// editor.
 	if err := Forbidden(path); err != nil {
 		return err
 	}
@@ -152,11 +139,6 @@ func (a Allowlist) Allows(path string) error {
 }
 
 // matches compares a path with a pattern.
-//
-// A pattern without a trailing slash also matches files in subdirectories
-// when it ends with an asterisk covering the whole tail - otherwise
-// "/root/*" would not cover "/root/.ssh/id_rsa", and that is exactly the
-// case it is meant to cover.
 func matches(pattern, path string) bool {
 	if ok, _ := filepath.Match(pattern, path); ok {
 		return true
@@ -169,10 +151,6 @@ func matches(pattern, path string) bool {
 }
 
 // OpenWithoutSymlinks opens a file, refusing to pass through a symlink.
-//
-// A symlink in the configuration directory would allow overwriting any root
-// file despite a correct allowlist: the pattern describes the path, not
-// where it really leads.
 func OpenWithoutSymlinks(path string, flags int, mode uint32) (*os.File, error) {
 	fd, err := unix.Openat2(unix.AT_FDCWD, path, &unix.OpenHow{
 		Flags:   uint64(flags) | unix.O_CLOEXEC,

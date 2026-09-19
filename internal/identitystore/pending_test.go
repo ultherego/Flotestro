@@ -154,9 +154,8 @@ func TestADamagedRecordIsReportedAsInvalid(t *testing.T) {
 }
 
 func TestAnAttemptNeedsAKeyThatCanBeWritten(t *testing.T) {
-	// A hardware key gives out no material: recording an attempt with it
-	// would leave a record that cannot be repeated. The refusal has to come
-	// before the network, with the code that names the reason.
+	// A hardware key gives out no material: recording an attempt with it would
+	// leave a record that cannot be repeated.
 	source := &nonExportableSource{keys: map[string]crypto.Signer{}}
 	store := NewWithSource(t.TempDir(), source)
 	if _, err := store.PreparePending(zeroes{}, testClock, "machine-1", nil, nil, ""); !errors.Is(err, ErrKeyNotExportable) {

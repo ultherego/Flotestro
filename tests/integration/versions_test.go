@@ -57,11 +57,6 @@ func versionCorpus(t *testing.T) []versionPair {
 }
 
 // TestCorpusAgreesWithDpkg asks dpkg about every Debian version pair.
-//
-// A home-grown version comparison sooner or later drifts away from the
-// package manager. A drift one way gives a false alarm, the other way - a
-// vulnerability considered fixed. That is why the corpus is checked with the
-// tool, not only with the unit test.
 func TestCorpusAgreesWithDpkg(t *testing.T) {
 	if _, err := exec.LookPath("dpkg"); err != nil {
 		t.Skip("this machine has no dpkg")
@@ -90,10 +85,6 @@ func TestCorpusAgreesWithDpkg(t *testing.T) {
 }
 
 // rpmScript asks librpm to compare a version pair.
-//
-// The release is compared only when both sides have one - just like the
-// correlator, because an advisory often gives the bare version without a
-// release.
 const rpmScript = `
 import rpm, sys
 def split(evr):

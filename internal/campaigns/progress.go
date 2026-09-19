@@ -21,9 +21,8 @@ import (
 func (o *Orchestrator) progressTarget(ctx context.Context, campaign Campaign, target *Target) error {
 	switch target.State {
 	case TargetDispatched, TargetAwaitingLock, TargetRunning:
-		// Three states of one task: handed over, waiting for a resource of
-		// the host, running on the agent's word. The task's own state says
-		// which, and its end settles the host the same way from any of them.
+		// Three states of one task: handed over, waiting for a resource of the host,
+		// running on the agent's word.
 		return o.afterMainJob(ctx, campaign, target)
 	case TargetRebooting:
 		return o.afterReboot(ctx, campaign, target)
@@ -52,15 +51,14 @@ func (o *Orchestrator) afterMainJob(ctx context.Context, campaign Campaign, targ
 	if err != nil {
 		return err
 	}
-	// The host follows its task for as long as the task is open: handed
-	// over, waiting on a lock with the blocker named, or running on the
-	// agent's word.
+	// The host follows its task for as long as the task is open: handed over,
+	// waiting on a lock with the blocker named, or running on the agent's word.
 	if !jobs.State(job.State).Terminal() {
 		return o.followJob(ctx, target, job)
 	}
-	// What the task ended with, read into one verdict: a broken session
-	// is told apart from a failed change, and the host's own word that it
-	// changed nothing from a change that landed.
+	// What the task ended with, read into one verdict: a broken session is told
+	// apart from a failed change, and the host's own word that it changed nothing
+	// from a change that landed.
 	verdict := jobVerdict{State: job.State, ErrorCode: job.ResultErrorCode}
 	if job.State != jobs.StateSucceeded {
 		lost, detail, err := o.connectivityLost(ctx, job, target)
@@ -86,9 +84,9 @@ func (o *Orchestrator) afterMainJob(ctx context.Context, campaign Campaign, targ
 	}
 	verdict.NoChange = resultNoChange(detail)
 	if state, _ := targetOutcome(verdict); state == TargetNoChange {
-		// Nothing changed on the host, so there is nothing to reboot for
-		// and nothing to verify: the reboot and the verification are
-		// answers to a change, and the strip says why neither ran.
+		// Nothing changed on the host, so there is nothing to reboot for and nothing
+		// to verify: the reboot and the verification are answers to a change, and
+		// the strip says why neither ran.
 		why := "the host reported that nothing changed"
 		o.finishTargetSteps(ctx, campaign, target, TargetNoChange, "", why,
 			stepOutcome{Key: StepExecute, State: StepSucceeded, Reason: why},
@@ -97,12 +95,8 @@ func (o *Orchestrator) afterMainJob(ctx context.Context, campaign Campaign, targ
 		return nil
 	}
 
-	// The task says it succeeded; the host's own reading of itself after
-	// the change decides whether that is a success. A change nobody
-	// observed is not one, and it must not carry a wave forward as if it
-	// were: the host ends applied_unverified, and neither the reboot nor
-	// the unit check runs for it - both are answers to a change that
-	// landed.
+	// The task says it succeeded; the host's own reading of itself after the
+	// change decides whether that is a success.
 	if reason := unverifiedChange(opspec.ActionType(campaign.ActionType), attempt); reason != "" {
 		o.log.Warn("the task of a campaign host succeeded and the host does not show the state asked for",
 			"campaign_id", campaign.ID, "host_id", target.HostID, "job_id", *target.JobID, "reason", reason)
@@ -132,12 +126,9 @@ func (o *Orchestrator) afterMainJob(ctx context.Context, campaign Campaign, targ
 			o.finishTargetSteps(ctx, campaign, target, TargetSucceeded, "", "", changed, notRebooted)
 			return nil
 		}
-		// The units are verified whether or not a reboot came between:
-		// the canary is there to say if the change left the service
-		// standing, and a restart campaign with no reboot in it is the
-		// one case where nothing else would ever look. The verification
-		// follows the change directly, and the strip says the reboot was
-		// skipped rather than never reached.
+		// The units are verified whether or not a reboot came between: the canary is
+		// there to say if the change left the service standing, and a restart
+		// campaign with no reboot in it is the one case where nothing else would
 		host, err := o.hosts.Get(ctx, target.HostID)
 		if err != nil {
 			o.finishTargetSteps(ctx, campaign, target, TargetFailed, "host_unavailable", err.Error(),
@@ -168,9 +159,8 @@ func (o *Orchestrator) afterMainJob(ctx context.Context, campaign Campaign, targ
 				Reason: stepReason("reboot_create_failed", err.Error())})
 		return nil
 	}
-	// The boot ID from before the reboot is the only certain proof that the
-	// host really came back rather than merely failed to disconnect in
-	// time. It is recorded with the transition, in the same transaction.
+	// The boot ID from before the reboot is the only certain proof that the host
+	// really came back rather than merely failed to disconnect in time.
 	planHash, _, _, err := o.store.HostPlan(ctx, campaign.ID, target.HostID)
 	if err != nil {
 		return err
@@ -190,14 +180,11 @@ func (o *Orchestrator) afterMainJob(ctx context.Context, campaign Campaign, targ
 
 // followJob copies onto the target where its open task stands: dispatched
 // until the agent says the operation started, waiting for a lock with the
-// blocker the agent named while it waits, running once it started. The
-// write happens only when something changes: the orchestrator passes every
-// few seconds, and a host waiting a minute must not be rewritten every
-// pass to say the same thing.
+// blocker the agent named while it waits, running once it started.
 func (o *Orchestrator) followJob(ctx context.Context, target *Target, job *jobs.Job) error {
-	// A task whose cancel was asked of the host stands where it stood:
-	// the host has not said yet whether it started, and the answer or the
-	// result moves the host - not a guess made from the request.
+	// A task whose cancel was asked of the host stands where it stood: the host
+	// has not said yet whether it started, and the answer or the result moves the
+	// host - not a guess made from the request.
 	if job.State == jobs.StateCancelRequested {
 		return nil
 	}
@@ -212,10 +199,7 @@ func (o *Orchestrator) followJob(ctx context.Context, target *Target, job *jobs.
 }
 
 // taskStanding maps an open task onto the state of the host carrying it,
-// together with the lock it waits on. The agent's word decides: a task it
-// has not reported started is dispatched wherever it is in the queue, a
-// task it reported waiting is waiting for that lock, and only a task it
-// reported started is running.
+// together with the lock it waits on.
 func taskStanding(state jobs.State, waitReason string) (TargetState, string) {
 	if blocker, waiting := jobs.LockBlocker(waitReason); waiting {
 		return TargetAwaitingLock, blocker
@@ -226,9 +210,9 @@ func taskStanding(state jobs.State, waitReason string) (TargetState, string) {
 	return TargetDispatched, ""
 }
 
-// jobVerdict is what the campaign reads off a task that ended: its state
-// and error code, whether the session broke while it ran, and whether the
-// host said it changed nothing.
+// jobVerdict is what the campaign reads off a task that ended: its state and
+// error code, whether the session broke while it ran, and whether the host
+// said it changed nothing.
 type jobVerdict struct {
 	State     jobs.State
 	ErrorCode string
@@ -236,23 +220,8 @@ type jobVerdict struct {
 	NoChange  bool
 }
 
-// targetOutcome maps the end of a task onto the state of the host and the
-// code it carries.
-//
-// A task that succeeded is a success - a change that landed, or nothing to
-// change when the host says so. A task that ended without a result is
-// unknown, not failed: the session broke while it ran, or the agent came
-// back from a restart with the operation half done. The document keeps
-// unknown apart from failure because the next step differs - read the
-// host, do not run the change again - and from success because nobody
-// saw the desired state on the host. A task canceled - by the campaign's
-// own cancel reaching the host before it started, or by an operator on
-// the job - is a host that was stopped, not one that failed: it changed
-// nothing, and the threshold has no failure to count. A task whose
-// cancel request got no answer within the operation's timeout is unknown
-// with that code: the host may have done anything. Everything else is a
-// failure of the change with the code the host gave, or the task's state
-// when it gave none.
+// targetOutcome maps the end of a task onto the state of the host and the code
+// it carries.
 func targetOutcome(verdict jobVerdict) (TargetState, string) {
 	switch {
 	case verdict.State == jobs.StateSucceeded && verdict.NoChange:
@@ -273,10 +242,7 @@ func targetOutcome(verdict jobVerdict) (TargetState, string) {
 }
 
 // resultNoChange reads off the result of a change whether the host said it
-// changed nothing. The families say it differently: a result with a
-// changed flag says so outright, a package transaction by applying no
-// package. A result that says nothing either way changed something as far
-// as the campaign knows - a unit restart has no "already restarted".
+// changed nothing.
 func resultNoChange(detail json.RawMessage) bool {
 	if len(detail) == 0 {
 		return false
@@ -311,22 +277,8 @@ func (o *Orchestrator) lastAttempt(ctx context.Context, jobID string) (*jobs.Att
 	return &attempts[len(attempts)-1], nil
 }
 
-// unverifiedChange says why a task that reports success is not one, from
-// the verification the host sent with its result. An empty answer means
-// the host may be called changed.
-//
-// Three cases are a success. An operation whose verifier is none is its
-// own observation - a read, a plan, a signal delivered. An operation whose
-// verifier the panel settles on the host's return (a reboot, an agent
-// replacement) was confirmed by the panel before the job reached this
-// state at all. And a verification that says the state was observed is
-// exactly what the campaign was waiting for.
-//
-// A verification that says the state was not observed is a failure of the
-// change: the host is left applied_unverified with the verifier's own
-// reason. An attempt without a verification comes from an agent older than
-// the verifiers; the campaign cannot invent an observation for it, so the
-// host keeps the verdict of its task and the strip says nobody looked.
+// unverifiedChange says why a task that reports success is not one, from the
+// verification the host sent with its result.
 func unverifiedChange(action opspec.ActionType, attempt *jobs.Attempt) string {
 	if attempt == nil || len(attempt.Verification) == 0 {
 		return ""
@@ -355,14 +307,8 @@ func unverifiedChange(action opspec.ActionType, attempt *jobs.Attempt) string {
 	return "the change was made and the host does not show the state asked for: " + reason
 }
 
-// afterRemediation settles a host of a fleet remediation from the state of
-// its plan.
-//
-// The runner drives the steps and closes the plan: succeeded once every
-// step went through, failed at the first step that did not, stopped when
-// an operator stopped it. A step that requires a reboot already waits for
-// the host to come back inside the plan, so the campaign has no reboot
-// phase of its own here.
+// afterRemediation settles a host of a fleet remediation from the state of its
+// plan.
 func (o *Orchestrator) afterRemediation(ctx context.Context, campaign Campaign, target *Target) error {
 	plan, err := o.remediation.ForCampaignHost(ctx, campaign.ID, target.HostID)
 	if errors.Is(err, remediation.ErrNotFound) {
@@ -418,8 +364,7 @@ func rebootNeeded(campaign Campaign, detail json.RawMessage) bool {
 }
 
 // afterReboot waits for the host to come back with a new boot ID and orders
-// the health check. The host counts as restored only after a new session and
-// the verification, not after the reboot command has merely been sent.
+// the health check.
 func (o *Orchestrator) afterReboot(ctx context.Context, campaign Campaign, target *Target) error {
 	if target.RebootJobID != nil {
 		job, err := o.jobs.Get(ctx, *target.RebootJobID)
@@ -463,12 +408,9 @@ func (o *Orchestrator) afterReboot(ctx context.Context, campaign Campaign, targe
 		"the host came back, verification is under way", rebooted)
 }
 
-// orderHealthCheck orders the verification of the campaign's units on a
-// host whose change is done: right after the change when no reboot
-// follows, or once the host came back from one. The steps that ended for
-// the verification to start close in the same transaction, and the step
-// row names the one it followed, so the strip reads the same whichever
-// way the host got here.
+// orderHealthCheck orders the verification of the campaign's units on a host
+// whose change is done: right after the change when no reboot follows, or once
+// the host came back from one.
 func (o *Orchestrator) orderHealthCheck(ctx context.Context, campaign Campaign, target *Target,
 	host *hosts.Host, after StepKey, message string, closes ...stepOutcome) error {
 	healthJobID, err := o.submitJob(ctx, campaign, host, opspec.ActionUnitStatus,
@@ -500,10 +442,7 @@ func (o *Orchestrator) orderHealthCheck(ctx context.Context, campaign Campaign, 
 }
 
 // rebootOrderedAt says since when the host has been away: the moment the
-// target entered the rebooting state. The change before the reboot may
-// have taken half an hour, and a wait counted from the start of the change
-// would fail a host the moment its reboot was ordered. A target without
-// either time cannot be judged and is waited for.
+// target entered the rebooting state.
 func rebootOrderedAt(target *Target) (time.Time, bool) {
 	switch {
 	case target.StateSince != nil:
@@ -515,9 +454,9 @@ func rebootOrderedAt(target *Target) (time.Time, bool) {
 	}
 }
 
-// rebootVerdict is the judgement on a host that has not come back from
-// its reboot: Waiting while the campaign still waits for it, otherwise
-// the code and the message the host is closed with.
+// rebootVerdict is the judgement on a host that has not come back from its
+// reboot: Waiting while the campaign still waits for it, otherwise the code
+// and the message the host is closed with.
 type rebootVerdict struct {
 	Waiting bool
 	Code    string
@@ -525,16 +464,7 @@ type rebootVerdict struct {
 }
 
 // judgeReboot decides whether a host away since the given moment is still
-// waited for, from the campaign's maintenance window and its reboot
-// timeout.
-//
-// The window is judged first and the timeout only then. The window is the
-// operator's promise about when the fleet is touched: a host that is down
-// after it ended is outside that promise however short its absence, and
-// a timeout that merely has not run out yet does not put it back inside.
-// The document lists "the host does not come back within the maintenance
-// window" among the mandatory scenarios and keeps such a host failed; it
-// says nothing about waiting past the end, so the campaign does not.
+// waited for, from the campaign's maintenance window and its reboot timeout.
 func judgeReboot(since time.Time, windowEnd *time.Time, timeout time.Duration, now time.Time) rebootVerdict {
 	away := now.Sub(since).Round(time.Second)
 	if windowEnd != nil && now.After(*windowEnd) {
@@ -563,19 +493,13 @@ func (o *Orchestrator) afterHealthCheck(ctx context.Context, campaign Campaign, 
 		return nil
 	}
 	if job.State != jobs.StateSucceeded {
-		// A failed health check is a failure of the host in the campaign: the
-		// change was carried out, but the host did not return to a working
-		// state. The host carries the campaign's verdict - the check failed -
-		// and the agent's finding travels in the message and on the task;
-		// the policy and the threshold read one code for one stage. A
-		// session lost during the check is the one exception: it is not a
-		// verdict on the units, and the campaign counts it with the other
-		// lost sessions.
+		// A failed health check is a failure of the host in the campaign: the change
+		// was carried out, but the host did not return to a working state.
 		state, code := TargetFailed, "health_check_failed"
 		if job.ResultErrorCode == ConnectivityLostCode {
-			// The change landed and nobody saw the units after it: the
-			// host is unknown, not failed, and the compensation count
-			// still reads its change step as landed.
+			// The change landed and nobody saw the units after it: the host is unknown,
+			// not failed, and the compensation count still reads its change step as
+			// landed.
 			state, code = TargetUnknown, ConnectivityLostCode
 		}
 		o.finishTarget(ctx, campaign, target, state, code,
@@ -586,23 +510,17 @@ func (o *Orchestrator) afterHealthCheck(ctx context.Context, campaign Campaign, 
 	return nil
 }
 
-// finishTarget settles a host in a campaign and records that in the audit trail.
-//
-// The step the host was carrying ends with it: the outcome is derived
-// from the target's state, so a host settled while running closes its
-// change and a host settled while waiting records the step it never got
-// to, with the reason. The places that know better - a change that
-// succeeded and a reboot that could not be ordered - name the outcomes
-// themselves through finishTargetSteps.
+// finishTarget settles a host in a campaign and records that in the audit
+// trail.
 func (o *Orchestrator) finishTarget(ctx context.Context, campaign Campaign, target *Target,
 	state TargetState, errorCode, message string) {
 	o.finishTargetSteps(ctx, campaign, target, state, errorCode, message,
 		settledOutcomes(campaign, target, state, errorCode, message)...)
 }
 
-// finishTargetSteps settles a host together with the named outcomes of
-// its steps, in one transaction: a target cannot end with its step left
-// open, and a step cannot close without the target that carried it.
+// finishTargetSteps settles a host together with the named outcomes of its
+// steps, in one transaction: a target cannot end with its step left open, and
+// a step cannot close without the target that carried it.
 func (o *Orchestrator) finishTargetSteps(ctx context.Context, campaign Campaign, target *Target,
 	state TargetState, errorCode, message string, outcomes ...stepOutcome) {
 	revision, err := o.settleTarget(ctx, campaign, target, state, errorCode, message, outcomes)
@@ -613,14 +531,11 @@ func (o *Orchestrator) finishTargetSteps(ctx context.Context, campaign Campaign,
 	}
 	target.Revision = revision
 	target.State = state
-	// The code stays on the target in memory as it is in the row: the pass
-	// that settled the host reads it back to decide whether the campaign
-	// goes on.
+	// The code stays on the target in memory as it is in the row: the pass that
+	// settled the host reads it back to decide whether the campaign goes on.
 	target.ErrorCode = errorCode
 	target.Message = message
-	// The tokens go back to the pool together with the end of the host. The
-	// release is separate from the expiry of the lease: the capacity is to
-	// come back now rather than in two minutes.
+	// The tokens go back to the pool together with the end of the host.
 	o.releaseCapacity(ctx, target)
 
 	outcome := audit.OutcomeSuccess
@@ -642,8 +557,7 @@ func (o *Orchestrator) finishTargetSteps(ctx context.Context, campaign Campaign,
 }
 
 // pauseOnThreshold holds a campaign back once the failure threshold is
-// crossed. The hosts already started finish their tasks; new ones do not
-// start.
+// crossed.
 func (o *Orchestrator) pauseOnThreshold(ctx context.Context, campaign Campaign, targets []Target,
 	reason string, failed, finished int) error {
 	if err := o.pause(ctx, &campaign, targets, reason); err != nil {
@@ -664,16 +578,8 @@ func (o *Orchestrator) pauseOnThreshold(ctx context.Context, campaign Campaign, 
 	return nil
 }
 
-// pauseOnWindowClosed holds a campaign back once a host was still
-// rebooting when the maintenance window ended.
-//
-// The threshold has no say here. A host that is down after the window
-// closed is exactly the case an operator must look at: the window is
-// what the fleet was promised, the host is outside it, and whether the
-// next wave may start after that is a decision, not a percentage. The
-// document keeps such a host failed and says it blocks its failure
-// domain; where it is silent about the campaign, the campaign stops and
-// asks.
+// pauseOnWindowClosed holds a campaign back once a host was still rebooting
+// when the maintenance window ended.
 func (o *Orchestrator) pauseOnWindowClosed(ctx context.Context, campaign Campaign, targets []Target,
 	hostIDs []string) error {
 	// The judgement only closes a host this way under a window with an
@@ -701,27 +607,20 @@ func (o *Orchestrator) pauseOnWindowClosed(ctx context.Context, campaign Campaig
 	return nil
 }
 
-// pause holds a campaign back by the machinery's own decision - a
-// threshold crossed, a window closed, sessions lost. With hosts still
-// carrying a task the campaign is pausing rather than paused: nothing new
-// starts, the hosts under way settle with their leases renewed, and the
-// campaign is paused with the last of them. The reason is recorded either
-// way, because it is what the operator reads first.
+// pause holds a campaign back by the machinery's own decision - a threshold
+// crossed, a window closed, sessions lost.
 func (o *Orchestrator) pause(ctx context.Context, campaign *Campaign, targets []Target, reason string) error {
 	return o.store.SetState(ctx, campaign, pauseState(targets), reason)
 }
 
 // complete closes a campaign whose hosts have all settled and records the
-// report in the audit trail. The state is the verdict on the tally:
-// completed, completed with issues, or failed when nothing got through.
+// report in the audit trail.
 func (o *Orchestrator) complete(ctx context.Context, campaign Campaign, targets []Target) error {
 	state := settleCampaignState(tallyTargets(targets))
 	if err := o.store.SetState(ctx, &campaign, state, ""); err != nil {
 		return err
 	}
-	// The hosts gave their tokens back as they finished one by one. What
-	// remains are the waiting records - and those have to disappear too,
-	// because they count towards the share of the next campaigns.
+	// The hosts gave their tokens back as they finished one by one.
 	if o.budgets != nil {
 		if err := o.budgets.ReleaseClaimant(ctx, "campaign:"+campaign.ID); err != nil {
 			o.log.Error("the capacity of a finished campaign was not released",
@@ -744,9 +643,9 @@ func (o *Orchestrator) complete(ctx context.Context, campaign Campaign, targets 
 	return nil
 }
 
-// withCompensation adds the compensated campaign to an audit detail when
-// there is one: the trail of the original is to lead to the campaign that
-// undid it, and the trail of the compensation to what it undid.
+// withCompensation adds the compensated campaign to an audit detail when there
+// is one: the trail of the original is to lead to the campaign that undid it,
+// and the trail of the compensation to what it undid.
 func withCompensation(detail map[string]any, campaign Campaign) map[string]any {
 	if campaign.CompensatesCampaignID != "" {
 		detail["compensates_campaign_id"] = campaign.CompensatesCampaignID
@@ -765,11 +664,6 @@ func firstNonEmpty(values ...string) string {
 
 // settleTarget writes the target's terminal state and the outcomes of its
 // steps in one transaction.
-//
-// An outcome closes the open step of its kind where there is one. Where
-// there is none - the host was settled before the step was ordered - the
-// step is recorded as it ended, so that the strip says "skipped: the host
-// is in a maintenance window" instead of showing no step at all.
 func (o *Orchestrator) settleTarget(ctx context.Context, campaign Campaign, target *Target,
 	state TargetState, errorCode, message string, outcomes []stepOutcome) (int64, error) {
 	tx, err := o.store.Pool().Begin(ctx)
@@ -811,17 +705,7 @@ func (o *Orchestrator) settleTarget(ctx context.Context, campaign Campaign, targ
 
 // openCompensation records, on the original campaign's target for the same
 // host, that its compensation started: a compensate step that follows the
-// original's change, runs under the compensating campaign's plan for the
-// host and is carried by that campaign's task.
-//
-// The original's target keeps its state. Its terminal state is the record
-// of what that campaign did to the host, the report written from those
-// states is immutable, and moving a failed target to "compensated" would
-// take the failure out of every count and filter that reads the state -
-// the history the document says a compensation must not erase. The step
-// row is that history: it names the compensating campaign in its note,
-// so the strip of the original reads "compensated by ..." without a word
-// of the original's own record rewritten.
+// original's change, runs under the compensating campaign's plan for the host
 func (o *Orchestrator) openCompensation(ctx context.Context, tx pgx.Tx, originalID string,
 	target *Target, start stepStart) error {
 	original, found, err := o.store.compensatedTarget(ctx, tx, originalID, target.HostID)
@@ -829,9 +713,9 @@ func (o *Orchestrator) openCompensation(ctx context.Context, tx pgx.Tx, original
 		return err
 	}
 	if !found {
-		// The order was checked against the original's snapshot; a host
-		// missing from it now has left the fleet, and the compensating
-		// campaign's own step says what happened on it.
+		// The order was checked against the original's snapshot; a host missing from
+		// it now has left the fleet, and the compensating campaign's own step says
+		// what happened on it.
 		o.log.Warn("the compensated campaign has no target for the host",
 			"campaign_id", originalID, "host_id", target.HostID)
 		return nil
@@ -844,17 +728,13 @@ func (o *Orchestrator) openCompensation(ctx context.Context, tx pgx.Tx, original
 }
 
 // compensationNote is what the compensate step of the original says about
-// where it came from. The task and the plan digest point at the
-// compensating campaign already; the note says it in words, on the strip.
+// where it came from.
 func compensationNote(campaignID string) string {
 	return "compensated by campaign " + campaignID
 }
 
-// closeCompensation settles the compensate step the compensating target
-// opened on the original's target, with the outcome of the compensating
-// change. A compensating host settled before its change started opened
-// nothing, and nothing is closed: the original host was not touched, and
-// the compensating campaign's own strip says why its host never ran.
+// closeCompensation settles the compensate step the compensating target opened
+// on the original's target, with the outcome of the compensating change.
 func (o *Orchestrator) closeCompensation(ctx context.Context, tx pgx.Tx, campaign Campaign,
 	target *Target, state TargetState, errorCode, message string) error {
 	original, found, err := o.store.compensatedTarget(ctx, tx, campaign.CompensatesCampaignID, target.HostID)
@@ -887,27 +767,19 @@ type stepStart struct {
 	Note    string
 	// BootID, when set, is recorded as the boot ID from before the change.
 	BootID *string
-	// Closes are the steps that ended for this one to start. A step among
-	// them that was never ordered - a reboot the policy skipped on the way
-	// to the verification - has no open row to close and is recorded as it
-	// ended instead, the way settleTarget records a step a settled host
-	// never got to.
+	// Closes are the steps that ended for this one to start.
 	Closes []stepOutcome
-	// Planned says whether the hosts of the campaign computed a plan step;
-	// it places a step recorded from Closes on the strip. Read only when
-	// such a record is written.
+	// Planned says whether the hosts of the campaign computed a plan step; it
+	// places a step recorded from Closes on the strip.
 	Planned bool
-	// Compensates names the campaign whose change on this host the step
-	// undoes; set on the change step of a compensating campaign only. The
-	// original's target for the same host gets its compensate step opened
-	// in the same transaction: the reverse change runs on the host, and
-	// the original is to say so on its own strip.
+	// Compensates names the campaign whose change on this host the step undoes;
+	// set on the change step of a compensating campaign only.
 	Compensates string
 }
 
-// startStep orders a step: it binds the task, moves the target into the
-// state the step runs in and opens the step row - in one transaction, so
-// that the target and its step never disagree about what is under way.
+// startStep orders a step: it binds the task, moves the target into the state
+// the step runs in and opens the step row - in one transaction, so that the
+// target and its step never disagree about what is under way.
 func (o *Orchestrator) startStep(ctx context.Context, target *Target, start stepStart) error {
 	tx, err := o.store.Pool().Begin(ctx)
 	if err != nil {
@@ -925,11 +797,8 @@ func (o *Orchestrator) startStep(ctx context.Context, target *Target, start step
 	return nil
 }
 
-// startStepTx writes the start of a step inside the caller's transaction
-// and returns the revision the target will carry once it commits. Every
-// write is fenced by the revision and the claim token the target carries
-// in memory: a row that moved fails the whole transaction with
-// ErrConcurrentTransition, and the caller reads the host again.
+// startStepTx writes the start of a step inside the caller's transaction and
+// returns the revision the target will carry once it commits.
 func (o *Orchestrator) startStepTx(ctx context.Context, tx pgx.Tx, target *Target, start stepStart) (int64, error) {
 	for _, done := range start.Closes {
 		settled, err := o.store.FinishStep(ctx, tx, target.ID, done.Key, done.State, done.Reason)
@@ -975,10 +844,9 @@ func (o *Orchestrator) startStepTx(ctx context.Context, tx pgx.Tx, target *Targe
 	return revision, nil
 }
 
-// applyStart copies a committed start onto the target in memory: the
-// state the step runs in, the revision the row carries now, the task and
-// the boot ID, so the rest of the pass reads the host as the database has
-// it.
+// applyStart copies a committed start onto the target in memory: the state the
+// step runs in, the revision the row carries now, the task and the boot ID, so
+// the rest of the pass reads the host as the database has it.
 func (o *Orchestrator) applyStart(target *Target, start stepStart, revision int64) {
 	target.Revision = revision
 	target.State = start.State
@@ -1002,12 +870,9 @@ func (o *Orchestrator) applyStart(target *Target, start stepStart, revision int6
 	}
 }
 
-// campaignPlans says whether the targets of this campaign have a plan step
-// of their own before the change: computed on the host, or split from the
-// order in the panel, which opens and closes the step without a task. A
-// plan set handed in whole with the order - a fleet remediation - is no
-// step of the host, so the change of such a campaign follows nothing on
-// the host's strip.
+// campaignPlans says whether the targets of this campaign have a plan step of
+// their own before the change: computed on the host, or split from the order
+// in the panel, which opens and closes the step without a task.
 func campaignPlans(campaign Campaign) bool {
 	return opspec.CampaignPlans(opspec.ActionType(campaign.ActionType))
 }

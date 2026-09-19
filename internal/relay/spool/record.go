@@ -1,22 +1,5 @@
-// Package spool is the durable queue of a relay: the messages of the
-// agents of a site that the centre has not yet confirmed it consumed.
-//
-// A relay stands between a site and the centre. While the link is down it
-// is the only place a result exists outside the host's journal, and after
-// its own restart it has to still hold what it took: a result the relay
-// lost looks to the panel like a job that is still running and blocks the
-// host for the length of the lease. The spool is an append-only log of
-// segment files with a checksum on every record, an index rebuilt from
-// the files at start, and a deletion that happens only on the
-// application acknowledgement of the panel - a successful write to the
-// socket says nothing about the panel having committed the message.
-//
-// Not every message is worth the same. A job result or the answer to a
-// cancel is what the panel waits for; a metrics sample is one of many and
-// the next one says more. The streams have priorities, the send order
-// follows them, and the quota is spent by class: the durable classes keep
-// a reserve the lighter ones cannot take, and a full spool coalesces,
-// rolls up or drops the lighter ones rather than the results.
+// Package spool is the durable queue of a relay: the messages of the agents of
+// a site that the centre has not yet confirmed it consumed.
 package spool
 
 import (
@@ -35,9 +18,9 @@ import (
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 )
 
-// The streams of the spool and their priorities, from the security
-// document: identity and control first, job results and acknowledgements
-// next, then inventory, metrics and interactive logs.
+// The streams of the spool and their priorities, from the security document:
+// identity and control first, job results and acknowledgements next, then
+// inventory, metrics and interactive logs.
 const (
 	StreamControl   = "control"
 	StreamJobResult = "job_result"
@@ -56,9 +39,7 @@ const (
 	PriorityLog       uint8 = 4
 )
 
-// PriorityOf returns the priority of a stream. An unknown stream is a log:
-// the least durable class, because a message the relay cannot classify is
-// not one to keep a result waiting behind.
+// PriorityOf returns the priority of a stream.
 func PriorityOf(stream string) uint8 {
 	switch stream {
 	case StreamControl:
@@ -74,11 +55,8 @@ func PriorityOf(stream string) uint8 {
 }
 
 // Durable says whether a stream is written ahead of the live forward: a
-// message of a durable stream goes to the disk before the socket, so a
-// restart of the relay between the send and the panel's commit loses
-// nothing. Metrics and logs are forwarded live and spooled only while the
-// link is down: a lost sample is one of many, and an interactive log line
-// that missed its moment has no reader.
+// message of a durable stream goes to the disk before the socket, so a restart
+// of the relay between the send and the panel's commit loses nothing.
 func Durable(stream string) bool {
 	return PriorityOf(stream) <= PriorityInventory
 }
@@ -100,9 +78,6 @@ func Classify(message *agentv1.AgentMessage) string {
 }
 
 // Record is one spooled message, as the security document lays it out.
-// SessionID is in addition to the document's fields: the acknowledgement
-// of the panel names the session and the sequence, and the record has to
-// be found by them without decoding the envelope.
 type Record struct {
 	ID        uuid.UUID
 	Site      string
@@ -110,9 +85,8 @@ type Record struct {
 	SessionID string
 	Stream    string
 	Priority  uint8
-	// Sequence is the sequence of the envelope, zero for a message of an
-	// agent from before the envelope. Such a message has no
-	// acknowledgement to wait for and is confirmed by its send alone.
+	// Sequence is the sequence of the envelope, zero for a message of an agent
+	// from before the envelope.
 	Sequence  uint64
 	CreatedAt time.Time
 	ExpiresAt *time.Time
@@ -159,9 +133,7 @@ func (r *Record) Size() int {
 	return headerSize + r.bodySize()
 }
 
-// FromMessage builds the record of a message of an agent. The envelope
-// and the payload are encoded apart, so that the resend attaches the same
-// signed envelope to the same payload bytes.
+// FromMessage builds the record of a message of an agent.
 func FromMessage(site, hostID string, message *agentv1.AgentMessage, now time.Time) (*Record, error) {
 	if message == nil {
 		return nil, errors.New("no message")
@@ -195,11 +167,7 @@ func FromMessage(site, hostID string, message *agentv1.AgentMessage, now time.Ti
 	return record, nil
 }
 
-// lifetimeOf says how long a message of the stream is worth carrying. A
-// result is worth carrying as long as the panel would still take it -
-// the sequences of a session are kept for a month. A metrics sample or a
-// log line is not worth a day: the panel would show a day-old sample as
-// the present, and the operator who watched the log has left.
+// lifetimeOf says how long a message of the stream is worth carrying.
 func lifetimeOf(stream string) time.Duration {
 	switch stream {
 	case StreamMetric:
@@ -211,16 +179,6 @@ func lifetimeOf(stream string) time.Duration {
 }
 
 // The layout of a record on disk: a fixed header and a body.
-//
-//	magic     4 bytes  "FSP1"
-//	kind      1 byte   1 = record, 2 = tombstone
-//	length    4 bytes  little endian, the length of the body
-//	crc32c    4 bytes  Castagnoli over the body
-//
-// The header names the length, the checksum proves the body: a segment
-// cut in the middle of a write leaves a header without its body or a
-// body without its end, and both are recognised and cut off at the point
-// they begin.
 const (
 	headerSize    = 13
 	kindRecord    = 1
@@ -247,9 +205,7 @@ func frame(kind byte, body []byte) []byte {
 	return out
 }
 
-// readFrame reads one frame from the reader. io.EOF at a frame boundary
-// is the end of the segment; anything short of a whole, verified frame
-// is errTorn.
+// readFrame reads one frame from the reader. io.
 func readFrame(reader io.Reader) (kind byte, body []byte, err error) {
 	header := make([]byte, headerSize)
 	n, err := io.ReadFull(reader, header)

@@ -9,17 +9,9 @@ import (
 	"time"
 )
 
-// The sources of pacman are the sections of /etc/pacman.conf: [core] and
-// [extra] of the distribution, and whatever the administrator added with a
-// "Server =" line or an included mirror list. There is no directory of
-// sources, so a source the panel manages is a section of the same file,
-// marked with the panel's comment in the line above its header. Only such
-// sections are rewritten; the sections of the distribution and of the
-// administrator are shown and left alone.
+// The sources of pacman are the sections of /etc/pacman.
 
-// pacmanIncludeDepth limits how far the includes are followed. The mirror
-// list is one level; anything deeper is a configuration nobody reads by
-// hand either.
+// pacmanIncludeDepth limits how far the includes are followed.
 const pacmanIncludeDepth = 4
 
 // pacmanSection is one section of the configuration, with its entries read
@@ -31,9 +23,8 @@ type pacmanSection struct {
 	// a managed section written commented out.
 	Managed  bool
 	Disabled bool
-	// Raw keeps the lines of the section as they stand in its own file,
-	// includes not followed. The refresh of a single source copies them into
-	// a configuration of its own.
+	// Raw keeps the lines of the section as they stand in its own file, includes
+	// not followed.
 	Raw     []string
 	Entries []pacmanKV
 }
@@ -84,10 +75,7 @@ func parsePacmanConf(path string) (*pacmanConfig, error) {
 	return config, nil
 }
 
-// parsePacmanConfFile reads one file. An include is read in the context of
-// the current section - that is how the mirror list gives [core] its
-// servers - and a section header inside an included file starts a section
-// like one in the main file.
+// parsePacmanConfFile reads one file.
 func parsePacmanConfFile(path string, depth int, config *pacmanConfig,
 	current **pacmanSection) error {
 	data, err := os.ReadFile(path)
@@ -188,12 +176,6 @@ func pacmanRepositories(config *pacmanConfig) []Repository {
 }
 
 // SigLevelRequiresSignature reads the package part of a SigLevel line.
-//
-// "Never" disables the check, "Optional" checks a signature only when there
-// is one - and a source whose packages may arrive unsigned is not a source
-// with signatures checked. The distribution ships "Required DatabaseOptional";
-// the built-in default when nothing is set is "Optional", so an empty level
-// means unchecked.
 func SigLevelRequiresSignature(level string) bool {
 	required := false
 	for _, token := range strings.Fields(level) {
@@ -209,9 +191,7 @@ func SigLevelRequiresSignature(level string) bool {
 	return required
 }
 
-// PacmanSourceBlock composes the section the panel writes. The signature
-// level is explicit either way: a source without checking says so in the
-// file rather than inheriting whatever the options section happens to say.
+// PacmanSourceBlock composes the section the panel writes.
 func PacmanSourceBlock(repo Repository) []string {
 	level := "SigLevel = Never"
 	if repo.Signed {
@@ -253,10 +233,7 @@ func RemovePacmanSource(content, id string) (string, error) {
 	return strings.Join(lines, "\n"), nil
 }
 
-// dropPacmanSource removes the managed section with the name. A section of
-// the same name that is not the panel's is an error: rewriting it would take
-// a source away from the administrator, and writing a second one would leave
-// pacman with two.
+// dropPacmanSource removes the managed section with the name.
 func dropPacmanSource(lines []string, id string) ([]string, error) {
 	var kept []string
 	for i := 0; i < len(lines); i++ {
@@ -300,19 +277,13 @@ func dropPacmanSource(lines []string, id string) ([]string, error) {
 	return kept, nil
 }
 
-// PacmanKeyPath names the file the key of a managed source is kept in. The
-// keyring is what pacman reads; the file is what lets the panel remove the
-// key again when the source goes.
+// PacmanKeyPath names the file the key of a managed source is kept in.
 func PacmanKeyPath(id string) string {
 	return filepath.Join(PacmanConfDir, flotestroFilePrefix+id+".asc")
 }
 
-// WritePacmanSource puts the section into pacman.conf and, for a signed
-// source, imports its key. It requires root.
-//
-// The key file has already been written by the caller at PacmanKeyPath: the
-// panel writes files the same way for every manager, and only the keyring
-// step is pacman's own.
+// WritePacmanSource puts the section into pacman. conf and, for a signed
+// source, imports its key.
 func WritePacmanSource(ctx context.Context, repo Repository) error {
 	data, err := os.ReadFile(PacmanConfPath)
 	if err != nil {
@@ -333,9 +304,8 @@ func WritePacmanSource(ctx context.Context, repo Repository) error {
 	return nil
 }
 
-// DropPacmanSource takes the section out of pacman.conf and the key out of
-// the keyring. The key file itself is removed by the caller along with the
-// other files of the source.
+// DropPacmanSource takes the section out of pacman. conf and the key out of
+// the keyring.
 func DropPacmanSource(ctx context.Context, id string) error {
 	data, err := os.ReadFile(PacmanConfPath)
 	if err != nil {
@@ -364,11 +334,6 @@ func DropPacmanSource(ctx context.Context, id string) error {
 }
 
 // pacmanRefreshSource fetches the database of one source.
-//
-// pacman syncs every source of its configuration at once, so the one source
-// is given a configuration of its own: the options section as it stands and
-// the section of the source, nothing else. The database lands in the system
-// sync directory like after an ordinary sync - only for this source.
 func pacmanRefreshSource(ctx context.Context, id string) error {
 	config, err := parsePacmanConf(PacmanConfPath)
 	if err != nil {
@@ -403,11 +368,8 @@ func pacmanRefreshSource(ctx context.Context, id string) error {
 	if !result.Ran || result.ExitCode != 0 {
 		return fmt.Errorf("pacman -Sy: %s", result.Reason())
 	}
-	// pacman ends with zero when the database was fetched; a source that
-	// does not answer ends with an error of its own. What is read here is a
-	// signature nobody trusts, which pacman reports as a failure of the sync
-	// as well - and the reason is to reach the operator rather than a bare
-	// exit code.
+	// pacman ends with zero when the database was fetched; a source that does not
+	// answer ends with an error of its own.
 	if line := PacmanTrustProblem(result.Stdout + "\n" + result.Stderr); line != "" {
 		return fmt.Errorf("pacman -Sy: %s", line)
 	}

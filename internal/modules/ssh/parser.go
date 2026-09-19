@@ -8,11 +8,6 @@ import (
 )
 
 // ParseEffective reads the output of "sshd -T".
-//
-// It is the only source that says what the server really considers its
-// configuration: included files have their own order and the first value
-// wins in them, so assembling this by hand from the file contents ends in a
-// picture the host does not confirm.
 func ParseEffective(output string) Snapshot {
 	snapshot := Snapshot{}
 	for _, line := range strings.Split(output, "\n") {
@@ -58,9 +53,6 @@ func ParseEffective(output string) Snapshot {
 var keyFingerprint = regexp.MustCompile(`^(\d+)\s+(\S+)\s+.*\((\w+)\)\s*$`)
 
 // ParseFingerprint reads one row of "ssh-keygen -l -f".
-//
-// The fingerprint and metadata are taken, never the private key: its copy in
-// the panel database would be a copy of the host's identity.
 func ParseFingerprint(line, path string) (HostKey, bool) {
 	fields := keyFingerprint.FindStringSubmatch(strings.TrimSpace(line))
 	if fields == nil {
@@ -75,11 +67,8 @@ func ParseFingerprint(line, path string) (HostKey, bool) {
 	}, true
 }
 
-// ComposeDropIn composes the content of the panel's configuration file.
-//
-// Only the settings the operator asked for are written. Printing the whole
-// configuration "for tidiness" would freeze on the host the defaults of the
-// day of the write - and those change with the OpenSSH version.
+// ComposeDropIn composes the content of the panel's configuration file. Only
+// the settings the operator asked for are written.
 func ComposeDropIn(settings Settings) (string, error) {
 	if err := Validate(settings); err != nil {
 		return "", err
@@ -111,13 +100,8 @@ func ComposeDropIn(settings Settings) (string, error) {
 	return strings.Join(lines, "\n") + "\n", nil
 }
 
-// DivergentSettings compares what the operator asked for with what the
-// server really applies.
-//
-// In the sshd configuration the first value wins, and included files are in
-// alphabetical order: an earlier file of the host administrator shadows ours
-// and the change looks done although it changes nothing. Instead of
-// pretending success, it says directly which setting did not take effect.
+// DivergentSettings compares what the operator asked for with what the server
+// really applies.
 func DivergentSettings(desired Settings, state Snapshot) []string {
 	var divergent []string
 	compare := func(name, wanted, current string) {

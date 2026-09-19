@@ -14,10 +14,6 @@ import (
 const recentBoots = 5
 
 // CollectPower reads the boot state and the shutdown inhibitors.
-//
-// The read needs no root: /proc is readable by everyone, logind answers the
-// question about inhibitors over the bus, and the journal is read by the same
-// process that reads it for the log tab.
 func CollectPower(ctx context.Context, bootID string, rebootRequired *bool) power.Snapshot {
 	now := time.Now().UTC()
 	snapshot := power.Snapshot{

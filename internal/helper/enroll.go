@@ -12,16 +12,12 @@ import (
 
 // enrollDomain checks the conditions and joins the host to the directory
 // domain.
-//
-// The preflight always runs, also during a full join: a failed blocking
-// condition stops the operation before anything changes on the host.
 func (s *Server) enrollDomain(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.DomainEnrollRequest) *helperv1.HelperResponse {
 	result := &helperv1.DomainEnrollResult{}
 
-	// One limit for the whole order: the preflight, the join and the checks
-	// after it. A directory server that does not answer must not stretch the
-	// operation past what the panel gave it.
+	// One limit for the whole order: the preflight, the join and the checks after
+	// it.
 	ctx, cancel := deadline(ctx, request, 10*time.Minute, 30*time.Minute)
 	defer cancel()
 
@@ -52,8 +48,7 @@ func (s *Server) enrollDomain(ctx context.Context, request *helperv1.HelperReque
 	}
 
 	// At most one join runs at a time: it changes the configuration of SSSD,
-	// Kerberos and PAM at once. The preflight above takes no guard - it only
-	// looks.
+	// Kerberos and PAM at once.
 	release, busy := s.hold(GuardIdentity, request)
 	if busy != nil {
 		busy.EnrollResult = result
@@ -61,15 +56,8 @@ func (s *Server) enrollDomain(ctx context.Context, request *helperv1.HelperReque
 	}
 	defer release()
 
-	// The one-time password travels in argv, so it is readable in the
-	// process list of the host for the length of the join. That is the
-	// residual, and it is a measured one: ipa-client-install (4.12) refuses
-	// "-W" together with "--unattended" ("Password must be provided in
-	// non-interactive mode"), and the helper has no terminal to answer a
-	// prompt on, so there is no other channel for it. The password is
-	// bound to this host, single-use and spent by the join itself, so
-	// what the process list shows is a credential nobody can use again.
-	// It is kept out of the logs and of every message of the result.
+	// The one-time password travels in argv, so it is readable in the process
+	// list of the host for the length of the join.
 	args := enrollArguments(action, hostname)
 
 	stdout, stderr, err := runIdentityToolStrict(ctx, timeLimit(request, 10*time.Minute, 30*time.Minute),
@@ -281,17 +269,10 @@ func redactSecret(text, secret string) string {
 }
 
 // leaveDomain takes the host out of its directory domain.
-//
-// Leaving is not the reverse of a join run backwards: it is its own decision
-// with its own conditions. The preflight refuses a host that is in no domain
-// and a host that is in a different one than the order names, so a leave
-// ordered from a stale view of the fleet cannot take a working host out of
-// the wrong domain.
 func (s *Server) leaveDomain(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.DomainLeaveRequest) *helperv1.HelperResponse {
-	// The leave reports through the same shape as the join: the checks
-	// before, the verifications after, and enrolled - false once the host
-	// is out. One shape means one reader on the panel side.
+	// The leave reports through the same shape as the join: the checks before,
+	// the verifications after, and enrolled - false once the host is out.
 	result := &helperv1.DomainEnrollResult{}
 
 	ctx, cancel := deadline(ctx, request, 10*time.Minute, 30*time.Minute)
@@ -313,9 +294,8 @@ func (s *Server) leaveDomain(ctx context.Context, request *helperv1.HelperReques
 	}
 	defer release()
 
-	// --uninstall unenrolls the host in the directory with its own keytab
-	// and restores the files the join changed. No credential is needed, so
-	// nothing travels on stdin here.
+	// --uninstall unenrolls the host in the directory with its own keytab and
+	// restores the files the join changed.
 	_, stderr, err := runIdentityToolStrict(ctx, timeLimit(request, 10*time.Minute, 30*time.Minute),
 		"ipa-client-install", "--uninstall", "--unattended")
 	if err != nil {
@@ -338,9 +318,9 @@ func (s *Server) leaveDomain(ctx context.Context, request *helperv1.HelperReques
 func runLeavePreflight(ctx context.Context, action *helperv1.DomainLeaveRequest) []*helperv1.EnrollCheck {
 	var checks []*helperv1.EnrollCheck
 
-	// The host has to be in a domain, and in the one the order names: the
-	// order comes from the panel's view of the host, and that view can be
-	// older than the host.
+	// The host has to be in a domain, and in the one the order names: the order
+	// comes from the panel's view of the host, and that view can be older than
+	// the host.
 	existing := parseExistingRealm()
 	switch {
 	case existing == "":
@@ -361,10 +341,8 @@ func runLeavePreflight(ctx context.Context, action *helperv1.DomainLeaveRequest)
 	return checks
 }
 
-// verifyLeave confirms that the host really left: the client configuration
-// and the host keytab are gone. A leave that ends with the command alone
-// and leaves the keytab behind is a host that still authenticates as a
-// member of the domain.
+// verifyLeave confirms that the host really left: the client configuration and
+// the host keytab are gone.
 func verifyLeave(ctx context.Context, domain string) []*helperv1.EnrollCheck {
 	var checks []*helperv1.EnrollCheck
 
@@ -372,11 +350,8 @@ func verifyLeave(ctx context.Context, domain string) []*helperv1.EnrollCheck {
 	checks = append(checks, check("ipa_config", os.IsNotExist(configErr), true,
 		describeAbsence("/etc/ipa/default.conf", configErr)))
 
-	// The keytab is advisory: ipa-client-install --uninstall unenrolls the
-	// host and removes its configuration, but leaves /etc/krb5.keytab where
-	// the file holds keys of its own (the lab's Debian client does). A
-	// keytab left behind after an unenrollment holds keys the directory no
-	// longer honours; the operator is told, the host is out of the domain.
+	// The keytab is advisory: ipa-client-install --uninstall unenrolls the host
+	// and removes its configuration, but leaves /etc/krb5.
 	_, keytabErr := os.Stat("/etc/krb5.keytab")
 	checks = append(checks, check("keytab", os.IsNotExist(keytabErr), false,
 		describeAbsence("/etc/krb5.keytab", keytabErr)))

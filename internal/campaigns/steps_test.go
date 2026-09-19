@@ -26,10 +26,8 @@ func TestARunningTargetSettlesTheStepItCarries(t *testing.T) {
 }
 
 func TestAWaitingTargetRecordsTheStepItNeverReached(t *testing.T) {
-	// A host skipped while waiting ran nothing; the step it was waiting for
-	// is recorded as skipped so the reason has somewhere to live. Which
-	// step that is depends on the phase: the plan while the campaign
-	// plans, the change afterwards.
+	// A host skipped while waiting ran nothing; the step it was waiting for is
+	// recorded as skipped so the reason has somewhere to live.
 	target := &Target{State: TargetPending}
 	planning := settledOutcomes(Campaign{State: StatePlanning}, target, TargetSkipped, "offline", "the host is offline")
 	if len(planning) != 1 || planning[0].Key != StepPlan || planning[0].State != StepSkipped {

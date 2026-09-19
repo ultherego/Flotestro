@@ -163,8 +163,8 @@ func TestTheStatesWithoutAFixHaveAnswersOfTheirOwn(t *testing.T) {
 		t.Errorf("vim: status = %q, we want %q", byKey["9/vim"].Status, vuln.StatusUnderInvestigation)
 	}
 	// The "not affected" state is not written down: the correlator makes no
-	// finding out of it anyway, and Red Hat lists thousands of packages per
-	// CVE in it.
+	// finding out of it anyway, and Red Hat lists thousands of packages per CVE
+	// in it.
 	if _, ok := byKey["9/nano"]; ok {
 		t.Error("a 'not affected' finding takes space in the snapshot")
 	}
@@ -218,9 +218,9 @@ func TestSplitNEVRA(t *testing.T) {
 	}{
 		{"zlib-0:1.2.11-40.el9.x86_64", "zlib", "x86_64", "1.2.11-40.el9", true},
 		{"kernel-rt-0:5.14.0-284.el9.x86_64", "kernel-rt", "x86_64", "5.14.0-284.el9", true},
-		// A non-zero epoch belongs to the version and has to be written down
-		// the way the host writes it - otherwise the comparison comes out the
-		// other way round.
+		// A non-zero epoch belongs to the version and has to be written down the way
+		// the host writes it - otherwise the comparison comes out the other way
+		// round.
 		{"podman-3:4.4.1-19.el9.aarch64", "podman", "aarch64", "3:4.4.1-19.el9", true},
 		{"zlib-0:1.2.11-40.el9.noarch", "zlib", "noarch", "1.2.11-40.el9", true},
 		{"zlib", "", "", "", false},
