@@ -54,6 +54,34 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
+      - name: The tag belongs to the default branch
+        # A tag can be pushed from any branch, and a signed artefact of a
+        # commit nobody reviewed is worth nothing. Two questions: does the
+        # repository's default branch contain this commit, and - when the
+        # owner signs tags at all - is the tag itself signed.
+        run: |
+          set -euo pipefail
+          branch="${{ github.event.repository.default_branch }}"
+          # checkout leaves no remote-tracking branch for a tag push, so the
+          # branch this is measured against is fetched by name.
+          git fetch --no-tags origin "+refs/heads/$branch:refs/remotes/origin/$branch"
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" "refs/remotes/origin/$branch"; then
+            echo "::error::$GITHUB_REF_NAME points at $GITHUB_SHA, which $branch does not contain" >&2
+            echo "a release is built from a reviewed commit; merge it first, then tag the merge" >&2
+            exit 1
+          fi
+          echo "$GITHUB_SHA is on $branch"
+          # An unsigned tag is reported rather than refused: the signature is a
+          # repository setting the workflow cannot turn on, and refusing here
+          # would block a release the owner never configured for it.
+          if git verify-tag "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "the tag carries a valid signature"
+          else
+            echo "### The tag is not signed" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "\`$GITHUB_REF_NAME\` carries no signature this runner can verify. The release is built anyway; the artefacts are covered by \`SHA256SUMS\` and its signature." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Packaging tools
         # dpkg-deb packs the .deb for any architecture; rpmbuild builds
         # only for the machine it runs on, so the arm64 .rpm is left to an

@@ -123,6 +123,14 @@ A tag with a suffix - `v1.2.3-rc1` - is a pre-release and may ship incomplete.
 The same comparison runs without the note: `.deb`, `.rpm` and `.pkg.tar` each
 have to carry both architectures or neither.
 
+**The tag belongs to the default branch.** A tag can be pushed from anywhere,
+and an artefact built from a commit nobody reviewed is worth nothing whatever
+signs it. The first step of the release refuses a tag whose commit the default
+branch does not contain: merge first, then tag the merge. An unsigned tag is
+reported in the job summary rather than refused - tag signing is a repository
+setting the workflow cannot turn on, and refusing would block a release the
+owner never configured for it.
+
 **Nothing is replaced.** The upload refuses an asset the release already holds
 and names it; there is no `--clobber`. A release is corrected by a new version,
 not by a new file under the old name.
