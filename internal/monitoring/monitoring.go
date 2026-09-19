@@ -61,6 +61,11 @@ const (
 	// identities.
 	identitySweepBatch  = 20000
 	identitySweepPasses = 16
+	// maxGapFactor is how many steps may pass between two points before the
+	// distance is a hole in the data rather than one slow sample.
+	maxGapFactor = 1.5
+	// refusalsPerHost bounds how many refusal rows the host tab reads.
+	refusalsPerHost = 30
 )
 
 // Filesystem is the usage of one mounted filesystem as the agent sent it.
@@ -218,7 +223,52 @@ const (
 	// ErrorRetentionTooShort: the configuration deletes samples before
 	// they can arrive; the panel refuses to start on it.
 	ErrorRetentionTooShort = "metrics_retention_too_short"
+	// ErrorClockSubstituted: the host dated the reading further from the
+	// panel's clock than the installation allows, so the panel supplied the
+	// moment itself. Not a refusal - the reading is stored.
+	ErrorClockSubstituted = "metric_clock_substituted"
 )
+
+// Observation is what the panel made of the moment a host claims for a
+// reading: the moment it stores, and whether it had to supply that moment.
+type Observation struct {
+	// At is the moment the reading is stored and drawn at.
+	At time.Time
+	// Skew is the host's clock against the panel's, positive when ahead.
+	Skew time.Duration
+	// Substituted says the panel replaced the host's moment with its own.
+	Substituted bool
+	// TooOld says the reading is older than the panel keeps any reading, so
+	// it is refused rather than stored.
+	TooOld bool
+}
+
+// ClampObservation bounds a host's clock in both directions, and says in
+// which one it went out.
+//
+// Forward the bound is the clock skew limit: nothing observes the future, so
+// a reading dated ahead of the panel takes the panel's moment. Backward the
+// bound is the lateness budget, not the skew limit, because a reading that
+// waited in a spool belongs where it was taken - stamping a drained spool
+// with the moment it arrived would draw an outage as an unbroken line, which
+// is the very thing a gap exists to prevent. Past the lateness budget the
+// reading is refused and becomes a recorded gap instead.
+func ClampObservation(at, now time.Time, skewLimit, maxLateness time.Duration) Observation {
+	if skewLimit <= 0 {
+		skewLimit = DefaultClockSkewLimit
+	}
+	if maxLateness <= 0 {
+		maxLateness = DefaultMaxLateness
+	}
+	observed := Observation{At: at, Skew: at.Sub(now)}
+	switch {
+	case observed.Skew > skewLimit:
+		observed.At, observed.Substituted = now.Truncate(time.Second), true
+	case -observed.Skew > maxLateness:
+		observed.TooOld = true
+	}
+	return observed
+}
 
 // RecordOutcome says what one delivery of a sample did.
 type RecordOutcome string
@@ -293,17 +343,116 @@ func (s *Store) Record(ctx context.Context, hostID string, sample Sample) (Recor
 		on conflict (host_id, bucket_at) do nothing`, hostID, sample.At); err != nil {
 		return OutcomeUnknown, err
 	}
-	// The host row carries the moment of the newest sample; an old sample
-	// replayed after a break must not move it backwards.
+	// The host row carries the moment the panel last heard from the host, by
+	// the panel's own clock: a host whose clock runs slow is talking, not
+	// silent. An old sample replayed after a break must not move it backwards.
 	if _, err := tx.Exec(ctx, `
-		update hosts set last_metrics_at = greatest(coalesce(last_metrics_at, $2), $2)
-		where id = $1`, hostID, sample.At); err != nil {
+		update hosts set last_metrics_at = greatest(
+		    coalesce(last_metrics_at, '-infinity'::timestamptz),
+		    coalesce($2::timestamptz, now()))
+		where id = $1`, hostID, orNullTime(sample.ReceivedAt)); err != nil {
 		return OutcomeUnknown, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return OutcomeUnknown, err
 	}
 	return OutcomePersisted, nil
+}
+
+// Refusal is what the panel would not store from one host on one day under
+// one typed code.
+type Refusal struct {
+	Reason  string `json:"reason"`
+	Samples int64  `json:"samples"`
+	// The span the refused readings cover, by the moments the host claimed.
+	FirstSampleAt time.Time `json:"first_sample_at"`
+	LastSampleAt  time.Time `json:"last_sample_at"`
+	// LastRefusedAt is when the panel last refused one, by its own clock.
+	LastRefusedAt time.Time `json:"last_refused_at"`
+}
+
+// RecordRefusal notes that a reading of a host was not stored. The readings
+// of one host, one code and one day share a row: a relay draining a week of
+// spool must not cost a row per refused sample to say one thing.
+func (s *Store) RecordRefusal(ctx context.Context, hostID, reason string, at time.Time) error {
+	_, err := s.pool.Exec(ctx, `
+		insert into metric_gaps (host_id, reason, day, samples,
+		    first_sample_at, last_sample_at, last_refused_at)
+		values ($1, $2, ($3::timestamptz at time zone 'UTC')::date, 1, $3, $3, now())
+		on conflict (host_id, reason, day) do update set
+		    samples = metric_gaps.samples + 1,
+		    first_sample_at = least(metric_gaps.first_sample_at, excluded.first_sample_at),
+		    last_sample_at = greatest(metric_gaps.last_sample_at, excluded.last_sample_at),
+		    last_refused_at = now()`, hostID, reason, at)
+	return err
+}
+
+// Refusals returns what the panel refused from a host since the moment
+// given, newest first; a zero moment asks for everything still held.
+func (s *Store) Refusals(ctx context.Context, hostID string, since time.Time) ([]Refusal, error) {
+	rows, err := s.pool.Query(ctx, `
+		select reason, samples, first_sample_at, last_sample_at, last_refused_at
+		from metric_gaps
+		where host_id = $1 and ($2::timestamptz is null or last_sample_at >= $2::timestamptz)
+		order by last_sample_at desc
+		limit $3::int`, hostID, orNullTime(since), refusalsPerHost)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	list := []Refusal{}
+	for rows.Next() {
+		var refusal Refusal
+		if err := rows.Scan(&refusal.Reason, &refusal.Samples, &refusal.FirstSampleAt,
+			&refusal.LastSampleAt, &refusal.LastRefusedAt); err != nil {
+			return nil, err
+		}
+		list = append(list, refusal)
+	}
+	return list, rows.Err()
+}
+
+// ClockSubstitution says the panel supplied the moment of a host's readings
+// itself, because that host's clock stands further from the panel's than the
+// installation allows.
+type ClockSubstitution struct {
+	Reason string `json:"reason"`
+	// SkewMillis is the host's clock against the panel's on the last reading
+	// the panel restamped; positive means the host is ahead.
+	SkewMillis int64     `json:"skew_millis"`
+	Samples    int64     `json:"samples"`
+	LastAt     time.Time `json:"last_at"`
+}
+
+// RecordClockSubstitution notes that the panel stamped a reading of this host
+// with its own time.
+func (s *Store) RecordClockSubstitution(ctx context.Context, hostID string, skew time.Duration) error {
+	_, err := s.pool.Exec(ctx, `
+		insert into metric_clock_skew (host_id, reason, skew_millis, substitutions, last_at)
+		values ($1, $2, $3, 1, now())
+		on conflict (host_id) do update set
+		    reason = excluded.reason,
+		    skew_millis = excluded.skew_millis,
+		    substitutions = metric_clock_skew.substitutions + 1,
+		    last_at = now()`, hostID, ErrorClockSubstituted, skew.Milliseconds())
+	return err
+}
+
+// HostClock returns the substitution note of a host, or nil where the panel
+// never had to supply a moment for it.
+func (s *Store) HostClock(ctx context.Context, hostID string) (*ClockSubstitution, error) {
+	var note ClockSubstitution
+	err := s.pool.QueryRow(ctx, `
+		select reason, skew_millis, substitutions, last_at
+		from metric_clock_skew where host_id = $1`, hostID).
+		Scan(&note.Reason, &note.SkewMillis, &note.Samples, &note.LastAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &note, nil
 }
 
 // orNullTime passes a moment the caller did not observe as null, so the
@@ -535,6 +684,18 @@ func (s *Store) sweep(ctx context.Context) error {
 		s.options.RollupRetention.Seconds()); err != nil {
 		return err
 	}
+	// A recorded hole outlives the readings around it: the long charts are
+	// drawn from the rollups, and a hole there needs its reason too.
+	if _, err := s.pool.Exec(ctx,
+		`delete from metric_gaps where last_sample_at < now() - make_interval(secs => $1)`,
+		s.options.RollupRetention.Seconds()); err != nil {
+		return err
+	}
+	if _, err := s.pool.Exec(ctx,
+		`delete from metric_clock_skew where last_at < now() - make_interval(secs => $1)`,
+		s.options.RollupRetention.Seconds()); err != nil {
+		return err
+	}
 	_, err := s.pool.Exec(ctx,
 		`delete from silences where until < now() - make_interval(secs => $1)`,
 		s.options.RollupRetention.Seconds())
@@ -641,18 +802,37 @@ type Point struct {
 	AgentCPUPercentMax *float64 `json:"agent_cpu_percent_max,omitempty"`
 }
 
+// Gap is a stretch of a chart window with no reading at all. It is returned
+// beside the points rather than as points with zero values, because a hole
+// in the data is not a reading of zero and must not be drawn as one.
+type Gap struct {
+	// From and To are the readings the hole sits between, or the edges of the
+	// window where it begins or ends one.
+	From time.Time `json:"from"`
+	To   time.Time `json:"to"`
+	// Steps is how many points of the range the hole swallowed.
+	Steps int `json:"steps"`
+	// Reason is the typed code of the refusal that explains the hole, empty
+	// where nothing explains it: a host that was simply quiet.
+	Reason string `json:"reason,omitempty"`
+	// RefusedSamples counts the readings the panel would not store within it.
+	RefusedSamples int64 `json:"refused_samples,omitempty"`
+}
+
 // Series is the chart data of one host over a range.
 type Series struct {
-	Range        Range
-	Points       []Point
+	Range  Range
+	Points []Point
+	// Gaps are the stretches of the window the points do not cover.
+	Gaps         []Gap
 	Latest       *Point
 	LastSampleAt *time.Time
 }
 
 // Series reads the points of a host over a range: raw samples for the short
-// windows, rollups for the long ones.
+// windows, rollups for the long ones, and the holes between them.
 func (s *Store) Series(ctx context.Context, hostID string, r Range) (Series, error) {
-	series := Series{Range: r, Points: []Point{}}
+	series := Series{Range: r, Points: []Point{}, Gaps: []Gap{}}
 	var samples []Sample
 	var err error
 	if r.Rollup() {
@@ -665,10 +845,72 @@ func (s *Store) Series(ctx context.Context, hostID string, r Range) (Series, err
 	}
 	series.Points = toPoints(samples)
 
+	now := time.Now().UTC()
+	from := now.Add(-r.Window)
+	series.Gaps = gapsIn(series.Points, r, from, now)
+	if len(series.Gaps) > 0 {
+		refusals, err := s.Refusals(ctx, hostID, from)
+		if err != nil {
+			return series, err
+		}
+		explain(series.Gaps, refusals)
+	}
+
 	// The latest point comes from the newest two raw samples: a rate needs
 	// a previous counter.
 	series.Latest, series.LastSampleAt, err = s.Latest(ctx, hostID)
 	return series, err
+}
+
+// gapsIn finds the stretches of a window with no reading. The edges count:
+// a window that begins or ends without readings holds as much of a hole as
+// one broken in the middle, and the chart has to break its line over all of
+// them.
+func gapsIn(points []Point, r Range, from, until time.Time) []Gap {
+	gaps := []Gap{}
+	step := r.Step
+	if step <= 0 {
+		step = SamplingInterval
+	}
+	tolerance := time.Duration(float64(step) * maxGapFactor)
+	add := func(start, end time.Time) {
+		if !end.After(start) || end.Sub(start) <= tolerance {
+			return
+		}
+		steps := int(end.Sub(start)/step) - 1
+		if steps < 1 {
+			steps = 1
+		}
+		gaps = append(gaps, Gap{From: start, To: end, Steps: steps})
+	}
+	previous := from
+	for _, point := range points {
+		add(previous, point.At)
+		previous = point.At
+	}
+	// The quarter now running has no rollup row yet, so the trailing edge of
+	// a rolled-up window is always one step short of the present.
+	end := until
+	if r.Rollup() {
+		end = until.Add(-step)
+	}
+	add(previous, end)
+	return gaps
+}
+
+// explain puts the code of a refusal on every hole its readings fall into.
+func explain(gaps []Gap, refusals []Refusal) {
+	for i := range gaps {
+		for _, refusal := range refusals {
+			if refusal.LastSampleAt.Before(gaps[i].From) || refusal.FirstSampleAt.After(gaps[i].To) {
+				continue
+			}
+			if gaps[i].Reason == "" {
+				gaps[i].Reason = refusal.Reason
+			}
+			gaps[i].RefusedSamples += refusal.Samples
+		}
+	}
 }
 
 // Latest returns the newest raw sample of a host as a chart point, with the

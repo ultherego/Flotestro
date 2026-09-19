@@ -114,6 +114,9 @@ const TONE_VAR: Record<WidgetTone | "accent", string> = {
   neutral: "--text-faint", accent: "--accent",
 };
 
+/** One label on the time axis: where it sits, and the instant it reads. */
+type AxisTick = { at: number; iso: string };
+
 export type AreaSeries = {
   name: string;
   tone: WidgetTone | "accent";
@@ -130,7 +133,7 @@ export type AreaSeries = {
 export function AreaChart({
   times, series, height = 160, max, format = (value) => String(value), label = shortTime, peak,
 }: {
-  /** The instants of the points, one per index of every series. */
+  /** The instants of the points, one per index of every series; they set the x coordinate. */
   times: string[];
   series: AreaSeries[];
   height?: number;
@@ -158,12 +161,29 @@ export function AreaChart({
   const ceiling = max !== undefined && max > 0 ? max : undefined;
   const step = ceiling !== undefined ? ceiling / 4 : niceStep(Math.max(1, highest));
   const top = ceiling ?? Math.max(step, Math.ceil(highest / step) * step);
-  const x = (i: number) => pad.left + (count > 1 ? (i / (count - 1)) * innerW : innerW / 2);
+  // The x coordinate is the instant, not the position in the array. Drawn by
+  // index, an hour with no readings takes the width of one sample and a hole
+  // in the data disappears into a smooth line.
+  const stamps = times.map((iso) => Date.parse(iso));
+  const first = stamps[0];
+  const span = count > 1 ? stamps[count - 1] - first : 0;
+  const timed = span > 0 && stamps.every((stamp) => Number.isFinite(stamp));
+  const x = (i: number) =>
+    count < 2 ? pad.left + innerW / 2
+      : timed ? pad.left + ((stamps[i] - first) / span) * innerW
+        : pad.left + (i / (count - 1)) * innerW;
   const y = (value: number) => pad.top + innerH - (Math.min(value, top) / top) * innerH;
   const ticks: number[] = [];
   for (let v = 0; v <= top + step / 1000; v += step) ticks.push(v);
-  // Five labels along the time axis, whatever the number of points.
+  // Five labels evenly spaced along the axis. On a timed axis they are five
+  // instants, which is not the same as five points once there are holes.
   const labelAt = count > 1 ? [0, 1, 2, 3, 4].map((k) => Math.round((k * (count - 1)) / 4)) : [0];
+  const labels: (AxisTick | undefined)[] = timed
+    ? [0, 1, 2, 3, 4].map((k) => ({
+      at: pad.left + (k / 4) * innerW,
+      iso: new Date(first + (k / 4) * span).toISOString(),
+    }))
+    : labelAt.map((i) => (times[i] === undefined ? undefined : { at: x(i), iso: times[i] }));
 
   return (
     <svg className="chart" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img">
@@ -206,9 +226,9 @@ export function AreaChart({
           d={runPath(run, x, y)}
         />
       ))}
-      {labelAt.map((i, k) => times[i] !== undefined && (
-        <text key={k} x={x(i)} y={height - 6} textAnchor={k === 0 ? "start" : k === labelAt.length - 1 ? "end" : "middle"}>
-          {label(times[i])}
+      {labels.map((tick, k) => tick !== undefined && (
+        <text key={k} x={tick.at} y={height - 6} textAnchor={k === 0 ? "start" : k === labels.length - 1 ? "end" : "middle"}>
+          {label(tick.iso)}
         </text>
       ))}
     </svg>

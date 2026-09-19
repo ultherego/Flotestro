@@ -6,6 +6,7 @@ package monitoring
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -20,6 +21,16 @@ var ErrLeaseLost = errors.New(ErrorEvaluatorLeaseLost +
 // ErrorEvaluatorLeaseLost is the code of ErrLeaseLost, as the error guide
 // lists it and as the log line names it.
 const ErrorEvaluatorLeaseLost = "alert_evaluator_lease_lost"
+
+// ErrFenceStale means the database refused a write of the alert state made
+// under this pass's token: the lease is gone, and the episode belongs to a
+// newer leader. It is a lease loss found at the write rather than at the
+// renewal, so it answers to both codes.
+var ErrFenceStale = fmt.Errorf("%s: %w", ErrorAlertFenceStale, ErrLeaseLost)
+
+// ErrorAlertFenceStale is the code of ErrFenceStale, as the error guide lists
+// it and as the log line and the counter name it.
+const ErrorAlertFenceStale = "alert_fence_stale"
 
 // evaluatorLeaseName is the row of monitoring_leases the evaluator holds.
 const evaluatorLeaseName = "alert_evaluator"
@@ -41,6 +52,36 @@ func (l Lease) Held(now time.Time) bool {
 	return l.Holder != "" && l.Until.After(now)
 }
 
+// fence is the lease carried into every write of the alert state: who writes
+// and under which token the row is stamped.
+type fence struct {
+	Holder string
+	Token  int64
+}
+
+// fenceOf is the fence a pass under this lease writes under.
+func fenceOf(lease Lease) fence {
+	return fence{Holder: lease.Holder, Token: lease.Token}
+}
+
+// held says whether there is anything to write under. The token is minted from
+// zero the first time the lease changes hands, so zero is "no lease": a pass
+// without one writes nothing rather than writing unfenced.
+func (f fence) held() bool { return f.Holder != "" && f.Token > 0 }
+
+// accepts is the fence itself, the same rule the statements apply in SQL. A row
+// carrying no token may be moved - a panel of the previous release, or an
+// operator acknowledging, left it that way - and a row carrying one may be
+// moved by a lease whose token is not older than it. Not older, rather than
+// newer: a leader has to be able to write the same row twice under its own
+// lease, and a pass that refused its own writes would never make progress.
+func (f fence) accepts(rowToken *int64) bool {
+	if !f.held() {
+		return false
+	}
+	return rowToken == nil || *rowToken <= f.Token
+}
+
 // EvaluatorLease reads the lease without touching it, for the status
 // screen: who is evaluating and until when.
 func (s *Store) EvaluatorLease(ctx context.Context) (Lease, error) {
@@ -57,6 +98,18 @@ func (s *Store) EvaluatorLease(ctx context.Context) (Lease, error) {
 		lease.Until = *until
 	}
 	return lease, err
+}
+
+// TakeEvaluatorLease takes the lease for this instance, or renews it when this
+// instance holds it already, and says whether it holds it afterwards.
+func (s *Store) TakeEvaluatorLease(ctx context.Context) (Lease, bool, error) {
+	return s.acquireEvaluatorLease(ctx)
+}
+
+// ReleaseEvaluatorLease gives back a lease this instance took, so the next
+// instance may start its pass at once instead of waiting out the term.
+func (s *Store) ReleaseEvaluatorLease(ctx context.Context, lease Lease) error {
+	return s.releaseEvaluatorLease(ctx, lease)
 }
 
 // acquireEvaluatorLease takes the lease for this instance, or renews it when

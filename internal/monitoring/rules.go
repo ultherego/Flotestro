@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/ultherego/flotestro/internal/authz"
+	"github.com/ultherego/flotestro/internal/opspec"
 	"github.com/ultherego/flotestro/internal/selector"
 )
 
@@ -459,6 +460,9 @@ const alertColumns = `
 	a.value, a.detail, a.started_at, a.fired_at, a.resolved_at,
 	exists (select 1 from silences s
 	        where s.expired_at is null and s.until > now()
+	          -- A global silence is written for the security alerts of the
+	          -- installation; it is not a silence of every alert of every host.
+	          and not s.global
 	          and (s.host_id is null or s.host_id = a.host_id)
 	          and (s.rule_id is null or s.rule_id = a.rule_id)),
 	a.host_id, h.hostname, coalesce(a.acknowledged_by, ''), a.acknowledged_at, a.note`
@@ -719,15 +723,21 @@ func (s *Store) queryAlerts(ctx context.Context, query string, args ...any) ([]A
 type Silence struct {
 	ID string `json:"id"`
 	// HostID and RuleID narrow the silence; an empty one does not narrow.
-	HostID    string     `json:"host_id,omitempty"`
-	Hostname  string     `json:"hostname,omitempty"`
-	RuleID    string     `json:"rule_id,omitempty"`
-	RuleName  string     `json:"rule_name,omitempty"`
-	Until     time.Time  `json:"until"`
-	Reason    string     `json:"reason"`
-	CreatedBy string     `json:"created_by"`
-	CreatedAt time.Time  `json:"created_at"`
-	ExpiredAt *time.Time `json:"expired_at"`
+	HostID   string    `json:"host_id,omitempty"`
+	Hostname string    `json:"hostname,omitempty"`
+	RuleID   string    `json:"rule_id,omitempty"`
+	RuleName string    `json:"rule_name,omitempty"`
+	Until    time.Time `json:"until"`
+	Reason   string    `json:"reason"`
+	// Global marks the silence that may keep back the security alerts of the
+	// whole installation; it names neither a host nor a rule.
+	Global bool `json:"global"`
+	// SendSummary asks for one message per channel when the silence ends,
+	// naming what it kept back; the kept-back messages themselves never go.
+	SendSummary bool       `json:"send_summary"`
+	CreatedBy   string     `json:"created_by"`
+	CreatedAt   time.Time  `json:"created_at"`
+	ExpiredAt   *time.Time `json:"expired_at"`
 }
 
 // The bounds of a silence: it is a decision to switch a sensor off, so it
@@ -737,8 +747,25 @@ const (
 	MinSilenceReason = 8
 )
 
+// The refusals a silence can get. A code, not a sentence: the panel and the
+// integrations branch on it.
+const (
+	// RefusalSilenceScopeConflict: a global silence that also names a host or a
+	// rule. A silence of one host is not a permission to blind the installation.
+	RefusalSilenceScopeConflict = "silence_scope_conflict"
+	// RefusalGlobalSilenceDenied: a global silence ordered without the global
+	// notification.manage permission.
+	RefusalGlobalSilenceDenied = "global_silence_denied"
+)
+
 // ValidateSilence checks a silence ordered from the panel.
 func ValidateSilence(silence Silence, now time.Time) error {
+	// The one refusal with a code of its own: everything else here is a
+	// malformed request, and invalid_silence has named that since the start.
+	if silence.Global && (silence.HostID != "" || silence.RuleID != "") {
+		return &opspec.RefusalError{Code: RefusalSilenceScopeConflict, Err: errors.New(
+			"a global silence names neither a host nor a rule: it covers the whole installation")}
+	}
 	if len(strings.TrimSpace(silence.Reason)) < MinSilenceReason {
 		return fmt.Errorf("the reason needs at least %d characters", MinSilenceReason)
 	}
@@ -770,9 +797,10 @@ func (s *Store) CreateSilence(ctx context.Context, silence Silence) (*Silence, e
 		ruleID = &silence.RuleID
 	}
 	if _, err := s.pool.Exec(ctx, `
-		insert into silences (id, host_id, rule_id, until, reason, created_by)
-		values ($1, $2, $3, $4, $5, $6)`,
-		id, hostID, ruleID, silence.Until, strings.TrimSpace(silence.Reason), silence.CreatedBy); err != nil {
+		insert into silences (id, host_id, rule_id, until, reason, created_by, global, send_summary)
+		values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		id, hostID, ruleID, silence.Until, strings.TrimSpace(silence.Reason), silence.CreatedBy,
+		silence.Global, silence.SendSummary); err != nil {
 		return nil, err
 	}
 	return s.GetSilence(ctx, id)
@@ -781,7 +809,8 @@ func (s *Store) CreateSilence(ctx context.Context, silence Silence) (*Silence, e
 const silenceColumns = `
 	s.id, coalesce(s.host_id::text, ''), coalesce(h.hostname, ''),
 	coalesce(s.rule_id::text, ''), coalesce(r.name, ''),
-	s.until, s.reason, s.created_by, s.created_at, s.expired_at`
+	s.until, s.reason, s.global, s.send_summary,
+	s.created_by, s.created_at, s.expired_at`
 
 // GetSilence returns one silence.
 func (s *Store) GetSilence(ctx context.Context, id string) (*Silence, error) {
@@ -812,6 +841,24 @@ func (s *Store) ExpireSilence(ctx context.Context, hostID, id string) error {
 	tag, err := s.pool.Exec(ctx, `
 		update silences set expired_at = now()
 		where id = $1 and host_id = $2 and expired_at is null`, id, hostID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ExpireFleetSilence ends a silence that names no host early. A silence of a
+// host is not found here: that one is ended through its host.
+func (s *Store) ExpireFleetSilence(ctx context.Context, id string) error {
+	if _, err := uuid.Parse(id); err != nil {
+		return ErrNotFound
+	}
+	tag, err := s.pool.Exec(ctx, `
+		update silences set expired_at = now()
+		where id = $1 and host_id is null and expired_at is null`, id)
 	if err != nil {
 		return err
 	}
@@ -862,8 +909,9 @@ func (s *Store) querySilences(ctx context.Context, query string, args ...any) ([
 	for rows.Next() {
 		var silence Silence
 		if err := rows.Scan(&silence.ID, &silence.HostID, &silence.Hostname, &silence.RuleID,
-			&silence.RuleName, &silence.Until, &silence.Reason, &silence.CreatedBy,
-			&silence.CreatedAt, &silence.ExpiredAt); err != nil {
+			&silence.RuleName, &silence.Until, &silence.Reason, &silence.Global,
+			&silence.SendSummary, &silence.CreatedBy, &silence.CreatedAt,
+			&silence.ExpiredAt); err != nil {
 			return nil, err
 		}
 		list = append(list, silence)

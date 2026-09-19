@@ -673,6 +673,17 @@ var reportedGuides = []ErrorGuide{
 		Meaning: "A notification channel cannot send as it is: it was disabled while its messages waited, its configuration does not read, or the panel has no sender for its kind.",
 		Action:  "Enable or correct the channel and retry the dead letters; the messages of a channel that is to stay disabled can be left as they are."},
 
+	// The refusals of a silence, which decides what the queue never sees
+	// (security remediation, chapter 10. 3).
+	{Code: "alert_fence_stale", Stage: "monitoring", Retry: RetryAutomatic,
+		Meaning: "A control-plane instance tried to write the state of an alert under a lease it no longer holds: the episode carries the token of a newer leader, or the lease had run out. Nothing was written and the pass stopped where it stood. This is the lease loss found at the write rather than at the renewal, so it counts as alert_evaluator_lease_lost as well.",
+		Action:  "Nothing, unless it repeats. A stream of these from one instance means it keeps judging the fleet on a lease it cannot renew in time: look at the database latency and at the clock of that instance. The log line names the rule, the host and both tokens."},
+	{Code: "silence_scope_conflict", Stage: "admission", Retry: RetryAfterChange,
+		Meaning: "The silence was ordered as global and also names a host or a rule. A global silence is the one that may keep back the security alerts of the whole installation, so it covers all of it; a silence of one host or one rule is not that, whoever wrote it. Nothing was written.",
+		Action:  "Order the global silence from the alerts screen, without a host and without a rule, or drop global and silence that host or that rule as before."},
+	{Code: "global_silence_denied", Stage: "admission", Retry: RetryNever,
+		Meaning: "A global silence - the one that may keep back the security alerts of the installation - was ordered by an identity that manages the notification channels of one site at most. Nothing was written and no alert was kept back.",
+		Action:  "Silence the host or the rule instead, or have somebody who manages the notification channels of the whole installation order the global silence and say in its reason why the security alerts are being kept back."},
 
 	// The lifecycle orders that travel between the instances of the control plane
 	// (security remediation, chapter 6).

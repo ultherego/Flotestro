@@ -2,6 +2,8 @@ package metrics
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -158,5 +160,177 @@ func TestTheLifecycleCountersAreExposed(t *testing.T) {
 	// about them rather than reporting empty buffers.
 	if strings.Contains(text, "flotestro_relay_buffer") {
 		t.Errorf("relay buffer metrics appeared without a relay source:\n%s", text)
+	}
+}
+
+// writeFixture puts fixture text where the readers look for a kernel file.
+func writeFixture(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("the fixture directory: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("the fixture file: %v", err)
+	}
+}
+
+// The cgroup is the budget a container is killed against, so where there is
+// one it decides. The reclaimable page cache is not resident memory the panel
+// is responsible for, so it comes off the charge.
+func TestTheResidentSetComesFromTheCgroup(t *testing.T) {
+	procRoot, cgroupRoot := t.TempDir(), t.TempDir()
+	writeFixture(t, filepath.Join(procRoot, "self", "cgroup"),
+		"0::/system.slice/flotestro-panel.service\n")
+	// A process under the first cgroup version also has these lines; the
+	// unified one is the only one the reader takes.
+	writeFixture(t, filepath.Join(procRoot, "self", "status"), "Name:\tflotestro\nVmRSS:\t  4096 kB\n")
+	unit := filepath.Join(cgroupRoot, "system.slice", "flotestro-panel.service")
+	writeFixture(t, filepath.Join(unit, "memory.current"), "2147483648\n")
+	writeFixture(t, filepath.Join(unit, "memory.stat"), "anon 1610612736\ninactive_file 147483648\nfile 200000000\n")
+
+	fp := readFootprint(procRoot, cgroupRoot)
+	if fp.ResidentBytes == nil {
+		t.Fatal("the cgroup gave no resident set")
+	}
+	if want := uint64(2147483648 - 147483648); *fp.ResidentBytes != want {
+		t.Errorf("resident set = %d; want %d", *fp.ResidentBytes, want)
+	}
+	if fp.ResidentFrom != "cgroup" {
+		t.Errorf("the source is %q; want cgroup", fp.ResidentFrom)
+	}
+}
+
+// A native installation has no unified cgroup line, or none the reader can
+// follow, and is measured from procfs instead.
+func TestTheResidentSetFallsBackToProcfs(t *testing.T) {
+	procRoot, cgroupRoot := t.TempDir(), t.TempDir()
+	writeFixture(t, filepath.Join(procRoot, "self", "cgroup"),
+		"11:devices:/user.slice\n1:name=systemd:/user.slice/session-3.scope\n")
+	writeFixture(t, filepath.Join(procRoot, "self", "status"),
+		"Name:\tflotestro\nVmPeak:\t 900000 kB\nVmRSS:\t 1884160 kB\nThreads:\t42\n")
+	writeFixture(t, filepath.Join(procRoot, "self", "limits"),
+		"Limit                     Soft Limit           Hard Limit           Units\n"+
+			"Max processes             62000                62000                processes\n"+
+			"Max open files            65536                65536                files\n")
+	writeFixture(t, filepath.Join(procRoot, "self", "stat"),
+		"7 (flotestro panel) S 1 7 7 0 -1 4194560 100 0 0 0 1234 567 0 0 20 0 42 0 900 0 0\n")
+
+	fp := readFootprint(procRoot, cgroupRoot)
+	if fp.ResidentBytes == nil || *fp.ResidentBytes != 1884160*1024 {
+		t.Fatalf("resident set = %v; want %d", fp.ResidentBytes, 1884160*1024)
+	}
+	if fp.ResidentFrom != "procfs" {
+		t.Errorf("the source is %q; want procfs", fp.ResidentFrom)
+	}
+	if fp.MaxFDs == nil || *fp.MaxFDs != 65536 {
+		t.Errorf("the descriptor limit is %v; want 65536", fp.MaxFDs)
+	}
+	// utime 1234 plus stime 567 ticks, at a hundred ticks to the second.
+	if fp.CPUSeconds == nil || *fp.CPUSeconds != 18.01 {
+		t.Errorf("the CPU time is %v; want 18.01", fp.CPUSeconds)
+	}
+}
+
+// Where neither the cgroup nor procfs answers, every number stays nil. A
+// resident set of zero would say the process holds no memory at all.
+func TestAnUnreadableFootprintIsUnknown(t *testing.T) {
+	fp := readFootprint(t.TempDir(), t.TempDir())
+	if fp.ResidentBytes != nil || fp.MaxFDs != nil || fp.CPUSeconds != nil {
+		t.Errorf("an unreadable host gave numbers: %+v", fp)
+	}
+	if fp.ResidentFrom != "" {
+		t.Errorf("the source is %q although nothing was read", fp.ResidentFrom)
+	}
+}
+
+// The readers take the shapes the kernel actually writes, and refuse the ones
+// that carry no number.
+func TestTheProcfsReadersTakeWhatTheKernelWrites(t *testing.T) {
+	if _, ok := parseResidentBytes("Name:\tx\nVmSize:\t 10 kB\n"); ok {
+		t.Error("a status without VmRSS gave a value")
+	}
+	if _, ok := parseFDLimit("Max open files            unlimited            unlimited            files\n"); ok {
+		t.Error("an unlimited soft limit was read as a number")
+	}
+	if _, ok := parseCgroupBytes("max\n"); ok {
+		t.Error("the word max was read as a byte count")
+	}
+	if _, ok := parseCgroupPath("11:devices:/user.slice\n"); ok {
+		t.Error("a hierarchy without a unified line gave a path")
+	}
+	path, ok := parseCgroupPath("0::/\n")
+	if !ok || path != "/" {
+		t.Errorf("the cgroup of a container is %q, %v; want /", path, ok)
+	}
+	// The command name is in brackets and may hold spaces of its own, so the
+	// fields are counted from the closing bracket and not from the start.
+	ticks, ok := parseCPUTicks("7 (a name with spaces) S 1 7 7 0 -1 0 0 0 0 0 10 5 0 0 20 0 1 0 0 0 0\n")
+	if !ok || ticks != 15 {
+		t.Errorf("the CPU ticks are %d, %v; want 15", ticks, ok)
+	}
+}
+
+// The percentiles take the value at the nearest rank: no number is invented
+// between two the process actually saw.
+func TestTheQuantileTakesTheNearestRank(t *testing.T) {
+	sorted := []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+	for _, want := range []struct {
+		at    float64
+		value float64
+	}{{0.5, 5}, {0.95, 10}, {0.99, 10}, {1, 10}} {
+		value, ok := quantile(sorted, want.at)
+		if !ok || value != want.value {
+			t.Errorf("quantile %g = %g, %v; want %g", want.at, value, ok, want.value)
+		}
+	}
+	if _, ok := quantile(nil, 0.99); ok {
+		t.Error("an empty series gave a percentile")
+	}
+}
+
+// The process gauges come from the host, and a number the host would not give
+// is absent from the exposition rather than shown as zero.
+func TestTheProcessGaugesComeFromTheHost(t *testing.T) {
+	resident, fds, limit := uint64(1884160*1024), uint64(2048), uint64(65536)
+	collector := NewCollector(nil, nil, nil, "panel")
+	collector.footprint = func() Footprint {
+		return Footprint{ResidentBytes: &resident, ResidentFrom: "cgroup", OpenFDs: &fds, MaxFDs: &limit}
+	}
+	text := string(collector.Gather(context.Background()))
+	for _, line := range []string{
+		`flotestro_process_resident_bytes{source="cgroup"} 1.92937984e+09`,
+		"flotestro_process_open_fds 2048",
+		"flotestro_process_max_fds 65536",
+	} {
+		if !strings.Contains(text, line+"\n") {
+			t.Errorf("missing line %q in:\n%s", line, text)
+		}
+	}
+	// The CPU was not read, so it is not in the answer at all.
+	if strings.Contains(text, "flotestro_process_cpu_seconds_total") {
+		t.Error("an unread CPU time appeared in the exposition")
+	}
+	// The runtime's own bookkeeping is still exposed, under a name that says
+	// what it is: reserved address space, not the resident set.
+	if !strings.Contains(text, "flotestro_go_memory_reserved_bytes") {
+		t.Errorf("the reserved address space is missing:\n%s", text)
+	}
+	if strings.Contains(text, "flotestro_memory_bytes") {
+		t.Error("the old name, which read as the resident set, is still exposed")
+	}
+
+	// A host that answers nothing leaves every process gauge out. The name is
+	// looked for as a declared family, not as a substring: the help of the Go
+	// gauge names flotestro_process_resident_bytes on purpose, to send a reader
+	// from the reserved address space to the resident set.
+	silent := NewCollector(nil, nil, nil, "panel")
+	silent.footprint = func() Footprint { return Footprint{} }
+	text = string(silent.Gather(context.Background()))
+	for _, absent := range []string{
+		"flotestro_process_resident_bytes", "flotestro_process_open_fds", "flotestro_process_max_fds",
+	} {
+		if strings.Contains(text, "# TYPE "+absent+" ") {
+			t.Errorf("%s appeared although the host gave no number", absent)
+		}
 	}
 }

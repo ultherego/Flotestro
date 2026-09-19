@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ultherego/flotestro/internal/authz"
@@ -203,14 +204,123 @@ func (s *Server) databaseStatus(ctx context.Context) statusBlock {
 	if err := s.pool.QueryRow(ctx, `show server_version`).Scan(&version); err == nil {
 		facts["server_version"] = version
 	}
+	// Beside the connection budget, what a fleet-scale panel is judged by: what
+	// waits on a lock, how fast the WAL grows and how fast the rows arrive.
+	s.lockFacts(ctx, facts)
+	s.writeRateFacts(ctx, facts)
 
 	block := statusOK(facts)
-	if used != nil && maximum != nil && *maximum > 0 && *used*10 >= *maximum*8 {
+	lockWait, timedLockWait := facts["lock_wait_seconds_max"].(float64)
+	switch {
+	case used != nil && maximum != nil && *maximum > 0 && *used*10 >= *maximum*8:
 		block.Attention = "the server is near its connection limit"
-	} else if oldest != nil && *oldest > 600 {
+	case oldest != nil && *oldest > 600:
 		block.Attention = "a transaction has been open for more than ten minutes"
+	case timedLockWait && lockWait > 60:
+		block.Attention = "a statement has been waiting for a lock for more than a minute"
 	}
 	return block
+}
+
+// lockFacts reads what is waiting on a lock. A backend blocked on a lock holds
+// a connection without doing work, which is how a pool runs out at fleet scale
+// long before the queries themselves get slow.
+func (s *Server) lockFacts(ctx context.Context, facts map[string]any) {
+	var waiting, ungranted *int
+	var longest *float64
+	if err := s.pool.QueryRow(ctx, `
+		select (select count(*) from pg_stat_activity
+		         where datname = current_database() and wait_event_type = 'Lock'),
+		       (select count(*) from pg_locks where not granted),
+		       (select max(extract(epoch from now() - state_change)) from pg_stat_activity
+		         where datname = current_database() and wait_event_type = 'Lock')`).
+		Scan(&waiting, &ungranted, &longest); err != nil {
+		// A database that will not answer about its locks leaves the facts out:
+		// no lock wait and an unreadable one are not the same thing.
+		return
+	}
+	if waiting != nil {
+		facts["lock_waiters"] = *waiting
+	}
+	if ungranted != nil {
+		facts["locks_ungranted"] = *ungranted
+	}
+	switch {
+	case longest != nil:
+		facts["lock_wait_seconds_max"] = *longest
+	case waiting != nil && *waiting == 0:
+		// Nothing waiting is a measured zero; a wait nobody could time is not.
+		facts["lock_wait_seconds_max"] = float64(0)
+	}
+}
+
+// writeCounters is one reading of the counters the write rates come from.
+type writeCounters struct {
+	at       time.Time
+	walBytes float64
+	inserts  int64
+}
+
+// lastWrite is the previous reading. The rates are the distance between two
+// reads of the status screen, so they describe the database now rather than
+// averaging it over the whole uptime.
+var lastWrite struct {
+	mu      sync.Mutex
+	reading *writeCounters
+}
+
+// writeRateFacts reads how fast the database writes: where the WAL stands, how
+// many bytes are behind it and how many rows have gone in.
+func (s *Server) writeRateFacts(ctx context.Context, facts map[string]any) {
+	var lsn *string
+	var walBytes *float64
+	var inserts *int64
+	if err := s.pool.QueryRow(ctx, `
+		select case when pg_is_in_recovery() then pg_last_wal_replay_lsn()::text
+		            else pg_current_wal_lsn()::text end,
+		       case when pg_is_in_recovery()
+		            then pg_wal_lsn_diff(pg_last_wal_replay_lsn(), '0/0')::float8
+		            else pg_wal_lsn_diff(pg_current_wal_lsn(), '0/0')::float8 end,
+		       (select tup_inserted from pg_stat_database where datname = current_database())`).
+		Scan(&lsn, &walBytes, &inserts); err != nil {
+		// A managed database may withhold the WAL functions; then the panel says
+		// nothing about the WAL rather than reporting a standstill.
+		return
+	}
+	if lsn != nil {
+		facts["wal_lsn"] = *lsn
+	}
+	if walBytes != nil {
+		facts["wal_bytes_total"] = *walBytes
+	}
+	if inserts != nil {
+		facts["inserts_total"] = *inserts
+	}
+	if walBytes == nil || inserts == nil {
+		return
+	}
+
+	current := writeCounters{at: time.Now(), walBytes: *walBytes, inserts: *inserts}
+	lastWrite.mu.Lock()
+	previous := lastWrite.reading
+	// Two reads closer together than a second would divide by a rounding error,
+	// so the older reading stays until the distance is worth a rate.
+	if previous == nil || current.at.Sub(previous.at) >= time.Second {
+		lastWrite.reading = &current
+	}
+	lastWrite.mu.Unlock()
+
+	if previous == nil {
+		return
+	}
+	seconds := current.at.Sub(previous.at).Seconds()
+	if seconds < 1 || current.walBytes < previous.walBytes || current.inserts < previous.inserts {
+		// A counter that went backwards is a server that restarted or had its
+		// statistics reset, not a negative rate.
+		return
+	}
+	facts["wal_bytes_per_second"] = (current.walBytes - previous.walBytes) / seconds
+	facts["inserts_per_second"] = float64(current.inserts-previous.inserts) / seconds
 }
 
 // replicasStatus is the number an operator reads before they scale rather than

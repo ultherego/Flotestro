@@ -352,3 +352,31 @@ func TestARuleWithoutDataHoldsItsEpisodeRatherThanFiring(t *testing.T) {
 		t.Error("a firing episode was restarted")
 	}
 }
+
+// TestTheLeaseIsAskedAboutInsideTheFleet: the interval is a number of hosts.
+// Once per rule leaves a rule over the whole fleet running on a lease that may
+// already be somebody else's; once per host is a round trip for every host.
+func TestTheLeaseIsAskedAboutInsideTheFleet(t *testing.T) {
+	if evaluatorGuardEvery <= 1 {
+		t.Fatalf("the guard is asked every %d hosts: that is every host", evaluatorGuardEvery)
+	}
+	const fleet = 10000
+	if asks := fleet / evaluatorGuardEvery; asks < 8 {
+		t.Fatalf("one rule over %d hosts asks about the lease %d times; most of the rule "+
+			"is judged without looking", fleet, asks)
+	}
+}
+
+// TestAWriteNamesTheRuleTheHostAndTheEpisode: a refusal is counted and logged,
+// and a count nobody can trace back to a host and a rule is not an answer.
+func TestAWriteNamesTheRuleTheHostAndTheEpisode(t *testing.T) {
+	mark := alertWrite{rule: "r1", host: "h1"}.on("a1").kinded("resolve")
+	if mark.rule != "r1" || mark.host != "h1" || mark.id != "a1" || mark.kind != "resolve" {
+		t.Fatalf("the write describes itself as %+v", mark)
+	}
+	// The descriptors are copies: naming one episode must not rename another.
+	base := alertWrite{rule: "r1", host: "h1"}
+	if base.on("a1").id == base.on("a2").id || base.id != "" {
+		t.Fatalf("naming an episode changed the write it was taken from: %+v", base)
+	}
+}

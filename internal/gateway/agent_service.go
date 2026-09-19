@@ -193,18 +193,18 @@ func (s *AgentService) SetMetrics(store *monitoring.Store) { s.samples = store }
 // SetClonePolicy sets what the gateway does with a copied identity.
 func (s *AgentService) SetClonePolicy(policy ClonePolicy) { s.clonePolicy = policy }
 
-// sampleFromProto translates a sample of the agent into the stored shape.
+// sampleFromProto translates a sample of the agent into the stored shape. It
+// returns what the panel made of the host's clock as well: the moment alone
+// no longer says whether the panel supplied it.
 func sampleFromProto(sample *agentv1.MetricsSample, now time.Time,
-	skewLimit time.Duration) monitoring.Sample {
-	at := time.Unix(sample.GetSampledAtUnix(), 0).UTC()
-	if at.Sub(now) > skewLimit {
-		at = now.Truncate(time.Second)
-	}
+	skewLimit, maxLateness time.Duration) (monitoring.Sample, monitoring.Observation) {
+	observed := monitoring.ClampObservation(
+		time.Unix(sample.GetSampledAtUnix(), 0).UTC(), now, skewLimit, maxLateness)
 	stored := monitoring.Sample{
 		// The identity of the reading, which its clock is not.
 		BootID:          sample.GetBootId(),
 		Sequence:        sample.GetSequence(),
-		At:              at,
+		At:              observed.At,
 		ReceivedAt:      now,
 		CPUPercent:      sample.GetCpuPercent(),
 		Load1:           sample.GetLoad1(),
@@ -238,7 +238,7 @@ func sampleFromProto(sample *agentv1.MetricsSample, now time.Time,
 			Name: iface.GetName(), RxBytes: iface.GetRxBytes(), TxBytes: iface.GetTxBytes(),
 		})
 	}
-	return stored
+	return stored, observed
 }
 
 // Connect serves the session of an agent.
@@ -622,33 +622,54 @@ const ackSendTimeout = 2 * time.Second
 // became of it.
 func (s *AgentService) recordSample(ctx context.Context, hostID string, session *Session,
 	sample *agentv1.MetricsSample) error {
+	// At fleet cadence this is the call the gateway makes most often, so its
+	// tail is the gateway's tail.
+	started, status := time.Now(), "persisted"
+	defer func() { metrics.SampleAck.Observe(time.Since(started).Seconds(), status) }()
 	if s.samples == nil {
 		// A gateway without a monitoring store keeps no samples at all.
+		status = monitoring.ErrorSampleNotKept
 		s.ackSample(hostID, session, sample,
 			agentv1.MetricsAck_STATUS_REJECTED_INVALID, monitoring.ErrorSampleNotKept)
 		return nil
 	}
 	now := time.Now().UTC()
-	stored := sampleFromProto(sample, now, s.samples.ClockSkewLimit())
-	if age := now.Sub(stored.At); age > s.samples.MaxLateness() {
-		// Older than the panel keeps raw samples for.
+	stored, observed := sampleFromProto(sample, now, s.samples.ClockSkewLimit(), s.samples.MaxLateness())
+	if observed.TooOld {
+		// Older than the panel keeps raw samples for. The refusal is written
+		// down before the host is told: a hole nobody recorded reads on the
+		// chart exactly like a host that was never asked to report.
 		s.log.Warn("a resource sample reached the panel too late to be stored",
-			"host_id", hostID, "age", age.String(),
+			"host_id", hostID, "age", (-observed.Skew).String(),
 			"max_lateness", s.samples.MaxLateness().String(),
 			"reason", monitoring.ErrorSampleTooOld)
+		status = monitoring.ErrorSampleTooOld
+		if err := s.samples.RecordRefusal(ctx, hostID, monitoring.ErrorSampleTooOld, stored.At); err != nil {
+			status = "error"
+			return err
+		}
 		s.ackSample(hostID, session, sample,
 			agentv1.MetricsAck_STATUS_REJECTED_TOO_OLD, monitoring.ErrorSampleTooOld)
 		return nil
 	}
+	if observed.Substituted {
+		// The panel put its own moment on the reading, so the panel says so:
+		// every point of this host is then drawn where the host did not put it.
+		if err := s.samples.RecordClockSubstitution(ctx, hostID, observed.Skew); err != nil {
+			status = "error"
+			return err
+		}
+	}
 	outcome, err := s.samples.Record(ctx, hostID, stored)
 	if err != nil {
+		status = "error"
 		return err
 	}
-	status := agentv1.MetricsAck_STATUS_PERSISTED
+	ack := agentv1.MetricsAck_STATUS_PERSISTED
 	if outcome == monitoring.OutcomeDuplicate {
-		status = agentv1.MetricsAck_STATUS_DUPLICATE
+		ack, status = agentv1.MetricsAck_STATUS_DUPLICATE, "duplicate"
 	}
-	s.ackSample(hostID, session, sample, status, "")
+	s.ackSample(hostID, session, sample, ack, "")
 	return nil
 }
 
@@ -678,6 +699,10 @@ func (s *AgentService) consume(ctx context.Context, hostID string, session *Sess
 	msg *agentv1.AgentMessage) error {
 	switch payload := msg.GetPayload().(type) {
 	case *agentv1.AgentMessage_Heartbeat:
+		// The other call every host makes on a fixed cadence; its tail says
+		// whether the gateway keeps up with the fleet.
+		started, outcome := time.Now(), "applied"
+		defer func() { metrics.HeartbeatApply.Observe(time.Since(started).Seconds(), outcome) }()
 		health := payload.Heartbeat.GetHealth()
 		// The fields absent from a message mean an undetermined state and go on as a
 		// missing value rather than as zero - and a heartbeat without any health at
@@ -694,10 +719,14 @@ func (s *AgentService) consume(ctx context.Context, hostID string, session *Sess
 			PendingUpdates:         health.PendingUpdates,
 			PendingSecurityUpdates: health.PendingSecurityUpdates,
 		}); err != nil {
+			outcome = "error"
 			return err
 		}
 		const query = `update agent_sessions set last_heartbeat_at = now() where id = $1`
 		_, err := s.pool.Exec(ctx, query, session.ID)
+		if err != nil {
+			outcome = "error"
+		}
 		return err
 
 	case *agentv1.AgentMessage_Inventory:

@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/ultherego/flotestro/internal/metrics"
 )
 
 // hostState is what the evaluator knows about one host: where it is, how
@@ -35,15 +37,16 @@ type openAlert struct {
 	StartedAt time.Time
 }
 
-// Evaluate runs every enabled rule over the matching hosts once.
+// Evaluate runs every enabled rule over the matching hosts once. It takes the
+// lease like any other pass: there is no unfenced way to judge the fleet.
 func (s *Store) Evaluate(ctx context.Context, now time.Time) error {
-	return s.evaluate(ctx, now, nil)
+	return s.EvaluateLeased(ctx, now)
 }
 
 // EvaluateLeased is the pass the running panel makes: one instance at a time,
 // under a lease taken from the database.
 func (s *Store) EvaluateLeased(ctx context.Context, now time.Time) error {
-	lease, held, err := s.acquireEvaluatorLease(ctx)
+	lease, held, err := s.TakeEvaluatorLease(ctx)
 	if err != nil {
 		return err
 	}
@@ -54,12 +57,29 @@ func (s *Store) EvaluateLeased(ctx context.Context, now time.Time) error {
 	defer func() {
 		// The lease is given back at the end of the pass so that the next instance
 		// may take it at once instead of waiting out the term.
-		if err := s.releaseEvaluatorLease(context.WithoutCancel(ctx), lease); err != nil {
+		if err := s.ReleaseEvaluatorLease(context.WithoutCancel(ctx), lease); err != nil {
 			s.log.Warn("the lease of the alert evaluator was not given back; it runs out by itself",
 				"err", err)
 		}
 	}()
 
+	if err := s.EvaluateUnder(ctx, now, lease); err != nil {
+		if errors.Is(err, ErrLeaseLost) {
+			// Not a failure of the panel: another instance judges the
+			// fleet now, and this pass stopped rather than writing over it.
+			s.log.Warn("the lease of the alert evaluator was lost during the pass; the pass was stopped",
+				"holder", lease.Holder, "token", lease.Token, "err", err)
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+// EvaluateUnder runs one pass under a lease this instance already holds: it
+// renews the lease as it goes, stamps every write with the lease's token and
+// stops at the first write the fence refuses.
+func (s *Store) EvaluateUnder(ctx context.Context, now time.Time, lease Lease) error {
 	renewed := time.Now()
 	guard := func(ctx context.Context) error {
 		if time.Since(renewed) < evaluatorRenewEvery {
@@ -71,21 +91,20 @@ func (s *Store) EvaluateLeased(ctx context.Context, now time.Time) error {
 		renewed = time.Now()
 		return nil
 	}
-	if err := s.evaluate(ctx, now, guard); err != nil {
-		if errors.Is(err, ErrLeaseLost) {
-			// Not a failure of the panel: another instance judges the
-			// fleet now, and this pass stopped rather than writing over it.
-			s.log.Warn("the lease of the alert evaluator was lost during the pass; the pass was stopped",
-				"holder", lease.Holder, "token", lease.Token)
-			return nil
-		}
-		return err
-	}
-	return nil
+	return s.evaluate(ctx, now, fenceOf(lease), guard)
 }
 
+// evaluatorGuardEvery is how many hosts of one rule pass between two checks of
+// the lease. The renewal behind the check is spaced by time, so this is not a
+// round trip per batch; it is how soon a pass that lost the fleet notices and
+// stops. Between the checks the database refuses its writes anyway, but a pass
+// that carries on computing verdicts nobody will take is wasted work on ten
+// thousand hosts. A rule over the whole fleet asks forty times rather than once
+// - the bug - or ten thousand times.
+const evaluatorGuardEvery = 256
+
 // evaluate is the pass itself.
-func (s *Store) evaluate(ctx context.Context, now time.Time, guard func(context.Context) error) error {
+func (s *Store) evaluate(ctx context.Context, now time.Time, f fence, guard func(context.Context) error) error {
 	rules, err := s.ListRules(ctx)
 	if err != nil {
 		return err
@@ -112,18 +131,26 @@ func (s *Store) evaluate(ctx context.Context, now time.Time, guard func(context.
 		if !rule.Enabled || within == nil {
 			continue
 		}
-		for _, host := range hosts {
+		for index, host := range hosts {
+			// Asked inside the fleet as well: a rule over ten thousand hosts is a long
+			// way to walk on a lease somebody else may already have taken.
+			if guard != nil && index > 0 && index%evaluatorGuardEvery == 0 {
+				if err := guard(ctx); err != nil {
+					return err
+				}
+			}
 			if !within.covers(host.ID) {
 				continue
 			}
 			value, detail, known := measure(rule, host, now)
 			key := rule.ID + "/" + host.ID
 			episode, exists := open[key]
+			mark := alertWrite{rule: rule.ID, host: host.ID}
 			if !known {
 				// Nothing can be said: the episode is not cleared - the condition may well
 				// still hold - but it is not advanced either.
 				if exists && noDataHold(episode, now) {
-					if err := s.restart(ctx, episode.ID, now); err != nil {
+					if err := s.restart(ctx, f, mark.on(episode.ID), now); err != nil {
 						return err
 					}
 				}
@@ -132,33 +159,31 @@ func (s *Store) evaluate(ctx context.Context, now time.Time, guard func(context.
 			holds := compare(rule.Operator, value, rule.Threshold)
 			switch {
 			case holds && !exists:
-				if err := s.startEpisode(ctx, rule, host, value, detail, now); err != nil {
+				if err := s.startEpisode(ctx, f, rule, host, value, detail, now); err != nil {
 					return err
 				}
 			case holds && episode.State == "pending":
-				since, err := s.observedSince(ctx, rule, host, episode, now)
+				since, err := s.observedSince(ctx, f, rule, host, episode, now)
 				if err != nil {
 					return err
 				}
 				if now.Sub(since) >= time.Duration(rule.ForMinutes)*time.Minute {
-					if err := s.fire(ctx, episode.ID, value, detail, now); err != nil {
+					if err := s.fire(ctx, f, mark.on(episode.ID), value, detail, now); err != nil {
 						return err
 					}
-				} else if err := s.refresh(ctx, episode, value, detail); err != nil {
+				} else if err := s.refresh(ctx, f, mark.on(episode.ID), episode, value, detail); err != nil {
 					return err
 				}
 			case holds:
-				if err := s.refresh(ctx, episode, value, detail); err != nil {
+				if err := s.refresh(ctx, f, mark.on(episode.ID), episode, value, detail); err != nil {
 					return err
 				}
 			case !holds && exists && episode.State == "pending":
-				if _, err := s.pool.Exec(ctx, `delete from alerts where id = $1`, episode.ID); err != nil {
+				if err := s.discard(ctx, f, mark.on(episode.ID)); err != nil {
 					return err
 				}
 			case !holds && exists:
-				if _, err := s.pool.Exec(ctx, `
-					update alerts set state = 'resolved', resolved_at = $2, value = $3
-					where id = $1 and state = 'firing'`, episode.ID, now, float32(value)); err != nil {
+				if err := s.resolve(ctx, f, mark.on(episode.ID), now, &value); err != nil {
 					return err
 				}
 			}
@@ -166,7 +191,7 @@ func (s *Store) evaluate(ctx context.Context, now time.Time, guard func(context.
 	}
 	// The episodes of the rules that no longer cover their host - the selector
 	// changed, the host moved - end here rather than staying open for ever.
-	return s.closeOrphans(ctx, rules, scopes, hosts, open, now)
+	return s.closeOrphans(ctx, f, rules, scopes, hosts, open, now)
 }
 
 // scope is the answer of a rule's selector over the fleet for one run of
@@ -231,7 +256,106 @@ func (s *Store) coveredHosts(ctx context.Context, sel Selector) (map[string]bool
 	return covered, rows.Err()
 }
 
-func (s *Store) startEpisode(ctx context.Context, rule Rule, host hostState,
+// alertWrite names one write for the counter and the log line: which write, on
+// which rule and host, and on which episode.
+type alertWrite struct {
+	kind string
+	rule string
+	host string
+	id   string
+}
+
+// on names the episode the write lands on, kinded the write itself.
+func (w alertWrite) on(id string) alertWrite { w.id = id; return w }
+
+func (w alertWrite) kinded(kind string) alertWrite { w.kind = kind; return w }
+
+// fencePredicate is the row half of the fence as every statement carries it.
+const fencePredicate = `(fence_row.fencing_token is null or
+	 fence_row.fencing_token <= fence_lease.token)`
+
+// fencedWrite frames one statement that moves an alert row. The lease is read
+// in the same statement as the write, so a pass that lost it between two hosts
+// is refused by the database rather than by a check that has gone stale in the
+// meantime; the answer says whether the row moved, what token it carried before
+// and whether the lease still stood, which is what tells a refusal from an
+// episode that had simply moved on.
+const fencedWrite = `
+with fence_lease as (
+    select token from monitoring_leases
+     where name = '` + evaluatorLeaseName + `'
+       and holder = $2::uuid and token = $3 and lease_until > now()
+),
+fence_row as (
+    select id, state, fencing_token from alerts where id = $1::uuid
+),
+written as (
+    %s
+)
+select exists (select 1 from written),
+       (select fencing_token from fence_row),
+       exists (select 1 from fence_lease)`
+
+// write runs one statement of the evaluator under the fence. It answers nil
+// both when the row moved and when the row had already moved on - a state guard
+// that did not match is not the fence - and ErrFenceStale when the fence
+// refused it.
+func (s *Store) write(ctx context.Context, f fence, w alertWrite, body string, args ...any) error {
+	if !f.held() {
+		// Fail closed: a pass with no lease to write under writes nothing.
+		return s.fenceRefused(f, w, nil)
+	}
+	params := append([]any{w.id, f.Holder, f.Token}, args...)
+	var wrote, leased bool
+	var rowToken *int64
+	if err := s.pool.QueryRow(ctx, fmt.Sprintf(fencedWrite, body), params...).
+		Scan(&wrote, &rowToken, &leased); err != nil {
+		return err
+	}
+	if wrote {
+		return nil
+	}
+	if !leased || !f.accepts(rowToken) {
+		return s.fenceRefused(f, w, rowToken)
+	}
+	return nil
+}
+
+// fenceRefused counts and names a write the fence turned down: which write, on
+// which host and rule, under which token and over which.
+func (s *Store) fenceRefused(f fence, w alertWrite, rowToken *int64) error {
+	metrics.AlertFence.Inc(w.kind)
+	// Zero is "the row carries no token": nothing fenced whatever wrote it last.
+	var onRow int64
+	if rowToken != nil {
+		onRow = *rowToken
+	}
+	s.log.Warn("the fence refused a write of the alert state; a newer leader owns the episode",
+		"code", ErrorAlertFenceStale, "write", w.kind, "rule", w.rule, "host", w.host,
+		"alert", w.id, "token", f.Token, "row_token", onRow, "holder", f.Holder)
+	return ErrFenceStale
+}
+
+// fencedInsert opens an episode under the lease, so an instance that lost the
+// fleet cannot start one on it either.
+const fencedInsert = `
+with fence_lease as (
+    select token from monitoring_leases
+     where name = '` + evaluatorLeaseName + `'
+       and holder = $1::uuid and token = $2 and lease_until > now()
+),
+written as (
+    insert into alerts (id, rule_id, rule_name, metric, severity, host_id, state,
+        value, detail, started_at, fired_at, fencing_token)
+    select $3::uuid, $4::uuid, $5::text, $6::text, $7::text, $8::uuid, $9::text,
+           $10::real, $11::text, $12::timestamptz, $13::timestamptz, fence_lease.token
+      from fence_lease
+    on conflict do nothing
+    returning id
+)
+select exists (select 1 from written), exists (select 1 from fence_lease)`
+
+func (s *Store) startEpisode(ctx context.Context, f fence, rule Rule, host hostState,
 	value float64, detail string, now time.Time) error {
 	state := "pending"
 	var firedAt *time.Time
@@ -239,14 +363,22 @@ func (s *Store) startEpisode(ctx context.Context, rule Rule, host hostState,
 		state = "firing"
 		firedAt = &now
 	}
-	_, err := s.pool.Exec(ctx, `
-		insert into alerts (id, rule_id, rule_name, metric, severity, host_id, state,
-		    value, detail, started_at, fired_at)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-		on conflict do nothing`,
-		uuid.NewString(), rule.ID, rule.Name, rule.Metric, rule.Severity, host.ID, state,
-		float32(value), detail, now, firedAt)
-	return err
+	mark := alertWrite{kind: "start", rule: rule.ID, host: host.ID}
+	if !f.held() {
+		return s.fenceRefused(f, mark, nil)
+	}
+	var wrote, leased bool
+	if err := s.pool.QueryRow(ctx, fencedInsert,
+		f.Holder, f.Token, uuid.NewString(), rule.ID, rule.Name, rule.Metric, rule.Severity,
+		host.ID, state, float32(value), detail, now, firedAt).Scan(&wrote, &leased); err != nil {
+		return err
+	}
+	if !wrote && !leased {
+		return s.fenceRefused(f, mark, nil)
+	}
+	// Nothing written under a standing lease means the open episode was already
+	// there: the list of open episodes is read once, at the start of the pass.
+	return nil
 }
 
 // maxSampleGap is the longest hole in a host's samples that still counts as
@@ -256,7 +388,7 @@ const maxSampleGap = 2 * SamplingInterval
 
 // observedSince returns the moment from which the rule's window is counted for
 // the episode: the start of the uninterrupted run of samples that reaches now.
-func (s *Store) observedSince(ctx context.Context, rule Rule, host hostState,
+func (s *Store) observedSince(ctx context.Context, f fence, rule Rule, host hostState,
 	episode openAlert, now time.Time) (time.Time, error) {
 	if rule.ForMinutes == 0 || rule.Metric == MetricHostOffline {
 		return episode.StartedAt, nil
@@ -267,7 +399,8 @@ func (s *Store) observedSince(ctx context.Context, rule Rule, host hostState,
 	}
 	since := continuousSince(episode.StartedAt, samples, now, maxSampleGap)
 	if since.After(episode.StartedAt) {
-		if err := s.restart(ctx, episode.ID, since); err != nil {
+		mark := alertWrite{rule: rule.ID, host: host.ID, id: episode.ID}
+		if err := s.restart(ctx, f, mark, since); err != nil {
 			return time.Time{}, err
 		}
 	}
@@ -322,33 +455,73 @@ func (s *Store) sampleTimes(ctx context.Context, hostID string, since time.Time)
 
 // restart moves the start of a pending episode, so its window is counted
 // from there. A firing episode is never moved: it has already fired.
-func (s *Store) restart(ctx context.Context, id string, at time.Time) error {
-	_, err := s.pool.Exec(ctx,
-		`update alerts set started_at = $2 where id = $1 and state = 'pending'`, id, at)
-	return err
+func (s *Store) restart(ctx context.Context, f fence, w alertWrite, at time.Time) error {
+	return s.write(ctx, f, w.kinded("restart"), `
+		update alerts a
+		   set started_at = $4, fencing_token = fence_lease.token
+		  from fence_row, fence_lease
+		 where a.id = fence_row.id and fence_row.state = 'pending' and `+fencePredicate+`
+		returning a.id`, at)
 }
 
-func (s *Store) fire(ctx context.Context, id string, value float64, detail string, now time.Time) error {
-	_, err := s.pool.Exec(ctx, `
-		update alerts set state = 'firing', fired_at = $2, value = $3, detail = $4
-		where id = $1 and state = 'pending'`, id, now, float32(value), detail)
-	return err
+func (s *Store) fire(ctx context.Context, f fence, w alertWrite,
+	value float64, detail string, now time.Time) error {
+	return s.write(ctx, f, w.kinded("fire"), `
+		update alerts a
+		   set state = 'firing', fired_at = $4, value = $5, detail = $6,
+		       fencing_token = fence_lease.token
+		  from fence_row, fence_lease
+		 where a.id = fence_row.id and fence_row.state = 'pending' and `+fencePredicate+`
+		returning a.id`, now, float32(value), detail)
 }
 
 // refresh keeps the value and the message of an open episode current. A
 // write only when something changed: the fleet has many quiet minutes.
-func (s *Store) refresh(ctx context.Context, episode openAlert, value float64, detail string) error {
+func (s *Store) refresh(ctx context.Context, f fence, w alertWrite,
+	episode openAlert, value float64, detail string) error {
 	if float32(value) == float32(episode.Value) && detail == episode.Detail {
 		return nil
 	}
-	_, err := s.pool.Exec(ctx, `update alerts set value = $2, detail = $3 where id = $1`,
-		episode.ID, float32(value), detail)
-	return err
+	return s.write(ctx, f, w.kinded("refresh"), `
+		update alerts a
+		   set value = $4, detail = $5, fencing_token = fence_lease.token
+		  from fence_row, fence_lease
+		 where a.id = fence_row.id and `+fencePredicate+`
+		returning a.id`, float32(value), detail)
+}
+
+// resolve ends a firing episode. The value is the last reading where there is
+// one; an episode ended because its rule stopped covering the host keeps the
+// reading it had.
+func (s *Store) resolve(ctx context.Context, f fence, w alertWrite,
+	now time.Time, value *float64) error {
+	var reading *float32
+	if value != nil {
+		last := float32(*value)
+		reading = &last
+	}
+	return s.write(ctx, f, w.kinded("resolve"), `
+		update alerts a
+		   set state = 'resolved', resolved_at = $4,
+		       value = coalesce($5::real, a.value), fencing_token = fence_lease.token
+		  from fence_row, fence_lease
+		 where a.id = fence_row.id and fence_row.state = 'firing' and `+fencePredicate+`
+		returning a.id`, now, reading)
+}
+
+// discard removes a pending episode that never fired: a condition that lasted
+// one sample is not an alert.
+func (s *Store) discard(ctx context.Context, f fence, w alertWrite) error {
+	return s.write(ctx, f, w.kinded("discard"), `
+		delete from alerts a
+		 using fence_row, fence_lease
+		 where a.id = fence_row.id and fence_row.state = 'pending' and `+fencePredicate+`
+		returning a.id`)
 }
 
 // closeOrphans ends the open episodes whose rule no longer covers their host
 // or whose host is gone from the fleet.
-func (s *Store) closeOrphans(ctx context.Context, rules []Rule, scopes map[string]*scope,
+func (s *Store) closeOrphans(ctx context.Context, f fence, rules []Rule, scopes map[string]*scope,
 	hosts []hostState, open map[string]openAlert, now time.Time) error {
 	covered := map[string]bool{}
 	unresolved := map[string]bool{}
@@ -371,18 +544,18 @@ func (s *Store) closeOrphans(ctx context.Context, rules []Rule, scopes map[strin
 		if covered[key] {
 			continue
 		}
-		if ruleID, _, _ := strings.Cut(key, "/"); unresolved[ruleID] {
+		ruleID, hostID, _ := strings.Cut(key, "/")
+		if unresolved[ruleID] {
 			continue
 		}
+		mark := alertWrite{rule: ruleID, host: hostID, id: episode.ID}
 		if episode.State == "pending" {
-			if _, err := s.pool.Exec(ctx, `delete from alerts where id = $1`, episode.ID); err != nil {
+			if err := s.discard(ctx, f, mark); err != nil {
 				return err
 			}
 			continue
 		}
-		if _, err := s.pool.Exec(ctx, `
-			update alerts set state = 'resolved', resolved_at = $2
-			where id = $1 and state = 'firing'`, episode.ID, now); err != nil {
+		if err := s.resolve(ctx, f, mark, now, nil); err != nil {
 			return err
 		}
 	}

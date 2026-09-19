@@ -11,6 +11,7 @@ import (
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/monitoring"
+	"github.com/ultherego/flotestro/internal/opspec"
 	"github.com/ultherego/flotestro/internal/selector"
 )
 
@@ -35,6 +36,10 @@ func (s *Server) monitoringRoutes(mux *http.ServeMux) {
 	s.route(mux, "POST /api/v1/monitoring/alerts/{id}/acknowledge", s.handleAcknowledgeAlert)
 	s.route(mux, "POST /api/v1/monitoring/alerts/{id}/annotate", s.handleAnnotateAlert)
 	s.route(mux, "GET /api/v1/monitoring/silences", s.handleListSilences)
+	// A silence that names no host covers every host, so it is written and
+	// ended with the permission over the whole installation.
+	s.route(mux, "POST /api/v1/monitoring/silences", s.handleCreateFleetSilence)
+	s.route(mux, "DELETE /api/v1/monitoring/silences/{silence}", s.handleExpireFleetSilence)
 	// The host view: its charts, its alerts and its silences.
 	s.route(mux, "GET /api/v1/hosts/{id}/metrics", s.handleHostMetrics)
 	s.route(mux, "GET /api/v1/hosts/{id}/monitoring", s.handleHostMonitoring)
@@ -62,6 +67,11 @@ type hostMetricsView struct {
 	Range       string             `json:"range"`
 	StepSeconds int                `json:"step_seconds"`
 	Points      []monitoring.Point `json:"points"`
+	// Gaps are the stretches of the window with no reading at all, each with
+	// the typed code of the refusal that explains it where there is one. A
+	// hole is not a row of zeroes, so it travels beside the points and never
+	// among them.
+	Gaps []monitoring.Gap `json:"gaps"`
 	// Latest is the newest raw sample whatever the range; nil for a host
 	// that never sent one.
 	Latest       *monitoring.Point `json:"latest"`
@@ -97,7 +107,8 @@ func (s *Server) handleHostMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, hostMetricsView{
 		HostID: hostID, Range: window.Name, StepSeconds: int(window.Step.Seconds()),
-		Points: series.Points, Latest: series.Latest, LastSampleAt: series.LastSampleAt,
+		Points: series.Points, Gaps: series.Gaps,
+		Latest: series.Latest, LastSampleAt: series.LastSampleAt,
 		SamplingIntervalSeconds: int(monitoring.SamplingInterval.Seconds()),
 		Source:                  "agent",
 	})
@@ -113,6 +124,13 @@ type hostMonitoringView struct {
 	// RulesMatching counts the enabled rules whose selector covers this
 	// host: a host nobody watches is to say so.
 	RulesMatching int `json:"rules_matching"`
+	// Refused is what this host sent and the panel would not store, with the
+	// typed code of each refusal. It is what tells a host with a hole in its
+	// data from a host that was simply quiet.
+	Refused []monitoring.Refusal `json:"refused"`
+	// ClockSubstitution is present only where the panel had to stamp this
+	// host's readings with its own time.
+	ClockSubstitution *monitoring.ClockSubstitution `json:"clock_substitution"`
 }
 
 // handleHostMonitoring returns the alerts, silences and latest sample of a
@@ -150,9 +168,22 @@ func (s *Server) handleHostMonitoring(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	// Everything the panel still holds, not only the window of the chart: a
+	// refusal from yesterday explains a hole an operator meets today.
+	refused, err := s.monitoring.Refusals(ctx, hostID, time.Time{})
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	clock, err := s.monitoring.HostClock(ctx, hostID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, hostMonitoringView{
 		HostID: hostID, LastSampleAt: lastSampleAt, Latest: latest,
 		Alerts: alerts, Silences: silences, RulesMatching: matching,
+		Refused: refused, ClockSubstitution: clock,
 	})
 }
 
@@ -661,7 +692,13 @@ func (s *Server) handleListSilences(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": silences, "count": len(silences)})
+	// The panel offers the global switch only to whoever may actually flip it;
+	// the endpoint refuses it anyway, this only keeps the form honest.
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": silences, "count": len(silences),
+		"can_silence_fleet":  principal.Can(authz.PermMonitoringSilence, authz.GlobalScope),
+		"can_silence_global": globalSilenceAllowed(principal),
+	})
 }
 
 // silenceRequest describes a silence ordered from the panel.
@@ -673,6 +710,50 @@ type silenceRequest struct {
 	// RuleID narrows the silence to one rule. Empty means every alert of
 	// this host.
 	RuleID string `json:"rule_id,omitempty"`
+	// Global asks for the silence that may keep back the security alerts of
+	// the installation; it names no host and no rule, and it needs the right
+	// to manage notifications over the whole installation.
+	Global bool `json:"global,omitempty"`
+	// SendSummary asks for one message per channel when the silence ends,
+	// naming what it kept back.
+	SendSummary bool `json:"send_summary,omitempty"`
+}
+
+// globalSilenceAllowed says whether the principal may write a silence that
+// keeps back the security alerts of the installation. Managing the
+// notification channels over the whole installation is that right; a
+// site-scoped or team-scoped binding is not.
+func globalSilenceAllowed(principal authz.Principal) bool {
+	return principal.Can(authz.PermNotificationManage, authz.GlobalScope)
+}
+
+// refuseGlobalSilence answers a global silence nobody may write. Fail-closed:
+// the caller stops here.
+func (s *Server) refuseGlobalSilence(w http.ResponseWriter, r *http.Request,
+	principal authz.Principal, targetType, targetID string) {
+	s.audit.Record(r.Context(), audit.Event{
+		ActorType: audit.ActorUser, ActorID: principal.Subject,
+		Action: "monitoring.silence.create", TargetType: targetType, TargetID: targetID,
+		RequestID: requestIDOf(r), Outcome: audit.OutcomeDenied,
+		Detail: map[string]any{
+			"reason": monitoring.RefusalGlobalSilenceDenied, "global": true,
+			"permission": string(authz.PermNotificationManage),
+			"scope":      authz.GlobalScope.String(), "roles": principal.Roles(),
+		},
+	})
+	problem(w, http.StatusForbidden, monitoring.RefusalGlobalSilenceDenied,
+		"a global silence may keep back the security alerts of the installation: it needs "+
+			string(authz.PermNotificationManage)+" over the whole installation, not over one site")
+}
+
+// silenceRefusal names a refused silence: a typed refusal keeps its own code,
+// and a plain validation error stays invalid_silence, as it always was.
+func silenceRefusal(err error) string {
+	var refusal *opspec.RefusalError
+	if errors.As(err, &refusal) {
+		return refusal.Code
+	}
+	return "invalid_silence"
 }
 
 // defaultSilence is the length of a silence ordered without one.
@@ -701,13 +782,20 @@ func (s *Server) handleCreateSilence(w http.ResponseWriter, r *http.Request) {
 	if request.Minutes == 0 {
 		length = defaultSilence
 	}
+	// The right to blind the security alerts is asked for before the shape of
+	// the silence is judged: whoever may not have it learns nothing else.
+	if request.Global && !globalSilenceAllowed(principal) {
+		s.refuseGlobalSilence(w, r, principal, "host", hostID)
+		return
+	}
 	now := time.Now().UTC()
 	silence := monitoring.Silence{
 		HostID: hostID, RuleID: strings.TrimSpace(request.RuleID),
-		Until: now.Add(length), Reason: request.Reason, CreatedBy: principal.Subject,
+		Until: now.Add(length), Reason: request.Reason, Global: request.Global,
+		SendSummary: request.SendSummary, CreatedBy: principal.Subject,
 	}
 	if err := monitoring.ValidateSilence(silence, now); err != nil {
-		problem(w, http.StatusBadRequest, "invalid_silence", err.Error())
+		problem(w, http.StatusBadRequest, silenceRefusal(err), err.Error())
 		return
 	}
 	if silence.RuleID != "" {
@@ -727,9 +815,98 @@ func (s *Server) handleCreateSilence(w http.ResponseWriter, r *http.Request) {
 		Detail: map[string]any{
 			"silence_id": created.ID, "until": created.Until.Format(time.RFC3339),
 			"reason": created.Reason, "rule_id": created.RuleID,
+			"global": created.Global, "send_summary": created.SendSummary,
 		},
 	})
 	writeJSON(w, http.StatusCreated, created)
+}
+
+// handleCreateFleetSilence creates a silence that names no host. It covers
+// every host the installation has, so it is written with the permission over
+// the whole installation; a global one needs the right to manage the
+// notification channels on top, because it may keep back security alerts.
+func (s *Server) handleCreateFleetSilence(w http.ResponseWriter, r *http.Request) {
+	principal, ok := s.authorize(w, r, authz.PermMonitoringSilence, authz.GlobalScope, "fleet", "")
+	if !ok {
+		return
+	}
+	if !s.monitoringEnabled(w) {
+		return
+	}
+	var request silenceRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&request); err != nil {
+		problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
+		return
+	}
+	if request.Global && !globalSilenceAllowed(principal) {
+		s.refuseGlobalSilence(w, r, principal, "fleet", "")
+		return
+	}
+	length := time.Duration(request.Minutes) * time.Minute
+	if request.Minutes == 0 {
+		length = defaultSilence
+	}
+	now := time.Now().UTC()
+	silence := monitoring.Silence{
+		RuleID: strings.TrimSpace(request.RuleID), Until: now.Add(length),
+		Reason: request.Reason, Global: request.Global,
+		SendSummary: request.SendSummary, CreatedBy: principal.Subject,
+	}
+	if err := monitoring.ValidateSilence(silence, now); err != nil {
+		problem(w, http.StatusBadRequest, silenceRefusal(err), err.Error())
+		return
+	}
+	if silence.RuleID != "" {
+		if _, err := s.monitoring.GetRule(r.Context(), silence.RuleID); s.ruleProblem(w, err) {
+			return
+		}
+	}
+	created, err := s.monitoring.CreateSilence(r.Context(), silence)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.audit.Record(r.Context(), audit.Event{
+		ActorType: audit.ActorUser, ActorID: principal.Subject,
+		Action: "monitoring.silence.create", TargetType: "fleet",
+		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
+		Detail: map[string]any{
+			"silence_id": created.ID, "until": created.Until.Format(time.RFC3339),
+			"reason": created.Reason, "rule_id": created.RuleID,
+			"global": created.Global, "send_summary": created.SendSummary,
+		},
+	})
+	writeJSON(w, http.StatusCreated, created)
+}
+
+// handleExpireFleetSilence ends a silence that names no host early. Ending one
+// only brings alerts back, so it asks for no right beyond writing it.
+func (s *Server) handleExpireFleetSilence(w http.ResponseWriter, r *http.Request) {
+	principal, ok := s.authorize(w, r, authz.PermMonitoringSilence, authz.GlobalScope, "fleet", "")
+	if !ok {
+		return
+	}
+	if !s.monitoringEnabled(w) {
+		return
+	}
+	id := r.PathValue("silence")
+	err := s.monitoring.ExpireFleetSilence(r.Context(), id)
+	if errors.Is(err, monitoring.ErrNotFound) {
+		problem(w, http.StatusNotFound, "silence_not_found",
+			"no such active silence of the whole fleet; a silence of one host is ended through its host")
+		return
+	}
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.audit.Record(r.Context(), audit.Event{
+		ActorType: audit.ActorUser, ActorID: principal.Subject,
+		Action: "monitoring.silence.expire", TargetType: "fleet",
+		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
+		Detail: map[string]any{"silence_id": id},
+	})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // handleExpireSilence ends a silence early.

@@ -892,6 +892,9 @@ func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
 		  and a.acknowledged_at is null
 		  and not exists (select 1 from silences s
 		                  where s.expired_at is null and s.until > now()
+		                    -- A global silence is written for the security alerts;
+		                    -- it is not a silence of every alert of every host.
+		                    and not s.global
 		                    and (s.host_id is null or s.host_id = a.host_id)
 		                    and (s.rule_id is null or s.rule_id = a.rule_id))
 		  and `+visible, args...).Scan(&summary.AlertsFiring, &summary.AlertsCritical)

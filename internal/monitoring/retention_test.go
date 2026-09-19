@@ -1,6 +1,7 @@
 package monitoring
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -90,5 +91,74 @@ func TestALeaseIsOnlyHeldWhileItLasts(t *testing.T) {
 	}
 	if (Lease{Until: now.Add(time.Minute)}).Held(now) {
 		t.Fatal("a lease nobody holds was held")
+	}
+}
+
+// TestTheFenceRefusesOnlyWhatIsOlderThanTheRow walks the predicate the alert
+// writes carry: not older than the token on the row, fail closed without a
+// lease, and open for a row nothing ever stamped.
+func TestTheFenceRefusesOnlyWhatIsOlderThanTheRow(t *testing.T) {
+	token := func(value int64) *int64 { return &value }
+	leader := fence{Holder: "instance-a", Token: 7}
+	if !leader.held() {
+		t.Fatal("a fence with a holder and a token minted from the lease is not held")
+	}
+	// A row a panel of the previous release wrote carries no token. Refusing it
+	// would leave an episode nobody can ever resolve.
+	if !leader.accepts(nil) {
+		t.Fatal("the fence refused a row that carries no token")
+	}
+	if !leader.accepts(token(6)) {
+		t.Fatal("the fence refused a row an older lease wrote")
+	}
+	// Its own: a leader writes the same episode again and again under one lease.
+	if !leader.accepts(token(7)) {
+		t.Fatal("the fence refused the row its own lease wrote; the pass would never make progress")
+	}
+	if leader.accepts(token(8)) {
+		t.Fatal("the fence let a stale pass write over a newer leader")
+	}
+
+	// Fail closed: no lease, no write. The token is minted from zero the first
+	// time the lease changes hands, so zero is nobody's.
+	for _, without := range []fence{{}, {Holder: "instance-a"}, {Token: 7}} {
+		if without.held() || without.accepts(nil) || without.accepts(token(1)) {
+			t.Fatalf("a pass without a lease wrote under %+v", without)
+		}
+	}
+}
+
+// TestTheRefusedWriteAnswersToTheLostLease: the pass stops on a refusal
+// because it recognises the lease loss in it, and the code is the one an
+// operator looks up.
+func TestTheRefusedWriteAnswersToTheLostLease(t *testing.T) {
+	if !errors.Is(ErrFenceStale, ErrLeaseLost) {
+		t.Fatal("a write the fence refused is not a lost lease; the pass would carry on")
+	}
+	if !strings.HasPrefix(ErrFenceStale.Error(), ErrorAlertFenceStale+":") {
+		t.Fatalf("the refusal does not name its own code: %q", ErrFenceStale)
+	}
+	if !strings.Contains(ErrFenceStale.Error(), ErrorEvaluatorLeaseLost) {
+		t.Fatalf("the refusal does not name the lease it lost: %q", ErrFenceStale)
+	}
+}
+
+// TestEveryFencedStatementStampsAndCompares pins the two halves of the
+// predicate that are easy to write the other way round and impossible to
+// notice afterwards.
+func TestEveryFencedStatementStampsAndCompares(t *testing.T) {
+	if !strings.Contains(fencePredicate, "fencing_token is null") {
+		t.Fatal("the predicate has nothing to say about a row no token was put on; " +
+			"an episode from a panel of the previous release would never be writable again")
+	}
+	if !strings.Contains(fencePredicate, "<= fence_lease.token") {
+		t.Fatal("the predicate refuses the row the lease itself wrote; " +
+			"two instances would hand an episode back and forth without either writing it")
+	}
+	if !strings.Contains(fencedWrite, "lease_until > now()") {
+		t.Fatal("the framed write does not check the lease in the same statement")
+	}
+	if !strings.Contains(fencedInsert, "fence_lease.token") {
+		t.Fatal("an episode is opened without the token of the lease that opened it")
 	}
 }

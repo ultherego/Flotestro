@@ -134,6 +134,38 @@ export type NotedAlert = Alert & {
   note?: string;
 };
 
+/**
+ * A silence with the two decisions of its policy: global marks the one that
+ * may keep back a security alert of the installation, send_summary asks for
+ * one message per channel when it ends instead of the flood it held.
+ */
+export type ScopedSilence = Silence & { global?: boolean; send_summary?: boolean };
+
+/** The silence list, with what the reader is allowed to write. */
+export type SilenceList = Collection<ScopedSilence> & {
+  can_silence_fleet?: boolean;
+  can_silence_global?: boolean;
+};
+
+/** The badges of a silence: nothing for the ordinary one. */
+export function SilenceBadges({ silence }: { silence: ScopedSilence }) {
+  const t = useT();
+  return (
+    <>
+      {silence.global && (
+        <span className="badge warn" title={t("Keeps back the security alerts of the whole installation.")}>
+          {t("global")}
+        </span>
+      )}
+      {silence.send_summary && (
+        <span className="badge" title={t("When it ends, every channel gets one message naming what it kept back.")}>
+          {t("summary")}
+        </span>
+      )}
+    </>
+  );
+}
+
 /** The filter of the firing table: everything, what waits, or what somebody took. */
 export type FiringFilter = "" | "waiting" | "acknowledged";
 
@@ -212,7 +244,7 @@ export function FleetMonitoring() {
   });
   const silences = useQuery({
     queryKey: ["monitoring", "silences"],
-    queryFn: () => api.get<Collection<Silence>>("/api/v1/monitoring/silences"),
+    queryFn: () => api.get<SilenceList>("/api/v1/monitoring/silences"),
     refetchInterval: 30000,
   });
 
@@ -250,9 +282,13 @@ export function FleetMonitoring() {
     });
     if (answer.ok) removeRule.mutate(rule);
   };
+  // A silence that names no host belongs to no host, so it is ended on the
+  // fleet path; the host path would not find it.
   const endSilence = useMutation({
-    mutationFn: (silence: Silence) =>
-      api.del(`/api/v1/hosts/${silence.host_id}/monitoring/silences/${encodeURIComponent(silence.id)}`),
+    mutationFn: (silence: ScopedSilence) =>
+      api.del(silence.host_id
+        ? `/api/v1/hosts/${silence.host_id}/monitoring/silences/${encodeURIComponent(silence.id)}`
+        : `/api/v1/monitoring/silences/${encodeURIComponent(silence.id)}`),
     onSuccess: () => {
       setMessage(t("Silence ended."));
       refresh();
@@ -268,6 +304,11 @@ export function FleetMonitoring() {
   const firing = filterFiring((data?.firing ?? []) as NotedAlert[], firingFilter);
   const ruleItems = rules.data?.items ?? [];
   const silenceItems = silences.data?.items ?? [];
+  // Who may write what is the server's answer, not a guess from the roles:
+  // a silence of the whole fleet needs the right over the whole fleet, and
+  // the global one the right to manage the notification channels with it.
+  const canSilenceFleet = silences.data?.can_silence_fleet ?? false;
+  const canSilenceGlobal = silences.data?.can_silence_global ?? false;
 
   return (
     <>
@@ -476,8 +517,11 @@ export function FleetMonitoring() {
         <Card
           className="span-4"
           title={t("Silences in force")}
-          description={t("Every silence ends by itself; ending one here brings the alert back at once.")}
+          description={t("Every silence ends by itself; ending one here brings the alert back at once. A silence of one host never keeps back a security alert of the installation - only a global one does.")}
           flush
+          footer={canSilenceFleet && (
+            <FleetSilenceForm canSilenceGlobal={canSilenceGlobal} onDone={refresh} onMessage={setMessage} />
+          )}
         >
           {silences.error ? (
             <ErrorBox error={silences.error} />
@@ -493,8 +537,19 @@ export function FleetMonitoring() {
               <tbody>
                 {silenceItems.map((silence) => (
                   <tr key={silence.id}>
-                    <td><Link to={`/hosts/${silence.host_id}/monitoring`}>{silence.hostname || silence.host_id.slice(0, 8)}</Link></td>
-                    <td>{silence.rule_name || <span className="source">{t("every rule")}</span>}</td>
+                    <td>
+                      {silence.host_id ? (
+                        <Link to={`/hosts/${silence.host_id}/monitoring`}>{silence.hostname || silence.host_id.slice(0, 8)}</Link>
+                      ) : (
+                        <span className="source">{t("every host")}</span>
+                      )}
+                    </td>
+                    <td>
+                      <div className="fp-host-cell">
+                        <span>{silence.rule_name || <span className="source">{t("every rule")}</span>}</span>
+                        <span><SilenceBadges silence={silence} /></span>
+                      </div>
+                    </td>
                     <td><Time value={silence.until} /></td>
                     <td>
                       <div className="fp-host-cell">
@@ -576,6 +631,80 @@ function AgentFootprintCard({ footprint, loaded }: { footprint?: FleetFootprint;
 }
 
 /**
+ * A silence that names no host: it covers every host of the installation.
+ * The global one covers the security alerts with it, which is why it is
+ * offered only to whoever may manage the notification channels everywhere.
+ */
+function FleetSilenceForm({ canSilenceGlobal, onDone, onMessage }: {
+  canSilenceGlobal: boolean; onDone: () => void; onMessage: (text: string) => void;
+}) {
+  const t = useT();
+  const toast = useToast();
+  const [reason, setReason] = useState("");
+  const [minutes, setMinutes] = useState("60");
+  const [blindSecurity, setBlindSecurity] = useState(false);
+  const [sendSummary, setSendSummary] = useState(true);
+
+  const create = useMutation({
+    mutationFn: () =>
+      api.post<ScopedSilence>("/api/v1/monitoring/silences", {
+        reason: reason.trim(),
+        minutes: Number(minutes) || 60,
+        global: blindSecurity,
+        send_summary: sendSummary,
+      }),
+    onSuccess: (created) => {
+      const until = new Date(created.until).toLocaleString();
+      const text = created.global
+        ? t("Every host is silenced until {until}, the security alerts of the installation with them.", { until })
+        : t("Every host is silenced until {until}; the security alerts keep going out.", { until });
+      onMessage(text);
+      toast.success(text);
+      setReason("");
+      setBlindSecurity(false);
+      onDone();
+    },
+    onError: (error) => {
+      onMessage(errorText(error));
+      toast.error(errorText(error));
+    },
+  });
+
+  const ready = reason.trim().length >= 8 && Number(minutes) > 0 && Number(minutes) <= 1440;
+  return (
+    <>
+      <FieldGrid>
+        <Field label={t("Silence every host")} hint={t("The reason stays on the silence and in the audit trail.")} wide>
+          <input
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder={t("Reason (at least 8 characters)")}
+          />
+        </Field>
+        <Field label={t("Minutes")} hint={t("At most 1440: a silence always ends.")}>
+          <input type="number" min={1} max={1440} value={minutes} onChange={(e) => setMinutes(e.target.value)} />
+        </Field>
+        <label className="toggle">
+          <input type="checkbox" checked={sendSummary} onChange={(e) => setSendSummary(e.target.checked)} />
+          <span>{t("Send one summary per channel when it ends")}</span>
+        </label>
+        {canSilenceGlobal && (
+          <label className="toggle">
+            <input type="checkbox" checked={blindSecurity} onChange={(e) => setBlindSecurity(e.target.checked)} />
+            <span>{t("Keep back the security alerts of the installation too")}</span>
+          </label>
+        )}
+      </FieldGrid>
+      <Actions>
+        <button disabled={!ready || create.isPending} onClick={() => create.mutate()}>
+          {create.isPending ? t("Silencing…") : t("Silence every host")}
+        </button>
+      </Actions>
+    </>
+  );
+}
+
+/**
  * The firing alerts with a silence at each row.
  */
 function FiringTable({ alerts, canAcknowledge, onChanged, onMessage }: {
@@ -587,6 +716,7 @@ function FiringTable({ alerts, canAcknowledge, onChanged, onMessage }: {
   const [silencing, setSilencing] = useState<string | null>(null);
   const [reason, setReason] = useState("");
   const [minutes, setMinutes] = useState("60");
+  const [sendSummary, setSendSummary] = useState(false);
 
   // The acknowledgement and the note go through the dialog: the note is
   // the reason of the acknowledgement, and the trail keeps it.
@@ -634,13 +764,14 @@ function FiringTable({ alerts, canAcknowledge, onChanged, onMessage }: {
 
   const silence = useMutation({
     mutationFn: (alert: Alert) =>
-      api.post<Silence>(`/api/v1/hosts/${alert.host_id}/monitoring/silences`, {
+      api.post<ScopedSilence>(`/api/v1/hosts/${alert.host_id}/monitoring/silences`, {
         reason: reason.trim(),
         minutes: Number(minutes) || 60,
         rule_id: alert.rule_id,
+        send_summary: sendSummary,
       }),
     onSuccess: (created) => {
-      onMessage(t("{host}: {rule} is silenced until {until}.", { host: created.hostname, rule: created.rule_name ?? t("every rule"), until: new Date(created.until).toLocaleString() }));
+      onMessage(t("{host}: {rule} is silenced until {until}.", { host: created.hostname ?? t("every host"), rule: created.rule_name ?? t("every rule"), until: new Date(created.until).toLocaleString() }));
       setSilencing(null);
       setReason("");
       onChanged();
@@ -694,6 +825,10 @@ function FiringTable({ alerts, canAcknowledge, onChanged, onMessage }: {
                 style={{ width: 90 }}
               />
               <span>{t("minutes")}</span>
+              <label className="toggle">
+                <input type="checkbox" checked={sendSummary} onChange={(e) => setSendSummary(e.target.checked)} />
+                <span>{t("summary when it ends")}</span>
+              </label>
             </Toolbar>
           </FiringRow>
         ))}

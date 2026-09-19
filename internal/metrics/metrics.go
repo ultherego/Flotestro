@@ -5,8 +5,12 @@ package metrics
 import (
 	"context"
 	"fmt"
+	"math"
+	"os"
+	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,6 +45,9 @@ type Collector struct {
 	relays  RelayHeartbeats
 	gateway string
 	started time.Time
+	// footprint reads what this process costs on its host; tests replace it so
+	// the readers are fed fixtures instead of the running kernel.
+	footprint func() Footprint
 }
 
 // WithAuthorities adds metrics for every CA in the trust set.
@@ -142,18 +149,138 @@ func (c *Collector) Gather(ctx context.Context) []byte {
 func (c *Collector) runtimeMetrics() []metric {
 	var memory runtime.MemStats
 	runtime.ReadMemStats(&memory)
-	return []metric{
+	result := []metric{
 		{
 			name: "flotestro_goroutines", kind: "gauge",
 			help:    "The number of goroutines of the panel process.",
 			samples: []sample{{value: float64(runtime.NumGoroutine())}},
 		},
 		{
-			name: "flotestro_memory_bytes", kind: "gauge",
-			help:    "Memory reserved by the panel process.",
+			// Sys is address space the runtime has taken, not pages the host
+			// holds; the name says so, because the budget of a node is judged
+			// against flotestro_process_resident_bytes.
+			name: "flotestro_go_memory_reserved_bytes", kind: "gauge",
+			help:    "Address space the Go runtime has taken from the host; the resident set is flotestro_process_resident_bytes.",
 			samples: []sample{{value: float64(memory.Sys)}},
 		},
+		{
+			name: "flotestro_gc_pause_seconds_total", kind: "counter",
+			help:    "Time this process spent stopped for garbage collection since it started.",
+			samples: []sample{{value: float64(memory.PauseTotalNs) / float64(time.Second)}},
+		},
+		{
+			name: "flotestro_gc_cycles_total", kind: "counter",
+			help:    "Garbage collections since the process started.",
+			samples: []sample{{value: float64(memory.NumGC)}},
+		},
 	}
+	// The percentiles describe the pauses the runtime still remembers. Before
+	// the first collection there is nothing to describe, and the series stays
+	// away rather than reporting a pause of zero.
+	if pauses := gcPauses(&memory); len(pauses) > 0 {
+		for _, rank := range []struct {
+			name string
+			at   float64
+		}{
+			{"flotestro_gc_pause_seconds_p95", 0.95},
+			{"flotestro_gc_pause_seconds_p99", 0.99},
+			{"flotestro_gc_pause_seconds_max", 1},
+		} {
+			value, ok := quantile(pauses, rank.at)
+			if !ok {
+				continue
+			}
+			result = append(result, metric{
+				name: rank.name, kind: "gauge",
+				help:    "Garbage collection pause over the collections the runtime still remembers.",
+				samples: []sample{{value: value}},
+			})
+		}
+	}
+	return append(result, c.processMetrics()...)
+}
+
+// processMetrics are the numbers the host keeps about this process rather than
+// the ones the runtime keeps about itself: the resident set the kernel charges
+// it, the descriptors it holds and the CPU it burnt. A number neither the
+// cgroup nor procfs would give is left out, never reported as zero.
+func (c *Collector) processMetrics() []metric {
+	read := c.footprint
+	if read == nil {
+		read = ReadFootprint
+	}
+	fp := read()
+
+	var result []metric
+	if fp.ResidentBytes != nil {
+		result = append(result, metric{
+			name: "flotestro_process_resident_bytes", kind: "gauge",
+			help: "Resident set of the panel process as the host measures it; the source label says where the number came from.",
+			samples: []sample{{
+				labels: map[string]string{"source": fp.ResidentFrom},
+				value:  float64(*fp.ResidentBytes),
+			}},
+		})
+	}
+	if fp.OpenFDs != nil {
+		result = append(result, metric{
+			name: "flotestro_process_open_fds", kind: "gauge",
+			help:    "File descriptors the panel process holds; a reconnect storm that leaks leaves this number up.",
+			samples: []sample{{value: float64(*fp.OpenFDs)}},
+		})
+	}
+	if fp.MaxFDs != nil {
+		result = append(result, metric{
+			name: "flotestro_process_max_fds", kind: "gauge",
+			help:    "The descriptor limit of the panel process; the open count alone does not say how close it is.",
+			samples: []sample{{value: float64(*fp.MaxFDs)}},
+		})
+	}
+	if fp.CPUSeconds != nil {
+		result = append(result, metric{
+			name: "flotestro_process_cpu_seconds_total", kind: "counter",
+			help:    "CPU time the panel process has used, user and system together.",
+			samples: []sample{{value: *fp.CPUSeconds}},
+		})
+	}
+	return result
+}
+
+// gcPauses returns the garbage collection pauses the runtime remembers, in
+// seconds, sorted. The runtime keeps the last 256, and that window is what the
+// percentiles above describe.
+func gcPauses(memory *runtime.MemStats) []float64 {
+	ring := len(memory.PauseNs)
+	count := int(memory.NumGC)
+	if count > ring {
+		count = ring
+	}
+	pauses := make([]float64, 0, count)
+	for i := 0; i < count; i++ {
+		// The runtime writes the ring at (NumGC+255)%256, so it is walked back
+		// from the most recent collection.
+		index := (int(memory.NumGC) - 1 - i + 2*ring) % ring
+		pauses = append(pauses, float64(memory.PauseNs[index])/float64(time.Second))
+	}
+	sort.Float64s(pauses)
+	return pauses
+}
+
+// quantile takes the value at the nearest rank of a sorted series. Over a
+// window of a few hundred observations that is the honest reading: no value is
+// invented between two the process actually saw.
+func quantile(sorted []float64, at float64) (float64, bool) {
+	if len(sorted) == 0 {
+		return 0, false
+	}
+	index := int(math.Ceil(at*float64(len(sorted)))) - 1
+	if index < 0 {
+		index = 0
+	}
+	if index >= len(sorted) {
+		index = len(sorted) - 1
+	}
+	return sorted[index], true
 }
 
 // databaseMetrics reads the state of the fleet and the queue.
@@ -202,26 +329,39 @@ func (c *Collector) databaseMetrics(ctx context.Context) []metric {
 	}
 
 	// We measure the dispatch latency from the creation of a task to handing it
-	// over to the agent.
-	var avg, max *float64
+	// over to the agent. The average hides the tail a fleet is judged by, so the
+	// two percentiles stand beside it.
+	var avg, max, p95, p99 *float64
 	if err := c.pool.QueryRow(queryCtx, `
 		select avg(extract(epoch from a.dispatched_at - j.created_at)),
-		       max(extract(epoch from a.dispatched_at - j.created_at))
+		       max(extract(epoch from a.dispatched_at - j.created_at)),
+		       percentile_cont(0.95) within group (order by extract(epoch from a.dispatched_at - j.created_at)),
+		       percentile_cont(0.99) within group (order by extract(epoch from a.dispatched_at - j.created_at))
 		from job_attempts a
 		join jobs j on j.id = a.job_id
-		where a.dispatched_at > now() - interval '15 minutes'`).Scan(&avg, &max); err == nil {
-		if avg != nil {
+		where a.dispatched_at > now() - interval '15 minutes'`).Scan(&avg, &max, &p95, &p99); err == nil {
+		for _, reading := range []struct {
+			name  string
+			help  string
+			value *float64
+		}{
+			{"flotestro_dispatch_latency_seconds_avg",
+				"The average time from creating a task to handing it to the agent, over the last 15 minutes.", avg},
+			{"flotestro_dispatch_latency_seconds_p95",
+				"The time from creating a task to handing it to the agent that 95 in 100 stayed under, over the last 15 minutes.", p95},
+			{"flotestro_dispatch_latency_seconds_p99",
+				"The time from creating a task to handing it to the agent that 99 in 100 stayed under, over the last 15 minutes.", p99},
+			{"flotestro_dispatch_latency_seconds_max",
+				"The longest time from creating a task to handing it to the agent, over the last 15 minutes.", max},
+		} {
+			// No task dispatched in the window leaves every reading null: a
+			// quarter of an hour nothing was measured in, not a latency of zero.
+			if reading.value == nil {
+				continue
+			}
 			result = append(result, metric{
-				name: "flotestro_dispatch_latency_seconds_avg", kind: "gauge",
-				help:    "The average time from creating a task to handing it to the agent, over the last 15 minutes.",
-				samples: []sample{{value: *avg}},
-			})
-		}
-		if max != nil {
-			result = append(result, metric{
-				name: "flotestro_dispatch_latency_seconds_max", kind: "gauge",
-				help:    "The longest time from creating a task to handing it to the agent, over the last 15 minutes.",
-				samples: []sample{{value: *max}},
+				name: reading.name, kind: "gauge", help: reading.help,
+				samples: []sample{{value: *reading.value}},
 			})
 		}
 	}
@@ -740,4 +880,191 @@ func render(metrics []metric) []byte {
 func escape(value string) string {
 	replacer := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)
 	return replacer.Replace(value)
+}
+
+// The panel reads its own cost the way the agent reads the host's: from the
+// cgroup or from procfs, never from the runtime's own bookkeeping.
+
+// userHZ is the unit of the CPU times in /proc/[pid]/stat.
+const userHZ = 100
+
+// Footprint is what a process costs on its host. A nil field is a number
+// neither the cgroup nor procfs would give: unknown, not zero.
+type Footprint struct {
+	ResidentBytes *uint64
+	// ResidentFrom names where the resident set came from: cgroup or procfs.
+	ResidentFrom string
+	OpenFDs      *uint64
+	MaxFDs       *uint64
+	CPUSeconds   *float64
+}
+
+// ReadFootprint reads the footprint of this process from the running host.
+func ReadFootprint() Footprint { return readFootprint("/proc", "/sys/fs/cgroup") }
+
+// readFootprint takes both roots as arguments so the readers can be given
+// fixture text instead of the kernel.
+func readFootprint(procRoot, cgroupRoot string) Footprint {
+	var fp Footprint
+	self := filepath.Join(procRoot, "self")
+
+	// The cgroup is the budget a container is killed against, so where there is
+	// one it is the number to report; procfs answers everywhere else.
+	if resident, ok := cgroupResident(procRoot, cgroupRoot); ok {
+		fp.ResidentBytes, fp.ResidentFrom = &resident, "cgroup"
+	} else if data, err := os.ReadFile(filepath.Join(self, "status")); err == nil {
+		if resident, ok := parseResidentBytes(string(data)); ok {
+			fp.ResidentBytes, fp.ResidentFrom = &resident, "procfs"
+		}
+	}
+
+	if entries, err := os.ReadDir(filepath.Join(self, "fd")); err == nil {
+		// The directory handle of this read is one of the descriptors it counts.
+		count := uint64(len(entries))
+		fp.OpenFDs = &count
+	}
+	if data, err := os.ReadFile(filepath.Join(self, "limits")); err == nil {
+		if limit, ok := parseFDLimit(string(data)); ok {
+			fp.MaxFDs = &limit
+		}
+	}
+	if data, err := os.ReadFile(filepath.Join(self, "stat")); err == nil {
+		if ticks, ok := parseCPUTicks(string(data)); ok {
+			seconds := float64(ticks) / userHZ
+			fp.CPUSeconds = &seconds
+		}
+	}
+	return fp
+}
+
+// cgroupResident reads the resident set the cgroup charges this process. The
+// charge counts page cache the kernel can drop for free, so the inactive file
+// pages come off it: what is left is what an out-of-memory kill would weigh.
+func cgroupResident(procRoot, cgroupRoot string) (uint64, bool) {
+	membership, err := os.ReadFile(filepath.Join(procRoot, "self", "cgroup"))
+	if err != nil {
+		return 0, false
+	}
+	path, ok := parseCgroupPath(string(membership))
+	if !ok {
+		return 0, false
+	}
+	directory := filepath.Join(cgroupRoot, filepath.FromSlash(path))
+	current, err := os.ReadFile(filepath.Join(directory, "memory.current"))
+	if err != nil {
+		return 0, false
+	}
+	charged, ok := parseCgroupBytes(string(current))
+	if !ok {
+		return 0, false
+	}
+	if stat, err := os.ReadFile(filepath.Join(directory, "memory.stat")); err == nil {
+		if inactive, ok := parseCgroupField(string(stat), "inactive_file"); ok && inactive <= charged {
+			charged -= inactive
+		}
+	}
+	return charged, true
+}
+
+// parseCgroupPath finds the unified hierarchy line of /proc/[pid]/cgroup. A
+// host still on the first version has no such line, and its process is read
+// from procfs instead.
+func parseCgroupPath(content string) (string, bool) {
+	for _, line := range strings.Split(content, "\n") {
+		rest, ok := strings.CutPrefix(strings.TrimSpace(line), "0::")
+		if !ok || rest == "" {
+			continue
+		}
+		return rest, true
+	}
+	return "", false
+}
+
+// parseCgroupBytes reads a single-value cgroup file. The word "max" stands
+// where a number would be when nothing is set, and it is not a measurement.
+func parseCgroupBytes(content string) (uint64, bool) {
+	value, err := strconv.ParseUint(strings.TrimSpace(content), 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return value, true
+}
+
+// parseCgroupField reads one "name value" line of memory.stat.
+func parseCgroupField(content, field string) (uint64, bool) {
+	for _, line := range strings.Split(content, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 || fields[0] != field {
+			continue
+		}
+		value, err := strconv.ParseUint(fields[1], 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		return value, true
+	}
+	return 0, false
+}
+
+// parseResidentBytes reads VmRSS out of /proc/[pid]/status. The file reports
+// kilobytes; the metric carries bytes like every other size.
+func parseResidentBytes(status string) (uint64, bool) {
+	for _, line := range strings.Split(status, "\n") {
+		key, rest, ok := strings.Cut(line, ":")
+		if !ok || key != "VmRSS" {
+			continue
+		}
+		fields := strings.Fields(rest)
+		if len(fields) == 0 {
+			return 0, false
+		}
+		value, err := strconv.ParseUint(fields[0], 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		return value * 1024, true
+	}
+	return 0, false
+}
+
+// parseFDLimit reads the soft descriptor limit out of /proc/[pid]/limits.
+func parseFDLimit(limits string) (uint64, bool) {
+	for _, line := range strings.Split(limits, "\n") {
+		rest, ok := strings.CutPrefix(line, "Max open files")
+		if !ok {
+			continue
+		}
+		fields := strings.Fields(rest)
+		if len(fields) == 0 {
+			return 0, false
+		}
+		// "unlimited" stands where the number would be; a limit that is not a
+		// number is no limit to compare the open count with.
+		value, err := strconv.ParseUint(fields[0], 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		return value, true
+	}
+	return 0, false
+}
+
+// parseCPUTicks reads utime plus stime out of /proc/[pid]/stat. The command
+// name is in brackets and may itself contain spaces, so the fields are counted
+// from the closing bracket.
+func parseCPUTicks(stat string) (uint64, bool) {
+	end := strings.LastIndex(stat, ")")
+	if end < 0 {
+		return 0, false
+	}
+	fields := strings.Fields(stat[end+1:])
+	if len(fields) < 13 {
+		return 0, false
+	}
+	user, errUser := strconv.ParseUint(fields[11], 10, 64)
+	system, errSystem := strconv.ParseUint(fields[12], 10, 64)
+	if errUser != nil || errSystem != nil {
+		return 0, false
+	}
+	return user + system, true
 }

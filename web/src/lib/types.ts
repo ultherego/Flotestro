@@ -1090,12 +1090,43 @@ export type MetricPoint = {
   agent_cpu_percent_max?: number;
 };
 
+/** A stretch of a chart window with no reading; the reason is the typed code
+ *  of the refusal that explains it. */
+export type MetricGap = {
+  from: string;
+  to: string;
+  /** How many points of the range the hole swallowed. */
+  steps: number;
+  reason?: string;
+  refused_samples?: number;
+};
+
+/** What the panel would not store from a host, per typed reason code and per day. */
+export type MetricRefusal = {
+  reason: string;
+  samples: number;
+  first_sample_at: string;
+  last_sample_at: string;
+  last_refused_at: string;
+};
+
+/** Where the panel had to stamp a host's readings with its own time. */
+export type MetricClockSubstitution = {
+  reason: string;
+  /** Positive means the host's clock runs ahead of the panel's. */
+  skew_millis: number;
+  samples: number;
+  last_at: string;
+};
+
 export type HostMetrics = {
   host_id: string;
   range: MetricRange;
   /** 60 for raw samples, 900 for the rollups of the long windows. */
   step_seconds: number;
   points: MetricPoint[];
+  /** The stretches of the window with no reading; a hole is not a row of zeroes. */
+  gaps: MetricGap[];
   /** The newest sample of the host at all, or null before the first one. */
   latest: MetricPoint | null;
   last_sample_at?: string | null;
@@ -1126,13 +1157,18 @@ export type Alert = {
 /** A silence always ends: it is a sensor turned off, with an owner and a reason. */
 export type Silence = {
   id: string;
-  host_id: string;
-  hostname: string;
+  /** Empty when the silence covers every host: a fleet-wide or a global one. */
+  host_id?: string;
+  hostname?: string;
   /** Empty when the silence covers every rule of the host. */
   rule_id?: string | null;
   rule_name?: string | null;
   until: string;
   reason: string;
+  /** Keeps back the security alerts of the installation; names no host and no rule. */
+  global?: boolean;
+  /** One message per channel when it ends, naming what it kept back. */
+  send_summary?: boolean;
   created_by: string;
   created_at: string;
   expired_at?: string | null;
@@ -1205,6 +1241,9 @@ export type HostMonitoring = {
   latest: MetricPoint | null;
   alerts: Alert[];
   silences: Silence[];
+  /** What the panel refused from this host: a hole with a cause, not a quiet machine. */
+  refused: MetricRefusal[];
+  clock_substitution: MetricClockSubstitution | null;
   /** How many rules select this host. */
   rules_matching: number;
 };

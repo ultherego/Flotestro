@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
-import type { Alert, Host, HostMetrics, HostMonitoring, MetricPoint, MetricRange, RuleCatalogue, Silence } from "../../lib/types";
+import type { Alert, Host, HostMetrics, HostMonitoring, MetricGap, MetricPoint, MetricRange, RuleCatalogue } from "../../lib/types";
 import { absoluteTime, bytes } from "../../lib/format";
 import { ErrorBox, Time, Empty } from "../../components/ui";
 import { AreaChart, ChartLegend, Meter, type AreaSeries } from "../../components/widgets";
@@ -10,7 +10,7 @@ import {
   Unknown, Widgets, countWhere, usageTone, useHost, useReadOperation,
 } from "./shared";
 import { capability } from "./modules";
-import { AlertStateBadge, SeverityBadge, duration, metricValue } from "../Monitoring";
+import { AlertStateBadge, SeverityBadge, SilenceBadges, duration, metricValue, type ScopedSilence } from "../Monitoring";
 import { ActionGuard } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
 
@@ -35,6 +35,34 @@ export function axisLabel(range: MetricRange): (iso: string) => string {
 
 const percent = (value: number) => `${Math.round(value)}%`;
 const rate = (value: number) => `${bytes(value)}/s`;
+
+/** One position on the time axis: a reading, or the middle of a hole. */
+type Slot = { at: string; point?: MetricPoint };
+
+/**
+ * The window as the chart draws it: the readings the panel holds, with a
+ * marker inside every hole so the line breaks over it instead of running
+ * through it.
+ */
+function slotsOf(points: MetricPoint[], gaps: MetricGap[]): Slot[] {
+  const holes = gaps
+    .map((gap) => ({ to: Date.parse(gap.to), at: new Date((Date.parse(gap.from) + Date.parse(gap.to)) / 2).toISOString() }))
+    .filter((hole) => Number.isFinite(hole.to));
+  const slots: Slot[] = [];
+  let next = 0;
+  for (const point of points) {
+    const at = Date.parse(point.at);
+    while (next < holes.length && holes[next].to <= at) slots.push({ at: holes[next++].at });
+    slots.push({ at: point.at, point });
+  }
+  while (next < holes.length) slots.push({ at: holes[next++].at });
+  return slots;
+}
+
+/** One field across the window; a slot with no reading has no value, never a zero. */
+function over<T>(slots: Slot[], read: (point: MetricPoint) => T | undefined): (T | undefined)[] {
+  return slots.map((slot) => (slot.point ? read(slot.point) : undefined));
+}
 
 /**
  * The busiest interface of the window: the one that moved the most bytes in
@@ -63,6 +91,7 @@ export function Monitoring() {
   const [silenceReason, setSilenceReason] = useState("");
   const [minutes, setMinutes] = useState("60");
   const [silenceRule, setSilenceRule] = useState("");
+  const [sendSummary, setSendSummary] = useState(false);
 
   const metrics = useQuery({
     queryKey: ["monitoring", host.id, "metrics", range],
@@ -88,9 +117,10 @@ export function Monitoring() {
 
   const silence = useMutation({
     mutationFn: (ruleID: string) =>
-      api.post<Silence>(`/api/v1/hosts/${host.id}/monitoring/silences`, {
+      api.post<ScopedSilence>(`/api/v1/hosts/${host.id}/monitoring/silences`, {
         reason: silenceReason.trim(),
         minutes: Number(minutes) || 60,
+        send_summary: sendSummary,
         ...(ruleID ? { rule_id: ruleID } : {}),
       }),
     onSuccess: (created) => {
@@ -104,9 +134,13 @@ export function Monitoring() {
     onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
   });
 
+  // A silence that names no host is in force here but belongs to no host, so
+  // it is ended on the fleet path.
   const unsilence = useMutation({
-    mutationFn: (id: string) =>
-      api.del(`/api/v1/hosts/${host.id}/monitoring/silences/${encodeURIComponent(id)}`),
+    mutationFn: (entry: ScopedSilence) =>
+      api.del(entry.host_id
+        ? `/api/v1/hosts/${host.id}/monitoring/silences/${encodeURIComponent(entry.id)}`
+        : `/api/v1/monitoring/silences/${encodeURIComponent(entry.id)}`),
     onSuccess: () => {
       setMessage(t("Silence ended."));
       refresh();
@@ -119,7 +153,15 @@ export function Monitoring() {
   const state = report.data;
   const series = metrics.data;
   const points = series?.points ?? [];
-  const times = points.map((point) => point.at);
+  // The holes belong on the axis: without them the chart draws a line from
+  // the reading before an outage straight to the one after it.
+  const gaps = series?.gaps ?? [];
+  const slots = slotsOf(points, gaps);
+  const times = slots.map((slot) => slot.at);
+  const explained = gaps.find((gap) => gap.reason);
+  const clock = state?.clock_substitution ?? null;
+  const refused = state?.refused ?? [];
+  const refusedSamples = refused.reduce((sum, item) => sum + item.samples, 0);
   const latest = series?.latest ?? state?.latest ?? null;
   const lastSampleAt = series?.last_sample_at ?? state?.last_sample_at ?? undefined;
   const rollup = (series?.step_seconds ?? 60) > 60;
@@ -127,7 +169,7 @@ export function Monitoring() {
   // Unread alerts are not zero alerts: the bar shows dashes then.
   const knownAlerts: Alert[] | undefined = state?.alerts;
   const alerts = knownAlerts ?? [];
-  const silences = state?.silences ?? [];
+  const silences = (state?.silences ?? []) as ScopedSilence[];
   const reasonReady = silenceReason.trim().length >= 8 && Number(minutes) > 0 && Number(minutes) <= 1440;
   // The rules a silence can name: the catalogue when it is readable, else
   // the ones already alerting on this host.
@@ -138,29 +180,29 @@ export function Monitoring() {
 
   const link = busiestInterface(points);
   const memoryTop = Math.max(0, ...points.map((point) => point.memory_total));
-  const cpuSeries: AreaSeries[] = [{ name: t("CPU"), tone: "accent", values: points.map((point) => point.cpu_percent) }];
+  const cpuSeries: AreaSeries[] = [{ name: t("CPU"), tone: "accent", values: over(slots, (point) => point.cpu_percent) }];
   const loadSeries: AreaSeries[] = [
     // The accent and the info tone are the same blue on the light theme,
     // so the second line of every chart takes a hue of its own.
-    { name: t("1 min"), tone: "accent", values: points.map((point) => point.load1) },
-    { name: t("5 min"), tone: "warn", values: points.map((point) => point.load5), line: true },
-    { name: t("15 min"), tone: "unknown", values: points.map((point) => point.load15), line: true },
+    { name: t("1 min"), tone: "accent", values: over(slots, (point) => point.load1) },
+    { name: t("5 min"), tone: "warn", values: over(slots, (point) => point.load5), line: true },
+    { name: t("15 min"), tone: "unknown", values: over(slots, (point) => point.load15), line: true },
   ];
   const memorySeries: AreaSeries[] = [
-    { name: t("Memory used"), tone: "accent", values: points.map((point) => point.memory_used) },
-    { name: t("Swap used"), tone: "warn", values: points.map((point) => point.swap_used), line: true },
+    { name: t("Memory used"), tone: "accent", values: over(slots, (point) => point.memory_used) },
+    { name: t("Swap used"), tone: "warn", values: over(slots, (point) => point.swap_used), line: true },
   ];
   // The agent's own cost, drawn like the host's: a gap where the agent did
   // not report the value, never a zero.
   const agentMemorySeries: AreaSeries[] = [
-    { name: t("Agent RSS"), tone: "accent", values: points.map((point) => point.agent_rss_bytes) },
-    { name: t("Helper RSS"), tone: "warn", values: points.map((point) => point.helper_rss_bytes), line: true },
+    { name: t("Agent RSS"), tone: "accent", values: over(slots, (point) => point.agent_rss_bytes) },
+    { name: t("Helper RSS"), tone: "warn", values: over(slots, (point) => point.helper_rss_bytes), line: true },
   ];
-  const agentCPUSeries: AreaSeries[] = [{ name: t("Agent CPU"), tone: "accent", values: points.map((point) => point.agent_cpu_percent) }];
+  const agentCPUSeries: AreaSeries[] = [{ name: t("Agent CPU"), tone: "accent", values: over(slots, (point) => point.agent_cpu_percent) }];
   const agentReported = points.some((point) => point.agent_rss_bytes !== undefined || point.agent_cpu_percent !== undefined);
   const networkSeries: AreaSeries[] = link ? [
-    { name: t("{name} received", { name: link.name }), tone: "ok", values: points.map((point) => point.interfaces?.find((item) => item.name === link.name)?.rx_bytes_per_second) },
-    { name: t("{name} sent", { name: link.name }), tone: "accent", values: points.map((point) => point.interfaces?.find((item) => item.name === link.name)?.tx_bytes_per_second), line: true },
+    { name: t("{name} received", { name: link.name }), tone: "ok", values: over(slots, (point) => point.interfaces?.find((item) => item.name === link.name)?.rx_bytes_per_second) },
+    { name: t("{name} sent", { name: link.name }), tone: "accent", values: over(slots, (point) => point.interfaces?.find((item) => item.name === link.name)?.tx_bytes_per_second), line: true },
   ] : [];
 
   // What stands in a chart section while there is no line to draw.
@@ -171,7 +213,11 @@ export function Monitoring() {
       : !latest
         ? <Empty>{t("The agent has not sent a sample yet")}</Empty>
         : points.length === 0
-          ? <Empty>{t("No sample in this window.")}</Empty>
+          ? <Empty>
+            {explained
+              ? t("No sample in this window: the panel refused {n} ({reason}).", { n: explained.refused_samples ?? 0, reason: explained.reason ?? t("unknown") })
+              : t("No sample in this window.")}
+          </Empty>
           : null;
 
   return (
@@ -204,6 +250,28 @@ export function Monitoring() {
         )}
         {series && <span>{t("sampled every {n} s", { n: series.sampling_interval_seconds })}</span>}
         {series && rollup && <span>{t("15-minute rollups with the peak of each step")}</span>}
+        {/* A hole in the data and a quiet machine read alike on a chart, so
+            the page names the holes and their cause before the charts. */}
+        {gaps.length > 0 && (
+          <span className="badge warn" title={explained ? explained.reason : t("The host sent nothing over these stretches.")}>
+            {t("{n} gaps in this window", { n: gaps.length })}
+          </span>
+        )}
+        {refusedSamples > 0 && (
+          <span className="badge error" title={refused[0].reason}>
+            {t("{n} samples refused", { n: refusedSamples })}
+          </span>
+        )}
+        {clock && (
+          <span
+            className="badge warn"
+            title={t("The panel stamped {n} readings of this host with its own time; the host's clock stood {skew} from the panel's.", {
+              n: clock.samples, skew: duration(Math.round(Math.abs(clock.skew_millis) / 1000)),
+            })}
+          >
+            {t("panel clock used for these points")}
+          </span>
+        )}
       </p>
       <Message text={message} />
 
@@ -232,7 +300,7 @@ export function Monitoring() {
         >
           {blank ?? (
             <>
-              <AreaChart times={times} series={cpuSeries} max={100} format={percent} label={label} peak={rollup ? points.map((point) => point.cpu_percent_max) : undefined} />
+              <AreaChart times={times} series={cpuSeries} max={100} format={percent} label={label} peak={rollup ? over(slots, (point) => point.cpu_percent_max) : undefined} />
               {rollup && <ChartLegend items={[{ name: t("mean of the step"), tone: "accent" }, { name: t("peak of the step"), tone: "accent", dashed: true }]} />}
             </>
           )}
@@ -262,7 +330,7 @@ export function Monitoring() {
         >
           {blank ?? (
             <>
-              <AreaChart times={times} series={memorySeries} max={memoryTop > 0 ? memoryTop : undefined} format={bytes} label={label} peak={rollup ? points.map((point) => point.memory_used_max) : undefined} />
+              <AreaChart times={times} series={memorySeries} max={memoryTop > 0 ? memoryTop : undefined} format={bytes} label={label} peak={rollup ? over(slots, (point) => point.memory_used_max) : undefined} />
               <ChartLegend items={[
                 ...memorySeries.map((item) => ({ name: item.name, tone: item.tone })),
                 ...(rollup ? [{ name: t("peak of the step"), tone: "accent" as const, dashed: true }] : []),
@@ -304,12 +372,12 @@ export function Monitoring() {
             <Empty>{t("The agent does not report its footprint; an older agent does not.")}</Empty>
           ) : (
             <>
-              <AreaChart times={times} series={agentMemorySeries} format={bytes} label={label} peak={rollup ? points.map((point) => point.agent_rss_bytes_max) : undefined} />
+              <AreaChart times={times} series={agentMemorySeries} format={bytes} label={label} peak={rollup ? over(slots, (point) => point.agent_rss_bytes_max) : undefined} />
               <ChartLegend items={[
                 ...agentMemorySeries.map((item) => ({ name: item.name, tone: item.tone })),
                 ...(rollup ? [{ name: t("peak of the step"), tone: "accent" as const, dashed: true }] : []),
               ]} />
-              <AreaChart times={times} series={agentCPUSeries} height={110} format={(value) => `${Math.round(value * 10) / 10}%`} label={label} peak={rollup ? points.map((point) => point.agent_cpu_percent_max) : undefined} />
+              <AreaChart times={times} series={agentCPUSeries} height={110} format={(value) => `${Math.round(value * 10) / 10}%`} label={label} peak={rollup ? over(slots, (point) => point.agent_cpu_percent_max) : undefined} />
               <ChartLegend items={[
                 { name: t("Agent CPU, percent of one core"), tone: "accent" },
                 ...(rollup ? [{ name: t("peak of the step"), tone: "accent" as const, dashed: true }] : []),
@@ -378,6 +446,19 @@ export function Monitoring() {
             </Fact>
             <Fact label={t("Rules watching this host")}>{state ? state.rules_matching : <Unknown />}</Fact>
             <Fact label={t("Memory total")}>{latest ? bytes(latest.memory_total) : <Unknown />}</Fact>
+            {/* A refused reading leaves a hole with a cause; a host that
+                never sent one leaves a hole with none. */}
+            <Fact label={t("Refused samples")}>
+              {!state ? <Unknown /> : refused.length === 0 ? (
+                <span className="source">{t("none")}</span>
+              ) : (
+                <>
+                  {refusedSamples}
+                  <div className="source hm-mono">{refused[0].reason}</div>
+                  <div className="source"><Time value={refused[0].last_sample_at} /></div>
+                </>
+              )}
+            </Fact>
           </Facts>
         </Section>
 
@@ -400,6 +481,12 @@ export function Monitoring() {
                   <option value="">{t("every rule")}</option>
                   {ruleOptions.map((rule) => <option key={rule.id} value={rule.id}>{rule.name}</option>)}
                 </select>
+              </Field>
+              <Field label={t("When it ends")}>
+                <label className="toggle">
+                  <input type="checkbox" checked={sendSummary} onChange={(e) => setSendSummary(e.target.checked)} />
+                  <span>{t("send one summary per channel")}</span>
+                </label>
               </Field>
             </Fields>
             <FormActions>
@@ -471,17 +558,21 @@ export function Monitoring() {
           ) : (
             <Table>
               <thead>
-                <tr><th>{t("Until")}</th><th>{t("Rule")}</th><th>{t("Reason")}</th><th>{t("By")}</th><th></th></tr>
+                <tr><th>{t("Until")}</th><th>{t("Rule")}</th><th>{t("Scope")}</th><th>{t("Reason")}</th><th>{t("By")}</th><th></th></tr>
               </thead>
               <tbody>
                 {silences.map((entry) => (
                   <tr key={entry.id}>
                     <td><Time value={entry.until} /></td>
                     <td>{entry.rule_name || <span className="source">{t("every rule")}</span>}</td>
+                    <td>
+                      {!entry.host_id && <span className="source">{t("every host")}</span>}{" "}
+                      <SilenceBadges silence={entry} />
+                    </td>
                     <td>{entry.reason}</td>
                     <td className="source">{entry.created_by}</td>
                     <td>
-                      <button className="secondary" disabled={unsilence.isPending} onClick={() => unsilence.mutate(entry.id)}>
+                      <button className="secondary" disabled={unsilence.isPending} onClick={() => unsilence.mutate(entry)}>
                         {t("End now")}
                       </button>
                     </td>

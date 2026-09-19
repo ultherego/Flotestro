@@ -235,6 +235,17 @@ var (
 	ResourceLockWait = Default.NewHistogram("flotestro_resource_lock_wait_seconds",
 		"Time a task waited on its host for a resource held by another task, by operation.",
 		DurationBuckets, "action")
+	// SampleAck measures the time from taking a resource sample off the stream
+	// to the word the panel sends back about it. At fleet cadence this is the
+	// call the gateway makes most often, so its tail is the gateway's tail.
+	SampleAck = Default.NewHistogram("flotestro_metric_sample_ack_seconds",
+		"Time from taking a resource sample off the stream to acknowledging it, by status.",
+		AckBuckets, "status")
+	// HeartbeatApply measures the time to apply one heartbeat of a host: the
+	// health it carries and the mark on its session.
+	HeartbeatApply = Default.NewHistogram("flotestro_heartbeat_seconds",
+		"Time to apply a host heartbeat, by outcome.",
+		AckBuckets, "outcome")
 
 	// AgentReconnect counts the sessions opened by a host whose previous session
 	// ended within the last ten minutes: a link that flaps or an agent that
@@ -272,4 +283,11 @@ var (
 	// queue by the state they settled in: delivered, retry_wait, dead_letter.
 	NotificationDeliveries = Default.NewCounter("flotestro_notification_deliveries_total",
 		"Settled attempts of the notification queue, by the state they settled in.", "state")
+	// AlertFence counts the writes of the alert state the evaluator's fencing
+	// token refused, by the write refused: start, fire, refresh, restart,
+	// resolve or discard. Every one of them is a pass that lost the lease and
+	// would have written over the leader that has it.
+	AlertFence = Default.NewCounter("flotestro_alert_fence_refused_total",
+		"Writes of the alert state refused because the instance no longer holds the evaluator lease, by the write refused.",
+		"write")
 )
