@@ -142,6 +142,15 @@ It answers with the commit, the workflow and the run. The GPG signature over
 what built it. A run that receives no OIDC identity publishes without an
 attestation and says so in the checks list rather than inventing one.
 
+**The key is not on the machine that built.** The release runs as two jobs.
+`Packages` compiles, packs, writes the checksums and makes the attestation; it
+holds no signing secret. `Sign and publish` runs in the protected environment
+`release-signing`, downloads what the first job produced, re-checks every file
+against `SHA256SUMS` before it signs anything, signs, and uploads. A compromise
+of the build job is then not a compromise of the release signature, and the
+environment's reviewers - which the owner configures in the repository - stand
+between a tag and a signature.
+
 **Nothing is replaced.** The upload refuses an asset the release already holds
 and names it; there is no `--clobber`. A release is corrected by a new version,
 not by a new file under the old name.
