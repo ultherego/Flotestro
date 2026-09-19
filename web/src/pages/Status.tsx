@@ -81,6 +81,9 @@ const BLOCK_TITLES: Record<string, string> = {
    the screen learns its name. */
 type FactKind = "text" | "number" | "bytes" | "seconds" | "time" | "flag" | "ms";
 const FACT_LABELS: Record<string, [string, FactKind]> = {
+  settings_stored: ["Settings stored in the panel", "flag"],
+  settings_updated_at: ["Settings stored at", "time"],
+  settings_updated_by: ["Settings stored by", "text"],
   lock_waiters: ["Backends waiting on a lock", "number"],
   locks_ungranted: ["Locks not granted", "number"],
   lock_wait_seconds_max: ["Longest lock wait", "seconds"],

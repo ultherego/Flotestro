@@ -230,14 +230,14 @@ What follows from that, on the API and on the screen:
 
 | Variable | Default | Meaning | Restart | Security |
 |---|---|---|---|---|
-| `FLOTESTRO_METRICS_RETENTION_RAW` | `168h` (7 days) | How long the raw resource samples of the hosts are kept. The raw samples live in one partition per day and the retention drops whole partitions, so a longer window costs storage rather than a sweep that holds the database. A partition that still owes a rollup is kept past its day; the status block counts what is owed. | yes | |
-| `FLOTESTRO_METRICS_RETENTION_ROLLUP` | `2160h` (90 days) | How long the quarter-hour rollups are kept. This is the window a capacity trend is read over. | yes | |
+| `FLOTESTRO_METRICS_RETENTION_RAW` | `168h` (7 days) | The initial value of how long the raw resource samples of the hosts are kept; once the installation stores its own on the settings screen, the stored one decides and this is what a cleared field falls back to. The raw samples live in one partition per day and the retention drops whole partitions, so a longer window costs storage rather than a sweep that holds the database. A partition that still owes a rollup is kept past its day; the status block counts what is owed. | no (stored) | |
+| `FLOTESTRO_METRICS_RETENTION_ROLLUP` | `2160h` (90 days) | The initial value of how long the quarter-hour rollups are kept. This is the window a capacity trend is read over. | no (stored) | |
 | `FLOTESTRO_RELAY_BUFFER_RETENTION_RAW` | `168h` (7 days) | How long the raw buffer reports of the relays are kept. A relay reports once a minute, so this is the window that answers "was this site cut off last night" minute by minute. Plain rows with a delete sweep, not daily partitions: a fleet of relays is three orders of magnitude smaller than a fleet of hosts. `0` means the default. | yes | |
 | `FLOTESTRO_RELAY_BUFFER_RETENTION_ROLLUP` | `2160h` (90 days) | How long the quarter-hour rollups of the relay buffer reports are kept. This is the window that answers "has this spool been filling for a month", and it also bounds how long a resolved relay buffer alert stays as history. `0` means the default. | yes | |
-| `FLOTESTRO_METRICS_MAX_LATENESS` | `24h` | How long after it was taken a sample may still arrive and be stored. A relay whose link to the centre was down drains its spool and every reading lands in the chart it belongs to; anything older is answered `metric_sample_too_old`, is not stored, and leaves a gap with a reason instead of a line drawn through it. The agent drops such a sample from its own spool. | yes | |
-| `FLOTESTRO_METRICS_QUERY_WINDOW` | `24h` | How far back the panel promises full resolution. It is what the retention is validated against, not a limit on the chart ranges. | yes | |
-| `FLOTESTRO_METRICS_CLOCK_SKEW` | `5m` | How far ahead of the panel a host's clock may be before its sample is stamped with the panel's time. Only the future direction is corrected: a sample from the past may simply have waited in a spool, and restamping it would turn a relay's backlog into a wall of identical points. A sample is identified by its boot and its sequence, never by its clock, so a correction here changes where a point is drawn and never which sample it is. | yes | |
-| `FLOTESTRO_METRICS_PARTITIONS_AHEAD` | `3` | How many days of raw partitions exist ahead of today. An insert into a day no partition covers is an error, so this is how many days the maintenance loop may fail to run without a fleet losing its samples. At most 60. | yes | |
+| `FLOTESTRO_METRICS_MAX_LATENESS` | `24h` | The initial value of how long after it was taken a sample may still arrive and be stored. A relay whose link to the centre was down drains its spool and every reading lands in the chart it belongs to; anything older is answered `metric_sample_too_old`, is not stored, and leaves a gap with a reason instead of a line drawn through it. The agent drops such a sample from its own spool. | no (stored) | |
+| `FLOTESTRO_METRICS_QUERY_WINDOW` | `24h` | The initial value of how far back the panel promises full resolution. It is what the retention is validated against, not a limit on the chart ranges. | no (stored) | |
+| `FLOTESTRO_METRICS_CLOCK_SKEW` | `5m` | How far ahead of the panel a host's clock may be before its sample is stamped with the panel's time. Only the future direction is corrected: a sample from the past may simply have waited in a spool, and restamping it would turn a relay's backlog into a wall of identical points. A sample is identified by its boot and its sequence, never by its clock, so a correction here changes where a point is drawn and never which sample it is. | no (stored) | |
+| `FLOTESTRO_METRICS_PARTITIONS_AHEAD` | `3` | How many days of raw partitions exist ahead of today. An insert into a day no partition covers is an error, so this is how many days the maintenance loop may fail to run without a fleet losing its samples. At most 60. | no (stored) | |
 | `FLOTESTRO_METRICS_EVALUATOR_LEASE` | `45s` | How long one control-plane instance holds the right to evaluate the alert rules. An instance that finds the lease held evaluates nothing; one that loses it mid-pass stops where it is (`alert_evaluator_lease_lost`) and the new holder carries on from the open episodes. Three renewals fit in the term. | yes | |
 | `FLOTESTRO_AUDIT_RETENTION` | `0` | How long the audit trail is kept; `0` keeps it forever. The trail is evidence: deleting it is a decision of the installation. | yes | Set it only when the trail is kept elsewhere. |
 | `FLOTESTRO_JOB_RETENTION` | `2160h` (90 days) | How long finished jobs are kept with their attempts. A job of a campaign stays as long as the campaign; a job under way is never deleted. `0` means the default. | yes | |
@@ -255,7 +255,41 @@ setting.
 `FLOTESTRO_METRICS_QUERY_WINDOW` plus `FLOTESTRO_METRICS_MAX_LATENESS`
 (`metrics_retention_too_short`). Such a configuration deletes a reading a relay is still
 carrying, by definition and without anybody ordering it; raise the retention or lower the
-window or the lateness.
+window or the lateness. **The same check runs on the write** from the settings screen, and it
+runs before anything is stored: a refused change leaves the values in force untouched.
+
+### The monitoring retentions are stored, not restarted into
+
+The six settings marked `no (stored)` above belong to the installation, not to the process.
+The environment sets the initial value of each; from the moment an operator stores one in the
+panel, the stored value decides and the environment is what a cleared field falls back to. The
+row lives in `monitoring_settings` (one row, a `NULL` field being one the installation never
+set) and carries who stored it and when, beside the entry `settings.monitoring.write` on the
+audit trail.
+
+| | |
+|---|---|
+| Read | `GET /api/v1/settings/monitoring` - the values in force, the ones stored and the ones this process started with, so the screen can say where each comes from. Permission `settings.read`. |
+| Preview | `PUT /api/v1/settings/monitoring?dry_run=true` - stores nothing and answers with what the change would remove: the daily partitions of raw samples that go, an estimate of the readings in them, and the counts of rollups, recorded gaps, clock corrections and expired silences. |
+| Write | `PUT /api/v1/settings/monitoring`. Permission `monitoring.rules.write` in the whole fleet. A duration is a Go duration string and an empty one clears the field. A change that removes anything is refused with `metrics_retention_shrink_unacknowledged` unless the body carries `acknowledge_data_loss: true`: shrinking a retention is the operator's decision, but it is made once and cannot be undone. |
+
+A stored change needs no restart. The replica that took the write puts it in force at once;
+every other replica re-reads the row on its own tick and has it **within thirty seconds**. A
+maintenance pass already running keeps the values it began with - the sweep and each partition
+pass read the settings once at their start - so a change never applies to half a pass. The
+ingest path reads them per sample, so the lateness and the clock skew limit apply to the next
+reading that arrives.
+
+**During a rolling upgrade** a replica on the previous release does not read this table at all
+and goes on running its own environment. While that lasts, the raw retention in effect for the
+fleet is the **shorter** of the two, because either replica's sweep may drop a partition. Store
+the new values once every replica is on the new release, or set the environment of the old one
+to match.
+
+A stored row that does not validate against this process's environment - the environment
+raised the query window after the retention was stored, say - is logged at start and left out:
+the replica runs on its own values, which were validated, rather than refusing to start on a
+setting only the panel could correct.
 
 The agent keeps the samples the panel has not acknowledged in
 `<state dir>/metrics-spool`: at most 240 of them, four hours at one a minute, one small file

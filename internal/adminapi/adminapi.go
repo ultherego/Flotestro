@@ -474,6 +474,10 @@ func (s *Server) Routes() http.Handler {
 	// The effective configuration, secrets masked: what this panel was
 	// started with, for whoever administers it.
 	s.route(mux, "GET /api/v1/settings", s.handleSettings)
+	// The monitoring retentions are the installation's own setting rather than
+	// the process's: read here, and written without a restart.
+	s.route(mux, "GET /api/v1/settings/monitoring", s.handleMonitoringSettings)
+	s.route(mux, "PUT /api/v1/settings/monitoring", s.handleSetMonitoringSettings)
 	// The first run: what the installation still lacks, and the two
 	// connection tests the checklist offers in place.
 	s.route(mux, "GET /api/v1/setup", s.handleSetup)

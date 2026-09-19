@@ -832,6 +832,13 @@ func (s *Server) monitoringStatus(ctx context.Context) statusBlock {
 		"clock_skew_limit":       state.ClockSkewLimit,
 		"partitions_ahead_days":  state.PartitionsAhead,
 		"evaluator_holder":       state.EvaluatorHolder,
+		// Whether the figures above are the installation's own setting or the
+		// environment this replica was started with.
+		"settings_stored": state.SettingsStored,
+	}
+	if state.SettingsUpdatedAt != nil {
+		facts["settings_updated_at"] = *state.SettingsUpdatedAt
+		facts["settings_updated_by"] = state.SettingsUpdatedBy
 	}
 	if state.OldestRawDay != nil {
 		facts["oldest_raw_day"] = *state.OldestRawDay

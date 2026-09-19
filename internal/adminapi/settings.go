@@ -1,16 +1,21 @@
 package adminapi
 
 import (
+	"encoding/json"
+	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/config"
 	"github.com/ultherego/flotestro/internal/housekeeping"
+	"github.com/ultherego/flotestro/internal/monitoring"
 )
 
-// The settings screen: what this panel was started with, read-only.
+// The settings screen: what this panel was started with, plus the few
+// settings the installation itself holds and an operator may change.
 
 // settingsSource is where the values are set. The screen names it, so
 // whoever wants a change knows where to make it.
@@ -217,8 +222,11 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		// evidence and is kept forever unless the installation decides otherwise,
 		// while the jobs, the campaigns and the delivered events are always swept.
 		{Key: "retention", Title: "Retention", Facts: []settingsFact{
-			durationFact("metrics_raw", effective.MetricsRawRetention),
-			durationFact("metrics_rollup", effective.MetricsRollupRetention),
+			// The two monitoring retentions are the installation's own setting,
+			// so the screen shows what is in force now and not what this
+			// process happened to start with.
+			durationFact("metrics_raw", metricsRetention(s, effective.MetricsRawRetention, true)),
+			durationFact("metrics_rollup", metricsRetention(s, effective.MetricsRollupRetention, false)),
 			durationFact("audit", effective.AuditRetention),
 			durationFact("agent_sessions", sweeps.Sessions),
 			durationFact("jobs", sweeps.Jobs),
@@ -248,10 +256,267 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	note := "The values are set in " + settingsSource +
-		" and read when the control plane starts; this screen shows them and changes nothing."
+		" and read when the control plane starts. The monitoring retentions and windows are the" +
+		" exception: the installation stores them and this screen changes them without a restart."
 	writeJSON(w, http.StatusOK, map[string]any{
 		"source": settingsSource,
 		"note":   note,
 		"areas":  areas,
+	})
+}
+
+// metricsRetention is what the monitoring runs on now, falling back to the
+// value of the process for a panel started without the monitoring.
+func metricsRetention(s *Server, started time.Duration, raw bool) time.Duration {
+	if s.monitoring == nil {
+		return started
+	}
+	options := s.monitoring.Settings()
+	if raw {
+		return options.RawRetention
+	}
+	return options.RollupRetention
+}
+
+// The monitoring settings as their own resource: the values in force, where
+// each one comes from, and the write that changes them while the panel runs.
+
+// monitoringSettingsBody is the shape read and written. A duration is a Go
+// duration string; an empty one clears the field, which hands it back to the
+// environment of the control plane.
+type monitoringSettingsBody struct {
+	RawRetention    string `json:"raw_retention"`
+	RollupRetention string `json:"rollup_retention"`
+	MaxLateness     string `json:"max_lateness"`
+	RawQueryWindow  string `json:"raw_query_window"`
+	ClockSkewLimit  string `json:"clock_skew_limit"`
+	PartitionsAhead int    `json:"partitions_ahead"`
+}
+
+// monitoringSettingsWrite is the body of the write: the values plus the two
+// things a change of retention needs and a change of capacity does not.
+type monitoringSettingsWrite struct {
+	monitoringSettingsBody
+	// AcknowledgeDataLoss is the operator saying they have read what goes.
+	// Shrinking a retention is their decision, but it is made once and cannot
+	// be undone, so it is not made by leaving a field at its default.
+	AcknowledgeDataLoss bool `json:"acknowledge_data_loss"`
+	// Reason goes on the audit trail beside the values.
+	Reason string `json:"reason"`
+}
+
+// settingsOf renders options for the API.
+func settingsOf(options monitoring.Options) monitoringSettingsBody {
+	return monitoringSettingsBody{
+		RawRetention:    options.RawRetention.String(),
+		RollupRetention: options.RollupRetention.String(),
+		MaxLateness:     options.MaxLateness.String(),
+		RawQueryWindow:  options.RawQueryWindow.String(),
+		ClockSkewLimit:  options.ClockSkewLimit.String(),
+		PartitionsAhead: options.PartitionsAhead,
+	}
+}
+
+// storedSettingsOf renders only the fields the installation set; an empty one
+// is not zero, it is a field the environment still decides.
+func storedSettingsOf(options monitoring.Options) map[string]any {
+	set := map[string]any{}
+	for key, value := range map[string]time.Duration{
+		"raw_retention":    options.RawRetention,
+		"rollup_retention": options.RollupRetention,
+		"max_lateness":     options.MaxLateness,
+		"raw_query_window": options.RawQueryWindow,
+		"clock_skew_limit": options.ClockSkewLimit,
+	} {
+		if value > 0 {
+			set[key] = value.String()
+		}
+	}
+	if options.PartitionsAhead > 0 {
+		set["partitions_ahead"] = options.PartitionsAhead
+	}
+	return set
+}
+
+// parseMonitoringSettings turns the body into options. An empty duration is a
+// cleared field, not a zero one; a malformed one is named.
+func parseMonitoringSettings(body monitoringSettingsBody) (monitoring.Options, string, error) {
+	var options monitoring.Options
+	fields := []struct {
+		key  string
+		text string
+		into *time.Duration
+	}{
+		{"raw_retention", body.RawRetention, &options.RawRetention},
+		{"rollup_retention", body.RollupRetention, &options.RollupRetention},
+		{"max_lateness", body.MaxLateness, &options.MaxLateness},
+		{"raw_query_window", body.RawQueryWindow, &options.RawQueryWindow},
+		{"clock_skew_limit", body.ClockSkewLimit, &options.ClockSkewLimit},
+	}
+	for _, field := range fields {
+		text := strings.TrimSpace(field.text)
+		if text == "" {
+			continue
+		}
+		value, err := time.ParseDuration(text)
+		if err != nil {
+			return options, field.key, err
+		}
+		if value <= 0 {
+			return options, field.key, errNotPositive
+		}
+		*field.into = value
+	}
+	if body.PartitionsAhead < 0 {
+		return options, "partitions_ahead", errNotPositive
+	}
+	options.PartitionsAhead = body.PartitionsAhead
+	return options, "", nil
+}
+
+// errNotPositive names a duration given as zero or less: an empty field is
+// how a setting is cleared, and "-1h" is not a retention.
+var errNotPositive = errors.New(
+	"a duration must be positive; leave the field empty to let the environment decide it")
+
+// requireMonitoringSettings is the gate and the nil check both writes and the
+// read share.
+func (s *Server) requireMonitoringSettings(w http.ResponseWriter, r *http.Request,
+	permission authz.Permission) (authz.Principal, bool) {
+	principal, ok := s.authorize(w, r, permission, authz.GlobalScope, "monitoring_settings", "")
+	if !ok {
+		return principal, false
+	}
+	if s.monitoring == nil {
+		problem(w, http.StatusServiceUnavailable, "monitoring_disabled",
+			"this installation runs without the built-in monitoring")
+		return principal, false
+	}
+	return principal, true
+}
+
+// handleMonitoringSettings serves the settings in force, what the
+// installation stored and what the process was started with, so the screen
+// can say where each value comes from.
+func (s *Server) handleMonitoringSettings(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireMonitoringSettings(w, r, authz.PermSettingsRead); !ok {
+		return
+	}
+	stored, err := s.monitoring.StoredSettings(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"effective":   settingsOf(s.monitoring.Settings()),
+		"environment": settingsOf(s.monitoring.Baseline()),
+		"stored": map[string]any{
+			"present":    stored.Present,
+			"updated_at": stored.UpdatedAt,
+			"updated_by": stored.UpdatedBy,
+			"revision":   stored.Revision,
+			"values":     storedSettingsOf(stored.Options),
+		},
+		"note": "A field left empty is decided by " + settingsSource +
+			"; a stored one takes effect on every replica within half a minute, without a restart.",
+	})
+}
+
+// handleSetMonitoringSettings stores the monitoring settings. With
+// ?dry_run=true it stores nothing and answers with what the change would
+// throw away, which is what the screen shows before it asks.
+func (s *Server) handleSetMonitoringSettings(w http.ResponseWriter, r *http.Request) {
+	principal, ok := s.requireMonitoringSettings(w, r, authz.PermMonitoringRulesWrite)
+	if !ok {
+		return
+	}
+	var body monitoringSettingsWrite
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		problem(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	proposed, field, err := parseMonitoringSettings(body.monitoringSettingsBody)
+	if err != nil {
+		problem(w, http.StatusBadRequest, "invalid_request", field+": "+err.Error())
+		return
+	}
+
+	impact, err := s.monitoring.RetentionImpact(r.Context(), proposed)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	dryRun := r.URL.Query().Get("dry_run") == "true"
+
+	// The validation the panel refuses to start on runs here too, and it runs
+	// before anything is stored: a retention shorter than the window plus the
+	// lateness deletes a reading a relay is still carrying.
+	if err := s.monitoring.Baseline().Overlay(proposed).Validate(); err != nil {
+		if dryRun {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"valid":  false,
+				"code":   monitoring.ErrorRetentionTooShort,
+				"detail": err.Error(),
+				"impact": impact,
+			})
+			return
+		}
+		s.audit.Record(r.Context(), audit.Event{
+			ActorType: audit.ActorUser, ActorID: principal.Subject,
+			Action: "settings.monitoring.write", TargetType: "monitoring_settings", TargetID: "",
+			RequestID: requestIDOf(r), Outcome: audit.OutcomeFailure,
+			Detail: map[string]any{"code": monitoring.ErrorRetentionTooShort, "reason": err.Error()},
+		})
+		problem(w, http.StatusUnprocessableEntity, monitoring.ErrorRetentionTooShort, err.Error())
+		return
+	}
+
+	if dryRun {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"valid":     true,
+			"impact":    impact,
+			"effective": settingsOf(s.monitoring.Baseline().Overlay(proposed)),
+		})
+		return
+	}
+	// What goes is gone. The operator decides it, but not by omission.
+	if impact.Destructive && !body.AcknowledgeDataLoss {
+		problem(w, http.StatusConflict, monitoring.ErrorRetentionShrinkUnacknowledged,
+			"these settings drop readings that are still kept; read what goes and send "+
+				"acknowledge_data_loss: true to store them")
+		return
+	}
+
+	before := settingsOf(s.monitoring.Settings())
+	effective, stored, err := s.monitoring.SaveSettings(r.Context(), proposed, principal.Subject)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.audit.Record(r.Context(), audit.Event{
+		ActorType: audit.ActorUser, ActorID: principal.Subject,
+		Action: "settings.monitoring.write", TargetType: "monitoring_settings", TargetID: "",
+		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
+		Detail: map[string]any{
+			"reason":               strings.TrimSpace(body.Reason),
+			"acknowledged":         body.AcknowledgeDataLoss,
+			"dropped_partitions":   impact.DroppedPartitions,
+			"raw_samples_estimate": impact.RawSamplesEstimate,
+			"rollup_rows":          impact.RollupRows,
+			"revision":             stored.Revision,
+		},
+		Before: map[string]any{"settings": before},
+		After:  map[string]any{"settings": settingsOf(effective)},
+	})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"effective": settingsOf(effective),
+		"stored": map[string]any{
+			"present":    true,
+			"updated_at": stored.UpdatedAt,
+			"updated_by": stored.UpdatedBy,
+			"revision":   stored.Revision,
+			"values":     storedSettingsOf(proposed),
+		},
+		"impact": impact,
 	})
 }

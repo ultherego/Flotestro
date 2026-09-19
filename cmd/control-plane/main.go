@@ -193,8 +193,10 @@ func run() error {
 		config.Env("FLOTESTRO_IPA_CA_CERT", "/etc/flotestro/ipa-ca.crt"), "the CA certificate of the directory")
 	ipaRealm := flag.String("ipa-realm",
 		config.Env("FLOTESTRO_IPA_REALM", ""), "the Kerberos realm of the directory")
-	// The built-in monitoring keeps the raw samples for two days and the
-	// quarter-hour rollups for a month.
+	// The built-in monitoring keeps the raw samples for a week and the
+	// quarter-hour rollups for a quarter of a year. These are the initial
+	// values of an installation: once it stores its own from the panel, the
+	// stored ones decide and these stay the fallback of a cleared field.
 	metricsRetention := monitoring.Options{}
 	flag.DurationVar(&metricsRetention.RawRetention, "metrics-retention-raw",
 		config.EnvDuration("FLOTESTRO_METRICS_RETENTION_RAW", monitoring.DefaultRawRetention),
@@ -992,15 +994,27 @@ func run() error {
 	// same stream as the heartbeat, the store keeps them, rolls them up and
 	// evaluates the alert rules over them.
 	monitoringStore := monitoring.NewStore(pool, log, metricsRetention)
+	// FLOTESTRO_METRICS_* above is the initial value of an installation that
+	// never set its own. What the installation stored takes over from it here,
+	// and again on its own tick while the panel runs. A row that cannot be read
+	// or does not validate leaves the environment's values in force - they were
+	// validated at start - rather than stopping the panel an operator would
+	// have to use to correct it.
+	if err := monitoringStore.RefreshSettings(ctx); err != nil {
+		log.Error("the stored monitoring settings were not applied; this replica runs on its environment",
+			"err", err)
+	}
+	metricsInForce := monitoringStore.Settings()
 	agentService.SetMetrics(monitoringStore)
 	panelServer.SetMonitoring(monitoringStore)
 	go monitoringStore.Run(ctx)
 	log.Info("the built-in monitoring is running",
 		"sampling_interval", monitoring.SamplingInterval.String(),
-		"raw_retention", metricsRetention.RawRetention.String(),
-		"rollup_retention", metricsRetention.RollupRetention.String(),
-		"max_lateness", metricsRetention.MaxLateness.String(),
-		"partitions_ahead_days", metricsRetention.PartitionsAhead,
+		"raw_retention", metricsInForce.RawRetention.String(),
+		"rollup_retention", metricsInForce.RollupRetention.String(),
+		"max_lateness", metricsInForce.MaxLateness.String(),
+		"raw_query_window", metricsInForce.RawQueryWindow.String(),
+		"partitions_ahead_days", metricsInForce.PartitionsAhead,
 		"evaluator_lease", metricsRetention.EvaluatorLease.String())
 
 	// The budgets are visible in the panel: a host standing on capacity is to

@@ -26,6 +26,9 @@ const (
 // EnsurePartitions creates the partitions of the raw samples that the days
 // ahead will need.
 func (s *Store) EnsurePartitions(ctx context.Context, now time.Time) error {
+	// The margin is read once here, so this pass works to one number even if
+	// the installation stores another while it runs.
+	options := s.current()
 	partitioned, err := s.rawIsPartitioned(ctx)
 	if err != nil || !partitioned {
 		return err
@@ -41,7 +44,7 @@ func (s *Store) EnsurePartitions(ctx context.Context, now time.Time) error {
 			from = newest.Add(partitionWidth)
 		}
 	}
-	upto := today.Add(time.Duration(s.options.PartitionsAhead) * partitionWidth)
+	upto := today.Add(time.Duration(options.PartitionsAhead) * partitionWidth)
 	for at := from; !at.After(upto); at = at.Add(partitionWidth) {
 		if err := s.createPartition(ctx, at); err != nil {
 			return err
@@ -66,6 +69,9 @@ func (s *Store) createPartition(ctx context.Context, at time.Time) error {
 // DropExpiredPartitions removes the partitions whose whole range is past the
 // raw retention.
 func (s *Store) DropExpiredPartitions(ctx context.Context, now time.Time) error {
+	// The retention in force at the start of this pass; a value stored while
+	// it runs drops its partitions in the next pass, not halfway through this.
+	retention := s.current().RawRetention
 	partitioned, err := s.rawIsPartitioned(ctx)
 	if err != nil || !partitioned {
 		return err
@@ -74,7 +80,7 @@ func (s *Store) DropExpiredPartitions(ctx context.Context, now time.Time) error 
 	if err != nil {
 		return err
 	}
-	cutoff := now.UTC().Add(-s.options.RawRetention)
+	cutoff := now.UTC().Add(-retention)
 	for _, at := range days {
 		ends := at.Add(partitionWidth)
 		if ends.After(cutoff) {
@@ -97,7 +103,7 @@ func (s *Store) DropExpiredPartitions(ctx context.Context, now time.Time) error 
 			return fmt.Errorf("dropping the partition %s of the raw samples: %w", name, err)
 		}
 		s.log.Info("a partition of the raw samples was dropped by the retention",
-			"partition", name, "retention", s.options.RawRetention.String())
+			"partition", name, "retention", retention.String())
 	}
 	return nil
 }
@@ -187,18 +193,30 @@ type MaintenanceState struct {
 	RawQueryWindow  string `json:"raw_query_window"`
 	ClockSkewLimit  string `json:"clock_skew_limit"`
 	PartitionsAhead int    `json:"partitions_ahead_days"`
+	// Where those settings come from: an installation that stored its own, and
+	// who stored them, rather than the environment of this process.
+	SettingsStored    bool       `json:"settings_stored"`
+	SettingsUpdatedAt *time.Time `json:"settings_updated_at,omitempty"`
+	SettingsUpdatedBy string     `json:"settings_updated_by,omitempty"`
 }
 
 // MaintenanceState reads that state in one round of short queries.
 func (s *Store) MaintenanceState(ctx context.Context) (MaintenanceState, error) {
+	options := s.current()
 	state := MaintenanceState{
-		RawRetention:    s.options.RawRetention.String(),
-		RollupRetention: s.options.RollupRetention.String(),
-		MaxLateness:     s.options.MaxLateness.String(),
-		RawQueryWindow:  s.options.RawQueryWindow.String(),
-		ClockSkewLimit:  s.options.ClockSkewLimit.String(),
-		PartitionsAhead: s.options.PartitionsAhead,
+		RawRetention:    options.RawRetention.String(),
+		RollupRetention: options.RollupRetention.String(),
+		MaxLateness:     options.MaxLateness.String(),
+		RawQueryWindow:  options.RawQueryWindow.String(),
+		ClockSkewLimit:  options.ClockSkewLimit.String(),
+		PartitionsAhead: options.PartitionsAhead,
 	}
+	stored, err := s.StoredSettings(ctx)
+	if err != nil {
+		return state, err
+	}
+	state.SettingsStored = stored.Present
+	state.SettingsUpdatedAt, state.SettingsUpdatedBy = stored.UpdatedAt, stored.UpdatedBy
 	partitioned, err := s.rawIsPartitioned(ctx)
 	if err != nil {
 		return state, err

@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -27,6 +29,9 @@ const (
 	// evaluationInterval is how often the rules are evaluated. One sampling
 	// interval: evaluating more often would look at the same sample twice.
 	evaluationInterval = SamplingInterval
+	// settingsRefreshInterval is how often a replica re-reads the settings the
+	// installation stored, so a change reaches every replica without a restart.
+	settingsRefreshInterval = 30 * time.Second
 
 	// DefaultRawRetention and DefaultRollupRetention are the retention of the raw
 	// samples and of the quarter-hour rollups: a week of readings at full
@@ -187,29 +192,82 @@ func (o Options) Validate() error {
 // maxPartitionsAhead bounds the margin.
 const maxPartitionsAhead = 60
 
+// Overlay puts the fields the installation stored over the ones the process
+// was started with. A zero stored field is one this installation never set,
+// so the environment still decides it; unknown is not zero here either.
+func (o Options) Overlay(stored Options) Options {
+	if stored.RawRetention > 0 {
+		o.RawRetention = stored.RawRetention
+	}
+	if stored.RollupRetention > 0 {
+		o.RollupRetention = stored.RollupRetention
+	}
+	if stored.MaxLateness > 0 {
+		o.MaxLateness = stored.MaxLateness
+	}
+	if stored.RawQueryWindow > 0 {
+		o.RawQueryWindow = stored.RawQueryWindow
+	}
+	if stored.ClockSkewLimit > 0 {
+		o.ClockSkewLimit = stored.ClockSkewLimit
+	}
+	if stored.PartitionsAhead > 0 {
+		o.PartitionsAhead = stored.PartitionsAhead
+	}
+	return o
+}
+
+// Stored is the settings row of the installation: the fields it set, when and
+// by whom. Present is false for a panel that never stored any.
+type Stored struct {
+	Options   Options    `json:"-"`
+	Present   bool       `json:"present"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+	UpdatedBy string     `json:"updated_by,omitempty"`
+	Revision  int64      `json:"revision,omitempty"`
+}
+
 // Store is the database side of the monitoring.
 type Store struct {
-	pool    *pgxpool.Pool
-	log     *slog.Logger
+	pool *pgxpool.Pool
+	log  *slog.Logger
+	// options is what this process was started with: the environment's values,
+	// which are the initial ones until the installation stores its own. The
+	// evaluator lease is read from here and nowhere else, because a lease term
+	// that changes under a holder is a different hazard from a retention.
 	options Options
+	// live is what the workers, the gateway and the screens read. It is
+	// replaced whole, so a pass already running keeps the values it began with.
+	live atomic.Pointer[Options]
 	// instanceID names this control-plane process among the ones that share the
 	// database.
 	instanceID string
 }
 
 func NewStore(pool *pgxpool.Pool, log *slog.Logger, options Options) *Store {
-	return &Store{pool: pool, log: log, options: options.withDefaults(), instanceID: uuid.NewString()}
+	filled := options.withDefaults()
+	store := &Store{pool: pool, log: log, options: filled, instanceID: uuid.NewString()}
+	store.live.Store(&filled)
+	return store
 }
+
+// current is the settings in force: what the installation stored over what
+// this process was started with.
+func (s *Store) current() Options { return *s.live.Load() }
+
+// Baseline is what this process was started with, before anything stored; the
+// settings screen shows it as the value a cleared field falls back to.
+func (s *Store) Baseline() Options { return s.options }
 
 // ClockSkewLimit and MaxLateness are what the gateway judges an arriving
 // sample by: how far the host's clock may be out before the panel's time is
-func (s *Store) ClockSkewLimit() time.Duration { return s.options.ClockSkewLimit }
+func (s *Store) ClockSkewLimit() time.Duration { return s.current().ClockSkewLimit }
 
-func (s *Store) MaxLateness() time.Duration { return s.options.MaxLateness }
+func (s *Store) MaxLateness() time.Duration { return s.current().MaxLateness }
 
 // Settings returns the retention and lateness the store runs on, for the
 // status screen.
-func (s *Store) Settings() Options { return s.options }
+func (s *Store) Settings() Options { return s.current() }
 
 // The codes the monitoring puts on a refusal, as the error guide lists them.
 const (
@@ -219,12 +277,264 @@ const (
 	// ErrorSampleNotKept: the gateway that received it keeps no samples.
 	ErrorSampleNotKept = "metric_sample_not_kept"
 	// ErrorRetentionTooShort: the configuration deletes samples before
-	// they can arrive; the panel refuses to start on it.
+	// they can arrive; the panel refuses to start on it and refuses to
+	// store it.
 	ErrorRetentionTooShort = "metrics_retention_too_short"
+	// ErrorRetentionShrinkUnacknowledged: the settings would throw stored
+	// readings away and the operator has not said so in the request.
+	ErrorRetentionShrinkUnacknowledged = "metrics_retention_shrink_unacknowledged"
 	// ErrorClockSubstituted: the host dated the reading further from the
 	// panel's clock than the installation allows, so the panel supplied the
 	ErrorClockSubstituted = "metric_clock_substituted"
 )
+
+// The settings row of the installation. One row: there is one monitoring in a
+// panel, and two rows would let the same setting disagree with itself.
+const (
+	storedSettingsRead = `
+		select raw_retention_seconds, rollup_retention_seconds, max_lateness_seconds,
+		       raw_query_window_seconds, clock_skew_limit_seconds, partitions_ahead,
+		       updated_at, updated_by, revision
+		  from monitoring_settings
+		 where singleton`
+	storedSettingsWrite = `
+		insert into monitoring_settings (
+		    singleton, raw_retention_seconds, rollup_retention_seconds,
+		    max_lateness_seconds, raw_query_window_seconds, clock_skew_limit_seconds,
+		    partitions_ahead, updated_at, updated_by, revision)
+		values (true, $1, $2, $3, $4, $5, $6, now(), $7, 1)
+		on conflict (singleton) do update set
+		    raw_retention_seconds    = excluded.raw_retention_seconds,
+		    rollup_retention_seconds = excluded.rollup_retention_seconds,
+		    max_lateness_seconds     = excluded.max_lateness_seconds,
+		    raw_query_window_seconds = excluded.raw_query_window_seconds,
+		    clock_skew_limit_seconds = excluded.clock_skew_limit_seconds,
+		    partitions_ahead         = excluded.partitions_ahead,
+		    updated_at               = now(),
+		    updated_by               = excluded.updated_by,
+		    revision                 = monitoring_settings.revision + 1
+		returning revision, updated_at`
+)
+
+// StoredSettings reads what the installation holds. A schema from before the
+// table and an installation that stored nothing answer the same way: no
+// stored value, so the environment decides every field.
+func (s *Store) StoredSettings(ctx context.Context) (Stored, error) {
+	var (
+		stored                              Stored
+		raw, rollup, lateness, window, skew *int64
+		ahead                               *int32
+		updatedAt                           time.Time
+	)
+	err := s.pool.QueryRow(ctx, storedSettingsRead).Scan(
+		&raw, &rollup, &lateness, &window, &skew, &ahead,
+		&updatedAt, &stored.UpdatedBy, &stored.Revision)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows), isUndefinedTable(err):
+		return Stored{}, nil
+	case err != nil:
+		return Stored{}, err
+	}
+	stored.Present = true
+	stored.UpdatedAt = &updatedAt
+	stored.Options = Options{
+		RawRetention:    secondsOf(raw),
+		RollupRetention: secondsOf(rollup),
+		MaxLateness:     secondsOf(lateness),
+		RawQueryWindow:  secondsOf(window),
+		ClockSkewLimit:  secondsOf(skew),
+		PartitionsAhead: countOf(ahead),
+	}
+	return stored, nil
+}
+
+// isUndefinedTable recognises a schema that predates the settings table: a
+// replica rolled back to the previous release has one, and it is not an
+// error to be reported every half minute.
+func isUndefinedTable(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "42P01"
+}
+
+func secondsOf(value *int64) time.Duration {
+	if value == nil || *value <= 0 {
+		return 0
+	}
+	return time.Duration(*value) * time.Second
+}
+
+func countOf(value *int32) int {
+	if value == nil || *value <= 0 {
+		return 0
+	}
+	return int(*value)
+}
+
+// nullSeconds writes a field the installation left to the environment as NULL
+// rather than as zero: a zero would read as "no retention at all".
+func nullSeconds(value time.Duration) *int64 {
+	if value <= 0 {
+		return nil
+	}
+	seconds := int64(value / time.Second)
+	return &seconds
+}
+
+func nullCount(value int) *int32 {
+	if value <= 0 {
+		return nil
+	}
+	count := int32(value)
+	return &count
+}
+
+// RefreshSettings re-reads the stored settings and makes them the ones the
+// workers use from the next pass on. A stored row that does not validate is
+// left out rather than applied: the panel does not start deleting readings on
+// a configuration it has already judged impossible.
+func (s *Store) RefreshSettings(ctx context.Context) error {
+	stored, err := s.StoredSettings(ctx)
+	if err != nil {
+		return err
+	}
+	next := s.options.Overlay(stored.Options).withDefaults()
+	if err := next.Validate(); err != nil {
+		return fmt.Errorf("the stored monitoring settings are not usable, the ones in force stay: %w", err)
+	}
+	if next == s.current() {
+		return nil
+	}
+	s.live.Store(&next)
+	s.log.Info("the monitoring settings were re-read and took effect",
+		"raw_retention", next.RawRetention.String(),
+		"rollup_retention", next.RollupRetention.String(),
+		"max_lateness", next.MaxLateness.String(),
+		"raw_query_window", next.RawQueryWindow.String(),
+		"clock_skew_limit", next.ClockSkewLimit.String(),
+		"partitions_ahead_days", next.PartitionsAhead,
+		"stored_by", stored.UpdatedBy)
+	return nil
+}
+
+// SaveSettings validates and stores the settings of the installation, and
+// puts them in force on this replica at once. A zero field is cleared in the
+// row, which hands that field back to the environment.
+func (s *Store) SaveSettings(ctx context.Context, next Options, actor string) (Options, Stored, error) {
+	effective := s.options.Overlay(next).withDefaults()
+	// The validation of the start-up, on the write: a pair that deletes a
+	// reading still on its way is refused before it is stored, never after.
+	if err := effective.Validate(); err != nil {
+		return Options{}, Stored{}, err
+	}
+	stored := Stored{Present: true, UpdatedBy: actor, Options: next}
+	var updatedAt time.Time
+	if err := s.pool.QueryRow(ctx, storedSettingsWrite,
+		nullSeconds(next.RawRetention), nullSeconds(next.RollupRetention),
+		nullSeconds(next.MaxLateness), nullSeconds(next.RawQueryWindow),
+		nullSeconds(next.ClockSkewLimit), nullCount(next.PartitionsAhead),
+		actor).Scan(&stored.Revision, &updatedAt); err != nil {
+		return Options{}, Stored{}, err
+	}
+	stored.UpdatedAt = &updatedAt
+	s.live.Store(&effective)
+	return effective, stored, nil
+}
+
+// RetentionImpact is what storing a shorter retention throws away. The
+// decision is the operator's, but it is made once and cannot be undone, so
+// the panel counts what goes before it stores anything.
+type RetentionImpact struct {
+	// DroppedPartitions are the daily partitions of the raw samples that the
+	// proposed retention drops and the one in force keeps.
+	DroppedPartitions []string `json:"dropped_raw_partitions"`
+	// RawSamplesEstimate is the planner's estimate of the rows in them; an
+	// estimate, because counting a fleet's samples exactly is a scan nobody
+	// should pay for to answer a question about a form.
+	RawSamplesEstimate int64 `json:"raw_samples_estimate"`
+	RollupRows         int64 `json:"rollup_rows"`
+	GapRows            int64 `json:"gap_rows"`
+	ClockRows          int64 `json:"clock_skew_rows"`
+	SilenceRows        int64 `json:"expired_silence_rows"`
+	// Destructive says at least one partition or row goes.
+	Destructive bool `json:"destructive"`
+}
+
+// RetentionImpact counts what the proposed settings would remove that the
+// ones in force keep. A proposal that only lengthens a retention removes
+// nothing and says so.
+func (s *Store) RetentionImpact(ctx context.Context, proposed Options) (RetentionImpact, error) {
+	inForce := s.current()
+	effective := s.options.Overlay(proposed).withDefaults()
+	var impact RetentionImpact
+
+	if effective.RawRetention < inForce.RawRetention {
+		partitioned, err := s.rawIsPartitioned(ctx)
+		if err != nil {
+			return impact, err
+		}
+		now := time.Now().UTC()
+		cutoff, kept := now.Add(-effective.RawRetention), now.Add(-inForce.RawRetention)
+		if partitioned {
+			days, err := s.partitionDays(ctx)
+			if err != nil {
+				return impact, err
+			}
+			for _, at := range days {
+				ends := at.Add(partitionWidth)
+				if ends.After(cutoff) || !ends.After(kept) {
+					continue
+				}
+				name := partitionName(at)
+				impact.DroppedPartitions = append(impact.DroppedPartitions, name)
+				rows, err := s.estimatedRows(ctx, name)
+				if err != nil {
+					return impact, err
+				}
+				impact.RawSamplesEstimate += rows
+			}
+		} else {
+			// Without partitions the retention deletes by the row, so the
+			// count is the plain one over the window that goes.
+			if err := s.pool.QueryRow(ctx,
+				`select count(*) from host_metrics where at < $1 and at >= $2`,
+				cutoff, kept).Scan(&impact.RawSamplesEstimate); err != nil {
+				return impact, err
+			}
+		}
+	}
+
+	if effective.RollupRetention < inForce.RollupRetention {
+		counts := []struct {
+			query string
+			into  *int64
+		}{
+			{`select count(*) from host_metrics_15m where at < $1 and at >= $2`, &impact.RollupRows},
+			{`select count(*) from metric_gaps where last_sample_at < $1 and last_sample_at >= $2`, &impact.GapRows},
+			{`select count(*) from metric_clock_skew where last_at < $1 and last_at >= $2`, &impact.ClockRows},
+			{`select count(*) from silences where until < $1 and until >= $2`, &impact.SilenceRows},
+		}
+		now := time.Now().UTC()
+		cutoff, kept := now.Add(-effective.RollupRetention), now.Add(-inForce.RollupRetention)
+		for _, count := range counts {
+			if err := s.pool.QueryRow(ctx, count.query, cutoff, kept).Scan(count.into); err != nil {
+				return impact, err
+			}
+		}
+	}
+
+	impact.Destructive = len(impact.DroppedPartitions) > 0 || impact.RawSamplesEstimate > 0 ||
+		impact.RollupRows > 0 || impact.GapRows > 0 || impact.ClockRows > 0 || impact.SilenceRows > 0
+	return impact, nil
+}
+
+// estimatedRows is the planner's row estimate for one partition.
+func (s *Store) estimatedRows(ctx context.Context, relation string) (int64, error) {
+	var rows int64
+	err := s.pool.QueryRow(ctx, `
+		select greatest(coalesce(reltuples, 0), 0)::bigint
+		  from pg_class where oid = to_regclass($1)`, relation).Scan(&rows)
+	return rows, err
+}
 
 // Observation is what the panel made of the moment a host claims for a
 // reading: the moment it stores, and whether it had to supply that moment.
@@ -489,6 +799,11 @@ func (s *Store) Run(ctx context.Context) {
 	defer rollup.Stop()
 	evaluate := time.NewTicker(evaluationInterval)
 	defer evaluate.Stop()
+	// The settings the installation stored are re-read on their own tick, so a
+	// change in the panel reaches the ingest path and the other replica within
+	// half a minute rather than at the next quarter-hour.
+	settings := time.NewTicker(settingsRefreshInterval)
+	defer settings.Stop()
 	// A rollup at the start catches up after a restart: a panel down for
 	// an hour has four quarter-hours waiting.
 	s.maintain(ctx)
@@ -496,6 +811,8 @@ func (s *Store) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-settings.C:
+			s.refreshSettings(ctx)
 		case <-rollup.C:
 			s.maintain(ctx)
 		case <-evaluate.C:
@@ -506,7 +823,18 @@ func (s *Store) Run(ctx context.Context) {
 	}
 }
 
+// refreshSettings re-reads the stored settings; a failure leaves the ones in
+// force, because the panel never guesses a retention.
+func (s *Store) refreshSettings(ctx context.Context) {
+	if err := s.RefreshSettings(ctx); err != nil && ctx.Err() == nil {
+		s.log.Error("the stored monitoring settings were not read; the ones in force stay", "err", err)
+	}
+}
+
 func (s *Store) maintain(ctx context.Context) {
+	// Every maintenance pass begins on the settings in force now; a pass
+	// already under way keeps the ones it started with.
+	s.refreshSettings(ctx)
 	// The partitions of the days ahead come first.
 	if err := s.EnsurePartitions(ctx, time.Now()); err != nil && ctx.Err() == nil {
 		s.log.Error("the partitions of the raw samples were not prepared", "err", err)
@@ -656,6 +984,10 @@ func (s *Store) rollupBatch(ctx context.Context) (int64, error) {
 // sweep applies the retention: the raw samples a partition at a time, the
 // rollups and the expired silences by the row, and the identities of the
 func (s *Store) sweep(ctx context.Context) error {
+	// One reading of the settings for the whole pass: a change stored while
+	// this sweep runs applies from the next one, so the pass cannot delete
+	// against two different retentions.
+	rollupRetention := s.current().RollupRetention.Seconds()
 	if err := s.DropExpiredPartitions(ctx, time.Now()); err != nil {
 		return err
 	}
@@ -665,31 +997,31 @@ func (s *Store) sweep(ctx context.Context) error {
 	// The quarter-hour rollups stay a delete by the row.
 	if _, err := s.pool.Exec(ctx,
 		`delete from host_metrics_15m where at < now() - make_interval(secs => $1)`,
-		s.options.RollupRetention.Seconds()); err != nil {
+		rollupRetention); err != nil {
 		return err
 	}
 	// A recorded hole outlives the readings around it: the long charts are
 	// drawn from the rollups, and a hole there needs its reason too.
 	if _, err := s.pool.Exec(ctx,
 		`delete from metric_gaps where last_sample_at < now() - make_interval(secs => $1)`,
-		s.options.RollupRetention.Seconds()); err != nil {
+		rollupRetention); err != nil {
 		return err
 	}
 	if _, err := s.pool.Exec(ctx,
 		`delete from metric_clock_skew where last_at < now() - make_interval(secs => $1)`,
-		s.options.RollupRetention.Seconds()); err != nil {
+		rollupRetention); err != nil {
 		return err
 	}
 	_, err := s.pool.Exec(ctx,
 		`delete from silences where until < now() - make_interval(secs => $1)`,
-		s.options.RollupRetention.Seconds())
+		rollupRetention)
 	return err
 }
 
 // sweepIdentities deletes the identities of the samples that can no longer be
 // delivered a second time.
 func (s *Store) sweepIdentities(ctx context.Context) error {
-	horizon := (s.options.MaxLateness + time.Hour).Seconds()
+	horizon := (s.current().MaxLateness + time.Hour).Seconds()
 	for pass := 0; pass < identitySweepPasses; pass++ {
 		tag, err := s.pool.Exec(ctx, `
 			delete from metric_samples

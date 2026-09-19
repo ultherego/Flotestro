@@ -1,6 +1,9 @@
 package monitoring
 
 import (
+	"io"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 )
@@ -159,5 +162,103 @@ func TestAHoleCarriesTheReasonOfTheRefusalThatCausedIt(t *testing.T) {
 	}
 	if gaps[1].Reason != "" || gaps[1].RefusedSamples != 0 {
 		t.Fatalf("a hole nothing explains was given the reason %q", gaps[1].Reason)
+	}
+}
+
+// TestAStoredSettingDecidesOverTheEnvironment: what the installation stored
+// takes over from what the process was started with, field by field. A field
+// nobody stored is not a zero, it is a field the environment still decides.
+func TestAStoredSettingDecidesOverTheEnvironment(t *testing.T) {
+	environment := Options{
+		RawRetention:    7 * 24 * time.Hour,
+		RollupRetention: 90 * 24 * time.Hour,
+		MaxLateness:     12 * time.Hour,
+		RawQueryWindow:  6 * time.Hour,
+		ClockSkewLimit:  time.Minute,
+		PartitionsAhead: 4,
+	}
+	// One field stored; the other five stay the environment's.
+	only := environment.Overlay(Options{RawRetention: 14 * 24 * time.Hour})
+	if only.RawRetention != 14*24*time.Hour {
+		t.Fatalf("the stored raw retention did not take over: %s", only.RawRetention)
+	}
+	if only.RollupRetention != environment.RollupRetention ||
+		only.MaxLateness != environment.MaxLateness ||
+		only.RawQueryWindow != environment.RawQueryWindow ||
+		only.ClockSkewLimit != environment.ClockSkewLimit ||
+		only.PartitionsAhead != environment.PartitionsAhead {
+		t.Fatalf("storing one field overwrote the others: %+v", only)
+	}
+	// An empty row means the environment decides everything.
+	if cleared := environment.Overlay(Options{}); cleared != environment {
+		t.Fatalf("an installation that stored nothing does not run on its environment: %+v", cleared)
+	}
+	// And the evaluator lease is deliberately not one of the stored fields:
+	// a lease term that changes under its holder is a different hazard.
+	if environment.Overlay(Options{EvaluatorLease: time.Hour}).EvaluatorLease != 0 {
+		t.Fatal("the evaluator lease was taken from a stored row")
+	}
+}
+
+// TestAStoredRetentionIsValidatedBeforeItIsStored: the rule the panel refuses
+// to start on is the rule the write obeys, and it is judged on the result of
+// the overlay rather than on the stored field alone.
+func TestAStoredRetentionIsValidatedBeforeItIsStored(t *testing.T) {
+	environment := Options{
+		RawRetention:   48 * time.Hour,
+		RawQueryWindow: 24 * time.Hour,
+		MaxLateness:    24 * time.Hour,
+	}
+	if err := environment.Validate(); err != nil {
+		t.Fatalf("the environment itself does not validate: %v", err)
+	}
+	// A raw retention alone, shorter than the window plus the lateness the
+	// environment sets: refused, with the code an operator can look up.
+	short := environment.Overlay(Options{RawRetention: 36 * time.Hour})
+	err := short.Validate()
+	if err == nil {
+		t.Fatal("a stored retention shorter than the window plus the lateness was accepted")
+	}
+	if !strings.Contains(err.Error(), ErrorRetentionTooShort) {
+		t.Fatalf("the refusal carries no typed code: %v", err)
+	}
+	// The same retention becomes storable once the lateness stored beside it
+	// leaves room: the pair is judged, not the field.
+	pair := environment.Overlay(Options{RawRetention: 36 * time.Hour, MaxLateness: 12 * time.Hour})
+	if err := pair.Validate(); err != nil {
+		t.Fatalf("a retention that fits its own window and lateness was refused: %v", err)
+	}
+	// A margin of partitions nobody can want is refused on the write too.
+	if err := environment.Overlay(Options{PartitionsAhead: 400}).Validate(); err == nil {
+		t.Fatal("a stored margin of 400 days of partitions was accepted")
+	}
+}
+
+// TestTheStoredSettingsAreTheOnesTheWorkersRead: the store hands the sweep,
+// the gateway and the screens the value in force, and swapping it is one
+// replacement rather than six, so a pass reading it twice cannot see halves
+// of two different configurations.
+func TestTheStoredSettingsAreTheOnesTheWorkersRead(t *testing.T) {
+	store := NewStore(nil, slog.New(slog.NewTextHandler(io.Discard, nil)), Options{
+		RawRetention:   48 * time.Hour,
+		RawQueryWindow: 24 * time.Hour,
+		MaxLateness:    24 * time.Hour,
+	})
+	if store.MaxLateness() != 24*time.Hour || store.Settings().RawRetention != 48*time.Hour {
+		t.Fatalf("a fresh store does not run on its environment: %+v", store.Settings())
+	}
+	if store.Baseline().RawRetention != 48*time.Hour {
+		t.Fatalf("the baseline is not what the process was started with: %+v", store.Baseline())
+	}
+
+	next := store.Baseline().Overlay(Options{RawRetention: 14 * 24 * time.Hour, MaxLateness: time.Hour})
+	store.live.Store(&next)
+	if store.Settings().RawRetention != 14*24*time.Hour || store.MaxLateness() != time.Hour {
+		t.Fatalf("the workers do not read the settings in force: %+v", store.Settings())
+	}
+	// The baseline does not move with it: it is what a cleared field falls
+	// back to, and the settings screen shows both.
+	if store.Baseline().RawRetention != 48*time.Hour {
+		t.Fatalf("storing a setting rewrote the environment's value: %+v", store.Baseline())
 	}
 }
