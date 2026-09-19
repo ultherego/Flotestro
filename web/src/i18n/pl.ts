@@ -5601,4 +5601,6 @@ export const pl: Record<string, string> = {
   "The agents sample once a minute, so a rule expects a reading every 60 s at the soonest and every 24 h at the latest.": "Agenci probkuja raz na minute, wiec regula oczekuje odczytu najczesciej co 60 s i najrzadziej co 24 h.",
   "The widest gap has to be a whole number of seconds, at most 24 h.": "Najszersza przerwa musi byc calkowita liczba sekund, najwyzej 24 h.",
   "A gap narrower than the expected cadence opens one after every reading that arrives on time.": "Przerwa wezsza niz oczekiwany takt otwiera sie po kazdym odczycie, ktory przyjdzie na czas.",
+  "Panel rules after a reboot": "Reguły panelu po restarcie",
+  "restored by the agent": "odtwarzane przez agenta",
 };

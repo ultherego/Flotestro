@@ -3,7 +3,9 @@ package helper
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -512,8 +514,14 @@ func (s *Server) readFirewall(ctx context.Context) firewall.Snapshot {
 }
 
 // nftPersistence compares the running ruleset with the file the host restores
-// it from at boot. The path comes from the unit of this host, not from an
+// it from at boot, and with what rebuilds the panel's own table there.
 func (s *Server) nftPersistence(ctx context.Context, rules []firewall.Rule) (firewall.NftPersistence, []firewall.Drift) {
+	return firewall.NftPersistentState(s.nftBootUnit(ctx), os.DirFS("/"), rules, s.bootRestore(ctx))
+}
+
+// nftBootUnit asks systemd what this host restores its ruleset from. The path
+// comes from the unit of this host, not from an example in a document.
+func (s *Server) nftBootUnit(ctx context.Context) firewall.NftUnit {
 	arguments := firewall.NftUnitArguments()
 	output, err := toolOutput(ctx, arguments[0], arguments[1:]...)
 	if err != nil {
@@ -521,7 +529,26 @@ func (s *Server) nftPersistence(ctx context.Context, rules []firewall.Rule) (fir
 		// ruleset - and not knowing is not agreement.
 		output = ""
 	}
-	return firewall.NftPersistentState(firewall.ParseNftUnit(output), os.DirFS("/"), rules)
+	return firewall.ParseNftUnit(output)
+}
+
+// bootRestore reads what rebuilds the panel's own table at boot: what systemd
+// says about the unit, and what the last run of it recorded.
+func (s *Server) bootRestore(ctx context.Context) firewall.BootRestore {
+	arguments := firewall.BootRestoreUnitArguments()
+	output, err := toolOutput(ctx, arguments[0], arguments[1:]...)
+	if err != nil {
+		output = ""
+	}
+	record, _ := firewall.LoadBootRestoreRecord(firewall.RegistryDir)
+	// A registry that cannot be read is not an empty one, so a failed read does
+	// not make the host look like one the panel never gave a rule.
+	registered := -1
+	if registry, err := firewall.LoadRegistry(firewall.RegistryDir); err == nil {
+		registered = len(registry.Rules)
+	}
+	return firewall.BootRestoreState(firewall.ParseBootRestoreUnit(output), record,
+		firewall.BootIdentifier(os.DirFS("/")), registered)
 }
 
 // readUFW adds the ufw state to the snapshot. It returns the reason the
@@ -654,6 +681,62 @@ func RollbackFirewall(ctx context.Context, id string) error {
 		return err
 	}
 	return removeFirewallPlan(id)
+}
+
+// bootRestoreInputs is everything the restore looks at before it touches the
+// host: where the registry lives, the filesystem, and the distribution's unit.
+type bootRestoreInputs struct {
+	dir  string
+	root fs.FS
+	unit firewall.NftUnit
+}
+
+// RestoreFirewallAtBoot rebuilds the panel's own table from its registry. No
+// boot file of a distribution carries that table, so nothing else brings it back.
+func RestoreFirewallAtBoot(ctx context.Context) (firewall.BootRestoreRecord, error) {
+	// The unit that calls this has no clock of its own.
+	ctx, cancel := context.WithTimeout(ctx, rollbackToolLimit)
+	defer cancel()
+	server := &Server{}
+	return server.restoreTable(ctx, bootRestoreInputs{
+		dir: firewall.RegistryDir, root: os.DirFS("/"), unit: server.nftBootUnit(ctx)})
+}
+
+// restoreTable carries out the decision and records it. The record is written
+// whatever happens: a restore that did not run is a fact of the host.
+func (s *Server) restoreTable(ctx context.Context, in bootRestoreInputs) (firewall.BootRestoreRecord, error) {
+	record := firewall.BootRestoreRecord{
+		At: time.Now().UTC(), Boot: firewall.BootIdentifier(in.root)}
+	registry, err := firewall.LoadRegistry(in.dir)
+	if err != nil {
+		record.Reason = firewall.DriftBootRestoreFailed
+		record.Detail = "the rule registry could not be read: " + err.Error()
+		_ = firewall.SaveBootRestoreRecord(in.dir, record)
+		return record, err
+	}
+
+	decision := firewall.PlanBootRestore(registry, in.root, in.unit)
+	record.Rules, record.Reason, record.Detail = decision.Rules, decision.Reason, decision.Detail
+	var failure error
+	if decision.Rebuild {
+		if err := s.rebuildTable(ctx, registry); err != nil {
+			record.Reason = firewall.DriftBootRestoreFailed
+			record.Detail = "the panel's own table was not rebuilt: " + err.Error()
+			failure = err
+		} else {
+			record.Detail = fmt.Sprintf("the panel's own table was rebuilt from the registry (%d rules)",
+				len(registry.Rules))
+		}
+	}
+	if err := firewall.SaveBootRestoreRecord(in.dir, record); err != nil && failure == nil {
+		failure = fmt.Errorf("writing the record of the restore: %w", err)
+	}
+	// A refusal the panel has to see must also end the unit as failed: a unit
+	// that finished cleanly says the table is there.
+	if failure == nil && record.Reason == firewall.DriftBootRestoreFailed {
+		failure = errors.New(record.Detail)
+	}
+	return record, failure
 }
 
 func firewallResponse(snapshot firewall.Snapshot, message string, plan *firewallPlan) *helperv1.HelperResponse {

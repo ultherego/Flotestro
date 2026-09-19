@@ -63,6 +63,14 @@ configure)
     # new version; the socket starts it again on demand.
     systemctl stop flotestro-helper.service || true
 
+    # The panel's own nftables table is in no boot file of the distribution,
+    # so a unit of ours rebuilds it from the helper's registry before the host
+    # is reachable. It is started and not restarted: on a host that has
+    # already run it the table is in place, and rebuilding it would flush and
+    # refill the panel's rules for no reason.
+    systemctl enable flotestro-firewall-restore.service || true
+    systemctl start flotestro-firewall-restore.service || true
+
     # An agent without a panel address has nowhere to connect. Running it in
     # a restart loop would litter the host journal; the installation then
     # ends with a hint, not a quiet error.

@@ -1,11 +1,15 @@
 package firewall
 
 import (
+	"encoding/json"
 	"io/fs"
+	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 // SystemctlPath points at systemd's control tool. The path is fixed, not
@@ -72,6 +76,9 @@ type NftPersistence struct {
 	Reason string `json:"reason,omitempty"`
 	// Detail says what that means for the host, in one sentence.
 	Detail string `json:"detail,omitempty"`
+	// Restore is what rebuilds the panel's own table after a reboot. No boot
+	// source of a distribution carries that table.
+	Restore BootRestore `json:"restore"`
 }
 
 // NftUnitArguments asks systemd what this host restores its ruleset from.
@@ -131,19 +138,29 @@ func nftLoadedFiles(value string) []string {
 
 // NftPersistentState compares the ruleset the kernel filters with against the
 // source the host restores at boot. It reads nothing but the files the unit
-func NftPersistentState(unit NftUnit, root fs.FS, running []Rule) (NftPersistence, []Drift) {
-	state := NftPersistence{Unit: unit}
+func NftPersistentState(unit NftUnit, root fs.FS, running []Rule, restore BootRestore) (NftPersistence, []Drift) {
+	state := NftPersistence{Unit: unit, Restore: restore}
+	// Where the restore is in force, the panel's own table is answered for by
+	// it and not by the boot source of the distribution.
+	prefix := BootRestoreDrift(restore)
+	notCompared := func(reason, detail string) (NftPersistence, []Drift) {
+		state, drift := nftNotCompared(state, reason, detail)
+		return state, append(prefix, drift...)
+	}
+	if restore.InForce() {
+		running = nftWithoutPanelTable(running)
+	}
 	switch {
 	case unit.LoadState != "loaded":
-		return nftNotCompared(state, DriftNftSourceUnknown,
+		return notCompared(DriftNftSourceUnknown,
 			"this host has no "+NftUnitName+", so nothing says what would restore its rules "+
 				"after a reboot and a rule in force now may be gone then")
 	case len(unit.Files) == 0:
-		return nftNotCompared(state, DriftNftSourceUnknown,
+		return notCompared(DriftNftSourceUnknown,
 			"the unit "+NftUnitName+" hands nft no file, so what it would restore at boot cannot be read")
 	case unit.BootState == "disabled" || unit.BootState == "masked":
 		state.Files = unit.Files
-		return nftNotCompared(state, DriftNftSourceInactive,
+		return notCompared(DriftNftSourceInactive,
 			"the unit "+NftUnitName+" is "+unit.BootState+", so nothing loads "+
 				strings.Join(unit.Files, ", ")+" and no rule in force now survives a reboot")
 	}
@@ -151,18 +168,32 @@ func NftPersistentState(unit NftUnit, root fs.FS, running []Rule) (NftPersistenc
 	content, files, missing := ReadNftSource(root, unit.Files)
 	state.Files = files
 	if missing != "" {
-		return nftNotCompared(state, DriftNftSourceUnreadable,
+		return notCompared(DriftNftSourceUnreadable,
 			"the ruleset is restored from "+missing+" and that file could not be read, "+
 				"so there is nothing to compare the running rules with")
 	}
 	filed, understood := NftFileRules(content)
 	if !understood {
-		return nftNotCompared(state, DriftNftNotComparable,
+		return notCompared(DriftNftNotComparable,
 			"the boot source holds a construct this panel does not read, so a rule missing from it "+
 				"would not mean the kernel is the only place that has it")
 	}
+	if restore.InForce() {
+		filed = nftWithoutPanelTable(filed)
+	}
 	state.Compared = true
-	return state, NftDrift(NftComparableRules(filed), NftComparableRules(running))
+	return state, append(prefix, NftDrift(NftComparableRules(filed), NftComparableRules(running))...)
+}
+
+// nftWithoutPanelTable drops the panel's own table from a view of the rules.
+func nftWithoutPanelTable(rules []Rule) []Rule {
+	kept := make([]Rule, 0, len(rules))
+	for _, rule := range rules {
+		if rule.Source != SourceManaged {
+			kept = append(kept, rule)
+		}
+	}
+	return kept
 }
 
 // nftNotCompared records why the two views were not compared: the answer is
@@ -536,4 +567,290 @@ func nftStripComment(line string) string {
 
 func nftBraces(line string) int {
 	return strings.Count(line, "{") - strings.Count(line, "}")
+}
+
+// BootRestoreUnitName is the unit that rebuilds the panel's own table after a
+// reboot. No boot source of a distribution carries that table.
+const BootRestoreUnitName = "flotestro-firewall-restore.service"
+
+// BootRestoreFile holds what the last run of that unit recorded. It lives
+// beside the registry the table is rebuilt from.
+const BootRestoreFile = "boot-restore.json"
+
+// bootIDPath is the kernel's name for this boot: a record written before the
+// last restart says nothing about the rules the host filters with now.
+const bootIDPath = "/proc/sys/kernel/random/boot_id"
+
+// What the panel's own table is restored by after a reboot, or why it is not.
+// The first four mean the panel's rules are gone once the machine restarts.
+const (
+	// DriftBootRestoreUnitAbsent: this host has no unit rebuilding the table,
+	// which is every host whose agent is of a release from before this one.
+	DriftBootRestoreUnitAbsent = "nft_boot_restore_unit_absent"
+	// DriftBootRestoreUnitInactive: the unit is installed and disabled or
+	// masked, so it rebuilds nothing.
+	DriftBootRestoreUnitInactive = "nft_boot_restore_unit_inactive"
+	// DriftBootRestoreFailed: the unit ran and the table was not rebuilt.
+	DriftBootRestoreFailed = "nft_boot_restore_failed"
+	// DriftBootRestorePending: the unit is enabled and has not run since this
+	// host started, so nothing here proves the table comes back.
+	DriftBootRestorePending = "nft_boot_restore_pending"
+	// BootRestoreNotNeeded: the host's own nftables unit loads the panel's
+	// table already, and two mechanisms writing one table fight each other.
+	BootRestoreNotNeeded = "nft_boot_restore_not_needed"
+	// BootRestoreNotApplicable: firewalld or ufw is on this host and owns its
+	// rules, so the restore leaves it alone. Where the panel nevertheless has
+	// rules of its own in the registry here, nothing puts those back.
+	BootRestoreNotApplicable = "nft_boot_restore_not_applicable"
+)
+
+// BootRestoreUnit is what systemd says about the unit that rebuilds the
+// panel's table at boot.
+type BootRestoreUnit struct {
+	Name string `json:"name,omitempty"`
+	// LoadState says whether the unit exists on this host at all.
+	LoadState string `json:"load_state,omitempty"`
+	// BootState is systemd's word for whether the unit runs at boot.
+	BootState string `json:"boot_state,omitempty"`
+	// ActiveState and Result are how the last run ended.
+	ActiveState string `json:"active_state,omitempty"`
+	Result      string `json:"result,omitempty"`
+}
+
+// BootRestoreRecord is what a run of the restore wrote about itself. The
+// helper writes it as root; the agent only reads it back.
+type BootRestoreRecord struct {
+	At time.Time `json:"at"`
+	// Boot is the boot the run belongs to.
+	Boot string `json:"boot,omitempty"`
+	// Rules is how many registered rules the run had to rebuild.
+	Rules int `json:"rules"`
+	// Reason is the stable code of what the run decided; empty means the table
+	// was rebuilt.
+	Reason string `json:"reason,omitempty"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// BootRestore is what the panel is told about the panel's own table after a
+// reboot: the unit, the run, and whether the rules are back.
+type BootRestore struct {
+	Unit BootRestoreUnit `json:"unit"`
+	// Ran says whether the restore ran at this boot of this host.
+	Ran   bool      `json:"ran"`
+	At    time.Time `json:"at,omitempty"`
+	Rules int       `json:"rules"`
+	// Registered is how many rules the registry holds now; -1 means it could
+	// not be read, which is not the same answer as none.
+	Registered int `json:"registered"`
+	// Reason is the stable code, and Detail what it means for this host.
+	Reason string `json:"reason,omitempty"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// InForce says whether the panel's own rules are in the kernel again after a
+// reboot. Not knowing is not agreement, and neither is another tool's answer.
+func (b BootRestore) InForce() bool {
+	switch b.Reason {
+	case "":
+		return b.Ran
+	case BootRestoreNotNeeded:
+		// The host's own unit loads the panel's table, which is the table being
+		// asked about.
+		return true
+	}
+	return false
+}
+
+// BootRestoreUnitArguments asks systemd about the unit that rebuilds the
+// panel's table.
+func BootRestoreUnitArguments() []string {
+	return []string{SystemctlPath, "show", "--no-pager",
+		"--property=LoadState", "--property=UnitFileState",
+		"--property=ActiveState", "--property=Result", BootRestoreUnitName}
+}
+
+// ParseBootRestoreUnit reads the answer of "systemctl show".
+func ParseBootRestoreUnit(output string) BootRestoreUnit {
+	unit := BootRestoreUnit{Name: BootRestoreUnitName}
+	for _, raw := range strings.Split(output, "\n") {
+		key, value, found := strings.Cut(strings.TrimSpace(raw), "=")
+		if !found {
+			continue
+		}
+		switch key {
+		case "LoadState":
+			unit.LoadState = value
+		case "UnitFileState":
+			unit.BootState = value
+		case "ActiveState":
+			unit.ActiveState = value
+		case "Result":
+			unit.Result = value
+		}
+	}
+	return unit
+}
+
+// BootRestoreState judges what this host does with the panel's own table at
+// boot: systemd answers for the unit, the record answers for the run.
+func BootRestoreState(unit BootRestoreUnit, record BootRestoreRecord, bootID string,
+	registered int) BootRestore {
+	state := BootRestore{Unit: unit, At: record.At, Rules: record.Rules, Registered: registered}
+	// A record of an earlier boot is not an answer about this one; where
+	// neither side names a boot, the record is taken as it stands.
+	ranHere := !record.At.IsZero() &&
+		(bootID == "" || record.Boot == "" || record.Boot == bootID)
+	switch {
+	case unit.LoadState != "loaded":
+		state.Reason = DriftBootRestoreUnitAbsent
+		state.Detail = "this host has no " + BootRestoreUnitName + ", so nothing rebuilds the " +
+			"panel's own table after a reboot and the rules the panel applied are in force only " +
+			"until the machine restarts"
+	case unit.BootState == "disabled" || unit.BootState == "masked":
+		state.Reason = DriftBootRestoreUnitInactive
+		state.Detail = "the unit " + BootRestoreUnitName + " is " + unit.BootState +
+			", so the panel's own table is not rebuilt after a reboot"
+	case unit.ActiveState == "failed" || (unit.Result != "" && unit.Result != "success"):
+		state.Ran = ranHere
+		state.Reason = DriftBootRestoreFailed
+		state.Detail = "the unit " + BootRestoreUnitName + " did not finish, so the panel's own " +
+			"table was not rebuilt"
+		if ranHere && record.Detail != "" {
+			state.Detail = record.Detail
+		}
+	case !ranHere:
+		state.Reason = DriftBootRestorePending
+		state.Detail = "the unit " + BootRestoreUnitName + " is enabled and has not run since " +
+			"this host started, so nothing here proves the panel's own table comes back"
+	default:
+		state.Ran = true
+		state.Reason, state.Detail = record.Reason, record.Detail
+	}
+	return state
+}
+
+// BootRestoreDrift names the one difference that matters here: the panel gave
+// this host rules and nothing puts them back after a reboot.
+func BootRestoreDrift(state BootRestore) []Drift {
+	if state.Registered == 0 || state.InForce() {
+		return nil
+	}
+	return []Drift{{Reason: state.Reason, Family: FlotestroFamily, Table: FlotestroTable,
+		Detail: state.Detail}}
+}
+
+// BootRestoreDecision is what the restore is to do on this host. It is
+// computed from files and from systemd's answer, and touches nothing.
+type BootRestoreDecision struct {
+	// Rebuild says whether the panel's own table is to be built again.
+	Rebuild bool
+	Rules   int
+	Reason  string
+	Detail  string
+}
+
+// PlanBootRestore decides what the helper does with the panel's own table at
+// boot. Everything it reads comes from the given root.
+func PlanBootRestore(registry Registry, root fs.FS, unit NftUnit) BootRestoreDecision {
+	decision := BootRestoreDecision{Rules: len(registry.Rules)}
+	switch {
+	case len(registry.Rules) == 0:
+		// A host the panel never gave a rule has nothing to rebuild, and that
+		// is an answer, not a failure.
+		decision.Detail = "the panel has given this host no rule, so there is nothing to rebuild"
+	case hostFileExists(root, FirewallCmdPath):
+		decision.Reason = BootRestoreNotApplicable
+		decision.Detail = "firewalld holds the rules on this host and writes its own tables at every start"
+	case UFWEnabled(hostFile(root, UFWConfigFile)):
+		decision.Reason = BootRestoreNotApplicable
+		decision.Detail = "ufw holds the rules on this host and restores them from its own files"
+	case !hostFileExists(root, NftPath):
+		decision.Reason = DriftBootRestoreFailed
+		decision.Detail = "this host has no nftables (nft) binary, so the rules the panel applied " +
+			"cannot be rebuilt"
+	case nftSourceCarriesPanelTable(root, unit):
+		decision.Reason = BootRestoreNotNeeded
+		decision.Detail = "the unit " + NftUnitName + " loads the panel's own table itself, so " +
+			"rebuilding it here would fight that unit"
+	default:
+		decision.Rebuild = true
+	}
+	return decision
+}
+
+// nftSourceCarriesPanelTable says whether what this host loads at boot already
+// holds the panel's own table. A source that cannot be read does not count as
+func nftSourceCarriesPanelTable(root fs.FS, unit NftUnit) bool {
+	if unit.LoadState != "loaded" || len(unit.Files) == 0 ||
+		unit.BootState == "disabled" || unit.BootState == "masked" {
+		return false
+	}
+	content, _, missing := ReadNftSource(root, unit.Files)
+	if missing != "" {
+		return false
+	}
+	rules, _ := NftFileRules(content)
+	for _, rule := range rules {
+		if rule.Source == SourceManaged {
+			return true
+		}
+	}
+	return false
+}
+
+// BootIdentifier is the kernel's name for this boot, or empty where the host
+// does not tell.
+func BootIdentifier(root fs.FS) string {
+	return strings.TrimSpace(hostFile(root, bootIDPath))
+}
+
+// LoadBootRestoreRecord reads what the last restore recorded. A missing file
+// is a host where the restore has not run, which the caller judges.
+func LoadBootRestoreRecord(dir string) (BootRestoreRecord, error) {
+	data, err := os.ReadFile(filepath.Join(dir, BootRestoreFile))
+	if os.IsNotExist(err) {
+		return BootRestoreRecord{}, nil
+	}
+	if err != nil {
+		return BootRestoreRecord{}, err
+	}
+	var record BootRestoreRecord
+	if err := json.Unmarshal(data, &record); err != nil {
+		return BootRestoreRecord{}, err
+	}
+	return record, nil
+}
+
+// SaveBootRestoreRecord writes what a run of the restore decided.
+func SaveBootRestoreRecord(dir string, record BootRestoreRecord) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	data, err := json.Marshal(record)
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(dir, BootRestoreFile)
+	// A record read half-way would say the restore did something it did not.
+	temporary := path + ".new"
+	if err := os.WriteFile(temporary, data, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(temporary, path)
+}
+
+// hostFileExists says whether the host carries the given absolute path.
+func hostFileExists(root fs.FS, file string) bool {
+	_, err := fs.Stat(root, strings.TrimPrefix(file, "/"))
+	return err == nil
+}
+
+// hostFile reads an absolute path of the host; what cannot be read is empty,
+// and every caller treats empty as "the host does not say".
+func hostFile(root fs.FS, file string) string {
+	content, err := fs.ReadFile(root, strings.TrimPrefix(file, "/"))
+	if err != nil {
+		return ""
+	}
+	return string(content)
 }

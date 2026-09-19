@@ -68,7 +68,7 @@ follows from what the panel binds a host to:
 
 - The package: `/usr/bin/flotestro-agent`, `/usr/bin/flotestro-agentctl`, the units
   (`flotestro-agent.service`, `flotestro-enroll.service`, `flotestro-helper.socket`,
-  `flotestro-helper.service`), sysusers and tmpfiles. The package enables
+  `flotestro-helper.service`, `flotestro-firewall-restore.service`), sysusers and tmpfiles. The package enables
   `flotestro-agent.service` and `flotestro-helper.socket`; both may stay enabled, the agent
   does not start without an identity.
 - `/etc/flotestro/agent.yaml` (`root:flotestro-agent`, `0640`) with `schema_version`,
@@ -104,6 +104,10 @@ rm -rf /var/lib/flotestro-agent/identity \
        /var/lib/flotestro-agent/status.json \
        /var/lib/flotestro-agent/agent.key \
        /var/lib/flotestro-agent/agent.pem
+# The firewall registry is what flotestro-firewall-restore.service rebuilds
+# the panel's table from. An image carrying one clone's rules would put them
+# on every machine made from it, at its first boot.
+rm -rf /var/lib/flotestro-helper/firewall
 rm -rf /run/flotestro-bootstrap
 : > /etc/machine-id
 rm -f /var/lib/dbus/machine-id && ln -s /etc/machine-id /var/lib/dbus/machine-id

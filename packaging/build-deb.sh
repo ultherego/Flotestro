@@ -56,7 +56,8 @@ agent)
     install -m 0755 "$STAGE/flotestro-agent-helper" "$root/usr/bin/flotestro-agent-helper"
     install -m 0755 "$STAGE/flotestro-agentctl"     "$root/usr/bin/flotestro-agentctl"
     for unit in flotestro-agent.service flotestro-enroll.service \
-                flotestro-helper.service flotestro-helper.socket; do
+                flotestro-helper.service flotestro-helper.socket \
+                flotestro-firewall-restore.service; do
         install -m 0644 "$here/systemd/$unit" "$root/lib/systemd/system/$unit"
     done
     install -m 0640 "$here/agent.yaml" "$root/etc/flotestro/agent.yaml"

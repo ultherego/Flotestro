@@ -49,6 +49,7 @@ install -m 0644 %{_flotestro_units}/flotestro-agent.service  %{buildroot}%{_unit
 install -m 0644 %{_flotestro_units}/flotestro-enroll.service %{buildroot}%{_unitdir}/
 install -m 0644 %{_flotestro_units}/flotestro-helper.service %{buildroot}%{_unitdir}/
 install -m 0644 %{_flotestro_units}/flotestro-helper.socket  %{buildroot}%{_unitdir}/
+install -m 0644 %{_flotestro_units}/flotestro-firewall-restore.service %{buildroot}%{_unitdir}/
 
 install -d -m 0755 %{buildroot}%{_sysconfdir}/flotestro
 install -m 0640 %{_flotestro_stage}/agent.yaml %{buildroot}%{_sysconfdir}/flotestro/agent.yaml
@@ -75,6 +76,7 @@ install -d -m 0755 %{buildroot}%{_docdir}/flotestro-agent
 %{_unitdir}/flotestro-enroll.service
 %{_unitdir}/flotestro-helper.service
 %{_unitdir}/flotestro-helper.socket
+%{_unitdir}/flotestro-firewall-restore.service
 %dir %{_sysconfdir}/flotestro
 # The configuration must not be overwritten on an update: it holds the
 # panel address and the enrollment token of this host.
@@ -110,9 +112,15 @@ if [ -f %{_sysconfdir}/flotestro/agent.env ] &&
     echo "  the daemon ignores it; enrollment is done with: sudo -u flotestro-agent flotestro-agentctl enroll" >&2
     echo "  remove the line from the file" >&2
 fi
-%systemd_post flotestro-agent.service flotestro-helper.socket
+%systemd_post flotestro-agent.service flotestro-helper.socket flotestro-firewall-restore.service
 # The helper socket must exist before the agent tries to connect to it.
 systemctl enable --now flotestro-helper.socket || :
+# The panel's own nftables table is in no boot file of the distribution, so a
+# unit of ours rebuilds it from the helper's registry before the host is
+# reachable. It is started and not restarted: where it has already run the
+# table is in place, and rebuilding it would flush and refill the rules.
+systemctl enable flotestro-firewall-restore.service || :
+systemctl start flotestro-firewall-restore.service || :
 # The helper keeps running after the binary is replaced, so after an update
 # it would serve jobs with the old code. The socket starts the new version at
 # the next job.
@@ -132,7 +140,7 @@ else
 fi
 
 %preun
-%systemd_preun flotestro-agent.service flotestro-helper.socket
+%systemd_preun flotestro-agent.service flotestro-helper.socket flotestro-firewall-restore.service
 
 %postun
 %systemd_postun_with_restart flotestro-agent.service

@@ -36,11 +36,31 @@ type Zone = {
   ports?: string[];
 };
 
+/** The panel's rules are back after a reboot only when the restore ran, or
+    when the host's own nftables unit carries the panel table itself. */
+function restoreInForce(restore: BootRestore): boolean {
+  if (!restore.reason) return restore.ran === true;
+  return restore.reason === "nft_boot_restore_not_needed";
+}
+
 type Drift = { reason: string; rule?: string; rule_id?: string; family?: string; table?: string; chain?: string; detail?: string };
 
 /** What restores the nftables ruleset at boot. Missing on an nftables host
     means an agent that does not report it: unknown, not agreement. */
+/** What rebuilds the panel's own table after a reboot. No boot file of a
+    distribution carries that table. */
+type BootRestore = {
+  unit?: { name?: string; load_state?: string; boot_state?: string; active_state?: string; result?: string };
+  ran?: boolean;
+  at?: string;
+  rules?: number;
+  registered?: number;
+  reason?: string;
+  detail?: string;
+};
+
 type Persistence = {
+  restore?: BootRestore;
   unit?: { name?: string; load_state?: string; boot_state?: string; files?: string[] };
   files?: string[];
   compared?: boolean;
@@ -212,6 +232,16 @@ export function Firewall() {
                   ? <span className="hm-mono">{(snapshot.persistent.files ?? []).join(", ") || "—"}</span>
                   : <span className="badge warn">{snapshot.persistent.reason}</span>}
               {snapshot.persistent?.detail && <span className="source"> · {snapshot.persistent.detail}</span>}
+            </Fact>
+          )}
+          {snapshot?.adapter === "nftables" && (
+            <Fact label={t("Panel rules after a reboot")}>
+              {!snapshot.persistent?.restore?.unit?.load_state
+                ? <span className="badge unknown">{t("not reported by this agent")}</span>
+                : restoreInForce(snapshot.persistent.restore)
+                  ? <span className="badge ok">{t("restored by the agent")}</span>
+                  : <span className="badge warn">{snapshot.persistent.restore.reason}</span>}
+              {snapshot.persistent?.restore?.detail && <span className="source"> · {snapshot.persistent.restore.detail}</span>}
             </Fact>
           )}
           {/* The fingerprint ties the plan to the rule set: a change

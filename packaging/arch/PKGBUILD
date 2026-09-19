@@ -39,6 +39,7 @@ source=(
   'flotestro-enroll.service'
   'flotestro-helper.service'
   'flotestro-helper.socket'
+  'flotestro-firewall-restore.service'
   'flotestro-agent.sysusers'
   'flotestro-agent.tmpfiles'
   'agent.yaml'
@@ -55,6 +56,8 @@ package() {
   install -Dm644 flotestro-enroll.service  "$pkgdir/usr/lib/systemd/system/flotestro-enroll.service"
   install -Dm644 flotestro-helper.service  "$pkgdir/usr/lib/systemd/system/flotestro-helper.service"
   install -Dm644 flotestro-helper.socket   "$pkgdir/usr/lib/systemd/system/flotestro-helper.socket"
+  install -Dm644 flotestro-firewall-restore.service \
+    "$pkgdir/usr/lib/systemd/system/flotestro-firewall-restore.service"
 
   install -Dm644 flotestro-agent.sysusers  "$pkgdir/usr/lib/sysusers.d/flotestro-agent.conf"
   install -Dm644 flotestro-agent.tmpfiles  "$pkgdir/usr/lib/tmpfiles.d/flotestro-agent.conf"

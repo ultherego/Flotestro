@@ -1,0 +1,43 @@
+[Unit]
+Description=Flotestro firewall restore (the panel's own nftables table)
+Documentation=https://github.com/ultherego/flotestro
+
+# The panel's own table lives in the helper's registry, not in any file the
+# distribution loads at boot. Without this unit every rule the panel applied
+# is gone after a restart, while the host keeps reporting itself as filtering
+# with them right up to that restart.
+#
+# The ordering is the same one every firewall on a systemd host takes:
+# network-pre.target is the point before anything the machine serves can be
+# reached, so the rules are in the kernel before the first packet arrives.
+Wants=network-pre.target
+Before=network-pre.target
+# The mechanisms that hold rules of their own go first. nftables.service
+# begins its script with "flush ruleset", so a table built before it would be
+# wiped by it; firewalld and ufw own the ruleset where they run, and the
+# restore then refuses to touch the host instead of fighting them. A unit
+# that is not installed here is simply no ordering constraint.
+After=nftables.service firewalld.service ufw.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/flotestro-agent-helper -restore-firewall
+
+# nft talks to the kernel over netlink; without this family it ends with code
+# 3 and a message that says not a word about sockets.
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+# The restore reads the registry and writes one record beside it. It needs no
+# other writable path, and it is over before anything else on the host runs.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+StateDirectory=flotestro-helper
+StateDirectoryMode=0700
+
+[Install]
+WantedBy=multi-user.target

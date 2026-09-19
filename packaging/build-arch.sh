@@ -41,13 +41,15 @@ else
     cp "$STAGE/flotestro-agent" "$STAGE/flotestro-agentctl" \
        "$STAGE/flotestro-agent-helper" "$build/"
     cp "$here/systemd/flotestro-agent.service" "$here/systemd/flotestro-enroll.service" \
-       "$here/systemd/flotestro-helper.service" "$here/systemd/flotestro-helper.socket" "$build/"
+       "$here/systemd/flotestro-helper.service" "$here/systemd/flotestro-helper.socket" \
+       "$here/systemd/flotestro-firewall-restore.service" "$build/"
     cp "$here/arch/flotestro-agent.sysusers" "$here/arch/flotestro-agent.tmpfiles" \
        "$here/arch/flotestro-agent.install" "$build/"
     cp "$here/agent.yaml" "$build/agent.yaml"
     FILES="flotestro-agent flotestro-agentctl flotestro-agent-helper"
     FILES="$FILES flotestro-agent.service flotestro-enroll.service"
     FILES="$FILES flotestro-helper.service flotestro-helper.socket"
+    FILES="$FILES flotestro-firewall-restore.service"
     FILES="$FILES flotestro-agent.sysusers flotestro-agent.tmpfiles agent.yaml"
     TEMPLATE="$here/arch/PKGBUILD"
 fi

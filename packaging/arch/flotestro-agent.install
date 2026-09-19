@@ -25,6 +25,12 @@ post_install() {
     chmod 0640 /etc/flotestro/agent.yaml 2>/dev/null || true
     # The helper socket must exist before the agent tries to connect to it.
     systemctl enable --now flotestro-helper.socket >/dev/null 2>&1 || true
+    # The panel's own nftables table is in no boot file of the distribution,
+    # so a unit of ours rebuilds it from the helper's registry before the host
+    # is reachable. It is started and not restarted: where it has already run
+    # the table is in place, and rebuilding it would flush and refill it.
+    systemctl enable flotestro-firewall-restore.service >/dev/null 2>&1 || true
+    systemctl start flotestro-firewall-restore.service >/dev/null 2>&1 || true
     systemctl enable flotestro-agent.service >/dev/null 2>&1 || true
     cat >&2 <<'END'
 flotestro-agent: fill in /etc/flotestro/agent.yaml and enroll the host
@@ -44,12 +50,15 @@ post_upgrade() {
     # update it would serve jobs with the old code; the socket starts the
     # new version.
     systemctl stop flotestro-helper.service >/dev/null 2>&1 || true
+    systemctl enable flotestro-firewall-restore.service >/dev/null 2>&1 || true
+    systemctl start flotestro-firewall-restore.service >/dev/null 2>&1 || true
     systemctl try-restart flotestro-agent.service >/dev/null 2>&1 || true
 }
 
 pre_remove() {
     systemctl disable --now flotestro-agent.service >/dev/null 2>&1 || true
     systemctl disable --now flotestro-helper.socket >/dev/null 2>&1 || true
+    systemctl disable flotestro-firewall-restore.service >/dev/null 2>&1 || true
 }
 
 post_remove() {

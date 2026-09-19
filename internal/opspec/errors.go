@@ -809,7 +809,7 @@ var reportedGuides = []ErrorGuide{
 	// remediation, chapter 14.4). None of these is a failure of a change: they
 	{Code: "nft_rule_not_persisted", Stage: "inventory", Retry: RetryAfterChange,
 		Meaning: "The kernel filters with this rule and the file the host loads at boot does not carry it. The rule is in force today and gone after the next reboot, which is exactly how a firewall reads as compliant and stops being one.",
-		Action:  "Write the rule into the file the host restores from - the panel names it next to the adapter - or accept it as temporary and say so. The panel's own table is rebuilt from its registry on the next change, not at boot."},
+		Action:  "Write the rule into the file the host restores from - the panel names it next to the adapter - or accept it as temporary and say so. The panel's own table is not in that file: it is rebuilt from the helper's registry by flotestro-firewall-restore.service, and the codes below say whether that unit does its work here."},
 	{Code: "nft_rule_not_loaded", Stage: "inventory", Retry: RetryAfterChange,
 		Meaning: "The file the host loads at boot carries this rule and the kernel is not filtering with it. It was edited without being loaded, or something flushed the ruleset afterwards.",
 		Action:  "Load the ruleset again on the host, or remove the rule from the file if it was left there by mistake. Until then nothing on this host enforces it."},
@@ -825,6 +825,46 @@ var reportedGuides = []ErrorGuide{
 	{Code: "nft_persistent_source_inactive", Stage: "inventory", Retry: RetryAfterChange,
 		Meaning: "The file with the rules is there and the unit that would load it is disabled or masked, so the file restores nothing. A ruleset matching that file to the letter still does not survive a reboot.",
 		Action:  "Enable the nftables unit on the host, or move the rules to whatever does load them there."},
+
+	// What rebuilds the panel's own table after a reboot. No boot file of a
+	// distribution carries that table; flotestro-firewall-restore.service does.
+	{Code: "nft_boot_restore_unit_absent", Stage: "inventory", Retry: RetryAfterChange,
+		Meaning: "This host has no flotestro-firewall-restore.service, so nothing rebuilds the panel's own table after a reboot. The rules the panel applied are in force now and gone at the next restart, while the host reports itself as filtering with them right up to it. That is the state of a host whose agent is of a release from before the unit existed.",
+		Action:  "Upgrade the agent package on this host; the package installs the unit and enables it. Until then treat the panel's rules on this host as valid only until the machine restarts."},
+	{Code: "nft_boot_restore_unit_inactive", Stage: "inventory", Retry: RetryAfterChange,
+		Meaning: "The unit that rebuilds the panel's own table is installed and disabled or masked, so it rebuilds nothing. This is not an old agent: somebody on the host switched the unit off.",
+		Action:  "systemctl enable flotestro-firewall-restore.service on the host, or record deliberately that the panel's rules there are temporary."},
+	{Code: "nft_boot_restore_failed", Stage: "inventory", Retry: RetryReadState,
+		Meaning: "The unit that rebuilds the panel's own table ran and did not finish its work, so the table is not what the registry says it should be. The detail beside the code carries what the run itself recorded - a registry that could not be read, a missing nft binary, or a command the kernel refused.",
+		Action:  "Read the journal of flotestro-firewall-restore.service on the host and the firewall state in the panel. The rules can be put back by applying them again from the panel once the cause is gone."},
+	{Code: "nft_boot_restore_pending", Stage: "inventory", Retry: RetryAfterChange,
+		Meaning: "The unit that rebuilds the panel's own table is enabled and has not run since this host started, so nothing here proves the table comes back. A host installed and not yet restarted is the usual case; a record from an earlier boot is the other.",
+		Action:  "Nothing, unless it persists. The package starts the unit at installation, so the fact survives only until the next boot or the next start of the unit."},
+	{Code: "nft_boot_restore_not_needed", Stage: "inventory", Retry: RetryNever,
+		Meaning: "The host's own nftables unit loads the panel's table already, so the restore leaves it alone. Two mechanisms writing one table fight each other, and the one the operator put there wins.",
+		Action:  "Nothing. The panel's rules on this host are restored by the file the host loads at boot, which the panel names next to the adapter."},
+	{Code: "nft_boot_restore_not_applicable", Stage: "inventory", Retry: RetryAfterChange,
+		Meaning: "firewalld or ufw is installed on this host and owns the rules there, so the restore leaves the host to that tool. This code is only a difference where the panel nevertheless has rules of its own in the nftables registry here: the adapter restores its own rules at boot, never the panel's table.",
+		Action:  "Where the rules of this host belong to firewalld or ufw, nothing. Where the panel's own nftables rules are listed beside this code, move them to the adapter that owns the host, or take off the tool that does not hold them."},
+
+	// The support bundle of the panel (security remediation, chapter 14.6).
+	// None of these is a failure of a change on a host: they are what the
+	// panel answers when a bundle is asked for or fetched.
+	{Code: "bundle_private_key_found", Stage: "reconcile", Retry: RetryAfterChange,
+		Meaning: "The scanner found a private key block in an assembled bundle, so nothing was written. A bundle goes to people who must not be able to act as this installation.",
+		Action:  "Take the key out of what the bundle reads - a log line, a configuration file - and ask for another bundle."},
+	{Code: "bundle_bearer_token_found", Stage: "reconcile", Retry: RetryAfterChange,
+		Meaning: "The scanner found a bearer token in an assembled bundle, so nothing was written.",
+		Action:  "Find where the token is being logged or written down, take it out, and ask for another bundle."},
+	{Code: "bundle_password_in_url_found", Stage: "reconcile", Retry: RetryAfterChange,
+		Meaning: "The scanner found a URL carrying a password in an assembled bundle, so nothing was written.",
+		Action:  "Move the credential out of the address - into the secret store or an environment file the bundle does not read - and ask for another bundle."},
+	{Code: "bundle_enrollment_token_found", Stage: "reconcile", Retry: RetryAfterChange,
+		Meaning: "The scanner found an enrollment token in an assembled bundle, so nothing was written. Whoever read it could enroll a machine into this fleet.",
+		Action:  "Revoke that enrollment request, take the token out of what the bundle reads, and ask for another bundle."},
+	{Code: "bundle_api_token_found", Stage: "reconcile", Retry: RetryAfterChange,
+		Meaning: "The scanner found a token of this panel's API in an assembled bundle, so nothing was written.",
+		Action:  "Revoke that token, take it out of what the bundle reads, and ask for another bundle."},
 }
 
 // RefusalError is a validation refusal with a code of its own.

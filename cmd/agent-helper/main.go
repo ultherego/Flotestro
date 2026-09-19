@@ -40,6 +40,8 @@ func run() error {
 			"carry out the recorded plan of rolling a network change back and finish")
 		rollbackFirewall = flag.String("rollback-firewall", "",
 			"carry out the recorded plan of rolling a firewall change back and finish")
+		restoreFirewall = flag.Bool("restore-firewall", false,
+			"rebuild the panel's own firewall table from its registry and finish")
 		agentReplacement = flag.String("agent-replacement", "",
 			"install the named version of the agent package and finish")
 		idleTimeout = flag.Duration("idle-timeout",
@@ -60,6 +62,17 @@ func run() error {
 		defer stop()
 		log.Info("the replacement of the agent", "package", *agentReplacement)
 		return helper.RunAgentReplacement(ctx, *agentReplacement, log)
+	}
+
+	// The restore mode is called at boot by flotestro-firewall-restore.service:
+	// no boot source of a distribution carries the panel's own table.
+	if *restoreFirewall {
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+		record, err := helper.RestoreFirewallAtBoot(ctx)
+		log.Info("the panel's own firewall table at boot",
+			"rules", record.Rules, "reason", record.Reason, "detail", record.Detail)
+		return err
 	}
 
 	// The rollback mode is called by a transient systemd unit when nobody has

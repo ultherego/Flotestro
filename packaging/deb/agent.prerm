@@ -5,5 +5,6 @@ remove|deconfigure)
     systemctl stop flotestro-agent.service || true
     systemctl stop flotestro-helper.socket flotestro-helper.service || true
     systemctl disable flotestro-agent.service flotestro-helper.socket || true
+    systemctl disable flotestro-firewall-restore.service || true
     ;;
 esac
