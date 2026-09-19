@@ -1,8 +1,4 @@
-// The Polish translation of the interface. The keys are the English source
-// strings from the components; the Polish side is written in the working
-// language of Linux administrators rather than translated word for word.
-//
-// A string missing here falls back to English.
+// The Polish translation of the interface.
 export const pl: Record<string, string> = {
   "+{n} more": "+{n} więcej",
   "0 matches": "0 trafień",

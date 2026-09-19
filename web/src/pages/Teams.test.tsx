@@ -6,16 +6,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@testing-library/jest-dom/vitest";
 import { Teams, refusalText, teamHostsAddress, UNPLACED_HOSTS_ADDRESS, type Team } from "./Teams";
 
-/*
+/**
  * The register of teams.
- *
- * A team is the only one of the three words a fleet is described with
- * that may decide who may touch what, so the screen is held to saying it:
- * an installation with no teams is told what a team would be for rather
- * than shown an empty table, a deletion says how many hosts it releases
- * and that they keep existing, and an identity without the permission
- * sees what the write takes instead of a screen with its buttons quietly
- * gone.
  */
 
 /** The answers the server gives this test, by path. */

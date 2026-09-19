@@ -118,7 +118,7 @@ export function App() {
 
   // Sections without backing in the permissions are hidden: a navigation
   // item that leads only to a refusal is an interface defect, not a
-  // safeguard. The server decides what is allowed anyway.
+  // safeguard.
   const permissions = new Set(data?.permissions ?? []);
   const managesAccess = permissions.has("principal.manage");
   const seesAudit = permissions.has("audit.read");
@@ -145,8 +145,7 @@ export function App() {
   const seesPolicies = permissions.has("policy.read");
 
   // The navigation, grouped by what the operator is doing rather than by
-  // backend module. An item that is not allowed is left out of its group;
-  // a group left empty is not drawn.
+  // backend module.
   const groups: NavGroup[] = [
     {
       key: "fleet",
@@ -220,8 +219,8 @@ export function App() {
         // it; for the rest the item would lead to a bare refusal.
         ...(managesAccess ? [{ to: "/access", label: "Access", icon: "access" as const }] : []),
         // A team is a boundary of authority rather than a label, so it
-        // stands with the access rules and not with the groups and the
-        // tags, which only choose hosts inside what somebody may touch.
+        // stands with the access rules and not with the groups and the tags,
+        // which only choose hosts inside what somebody may touch.
         { to: "/teams", label: "Teams", icon: "accounts" as const },
       ],
     },
@@ -389,8 +388,7 @@ function LoginScreen({ provider }: { provider: boolean }) {
           </>
         ) : (
           // Without a configured provider the login button would lead to an
-          // error. The panel then works on API tokens and that has to be
-          // said outright instead of showing a dead action.
+          // error.
           <p className="subtitle">
             {t("No identity provider is configured in this installation. Access to the panel uses an API token passed in the Authorization header.")}
           </p>
@@ -410,9 +408,7 @@ function Landing() {
 
 /**
  * The way in before the identity provider lets anybody in: the bootstrap
- * token from the state directory. It is kept for this tab alone and sent
- * as the Authorization header by the API client; the first-run checklist
- * warns as long as it still works.
+ * token from the state directory.
  */
 function BootstrapTokenEntry() {
   const t = useT();
@@ -435,11 +431,7 @@ function BootstrapTokenEntry() {
 }
 
 /**
- * The section the address belongs to, for the trail in the top bar. It is
- * found in the navigation itself, so the bar names a page exactly as the
- * sidebar does; a page deeper than its item (a campaign, a host) gets the
- * item as a link back. An address outside the navigation is named by the
- * product, because a bar with an empty title would look broken.
+ * The section the address belongs to, for the trail in the top bar.
  */
 function sectionOf(groups: NavGroup[], pathname: string): Pick<Trail, "section" | "to"> {
   for (const group of groups) {
@@ -460,10 +452,8 @@ function sectionOf(groups: NavGroup[], pathname: string): Pick<Trail, "section" 
 
 /**
  * The host context of the shell: on a host page the fleet groups of the
- * sidebar give way to the modules of that host, under the same headings
- * the registry knows, with the way back to the list above them; the top
- * bar names the host and the open module. The host is read with the same
- * query the page uses, so it costs no second request.
+ * sidebar give way to the modules of that host, under the same headings the
+ * registry knows, with the way back to the list above them; the top bar
  */
 function useHostContext(installation: ReturnType<typeof useCapabilities>): { face: NavFace; host?: Host; module?: string } | undefined {
   const match = useMatch("/hosts/:id/*");

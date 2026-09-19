@@ -5,10 +5,6 @@ import {
 
 /**
  * Scheduled jobs.
- *
- * An entry is a declaration of the state the host is to be in, not a
- * command run once: ordering the same entry twice duplicates nothing. The
- * identifier is how the panel recognises its own entry on every host.
  */
 
 const GROUP = "Scheduled jobs";
@@ -91,10 +87,7 @@ export const schedules: OperationEntry[] = [
         });
       }
       // Cron runs a job when the day of the month or the day of the week
-      // matches, systemd only when both do. An expression that restricts
-      // both means two different things on the two mechanisms, so it is
-      // not written as a timer at all - and the operator hears it here,
-      // not from a job that failed.
+      // matches, systemd only when both do.
       if (text(form, "kind") === "timer") {
         const fields = expression.trim().split(/\s+/);
         if (fields.length === 5 && fields[2] !== "*" && fields[4] !== "*") {

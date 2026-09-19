@@ -6,12 +6,6 @@ import {
 
 /**
  * Containers.
- *
- * A container is named by its identifier and not by its name: a name is a
- * label that can move to another container between the plan and the
- * execution, and the operator approved one specific object. The name
- * travels beside it for the audit trail, so what they saw is what stays in
- * the record.
  */
 
 const GROUP = "Containers";
@@ -54,20 +48,8 @@ const stopTimeout: OperationField = {
 };
 
 /**
- * Declared containers, networks and volumes.
- *
- * A declaration says what is to stand on the host, not the steps that
- * would put it there. It is therefore named, not identified: the operator
- * declares "the container called this", and the identifier of whatever
- * carries that name changes with every replacement - which is also why a
- * container that differs is replaced rather than edited, and why the plan
- * says so before anybody approves it.
- *
- * The compact forms are the ones the host reads: a published port is
- * "8080:80/tcp", a mount is "volume:data:/var/lib/data:ro", an attachment
- * is "internal=api@10.0.1.5". The panel checks their shape here and the
- * host reads them with the same code, so the words on the screen mean on
- * the host exactly what they looked like.
+ * Declared containers, networks and volumes. A declaration says what is to
+ * stand on the host, not the steps that would put it there.
  */
 
 const OBJECT_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
@@ -99,9 +81,9 @@ const forceField: OperationField = {
 const containerFields: OperationField[] = [
   {
     name: "name", label: "Container", kind: "text",
-    // A declaration that meets a container of this name replaces it, so
-    // the field must not offer a name the panel invented: on some host it
-    // is somebody's running service.
+    // A declaration that meets a container of this name replaces it, so the
+    // field must not offer a name the panel invented: on some host it is
+    // somebody's running service.
     hint: "What the container is to be called, as the host's containers page lists it when the declaration is about one that already stands there. A declaration is about the name: the engine identifier changes with every replacement.",
   },
   {
@@ -256,9 +238,7 @@ function secretsOf(form: FormValue): Record<string, unknown> {
 }
 
 /**
- * The secret references of a payload, back as the lines that produced
- * them. Anything that is not a reference reads as null: a payload the form
- * would half show belongs in the advanced view.
+ * The secret references of a payload, back as the lines that produced them.
  */
 function secretLines(value: unknown): string | null {
   if (value === undefined || value === null) return "";
@@ -287,11 +267,8 @@ function described(value: unknown, names: string[]): Record<string, unknown> | n
 }
 
 /**
- * What a declaration carries beside the description itself.
- *
- * The digest of the plan is not among it: nobody types a digest. It comes
- * from the planning step - the campaign's, or the host page's - and is put
- * into the order there, the same way a Compose deployment gets its own.
+ * What a declaration carries beside the description itself. The digest of
+ * the plan is not among it: nobody types a digest.
  */
 function tail(form: FormValue): Record<string, unknown> {
   return flag(form, "force") ? { force: true } : {};

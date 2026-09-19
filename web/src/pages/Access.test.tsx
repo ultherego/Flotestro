@@ -89,13 +89,8 @@ describe("the audit page", () => {
   });
 });
 
-/*
+/**
  * A role binding names a team, or a site and an environment, never both.
- * The server refuses a request that names both with scope_conflict; the
- * panel must never be able to send one, so the form is a choice of
- * vocabulary and the request is built from that choice alone. The two
- * functions below are what the form and the tables read, so both are
- * checked here without a screen.
  */
 
 const principal = "5f1c9e6a-0000-4000-8000-000000000001";
@@ -125,8 +120,8 @@ describe("grantRequest", () => {
       valid_until: "", reason: "on-call rotation for the quarter",
     });
     // The fields of the other vocabulary are not sent empty; they are not
-    // sent at all, which is what makes scope_conflict unreachable from
-    // the panel even when the operator typed a site first.
+    // sent at all, which is what makes scope_conflict unreachable from the
+    // panel even when the operator typed a site first.
     expect(request.body).not.toHaveProperty("site");
     expect(request.body).not.toHaveProperty("environment");
   });

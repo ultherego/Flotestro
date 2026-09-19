@@ -17,11 +17,7 @@ function anyScope(value: string | undefined): boolean {
 }
 
 /**
- * The scope of a binding as the server sends it. A binding over a team
- * carries the team's identifier and leaves the site and the environment
- * at the asterisk, which is why the team has to be read first: rendered
- * as a site scope it would read as "whole fleet", the one sentence it
- * does not mean.
+ * The scope of a binding as the server sends it.
  */
 export type BindingScope = { site?: string; environment?: string; team?: string };
 
@@ -31,9 +27,7 @@ export function scopeKind(scope: BindingScope | undefined): GrantScope {
 }
 
 /**
- * A scope in words. The server keeps it as two fields, and "lab / test"
- * or "* / prod" in a table says neither which is the site nor what the
- * asterisk stands for; the words do.
+ * A scope in words.
  */
 function ScopeText({ site, environment, team, teamName }: { site?: string; environment?: string; team?: string; teamName?: string }) {
   const t = useT();
@@ -55,17 +49,12 @@ function ScopeText({ site, environment, team, teamName }: { site?: string; envir
 }
 
 /**
- * The two vocabularies a binding may be written in. A binding names a
- * team, or a site and an environment; the form offers the choice rather
- * than two sets of fields, so the server's scope_conflict cannot be
- * reached from the panel at all.
+ * The two vocabularies a binding may be written in.
  */
 export type GrantScope = "site" | "team";
 
 /**
- * The request one grant makes: the route and the whole body. The choice
- * decides both, and the body carries one vocabulary alone - the fields of
- * the other are not sent empty, they are not sent.
+ * The request one grant makes: the route and the whole body.
  */
 export function grantRequest(principalID: string, scope: GrantScope, fields: {
   role: string; site: string; environment: string; team: string; validUntil: string; reason: string;
@@ -108,14 +97,8 @@ export function tabFromParam(value: string | null): Tab {
 }
 
 /**
- * Panel access management.
- *
- * These operations change the access rules themselves, so the panel demands
- * a fresh authentication and a reason. The reason lands in the audit trail
- * together with the description of the change.
- *
- * The tab lives in the address: the audit trail links here to one
- * identity, and a link to "the identities" has to open the identities.
+ * Panel access management. These operations change the access rules
+ * themselves, so the panel demands a fresh authentication and a reason.
  */
 export function Access() {
   const t = useT();
@@ -165,10 +148,8 @@ function reasonGiven(reason: string): boolean {
 }
 
 /**
- * The confirmation of one change: what is about to happen, the reason it
- * is recorded with and the button that does it. The card stands beside
- * the list rather than over it, so the row it concerns stays in view; a
- * browser prompt would hide it and take the reason without the rule.
+ * The confirmation of one change: what is about to happen, the reason it is
+ * recorded with and the button that does it.
  */
 function ConfirmCard({ title, text, action, danger = false, busy = false, disabled = false, onConfirm, onCancel, children }: {
   title: string;
@@ -252,9 +233,8 @@ function Mappings() {
 
   const mappings = list.data?.items ?? [];
   const listed = t("among the {n} listed", { n: mappings.length });
-  // The mappings by role and by reach: how many hand out which role, and
-  // how many of them reach the whole fleet rather than one site or
-  // environment. A fleet-wide operator mapping is the one to look at.
+  // The mappings by role and by reach: how many hand out which role, and how
+  // many of them reach the whole fleet rather than one site or environment.
   const byRole = ROLES.map((role) => ({ role, count: mappings.filter((mapping) => mapping.role === role).length }));
   // The server keeps "any" as an asterisk and older records as an empty
   // string; both reach the whole fleet.
@@ -394,9 +374,7 @@ type SessionView = {
 };
 
 /**
- * Whether a token ends within the coming week. A token that ends soon is
- * a question - is anybody going to renew it - not a defect; a token
- * without an end is not "soon" and not flagged here.
+ * Whether a token ends within the coming week.
  */
 export function expiresSoon(token: Pick<ApiToken, "expires_at">, now = Date.now(), days = 7): boolean {
   if (!token.expires_at) return false;
@@ -408,7 +386,7 @@ export function expiresSoon(token: Pick<ApiToken, "expires_at">, now = Date.now(
 /**
  * Whether an identity matches a search: by subject, by display name or by
  * identifier, because the audit trail names identities by identifier and
- * links here with one. An empty search matches everything.
+ * links here with one.
  */
 export function matchesIdentity(principal: Pick<Principal, "id" | "subject" | "display_name">, query: string): boolean {
   const needle = query.trim().toLowerCase();
@@ -423,9 +401,9 @@ type Pending =
   | { kind: "issue-token"; principal: ListedPrincipal }
   | { kind: "revoke-token"; principal: ListedPrincipal; token: ApiToken }
   | { kind: "revoke-role"; principal: ListedPrincipal; role: string; site: string; environment: string }
-  // A team binding is keyed on the team, not on the site and the
-  // environment it leaves at the asterisk, so it is removed by its own
-  // route and waits for its reason under its own name.
+  // A team binding is keyed on the team, not on the site and the environment
+  // it leaves at the asterisk, so it is removed by its own route and waits
+  // for its reason under its own name.
   | { kind: "revoke-team-role"; principal: ListedPrincipal; role: string; team: string; teamName: string }
   | { kind: "revoke-session"; principal: ListedPrincipal; session: SessionView };
 
@@ -452,8 +430,8 @@ function Identities({ initialSearch }: { initialSearch: string }) {
   const settled = () => { setPending(null); refresh(); };
 
   // Every change here moves who can do what on the fleet, so each one asks
-  // for a reason the same way the group mappings do; the panel demands
-  // fresh authentication behind it.
+  // for a reason the same way the group mappings do; the panel demands fresh
+  // authentication behind it.
   const disable = useMutation({
     mutationFn: ({ id, reason }: { id: string; reason: string }) =>
       api.del(`/api/v1/principals/${id}?reason=${encodeURIComponent(reason)}`),
@@ -496,17 +474,13 @@ function Identities({ initialSearch }: { initialSearch: string }) {
       api.del(`/api/v1/principals/${id}/sessions/${session}?reason=${encodeURIComponent(reason)}`),
     onSuccess: () => { setPending(null); queryClient.invalidateQueries({ queryKey: ["principal-sessions"] }); }, onError,
   });
-  // A grant names the identity, the role, the scope and - when the access
-  // is meant to end by itself - until when. Granting a role the identity
-  // already has changes the validity alone.
+  // A grant names the identity, the role, the scope and - when the access is
+  // meant to end by itself - until when.
   const [grant, setGrant] = useState<{ id: string; subject: string } | null>(null);
   const [grantRole, setGrantRole] = useState("viewer");
   const [grantSite, setGrantSite] = useState("");
   const [grantEnvironment, setGrantEnvironment] = useState("");
-  // Which vocabulary the binding is written in. It is one choice rather
-  // than two sets of fields nobody stops an operator from filling at
-  // once: a binding that named both would grant something whose meaning
-  // depends on which check reads it first.
+  // Which vocabulary the binding is written in.
   const [grantScopeKind, setGrantScopeKind] = useState<GrantScope>("site");
   const [grantTeam, setGrantTeam] = useState("");
   const [grantUntil, setGrantUntil] = useState("");
@@ -546,9 +520,9 @@ function Identities({ initialSearch }: { initialSearch: string }) {
   const all = data?.items ?? [];
   const shown = all.filter((principal) => matchesIdentity(principal, search));
 
-  // The identities by kind, and the roles their direct assignments hand
-  // out; an identity without assignments is named, because its roles, if
-  // any, come from the group mappings and are not visible here.
+  // The identities by kind, and the roles their direct assignments hand out;
+  // an identity without assignments is named, because its roles, if any,
+  // come from the group mappings and are not visible here.
   const tally = (keys: (principal: Principal) => string[]) => Object.entries(
     all.reduce<Record<string, number>>((acc, principal) => { for (const k of keys(principal)) acc[k] = (acc[k] ?? 0) + 1; return acc; }, {}),
   ).sort((x, y) => y[1] - x[1]);
@@ -622,9 +596,9 @@ function Identities({ initialSearch }: { initialSearch: string }) {
                     {(principal.bindings ?? []).length === 0
                       ? <span className="source">{t("no direct assignments; roles may come from group mappings")}</span>
                       : (principal.bindings ?? []).map((binding, index) => {
-                          // The team is read first: a team binding leaves the
-                          // site and the environment at the asterisk, and as a
-                          // site scope it would read as the whole fleet.
+                          // The team is read first: a team binding leaves
+                          // the site and the environment at the asterisk,
+                          // and as a site scope it would read as the whole
                           const scope = binding.scope as BindingScope;
                           return (
                           <div key={index} className="row-actions" style={{ justifyContent: "flex-start" }} data-testid="binding">
@@ -933,10 +907,7 @@ function Identities({ initialSearch }: { initialSearch: string }) {
 }
 
 /**
- * The live browser sessions of one identity, under its row. A token is
- * not a session, so an automated identity has none here; a person may
- * have several, one per browser, and the one that should not be there is
- * ended by itself.
+ * The live browser sessions of one identity, under its row.
  */
 function Sessions({ principal, revoking, onRevoke }: {
   principal: ListedPrincipal;
@@ -990,10 +961,7 @@ function Sessions({ principal, revoking, onRevoke }: {
 type CreatedIdentity = { id: string; subject: string; token?: string; token_expires_at?: string };
 
 /**
- * A new local identity: a person with a token or a service. One role may
- * be granted with it; the others come later, one by one, like every
- * other grant. The first token is issued in the same answer, because a
- * service without a token cannot do anything yet.
+ * A new local identity: a person with a token or a service.
  */
 function CreateIdentity({ onCreated, onCancel, onError }: {
   onCreated: (token: IssuedToken | null) => void;
@@ -1091,8 +1059,8 @@ type RoleInfo = { role: string; permissions: string[] };
 
 /**
  * The permissions of the catalogue as rows and the roles as columns, with
- * the rows in a fixed order: the matrix is read down a column to learn
- * what a role may do and along a row to learn who may do a thing.
+ * the rows in a fixed order: the matrix is read down a column to learn what
+ * a role may do and along a row to learn who may do a thing.
  */
 export function permissionMatrix(roles: RoleInfo[]): { roles: string[]; permissions: string[]; has: (role: string, permission: string) => boolean } {
   const permissions = Array.from(new Set(roles.flatMap((role) => role.permissions))).sort();
@@ -1105,9 +1073,7 @@ export function permissionMatrix(roles: RoleInfo[]): { roles: string[]; permissi
 }
 
 /**
- * The role catalogue as a matrix. The roles are fixed in the panel and
- * are not edited here: the screen answers "what may an operator do" and
- * "who may approve", which the list of identities does not.
+ * The role catalogue as a matrix.
  */
 function Roles() {
   const t = useT();
@@ -1163,11 +1129,8 @@ function Roles() {
 }
 
 /**
- * The access review: every enabled identity with what it can do, when it
- * was last used and what the reviewer should look at. A flag is a question
- * for the reviewer, not a verdict - an administrator without an expiry may
- * be exactly what the installation wants, but somebody has to have said
- * so. The CSV is the same review for the record an auditor keeps.
+ * The access review: every enabled identity with what it can do, when it was
+ * last used and what the reviewer should look at.
  */
 function Review() {
   const t = useT();
@@ -1242,9 +1205,9 @@ function Review() {
 
 function ReviewRow({ principal }: { principal: ReviewedPrincipal }) {
   const t = useT();
-  // The review reads the same bindings as the list, so it must read a
-  // team binding as a team too; a scope of "whole fleet" on a review row
-  // would be the one mistake a review exists to catch.
+  // The review reads the same bindings as the list, so it must read a team
+  // binding as a team too; a scope of "whole fleet" on a review row would be
+  // the one mistake a review exists to catch.
   const teams = useTeams();
   const teamName = (id: string) => teams.data?.items.find((team) => team.id === id)?.name ?? id;
   return (

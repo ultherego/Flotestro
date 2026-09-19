@@ -6,16 +6,8 @@ import "@testing-library/jest-dom/vitest";
 import type { Host } from "../../lib/types";
 import { HostTeam } from "./Overview";
 
-/*
+/**
  * The team of a host, on the host's own page.
- *
- * The team is the one thing beside the placement that decides who may act
- * on the machine, so the fact has two jobs the tests below hold it to: a
- * host nobody has placed says "no team" rather than showing a blank -
- * unknown is not a team called nothing - and the move says once, in the
- * form, that it changes who may act on the host. The control is behind
- * the permission the server checks, host.scope.write, so an operator who
- * does not hold it reads the team and is offered nothing.
  */
 
 const teams = {

@@ -5,12 +5,8 @@ import {
 } from "./fields";
 
 /**
- * The firewall, the SSH server and mandatory access control.
- *
- * These are the changes that lock an operator out of the host they are
- * changing. The panel protects its own channel by default and asks for an
- * explicit decision before it lets a change close it - because the result
- * is sometimes a host somebody has to drive to.
+ * The firewall, the SSH server and mandatory access control. These are the
+ * changes that lock an operator out of the host they are changing.
  */
 
 const GROUP = "Security";

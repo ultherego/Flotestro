@@ -6,11 +6,6 @@ import {
 
 /**
  * The network and the resolver.
- *
- * Every change here describes the target state of an interface, never the
- * commands to reach it, and every one of them can cut the host off. That is
- * why the host holds the change open for a while and puts the old profile
- * back when nobody confirms it is still reachable.
  */
 
 const GROUP = "Network";
@@ -24,8 +19,7 @@ const interfaceField: OperationField = {
   kind: "text",
   // No example name here on purpose: an interface is called whatever the
   // host calls it - enp2s0, ens192, eno1np0 - and a name borrowed from an
-  // example is a name the host does not have. The host page lists the
-  // interfaces this host really reports.
+  // example is a name the host does not have.
   hint: "The name the host itself reports for the link, copied exactly; the host's network page lists them. The panel finds the profile behind it.",
 };
 
@@ -65,11 +59,6 @@ function sixthPrefixedValid(value: string): boolean {
 
 /**
  * The second family of an address profile.
- *
- * It is a set of fields of its own rather than a second spelling of the
- * first: a host can take its IPv4 address from DHCP and hold a static IPv6
- * one at the same time, and a form that could say only one of those would
- * leave the other to whatever was there before.
  */
 const ipv6Fields: OperationField[] = [
   {
@@ -244,8 +233,6 @@ export const network: OperationEntry[] = [
       const problems = interfaceCheck(form);
       const method = text(form, "method");
       // One family is enough to order: the other keeps what the host has.
-      // Naming neither would be a change that changes nothing and still
-      // takes the network lock and arms a rescue timer.
       if (method !== "" && method !== "auto" && method !== "manual") {
         problems.push({ field: "method", message: "Say where the address comes from: from the network or typed in here." });
       }
@@ -345,11 +332,8 @@ export const network: OperationEntry[] = [
     note: "The layering says what an interface is made of, not what it carries. Enslaving a link moves its address to the layer above, so the host refuses a member another layer already owns, a bond of one member, a VLAN on a parent it does not have, and any layer that would swallow the interface the panel talks over. A host whose mechanism cannot express a bond says so instead of writing half of one.",
     fields: [...layerFields, rollbackField],
     // The layer travels as a description of its own inside the network
-    // section, and the interface field repeats its name: the panel shows
-    // the operator one name and the host writes one name. What the kind
-    // does not use - a VLAN identifier on a bond - the host refuses by
-    // name; the form does not quietly drop it, because a field dropped
-    // here would be a mistake nobody ever read.
+    // section, and the interface field repeats its name: the panel shows the
+    // operator one name and the host writes one name.
     extra: ["interface", "link"],
     compose: (form) => {
       const payload: Record<string, unknown> = {
@@ -387,9 +371,9 @@ export const network: OperationEntry[] = [
         problems.push({ field: "members", message: "An interface cannot be a member of itself." });
       }
       if (kind === "bond") {
-        // A bond of one member carries the same traffic over the same
-        // cable with a driver in between, and none of the redundancy it
-        // exists for. The host refuses it too; the form says so first.
+        // A bond of one member carries the same traffic over the same cable
+        // with a driver in between, and none of the redundancy it exists
+        // for.
         if (members.length < 2) {
           problems.push({ field: "members", message: "A bond carries traffic over at least two members; with one it is the same link with a driver in between." });
         }

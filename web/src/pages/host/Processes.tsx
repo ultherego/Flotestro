@@ -35,9 +35,7 @@ type Snapshot = { processes?: Process[]; total?: number; truncated?: boolean };
 type Row = { process: Process; depth: number; children: number };
 
 /**
- * The scheduler state in words. procfs prints one letter, and "D" tells
- * an operator nothing until they remember it is the one that cannot be
- * killed; the letter stays on hover, because it is what ps prints.
+ * The scheduler state in words.
  */
 export function stateWords(state: string): string {
   switch (state.charAt(0)) {
@@ -55,24 +53,18 @@ export function stateWords(state: string): string {
 
 /**
  * Whether a process is a kernel thread: a child of kthreadd (PID 2) or
- * kthreadd itself. It has no address space of its own, so its resident
- * size is not a small number but no number, and no signal will end it.
+ * kthreadd itself.
  */
 export function kernelThread(process: Pick<Process, "pid" | "ppid">): boolean {
   return process.pid === 2 || process.ppid === 2;
 }
 
 /**
- * The host's processes.
- *
- * The module is a diagnostic, not an observability system: the snapshot is
- * taken on request and has an upper bound. The trend of the host over
- * time is the Monitoring module's.
+ * The host's processes. The module is a diagnostic, not an observability
+ * system: the snapshot is taken on request and has an upper bound.
  */
 /**
- * The columns of the process table. The PID and the command are the
- * identity of a row and cannot be taken off the screen: a process is
- * known by its number and by what it runs, and a signal is aimed by both.
+ * The columns of the process table.
  */
 export function processColumns(t: (text: string) => string): ColumnDef[] {
   return [
@@ -144,8 +136,7 @@ export function Processes() {
   };
   const processes = (snapshot?.processes ?? []).filter(matches);
   // The tree is computed here from the ppid of every row: the host sends a
-  // flat slice, and nesting it is the panel's work. A parent outside the
-  // slice makes its child a root - the slice is a slice, not the host.
+  // flat slice, and nesting it is the panel's work.
   const rows: Row[] = tree
     ? treeRows(snapshot?.processes ?? [], matches, collapsed)
     : processes.map((process) => ({ process, depth: 0, children: 0 }));
@@ -410,10 +401,8 @@ function agentProcess(process: Process): boolean {
 }
 
 /**
- * The rows of the tree: every process under its parent, in the order of
- * the slice, with the collapsed branches folded away. A filter keeps the
- * matching processes and the path down to them, so a match deep in the
- * tree is still seen where it stands.
+ * The rows of the tree: every process under its parent, in the order of the
+ * slice, with the collapsed branches folded away.
  */
 function treeRows(processes: Process[], matches: (process: Process) => boolean, collapsed: Set<number>): Row[] {
   const byPid = new Map<number, Process>(processes.map((process) => [process.pid, process]));

@@ -31,9 +31,7 @@ const ADDRESS_SOURCES: Record<string, string> = {
 };
 
 /**
- * The columns the server can order the list by, as it names them. A sort
- * the address carries that names another column is not sent: the server
- * would refuse it and the whole list would turn into an error.
+ * The columns the server can order the list by, as it names them.
  */
 const SORT_COLUMNS = [
   "hostname", "site", "environment", "owner", "lifecycle_state", "connection_state", "agent_version",
@@ -44,11 +42,8 @@ const SORT_COLUMNS = [
 const DEFAULT_SORT: SortValue = { column: "hostname", descending: false };
 
 /**
- * The filters of the list, each under the name it carries in the address
- * and in the query to the server. The tags are one text of words; every
- * other filter is one value, and an empty value does not narrow. The sort
- * travels with them: it is part of the view a link hands on, though it
- * narrows nothing and stands on no chip.
+ * The filters of the list, each under the name it carries in the address and
+ * in the query to the server.
  */
 type HostFilters = {
   q: string;
@@ -73,9 +68,8 @@ type HostFilters = {
   relay: string;
   failure_domain: string;
   /**
-   * The team the hosts belong to, by identifier, or the word `none` for
-   * the hosts nobody has placed in a team. It narrows the list; it is not
-   * what the caller may see, which the server decides on its own.
+   * The team the hosts belong to, by identifier, or the word `none` for the
+   * hosts nobody has placed in a team.
    */
   team: string;
   sort: string;
@@ -89,9 +83,9 @@ const EMPTY_FILTERS: HostFilters = {
 };
 
 /**
- * A button that reads as a word in a line rather than as a control: a
- * value in the composition or the cross on a chip narrows or widens the
- * list, and a row of accent buttons would drown the numbers next to them.
+ * A button that reads as a word in a line rather than as a control: a value
+ * in the composition or the cross on a chip narrows or widens the list, and
+ * a row of accent buttons would drown the numbers next to them.
  */
 const WORD_BUTTON: CSSProperties = {
   background: "none", border: 0, padding: 0, font: "inherit", color: "inherit",
@@ -114,8 +108,7 @@ function readFilters(params: URLSearchParams): HostFilters {
 
 /**
  * The filters as the address and the server take them: only the ones set,
- * the tags one by one. The typed texts go in as typed - trimmed, so a
- * bookmark does not carry a trailing space.
+ * the tags one by one.
  */
 function filterParams(filters: HostFilters): URLSearchParams {
   const params = new URLSearchParams();
@@ -129,10 +122,7 @@ function filterParams(filters: HostFilters): URLSearchParams {
 }
 
 /**
- * The host list with filters executed on the server side. The panel never
- * fetches the whole fleet into the browser memory to filter it: the search,
- * the filters and the paging all happen in the database, and the screen
- * grows page by page with the cursor the server hands back.
+ * The host list with filters executed on the server side.
  */
 export function Hosts() {
   const t = useT();
@@ -152,11 +142,8 @@ export function Hosts() {
   const [metadataOpen, setMetadataOpen] = useState(false);
   const navigate = useNavigate();
   // The address carries the filters: a tile on the dashboard, a chip on a
-  // row and a bookmark all link here with some already set, and every
-  // change goes back into the address so the view can be handed on as a
-  // link. The address last written or adopted tells a change made on the
-  // screen from a link followed to this page, so each side follows the
-  // other without the two chasing each other.
+  // row and a bookmark all link here with some already set, and every change
+  // goes back into the address so the view can be handed on as a link.
   const [searchParams, setSearchParams] = useSearchParams();
   const [filters, setFilters] = useState<HostFilters>(() => readFilters(searchParams));
   const setFilter = (key: keyof HostFilters, value: string) =>
@@ -176,11 +163,7 @@ export function Hosts() {
       setFilters(readFilters(searchParams));
     }
   }, [searchParams]);
-  // The rows ticked for the bulk workspace. The selection is by
-  // identifier, so it survives a refresh of the list and a page loaded
-  // later; a filter change drops it, because the rows it named are gone
-  // from view and a hidden selection would order a campaign on hosts the
-  // operator no longer sees.
+  // The rows ticked for the bulk workspace.
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   // The typed text reaches the server after a pause, not per keystroke.
   const settledSearch = useDebounced(filters.q.trim());
@@ -231,8 +214,8 @@ export function Hosts() {
     refetchInterval: REFRESH_INTERVAL,
   });
   // The facets over the whole visible fleet, counted in the database: the
-  // status bar and the composition do not depend on which page is loaded
-  // or which filters are set.
+  // status bar and the composition do not depend on which page is loaded or
+  // which filters are set.
   const activity = useQuery({
     queryKey: ["fleet-activity"],
     queryFn: () => api.get<FleetActivity>("/api/v1/fleet/activity?hours=24"),
@@ -248,14 +231,10 @@ export function Hosts() {
     enabled: canSeeRelays,
     staleTime: 60 * 1000,
   });
-  // The teams, for the filter by team. Whoever may read a host may read
-  // the name of the team it is in: the name is printed on the host page
-  // and somebody choosing a filter has to see the names to choose from.
+  // The teams, for the filter by team.
   const teams = useTeams();
 
-  // The columns of the table. The name stays whatever the operator hides;
-  // the columns a phone screen can do without are marked secondary, and
-  // the ones few operators need stay off the screen until chosen.
+  // The columns of the table.
   const columns = useColumns("hosts", [
     { key: "host", label: t("Host"), sort: "hostname", fixed: true },
     { key: "state", label: t("State"), sort: "connection_state" },
@@ -288,8 +267,8 @@ export function Hosts() {
   const a = activity.data;
   const fleetSize = a?.by_connection_state.reduce((sum, facet) => sum + facet.count, 0);
   // A state absent from the facets is a state no host is in; the facets
-  // themselves absent are a count nobody has yet, and the segment shows
-  // a dash.
+  // themselves absent are a count nobody has yet, and the segment shows a
+  // dash.
   const byConnection = (state: string) => (a ? a.by_connection_state.find((f) => f.key === state)?.count ?? 0 : undefined);
   // A row of the composition narrows the list to its value: the count is
   // one click from the hosts it counted.
@@ -305,10 +284,8 @@ export function Hosts() {
   // The facets do not count owners, so the suggestions are the owners of
   // the rows on screen: a hint, not the whole list.
   const ownerKeys = [...new Set(rows.map((host) => host.owner).filter((owner): owner is string => Boolean(owner)))].sort();
-  // The active filters as chips: what the list is narrowed by, each with
-  // its own way off. The refusal has no control of its own - the
-  // dashboard's expired-certificates tile links here with it set - so the
-  // chip is the only place it can be seen and cleared.
+  // The active filters as chips: what the list is narrowed by, each with its
+  // own way off.
   const chipLabels: Record<Exclude<keyof HostFilters, "sort">, string> = {
     q: t("search"), site: t("site"), environment: t("environment"), os_family: t("OS"),
     connection_state: t("state"), lifecycle_state: t("lifecycle"), owner: t("owner"),
@@ -765,8 +742,8 @@ export function Hosts() {
 }
 
 /**
- * When the list was last read from the server, with a way to read it
- * again now rather than at the next tick: an operator who has just changed
+ * When the list was last read from the server, with a way to read it again
+ * now rather than at the next tick: an operator who has just changed
  * something on a host does not want to wait five seconds to see it.
  */
 function Refreshed({ at, fetching, onRefresh }: { at: number; fetching: boolean; onRefresh: () => void }) {

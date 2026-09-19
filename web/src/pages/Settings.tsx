@@ -8,15 +8,6 @@ import { useT } from "../i18n";
 
 /**
  * The effective configuration of this panel, read-only.
- *
- * An administrator debugging a login or a stale feed asks first which
- * issuer the panel talks to and with which client, or where the feed comes
- * from and how old its data are. The answer was in the process environment
- * and nowhere on a screen. The values are set in the environment file the
- * page names; the page shows them and changes nothing - a panel that let
- * its own configuration be edited over the API would let a stolen session
- * point the login at somebody else's provider. Secrets are never shown,
- * only whether they are set.
  */
 export function Settings() {
   const t = useT();
@@ -67,9 +58,7 @@ const GO_DURATION = /^(?:\d+h)?(?:\d+m)?(?:\d+(?:\.\d+)?s)?$/;
 
 function FactValue({ fact, area }: { fact: SettingsFact; area: string }) {
   const t = useT();
-  // A secret says only whether it is set. The server masks the value, but
-  // the screen does not print it either way: what it gets is not its to
-  // show, masked or not.
+  // A secret says only whether it is set.
   if (fact.secret) {
     return fact.configured
       ? <span className="badge ok" title={t("The value is set; it is never shown here.")}>{t("set")}</span>

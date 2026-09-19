@@ -22,35 +22,26 @@ import { browserZone, emptyRecurrence, RecurrenceFields, recurrenceProblem, recu
 import { useT } from "../i18n";
 
 /**
- * Bulk Workspace: the second, equal path of work next to the host tabs.
- *
- * The Host Workspace serves precise work on one machine. Here one picks the
- * target, reads the refusals and drives a change across the whole fleet. A
- * campaign cannot be one button hidden on the host list: it is the main
- * mechanism of change, not a shortcut.
+ * Bulk Workspace: the second, equal path of work next to the host tabs. The
+ * Host Workspace serves precise work on one machine.
  */
 export function Bulk() {
   const t = useT();
   // Another screen may open the workspace with an order half written - the
-  // certificate view hands over a rotation stage this way. The address
-  // carries the operation, a name and a payload; everything else is
-  // decided here. An address with nothing in it reopens the draft the
-  // browser kept, so a reload halfway through does not start over.
+  // certificate view hands over a rotation stage this way.
   const [prefill] = useSearchParams();
   const [draft] = useState(() => prefilledOrder(prefill) ?? loadDraft(sessionStorageOrNull()));
   const [step, setStep] = useState(draft?.step ?? 0);
-  // The campaign comes into being halfway through. Until then we work on an
-  // order, afterwards - on a campaign that computes its plans itself and
-  // waits for consent.
+  // The campaign comes into being halfway through.
   const [campaignID, setCampaignID] = useState("");
   const [order, setOrder] = useState<Order>(draft?.order ?? emptyOrder());
 
   const change = (delta: Partial<Order>) =>
     setOrder((previous) => ({ ...previous, ...delta }));
 
-  // The draft follows every change until the campaign exists: after that
-  // the record on the server is the truth, and a stale draft reopening on
-  // the next visit would look like a second order waiting to be placed.
+  // The draft follows every change until the campaign exists: after that the
+  // record on the server is the truth, and a stale draft reopening on the
+  // next visit would look like a second order waiting to be placed.
   useEffect(() => {
     if (campaignID) return;
     saveDraft(sessionStorageOrNull(), { order, step });
@@ -61,9 +52,7 @@ export function Bulk() {
   const bulk = (operations.data?.items ?? []).filter((item) => item.campaign_ready);
   const chosenOperation = bulk.find((item) => item.action === order.action);
   // An operation that arrived in the address may be one the catalogue
-  // refuses in bulk - a rollback family, a specialised sequence. The
-  // catalogue's reason closes the first gate; the server would refuse the
-  // order anyway, and later.
+  // refuses in bulk - a rollback family, a specialised sequence.
   const unready = order.action && operations.data && !chosenOperation
     ? operations.data.items.find((item) => item.action === order.action)
     : undefined;
@@ -71,9 +60,7 @@ export function Bulk() {
     ? unready.campaign_refusal ?? t("the catalogue does not open it to the fleet")
     : undefined;
   // A prefilled operation without a payload takes the template once the
-  // catalogue is in, exactly as choosing it by hand would. An operation the
-  // registry has a form for takes nothing: its fields start from their own
-  // defaults, and a template in the JSON box would only compete with them.
+  // catalogue is in, exactly as choosing it by hand would.
   const prefilledTemplate = order.action && !order.payloadText && !operationForm(order.action)
     ? bulk.find((item) => item.action === order.action)?.payload_template
     : undefined;
@@ -82,9 +69,7 @@ export function Bulk() {
       setOrder((previous) => ({ ...previous, payloadText: JSON.stringify(prefilledTemplate, null, 2) }));
     }
   }, [prefilledTemplate]);
-  // Refusals are shown together with the reason. An operation missing from
-  // the list without a word of explanation looks like a missing feature -
-  // while it may be a boundary drawn on purpose, e.g. restoring a backup.
+  // Refusals are shown together with the reason.
   const refusals = (operations.data?.items ?? []).filter(
     (item) => item.mutating && !item.campaign_ready && item.campaign_refusal,
   );
@@ -92,9 +77,9 @@ export function Bulk() {
   const params = new URLSearchParams();
   const expression = expressionOf(order);
   if (order.hostIDs.length > 0) {
-    // A list of hosts is the order itself: the preview resolves the
-    // same identifiers the creation will, and nothing else is sent next
-    // to them - a filter beside a list would be ignored on the server.
+    // A list of hosts is the order itself: the preview resolves the same
+    // identifiers the creation will, and nothing else is sent next to them -
+    // a filter beside a list would be ignored on the server.
     for (const hostID of order.hostIDs) params.append("host_id", hostID);
   } else if (expression) {
     // The typed selector decides alone; the flat filters are not sent
@@ -112,8 +97,8 @@ export function Bulk() {
   // hosts that changed and refuses the rest, before anything is created.
   if (order.compensates) params.set("compensates", order.compensates);
   // A host list with nobody on it yet is not previewed: without the
-  // identifiers the query would count the whole fleet, and the count
-  // would open a gate the operator has not earned.
+  // identifiers the query would count the whole fleet, and the count would
+  // open a gate the operator has not earned.
   const listEmpty = order.targetMode === "hosts" && order.hostIDs.length === 0;
   const preview = useQuery({
     queryKey: ["campaign-preview", params.toString()],
@@ -128,16 +113,13 @@ export function Bulk() {
     refetchInterval: OPERATIONS_INTERVAL,
   });
 
-  // A host list from the address is not a filter the preview can count:
-  // the preview reads the selector fields, and a compensation narrowed to
-  // one host previews the whole set the original changed. The named hosts
-  // are what the order carries, so they are what the count says.
+  // A host list from the address is not a filter the preview can count: the
+  // preview reads the selector fields, and a compensation narrowed to one
+  // host previews the whole set the original changed.
   const eligible = orderTargets(order, preview.data);
   const gates = stepGates(t, order, preview.data, campaign.data, refusal);
 
   // A backend without a planning phase will not drive any of these changes.
-  // A wizard that ends in an error after the form is filled in is worse than
-  // its absence together with the reason.
   if (!capabilities.campaign_v2) {
     return (
       <>
@@ -163,12 +145,7 @@ export function Bulk() {
 
       <ol className="bulk-steps">
         {STEPS.map((title, index) => {
-          // A step opens once every gate before it is open. The first
-          // step behind a closed gate says what is missing; the ones after
-          // it are closed for the same reason, and repeating the sentence
-          // on every pill would drown it. A step greyed out without any
-          // reason looks like an interface defect, so the later pills
-          // still carry it on hover.
+          // A step opens once every gate before it is open.
           const closed = gates.slice(0, index).find((gate) => !gate.open);
           const first = closed === gates[index - 1];
           return (
@@ -252,10 +229,8 @@ export function Bulk() {
 }
 
 /**
- * The buttons at the end of a step: back to the previous one, and on to
- * the next by its name. A closed gate keeps the button off and says next
- * to it what is still missing - the same sentence the pill above shows,
- * so the operator reads one reason, not two.
+ * The buttons at the end of a step: back to the previous one, and on to the
+ * next by its name.
  */
 function StepNav({ step, setStep, gates }: { step: number; setStep: (step: number) => void; gates: Gate[] }) {
   const t = useT();
@@ -322,8 +297,7 @@ export function emptyOrder(): Order {
 
 /**
  * The order another screen handed over in the address, or null when the
- * address carries no order. A link with an operation in it is a new order
- * and wins over a draft: the operator followed it on purpose.
+ * address carries no order.
  */
 export function prefilledOrder(params: URLSearchParams): Draft | null {
   if (!params.has("action") && !params.has("name") && !params.has("reason")
@@ -382,7 +356,7 @@ function sessionStorageOrNull(): Storage | null {
 /**
  * The draft the browser kept, laid over an empty order so a field this
  * release added and an older draft does not know starts from its default
- * instead of from nothing. A draft that is not an object is ignored.
+ * instead of from nothing.
  */
 export function loadDraft(storage: Storage | null): Draft | null {
   if (!storage) return null;
@@ -419,9 +393,7 @@ export function clearDraft(storage: Storage | null): void {
 
 /**
  * The number of hosts the order is placed on: the hosts the address named,
- * or what the preview counted as eligible, or what it matched. A host list
- * from the campaign page is not a filter the preview can count, so the
- * list itself is the number.
+ * or what the preview counted as eligible, or what it matched.
  */
 export function orderTargets(order: Pick<Order, "hostIDs">, preview?: Pick<Preview, "count" | "eligible">): number {
   if (order.hostIDs.length > 0) return order.hostIDs.length;
@@ -440,10 +412,9 @@ export function reasonValid(reason: string): boolean {
 export type WindowProblem = "start_invalid" | "end_invalid" | "start_past" | "end_past" | "end_before_start";
 
 /**
- * The maintenance window as typed, checked against the clock: both ends
- * are optional, a given end has to lie ahead of the start and of now, and
- * a given start ahead of now - a window that already closed would create
- * a campaign that waits forever, with nothing on screen to say so.
+ * The maintenance window as typed, checked against the clock: both ends are
+ * optional, a given end has to lie ahead of the start and of now, and a
+ * given start ahead of now - a window that already closed would create a
  */
 export function windowProblem(start: string, end: string, now: Date): WindowProblem | null {
   const from = start ? new Date(start) : null;
@@ -475,9 +446,7 @@ export function jobTimeoutValid(seconds: number): boolean {
 
 /**
  * The instant of a datetime-local value as the API reads it: an RFC 3339
- * timestamp in UTC. The input gives local wall time without a zone, and
- * the Date constructor reads it in the browser's zone, which is the zone
- * the operator meant.
+ * timestamp in UTC.
  */
 export function windowInstant(value: string): string | undefined {
   if (!value) return undefined;
@@ -486,9 +455,7 @@ export function windowInstant(value: string): string | undefined {
 }
 
 /**
- * The body of the order as the API takes it. A field the operator left at
- * its default is not sent, so an order that said nothing about it reads
- * like one on the server as well.
+ * The body of the order as the API takes it.
  */
 export function campaignBody(order: Order, token?: PreviewToken): Record<string, unknown> {
   const expression = expressionOf(order);
@@ -541,44 +508,32 @@ export function campaignBody(order: Order, token?: PreviewToken): Record<string,
 type Order = {
   name: string;
   action: string;
-  // The unit and the security-only choice of the orders this wizard
-  // carried before the registry existed. They are read as the starting
-  // value of the registry's form, so a draft or a link written by an
-  // earlier release still orders what it was written for.
+  // The unit and the security-only choice of the orders this wizard carried
+  // before the registry existed.
   unit: string;
   securityOnly: boolean;
-  // The fields of the operation, as the registry describes them. Empty
-  // until something is typed; the registry's own starting value lies
-  // underneath.
+  // The fields of the operation, as the registry describes them. Empty until
+  // something is typed; the registry's own starting value lies underneath.
   form: FormValue;
   // The payload of an operation the registry cannot show, as JSON text the
-  // operator edits; it starts from the template the server gives. An
-  // operation with a form leaves this empty unless the operator took the
-  // payload over by hand in the advanced view.
+  // operator edits; it starts from the template the server gives.
   payloadText: string;
-  // A rename in bulk: the new name of every host, by host identifier. The
-  // server splits it host by host and a host it does not name is
-  // ineligible - there is no shared name, on purpose.
+  // A rename in bulk: the new name of every host, by host identifier.
   mapping: Record<string, string>;
   // The pretty name a rename sets everywhere; empty leaves it alone.
   pretty: string;
-  // The campaign this order undoes, when it came from "Plan the rollback"
-  // on a finished campaign. Empty for an ordinary campaign. The server
-  // holds the rules: the reverse operation, the hosts that changed.
+  // The campaign this order undoes, when it came from "Plan the rollback" on
+  // a finished campaign.
   compensates: string;
   // Hosts named by identifier: picked one by one from the host list, or
   // handed over in the address as a compensation of one host from the
-  // campaign page. When present they are the order's targets and the
-  // filters are not sent; the server checks them against the original
-  // the way it checks any selector.
+  // campaign page.
   hostIDs: string[];
   site: string;
   environment: string;
   osFamily: string;
-  // How the targets are named: by the flat filters, by a group and tag
-  // rules compiled into one expression, or by a list of hosts picked by
-  // hand. The expression, when present, decides alone; a host list
-  // decides over both.
+  // How the targets are named: by the flat filters, by a group and tag rules
+  // compiled into one expression, or by a list of hosts picked by hand.
   targetMode: TargetMode;
   group: string;
   rules: Rule[];
@@ -595,9 +550,7 @@ type Order = {
   rebootPolicy: string;
   // How long a rebooted host is waited for before it fails, in seconds.
   rebootTimeoutSeconds: number;
-  // What happens to a host that is not connected when its turn comes. An
-  // empty value keeps the operation's own policy; a chosen one may only
-  // tighten it.
+  // What happens to a host that is not connected when its turn comes.
   offlinePolicy: string;
   // How long the campaign waits for offline hosts, counted from creation.
   deadlineMinutes: number;
@@ -606,27 +559,20 @@ type Order = {
   // How many lost sessions mid-task pause the campaign; zero disables it.
   connectivityLost: number;
   // Why the change is made, or the change reference it answers to: the
-  // sentence the audit trail keeps next to the order. Required, so the
-  // trail does not fill with the operation name repeated.
+  // sentence the audit trail keeps next to the order.
   reason: string;
   // The maintenance window, as datetime-local values in the browser's
   // zone; either end may be empty. No host is started outside it.
   maintenanceStart: string;
   maintenanceEnd: string;
   // The units checked on every host once its change is done - after the
-  // reboot when one follows, right after the change when none does. One
-  // per line or comma-separated; empty means nothing is verified.
+  // reboot when one follows, right after the change when none does.
   healthCheckUnits: string;
   // How long one host's task may run, in seconds; zero takes the
   // operation's own default from the catalogue.
   jobTimeoutSeconds: number;
   // Whether the campaign waits for a consent before anything runs. A
   // critical operation cannot turn it off.
-  // Whether the order is kept for a moment instead of placed now: the
-  // first run as a datetime-local value in the browser's zone, and the
-  // rule of the moments after it. The schedule places the same order
-  // through the same door at its moments; each campaign then waits for
-  // its approval like any other.
   schedule: ScheduleChoice;
 };
 
@@ -637,9 +583,9 @@ export type TargetMode = "filters" | "expression" | "hosts";
 export type ScheduleChoice = { enabled: boolean; startAt: string; recurrence: RecurrenceForm };
 
 /**
- * What is wrong with the schedule of an order, or null when nothing is
- * or nothing is scheduled: a single run needs a moment ahead, a recurring
- * one a complete rule.
+ * What is wrong with the schedule of an order, or null when nothing is or
+ * nothing is scheduled: a single run needs a moment ahead, a recurring one a
+ * complete rule.
  */
 export function scheduleProblem(choice: ScheduleChoice, now: Date): "start_invalid" | "start_past" | "moment_required" | "recurrence" | null {
   if (!choice.enabled) return null;
@@ -654,9 +600,8 @@ export function scheduleProblem(choice: ScheduleChoice, now: Date): "start_inval
 
 /**
  * The body of a schedule as the API takes it: the order as it would be
- * placed now, kept for the moment, with the reason on the schedule as
- * well - it is what the trail keeps next to the schedule and what every
- * campaign it places carries.
+ * placed now, kept for the moment, with the reason on the schedule as well -
+ * it is what the trail keeps next to the schedule and what every campaign it
  */
 export function scheduleBody(order: Order): Record<string, unknown> {
   const rule = recurrenceText(order.schedule.recurrence);
@@ -702,9 +647,7 @@ export type Operation = OperationContract & {
 /**
  * The operation catalogue under /api/v1/actions, read once and shared by
  * every screen that draws something from an operation's contract: the
- * wizard, the campaign page and the job list. The registry changes only
- * with a release of the control plane, so the copy stays fresh for a good
- * while and one screen does not fetch what another just did.
+ * wizard, the campaign page and the job list.
  */
 export function useOperations() {
   return useQuery({
@@ -722,9 +665,8 @@ export function useOperation(action: string | undefined): Operation | undefined 
 
 /**
  * The facets of the visible fleet - sites, environments, OS families with
- * their host counts - counted in the database, under the same key the
- * host list and the dashboard read them by, so one screen does not fetch
- * what another just did.
+ * their host counts - counted in the database, under the same key the host
+ * list and the dashboard read them by, so one screen does not fetch what
  */
 export function useFleetFacets() {
   return useQuery({
@@ -736,9 +678,8 @@ export function useFleetFacets() {
 
 /**
  * The values a target field may take, offered under an input that still
- * takes free text: the sites the fleet really has are a hint, not a
- * boundary - a site with no host yet is a valid selector that matches
- * nobody, and the preview says so.
+ * takes free text: the sites the fleet really has are a hint, not a boundary
+ * - a site with no host yet is a valid selector that matches nobody, and the
  */
 export function FacetList({ id, facets }: { id: string; facets?: Facet[] }) {
   return (
@@ -753,17 +694,6 @@ export function FacetList({ id, facets }: { id: string; facets?: Facet[] }) {
 /**
  * The reverse of a change, where a true one exists: an operation that puts
  * back what the forward one changed, as a new plan the operator approves.
- * A restart or a signal has no reverse, and the list says so by leaving
- * it out.
- *
- * A network profile and a firewall rule set have a reverse on one host -
- * the rollback plan the host kept under the identifier the change
- * reported - but not as a campaign: the identifier is minted on each host
- * from its own clock, and the plan leaves the host the moment the change
- * is confirmed. One payload could name one host's plan at most, and a
- * settled campaign has already confirmed every host. The families are
- * left out here on purpose, so the campaign page says there is no reverse
- * to plan rather than offering an order the engine refuses.
  */
 export const REVERSE_OPERATION: Record<string, string> = {
   "file.ensure": "file.rollback",
@@ -789,10 +719,7 @@ export function reversePayload(action: string, payload: unknown): Record<string,
 }
 
 /**
- * The address of the wizard with an order half written. A rollback link
- * names the campaign it undoes as well, so the order is created as its
- * compensation and the two campaigns are linked rather than merely named
- * alike.
+ * The address of the wizard with an order half written.
  */
 export function bulkPrefill(action: string, name: string, payload: unknown, compensates?: string, hostIDs: string[] = []): string {
   let address = `/bulk?action=${encodeURIComponent(action)}&name=${encodeURIComponent(name)}&payload=${encodeURIComponent(JSON.stringify(payload, null, 2))}`;
@@ -804,10 +731,8 @@ export function bulkPrefill(action: string, name: string, payload: unknown, comp
 }
 
 /**
- * The words for every class of the contract: a short label for the chip
- * and one sentence for the tooltip. The values are the registry's; the
- * words are the panel's, so a class the panel does not know yet shows as
- * it came instead of as nothing.
+ * The words for every class of the contract: a short label for the chip and
+ * one sentence for the tooltip.
  */
 const CONTRACT_WORDS: Record<string, Record<string, [label: string, meaning: string]>> = {
   cancel: {
@@ -853,8 +778,8 @@ function describeClaim(t: (text: string) => string, claim: ResourceClaim): strin
 
 /**
  * The contract of an operation as small chips, each with its sentence on
- * hover: what a cancel does, whether a repeat is safe, what way back
- * exists, what is verified and which host resources the operation takes.
+ * hover: what a cancel does, whether a repeat is safe, what way back exists,
+ * what is verified and which host resources the operation takes.
  */
 export function ContractChips({ contract }: { contract: OperationContract }) {
   const t = useT();
@@ -890,8 +815,7 @@ export function ContractChips({ contract }: { contract: OperationContract }) {
 /**
  * The form of the order: the registry's own starting value, the fields an
  * older release kept beside the order laid over it, and what was typed in
- * this wizard on top. A draft written before the registry existed still
- * orders the unit or the upgrade it named.
+ * this wizard on top.
  */
 export function orderForm(order: Order): FormValue {
   const legacy: FormValue = {};
@@ -901,21 +825,13 @@ export function orderForm(order: Order): FormValue {
 }
 
 /**
- * The payload of the order. An operation the registry has a form for builds
- * it from the fields, unless the operator took the payload over by hand;
- * every other one takes the JSON they edited, starting from the server's
- * template. The server validates it the same way as an order typed by hand
- * and names what is wrong.
+ * The payload of the order.
  */
 function orderPayload(order: Order): Record<string, unknown> | null {
   if (order.action === RENAME_OPERATION) {
     // A rename across the fleet carries one name per host and nothing
     // shared, so it keeps its own editor: the registry's form describes a
     // rename of one host and would give every host the same name - the one
-    // thing a rename must never do.
-    //
-    // Only the hosts given a name travel; an order that names nobody is
-    // no order, and the server refuses an empty mapping the same way.
     const mapping = Object.fromEntries(
       Object.entries(order.mapping).map(([id, name]) => [id, name.trim()] as const).filter(([, name]) => name !== ""),
     );
@@ -925,8 +841,8 @@ function orderPayload(order: Order): Record<string, unknown> | null {
   const entry = operationForm(order.action);
   if (entry && !order.payloadText) {
     // A form with a problem in it is not a payload: the wizard holds the
-    // order at the first step and says what is missing, rather than
-    // sending something the server would refuse.
+    // order at the first step and says what is missing, rather than sending
+    // something the server would refuse.
     if (entry.validate(orderForm(order)).length > 0) return null;
     return entry.toPayload(orderForm(order));
   }
@@ -958,11 +874,9 @@ type Preview = {
   // The campaign the order would undo, as the server checked it, with the
   // number of hosts it changed - the only hosts the order may name.
   compensates?: { id: string; name: string; state: string; changed: number };
-  // The binding between this answer and the order placed from it: the
-  // server records what it showed, the order names it, and the creation
-  // refuses when the fleet or the operator's rights moved in between. An
-  // answer without an operation carries none, because no order follows
-  // from it.
+  // The binding between this answer and the order placed from it: the server
+  // records what it showed, the order names it, and the creation refuses
+  // when the fleet or the operator's rights moved in between.
   preview_id?: string;
   preview_digest?: string;
   expires_at?: string;
@@ -972,9 +886,7 @@ type Preview = {
 export type PreviewToken = { preview_id: string; preview_digest: string };
 
 /**
- * The token of a preview, when it has one. A preview taken without an
- * operation - the count of a selector - has none, and an order is not
- * placed from it.
+ * The token of a preview, when it has one.
  */
 export function previewTokenOf(preview?: Preview): PreviewToken | undefined {
   if (!preview?.preview_id || !preview.preview_digest) return undefined;
@@ -982,13 +894,8 @@ export function previewTokenOf(preview?: Preview): PreviewToken | undefined {
 }
 
 /**
- * The steps go in the order the system really works in.
- *
- * The document puts the plans before the rollout policy. Here the plan is
- * computed as the first phase of the campaign - and the campaign must already
- * know its policy, because it enters the approval fingerprint. The order is
- * therefore different, and it is better to show it plainly than to pretend a
- * plan can be computed before the order.
+ * The steps go in the order the system really works in. The document puts
+ * the plans before the rollout policy.
  */
 const STEPS = [
   "Scope",
@@ -1045,9 +952,9 @@ function stepGates(
   campaign?: Campaign,
   refusal?: string,
 ): Gate[] {
-  // A valid payload is the whole test of the first step: the registry's
-  // form reports what is missing field by field, and an operation without
-  // one is judged by whether its JSON parses.
+  // A valid payload is the whole test of the first step: the registry's form
+  // reports what is missing field by field, and an operation without one is
+  // judged by whether its JSON parses.
   const hasAction = Boolean(order.action && order.name) && orderPayload(order) !== null;
   const hasTargets = order.targetMode === "hosts"
     ? order.hostIDs.length > 0
@@ -1091,10 +998,6 @@ function stepGates(
 /**
  * ScopeBar: the name, the operation, the target count and the snapshot
  * fingerprint, pinned for the whole wizard.
- *
- * The operator is to see all the time what the thing they are setting up
- * applies to. A host count hidden two steps earlier is worth as much as its
- * absence.
  */
 function ScopeBar({
   order,
@@ -1160,9 +1063,8 @@ function ScopeBar({
 }
 
 /**
- * The operations whose payload an earlier release of this wizard built
- * from a field of its own. The registry draws them now; the names stay so
- * a draft or a link written back then still finds its unit.
+ * The operations whose payload an earlier release of this wizard built from
+ * a field of its own.
  */
 const UNIT_OPERATIONS = ["unit.start", "unit.stop", "unit.restart", "unit.reload", "unit.reset_failed"];
 
@@ -1171,11 +1073,8 @@ const RENAME_OPERATION = "system.hostname.set";
 
 /**
  * The operations the wizard can build a payload for: those the catalogue
- * opens to the fleet and the registry has a form for, plus the rename,
- * whose per-host mapping this wizard builds itself.
- *
- * An operation outside this list is not refused - its payload is typed as
- * JSON, and the step says so.
+ * opens to the fleet and the registry has a form for, plus the rename, whose
+ * per-host mapping this wizard builds itself.
  */
 export function wizardOperations(bulk: Operation[]): string[] {
   return bulk
@@ -1197,17 +1096,15 @@ function ScopeStep({
   bulk: Operation[];
   refusals: Operation[];
   preview?: Preview;
-  // Why the catalogue refuses the operation the address named in bulk,
-  // so the refusal is read here and not from the server after the form
-  // is filled in.
+  // Why the catalogue refuses the operation the address named in bulk, so
+  // the refusal is read here and not from the server after the form is
+  // filled in.
   refusal?: string;
   nav: ReactNode;
 }) {
   const t = useT();
   const chosen = bulk.find((item) => item.action === order.action);
-  // The registry draws the fields of every operation it knows. A rename
-  // keeps its own editor, because its payload is one name per host; an
-  // operation the registry does not carry yet keeps the JSON box.
+  // The registry draws the fields of every operation it knows.
   const entry = order.action === RENAME_OPERATION ? undefined : operationForm(order.action);
   const generic = Boolean(order.action) && !entry && order.action !== RENAME_OPERATION;
   const formed = wizardOperations(bulk);
@@ -1237,10 +1134,8 @@ function ScopeStep({
           <select
             value={order.action}
             onChange={(e) => {
-              // An operation the registry knows opens on its own fields,
-              // at their own starting values. One it does not know opens
-              // on the catalogue's template: the operator edits a shape
-              // the server already accepts, not a blank field.
+              // An operation the registry knows opens on its own fields, at
+              // their own starting values.
               const action = e.target.value;
               const next = bulk.find((item) => item.action === action);
               const known = Boolean(operationForm(action));
@@ -1345,10 +1240,7 @@ function ScopeStep({
 
 /**
  * The mapping of a rename in bulk: one row per host the selector matches,
- * current name on the left, the new name typed on the right. A paste box
- * takes the same thing as CSV, "hostname,fqdn" per line, for a list kept
- * somewhere else. There is no shared name and no default: a host left
- * without a name is shown as ineligible here and settles so on the server.
+ * current name on the left, the new name typed on the right.
  */
 function MappingEditor({
   order,
@@ -1365,9 +1257,8 @@ function MappingEditor({
   const named = rows.filter((host) => (order.mapping[host.id] ?? "").trim() !== "").length;
   const setName = (id: string, name: string) => change({ mapping: { ...order.mapping, [id]: name } });
   // The paste matches by the current name, full or short: the list the
-  // operator keeps elsewhere rarely spells the names the way the
-  // inventory does. A line that names no matched host is reported, not
-  // dropped: silence would look like a host that was renamed.
+  // operator keeps elsewhere rarely spells the names the way the inventory
+  // does.
   const applyPaste = () => {
     const byName = new Map<string, string>();
     for (const host of rows) {
@@ -1458,9 +1349,9 @@ function MappingEditor({
 }
 
 /**
- * The words for each way of naming the targets: a short label for the
- * choice and one sentence for what it means, so a first-time operator
- * reads the three ways side by side before picking one.
+ * The words for each way of naming the targets: a short label for the choice
+ * and one sentence for what it means, so a first-time operator reads the
+ * three ways side by side before picking one.
  */
 const TARGET_WAYS: [mode: TargetMode, label: string, meaning: string][] = [
   ["filters", "by site, environment and OS", "Every host that matches the fields; leave a field empty to match any value. Hosts added later do not join: the list is frozen when the campaign is created."],
@@ -1478,9 +1369,9 @@ function TargetsStep({
   order: Order;
   change: (delta: Partial<Order>) => void;
   preview?: Preview;
-  // The server's refusal of the selector, when there is one: a
-  // compensation narrowed to a host the original did not change is
-  // refused here, with the host named, rather than at the creation.
+  // The server's refusal of the selector, when there is one: a compensation
+  // narrowed to a host the original did not change is refused here, with the
+  // host named, rather than at the creation.
   refusal?: unknown;
   nav: ReactNode;
 }) {
@@ -1496,9 +1387,9 @@ function TargetsStep({
   });
   const [excluding, setExcluding] = useState(false);
   const expression = expressionOf(order);
-  // Changing the way clears what the other ways typed: a host list kept
-  // from an earlier choice would win over the filters on the server
-  // without a word on screen.
+  // Changing the way clears what the other ways typed: a host list kept from
+  // an earlier choice would win over the filters on the server without a
+  // word on screen.
   const chooseMode = (mode: TargetMode) => change({
     targetMode: mode,
     hostIDs: mode === "hosts" ? order.hostIDs : [],
@@ -1667,10 +1558,6 @@ function TargetsStep({
 /**
  * The distribution of the frozen snapshot by site, environment, OS family
  * and the required capability.
- *
- * The bare count of eligible hosts does not say what is about to happen:
- * thirty hosts from one site are a different change than thirty spread over
- * three.
  */
 function Distribution({ preview }: { preview?: Preview }) {
   const t = useT();
@@ -1775,9 +1662,7 @@ function reasonName(t: (text: string) => string, reason: string): string {
 
 /**
  * The offline policies, from the one that does the most with an offline host
- * to the one that does the least. A campaign may move down this list and
- * never up: the operation's own policy is the boundary its module drew, and
- * the server refuses a request that loosens it.
+ * to the one that does the least.
  */
 const OFFLINE_POLICIES = ["wait_until_deadline", "replan_on_reconnect", "skip_if_offline", "require_online"];
 
@@ -1911,10 +1796,7 @@ function RolloutStep({
 }
 
 /**
- * The window the change may run in, and what is checked afterwards. Both
- * live in the campaign record and enter the approval fingerprint, so they
- * are settled before the campaign exists - the approver reads them as
- * part of what is approved.
+ * The window the change may run in, and what is checked afterwards.
  */
 function WindowStep({
   order,
@@ -2045,9 +1927,9 @@ function CreateStep({
     },
     onError: (error) => {
       setErrorMessage(error instanceof Error ? error.message : String(error));
-      // A refused order has spent its preview, whatever the reason: the
-      // next attempt is placed from a fresh one, so the operator is not
-      // told twice that the fleet moved.
+      // A refused order has spent its preview, whatever the reason: the next
+      // attempt is placed from a fresh one, so the operator is not told
+      // twice that the fleet moved.
       queryClient.invalidateQueries({ queryKey: ["campaign-preview"] });
     },
   });
@@ -2180,9 +2062,8 @@ export type PlanGroups = {
 function ApprovalStep({ campaignID, campaign, nav }: { campaignID: string; campaign?: Campaign; nav: ReactNode }) {
   const t = useT();
   const [errorMessage, setErrorMessage] = useState("");
-  // The reason and the change ticket go into the approval record next to
-  // the fingerprint; a critical operation cannot be approved without the
-  // reason.
+  // The reason and the change ticket go into the approval record next to the
+  // fingerprint; a critical operation cannot be approved without the reason.
   const [reason, setReason] = useState("");
   const [ticket, setTicket] = useState("");
   const queryClient = useQueryClient();
@@ -2192,9 +2073,7 @@ function ApprovalStep({ campaignID, campaign, nav }: { campaignID: string; campa
       api.post(`/api/v1/campaigns/${campaignID}/approve`, {
         reason: reason.trim(),
         change_ticket: ticket.trim(),
-        // The consent carries the fingerprint of what is on screen. A
-        // campaign changed since it was loaded ends in a refusal, not in the
-        // consent being transferred.
+        // The consent carries the fingerprint of what is on screen.
         approval_fingerprint: campaign?.approval_fingerprint,
       }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["campaign", campaignID] }),
@@ -2255,9 +2134,7 @@ function ApprovalStep({ campaignID, campaign, nav }: { campaignID: string; campa
 }
 
 /**
- * The target table with the blocker. A host that stands still is to say
- * what it waits for: a budget, somebody else's resource lock, or coming back
- * online.
+ * The target table with the blocker.
  */
 function TargetTable({ targets, action }: { targets: ReturnType<typeof useTargets>; action: string }) {
   const t = useT();

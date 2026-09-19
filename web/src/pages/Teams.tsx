@@ -7,20 +7,9 @@ import { Empty, ErrorBox, Time } from "../components/ui";
 import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, Stat, StatGrid } from "../components/layout";
 import { t, useT } from "../i18n";
 
-/*
- * The register of teams.
- *
- * A team is the one word of the three a fleet is described with that may
- * decide who may touch what. A tag cannot: an operator edits tags, so
- * somebody who could grant themselves a scope by typing a tag would have
- * no scope at all. An owner cannot: it is a name typed into a field, spelt
- * three ways by three people. A team can, because it is a row with an
- * identifier that outlives every rename.
- *
- * The screen has to make that difference visible rather than read as
- * another list of labels, so it says it in the header, repeats it beside
- * the register, and keeps every write behind the permission only the
- * platform administrator holds, with the reason the trail requires.
+/**
+ * The register of teams. A team is the one word of the three a fleet is
+ * described with that may decide who may touch what.
  */
 
 /** One team as the register lists it, with the hosts placed in it counted. */
@@ -36,9 +25,7 @@ export type Team = {
 };
 
 /**
- * The team a host carries. The host view has both for a host somebody
- * placed and neither for a host nobody did - a host with no team is not a
- * host in a team called nothing, and the screens say so in words.
+ * The team a host carries.
  */
 export type HostTeamFields = { team_id?: string; team_name?: string };
 
@@ -62,17 +49,12 @@ export function teamHostsAddress(teamID: string): string {
 }
 
 /**
- * The host list of the hosts nobody has placed in a team. The word is the
- * server's own: `team=none` asks for the other list rather than for a team
- * whose identifier is missing.
+ * The host list of the hosts nobody has placed in a team.
  */
 export const UNPLACED_HOSTS_ADDRESS = "/hosts?team=none";
 
 /**
- * A refusal of the teams API in words an operator can act on. The codes
- * are the server's stable ones; anything else is shown as the server
- * worded it, because inventing a sentence for a refusal nobody foresaw
- * would hide what really happened.
+ * A refusal of the teams API in words an operator can act on.
  */
 export function refusalText(code: string, message: string): string {
   switch (code) {
@@ -128,11 +110,9 @@ function Refusal({ error, close }: { error: ApiError | null; close: () => void }
 }
 
 /**
- * A control whose permission the identity does not hold, kept on the
- * screen and disabled with the reason beside it - the way ActionGuard
- * keeps a refused action in view on a host page. A button that simply
- * vanished would leave the operator looking for a feature instead of
- * reading what it takes.
+ * A control whose permission the identity does not hold, kept on the screen
+ * and disabled with the reason beside it - the way ActionGuard keeps a
+ * refused action in view on a host page.
  */
 function Guarded({ allowed, children }: { allowed: boolean; children: ReactNode }) {
   const t = useT();
@@ -176,10 +156,7 @@ export function Teams() {
     queryFn: () => api.get<Collection<Team>>("/api/v1/teams"),
     retry: false,
   });
-  // The hosts nobody has placed in a team. The register opens with the
-  // number because it is the work the register creates: a team that holds
-  // nobody draws no boundary. One row is asked for, because the count is
-  // all that is read here.
+  // The hosts nobody has placed in a team.
   const unplaced = useQuery({
     queryKey: ["hosts", "team-none-count"],
     queryFn: () => api.get<Page<Host>>("/api/v1/hosts?team=none&limit=1"),
@@ -336,13 +313,6 @@ export function Teams() {
 
 /**
  * Creating a team, or rewriting the name and the description of one.
- *
- * Both are the same form because both are the same write: the whole team
- * is sent, the field that stays the same repeated, so the request reads as
- * "the team is this" rather than as a patch two operators can interleave.
- * Renaming moves nobody - the identifier is the boundary - and the form
- * says so, because a reader who thinks otherwise will avoid a rename that
- * costs nothing.
  */
 function TeamForm({ team, onDone, onCancel, onError }: {
   team?: Team;
@@ -399,12 +369,6 @@ function TeamForm({ team, onDone, onCancel, onError }: {
 
 /**
  * Deleting a team.
- *
- * It deletes no machines, and the card says so plainly with the number:
- * the hosts stay and go back to being reachable through their site, as
- * they were before anybody drew this boundary. The bindings that named the
- * team go with it, because an access to a group that no longer exists is
- * an access nobody can read.
  */
 function DeleteTeam({ team, busy, onConfirm, onCancel }: {
   team: Team;
@@ -444,9 +408,8 @@ function DeleteTeam({ team, busy, onConfirm, onCancel }: {
 
 /**
  * The teams as every other screen reads them: the filter on the host list,
- * the placement on a host page and the binding form of the access screen
- * all need the same names, and they all narrow nothing - a team name is
- * printed on every host row that belongs to one.
+ * the placement on a host page and the binding form of the access screen all
+ * need the same names, and they all narrow nothing - a team name is printed
  */
 export function useTeams(enabled = true) {
   return useQuery({

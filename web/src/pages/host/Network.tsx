@@ -23,12 +23,6 @@ type Address = {
 
 /**
  * What the host reports about a bond.
- *
- * The members come from the links that name this bond as their master, not
- * from the bond itself: the kernel keeps the relation on the member side.
- * The active member and the state of each member come from the bonding
- * driver, which knows what "ip" does not - and a bond whose active member
- * is not its primary is a bond that failed over and nobody noticed.
  */
 type BondDetails = {
   mode?: string;
@@ -63,9 +57,7 @@ type VLANDetails = {
 };
 
 /**
- * The kernel's own switches for the second family. Every field is optional
- * on purpose: a setting that could not be read is unknown, and unknown is
- * not "off".
+ * The kernel's own switches for the second family.
  */
 type IPv6Settings = {
   disabled?: boolean;
@@ -132,9 +124,7 @@ function adapterLabel(adapter: string): string {
 }
 
 /**
- * The origin of a route in words. The kernel's names are terse - "ra" is
- * a router advertisement, "boot" a route set at boot by a script - and
- * the operator asks who put the route there, not what the field is called.
+ * The origin of a route in words.
  */
 export function routeProtocolWords(protocol: string | undefined): string {
   switch (protocol) {
@@ -159,10 +149,6 @@ type Intent = {
 
 /**
  * The host's network: interfaces, addresses and routes read from the kernel.
- *
- * The panel shows the actual state, not the content of configuration files:
- * what the host has up and what somebody once wrote into a configuration
- * can drift apart - and the operator asks about the former.
  */
 /** The changes this page offers; when every one is refused, the page says so once. */
 const NETWORK_CHANGES = [
@@ -217,9 +203,7 @@ export function privacyWords(value: number | undefined): string {
 }
 
 /**
- * The settings of a layer, each kind in its own terms. A bond that does not
- * watch its members is said so in words, because a zero in a column reads
- * as "nothing to report" and this one is a decision.
+ * The settings of a layer, each kind in its own terms.
  */
 function layerSettings(iface: Interface, t: (text: string, params?: Record<string, string | number>) => string) {
   if (iface.bond) {
@@ -532,9 +516,7 @@ export function Network() {
                       : layerMembers(iface).length === 0
                         ? "—"
                         : layerMembers(iface).map((member) => {
-                            // The driver's own word about the member. An
-                            // absent entry is not "down": it is a member the
-                            // driver said nothing about.
+                            // The driver's own word about the member.
                             const state = iface.bond?.member_states?.[member] ?? "";
                             const carrying = iface.bond?.active_member === member;
                             return (
@@ -653,11 +635,6 @@ export function Network() {
 
 /**
  * The interface change form.
- *
- * Every change is armed with a rollback on the host side: if the agent does
- * not confirm connectivity after the change, the host returns to the
- * previous configuration by itself. That is why the form asks for the
- * rollback window instead of hiding it as a detail.
  */
 function InterfaceChange({
   hostID, iface, management, onIntent, onCancel,
@@ -683,7 +660,7 @@ function InterfaceChange({
   const [window, setWindow] = useState("120");
   // The second family is asked separately, because it is a separate
   // decision: a host can take its IPv4 address from DHCP and hold a static
-  // IPv6 one at the same time. Left alone, it keeps what the host has.
+  // IPv6 one at the same time.
   const [method6, setMethod6] = useState("");
   const [addresses6, setAddresses6] = useState(
     (iface.addresses ?? [])
@@ -905,12 +882,6 @@ function InterfaceChange({
 
 /**
  * The form that builds a bond, a bridge or a VLAN.
- *
- * The refusals are named here before the order is ever sent, not because
- * the panel is the authority - the host is, and it checks every one of them
- * again against its own layering - but because an operator about to fold
- * three interfaces into a bond should not learn from a failed job that one
- * of them already belongs to somebody else.
  */
 function LayerBuild({
   hostID, interfaces, onIntent, onCancel,
@@ -936,10 +907,9 @@ function LayerBuild({
   const chosen = members.split(",").map((element) => element.trim()).filter(Boolean);
   const seconds = Number(window) || 0;
   const byName = new Map<string, Interface>(interfaces.map((iface) => [iface.name, iface]));
-  // The lower interfaces are the host's own: an interface is called
-  // whatever the host calls it - enp2s0, ens192, eno1np0 - so the form
-  // offers the names this host reports rather than an example that would
-  // be wrong on most machines.
+  // The lower interfaces are the host's own: an interface is called whatever
+  // the host calls it - enp2s0, ens192, eno1np0 - so the form offers the
+  // names this host reports rather than an example that would be wrong on
   const lower = interfaces.filter((iface) => iface.name !== "lo").map((iface) => iface.name);
 
   // The refusals, in the order the questions come: is the name free, is the
@@ -1126,8 +1096,7 @@ function LayerBuild({
 
 /**
  * An interface is relevant when the operator may ask about it: physical,
- * with an address or being the management channel. The rest are veths and
- * container bridges that would obscure the picture.
+ * with an address or being the management channel.
  */
 function relevant(iface: Interface): boolean {
   if (iface.management) return true;

@@ -4,11 +4,7 @@ import {
 } from "./fields";
 
 /**
- * The systemd units.
- *
- * Every operation here names one unit. The state before and after is read
- * separately, so the same name means the same thing on every host - which
- * is why these are the operations a campaign carries most often.
+ * The systemd units. Every operation here names one unit.
  */
 
 const GROUP = "Services";
@@ -17,9 +13,8 @@ const unitField: OperationField = {
   name: "unit",
   label: "Unit",
   kind: "unit",
-  // A unit is named by the host that carries it, and the same job runs
-  // under a different unit on another distribution. The host's services
-  // page lists what this host really has, so the field suggests nothing.
+  // A unit is named by the host that carries it, and the same job runs under
+  // a different unit on another distribution.
   hint: "The systemd unit this acts on, with its suffix, exactly as the host's services page lists it.",
 };
 

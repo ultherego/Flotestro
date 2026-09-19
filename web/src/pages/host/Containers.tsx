@@ -132,15 +132,8 @@ type EventsResult = {
 };
 
 /**
- * The host's containers.
- *
- * The summary comes from the inventory cycle and is cheap. The full lists
- * are fetched when the operator asks for them: querying the engine about
- * hundreds of images on every cycle would load the host for no reason.
- *
- * Networks and volumes have sub-tabs of their own, not just a counter: they
- * are what host clean-up trips over, and they outlive the containers that
- * created them.
+ * The host's containers. The summary comes from the inventory cycle and is
+ * cheap.
  */
 /** The changes this page offers; when every one is refused, the page says so once. */
 const CONTAINER_CHANGES = [
@@ -434,29 +427,12 @@ export function Containers() {
 }
 
 /**
- * Declaring a container, a network or a volume.
- *
- * Nothing is ordered from this panel without a plan. The operator writes
- * the description, the host computes what would change, and only that plan
- * - with its digest - can be carried out. The digest binds the two: a host
- * somebody else changed in between gets no change that was approved for
- * another state, and the operator never approves a word like "replace"
- * without the list of settings behind it.
- *
- * A container that differs is replaced rather than edited. That is the
- * engine's doing - it can change a handful of a running container's
- * settings and refuses the rest - and it is why the plan says so before
- * anybody agrees to it.
+ * Declaring a container, a network or a volume. Nothing is ordered from this
+ * panel without a plan.
  */
 /**
  * What the engine on this host really carries, for the fields of a
  * declaration.
- *
- * A declaration that meets an object of the same name replaces it, so the
- * name field is the dangerous one: an example the panel invents is either
- * useless or names somebody's running container. The page has just read
- * the engine, so it offers what is there - and the operator can still type
- * a name that is not, which is how a new object is declared.
  */
 export function engineSuggestions(lists?: FullState): FieldSuggestions {
   if (!lists) return {};
@@ -489,9 +465,7 @@ function Declaration({ kind, lists }: {
   const [confirming, setConfirming] = useState(false);
   const [ordered, setOrdered] = useState<Job | null>(null);
   const [message, setMessage] = useState("");
-  // The description the plan on the screen was computed for. A plan
-  // belongs to one description: anything typed afterwards makes it
-  // somebody else's plan, and it must not authorise this change.
+  // The description the plan on the screen was computed for.
   const [plannedFor, setPlannedFor] = useState("");
   const plan = useReadOperation<DeclarationResult>(host);
 
@@ -625,11 +599,6 @@ function Declaration({ kind, lists }: {
 
 /**
  * The declarative operations offered per kind of object.
- *
- * Removing a container is deliberately absent: a container is declared,
- * and a container that is not to run any more is declared away by
- * lifecycle operations that name it by identifier - the one thing a
- * declaration never does.
  */
 export const DECLARATION_ACTIONS: Record<string, string[]> = {
   container: ["docker.container.ensure"],
@@ -665,10 +634,6 @@ type DeclarationResult = {
 
 /**
  * What the plan says would happen.
- *
- * The verdict alone is not an approval: a replacement without the list of
- * settings behind it asks the operator to agree to a word. So the changes
- * are the body of this view, and the verdict only its heading.
  */
 function PlanView({ plan, stale }: { plan: ComputedPlan; stale: boolean }) {
   const t = useT();
@@ -723,11 +688,6 @@ function PlanView({ plan, stale }: { plan: ComputedPlan; stale: boolean }) {
 
 /**
  * The verdict of a plan, as a sentence rather than a word.
- *
- * "replace" tells an operator nothing about what it costs them; the
- * sentence does, and the change list below it says which settings brought
- * it about. A verdict this panel does not know is not translated into a
- * guess - it is named as it came.
  */
 export function planVerdict(action: string | undefined): string {
   return PLAN_VERDICTS[action ?? ""] ?? "What the plan would do";
@@ -756,16 +716,6 @@ export function safePayload(raw: string): Record<string, unknown> | null {
 
 /**
  * The engine's event log.
- *
- * The read is an order with a closed window, not a live preview: a job that
- * reads events until cancelled would stay on the host forever. That is why
- * the window, the follow time and the limit are form fields - the operator
- * asks about a specific range around one failure.
- *
- * The events are an answer from one moment, so they stay in the job result
- * and do not enter the inventory: the host state says how it is now, and the
- * log - what happened along the way, including to a container that no
- * longer exists.
  */
 function Events() {
   const t = useT();
@@ -928,13 +878,6 @@ function Events() {
 
 /**
  * The tail of one container's log.
- *
- * A read bounded by a line count and by the same byte limit as a log file:
- * a container that writes in a loop must not hand the panel its whole
- * history. The lines come back in the job result and stay there - the log
- * is what the application said at one moment, not the state of the host.
- * Stderr lines are marked in place, so the order of what the container
- * wrote is kept.
  */
 function ContainerLogs({ container, onClose }: { container: Container; onClose: () => void }) {
   const t = useT();
@@ -1218,10 +1161,8 @@ function ImageTable({
 const IMAGE_REFERENCE_PATTERN = /^[a-z0-9][A-Za-z0-9._\-/:@]{0,511}$/;
 
 /**
- * Pulling an image ahead of a deploy: the download happens when somebody
- * is watching rather than in the middle of a compose apply. The pull is
- * a mutation and waits for approval like every other; it adds to the host
- * and removes nothing, so it needs no typed confirmation.
+ * Pulling an image ahead of a deploy: the download happens when somebody is
+ * watching rather than in the middle of a compose apply.
  */
 function PullImage({ hostID, images, busy, onPull }: {
   hostID: string;
@@ -1234,9 +1175,8 @@ function PullImage({ hostID, images, busy, onPull }: {
   const value = reference.trim();
   const valid = IMAGE_REFERENCE_PATTERN.test(value);
   // The references this host already carries: fetching one again is how a
-  // moving tag is brought up to date, and it saves copying the string out
-  // of the table above. A reference the host has not got is still typed in
-  // by hand, so the list stands beside the field and does not close it.
+  // moving tag is brought up to date, and it saves copying the string out of
+  // the table above.
   const held = [...new Set((images ?? []).flatMap((image) => image.tags ?? []).filter((tag) => tag !== "<none>:<none>"))].sort();
   // The whole form exists for one order; without the right to place it
   // the form is not drawn at all.
@@ -1275,12 +1215,8 @@ function PullImage({ hostID, images, busy, onPull }: {
 }
 
 /**
- * The host's networks.
- *
- * The container column is the most important one here: it answers whether
- * the network can be removed. A built-in engine network has no button at
- * all - the engine would refuse anyway, and a button that always ends in an
- * error is worse than its absence.
+ * The host's networks. The container column is the most important one here:
+ * it answers whether the network can be removed.
  */
 function NetworkTable({
   hostID,
@@ -1356,11 +1292,6 @@ function NetworkTable({
 
 /**
  * The host's volumes.
- *
- * The size is sometimes unknown and shown as such: zero would mean an empty
- * volume ready to be deleted, which is a completely different piece of
- * information. Usage includes stopped containers - the volume of a stopped
- * container is not nobody's.
  */
 function VolumeTable({
   hostID,

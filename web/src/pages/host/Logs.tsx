@@ -17,10 +17,8 @@ import { useT } from "../../i18n";
 type JournalResult = { lines?: string[]; truncated?: boolean };
 
 /**
- * The window of a job on the host: from the delivery of its last attempt
- * to its end plus a margin, in UTC, and the unit its payload names. The
- * journal read bounded to it shows what the host wrote while the operation
- * ran - the lines an operator reads after a failed restart.
+ * The window of a job on the host: from the delivery of its last attempt to
+ * its end plus a margin, in UTC, and the unit its payload names.
  */
 export type JobWindow = { since: string; until: string; unit?: string };
 
@@ -28,9 +26,7 @@ export type JobWindow = { since: string; until: string; unit?: string };
 const WINDOW_MARGIN_SECONDS = 30;
 
 /**
- * The window of a job from its record and its attempts. A job that has
- * not been delivered has no window yet; a job still running is bounded
- * by now plus the margin.
+ * The window of a job from its record and its attempts.
  */
 export function jobWindow(job: Job | undefined, attempts: Attempt[] | undefined, now = Date.now()): JobWindow | null {
   if (!job) return null;
@@ -48,9 +44,7 @@ export function jobWindow(job: Job | undefined, attempts: Attempt[] | undefined,
 }
 
 /**
- * A moment as journalctl takes it, in UTC. The host reads a bare
- * timestamp in its own zone, and the panel does not know that zone; the
- * suffix settles it.
+ * A moment as journalctl takes it, in UTC.
  */
 export function utcStamp(millis: number): string {
   const d = new Date(millis);
@@ -61,8 +55,6 @@ export function utcStamp(millis: number): string {
 
 /**
  * The lines that carry the searched text, by index, case-insensitively.
- * A blank search matches nothing rather than everything: the count would
- * otherwise equal the line count and say nothing.
  */
 export function findMatches(lines: string[] | undefined, query: string): number[] {
   const needle = query.toLowerCase();
@@ -75,9 +67,8 @@ export function findMatches(lines: string[] | undefined, query: string): number[
 }
 
 /**
- * One line cut into the pieces that match the search and the pieces that
- * do not, in order, so the screen can mark the former. The comparison is
- * case-insensitive; the pieces keep the line's own case.
+ * One line cut into the pieces that match the search and the pieces that do
+ * not, in order, so the screen can mark the former.
  */
 export function splitMatches(line: string, query: string): { text: string; hit: boolean }[] {
   const needle = query.toLowerCase();
@@ -108,13 +99,8 @@ export function logFileName(hostname: string, source: string, millis: number): s
 }
 
 /**
- * Whether the agent of the host applies a boot identifier to a journal
- * read, and the reason when it does not. The journald adapter has to
- * name the boot_filter feature as present: an agent from before the
- * feature is silent about it, and silence is what an old agent says - it
- * would ignore the field and answer with every boot under the name of
- * one. The panel refuses such a read before dispatch; the screen says so
- * before the operator asks.
+ * Whether the agent of the host applies a boot identifier to a journal read,
+ * and the reason when it does not.
  */
 export function bootFilterSupport(
   capabilities: Capabilities | undefined,
@@ -136,12 +122,6 @@ export const FOLLOW_BACKLOG = 50;
 
 /**
  * The journal payload of a live view.
- *
- * The view takes the narrowing a read takes - the unit, the severity, the
- * start of the range, the cursor, the boot of the host - because watching a
- * unit and reading it are the same question asked twice. It takes no end
- * date: a view ends by its own time limit, and an end already in the past
- * would close it before the first line.
  */
 export function followPayload(filters: {
   unit?: string;
@@ -163,10 +143,6 @@ export function followPayload(filters: {
 
 /**
  * What the panel says about the lines a live view could not carry.
- *
- * The host counts them - the reader outrunning the sender, the rate limit -
- * and the number travels with every batch and again in the result. Saying
- * nothing would leave a gap the operator reads as a quiet host.
  */
 export function droppedNotice(
   dropped: number,
@@ -177,9 +153,8 @@ export function droppedNotice(
 }
 
 /**
- * A boot identifier as the address carries it: the bare lowercase form
- * the journal uses, or empty for a value that is not one. The Power tab
- * links here with the kernel's dashed form; both spell one boot.
+ * A boot identifier as the address carries it: the bare lowercase form the
+ * journal uses, or empty for a value that is not one.
  */
 export function bootParam(value: string | null): string {
   const bare = (value ?? "").trim().toLowerCase().replace(/-/g, "");
@@ -196,11 +171,6 @@ type FileResult = {
 
 /**
  * The host's logs.
- *
- * A read is always on request and always bounded: the journal by a line
- * count, a file additionally by the host administrator's allowlist. The
- * panel does not index logs - it leads from host to host instead of
- * querying the whole fleet at once.
  */
 export function Logs() {
   const t = useT();
@@ -208,14 +178,12 @@ export function Logs() {
   const queryClient = useQueryClient();
   const [source, setSource] = useState<"journal" | "file">("journal");
   const [preview, setPreview] = useState<string | null>(null);
-  // The job behind the live preview: stopping the preview cancels it, so
-  // the host does not keep the journal open for the rest of the timeout
-  // after the operator has stopped watching.
+  // The job behind the live preview: stopping the preview cancels it, so the
+  // host does not keep the journal open for the rest of the timeout after
+  // the operator has stopped watching.
   const [previewJob, setPreviewJob] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
-  // What the last live view could not carry. The count outlives the view:
-  // closing the screen on the gap would leave the operator believing they
-  // saw everything.
+  // What the last live view could not carry.
   const [watched, setWatched] = useState<number | null>(null);
   // The unit detail on the Services tab hands over the unit and the cursor
   // of its last journal line, so the read here starts where that ended.
@@ -242,8 +210,7 @@ export function Logs() {
   const [footer, setFooter] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   // The search runs over the lines on screen, not on the host: the read is
-  // bounded already, and the operator narrows what came back. The cursor
-  // walks the matches; the wrap decides whether a long line folds.
+  // bounded already, and the operator narrows what came back.
   const [search, setSearch] = useState("");
   const [matchIndex, setMatchIndex] = useState(0);
   const [wrap, setWrap] = useState(true);
@@ -344,9 +311,7 @@ export function Logs() {
       const job = await api.post<Job>(`/api/v1/hosts/${host.id}/operations`, body);
       queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
 
-      // The read goes through a job, so the screen waits for its result. A
-      // journal read prints its lines on stdout; a file read carries them in
-      // the detail.
+      // The read goes through a job, so the screen waits for its result.
       const last = await awaitJob<Record<string, unknown>>(api, job.id);
       if (!last) throw new Error(t("The host did not answer in time."));
       return last;
@@ -720,8 +685,7 @@ export function Logs() {
 
 /**
  * The search, the walk through its matches, the wrap and the two ways of
- * taking the lines away. The same strip stands over the live stream and
- * over a finished read, so the operator does not look for it twice.
+ * taking the lines away.
  */
 function LogTools({
   search, onSearch, matches, current, onStep, wrap, onWrap, onDownload, onCopy, copied, disabled,
@@ -774,8 +738,6 @@ function LogTools({
 
 /**
  * The lines with the matches marked and the current one brought into view.
- * Every line is its own element only while a search is on: a read of two
- * thousand lines is one text node otherwise, which is what a pre is for.
  */
 function LogView({
   lines, search, matches, current, wrap,

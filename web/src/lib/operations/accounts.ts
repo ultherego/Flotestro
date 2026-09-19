@@ -6,11 +6,6 @@ import {
 
 /**
  * Local accounts and their keys.
- *
- * The panel sets no passwords: an account it creates is reachable by SSH
- * key alone, so there is no secret it would have to keep or carry. That is
- * why a key list is not decoration here - it is the whole way in, and an
- * order that empties it is an order that cuts somebody off.
  */
 
 const GROUP = "Accounts";

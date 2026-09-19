@@ -18,9 +18,7 @@ type Schedule = {
   source: string;
   enabled: boolean;
   expression: string;
-  // The OnCalendar expression a timer really runs by. A timer the panel
-  // wrote keeps the cron expression it was ordered with above; this is
-  // what systemd was told, so both are visible at once.
+  // The OnCalendar expression a timer really runs by.
   calendar?: string;
   command?: string[];
   command_line?: string;
@@ -46,8 +44,7 @@ export type Preview = {
   next_runs?: string[];
   error?: string;
   // The plan of a timer: the calendar expression the cron line becomes and
-  // the two units that would be written. Absent for a cron entry, which is
-  // one line in one file and needs no plan to be readable.
+  // the two units that would be written.
   calendar?: string;
   units?: UnitFile[];
 };
@@ -67,13 +64,7 @@ export type Attempt = { status?: string; error_code?: string; message?: string; 
 
 /**
  * The preview of an attempt: typed from the result when the panel has read
- * it, otherwise the document the agent prints on stdout. An agent from
- * before the typed result prints only stdout, so it stays the fallback for
- * one release; drop it together with the support for those agents.
- *
- * The plan of a timer is taken from the document where the typed result
- * does not carry it yet: a panel newer than the control plane it talks to
- * still shows the operator what would be written.
+ * it, otherwise the document the agent prints on stdout.
  */
 export function previewOf(attempt: Attempt): Preview {
   const printed = readDocument(attempt.stdout);
@@ -102,14 +93,6 @@ function readDocument(stdout?: string): Preview {
 
 /**
  * The mechanisms this host can carry a managed entry with.
- *
- * Cron and systemd timers are two mechanisms of one thing, and the host
- * says in its schedules adapter which of them it has. A timer is offered
- * only where the adapter names managed_timers: an agent from before the
- * feature reads the host's timers but writes none, and it would ignore the
- * kind and write a cron entry under the name of a timer. Silence is what
- * such an agent says, so silence means cron - which is what every order
- * meant then.
  */
 export function scheduleKinds(capabilities: Capabilities | undefined): string[] {
   const adapter = (capabilities ?? []).find((capability) => capability.name === "schedules");
@@ -135,12 +118,8 @@ type Intent = {
 };
 
 /**
- * The host's recurring jobs.
- *
- * The panel tells its own entries from the pre-existing ones. A pre-existing
- * entry belongs to the host administrator; for the panel to manage it, it
- * has to be adopted explicitly - otherwise the first operation from the
- * panel would erase somebody else's work.
+ * The host's recurring jobs. The panel tells its own entries from the
+ * pre-existing ones.
  */
 /** The changes this page offers; when every one is refused, the page says so once. */
 const SCHEDULE_CHANGES = ["schedule.ensure", "schedule.run_now", "schedule.disable", "schedule.remove"];
@@ -421,9 +400,7 @@ export function kindLabel(kind: string, t: (text: string) => string): string {
 }
 
 /**
- * The new entry form. The command is an argument list, not a shell line: we
- * split it on whitespace and show the operator what really lands on the
- * host.
+ * The new entry form.
  */
 function NewEntry({
   hostId, online, kinds, entries, onRequest,
@@ -449,21 +426,15 @@ function NewEntry({
   const [kind, setKind] = useState(kinds[0] ?? "cron");
   const [previewError, setPreviewError] = useState("");
   const args = commandLine.trim().split(/\s+/).filter(Boolean);
-  // The accounts this host already schedules work under. They are facts of
-  // the host, so they are offered instead of an account name invented here
-  // - "backup" and "deploy" exist on some machines and on others they do
-  // not, and an entry for an account the host has not got never runs.
+  // The accounts this host already schedules work under.
   const accounts = [...new Set(entries.map((entry) => entry.user).filter((name): name is string => Boolean(name)))].sort();
   // A name another entry already carries is not a new entry: ordering it
-  // rewrites that one. The list is on the screen below, so the form says
-  // so rather than letting the operator find out afterwards.
+  // rewrites that one.
   const taken = entries.some((entry) => entry.id === id.trim());
 
   // The next runs come from the host, not from the browser: the browser
-  // knows neither the host's zone nor its clock, and a preview in the
-  // wrong zone would show the entry running at the wrong hour. The order
-  // travels with it, so a timer's plan comes back as well: the operator
-  // reads the two units before they are on the host.
+  // knows neither the host's zone nor its clock, and a preview in the wrong
+  // zone would show the entry running at the wrong hour.
   const preview = useMutation({
     mutationFn: async (spec: string) => {
       const job = await api.post<Job>(`/api/v1/hosts/${hostId}/operations`, {

@@ -5,11 +5,6 @@ import {
 
 /**
  * Disks, filesystems and volumes.
- *
- * A device is named by something that still means the same thing after a
- * reboot: /dev/sdb is whichever disk the kernel found second this time. The
- * planning step resolves the source to the filesystem's own identifier, and
- * that identifier is what travels in the change.
  */
 
 const GROUP = "Storage";
@@ -17,10 +12,7 @@ const GROUP = "Storage";
 const PLAN_NOTE =
   "Every host computes its own plan first: the planning step resolves the device to the filesystem it really holds, says whether it is mounted and how much room there is, and the change is bound to that.";
 
-// No example device here on purpose. A path in /dev is whatever this
-// host's kernel handed out, and these orders format, delete and overwrite:
-// an example that looks like a real disk is an invitation to wipe one. The
-// host's storage page prints the true name on every row.
+// No example device here on purpose.
 const deviceField: OperationField = {
   name: "device",
   label: "Device",
@@ -43,9 +35,8 @@ function deviceCheck(form: FormValue): FormProblem[] {
 }
 
 /**
- * A size LVM takes for something being created: absolute, or a share of
- * what is free. An increment starting with "+" belongs to a growth, where
- * there is already something to add to.
+ * A size LVM takes for something being created: absolute, or a share of what
+ * is free.
  */
 const LVM_ABSOLUTE_SIZE = /^\d{1,9}[KMGTkmgt]$|^\d{1,3}%(FREE|VG|PVS|ORIGIN)$/;
 
@@ -109,11 +100,6 @@ function memberCheck(form: FormValue): FormProblem[] {
 
 /**
  * Software RAID: the members of an array that exists.
- *
- * Failing a member is how a dying disk leaves the array before it takes the
- * array with it - and it is also the move that spends the array's
- * redundancy, which is why the plan says what the array is left with and
- * the host refuses on an array that has nothing left to lose.
  */
 const arrays: OperationEntry[] = [
   define({
@@ -177,12 +163,8 @@ const volumeIdentityField: OperationField = {
 };
 
 /**
- * LVM beyond growing a volume.
- *
- * The group is never created here: which disks a machine gives to LVM is
- * decided when the machine is built. What these orders do is work inside a
- * group that exists - and every one of them names the group or the volume
- * by its UUID, because that is what makes the consent mean one thing.
+ * LVM beyond growing a volume. The group is never created here: which disks
+ * a machine gives to LVM is decided when the machine is built.
  */
 const volumes: OperationEntry[] = [
   define({

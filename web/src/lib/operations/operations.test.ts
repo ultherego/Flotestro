@@ -12,12 +12,7 @@ import {
 
 /**
  * The operations the control plane marks campaign-capable, copied by hand
- * from campaignModes in internal/opspec/campaigns.go.
- *
- * It is a copy on purpose: the panel cannot read a Go map, and a list that
- * drifts is exactly what this test is for. An operation added there and
- * not here is invisible, so the copy is updated in the same change that
- * opens a new operation to the fleet.
+ * from campaignModes in internal/opspec/campaigns.
  */
 const CAMPAIGN_ACTIONS = [
   // same payload on every host
@@ -118,8 +113,6 @@ describe("the registry", () => {
         if (!example) continue;
         const where = `${entry.action}.${field.name}: ${example}`;
         // A path in /dev is the name this kernel handed out this boot.
-        // Only an unfinished one, ending in the ellipsis, shows the shape
-        // without naming a disk.
         if (example.startsWith("/dev/") && !example.endsWith("…")) offered.push(where);
         if (/\.(service|socket|timer|mount|target)\b/.test(example)) offered.push(where);
         for (const address of example.match(/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/g) ?? []) {

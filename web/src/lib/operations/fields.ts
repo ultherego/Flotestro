@@ -1,18 +1,5 @@
 /**
  * The vocabulary every operation form is written in.
- *
- * An operation is described here as data, never as JSX: what it is called,
- * which module it belongs to, which fields it has, how those fields become
- * the payload the server takes and how a payload is read back into them. A
- * screen decides how that looks; this file decides what it means. That is
- * what lets the Bulk wizard and a host page draw the same form from one
- * description instead of each keeping its own copy of the shape.
- *
- * The form keeps flat values only - text, a number, a flag. A list is the
- * text the operator typed, one entry per line, and a key/value map is
- * "name = value" per line. Keeping the text rather than the parsed array is
- * deliberate: the operator is in the middle of typing most of the time, and
- * a value that reparses on every keystroke cannot be typed into at all.
  */
 
 /** What a field means for the value behind it. */
@@ -50,12 +37,8 @@ export type FieldValue = string | number | boolean;
 export type FormValue = Record<string, FieldValue>;
 
 /**
- * What is wrong with the form; a problem without a field is about the
- * whole order.
- *
- * The message is a fixed sentence and the values it names travel beside it
- * in `params`, so it can be translated: a sentence assembled from pieces
- * exists in one language only.
+ * What is wrong with the form; a problem without a field is about the whole
+ * order.
  */
 export type FormProblem = {
   field?: string;
@@ -64,11 +47,8 @@ export type FormProblem = {
 };
 
 /**
- * One field of a form.
- *
- * The name is the payload's own field name wherever the shapes agree, so a
- * form and the JSON it produces read as the same thing. The label says what
- * the field does to the host rather than what the API calls it.
+ * One field of a form. The name is the payload's own field name wherever the
+ * shapes agree, so a form and the JSON it produces read as the same thing.
  */
 export type OperationField = {
   name: string;
@@ -87,14 +67,6 @@ export type OperationField = {
 
 /**
  * What a host really has, for the fields that name something on it.
- *
- * The registry cannot know a device path, a unit name or a container: they
- * are different on every machine, and an example the panel invents is
- * either useless or - on a destructive operation - dangerous. A screen that
- * does know, because it has just read the host, passes what it holds under
- * the field's name, and the form offers it while still letting anything be
- * typed. The Bulk wizard, which is about many hosts at once, passes
- * nothing and the fields stay as they are.
  */
 export type FieldSuggestions = Record<string, string[]>;
 
@@ -118,9 +90,7 @@ export type OperationEntry = {
   /** The form a payload fills in, or null when the fields cannot show it. */
   fromPayload: (payload: Record<string, unknown>) => FormValue | null;
   /**
-   * What the payload acts on - the unit, the path, the packages. It is
-   * values and not prose on purpose: a screen puts its own words around it,
-   * and a list of fifty hosts has room for the target and nothing else.
+   * What the payload acts on - the unit, the path, the packages.
    */
   summary: (payload: Record<string, unknown>) => string;
   validate: (form: FormValue) => FormProblem[];
@@ -249,10 +219,6 @@ export function asPairs(value: unknown): string | null {
 /**
  * The one sub-payload an operation carries, or null when the payload is
  * shaped differently or carries a field these forms do not know.
- *
- * The strictness is the point: a payload with a field outside the list is
- * shown as JSON rather than drawn as a form that would drop it on the next
- * keystroke.
  */
 export function sub(
   payload: Record<string, unknown>, key: string, known: string[],
@@ -271,9 +237,7 @@ export function sub(
 
 /**
  * The sub-payload of a form whose fields are named after the payload's own
- * fields: every value that says something, under its own name. A value left
- * at nothing is not sent, so an order that said nothing about a field reads
- * like one on the server as well.
+ * fields: every value that says something, under its own name.
  */
 export function payloadOf(fields: OperationField[], form: FormValue): Record<string, unknown> {
   const result: Record<string, unknown> = {};
@@ -371,12 +335,6 @@ type Definition = {
 
 /**
  * Turns a written-down operation into a registry entry.
- *
- * The mechanical half - wrapping the sub-payload in its key, reading it
- * back, refusing a payload with a field the form does not know - is the
- * same for every operation and lives here. What differs per operation is
- * its fields and what it refuses, and that is all an entry has to spell
- * out.
  */
 export function define(definition: Definition): OperationEntry {
   const known = [...definition.fields.map((field) => field.name), ...(definition.extra ?? [])];

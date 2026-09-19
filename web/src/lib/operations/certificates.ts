@@ -5,12 +5,6 @@ import {
 
 /**
  * Certificates and the authorities behind them.
- *
- * The certificate itself travels in the order: it is public material and
- * the plan is meant to show what will reach the host. The private key does
- * not - it is a reference to the secret store, and the host fetches it on a
- * single-use lease right before the swap, so it is in neither the order nor
- * the audit trail.
  */
 
 const GROUP = "Certificates";

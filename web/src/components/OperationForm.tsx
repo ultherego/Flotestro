@@ -9,17 +9,6 @@ import {
 
 /**
  * The form of one operation, drawn from the registry.
- *
- * The component knows nothing about any particular operation: it takes the
- * entry, draws its fields and hands back the value. That is what lets the
- * Bulk wizard and a host page show the operator the same form, with the
- * same words and the same refusals, instead of each keeping its own copy.
- *
- * The JSON has not gone away, it has moved: the advanced view shows exactly
- * the payload the fields produce and lets it be edited by hand, for the
- * field the registry does not carry yet and for an order composed
- * elsewhere. A payload the fields can show goes back to being theirs, so
- * the advanced view is a detour rather than a one-way door.
  */
 export function OperationForm({
   entry, value, onChange, json, onJson, suggestions,
@@ -28,9 +17,7 @@ export function OperationForm({
   value: FormValue;
   onChange: (value: FormValue) => void;
   /**
-   * What the host this order is for really has, by field name. A screen
-   * that has just read the host passes it; the Bulk wizard, which orders
-   * on many hosts at once, passes nothing.
+   * What the host this order is for really has, by field name.
    */
   suggestions?: FieldSuggestions;
   /**
@@ -137,10 +124,7 @@ export function OperationForm({
   );
 }
 
-// advancedWords says what the advanced view holds right now. It reads the
-// text in the box rather than what the order carries: the operator is told
-// about what they have just typed, not about the last thing that was
-// accepted.
+// advancedWords says what the advanced view holds right now.
 function advancedWords(t: (text: string) => string, entry: OperationEntry, draft: string): string {
   if (readPayloadText(entry, draft)) {
     return t("The fields can show this payload, so they are what the order carries; close the advanced view and they are filled in with it.");
@@ -161,9 +145,7 @@ function readsAsObject(draft: string): boolean {
 }
 
 /**
- * One field. A flag is drawn as its own block rather than inside a Field,
- * because a label around a checkbox and its explanation sends every click
- * on the explanation to the checkbox.
+ * One field.
  */
 function FormField({
   field, value, problem, set, suggestions,
@@ -214,7 +196,6 @@ function control(
   // What the host has is offered, not imposed: a list beside the field
   // rather than a select, because an operator ordering something the host
   // does not report yet - a volume about to be created, a unit from a
-  // package being installed - must still be able to type it.
   const listID = suggestions && suggestions.length > 0 ? "operation-field-" + field.name : undefined;
   const list = listID ? (
     <datalist id={listID}>

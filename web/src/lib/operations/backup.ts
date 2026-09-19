@@ -4,12 +4,8 @@ import {
 } from "./fields";
 
 /**
- * Backups.
- *
- * The data flows from the host straight to the repository and never through
- * the panel. The credentials are references to the secret store: the host
- * reaches for them at execution time and hands them to the tool through the
- * environment rather than as an argument anybody could read in /proc.
+ * Backups. The data flows from the host straight to the repository and never
+ * through the panel.
  */
 
 const GROUP = "Backups";

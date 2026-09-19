@@ -35,8 +35,7 @@ type SystemState = {
 
 /**
  * The changes this page offers; when every one is refused, the lifecycle
- * section says so once. The three lifecycle orders are not operations of
- * the catalogue, but the same preview answers for them under these names.
+ * section says so once.
  */
 const OVERVIEW_CHANGES = ["system.hostname.set", "host.quarantine", "host.quarantine.release", "host.decommission"];
 
@@ -46,18 +45,17 @@ export function Overview() {
   const module = useModule<SystemState>(host.id, "system");
   const hardware = module.data?.payload?.hardware;
   // The owner and the address are facts recorded in the panel, edited in
-  // place by whoever may write the host's tags: the same right, because
-  // they are the same kind of thing - what the panel knows, not what the
-  // host reports.
+  // place by whoever may write the host's tags: the same right, because they
+  // are the same kind of thing - what the panel knows, not what the host
   const whoami = useQuery({
     queryKey: ["whoami"],
     queryFn: () => api.get<Whoami>("/api/v1/whoami"),
     staleTime: 5 * 60 * 1000,
   });
   const canEditFacts = (whoami.data?.permissions ?? []).includes("host.tag.write");
-  // Moving a host between teams is not editing a fact about it: it hands
-  // the machine to other people, so it takes its own permission, the one
-  // only the platform administrator holds out of the box.
+  // Moving a host between teams is not editing a fact about it: it hands the
+  // machine to other people, so it takes its own permission, the one only
+  // the platform administrator holds out of the box.
   const canMoveTeam = (whoami.data?.permissions ?? []).includes(HOST_TEAM_PERMISSION);
 
   // A host that has not reported its adapters has an unknown registry,
@@ -292,12 +290,6 @@ function addressSourceMeaning(source: string | undefined): string {
 
 /**
  * A hand-recorded fact of the host, shown with an editor in place.
- *
- * The write goes back with the entity tag of the host read when the
- * editor opened, so a correction made by somebody else in the meantime is
- * refused with a message rather than overwritten; the operator reads the
- * host again and decides with the newer value in front of them. The
- * reason is optional and kept in the trail.
  */
 function HostFact({ host, editable, value, shown, label, help, placeholder, path, field, testID }: {
   host: Host;
@@ -406,11 +398,6 @@ const MAX_NOTES_LENGTH = 4000;
 
 /**
  * The notes of the host, shown whole and edited in place.
- *
- * The editor is the owner's, grown to a paragraph: the write goes back
- * with the tag of the host read when the editor opened, so two people
- * writing the same note at once do not lose one text without a word.
- * The reason is optional and kept in the trail next to both texts.
  */
 function HostNotes({ host, editable }: { host: Host; editable: boolean }) {
   const t = useT();
@@ -507,13 +494,7 @@ function HostNotes({ host, editable }: { host: Host; editable: boolean }) {
 
 /**
  * The placement of the host - its site and its environment - edited in
- * place. Both are sent whole, the one that stays repeated, so the write
- * reads as "this host stands here". The reason is required: a move
- * changes who may manage the host, which budgets its changes load and
- * which groups it stands in, from the next order on, and the trail must
- * say why. The host says when it was last moved, because nothing
- * re-evaluates on its own after a move and the reader of a stale group
- * or budget needs the date.
+ * place.
  */
 function HostPlacement({ host, editable }: { host: Host; editable: boolean }) {
   const t = useT();
@@ -630,13 +611,6 @@ function HostPlacement({ host, editable }: { host: Host; editable: boolean }) {
 
 /**
  * The team of the host, and the move between teams.
- *
- * A host nobody has placed is in no team, which is not a team called
- * nothing: such a host is reachable through its site alone, and the fact
- * says so instead of showing a blank. The move has its own permission and
- * its own reason because it is the one change on this page that hands the
- * machine to other people - the form says that once, plainly, and the
- * panel does not repeat the whole doctrine at somebody who is mid-task.
  */
 export function HostTeam({ host, editable }: { host: Host; editable: boolean }) {
   const t = useT();
@@ -718,13 +692,6 @@ const HOSTNAME_PATTERN = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9
 
 /**
  * Renaming the host.
- *
- * A rename changes the identity of the host towards everything that knows
- * it by name: DNS, Kerberos, the certificates of its services, the entries
- * of other hosts. The panel knows the host by identifier, so the management
- * channel survives - the rest is checked on the host before the change and
- * reported, never guessed. Critical: the operator types the name they are
- * taking away, and the order asks for fresh authentication.
  */
 function RenameHost({ host, reported }: { host: Host; reported?: string }) {
   const t = useT();
@@ -848,8 +815,8 @@ function lifecycleMeaning(t: (text: string) => string, state: string): string {
 function Lifecycle({ host }: { host: Host }) {
   const t = useT();
   // The outcome lives here rather than in the form: the form goes away once
-  // the host is retired, and the answer - above all an unconfirmed cleanup
-  // - has to stay on screen after that.
+  // the host is retired, and the answer - above all an unconfirmed cleanup -
+  // has to stay on screen after that.
   const [outcome, setOutcome] = useState<DecommissionOutcome | null>(null);
   const refusal = host.connection_state !== "online" ? host.last_connection_refusal : undefined;
   const alive = host.lifecycle_state !== "retired" && host.lifecycle_state !== "retiring";
@@ -881,9 +848,7 @@ function Lifecycle({ host }: { host: Host }) {
 }
 
 /**
- * Who took the lifecycle decision, when the host view carries it. The
- * field is written with every transition; a view from before it was
- * exposed has none, and that is shown as unknown rather than as nobody.
+ * Who took the lifecycle decision, when the host view carries it.
  */
 function lifecycleActor(host: Host): string {
   const actor = (host as Host & { lifecycle_changed_by?: string }).lifecycle_changed_by;
@@ -892,14 +857,6 @@ function lifecycleActor(host: Host): string {
 
 /**
  * Cutting the host off and letting it back in.
- *
- * Quarantine is the first move of an incident: the host loses its session
- * and its secrets, the undelivered jobs are cancelled, and nothing runs on
- * it until somebody releases it. Revoking the certificates is a separate
- * decision, taken on a suspected key theft: a revoked certificate cannot
- * be released, only recovered. Both changes are step-up operations: the
- * operator types the hostname, gives a reason, and the order asks for
- * fresh authentication. The buttons exist only for whoever may order them.
  */
 function Quarantine({ host }: { host: Host }) {
   const t = useT();
@@ -1041,12 +998,6 @@ function Quarantine({ host }: { host: Host }) {
 
 /**
  * Why the host is not connected, when the gateway is the one that said no.
- *
- * An offline host and a refused host look the same from the connection
- * badge, and the difference is the whole diagnosis: a refused host is
- * alive and knocking, and the reason names what to do about it. The
- * certificate refusals are answered by an identity recovery; a lifecycle
- * refusal is an operator's own decision and is said to be one.
  */
 function ConnectionRefusalNotice({ host }: { host: Host }) {
   const t = useT();
@@ -1079,14 +1030,6 @@ type RecoveryOrder = EnrollmentOrder & { token?: string };
 
 /**
  * Ordering an identity recovery.
- *
- * The host stays in the fleet with its history: the order issues a token
- * that fits this host alone, and the agent on the machine trades it for a
- * new key and certificate. Meant for a host whose certificate the gateway
- * refuses - expired, unknown, revoked - and for a suspected key theft, in
- * which case the old certificate is cut off at once rather than at the
- * first session of the new one. Critical: the operator types the hostname
- * and gives a reason, and the order asks for fresh authentication.
  */
 function IdentityRecovery({ host, prompted }: { host: Host; prompted: boolean }) {
   const t = useT();
@@ -1190,9 +1133,7 @@ function IdentityRecovery({ host, prompted }: { host: Host; prompted: boolean })
 }
 
 /**
- * The recovery order and what to do with it on the host. The token is
- * shown here and never again: it is not stored in the browser and cannot
- * be read back from the panel.
+ * The recovery order and what to do with it on the host.
  */
 function RecoveryOrderResult({ host, order }: { host: Host; order: RecoveryOrder }) {
   const t = useT();
@@ -1218,15 +1159,8 @@ function RecoveryOrderResult({ host, order }: { host: Host; order: RecoveryOrder
 }
 
 /**
- * Decommissioning the host.
- *
- * The end of trust, not the end of history: the record, the inventory and
- * the audit trail stay. A connected host is asked to finish its work, drop
- * its secret leases and wipe its identity; a host without a session is
- * retired without that, and the answer says so - a machine on a shelf must
- * not be taken for a machine that wiped itself. Critical: the operator
- * types the hostname and gives a reason, and the order asks for fresh
- * authentication.
+ * Decommissioning the host. The end of trust, not the end of history: the
+ * record, the inventory and the audit trail stay.
  */
 function DecommissionHost({ host, onDone }: { host: Host; onDone: (outcome: DecommissionOutcome) => void }) {
   const t = useT();
@@ -1319,9 +1253,7 @@ function DecommissionHost({ host, onDone }: { host: Host; onDone: (outcome: Deco
 }
 
 /**
- * What the decommission ended with. The unconfirmed cleanup is shown as a
- * warning and named for what it is; the confirmed one lists what the host
- * reported.
+ * What the decommission ended with.
  */
 function DecommissionResult({ outcome }: { outcome: DecommissionOutcome }) {
   const t = useT();
@@ -1359,9 +1291,7 @@ const KIND_ICONS: Record<HostTimelineKind, IconName> = {
 
 /**
  * The host timeline. Every row is one record of one table - nothing is
- * derived here - and the row links to the page of that record. The server
- * folds in only the sources the operator may read; the ones left out are
- * named under the list rather than passed over.
+ * derived here - and the row links to the page of that record.
  */
 function RecentActivity({ host }: { host: Host }) {
   const t = useT();
@@ -1437,10 +1367,7 @@ function kindName(kind: HostTimelineKind): string {
 }
 
 /**
- * The title of a row with the link to its record. A task links to the
- * host's task list and an audit entry to the host's trail, because those
- * are the pages that show the record; a campaign has a page of its own;
- * a session has none and stays text.
+ * The title of a row with the link to its record.
  */
 function ActivityTitle({ host, item }: { host: Host; item: HostTimelineItem }) {
   const t = useT();
@@ -1461,9 +1388,8 @@ function ActivityTitle({ host, item }: { host: Host; item: HostTimelineItem }) {
 }
 
 /**
- * Who acted: a person or a token by name, the host's own agent by the
- * host's name. The agent signs its audit entries with the host identifier,
- * which nobody recognises in a list.
+ * Who acted: a person or a token by name, the host's own agent by the host's
+ * name.
  */
 function ActivityActor({ host, item }: { host: Host; item: HostTimelineItem }) {
   const t = useT();
@@ -1487,10 +1413,9 @@ function linkOf(host: Host, item: HostTimelineItem): string | undefined {
 }
 
 /**
- * The state of the record, coloured by what it means: a task or a
- * campaign target uses the shared state badge, an audit entry its outcome,
- * a lifecycle change the state the host went into, an alert whether it
- * still fires. An empty state is a dash, not a made-up "ok".
+ * The state of the record, coloured by what it means: a task or a campaign
+ * target uses the shared state badge, an audit entry its outcome, a
+ * lifecycle change the state the host went into, an alert whether it still
  */
 function ActivityState({ item }: { item: HostTimelineItem }) {
   const t = useT();
@@ -1531,10 +1456,8 @@ function lifecycleTone(state: string): string {
 }
 
 /**
- * The page an adapter serves, by the adapter's name: the row of the
- * registry links there, so "packages.pacman is available" is one click
- * from the packages themselves. An adapter without a page of its own
- * (the audit trail, the MAC switch) stays text.
+ * The page an adapter serves, by the adapter's name: the row of the registry
+ * links there, so "packages.
  */
 export function adapterSegment(name: string): string | undefined {
   const bySegment: Record<string, string> = {

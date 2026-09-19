@@ -70,9 +70,7 @@ type VolumeGroup = {
 };
 
 /**
- * One logical volume. `attributes` is lv_attr as LVM prints it and
- * `data_percent` is how full a snapshot's copy-on-write space is - absent
- * on an ordinary volume, which has none, rather than zero.
+ * One logical volume.
  */
 type LogicalVolume = {
   name: string;
@@ -95,9 +93,7 @@ type PhysicalVolume = {
 };
 
 /**
- * One member of a software array. The role is what the array thinks the
- * device is now; the by-id link is what an order binds to, and a member
- * without one says why instead of showing an empty cell.
+ * One member of a software array.
  */
 type RAIDMember = {
   path: string;
@@ -114,10 +110,7 @@ type RAIDMember = {
 };
 
 /**
- * One software array. `sync_percent` is absent when nothing is being
- * rebuilt - not a rebuild standing at zero - and
- * `detail_unavailable_reason` says why an array carries no UUID, which is
- * the same as saying no order can bind to it.
+ * One software array.
  */
 type RAIDArray = {
   name: string;
@@ -195,10 +188,9 @@ type SmartResult = {
 type MountRow = { mount: Mount; times: number };
 
 /**
- * The mounts folded by mount point and source: a shared folder mounted
- * twice at the same path (what a provisioning tool does when it runs
- * again) is one row that says "twice", not two rows that read as two
- * different filesystems.
+ * The mounts folded by mount point and source: a shared folder mounted twice
+ * at the same path (what a provisioning tool does when it runs again) is one
+ * row that says "twice", not two rows that read as two different
  */
 export function mountRows(mounts: Mount[]): MountRow[] {
   const rows: MountRow[] = [];
@@ -218,10 +210,8 @@ export function mountRows(mounts: Mount[]): MountRow[] {
 }
 
 /**
- * Whether anything sits on the device: its own mount points, or a
- * partition or volume under it that is mounted or used as swap. A disk
- * whose partitions are in use is not a blank disk to format, whatever
- * its own row says.
+ * Whether anything sits on the device: its own mount points, or a partition
+ * or volume under it that is mounted or used as swap.
  */
 export function deviceInUse(device: Device, devices: Device[]): boolean {
   if ((device.mountpoints ?? []).length > 0) return true;
@@ -242,9 +232,6 @@ export function byIdName(device: Device): string {
 
 /**
  * Whether the device has an identity a destructive operation can bind to.
- * The host applies the same rule: a by-id link, and behind it a WWN or a
- * serial - or the UUID of a device-mapper or RAID volume, which is the
- * identity such a device has. A dm-name link is a name, not an identity.
  */
 export function hasStableIdentity(device: Device): boolean {
   const link = byIdName(device);
@@ -254,10 +241,8 @@ export function hasStableIdentity(device: Device): boolean {
 }
 
 /**
- * Why the host would refuse to format or wipe the device, in the host's
- * own codes, or nothing when the operation may be ordered. The host checks
- * again right before the change; this is the same answer given before the
- * operator clicks, so a refused plan is shown as refused and not offered.
+ * Why the host would refuse to format or wipe the device, in the host's own
+ * codes, or nothing when the operation may be ordered.
  */
 export function destructiveRefusal(device: Device, devices: Device[]): { code: string; reason: string } | null {
   if (!hasStableIdentity(device)) {
@@ -280,11 +265,6 @@ export function destructiveRefusal(device: Device, devices: Device[]): { code: s
 
 /**
  * The host's storage.
- *
- * The panel shows the kernel state and the fstab content separately: the
- * file says what is to be mounted after a reboot, not what is mounted now.
- * The difference between the two is usually the reason somebody opens this
- * tab.
  */
 /** The changes this page offers; when every one is refused, the page says so once. */
 const STORAGE_CHANGES = [
@@ -296,9 +276,7 @@ const STORAGE_CHANGES = [
 
 /**
  * Why the panel will not fail or remove this member, in the host's own
- * codes, or nothing when the order may be given. The host checks again
- * before the change; this is the same answer, given before the operator
- * clicks.
+ * codes, or nothing when the order may be given.
  */
 export function memberRefusal(array: RAIDArray, member: RAIDMember, losingData: boolean):
   { code: string; reason: string } | null {
@@ -340,9 +318,8 @@ export function isSnapshot(volume: LogicalVolume): boolean {
 }
 
 /**
- * The sentence the panel gives when somebody looks for a button that
- * builds or tears down an array. The boundary is drawn on purpose, and a
- * boundary that says nothing reads as a missing feature.
+ * The sentence the panel gives when somebody looks for a button that builds
+ * or tears down an array.
  */
 const ARRAY_LIFECYCLE_REFUSAL =
   "The panel manages the members of an array that exists. Creating an array and destroying one are decisions about a machine's whole disk layout, taken on the machine when it is built, not operations run over a running fleet.";
@@ -359,9 +336,9 @@ export function Storage() {
   const [smartOf, setSmartOf] = useState<Device | null>(null);
   const [message, setMessage] = useState("");
   const [wizard, setWizard] = useState(false);
-  // The order being composed in a form of the operation registry: the
-  // volume and group operations need values typed in, and they are drawn
-  // from the same registry the Bulk wizard draws from.
+  // The order being composed in a form of the operation registry: the volume
+  // and group operations need values typed in, and they are drawn from the
+  // same registry the Bulk wizard draws from.
   const [layer, setLayer] = useState<{ action: string; seed: FormValue } | null>(null);
   const unknown = <span className="badge unknown">{t("unknown")}</span>;
 
@@ -1029,8 +1006,6 @@ export function Storage() {
               action: intent.action,
               reason,
               // A destructive operation requires the target name typed out.
-              // The other operations do not need it, but sending it does no
-              // harm.
               target_confirmation: confirmation,
               payload: intent.payload,
             })
@@ -1043,14 +1018,8 @@ export function Storage() {
 }
 
 /**
- * One software array: what it is, what it is left with, and what may be
- * done to its members.
- *
- * The numbers the operator came for are the slot count and the rebuild:
- * "2 of 3 slots filled" is an array that still answers every read and has
- * lost its redundancy, and that is worth knowing before the second disk
- * goes. A level that keeps no copy is said outright, because such an array
- * is never "healthy with a spare to lose".
+ * One software array: what it is, what it is left with, and what may be done
+ * to its members.
  */
 function ArrayCard({ array, hostID, onIntent, onAdd }: {
   array: RAIDArray;
@@ -1062,8 +1031,8 @@ function ArrayCard({ array, hostID, onIntent, onAdd }: {
   const unknown = <span className="badge unknown">{t("unknown")}</span>;
   const members = array.members ?? [];
   // The order a member operation carries: the array by the UUID out of its
-  // superblock, the member by the link that still means the same disk
-  // after a reboot. The panel has already refused what has neither.
+  // superblock, the member by the link that still means the same disk after
+  // a reboot.
   const memberOrder = (member: RAIDMember) => ({
     array: array.path,
     device: member.path,
@@ -1223,11 +1192,6 @@ function ArrayCard({ array, hostID, onIntent, onAdd }: {
 
 /**
  * What this host really has, for the fields of a storage order.
- *
- * The registry names no device, no array and no group, because each of
- * them is called something different on every machine and an order that
- * names the wrong one destroys what is on it. The page has just read the
- * host, so it offers exactly what the host reported - and nothing else.
  */
 export function storageSuggestions(snapshot?: Snapshot): FieldSuggestions {
   if (!snapshot) return {};
@@ -1247,12 +1211,6 @@ export function storageSuggestions(snapshot?: Snapshot): FieldSuggestions {
 /**
  * The form of one volume or array operation, drawn from the operation
  * registry.
- *
- * The screen does not know the shape of these orders: it hands the
- * registry the identity read off the row - the group's UUID, the volume's
- * UUID, the array's UUID - and the registry draws the fields, refuses what
- * the server would refuse and builds the payload. One description of an
- * operation, used by this page and by the Bulk wizard alike.
  */
 function LayerWizard({ action, seed, suggestions, onIntent, onClose }: {
   action: string;
@@ -1298,13 +1256,8 @@ function LayerWizard({ action, seed, suggestions, onIntent, onClose }: {
 }
 
 /**
- * The SMART state of one disk.
- *
- * The read goes through a job like every other read: the tool needs root
- * to talk to the device. A virtual disk, a USB bridge without passthrough
- * or a device the tool does not know comes back as unsupported with the
- * tool's own words - the panel shows that reason and invents no healthy
- * disk. Every counter is shown only when the device reported it.
+ * The SMART state of one disk. The read goes through a job like every other
+ * read: the tool needs root to talk to the device.
  */
 function SmartReport({ device, onClose }: { device: Device; onClose: () => void }) {
   const t = useT();
@@ -1415,11 +1368,7 @@ function SectorCount({ count }: { count: number }) {
 }
 
 /**
- * The device identity sent together with the operation. The host compares
- * it with its state and refuses at the first mismatch: /dev/sdX after a
- * reboot may point at a different disk than the one the operator is looking
- * at. The size is not sent as an identity: two disks of the same size prove
- * nothing about each other.
+ * The device identity sent together with the operation.
  */
 export function identity(device: Device): Record<string, unknown> {
   return {
@@ -1432,16 +1381,7 @@ export function identity(device: Device): Record<string, unknown> {
 }
 
 /**
- * The mount wizard. The source is given by a durable identifier, because
- * the /dev/sdX name depends on the detection order and may point at a
- * different disk after a reboot.
- *
- * The identifiers are the host's own: the filesystems this host reported
- * are offered by their UUID, with the device and the type beside them, so
- * nobody has to copy a string out of another tab - and the panel suggests
- * no device of its own invention. Something the list does not hold, a
- * network filesystem among others, is still typed in by hand, which is
- * why this is a list beside the field rather than a closed choice.
+ * The mount wizard.
  */
 function MountWizard({ devices, onIntent }: { devices: Device[]; onIntent: (intent: Intent) => void }) {
   const t = useT();

@@ -16,9 +16,7 @@ const SYSCTL_NAMESPACES = ["vm.", "net.", "fs.", "kernel.", "user."];
 
 /**
  * Kernel modules the panel does not block, and the sentence each refusal
- * says. The whole sentence is written out rather than assembled from a
- * reason, because a sentence put together from pieces exists in one
- * language only.
+ * says.
  */
 const PROTECTED_MODULES: Record<string, string> = {
   ext4: "The panel does not block {value}: without it the host cannot mount its own root.",

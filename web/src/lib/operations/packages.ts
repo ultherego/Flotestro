@@ -5,12 +5,6 @@ import {
 
 /**
  * Packages and the sources they come from.
- *
- * An installation and an upgrade compute a different transaction on every
- * host, so they carry no set of versions here: the planning step reads what
- * each host would really do and the approval covers that set. A source, a
- * hold and a repair are declarations about a name and mean the same
- * everywhere.
  */
 
 const GROUP = "Packages";

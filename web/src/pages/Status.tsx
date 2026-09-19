@@ -8,14 +8,8 @@ import { StatusBar, type Segment, type WidgetTone } from "../components/widgets"
 import { useT } from "../i18n";
 
 /**
- * The condition of the panel itself: is it the database, the publisher,
- * the scheduler or a feed that is not well. The metrics endpoint carries
- * the same facts for a scraper; this screen is for the person without
- * one, and it refreshes itself so an incident can be watched from it.
- *
- * Every block is judged by the server: fine, not fine with a reason, or
- * unknown when the panel cannot tell. Unknown is drawn grey, never green -
- * a light that means "nobody looked" is the one that costs an outage.
+ * The condition of the panel itself: is it the database, the publisher, the
+ * scheduler or a feed that is not well.
  */
 
 /** How often the screen asks again; an incident moves faster than a page reload. */
@@ -48,9 +42,8 @@ export function blockTone(block: Pick<StatusBlock, "ok" | "attention">): WidgetT
 }
 
 /**
- * A number of seconds as a short duration. Fractions matter below a
- * minute - a latency of 0.4 s and one of 4 s are different conditions -
- * and stop mattering above it.
+ * A number of seconds as a short duration. Fractions matter below a minute -
+ * a latency of 0.
  */
 export function formatSeconds(value: number): string {
   if (!Number.isFinite(value) || value < 0) return "—";
@@ -459,8 +452,8 @@ function About({ block }: { block: StatusBlock }) {
 
 /**
  * A Go duration such as 720h0m0s, 4m30s or 29m53s in the units a person
- * reads it in: whole days, hours, minutes and seconds, the zero parts
- * left out. A value in another shape is shown as it came.
+ * reads it in: whole days, hours, minutes and seconds, the zero parts left
+ * out.
  */
 export function humanDuration(value: string): string {
   const match = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)?$/.exec(value);
