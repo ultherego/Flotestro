@@ -1,0 +1,67 @@
+# The site: docs/site/ in the tree becomes the root of gh-pages.
+#
+# The branch also carries the signed package repository under packages/, which
+# the release publishes and this workflow must never touch: it replaces the
+# files it owns and leaves everything else where it is.
+name: Site
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "docs/site/**"
+      - ".github/workflows/site.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  # Two publications of the same branch would race on the push.
+  group: gh-pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish the site
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          path: source
+
+      - name: The branch as it stands
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          url="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git clone --quiet --depth 1 --branch gh-pages "$url" pages
+          git -C pages config user.name "github-actions[bot]"
+          git -C pages config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Replace what the site owns
+        run: |
+          set -euo pipefail
+          # Everything the site published before, and nothing else: packages/
+          # belongs to the release and .git to git.
+          find pages -mindepth 1 -maxdepth 1 \
+            -not -name .git -not -name packages -exec rm -rf {} +
+          cp -a source/docs/site/. pages/
+          : > pages/.nojekyll
+          test -d pages/packages || echo "no packages/ yet; the release has not published one"
+
+      - name: Publish
+        run: |
+          set -euo pipefail
+          cd pages
+          git add -A
+          if git diff --cached --quiet; then
+            echo "the site is already what the tree says"
+            exit 0
+          fi
+          git commit --quiet -m "The site of ${GITHUB_SHA:0:12}"
+          git push --quiet origin gh-pages
+          echo "published $(find . -name '*.html' -not -path './packages/*' | wc -l) pages"
