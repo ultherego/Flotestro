@@ -1,6 +1,10 @@
 package packages
 
-import "testing"
+import (
+	"os"
+	"strings"
+	"testing"
+)
 
 // updateinfoOutput is the real output of "dnf updateinfo info" from Fedora 42.
 const updateinfoOutput = `Name        : FEDORA-2025-191738fa1f
@@ -108,5 +112,17 @@ func TestParseNEVRAReadsANameWithDashes(t *testing.T) {
 		if _, ok := ParseNEVRA(bad); ok {
 			t.Errorf("%q was accepted as a NEVRA", bad)
 		}
+	}
+}
+
+// The findings are read from the metadata the host already has: a dnf call
+// that may fetch turns an isolated site into a fleet nobody assessed.
+func TestTheAdvisoryReadNeverFetches(t *testing.T) {
+	source, err := os.ReadFile("updateinfo.go")
+	if err != nil {
+		t.Fatalf("reading the module: %v", err)
+	}
+	if !strings.Contains(string(source), `"--cacheonly", "updateinfo"`) {
+		t.Error("the advisory read does not pass --cacheonly")
 	}
 }

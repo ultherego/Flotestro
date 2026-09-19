@@ -38,6 +38,10 @@ const TypeSecurity = "security"
 // cvePattern catches CVE identifiers anywhere in a description.
 var cvePattern = regexp.MustCompile(`CVE-\d{4}-\d{4,7}`)
 
+// ReasonAdvisoriesUnreadable is the typed reason the panel reads when the
+// host's own metadata could not be turned into findings.
+const ReasonAdvisoriesUnreadable = "host_advisories_unreadable"
+
 // Advisories reads the vendor findings known to the host.
 func Advisories(ctx context.Context, manager string,
 	installed []InstalledPackage) ([]Advisory, string) {
@@ -46,10 +50,13 @@ func Advisories(ctx context.Context, manager string,
 		// findings straight from the tracker of the vendor.
 		return nil, ""
 	}
-	// --all: the findings already applied as well.
-	result := run(ctx, 5*time.Minute, dnfPath, "updateinfo", "info", "--all", "--with-cve")
+	// --cacheonly, like every other dnf call of this module: the findings are
+	// read from the metadata the host already has, never fetched here.
+	result := run(ctx, 5*time.Minute, dnfPath, "--cacheonly", "updateinfo", "info", "--all", "--with-cve")
 	if !result.Ran || result.ExitCode != 0 {
-		return nil, "dnf updateinfo: " + result.Reason()
+		// A typed reason, because the panel judges coverage by it: a shell
+		// message there reads as a host nobody assessed, with no code to act on.
+		return nil, ReasonAdvisoriesUnreadable + ": " + result.Reason()
 	}
 	return NarrowToInstalled(ParseUpdateinfo(result.Stdout), installed), ""
 }

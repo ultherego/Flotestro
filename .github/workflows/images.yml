@@ -190,6 +190,10 @@ jobs:
           parse -f compose.yaml -f compose.tools.yaml --profile tools --profile restore
           parse -f compose.yaml -f compose.local-db.yaml -f compose.tools.yaml \
             --profile tools --profile restore
+          # Air-gapped: the same, plus the package repository of the release.
+          export FLOTESTRO_PACKAGE_REPOSITORY_URL=http://packages.invalid:8090
+          parse -f compose.yaml -f compose.airgap.yaml
+          parse -f compose.yaml -f compose.local-db.yaml -f compose.airgap.yaml
           # The relay: its own project, on the site host.
           parse -f compose.relay.yaml
           parse -f compose.relay.yaml --profile enroll

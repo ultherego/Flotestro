@@ -7,15 +7,16 @@ the signed repository.
 
 | File | Role |
 |---|---|
-| `Containerfile` | All three images: the control plane (target `control-plane`), the relay (target `relay`) and the administration tools (target `admin-tools`). |
+| `Containerfile` | All four images: the control plane (target `control-plane`), the relay (target `relay`), the administration tools (target `admin-tools`) and the package repository of an isolated site (target `package-repository`). |
 | `compose.yaml` | The control plane alone, against a database somebody else runs. |
 | `compose.local-db.yaml` | The overlay that adds a local PostgreSQL for a laboratory or a small fleet. |
 | `compose.relay.yaml` | The relay of one site, run on the site host as its own project. |
+| `compose.airgap.yaml` | The overlay that puts the signed package repository of the release beside the control plane, for a site with no route out. |
 | `compose.tools.yaml` | The overlay with the backup and the restore, behind the profiles `tools` and `restore`. It adds nothing to `up`. |
 | `../.dockerignore` | The allowlist of the build context; it lies at the repository root because that is the context the build runs with. |
-| `../.github/workflows/images.yml` | What builds, publishes, describes and signs the three images, and what a pull request runs to prove the files above still work. |
+| `../.github/workflows/images.yml` | What builds, publishes, describes and signs the three service images, and what a pull request runs to prove the files above still work. |
 
-## The three profiles
+## The four profiles
 
 **Quick start** - the control plane and a PostgreSQL of its own, one host,
 local backup. For a laboratory, a demonstration and a small installation.
@@ -40,8 +41,17 @@ docker compose -f compose.relay.yaml --profile enroll run --rm relay-enroll
 docker compose -f compose.relay.yaml up -d
 ```
 
-The backup and the restore are not a fourth profile of a deployment: they are
-two one-shot services behind the profiles `tools` and `restore` in
+**Air-gapped** - any of the three above, plus the package repository of the
+release on the network the managed hosts reach. The site receives the images
+on media and installs its agents from the fourth one; nothing reaches the
+Internet.
+
+```
+docker compose -f compose.yaml -f compose.airgap.yaml up -d
+```
+
+The backup and the restore are not a profile of a deployment: they are two
+one-shot services behind the profiles `tools` and `restore` in
 `compose.tools.yaml`, which adds nothing to `up`. See "Taking the pair".
 
 `compose.yaml` never names a database service, a host called `postgres` or a
@@ -74,10 +84,35 @@ docker buildx build -f deploy/Containerfile --target admin-tools \
   -t ghcr.io/ultherego/flotestro-admin-tools:0.54.0 --push .
 ```
 
-These are the commands by hand, for a laboratory. A release runs all three
-from `.github/workflows/images.yml`, which also attaches the bills of
-materials and the provenance, signs the result and prints the digests; see
-"The supply chain" below.
+The fourth image is built from something the source tree does not contain: a
+repository that is already built and already signed. `packaging/build-release.sh`
+makes the packages, `packaging/sign-repo.sh` signs them into a tree, and that
+tree enters the build as a named context. The signing key stays on the machine
+that used it and never reaches a layer - what the image carries is the public
+half, `flotestro-repo.asc`, which is what a host imports before it installs
+anything.
+
+```
+packaging/build-release.sh all 0.54.0 /srv/release
+packaging/sign-repo.sh /srv/release <gpg-key-id> /srv/repo
+
+docker build -f deploy/Containerfile --target package-repository \
+  --build-context repository=/srv/repo \
+  --build-arg VERSION=0.54.0 \
+  --build-arg COMMIT="$(git rev-parse HEAD)" \
+  --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  -t ghcr.io/ultherego/flotestro-package-repository:0.54.0 .
+```
+
+The build refuses a context without `flotestro-repo.asc`: a tree that carries
+no public key is not one a host could verify, and an image that served it
+would fail on every managed host instead of on the machine that built it.
+
+These are the commands by hand, for a laboratory. A release runs the three
+service images from `.github/workflows/images.yml`, which also attaches the
+bills of materials and the provenance, signs the result and prints the
+digests; see "The supply chain" below. The repository image is built after the
+packages are signed, because that is the artefact it is made of.
 
 The build arguments are written into the binaries as `buildinfo.Version`,
 `buildinfo.Commit` and `buildinfo.Date` - the same symbols the release script
@@ -98,6 +133,10 @@ our own (`cmd/container-healthcheck`) precisely because there is nothing in
 the image to call an endpoint with; debugging is done with a support bundle
 or the tools image, never by installing something into a running container.
 
+The package repository image is the same base again: it is a static server
+and a directory of already-signed files, and an image the whole fleet
+downloads from is the last place to put a shell.
+
 The tools image is the one exception, and only where it has to be. It is
 built on the image of the PostgreSQL server, because a dump is written by
 the client of the server and that client is a C program with a distribution
@@ -114,7 +153,7 @@ occasions and they are deliberately different:
 
 | Trigger | What runs |
 |---|---|
-| A tag `v*` | The build context is checked, every Compose combination is parsed, the three images are built for `linux/amd64` and `linux/arm64` and **pushed** to GHCR, each with a bill of materials and a provenance statement attached, signed with cosign when the run has an identity, and the digests are printed. |
+| A tag `v*` | The build context is checked, every Compose combination is parsed, the three service images are built for `linux/amd64` and `linux/arm64` and **pushed** to GHCR, each with a bill of materials and a provenance statement attached, signed with cosign when the run has an identity, and the digests are printed. |
 | A pull request touching `deploy/`, `cmd/`, `internal/`, `db/`, `web/`, `go.mod`, `go.sum` or `.dockerignore` | The same checks and the same build for both platforms, and **nothing is pushed**: a Containerfile that no longer builds is found while there is still a branch to fix it on. |
 | `workflow_dispatch` | A dry run of the above on a branch. It pushes nothing either. |
 
@@ -300,6 +339,206 @@ For a relay, create `relay.yaml` and `relay-ca.pem` next to
 `compose.relay.yaml` before the first start - a bind mount whose source does
 not exist becomes a directory - then register the relay with a one-time token
 from the panel and start it. The token file is deleted afterwards.
+
+## Into an isolated site
+
+An air-gapped site receives the release on media and nothing else. Four images
+cross the gap:
+
+| Image | Why it has to be there |
+|---|---|
+| `flotestro-control-plane` | The panel and the two agent listeners. |
+| `flotestro-package-repository` | The signed packages of the same release; the fleet installs its agents from it and from nowhere else. |
+| `flotestro-admin-tools` | The backup pair. A site that cannot pull an image cannot improvise one on the day it has to restore. |
+| `flotestro-relay` | Only where the site has a relay; a single-network site does not need it. |
+
+PostgreSQL is the site's own, from whatever channel the site already trusts
+for its databases: it is not ours to carry.
+
+### On the connected side
+
+Verify the identity of each image first, then take it. A signature checked
+after the crossing would be a signature checked against a transparency log the
+site cannot reach - the verification belongs where the network is.
+
+```
+version=0.56.0
+owner=ultherego
+images="control-plane package-repository admin-tools relay"
+
+for name in $images; do
+  reference="ghcr.io/$owner/flotestro-$name:$version"
+  cosign verify \
+    --certificate-identity-regexp '^https://github\.com/ultherego/Flotestro/\.github/workflows/images\.yml@refs/tags/v' \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+    "$reference"
+  docker pull "$reference"
+  docker save -o "flotestro-$name-$version.tar" "$reference"
+done
+```
+
+Then write down what the isolated side is to check, and sign it with the same
+GPG key the packages are signed with - that key is the one trust anchor the
+site already has, and it is the only one that survives a gap:
+
+```
+for name in $images; do
+  printf '%s %s\n' "flotestro-$name-$version.tar" \
+    "$(docker image inspect --format '{{.Id}}' "ghcr.io/$owner/flotestro-$name:$version")"
+done > IMAGE-IDS
+
+sha256sum flotestro-*-$version.tar IMAGE-IDS > SHA256SUMS
+gpg --local-user <gpg-key-id> --armor --detach-sign SHA256SUMS
+```
+
+The image id and not the registry digest, deliberately: `docker save` writes an
+archive of its own and `docker load` gives the image a new manifest, so the
+`sha256:` the release printed does not survive the crossing. The pin at an
+isolated site is therefore the image id recorded here plus the signed
+checksum of the archive, and `compose.pins.yaml` is not usable there. A site
+that runs a local registry of its own has the other option - `skopeo copy
+docker://<reference>@sha256:... oci-archive:...` keeps the manifest, and then
+the digest pin works as everywhere else.
+
+### On the isolated side
+
+The public key is imported once, from a copy whose fingerprint was compared
+out of band; everything after that is checked against it.
+
+```
+gpg --import flotestro-repo.asc
+gpg --verify SHA256SUMS.asc SHA256SUMS
+sha256sum --check --strict SHA256SUMS
+```
+
+Only then is anything loaded, and the ids are compared against the file that
+was signed:
+
+```
+for archive in flotestro-*.tar; do docker load -i "$archive"; done
+
+while read -r archive expected; do
+  reference="$(printf '%s' "$archive" | sed -E 's/^flotestro-(.*)-([^-]+)\.tar$/ghcr.io\/ultherego\/flotestro-\1:\2/')"
+  actual="$(docker image inspect --format '{{.Id}}' "$reference")"
+  [ "$actual" = "$expected" ] || echo "$reference is $actual, not the $expected that was signed" >&2
+done < IMAGE-IDS
+```
+
+The images keep the `ghcr.io/ultherego/...` names although the site cannot
+reach that registry. That is on purpose: `docker load` restores an image under
+exactly the name it was saved with, the Compose files name it the same way,
+and an image renamed at the gap is one nobody can match against what was
+signed. Nothing pulls, because every reference already resolves locally.
+
+### Pointing the panel at it
+
+The panel does not serve the repository and does not proxy it: it composes the
+"Add host" commands from one address, and the hosts fetch from that address
+themselves. So the address is the one the *hosts* reach - a name or address of
+this machine and the published port - never a Compose service name.
+
+```
+cat >> .env <<'SETTINGS'
+FLOTESTRO_PACKAGE_REPOSITORY_URL=http://panel.site.example.org:8090
+SETTINGS
+
+docker compose -f compose.yaml -f compose.airgap.yaml up -d
+```
+
+What the panel then writes into the commands, and what the repository image
+serves, is the layout `packaging/sign-repo.sh` writes: `flotestro-repo.asc`
+at the root, `deb/dists/<channel>/main` for apt, `rpm/<channel>` for dnf and
+`arch/<channel>` for pacman. Left empty, `FLOTESTRO_PACKAGE_REPOSITORY_URL`
+leaves a placeholder in those commands and the "Add host" screen says so in a
+warning; it is not a setting the panel guesses.
+
+Plain HTTP is not a weakness here. What a package manager trusts is the
+signature over the index and the key it imported once, and the fleet's
+verification of a package is the same on an isolated site as anywhere else. A
+site that wants TLS anyway puts the same edge in front of port 8090 as in
+front of the panel.
+
+From a managed host, the whole chain is one command:
+
+```
+curl -fsS http://panel.site.example.org:8090/flotestro-repo.asc | gpg --show-keys
+```
+
+## What an isolated site cannot do
+
+The vulnerability feeds reach the Internet by design, and no profile changes
+that. This is the honest account of what a site without a route out keeps,
+what it loses, and what it can do about each.
+
+**What still works, completely.** Everything the fleet is managed with: the
+inventory, the tasks, the campaigns, the monitoring and its alert rules, the
+audit trail, the backups, the agent upgrades from the repository above. The
+vulnerability assessment itself is local too - the hosts report their package
+lists, the panel compares versions with dpkg and rpm rules of its own, and the
+feed snapshots live in the database rather than being fetched per request. A
+panel that synchronised once goes on assessing its fleet from what it has,
+offline, indefinitely.
+
+**What reports itself unavailable, and how.** The status block
+`vulnerability_feeds` answers *unknown* while no feed has ever been read and
+*failed* once a snapshot is older than `FLOTESTRO_VULN_MAX_SNAPSHOT_AGE` (six
+hours by default). Per source the panel shows the moment of the last fetch,
+whether it is stale, and the error of the last attempt. Per host the coverage
+reason says which of the two cases it is: `feed_stale` still produces findings
+- day-old data beat none - while `feed_missing` produces none at all, and the
+panel states in as many words that zero findings there means nothing could be
+decided, not that the host is clean. Two things are worth knowing before they
+are seen: a fetch that simply cannot reach the network is recorded as the raw
+error text of the attempt rather than as a typed code, and on an installation
+that never fetched anything the per-source table stays empty, so the status
+block is the place that says so.
+
+**What an operator does instead.** Every distribution source accepts a
+`file://` address, and a copy on the panel's disk is read exactly as the
+remote feed is - including the conditional fetch, so an unchanged copy is not
+re-parsed. The commented block in `compose.airgap.yaml` is the shape of it;
+what has to be on the media is:
+
+| Source | What to copy |
+|---|---|
+| Debian | The tracker dump, one JSON file, pointed at directly. |
+| Ubuntu | A directory holding `com.ubuntu.<release>.cve.oval.xml.bz2` for each release in the fleet. |
+| Red Hat and Fedora | A directory holding `archive_latest.txt`, the `.tar.zst` archive it names, `changes.csv` and `deletions.csv`. |
+
+A scheduled import is then a copy job on the media and nothing more; the panel
+picks the new file up at its next cycle.
+
+**The gaps, plainly.** Four of them, and none has a workaround inside the
+product today.
+
+*The age of a copied feed is not the panel's to know.* A local file is
+confirmed unchanged from its own size and modification time, so a copy nobody
+replaces keeps reporting itself fresh instead of going stale. The warning an
+isolated site needs most is the one the offline path suppresses, and until
+that changes the age of the feeds is the operator's calendar, not a panel
+screen.
+
+*NVD has no offline form at all.* It is read page by page from a live API
+against one address, so no static file can stand in for it; this profile
+therefore switches it off rather than letting a timer fail every six hours.
+What is lost is enrichment only - the descriptions and the CVSS scores. The
+findings, their packages and the vendor's own severity stay; a CVE the vendor
+did not rate shows as unrated rather than as harmless.
+
+*A Fedora host reads its own advisories, and that read needs a repository.*
+For Fedora the findings are settled by the host's `dnf updateinfo` rather than
+by a central feed, and that call is the one place in the product that does not
+run against the cache alone. On a host whose metadata has expired and which
+has no route to a mirror it fails, the host is then assessed as nothing at
+all, and the shell's own error stands where a typed reason should. A site that
+mirrors its distribution for its own hosts does not meet this; a site that
+mirrors only Flotestro does.
+
+*A copied feed is trusted because it is on the disk.* Nothing verifies a
+signature over it and nothing records where it came from, so the trust
+boundary moves to whoever put the file there. On an isolated site that is a
+deliberate, auditable act by an operator - but it is not the product checking
+anything, and it should not be described as if it were.
 
 ## The database and the state are one backup pair
 

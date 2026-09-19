@@ -30,7 +30,7 @@ off.
 | `FLOTESTRO_ENROLLMENT_ADDR` | `:8444` | The enrollment endpoint (TLS, no client certificate). | yes | Answers strangers; a request is bounded to 256 KiB. |
 | `FLOTESTRO_ADVERTISE` | `127.0.0.1` | The addresses and names the agents see the panel under, comma separated. They enter the gateway certificate and are reserved: no relay may carry one of them. | yes | A panel left at the loopback serves no fleet and says so at start. |
 | `FLOTESTRO_PUBLIC_URL` | empty | The panel address as the browser sees it; the OIDC redirect and the Secure flag of the cookies follow from it. | yes | |
-| `FLOTESTRO_PACKAGE_REPOSITORY_URL` | empty | The base address of the signed package repository the "Add host" instructions point at. | yes | |
+| `FLOTESTRO_PACKAGE_REPOSITORY_URL` | empty | The base address of the signed package repository the "Add host" instructions point at; in an isolated site, the package-repository image of the air-gapped profile. It is the address the hosts reach, not a Compose service name. | yes | |
 | `FLOTESTRO_WEB_ROOT` | empty | The directory with the built panel; empty serves the API alone. | yes | |
 | `FLOTESTRO_GATEWAY_ID` | the hostname | The name of this gateway in a multi-gateway installation; sessions and leases are tagged with it. | yes | |
 
@@ -218,10 +218,10 @@ What follows from that, on the API and on the screen:
 | `FLOTESTRO_VULN_SYNC_INTERVAL` | `30m` | How often the panel asks the trackers about changes. | yes | |
 | `FLOTESTRO_VULN_MAX_SNAPSHOT_AGE` | `6h` | The age above which a feed is described as stale next to every assessment. | yes | |
 | `FLOTESTRO_VULN_DEBIAN_URL` | `https://security-tracker.debian.org/tracker/data/json` | The Debian tracker dump (`https://` or `file://`); empty disables the source. | yes | |
-| `FLOTESTRO_VULN_UBUNTU_URL` | `https://security-metadata.canonical.com/oval/` | The directory with the OVAL data of Canonical; empty disables the source. | yes | |
-| `FLOTESTRO_VULN_REDHAT_URL` | `https://security.access.redhat.com/data/csaf/v2/vex/` | The directory with the CSAF/VEX data of Red Hat; empty disables the source. | yes | |
+| `FLOTESTRO_VULN_UBUNTU_URL` | `https://security-metadata.canonical.com/oval/` | The directory with the OVAL data of Canonical (`https://` or `file://`); empty disables the source. | yes | |
+| `FLOTESTRO_VULN_REDHAT_URL` | `https://security.access.redhat.com/data/csaf/v2/vex/` | The directory with the CSAF/VEX data of Red Hat (`https://` or `file://`); empty disables the source. | yes | |
 | `FLOTESTRO_VULN_REDHAT_CACHE` | `/var/lib/flotestro/vuln/redhat` | Where the Red Hat findings read so far are kept between cycles. | yes | |
-| `FLOTESTRO_VULN_NVD_URL` | `https://services.nvd.nist.gov/rest/json/cves/2.0` | The NVD API for the descriptions and scores; empty disables the enrichment. NVD settles nothing about a host. | yes | |
+| `FLOTESTRO_VULN_NVD_URL` | `https://services.nvd.nist.gov/rest/json/cves/2.0` | The NVD API for the descriptions and scores; empty disables the enrichment, which is what an isolated site sets - NVD has no offline form. NVD settles nothing about a host. | yes | |
 | `FLOTESTRO_VULN_NVD_KEY` | empty | The NVD API key; without it the first read takes around twenty minutes. | yes | Secret; the settings screen shows only whether it is set. |
 | `FLOTESTRO_VULN_NVD_INTERVAL` | `6h` | How often the descriptions are refreshed. | yes | |
 | `FLOTESTRO_VULN_SHRINK_SHARE` | `0.4` | How much of the snapshot in force a fetch may lose and still be activated. A fetch that loses more, or that stops covering a release the snapshot in force covered, is not activated: it is kept as a candidate with the reason `feed_shrank` or `feed_release_missing`, the previous snapshot stays in force and ages into stale, and an operator accepts the candidate deliberately from the Vulnerabilities screen (`POST /api/v1/vulnerabilities/snapshots/{id}/accept`, with a reason and on the audit trail). A value outside `0 < share < 1` falls back to the default, so a mistyped setting cannot switch the gate off; `0` means the default. | yes | Towards `0` the gate refuses ordinary movement at the vendor and trains the operator to accept without reading; towards `1` only an empty feed is refused. |

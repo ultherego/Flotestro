@@ -1,8 +1,9 @@
 # syntax=docker/dockerfile:1.7
 
 # The images of one release come out of one file: the control plane (target
-# control-plane), the relay (target relay) and the administration tools
-# (target admin-tools). They are built from one source tree, share the build
+# control-plane), the relay (target relay), the administration tools (target
+# admin-tools) and the package repository of the air-gapped profile (target
+# package-repository). They are built from one source tree, share the build
 # of the panel and the toolchain, and must never drift apart in their
 # version: an agent talks to two of them, and a relay from another release is
 # a support case nobody can see.
@@ -31,7 +32,13 @@
 #     --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
 #     -t ghcr.io/ultherego/flotestro-control-plane:0.54.0 --push .
 #
-# A release builds all three the same way, one after the other, from
+# Build (the package repository of a release, from a tree that is already
+# signed - see packaging/sign-repo.sh; the signing key is never here):
+#   docker build -f deploy/Containerfile --target package-repository \
+#     --build-context repository=/srv/repo \
+#     --build-arg VERSION=0.54.0 -t flotestro-package-repository:0.54.0 .
+#
+# A release builds all four the same way, one after the other, from
 # .github/workflows/images.yml; that workflow also pushes them, attaches the
 # bills of materials and the provenance, and prints the digests a deployment
 # pins.
@@ -557,3 +564,182 @@ USER 65532:65532
 STOPSIGNAL SIGTERM
 ENTRYPOINT ["/usr/local/bin/flotestro-admin-tools"]
 CMD ["help"]
+
+# The package repository of the air-gapped profile: one static tree, served
+# to the hosts of an isolated site over HTTP.
+#
+# The tree is built and signed outside this build, by
+# packaging/build-release.sh and packaging/sign-repo.sh, and arrives through
+# a named build context. The signing key stays where it was used and never
+# enters a layer; what the image carries is the public half,
+# flotestro-repo.asc, which is what a host adds to apt, dnf or pacman before
+# it installs anything. An image whose tree could be signed from inside it
+# would be an image that can sign a package for the whole fleet.
+#
+#   docker build -f deploy/Containerfile --target package-repository \
+#     --build-context repository=/srv/repo .
+#
+# The layout is the one the panel composes its "Add host" commands from:
+# flotestro-repo.asc at the root, the packages under /deb, /rpm and /arch.
+FROM go-build AS repository-build
+ARG TARGETOS TARGETARCH
+WORKDIR /repository-server
+
+# The server is a module of its own, outside the product: it ships in no
+# package, has no import of ours and is deployment furniture, not a binary
+# the fleet talks to.
+COPY <<'SERVER' main.go
+// Command repository-server serves one already-signed repository tree over
+// HTTP, read only: it verifies nothing and decides nothing.
+package main
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"io/fs"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"syscall"
+	"time"
+)
+
+// keyFile is the public key of the repository. The hosts fetch it from here
+// before they install anything, so a tree without it is not servable.
+const keyFile = "flotestro-repo.asc"
+
+func main() {
+	address := flag.String("addr", env("FLOTESTRO_REPOSITORY_ADDR", "0.0.0.0:8080"),
+		"the address to listen on")
+	root := flag.String("root", env("FLOTESTRO_REPOSITORY_ROOT", "/srv/repository"),
+		"the directory with the signed repository tree")
+	flag.Parse()
+
+	// Fail closed at start instead of answering 404 to every host: an empty
+	// mount over the tree is the one mistake this service can make.
+	if _, err := os.Stat(filepath.Join(*root, keyFile)); err != nil {
+		log.Fatalf("%s carries no %s, so it is not a signed repository tree: %v", *root, keyFile, err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write([]byte("ok\n"))
+	})
+	mux.Handle("/", http.FileServer(tree{http.Dir(*root)}))
+
+	server := &http.Server{
+		Addr:              *address,
+		Handler:           readOnly(mux),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+	// No write deadline: a package is a large file over a slow site link,
+	// and a deadline here would cut the download rather than protect anything.
+
+	go func() {
+		stop := make(chan os.Signal, 1)
+		signal.Notify(stop, syscall.SIGTERM, os.Interrupt)
+		<-stop
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		_ = server.Shutdown(ctx)
+	}()
+
+	log.Printf("the repository in %s is served on %s", *root, *address)
+	if err := server.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+		log.Fatal(err)
+	}
+}
+
+// readOnly answers anything that is not a read itself: this service holds no
+// state a request could change.
+func readOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			http.Error(w, "the repository answers GET and HEAD", http.StatusMethodNotAllowed)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// tree is the repository without directory listings: a package manager asks
+// for files by name, and an index is one more thing to get wrong.
+type tree struct{ dir http.FileSystem }
+
+func (t tree) Open(name string) (http.File, error) {
+	file, err := t.dir.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	if info.IsDir() {
+		_ = file.Close()
+		return nil, fs.ErrNotExist
+	}
+	return file, nil
+}
+
+func env(name, fallback string) string {
+	if value := os.Getenv(name); value != "" {
+		return value
+	}
+	return fallback
+}
+SERVER
+
+RUN --mount=type=cache,id=flotestro-gobuild,target=/root/.cache/go-build \
+    go mod init flotestro-repository-server >/dev/null && \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -buildvcs=false -trimpath -ldflags="-s -w" \
+      -o /out/flotestro-repository-server .
+
+# The tree is normalised here and not in the final image, which has no shell
+# to do it with: the modes it arrives with are those of whoever signed it.
+FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS repository-tree
+COPY --from=repository . /srv/repository/
+RUN if [ ! -f /srv/repository/flotestro-repo.asc ]; then \
+        echo "the build context 'repository' carries no flotestro-repo.asc; compose the tree with packaging/sign-repo.sh first" >&2; \
+        exit 1; \
+    fi && \
+    find /srv/repository -type d -exec chmod 0755 {} + && \
+    find /srv/repository -type f -exec chmod 0444 {} +
+
+# The same distroless base as the two other services: a repository is a
+# binary and a directory of files, and everything else in an image that the
+# whole fleet downloads from is surface nobody asked for.
+FROM --platform=$TARGETPLATFORM ${RUNTIME_IMAGE} AS package-repository
+
+ARG VERSION COMMIT BUILD_DATE
+LABEL org.opencontainers.image.title="Flotestro package repository" \
+      org.opencontainers.image.source="https://github.com/ultherego/Flotestro" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${COMMIT}" \
+      org.opencontainers.image.created="${BUILD_DATE}"
+
+COPY --from=repository-build /out/flotestro-repository-server /usr/local/bin/
+COPY --from=go-build /out/flotestro-healthcheck /usr/local/bin/
+# Read-only for the account that serves it: the process never writes into the
+# tree, and a repository a request could change is a way into the fleet.
+COPY --from=repository-tree /srv/repository/ /srv/repository/
+
+ENV FLOTESTRO_REPOSITORY_ROOT=/srv/repository \
+    FLOTESTRO_REPOSITORY_ADDR=0.0.0.0:8080
+
+USER 65532:65532
+EXPOSE 8080
+STOPSIGNAL SIGTERM
+# The server answers /healthz itself, so the health client of the other
+# images asks the same question here.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+  CMD ["/usr/local/bin/flotestro-healthcheck", "-addr", "127.0.0.1:8080"]
+ENTRYPOINT ["/usr/local/bin/flotestro-repository-server"]
