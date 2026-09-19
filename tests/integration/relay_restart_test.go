@@ -89,9 +89,23 @@ func TestARelayRestartLosesNoResult(t *testing.T) {
 	// another one - what a real agent does - and reports the result of the
 	// task it was given before the restart.
 	session.close()
-	again, err := openRelayedAgent(ctx, relayURL, identity)
-	if err != nil {
-		t.Fatalf("the host did not come back through the restarted relay: %v", err)
+	// A relay that has just been restarted is not listening the instant
+	// the job that restarted it reports success: the unit is started, the
+	// process opens its listener a moment later, and a real agent retries
+	// exactly like this. What the test is about is that the result still
+	// settles, not how fast the socket comes back.
+	var again *syntheticSession
+	deadline := time.Now().Add(90 * time.Second)
+	for {
+		var err error
+		again, err = openRelayedAgent(ctx, relayURL, identity)
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the host did not come back through the restarted relay: %v", err)
+		}
+		time.Sleep(2 * time.Second)
 	}
 	defer again.close()
 	if err := again.stream.Send(&agentv1.AgentMessage{
