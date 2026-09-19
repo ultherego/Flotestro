@@ -495,47 +495,14 @@ td { color: var(--subtext1); }
 
 /* ---------------------------------------------------------------------- */
 /* The reference chapters: a badge vocabulary the narrative pages have no  */
-/* use for, and the two-column shape a code entry reads best in.           */
+/* use for. The colour carries the meaning; peach stays the accent.       */
 /* ---------------------------------------------------------------------- */
 
-.skip-link {
-  position: absolute; left: -9999px; top: 0; z-index: 10;
-  background: var(--surface0); color: var(--text);
-  padding: 0.6rem 1rem; border-radius: 0 0 6px 0;
-}
-.skip-link:focus { left: 0; outline: 2px solid var(--peach); }
-
-/* The reference pages name the shell slightly differently; both spellings
-   reach the same thing rather than one set of pages going unstyled. */
-.site-title { font-family: var(--font-mono); font-weight: 600; color: var(--text); }
-.sidebar-title,
-.toc-title { font-family: var(--font-mono); font-size: 0.78rem; letter-spacing: 0.08em;
-  text-transform: uppercase; color: var(--subtext0); margin: 1.4rem 0 0.5rem; }
-.sidebar a.current,
-a.current { color: var(--peach); }
-.footer-note { color: var(--subtext0); font-size: 0.86rem; }
-
-.toc { margin: 0 0 2rem; padding-left: 1.1rem; }
-.toc-sub { margin: 0.2rem 0 0.6rem 0; padding-left: 1.1rem; color: var(--subtext0); }
-.table-wrap { overflow-x: auto; margin: 1.2rem 0; }
-.caption { color: var(--subtext0); font-size: 0.86rem; margin-top: 0.4rem; }
-
-/* One entry of a reference: what it is on the left, what it means and what
-   to do on the right. */
-.ref { width: 100%; border-collapse: collapse; }
-.ref th, .ref td { text-align: left; vertical-align: top;
-  padding: 0.5rem 0.8rem; border-bottom: 1px solid var(--surface1); }
-.ref th { color: var(--subtext0); font-weight: 600; }
 .label { color: var(--subtext0); font-family: var(--font-mono); font-size: 0.82rem;
   white-space: nowrap; }
-.meaning { color: var(--text); }
-.action { color: var(--subtext1); }
-.facts, .errors, .ops, .routes, .code-index { margin: 1rem 0 2.4rem; }
-.op-title, .code { font-family: var(--font-mono); color: var(--peach); }
+.caption { color: var(--subtext0); font-size: 0.86rem; margin-top: 0.4rem; }
 .alias { color: var(--subtext0); font-family: var(--font-mono); font-size: 0.82rem; }
 
-/* A badge says one word about an entry. The colour carries the meaning:
-   peach is the accent and never a severity. */
 .badge {
   display: inline-block; font-family: var(--font-mono); font-size: 0.74rem;
   letter-spacing: 0.04em; padding: 0.1rem 0.45rem; border-radius: 4px;
