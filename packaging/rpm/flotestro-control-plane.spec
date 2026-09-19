@@ -19,6 +19,23 @@ Suggests:       postgresql-server
 # rpm outside Fedora has no systemd-rpm-macros, so the macro is undefined
 # and every unit path expands to a name rpm refuses.
 %{!?_unitdir: %global _unitdir /usr/lib/systemd/system}
+# Upstream rpm reads _sharedstatedir as /usr/com; every rpm distribution keeps
+# the state under /var/lib, so the path must not follow the build machine.
+%global _sharedstatedir /var/lib
+# The scriptlet macros come from the same package: undefined, they stay literal
+# and the host runs them as commands, so a fallback stands in for them.
+%if 0%{!?systemd_post:1}
+%global systemd_post() \
+if [ $1 -eq 1 ]; then systemctl preset %{?*} >/dev/null 2>&1 || :; fi \
+%{nil}
+%global systemd_preun() \
+if [ $1 -eq 0 ]; then systemctl --no-reload disable --now %{?*} >/dev/null 2>&1 || :; fi \
+%{nil}
+%global systemd_postun_with_restart() \
+systemctl daemon-reload >/dev/null 2>&1 || : \
+if [ $1 -ge 1 ]; then systemctl try-restart %{?*} >/dev/null 2>&1 || :; fi \
+%{nil}
+%endif
 %global _build_id_links none
 %global __strip /bin/true
 

@@ -102,9 +102,15 @@ jobs:
         # dpkg-deb packs the .deb for any architecture; rpmbuild builds
         # only for the machine it runs on, so the arm64 .rpm is left to an
         # arm64 machine and this run records that in the job summary.
+        #
+        # makepkg is Arch's own tool, packaged for Ubuntu as `makepkg`; without
+        # it build-release.sh quietly skips the pacman packages and the release
+        # ships two families out of three. The tools it drives are named here
+        # rather than left to whatever the runner image happens to carry.
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends dpkg-dev rpm
+          sudo apt-get install -y --no-install-recommends \
+            dpkg-dev rpm makepkg fakeroot libarchive-tools zstd binutils file
 
       - name: Panel
         working-directory: web
@@ -353,11 +359,12 @@ jobs:
         # dpkg-dev writes the apt index, createrepo-c the dnf metadata, rpm
         # signs the .rpm files themselves, and repo-add - pacman's own tool,
         # packaged for Debian and Ubuntu as pacman-package-manager - writes
-        # the pacman database.
+        # the pacman database. repo-add reads the packages with bsdtar, which
+        # on Ubuntu is libarchive-tools and is not pulled in by pacman itself.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            dpkg-dev rpm createrepo-c pacman-package-manager
+            dpkg-dev rpm createrepo-c pacman-package-manager libarchive-tools
 
       - name: The script that composes them
         if: env.RELEASE_SIGNING_KEY != ''

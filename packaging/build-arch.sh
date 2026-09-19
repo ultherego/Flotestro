@@ -82,7 +82,10 @@ done
 sed -e "s/__VERSION__/$VERSION/" -e "s/__SUMS__/${sums% }/" -e "s/__SBOM__/${bills% }/" \
     "$TEMPLATE" > "$build/PKGBUILD"
 
-( cd "$build" && CARCH="$ARCH" makepkg --nodeps --noconfirm --ignorearch >makepkg.log 2>&1 ) ||
+# makepkg.conf is the build machine's, and both the architecture and the
+# compressor are part of the package name; the environment keeps the last word.
+( cd "$build" && CARCH="$ARCH" PKGEXT=.pkg.tar.zst \
+    makepkg --nodeps --noconfirm --ignorearch >makepkg.log 2>&1 ) ||
     { cat "$build/makepkg.log" >&2; exit 1; }
 
 # The debug package has a name so similar that it matches the same pattern.

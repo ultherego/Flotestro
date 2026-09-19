@@ -209,6 +209,18 @@ A tag with a suffix - `v1.2.3-rc1` - is a pre-release and may ship incomplete.
 The same comparison runs without the note: `.deb`, `.rpm` and `.pkg.tar` each
 have to carry both architectures or neither.
 
+**One runner, three families.** The laboratory builds each package on a machine
+of its own family; the release builds all three on one `ubuntu-latest` runner,
+so anything a Fedora or an Arch machine provides by being that machine is
+absent here and no laboratory run can find it. What that has already cost:
+`%{_unitdir}` and the `%systemd_*` scriptlet macros come from Fedora's
+`systemd-rpm-macros` and are undefined on Ubuntu, `%{_sharedstatedir}` reads
+`/usr/com` there instead of `/var/lib`, and `makepkg` and `bsdtar` are separate
+apt packages that nothing else pulls in. The specs now define what they need
+and the workflow names every tool it calls. The rule for anything added later:
+a packaging file may use only what it defines itself or what the workflow
+installs by name.
+
 **The tag belongs to the default branch.** A tag can be pushed from anywhere,
 and an artefact built from a commit nobody reviewed is worth nothing whatever
 signs it. The first step of the release refuses a tag whose commit the default
