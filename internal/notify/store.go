@@ -938,17 +938,25 @@ func (s *Store) EnqueueSummary(ctx context.Context, work SummaryWork, message Me
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	// The rows are marked first and the summary written only for the rows this
+	// transaction marked: a second worker that read the same silence marks none.
+	marked, err := tx.Exec(ctx, `
+		update notification_deliveries set summarized = true, updated_at = now()
+		 where policy_id = $1 and channel_id = $2 and state = 'suppressed' and not summarized`,
+		work.SilenceID, work.ChannelID)
+	if err != nil {
+		return err
+	}
+	if marked.RowsAffected() == 0 {
+		return nil
+	}
+	// The silence is both what the summary is about and the policy that kept the
+	// rows back, and those two columns are of different types.
 	if _, err := tx.Exec(ctx, `
 		insert into notification_deliveries
 		    (channel_id, event_id, event_type, aggregate_id, message, channel_revision, state, policy_id)
-		values ($1, null, $2, $3, $4::jsonb, $5, 'pending', $3)`,
+		values ($1::uuid, null, $2, $3::text, $4::jsonb, $5, 'pending', $3::uuid)`,
 		work.ChannelID, message.EventType, work.SilenceID, encoded, work.ChannelRevision); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(ctx, `
-		update notification_deliveries set summarized = true, updated_at = now()
-		 where policy_id = $1 and channel_id = $2 and state = 'suppressed' and not summarized`,
-		work.SilenceID, work.ChannelID); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

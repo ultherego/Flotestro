@@ -30,8 +30,12 @@ const (
 	// nothing woke it.
 	DefaultPoll = 2 * time.Second
 	// sweepInterval is how often the settled rows past their retention
-	// are deleted, and the summaries of ended silences are written.
+	// are deleted.
 	sweepInterval = 10 * time.Minute
+	// summaryInterval is how often the silences that ended are looked for. A
+	// silence that ends is news now, so the summary does not wait for the sweep;
+	// the look costs a join over the rows one silence kept back.
+	summaryInterval = 5 * time.Second
 )
 
 // Options tune the worker; a zero field takes its default.
@@ -76,6 +80,8 @@ type Worker struct {
 	// owner is this worker's lease identity.
 	owner string
 	wake  chan struct{}
+	// summaryWake asks for the ended silences to be summarised out of turn.
+	summaryWake chan struct{}
 	// random is the jitter draw; replaced in tests.
 	random func() float64
 }
@@ -86,7 +92,8 @@ func NewWorker(store *Store, router *Router, options Options, log *slog.Logger) 
 	return &Worker{
 		store: store, senders: router.senders, publicURL: router.publicURL, log: log,
 		options: options.withDefaults(), owner: uuid.NewString(),
-		wake: make(chan struct{}, 1), random: rand.Float64,
+		wake: make(chan struct{}, 1), summaryWake: make(chan struct{}, 1),
+		random: rand.Float64,
 	}
 }
 
@@ -98,13 +105,25 @@ func (w *Worker) Wake() {
 	}
 }
 
+// WakeSummary asks for the silences that ended to be summarised now: an
+// operator who ends a silence is told what it kept back without waiting.
+func (w *Worker) WakeSummary() {
+	select {
+	case w.summaryWake <- struct{}{}:
+	default:
+	}
+}
+
 // Run sends until the context ends.
 func (w *Worker) Run(ctx context.Context) {
 	poll := time.NewTicker(w.options.Poll)
 	defer poll.Stop()
 	sweep := time.NewTicker(sweepInterval)
 	defer sweep.Stop()
+	summaries := time.NewTicker(summaryInterval)
+	defer summaries.Stop()
 	w.housekeep(ctx)
+	w.summarize(ctx)
 	for {
 		for {
 			sent, err := w.Round(ctx)
@@ -123,18 +142,26 @@ func (w *Worker) Run(ctx context.Context) {
 			return
 		case <-poll.C:
 		case <-w.wake:
+		case <-summaries.C:
+			w.summarize(ctx)
+		case <-w.summaryWake:
+			w.summarize(ctx)
 		case <-sweep.C:
 			w.housekeep(ctx)
 		}
 	}
 }
 
-// housekeep sweeps the settled rows past their retention and writes the
-// summaries of the silences that ended.
+// housekeep sweeps the settled rows past their retention.
 func (w *Worker) housekeep(ctx context.Context) {
 	if err := w.store.SweepDeliveries(ctx); err != nil && ctx.Err() == nil {
 		w.log.Error("the notification queue was not swept", "err", err)
 	}
+}
+
+// summarize writes the summaries of the silences that ended, and says so when
+// it could not: a summary nobody got is a silence nobody was told the end of.
+func (w *Worker) summarize(ctx context.Context) {
 	if err := w.Summarize(ctx); err != nil && ctx.Err() == nil {
 		w.log.Error("the summaries of the ended silences were not written", "err", err)
 	}

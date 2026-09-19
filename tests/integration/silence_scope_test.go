@@ -60,6 +60,9 @@ func forgetSilence(h *harness, id string) {
 // rule: who may write a global silence, what a scoped one does to a security
 func TestAGlobalSilenceIsTheOnlyOneThatKeepsSecurityAlertsBack(t *testing.T) {
 	h := newHarness(t)
+	// The pool before anything registers a cleanup that reads through it: the
+	// cleanups run in reverse, so the pool opened last would close first.
+	h.database(context.Background())
 	host := h.enrollSyntheticHost(t)
 	if host.ID == "" {
 		t.Fatal("the synthetic host was not enrolled")

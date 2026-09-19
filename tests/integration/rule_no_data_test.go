@@ -30,6 +30,16 @@ func TestAHostThatStopsReportingRaisesANoDataEpisode(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	store := monitoring.NewStore(pool, logger, monitoring.Options{EvaluatorLease: noDataLeaseTerm})
 
+	// The lease is taken before the rules exist: while the test holds it the
+	// panel's own evaluator judges nothing, so the only pass over these two
+	// rules is the one the test makes.
+	lease := takeEvaluatorLease(ctx, t, store)
+	t.Cleanup(func() {
+		if err := store.ReleaseEvaluatorLease(context.Background(), lease); err != nil {
+			t.Logf("giving the lease back: %v", err)
+		}
+	})
+
 	// A condition that always holds while there are readings, so the only
 	// thing the two rules disagree about is what a gap means.
 	told := h.cadenceRule(t, store, host.ID, "integration: cpu, told about gaps", monitoring.NoDataAlert)
@@ -38,12 +48,6 @@ func TestAHostThatStopsReportingRaisesANoDataEpisode(t *testing.T) {
 	// The host reported twenty minutes ago and has said nothing since: well
 	// past the two minutes both rules allow.
 	h.writeSample(t, host.ID, 20*time.Minute)
-	lease := takeEvaluatorLease(ctx, t, store)
-	t.Cleanup(func() {
-		if err := store.ReleaseEvaluatorLease(context.Background(), lease); err != nil {
-			t.Logf("giving the lease back: %v", err)
-		}
-	})
 	if err := store.EvaluateUnder(ctx, time.Now(), lease); err != nil {
 		t.Fatalf("the pass over the quiet host: %v", err)
 	}
@@ -118,6 +122,7 @@ func (h *harness) cadenceRule(t *testing.T, store *monitoring.Store,
 		Severity:               "info",
 		CreatedBy:              "integration",
 		Selector:               monitoring.Selector{HostIDs: []string{hostID}},
+		Enabled:                true,
 		ExpectedCadenceSeconds: 60,
 		MaxGapSeconds:          120,
 		NoDataPolicy:           policy,
@@ -125,7 +130,7 @@ func (h *harness) cadenceRule(t *testing.T, store *monitoring.Store,
 	if err != nil {
 		t.Fatalf("writing the rule %q: %v", name, err)
 	}
-	if rule.NoDataPolicy != policy || rule.MaxGapSeconds != 120 {
+	if !rule.Enabled || rule.NoDataPolicy != policy || rule.MaxGapSeconds != 120 {
 		t.Fatalf("the rule came back as %+v", rule)
 	}
 	t.Cleanup(func() {

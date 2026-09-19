@@ -922,6 +922,11 @@ func (s *Server) handleExpireFleetSilence(w http.ResponseWriter, r *http.Request
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		Detail: map[string]any{"silence_id": id},
 	})
+	// The silence is over: whoever it kept quiet is told what they missed now,
+	// not at the next round of the clock.
+	if s.notificationQueue != nil {
+		s.notificationQueue.WakeSummary()
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -955,5 +960,10 @@ func (s *Server) handleExpireSilence(w http.ResponseWriter, r *http.Request) {
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		Detail: map[string]any{"silence_id": id},
 	})
+	// The silence is over: whoever it kept quiet is told what they missed now,
+	// not at the next round of the clock.
+	if s.notificationQueue != nil {
+		s.notificationQueue.WakeSummary()
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
