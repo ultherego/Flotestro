@@ -402,7 +402,30 @@ func readingsStopped(rule Rule, host hostState, now time.Time) bool {
 	if host.Latest == nil {
 		return true
 	}
-	return now.Sub(host.Latest.At) > rule.MaxGap()
+	// The panel's own clock decides whether a host is talking: a host whose
+	// clock runs slow is not silent, and stamping it silent evaluates nothing.
+	return now.Sub(currentAt(host.Latest)) > rule.MaxGap()
+}
+
+// currentAt is the moment a reading's freshness is measured from: when the
+// panel received it, or, for one that carries no receipt, when it was taken.
+func currentAt(sample *Sample) time.Time {
+	if sample == nil {
+		return time.Time{}
+	}
+	if !sample.ReceivedAt.IsZero() {
+		return sample.ReceivedAt
+	}
+	return sample.At
+}
+
+// receivedOrTaken is the moment the panel got the reading, falling back to the
+// moment the host says it took it for a row written before the column.
+func receivedOrTaken(received *time.Time, taken time.Time) time.Time {
+	if received != nil && !received.IsZero() {
+		return *received
+	}
+	return taken
 }
 
 // gapDetail says how long the readings have been missing and what the rule
@@ -414,7 +437,7 @@ func gapDetail(rule Rule, host hostState, now time.Time) string {
 			rule.Metric, allowed)
 	}
 	return fmt.Sprintf("no reading of %s for %s; the rule allows a gap of %s",
-		rule.Metric, formatDuration(now.Sub(host.Latest.At).Seconds()), allowed)
+		rule.Metric, formatDuration(now.Sub(currentAt(host.Latest)).Seconds()), allowed)
 }
 
 // noData is the gap the rule asked to be told about: alert raises an episode
@@ -476,11 +499,11 @@ func (s *Store) observedSince(ctx context.Context, f fence, rule Rule, host host
 	if rule.ForMinutes == 0 || rule.Metric == MetricHostOffline {
 		return episode.StartedAt, nil
 	}
-	samples, err := s.sampleTimes(ctx, host.ID, episode.StartedAt)
+	samples, err := s.sampleRun(ctx, host.ID, episode.StartedAt)
 	if err != nil {
 		return time.Time{}, err
 	}
-	since := continuousSince(episode.StartedAt, samples, now, rule.MaxGap())
+	since := continuousSince(episode.StartedAt, samples, now, rule.MaxGap(), holdsFor(rule, host))
 	if since.After(episode.StartedAt) {
 		mark := alertWrite{rule: rule.ID, host: host.ID, id: episode.ID}
 		if err := s.restart(ctx, f, mark, since); err != nil {
@@ -490,20 +513,47 @@ func (s *Store) observedSince(ctx context.Context, f fence, rule Rule, host host
 	return since, nil
 }
 
+// holdsFor judges one reading of the run by the rule, as the pass judges the
+// newest one: a reading the rule does not hold for breaks the run.
+func holdsFor(rule Rule, host hostState) func(Sample) bool {
+	return func(sample Sample) bool {
+		at := host
+		at.Latest = &sample
+		// The sample's own moment stands for now, or measure would call every
+		// reading of the history stale and break every run.
+		value, _, known := measure(rule, at, currentAt(&sample))
+		return known && compare(rule.Operator, value, rule.Threshold)
+	}
+}
+
 // continuousSince walks the samples of an episode in order and returns the
-// start of its last unbroken run: the first reading after the last wide hole.
-func continuousSince(started time.Time, samples []time.Time, now time.Time, gap time.Duration) time.Time {
+// start of its last unbroken run: the first reading after the last wide hole
+// or after the last reading the rule did not hold for. A window counted from
+// the timestamps alone would read high-low-high as one long high.
+func continuousSince(started time.Time, samples []Sample, now time.Time, gap time.Duration,
+	holds func(Sample) bool) time.Time {
 	since, last := started, started
-	for _, at := range samples {
+	broke := false
+	for _, sample := range samples {
+		at := sample.At
 		if at.Before(started) {
 			continue
 		}
-		if at.Sub(last) > gap {
-			since = at
+		switch {
+		case at.Sub(last) > gap:
+			// The hole lies before this reading, so the run starts here.
+			since, broke = at, false
+		case broke:
+			since, broke = at, false
+		}
+		if holds != nil && !holds(sample) {
+			// The condition broke here; the run can only start with the next
+			// reading, and there may be none.
+			broke = true
 		}
 		last = at
 	}
-	if now.Sub(last) > gap {
+	if broke || now.Sub(last) > gap {
 		return now
 	}
 	return since
@@ -515,24 +565,56 @@ func noDataHold(episode openAlert, now time.Time, gap time.Duration) bool {
 	return episode.State == "pending" && now.Sub(episode.StartedAt) > gap
 }
 
-// sampleTimes reads the moments of the host's samples since the given one,
-// oldest first.
-func (s *Store) sampleTimes(ctx context.Context, hostID string, since time.Time) ([]time.Time, error) {
-	rows, err := s.pool.Query(ctx,
-		`select at from host_metrics where host_id = $1 and at >= $2 order by at`, hostID, since)
+// sampleRun reads the host's samples since the given moment, oldest first,
+// with what the rules measure: the window is judged on the readings, not on
+// the fact that rows exist.
+func (s *Store) sampleRun(ctx context.Context, hostID string, since time.Time) ([]Sample, error) {
+	rows, err := s.pool.Query(ctx, `
+		select at, received_at, cpu_percent, load1, memory_total, memory_used,
+		       swap_total, swap_used, uptime_seconds, filesystems,
+		       agent_rss_bytes, agent_cpu_percent
+		  from host_metrics where host_id = $1 and at >= $2 order by at`, hostID, since)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var moments []time.Time
+	var samples []Sample
 	for rows.Next() {
-		var at time.Time
-		if err := rows.Scan(&at); err != nil {
+		var sample Sample
+		var receivedAt *time.Time
+		var cpu, load1, agentCPU *float32
+		var memoryTotal, memoryUsed, swapTotal, swapUsed, uptime, agentRSS *int64
+		var filesystems []Filesystem
+		if err := rows.Scan(&sample.At, &receivedAt, &cpu, &load1, &memoryTotal, &memoryUsed,
+			&swapTotal, &swapUsed, &uptime, &filesystems, &agentRSS, &agentCPU); err != nil {
 			return nil, err
 		}
-		moments = append(moments, at)
+		sample.ReceivedAt = receivedOrTaken(receivedAt, sample.At)
+		sample.CPUPercent, sample.Load1 = float64Value(cpu), float64Value(load1)
+		sample.MemoryTotal, sample.MemoryUsed = unsignedValue(memoryTotal), unsignedValue(memoryUsed)
+		sample.SwapTotal, sample.SwapUsed = unsignedValue(swapTotal), unsignedValue(swapUsed)
+		sample.UptimeSeconds, sample.Filesystems = unsignedValue(uptime), filesystems
+		sample.AgentRSSBytes, sample.AgentCPUPercent = unsignedOf(agentRSS), float64Of(agentCPU)
+		samples = append(samples, sample)
 	}
-	return moments, rows.Err()
+	return samples, rows.Err()
+}
+
+// float64Value and unsignedValue read a column that may be null as zero: a
+// reading without the number is a reading the rule cannot be judged on, and
+// measure says so by the metric it is asked about.
+func float64Value(value *float32) float64 {
+	if value == nil {
+		return 0
+	}
+	return float64(*value)
+}
+
+func unsignedValue(value *int64) uint64 {
+	if value == nil || *value < 0 {
+		return 0
+	}
+	return uint64(*value)
 }
 
 // restart moves the start of a pending episode, so its window is counted
@@ -662,7 +744,9 @@ func measure(rule Rule, host hostState, now time.Time) (value float64, detail st
 			minutes, rule.Metric, symbol(rule.Operator), rule.Threshold), true
 	}
 	sample := host.Latest
-	if sample == nil || now.Sub(sample.At) > silentAfter {
+	// Whether a reading is still current is the panel's clock; the host's own
+	// moment says where the chart draws it, not whether it arrived.
+	if sample == nil || now.Sub(currentAt(sample)) > silentAfter {
 		return 0, "", false
 	}
 	describe := func(value float64, unit string) string {
@@ -817,12 +901,12 @@ func (s *Store) hostStates(ctx context.Context) ([]hostState, error) {
 		                 from inventory_revisions i
 		                 where i.host_id = h.id
 		                 order by i.observed_at desc limit 1), 0),
-		       m.at, m.cpu_percent, m.load1, m.memory_total, m.memory_used,
+		       m.at, m.received_at, m.cpu_percent, m.load1, m.memory_total, m.memory_used,
 		       m.swap_total, m.swap_used, m.uptime_seconds, m.filesystems,
 		       m.agent_rss_bytes, m.agent_cpu_percent
 		from hosts h
 		left join lateral (
-		    select at, cpu_percent, load1, memory_total, memory_used, swap_total, swap_used,
+		    select at, received_at, cpu_percent, load1, memory_total, memory_used, swap_total, swap_used,
 		           uptime_seconds, filesystems, agent_rss_bytes, agent_cpu_percent
 		    from host_metrics where host_id = h.id
 		    order by at desc limit 1
@@ -835,20 +919,21 @@ func (s *Store) hostStates(ctx context.Context) ([]hostState, error) {
 	var hosts []hostState
 	for rows.Next() {
 		var host hostState
-		var at *time.Time
+		var at, receivedAt *time.Time
 		var cpu, load1 *float32
 		var memoryTotal, memoryUsed, swapTotal, swapUsed, uptime *int64
 		var filesystems []Filesystem
 		var agentRSS *int64
 		var agentCPU *float32
 		if err := rows.Scan(&host.ID, &host.Hostname, &host.Site, &host.Environment, &host.OSFamily,
-			&host.LastSampleAt, &host.Cores, &at, &cpu, &load1, &memoryTotal, &memoryUsed,
+			&host.LastSampleAt, &host.Cores, &at, &receivedAt, &cpu, &load1, &memoryTotal, &memoryUsed,
 			&swapTotal, &swapUsed, &uptime, &filesystems, &agentRSS, &agentCPU); err != nil {
 			return nil, err
 		}
 		if at != nil {
 			host.Latest = &Sample{
-				At: *at, CPUPercent: float64(*cpu), Load1: float64(*load1),
+				At: *at, ReceivedAt: receivedOrTaken(receivedAt, *at),
+				CPUPercent: float64(*cpu), Load1: float64(*load1),
 				MemoryTotal: uint64(*memoryTotal), MemoryUsed: uint64(*memoryUsed),
 				SwapTotal: uint64(*swapTotal), SwapUsed: uint64(*swapUsed),
 				UptimeSeconds: uint64(*uptime), Filesystems: filesystems,

@@ -266,6 +266,19 @@ func TestPointsCarryRatesBetweenConsecutiveSamples(t *testing.T) {
 	}
 }
 
+// atSamples turns a list of moments into the readings continuousSince walks,
+// for the cases that are about the holes and not about the values.
+func atSamples(moments []time.Time) []Sample {
+	samples := make([]Sample, 0, len(moments))
+	for _, at := range moments {
+		samples = append(samples, Sample{At: at, ReceivedAt: at})
+	}
+	return samples
+}
+
+// always is the judge for those cases: every reading holds.
+func always(Sample) bool { return true }
+
 // A "for" window says the condition held that long, and holding is something
 // somebody watched.
 func TestAGapInTheSamplesRestartsTheWindow(t *testing.T) {
@@ -278,7 +291,7 @@ func TestAGapInTheSamplesRestartsTheWindow(t *testing.T) {
 		unbroken = append(unbroken, started.Add(time.Duration(i)*time.Minute))
 	}
 	now := started.Add(10 * time.Minute)
-	if since := continuousSince(started, unbroken, now, gap); !since.Equal(started) {
+	if since := continuousSince(started, atSamples(unbroken), now, gap, always); !since.Equal(started) {
 		t.Errorf("an unbroken run counts from %s rather than from the start of the episode", since)
 	}
 
@@ -288,7 +301,7 @@ func TestAGapInTheSamplesRestartsTheWindow(t *testing.T) {
 		started.Add(1 * time.Minute), started.Add(2 * time.Minute), started.Add(3 * time.Minute),
 		started.Add(8 * time.Minute), started.Add(9 * time.Minute), started.Add(10 * time.Minute),
 	}
-	since := continuousSince(started, broken, now, gap)
+	since := continuousSince(started, atSamples(broken), now, gap, always)
 	if !since.Equal(started.Add(8 * time.Minute)) {
 		t.Errorf("the window after a gap counts from %s rather than from the sample that came back", since)
 	}
@@ -307,24 +320,24 @@ func TestAGapInTheSamplesRestartsTheWindow(t *testing.T) {
 		started.Add(5 * time.Minute), started.Add(6 * time.Minute), started.Add(7 * time.Minute),
 		started.Add(8 * time.Minute), started.Add(9 * time.Minute), started.Add(10 * time.Minute),
 	}
-	if since := continuousSince(started, oneLost, now, gap); !since.Equal(started) {
+	if since := continuousSince(started, atSamples(oneLost), now, gap, always); !since.Equal(started) {
 		t.Errorf("a single lost sample broke the run at %s", since)
 	}
 
 	// An episode whose newest sample is older than a gap has no run that
 	// reaches now: it starts now and has nothing behind it.
 	stale := []time.Time{started.Add(1 * time.Minute), started.Add(2 * time.Minute)}
-	if since := continuousSince(started, stale, now, gap); !since.Equal(now) {
+	if since := continuousSince(started, atSamples(stale), now, gap, always); !since.Equal(now) {
 		t.Errorf("a run with no recent sample starts at %s rather than now", since)
 	}
 	// And an episode with no sample at all behind it likewise.
-	if since := continuousSince(started, nil, now, gap); !since.Equal(now) {
+	if since := continuousSince(started, nil, now, gap, always); !since.Equal(now) {
 		t.Errorf("an episode without samples starts at %s rather than now", since)
 	}
 	// While an episode a moment old, whose samples have yet to arrive,
 	// keeps its start: it has not been waiting long enough to be a gap.
 	fresh := started.Add(time.Minute)
-	if since := continuousSince(started, nil, fresh, gap); !since.Equal(started) {
+	if since := continuousSince(started, nil, fresh, gap, always); !since.Equal(started) {
 		t.Errorf("a fresh episode was restarted at %s", since)
 	}
 }
@@ -390,10 +403,10 @@ func TestTheWindowIsCountedOverTheRulesOwnGap(t *testing.T) {
 	samples := []time.Time{
 		started.Add(5 * time.Minute), started.Add(10 * time.Minute),
 	}
-	if since := continuousSince(started, samples, now, slow.MaxGap()); !since.Equal(started) {
+	if since := continuousSince(started, atSamples(samples), now, slow.MaxGap(), always); !since.Equal(started) {
 		t.Errorf("a five-minute cadence read its own readings as a gap at %s", since)
 	}
-	if since := continuousSince(started, samples, now, quick.MaxGap()); since.Equal(started) {
+	if since := continuousSince(started, atSamples(samples), now, quick.MaxGap(), always); since.Equal(started) {
 		t.Error("a minute-by-minute rule counted five-minute holes as one continuous run")
 	}
 	// And the hold on a pending episode follows the same gap: what the rule
@@ -462,5 +475,97 @@ func TestGapDetailSaysHowLongAndWhatWasAllowed(t *testing.T) {
 	never := gapDetail(rule, hostState{}, now)
 	if !strings.Contains(never, "at all") {
 		t.Errorf("a host that never reported reads %q", never)
+	}
+}
+
+// A host whose clock runs slow is talking, not silent. Its readings carry a
+// moment in the past, and judging freshness by that moment put the host in a
+// permanent gap - unevaluated, while host_offline said it was fine.
+func TestFreshnessIsThePanelsClockAndNotTheHosts(t *testing.T) {
+	now := time.Now()
+	rule := Rule{Metric: MetricCPUPercent, Operator: ">", Threshold: 50, ForMinutes: 0}
+	slow := hostState{
+		ID: "slow-clock", Cores: 4,
+		LastSampleAt: &now,
+		Latest: &Sample{
+			At: now.Add(-20 * time.Minute), ReceivedAt: now.Add(-10 * time.Second),
+			CPUPercent: 80, MemoryTotal: 100, MemoryUsed: 10, SwapTotal: 100, SwapUsed: 1,
+		},
+	}
+	if readingsStopped(rule, slow, now) {
+		t.Errorf("a host that answered ten seconds ago was called silent")
+	}
+	if _, _, known := measure(rule, slow, now); !known {
+		t.Errorf("the reading of a host with a slow clock was not read")
+	}
+
+	// A host that really has gone quiet is still found, by the same clock.
+	quiet := slow
+	quiet.Latest = &Sample{At: now, ReceivedAt: now.Add(-30 * time.Minute), CPUPercent: 80}
+	if !readingsStopped(rule, quiet, now) {
+		t.Errorf("a host whose last reading arrived half an hour ago was called current")
+	}
+
+	// A sample from before the receipt moment was stored falls back to the
+	// moment the host took it, rather than to the epoch.
+	older := slow
+	older.Latest = &Sample{At: now.Add(-10 * time.Second), CPUPercent: 80,
+		MemoryTotal: 100, MemoryUsed: 10, SwapTotal: 100, SwapUsed: 1}
+	if readingsStopped(rule, older, now) {
+		t.Errorf("a sample without a receipt moment was called silent")
+	}
+}
+
+// The window of a "for" rule has to be a window the condition held through.
+// Counting rows rather than readings made high-low-high across a missed pass
+// look like one long high, and the alert fired on a minute it was not.
+func TestTheWindowIsBrokenByAReadingTheRuleDoesNotHoldFor(t *testing.T) {
+	started := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	gap := Rule{}.MaxGap()
+	now := started.Add(10 * time.Minute)
+	rule := Rule{Metric: MetricCPUPercent, Operator: "gt", Threshold: 90}
+	host := hostState{ID: "h1", Cores: 4}
+
+	reading := func(minute int, cpu float64) Sample {
+		at := started.Add(time.Duration(minute) * time.Minute)
+		return Sample{At: at, ReceivedAt: at, CPUPercent: cpu,
+			MemoryTotal: 100, MemoryUsed: 10, SwapTotal: 100, SwapUsed: 1}
+	}
+	var samples []Sample
+	for minute := 1; minute <= 10; minute++ {
+		cpu := 95.0
+		// The eighth minute is the dip nobody watched.
+		if minute == 8 {
+			cpu = 10
+		}
+		samples = append(samples, reading(minute, cpu))
+	}
+	since := continuousSince(started, samples, now, gap, holdsFor(rule, host))
+	if !since.Equal(started.Add(9 * time.Minute)) {
+		t.Errorf("the window counts from %s rather than from the reading after the dip", since)
+	}
+	// Which is the whole point: two minutes are not the ten the rule asks for.
+	if now.Sub(since) >= 10*time.Minute {
+		t.Error("an episode would fire on a window the condition did not hold through")
+	}
+
+	// An unbroken run is still unbroken.
+	var held []Sample
+	for minute := 1; minute <= 10; minute++ {
+		held = append(held, reading(minute, 95))
+	}
+	if since := continuousSince(started, held, now, gap, holdsFor(rule, host)); !since.Equal(started) {
+		t.Errorf("an unbroken run counts from %s rather than from the start of the episode", since)
+	}
+
+	// A reading the rule cannot be judged on is not agreement either: a host
+	// that stopped reporting the number breaks the run.
+	unreadable := append([]Sample(nil), held[:9]...)
+	last := reading(10, 95)
+	last.MemoryTotal = 0
+	unreadable = append(unreadable, last)
+	memory := Rule{Metric: MetricMemoryUsedPercent, Operator: "gt", Threshold: 5}
+	if since := continuousSince(started, unreadable, now, gap, holdsFor(memory, host)); !since.Equal(now) {
+		t.Errorf("a run whose newest reading cannot be judged starts at %s rather than now", since)
 	}
 }
