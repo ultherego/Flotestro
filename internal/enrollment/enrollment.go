@@ -56,6 +56,10 @@ const (
 	// DenialMachineRetired is a "new host" token used on a machine that
 	// belongs to a retired host still within its retention period.
 	DenialMachineRetired = "machine_id_retired"
+	// DenialAdvertiseLoopback is a remote host registering against a panel
+	// that presents itself as loopback: the certificate it would be given
+	// names an address the host cannot reach.
+	DenialAdvertiseLoopback = "advertise_is_loopback"
 )
 
 // ErrRepeated means the creator already placed an order under this

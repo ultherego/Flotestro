@@ -10,7 +10,6 @@ the signed repository.
 | `Containerfile` | All four images: the control plane (target `control-plane`), the relay (target `relay`), the administration tools (target `admin-tools`) and the package repository of an isolated site (target `package-repository`). |
 | `compose.yaml` | The whole deployment, in profiles: the control plane on its own, `quickstart` for a PostgreSQL of its own, `airgap` for the signed package repository of the release, `tools` and `restore` for the backup pair. |
 | `compose.relay.yaml` | The relay of one site, run on the site host as its own project. It is not a profile of the file above: that file requires settings a relay host has none of, and Compose interpolates a whole document whatever profile is active. |
-| `compose.podman.yaml` | The override rootless Podman needs: `keep-id`, so the secrets stay owned by the deploying account. It changes a property of a service that already exists, which no profile can do. |
 | `../.dockerignore` | The allowlist of the build context; it lies at the repository root because that is the context the build runs with. |
 | `../.github/workflows/images.yml` | What builds, publishes, describes and signs the three service images, and what a pull request runs to prove the files above still work. |
 
@@ -75,17 +74,16 @@ deployment that runs the image with a bare `podman run` gets none and should
 either add `--health-cmd /usr/local/bin/flotestro-healthcheck` or build with
 `--format docker`.
 
-**The secrets need one more thing than the file mode.** A Compose secret is a
-bind mount of a file the deploying account owns, and the container runs as
-65532. Under Docker, give the file to that account: `chown 65532:65532
-./secrets/*` and `chmod 0400`. Rootless Podman cannot use that - host uid 65532
-is outside the account's subuid range, so the container would see the file as
-nobody's - so `compose.podman.yaml` turns the mapping round instead with
-`keep-id`, and the files stay owned by the deploying account at mode 0600. On a
-host with SELinux the file also needs the container label, or the read fails
-with a plain "permission denied" that says nothing about SELinux:
-
-    chcon -Rt container_file_t ./secrets
+**The secrets need nothing from the deploying account.** They used to: a
+Compose secret is a bind mount of a file the account owns, the container runs
+as 65532, and host uid 65532 is outside a rootless account's subuid range - so
+Docker wanted `chown 65532:65532` and Podman wanted the mapping turned round
+with `keep-id`. The two runtimes wanted opposite things about the same file.
+The `init` service ends that: it writes the DSN and the database password into
+a volume and gives each file to the account that reads it, inside the runtime,
+where both behave the same. `./secrets/` is now an import directory, mounted
+`:ro,z` so that SELinux relabels it without a `chcon`, and it is read once at
+every start.
 
 **Rootless is the sensible way to run it,** and the images are built for it:
 they run as 65532, drop every capability and write only to their volume and to
@@ -102,7 +100,7 @@ resolve one without a terminal to ask at; the files name
 `podman-compose` honours `--profile` but not the `COMPOSE_PROFILES`
 environment variable, so every profile here is named with the flag.
 
-`podman-compose` reads the rest of the files as written: `secrets:`,
+`podman-compose` reads the rest of the files as written:
 `read_only`, `tmpfs`, `cap_drop`, `security_opt`, `pids_limit`, `ulimits` and
 `stop_grace_period`. Two options had to change to be portable at all, and both
 changed in the shipped files rather than in an overlay: the tmpfs is declared
@@ -339,7 +337,8 @@ leaves the apt family with no proof of origin at all.
 | Mount | Why |
 |---|---|
 | `flotestro-state` → `/var/lib/flotestro` | The identity of the installation: the fleet CA (`ca.key`, `ca.pem`), the keys of the secret store under `keys/`, the helper signing key, the bootstrap token, the feed cache. Read and written by the control plane alone. |
-| `/run/secrets/*` (read-only) | One file per secret; see below. |
+| `flotestro-secrets` → `/run/flotestro` (read-only) | The DSN and the database password, written by `init`. |
+| `/run/secrets/*` (read-only) | Every other secret, one file per bind mount; see below. |
 | `/tmp` (tmpfs) | The only other writable path. The root filesystem is read-only. |
 | `flotestro-relay-state` → `/var/lib/flotestro-relay` | The relay identity, its certificate and the durable spool: the results of the site the centre has not acknowledged yet. |
 | `./relay.yaml` → `/etc/flotestro/relay.yaml` (read-only) | The relay is configured by a file, not by the environment: its name, site, listen address, advertised names and upstream gateways. |
@@ -361,19 +360,26 @@ Secrets are passed as files and read once at start. Every variable has a
 both be set, and an empty file, a symlink, a directory or a file readable by
 anyone else is refused.
 
-| Secret | Variable | Mount |
-|---|---|---|
-| Database DSN | `FLOTESTRO_DATABASE_URL_FILE` | `/run/secrets/database_url` |
-| OIDC client secret | `FLOTESTRO_OIDC_CLIENT_SECRET_FILE` | `/run/secrets/oidc_client_secret` |
-| Webhook HMAC key | `FLOTESTRO_WEBHOOK_SECRET_FILE` | `/run/secrets/webhook_secret` |
-| NVD API key | `FLOTESTRO_VULN_NVD_KEY_FILE` | `/run/secrets/nvd_key` |
-| FreeIPA keytab | `FLOTESTRO_IPA_KEYTAB` (already a path) | `/run/secrets/ipa.keytab` |
-| PostgreSQL password (local profile) | `POSTGRES_PASSWORD_FILE` | `/run/secrets/postgres_password` |
+| Secret | Variable | Mount | Put there by |
+|---|---|---|---|
+| Database DSN | `FLOTESTRO_DATABASE_URL_FILE` | `/run/flotestro/database-url` | `init` |
+| PostgreSQL password (quickstart) | `POSTGRES_PASSWORD_FILE` | `/run/flotestro/postgres-password` | `init` |
+| OIDC client secret | `FLOTESTRO_OIDC_CLIENT_SECRET_FILE` | `/run/secrets/oidc_client_secret` | a bind mount you add |
+| Webhook HMAC key | `FLOTESTRO_WEBHOOK_SECRET_FILE` | `/run/secrets/webhook_secret` | a bind mount you add |
+| NVD API key | `FLOTESTRO_VULN_NVD_KEY_FILE` | `/run/secrets/nvd_key` | a bind mount you add |
+| FreeIPA keytab | `FLOTESTRO_IPA_KEYTAB` (already a path) | `/run/secrets/ipa.keytab` | a bind mount you add |
 
-The files live in `./secrets/`, which is not tracked by Git and is readable
-only by the account that runs the deployment. `./.env` holds non-secret
-values alone - the version, the gateway identifier, the advertised addresses
-and the public URL.
+The first two are made inside the runtime, so no account on the host has to
+own them. The rest are added as they are needed, a line each under the
+control plane's `volumes:` and a `_FILE` variable beside it:
+
+    volumes:
+      - ./secrets/oidc-client-secret:/run/secrets/oidc_client_secret:ro,z
+
+`./secrets/` is not tracked by Git and is readable only by the account that
+runs the deployment. `./.env` holds non-secret values alone - the version,
+the gateway identifier, the advertised addresses and the public URL; see
+`env.example` for the whole list.
 
 Nothing secret goes into a command line, a label, a log line or the settings
 screen: an environment variable is visible in `docker inspect` and in the
@@ -394,17 +400,12 @@ FLOTESTRO_ADVERTISE=panel.example.org
 FLOTESTRO_PUBLIC_URL=https://panel.example.org
 SETTINGS
 
-# 2. The database DSN, as a file and with no trailing surprises.
+# 2. The database DSN, as a file and with no trailing surprises. Nothing else
+#    about it: init reads it at every start and gives the copy it makes to the
+#    account the panel runs as.
 mkdir -p secrets && chmod 700 secrets
 printf '%s' 'postgresql://flotestro:PASSWORD@db.example.org:5432/flotestro?sslmode=verify-full&application_name=flotestro-control-plane' > secrets/database-url
-# The container runs as 65532 and a Compose secret keeps the file's ownership,
-# so the file has to be readable by that account and by nobody else. Rootless
-# Podman maps the other way round - see the Podman section.
-sudo chown 65532:65532 secrets/database-url
-chmod 400 secrets/database-url
-# On a host with SELinux, without the container label the read fails with a
-# plain "permission denied" that says nothing about SELinux.
-command -v chcon >/dev/null && sudo chcon -Rt container_file_t secrets
+chmod 600 secrets/database-url
 
 # 3. Start. The panel migrates the schema itself before it listens.
 docker compose up -d
@@ -423,17 +424,16 @@ docker compose --profile tools run --rm admin-tools backup
 Delete `./bootstrap-token` and the token in the panel once the real accounts
 exist; the control plane warns at every start while it is still valid.
 
-For the quick start profile, write `secrets/postgres-password` first, point
-the DSN at the local database, and start both files together:
+The quick start profile needs none of that. With no `./secrets/database-url`
+to import, init makes a password for the local database, writes the DSN and
+gives each file to the account that reads it:
 
 ```
-printf '%s' 'a-long-random-password' > secrets/postgres-password && chmod 600 secrets/postgres-password
-printf '%s' 'postgresql://flotestro:a-long-random-password@postgres:5432/flotestro?sslmode=disable&application_name=flotestro-control-plane' > secrets/database-url
 docker compose --profile quickstart up -d
 ```
 
-`sslmode=disable` is acceptable only here, on one host with an internal
-network; an external database requires `verify-full`.
+That DSN carries `sslmode=disable`, which is acceptable only there, on one
+host and an internal network; an external database requires `verify-full`.
 
 For a relay, create `relay.yaml` and `relay-ca.pem` next to
 `compose.relay.yaml` before the first start - a bind mount whose source does

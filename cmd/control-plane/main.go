@@ -650,8 +650,8 @@ func run() error {
 	// certificate of the gateway will not match the address the agent connects to
 	// the panel under.
 	if *advertised == "127.0.0.1" {
-		log.Warn("the panel presents itself to the agents as 127.0.0.1; " +
-			"set FLOTESTRO_ADVERTISE to an address visible to the hosts of the fleet")
+		log.Warn("the panel presents itself to the agents as 127.0.0.1, so only a host " +
+			"on this machine can enrol; set FLOTESTRO_ADVERTISE to an address the fleet reaches")
 	}
 	dnsNames, ips := splitAdvertised(*advertised)
 	serverCertPEM, serverKeyPEM, err := ca.IssueServerCert(dnsNames, ips)
@@ -850,6 +850,7 @@ func run() error {
 	enrollmentService := gateway.NewEnrollmentService(certIssuer, hostStore, relayStore,
 		tokenStore, recorder, log)
 	enrollmentService.SetHelperSigner(helperSigner)
+	enrollmentService.SetAdvertised(splitList(*advertised))
 	relayService := gateway.NewRelayService(relayStore, certIssuer, recorder, registry,
 		enrollmentService, log)
 

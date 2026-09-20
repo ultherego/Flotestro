@@ -163,21 +163,18 @@ docker compose --profile quickstart up -d</code></pre>
     internal network. An external database requires
     <code>verify-full</code>.</p>
 
-    <div class="note note--warning">
-      <p class="note__title">Three things that cost an hour each</p>
+    <div class="note">
+      <p class="note__title">Nothing to prepare</p>
       <ul>
-        <li><strong>The secret files belong to the account the container runs
-        as.</strong> A Compose secret is a bind mount that keeps its ownership,
-        and the control plane runs as 65532. Under Docker:
-        <code>chown 65532:65532 secrets/*</code> and <code>chmod 0400</code>.</li>
-        <li><strong>Under rootless Podman that uid is outside the account's
-        subuid range</strong>, so the container would see the file as nobody's.
-        Add <code>-f compose.podman.yaml</code>, which turns the mapping round
-        with <code>keep-id</code> and leaves the files owned by the deploying
-        account at mode 0600.</li>
-        <li><strong>On a host with SELinux the secret also needs the container
-        label</strong>, or the read fails with a plain "permission denied" that
-        names nothing: <code>chcon -Rt container_file_t ./secrets</code>.</li>
+        <li>The <code>init</code> service writes the DSN and the database
+        password into a volume and gives each file to the account that reads
+        it, inside the runtime. No <code>chown</code>, and no uid to get
+        right.</li>
+        <li>Docker and rootless Podman behave the same, because no host
+        account owns the files any more.</li>
+        <li><code>./secrets</code> is mounted <code>:ro,z</code>, so a host
+        with SELinux relabels it by itself instead of failing with a plain
+        &ldquo;permission denied&rdquo;.</li>
       </ul>
     </div>
 

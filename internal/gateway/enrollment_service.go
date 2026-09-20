@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net"
+	"strings"
 	"time"
 
 	"connectrpc.com/connect"
@@ -40,10 +41,43 @@ type EnrollmentService struct {
 	// helperSigner signs the trust bundle a new host hands to its root helper:
 	// the host identifier and the panel's capability keys.
 	helperSigner *helpercap.Signer
+	// advertisedLoopback records that every name in FLOTESTRO_ADVERTISE is a
+	// loopback address, which only a host on this machine can reach.
+	advertisedLoopback bool
 }
 
 // SetHelperSigner connects the capability key.
 func (s *EnrollmentService) SetHelperSigner(signer *helpercap.Signer) { s.helperSigner = signer }
+
+// SetAdvertised takes what the panel tells the agents to come back to. A
+// default good on a laptop must not quietly become a production setting.
+func (s *EnrollmentService) SetAdvertised(names []string) {
+	s.advertisedLoopback = allLoopback(names)
+}
+
+// allLoopback is true when the list is not empty and names nothing a host on
+// another machine could reach.
+func allLoopback(names []string) bool {
+	if len(names) == 0 {
+		return false
+	}
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if ip := net.ParseIP(name); ip != nil {
+			if !ip.IsLoopback() {
+				return false
+			}
+			continue
+		}
+		if !strings.EqualFold(name, "localhost") {
+			return false
+		}
+	}
+	return true
+}
 
 // helperTrustFor is the signed keyring for one host, or nil on a panel
 // without a signing key.
@@ -106,6 +140,12 @@ func (s *EnrollmentService) throttle(ctx context.Context, req *connect.Request[a
 
 // peerHost strips the port off a peer address. A limit per address has to
 // key on the address alone: every connection has a port of its own.
+// isLoopbackPeer is true when the client is on this machine.
+func isLoopbackPeer(addr string) bool {
+	ip := net.ParseIP(peerHost(addr))
+	return ip != nil && ip.IsLoopback()
+}
+
 func peerHost(addr string) string {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -127,6 +167,14 @@ func (s *EnrollmentService) Enroll(ctx context.Context,
 	req *connect.Request[agentv1.EnrollRequest]) (*connect.Response[agentv1.EnrollResponse], error) {
 	if err := s.throttle(ctx, req); err != nil {
 		return nil, err
+	}
+	// The certificate this host would be given names loopback alone, so it
+	// would fail on the very next connection. Refusing here says why.
+	if s.advertisedLoopback && !isLoopbackPeer(req.Peer().Addr) {
+		s.deny(ctx, req.Msg, "", enrollment.DenialAdvertiseLoopback,
+			denialMessage(enrollment.DenialAdvertiseLoopback), nil)
+		return nil, connect.NewError(connect.CodeFailedPrecondition,
+			errors.New(denialMessage(enrollment.DenialAdvertiseLoopback)))
 	}
 	response, err := s.enrollThroughRelay(ctx, req.Msg, relayAttestation{})
 	if err == nil {
@@ -523,6 +571,8 @@ func denialMessage(code string) string {
 		return "the token matched no order"
 	case enrollment.DenialMachineRetired:
 		return "the machine belongs to a retired host and is held back; a new-host token does not fit it yet"
+	case enrollment.DenialAdvertiseLoopback:
+		return "the panel presents itself to the fleet as loopback; set FLOTESTRO_ADVERTISE to an address this host can reach"
 	default:
 		return "the token was refused"
 	}

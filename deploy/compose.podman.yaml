@@ -1,9 +1,0 @@
-# Rootless Podman, beside compose.yaml:
-#
-#   podman-compose -f compose.yaml -f compose.podman.yaml up -d
-#
-# keep-id makes the container's 65532 the deploying account, so the secrets
-# stay owned by it; host uid 65532 is outside that account's subuid range.
-services:
-  control-plane:
-    userns_mode: "keep-id:uid=65532,gid=65532"

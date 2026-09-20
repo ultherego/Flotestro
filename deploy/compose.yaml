@@ -1,47 +1,112 @@
 # The Flotestro control plane and what it is deployed with, in profiles.
 #
-#   docker compose up -d                                with a database somebody else runs
 #   docker compose --profile quickstart up -d           with a database of its own
+#   docker compose up -d                                with a database somebody else runs
 #   docker compose --profile airgap up -d               plus the package repository of the release
 #   docker compose --profile tools run --rm admin-tools backup
 #   docker compose --profile restore run --rm admin-restore restore <backup-id>
 #
+# The quickstart needs nothing prepared: this file alone brings up a panel and
+# a database, and the init service below makes the secrets they share. Every
+# setting has a working default; env.example lists all of them and names the
+# three an installation for real hosts has to change.
+#
 # Nothing but the control plane starts unless its profile is named, so an
 # installation pointed at an external database cannot quietly run a second
 # beside it. Profiles combine: --profile quickstart --profile airgap.
-# Settings come from ./.env, secrets from files under ./secrets/ - see README.md.
 name: flotestro
 
 services:
+  # Everything the deployment needs before it starts, so that nobody has to
+  # run printf, mkdir, chown and chmod by hand and get the uid right.
+  #
+  # ./secrets/database-url wins when it exists: that is the database somebody
+  # else runs. When it does not, a password for the quickstart database is
+  # made here and never leaves the runtime.
+  init:
+    image: docker.io/library/busybox:1.37
+    restart: "no"
+    user: "0:0"
+
+    volumes:
+      - shared_secrets:/run/flotestro
+      # Read-only, and created empty by the runtime when it is not there.
+      - ./secrets:/import:ro,z
+
+    command:
+      - /bin/sh
+      - -euc
+      - |
+        umask 077
+        if [ -f /import/database-url ]; then
+          cp /import/database-url /run/flotestro/database-url
+          # An installation that made its own files before this service
+          # existed keeps them, password and all.
+          [ -f /import/postgres-password ] &&
+            cp /import/postgres-password /run/flotestro/postgres-password
+          echo "the DSN was taken from ./secrets/database-url"
+        elif [ ! -f /run/flotestro/database-url ]; then
+          password="$$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+          printf '%s' "$$password" > /run/flotestro/postgres-password
+          printf 'postgresql://flotestro:%s@postgres:5432/flotestro?sslmode=disable' \
+            "$$password" > /run/flotestro/database-url
+          echo "no ./secrets/database-url was given, so the quickstart database got a"
+          echo "password of its own. An installation on a database somebody else runs"
+          echo "stops here, puts its DSN in ./secrets/database-url and starts again."
+        fi
+        # The control plane and the tools run as 65532, PostgreSQL as 999, and
+        # each reads only the file it needs.
+        chmod 0400 /run/flotestro/database-url
+        chown 65532:65532 /run/flotestro/database-url
+        if [ -f /run/flotestro/postgres-password ]; then
+          chmod 0400 /run/flotestro/postgres-password
+          chown 999:999 /run/flotestro/postgres-password
+        fi
+
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 32
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "1m"
+        max-file: "2"
+
   control-plane:
-    # A tag is readable and is what an example should show. Production pins
-    # the digest as well - image:tag@sha256:... - because a tag can be
+    # A tag is readable and is what an example shows. Production pins the
+    # digest as well - image:tag@sha256:... - because a tag can be moved.
     image: ghcr.io/ultherego/flotestro-control-plane:${FLOTESTRO_VERSION:?set FLOTESTRO_VERSION in .env}
     restart: unless-stopped
     user: "65532:65532"
 
     environment:
       # The DSN is a secret and travels as a file, never as a value: an
-      # environment variable is visible in "docker inspect", in the process
-      FLOTESTRO_DATABASE_URL_FILE: /run/secrets/database_url
-      # The state directory and the panel are already set in the image; they
-      # stand here as well because a deployment that has to be read in one
+      # environment variable is visible in "docker inspect" and in a crash dump.
+      FLOTESTRO_DATABASE_URL_FILE: /run/flotestro/database-url
+      # The state directory and the panel are set in the image already; they
+      # stand here too so that the deployment can be read in one place.
       FLOTESTRO_STATE_DIR: /var/lib/flotestro
       FLOTESTRO_WEB_ROOT: /usr/share/flotestro/web
-      # Every listener binds to every address inside the container. The
-      # native installation keeps the admin listener on 127.0.0.1, which
+      # Every listener binds to every address inside the container; which of
+      # them is reachable is decided by the published ports below.
       FLOTESTRO_ADMIN_ADDR: 0.0.0.0:8080
       FLOTESTRO_GATEWAY_ADDR: 0.0.0.0:8443
       FLOTESTRO_ENROLLMENT_ADDR: 0.0.0.0:8444
-      # The name of this gateway. Without it the control plane takes the
-      # hostname of the machine, and the hostname of a container is a random
-      FLOTESTRO_GATEWAY_ID: ${FLOTESTRO_GATEWAY_ID:?required, for example cp-prod-01}
-      # The addresses the agents see the panel under. They enter the
-      # certificate of the agent gateway, so they are the public names of the
-      FLOTESTRO_ADVERTISE: ${FLOTESTRO_ADVERTISE:?required, the DNS names or addresses the fleet reaches this panel at}
+      # The name of this gateway, and the name a second replica must not
+      # repeat. The container's own hostname is random, so it cannot serve.
+      FLOTESTRO_GATEWAY_ID: ${FLOTESTRO_GATEWAY_ID:-cp-01}
+      # The addresses the fleet reaches the panel at. They enter the certificate
+      # of the agent gateway, so they are public names, not the container's.
+      # The default serves a trial on this machine; no remote host can enrol
+      # against it, and the panel refuses such an enrollment rather than
+      # issuing a certificate that would not match. Change it for a real fleet.
+      FLOTESTRO_ADVERTISE: ${FLOTESTRO_ADVERTISE:-127.0.0.1}
       # The address the operator sees. The OIDC redirect and the Secure flag
       # of the session cookies follow from it.
-      FLOTESTRO_PUBLIC_URL: ${FLOTESTRO_PUBLIC_URL:?required, for example https://panel.example.org}
+      FLOTESTRO_PUBLIC_URL: ${FLOTESTRO_PUBLIC_URL:-http://localhost:8080}
       # Optional and non-secret, empty unless ./.env says otherwise: the address
       # the hosts reach the repository at, and the NVD an isolated site clears.
       FLOTESTRO_PACKAGE_REPOSITORY_URL: ${FLOTESTRO_PACKAGE_REPOSITORY_URL-}
@@ -49,12 +114,11 @@ services:
       # unset variable is unset in the container and not an empty one.
       FLOTESTRO_VULN_NVD_URL:
 
-    secrets:
-      - database_url
-
     volumes:
-      # The state: the fleet CA, the keys of the secret store, the helper
-      # signing key, the bootstrap token and the feed cache. The name is
+      # Written by init, read-only here and owned by this container's account.
+      - shared_secrets:/run/flotestro:ro
+      # The state: the fleet CA, the secret store keys, the helper signing key,
+      # the bootstrap token and the feed cache. Losing it loses the fleet.
       - control_plane_state:/var/lib/flotestro
       # The keytab of the directory connector, when FreeIPA is configured:
       # - ./secrets/ipa.keytab:/run/secrets/ipa.keytab:ro
@@ -66,8 +130,8 @@ services:
       # The panel and the API are published on the host loopback alone; a
       # reverse proxy with TLS puts them on the network.
       - "127.0.0.1:8080:8080"
-      # The agent gateway (mTLS) and the enrollment (TLS) are reached by the
-      # fleet directly or through an L4 load balancer: their TLS is
+      # The agent gateway (mTLS) and the enrollment (TLS) are reached directly
+      # or through an L4 balancer: the panel terminates their TLS itself.
       - "8443:8443"
       - "8444:8444"
 
@@ -76,11 +140,15 @@ services:
       - database_egress
       - database
 
-    # No depends_on: the panel waits for a database that answers, not for a
-    # container that exists, and says so while it waits.
+    # The panel waits for a database that answers, not for a container that
+    # exists, and says so while it waits - so nothing depends on postgres here.
+    # init is different: it makes the file the DSN is read from.
+    depends_on:
+      init:
+        condition: service_completed_successfully
 
     # The process writes to its state volume and to /tmp, and nowhere else.
-    # mode rather than uid/gid: 1777 is what a tmpfs is for, every runtime
+    # mode 1777 rather than uid/gid, because every runtime honours it.
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
@@ -93,12 +161,12 @@ services:
         soft: 65536
         hard: 131072
     # A stop is a chance to finish what is in flight: the gateway ends the
-    # agent sessions and the workers release their leases instead of leaving
+    # agent sessions and the workers release their leases.
     stop_grace_period: 30s
 
     healthcheck:
-      # The image carries no curl and no shell; this is the static client
-      # from cmd/container-healthcheck. It asks /healthz, which pings the
+      # The image carries no curl and no shell; this is the static client from
+      # cmd/container-healthcheck. It asks /healthz, which pings the database.
       test: ["CMD", "/usr/local/bin/flotestro-healthcheck"]
       interval: 15s
       timeout: 5s
@@ -127,13 +195,15 @@ services:
       POSTGRES_DB: flotestro
       POSTGRES_USER: flotestro
       # The password as a file, like every other secret here.
-      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_PASSWORD_FILE: /run/flotestro/postgres-password
 
-    secrets:
-      - postgres_password
+    depends_on:
+      init:
+        condition: service_completed_successfully
 
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - shared_secrets:/run/flotestro:ro
 
     networks:
       - database
@@ -216,17 +286,15 @@ services:
     environment:
       # The same DSN the control plane uses, from the same file. The tool takes
       # the password out of it before it runs anything.
-      FLOTESTRO_DATABASE_URL_FILE: /run/secrets/database_url
+      FLOTESTRO_DATABASE_URL_FILE: /run/flotestro/database-url
       FLOTESTRO_STATE_DIR: /state
       FLOTESTRO_BACKUP_DIR: /backups
       # The digest this deployment pins, so that the manifest of a backup can
       # name the image the backup was taken with.
       FLOTESTRO_IMAGE_DIGEST: ${FLOTESTRO_TOOLS_DIGEST:-}
 
-    secrets:
-      - database_url
-
     volumes:
+      - shared_secrets:/run/flotestro:ro
       # The state of the control plane, read-only: the CA, the keys of the
       # secret store, the bootstrap token. Half of the backup pair.
       - control_plane_state:/state:ro
@@ -264,15 +332,13 @@ services:
     user: "65532:65532"
 
     environment:
-      FLOTESTRO_DATABASE_URL_FILE: /run/secrets/database_url
+      FLOTESTRO_DATABASE_URL_FILE: /run/flotestro/database-url
       FLOTESTRO_STATE_DIR: /state
       FLOTESTRO_BACKUP_DIR: /backups
       FLOTESTRO_IMAGE_DIGEST: ${FLOTESTRO_TOOLS_DIGEST:-}
 
-    secrets:
-      - database_url
-
     volumes:
+      - shared_secrets:/run/flotestro:ro
       # Read-write, and the tool refuses to write into a state that is not
       # empty: a restore puts an installation back where there is none.
       - control_plane_state:/state
@@ -306,8 +372,8 @@ networks:
   # The quickstart database: no route out, and none in from outside.
   database:
     internal: true
-  # The way out to the database. It is a separate network so that the rule
-  # which lets the control plane reach PostgreSQL is one an operator can see
+  # The way out to an external database, kept separate so that the rule which
+  # lets the control plane reach PostgreSQL is one an operator can see.
   database_egress:
 
 volumes:
@@ -315,14 +381,8 @@ volumes:
     name: flotestro-state
   postgres_data:
     name: flotestro-postgres
-
-secrets:
-  # Read only under --profile quickstart.
-  postgres_password:
-    file: ./secrets/postgres-password
-  database_url:
-    # Mode 0600, owned by the account that runs the deployment. The directory
-    # is not in Git.
-    file: ./secrets/database-url
-  # oidc_client_secret:
-  #   file: ./secrets/oidc-client-secret
+  # The DSN and the database password. A volume rather than files next to this
+  # one: nothing has to be created, owned or protected by hand, and a secret
+  # that never leaves the runtime cannot be committed by accident.
+  shared_secrets:
+    name: flotestro-secrets

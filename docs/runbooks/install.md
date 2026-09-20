@@ -32,14 +32,12 @@ real systemd is a `--privileged` container with nothing isolated about it
 Follow "The first start" in `deploy/README.md`, which carries the exact files. Three things
 that are easy to get wrong and cost an hour each:
 
-- **The secret files belong to the account the container runs as.** A Compose secret is a
-  bind mount that keeps its ownership, and the control plane runs as 65532. Under Docker:
-  `chown 65532:65532 secrets/*` and `chmod 0400`. Under rootless Podman that uid is outside
-  the account's subuid range, so use `compose.podman.yaml`, which maps the other way round
-  and leaves the files owned by the deploying account.
-- **On a host with SELinux the secret also needs the container label**, or the read fails
-  with a plain "permission denied" that names nothing:
-  `chcon -Rt container_file_t ./secrets`.
+- **The DSN is a file you write, and nothing else.** `./secrets/database-url`, mode 0600,
+  owned by you. The `init` service copies it into the runtime and gives the copy to the
+  account the panel runs as, so neither the uid nor the SELinux label is yours to get right.
+- **The quickstart writes its own.** With no `./secrets/database-url` to import, init makes
+  a password for the local database. An installation that meant to use an external one
+  stops, writes the DSN and starts again.
 - **Pin the digest in production.** The example shows a tag because a tag is readable; a tag
   can be rewritten by whoever publishes it and a digest cannot.
 

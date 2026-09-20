@@ -334,11 +334,10 @@ docker compose cp control-plane:/var/lib/flotestro/bootstrap-token .</code></pre
       panel at: it enters the agent gateway&rsquo;s certificate. The bootstrap token is the first
       sign-in; map the identity provider&rsquo;s groups to roles, then delete it.</p>
 
-    <p class="prose">Against a database you already run, leave the profile out and point
-      <code>secrets/database-url</code> at it. Under rootless Podman add
-      <code>-f compose.podman.yaml</code>. On a host with SELinux,
-      <code>chcon -Rt container_file_t secrets</code>. The backup pair, an isolated site, pinning
-      a digest and upgrading are in
+    <p class="prose">Against a database you already run, leave the profile out and write its
+      DSN into <code>secrets/database-url</code> before the first start; the same file works
+      under Docker and rootless Podman, on a host with SELinux and without. The backup pair,
+      an isolated site, pinning a digest and upgrading are in
       <a href="https://github.com/ultherego/Flotestro/blob/main/deploy/README.md">deploy/README.md</a>.</p>
 
     <div class="note">

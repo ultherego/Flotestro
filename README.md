@@ -47,17 +47,14 @@ database.
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/ultherego/Flotestro/main/deploy/compose.yaml
-printf '%s\n' FLOTESTRO_VERSION=latest FLOTESTRO_GATEWAY_ID=cp-01 \
-  FLOTESTRO_ADVERTISE=panel.example.org FLOTESTRO_PUBLIC_URL=http://panel.example.org:8080 > .env
-mkdir -p secrets && chmod 700 secrets
-printf '%s' 'a-long-random-password' > secrets/postgres-password
-printf '%s' 'postgresql://flotestro:a-long-random-password@postgres:5432/flotestro?sslmode=disable' > secrets/database-url
-sudo chown 65532:65532 secrets/* && chmod 400 secrets/*
 docker compose --profile quickstart up -d
 docker compose cp control-plane:/var/lib/flotestro/bootstrap-token .
 ```
 
-Open the panel, sign in with the token, and add your first host.
+Open <http://localhost:8080>, sign in with the token, and add your first host.
+Every setting has a working default; to serve hosts on other machines, put your
+own address in `.env` — [`env.example`](deploy/env.example) lists all of them
+and names the three that matter.
 
 **A host:**
 
@@ -68,7 +65,8 @@ sudo apt update && sudo apt install flotestro-agent
 ```
 
 `dnf` and `pacman` are in the [documentation](https://ultherego.github.io/Flotestro/docs/installation.html).
-The panel writes the enrollment command for each host under **Add host**.
+The panel writes the enrollment command for each host under **Add host**, and
+[`deploy/ansible`](deploy/ansible) does the same for a hundred hosts at once.
 
 Everything else — an external database, a relay for a remote site, an
 air-gapped installation, backups, upgrades — is in the
