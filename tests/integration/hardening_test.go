@@ -19,14 +19,12 @@ import (
 )
 
 // The tests of this file check the closing of the review findings: the bounds
-// an agent cannot move, the management of tokens and identities, the key
-// policy of the fleet, the replacement of a certificate, and the scope of the
+// an agent cannot move, the tokens and identities, and the key policy.
 
 const hardeningReason = "integration test of the security hardening"
 
 // TestIdentityTokensAreIssuedRevokedAndDisabled walks the life of an automated
-// identity: a token issued later than the identity, revoked by its identifier,
-// a role taken away by its scope, and the identity disabled with every
+// identity: a token issued and revoked, a role removed, the identity disabled.
 func TestIdentityTokensAreIssuedRevokedAndDisabled(t *testing.T) {
 	h := newHarness(t)
 	subject := uniqueSubject("token-life")

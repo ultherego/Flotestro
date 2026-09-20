@@ -458,8 +458,7 @@ func TestFleetViewHasAnExpiryTimeline(t *testing.T) {
 }
 
 // TestPrivateKeyDoesNotReachTheHostJournal guards the property the secret
-// store exists for in the first place - and which is not visible in the API:
-// the key material passes through the agent and the helper at deployment, so
+// store exists for: the key passes the agent and the helper, not the journal.
 func TestPrivateKeyDoesNotReachTheHostJournal(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("rhel")

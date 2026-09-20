@@ -161,8 +161,7 @@ export function Campaign() {
     enabled: campaign.data !== undefined && campaign.data.approved_by !== undefined && campaign.data.approved_by !== "",
   });
   // The timeline comes from the durable trail, not from notifications: an
-  // event sent while the panel restarted no longer exists anywhere, and an
-  // operator coming back to a campaign is to see how it went, not only how
+  // event sent while the panel was restarting exists nowhere else.
   const timeline = useQuery({
     queryKey: ["campaign-timeline", id],
     queryFn: () => api.get<Collection<TimelineEntry>>(`/api/v1/campaigns/${id}/timeline`),

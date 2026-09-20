@@ -354,9 +354,8 @@ func TestAnUnknownVerifierIsNeverASuccess(t *testing.T) {
 	expectUnreadable(t, found)
 }
 
-// The layers above a bare disk are settled by a read of the host and never by
-// the exit code of a tool: mdadm exits zero on a member it accepted and on one
-// the array had already forgotten, and lvcreate rounds a size up to whole
+// The layers above a bare disk are settled by a read of the host, never by the
+// exit code of a tool: mdadm exits zero on a member it had already forgotten.
 func TestVerifyingAnArrayMember(t *testing.T) {
 	array := storage.RAIDArray{
 		Path: "/dev/md0", Name: "md0", UUID: "array-uuid", Level: "raid1",

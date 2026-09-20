@@ -35,9 +35,8 @@ func testState() Snapshot {
 	}
 }
 
-// TestNetworkUsageComesFromContainers guards the most important property of
-// this view: the engine returns an empty container map in the network list, so
-// without the derivation from containers every network would look abandoned -
+// TestNetworkUsageComesFromContainers guards the property this view rests on:
+// without the derivation from containers, every network would look abandoned.
 func TestNetworkUsageComesFromContainers(t *testing.T) {
 	state := testState()
 	linkUsage(&state)

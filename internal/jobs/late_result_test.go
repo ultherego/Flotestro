@@ -3,8 +3,7 @@ package jobs
 import "testing"
 
 // The status an attempt has when its result arrives decides what the result
-// does: a lease the scheduler gave up on is settled and its redelivery
-// superseded, a superseded attempt takes nothing, and an attempt without a
+// does: an expired lease is settled, a superseded attempt takes nothing.
 func TestWhatALateResultDoesByTheStatusOfItsAttempt(t *testing.T) {
 	cases := []struct {
 		status             string

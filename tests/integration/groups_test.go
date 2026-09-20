@@ -390,7 +390,7 @@ func TestTheSelectorRefusesACyclicGroup(t *testing.T) {
 
 // TestAGroupIsEditedInPlaceAndKnowsWhoNamesIt: a group's name, description and
 // selector change through one write that carries the tag the group was read
-// with - a stale tag is refused - and the group read back says which campaign
+// with - a stale tag is refused - and the group read back says who names it.
 func TestAGroupIsEditedInPlaceAndKnowsWhoNamesIt(t *testing.T) {
 	h := newHarness(t)
 	lab := h.hosts()

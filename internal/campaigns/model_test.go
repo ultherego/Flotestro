@@ -198,8 +198,7 @@ func TestTheFingerprintChangesWithEveryDecision(t *testing.T) {
 }
 
 // TestAHostQueuedOfflineHoldsNeitherASlotNorItsWave guards the two things the
-// offline queue exists for: such a host is not working, so it takes no
-// concurrency slot, and in a wave it is not a verdict, so it does not keep the
+// offline queue exists for: the host takes no slot and holds no wave open.
 func TestAHostQueuedOfflineHoldsNeitherASlotNorItsWave(t *testing.T) {
 	if !TargetQueuedOffline.Waiting() {
 		t.Error("a host queued offline should wait in the queue")
@@ -234,9 +233,8 @@ func TestAHostQueuedOfflineHoldsNeitherASlotNorItsWave(t *testing.T) {
 	}
 }
 
-// TestTheNewStatesKnowTheirPlace guards how the states the document names sit
-// among the predicates: the two in-flight ones hold their slot and their wave
-// without being ready to start, the two terminal ones end the host, and only
+// TestTheNewStatesKnowTheirPlace guards the predicates: the in-flight states
+// hold their slot and their wave, the terminal ones end the host.
 func TestTheNewStatesKnowTheirPlace(t *testing.T) {
 	for _, state := range []TargetState{TargetDispatched, TargetAwaitingLock} {
 		if state.Finished() || state.Waiting() {
@@ -270,8 +268,7 @@ func TestTheNewStatesKnowTheirPlace(t *testing.T) {
 }
 
 // TestTheTallyCountsUnknownAsAFailure guards the document's rule that unknown
-// is not a success: the threshold reads an unknown host the way it reads a
-// failed one, a host that changed nothing the way it reads one whose change
+// is not a success: the threshold reads it the way it reads a failed host.
 func TestTheTallyCountsUnknownAsAFailure(t *testing.T) {
 	targets := []Target{
 		{State: TargetSucceeded},
@@ -297,8 +294,7 @@ func TestTheTallyCountsUnknownAsAFailure(t *testing.T) {
 }
 
 // TestTheVerdictOnASettledCampaign guards the three ways a campaign ends once
-// every host has settled: completed when every host that took part got
-// through, completed with issues when the threshold held but hosts failed or
+// every host has settled: completed, completed with issues, and failed.
 func TestTheVerdictOnASettledCampaign(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -346,8 +342,7 @@ func TestACancelWaitsForTheHostsUnderWay(t *testing.T) {
 }
 
 // TestPlansExpireOnlyBeforeTheStart guards the expiry: a campaign whose oldest
-// plan passed the time limit expires as a whole while nothing has started,
-// keeps going once a host has - every host checks its own plan's age at
+// plan passed the limit expires while nothing has started, not once a host has.
 func TestPlansExpireOnlyBeforeTheStart(t *testing.T) {
 	computed := time.Date(2026, 9, 13, 10, 0, 0, 0, time.UTC)
 	if plansExpired(computed, nil, computed.Add(PlanTTL-time.Minute)) {
@@ -399,8 +394,7 @@ func TestTheGateAndTheOfflinePolicyAreValidated(t *testing.T) {
 }
 
 // TestTheRebootTimeoutIsBoundedAndDefaulted guards the reboot timeout field:
-// zero is the default of fifteen minutes, so a campaign from before the field
-// waits as it always did; anything else has to lie within the bounds, and a
+// zero is the default of fifteen minutes, anything else lies within the bounds.
 func TestTheRebootTimeoutIsBoundedAndDefaulted(t *testing.T) {
 	valid := Spec{Name: "test", WaveSize: 10, MaxConcurrent: 5, RebootPolicy: RebootNever}
 	if valid.RebootTimeout() != DefaultRebootTimeout {
@@ -431,9 +425,8 @@ func TestTheRebootTimeoutIsBoundedAndDefaulted(t *testing.T) {
 	}
 }
 
-// TestACanaryHealthFailureCountsTowardsTheThreshold guards the mandatory
-// scenario "canary health check negative, wave two stopped": a canary whose
-// units did not come up after the change is a failure like any other, so the
+// TestACanaryHealthFailureCountsTowardsTheThreshold guards the scenario
+// "canary health check negative": a failed canary counts towards the threshold.
 func TestACanaryHealthFailureCountsTowardsTheThreshold(t *testing.T) {
 	targets := []Target{
 		{Wave: 0, State: TargetFailed, ErrorCode: "health_check_failed"},
@@ -461,9 +454,8 @@ func TestACanaryHealthFailureCountsTowardsTheThreshold(t *testing.T) {
 	}
 }
 
-// TestTheBarrierWaitsForAnOfflineCanaryUntilItIsSkipped reads the wave barrier
-// the orchestrator reads: with the canary offline the current wave is still
-// the canary and the canary is not finished, so wave one does not open; once
+// TestTheBarrierWaitsForAnOfflineCanaryUntilItIsSkipped: with a host of the
+// canary offline wave one does not open, and it opens once that host is skipped.
 func TestTheBarrierWaitsForAnOfflineCanaryUntilItIsSkipped(t *testing.T) {
 	targets := []Target{
 		{HostID: "a", Wave: 0, State: TargetSucceeded},
@@ -513,8 +505,7 @@ func TestTheConcurrencyLimitCountsEveryWave(t *testing.T) {
 }
 
 // TestALateSuccessDoesNotResurrectACanceledCampaign guards the settle path
-// after a cancel: a host settled canceled stays canceled when its task's
-// result arrives late - a settled host never moves - and a canceled or
+// after a cancel: a settled host never moves, and neither does the campaign.
 func TestALateSuccessDoesNotResurrectACanceledCampaign(t *testing.T) {
 	for _, to := range []TargetState{TargetSucceeded, TargetNoChange, TargetRunning, TargetVerifying} {
 		if TargetCanceled.mayBecome(to) {

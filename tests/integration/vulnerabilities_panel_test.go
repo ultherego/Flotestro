@@ -66,8 +66,7 @@ var severityRank = map[string]int{
 }
 
 // TestCVEListAgreesWithTheCVEPage guards that the fleet's CVE list and the
-// page of one CVE tell the same story: the host count of the row is the number
-// of distinct affected hosts the page lists, the severity is the same word,
+// page of one CVE tell the same story about host count and severity.
 func TestCVEListAgreesWithTheCVEPage(t *testing.T) {
 	h := newHarness(t)
 	var list cveListView

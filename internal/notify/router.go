@@ -26,7 +26,7 @@ type Router struct {
 	// messages without links.
 	publicURL string
 	// worker is woken when rows were written, so a message goes out within a
-	// moment rather than at the next poll; nil means the worker of another
+	// moment rather than at the next poll; nil means there is none to wake.
 	worker *Worker
 	// now is replaced in tests.
 	now func() time.Time
@@ -104,7 +104,7 @@ func (r *Router) Deliver(ctx context.Context, events []outbox.Event) error {
 				row.LastError = verdict.Sentence
 			}
 			// A resolve is kept back for a channel whose fire was kept back: the two
-			// are decided per channel, because the same silence may have started
+			// are decided per channel, because a silence may start between them.
 			if !verdict.Suppressed && message.Subject == "alert.resolved" {
 				kept, err := r.fireWasKept(ctx, channel.ID, event.AggregateID)
 				if err != nil {

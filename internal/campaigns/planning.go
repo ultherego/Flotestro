@@ -410,8 +410,7 @@ func hostFingerprint(detail json.RawMessage) string {
 }
 
 // planReference reads off a package plan the header of its envelope and the
-// elements the operator approved, so the change carries them back to the host:
-// the host rebuilds the envelope with the same header, and a refusal names
+// elements the operator approved, so the host can rebuild the same envelope.
 func planReference(plan json.RawMessage) *opspec.PlanReference {
 	if len(plan) == 0 {
 		return nil

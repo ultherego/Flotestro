@@ -158,8 +158,7 @@ func TestTheSameContentIsKeptOnce(t *testing.T) {
 }
 
 // TestTheDigestOfASecretVersionIsNotReported guards the boundary of the secret
-// store: the host keeps the copy, so a rollback does not need the store again,
-// but it does not put a fingerprint of a secret value into the panel's
+// store: the host keeps the copy, but reports no digest of a secret value.
 func TestTheDigestOfASecretVersionIsNotReported(t *testing.T) {
 	store := testStore(t)
 	current := File{Path: "/etc/token.conf", Exists: true, Mode: "0600", FromSecret: true}

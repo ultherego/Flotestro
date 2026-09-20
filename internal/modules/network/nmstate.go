@@ -323,9 +323,8 @@ func NmstateDocument(kind string, current, desired Profile) (string, error) {
 				return "", err
 			}
 		}
-		// Both families in one document: nmstate takes the destination as it is
-		// written, so the only thing that has to be right is that the routes of the
-		// family the order did not touch are carried over unchanged rather than
+		// Both families go in one document, so the routes of the family the order
+		// did not touch have to be carried over rather than dropped.
 		entries := routeEntries(current.Connection, current.Routes, desired.Routes)
 		entries = append(entries, routeEntries(current.Connection, current.Routes6, desired.Routes6)...)
 		document.Routes = &nmstateRoutesDoc{Config: entries}

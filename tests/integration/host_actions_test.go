@@ -9,8 +9,7 @@ import (
 )
 
 // The action preview of a host answers what the order would: a viewer is
-// refused every change with permission_denied, a host that announced no
-// adapter refuses every change that needs one with capability_missing, and an
+// refused with permission_denied, a missing adapter with capability_missing.
 
 type hostActionView struct {
 	Action            string `json:"action"`

@@ -252,9 +252,8 @@ export function AddHost() {
     setRelayId(shape.relay_id ?? "");
   };
 
-  // Regenerate is the same replacement the history offers: the server
-  // revokes the order in hand and places one like it in one call, so two
-  // live tokens for one host never exist side by side, and the old token
+  // Regenerate is the same replacement the history offers: the server revokes
+  // the order in hand and places one like it, so two live tokens never coexist.
   const replace = useMutation({
     mutationFn: (previous: EnrollmentOrder) =>
       api.post<NewOrder>(`/api/v1/enrollment-requests/${previous.id}/replace`, { reason }),

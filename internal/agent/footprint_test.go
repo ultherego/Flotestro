@@ -172,9 +172,8 @@ func TestFootprintLeavesOutWhatItCannotRead(t *testing.T) {
 	}
 }
 
-// TestTheAgentHandsBackWhatItNoLongerUses: a sample taken while the agent
-// holds more than the release threshold frees the pages once and reports what
-// the host sees afterwards; the next sample a minute later does not free
+// TestTheAgentHandsBackWhatItNoLongerUses: a sample above the release
+// threshold frees the pages once and reports what the host sees afterwards.
 func TestTheAgentHandsBackWhatItNoLongerUses(t *testing.T) {
 	root := procFixture(t, "cpu 100 0 50 800 20 0 5 25 0 0")
 	selfFixture(t, root, statFixture(100, 20), 7)

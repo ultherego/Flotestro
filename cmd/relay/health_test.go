@@ -101,8 +101,7 @@ func TestAHealthListenerTurnedOffIsNoError(t *testing.T) {
 }
 
 // TestAHealthAddressThatCannotBeBoundStopsTheRelay guards the fail-closed
-// start: an operator who asked for a health answer and would get none has a
-// relay that says so at the start, rather than a container the runtime keeps
+// start: a relay that cannot answer for its health says so instead of running.
 func TestAHealthAddressThatCannotBeBoundStopsTheRelay(t *testing.T) {
 	// An address of the documentation range: it belongs to no interface
 	// of this machine, so the bind fails without touching a network.

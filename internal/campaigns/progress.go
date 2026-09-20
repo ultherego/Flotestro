@@ -127,8 +127,7 @@ func (o *Orchestrator) afterMainJob(ctx context.Context, campaign Campaign, targ
 			return nil
 		}
 		// The units are verified whether or not a reboot came between: the canary is
-		// there to say if the change left the service standing, and a restart
-		// campaign with no reboot in it is the one case where nothing else would
+		// there to say whether the change left the service standing.
 		host, err := o.hosts.Get(ctx, target.HostID)
 		if err != nil {
 			o.finishTargetSteps(ctx, campaign, target, TargetFailed, "host_unavailable", err.Error(),
@@ -704,8 +703,7 @@ func (o *Orchestrator) settleTarget(ctx context.Context, campaign Campaign, targ
 }
 
 // openCompensation records, on the original campaign's target for the same
-// host, that its compensation started: a compensate step that follows the
-// original's change, runs under the compensating campaign's plan for the host
+// host, that its compensation started.
 func (o *Orchestrator) openCompensation(ctx context.Context, tx pgx.Tx, originalID string,
 	target *Target, start stepStart) error {
 	original, found, err := o.store.compensatedTarget(ctx, tx, originalID, target.HostID)

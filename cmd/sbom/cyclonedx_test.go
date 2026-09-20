@@ -101,8 +101,7 @@ type bill struct {
 }
 
 // TestWriteRendersCycloneDX: the bill names the format and version, the
-// application with the release version, one library per module with a golang
-// package URL, the toolchain, and the dependency edge from the application to
+// application, one library per module, and the edges between them.
 func TestWriteRendersCycloneDX(t *testing.T) {
 	agent := fixture(t)[0]
 	var out bytes.Buffer

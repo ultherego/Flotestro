@@ -129,9 +129,8 @@ func inFlightFiles(t *testing.T, dir string) []string {
 	return markers
 }
 
-// TestTheMarkerIsDownBeforeTheHelperActsAndGoneWithTheResult guards the order
-// the scenario depends on: at the moment the helper is touching the host the
-// journal already says so, and once the result is stored nothing is left that
+// TestTheMarkerIsDownBeforeTheHelperActsAndGoneWithTheResult: the journal
+// says the helper is at the host before it acts, and the result closes it.
 func TestTheMarkerIsDownBeforeTheHelperActsAndGoneWithTheResult(t *testing.T) {
 	dir := t.TempDir()
 	journal, err := NewIdempotencyJournal(dir, time.Hour)
@@ -248,9 +247,8 @@ func TestARestartInFlightAnswersWithAnUnknownOutcome(t *testing.T) {
 	}
 }
 
-// TestAnUnknownPackageOutcomeCarriesWhatTheAdapterCanSay guards the panel's
-// view of the package database: a result that knows the state carries it under
-// the same field as a transaction would, and a result that does not carries no
+// TestAnUnknownPackageOutcomeCarriesWhatTheAdapterCanSay: a result that knows
+// the state of the package database carries it, one that does not carries none.
 func TestAnUnknownPackageOutcomeCarriesWhatTheAdapterCanSay(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -440,9 +438,8 @@ func TestARedeliveryDuringTheOperationIsAcknowledgedNotRefused(t *testing.T) {
 	}
 }
 
-// TestTheNewestRedeliveredAttemptGetsTheResult guards what the agent remembers
-// when the panel gives up more than once during one operation: each reclaim
-// closes the previous attempt on the panel, so only the newest one is still
+// TestTheNewestRedeliveredAttemptGetsTheResult: each reclaim closes the
+// attempt before it, so the result goes to the newest attempt alone.
 func TestTheNewestRedeliveredAttemptGetsTheResult(t *testing.T) {
 	dir := t.TempDir()
 	journal, err := NewIdempotencyJournal(dir, time.Hour)
@@ -556,9 +553,8 @@ func TestTheJournalKeepsMarkersApartFromResults(t *testing.T) {
 	}
 }
 
-// TestATaskIsAcceptedThenStartedAroundTheModuleCall guards the order the
-// panel's leases rest on: "accepted" goes out before the task queues for the
-// resources of the host, "started" once it holds them and the marker is down -
+// TestATaskIsAcceptedThenStartedAroundTheModuleCall: "accepted" goes out
+// before the wait for the resources, "started" once the task holds them.
 func TestATaskIsAcceptedThenStartedAroundTheModuleCall(t *testing.T) {
 	dir := t.TempDir()
 	journal, err := NewIdempotencyJournal(dir, time.Hour)
@@ -631,9 +627,8 @@ func TestAReadIsAcceptedAndStartedWithoutClaims(t *testing.T) {
 	}
 }
 
-// TestAWaitForABusyLockIsReportedBetweenAcceptedAndStarted: the executor
-// passes the blocker the locks name on to the panel as an awaiting_lock
-// report, after accepted and before started, so that the host is shown as
+// TestAWaitForABusyLockIsReportedBetweenAcceptedAndStarted: the blocker the
+// locks name goes to the panel as an awaiting_lock report before started.
 func TestAWaitForABusyLockIsReportedBetweenAcceptedAndStarted(t *testing.T) {
 	journal, err := NewIdempotencyJournal(t.TempDir(), time.Hour)
 	if err != nil {
@@ -823,8 +818,7 @@ func TestAChangedPreconditionAfterTheWaitIsRefusedWithoutTouchingTheHost(t *test
 }
 
 // TestAJournalThatCannotTakeTheMarkerStartsNothing is the full disk of the
-// document's scenario list: the state directory refuses the write of the
-// marker, so the helper is never asked and the refusal is typed - the operator
+// scenario list: the helper is never asked, and the refusal is typed.
 func TestAJournalThatCannotTakeTheMarkerStartsNothing(t *testing.T) {
 	dir := t.TempDir()
 	journal, err := NewIdempotencyJournal(dir, time.Hour)

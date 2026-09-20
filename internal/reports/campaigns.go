@@ -105,8 +105,7 @@ func (s *Store) Campaigns(ctx context.Context, period Period, filter Filter) (*C
 	args = append([]any{period.From, period.To}, args...)
 	args = append(args, campaignRowLimit)
 	// The campaigns of the period, with the tally over all of their targets: the
-	// outcome of a campaign is the outcome of the whole campaign, as its own
-	// report states it, and the scope decides only whether the reader sees the
+	// scope decides only whether the reader sees the campaign at all.
 	rows, err := s.pool.Query(ctx, fmt.Sprintf(`
 		select c.id::text, c.name, c.action_type, c.state, c.created_by, coalesce(c.approved_by, ''),
 		       c.created_at, c.started_at, c.finished_at, `+outcomeSQL+`

@@ -126,8 +126,7 @@ func (s *Store) Save(ctx context.Context, hostID string, report Report) (stored 
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	// A revision seen before is not written again, but its observation mark
-	// moves: a host that went back to an earlier picture - a partial cycle
-	// toggles a fast module and toggles it back - has that picture as its latest,
+	// moves, so a host back at an earlier revision has it as its latest.
 	const insert = `
 		insert into inventory_revisions
 			(id, host_id, revision, is_full, schema_version, payload, observed_at)

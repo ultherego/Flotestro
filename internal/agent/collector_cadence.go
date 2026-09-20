@@ -20,8 +20,7 @@ const (
 	// changes on its own, but slowly, and the read starts tools.
 	CadenceNormal CadenceClass = "normal"
 	// CadenceSlow marks a module read every six hours and at the start of a
-	// session, which is where a reboot lands: the platform facts and the sudo
-	// policy change when somebody changes the machine, and the document sets
+	// session: these facts change only when somebody changes the machine.
 	CadenceSlow CadenceClass = "slow"
 	// CadenceStatic marks a module read once a day, at the full report, or on
 	// demand: the state changes only when somebody changes it, and then the

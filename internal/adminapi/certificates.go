@@ -472,8 +472,7 @@ var certificatesCSVColumns = []string{
 }
 
 // writeCertificatesCSV streams every certificate of the visible fleet, nearest
-// expiry first as the screen sorts them, a page at a time from the same cursor
-// the screen pages with: the file is for the operator who wants the whole
+// expiry first, from the same cursor the screen pages with, so the two agree.
 func (s *Server) writeCertificatesCSV(w http.ResponseWriter, r *http.Request, scopes []authz.Scope, now time.Time) {
 	s.writeCSV(w, r, exportFileName("certificates", now), certificatesCSVColumns, func(yield func([]string) bool) error {
 		cursor := certificatestore.FleetCursor{}

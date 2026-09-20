@@ -67,8 +67,8 @@ func settledTarget(state string) bool {
 }
 
 // TestPauseKeepsTheRunningHostAndStartsNoNewOne is the document's CAM-02: a
-// pause ordered while a host carries its task either finds the task already
-// created - and then follows it to its end, with the budget lease renewed
+// pause lets the host already carrying a task run to its end, with its budget
+// lease renewed meanwhile, and no task is created after it.
 func TestPauseKeepsTheRunningHostAndStartsNoNewOne(t *testing.T) {
 	h := newHarness(t)
 	online := 0
@@ -196,8 +196,8 @@ func TestPauseKeepsTheRunningHostAndStartsNoNewOne(t *testing.T) {
 }
 
 // TestCancelTakesBackTheQueuedTaskOfAnOfflineHost guards the cancel of a
-// campaign whose host went offline right after its task was created: the task
-// sits in the panel's queue, and a cancel takes it back in the same
+// campaign whose host went offline right after its task was created: the
+// queued task is canceled with the campaign and the budget tokens go back.
 func TestCancelTakesBackTheQueuedTaskOfAnOfflineHost(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

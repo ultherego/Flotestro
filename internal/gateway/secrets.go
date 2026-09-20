@@ -44,9 +44,8 @@ func (s *AgentService) FetchSecret(ctx context.Context,
 		return nil, err
 	}
 	hostID := who.HostID
-	// A direct caller was checked against the record of the certificate it
-	// presented, the way Connect checks it: a revoked or unknown one, or one of a
-	// host that is no longer active, fetches nothing - even with a lease issued
+	// A direct caller was already checked against the record of the certificate
+	// it presented: a revoked or unknown one fetches nothing.
 	var sealTo []byte
 	if who.RelayID != "" {
 		verified, problem := s.verifySecretEnvelope(ctx, who, req.Msg)
@@ -116,8 +115,7 @@ func (s *AgentService) FetchSecret(ctx context.Context,
 		}), nil
 	}
 	// Sealed to the host's one-time key under the lease as associated data: the
-	// plaintext leaves this process only inside the cipher text, and the digest
-	// stays out - the cipher authenticates the content, and a digest of a short
+	// plaintext leaves this process inside the cipher text, without a digest.
 	sealed, nonce, serverPublic, err := relayproof.Seal(sealTo, value,
 		relayproof.SecretAAD(req.Msg.GetTaskId(), name, uint32(version)))
 	if err != nil {

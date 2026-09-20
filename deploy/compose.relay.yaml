@@ -17,10 +17,10 @@ services:
 
     volumes:
       # The configuration is a file and not an environment: the relay is a
-      # separate trust boundary with its own name, its own site and its own
+      # separate trust boundary, with its own name, site and identity.
       - ./relay.yaml:/etc/flotestro/relay.yaml:ro
-      # The fleet CA for the first connection, as bootstrap_ca_file in that
-      # file points at it. After the enrollment the relay uses the copy in
+      # The fleet CA for the first connection: bootstrap_ca_file points here.
+      # After the enrollment the relay uses the copy in its own state.
       - ./relay-ca.pem:/etc/flotestro/ca.pem:ro
       # The identity of the relay, its certificate and the durable spool -
       # the results of the site that the centre has not acknowledged yet.
@@ -46,8 +46,8 @@ services:
     stop_grace_period: 30s
 
     healthcheck:
-      # Liveness only: the listener of the site is up and accepts. It is
-      # deliberately not a question about the link to the centre - a WAN
+      # Liveness only: the listener of the site is up and accepts. A question
+      # about the link to the centre would restart the relay over a WAN blip.
       test: ["CMD", "/usr/local/bin/flotestro-healthcheck", "-addr", "127.0.0.1:8454"]
       interval: 30s
       timeout: 5s
@@ -60,8 +60,8 @@ services:
         max-size: "20m"
         max-file: "5"
 
-  # The registration. It runs once, with a one-time token, and ends; the
-  # token never enters the service above, because that one restarts and the
+  # The registration runs once, with a one-time token, and ends. The token
+  # never enters the service above, which restarts and would keep it.
   relay-enroll:
     image: ghcr.io/ultherego/flotestro-relay:${FLOTESTRO_VERSION:?set FLOTESTRO_VERSION in .env}
     profiles: ["enroll"]

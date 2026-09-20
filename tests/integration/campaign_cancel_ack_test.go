@@ -181,7 +181,7 @@ func TestACancelOfAQueuedTaskNeverAsksAHost(t *testing.T) {
 
 // TestAnOfflineCanaryHoldsTheWaveUntilItIsSkipped is the barrier of the
 // document: a canary that was not connected when its turn came stays queued
-// offline and the waves do not open over it - the canary has said nothing
+// offline, and no wave opens over it until somebody skips it with a reason.
 func TestAnOfflineCanaryHoldsTheWaveUntilItIsSkipped(t *testing.T) {
 	h := newHarness(t)
 	offline := h.enrollSyntheticHost(t)

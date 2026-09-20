@@ -96,8 +96,7 @@ func TestTheConfigurationRejectsErrors(t *testing.T) {
 }
 
 // TestNoBufferIsAChoice guards the difference between "nothing was written"
-// and "zero was written": a relay without a buffer loses results while the
-// link is down, and that is to be a decision of the operator rather than the
+// and "zero was written": no buffer loses results, so it has to be chosen.
 func TestNoBufferIsAChoice(t *testing.T) {
 	without := strings.Replace(validConfig, "  buffer_max_bytes: 268435456\n", "", 1)
 	cfg, err := Read(strings.NewReader(without))
@@ -125,9 +124,8 @@ func TestASecondDocumentIsAnError(t *testing.T) {
 	}
 }
 
-// TestTheHealthListenerHasADefaultAndCanBeTurnedOff guards the difference
-// between a file that says nothing about the health listener and one that
-// turns it off: an installation upgraded from a release without the listener
+// TestTheHealthListenerHasADefaultAndCanBeTurnedOff separates a file silent
+// about the listener, which gets the default, from one that turns it off.
 func TestTheHealthListenerHasADefaultAndCanBeTurnedOff(t *testing.T) {
 	cfg, err := Read(strings.NewReader(validConfig))
 	if err != nil {
@@ -159,9 +157,8 @@ func TestTheHealthListenerHasADefaultAndCanBeTurnedOff(t *testing.T) {
 	}
 }
 
-// TestTheHealthListenerIsNotThePortOfTheFleet guards the one mistake that
-// would turn a convenience into a leak: the health answer goes out without a
-// client certificate, and on the port of the agents it would hand the state of
+// TestTheHealthListenerIsNotThePortOfTheFleet: the health answer goes out
+// without a client certificate, so it must not share the port of the agents.
 func TestTheHealthListenerIsNotThePortOfTheFleet(t *testing.T) {
 	cases := []struct {
 		name    string

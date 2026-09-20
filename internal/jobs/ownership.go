@@ -170,9 +170,8 @@ func (s *Store) OwnersOf(ctx context.Context, hostIDs []string) (map[string]Owne
 	return owners, rows.Err()
 }
 
-// SweepExpiredOwners forgets the sessions of the owner rows whose lease ran
-// out: an instance that died without releasing its hosts leaves them named as
-// owners, and while the expired lease already refuses every write, the rows
+// SweepExpiredOwners clears the owner rows whose lease ran out: the lease
+// already refuses every write, but a dead instance must not be named an owner.
 func (s *Store) SweepExpiredOwners(ctx context.Context) (int64, error) {
 	tag, err := s.pool.Exec(ctx, `
 		update host_session_owners

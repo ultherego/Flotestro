@@ -4,9 +4,8 @@ import (
 	"testing"
 )
 
-// TestARetryTakesTheFailedHostsOfAFinishedCampaign guards the rules a retry
-// order is checked against: the campaign has to be finished, the failed hosts
-// are taken, the unknown ones only on request, and the hosts that succeeded or
+// TestARetryTakesTheFailedHostsOfAFinishedCampaign guards the retry order: a
+// finished campaign, its failed hosts, and the unknown ones only on request.
 func TestARetryTakesTheFailedHostsOfAFinishedCampaign(t *testing.T) {
 	original := Campaign{ID: "orig", Name: "rollout", ActionType: "unit.restart", State: StateCompletedWithIssues}
 	targets := []Target{

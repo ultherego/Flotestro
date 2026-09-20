@@ -42,8 +42,7 @@ func BuildReport(campaign Campaign, targets []Target) Report {
 			report.RebootPending = append(report.RebootPending, target.HostID)
 		}
 		// A host that came back with a different plan ran nothing, and the report
-		// says so by name: the consent covered the old plan, and a campaign that
-		// quietly counted it among the skipped would hide the one host the operator
+		// names it: counting it among the skipped would hide it from the operator.
 		if target.State == TargetSkipped && target.ErrorCode == "plan_changed_offline" {
 			report.PlanChanged = append(report.PlanChanged, target)
 		}
@@ -140,8 +139,7 @@ func (s *Store) StoredReport(ctx context.Context, campaignID string) (ReportView
 }
 
 // recordReport writes the final report of a campaign that just reached a
-// terminal state, inside the transaction of the transition: there is no
-// finished campaign without its report and no report of a campaign that did
+// terminal state, inside the transaction of the transition.
 func (s *Store) recordReport(ctx context.Context, tx pgx.Tx, campaignID string) error {
 	campaign, err := s.getTx(ctx, tx, campaignID)
 	if err != nil {

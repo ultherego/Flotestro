@@ -24,9 +24,8 @@ type helloView struct {
 	ConfigLegacy        *bool  `json:"config_legacy"`
 }
 
-// TestEveryOnlineHostReportsItsBuildAndConfiguration: once an agent of a
-// release that introduces itself fully has reconnected, the panel knows which
-// commit it runs, which protocols it speaks, and what configuration it is on -
+// TestEveryOnlineHostReportsItsBuildAndConfiguration: an agent that introduces
+// itself tells the panel its commit, its protocols and its configuration.
 func TestEveryOnlineHostReportsItsBuildAndConfiguration(t *testing.T) {
 	h := newHarness(t)
 	var listing struct {

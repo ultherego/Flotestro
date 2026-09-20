@@ -29,8 +29,7 @@ func CanonicalPayload(action opspec.ActionType, version int, payload opspec.Payl
 }
 
 // withoutEmptySubPayloads drops the sub-payloads that carry no content, the
-// way the payload hash does: a payload with an empty sub-payload and one
-// without it describe the same operation, and the bytes under the digest have
+// way the payload hash does, so the same operation gives the same digest.
 func withoutEmptySubPayloads(payload opspec.Payload) opspec.Payload {
 	value := reflect.ValueOf(&payload).Elem()
 	for i := 0; i < value.NumField(); i++ {

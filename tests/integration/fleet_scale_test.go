@@ -134,7 +134,8 @@ func insertScaleFleet(t *testing.T, ctx context.Context, h *harness) {
 
 // TestFleetViewsCountTheWholeFleet is the guard of chapter 5: a fleet past the
 // old five-hundred bound is counted whole, the hosts nothing is known about
-// are counted apart rather than as clean ones, the scope of the reader bounds
+// are counted apart rather than as clean ones, and the reader's scope bounds
+// what the counts cover.
 func TestFleetViewsCountTheWholeFleet(t *testing.T) {
 	h := newHarness(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)

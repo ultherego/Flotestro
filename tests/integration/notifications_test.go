@@ -87,7 +87,7 @@ func createChannel(h *harness, body map[string]any) channelView {
 
 // TestNotificationChannelKeepsItsSecretAndLogsTypedFailures guards what a
 // channel promises: a reason on every write, a secret that goes in and is
-// never shown again, and a receiver that cannot be reached recorded in the log
+// never shown again, and a failed delivery logged with a typed reason.
 func TestNotificationChannelKeepsItsSecretAndLogsTypedFailures(t *testing.T) {
 	h := newHarness(t)
 	name := fmt.Sprintf("integration-webhook-%d", time.Now().UnixNano())
@@ -249,7 +249,7 @@ func TestNotificationChannelKeepsItsSecretAndLogsTypedFailures(t *testing.T) {
 
 // TestAcknowledgedAlertLeavesTheWaitingCounts guards the meaning of an
 // acknowledgement: the alert keeps firing, but it no longer counts among what
-// waits for a person - on the dashboard and in the fleet view - and the row
+// waits for a person, either on the dashboard or in the fleet view.
 func TestAcknowledgedAlertLeavesTheWaitingCounts(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")

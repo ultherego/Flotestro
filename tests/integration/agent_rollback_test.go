@@ -13,7 +13,7 @@ import (
 const keptArtefactDir = "/var/lib/flotestro-helper/agent-upgrade/rollback"
 
 // TestGoingBackReadsTheKeptArtefactAndNotTheRepository is the negative side of
-// chapter 14. 5: the return is a separate artefact held locally, and the host
+// chapter 14.5: the refusal names the artefact the host kept, not a download.
 func TestGoingBackReadsTheKeptArtefactAndNotTheRepository(t *testing.T) {
 	h := newHarness(t)
 	// A Debian-family host: its manager can fetch the file of a version it
@@ -26,8 +26,8 @@ func TestGoingBackReadsTheKeptArtefactAndNotTheRepository(t *testing.T) {
 		t.Skip("the host does not report the version of its agent")
 	}
 
-	// The host is made to keep a way back to the version it runs. The target of
-	// this order is a release that exists nowhere, so the order is refused - but
+	// The host is made to keep a way back to the version it runs: the target of
+	// this order is a release that exists nowhere, so the order is refused.
 	prepare, _ := h.runOperation(host.ID, map[string]any{
 		"action": "agent.upgrade",
 		"payload": map[string]any{
@@ -46,8 +46,8 @@ func TestGoingBackReadsTheKeptArtefactAndNotTheRepository(t *testing.T) {
 			before.AgentVersion, prepare.ResultMessage)
 	}
 
-	// Going back to the version the host kept. Without the kept copy the host
-	// would fetch the file from the repository again and refuse on the digest;
+	// Going back to the version the host kept, under a digest that matches
+	// nothing: the refusal names the kept artefact, not a fresh download.
 	wrongDigest := strings.Repeat("9f", 32)
 	job, attempts := h.runOperation(host.ID, map[string]any{
 		"action": "agent.upgrade",
@@ -83,7 +83,7 @@ func TestGoingBackReadsTheKeptArtefactAndNotTheRepository(t *testing.T) {
 	}
 
 	// The host is still there, running the version it ran before: a refused
-	// return that costs the fleet its agent would be worse than the gap it
+	// return must not cost the fleet its agent.
 	h.awaitConnection(host.ID, 2*time.Minute)
 	var after agentHostView
 	h.get("/api/v1/hosts/"+host.ID, &after)

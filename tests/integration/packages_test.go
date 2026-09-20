@@ -525,8 +525,7 @@ type brokenScriptExpectation struct {
 }
 
 // TestAFailingMaintainerScriptIsATypedFailure is the scenario of chapter 23 in
-// which a maintainer script fails half-way: the transaction ends as
-// transaction_failed rather than as an opaque error, the report says what
+// which a maintainer script fails half-way: the failure comes back typed.
 func TestAFailingMaintainerScriptIsATypedFailure(t *testing.T) {
 	for _, tc := range []struct {
 		family string

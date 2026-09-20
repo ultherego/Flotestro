@@ -94,9 +94,8 @@ func readCronFile(path string, withUser bool, now time.Time) []Schedule {
 		if disabled {
 			line = strings.TrimSpace(strings.TrimPrefix(line, "#@"))
 		} else if strings.HasPrefix(line, "#") {
-			// A comment is attributed only to our own entries: in somebody else's file
-			// the line above an entry is usually a format header or a note about
-			// something else, and shown next to the entry it would look like its
+			// A comment is attributed only to our own entries: in somebody else's
+			// file the line above an entry is rarely a description of it.
 			if managed && line != FileHeader {
 				comment = strings.TrimSpace(strings.TrimPrefix(line, "#"))
 			}

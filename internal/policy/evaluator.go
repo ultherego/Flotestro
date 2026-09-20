@@ -399,8 +399,7 @@ func (e *Evaluator) remediate(ctx context.Context, policy Policy, version Versio
 	}
 
 	// The campaign is created on the publisher's authority, and the publisher's
-	// rights are read now, not assumed from the publication: a host the publisher
-	// may not change is closed in the snapshot the way a fleet remediation
+	// rights are read now rather than assumed from the publication.
 	publisher, err := e.principal(ctx, version.PublishedBy)
 	if err != nil {
 		e.recordRemediation(ctx, policy, document, audit.OutcomeDenied, map[string]any{

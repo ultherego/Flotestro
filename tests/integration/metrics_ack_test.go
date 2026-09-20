@@ -158,9 +158,8 @@ func TestALateSampleIsRolledUpIntoItsOwnQuarter(t *testing.T) {
 	}
 	defer session.close()
 
-	// The store the test drives the rollup with is the panel's own, on the
-	// panel's own database: the rollup runs every quarter of an hour in the
-	// control plane, which is longer than this test may take, so the same code is
+	// The rollup runs every quarter of an hour in the control plane, longer
+	// than this test may take, so the test drives the panel's own store itself.
 	store := monitoring.NewStore(pool, slog.New(slog.NewTextHandler(io.Discard, nil)), monitoring.Options{})
 
 	taken := time.Now().UTC().Add(-40 * time.Minute).Truncate(time.Second)
@@ -257,8 +256,7 @@ func quarterOf(at time.Time) time.Time {
 }
 
 // TestOnlyOneInstanceJudgesTheRules proves the lease: an instance that finds
-// it held evaluates nothing at all, rather than judging the same fleet a
-// second time and relying on a unique index to swallow the parts of its
+// it held evaluates nothing at all, rather than judging the same fleet twice.
 func TestOnlyOneInstanceJudgesTheRules(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

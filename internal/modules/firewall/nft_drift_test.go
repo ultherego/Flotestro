@@ -283,7 +283,7 @@ func TestTheIncludesOfTheBootSourceAreFollowedInOrder(t *testing.T) {
 }
 
 // An include naming a file that is not there is a source that could not be
-// read; a glob matching nothing is a directory without rule files, which is
+// read; a glob matching nothing is only a directory without rule files.
 func TestAMissingIncludeIsReportedAndAnEmptyGlobIsNot(t *testing.T) {
 	unit, _ := nftDebianHost("")
 	missing := fstest.MapFS{"etc/nftables.conf": &fstest.MapFile{
@@ -356,7 +356,7 @@ func TestForeignTablesAreNotComparedWithTheBootSource(t *testing.T) {
 }
 
 // A rule added at the top level is a rule this parser does not place. A file
-// read only in part would make the kernel look like the only place that has
+// read only in part would make the kernel look like the only place with rules.
 func TestAConstructTheParserCannotPlaceStopsTheComparison(t *testing.T) {
 	unit, root := nftDebianHost("add rule inet filter input tcp dport 25 drop\n")
 
@@ -553,8 +553,8 @@ table inet flotestro {
 	}
 }
 
-// The panel's own table is in no boot file, so as long as nothing restores it
-// the panel says the rules disappear at the next reboot - and stops saying it
+// The panel's own table is in no boot file, so the panel reports the rules as
+// lost at the next reboot until the restore unit is in place.
 func TestThePanelTableIsAnsweredForByTheRestoreAndNotByTheBootSource(t *testing.T) {
 	unit, root := nftDebianHost(nftBootSource)
 	running := ParseRuleset(nftLoadedRuleset + "\n" + nftPanelRuleset).Rules

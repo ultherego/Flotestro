@@ -165,8 +165,7 @@ func TestNetplanRouteListKeepsTheGateway(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The default route is written with the destination of its own family rather
-	// than the word "default", which netplan reads from the family of the
-	// gateway: on a host with both families that word would make a v6 default
+	// than the word "default", whose family netplan takes from the gateway.
 	if !strings.Contains(document, "to: "+defaultRouteIPv4) || !strings.Contains(document, "via: 192.168.56.1") {
 		t.Errorf("the route list dropped the gateway: %s", document)
 	}

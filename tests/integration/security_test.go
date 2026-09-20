@@ -492,6 +492,7 @@ func fixableCheck(t *testing.T, h *harness) (fleetCheckView, []string) {
 // TestFleetRemediationGroupsPlansAndBindsTheApproval checks the fleet form of
 // remediation: chosen checks on chosen hosts, every host with its own plan,
 // hosts with the same steps in one group, and one campaign whose approval
+// is bound to a fingerprint over all the plans.
 func TestFleetRemediationGroupsPlansAndBindsTheApproval(t *testing.T) {
 	h := newHarness(t)
 	check, hostIDs := fixableCheck(t, h)
@@ -540,9 +541,8 @@ func TestFleetRemediationGroupsPlansAndBindsTheApproval(t *testing.T) {
 		}
 	}
 
-	// The composite permission: an operator may write the sshd configuration and
-	// create campaigns, but does not hold the remediation permission - so the
-	// order is refused as a whole, naming the missing one, and nothing comes into
+	// The composite permission: an operator without security.remediate is
+	// refused the whole order, with the missing permission named.
 	host := h.hostByFamily("debian")
 	operator := h.withToken(h.createPrincipal(uniqueSubject("remediation-operator"), []map[string]string{
 		{"role": "operator", "site": host.Site, "environment": host.Environment},

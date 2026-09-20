@@ -55,8 +55,7 @@ func (s *Server) handleHostAudit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The trail of one host takes the filters of the fleet trail and pages the
-	// same way: the host tab asks "the denials on this host since Monday" as the
-	// fleet page does, and a host with a long history is browsed rather than cut
+	// same way, so a host with a long history is browsed rather than cut short.
 	filter, ok := auditFilter(w, r)
 	if !ok {
 		return

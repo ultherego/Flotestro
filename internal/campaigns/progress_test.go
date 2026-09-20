@@ -10,9 +10,8 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// TestTheRebootJudgementFollowsTheWindowThenTheTimeout guards the mandatory
-// scenario "the host does not come back within the maintenance window": a host
-// still away when the window ends is closed with the window as the reason,
+// TestTheRebootJudgementFollowsTheWindowThenTheTimeout guards the verdict: a
+// host still away when the window ends is closed with the window as the reason.
 func TestTheRebootJudgementFollowsTheWindowThenTheTimeout(t *testing.T) {
 	ordered := time.Date(2026, 9, 14, 22, 50, 0, 0, time.UTC)
 	windowEnd := ordered.Add(10 * time.Minute)
@@ -99,8 +98,7 @@ func TestTheWaitForARebootIsCountedFromTheReboot(t *testing.T) {
 }
 
 // TestTheOutcomeOfATaskNamesTheHostState guards the mapping from a settled
-// task onto the host: a success is a success, a success the host says changed
-// nothing is no_change, a task that ended without a result - the session
+// task onto the host, down to a lost session leaving the host unknown.
 func TestTheOutcomeOfATaskNamesTheHostState(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -152,7 +150,7 @@ func TestTheHostFollowsItsTask(t *testing.T) {
 
 // TestTheResultSaysWhetherAnythingChanged guards how the campaign reads
 // "nothing changed" off a result: a changed flag says it outright, a package
-// transaction says it by applying nothing, and a result that says nothing
+// transaction says it by applying nothing, and anything unreadable says no.
 func TestTheResultSaysWhetherAnythingChanged(t *testing.T) {
 	cases := map[string]struct {
 		detail   string
@@ -232,9 +230,8 @@ func TestTheRebootFollowsThePolicyAndTheResult(t *testing.T) {
 	}
 }
 
-// TestOnlyAConfirmedChangeCarriesTheHostForward guards what chapter 1 of the
-// functional review asks for: a task that says succeeded settles the host
-// succeeded only once the host's own reading after the change showed the state
+// TestOnlyAConfirmedChangeCarriesTheHostForward: a task that says succeeded
+// settles the host succeeded only once the host's own reading confirms it.
 func TestOnlyAConfirmedChangeCarriesTheHostForward(t *testing.T) {
 	verified := &jobs.Attempt{Verification: json.RawMessage(
 		`{"verifier":"unit_state","verified":true,"expected":"active","observed":"active"}`)}

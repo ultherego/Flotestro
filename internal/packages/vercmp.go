@@ -38,8 +38,7 @@ func changeAction(manager, current, candidate string) string {
 }
 
 // CompareDebVersions orders two Debian versions the way dpkg does
-// (deb-version(7)): the epoch numerically, then the upstream part and the
-// revision each by the alternating comparison of non-digit and digit runs,
+// (deb-version(7)): the epoch numerically, then the upstream and the revision.
 func CompareDebVersions(a, b string) int {
 	epochA, restA := splitEpoch(a)
 	epochB, restB := splitEpoch(b)
@@ -128,8 +127,7 @@ func compareDebPart(a, b string) int {
 }
 
 // CompareRPMVersions orders two EVR strings the way rpm does (rpmvercmp): the
-// epoch numerically, then the version and the release each by their
-// alphanumeric segments, where a numeric segment beats an alphabetic one,
+// epoch numerically, then the version and the release by their segments.
 func CompareRPMVersions(a, b string) int {
 	epochA, restA := splitEpoch(a)
 	epochB, restB := splitEpoch(b)

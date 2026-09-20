@@ -53,9 +53,8 @@ func main() {
 	)
 	flag.Parse()
 
-	// What the operator set and what came from the defaults - that distinction is
-	// the whole content of the precedence: a file must not override what somebody
-	// gave explicitly, and the default value of a flag must not pretend to be a
+	// A value the operator gave explicitly must win over the file, and the
+	// default of a flag must not pretend to be a choice anybody made.
 	explicit := map[string]bool{}
 	flag.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
 

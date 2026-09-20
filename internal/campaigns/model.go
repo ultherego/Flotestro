@@ -66,9 +66,8 @@ func (s State) Terminal() bool {
 	}
 }
 
-// Launching says whether the campaign may start a host now: a campaign in its
-// planning phase, its canary or its waves hands tasks to hosts, and so does a
-// planned one - approved, or in need of no approval - whose first pass is
+// Launching says whether the campaign may start a host now: the planning
+// phase, a planned campaign, the canary and the waves all hand out tasks.
 func (s State) Launching() bool {
 	return s == StatePlanning || s == StatePlanned || s == StateCanary || s == StateRunning
 }
@@ -714,8 +713,7 @@ type Report struct {
 	CampaignID string `json:"campaign_id"`
 	State      State  `json:"state"`
 	// Totals counts the hosts per target state - succeeded, no_change, failed,
-	// unknown, skipped, canceled, and the rest - the way the document's terminal
-	// report does: a host in the desired state without a mutation and one that
+	// unknown, skipped, canceled, and the rest - as the terminal report does.
 	Totals map[string]int `json:"totals"`
 	Waves  []WaveSummary  `json:"waves"`
 	// Failures lists the hosts the operator has to look at: the ones that

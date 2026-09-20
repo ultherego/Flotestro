@@ -37,8 +37,7 @@ var fanOutLimits = map[ActionType]int{
 	ActionDomainPreflight:  50,
 
 	// An inventory refresh is a read whose answer lands in the inventory, not in
-	// a merged output, so the panel holds nothing per host: the ceiling is the
-	// wave of the overview chapter (two hundred), and the cost on the hosts is
+	// a merged output, so the ceiling is the wave of the overview chapter.
 	ActionInventoryRefresh: 200,
 }
 

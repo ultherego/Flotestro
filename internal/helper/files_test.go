@@ -64,8 +64,7 @@ func TestStagingDoesNotFollowALinkPlantedUnderThePredictableName(t *testing.T) {
 }
 
 // The named fallback is the path a file system without O_TMPFILE takes, so it
-// is exercised on its own: the file is created with O_EXCL and O_NOFOLLOW in
-// the opened directory, carries the content, keeps the suffix of the target
+// is exercised on its own: created with O_EXCL and O_NOFOLLOW, and removed.
 func TestNamedStagingCreatesAFreshFileAndRemovesIt(t *testing.T) {
 	dir := t.TempDir()
 	directory := openDirectory(t, dir)

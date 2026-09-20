@@ -13,8 +13,7 @@ import (
 )
 
 // The answer to a cancel follows the phase the task is in, and nothing else:
-// before the start the task is refused and never starts; a read with a
-// registered interruption is interrupted; a mutation runs to its end; a task
+// a task before its start is refused, a mutation under way runs to its end.
 func TestACancelIsAnsweredByThePhaseOfTheTask(t *testing.T) {
 	executor := &TaskExecutor{
 		log: slog.Default(), cancels: newCancellationTable(), phases: newTaskPhases(), running: newRunningKeys(),

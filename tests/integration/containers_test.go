@@ -60,8 +60,7 @@ type engineState struct {
 const containersReason = "integration test of networks and volumes"
 
 // TestNetworkAndVolumeUsageFollowsFromContainers guards the property without
-// which this tab lies: the engine returns an empty container map in the
-// network list, and gives the volume size and reference count only in a
+// which this tab lies: usage is read from the containers, never made up.
 func TestNetworkAndVolumeUsageFollowsFromContainers(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")

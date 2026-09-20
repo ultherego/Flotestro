@@ -27,9 +27,8 @@ const enrollTestHost = "3f2a9c1e-0000-4000-8000-000000000001"
 
 var enrollTestClock = time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
 
-// fakeIssuer behaves like the enrollment service of the panel: it keeps every
-// attempt under its number and the digest of its request, answers a repeated
-// attempt with the certificate it has already issued, and refuses a known
+// fakeIssuer behaves like the enrollment service of the panel: a repeated
+// attempt gets the certificate already issued, a changed request is refused.
 type fakeIssuer struct {
 	ca       *pki.CA
 	requests []*agentv1.EnrollRequest
@@ -126,8 +125,7 @@ func existingGeneration(t *testing.T, store *identitystore.Store, ca *pki.CA) *i
 }
 
 // TestARetryRepeatsTheSameAttempt is the reason the pending record exists:
-// after a lost answer the host asks again under the same number and with the
-// same request, and gets the certificate that was already issued - instead of
+// the host asks again under the same number and gets the same certificate.
 func TestARetryRepeatsTheSameAttempt(t *testing.T) {
 	issuer := newFakeIssuer(t)
 	issuer.lose = 1

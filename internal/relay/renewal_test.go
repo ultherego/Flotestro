@@ -70,8 +70,7 @@ func TestAnUnknownDeadlineIsAReason(t *testing.T) {
 }
 
 // TestTheSwapIsVisibleAtOnce guards what this identity is live for: the
-// listener reaches for the certificate at every handshake, so a renewal
-// requires no restart of the process and does not tear down the sessions of
+// listener reaches for it at every handshake, so a renewal needs no restart.
 func TestTheSwapIsVisibleAtOnce(t *testing.T) {
 	old := certificateFrom(t, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
 	fresh := certificateFrom(t, time.Now(), time.Now().Add(7*24*time.Hour))

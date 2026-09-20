@@ -378,9 +378,8 @@ func TestHealthReportsTheCallsWithoutAskingTheDirectory(t *testing.T) {
 	}
 }
 
-// TestRetireServiceKeytabSendsServiceDisableAndNothingElse checks the one
-// write the rotation makes in the directory: service_disable on the principal
-// named, with no option that could issue or export key material, and a refusal
+// TestRetireServiceKeytabSendsServiceDisableAndNothingElse checks the one write
+// the rotation makes: service_disable, and nothing for a refused principal.
 func TestRetireServiceKeytabSendsServiceDisableAndNothingElse(t *testing.T) {
 	fake, client := newFakeDirectory(t)
 	if err := client.RetireServiceKeytab(context.Background(), "HTTP/web1.example.test@EXAMPLE.TEST"); err != nil {

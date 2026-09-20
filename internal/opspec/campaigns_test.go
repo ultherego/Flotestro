@@ -198,9 +198,8 @@ func TestWithdrawingAnAuthorityNeedsTheWholeFleet(t *testing.T) {
 	}
 }
 
-// TestAPackageSourceIsTheSameDeclarationEverywhere guards the row of the
-// packages chapter: a source is an address, a key and a consent, and those
-// mean the same on every host - there is no diff to plan, so the campaign runs
+// TestAPackageSourceIsTheSameDeclarationEverywhere: a source is an address, a
+// key and a consent, which mean the same everywhere, so it runs by payload.
 func TestAPackageSourceIsTheSameDeclarationEverywhere(t *testing.T) {
 	if mode := ActionRepositorySet.CampaignMode(); mode != CampaignSamePayload {
 		t.Fatalf("a package source has the mode %q", mode)
@@ -222,8 +221,7 @@ func TestAPackageSourceIsTheSameDeclarationEverywhere(t *testing.T) {
 }
 
 // TestAnInventoryRefreshFansOutAndIsNotACampaign guards the row of the
-// overview chapter: a refresh changes nothing and needs no approval, so it
-// goes the way of the reads - up to the document's wave of two hundred hosts -
+// overview chapter: a refresh changes nothing, so it fans out like a read.
 func TestAnInventoryRefreshFansOutAndIsNotACampaign(t *testing.T) {
 	if limit := ActionInventoryRefresh.FanOutLimit(); limit != 200 {
 		t.Fatalf("a refresh fans out to %d hosts, the document says 200", limit)
@@ -237,8 +235,7 @@ func TestAnInventoryRefreshFansOutAndIsNotACampaign(t *testing.T) {
 }
 
 // TestARenameSplitsTheMappingPerHost guards the mechanism of the system
-// chapter: a rename in bulk carries a map of host to new name, every host gets
-// its own name and nothing else, and a host the map does not name is
+// chapter: a rename in bulk carries a map of host to new name, one name each.
 func TestARenameSplitsTheMappingPerHost(t *testing.T) {
 	if !PanelPlanned(ActionSystemHostnameSet) {
 		t.Fatal("a rename is not planned from the order")

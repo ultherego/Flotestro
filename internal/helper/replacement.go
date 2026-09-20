@@ -60,7 +60,7 @@ const (
 )
 
 // agentUpgradeDir is where the replacement keeps what it fetched: the verified
-// artefact of the new version and the artefact of the version the host can go
+// artefact of the new version and the one the host can go back to.
 var agentUpgradeDir = "/var/lib/flotestro-helper/agent-upgrade"
 
 // rollbackDir holds the artefacts the host can go back to, downloadDir the
@@ -238,8 +238,8 @@ func StartAgentReplacement(ctx context.Context, spec string) error {
 	}
 	cmd := exec.CommandContext(ctx, systemdRun,
 		"--collect", "--quiet",
-		// Without --no-block systemd-run waits for the end of a oneshot unit, that
-		// is for the whole transaction - while standing in the helper's control
+		// Without --no-block systemd-run waits for the end of the oneshot unit,
+		// that is for the whole transaction, and the helper would wait with it.
 		"--no-block",
 		"--unit="+AgentReplacementUnit,
 		"--description=Flotestro: agent replacement",
@@ -301,7 +301,7 @@ func RunAgentReplacement(ctx context.Context, spec string, log *slog.Logger) err
 	var apply packages.Apply
 	if target != spec && manager.Name() == packages.PacmanName {
 		// pacman installs a file with -U and a repository name with -S; the two are
-		// different commands rather than two forms of one, so the adapter's install
+		// different commands, so the adapter's install does not cover this one.
 		err = installPacmanArtefact(ctx, target)
 	} else {
 		apply, err = lifecycle.Install(ctx, options)
@@ -317,7 +317,7 @@ func RunAgentReplacement(ctx context.Context, spec string, log *slog.Logger) err
 	}
 
 	// What is installed is read from the package database rather than taken from
-	// the order: the transaction saying it went through is not the same statement
+	// the order: a transaction that went through is not proof of the version.
 	installed, reason := installedAgentVersion(ctx, manager.Name())
 	log.Info("the agent replacement was performed",
 		"package", spec, "artefact", order.ArtefactPath, "manager", manager.Name(),
@@ -394,8 +394,8 @@ func keepRollbackArtefact(ctx context.Context, managerName, spec, version string
 	return target, nil
 }
 
-// keepSignature keeps the detached signature beside the artefact. pacman signs
-// the file itself, and a kept copy without its signature could never prove who
+// keepSignature keeps the detached signature beside the artefact. pacman
+// signs the file itself, and a copy without its signature proves nothing.
 func keepSignature(from, to string) {
 	if _, err := os.Stat(from + signatureSuffix); err != nil {
 		return
@@ -411,7 +411,7 @@ var errDigestMismatch = errors.New("the artefact does not match the digest of th
 var errKeptArtefactInvalid = errors.New("the kept artefact is not the one the order names")
 
 // obtainArtefact returns the file the order is installed from. The copy the
-// host kept answers first: going back must not depend on the old version still
+// host kept answers first: going back must not depend on the repository.
 func obtainArtefact(ctx context.Context, managerName, spec, digest string) (string, string, error) {
 	if kept, ok := keptArtefactFor(spec); ok {
 		if err := verifyDigest(kept, digest); err != nil {
@@ -556,7 +556,7 @@ func downloadCommands(managerName, spec, dir string) []downloadCommand {
 	case "dnf":
 		return []downloadCommand{
 			// The download subcommand fetches the file whether or not the version is
-			// installed, which the transaction's download mode does not; it is not on
+			// installed, which the transaction's download mode does not; hence both.
 			{tool: "dnf", args: []string{"--assumeyes", "download",
 				"--destdir=" + dir, spec}, prepare: nothing},
 			{tool: "dnf", args: []string{"--assumeyes", "install", "--downloadonly",
@@ -564,7 +564,7 @@ func downloadCommands(managerName, spec, dir string) []downloadCommand {
 		}
 	case packages.PacmanName:
 		// pacman cannot ask a repository for a version other than the one its
-		// database holds, so the bare name is fetched and the digest settles whether
+		// database holds, so the digest settles whether the file is the right one.
 		return []downloadCommand{{tool: "pacman", args: []string{"-Sw", "--noconfirm",
 			"--noprogressbar", "--cachedir", dir, packages.AgentPackage}, prepare: nothing}}
 	}
@@ -613,7 +613,7 @@ var managerCacheDirs = map[string][]string{
 }
 
 // findCachedArtefact looks for the artefact of a version in the manager's own
-// cache, which is where the file of the version the host runs usually still
+// cache, where the file of the version the host runs usually still lies.
 func findCachedArtefact(managerName, version string) (string, bool) {
 	for _, dir := range managerCacheDirs[managerName] {
 		var match string
@@ -680,7 +680,7 @@ var pacmanKeyringDir = "/etc/pacman.d/gnupg"
 var errSignerUnavailable = errors.New("the signer of the artefact could not be established")
 
 // artefactSigner names the key whose signature the host's own package tooling
-// accepted on this file. The digest proves the bytes are the ones the order
+// accepted on this file.
 func artefactSigner(ctx context.Context, managerName, path string) (string, string, error) {
 	switch managerName {
 	case packages.PacmanName:
@@ -805,7 +805,7 @@ func artefactProof(ctx context.Context, managerName, spec, digest,
 }
 
 // judgeSigner settles the signature of the artefact against the key the order
-// names. An order that names no key installs as before and the result still
+// names. An order that names no key installs as before.
 func judgeSigner(expected, established string, err error) *helperv1.HelperResponse {
 	if expected == "" {
 		return nil
@@ -910,7 +910,7 @@ func pruneKeptArtefacts(keep ...string) []string {
 }
 
 // ReleaseSettledRollback drops what the last replacement kept once the host
-// holds the version that replacement ordered. Until then the prepared return
+// holds the version it ordered. Until then the prepared return stays.
 func ReleaseSettledRollback(ctx context.Context, log *slog.Logger) {
 	content, err := os.ReadFile(replacementOrderPath())
 	if err != nil {

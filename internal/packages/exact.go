@@ -111,8 +111,7 @@ func (a *APT) ApplyExact(ctx context.Context, approved Plan, options Options) (A
 }
 
 // ApplyExact carries the plan out with dnf on the exact NEVRAs and only from
-// the repositories the plan names, against the metadata the plan was read
-// from: the cached metadata is declared never expired, so dnf resolves on
+// the repositories the plan names, against the cache the plan was read from.
 func (d *DNF) ApplyExact(ctx context.Context, approved Plan, options Options) (Apply, error) {
 	apply := Apply{Manager: d.Name()}
 	byAction := map[string][]string{}

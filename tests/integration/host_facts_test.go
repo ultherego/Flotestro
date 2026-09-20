@@ -34,9 +34,8 @@ func readHostFacts(t *testing.T, h *harness, hostID string) (hostFactsView, stri
 	return host, response.Header.Get("ETag")
 }
 
-// TestOwnerAndManualAddressRoundTrip guards the facts an operator records
-// about a host by hand: the owner and the management address go in with the
-// entity tag of the host, a stale tag is refused with the current one, the
+// TestOwnerAndManualAddressRoundTrip guards the facts an operator records by
+// hand: the owner and the management address go in under the host's ETag.
 func TestOwnerAndManualAddressRoundTrip(t *testing.T) {
 	h := newHarness(t)
 	host := h.enrollSyntheticHost(t)
@@ -145,8 +144,8 @@ func TestOwnerAndManualAddressRoundTrip(t *testing.T) {
 }
 
 // TestHostListFactFilters guards the filters over what the hosts reported: a
-// host that has not said whether it needs a reboot or how many security
-// updates wait is in neither the "yes" nor the "no" list, and a domain filter
+// host that has said nothing is in neither the "yes" nor the "no" list, and a
+// domain filter lists the hosts of that domain alone.
 func TestHostListFactFilters(t *testing.T) {
 	h := newHarness(t)
 	host := h.enrollSyntheticHost(t)
@@ -230,7 +229,7 @@ func TestHostListFactFilters(t *testing.T) {
 
 // TestEnrollmentOrderCarriesOwnerAndTags guards the facts an order carries
 // onto the host: the owner and the tags typed when ordering the installation
-// are on the host the moment it enrolls, and an order with a tag the tag
+// are on the host the moment it enrolls, and a malformed tag is refused.
 func TestEnrollmentOrderCarriesOwnerAndTags(t *testing.T) {
 	h := newHarness(t)
 

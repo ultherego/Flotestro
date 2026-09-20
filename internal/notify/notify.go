@@ -31,7 +31,7 @@ type Subject struct {
 }
 
 // SubjectSecurity is the subject of the security alerts of the whole
-// installation: a duplicate identity, a helper that refused a signature, a
+// installation: a duplicate identity, a helper that refused a signature.
 const SubjectSecurity = "security.alert"
 
 // Subjects is the catalogue of what a channel can carry.
@@ -310,7 +310,7 @@ func (c *Channel) Validate() (any, error) {
 }
 
 // decodeConfig reads the configuration of the kind and checks what can be
-// checked without sending: an address that parses, a port, a mailbox list that
+// checked without sending: an address that parses, a port, a mailbox list.
 func decodeConfig(kind string, raw json.RawMessage) (any, error) {
 	if len(raw) == 0 {
 		raw = json.RawMessage("{}")
@@ -338,7 +338,7 @@ func decodeConfig(kind string, raw json.RawMessage) (any, error) {
 		}
 		config.URL = strings.TrimSpace(config.URL)
 		// An edit that says "the address is set" and types none keeps the stored
-		// address; the store checks that one is stored and refuses a channel that
+		// address; the store refuses a channel that has none stored.
 		if config.URL == "" && config.URLSet {
 			return config, nil
 		}
@@ -481,8 +481,8 @@ const (
 	SuppressedBySilence = "silence"
 	// SuppressedByMaintenance: the host is inside a maintenance window.
 	SuppressedByMaintenance = "maintenance_window"
-	// SuppressedFireKept: the resolve of an alert whose fire the channel never
-	// got, because a silence kept it; a resolve of nothing said is nothing to
+	// SuppressedFireKept: the resolve of an alert whose fire a silence kept
+	// back; a resolve of something never announced is nothing to say.
 	SuppressedFireKept = "fired_suppressed"
 )
 
@@ -492,8 +492,8 @@ const (
 	// CodeCredentialsRejected: the receiver answered 401 or 403, or the mail
 	// relay refused the login.
 	CodeCredentialsRejected = "channel_credentials_rejected"
-	// CodePermanentHTTP: the receiver answered a status that is neither a success
-	// nor a failure that passes - a 404, a 400 - so the address or the body is
+	// CodePermanentHTTP: the receiver answered a status no retry will pass -
+	// a 404, a 400 - so the address or the body is wrong.
 	CodePermanentHTTP = "permanent_http_error"
 	// CodePermanentSMTP: the mail relay refused the message with a
 	// permanent reply.
@@ -535,14 +535,14 @@ type Delivery struct {
 	UpdatedAt         time.Time  `json:"updated_at"`
 
 	// The fields below are the names of the previous release, kept for the
-	// readers that know them: status sent or failed, the code and the sentence of
+	// readers that know them: the status, the error code and its sentence.
 	Status    string    `json:"status"`
 	ErrorCode string    `json:"error_code"`
 	Error     string    `json:"error"`
 	SentAt    time.Time `json:"sent_at"`
 
 	// aggregateID, message and channelRevision are the row's own: what the event
-	// is about, the composed message as JSON, and the revision of the channel the
+	// is about, the composed message as JSON, and the channel's revision.
 	aggregateID     string
 	message         []byte
 	channelRevision int64
@@ -578,7 +578,7 @@ const (
 )
 
 // legacyStatus reads a state as the previous release's status: delivered is
-// sent, a dead letter or a wait for the next attempt is failed, and the rest -
+// sent, a dead letter or a wait is failed, and any other state is itself.
 func legacyStatus(state string) string {
 	switch state {
 	case StateDelivered:

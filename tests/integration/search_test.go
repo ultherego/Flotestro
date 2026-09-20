@@ -41,7 +41,7 @@ func hitOf(hits []searchHit, kind, id string) *searchHit {
 
 // TestSearchFindsAHostByThePrefixOfItsName types the beginning of a lab host's
 // name into the global search and expects the host among the hits, with the
-// address of its overview; the full name is a prefix of itself, so it finds
+// address of its overview; the full name finds it too, one letter does not.
 func TestSearchFindsAHostByThePrefixOfItsName(t *testing.T) {
 	h := newHarness(t)
 	hosts := h.hosts()
@@ -92,8 +92,7 @@ func TestSearchFindsACampaignByAWordOfItsName(t *testing.T) {
 }
 
 // TestSearchKeepsTheIdentitiesFromAViewer creates a viewer bound to one scope
-// and expects the search to answer them with the hosts of that scope and with
-// no identity at all: the identities are read with the right to manage access,
+// and expects their search to find that scope's hosts and no identity at all.
 func TestSearchKeepsTheIdentitiesFromAViewer(t *testing.T) {
 	h := newHarness(t)
 	hosts := h.hosts()

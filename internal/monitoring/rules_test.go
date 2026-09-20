@@ -18,7 +18,7 @@ func silenceAt(now time.Time) Silence {
 }
 
 // A global silence is the one that may keep back the security alerts of the
-// installation, so it covers all of it; naming a host or a rule contradicts
+// installation, so it covers all of it: naming a host or a rule contradicts it.
 func TestValidateSilenceRefusesAGlobalSilenceThatNarrows(t *testing.T) {
 	now := time.Date(2026, 9, 19, 10, 0, 0, 0, time.UTC)
 

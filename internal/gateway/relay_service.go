@@ -127,9 +127,8 @@ func (s *RelayService) RenewCertificate(ctx context.Context,
 		return nil, connect.NewError(connect.CodeFailedPrecondition,
 			errors.New("the relay has no recorded network names"))
 	}
-	// The wish of the relay is noted but not granted: a divergence means the
-	// configuration of the site has drifted apart from the registry of the panel
-	// and the operator is to see it before the agents start rejecting
+	// The wish of the relay is noted but not granted: names outside the registry
+	// mean the site has drifted from the panel, and the operator is to see it.
 	if extra := extraNames(req.Msg.GetAdvertisedNames(), names); len(extra) > 0 {
 		s.log.Warn("the relay asks for names from outside the registry",
 			"relay_id", relayID, "names", extra, "issued", names)

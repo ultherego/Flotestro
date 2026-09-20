@@ -44,8 +44,7 @@ const rollbackReason = "integration test of the file version store"
 const rollbackPath = "/etc/flotestro-rollback-test.conf"
 
 // TestFileRollbackRestoresAVersionTheHostKept closes the half of the file
-// module that was missing: the panel could name a version, but nothing on the
-// host kept one, so a return was a write of whatever the panel happened to
+// module that was missing: the version the host kept, not the panel's copy.
 func TestFileRollbackRestoresAVersionTheHostKept(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")

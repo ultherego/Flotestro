@@ -3,8 +3,7 @@ package jobs
 import "testing"
 
 // A cancel of a task the host holds is a question, not a verdict: the job
-// enters cancel_requested from the two states in which a host has the task,
-// and from nowhere else - a task still in the panel is canceled outright and
+// enters cancel_requested only from the two states in which a host has it.
 func TestACancelRequestIsAskedOnlyOfAHostThatHoldsTheTask(t *testing.T) {
 	for _, from := range []State{StateDispatched, StateRunning} {
 		if !from.CanTransition(StateCancelRequested) {

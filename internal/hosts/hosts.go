@@ -1017,9 +1017,8 @@ func (s Sort) String() string {
 	return s.column()
 }
 
-// sortColumn is one column the list can be ordered by: the SQL expression that
-// carries its order, the type the cursor's value is cast back to, the
-// rendering of a row's value for the cursor and the check of a value that
+// sortColumn is one column the list can be ordered by: its SQL expression,
+// the cursor's type, how a row renders its value and which values are valid.
 type sortColumn struct {
 	expression string
 	kind       string

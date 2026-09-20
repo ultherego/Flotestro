@@ -15,7 +15,8 @@ const identityLifecycleReason = "integration test of the identity lifecycle"
 
 // TestAnIdentityIsDisabledAndEnabledAgain walks an identity through its whole
 // life: created without a token, given one with a short life and a
-// description, listed with its sessions, disabled with every credential ending
+// description, listed with its sessions, disabled with every credential
+// ending at once, and enabled again.
 func TestAnIdentityIsDisabledAndEnabledAgain(t *testing.T) {
 	h := newHarness(t)
 	subject := uniqueSubject("lifecycle")

@@ -484,8 +484,7 @@ func TestInvalidProjectIsRejected(t *testing.T) {
 }
 
 // TestBudgetWriteHonoursIfMatch guards the entity tags of the settings two
-// operators may edit at once: a budget read carries its ETag, a write with a
-// stale If-Match is refused with the current tag, and the fresh tag lets the
+// operators may edit at once: a stale If-Match is refused, a fresh one passes.
 func TestBudgetWriteHonoursIfMatch(t *testing.T) {
 	h := newHarness(t)
 	const key = "global:reads"

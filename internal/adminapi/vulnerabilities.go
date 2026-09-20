@@ -533,8 +533,7 @@ var vulnerabilitiesCSVColumns = []string{
 }
 
 // writeVulnerabilitiesCSV streams the fleet assessment as a file: one row per
-// host of the filtered table, in the order the screen sorts it, a page at a
-// time from the same cursor the screen pages with, with the coverage next to
+// host of the filtered table, in the order and paging the screen itself uses.
 func (s *Server) writeVulnerabilitiesCSV(w http.ResponseWriter, r *http.Request, filter vuln.FleetFilter, now time.Time) {
 	s.writeCSV(w, r, exportFileName("vulnerabilities", now), vulnerabilitiesCSVColumns, func(yield func([]string) bool) error {
 		cursor := vuln.FleetCursor{}

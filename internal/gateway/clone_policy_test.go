@@ -32,8 +32,7 @@ func TestCloneReactionFollowsThePolicy(t *testing.T) {
 }
 
 // TestSameAddressIgnoresThePort guards the comparison of two sessions'
-// addresses: the port is the connection's and differs every time, an unknown
-// older address matches nothing, and a bare address without a port is compared
+// addresses: the port differs every time, an unknown address matches nothing.
 func TestSameAddressIgnoresThePort(t *testing.T) {
 	cases := []struct {
 		a, b string

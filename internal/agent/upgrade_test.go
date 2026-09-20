@@ -12,8 +12,8 @@ import (
 	"github.com/ultherego/flotestro/internal/packages"
 )
 
-// stubManager stands in for the package adapter of the host: a replacement has
-// to be decided the same way whichever manager answers, and a unit test must
+// stubManager stands in for the package adapter of the host: a replacement is
+// decided the same way whichever manager answers.
 type stubManager struct{ name string }
 
 func (s stubManager) Name() string             { return s.name }
@@ -132,7 +132,7 @@ func TestAnArtefactDigestThatDoesNotMatchRefusesAndChangesNothing(t *testing.T) 
 			result.GetErrorCode(), result.GetMessage(), helper.ErrorArtefactDigest)
 	}
 	// A rejection rather than a failure: the host was not touched, so the
-	// operator corrects the release and orders again, and a campaign is not told
+	// operator corrects the release and orders again.
 	if result.GetStatus() != agentv1.TaskResult_STATUS_REJECTED {
 		t.Errorf("status = %s, expected rejected", result.GetStatus())
 	}

@@ -28,9 +28,8 @@ func TestTheCancelOutcomeIsStoredUnderTheProtocolsName(t *testing.T) {
 	}
 }
 
-// The request the host gets names the attempt it holds the task by, the
-// revision the answer is read against and the deadline after which the panel
-// stops waiting - and a reason, even when the operator gave none, so the
+// The request the host gets names the attempt, the revision, the deadline
+// after which the panel stops waiting, and a reason even when none was given.
 func TestTheCancelRequestCarriesTheAttemptTheRevisionAndTheDeadline(t *testing.T) {
 	deadline := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
 	message := cancelTaskOf(jobs.CancelRequest{

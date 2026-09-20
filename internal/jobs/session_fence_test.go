@@ -7,8 +7,7 @@ import (
 )
 
 // A delivery over a session the host has left is refused with a typed reason
-// the scheduler recognises, and the reason carries the code the error guide
-// documents, so a released attempt reads the same on the screen as on the
+// the scheduler recognises, carrying the code the error guide documents.
 func TestAStaleSessionRefusalIsTyped(t *testing.T) {
 	wrapped := errors.Join(ErrSessionStale, errors.New("recording the delivery"))
 	if !errors.Is(wrapped, ErrSessionStale) {

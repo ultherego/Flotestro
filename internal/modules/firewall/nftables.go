@@ -31,8 +31,8 @@ func ParseRuleset(output string) Snapshot {
 
 	var table *Table
 	var chain *Chain
-	// other counts the braces of a block that is neither a table nor a chain -
-	// a named set, a map, a flowtable - whose closing brace would otherwise be
+	// other counts the braces of a set, a map or a flowtable, whose closing
+	// brace would otherwise be taken for the end of the table or chain.
 	other := 0
 
 	for _, raw := range strings.Split(output, "\n") {
@@ -134,8 +134,8 @@ func ruleFromLine(line string, chain Chain) Rule {
 	return rule
 }
 
-// tableOrigin says who a table belongs to by its name alone. It is what the
-// panel knows about a table nft did not warn about - and the only thing it
+// tableOrigin says who a table belongs to by its name alone: it is all the
+// panel has about a table nft did not warn about.
 func tableOrigin(family, name string) string {
 	if family == FlotestroFamily && name == FlotestroTable {
 		return SourceManaged

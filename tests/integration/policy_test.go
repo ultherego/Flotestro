@@ -231,7 +231,8 @@ func TestPolicyInReportModeRecordsDriftAndOrdersNothing(t *testing.T) {
 
 // TestPolicyInCampaignModeOrdersOneCampaignAwaitingApproval checks the second
 // mode: one campaign for the drift set, linked to the policy, one target per
-// drifted host, waiting for a consent nobody gave yet - and no second campaign
+// drifted host, waiting for a consent nobody gave yet, and the same drift
+// again orders no second campaign.
 func TestPolicyInCampaignModeOrdersOneCampaignAwaitingApproval(t *testing.T) {
 	h := newHarness(t)
 	policy, outcome, online := packageDriftPolicy(t, h, "campaign")

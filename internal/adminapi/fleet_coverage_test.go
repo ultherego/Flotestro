@@ -11,8 +11,7 @@ import (
 )
 
 // The head of a fleet view is the part an operator reads before anything else,
-// so the arithmetic behind it is checked here rather than through a screen: a
-// host nobody has heard from has to stay visible as unknown, and a view that
+// so its arithmetic is checked here rather than through a screen.
 
 func TestModuleCoverageCountsAnUnknownHostUnderItsReason(t *testing.T) {
 	head := moduleCoverage(hosts.ModuleCoverage{Hosts: 1001, Observed: 400, Unavailable: 25, Stale: 40})

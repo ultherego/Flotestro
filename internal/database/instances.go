@@ -49,8 +49,7 @@ type Instance struct {
 	StartedAt       time.Time
 	LastHeartbeatAt time.Time
 	// SinceHeartbeat is measured by the clock of the database rather than by the
-	// clock of the process that reads it: the replicas are separate machines and
-	// their clocks differ, and a judgement about who is alive must not depend on
+	// clock of the process that reads it: the clocks of the replicas differ.
 	SinceHeartbeat time.Duration
 }
 

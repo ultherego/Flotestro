@@ -1617,8 +1617,7 @@ func firewallPlanAction(h *harness, jobID string) string {
 }
 
 // TestMountCampaignResolvesTheUUIDOnEveryHost checks that the order "mount
-// /dev/sdb" does not go to the hosts as a path: every host resolves it to the
-// UUID of the filesystem it really has, and that UUID comes back in the
+// /dev/sdb" reaches every host as the UUID of the filesystem it really has.
 func TestMountCampaignResolvesTheUUIDOnEveryHost(t *testing.T) {
 	h := newHarness(t)
 	const target = "/mnt/flotestro-campaign"
@@ -1806,8 +1805,7 @@ func mountPlan(h *harness, jobID string) (plan struct {
 }
 
 // TestNetworkCampaignComputesTheDiffAndRefusesBeforeConsent checks that a
-// network change in a campaign gets a plan computed on the host: the
-// difference against the profile the host has, the fingerprint of that
+// network change gets a plan computed on the host before anyone consents.
 func TestNetworkCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 	h := newHarness(t)
 
@@ -1946,8 +1944,7 @@ func TestNetworkCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 }
 
 // TestFirewalldZoneCampaignComputesTheDiffAndRefusesBeforeConsent checks that
-// a firewalld zone entry in a campaign gets a plan computed on the host:
-// whether the port is already open, in which zone and against which ruleset -
+// a firewalld zone entry gets a plan computed on the host before any consent.
 func TestFirewalldZoneCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 	h := newHarness(t)
 	const port = "9445"
@@ -2113,7 +2110,7 @@ func zonePlan(h *harness, jobID string) (plan struct {
 
 // TestResolverCampaignComputesTheDiffAndRefusesBeforeConsent checks that a
 // resolver change in a campaign gets a plan computed on the host against the
-// profile the host has, and comes back with its fingerprint - and an interface
+// profile it has, and that an interface without one is refused before consent.
 func TestResolverCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 	h := newHarness(t)
 	const server = "192.168.56.50"
@@ -2264,8 +2261,8 @@ func planOfKind(h *harness, jobID, kind string) (plan struct {
 }
 
 // TestSSHCampaignComputesTheDiffAndRefusesBeforeConsent checks that an sshd
-// configuration change in a campaign gets a plan computed on the host: the
-// difference against what the server applies, the panel file the write
+// configuration change in a campaign is planned per host against the state
+// found, and that cutting off every login method is refused before consent.
 func TestSSHCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 	h := newHarness(t)
 
@@ -2432,8 +2429,7 @@ func TestSSHCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 }
 
 // TestModuleBlacklistCampaignComputesTheDiffOnEveryHost checks that a module
-// blacklist in a campaign gets a plan computed on the host: a host that
-// already blacklists the module has no change, and the rest get the entry -
+// blacklist gets a plan per host: one that already has it sees no change.
 func TestModuleBlacklistCampaignComputesTheDiffOnEveryHost(t *testing.T) {
 	h := newHarness(t)
 	const module = "floppy"
@@ -2537,8 +2533,7 @@ func TestModuleBlacklistCampaignComputesTheDiffOnEveryHost(t *testing.T) {
 }
 
 // TestTimeSourceCampaignComputesTheDiffAndRefusesBeforeConsent checks that a
-// time source change in a campaign gets a plan computed on the host: which
-// daemon, whether a restart or a reload - and a host without a daemon or
+// time source change gets a plan computed on the host before any consent.
 func TestTimeSourceCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 	h := newHarness(t)
 
@@ -2650,8 +2645,7 @@ func TestTimeSourceCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) 
 }
 
 // TestFilesystemCheckCampaignComputesAPlanOnEveryHost checks that a filesystem
-// check in a campaign gets a plan computed on the host: which filesystem and
-// UUID the host has under the path, whether it is unmounted - and a device the
+// check gets a plan on every host: the filesystem and the UUID under the path.
 func TestFilesystemCheckCampaignComputesAPlanOnEveryHost(t *testing.T) {
 	h := newHarness(t)
 
@@ -2801,7 +2795,7 @@ func devicePlan(h *harness, jobID string) (plan struct {
 
 // TestCertificateCampaignComputesTheDiffAndProtectsTheKey checks two things at
 // once: a certificate deployment in a campaign gets a plan computed on the
-// host (the found and desired fingerprints, the expiry), and the private key
+// host, and the private key never leaves the store on the way there.
 func TestCertificateCampaignComputesTheDiffAndProtectsTheKey(t *testing.T) {
 	h := newHarness(t)
 
@@ -2953,8 +2947,8 @@ func certificatePlan(h *harness, jobID string) (plan struct {
 }
 
 // TestBackupCampaignComputesTheScopeAndRequiresAVerification checks three
-// things at once: a copy in a campaign gets a plan computed on the host (the
-// scope, the size, the repository state), the copy ends with a repository
+// things at once: a copy in a campaign gets a plan computed on the host, the
+// copy ends with a repository check, and a restore is refused in bulk.
 func TestBackupCampaignComputesTheScopeAndRequiresAVerification(t *testing.T) {
 	h := newHarness(t)
 
@@ -3116,8 +3110,7 @@ func backupPlan(h *harness, jobID string) (plan struct {
 }
 
 // TestCatalogueSaysWhatACampaignWillNotDoAndWhy checks what the interface
-// recognises the boundaries by: the installation says whether it runs
-// campaigns at all, and the operation catalogue - which change it will not
+// recognises the boundaries by: the capabilities and the operation catalogue.
 func TestCatalogueSaysWhatACampaignWillNotDoAndWhy(t *testing.T) {
 	h := newHarness(t)
 
@@ -3235,9 +3228,8 @@ func TestBackendBudgetStopsTheSecondCampaign(t *testing.T) {
 		for _, target := range h.campaignTargets(campaign.ID) {
 			if target.State == "awaiting_budget" {
 				if !waited {
-					// The budget screen counts the waiting host from the budget's side, read
-					// while the host still waits - the operator looking at the budget must
-					// see the campaign behind it, not only the campaign looking at the
+					// The budget screen counts the waiting host from the
+					// budget's side: the campaign behind it must show.
 					shown := h.budgetState("backend:" + repository + ":backup")
 					if shown.WaitingTargets < 1 && stillWaiting(h.campaignTargets(campaign.ID), target.HostID) {
 						t.Errorf("a host waits for the backend and the budget counts %d waiting targets", shown.WaitingTargets)
@@ -3308,7 +3300,7 @@ func stillWaiting(targets []campaignTargetView, hostID string) bool {
 
 // TestTrustCampaignDistributesTheAuthorityAndProtectsTheOneInUse walks two
 // steps of an authority rotation: the fleet starts trusting the new authority,
-// and withdrawing an authority that still signs a host certificate falls out
+// and withdrawing one that still signs a host certificate is refused.
 func TestTrustCampaignDistributesTheAuthorityAndProtectsTheOneInUse(t *testing.T) {
 	h := newHarness(t)
 
@@ -3600,9 +3592,8 @@ func renewalPlan(h *harness, jobID string) (plan struct {
 	return plan
 }
 
-// TestCampaignPlansAreGroupedByFingerprint checks the screen on which the
-// operator makes the decision: the consent concerns a set of plans, so the set
-// must be visible - and a hundred hosts with an identical diff are to be one
+// TestCampaignPlansAreGroupedByFingerprint checks the screen the operator
+// decides on: hosts with an identical diff are one group, not a hundred rows.
 func TestCampaignPlansAreGroupedByFingerprint(t *testing.T) {
 	h := newHarness(t)
 	const name = "grouped-plans-test"
@@ -3745,8 +3736,7 @@ func TestPreviewShowsTheSnapshotDistribution(t *testing.T) {
 }
 
 // TestFleetShowsWhomItTrustsDuringARotation checks the screen without which an
-// authority rotation is invisible: during it part of the fleet trusts both
-// authorities at once, and only that says whether the old one may be
+// authority rotation is invisible: which hosts trust which authority.
 func TestFleetShowsWhomItTrustsDuringARotation(t *testing.T) {
 	h := newHarness(t)
 
@@ -3924,8 +3914,8 @@ func TestBackendBudgetBindsTwoCampaigns(t *testing.T) {
 }
 
 // TestCampaignStreamResumesFromTheLastEvent guards the durable stream of a
-// campaign: the trail events carry identifiers, a reconnection with
-// Last-Event-ID gets only what happened after it, and the publisher marks
+// campaign: the trail events carry identifiers, and a reconnection with
+// Last-Event-ID gets only what came after it, nothing twice, nothing missing.
 func TestCampaignStreamResumesFromTheLastEvent(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -4052,7 +4042,7 @@ func (h *harness) streamTimeline(campaignID string, after int64) []timelineEntry
 
 // TestCampaignTargetsArePagedAndFilteredOnTheServer guards the contract a
 // large campaign needs: the targets come page by page in the order of the
-// rollout, a filter is answered by the database and the total says how many
+// rollout, and a filter is answered by the database with a total of its own.
 func TestCampaignTargetsArePagedAndFilteredOnTheServer(t *testing.T) {
 	h := newHarness(t)
 	online := make([]string, 0, 2)
@@ -4162,8 +4152,7 @@ func TestActionCatalogueCarriesTemplates(t *testing.T) {
 }
 
 // TestTrailConsumerMovesOnlyAfterDelivery guards the contract of an external
-// consumer of the trail: the cursor moves only after the receiver took the
-// batch, a refusal leaves it in place and holds the consumer back, and the
+// consumer: the cursor moves after delivery, and a refusal leaves it in place.
 func TestTrailConsumerMovesOnlyAfterDelivery(t *testing.T) {
 	h := newHarness(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -4257,8 +4246,7 @@ func (r *recordingReceiver) Deliver(_ context.Context, events []outbox.Event) er
 }
 
 // TestOpenAPIDescribesTheLiveAPI guards the public contract: the running panel
-// serves a document that names the routes the tests use, and every route the
-// document names answers - a 404 would be a contract without an
+// serves a document naming the routes the tests use, and each of them answers.
 func TestOpenAPIDescribesTheLiveAPI(t *testing.T) {
 	h := newHarness(t)
 	var document struct {
@@ -4415,7 +4403,7 @@ func TestCampaignHonorsMaxConcurrent(t *testing.T) {
 
 // TestCampaignReportExportsCSV covers the report a spreadsheet reads: the same
 // endpoint with format=csv hands out a file with one row per target and the
-// columns in a fixed order, so an operator can hand the outcome of a campaign
+// columns in a fixed order that a spreadsheet reads without the panel.
 func TestCampaignReportExportsCSV(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -4484,8 +4472,7 @@ func TestCampaignReportExportsCSV(t *testing.T) {
 }
 
 // TestTwoOrchestratorsCreateOneJobPerTarget guards the invariant of a second
-// control-plane instance: two orchestrators driving the same campaign at once
-// create one job per target step and hold one set of budget tokens per target,
+// control-plane instance: two of them still make one job per target step.
 func TestTwoOrchestratorsCreateOneJobPerTarget(t *testing.T) {
 	h := newHarness(t)
 	online := make([]string, 0, 2)
@@ -4748,9 +4735,8 @@ func TestAnExpiredPlanDoesNotStartTheHost(t *testing.T) {
 		campaign.ID); err != nil {
 		t.Fatal(err)
 	}
-	// The approval may land before or after the engine sees the age: an approved
-	// campaign with a stale plan closes the host as failed with plan_stale, and
-	// one the engine caught first expires as a whole with the host skipped for
+	// The approval may land before or after the engine sees the age: the host
+	// is closed as failed or as skipped, with plan_stale either way.
 	h.approveCampaign(planned)
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true, "expired": true}, 3*time.Minute)
@@ -4765,8 +4751,7 @@ func TestAnExpiredPlanDoesNotStartTheHost(t *testing.T) {
 }
 
 // TestOfflinePolicySkipsAHostThatIsNotConnected guards the answer a campaign
-// gives for a host that is not connected when its turn comes: the policy
-// decides, and the host is closed with a reason rather than passed over in
+// gives for an offline host: the policy decides, and the host gets a reason.
 func TestOfflinePolicySkipsAHostThatIsNotConnected(t *testing.T) {
 	h := newHarness(t)
 	offline := h.enrollSyntheticHost(t)
@@ -4991,7 +4976,7 @@ func TestOfflinePolicyMayOnlyBeTightened(t *testing.T) {
 
 // TestTheCatalogueCarriesTheOperationContract guards the second half of the
 // contract on the wire: what a cancel does to an operation under way, whether
-// it may be repeated, what way back exists, what is verified and which host
+// it may be repeated, what way back exists, what is verified, what it claims.
 func TestTheCatalogueCarriesTheOperationContract(t *testing.T) {
 	h := newHarness(t)
 

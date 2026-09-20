@@ -461,8 +461,7 @@ func (s *Store) CreateSchedule(ctx context.Context, checked CheckedSchedule, cre
 }
 
 // UpdateSchedule rewrites a schedule from a checked spec under the subject
-// given, who becomes its author: the orders are placed under the rights of
-// whoever last wrote the order, so nobody widens a colleague's schedule onto
+// given, who becomes its author: the orders run with that author's rights.
 func (s *Store) UpdateSchedule(ctx context.Context, id string, checked CheckedSchedule, author string) (*Schedule, error) {
 	spec := checked.Spec
 	enabled := spec.Enabled == nil || *spec.Enabled

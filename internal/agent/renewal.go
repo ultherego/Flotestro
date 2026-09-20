@@ -167,9 +167,8 @@ func renewCertificate(ctx context.Context, identity *Identity, options RenewalOp
 				CsrPem: csrPEM,
 				Build:  &agentv1.AgentBuild{AgentVersion: Version},
 			}
-			// Through a relay the handshake proves the relay, so the request has to
-			// carry the host's own proof: a challenge the panel issued for this host
-			// and this relay, signed with the key the host holds now together with the
+			// Through a relay the handshake proves the relay, so the request carries
+			// the host's own proof: the panel's challenge signed with the current key.
 			if err := proveRenewal(ctx, client, peer, material, identity.HostID, request, csrPEM, options.Log); err != nil {
 				return err
 			}

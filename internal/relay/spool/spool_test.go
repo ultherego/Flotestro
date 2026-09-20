@@ -242,9 +242,8 @@ func TestInflightIsBoundedAndResentAfterTheTimeout(t *testing.T) {
 	}
 }
 
-// TestTheReserveIsKeptForTheDurableClasses guards the quota by class: a
-// metrics sample is refused once the room outside the reserve is spent,
-// evicting an older sample first, while a job result still fits; and the whole
+// TestTheReserveIsKeptForTheDurableClasses guards the quota by class: a metrics
+// sample gives way to a newer one while a job result still enters the reserve.
 func TestTheReserveIsKeptForTheDurableClasses(t *testing.T) {
 	spool := open(t, t.TempDir(), Options{MaxBytes: 2000, CriticalReserveBytes: 800})
 	for i := int64(1); i <= 100; i++ {
@@ -471,9 +470,8 @@ func TestARecordKeepsItsIdentifier(t *testing.T) {
 	}
 }
 
-// TestEveryDurableClassIsOnTheDiskBeforeItIsAccepted guards the promise the
-// relay makes when it takes a message of a durable class: the record is on the
-// disk before the caller goes on, so a power failure a millisecond later costs
+// TestEveryDurableClassIsOnTheDiskBeforeItIsAccepted guards the promise of a
+// durable class: the record is on the disk before the caller goes on.
 func TestEveryDurableClassIsOnTheDiskBeforeItIsAccepted(t *testing.T) {
 	// The batch of the light classes is pushed out of the way, so that what the
 	// test observes is the sync of the append and not a tick that happened to
@@ -507,9 +505,8 @@ func TestEveryDurableClassIsOnTheDiskBeforeItIsAccepted(t *testing.T) {
 	}
 }
 
-// TestASpoolThatCannotReachTheDiskSaysSo guards what the readiness of the
-// relay is built on: a failed sync of the batch is remembered rather than
-// swallowed, so a relay whose disk stopped taking writes stops reporting
+// TestASpoolThatCannotReachTheDiskSaysSo guards what the readiness of the relay
+// is built on: a failed sync is remembered rather than swallowed.
 func TestASpoolThatCannotReachTheDiskSaysSo(t *testing.T) {
 	spool := open(t, t.TempDir(), Options{FlushInterval: 5 * time.Millisecond})
 	appendMessage(t, spool, "host-1", signed(metric(1), "session-a", 1))

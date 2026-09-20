@@ -220,9 +220,8 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 	stream := client.Connect(sessionCtx)
 	defer func() { _ = stream.CloseRequest() }()
 
-	// The address the host reaches the panel with is determined once per session
-	// and passed to the network module: it is what decides which interface is the
-	// management channel, and therefore which change must not be made without a
+	// The address the host reaches the panel with is settled once per session:
+	// it tells the network module which interface is the management channel.
 	localAddress := panelAddress(opts.gatewayURL)
 
 	collect := opts.CollectFacts
@@ -242,8 +241,7 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 	}
 
 	// The request goes out before Hello, headers alone, so that the handshake
-	// happens now and the session learns whom it reached: a relay names itself in
-	// its certificate, and the envelope of every message names the relay it goes
+	// happens now and the session learns which relay it reached.
 	if err := stream.Send(nil); err != nil {
 		return err
 	}
@@ -545,9 +543,8 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 						return
 					}
 
-					// The locks and the budget slot are taken inside the executor, behind the
-					// checks that refuse a task without touching the host and behind the
-					// acknowledgement: the panel is to hear "accepted" before the task queues
+					// The locks and the budget slot are taken inside the executor, so
+					// the panel hears "accepted" before the task waits for the host.
 					result := executeTask(sessionCtx, opts.Executor, task, opts.Log)
 					// A wait for the resources that ended with the session has nobody left to
 					// answer to; the panel's lease runs out and the task comes back to the
@@ -585,9 +582,8 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 						opts.Log.Error("the result of the task was not sent back",
 							"task_id", task.GetTaskId(), "err", err)
 					}
-					// The panel may have given up on this attempt while the operation ran and
-					// delivered the key again; that attempt is owed the same result, after
-					// the original, so that the job is settled from the attempt that did the
+					// The panel may have given up on this attempt and delivered the key
+					// again; that attempt is owed the same result, after the original.
 					if copied := opts.Executor.RedeliveredCopy(result); copied != nil {
 						opts.Log.Info("the result is delivered to the redelivered attempt as well",
 							"task_id", copied.GetTaskId(), "previous_task_id", task.GetTaskId())
@@ -621,8 +617,7 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 
 			case *agentv1.ServerMessage_CancelTask:
 				// A cancel is answered by what it finds, not carried out blindly: a task
-				// that has not started is refused and never starts, a read under way is
-				// interrupted where its module allows, a mutation under way runs to its
+				// that has not started never starts, a mutation under way runs to its end.
 				cancel := payload.CancelTask
 				outcome, phase, resultHash, interrupt := opts.Executor.CancelTask(cancel.GetTaskId())
 				if err := send(&agentv1.AgentMessage{

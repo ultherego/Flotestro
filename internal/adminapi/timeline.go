@@ -158,9 +158,8 @@ func parseTimelineCursor(value string) (timelineCursor, error) {
 	return timelineCursor{At: at, Kind: parts[1], ID: parts[2], Set: true}, nil
 }
 
-// validateTimelineKey checks that the kind and the identifier of a cursor are
-// ones the timeline issues: the kind is a source, and the identifier is the
-// record key of that source - a number for the trail, a UUID with an optional
+// validateTimelineKey checks the kind and the identifier of a cursor: a number
+// for the trail, a UUID with an optional suffix for every other source.
 func validateTimelineKey(kind, id string) error {
 	known := false
 	for _, source := range timelineSources {

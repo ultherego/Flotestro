@@ -201,7 +201,7 @@ func withUpgradeDirs(t *testing.T, state string, caches map[string][]string) {
 }
 
 // The copy the host kept answers before the repository: going back must not
-// depend on the old version still being published. The manager here can fetch
+// depend on the old version still being published.
 func TestTheKeptArtefactAnswersBeforeTheRepository(t *testing.T) {
 	state := t.TempDir()
 	withUpgradeDirs(t, state, nil)
@@ -227,7 +227,7 @@ func TestTheKeptArtefactAnswersBeforeTheRepository(t *testing.T) {
 }
 
 // A kept copy that does not hash to the digest of the order is a refusal of
-// its own. Downloading the version again here would turn an artefact nobody
+// its own, never a reason to fetch the version again.
 func TestAKeptArtefactThatDoesNotVerifyIsRefusedRatherThanFetchedAgain(t *testing.T) {
 	withUpgradeDirs(t, t.TempDir(), nil)
 	writeKeptArtefact(t, "flotestro-agent_0.54.0-1_amd64.deb", "a file nobody published")
@@ -269,7 +269,7 @@ func TestPruningLeavesOnlyTheArtefactsTheOrderNeeds(t *testing.T) {
 }
 
 // The kept artefact goes when the host holds the version the order installed,
-// and only then: a host that did not come back in that version is exactly the
+// and only then: a host that did not come back still needs the way back.
 func TestTheKeptArtefactIsReleasedOnlyOnceTheHostHoldsTheOrderedVersion(t *testing.T) {
 	withUpgradeDirs(t, t.TempDir(), nil)
 	order := replacementOrder{Spec: "flotestro-agent=0.55.0"}

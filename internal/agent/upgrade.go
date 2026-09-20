@@ -77,8 +77,8 @@ func (e *TaskExecutor) upgradeAgent(ctx context.Context, task *agentv1.TaskEnvel
 		})
 	}
 
-	// The repository metadata has to be fresh: a version released a quarter of an
-	// hour ago does not exist for a manager that last looked at the repository
+	// The repository metadata has to be fresh: a version released a quarter of
+	// an hour ago does not exist for a manager with an old index.
 	refresh, err := e.helper.Call(upgradeCtx, &helperv1.HelperRequest{
 		TaskId:         task.GetTaskId(),
 		TimeoutSeconds: 300,
@@ -124,7 +124,7 @@ func (e *TaskExecutor) upgradeAgent(ctx context.Context, task *agentv1.TaskEnvel
 		replacementRequest(task, name, payload, timeout, false), timeout)
 	if err != nil {
 		// A broken connection to the helper during this operation usually means the
-		// package managed to install and the restart is under way - together with
+		// package installed and the restart took this agent down with it.
 		return &agentv1.TaskResult{
 			Status: agentv1.TaskResult_STATUS_UNSPECIFIED, ErrorCode: StatusAfterReplacement,
 			Message: "the installation is in flight; the return of the agent decides the result",
@@ -137,8 +137,8 @@ func (e *TaskExecutor) upgradeAgent(ctx context.Context, task *agentv1.TaskEnvel
 		return result
 	}
 
-	// Even when the installation went through without a broken connection, the
-	// success is not the exit code of the package manager: the agent may fail to
+	// Even when the installation went through, the success is not the exit code
+	// of the package manager: the agent has to come back at the new version.
 	return &agentv1.TaskResult{
 		Status: agentv1.TaskResult_STATUS_UNSPECIFIED, ErrorCode: StatusAfterReplacement,
 		Message: "the package was installed; waiting for the agent to come back at version " +
@@ -149,7 +149,7 @@ func (e *TaskExecutor) upgradeAgent(ctx context.Context, task *agentv1.TaskEnvel
 }
 
 // releaseKeptArtefact tells the host to drop the artefact it kept for a
-// return. Until this order arrives the way back stays on the host, whatever
+// return. Until this order arrives the way back stays on the host.
 func (e *TaskExecutor) releaseKeptArtefact(ctx context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.AgentUpgradePayload) *agentv1.TaskResult {
 	manager, detected := detectManager()

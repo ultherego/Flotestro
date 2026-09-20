@@ -37,8 +37,7 @@ type testRelay struct {
 }
 
 // TestRelayRenewalKeepsTheNamesFromTheRegistry guards the property that makes
-// relay renewal a separate RPC: the network names are the trust boundary
-// towards the site's agents, so they come from the panel registry, not from
+// relay renewal a separate RPC: the names come from the registry, not the call.
 func TestRelayRenewalKeepsTheNamesFromTheRegistry(t *testing.T) {
 	h := newHarness(t)
 	relay := h.enrollRelay(t, []string{"test-relay.flotestro.test", "192.168.56.99"})

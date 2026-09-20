@@ -52,6 +52,7 @@ func walkHosts(t *testing.T, h *harness, query url.Values, fleet int) []sortedHo
 // TestHostListSortsAndPagesUnderASort checks the order the list can be asked
 // for: sorted by hostname the rows come in the database's order, turned round
 // under :desc, and the pages of a sorted list neither repeat a host nor skip
+// one.
 func TestHostListSortsAndPagesUnderASort(t *testing.T) {
 	h := newHarness(t)
 	var whole sortedHostPage
@@ -143,9 +144,8 @@ func TestHostListSortsAndPagesUnderASort(t *testing.T) {
 	}
 }
 
-// TestJobListSortsByCreationTime orders two reads and checks that the list
-// asked for oldest first gives the first read before the second, page by page,
-// while the default stays newest first; a sort by a column the list has not
+// TestJobListSortsByCreationTime orders two reads and checks that oldest first
+// gives them in order, page by page, while the default stays newest first.
 func TestJobListSortsByCreationTime(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")

@@ -107,7 +107,7 @@ func (h *harness) hostSessions(t *testing.T, hostID string) []sessionView {
 
 // TestACloneOfTheIdentityIsReported guards the detection of a copied identity
 // and the packaged reaction to it: the same certificate alive on two boots at
-// the same time is recorded as an incident, and under the quarantine policy
+// the same time quarantines the host and ends both sessions with that reason.
 func TestACloneOfTheIdentityIsReported(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")

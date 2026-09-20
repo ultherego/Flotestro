@@ -82,8 +82,7 @@ type cveReport struct {
 	References []vuln.CVEReference `json:"references"`
 	Hosts      []vuln.CVEHost      `json:"hosts"`
 	// HostsTotal counts the rows the page could list, which may exceed the rows
-	// it did; AffectedHosts and HostsWithVendorFix count distinct hosts among the
-	// rows returned, because those are the hosts the operator can act on from
+	// it did; the other counts cover only the distinct hosts in those rows.
 	HostsTotal         int      `json:"hosts_total"`
 	AffectedHosts      int      `json:"affected_hosts"`
 	UndecidedHosts     int      `json:"undecided_hosts"`

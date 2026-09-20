@@ -129,8 +129,7 @@ func (s *Server) scoped(taskID string, family opspec.ResourceFamily, argv []stri
 }
 
 // scopeContext records the scope of a family in the context, for the modules
-// that start their tools on their own: the package managers and the backup
-// tools build their commands far from the helper, and read the prefix back at
+// that build their commands far from the helper and read the prefix there.
 func (s *Server) scopeContext(ctx context.Context, taskID string,
 	family opspec.ResourceFamily) context.Context {
 	runner := s.scopes

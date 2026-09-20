@@ -220,8 +220,7 @@ func TestAMissingValidatorIsNotAPassedCheck(t *testing.T) {
 }
 
 // TestThePlanFingerprintIgnoresTheSurroundings guards that an approval binds
-// the change and not the environment: the version of the tool, the units
-// installed and the number of copies kept may differ between the plan and the
+// the change and not the environment the change is applied in.
 func TestThePlanFingerprintIgnoresTheSurroundings(t *testing.T) {
 	current := File{Path: "/etc/nginx/conf.d/app.conf", Exists: true, SHA256: "aaa", Mode: "0644"}
 	desired := Desired{Content: []byte("server {}\n"), Mode: "0644",

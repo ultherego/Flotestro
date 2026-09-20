@@ -288,9 +288,8 @@ func (s *Server) writeFile(ctx context.Context, request *helperv1.HelperRequest,
 	}
 	change.Consumers, change.ConsumersReason = files.Consumers(path)
 
-	// The digest of what was written answers this one job and is what the
-	// verifier compares the host against a moment later; the standing record of a
-	// file from the secret store still carries no digest, which is what the
+	// The digest of what was written answers this one job: it is what the
+	// verifier compares the host against a moment later.
 	response := fileResponse(s.fileState(), message, nil, files.Fingerprint(content))
 	if response.GetFileResult() != nil {
 		if encoded, err := json.Marshal(change); err == nil {

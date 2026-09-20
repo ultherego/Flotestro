@@ -121,6 +121,7 @@ func TestSetupChecklistIsReadByAViewer(t *testing.T) {
 // TestSetupDirectoryTestAnswersWithAVerdict checks that the directory test
 // answers 200 either way: ok with the directory's own summary when the
 // connector reaches it, or a typed reason when it does not - never a bare
+// failure.
 func TestSetupDirectoryTestAnswersWithAVerdict(t *testing.T) {
 	h := newHarness(t)
 	var result connectionTestView

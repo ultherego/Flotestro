@@ -76,7 +76,8 @@ func compareParts(a, b []int) int {
 
 // TestHostListAttentionFiltersKeepOnlyTheHostsTheyName guards the filters the
 // dashboard tiles link with: each keeps every host that satisfies it and no
-// host that does not, a value that matches nothing gives an empty list rather
+// host that does not, a value that matches nothing gives an empty list, and a
+// value that is not a filter is refused.
 func TestHostListAttentionFiltersKeepOnlyTheHostsTheyName(t *testing.T) {
 	h := newHarness(t)
 	fleet := listHostsBy(t, h, url.Values{})
@@ -217,8 +218,7 @@ func TestHostListAttentionFiltersKeepOnlyTheHostsTheyName(t *testing.T) {
 }
 
 // TestFleetSummaryCountsTheDecisionsWaiting guards the counters behind the
-// dashboard's "waiting for approval" tile and the sidebar's badges: the global
-// test identity may read every list they count, so every counter is present,
+// "waiting for approval" tile and the sidebar badges: none of them is missing.
 func TestFleetSummaryCountsTheDecisionsWaiting(t *testing.T) {
 	h := newHarness(t)
 	var summary struct {

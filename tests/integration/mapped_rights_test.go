@@ -14,8 +14,7 @@ import (
 )
 
 // TestMappedRightsHoldAwayFromTheRequest guards the person who signs in
-// through the identity provider: their rights come from the group mapping and
-// not from bindings of their own, so a check made away from any request - the
+// through the provider: the group mapping holds even away from a request.
 func TestMappedRightsHoldAwayFromTheRequest(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

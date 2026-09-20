@@ -14,8 +14,7 @@ import (
 const hostKeytabPath = "/etc/krb5.keytab"
 
 // renewKeytab fetches a new key of a service principal into the host's keytab
-// with ipa-getkeytab, authenticated with the host's own keytab (-k on a joined
-// host makes the tool take the host credential the way kinit -k does;
+// with ipa-getkeytab, authenticated with the host's own keytab (-k).
 func (s *Server) renewKeytab(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.KeytabRenewRequest) *helperv1.HelperResponse {
 	principal := strings.TrimSpace(action.GetPrincipal())

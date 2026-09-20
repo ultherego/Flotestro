@@ -145,7 +145,7 @@ func Compose(event outbox.Event, publicURL string) (Message, bool) {
 }
 
 // SummaryMessage is the one message a channel gets when a silence with
-// send_summary ends: how many messages the silence kept back and their titles,
+// send_summary ends: how many messages it kept back, and their first titles.
 func SummaryMessage(kept []string, until time.Time, reason string, publicURL string) Message {
 	message := Message{
 		Subject:    "alert.summary",
@@ -184,7 +184,7 @@ func alertText(fields payload) string {
 }
 
 // ScopeHint is what the payload alone says about the scope: the site and the
-// environment when the trigger wrote them, the host to look up when it did
+// environment when the trigger wrote them, and the host to look them up by.
 func ScopeHint(event outbox.Event) (scope Scope, hostID string) {
 	var fields payload
 	_ = json.Unmarshal(event.Payload, &fields)
@@ -197,7 +197,7 @@ func ScopeHint(event outbox.Event) (scope Scope, hostID string) {
 }
 
 // TestMessage is what the test button sends: a sentence that says which
-// channel it is and when it was pressed, so a receiver that shows it is known
+// channel it is and when the button was pressed.
 func TestMessage(channel Channel, now time.Time) Message {
 	return Message{
 		Subject:    "test",

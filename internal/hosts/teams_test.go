@@ -84,8 +84,7 @@ func TestScopeSQLNumbersAfterTheOffset(t *testing.T) {
 }
 
 // TestScopeSQLAgreesWithMatches is the guard that keeps the listing and the
-// single read from drifting apart: for every combination of binding and host
-// below, the condition either names the host's column value or refuses,
+// single read from drifting apart, over every binding and host below.
 func TestScopeSQLAgreesWithMatches(t *testing.T) {
 	mine := "1e83b0e4-0000-4000-8000-00000000000a"
 	theirs := "1e83b0e4-0000-4000-8000-00000000000b"

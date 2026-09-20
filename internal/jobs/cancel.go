@@ -254,9 +254,8 @@ func (s *Store) RecordCancelAck(ctx context.Context, jobID, outcome, phase strin
 	return settlement, tx.Commit(ctx)
 }
 
-// SettleCancelTimeouts ends the cancel requests nobody answered within the
-// operation's timeout: the job fails with cancel_ack_timeout and an unknown
-// outcome, its open attempt is closed with the same code, and its tokens go
+// SettleCancelTimeouts ends the cancel requests nobody answered in time: the
+// job fails with an unknown outcome and its budget tokens go back.
 func (s *Store) SettleCancelTimeouts(ctx context.Context) ([]string, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {

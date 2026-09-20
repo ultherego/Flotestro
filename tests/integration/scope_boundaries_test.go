@@ -145,8 +145,7 @@ func TestCampaignPreviewAndOrderShareTheCallersScope(t *testing.T) {
 }
 
 // TestEnrollmentOrdersStayWithinTheCallersScope guards the enrollment chapter
-// of the RBAC document: a site-scoped operator lists only the orders of their
-// site, with the filters and the paging of the list, and cannot revoke an
+// of the RBAC document: a site-scoped operator sees only their site's orders.
 func TestEnrollmentOrdersStayWithinTheCallersScope(t *testing.T) {
 	h := newHarness(t)
 	operator := h.labOperator(t, "operator-lab-enrollment")
@@ -242,7 +241,7 @@ func TestEnrollmentOrdersStayWithinTheCallersScope(t *testing.T) {
 
 // TestNotificationChannelsAreVisibleInTheirScope guards the notification part
 // of the RBAC chapter: a channel filtered to a site is the business of that
-// site's operators, a fleet-wide one of somebody with a right over the whole
+// site's operators, and a fleet-wide one is not theirs to see.
 func TestNotificationChannelsAreVisibleInTheirScope(t *testing.T) {
 	h := newHarness(t)
 	operator := h.labOperator(t, "operator-lab-notifications")

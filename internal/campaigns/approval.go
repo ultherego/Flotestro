@@ -23,9 +23,8 @@ type ApprovedPlan struct {
 	CreatedAt      time.Time       `json:"created_at"`
 }
 
-// ApproveWithPlans approves a campaign and records, with the approval, the
-// plan of every host as it stands now: the consent has to keep what it
-// covered, because campaign_plans is overwritten by the next planning and the
+// ApproveWithPlans approves a campaign and records the plan of every host
+// with the approval: campaign_plans is overwritten by the next planning.
 func (s *Store) ApproveWithPlans(ctx context.Context, tx pgx.Tx, campaign Campaign,
 	approval Approval) (*Campaign, error) {
 	approved, err := s.Approve(ctx, tx, campaign.ID, approval)

@@ -329,8 +329,7 @@ func (s *Server) searchGroups(ctx context.Context, principal authz.Principal, qu
 }
 
 // relayScopeSQL renders the visibility of a relay the way the relay list
-// decides it: a binding to the relay's site sees it, and a relay without an
-// environment serves its whole site, so a binding to any environment of the
+// decides it: a relay without an environment is visible across its whole site.
 func relayScopeSQL(scopes []authz.Scope, offset int) (string, []any) {
 	if len(scopes) == 0 {
 		return "false", nil

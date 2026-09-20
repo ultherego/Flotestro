@@ -27,9 +27,8 @@ func TestTheDefaultsAreTheOnesTheDocumentAsksFor(t *testing.T) {
 	}
 }
 
-// TestARetentionThatDeletesWhatIsStillArrivingIsRefused: a configuration whose
-// raw retention is shorter than the window it offers plus the longest a sample
-// may take to arrive throws readings away by definition, and the panel says so
+// TestARetentionThatDeletesWhatIsStillArrivingIsRefused: a raw retention
+// shorter than the query window plus the lateness is refused with a code.
 func TestARetentionThatDeletesWhatIsStillArrivingIsRefused(t *testing.T) {
 	options := Options{
 		RawRetention:   24 * time.Hour,
@@ -58,9 +57,9 @@ func TestAnAbsurdMarginOfPartitionsIsRefused(t *testing.T) {
 	}
 }
 
-// TestAPartitionIsNamedAfterTheDayItBegins, and the name reads back: the
-// retention derives the end of a partition's range from its name, so a name
-// that does not round-trip is a partition that is dropped at the wrong moment
+// TestAPartitionIsNamedAfterTheDayItBegins: the retention derives a
+// partition's range from its name, so a name that does not read back drops it
+// at the wrong moment.
 func TestAPartitionIsNamedAfterTheDayItBegins(t *testing.T) {
 	at := time.Date(2026, 9, 18, 0, 0, 0, 0, time.UTC)
 	name := partitionName(at)

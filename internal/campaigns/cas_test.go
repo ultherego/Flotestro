@@ -95,8 +95,7 @@ func TestAConcurrentTransitionIsRefused(t *testing.T) {
 }
 
 // TestASettledHostNeverMovesAgain guards the terminal rule of the target state
-// machine: a settled host is not written again, whatever state is asked for,
-// and the database is not even asked - a late result is an observation about
+// machine: a settled host is not written again, and the database is not asked.
 func TestASettledHostNeverMovesAgain(t *testing.T) {
 	store := &Store{}
 	for _, from := range []TargetState{TargetSucceeded, TargetNoChange, TargetFailed, TargetUnknown,
@@ -144,8 +143,7 @@ func TestASettledHostNeverMovesAgain(t *testing.T) {
 }
 
 // TestTheCampaignStateMachineHasNoWayOutOfTheEnd guards the campaign side: a
-// terminal campaign never runs again, the orchestrator's transitions follow
-// the phases, and the pausing state sits between a running campaign and a
+// terminal campaign never runs again, and the transitions follow the phases.
 func TestTheCampaignStateMachineHasNoWayOutOfTheEnd(t *testing.T) {
 	for _, from := range []State{StateCompleted, StateCompletedWithIssues, StateFailed, StatePlanFailed, StateExpired, StateCanceled} {
 		for _, to := range []State{StateRunning, StateCanary, StatePaused, StatePausing, StateCanceled, StateCompleted} {
@@ -181,8 +179,7 @@ func TestTheCampaignStateMachineHasNoWayOutOfTheEnd(t *testing.T) {
 }
 
 // TestAPauseWaitsForTheHostsUnderWay guards the pausing state: a pause with
-// hosts still carrying a task is pausing, a pause with none is paused, and
-// neither pausing nor paused starts a host - only the planning phase, a
+// hosts still carrying a task is pausing, a pause with none is paused.
 func TestAPauseWaitsForTheHostsUnderWay(t *testing.T) {
 	for _, state := range []TargetState{TargetDispatched, TargetAwaitingLock, TargetRunning, TargetRebooting, TargetVerifying} {
 		targets := []Target{{State: TargetSucceeded}, {State: state}, {State: TargetPending}}

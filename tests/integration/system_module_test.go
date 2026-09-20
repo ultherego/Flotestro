@@ -12,8 +12,7 @@ import (
 )
 
 // The tests of this file check the system module of the host management
-// document: the platform picture every online host reports, the history of
-// kernels the panel keeps, the local sudo policy the helper reads, and the
+// document: the platform picture, the kernel history and the local sudo policy.
 
 // systemPayload mirrors the system fragment: the basic facts every agent
 // sends and the platform picture laid over them.
@@ -233,9 +232,8 @@ func TestThePanelKeepsThePlatformHistory(t *testing.T) {
 	}
 }
 
-// TestLocalSudoersReachTheAccessView: the helper reads the distribution's
-// default sudoers, the fragment lists the sudo or wheel group rule with every
-// command, and the access view shows it as a local rule that amounts to root -
+// TestLocalSudoersReachTheAccessView: the helper reads the default sudoers and
+// the access view shows the group rule as a local rule that amounts to root.
 func TestLocalSudoersReachTheAccessView(t *testing.T) {
 	h := newHarness(t)
 	for _, host := range connectedHosts(t, h) {

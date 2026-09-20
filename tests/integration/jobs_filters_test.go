@@ -9,8 +9,7 @@ import (
 )
 
 // TestJobListFiltersByFanOutAndHost orders a read fan-out over the connected
-// hosts and checks that the job list narrows to it: the fan-out filter keeps
-// exactly its jobs, the host filter keeps the jobs of that host alone, and the
+// hosts: the fan-out filter keeps its jobs, the host filter keeps that host's.
 func TestJobListFiltersByFanOutAndHost(t *testing.T) {
 	h := newHarness(t)
 	online := onlineHosts(t, h)

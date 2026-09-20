@@ -27,7 +27,7 @@ type hostPage struct {
 
 // TestHostSearchFindsAHostByFragmentAndAddress checks that the search runs in
 // the database: a fragment of the name and the management address both find
-// the lab host, and the total says how many hosts match rather than how many
+// the lab host, and the total counts the matches, not the rows of one page.
 func TestHostSearchFindsAHostByFragmentAndAddress(t *testing.T) {
 	h := newHarness(t)
 	var fleet hostPage
@@ -234,8 +234,7 @@ func TestAuditListFiltersByAction(t *testing.T) {
 }
 
 // TestHostAuditTrailFiltersAndPages checks that the trail of one host takes
-// the filters of the fleet trail and pages the same way: the host tab asks
-// "the job events on this host" by the family of the action, every event on
+// the filters of the fleet trail and pages the same way.
 func TestHostAuditTrailFiltersAndPages(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")

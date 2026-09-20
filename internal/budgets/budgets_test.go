@@ -161,8 +161,7 @@ func TestBackendBudgetFollowsTheRepository(t *testing.T) {
 }
 
 // TestJobClassFollowsTheOperatorThenTheEvidence guards the order of the class
-// rule: what the order stated, then what can be seen - the panel's own sweeps
-// never make an operator wait, locking an account never waits behind a
+// rule: what the order stated first, then what can be seen of the action.
 func TestJobClassFollowsTheOperatorThenTheEvidence(t *testing.T) {
 	cases := []struct {
 		action    opspec.ActionType
@@ -230,8 +229,7 @@ func TestDescribedKeyReadsTheBudgetOutOfTheSentence(t *testing.T) {
 }
 
 // TestLeaseClassIsReadFromTheHolder guards how the budget screen tells the
-// classes apart although the lease records none: a job's class comes from its
-// order, a campaign always asks as maintenance, a fan-out as interactive - and
+// classes apart although the lease records none: from the holder of the lease.
 func TestLeaseClassIsReadFromTheHolder(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -256,8 +254,7 @@ func TestLeaseClassIsReadFromTheHolder(t *testing.T) {
 }
 
 // TestChangeLoadsItsFailureDomainAndGateway guards the topology budgets of the
-// document: a change on a host loads the rack, the zone or the cluster the
-// operator placed it in and the gateway its session goes through, each with a
+// document: a change loads the site, the failure domain and the gateway.
 func TestChangeLoadsItsFailureDomainAndGateway(t *testing.T) {
 	where := Topology{Site: "warsaw", FailureDomain: "rack-1", Gateway: "edge-03"}
 	needs := Needs(opspec.ActionUnitRestart, where, "")

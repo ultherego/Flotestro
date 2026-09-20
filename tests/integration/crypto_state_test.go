@@ -13,7 +13,7 @@ var uuidShape = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 
 // TestTheInstallationHasARecordedCryptographicState checks that the panel
 // started through the startup guard: the status screen shows the installation
-// identifier, the active key and the issuer, the sentinel row in the database
+// identifier, the active key and the issuer, and the sentinel row agrees.
 func TestTheInstallationHasARecordedCryptographicState(t *testing.T) {
 	h := newHarness(t)
 	var status struct {

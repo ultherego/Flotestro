@@ -48,9 +48,8 @@ func Scan(targets []Target) Snapshot {
 		}
 	}
 
-	// The state of the certmonger requests needs root, but the question "does
-	// anything on this host watch certificates at all" has an answer without it:
-	// a host without the tool has nothing to track and that is not an unknown
+	// The state of the certmonger requests needs root, but a host without the
+	// tool has nothing to track: that is an answer, not an unknown.
 	if !HasCertmonger() {
 		snapshot.TrackingKnown = true
 		snapshot.TrackingReason = "this host does not run certmonger"

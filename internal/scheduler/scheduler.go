@@ -102,7 +102,7 @@ func New(store *jobs.Store, registry *gateway.Registry, recorder *audit.Recorder
 		credentials: credentials, log: log, options: options}
 	scheduler.admission = admission{waits: store, log: log, gateway: options.GatewayID}
 	// The budgets live in the database, not in the process: a second store over
-	// the same tables sees the same grants as the orchestrator's, so a task and a
+	// the same tables sees the same grants as the orchestrator's.
 	if store != nil && store.Pool() != nil {
 		scheduler.SetBudgets(budgets.NewStore(store.Pool(), log))
 	}
@@ -190,13 +190,13 @@ func (s *Scheduler) dispatchOnce(ctx context.Context) {
 		return
 	}
 	// The dispatch rate is looked at before any task is taken: a task the rate
-	// has no token for stays queued, not leased, so its lease does not tick while
+	// has no token for stays queued, not leased, so its lease does not tick.
 	room := len(candidates)
 	if s.bucket != nil {
 		room = s.bucket.Available()
 	}
 	// Every task is admitted on its own, oldest first, before any is taken: a
-	// task the budgets refuse stays queued as it was, with no attempt opened, and
+	// task the budgets refuse stays queued as it was, with no attempt opened.
 	admitted := make([]string, 0, len(candidates))
 	for i, candidate := range candidates {
 		if len(admitted) >= room {
@@ -235,11 +235,11 @@ func (s *Scheduler) dispatchOnce(ctx context.Context) {
 		s.admission.release(ctx, jobID)
 	}
 	// A host with a session open on more than one gateway is not served this
-	// pass: the registry of this gateway sees only its own session and cannot
+	// pass: this gateway's registry cannot tell which session is the right one.
 	ambiguous, err := s.ambiguousHosts(ctx, hostsOf(leased))
 	if err != nil {
 		// A failed check holds the whole batch: without the answer the scheduler
-		// does not know whose session is the right one, and a task sent over the
+		// does not know whose session is the right one to send the task over.
 		s.log.Error("the open sessions of the hosts were not read; the batch is held", "err", err)
 		for _, item := range leased {
 			s.holdAmbiguous(ctx, item)
@@ -265,11 +265,11 @@ func (s *Scheduler) dispatchOnce(ctx context.Context) {
 }
 
 // ErrorSessionUnowned is the reason a task is held back from a host whose
-// ownership row names no live owner: no session claimed the host, or the
+// ownership row names no live owner: none claimed it, or the claim ran out.
 const ErrorSessionUnowned = "session_unowned"
 
 // deliverable says whether the task may go out over the session this gateway
-// holds for the host, by the host's ownership row: the row has to name a live
+// holds: the ownership row has to be live and name that session and token.
 func deliverable(owner jobs.Owner, session *gateway.Session, now time.Time) (string, bool) {
 	if !owner.Live(now) {
 		return ErrorSessionUnowned, false
@@ -343,8 +343,8 @@ func (s *Scheduler) holdAmbiguous(ctx context.Context, item jobs.LeasedJob) {
 }
 
 func (s *Scheduler) deliver(ctx context.Context, item jobs.LeasedJob, owner jobs.Owner) {
-	// The session and the ownership are settled before the envelope is built: the
-	// envelope issues secret leases and one-time credentials, and a host that
+	// The session and the ownership are settled before the envelope is built:
+	// the envelope issues secret leases and one-time credentials.
 	session, connected := s.registry.Get(item.Job.HostID)
 	if !connected {
 		s.log.Info("the task was not delivered, going back to the queue",
@@ -376,7 +376,7 @@ func (s *Scheduler) deliver(ctx context.Context, item jobs.LeasedJob, owner jobs
 		}
 		if errors.Is(err, errCapabilityUnsupported) {
 			// Under enforce a host whose agent forwards no capability gets no mutating
-			// task: the helper would refuse it anyway, and the job says on the panel
+			// task: the helper would refuse it anyway, so it is settled here.
 			if err := s.store.FailUndelivered(ctx, item.Job.ID, item.AttemptID,
 				ErrorHelperCapabilityUnsupported, err.Error()); err != nil {
 				s.log.Error("the held task was not settled", "job_id", item.Job.ID, "err", err)
@@ -393,8 +393,8 @@ func (s *Scheduler) deliver(ctx context.Context, item jobs.LeasedJob, owner jobs
 			return
 		}
 		if permanentFailure(err) {
-			// The same answer would come on every pass until the deadline; a task that
-			// cannot be assembled is settled now, with the reason, instead of waiting
+			// The same answer would come on every pass until the deadline, so a task
+			// that cannot be assembled is settled now with the reason.
 			if err := s.store.FailUndelivered(ctx, item.Job.ID, item.AttemptID,
 				"envelope_rejected", err.Error()); err != nil {
 				s.log.Error("the rejected task was not settled", "job_id", item.Job.ID, "err", err)
@@ -406,7 +406,7 @@ func (s *Scheduler) deliver(ctx context.Context, item jobs.LeasedJob, owner jobs
 	}
 
 	// The envelope goes over the very session the ownership was checked for: a
-	// session that replaced it in the registry in the meantime has a token of its
+	// session that replaced it in the meantime has a fence token of its own.
 	sessionID := session.ID
 	if err := session.Send(&agentv1.ServerMessage{Payload: &agentv1.ServerMessage_Task{Task: envelope}},
 		s.options.SendTimeout); err != nil {
@@ -441,7 +441,7 @@ func (s *Scheduler) deliver(ctx context.Context, item jobs.LeasedJob, owner jobs
 	}
 	if errors.Is(err, jobs.ErrStaleFence) {
 		// The row is still open, but the host's ownership moved: another instance
-		// claimed the host between the check and the record, and the database
+		// claimed the host between the check and the record; the task is requeued.
 		s.log.Info("the delivery was refused: the session no longer owns the host, going back to the queue",
 			"job_id", item.Job.ID, "host_id", item.Job.HostID, "session_id", sessionID)
 		if releaseErr := s.store.ReleaseLease(ctx, item.Job.ID, item.AttemptID,
@@ -513,7 +513,7 @@ func (s *Scheduler) buildEnvelopeFor(ctx context.Context, item jobs.LeasedJob) (
 	}
 
 	// The secrets named in the task get their leases exactly at delivery time:
-	// the short window starts when the host starts working rather than when the
+	// the short window starts at the work, not when the task was queued.
 	if err := s.issueLeases(ctx, item); err != nil {
 		return nil, err
 	}
@@ -594,7 +594,7 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 	}
 
 	// The resource scope comes from the registry by family: the host wraps the
-	// tools of a package transaction or a backup in a transient scope with these
+	// tools of a package transaction or a backup in a transient scope.
 	scope := opspec.ActionType(item.Job.ActionType).ResourceLimits()
 	envelope := &agentv1.TaskEnvelope{
 		TaskId:         item.AttemptID,
@@ -692,7 +692,7 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 
 	case opspec.ActionIdentityKeytabRenew:
 		// The envelope carries the principal alone: the host fetches the new key
-		// itself with the credentials it holds, and no key material passes through
+		// itself with the credentials it holds, so none travels in the task.
 		envelope.Action = &agentv1.TaskEnvelope_KeytabRenew{
 			KeytabRenew: &agentv1.KeytabRenew{Principal: payload.Keytab.Principal},
 		}
@@ -844,7 +844,7 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			file.Validator = payload.File.Validator
 			file.AllowMissingValidator = payload.File.AllowMissingValidator
 			// A return to a version the panel does not hold travels as the digest of
-			// that version: the content lies on the host, which is the only place it
+			// that version: the content lies on the host, the only place that has it.
 			file.VersionSha256 = payload.File.VersionSHA256
 		}
 		envelope.Action = &agentv1.TaskEnvelope_File{File: file}
@@ -893,7 +893,7 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			certificate.KeyPath = payload.Certificate.KeyPath
 			certificate.Certificate = payload.Certificate.Certificate
 			// The envelope carries a reference to the key rather than the key itself:
-			// the host fetches the value in a separate call once it starts the
+			// the host fetches the value in a separate call once it starts the task.
 			if !payload.Certificate.KeySecret.Empty() {
 				certificate.KeySecret = &agentv1.SecretRef{
 					Name:    payload.Certificate.KeySecret.Name,
@@ -1106,7 +1106,7 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			operation = agentv1.StorageAction_OPERATION_SMART_READ
 		case opspec.ActionStoragePlan:
 			// A plan without a target is a read of the topology (the host tab); a plan
-			// with a target computes the difference for one mount - the planning phase
+			// with a target computes the difference for one mount.
 			operation = agentv1.StorageAction_OPERATION_READ
 			if payload.Storage != nil && strings.TrimSpace(payload.Storage.Target) != "" {
 				operation = agentv1.StorageAction_OPERATION_MOUNT_PLAN
@@ -1181,7 +1181,7 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		switch action {
 		case opspec.ActionFirewallPlan:
 			// A plan without a rule is a read of the ruleset (the host tab); a plan
-			// with a rule computes the difference for it - the planning phase of a
+			// with a rule computes the difference for it - the planning phase.
 			operation = agentv1.FirewallAction_OPERATION_READ
 			if payload.Firewall != nil && (strings.TrimSpace(payload.Firewall.RuleID) != "" ||
 				strings.TrimSpace(payload.Firewall.Zone) != "") {
@@ -1272,8 +1272,8 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			network.RollbackSeconds = payload.Network.RollbackSeconds
 			network.RollbackId = payload.Network.RollbackID
 			network.PlanHash = payload.Network.PlanHash
-			// The second family and the layering travel in the envelope as well: a
-			// field the envelope does not carry is a field the host would hash
+			// The second address family and the link layering travel in the envelope as
+			// well: a field left out here would make the host's plan hash differ.
 			network.Method6 = payload.Network.Method6
 			network.Addresses6 = payload.Network.Addresses6
 			network.Gateway6 = payload.Network.Gateway6
@@ -1610,8 +1610,8 @@ func dockerEnsureEnvelope(action opspec.ActionType,
 	return declaration, nil
 }
 
-// planReferenceToProto carries the approved plan envelope reference of an
-// order to the agent: the header the host rebuilds the envelope with and the
+// planReferenceToProto carries the approved plan reference of an order to the
+// agent: the header the host rebuilds the envelope with and the changes.
 func planReferenceToProto(reference *opspec.PlanReference) *agentv1.PackagePlanReference {
 	if reference == nil {
 		return nil

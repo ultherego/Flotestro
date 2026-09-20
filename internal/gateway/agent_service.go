@@ -1129,9 +1129,8 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 	// than at the ordering: the panel must not claim it manages a file the host
 	// rejected.
 	if result.GetStatus() == agentv1.TaskResult_STATUS_SUCCEEDED {
-		// The content the host reported goes into the store of versions first:
-		// without it there is no getting back to the state from before the panel
-		// managed the file, and the desired state written below names a version
+		// The content the host reported goes into the store of versions first: it is
+		// the way back to the state from before the panel managed the file.
 		var restored []byte
 		if file := result.GetFileResult(); file != nil && len(file.GetContent()) > 0 &&
 			!file.GetTruncated() {

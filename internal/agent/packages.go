@@ -27,8 +27,7 @@ func (e *TaskExecutor) planPackages(ctx context.Context, task *agentv1.TaskEnvel
 
 	refreshed := false
 	// On Arch without pacman-contrib the plan reads a copy of the sync database
-	// that only the helper can refresh; a copy that is missing or old is
-	// refreshed first, whether or not the order asked for it, because a plan
+	// only the helper can refresh, so a missing or old copy is refreshed first.
 	if payload.RefreshMetadata || packages.NeedsSyncCopy(manager) {
 		response, err := e.helper.Call(planCtx, &helperv1.HelperRequest{
 			TaskId:         task.GetTaskId(),

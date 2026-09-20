@@ -139,9 +139,8 @@ func (s *Server) editLocalUserKeys(ctx context.Context, request *helperv1.Helper
 	return &helperv1.HelperResponse{Accepted: true}
 }
 
-// readKeyFiles returns the content of the file the order edits and the number
-// of keys in the other one - the managed file when the user's is edited and
-// the other way round - so the lockout guard counts every way in the account
+// readKeyFiles returns the file the order edits and the number of keys in the
+// other one, so the lockout guard counts every way into the account.
 func (s *Server) readKeyFiles(name string, account accountRecord, managed bool) ([]byte, int, *helperv1.HelperResponse) {
 	userFile, err := readAuthorizedKeysFile(account.Home)
 	if err != nil {
@@ -248,8 +247,7 @@ func readManagedKeysFile(name string) ([]byte, error) {
 }
 
 // writeManagedKeysFile replaces the account's managed file atomically: a
-// temporary file created exclusively next to it and renamed over it,
-// root-owned and world-readable as sshd requires of a file outside the user's
+// temporary file created exclusively next to it and renamed over it.
 func writeManagedKeysFile(name, content string) error {
 	root := filepath.Clean(managedKeysRoot)
 	if err := os.MkdirAll(root, 0o755); err != nil {

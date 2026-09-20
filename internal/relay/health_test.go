@@ -78,8 +78,7 @@ func TestLivenessSurvivesAnOutageOfTheCentre(t *testing.T) {
 }
 
 // TestReadinessIsTrueOnlyWhenTheRelayCanCarryWork guards the positive answer:
-// the link is up, the spool is inside its bound and the certificate is valid,
-// so the relay takes work and the document's condition for a restart without a
+// the link is up, the spool is inside its bound and the certificate is valid.
 func TestReadinessIsTrueOnlyWhenTheRelayCanCarryWork(t *testing.T) {
 	relay := newTestRelay(t, spool.Options{})
 	relay.upstream.Store(true)

@@ -7,9 +7,8 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/sudoers"
 )
 
-// The sudo check judges what the helper parsed: the distribution's default
-// grant to the sudo group passes because it asks for a password, a
-// passwordless drop-in fails with the file named, and a policy the helper
+// The sudo check judges what the helper parsed: the default grant passes
+// because it asks for a password, and a policy nobody could read is unknown.
 func TestRootWithoutPasswordIsJudgedFromTheParsedPolicy(t *testing.T) {
 	group := sudoers.Rule{
 		Users: []string{"%sudo"}, Hosts: []string{"ALL"}, RunAs: []string{"ALL"}, Commands: []string{"ALL"},

@@ -12,8 +12,7 @@ import (
 const mib = 1 << 20
 
 // The judgement is per file system, with the headroom, and never on a fact
-// whose need was not measured: a full /boot refuses a kernel while "/" has
-// room, two paths on one file system share its free bytes, and a host whose
+// whose need was not measured: room on "/" does not save a full /boot.
 func TestSpaceShortfallJudgesPerFilesystem(t *testing.T) {
 	cases := []struct {
 		name    string

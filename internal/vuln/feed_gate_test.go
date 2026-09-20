@@ -64,9 +64,8 @@ func TestTheGateRefusesAFetchThatLostMostOfWhatIsInForce(t *testing.T) {
 	}
 }
 
-// A provider with nothing in force has no previous answer to protect: the
-// first fetch of a feed is a fact the panel starts from, however small, and it
-// is the coverage next to the assessment that says how much such a feed
+// A provider with nothing in force has no previous answer to protect, so the
+// first fetch of a feed is let through however small it is.
 func TestTheGateLetsTheFirstFetchOfAProviderThrough(t *testing.T) {
 	var nothing Snapshot
 	if got := feedRefusal(nothing, 0, nil, 0); got != "" {

@@ -504,7 +504,7 @@ func TestInstallationProgressDescribesTheSteps(t *testing.T) {
 
 // TestAgentReplacementEndsWithTheHostComingBack guards the property this
 // operation exists separately for in the first place: success is a host that
-// came back with the expected version, not the exit status of the package
+// came back with the expected version, not a package manager that exited 0.
 func TestAgentReplacementEndsWithTheHostComingBack(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -601,7 +601,7 @@ func (h *harness) newestAgentVersion() string {
 
 // TestRevokedHostIsNotReleasedWithoutRecovery guards that lifting a quarantine
 // imposed with a revocation does not pretend to bring the host back: without a
-// live certificate the host cannot connect, and its return is identity
+// live certificate the host cannot connect: the way back is identity recovery.
 func TestRevokedHostIsNotReleasedWithoutRecovery(t *testing.T) {
 	h := newHarness(t)
 	host := h.enrollSyntheticHost(t)
@@ -680,8 +680,7 @@ func TestEnrollmentOrderIsIdempotent(t *testing.T) {
 }
 
 // TestInstallationProfileNamesTheTrust guards that the profile gives a host
-// everything it needs before it holds a token: the addresses to connect to, in
-// a configuration the agent reads as it is, and the CA with a fingerprint the
+// everything it needs before it holds a token: the addresses and the CA.
 func TestInstallationProfileNamesTheTrust(t *testing.T) {
 	h := newHarness(t)
 	var profile profileView

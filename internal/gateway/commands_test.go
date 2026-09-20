@@ -33,8 +33,7 @@ func TestACommandIsCarriedOutOnTheSessionItNames(t *testing.T) {
 }
 
 // TestACommandWhoseSessionIsGoneIsNotCarriedOut guards the property the whole
-// table exists for: the ownership row may still name a session the registry no
-// longer holds - the stream ended a moment ago, the release has not been
+// table exists for: the ownership row may name a session already gone.
 func TestACommandWhoseSessionIsGoneIsNotCarriedOut(t *testing.T) {
 	session := heldSession("6f1b7b3e-0000-4000-8000-000000000010", "host-1", 7)
 	command := addressedCommand(session)

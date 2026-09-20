@@ -71,7 +71,7 @@ func orderAndRun(t *testing.T, h, approver *harness, action string, payload map[
 
 // TestDirectoryUserLifecycleExpiresResetsAndPreservesAnAccount walks a test
 // account through the lifecycle the document names: creation, an expiration
-// set and cleared, a password reset whose one-time value the requester reads
+// set and cleared, a password reset read once, and the account preserved.
 func TestDirectoryUserLifecycleExpiresResetsAndPreservesAnAccount(t *testing.T) {
 	h := newHarness(t)
 	if !directoryAvailable(t, h) {
@@ -425,8 +425,7 @@ func preserveRefusedByTheDirectory(t *testing.T, h *harness, changeID string) bo
 }
 
 // TestServiceKeytabRotationIsASeparateRightAndRunsOnTheHost guards the
-// rotation the architecture document names as "keytab rotation per separate
-// permission": an operator of the fleet is refused with the permission named,
+// rotation: an operator of the fleet is refused with the missing right named.
 func TestServiceKeytabRotationIsASeparateRightAndRunsOnTheHost(t *testing.T) {
 	h := newHarness(t)
 	if !directoryAvailable(t, h) {

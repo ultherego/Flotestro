@@ -61,9 +61,8 @@ func enrollClone(t *testing.T, h *harness, token, machine string) cloneIdentity 
 	}
 }
 
-// TestTwoClonesOfOneImageGetDistinctIdentities is the CI test the lifecycle
-// document asks for next to the golden image procedure: two machines started
-// from one image must end up as two hosts with two keys and two certificates,
+// TestTwoClonesOfOneImageGetDistinctIdentities is the CI test the golden image
+// procedure asks for: two machines from one image get two distinct identities.
 func TestTwoClonesOfOneImageGetDistinctIdentities(t *testing.T) {
 	h := newHarness(t)
 

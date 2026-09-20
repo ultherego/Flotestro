@@ -31,9 +31,8 @@ func parse(t *testing.T, text string) *Expression {
 	return &e
 }
 
-// TestCompileRendersEveryLeaf pins the SQL of every kind of leaf and the
-// numbering of the parameters: the condition joins a query that already has
-// parameters of its own, and a placeholder off by one would filter on the
+// TestCompileRendersEveryLeaf pins the SQL of every leaf and the numbering of
+// the parameters: a placeholder off by one filters on the wrong value.
 func TestCompileRendersEveryLeaf(t *testing.T) {
 	cases := []struct {
 		name string

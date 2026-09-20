@@ -218,9 +218,8 @@ func (r *recordingRefusals) RecordConnectionRefusal(_ context.Context, hostID, c
 	return true, nil
 }
 
-// TestVerifierRefusesTheHandshakeAndRecordsTheHost: the handshake hook ends
-// the handshake for an expired certificate of the fleet and writes the refusal
-// on the host; a stranger is refused without a host to write on; a retry
+// TestVerifierRefusesTheHandshakeAndRecordsTheHost: an expired certificate
+// ends the handshake and is written on the host, a stranger's is not.
 func TestVerifierRefusesTheHandshakeAndRecordsTheHost(t *testing.T) {
 	now := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
 	fleet := newTestAuthority(t, "Flotestro Fleet CA", now)

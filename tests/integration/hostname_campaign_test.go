@@ -12,7 +12,8 @@ import (
 
 // TestHostnameCampaignSplitsTheMappingPerHost checks a rename in bulk as the
 // system chapter describes it: the order carries a map of host to new name,
-// the panel splits it into one plan per host, and a host the map does not name
+// the panel splits it into one plan per host, and a host the map does not
+// name settles as ineligible.
 func TestHostnameCampaignSplitsTheMappingPerHost(t *testing.T) {
 	h := newHarness(t)
 	online := h.onlineDebianHosts()

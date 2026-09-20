@@ -49,8 +49,7 @@ func TestTheProtectedOnesInASetNameTheCulprit(t *testing.T) {
 }
 
 // TestTheEnvironmentSuspendsNeedrestart guards the boundary that cost a job in
-// the laboratory: needrestart restarted the helper in the middle of the
-// transaction the helper was running, and the result ended with "the answer of
+// the laboratory: needrestart restarted the helper in mid-transaction.
 func TestTheEnvironmentSuspendsNeedrestart(t *testing.T) {
 	testEnvironment := environment()
 	wanted := map[string]bool{

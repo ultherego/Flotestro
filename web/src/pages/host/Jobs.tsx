@@ -93,9 +93,8 @@ export function HostJobs() {
     refetchInterval: OPERATIONS_INTERVAL,
   });
 
-  // The cancel button follows the contract of the operation and the
-  // operator's permission: a button that leads only to a refusal is an
-  // interface defect, and one drawn on a running package transaction would
+  // The cancel button is drawn from the contract of the operation and the
+  // operator's permission: a button that leads only to a refusal is a defect.
   const catalogue = useOperations();
   const whoami = useQuery({
     queryKey: ["whoami"],

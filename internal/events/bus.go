@@ -233,9 +233,8 @@ func (b *Bus) PublishLog(ctx context.Context, event Event) error {
 	return err
 }
 
-// Notifier is what a notification is sent through: the pool, or the
-// transaction the change is made in - a notification sent inside a transaction
-// leaves with its commit and not at all on a rollback, so a screen never hears
+// Notifier is what a notification is sent through: the pool, or the transaction
+// the change is made in, so a screen never hears of a change that rolled back.
 type Notifier interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 }

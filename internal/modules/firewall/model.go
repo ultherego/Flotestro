@@ -111,13 +111,13 @@ type Snapshot struct {
 	Rules  []Rule  `json:"rules,omitempty"`
 	Zones  []Zone  `json:"zones,omitempty"`
 	// UFW is the header of "ufw status" on a host where ufw holds the rules: the
-	// default policy is what a packet meets when no rule matches, and no rule
+	// default policy is what a packet meets when no rule matches.
 	UFW *UFWStatus `json:"ufw,omitempty"`
 	// Drift lists the differences between what the host filters with and what it
 	// keeps for its next start.
 	Drift []Drift `json:"drift,omitempty"`
 	// Persistent is what the host restores its nftables ruleset from at the next
-	// boot. No value means the question was not asked here: ufw keeps its own
+	// boot. No value means the question was not asked: ufw keeps its own.
 	Persistent *NftPersistence `json:"persistent,omitempty"`
 	// Writable says whether the panel can change anything here and why not.
 	Writable       bool      `json:"writable"`

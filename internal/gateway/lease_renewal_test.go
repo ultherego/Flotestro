@@ -8,8 +8,7 @@ import (
 )
 
 // TestASignOfLifeRenewsTheLeaseOncePerInterval guards the pacing of the
-// renewal: a package transaction reports several times a second, and the lease
-// is minutes long, so the first report writes and the ones within the interval
+// renewal: the first report writes, the ones within the interval do not.
 func TestASignOfLifeRenewsTheLeaseOncePerInterval(t *testing.T) {
 	service := &AgentService{attempts: map[string]attemptContextEntry{
 		"attempt-1": {jobID: "job-1", hostID: "host-1"},
@@ -50,9 +49,8 @@ func TestTheRenewalOutpacesTheReclaim(t *testing.T) {
 	}
 }
 
-// TestTheDispatchLeaseSitsBetweenTheReclaimAndTheExecutionLease guards the two
-// ends of the short lease an envelope gets at the hand-over: it has to outlast
-// a housekeeping pass, or a healthy acknowledgement races the reclaim; and it
+// TestTheDispatchLeaseSitsBetweenTheReclaimAndTheExecutionLease: the hand-over
+// lease outlasts a housekeeping pass and stays under the execution lease.
 func TestTheDispatchLeaseSitsBetweenTheReclaimAndTheExecutionLease(t *testing.T) {
 	const housekeeping = 30 * time.Second
 	if jobs.DispatchLease <= housekeeping {

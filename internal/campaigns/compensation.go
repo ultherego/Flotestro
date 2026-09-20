@@ -101,8 +101,7 @@ func CheckCompensation(original Campaign, action opspec.ActionType, changed []Ta
 }
 
 // ChangedTargets returns the targets of a campaign whose change landed on the
-// host: the ones that succeeded, and the ones that failed only after the
-// change - in the reboot or the verification - which the execute step records
+// host: the ones that succeeded, and the ones that failed only after it.
 func (s *Store) ChangedTargets(ctx context.Context, campaignID string) ([]Target, error) {
 	const query = `
 		select t.id, t.campaign_id, t.host_id, coalesce(h.hostname, ''), t.wave, t.position,

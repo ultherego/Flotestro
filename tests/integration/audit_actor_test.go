@@ -31,8 +31,7 @@ type actorPage struct {
 }
 
 // TestAuditKeepsTheActorsNameAsItWas checks that an event carries the actor as
-// it was when the event was written - the immutable identifier, the subject,
-// the display name and the kind - and that a later rename or removal of the
+// it was written: the identifier, the subject, the display name and the kind.
 func TestAuditKeepsTheActorsNameAsItWas(t *testing.T) {
 	h := newHarness(t)
 	subject := uniqueSubject("renamed-auditor")

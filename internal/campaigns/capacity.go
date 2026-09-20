@@ -20,9 +20,8 @@ func (o *Orchestrator) takeCapacity(ctx context.Context, campaign Campaign,
 	// A backup repository is a shared resource: a site budget knows nothing
 	// about the backend half the fleet writes to at once.
 	repository := campaignRepository(campaign)
-	// The host's place in the fleet names the budgets of the change beyond the
-	// fleet's own: the site and the failure domain are what the panel recorded
-	// about the host, and the gateway is the one its session is open on now -
+	// The host's place in the fleet names the budgets beyond the fleet's own:
+	// site and failure domain come from the panel, the gateway from the session.
 	gateway, err := o.budgets.SessionGateway(ctx, host.ID)
 	if err != nil {
 		return false, err

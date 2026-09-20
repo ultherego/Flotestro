@@ -65,9 +65,8 @@ func awaitRow(ctx context.Context, t *testing.T, pool *pgxpool.Pool, jobID strin
 	}
 }
 
-// TestADeliveredTaskIsAcknowledgedAndRunsWithinSeconds: a preview of the
-// journal is accepted and started by the agent within seconds of the
-// hand-over, so the job shows running - not dispatched - while the host works,
+// TestADeliveredTaskIsAcknowledgedAndRunsWithinSeconds: the agent accepts and
+// starts a journal preview within seconds, so the job shows running.
 func TestADeliveredTaskIsAcknowledgedAndRunsWithinSeconds(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

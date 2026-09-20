@@ -130,9 +130,8 @@ func TestCampaignVerifiesUnitsWithoutAReboot(t *testing.T) {
 	}
 }
 
-// TestACanaryHealthFailureStopsTheNextWave guards the mandatory scenario
-// "canary health check negative, wave two stopped": a canary whose change
-// succeeded but whose units are not up afterwards fails with
+// TestACanaryHealthFailureStopsTheNextWave guards the scenario "canary health
+// check negative, wave two stopped": the campaign pauses before the next wave.
 func TestACanaryHealthFailureStopsTheNextWave(t *testing.T) {
 	h := newHarness(t)
 	online := h.onlineDebianHosts()

@@ -626,9 +626,8 @@ func verifyMountState(ctx context.Context, readers *hostReaders, in verifyInput)
 	return verified(expected, observed)
 }
 
-// verifyStorageLayout reads the device after the change: a volume or a
-// filesystem that grew, a device that carries the filesystem ordered, a device
-// that carries no signature after a wipe, an array that knows its member
+// verifyStorageLayout reads the device after the change: the host's own
+// picture of the volume, the filesystem or the array settles the order.
 func verifyStorageLayout(ctx context.Context, readers *hostReaders, in verifyInput) observation {
 	payload := in.payload.Storage
 	if payload == nil {

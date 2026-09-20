@@ -168,8 +168,7 @@ func TestAHostInNoDomainPassesTheRealmCheck(t *testing.T) {
 }
 
 // TestTheJoinStopsAtAFailedPreflight is the point of the preflight: a blocking
-// failure ends the order before ipa-client-install starts, with the typed
-// code, the list of failed conditions and every check attached, so the
+// failure ends the order before ipa-client-install starts, with a typed code.
 func TestTheJoinStopsAtAFailedPreflight(t *testing.T) {
 	const password = "one-time-secret-4711"
 	action := &helperv1.DomainEnrollRequest{
@@ -229,8 +228,7 @@ func TestAPreflightOnlyOrderReportsWithoutJoining(t *testing.T) {
 }
 
 // TestAJoinWithoutThePasswordIsRefusedAfterThePreflight guards the order of
-// the refusals: the conditions of the host come before the credential, so an
-// operator who fixes the missing password on a host that cannot join anyway is
+// the refusals: the conditions of the host come before the credential.
 func TestAJoinWithoutThePasswordIsRefusedAfterThePreflight(t *testing.T) {
 	action := &helperv1.DomainEnrollRequest{
 		Domain: "flotestro.test", Realm: "FLOTESTRO.TEST", Hostname: "web1",
@@ -353,8 +351,7 @@ func resolvableHostname(t *testing.T) string {
 }
 
 // TestTheJoinArgumentsCarryThePassword pins the measured residual: the
-// unattended tool takes the one-time password nowhere but in argv (it refuses
-// -W without a terminal), so the argv carries it, and every message of the
+// unattended tool takes the one-time password nowhere but in argv.
 func TestTheJoinArgumentsCarryThePassword(t *testing.T) {
 	args := enrollArguments(&helperv1.DomainEnrollRequest{
 		Domain: "flotestro.test", Realm: "FLOTESTRO.TEST", Server: "ipa.flotestro.test",

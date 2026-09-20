@@ -12,7 +12,7 @@ import (
 
 // TestABootFilterNeedsTheCapability checks that a journal read narrowed to one
 // boot is refused before dispatch, with its own code, on a host whose agent
-// does not announce the boot filter - an older agent would ignore the field
+// does not announce the boot filter.
 func TestABootFilterNeedsTheCapability(t *testing.T) {
 	h := newHarness(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

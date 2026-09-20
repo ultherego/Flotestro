@@ -32,9 +32,8 @@ import (
 	"github.com/ultherego/flotestro/internal/relayproof"
 )
 
-// Chapter 4 of the security document, the inner identity envelope: a relay
-// proves itself in its handshake, the host proves itself with a signature over
-// every message, and the gateway checks the second against the certificate on
+// Chapter 4 of the security document, the inner identity envelope: the relay
+// proves itself in the handshake, the host with a signature over every message.
 
 // relayClient is the agent service reached with the relay's identity: what
 // a relay speaks to the centre with.
@@ -305,8 +304,7 @@ func TestARelayedSessionCarriesTheHostsOwnSignature(t *testing.T) {
 }
 
 // TestARelayedRenewalIsBoundToTheOldKey plays the relay on a renewal: the
-// challenge is asked through the relay, the proof is signed with the key the
-// host holds, and the panel issues the certificate for the host of the
+// challenge goes through the relay, the proof is signed with the host's key.
 func TestARelayedRenewalIsBoundToTheOldKey(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -397,7 +395,7 @@ func TestARelayedRenewalIsBoundToTheOldKey(t *testing.T) {
 
 // TestASecretFetchedThroughARelayIsSealed drives a whole path: a relayed
 // session of a synthetic host receives a task that names a secret, and the
-// fetch through the relay answers sealed to the host's one-time key - no value
+// fetch answers sealed to the host's one-time key, never in the clear.
 func TestASecretFetchedThroughARelayIsSealed(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

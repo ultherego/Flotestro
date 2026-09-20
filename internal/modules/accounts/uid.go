@@ -1,6 +1,5 @@
 // Package accounts holds what the inventory, the control plane and the root
-// helper have to agree on about local accounts: which identifiers belong to
-// people and which to the system, which groups are root by another name, and
+// helper agree on about local accounts: UID ranges, root groups and keys.
 package accounts
 
 import (

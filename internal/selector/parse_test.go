@@ -76,9 +76,8 @@ func TestParseReadsTheTextForm(t *testing.T) {
 	}
 }
 
-// TestParseRefusesWhatDoesNotParse: a text that does not hold together is
-// refused as a syntax error naming the place, and one that parses into a
-// selector no host can match is refused as an invalid selector - both are
+// TestParseRefusesWhatDoesNotParse: a text that does not hold together is a
+// syntax error, and a selector no host can match is an invalid selector.
 func TestParseRefusesWhatDoesNotParse(t *testing.T) {
 	syntax := map[string]string{
 		"empty":                   ``,

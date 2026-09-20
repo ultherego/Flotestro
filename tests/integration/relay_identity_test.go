@@ -100,8 +100,7 @@ func (h *harness) relayIdentityOf(hostID string) string {
 }
 
 // TestARelayedSessionIsCheckedAgainstTheCertificateRecord plays the relay with
-// an identity enrolled for the test: the gateway lets a host through on a live
-// certificate the relay names, refuses another host's certificate under the
+// an identity enrolled for the test: the gateway checks what the relay names.
 func TestARelayedSessionIsCheckedAgainstTheCertificateRecord(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -152,7 +151,7 @@ func TestARelayedSessionIsCheckedAgainstTheCertificateRecord(t *testing.T) {
 
 	// The certificate is revoked through the panel - a recovery ordered for a
 	// suspected copy cuts the old key off at once - and the relay can no longer
-	// carry the host: the refusal is the one a direct connection gets, and stands
+	// carry the host: relayed or direct, the refusal is revoked_certificate.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/identity-recovery", map[string]any{
 		"reason": "key replaced after a suspected copy", "revoke_old_immediately": true, "ttl_seconds": 300,
 	}, nil, http.StatusCreated)
@@ -171,8 +170,7 @@ func TestARelayedSessionIsCheckedAgainstTheCertificateRecord(t *testing.T) {
 }
 
 // TestARevokedHostDoesNotConnectThroughTheLabRelay walks the whole path: a
-// host of the lab connects through the relay on the Ubuntu machine, is revoked
-// through the panel, and the relay - which knows nothing of the revocation and
+// host connects through the lab relay, is revoked, and is let in no more.
 func TestARevokedHostDoesNotConnectThroughTheLabRelay(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

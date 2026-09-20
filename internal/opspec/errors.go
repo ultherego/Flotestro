@@ -26,7 +26,7 @@ const (
 type ErrorGuide struct {
 	Code string `json:"code"`
 	// Stage is where the code arises: materialize, preflight, planning,
-	// admission, dispatch, agent, helper, verify, reconcile, approval, cancel,
+	// admission, dispatch, agent, helper, verify, reconcile and the rest.
 	Stage string      `json:"stage"`
 	Retry RetryPolicy `json:"retry"`
 	// What happened, in one sentence.
@@ -37,7 +37,7 @@ type ErrorGuide struct {
 	// campaign. An excluded or skipped host is visible but not a failure.
 	CountsAsFailure bool `json:"counts_as_failure"`
 	// Alias is the code the panel really puts on a job or a target when this
-	// entry is one of the names the campaigns document uses for the same
+	// entry is another of the campaigns document's names for the same thing.
 	Alias string `json:"alias,omitempty"`
 }
 
@@ -327,7 +327,7 @@ var reportedGuides = []ErrorGuide{
 		Meaning: "The reboot was ordered and accepted by the host, and no session with a new boot identifier followed within the wait: the host is down, is up without the agent, or came back so late that the wait ran out first.",
 		Action:  "Check the host out of band. A host that comes back later reconnects on its own; the job stays failed, because nobody saw the return in time.", CountsAsFailure: true},
 	// The gate in front of a vulnerability feed: a fetch that lost most of what
-	// the snapshot in force holds is a source in trouble far more often than a
+	// the snapshot holds is a broken source far more often than a real change.
 	{Code: "feed_shrank", Stage: "startup", Retry: RetryAfterChange,
 		Meaning: "A fetch of a vulnerability feed carried far fewer findings than the snapshot in force, so it was not activated.",
 		Action:  "Compare the two counts on the Vulnerabilities screen; accept the fetch there if the vendor really retired the findings, otherwise fix the source. The previous snapshot stays in force and ages into stale."},
@@ -838,7 +838,7 @@ var reportedGuides = []ErrorGuide{
 		Action:  "Wait for the rollback, read the state of the host, and order the change again only with a rule that leaves the management channel working - or, deliberately, with break-glass consent.", CountsAsFailure: true},
 
 	// What a firewall adapter says about its own persistent state (security
-	// remediation, chapter 14.4). None of these is a failure of a change: they
+	// remediation, chapter 14.4): none of these is a failure, but a finding.
 	{Code: "nft_rule_not_persisted", Stage: "inventory", Retry: RetryAfterChange,
 		Meaning: "The kernel filters with this rule and the file the host loads at boot does not carry it. The rule is in force today and gone after the next reboot, which is exactly how a firewall reads as compliant and stops being one.",
 		Action:  "Write the rule into the file the host restores from - the panel names it next to the adapter - or accept it as temporary and say so. The panel's own table is not in that file: it is rebuilt from the helper's registry by flotestro-firewall-restore.service, and the codes below say whether that unit does its work here."},

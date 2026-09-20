@@ -177,7 +177,8 @@ type tagCatalogueView struct {
 
 // TestTagCatalogueListsAndRenames guards that a tag set on a host appears in
 // the catalogue with its host count, that a rename moves it on every host
-// carrying it in one step and says how many moved, that the old name leaves
+// carrying it in one step and says how many moved, and that the old name is
+// then gone from the catalogue.
 func TestTagCatalogueListsAndRenames(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -261,9 +262,8 @@ func hasTag(tags []string, tag string) bool {
 	return false
 }
 
-// TestBudgetDeleteRefusedWhileHeld guards that a configured budget cannot be
-// taken away while somebody holds its tokens - the ceiling is not pulled from
-// under running work - and goes away, with a trail entry, once the tokens are
+// TestBudgetDeleteRefusedWhileHeld guards that a budget cannot be taken away
+// while somebody holds its tokens: no ceiling is pulled from under live work.
 func TestBudgetDeleteRefusedWhileHeld(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

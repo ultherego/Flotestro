@@ -14,8 +14,8 @@ import (
 // hour-long transaction.
 var DurationBuckets = []float64{0.1, 0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600, 1800, 3600}
 
-// AckBuckets covers an acknowledgement: a round trip on a healthy stream is
-// well under a second, and the dispatch lease is a minute, so the buckets are
+// AckBuckets covers an acknowledgement: a healthy round trip is well under a
+// second, and the dispatch lease is a minute, so the buckets stop at sixty.
 var AckBuckets = []float64{0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60}
 
 // Registry keeps the instruments of one process.
@@ -108,8 +108,8 @@ func (h *Histogram) Observe(value float64, values ...string) {
 	s.count++
 }
 
-// key joins the label values; the separator cannot occur in a label value
-// because escape takes care of it at render time, not here, so a value with
+// key joins the label values on a NUL, which no label value carries; quotes
+// and newlines are escaped at render time, not here.
 func key(values []string) string { return strings.Join(values, "\x00") }
 
 func splitKey(k string) []string {
@@ -234,7 +234,7 @@ var (
 		"Time a task waited on its host for a resource held by another task, by operation.",
 		DurationBuckets, "action")
 	// SampleAck measures the time from taking a resource sample off the stream
-	// to the word the panel sends back about it. At fleet cadence this is the
+	// to the word the panel sends back about it.
 	SampleAck = Default.NewHistogram("flotestro_metric_sample_ack_seconds",
 		"Time from taking a resource sample off the stream to acknowledging it, by status.",
 		AckBuckets, "status")
@@ -244,39 +244,39 @@ var (
 		"Time to apply a host heartbeat, by outcome.",
 		AckBuckets, "outcome")
 
-	// AgentReconnect counts the sessions opened by a host whose previous session
-	// ended within the last ten minutes: a link that flaps or an agent that
+	// AgentReconnect counts the sessions a host opened within ten minutes of its
+	// previous one ending: the shape of a flapping link or a restarting agent.
 	AgentReconnect = Default.NewCounter("flotestro_agent_reconnect_total",
 		"Agent sessions opened within ten minutes of the host's previous session ending, by host family.",
 		"host_family")
 	// RelaySessionIdentity counts the sessions opened through a relay by how the
-	// host was identified: end_to_end, when the host signed its envelope and the
+	// host was identified: end_to_end, attested or weak.
 	RelaySessionIdentity = Default.NewCounter("flotestro_relay_session_identity_total",
 		"Agent sessions opened through a relay, by the strength of the host's identity.",
 		"strength")
 	// RelayEnvelopeRefusal counts the relayed messages and calls whose identity
-	// envelope was refused, by the refusal code: relay_envelope_invalid,
+	// envelope was refused, by the refusal code the host record carries.
 	RelayEnvelopeRefusal = Default.NewCounter("flotestro_relay_envelope_refusal_total",
 		"Relayed messages whose identity envelope was refused, by code.",
 		"code")
 	// RelayEnvelopeRedelivery counts the relayed messages the panel had consumed
-	// already and the relay carried a second time because it never saw the
+	// already and the relay carried again, having never seen the acknowledgement.
 	RelayEnvelopeRedelivery = Default.NewCounter("flotestro_relay_envelope_redelivery_total",
 		"Relayed messages carried again after the panel had already consumed them.")
-	// AgentRenewal counts the certificate renewals by how they ended. The gateway
-	// increments it where the renewal is settled (renewal.
+	// AgentRenewal counts the certificate renewals by how they ended: renewed,
+	// refused or failed.
 	AgentRenewal = Default.NewCounter("flotestro_agent_renewal_total",
 		"Agent certificate renewals, by outcome.", "outcome")
-	// SessionFence counts what the session ownership fence refused or held, by
-	// outcome: delivery_held when the scheduler kept a task in the queue because
+	// SessionFence counts what the session ownership fence refused or held:
+	// delivery_held, dispatch_refused, result_refused and renewal_lost.
 	SessionFence = Default.NewCounter("flotestro_session_fence_total",
 		"Writes refused and tasks held by the session ownership fence, by outcome.", "outcome")
 	// NotificationDeliveries counts the settled attempts of the notification
 	// queue by the state they settled in: delivered, retry_wait, dead_letter.
 	NotificationDeliveries = Default.NewCounter("flotestro_notification_deliveries_total",
 		"Settled attempts of the notification queue, by the state they settled in.", "state")
-	// AlertFence counts the writes of the alert state the evaluator's fencing
-	// token refused, by the write refused: start, fire, refresh, restart,
+	// AlertFence counts the alert-state writes the evaluator's fencing token
+	// refused: start, fire, refresh, restart, resume, resolve, no_data, discard.
 	AlertFence = Default.NewCounter("flotestro_alert_fence_refused_total",
 		"Writes of the alert state refused because the instance no longer holds the evaluator lease, by the write refused.",
 		"write")

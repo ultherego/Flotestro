@@ -10,8 +10,7 @@ import (
 )
 
 // compensationView is the campaign as the link between an original and its
-// compensation shows on it: the compensating side names the original, the
-// original lists what was ordered to undo it and counts the hosts a
+// compensation shows it: each side names the other, plus the changed hosts.
 type compensationView struct {
 	ID                      string `json:"id"`
 	Name                    string `json:"name"`

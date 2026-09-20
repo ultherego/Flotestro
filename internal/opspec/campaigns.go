@@ -88,8 +88,7 @@ var campaignModes = map[ActionType]CampaignMode{
 	ActionNetworkRouteEnsure:     CampaignPerHostPlan,
 	ActionNetworkMTUSet:          CampaignPerHostPlan,
 	// A layered change is planned per host for the same reason an address change
-	// is, and for one more: the refusals are about relations on that particular
-	// host - which interface another bond already owns, which one the panel
+	// is, and because its refusals are about relations on that particular host.
 	ActionNetworkLinkApply:      CampaignPerHostPlan,
 	ActionNetworkLinkRemove:     CampaignPerHostPlan,
 	ActionDNSHostApply:          CampaignPerHostPlan,

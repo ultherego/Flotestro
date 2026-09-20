@@ -254,9 +254,8 @@ function BufferHistory({ relay }: { relay: Relay }) {
   if (limit > 0) {
     fillSeries.push({ name: t("Limit"), tone: "neutral", line: true, values: points.map((point) => point.bytes_limit) });
   }
-  // The outage is drawn as a band the height of the chart over the points
-  // that had no upstream, and a restart as a single mark: both are stretches
-  // of the same time axis, so they belong on the same picture rather than in
+  // An outage is a band the height of the chart over the points with no
+  // upstream, a restart a single mark: both are read off the same time axis.
   fillSeries.push({
     name: t("No upstream"), tone: "error",
     values: points.map((point) => (point.disconnected ? band : undefined)),

@@ -80,7 +80,7 @@ func (s *Store) EvaluateLeased(ctx context.Context, now time.Time) error {
 }
 
 // EvaluateUnder runs one pass under a lease this instance already holds: it
-// renews the lease as it goes, stamps every write with the lease's token and
+// renews the lease as it goes and stamps every write with the lease's token.
 func (s *Store) EvaluateUnder(ctx context.Context, now time.Time, lease Lease) error {
 	renewed := time.Now()
 	guard := func(ctx context.Context) error {
@@ -97,7 +97,7 @@ func (s *Store) EvaluateUnder(ctx context.Context, now time.Time, lease Lease) e
 }
 
 // evaluatorGuardEvery is how many hosts of one rule pass between two checks of
-// the lease. The renewal behind the check is spaced by time, so this is not a
+// the lease; the renewal behind the check is spaced by time, not by hosts.
 const evaluatorGuardEvery = 256
 
 // evaluate is the pass itself.
@@ -117,7 +117,7 @@ func (s *Store) evaluate(ctx context.Context, now time.Time, f fence, guard func
 	scopes := s.scopes(ctx, rules)
 	for _, rule := range rules {
 		// Asked between rules rather than only at the start: a pass over a fleet
-		// takes time, and an instance that lost the fleet halfway must not write the
+		// takes time, and an instance that lost its lease halfway must stop writing.
 		if guard != nil {
 			if err := guard(ctx); err != nil {
 				return err
@@ -218,7 +218,7 @@ func (sc *scope) covers(hostID string) bool {
 }
 
 // scopes resolves the selector of every enabled rule once per run, in the
-// database, through the same compiler the campaign preview uses: a rule on a
+// database, through the same compiler the campaign preview uses.
 func (s *Store) scopes(ctx context.Context, rules []Rule) map[string]*scope {
 	scopes := make(map[string]*scope, len(rules))
 	for _, rule := range rules {
@@ -283,7 +283,7 @@ const fencePredicate = `(fence_row.fencing_token is null or
 	 fence_row.fencing_token <= fence_lease.token)`
 
 // fencedWrite frames one statement that moves an alert row. The lease is read
-// in the same statement as the write, so a pass that lost it between two hosts
+// in the same statement as the write, so a pass that lost it writes nothing.
 const fencedWrite = `
 with fence_lease as (
     select token from monitoring_leases
@@ -301,7 +301,7 @@ select exists (select 1 from written),
        exists (select 1 from fence_lease)`
 
 // write runs one statement of the evaluator under the fence. It answers nil
-// both when the row moved and when the row had already moved on - a state guard
+// both when the row moved and when a state guard found it already moved on.
 func (s *Store) write(ctx context.Context, f fence, w alertWrite, body string, args ...any) error {
 	if !f.held() {
 		// Fail closed: a pass with no lease to write under writes nothing.
@@ -418,7 +418,7 @@ func gapDetail(rule Rule, host hostState, now time.Time) string {
 }
 
 // noData is the gap the rule asked to be told about: alert raises an episode
-// where there is none, unknown only marks the open one. The value is left as
+// where there is none, unknown only marks the open one and leaves its value.
 func (s *Store) noData(ctx context.Context, f fence, rule Rule, host hostState,
 	w alertWrite, episode openAlert, exists bool, now time.Time) error {
 	detail := gapDetail(rule, host, now)
@@ -442,7 +442,7 @@ func (s *Store) noData(ctx context.Context, f fence, rule Rule, host hostState,
 }
 
 // resume takes an episode out of no_data now that the readings are back: one
-// that had fired fires again, one that had not starts its window from this
+// that had fired fires again, one that had not starts its window now.
 func (s *Store) resume(ctx context.Context, f fence, w alertWrite, rule Rule,
 	episode openAlert, holds bool, value float64, detail string, now time.Time) error {
 	if !holds {
@@ -491,7 +491,7 @@ func (s *Store) observedSince(ctx context.Context, f fence, rule Rule, host host
 }
 
 // continuousSince walks the samples of an episode in order and returns the
-// start of the last uninterrupted run: the moment after the last hole wider
+// start of its last unbroken run: the first reading after the last wide hole.
 func continuousSince(started time.Time, samples []time.Time, now time.Time, gap time.Duration) time.Time {
 	since, last := started, started
 	for _, at := range samples {
@@ -573,7 +573,7 @@ func (s *Store) refresh(ctx context.Context, f fence, w alertWrite,
 }
 
 // resolve ends a firing episode. The value is the last reading where there is
-// one; an episode ended because its rule stopped covering the host keeps the
+// one; without a reading the episode keeps the value it already had.
 func (s *Store) resolve(ctx context.Context, f fence, w alertWrite,
 	now time.Time, value *float64) error {
 	var reading *float32

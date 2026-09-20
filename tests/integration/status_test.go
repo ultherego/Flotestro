@@ -7,9 +7,8 @@ import (
 	"testing"
 )
 
-// TestStatusJudgesEveryPartOfThePanel checks that the status screen names the
-// database as reachable, the schema at its level, the build by its version and
-// the durable trail by its queue - and that a block the panel cannot judge is
+// TestStatusJudgesEveryPartOfThePanel checks the status screen: the database,
+// the schema, the build, the trail, and what it cannot judge as unknown.
 func TestStatusJudgesEveryPartOfThePanel(t *testing.T) {
 	h := newHarness(t)
 	var status struct {

@@ -137,7 +137,7 @@ func nftLoadedFiles(value string) []string {
 }
 
 // NftPersistentState compares the ruleset the kernel filters with against the
-// source the host restores at boot. It reads nothing but the files the unit
+// source the host restores at boot, reading only the files the unit hands nft.
 func NftPersistentState(unit NftUnit, root fs.FS, running []Rule, restore BootRestore) (NftPersistence, []Drift) {
 	state := NftPersistence{Unit: unit, Restore: restore}
 	// Where the restore is in force, the panel's own table is answered for by
@@ -205,7 +205,7 @@ func nftNotCompared(state NftPersistence, reason, detail string) (NftPersistence
 }
 
 // NftComparableRules picks the rules the boot source is answerable for. A
-// foreign table - docker, firewalld, iptables-nft - is written by its owner at
+// foreign table - docker, firewalld, iptables-nft - is written by its owner.
 func NftComparableRules(rules []Rule) []Rule {
 	own := make([]Rule, 0, len(rules))
 	for _, rule := range rules {
@@ -217,7 +217,7 @@ func NftComparableRules(rules []Rule) []Rule {
 }
 
 // NftDrift compares what the host restores at boot with what the kernel
-// filters with now. The two views are matched as multisets: two identical
+// filters with now, matching the two views as multisets.
 func NftDrift(filed, loaded []Rule) []Drift {
 	var drift []Drift
 	filedKeys, filedUnreadable := nftKeys(filed,
@@ -271,7 +271,7 @@ func nftDriftOf(reason string, rule Rule, detail string) Drift {
 }
 
 // nftKeys renders one side of the comparison and records the rules it could
-// not render as a drift of their own: a rule nobody can compare is not a rule
+// not render as a drift of their own, rather than as rules in agreement.
 func nftKeys(rules []Rule, detail string, drift *[]Drift) (map[int]string, int) {
 	keys := make(map[int]string, len(rules))
 	unreadable := 0
@@ -323,7 +323,7 @@ func nftRuleKey(rule Rule) (string, bool) {
 }
 
 // nftNumericPorts says whether the ports of a rule are written as numbers.
-// nft prints a service by its number and a file may hold its name, and the two
+// nft prints a service by its number where a file may hold its name.
 func nftNumericPorts(text string) bool {
 	for _, match := range nftPortArgument.FindAllStringSubmatch(text, -1) {
 		for _, element := range strings.Split(strings.Trim(match[1], "{}"), ",") {
@@ -356,7 +356,7 @@ func nftSortedSet(set string) string {
 }
 
 // ReadNftSource reads the script the host restores its ruleset from, following
-// the includes it names. It returns the text, the files it came from in
+// the includes it names: the text, the files read, and the first one missing.
 func ReadNftSource(root fs.FS, entry []string) (content string, files []string, missing string) {
 	reader := nftScript{root: root, seen: map[string]bool{}}
 	for _, file := range entry {
@@ -407,8 +407,8 @@ func (s *nftScript) read(file string, depth int) {
 	}
 }
 
-// expand resolves an include: a glob is read in the order nft reads it, and a
-// path without a directory is looked for beside the including file first and
+// expand resolves an include the way nft does: a relative path beside the
+// including file first, then in the include directory.
 func (s *nftScript) expand(pattern, dir string) []string {
 	candidates := []string{pattern}
 	if !path.IsAbs(pattern) {
@@ -441,7 +441,7 @@ var (
 )
 
 // NftFileRules reads the rules out of an nft script. It returns false when the
-// script holds a construct it could not place: a half-read file would make the
+// script holds a construct it could not place, so a partial read is not used.
 func NftFileRules(content string) ([]Rule, bool) {
 	content = nftResolveDefines(content)
 	var rules []Rule
@@ -779,7 +779,7 @@ func PlanBootRestore(registry Registry, root fs.FS, unit NftUnit) BootRestoreDec
 }
 
 // nftSourceCarriesPanelTable says whether what this host loads at boot already
-// holds the panel's own table. A source that cannot be read does not count as
+// holds the panel's own table. A source that cannot be read does not count.
 func nftSourceCarriesPanelTable(root fs.FS, unit NftUnit) bool {
 	if unit.LoadState != "loaded" || len(unit.Files) == 0 ||
 		unit.BootState == "disabled" || unit.BootState == "masked" {

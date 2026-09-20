@@ -482,9 +482,8 @@ func isUniqueViolation(err error) bool {
 // is recorded under.
 const SecretMigrationName = "channel_secrets_to_store"
 
-// MigrateSecrets moves the plaintext credentials of the channels written by
-// the previous release into the secret store: the address of every incoming
-// webhook, the signing key of every webhook, and the reference of every
+// MigrateSecrets moves the credentials the previous release wrote in plain
+// into the secret store: webhook addresses, signing keys and mail passwords.
 func (s *Store) MigrateSecrets(ctx context.Context) (moved int, err error) {
 	if s.secrets == nil {
 		return 0, errors.New("the credentials of the channels cannot be moved without a secret store")
@@ -611,9 +610,8 @@ func (s *Store) Enqueue(ctx context.Context, rows []Delivery) error {
 	return tx.Commit(ctx)
 }
 
-// Claim takes up to limit due rows under a lease of the owner, the way the
-// document writes it: the due rows in the order they are due, locked and
-// skipped when another worker holds them, moved to leased with the attempt
+// Claim takes up to limit due rows under a lease of the owner: the due rows in
+// order, locked and skipped when another worker holds them, the attempt raised.
 func (s *Store) Claim(ctx context.Context, owner string, lease time.Duration, limit int) ([]Delivery, error) {
 	rows, err := s.pool.Query(ctx, `
 		with picked as (

@@ -116,7 +116,7 @@ func TestAChangeTheHostDoesNotShowEndsUnverified(t *testing.T) {
 
 // TestARestartOfAMaskedUnitIsNeverASuccess is the unit half of the same rule,
 // in the one shape the lab can produce honestly: a masked unit cannot be
-// started, and the job says so instead of reporting a restart nobody
+// started, and the job fails with a code instead of reporting a restart.
 func TestARestartOfAMaskedUnitIsNeverASuccess(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByName("agent-debian")
@@ -286,7 +286,8 @@ func TestACopyBoundToAForeignPlanIsRefused(t *testing.T) {
 
 // TestARestartWaitsForAnotherBootIdentifier proves the panel's half of the
 // settlement without restarting anything: a synthetic host takes the order,
-// its session ends the way a machine going down ends one, and the job stays
+// its session ends the way a machine going down ends one, and the job settles
+// only when the host comes back on another boot.
 func TestARestartWaitsForAnotherBootIdentifier(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

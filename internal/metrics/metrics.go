@@ -157,7 +157,7 @@ func (c *Collector) runtimeMetrics() []metric {
 		},
 		{
 			// Sys is address space the runtime has taken, not pages the host
-			// holds; the name says so, because the budget of a node is judged
+			// holds; a node's budget is judged on the resident set instead.
 			name: "flotestro_go_memory_reserved_bytes", kind: "gauge",
 			help:    "Address space the Go runtime has taken from the host; the resident set is flotestro_process_resident_bytes.",
 			samples: []sample{{value: float64(memory.Sys)}},
@@ -174,7 +174,7 @@ func (c *Collector) runtimeMetrics() []metric {
 		},
 	}
 	// The percentiles describe the pauses the runtime still remembers. Before
-	// the first collection there is nothing to describe, and the series stays
+	// the first collection there is nothing to describe, so they are left out.
 	if pauses := gcPauses(&memory); len(pauses) > 0 {
 		for _, rank := range []struct {
 			name string
@@ -199,7 +199,7 @@ func (c *Collector) runtimeMetrics() []metric {
 }
 
 // processMetrics are the numbers the host keeps about this process rather than
-// the ones the runtime keeps about itself: the resident set the kernel charges
+// the ones the runtime keeps about itself: the resident set, the descriptors.
 func (c *Collector) processMetrics() []metric {
 	read := c.footprint
 	if read == nil {
@@ -243,7 +243,7 @@ func (c *Collector) processMetrics() []metric {
 }
 
 // gcPauses returns the garbage collection pauses the runtime remembers, in
-// seconds, sorted. The runtime keeps the last 256, and that window is what the
+// seconds, sorted; the runtime keeps the last 256, so that is the window.
 func gcPauses(memory *runtime.MemStats) []float64 {
 	ring := len(memory.PauseNs)
 	count := int(memory.NumGC)
@@ -261,8 +261,8 @@ func gcPauses(memory *runtime.MemStats) []float64 {
 	return pauses
 }
 
-// quantile takes the value at the nearest rank of a sorted series. Over a
-// window of a few hundred observations that is the honest reading: no value is
+// quantile takes the value at the nearest rank of a sorted series, so the
+// answer is an observation that really happened, never an interpolation.
 func quantile(sorted []float64, at float64) (float64, bool) {
 	if len(sorted) == 0 {
 		return 0, false
@@ -323,7 +323,7 @@ func (c *Collector) databaseMetrics(ctx context.Context) []metric {
 	}
 
 	// We measure the dispatch latency from the creation of a task to handing it
-	// over to the agent. The average hides the tail a fleet is judged by, so the
+	// over to the agent. The average hides the tail, so p95, p99 and max go too.
 	var avg, max, p95, p99 *float64
 	if err := c.pool.QueryRow(queryCtx, `
 		select avg(extract(epoch from a.dispatched_at - j.created_at)),
@@ -374,7 +374,7 @@ func (c *Collector) databaseMetrics(ctx context.Context) []metric {
 }
 
 // lifecycleMetrics show the way into and out of the fleet: the enrollment
-// orders and how long they take, the certificates and when they run out, the
+// orders, the certificates and their expiry, the hosts by state and by build.
 func (c *Collector) lifecycleMetrics(ctx context.Context) []metric {
 	var result []metric
 
@@ -467,7 +467,7 @@ func (c *Collector) lifecycleMetrics(ctx context.Context) []metric {
 	}
 
 	// Sessions opened over the last day, by how they ended: a host that
-	// reconnects every few minutes is a host with a flapping link or an agent
+	// reconnects every few minutes has a flapping link or a restarting agent.
 	if grouped, err := c.groupCount(ctx, `
 		select coalesce(end_reason, 'open'), count(*) from agent_sessions
 		where started_at > now() - interval '24 hours' group by 1`); err == nil {
@@ -549,7 +549,7 @@ func (c *Collector) relayBufferMetrics(ctx context.Context) []metric {
 		},
 		{
 			// The relay counts the drops since its start; the panel renders the number
-			// as the relay reports it, so a relay restart resets the series the way a
+			// as the relay reports it, so a relay restart shows as a counter reset.
 			name: "flotestro_relay_buffer_dropped_total", kind: "counter",
 			help:    "Results the relay threw away because its buffer was full, since the relay started, by relay.",
 			samples: dropped,
@@ -573,8 +573,8 @@ func (c *Collector) campaignMetrics(ctx context.Context) []metric {
 		})
 	}
 
-	// The reason code matters here as much as the state: a host held back by a
-	// lack of capacity and a host without the required adapter are both "did not
+	// The reason code matters here as much as the state: a host held back for
+	// lack of capacity and one missing the adapter share a state, not a reason.
 	if samples, err := c.labelPairs(ctx, `
 		select t.state, coalesce(nullif(t.error_code, ''), 'none'), count(*)
 		  from campaign_targets t
@@ -630,7 +630,7 @@ func (c *Collector) campaignMetrics(ctx context.Context) []metric {
 		})
 	}
 	// An external consumer that stopped shows as a distance from the end of the
-	// trail and as its failures; both say the receiver, not the panel, needs
+	// trail and as its failures; both point at the receiver, not at the panel.
 	if samples, err := c.consumerLag(ctx); err == nil && len(samples) > 0 {
 		result = append(result, metric{
 			name: "flotestro_outbox_consumer_lag_events", kind: "gauge",
@@ -926,7 +926,7 @@ func readFootprint(procRoot, cgroupRoot string) Footprint {
 }
 
 // cgroupResident reads the resident set the cgroup charges this process. The
-// charge counts page cache the kernel can drop for free, so the inactive file
+// charge counts page cache the kernel can drop, so inactive_file is taken off.
 func cgroupResident(procRoot, cgroupRoot string) (uint64, bool) {
 	membership, err := os.ReadFile(filepath.Join(procRoot, "self", "cgroup"))
 	if err != nil {
@@ -954,7 +954,7 @@ func cgroupResident(procRoot, cgroupRoot string) (uint64, bool) {
 }
 
 // parseCgroupPath finds the unified hierarchy line of /proc/[pid]/cgroup. A
-// host still on the first version has no such line, and its process is read
+// host still on the first version has no such line, and procfs answers instead.
 func parseCgroupPath(content string) (string, bool) {
 	for _, line := range strings.Split(content, "\n") {
 		rest, ok := strings.CutPrefix(strings.TrimSpace(line), "0::")
@@ -1036,7 +1036,7 @@ func parseFDLimit(limits string) (uint64, bool) {
 }
 
 // parseCPUTicks reads utime plus stime out of /proc/[pid]/stat. The command
-// name is in brackets and may itself contain spaces, so the fields are counted
+// name is in brackets and may contain spaces, so counting starts after them.
 func parseCPUTicks(stat string) (uint64, bool) {
 	end := strings.LastIndex(stat, ")")
 	if end < 0 {

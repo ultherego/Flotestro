@@ -86,8 +86,7 @@ func (h *harness) awaitSchedulePlacement(id string, timeout time.Duration) campa
 }
 
 // TestAScheduledCampaignIsPlacedAtItsMomentAndWaitsForApproval guards the
-// schedule loop: a schedule with a moment a few seconds ahead places its order
-// at that moment, the campaign it places is an ordinary one - requested by the
+// schedule loop: the order is placed at its moment and waits for approval.
 func TestAScheduledCampaignIsPlacedAtItsMomentAndWaitsForApproval(t *testing.T) {
 	h := newHarness(t)
 	startAt := time.Now().UTC().Add(5 * time.Second).Truncate(time.Second)
@@ -144,7 +143,7 @@ func TestAScheduledCampaignIsPlacedAtItsMomentAndWaitsForApproval(t *testing.T) 
 
 // TestRunNowPlacesTheScheduledOrderAtOnce guards the on-demand run: the order
 // is placed immediately under the schedule's name, the run is recorded on the
-// schedule and the next moment of a recurring schedule stays where the rule
+// schedule, and the next moment of a recurring schedule does not move.
 func TestRunNowPlacesTheScheduledOrderAtOnce(t *testing.T) {
 	h := newHarness(t)
 	schedule := h.createCampaignSchedule(map[string]any{
@@ -195,8 +194,7 @@ func TestRunNowPlacesTheScheduledOrderAtOnce(t *testing.T) {
 }
 
 // TestAScheduleIsRefusedWhereItCouldNeverFire guards the door of the
-// schedules: a moment in the past, a rule outside the subset, an operation
-// that does not run in bulk and a write without a reason are each refused with
+// schedules: an order that could never fire is refused with its own code.
 func TestAScheduleIsRefusedWhereItCouldNeverFire(t *testing.T) {
 	h := newHarness(t)
 	order := labScheduleOrder(t, h, "refused")
@@ -233,7 +231,7 @@ func TestAScheduleIsRefusedWhereItCouldNeverFire(t *testing.T) {
 
 // TestTheCalendarListsScheduleMomentsAndDisablingRemovesThem guards the
 // calendar and the life of a schedule: a weekly rule draws its moments in the
-// month, a disabled schedule draws none and names no next moment, a removal
+// month, a disabled one draws none, and a removed one is not found again.
 func TestTheCalendarListsScheduleMomentsAndDisablingRemovesThem(t *testing.T) {
 	h := newHarness(t)
 	order := labScheduleOrder(t, h, "weekly cron restart")

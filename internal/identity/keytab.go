@@ -17,8 +17,7 @@ import (
 )
 
 // A service keytab rotation is one consent over two halves in two places: the
-// directory retires the principal's current keytab, and the fleet host that
-// carries the service fetches a new one into its own keytab file with the
+// directory retires the current keytab, and the fleet host fetches a new one.
 
 var (
 	// ErrHostNotInFleet means the host the principal names is not a host of the
@@ -208,9 +207,8 @@ func containsFold(values []string, wanted string) bool {
 	return false
 }
 
-// rotateKeytab carries out the two halves, in the only safe order: the host is
-// resolved and checked first, because a keytab retired with nobody to fetch a
-// new one is an outage until somebody joins the host anew; then the directory
+// rotateKeytab carries out the two halves in the only safe order: the host is
+// resolved first, then the keytab retired; the other order is an outage.
 func (e *Executor) rotateKeytab(ctx context.Context, change Change, spec *KeytabPayload) []Phase {
 	resolving := startPhase("finding the fleet host " + spec.Host())
 	if e.fleet == nil {

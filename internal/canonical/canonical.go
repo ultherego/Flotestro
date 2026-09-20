@@ -1,6 +1,5 @@
 // Package canonical is the one library every side of Flotestro hashes
-// documents with: the panel that records a consent, the agent that checks a
-// task against it, and the root helper that checks a capability against the
+// documents with: the panel, the agent and the root helper.
 package canonical
 
 import (
@@ -42,9 +41,8 @@ func (e Envelope) SHA256() ([32]byte, []byte, error) {
 	return SHA256(e.Normalized())
 }
 
-// NormalizeRFC8785 renders a value as the canonical JSON of RFC 8785: the
-// members sorted by the UTF-16 code units of their names, no whitespace,
-// numbers as ECMAScript prints them, strings escaped only where the grammar
+// NormalizeRFC8785 renders a value as the canonical JSON of RFC 8785: members
+// sorted by UTF-16 code unit, no whitespace, numbers as ECMAScript prints them.
 func NormalizeRFC8785(v any) ([]byte, error) {
 	normalized, err := jcs.Canonical(v)
 	if err != nil {

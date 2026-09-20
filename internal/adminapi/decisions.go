@@ -7,8 +7,7 @@ import (
 )
 
 // PendingDecisions is the part of the fleet summary that counts what waits for
-// a person: an order nobody has approved, a campaign standing at a gate, a
-// directory change with a plan and no signature, a host the declared state
+// a person: an unapproved order, a campaign at a gate, a drifted host.
 type PendingDecisions struct {
 	// JobsAwaitingApproval counts the jobs on the visible hosts that wait
 	// for an operator's approval.
@@ -26,9 +25,8 @@ type PendingDecisions struct {
 	HostsDrifted *int `json:"hosts_drifted,omitempty"`
 }
 
-// countPendingDecisions fills the decision counters of the summary, each with
-// one aggregated query over the rows the principal may see - the narrowing is
-// the same one the lists apply, so a badge never counts a row the list behind
+// countPendingDecisions fills the decision counters with one aggregated query
+// each, narrowed as the lists are, so a badge never counts a hidden row.
 func (s *Server) countPendingDecisions(ctx context.Context, principal authz.Principal, decisions *PendingDecisions) error {
 	// The visibility of a row that belongs to a host - a job, a policy verdict -
 	// is the visibility of the host, under the permission that reads the row.

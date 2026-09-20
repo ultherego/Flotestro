@@ -6,9 +6,8 @@ import (
 	"github.com/ultherego/flotestro/internal/authz"
 )
 
-// The coverage of a module is the arithmetic a fleet screen rests on, so it is
-// checked here rather than through a screen: a host nobody has heard from must
-// never fall out of the sum, because that is exactly the host a plausible
+// The coverage of a module is the arithmetic a fleet screen rests on: a host
+// nobody has heard from must never fall out of the sum, or the number lies.
 
 func TestModuleCoverageCountsEveryHostOnce(t *testing.T) {
 	coverage := ModuleCoverage{Hosts: 1000, Observed: 700, Unavailable: 40, Stale: 100}

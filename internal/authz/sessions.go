@@ -408,8 +408,7 @@ func (s *Store) UpsertExternalPrincipal(ctx context.Context, tx pgx.Tx,
 	}
 
 	// An external identity never takes over a principal that exists under the
-	// same subject with another origin: a local or service principal (an API
-	// token holder, the bootstrap administrator) keeps its bindings to itself,
+	// same subject with another origin, such as a local or service principal.
 	err = tx.QueryRow(ctx, `
 		insert into principals (id, subject, display_name, kind, issuer, subject_id, email, last_login_at)
 		values ($1, $2, $3, 'user', $4, $5, $6, now())

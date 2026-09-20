@@ -200,8 +200,7 @@ func TestEveryCampaignReadyActionDeclaresClaims(t *testing.T) {
 }
 
 // TestTheSharedClassesHaveACapacity spells out the ration of the two weighted
-// classes of the document, and that a lock class read shared has none: the
-// reads of the package database are kept off a transaction by the exclusive
+// classes, and that a lock class has none: its readers go by the task budget.
 func TestTheSharedClassesHaveACapacity(t *testing.T) {
 	if SharedCapacity(ClaimLogsRead) < 1 || SharedCapacity(ClaimInventoryHeavy) < 1 {
 		t.Errorf("the weighted classes have the capacities logs %d and inventory %d",

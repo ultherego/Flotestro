@@ -13,9 +13,8 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// The negative matrix of chapter 19 for the helper: HLP-01 a request of the
-// right user without a signature, HLP-02 a valid signature over a changed
-// payload, HLP-03 a nonce replayed after a restart of the helper - and the
+// The negative matrix of chapter 19 for the helper: HLP-01 a request without
+// a signature, HLP-02 a signature over a changed payload, HLP-03 a replay.
 
 type fixture struct {
 	t         *testing.T

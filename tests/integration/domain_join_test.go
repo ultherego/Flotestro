@@ -206,7 +206,7 @@ func leaveDomain(t *testing.T, h *harness, hostID string) (jobView, []attemptVie
 
 // TestAHostJoinsTheDomainThroughThePanelAndLeavesIt runs the join end to end:
 // the panel fetches the one-time password from the directory at dispatch, the
-// host joins, the verifications after the join pass and the identity inventory
+// host joins, the verifications pass, and the leave puts the host back out.
 func TestAHostJoinsTheDomainThroughThePanelAndLeavesIt(t *testing.T) {
 	h := newHarness(t)
 	if !directoryAvailable(t, h) {

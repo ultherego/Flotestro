@@ -17,8 +17,8 @@ func mustLocation(t *testing.T, name string) *time.Location {
 }
 
 // TestAMonthlyRuleNamesTheNextDayOfTheMonth guards the monthly rule: the next
-// occurrence is the named day of the month at the named wall-clock time in the
-// schedule's zone, this month when the moment is still ahead and the next
+// occurrence is the named day and time in the schedule's zone, this month
+// while it is still ahead and a later month once it is past.
 func TestAMonthlyRuleNamesTheNextDayOfTheMonth(t *testing.T) {
 	warsaw := mustLocation(t, "Europe/Warsaw")
 	rule, err := ParseRecurrence("FREQ=MONTHLY;BYMONTHDAY=15;BYHOUR=2;BYMINUTE=30")
@@ -63,9 +63,8 @@ func TestAMonthlyRuleNamesTheNextDayOfTheMonth(t *testing.T) {
 	}
 }
 
-// TestAWeeklyRuleNamesTheNextListedWeekday guards the weekly rule: the
-// weekdays are read in any order and each once, and the next occurrence is the
-// nearest listed weekday at the named time, today included when the time is
+// TestAWeeklyRuleNamesTheNextListedWeekday guards the weekly rule: the weekdays
+// are read in any order and each once, and the moment itself still counts.
 func TestAWeeklyRuleNamesTheNextListedWeekday(t *testing.T) {
 	rule, err := ParseRecurrence("freq=weekly;byday=FR,MO,MO;byhour=22;byminute=0")
 	if err != nil {
@@ -89,9 +88,8 @@ func TestAWeeklyRuleNamesTheNextListedWeekday(t *testing.T) {
 	}
 }
 
-// TestARecurrenceOutsideTheSubsetIsRefused guards the parser: a key the panel
-// does not read, a frequency it does not schedule, a day out of range or a
-// rule without its day are refused with the reason, never stored to fire at a
+// TestARecurrenceOutsideTheSubsetIsRefused guards the parser: a key, frequency
+// or day outside the subset is refused with the reason, never stored.
 func TestARecurrenceOutsideTheSubsetIsRefused(t *testing.T) {
 	refused := map[string]string{
 		"":                                       "empty",
@@ -154,8 +152,7 @@ func TestNextRunReadsTheStartAsTheEarliestMoment(t *testing.T) {
 }
 
 // TestCheckScheduleRefusesWhatCannotFire guards the spec check: a name, an
-// order with an operation, a real zone, a readable rule and a moment that lies
-// ahead are each required with their own code, and a spec that passes carries
+// order, a real zone, a readable rule and a moment ahead each have their code.
 func TestCheckScheduleRefusesWhatCannotFire(t *testing.T) {
 	now := time.Date(2026, time.September, 15, 12, 0, 0, 0, time.UTC)
 	ahead := now.Add(time.Hour)

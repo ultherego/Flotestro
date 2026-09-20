@@ -159,9 +159,8 @@ func TestAnIdentityIsResolvedBySubjectOncePerRequest(t *testing.T) {
 	}
 }
 
-// What acts as an agent is told apart by the spelling and the tables: a dashed
-// identifier is a host or a relay, a bare name is a relay at its enrollment,
-// and thirty-two hex digits are a machine - which is a row of nothing and must
+// What acts as an agent is told apart by the spelling: a dashed identifier is a
+// host or a relay, a bare name a relay, and hex digits a machine no table has.
 func TestAnAgentActorNamesItsHostRelayOrMachine(t *testing.T) {
 	db := tables()
 	recorder := testRecorder()

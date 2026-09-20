@@ -39,9 +39,8 @@ type RelayPeer struct {
 type RelayRefusal struct {
 	Code   string
 	Detail string
-	// Redelivery marks a relay_sequence_replayed that is no replay at all: the
-	// sequence is one the same session spent already, so the message is one the
-	// panel consumed and the relay carried again because the acknowledgement
+	// Redelivery marks a relay_sequence_replayed that is no replay: the relay
+	// carried the message again because its acknowledgement did not arrive.
 	Redelivery bool
 }
 
@@ -73,8 +72,7 @@ type sequenceRecords interface {
 }
 
 // RelayVerifier checks the inner identity envelope of a relayed message the
-// way the security document lays it out: the relay is the one that forwarded
-// the message, the certificate the envelope names is on record, live and the
+// way the security document lays it out, against the panel's own records.
 type RelayVerifier struct {
 	certs     certificateRecords
 	hosts     hostRecords
@@ -209,9 +207,8 @@ func (v *RelayVerifier) verify(ctx context.Context, peer RelayPeer, envelope *ag
 			return nil, err
 		}
 		if !accepted {
-			// A number at or below the one the same session last spent is a message
-			// this panel consumed already: the relay holds it in its spool until an
-			// acknowledgement arrives, and a link that broke in between means it sends
+			// A number at or below the one the same session last spent is a message this
+			// panel consumed already and the relay sent again unacknowledged.
 			if envelope.GetSequence() <= last {
 				return nil, &RelayRefusal{Code: hosts.RefusalRelaySequenceReplayed, Redelivery: true,
 					Detail: "sequence " + strconv.FormatUint(envelope.GetSequence(), 10) +
@@ -227,8 +224,7 @@ func (v *RelayVerifier) verify(ctx context.Context, peer RelayPeer, envelope *ag
 }
 
 // publicKeyOf finds the key the envelope is checked against: the one on
-// record, or - for a certificate issued before the record carried keys - the
-// one in the certificate the relay presented, once its fingerprint is the
+// record, or the one in the presented certificate once its fingerprint matches.
 func publicKeyOf(certificate hosts.CertificateStatus, presented *x509.Certificate) (crypto.PublicKey, []byte, error) {
 	if len(certificate.PublicKeyDER) > 0 {
 		key, err := x509.ParsePKIXPublicKey(certificate.PublicKeyDER)

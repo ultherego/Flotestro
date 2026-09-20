@@ -153,7 +153,8 @@ func TestSelectorComparesTheAgentVersion(t *testing.T) {
 
 // TestAlertRuleScopesByTagGroupAndExpression: a rule scoped by a tag covers
 // the tagged host and nobody else, as the host page counts it; a rule scoped
-// by an expression is read with the campaign grammar; a rule naming a group
+// by an expression is read with the campaign grammar; and a group scopes a
+// rule the way a tag does.
 func TestAlertRuleScopesByTagGroupAndExpression(t *testing.T) {
 	h := newHarness(t)
 	lab := h.hosts()

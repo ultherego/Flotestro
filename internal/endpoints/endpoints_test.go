@@ -190,8 +190,7 @@ func TestEveryGatewayRefusingIsOneAnswer(t *testing.T) {
 }
 
 // TestARejectedIdentityStopsTheFailover guards the doctrine of the class: a
-// certificate the panel revoked is refused by every gateway, so the second
-// address is not even tried - and the caller learns the reason rather than a
+// certificate the panel revoked is refused everywhere, so nothing is retried.
 func TestARejectedIdentityStopsTheFailover(t *testing.T) {
 	m := tryManager("https://a:8443", "https://b:8443")
 	tried := 0

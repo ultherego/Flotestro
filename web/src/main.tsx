@@ -12,9 +12,8 @@ import "./styles/fleet-pages.css";
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      // The data refreshes on its own, but less often: refreshing every
-      // query on every screen every ten seconds turned the panel into a
-      // flicker, because the view went back to loading or to an error and
+      // The data refreshes on its own, but not often: refetching every query
+      // on every screen every ten seconds turned the panel into a flicker.
       refetchInterval: 30_000,
       staleTime: 15_000,
       // The previous data stays on the screen while refreshing. Without it

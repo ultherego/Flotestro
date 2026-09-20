@@ -192,8 +192,7 @@ func TestTheFailureSentenceKeepsTheAddressOut(t *testing.T) {
 }
 
 // The classification of an attempt is the document's table: 2xx is delivered,
-// 408/429/5xx and a network error pass to the next attempt until the attempts
-// run out, 401/403 are the credential's fault, and any other status is
+// 408/429/5xx and network errors pass, 401/403 and the rest are permanent.
 func TestClassifyFollowsTheTable(t *testing.T) {
 	status := func(code int) error {
 		return SendError{Code: CodeReceiverStatus, Status: code, Err: errors.New("the receiver answered")}
@@ -237,8 +236,7 @@ func TestClassifyFollowsTheTable(t *testing.T) {
 }
 
 // The pause before the next attempt doubles from the base up to the cap, and
-// the jitter draws anywhere below it: attempt one waits at most the base,
-// attempt seven at most the cap of an hour, and a draw of zero is an attempt
+// the jitter draws anywhere below it, a draw of zero included.
 func TestBackoffIsExponentialWithFullJitter(t *testing.T) {
 	base, ceiling := 30*time.Second, time.Hour
 	for attempt, want := range map[int]time.Duration{
@@ -257,9 +255,8 @@ func TestBackoffIsExponentialWithFullJitter(t *testing.T) {
 	}
 }
 
-// The suppression: a silence of the host, the rule or both keeps back the
-// alerts of the host; a maintenance window keeps back everything of the host;
-// a security alert of the installation is kept back by a global silence alone,
+// The suppression: a silence or a maintenance window keeps back the alerts of
+// the host it names; a security alert only a global silence keeps back.
 func TestDecideAppliesSilencesAndMaintenance(t *testing.T) {
 	until := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
 	scoped := silence{ID: "s1", HostID: "h1", RuleID: "r1", Until: until, Reason: "disk swap"}

@@ -194,7 +194,7 @@ func describeFirewallPlan(plan firewall.Plan) string {
 }
 
 // changeRules creates or removes a panel rule and rebuilds the table - or, on
-// a host where ufw holds the rules, runs the ufw commands that carry the
+// a host where ufw holds the rules, runs the ufw commands for that change.
 func (s *Server) changeRules(ctx context.Context, action *helperv1.FirewallRequest) *helperv1.HelperResponse {
 	state := s.readFirewall(ctx)
 	if state.UnavailableReason != "" {
@@ -260,7 +260,7 @@ func (s *Server) changeRules(ctx context.Context, action *helperv1.FirewallReque
 	}
 	if state.Adapter == firewall.AdapterUFW {
 		// ufw is changed rule by rule, so the registry is written before the first
-		// step: a change that stops halfway is then rolled back from the registry it
+		// step: a change that stops halfway is still described by the registry.
 		if err := saveRuleRegistry(state.Adapter, registry); err != nil {
 			return reject(ErrorExecFailed, "writing the rule registry: "+err.Error())
 		}
@@ -295,7 +295,7 @@ func (s *Server) changeZone(ctx context.Context, action *helperv1.FirewallReques
 		return reject(ErrorUnsupported, "this host has no firewalld")
 	}
 	// A change ordered against a different rule set is not the same change the
-	// operator looked at in the plan: firewalld rewrites nftables at every zone
+	// operator looked at in the plan.
 	if expected := action.GetExpectedHash(); expected != "" {
 		if state := s.readFirewall(ctx); expected != state.Hash {
 			return reject(ErrorPreconditionFailed, fmt.Sprintf(
@@ -486,7 +486,7 @@ func (s *Server) readFirewall(ctx context.Context) firewall.Snapshot {
 	}
 
 	// ufw loads its rules into the tables underneath through iptables-nft, which
-	// nft reports as foreign: the rules the operator knows are the ufw ones, read
+	// nft reports as foreign, so the ufw rules are read from ufw itself.
 	if ufw {
 		if response := s.readUFW(ctx, &snapshot, ruleset); response != "" {
 			snapshot.ReadOnlyReason = response
@@ -592,7 +592,7 @@ func (s *Server) readUFW(ctx context.Context, snapshot *firewall.Snapshot, rules
 	// pictures, and the panel used to see only the tool's account of itself.
 	snapshot.Drift = ufwDrift(ruleset, loaded)
 	// The fingerprint covers the ufw rules together with the tables: a rule added
-	// with ufw since the plan is a changed rule set even when the operator's nft
+	// with ufw since the plan is a changed rule set too.
 	snapshot.Hash = firewall.Fingerprint(ruleset + "\n" + added)
 	snapshot.Writable = true
 	return ""

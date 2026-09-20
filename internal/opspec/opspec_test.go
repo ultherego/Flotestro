@@ -203,9 +203,8 @@ func TestReplacingTheAgentHasItsOwnRules(t *testing.T) {
 	}
 }
 
-// TestEveryHashSchemeIsAFunctionOfThePlan guards the switch of the scheme: the
-// agent accepts a hash of any known scheme, so every scheme has to be as
-// sensitive to a swapped plan as the one the panel issues, and the schemes
+// TestEveryHashSchemeIsAFunctionOfThePlan: the agent accepts a hash of any
+// known scheme, so each has to see a swapped plan and give its own answer.
 func TestEveryHashSchemeIsAFunctionOfThePlan(t *testing.T) {
 	plan := Payload{Unit: &UnitPayload{Unit: "nginx.service"}}
 	swapped := Payload{Unit: &UnitPayload{Unit: "sshd.service"}}
@@ -243,9 +242,8 @@ func TestEveryHashSchemeIsAFunctionOfThePlan(t *testing.T) {
 	}
 }
 
-// TestTheReverseTableNamesOnlyDeclaredWaysBack guards the table a compensation
-// is checked against: every row is a mutating operation whose reverse is
-// another known mutating operation with a real way back, and an operation
+// TestTheReverseTableNamesOnlyDeclaredWaysBack: every row reverses one known
+// mutating operation with another, and none of them declares no way back.
 func TestTheReverseTableNamesOnlyDeclaredWaysBack(t *testing.T) {
 	for forward, reverse := range reverseActions {
 		if !forward.Known() || !forward.Mutating() {

@@ -95,8 +95,7 @@ func (s *Server) handleCreateEnrollmentRequest(w http.ResponseWriter, r *http.Re
 }
 
 // authorizeOrder checks an order for a new machine or a relay before it is
-// placed: the right where the machine will live, the batch right for a pool of
-// uses, the facts of the host, fresh authentication where the order asks for
+// placed: the rights for its placement, the facts of the host, and step-up.
 func (s *Server) authorizeOrder(w http.ResponseWriter, r *http.Request, req *enrollmentRequestBody,
 	stepUpAction, targetID string) (authz.Principal, map[string]any, bool) {
 	req.Site, req.Environment = orderPlacement(req.Site, req.Environment)
@@ -485,8 +484,7 @@ func (s *Server) lastDenial(r *http.Request, orderID string) (string, string) {
 }
 
 // handleListEnrollmentRequests shows the pending and closed installations the
-// caller may read: the list is narrowed in the query to the scopes of the
-// caller's right, so the operator of one site sees that site's orders and
+// caller may read: the query is narrowed to the scopes of the caller's right.
 func (s *Server) handleListEnrollmentRequests(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermHostEnrollRead, "enrollment_request")
 	if !ok {

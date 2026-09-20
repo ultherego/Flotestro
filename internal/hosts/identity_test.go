@@ -11,8 +11,7 @@ func uint32Ptr(value uint32) *uint32 { return &value }
 func uint64Ptr(value uint64) *uint64 { return &value }
 
 // The verdict follows the reported policy and never fills a missing fact with
-// a value: no policy is unknown, a policy without a cache is no cached logins,
-// a cache without expiry is indefinite, and a cache with an expiry names the
+// a value: no policy is unknown, not a default.
 func TestJudgeOfflineLogins(t *testing.T) {
 	observed := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
 	offline := boolPtr(false)

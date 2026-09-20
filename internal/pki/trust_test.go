@@ -189,8 +189,7 @@ func TestWithdrawalProtectsTheHosts(t *testing.T) {
 }
 
 // An activation interrupted between the key and the certificate is finished at
-// the next open rather than reported as a broken CA: the key goes first, the
-// pending certificate stays until both are in place, and that combination is
+// the next open rather than reported as a broken CA.
 func TestAnInterruptedActivationIsFinishedAtTheNextOpen(t *testing.T) {
 	dir := t.TempDir()
 	trust, err := EnsureTrust(dir)

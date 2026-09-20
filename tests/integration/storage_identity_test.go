@@ -253,8 +253,7 @@ func TestDestructiveOperationIsRefusedByIdentityBeforeAnythingRuns(t *testing.T)
 }
 
 // TestDestructiveOperationWithoutAStableIdentityIsRefused checks that an order
-// naming the device by its serial and size alone does not reach the disk: the
-// panel refuses it at the door, or the host refuses it with
+// naming the device by its serial and size alone does not reach the disk.
 func TestDestructiveOperationWithoutAStableIdentityIsRefused(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -295,7 +294,7 @@ func TestDestructiveOperationWithoutAStableIdentityIsRefused(t *testing.T) {
 
 // TestMountPlanCarriesTheFstabRevision checks that a mount plan is bound to
 // the fstab it was computed against and to the state of the mount point: the
-// fingerprint covers both, so an fstab edited after the plan makes the change
+// fingerprint covers both, so a change on a stale plan is refused as such.
 func TestMountPlanCarriesTheFstabRevision(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")

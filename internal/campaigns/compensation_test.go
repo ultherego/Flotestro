@@ -7,9 +7,8 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// TestACompensationNeedsASettledOriginalAndItsDeclaredReverse guards the rules
-// a compensation order is checked against: the original has to be finished,
-// the operation has to be the registry's reverse of the original's, and every
+// TestACompensationNeedsASettledOriginalAndItsDeclaredReverse guards the two
+// rules: the original must be finished and the operation its declared reverse.
 func TestACompensationNeedsASettledOriginalAndItsDeclaredReverse(t *testing.T) {
 	original := Campaign{ID: "orig", Name: "rollout", ActionType: "file.ensure", State: StateCompleted}
 	changed := []Target{{HostID: "host-a", State: TargetSucceeded}, {HostID: "host-b", State: TargetFailed}}
@@ -81,8 +80,7 @@ func TestACompensationNeedsASettledOriginalAndItsDeclaredReverse(t *testing.T) {
 }
 
 // TestTheCompensateStepEndsAsTheCompensatingHostDid guards the outcome written
-// on the original's target: only a change that succeeded compensates, and
-// every other end says why - the table refuses a step that did not run without
+// on the original's target: only a success compensates, every other end says why.
 func TestTheCompensateStepEndsAsTheCompensatingHostDid(t *testing.T) {
 	if state, reason := compensationOutcome(TargetSucceeded, "", ""); state != StepSucceeded || reason != "" {
 		t.Errorf("a successful compensation closed the step as %s (%q)", state, reason)

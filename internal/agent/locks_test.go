@@ -138,9 +138,8 @@ func TestTheHostWaitsForMutationsInFlight(t *testing.T) {
 	packages()
 }
 
-// TestAReadWithoutAContractClaimTakesNoResource guards that a read whose
-// contract lists nothing takes nothing: a unit status read has no lock class
-// and costs the host nothing worth rationing, so its cost is limited by the
+// TestAReadWithoutAContractClaimTakesNoResource: a unit status read names no
+// lock class in its contract, so it takes no resource of the host.
 func TestAReadWithoutAContractClaimTakesNoResource(t *testing.T) {
 	read := &agentv1.TaskEnvelope{
 		TaskId: "read",
@@ -153,9 +152,8 @@ func TestAReadWithoutAContractClaimTakesNoResource(t *testing.T) {
 	}
 }
 
-// TestAReadTakesTheSharedClaimsOfItsContract guards the other kind of read:
-// the journal read takes the logs class shared with the weight the contract
-// gives it, and a package plan takes the package class shared - so that it
+// TestAReadTakesTheSharedClaimsOfItsContract: the journal read takes the logs
+// class shared with the weight of the contract, the package plan its class.
 func TestAReadTakesTheSharedClaimsOfItsContract(t *testing.T) {
 	journal := &agentv1.TaskEnvelope{
 		TaskId: "journal",
@@ -284,9 +282,8 @@ func TestTheRepairPayloadHashesTheSameAsInThePanel(t *testing.T) {
 	}
 }
 
-// TestAWaitingTaskNamesItsBlocker guards what the panel shows under a host
-// that has not started: the wait is reported the moment the task finds the
-// resource busy, the report names the resource and the task holding it, and a
+// TestAWaitingTaskNamesItsBlocker: the wait is reported the moment the task
+// finds the resource busy, and the report names the resource and its holder.
 func TestAWaitingTaskNamesItsBlocker(t *testing.T) {
 	l := newLocks()
 	ctx := context.Background()
@@ -414,9 +411,8 @@ func TestSharedClaimsCoexist(t *testing.T) {
 	second()
 }
 
-// TestSharedAndExclusiveClaimsExcludeEachOther guards both directions: a
-// package upgrade waits for a package plan still reading the database, and a
-// package plan waits for an upgrade under way - the read would otherwise
+// TestSharedAndExclusiveClaimsExcludeEachOther guards both directions: an
+// upgrade waits for a read of the package database, and a read for an upgrade.
 func TestSharedAndExclusiveClaimsExcludeEachOther(t *testing.T) {
 	l := newLocks()
 
@@ -460,8 +456,7 @@ func TestSharedAndExclusiveClaimsExcludeEachOther(t *testing.T) {
 }
 
 // TestWeightsAddUpAgainstTheCapacity guards the ration of a shared class: the
-// logs class carries four at once, so readers enter while their weights fit
-// and the one that would exceed the capacity waits for a release - and a claim
+// readers' weights add up, and the one that overflows waits for a release.
 func TestWeightsAddUpAgainstTheCapacity(t *testing.T) {
 	if opspec.SharedCapacity(opspec.ClaimLogsRead) != 4 || opspec.SharedCapacity(opspec.ClaimInventoryHeavy) != 2 {
 		t.Fatalf("the capacities are logs %d and inventory %d; the test assumes 4 and 2",

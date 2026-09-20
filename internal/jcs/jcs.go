@@ -163,8 +163,7 @@ func writeString(out *bytes.Buffer, s string) {
 const hexDigits = "0123456789abcdef"
 
 // FormatNumber prints a double the way ECMAScript's Number::toString does,
-// which is what the RFC prescribes for numbers: the shortest digits that read
-// back as the same value, plain for magnitudes from 1e-6 up to 1e21, with an
+// which is what the RFC prescribes: the shortest digits that read back equal.
 func FormatNumber(f float64) (string, error) {
 	if math.IsNaN(f) || math.IsInf(f, 0) {
 		return "", fmt.Errorf("jcs: %v is not a JSON number", f)

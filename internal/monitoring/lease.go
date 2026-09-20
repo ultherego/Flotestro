@@ -13,7 +13,7 @@ import (
 )
 
 // ErrLeaseLost means the instance no longer holds the lease it was working
-// under: another instance took it, or this one stopped renewing long enough
+// under: another took it, or this one stopped renewing long enough to lose it.
 var ErrLeaseLost = errors.New(ErrorEvaluatorLeaseLost +
 	": the instance no longer holds the lease of the alert evaluator")
 
@@ -22,7 +22,7 @@ var ErrLeaseLost = errors.New(ErrorEvaluatorLeaseLost +
 const ErrorEvaluatorLeaseLost = "alert_evaluator_lease_lost"
 
 // ErrFenceStale means the database refused a write of the alert state made
-// under this pass's token: the lease is gone, and the episode belongs to a
+// under this pass's token: the lease is gone, so the episode is not ours.
 var ErrFenceStale = fmt.Errorf("%s: %w", ErrorAlertFenceStale, ErrLeaseLost)
 
 // ErrorAlertFenceStale is the code of ErrFenceStale, as the error guide lists
@@ -62,11 +62,11 @@ func fenceOf(lease Lease) fence {
 }
 
 // held says whether there is anything to write under. The token is minted from
-// zero the first time the lease changes hands, so zero is "no lease": a pass
+// zero the first time the lease changes hands, so zero is "no lease".
 func (f fence) held() bool { return f.Holder != "" && f.Token > 0 }
 
 // accepts is the fence itself, the same rule the statements apply in SQL. A row
-// carrying no token may be moved - a panel of the previous release, or an
+// carrying no token may be moved: a panel of the previous release wrote it.
 func (f fence) accepts(rowToken *int64) bool {
 	if !f.held() {
 		return false

@@ -103,6 +103,7 @@ func TestHostListExportsEveryHostOfTheFilter(t *testing.T) {
 // TestJobListExportGuardsFormulas checks the task export against the paged
 // JSON list of one host, and that a cell an operator typed cannot become a
 // formula: a cancel reason beginning with '=' is written with a leading
+// apostrophe.
 func TestJobListExportGuardsFormulas(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")

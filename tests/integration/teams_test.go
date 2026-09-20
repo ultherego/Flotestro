@@ -103,8 +103,7 @@ func visibleHostIDs(t *testing.T, h *harness) map[string]string {
 }
 
 // TestTeamScopeBoundsTheFleet is the whole boundary in one run: a principal
-// bound only to a team sees and touches that team's hosts and nothing else,
-// the boundary follows a host between teams, and deleting the team leaves the
+// bound to a team sees that team's hosts, and the boundary follows a host.
 func TestTeamScopeBoundsTheFleet(t *testing.T) {
 	h := newHarness(t)
 	fleet := h.hosts()

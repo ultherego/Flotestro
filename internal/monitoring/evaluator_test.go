@@ -126,7 +126,7 @@ func TestCompareAppliesTheOperator(t *testing.T) {
 }
 
 // TestSelectorTreeIsACampaignSelector: the scope of a rule is the same
-// structure a campaign selector is, so the two compile into the same host
+// structure a campaign selector is, so the two compile the same way.
 func TestSelectorTreeIsACampaignSelector(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -283,7 +283,7 @@ func TestAGapInTheSamplesRestartsTheWindow(t *testing.T) {
 	}
 
 	// The host went quiet after the third sample and came back at the eighth
-	// minute: the window counts from the reading that came back, not from the
+	// minute: the window counts from that reading, not from the episode's start.
 	broken := []time.Time{
 		started.Add(1 * time.Minute), started.Add(2 * time.Minute), started.Add(3 * time.Minute),
 		started.Add(8 * time.Minute), started.Add(9 * time.Minute), started.Add(10 * time.Minute),
@@ -339,7 +339,7 @@ func TestARuleWithoutDataHoldsItsEpisodeRatherThanFiring(t *testing.T) {
 		t.Error("a late sample restarted the window")
 	}
 	// Past it the episode is held: the window restarts, so however long the host
-	// stays silent the episode cannot reach its firing point on the strength of
+	// stays silent the episode never reaches its firing point on old readings.
 	if !noDataHold(pending, started.Add(5*time.Minute), gap) {
 		t.Error("an episode without data for five minutes was not held")
 	}
@@ -352,7 +352,7 @@ func TestARuleWithoutDataHoldsItsEpisodeRatherThanFiring(t *testing.T) {
 }
 
 // TestTheLeaseIsAskedAboutInsideTheFleet: the interval is a number of hosts.
-// Once per rule leaves a rule over the whole fleet running on a lease that may
+// Once per rule would run a whole fleet on a lease that may already be gone.
 func TestTheLeaseIsAskedAboutInsideTheFleet(t *testing.T) {
 	if evaluatorGuardEvery <= 1 {
 		t.Fatalf("the guard is asked every %d hosts: that is every host", evaluatorGuardEvery)
@@ -383,8 +383,8 @@ func TestAWriteNamesTheRuleTheHostAndTheEpisode(t *testing.T) {
 func TestTheWindowIsCountedOverTheRulesOwnGap(t *testing.T) {
 	started := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
 	now := started.Add(10 * time.Minute)
-	// The host reports every five minutes, and the rule says so. The same
-	// readings are one continuous run for it and a hole for a rule that
+	// The host reports every five minutes, and the rule says so: the same
+	// readings are one run for it and a hole for a minute-by-minute rule.
 	slow := Rule{ExpectedCadenceSeconds: 300}
 	quick := Rule{}
 	samples := []time.Time{

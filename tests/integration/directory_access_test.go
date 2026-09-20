@@ -149,7 +149,7 @@ func removeRule(t *testing.T, h, approver *harness, action, family, name string)
 
 // TestDirectoryHBACRuleGoesThroughPlanApprovalAndExecution walks the whole
 // path of a managed access rule: the plan with its impact, the approval by a
-// second person with a reason, the execution, the rule as the directory holds
+// second person with a reason, the execution, and the rule the directory holds.
 func TestDirectoryHBACRuleGoesThroughPlanApprovalAndExecution(t *testing.T) {
 	h := newHarness(t)
 	if !directoryAvailable(t, h) {
@@ -484,7 +484,7 @@ func userOutsideTheGroup(t *testing.T, h *harness, group string) string {
 
 // TestHBACSimulationDeniesAUserOutsideTheGroup is the denial the design
 // requires the panel to show honestly: a rule for one group on one host does
-// not admit a user outside that group, and the directory's own simulation says
+// not admit a user outside that group, and the simulation says so.
 func TestHBACSimulationDeniesAUserOutsideTheGroup(t *testing.T) {
 	h := newHarness(t)
 	if !directoryAvailable(t, h) {

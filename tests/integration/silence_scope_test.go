@@ -12,7 +12,7 @@ import (
 )
 
 // Chapter 10.3 of the security remediation: a silence decides what the queue
-// never sees, so the two properties of a silence that the queue already reads
+// never sees, so its scope and its summary flag are what these tests read.
 
 // scopedSilenceView is a silence with the two properties of its policy.
 type scopedSilenceView struct {
@@ -30,7 +30,7 @@ type scopedSilenceView struct {
 const silenceReason = "integration test of the silence scope"
 
 // recordTrailEvent writes one event of a host straight into the trail, which is
-// what the notification router consumes. A security alert of the installation
+// what the notification router consumes.
 func recordTrailEvent(h *harness, hostID, eventType string, payload map[string]any) {
 	h.t.Helper()
 	encoded, err := json.Marshal(payload)
@@ -57,7 +57,7 @@ func forgetSilence(h *harness, id string) {
 }
 
 // TestAGlobalSilenceIsTheOnlyOneThatKeepsSecurityAlertsBack walks the whole
-// rule: who may write a global silence, what a scoped one does to a security
+// rule: who may write a global silence, and what a scoped one cannot hold back.
 func TestAGlobalSilenceIsTheOnlyOneThatKeepsSecurityAlertsBack(t *testing.T) {
 	h := newHarness(t)
 	// The pool before anything registers a cleanup that reads through it: the
@@ -68,8 +68,8 @@ func TestAGlobalSilenceIsTheOnlyOneThatKeepsSecurityAlertsBack(t *testing.T) {
 		t.Fatal("the synthetic host was not enrolled")
 	}
 
-	// The channel hears the security alerts of the installation, the hosts
-	// that go quiet, and nothing is narrowed: a scoped channel would refuse
+	// The channel hears the security alerts of the installation and the hosts
+	// that go quiet, with no filter to narrow what reaches it.
 	receiver := newRecipient(t, http.StatusOK)
 	channel := createChannel(h, map[string]any{
 		"name": fmt.Sprintf("integration-silence-%d", time.Now().UnixNano()), "kind": "webhook",

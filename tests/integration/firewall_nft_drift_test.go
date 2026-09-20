@@ -53,8 +53,8 @@ type nftFirewallView struct {
 	Drift             []nftDriftView      `json:"drift"`
 }
 
-// nftSnapshotOf reads the firewall fragment of a host. It changes nothing: the
-// lab's Debian and Ubuntu agents filter with nftables, and a test that touched
+// nftSnapshotOf reads the firewall fragment of a host. It changes nothing: a
+// test that touched the live ruleset would leave the lab fleet altered.
 func nftSnapshotOf(t *testing.T, h *harness, hostID string) nftFirewallView {
 	t.Helper()
 	h.runOperation(hostID, map[string]any{
@@ -80,7 +80,7 @@ func nftPersistentReasons() map[string]bool {
 }
 
 // TestNftablesHostComparesItsPersistentState is the gap of chapter 14.4 on the
-// nftables adapter: the snapshot used to be the running ruleset and nothing
+// nftables adapter: the snapshot also says what restores the rules at boot.
 func TestNftablesHostComparesItsPersistentState(t *testing.T) {
 	h := newHarness(t)
 

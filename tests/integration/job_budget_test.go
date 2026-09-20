@@ -24,8 +24,7 @@ func (h *harness) waitingJob(jobID string) waitingJobView {
 }
 
 // TestJobWaitsForTheMutationBudget guards the rule that a budget is admission
-// for every change, not only for a campaign: a restart ordered by hand asks
-// for the fleet's mutation token like a campaign target does, says which
+// for every change: a restart ordered by hand asks for the same token.
 func TestJobWaitsForTheMutationBudget(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

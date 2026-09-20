@@ -5,8 +5,8 @@ import (
 	"time"
 )
 
-// A silence that names no host now really exists - the panel can write one -
-// so the two shapes have to be told apart: a fleet-wide silence covers the
+// A silence that names no host covers the ordinary alerts of every host; only
+// a global one keeps back a security alert of the installation.
 func TestDecideSeparatesTheFleetWideSilenceFromTheGlobalOne(t *testing.T) {
 	until := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
 	fleet := silence{ID: "f1", Until: until, Reason: "network migration"}

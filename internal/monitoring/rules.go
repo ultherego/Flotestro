@@ -98,7 +98,7 @@ func (sel Selector) Narrows() bool {
 }
 
 // Tree renders the selector as the campaign selector package reads it, the
-// host list aside: every set field is one condition and all of them hold at
+// host list aside: every set field is one condition, and all of them must hold.
 func (sel Selector) Tree() (*selector.Expression, error) {
 	var all []selector.Expression
 	if sel.Site != "" {
@@ -143,7 +143,7 @@ func (sel Selector) Tree() (*selector.Expression, error) {
 }
 
 // validate checks the selector as the operator wrote it: the shape of every
-// field, and the whole as one selector, so that a scope the campaign page
+// field, and the whole as one selector the campaign page would also accept.
 func (sel Selector) validate() error {
 	for _, tag := range sel.Tags {
 		if !selector.TagPattern.MatchString(tag) {
@@ -238,7 +238,7 @@ type Rule struct {
 	// continuous run of them; zero is twice the cadence.
 	MaxGapSeconds int `json:"max_gap_seconds"`
 	// NoDataPolicy says what the evaluator does when the readings stop: alert,
-	// unknown or ignore. Empty is ignore, as every rule behaved before the
+	// unknown or ignore. Empty is ignore, the way rules behaved before the field.
 	NoDataPolicy string `json:"no_data_policy"`
 }
 
@@ -528,7 +528,7 @@ func (s *Store) DeleteRule(ctx context.Context, id string) error {
 }
 
 // closeOpenAlerts ends the episodes of a rule: one that never fired vanishes,
-// one that did resolves. A no-data episode is closed on the same terms, or a
+// one that did resolves, and a no-data episode is closed on the same terms.
 func closeOpenAlerts(ctx context.Context, tx pgx.Tx, ruleID string) error {
 	if _, err := tx.Exec(ctx, `
 		delete from alerts
@@ -648,8 +648,8 @@ func (s *Store) ListAlerts(ctx context.Context, filter AlertFilter) ([]Alert, er
 		limit $`+fmt.Sprint(len(args)), args...)
 }
 
-// Firing reads what is somebody's business now on the visible hosts: the firing
-// alerts and the episodes whose readings stopped under a rule that asked to be
+// Firing reads what is somebody's business now: the firing alerts and the
+// no-data episodes, on the hosts the caller's scopes make visible.
 func (s *Store) Firing(ctx context.Context, scopes []authz.Scope) ([]Alert, error) {
 	condition, args := authz.ScopeSQL(scopes, "h.site", "h.environment", 0)
 	if condition == "" {
@@ -795,7 +795,7 @@ func (s *Store) RulesMatching(ctx context.Context, hostID string) (int, error) {
 }
 
 // compileSelector renders a selector that narrows as one SQL condition over
-// the alias h of the hosts table, group references resolved and the host list
+// the alias h: group references resolved, the host list a condition of its own.
 func (s *Store) compileSelector(ctx context.Context, sel Selector, offset int) (string, []any, error) {
 	var conditions []string
 	var args []any

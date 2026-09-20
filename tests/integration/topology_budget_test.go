@@ -38,9 +38,8 @@ func (h *harness) placeInFailureDomain(hostID, domain string) hostTopologyView {
 	return host
 }
 
-// TestFailureDomainBudgetHoldsTheSecondChange guards the topology budget of
-// the document: two hosts placed in one rack share the rack's token of the
-// units family, so a restart ordered on each asks for the same domain budget,
+// TestFailureDomainBudgetHoldsTheSecondChange guards the topology budget: two
+// hosts in one rack share the rack's token, so the second change waits.
 func TestFailureDomainBudgetHoldsTheSecondChange(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

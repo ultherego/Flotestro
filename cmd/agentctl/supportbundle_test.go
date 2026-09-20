@@ -77,9 +77,8 @@ func testCertificate(t *testing.T) (pemBytes []byte, certificate *x509.Certifica
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), certificate
 }
 
-// fakeBundleSources describes a host that exists only in the test: a valid
-// configuration, an environment file with a lingering token, a journal that
-// quotes a password, a helper journal that cannot be read, and an identity
+// fakeBundleSources describes a host that exists only in the test: a lingering
+// token, a password in the journal, an unreadable helper journal, a key.
 func fakeBundleSources(t *testing.T, certPEM []byte) bundleSources {
 	t.Helper()
 	files := map[string][]byte{}

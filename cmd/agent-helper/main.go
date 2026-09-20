@@ -116,7 +116,7 @@ func run() error {
 	}
 	if !activated {
 		// The mode without socket activation serves the tests; the helper then
-		// watches over the permissions of the socket itself so that it is not
+		// sets the owner and mode of the socket, so only the agent reaches it.
 		_ = os.Remove(*socketPath)
 		if err := os.MkdirAll(dirOf(*socketPath), 0o755); err != nil {
 			return err
@@ -150,7 +150,7 @@ func run() error {
 	}
 
 	// What the last replacement kept so that the host could go back is dropped
-	// once the package database holds the version that replacement ordered. The
+	// once the package database holds the version that replacement ordered.
 	helper.ReleaseSettledRollback(ctx, log)
 
 	// The helper finishes its work after a period of idleness. With the fleet at

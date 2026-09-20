@@ -11,8 +11,8 @@ import (
 )
 
 // The plan envelope of chapter 7: a package plan names, for every element, the
-// exact version, the architecture, the origin and the direction; the execution
-// runs exactly that and settles every effect; a plan the host no longer
+// exact version, the architecture, the origin and the direction, and the
+// execution runs exactly that and settles every effect.
 
 // envelopePlan is the package plan as the API serves it, with the header of
 // the envelope.
@@ -153,7 +153,7 @@ var planDigestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // TestPackagePlanCarriesTheEnvelope checks that a plan on Debian and on the
 // RHEL family names, per element, the origin, the architecture and the
-// direction, and carries the header of the envelope: the planner, the expiry
+// direction, and carries the header of the envelope with its expiry.
 func TestPackagePlanCarriesTheEnvelope(t *testing.T) {
 	for _, family := range []string{"debian", "rhel"} {
 		t.Run(family, func(t *testing.T) {

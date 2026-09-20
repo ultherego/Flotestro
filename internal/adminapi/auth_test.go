@@ -60,8 +60,7 @@ func TestLocalPathAcceptsLocalPaths(t *testing.T) {
 }
 
 // TestCollectionsDoNotRequireGlobalScope guards against the regression that
-// gave an operator limited to one environment a refusal on half the panel: the
-// dashboard, campaigns and tasks checked the permission in the global scope,
+// gave an operator limited to one environment a refusal on half the panel.
 func TestCollectionsDoNotRequireGlobalScope(t *testing.T) {
 	operator := authz.Principal{
 		Subject: "jsmith", Kind: "user",

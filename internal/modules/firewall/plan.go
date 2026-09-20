@@ -92,8 +92,7 @@ func ComputeRemoval(registry Registry, id, rulesetHash, adapter string) Plan {
 }
 
 // Refuse records a refusal reason learned after the differences were computed
-// - for example the management channel protection - and recomputes the
-// fingerprint: a plan with a refusal is a different answer than a plan without
+// and recomputes the fingerprint: a plan with a refusal is another answer.
 func (p *Plan) Refuse(reason string) {
 	p.Refusal = reason
 	p.PlanHash = planFingerprint(*p)

@@ -23,8 +23,7 @@ import (
 )
 
 // The scenario of the architecture document: a FreeIPA user logs in through
-// Keycloak and the panel accepts the identity token only with the issuer, the
-// audience, the nonce and the signature checked, taking the roles from the
+// Keycloak and the panel accepts the identity token only fully checked.
 
 const (
 	testClientID    = "flotestro-panel"

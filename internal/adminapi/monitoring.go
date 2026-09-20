@@ -62,12 +62,12 @@ func (s *Server) monitoringEnabled(w http.ResponseWriter) bool {
 type hostMetricsView struct {
 	HostID string `json:"host_id"`
 	// Range is the window the points cover, and StepSeconds the distance between
-	// them: the sampling interval for the short windows, a quarter-hour for the
+	// them: the sampling interval for raw windows, a quarter-hour for rollups.
 	Range       string             `json:"range"`
 	StepSeconds int                `json:"step_seconds"`
 	Points      []monitoring.Point `json:"points"`
 	// Gaps are the stretches of the window with no reading at all, each with
-	// the typed code of the refusal that explains it where there is one. A
+	// the typed code of the refusal that explains it where there is one.
 	Gaps []monitoring.Gap `json:"gaps"`
 	// Latest is the newest raw sample whatever the range; nil for a host
 	// that never sent one.
@@ -122,7 +122,7 @@ type hostMonitoringView struct {
 	// host: a host nobody watches is to say so.
 	RulesMatching int `json:"rules_matching"`
 	// Refused is what this host sent and the panel would not store, with the
-	// typed code of each refusal. It is what tells a host with a hole in its
+	// typed code of each refusal.
 	Refused []monitoring.Refusal `json:"refused"`
 	// ClockSubstitution is present only where the panel had to stamp this
 	// host's readings with its own time.
@@ -205,7 +205,7 @@ type fleetMonitoringView struct {
 	Firing []monitoring.Alert `json:"firing"`
 	Counts alertCounts        `json:"counts"`
 	// HostsReporting counts the hosts that sent a sample within the last three
-	// intervals, HostsSilent those that did not - a silent host has no charts and
+	// intervals, HostsSilent those that did not.
 	HostsReporting int `json:"hosts_reporting"`
 	HostsSilent    int `json:"hosts_silent"`
 	// Rules counts the enabled rules.
@@ -488,8 +488,8 @@ func (s *Server) handleListAlerts(w http.ResponseWriter, r *http.Request) {
 	}
 	limit, _ := strconv.Atoi(query.Get("limit"))
 	if asCSV {
-		// The file takes the most the store hands out at once, whatever the screen
-		// asked for: the alert history has no cursor, so the export is the newest
+		// The file takes the most the store hands out at once: the alert
+		// history has no cursor, so the export is the newest page.
 		limit = alertHistoryCeiling
 	}
 	var acknowledged *bool
@@ -723,8 +723,8 @@ type silenceRequest struct {
 	// RuleID narrows the silence to one rule. Empty means every alert of
 	// this host.
 	RuleID string `json:"rule_id,omitempty"`
-	// Global asks for the silence that may keep back the security alerts of
-	// the installation; it names no host and no rule, and it needs the right
+	// Global asks for the silence that keeps back the security alerts of the
+	// installation; it names no host and no rule, and it needs a global right.
 	Global bool `json:"global,omitempty"`
 	// SendSummary asks for one message per channel when the silence ends,
 	// naming what it kept back.
@@ -732,7 +732,7 @@ type silenceRequest struct {
 }
 
 // globalSilenceAllowed says whether the principal may write a silence that
-// keeps back the security alerts of the installation. Managing the
+// keeps back the security alerts of the installation: a global right.
 func globalSilenceAllowed(principal authz.Principal) bool {
 	return principal.Can(authz.PermNotificationManage, authz.GlobalScope)
 }
@@ -839,8 +839,8 @@ func (s *Server) handleCreateSilence(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, created)
 }
 
-// handleCreateFleetSilence creates a silence that names no host. It covers
-// every host the installation has, so it is written with the permission over
+// handleCreateFleetSilence creates a silence that names no host: it covers
+// every host, so it asks for the silence permission in the global scope.
 func (s *Server) handleCreateFleetSilence(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorize(w, r, authz.PermMonitoringSilence, authz.GlobalScope, "fleet", "")
 	if !ok {

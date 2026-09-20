@@ -101,8 +101,7 @@ func Compute(state Snapshot, desired Settings, allowLockout bool) Plan {
 	compareList("DenyUsers", desired.DenyUsers, state.DenyUsers)
 
 	// The panel's file is overwritten whole: different content is a change even
-	// when the server already applies the requested values - because after the
-	// write it applies them for a different reason, and the settings from the
+	// when the server already applies the requested values from elsewhere.
 	switch {
 	case !state.ManagedPresent:
 		plan.Changes = append(plan.Changes, "the panel's file will be created")

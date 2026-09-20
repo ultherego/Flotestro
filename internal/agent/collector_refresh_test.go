@@ -152,9 +152,8 @@ func TestTheEndOfTheSessionEndsTheWaitOnRefresh(t *testing.T) {
 	}
 }
 
-// TestARequestDuringACollectionWaitsForTheNextOne guards the most dangerous
-// shortcut of the deduplication: a request for a module that arrived after the
-// read started must not be settled with a picture that does not cover that
+// TestARequestDuringACollectionWaitsForTheNextOne: a request that arrived
+// after the read started waits for the next read, which covers its module.
 func TestARequestDuringACollectionWaitsForTheNextOne(t *testing.T) {
 	k := newCollector()
 	ctx, cancel := context.WithCancel(context.Background())

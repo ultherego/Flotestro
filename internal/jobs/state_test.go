@@ -54,8 +54,7 @@ func TestValidateAllowsRepeatingTheSameState(t *testing.T) {
 }
 
 // TestRunningIsReachedFromDispatchedOnly: the agent's word that the operation
-// started moves a delivered job to running and nothing else does - a job that
-// was never handed over cannot start, and a running job ends the way any
+// started moves a delivered job to running, and nothing else does.
 func TestRunningIsReachedFromDispatchedOnly(t *testing.T) {
 	if !StateDispatched.CanTransition(StateRunning) {
 		t.Fatal("dispatched -> running is the start the agent reports and has to be allowed")

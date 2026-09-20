@@ -330,7 +330,7 @@ func networkPlan(t *testing.T, h *harness, hostID, iface, mtu string) networkPla
 
 // TestNetplanHostPlansInItsOwnFile finds the host that writes its network
 // through netplan - the Ubuntu host of the lab - and checks that a plan is
-// computed there the way the doctrine wants it: against the merged
+// computed there against the merged state, into the panel's own file.
 func TestNetplanHostPlansInItsOwnFile(t *testing.T) {
 	h := newHarness(t)
 	host, state := hostWithWriteAdapter(t, h, "netplan")

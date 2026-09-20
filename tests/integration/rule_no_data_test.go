@@ -19,7 +19,7 @@ import (
 const noDataLeaseTerm = 5 * time.Minute
 
 // TestAHostThatStopsReportingRaisesANoDataEpisode: the chapter's case. Two
-// rules watch the same metric on the same host; the host stops reporting. The
+// rules watch the same metric on the same host, and the host stops reporting.
 func TestAHostThatStopsReportingRaisesANoDataEpisode(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

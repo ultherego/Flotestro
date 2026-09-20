@@ -49,7 +49,8 @@ func reportPeriod(back time.Duration) string {
 
 // TestPatchStatusReportListsEveryVisibleHostOnce checks the patch report
 // against the host list: every host of the list once, the total equal to the
-// list's, the unknowns counted apart from the zeros, the breakdown by site
+// list's, the unknowns counted apart from the zeros, and the sites summing
+// to the same fleet.
 func TestPatchStatusReportListsEveryVisibleHostOnce(t *testing.T) {
 	h := newHarness(t)
 	var list struct {
@@ -151,9 +152,8 @@ type campaignsReportView struct {
 	} `json:"totals"`
 }
 
-// TestCampaignsReportCountsACanceledCampaign checks that a campaign that
-// closed in the period is in the report whatever its end: a campaign ordered
-// and canceled before any host started is a canceled campaign of the period,
+// TestCampaignsReportCountsACanceledCampaign checks that a campaign closed in
+// the period is in the report whatever its end, a cancellation included.
 func TestCampaignsReportCountsACanceledCampaign(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -248,8 +248,7 @@ type complianceReportView struct {
 }
 
 // TestComplianceReportAgreesWithThePolicyResults checks the compliance report
-// against the results list of a policy the test publishes and evaluates: the
-// rule tally by verdict equals the list's counts, the hosts add up across the
+// against the results of a policy the test publishes: the tallies must agree.
 func TestComplianceReportAgreesWithThePolicyResults(t *testing.T) {
 	h := newHarness(t)
 	policy := h.createPolicy(t, uniqueSubject("report-cron"), "report", []map[string]any{

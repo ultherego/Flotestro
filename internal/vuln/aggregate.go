@@ -31,9 +31,8 @@ const (
 
 // FleetSummary is what the database counted over the visible fleet.
 type FleetSummary struct {
-	// Hosts is the number of hosts in scope; Evaluated those with an assessment;
-	// Unassessed those without one - not hosts without vulnerabilities;
-	// FullyAssessed those whose assessment is complete in the sense of
+	// Hosts counts the hosts in scope, Evaluated those with an assessment,
+	// Unassessed those without one, FullyAssessed those with no gap in it.
 	Hosts         int
 	Evaluated     int
 	Unassessed    int

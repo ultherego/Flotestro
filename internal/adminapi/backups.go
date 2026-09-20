@@ -454,8 +454,7 @@ var backupsCSVColumns = []string{
 }
 
 // writeBackupsCSV streams every backup definition of the visible fleet, the
-// worst first as the screen sorts them, a page at a time from the same cursor
-// the screen pages with, so the two agree; an empty last_success_at is a copy
+// worst first and from the same cursor the screen pages with, so the two agree.
 func (s *Server) writeBackupsCSV(w http.ResponseWriter, r *http.Request, scopes []authz.Scope, now time.Time) {
 	s.writeCSV(w, r, exportFileName("backups", now), backupsCSVColumns, func(yield func([]string) bool) error {
 		cursor := backupstore.FleetCursor{}

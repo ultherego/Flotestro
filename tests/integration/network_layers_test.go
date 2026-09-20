@@ -485,9 +485,8 @@ func TestVLANOnAFreeInterfaceIsBuiltAndRemoved(t *testing.T) {
 		t.Errorf("a layered change without a connectivity confirmation: %s", lastMessage(attempts))
 	}
 
-	// The verifier is what decides the job succeeded, so the host really has the
-	// VLAN by now; the inventory is waited for as well, because the panel is what
-	// an operator looks at, and it learns on the host's own cycle rather than at
+	// The verifier already decided the job succeeded, so the host has the VLAN;
+	// the panel is waited for too, because it learns on the host's own cycle.
 	deadline := time.Now().Add(3 * time.Minute)
 	for {
 		after := hostLayeredNetwork(t, h, host.ID)

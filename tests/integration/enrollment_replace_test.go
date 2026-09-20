@@ -17,8 +17,8 @@ type replacedOrderView struct {
 }
 
 // TestAnEnrollmentOrderCanBeReplacedWithinItsScope checks that "revoke and
-// replace" closes the order in hand and places one like it - the same
-// placement, owner, tags and pool of uses - with a token of its own, shown
+// replace" closes the order in hand and places one like it, with a token of
+// its own, for an operator of the order's site and for nobody else.
 func TestAnEnrollmentOrderCanBeReplacedWithinItsScope(t *testing.T) {
 	h := newHarness(t)
 	reason := "integration test of the enrollment replacement"

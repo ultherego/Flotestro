@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-// The instruments a panel is judged by at fleet scale. Without them nobody can
-// say whether ten thousand sessions fit in the budget: the resident set was
+// The instruments a panel is judged by at fleet scale: without them nobody can
+// say whether ten thousand sessions fit in the budget.
 
 // TestTheExpositionCarriesTheProcessInstruments checks that the panel measures
 // itself from the host rather than from the Go runtime.
@@ -52,7 +52,8 @@ func TestTheExpositionCarriesTheProcessInstruments(t *testing.T) {
 }
 
 // TestTheStatusCarriesTheDatabaseFactsOfScale checks the numbers beside the
-// connection budget: what waits on a lock, where the WAL stands and how many
+// connection budget: what waits on a lock, where the WAL stands, and the
+// rates between two readings.
 func TestTheStatusCarriesTheDatabaseFactsOfScale(t *testing.T) {
 	h := newHarness(t)
 	var status struct {

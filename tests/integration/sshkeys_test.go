@@ -101,9 +101,8 @@ func refusalCode(job jobView, attempts []attemptView) string {
 	return job.ResultErrorCode
 }
 
-// TestSSHKeysEditedOneAtATime walks the key operations of one account on a
-// real host: an add that leaves the key already there untouched, a removal by
-// fingerprint, the refusal to take the last key of an account that has no
+// TestSSHKeysEditedOneAtATime walks the key operations of one account on a real
+// host: an add that leaves an existing key alone, a removal by fingerprint.
 func TestSSHKeysEditedOneAtATime(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -234,9 +233,8 @@ func TestSSHKeysEditedOneAtATime(t *testing.T) {
 	}
 }
 
-// TestKeyRemovalOfAMissingKeyIsRefused checks that a removal of a key the
-// account does not carry is a refusal rather than a quiet success: the
-// operator may be looking at another host's list, and the key they meant is
+// TestKeyRemovalOfAMissingKeyIsRefused checks that removing a key the account
+// does not carry is a refusal rather than a quiet success.
 func TestKeyRemovalOfAMissingKeyIsRefused(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")

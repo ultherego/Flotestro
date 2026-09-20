@@ -145,9 +145,8 @@ func TestARetryRunsTheFailedHostsAgainUnderANewApproval(t *testing.T) {
 	}
 }
 
-// TestCampaignListFiltersAndCountsProgress guards the list: the filters on
-// state, operation, requester and creation time run on the server, the page
-// says how many rows the whole list has, and every row carries the tally of
+// TestCampaignListFiltersAndCountsProgress guards the list: state, operation,
+// requester and time filter on the server, and every row carries its tally.
 func TestCampaignListFiltersAndCountsProgress(t *testing.T) {
 	h := newHarness(t)
 	campaign := h.createCampaign(labCampaign("listed and counted", "cron.service", nil))

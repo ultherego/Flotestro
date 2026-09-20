@@ -194,8 +194,7 @@ func ChassisType(code string) string {
 }
 
 // DetectVirtualization decides what the host runs on from the evidence it was
-// given: the DMI vendor and product, the hypervisor flag of the processor, the
-// hypervisor type sysfs names, and the container marker systemd leaves in
+// given: systemd's container marker, sysfs, DMI, and the processor flag.
 func DetectVirtualization(container, sysfsHypervisor, dmiVendor, dmiProduct string, hypervisorFlag bool) Virtualization {
 	if container = strings.TrimSpace(container); container != "" {
 		return Virtualization{Kind: container, Source: "/run/systemd/container"}

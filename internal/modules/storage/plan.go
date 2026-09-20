@@ -145,9 +145,8 @@ func ComputeUnmount(state Snapshot, target string) MountPlan {
 	return plan
 }
 
-// Refuse records in the plan a refusal reason learned after the differences
-// were computed - for example processes holding the filesystem - and
-// recomputes the fingerprint, because a plan with a refusal is a different
+// Refuse records a refusal reason learned after the differences were computed
+// and recomputes the fingerprint: a plan with a refusal is another answer.
 func (p *MountPlan) Refuse(reason string) {
 	p.Refusal = reason
 	p.PlanHash = mountPlanFingerprint(*p)

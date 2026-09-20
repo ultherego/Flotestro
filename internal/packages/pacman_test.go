@@ -558,8 +558,7 @@ func TestPacmanEntriesAreSplit(t *testing.T) {
 }
 
 // TestPacmanPlanDoesNotDependOnCheckupdates guards the declaration of the
-// adapter: the plan is computed from a database that is already on the host,
-// so a host without pacman-contrib reports the plan as available and really
+// adapter: the plan comes from the database on the host, not from checkupdates.
 func TestPacmanPlanDoesNotDependOnCheckupdates(t *testing.T) {
 	features := PacmanFeatures(true)
 	for _, feature := range []string{"repair", "hold", "plan"} {
@@ -603,8 +602,7 @@ func TestPacmanDatabaseArgumentsLeaveTheHostDatabaseAlone(t *testing.T) {
 }
 
 // TestPlanMetadataMissingIsARefusal guards that a host with no repository
-// metadata at all says so with its own code instead of answering with an empty
-// plan - nothing pending and nothing read look the same to an operator, and
+// metadata says so with its own code instead of answering with an empty plan.
 func TestPlanMetadataMissingIsARefusal(t *testing.T) {
 	code, ok := ErrorCodeOf(ErrPlanMetadataMissing)
 	if !ok || code != ErrorPlanMetadataMissing {

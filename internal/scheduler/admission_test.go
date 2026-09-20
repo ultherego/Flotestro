@@ -319,9 +319,8 @@ func (f *fakeTopology) FailureDomains(_ context.Context, hostIDs []string) (map[
 	return f.domains, nil
 }
 
-// TestHostInAFailureDomainAsksForItsDomainBudget guards the topology budget of
-// a job: a change on a host the operator placed in a rack asks for the rack's
-// token of the family, next to the site's and the gateway's, and a host nobody
+// TestHostInAFailureDomainAsksForItsDomainBudget: a change on a host placed in
+// a rack asks for the rack's token too, and a host nobody placed asks for none.
 func TestHostInAFailureDomainAsksForItsDomainBudget(t *testing.T) {
 	b := newFakeBudgets("domain:rack-1:units")
 	w := &fakeWaits{}
