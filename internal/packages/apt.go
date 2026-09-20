@@ -84,35 +84,57 @@ func (a *APT) plan(ctx context.Context, options Options) (Plan, error) {
 		return a.planInstall(ctx, plan, options)
 	}
 
-	result := run(ctx, 3*time.Minute, aptGetPath,
-		"--simulate", "--quiet", "-o", "Debug::NoLocking=true", "upgrade")
+	// The simulation is of the transaction that will run, not of a wider one
+	// filtered afterwards: install --only-upgrade resolves dependencies and
+	// removals of its own, and a filtered plain upgrade never shows them.
+	names := options.Packages
+	if options.SecurityOnly && len(names) == 0 {
+		found, err := a.securityUpgradeNames(ctx)
+		if err != nil {
+			return plan, err
+		}
+		if len(found) == 0 {
+			// Nothing to raise is a plan with no changes, never a full upgrade.
+			plan.DownloadBytes, plan.Space = a.planSpace(ctx, nil, []string{"upgrade"})
+			return plan, nil
+		}
+		names = found
+	}
+	operation, sizing := []string{"upgrade"}, []string{"upgrade"}
+	if len(names) > 0 {
+		operation = append([]string{"install", "--only-upgrade"}, names...)
+		sizing = operation
+	}
+	args := append([]string{"--simulate", "--quiet", "-o", "Debug::NoLocking=true"}, operation...)
+	result := run(ctx, 3*time.Minute, aptGetPath, args...)
 	if !result.Ran || result.ExitCode != 0 {
 		return plan, fmt.Errorf("the apt simulation: %s", result.Reason())
 	}
 
-	for _, line := range strings.Split(result.Stdout, "\n") {
-		change, ok := parseAptInstLine(line)
-		if !ok || !matchesFilter(change, options) {
-			continue
-		}
-		plan.Changes = append(plan.Changes, change)
-		// An upgrade can drop a package as well - a conflict resolved by a
-		// replacement - and that is a removal the operator approves or not.
-		if name, ok := parseAptRemvLine(line); ok {
-			plan.Removals = append(plan.Removals, name)
-		}
-	}
-
-	// The archives of a narrowed upgrade are those of the named packages, not of
-	// everything apt-get would raise; the transaction narrows the same way, with
-	// "install --only-upgrade" and the names.
-	sizing := []string{"upgrade"}
-	if options.SecurityOnly || len(options.Packages) > 0 {
-		sizing = append([]string{"install", "--only-upgrade"}, changeNames(plan.Changes)...)
-	}
+	plan.Changes, plan.Removals = parseAptSimulation(result.Stdout)
+	plan.Protected = ProtectedInSet(plan.Removals)
 	plan.DownloadBytes, plan.Space = a.planSpace(ctx, plan.Changes, sizing)
 	plan.RebootPredicted = a.rebootPredicted(plan.Changes)
 	return plan, nil
+}
+
+// securityUpgradeNames names the packages a security-only upgrade raises. apt
+// has no security mode, so the full upgrade is simulated and read by origin.
+func (a *APT) securityUpgradeNames(ctx context.Context) ([]string, error) {
+	result := run(ctx, 3*time.Minute, aptGetPath,
+		"--simulate", "--quiet", "-o", "Debug::NoLocking=true", "upgrade")
+	if !result.Ran || result.ExitCode != 0 {
+		return nil, fmt.Errorf("the apt security simulation: %s", result.Reason())
+	}
+	var names []string
+	for _, line := range strings.Split(result.Stdout, "\n") {
+		// The agent package has an operation of its own: raised in this
+		// transaction it would stop the helper that runs it.
+		if change, ok := parseAptInstLine(line); ok && change.Security && change.Name != AgentPackage {
+			names = append(names, change.Name)
+		}
+	}
+	return names, nil
 }
 
 // planSpace measures where the bytes of the plan go.
@@ -349,29 +371,19 @@ func (a *APT) Upgrade(ctx context.Context, options Options) (Apply, error) {
 	// the transaction fails.
 	before := a.installedVersions(ctx)
 
-	// APT has no "security only" mode: apt-get upgrade raises everything that can
-	// be raised.
+	// APT has no "security only" mode: the names come from the same read the
+	// plan narrows itself with, so the two describe one transaction.
 	if options.SecurityOnly && len(options.Packages) == 0 {
-		plan, err := a.Plan(ctx, options)
+		names, err := a.securityUpgradeNames(ctx)
 		if err != nil {
 			return apply, err
 		}
-		if len(plan.Changes) == 0 {
+		if len(names) == 0 {
 			// No security updates is not an error and must not turn into a
 			// full upgrade of the host.
 			return apply, nil
 		}
-		for _, change := range plan.Changes {
-			// The agent package has an operation of its own for replacing it: raised in
-			// this transaction it would stop the helper that runs it.
-			if change.Name == AgentPackage {
-				continue
-			}
-			options.Packages = append(options.Packages, change.Name)
-		}
-		if len(options.Packages) == 0 {
-			return apply, nil
-		}
+		options.Packages = names
 	}
 
 	args := []string{
@@ -621,20 +633,30 @@ func (a *APT) planInstall(ctx context.Context, plan Plan, options Options) (Plan
 		return plan, fmt.Errorf("the installation simulation: %s", result.Reason())
 	}
 
-	for _, line := range strings.Split(result.Stdout, "\n") {
-		if change, ok := parseAptInstLine(line); ok {
-			plan.Changes = append(plan.Changes, change)
-		}
-		// An installation can remove as well: a conflict of packages ends with
-		// a replacement rather than an addition.
-		if name, ok := parseAptRemvLine(line); ok {
-			plan.Removals = append(plan.Removals, name)
-		}
-	}
+	plan.Changes, plan.Removals = parseAptSimulation(result.Stdout)
 	plan.Protected = ProtectedInSet(plan.Removals)
 	plan.DownloadBytes, plan.Space = a.planSpace(ctx, plan.Changes,
 		append([]string{"install"}, options.Packages...))
 	return plan, nil
+}
+
+// parseAptSimulation reads what apt-get --simulate says it would do. A line
+// is an Inst or a Remv, never both, so the two are read side by side.
+func parseAptSimulation(stdout string) ([]Change, []string) {
+	var changes []Change
+	var removals []string
+	for _, line := range strings.Split(stdout, "\n") {
+		if change, ok := parseAptInstLine(line); ok {
+			changes = append(changes, change)
+			continue
+		}
+		// A transaction can drop a package too - a conflict resolved by a
+		// replacement - and that is a removal the operator approves or not.
+		if name, ok := parseAptRemvLine(line); ok {
+			removals = append(removals, name)
+		}
+	}
+	return changes, removals
 }
 
 // parseAptRemvLine reads a line of the form: Remv libfoo [1.

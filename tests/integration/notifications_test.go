@@ -223,9 +223,6 @@ func TestNotificationChannelKeepsItsSecretAndLogsTypedFailures(t *testing.T) {
 	if outcome.Status != "failed" || !connectionFailure(outcome.ErrorCode) {
 		t.Errorf("the test of an unresolvable relay came back as %+v", outcome)
 	}
-	var refusal struct {
-		Code string `json:"code"`
-	}
 	h.do(http.MethodPost, "/api/v1/notifications/channels", map[string]any{
 		"name": name + "-secret", "kind": "email",
 		"config": map[string]any{
