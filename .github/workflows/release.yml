@@ -643,3 +643,72 @@ jobs:
             [ -f "$file" ] && assets+=("$file")
           done
           gh release upload "$tag" "${assets[@]}"
+
+  repository-image:
+    name: The repository of an isolated site
+    needs: sign
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    # The fourth image of the product, and the only one that cannot be built
+    # from a checkout: it serves an already-signed package tree, so it can
+    # only be made after the tree exists. compose.yaml names it under
+    # --profile airgap, so without this job that profile pulls a manifest
+    # nobody published.
+    #
+    # It is built here rather than in the signing job on purpose: this needs
+    # a registry token and the signing job holds the release key. Neither
+    # wants the other's credential.
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          path: source
+
+      - name: The published tree this image serves
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # From the branch rather than from the signing job's working copy:
+        # what an isolated site receives is what the connected world can see,
+        # and a tree carried between jobs would be neither.
+        run: |
+          set -euo pipefail
+          url="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git clone --quiet --depth 1 --branch "$PAGES_BRANCH" "$url" pages
+          if [ ! -f pages/packages/flotestro-repo.asc ]; then
+            echo "the branch carries no signed repository; the signing job publishes one only when it holds the key" >&2
+            exit 1
+          fi
+          echo "the tree carries $(find pages/packages -name '*.deb' -o -name '*.rpm' -o -name '*.pkg.tar.*' | wc -l) packages"
+
+      - uses: docker/setup-buildx-action@v3.7.1
+
+      - uses: docker/login-action@v3.3.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/flotestro-package-repository"
+          tags="--tag $image:$version"
+          # latest and the minor alias follow a finished release only, the
+          # same rule the other three images keep.
+          case "$version" in
+          *-*) ;;
+          *)   tags="$tags --tag $image:latest --tag $image:${version%.*}" ;;
+          esac
+          docker buildx build source \
+            --file source/docker/Containerfile \
+            --target package-repository \
+            --build-context repository=pages/packages \
+            --platform linux/amd64,linux/arm64 \
+            --build-arg VERSION="$version" \
+            --build-arg COMMIT="$GITHUB_SHA" \
+            --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --provenance=true --sbom=true \
+            $tags --push
