@@ -590,6 +590,10 @@ jobs:
         # than half way through the upload with some assets replaced.
         env:
           GH_TOKEN: ${{ github.token }}
+          # Without it gh cannot tell which repository it is looking at, and
+          # its error reads here as "no release yet" - so the guard against
+          # publishing a tag twice would pass by failing.
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           tag="$GITHUB_REF_NAME"
@@ -619,6 +623,10 @@ jobs:
       - name: Attach to the release
         env:
           GH_TOKEN: ${{ github.token }}
+          # This job checks out one script into source/ and nothing else, so
+          # the working directory is not a git repository and gh has nothing
+          # to read the repository name from. It is told instead.
+          GH_REPO: ${{ github.repository }}
         # The release is created when the tag was pushed without one. The
         # upload carries no --clobber: an asset that is already there makes
         # this step fail, which is the intention.
