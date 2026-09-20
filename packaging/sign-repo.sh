@@ -30,6 +30,11 @@ case "$CHANNEL" in
     ""|*[!a-z0-9-]*) echo "the channel is a bare word: '$CHANNEL' is not" >&2; exit 1 ;;
 esac
 mkdir -p "$REPO"
+# Both directories are resolved once, here. The script cds into the
+# architecture directory to run repo-add, and a relative path handed in from
+# outside - as the release workflow hands one in - stops resolving there.
+RELEASE="$(cd "$RELEASE" && pwd)"
+REPO="$(cd "$REPO" && pwd)"
 
 # place copies a release file into the repository once. A name that is
 # already published with other bytes stops everything: the host that fetched
@@ -175,7 +180,7 @@ if ls "$RELEASE"/*.pkg.tar.* >/dev/null 2>&1; then
         # got last, not the one with the highest version. The shell glob sorts
         # alphabetically, so 0.9.0 won over 0.13.0 and the repository announced
         # an old version as current. Sorting by version puts the newest last.
-        mapfile -t packages < <(printf '%s\n' "$arch_dir"/*.pkg.tar.zst | sort -V)
+        mapfile -t packages < <(cd "$arch_dir" && printf '%s\n' *.pkg.tar.zst | sort -V)
         ( cd "$arch_dir" && repo-add --sign --key "$KEY" flotestro.db.tar.gz "${packages[@]}" >/dev/null )
         [ -e "$arch_dir/flotestro.db" ] || { echo "repo-add did not build the package database" >&2; exit 1; }
     done < <(sort -u "$touched")
