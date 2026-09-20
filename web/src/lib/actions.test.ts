@@ -64,7 +64,7 @@ export function actionConstants(go: string): Map<string, string> {
 }
 
 /** The body of a Go map or slice literal opened by this line. */
-function literalBody(go: string, opening: string): string {
+export function literalBody(go: string, opening: string): string {
   const start = go.indexOf(opening);
   if (start < 0) throw new Error(`the Go sources no longer contain ${opening}`);
   const end = go.indexOf("\n}\n", start);

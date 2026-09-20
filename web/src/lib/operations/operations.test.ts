@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   emptyForm, operationForm, OPERATION_FORMS, payloadTextOf, readPayloadText,
   type FieldValue, type FormValue, type OperationEntry, type OperationField,
 } from "./index";
+import { actionConstants, literalBody } from "../actions.test";
 
 /* The registry is data, so it is checked as data: every entry has to read
    back what it wrote, refuse an empty form or produce a payload the server
@@ -11,37 +15,27 @@ import {
    with the names of the operations still typed as JSON. */
 
 /**
- * The operations the control plane marks campaign-capable, copied by hand
- * from campaignModes in internal/opspec/campaigns.
+ * The operations the control plane marks campaign-capable, read out of
+ * campaignModes itself. A copy of that list would drift the same way the
+ * list it copies moves, and the drift would be silent: an operation opened
+ * to the fleet with no form is one an operator can only order as raw JSON.
  */
-const CAMPAIGN_ACTIONS = [
-  // same payload on every host
-  "unit.start", "unit.stop", "unit.restart", "unit.reload", "unit.enable.set",
-  "unit.mask.set", "unit.reset_failed",
-  "schedule.ensure", "schedule.disable", "schedule.remove", "schedule.run_now",
-  "localuser.create", "localuser.lock", "localuser.unlock", "localuser.sshkeys.set",
-  "localuser.groups.set", "localuser.expiry.set",
-  "packages.hold.set", "packages.repository.set",
-  "agent.upgrade",
-  "docker.container.start", "docker.container.stop", "docker.container.restart",
-  "docker.image.pull",
-  "kernel.module.load", "sysctl.ensure", "selinux.mode.set", "time.timezone.set",
-  // a different diff on every host
-  "packages.install", "packages.upgrade",
-  "file.ensure", "file.remove", "file.rollback",
-  "backup.run", "backup.verify",
-  "certificate.deploy", "certificate.renew", "certificate.trust.ensure", "certificate.trust.remove",
-  "mount.ensure", "mount.remove", "filesystem.check", "filesystem.resize", "lvm.extend",
-  "network.profile.apply", "network.route.ensure", "network.mtu.set", "dns.host.apply",
-  "network.link.apply", "network.link.remove",
-  "firewall.rule.ensure", "firewall.rule.remove", "firewall.zone.port", "firewall.zone.service",
-  "ssh.config.apply", "time.config.apply", "docker.compose.deploy", "kernel.module.blacklist",
-  "docker.container.ensure", "docker.network.ensure", "docker.volume.ensure",
-  "system.hostname.set",
-  // their own state machine
-  "system.reboot", "identity.host.enroll", "packages.repair",
-  "network.rollback", "firewall.ruleset.restore", "security.remediate",
-];
+function campaignActions(): string[] {
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
+  const go = readFileSync(join(root, "internal/opspec/campaigns.go"), "utf8");
+  const opspec = readFileSync(join(root, "internal/opspec/opspec.go"), "utf8");
+  const constants = actionConstants(opspec);
+  const body = literalBody(go, "var campaignModes = map[ActionType]CampaignMode{");
+  const out: string[] = [];
+  for (const match of body.matchAll(/^\t(Action[A-Za-z0-9]*):/gm)) {
+    const name = constants.get(match[1]);
+    if (!name) throw new Error(`campaignModes names ${match[1]}, which declares no ActionType`);
+    out.push(name);
+  }
+  // An empty read would let this test pass having checked nothing.
+  if (out.length < 20) throw new Error(`campaignModes read as ${out.length} entries`);
+  return out;
+}
 
 /** A value of the right kind for a field, canonical enough to read back. */
 function sample(field: OperationField): FieldValue {
@@ -297,7 +291,7 @@ describe("what the entries refuse", () => {
 
 describe("the operations still typed as JSON", () => {
   it("covers every operation the catalogue opens to the fleet", () => {
-    const missing = CAMPAIGN_ACTIONS.filter((action) => !operationForm(action));
+    const missing = campaignActions().filter((action) => !operationForm(action));
     expect(missing, `no form yet for: ${missing.join(", ")}`).toEqual([]);
   });
 });
