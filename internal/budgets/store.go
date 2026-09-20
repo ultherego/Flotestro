@@ -3,6 +3,7 @@ package budgets
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sort"
 	"strings"
@@ -300,11 +301,31 @@ func (s *Store) Renew(ctx context.Context, owners []string) error {
 	if len(owners) == 0 {
 		return nil
 	}
-	_, err := s.pool.Exec(ctx,
-		`update budget_leases set lease_until = now() + make_interval(secs => $2)
-		  where owner = any($1)`, owners, s.lease.Seconds())
-	return err
+	// Only a lease that is still alive: capacity counts the living ones, so
+	// renewing an expired row hands back tokens somebody else already holds.
+	// A row that is simply gone is a task that finished, which is not a loss.
+	var lost int
+	err := s.pool.QueryRow(ctx, `
+		with renewed as (
+		    update budget_leases set lease_until = now() + make_interval(secs => $2)
+		     where owner = any($1) and lease_until > now()
+		    returning owner
+		)
+		select count(*) from budget_leases
+		 where owner = any($1) and lease_until <= now()`,
+		owners, s.lease.Seconds()).Scan(&lost)
+	if err != nil {
+		return err
+	}
+	if lost > 0 {
+		return fmt.Errorf("%w: %d of %d had already expired", ErrLeaseLost, lost, len(owners))
+	}
+	return nil
 }
+
+// ErrLeaseLost means a lease this caller believed it held had already expired
+// and its tokens are somebody else's now.
+var ErrLeaseLost = errors.New("the budget lease was lost")
 
 // Fenced names one lease by its owner and the fencing token the caller
 // holds for it.
@@ -324,13 +345,31 @@ func (s *Store) RenewFenced(ctx context.Context, leases []Fenced) error {
 		owners = append(owners, lease.Owner)
 		tokens = append(tokens, lease.Token)
 	}
-	_, err := s.pool.Exec(ctx, `
-		update budget_leases l
-		   set lease_until = now() + make_interval(secs => $3)
-		  from unnest($1::text[], $2::bigint[]) as held (owner, token)
-		 where l.owner = held.owner and l.fencing_token = held.token`,
-		owners, tokens, s.lease.Seconds())
-	return err
+	// Lost means the row is still there and is no longer ours: expired, or
+	// taken by another holder. A row that is gone is a target that finished.
+	var lost int
+	err := s.pool.QueryRow(ctx, `
+		with renewed as (
+		    update budget_leases l
+		       set lease_until = now() + make_interval(secs => $3)
+		      from unnest($1::text[], $2::bigint[]) as held (owner, token)
+		     where l.owner = held.owner and l.fencing_token = held.token
+		       and l.lease_until > now()
+		    returning l.owner
+		)
+		select count(*) from budget_leases l
+		  join unnest($1::text[], $2::bigint[]) as held (owner, token)
+		    on l.owner = held.owner
+		 where l.fencing_token <> held.token or l.lease_until <= now()`,
+		owners, tokens, s.lease.Seconds()).Scan(&lost)
+	if err != nil {
+		return err
+	}
+	if lost > 0 {
+		return fmt.Errorf("%w: %d of %d had expired or changed hands",
+			ErrLeaseLost, lost, len(leases))
+	}
+	return nil
 }
 
 // Release returns the tokens of one piece of work.
