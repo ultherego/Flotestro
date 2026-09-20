@@ -84,7 +84,7 @@ services:
   control-plane:
     # A tag is readable and is what an example shows. Production pins the
     # digest as well - image:tag@sha256:... - because a tag can be moved.
-    image: ghcr.io/ultherego/flotestro-control-plane:${FLOTESTRO_VERSION:?set FLOTESTRO_VERSION in .env}
+    image: ghcr.io/ultherego/flotestro-control-plane:${FLOTESTRO_VERSION:-latest}
     restart: unless-stopped
     user: "65532:65532"
 
@@ -240,7 +240,7 @@ services:
     profiles: ["airgap"]
     # The reference keeps the registry it was built under although the site
     # cannot reach it: "docker load" restores the image under exactly that name.
-    image: ghcr.io/ultherego/flotestro-package-repository:${FLOTESTRO_VERSION:?set FLOTESTRO_VERSION in .env}
+    image: ghcr.io/ultherego/flotestro-package-repository:${FLOTESTRO_VERSION:-latest}
     restart: unless-stopped
     user: "65532:65532"
 
@@ -285,7 +285,7 @@ services:
   # writes into the identity of the installation.
   admin-tools:
     profiles: ["tools"]
-    image: ghcr.io/ultherego/flotestro-admin-tools:${FLOTESTRO_VERSION:?set FLOTESTRO_VERSION in .env}
+    image: ghcr.io/ultherego/flotestro-admin-tools:${FLOTESTRO_VERSION:-latest}
     restart: "no"
     user: "65532:65532"
 
@@ -333,7 +333,7 @@ services:
   # that the state is writable and the backups are not.
   admin-restore:
     profiles: ["restore"]
-    image: ghcr.io/ultherego/flotestro-admin-tools:${FLOTESTRO_VERSION:?set FLOTESTRO_VERSION in .env}
+    image: ghcr.io/ultherego/flotestro-admin-tools:${FLOTESTRO_VERSION:-latest}
     restart: "no"
     user: "65532:65532"
 

@@ -98,7 +98,11 @@ registry - `postgres:17-bookworm` - is a short name, and Podman refuses to
 resolve one without a terminal to ask at; the files name
 `docker.io/library/postgres` in full, which both runtimes take. And
 `podman-compose` honours `--profile` but not the `COMPOSE_PROFILES`
-environment variable, so every profile here is named with the flag.
+environment variable, so every profile here is named with the flag. It also
+has no `cp` subcommand, so the one command in the quick start that uses it -
+fetching the bootstrap token - is `podman cp` against the container instead:
+
+    podman cp flotestro_control-plane_1:/var/lib/flotestro/bootstrap-token .
 
 `podman-compose` reads the rest of the files as written:
 `read_only`, `tmpfs`, `cap_drop`, `security_opt`, `pids_limit`, `ulimits` and

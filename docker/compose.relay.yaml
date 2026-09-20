@@ -6,7 +6,7 @@ name: flotestro-relay
 
 services:
   relay:
-    image: ghcr.io/ultherego/flotestro-relay:${FLOTESTRO_VERSION:?set FLOTESTRO_VERSION in .env}
+    image: ghcr.io/ultherego/flotestro-relay:${FLOTESTRO_VERSION:-latest}
     # A tag for readability; production pins the digest as well, and the
     # relay is upgraded from the same release as the panel it talks to.
     restart: unless-stopped
@@ -63,7 +63,7 @@ services:
   # The registration runs once, with a one-time token, and ends. The token
   # never enters the service above, which restarts and would keep it.
   relay-enroll:
-    image: ghcr.io/ultherego/flotestro-relay:${FLOTESTRO_VERSION:?set FLOTESTRO_VERSION in .env}
+    image: ghcr.io/ultherego/flotestro-relay:${FLOTESTRO_VERSION:-latest}
     profiles: ["enroll"]
     user: "65532:65532"
     command: ["enroll", "-config", "/etc/flotestro/relay.yaml", "-token-file", "/run/secrets/relay_enrollment_token"]
