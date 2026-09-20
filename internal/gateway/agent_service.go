@@ -1078,6 +1078,16 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 			errorCode, errorMessage = code, message
 		}
 	}
+	// A change the host never read back is not a change that landed. The agent
+	// settles this for itself, so an absent verification means the block was
+	// lost on the way or the read never happened; either way the panel is not
+	// entitled to call it a success.
+	if state == jobs.StateSucceeded && result.GetVerification() == nil &&
+		verificationExpected(opspec.ActionType(action)) {
+		state, statusName = jobs.StateFailed, "failed"
+		errorCode = opspec.ErrorAppliedUnverified
+		errorMessage = "the change was made and the result carries no read of the host afterwards"
+	}
 
 	accepted, err := s.jobs.RecordResult(ctx, jobID, attemptID, jobs.Result{
 		Status:          statusName,

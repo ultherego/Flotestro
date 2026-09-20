@@ -113,6 +113,15 @@ func (s *AgentService) closeReboot(ctx context.Context, hostID string,
 		"host_id", hostID, "job_id", job.JobID, "boot_id", verdict.Observed)
 }
 
+// verificationExpected says whether this operation's result has to carry the
+// host's own reading. An operation with no verifier has nothing to read, and
+// the two the panel settles - a restart, an agent upgrade - are confirmed by
+// the host coming back rather than by anything in the result.
+func verificationExpected(action opspec.ActionType) bool {
+	verifier := action.Verifier()
+	return verifier != opspec.VerifierNone && !verifier.PanelSettled()
+}
+
 // verificationJSON writes the host's reading of itself after a change the way
 // it arrived.
 func verificationJSON(verification *agentv1.Verification) json.RawMessage {

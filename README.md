@@ -108,8 +108,15 @@ and packages to the signed
 [apt, dnf and pacman repository](https://ultherego.github.io/Flotestro/packages/),
 each with a build attestation that says which run produced it.
 
-Contributing, building from source and the repository layout are in the
-[documentation](https://ultherego.github.io/Flotestro/docs/).
+Building it, the conventions the code holds to and what CI checks are in
+[CONTRIBUTING.md](CONTRIBUTING.md). What changed between releases is in
+[CHANGELOG.md](CHANGELOG.md).
+
+## Reporting a vulnerability
+
+One installation holds the fleet's certificate authority, its secret store and
+a root helper on every managed host. Please read [SECURITY.md](SECURITY.md)
+before opening anything in public.
 
 ## Licence
 

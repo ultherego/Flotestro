@@ -247,10 +247,18 @@ func TestPanelDoesNotAppendToSomeoneElsesConfigurationWithoutConsent(t *testing.
 	if job.State == "succeeded" {
 		t.Fatal("the panel appended itself to someone else's configuration without consent")
 	}
+	// The guard above checks that a source is listed, which is not the same as
+	// one that answers: a laboratory with no route out refuses at the
+	// reachability gate first, and then this test is not looking at the gate
+	// it came to look at.
+	message := lastMessage(attempts)
+	if strings.Contains(message, "servers answered") {
+		t.Skipf("the host reaches none of its own time sources from here: %s", message)
+	}
 	// The refusal is to name the condition the host does not meet, not
 	// only state that it cannot be done.
-	if !strings.Contains(lastMessage(attempts), "drop-in") {
-		t.Errorf("refusal without a reason: %q", lastMessage(attempts))
+	if !strings.Contains(message, "drop-in") {
+		t.Errorf("refusal without a reason: %q", message)
 	}
 
 	after := hostTimeSnapshot(t, h, host.ID)
