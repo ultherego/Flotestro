@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { kindLabel, previewOf, scheduleKinds } from "./Schedules";
+import { entryFile, foundUnderName, kindLabel, previewOf, scheduleKinds, type Schedule } from "./Schedules";
 import type { Capabilities } from "../../lib/types";
 
 /* Cron and systemd timers are two mechanisms of one thing. Which of them a
@@ -83,5 +83,40 @@ describe("previewOf", () => {
   it("stays a preview of nothing when there is nothing to read", () => {
     expect(previewOf({ status: "succeeded" })).toEqual({});
     expect(previewOf({ status: "succeeded", stdout: "not a document" })).toEqual({});
+  });
+});
+
+/* An entry found on the host is named by the file it lives in and the line
+   inside it, and one file holds as many entries as it has lines. A name typed
+   into the form is therefore compared with the file, not with an identifier. */
+
+describe("foundUnderName", () => {
+  const line = (path: string, at: number): Schedule => ({
+    id: `${path}:${at}`, kind: "cron", source: "manual", enabled: true,
+    expression: "0 1 * * 0", path, line: at,
+  });
+  const ours: Schedule = {
+    id: "raid-check", kind: "cron", source: "managed", enabled: true,
+    expression: "0 5 * * *", path: "/etc/cron.d/flotestro-raid-check", line: 2,
+  };
+  const entries: Schedule[] = [
+    ours,
+    line("/etc/cron.d/raid-check", 1),
+    line("/etc/cron.d/raid-check", 2),
+    line("/etc/crontab", 4),
+  ];
+
+  it("finds every line of the file the name would take over", () => {
+    expect(foundUnderName(entries, "raid-check").map((entry) => entry.line)).toEqual([1, 2]);
+    expect(entryFile(entries[1])).toBe("raid-check");
+  });
+
+  it("leaves our own entry alone: ordering that name again rewrites it", () => {
+    expect(foundUnderName([ours], "raid-check")).toEqual([]);
+  });
+
+  it("finds nothing for an empty name or a name nobody uses", () => {
+    expect(foundUnderName(entries, "")).toEqual([]);
+    expect(foundUnderName(entries, "nightly")).toEqual([]);
   });
 });

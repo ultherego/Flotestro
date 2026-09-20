@@ -46,6 +46,9 @@ const (
 	// ErrorCalendarUnsupported means an expression that cannot become a
 	// timer, because cron and systemd disagree on what it means.
 	ErrorCalendarUnsupported = "timer_calendar_unsupported"
+	// ErrorAdoptSharedFile means an entry found in a file that holds more
+	// than it: adopting it would take the file and every other line with it.
+	ErrorAdoptSharedFile = "schedule_adopt_shared_file"
 )
 
 // PermissionScheduleRootExec is the grant a root entry needs on top of the
@@ -277,32 +280,72 @@ func (s *Server) ensureCron(ctx context.Context, action *helperv1.ScheduleReques
 	}
 	// An entry with the same identifier may already exist as a found one.
 	// Overwriting it without operator consent would erase somebody else's work.
-	collision := s.foundEntry(ctx, action.GetId())
-	if collision != nil && !action.GetAdopt() {
+	collisions := s.foundEntries(ctx, action.GetId())
+	if len(collisions) > 0 && !action.GetAdopt() {
 		return reject(ErrorUnsupported, fmt.Sprintf(
-			"an entry with this name already exists on the host (%s, line %d) and does not belong to the panel; "+
-				"adopting it needs explicit consent", collision.Path, collision.Line))
+			"an entry with this name already exists on the host (%s) and does not belong to the panel; "+
+				"adopting it needs explicit consent", collisionPlace(collisions)))
 	}
-	// The adoption has to remove the entry found. Left next to the panel entry
-	// it would run the same job a second time - and the operator asked for one.
-	if collision != nil && filepath.Dir(collision.Path) != cronDir {
-		return reject(ErrorUnsupported, fmt.Sprintf(
-			"the entry lies in %s (line %d); the panel does not rewrite that file, "+
-				"remove the line there by hand before adopting it", collision.Path, collision.Line))
+	if len(collisions) > 0 {
+		if refusal := adoptableByFile(collisions); refusal != nil {
+			return refusal
+		}
 	}
 
 	if err := schedules.WriteEntry(cronDir, entry); err != nil {
 		return reject(ErrorExecFailed, err.Error())
 	}
 	message := "the entry " + entry.ID + " was written to " + schedules.EntryPath(cronDir, entry.ID)
-	if collision != nil {
-		if err := os.Remove(collision.Path); err != nil {
+	if len(collisions) > 0 {
+		adopted := collisions[0]
+		if err := os.Remove(adopted.Path); err != nil {
 			return reject(ErrorExecFailed, "the entry was written, but the adopted "+
-				collision.Path+" was not removed: "+err.Error())
+				adopted.Path+" was not removed: "+err.Error())
 		}
-		message += "; " + collision.Path + " was adopted and removed"
+		message += "; " + adopted.Path + " held the adopted entry alone (line " +
+			strconv.Itoa(adopted.Line) + ") and was removed with it"
 	}
 	return scheduleResponse(s.readSchedules(ctx), message)
+}
+
+// adoptableByFile judges whether the adoption can be carried out by removing
+// the file: the panel adopts a line, and a file only when it is that line.
+func adoptableByFile(collisions []schedules.Schedule) *helperv1.HelperResponse {
+	// The adoption has to remove the entry found. Left next to the panel entry
+	// it would run the same job a second time - and the operator asked for one.
+	adopted := collisions[0]
+	if filepath.Dir(adopted.Path) != cronDir {
+		return reject(ErrorUnsupported, fmt.Sprintf(
+			"the entry lies outside %s (%s); the panel does not rewrite that file, "+
+				"remove the line there by hand before adopting it", cronDir, collisionPlace(collisions)))
+	}
+	// The file is read again rather than counted from the snapshot: a line the
+	// parser skipped - a variable, a line it could not read - is content too.
+	lines, err := schedules.ContentLines(adopted.Path)
+	if err != nil {
+		return reject(ErrorExecFailed, "reading "+adopted.Path+" before adopting it: "+err.Error())
+	}
+	if lines != 1 || len(collisions) != 1 {
+		return reject(ErrorAdoptSharedFile, fmt.Sprintf(
+			"%s carries %d lines and the entry to adopt is one of them (%s); removing the file would "+
+				"remove the others with it, so nothing was written - take that line out by hand "+
+				"and order the entry again", adopted.Path, lines, collisionPlace(collisions)))
+	}
+	return nil
+}
+
+// collisionPlace names where the found entries are: one cron file can hold
+// many of them, so the lines are named and not only the file.
+func collisionPlace(collisions []schedules.Schedule) string {
+	lines := make([]string, 0, len(collisions))
+	for _, entry := range collisions {
+		lines = append(lines, strconv.Itoa(entry.Line))
+	}
+	label := ", line "
+	if len(lines) > 1 {
+		label = ", lines "
+	}
+	return collisions[0].Path + label + strings.Join(lines, ", ")
 }
 
 // toggleEntry enables or disables a managed entry. Disabling leaves the content
@@ -612,17 +655,21 @@ func (s *Server) managedEntry(ctx context.Context, id string) *schedules.Schedul
 	return nil
 }
 
-func (s *Server) foundEntry(ctx context.Context, id string) *schedules.Schedule {
-	for _, entry := range s.readSchedules(ctx).Schedules {
-		// A collision is a file with exactly this name in /etc/cron. d or an entry
-		// in /etc/crontab with the same name.
+func (s *Server) foundEntries(ctx context.Context, id string) []schedules.Schedule {
+	return cronCollisions(s.readSchedules(ctx).Schedules, id)
+}
+
+// cronCollisions returns every entry the host carries under this name: a file
+// of exactly this name is as many entries as it has lines, not one.
+func cronCollisions(entries []schedules.Schedule, id string) []schedules.Schedule {
+	var found []schedules.Schedule
+	for _, entry := range entries {
 		if entry.Source != schedules.SourceManaged && entry.Kind == schedules.KindCron &&
 			filepath.Base(entry.Path) == id {
-			found := entry
-			return &found
+			found = append(found, entry)
 		}
 	}
-	return nil
+	return found
 }
 
 // systemctlOutput runs systemctl with a fixed set of arguments.

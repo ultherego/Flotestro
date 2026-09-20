@@ -5,14 +5,14 @@ import type { Capabilities, Job } from "../../lib/types";
 import { Time, Empty } from "../../components/ui";
 import { Breakdown } from "../../components/widgets";
 import {
-  Fact, Facts, Field, Fields, Foot, Form, FormActions, FormNote, Message, ModuleFreshness, ModuleHeader, ModulePage,
-  Section, Summary, Table, Widgets, countWhere, useHost, useModule,
+  Check, Fact, Facts, Field, Fields, Foot, Form, FormActions, FormNote, Message, ModuleFreshness, ModuleHeader,
+  ModulePage, Section, Summary, Table, Widgets, countWhere, useHost, useModule,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
 
-type Schedule = {
+export type Schedule = {
   id: string;
   kind: string;
   source: string;
@@ -386,6 +386,23 @@ function command(entry: Schedule): string {
   return entry.command_line || (entry.command ?? []).join(" ");
 }
 
+/** The file a found entry lives in; its own name is that file and a line. */
+export function entryFile(entry: Schedule): string {
+  const path = entry.path ?? "";
+  return path.slice(path.lastIndexOf("/") + 1);
+}
+
+/**
+ * What the host already runs under a name a new entry would take. A found
+ * entry is named "<file>:<line>", so the name is compared with its file.
+ */
+export function foundUnderName(entries: Schedule[], name: string): Schedule[] {
+  if (!name) return [];
+  return entries.filter(
+    (entry) => entry.source !== "managed" && entry.kind === "cron" && entryFile(entry) === name,
+  );
+}
+
 /** What a mechanism is called on screen. */
 export function kindLabel(kind: string, t: (text: string) => string): string {
   switch (kind) {
@@ -425,12 +442,21 @@ function NewEntry({
   const choices = kinds.length > 1 ? [...kinds, "any"] : kinds;
   const [kind, setKind] = useState(kinds[0] ?? "cron");
   const [previewError, setPreviewError] = useState("");
+  // Adoption removes what the host runs under this name, so it is a decision
+  // of its own and it is not remembered past the name it was given for.
+  const [adopt, setAdopt] = useState(false);
   const args = commandLine.trim().split(/\s+/).filter(Boolean);
   // The accounts this host already schedules work under.
   const accounts = [...new Set(entries.map((entry) => entry.user).filter((name): name is string => Boolean(name)))].sort();
-  // A name another entry already carries is not a new entry: ordering it
-  // rewrites that one.
-  const taken = entries.some((entry) => entry.id === id.trim());
+  // A name another entry of ours already carries is not a new entry: ordering
+  // it rewrites that one.
+  const taken = entries.some((entry) => entry.source === "managed" && entry.id === id.trim());
+  // What the host administrator runs under this name; only a cron entry takes
+  // such a line over, a timer is written beside it under its own name.
+  const found = kind === "timer" ? [] : foundUnderName(entries, id.trim());
+  // The host adopts a line by removing the file it is alone in, so a file it
+  // shares with other entries it refuses - and so does the form.
+  const shared = found.length > 1;
 
   // The next runs come from the host, not from the browser: the browser
   // knows neither the host's zone nor its clock, and a preview in the wrong
@@ -470,7 +496,8 @@ function NewEntry({
             <input
               placeholder={t("A name for this entry, its own on this host")}
               value={id}
-              onChange={(e) => setId(e.target.value)}
+              // The consent was given for one name; another name is another entry.
+              onChange={(e) => { setId(e.target.value); setAdopt(false); }}
             />
           </Field>
           <Field label={t("Cron expression")} narrow>
@@ -518,6 +545,26 @@ function NewEntry({
             <input value={comment} onChange={(e) => setComment(e.target.value)} />
           </Field>
         </Fields>
+        {/* An entry of the host administrator under this name is taken over
+            only on purpose, and the operator reads first what disappears. */}
+        {found.length > 0 && (
+          <FormNote>
+            {shared ? (
+              t("{path} carries {count} entries of the host administrator, this name among them. The host does not take over a file it shares: remove that line there by hand, or give this entry another name.", {
+                path: found[0].path ?? "", count: found.length,
+              })
+            ) : (
+              <>
+                {t("{path} (line {line}) already runs under this name and belongs to the host administrator.", {
+                  path: found[0].path ?? "", line: found[0].line ?? 0,
+                })}{" "}
+                <Check checked={adopt} onChange={setAdopt}>
+                  {t("Take it over: the panel writes its own entry and removes that one. The host refuses the order if that file holds anything besides it.")}
+                </Check>
+              </>
+            )}
+          </FormNote>
+        )}
         {/* The arguments shown plainly: the operator is to see that the panel
             runs no shell and that quotes mean nothing here. */}
         {args.length > 0 && (
@@ -570,9 +617,12 @@ function NewEntry({
                 user,
                 comment,
                 enabled: true,
+                // The consent travels with the order: the host refuses to take
+                // over anything it was not given for.
+                adopt: found.length > 0 && adopt,
               })
             }
-            disabled={!id || !expression || args.length === 0}
+            disabled={!id || !expression || args.length === 0 || shared || (found.length > 0 && !adopt)}
           >
             {t("Create")}
           </button>

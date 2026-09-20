@@ -251,3 +251,42 @@ func TestTimersLandInTheSameTable(t *testing.T) {
 		t.Error("an inactive timer was read as active")
 	}
 }
+
+// A file in /etc/cron. d holds as many entries as it has lines, and each of
+// them is named by its line: taking the file for the entry loses the rest.
+func TestAFoundFileIsOneEntryPerLine(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "raid-check")
+	content := "# the weekly checks\n" +
+		"0 1 * * 0 root /usr/sbin/raid-check --array md0\n" +
+		"0 2 * * 0 root /usr/sbin/raid-check --array md1\n" +
+		"#@ 0 3 * * 0 root /usr/sbin/raid-check --array md2\n" +
+		"MAILTO=root\n"
+	if err := os.WriteFile(file, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := ReadCron("", dir, time.Now())
+	if len(entries) != 3 {
+		t.Fatalf("entries = %d: %+v", len(entries), entries)
+	}
+	for i, want := range []string{LineIdentifier(file, 2), LineIdentifier(file, 3), LineIdentifier(file, 4)} {
+		if entries[i].ID != want {
+			t.Errorf("entry %d is named %q, want %q", i, entries[i].ID, want)
+		}
+	}
+
+	// The count carries the line the parser skips as well: removing the file
+	// would remove that one too.
+	lines, err := ContentLines(file)
+	if err != nil || lines != 4 {
+		t.Errorf("content lines = %d, %v; want the three entries and the assignment", lines, err)
+	}
+	alone := filepath.Join(dir, "single")
+	if err := os.WriteFile(alone, []byte("# nightly\n\n0 4 * * * root /usr/bin/true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if lines, err := ContentLines(alone); err != nil || lines != 1 {
+		t.Errorf("a file that is its one entry counts %d lines, %v", lines, err)
+	}
+}

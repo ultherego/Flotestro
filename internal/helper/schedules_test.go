@@ -1,11 +1,13 @@
 package helper
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 	"github.com/ultherego/flotestro/internal/modules/schedules"
 )
 
@@ -174,5 +176,132 @@ func TestTimerCalendarAsksSystemdInItsOwnLanguage(t *testing.T) {
 	found := schedules.Schedule{Expression: "daily"}
 	if got := timerCalendar(found); got != "daily" {
 		t.Errorf("the calendar of a found timer = %q", got)
+	}
+}
+
+// ensureOrder is an order to write a cron entry of this name, with or without
+// the consent to take over what the host already carries under it.
+func ensureOrder(id string, adopt bool) (*helperv1.ScheduleRequest, schedules.Schedule) {
+	return &helperv1.ScheduleRequest{
+			Operation:  helperv1.ScheduleRequest_OPERATION_ENSURE,
+			Id:         id,
+			Kind:       schedules.KindCron,
+			Expression: "0 5 * * *",
+			Command:    []string{"/usr/bin/true"},
+			User:       "root",
+			Adopt:      adopt,
+		}, schedules.Schedule{
+			ID: id, Kind: schedules.KindCron, Expression: "0 5 * * *",
+			Command: []string{"/usr/bin/true"}, User: "root", Enabled: true,
+		}
+}
+
+// Adoption takes over the line found, and removes the file only when it holds
+// nothing else: a distribution's file of four entries is four entries.
+func TestAdoptionDoesNotTakeTheWholeCronFile(t *testing.T) {
+	cron, _ := hostWith(t, true, false)
+	shared := filepath.Join(cron, "raid-check")
+	content := "0 1 * * 0 root /usr/sbin/raid-check --array md0\n" +
+		"0 2 * * 0 root /usr/sbin/raid-check --array md1\n"
+	if err := os.WriteFile(shared, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	action, entry := ensureOrder("raid-check", true)
+	response := testServer().ensureCron(context.Background(), action, entry)
+	if response.GetAccepted() {
+		t.Fatal("a file of several entries was adopted as one entry")
+	}
+	if response.GetErrorCode() != ErrorAdoptSharedFile {
+		t.Errorf("code = %q, want %q (%s)", response.GetErrorCode(), ErrorAdoptSharedFile, response.GetMessage())
+	}
+	// The refusal names every line, because the operator has to find the one.
+	if !strings.Contains(response.GetMessage(), "lines 1, 2") {
+		t.Errorf("the refusal does not name the lines: %q", response.GetMessage())
+	}
+	if current, err := os.ReadFile(shared); err != nil || string(current) != content {
+		t.Errorf("the file of the host administrator was changed: %q, %v", current, err)
+	}
+	// A refused order writes nothing: the panel entry would run the job twice.
+	if _, err := os.Stat(schedules.EntryPath(cron, "raid-check")); !os.IsNotExist(err) {
+		t.Errorf("a refused adoption still wrote the panel entry: %v", err)
+	}
+}
+
+// A found file that is its single entry is the one case where removing the
+// file removes exactly the adopted line.
+func TestAdoptionRemovesAFileThatIsTheOneEntry(t *testing.T) {
+	cron, _ := hostWith(t, true, false)
+	sole := filepath.Join(cron, "nightly")
+	if err := os.WriteFile(sole, []byte("# the nightly job\n0 4 * * * root /usr/bin/true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	server := testServer()
+	action, entry := ensureOrder("nightly", true)
+	response := server.ensureCron(context.Background(), action, entry)
+	if !response.GetAccepted() {
+		t.Fatalf("the adoption was refused: %s (%s)", response.GetErrorCode(), response.GetMessage())
+	}
+	if _, err := os.Stat(sole); !os.IsNotExist(err) {
+		t.Error("the adopted entry stayed next to the panel entry and would run twice")
+	}
+	if _, err := os.Stat(schedules.EntryPath(cron, "nightly")); err != nil {
+		t.Errorf("the panel entry was not written: %v", err)
+	}
+
+	// The entry the panel itself wrote is not a collision with itself: ordering
+	// it again rewrites it, without any consent to adopt.
+	action, entry = ensureOrder("nightly", false)
+	if response := server.ensureCron(context.Background(), action, entry); !response.GetAccepted() {
+		t.Errorf("rewriting the panel's own entry was refused: %s (%s)",
+			response.GetErrorCode(), response.GetMessage())
+	}
+}
+
+// Without consent nothing is written and nothing is removed, and the refusal
+// says where the entries are.
+func TestAnEntryFoundOnTheHostIsNotOverwrittenWithoutConsent(t *testing.T) {
+	cron, _ := hostWith(t, true, false)
+	found := filepath.Join(cron, "e2scrub_all")
+	if err := os.WriteFile(found, []byte("30 3 * * 0 root /usr/lib/e2scrub_all\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	action, entry := ensureOrder("e2scrub_all", false)
+	response := testServer().ensureCron(context.Background(), action, entry)
+	if response.GetAccepted() {
+		t.Fatal("an entry of the host administrator was overwritten without consent")
+	}
+	if !strings.Contains(response.GetMessage(), found+", line 1") {
+		t.Errorf("the refusal does not say where the entry is: %q", response.GetMessage())
+	}
+	if _, err := os.Stat(found); err != nil {
+		t.Errorf("the entry found on the host was removed: %v", err)
+	}
+}
+
+// A collision is with the lines of the file of that name, not with the panel's
+// own entries, which carry their own file name.
+func TestCollisionsAreTheLinesOfTheFileAndNotOurOwnEntries(t *testing.T) {
+	ours := schedules.Schedule{
+		ID: "raid-check", Kind: schedules.KindCron, Source: schedules.SourceManaged,
+		Path: "/etc/cron.d/flotestro-raid-check", Line: 2,
+	}
+	entries := []schedules.Schedule{ours,
+		{ID: "/etc/cron.d/raid-check:1", Kind: schedules.KindCron, Source: schedules.SourceManual,
+			Path: "/etc/cron.d/raid-check", Line: 1},
+		{ID: "/etc/cron.d/raid-check:4", Kind: schedules.KindCron, Source: schedules.SourceManual,
+			Path: "/etc/cron.d/raid-check", Line: 4},
+	}
+	found := cronCollisions(entries, "raid-check")
+	if len(found) != 2 {
+		t.Fatalf("collisions = %d: %+v", len(found), found)
+	}
+	if place := collisionPlace(found); place != "/etc/cron.d/raid-check, lines 1, 4" {
+		t.Errorf("the place of the collision = %q", place)
+	}
+	if found := cronCollisions([]schedules.Schedule{ours}, "raid-check"); len(found) != 0 {
+		t.Errorf("the panel's own entry collided with itself: %+v", found)
 	}
 }

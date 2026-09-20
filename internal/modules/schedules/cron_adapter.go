@@ -43,6 +43,36 @@ func EntryPath(dir, id string) string {
 	return filepath.Join(dir, FilePrefix+id)
 }
 
+// LineIdentifier names an entry found on the host. A cron file holds as many
+// entries as it has lines, so the line is part of what the entry is.
+func LineIdentifier(path string, line int) string {
+	return fmt.Sprintf("%s:%d", path, line)
+}
+
+// ContentLines counts the lines of a file that carry something: a blank line
+// and a plain comment carry nothing, a commented-out entry does.
+func ContentLines(path string) (int, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+
+	count := 0
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || (strings.HasPrefix(line, "#") && !strings.HasPrefix(line, "#@")) {
+			continue
+		}
+		count++
+	}
+	if err := scanner.Err(); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 // ReadCron gathers the cron entries from /etc/crontab and /etc/cron. d.
 func ReadCron(crontab, dir string, now time.Time) []Schedule {
 	var entries []Schedule
@@ -123,7 +153,7 @@ func readCronFile(path string, withUser bool, now time.Time) []Schedule {
 			entry.Command = strings.Fields(entry.CommandLine)
 		} else {
 			entry.Source = SourceManual
-			entry.ID = fmt.Sprintf("%s:%d", path, number)
+			entry.ID = LineIdentifier(path, number)
 		}
 		// The date is computed only for active entries: a disabled entry
 		// has no next run and giving one would be false.
