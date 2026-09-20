@@ -218,7 +218,8 @@ func AdvisoriesFromHost(distribution string) bool {
 }
 
 // ProviderFor returns the name of the tracker proper for the distribution of a
-// host.
+// host. It is also what decides a family is supported at all: an empty answer
+// is ReasonFamilyUnsupported, so a family belongs here only once it works.
 func ProviderFor(distribution string) string {
 	switch strings.ToLower(distribution) {
 	case "debian":

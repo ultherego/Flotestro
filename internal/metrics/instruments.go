@@ -272,7 +272,8 @@ var (
 	SessionFence = Default.NewCounter("flotestro_session_fence_total",
 		"Writes refused and tasks held by the session ownership fence, by outcome.", "outcome")
 	// NotificationDeliveries counts the settled attempts of the notification
-	// queue by the state they settled in: delivered, retry_wait, dead_letter.
+	// queue by the state they settled in: delivered, retry_wait, dead_letter,
+	// and suppressed for a row a silence caught on its way out.
 	NotificationDeliveries = Default.NewCounter("flotestro_notification_deliveries_total",
 		"Settled attempts of the notification queue, by the state they settled in.", "state")
 	// AlertFence counts the alert-state writes the evaluator's fencing token

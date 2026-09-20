@@ -119,7 +119,7 @@ type CVEPage = { items: CVERow[]; count: number; total: number; limit: number; o
 /** The coverage reasons the panel can name; unknown codes are shown as-is. */
 export const COVERAGE_REASONS: Record<string, string> = {
   feed_missing: "no feed for the distribution",
-  family_unsupported: "no vulnerability feed for this family",
+  family_unsupported: "this system family is not supported",
   feed_stale: "feed older than policy",
   release_unsupported: "release not covered",
   package_list_missing: "no package list yet",

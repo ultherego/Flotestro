@@ -1470,38 +1470,161 @@ func verifyNetworkState(ctx context.Context, readers *hostReaders, in verifyInpu
 	// Both families are read back, because both were ordered: an IPv6 address
 	// that never landed is as much a failed change as an IPv4 one, and a verifier
 	// that looked only at the first family would call it a success.
+	have := make([]string, 0, len(link.Addresses))
+	for _, address := range link.Addresses {
+		have = append(have, address.Address)
+	}
+	observed := subject + " " + listOf(have)
 	if ordered := append(append([]string(nil), payload.Addresses...),
 		payload.Addresses6...); len(ordered) > 0 {
-		have := make([]string, 0, len(link.Addresses))
-		for _, address := range link.Addresses {
-			have = append(have, address.Address)
-		}
 		var missing []string
 		for _, address := range ordered {
 			if !contains(have, address) {
 				missing = append(missing, address)
 			}
 		}
-		observed := subject + " " + listOf(have)
-		if len(missing) == 0 {
-			return verified(expected, observed)
+		if len(missing) > 0 {
+			return unverified(expected, observed,
+				"the interface "+subject+" does not carry "+listOf(missing)+" after the change")
 		}
-		return unverified(expected, observed,
-			"the interface "+subject+" does not carry "+listOf(missing)+" after the change")
+	} else {
+		// A profile applied by DHCP and a rollback name no address: what they
+		// promise of the addressing is an interface that is up and addressed.
+		observed = subject + " " + firstNonEmpty(link.OperState, "unknown") + ", " +
+			strconv.Itoa(len(link.Addresses)) + " addresses"
+		if link.OperState == "down" {
+			return unverified(expected, observed, "the interface "+subject+" is down after the change")
+		}
+		if len(link.Addresses) == 0 {
+			return unverified(expected, observed,
+				"the interface "+subject+" carries no address after the change")
+		}
 	}
 
-	// A profile applied by DHCP and a rollback promise no single value: what
-	// they promise is an interface that is up and addressed.
-	observed := subject + " " + firstNonEmpty(link.OperState, "unknown") + ", " +
-		strconv.Itoa(len(link.Addresses)) + " addresses"
-	if link.OperState == "down" {
-		return unverified(expected, observed, "the interface "+subject+" is down after the change")
+	// The gateway and the servers the order named are part of the change: an
+	// address that landed without the route through it is not what was ordered,
+	// and a DHCP profile addresses itself whatever the order asked for.
+	if failed := verifyOrderedGateways(expected, subject, payload, snapshot); failed != nil {
+		return *failed
 	}
-	if len(link.Addresses) == 0 {
-		return unverified(expected, observed,
-			"the interface "+subject+" carries no address after the change")
+	if failed := verifyOrderedServers(ctx, readers, expected, subject, payload); failed != nil {
+		return *failed
 	}
 	return verified(expected, observed)
+}
+
+// verifyOrderedGateways reads the default route of every family the order gave
+// a gateway. A gateway that was ordered and is not in the table is a change
+// that did not happen; a family whose table was not read at all is unknown.
+func verifyOrderedGateways(expected, subject string, payload *opspec.NetworkPayload,
+	snapshot network.Snapshot) *observation {
+	for _, want := range []struct{ gateway, family, word string }{
+		{payload.Gateway, network.FamilyIPv4, "the first family"},
+		{payload.Gateway6, network.FamilyIPv6, "the second family"},
+	} {
+		if want.gateway == "" {
+			continue
+		}
+		wanted := expected + " via " + want.gateway
+		gateways, known := defaultGateways(snapshot.Routes, subject, want.family)
+		if !known {
+			failed := unreadable(wanted, "the host reported no route of "+want.word+" after the change")
+			return &failed
+		}
+		if !contains(gateways, want.gateway) {
+			failed := unverified(wanted, subject+" via "+listOf(gateways),
+				"the default route of "+subject+" runs through "+listOf(gateways)+
+					" and not through "+want.gateway)
+			return &failed
+		}
+	}
+	return nil
+}
+
+// defaultGateways lists the gateways of the default routes of one family on the
+// interface, and says whether the table of that family was read at all.
+func defaultGateways(routes []network.Route, device, family string) ([]string, bool) {
+	var gateways []string
+	known := false
+	for _, route := range routes {
+		if routeFamily(route) != family {
+			continue
+		}
+		known = true
+		if !defaultDestination(route.Destination) || route.Gateway == "" {
+			continue
+		}
+		if route.Interface != "" && device != "" && route.Interface != device {
+			continue
+		}
+		gateways = append(gateways, route.Gateway)
+	}
+	return gateways, known
+}
+
+// defaultDestination says whether the route is the one a gateway is written as.
+func defaultDestination(destination string) bool {
+	switch destination {
+	case "default", "0.0.0.0/0", "::/0":
+		return true
+	}
+	return false
+}
+
+// routeFamily names the family of a route. A table read without one is placed
+// by its own text: a colon belongs to the second family.
+func routeFamily(route network.Route) string {
+	if route.Family != "" {
+		return route.Family
+	}
+	if strings.Contains(route.Destination+route.Gateway, ":") {
+		return network.FamilyIPv6
+	}
+	return network.FamilyIPv4
+}
+
+// verifyOrderedServers reads the resolver back for the servers the order named.
+// A resolver that does not name them is not the host that was ordered.
+func verifyOrderedServers(ctx context.Context, readers *hostReaders, expected, subject string,
+	payload *opspec.NetworkPayload) *observation {
+	if len(payload.DNS) == 0 {
+		return nil
+	}
+	wanted := expected + ", servers " + listOf(payload.DNS)
+	if readers.resolver == nil {
+		failed := unreadable(wanted, noReader("the resolver"))
+		return &failed
+	}
+	snapshot := readers.resolver(ctx)
+	if snapshot.UnavailableReason != "" {
+		failed := unreadable(wanted, snapshot.UnavailableReason)
+		return &failed
+	}
+	// The servers belong to the interface; the file is only what the service
+	// computed out of every interface it serves.
+	servers := snapshot.Servers
+	for _, link := range snapshot.Links {
+		if link.Name == subject {
+			servers = link.Servers
+			break
+		}
+	}
+	if len(servers) == 0 {
+		failed := unreadable(wanted, "the host named no resolver of "+subject+" after the change")
+		return &failed
+	}
+	var missing []string
+	for _, server := range payload.DNS {
+		if !contains(servers, server) {
+			missing = append(missing, server)
+		}
+	}
+	if len(missing) > 0 {
+		failed := unverified(wanted, "servers "+listOf(servers),
+			"the resolver of "+subject+" does not name "+listOf(missing)+" after the change")
+		return &failed
+	}
+	return nil
 }
 
 // verifyIPv6Switches reads the two switches of the second family back from the
@@ -1513,10 +1636,10 @@ func verifyIPv6Switches(expected, subject string, payload *opspec.NetworkPayload
 		return nil
 	}
 	if payload.AcceptRA != "" && settings.AcceptRA != nil {
+		// on-forwarding is its own setting, not a stronger "on": a host that
+		// took the one when the other was ordered took another change.
 		word := network.AcceptRAWord(*settings.AcceptRA)
-		wanted := payload.AcceptRA == word ||
-			(payload.AcceptRA != network.AcceptRAOff && word != network.AcceptRAOff)
-		if !wanted {
+		if word != payload.AcceptRA {
 			failed := unverified(expected, subject+" accept_ra "+word,
 				"the host takes router advertisements on "+subject+" as "+word+
 					" and not as "+payload.AcceptRA)

@@ -88,7 +88,7 @@ func (r *Router) Deliver(ctx context.Context, events []outbox.Event) error {
 		if len(matching) == 0 {
 			continue
 		}
-		verdict, err := r.suppression(ctx, event, message)
+		verdict, err := r.suppression(ctx, message)
 		if err != nil {
 			return err
 		}
@@ -97,25 +97,19 @@ func (r *Router) Deliver(ctx context.Context, events []outbox.Event) error {
 				ChannelID: channel.ID, EventID: event.ID, EventType: event.Type,
 				State: StatePending, channelRevision: channel.Revision,
 			}
-			if verdict.Suppressed {
-				row.State = StateSuppressed
-				row.PolicyID = verdict.PolicyID
-				row.SuppressionReason = verdict.Reason
-				row.LastError = verdict.Sentence
-			}
+			held := verdict
 			// A resolve is kept back for a channel whose fire was kept back: the two
 			// are decided per channel, because a silence may start between them.
-			if !verdict.Suppressed && message.Subject == "alert.resolved" {
-				kept, err := r.fireWasKept(ctx, channel.ID, event.AggregateID)
-				if err != nil {
+			if !held.Suppressed {
+				if held, err = r.resolveOfKeptFire(ctx, channel.ID, message); err != nil {
 					return err
 				}
-				if kept != nil {
-					row.State = StateSuppressed
-					row.PolicyID = kept.PolicyID
-					row.SuppressionReason = SuppressedFireKept
-					row.LastError = "the fire of this alert was kept back: " + kept.Sentence
-				}
+			}
+			if held.Suppressed {
+				row.State = StateSuppressed
+				row.PolicyID = held.PolicyID
+				row.SuppressionReason = held.Reason
+				row.LastError = held.Sentence
 			}
 			if row, err = row.WithMessage(message); err != nil {
 				return err
@@ -174,19 +168,19 @@ type maintenance struct {
 	Reason string
 }
 
-// suppression decides, before the row is written, whether a silence or a
-// maintenance window keeps the event back.
-func (r *Router) suppression(ctx context.Context, event outbox.Event, message Message) (Verdict, error) {
+// suppression decides whether a silence or a maintenance window keeps the
+// message back, as of now: the queue asks it again before it sends.
+func (r *Router) suppression(ctx context.Context, message Message) (Verdict, error) {
 	var fields payload
-	_ = json.Unmarshal(event.Payload, &fields)
+	_ = json.Unmarshal(message.Payload, &fields)
 	hostID := fields.HostID
-	if hostID == "" && event.Aggregate == "host" {
-		hostID = event.AggregateID
+	if hostID == "" && message.Aggregate == "host" {
+		hostID = message.AggregateID
 	}
 	ruleID := ""
 	if message.Subject == "alert.fired" || message.Subject == "alert.resolved" ||
 		message.Subject == "alert.no_data" {
-		ruleID = ruleIDOf(event.Payload)
+		ruleID = ruleIDOf(message.Payload)
 	}
 	silences, err := r.activeSilences(ctx, hostID, ruleID)
 	if err != nil {
@@ -267,6 +261,47 @@ func (r *Router) maintenanceOf(ctx context.Context, hostID string) (*maintenance
 		return nil, err
 	}
 	return &window, nil
+}
+
+// Recheck decides the suppression again, at the instant the row would be sent:
+// the silences and the window are read as they are now, so one started while
+// the row waited in backoff keeps it back and one that has ended does not.
+func (r *Router) Recheck(ctx context.Context, channelID string, message Message) (Verdict, error) {
+	// The summary of an ended silence is the word about the suppression, not a
+	// message the suppression covers; it is the only row not of the trail.
+	if message.Subject == "alert.summary" {
+		return Verdict{}, nil
+	}
+	verdict, err := r.suppression(ctx, message)
+	if err != nil || verdict.Suppressed {
+		return verdict, err
+	}
+	return r.resolveOfKeptFire(ctx, channelID, message)
+}
+
+// resolveOfKeptFire keeps back a resolve whose fire this channel never got,
+// whether the fire was kept back when it was written or when it would be sent.
+func (r *Router) resolveOfKeptFire(ctx context.Context, channelID string, message Message) (Verdict, error) {
+	if message.Subject != "alert.resolved" {
+		return Verdict{}, nil
+	}
+	kept, err := r.fireWasKept(ctx, channelID, message.AggregateID)
+	if err != nil {
+		return Verdict{}, err
+	}
+	return KeptFire(kept), nil
+}
+
+// KeptFire is the verdict of a resolve whose fire was kept back, without the
+// database; the zero verdict when the fire went out.
+func KeptFire(fire *Verdict) Verdict {
+	if fire == nil {
+		return Verdict{}
+	}
+	return Verdict{
+		Suppressed: true, PolicyID: fire.PolicyID, Reason: SuppressedFireKept,
+		Sentence: "the fire of this alert was kept back: " + fire.Sentence,
+	}
 }
 
 // fireWasKept says whether the channel's row for the fire of the alert

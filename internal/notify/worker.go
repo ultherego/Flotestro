@@ -70,13 +70,37 @@ func (o Options) withDefaults() Options {
 	return o
 }
 
+// queue is what the worker does to the notification queue; the store
+// implements it, and a test stands in for it.
+type queue interface {
+	ReclaimStale(ctx context.Context) (int64, error)
+	Claim(ctx context.Context, owner string, lease time.Duration, limit int) ([]Delivery, error)
+	Renew(ctx context.Context, id, owner string, lease time.Duration) (bool, error)
+	Settle(ctx context.Context, id, owner string, outcome Outcome) error
+	settleSuppressed(ctx context.Context, id, owner string, verdict Verdict) error
+	get(ctx context.Context, id string) (*Channel, error)
+	withSecret(ctx context.Context, channel Channel) (Channel, error)
+	SweepDeliveries(ctx context.Context) error
+	EndedSilences(ctx context.Context) ([]SummaryWork, error)
+	EnqueueSummary(ctx context.Context, work SummaryWork, message Message) error
+}
+
+// suppressionCheck decides the suppression again at the moment a row would be
+// sent; the router implements it, and a test stands in for it.
+type suppressionCheck interface {
+	Recheck(ctx context.Context, channelID string, message Message) (Verdict, error)
+}
+
 // Worker sends the rows of the queue.
 type Worker struct {
-	store     *Store
+	store     queue
 	senders   map[string]Sender
 	publicURL string
 	log       *slog.Logger
 	options   Options
+	// suppression is asked before every attempt, because a silence an operator
+	// started while the row waited in backoff has to reach the row too.
+	suppression suppressionCheck
 	// owner is this worker's lease identity.
 	owner string
 	wake  chan struct{}
@@ -91,7 +115,7 @@ type Worker struct {
 func NewWorker(store *Store, router *Router, options Options, log *slog.Logger) *Worker {
 	return &Worker{
 		store: store, senders: router.senders, publicURL: router.publicURL, log: log,
-		options: options.withDefaults(), owner: uuid.NewString(),
+		suppression: router, options: options.withDefaults(), owner: uuid.NewString(),
 		wake: make(chan struct{}, 1), summaryWake: make(chan struct{}, 1),
 		random: rand.Float64,
 	}
@@ -201,6 +225,15 @@ func (w *Worker) send(ctx context.Context, row Delivery) error {
 	if !held {
 		return nil
 	}
+	kept, err := w.keptBack(ctx, row)
+	if err != nil {
+		// The silences could not be read, so it is not known whether the row is
+		// covered; the lease runs out and the row comes back rather than going out.
+		return err
+	}
+	if kept {
+		return nil
+	}
 	outcome, held := w.attempt(ctx, row)
 	if !held {
 		return nil
@@ -215,6 +248,32 @@ func (w *Worker) send(ctx context.Context, row Delivery) error {
 			"attempt", row.Attempt, "state", outcome.State, "code", outcome.ErrorCode, "err", outcome.Error)
 	}
 	return nil
+}
+
+// keptBack settles the row as suppressed when a silence or a maintenance
+// window covers it at this instant, and says whether it did.
+func (w *Worker) keptBack(ctx context.Context, row Delivery) (bool, error) {
+	if w.suppression == nil {
+		return false, nil
+	}
+	message, err := row.Message()
+	if err != nil {
+		// A row without a message is nothing to decide about; the attempt settles
+		// it as the dead letter it is, with the code that names the fault.
+		return false, nil
+	}
+	verdict, err := w.suppression.Recheck(ctx, row.ChannelID, message)
+	if err != nil || !verdict.Suppressed {
+		return false, err
+	}
+	if err := w.store.settleSuppressed(ctx, row.ID, w.owner, verdict); err != nil {
+		return false, err
+	}
+	metrics.NotificationDeliveries.Inc(StateSuppressed)
+	w.log.Info("a notification was kept back on its way out",
+		"delivery", row.ID, "channel", row.ChannelID, "event", row.EventType,
+		"reason", verdict.Reason, "policy", verdict.PolicyID)
+	return true, nil
 }
 
 // attempt sends the row once and classifies what happened.

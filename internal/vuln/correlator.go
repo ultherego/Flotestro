@@ -140,16 +140,16 @@ func Evaluate(input Input, snapshot Snapshot, advisories map[string][]Advisory,
 func CoverageReasonFor(input Input, snapshot Snapshot,
 	maxFeedAge time.Duration, now time.Time) (string, bool) {
 	switch {
+	case FamilyWithoutFeed(input.Distribution):
+		// Stands before the gaps below: for such a host nothing arrives later, and
+		// a list the panel never asks for is not a list it is still waiting for.
+		return ReasonFamilyUnsupported, true
 	case input.ListMissing:
 		return ReasonPackageListMissing, true
 	case input.AdvisoriesReason != "" && input.AdvisoriesReason != ReasonHostAdvisoriesStale:
 		// A host whose repository metadata the panel has not read is not a host
 		// without vendor findings: it is a host nobody has checked for any.
 		return input.AdvisoriesReason, true
-	case FamilyWithoutFeed(input.Distribution):
-		// No feed for the family is a different answer than a feed not yet
-		// fetched: nothing will arrive later.
-		return ReasonFamilyUnsupported, true
 	case snapshot.Digest == "":
 		return ReasonFeedMissing, true
 	case !CoversRelease(snapshot, input.Release):
@@ -170,13 +170,15 @@ func CoverageReasonFor(input Input, snapshot Snapshot,
 }
 
 // FamilyWithoutFeed says whether the distribution belongs to a family no
-// vulnerability feed of the panel describes.
+// tracker of the panel speaks about. The trackers themselves answer it, so a
+// family spelled in a way no list foresaw is still named for what it is.
 func FamilyWithoutFeed(distribution string) bool {
-	switch strings.ToLower(strings.TrimSpace(distribution)) {
-	case "arch", "archlinux", "archarm", "cachyos", "manjaro", "endeavouros", "artix", "garuda":
-		return true
+	name := strings.ToLower(strings.TrimSpace(distribution))
+	if name == "" {
+		// A host whose system nobody has read yet is unknown, not unsupported.
+		return false
 	}
-	return false
+	return ProviderFor(name) == ""
 }
 
 // evaluatePackage settles one package against one vendor finding.
@@ -371,6 +373,8 @@ func Compare(distribution, installed, fixed string) (int, bool) {
 	return version.CompareDeb(installed, fixed), true
 }
 
+// isRPMFamily picks the comparison rules of a version, not the families the
+// panel supports: only ProviderFor says that, and it names four.
 func isRPMFamily(distribution string) bool {
 	switch distribution {
 	case "fedora", "rhel", "centos", "almalinux", "rocky", "opensuse", "sles":

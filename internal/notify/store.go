@@ -683,6 +683,20 @@ type Outcome struct {
 	NextAttempt time.Duration
 }
 
+// settleSuppressed ends a leased row that a silence caught on its way out.
+// Settle takes only the outcomes of an attempt that was made, and this one
+// never reached the sender.
+func (s *Store) settleSuppressed(ctx context.Context, id, owner string, verdict Verdict) error {
+	_, err := s.pool.Exec(ctx, `
+		update notification_deliveries
+		   set state = 'suppressed', lease_owner = null, lease_until = null,
+		       policy_id = $3, suppression_reason = $4,
+		       last_error_code = '', last_error = $5, updated_at = now()
+		 where id = $1 and lease_owner = $2 and state = 'leased'`,
+		id, owner, nullableID(verdict.PolicyID), verdict.Reason, verdict.Sentence)
+	return err
+}
+
 // Settle writes the outcome of an attempt on a row the owner holds.
 func (s *Store) Settle(ctx context.Context, id, owner string, outcome Outcome) error {
 	var err error

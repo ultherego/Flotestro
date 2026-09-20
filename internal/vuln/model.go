@@ -101,10 +101,11 @@ func StaleReason(reason string) bool {
 
 // Reason codes for an undetermined state.
 const (
-	// ReasonFeedMissing means there is no snapshot for this distribution.
+	// ReasonFeedMissing means there is no snapshot for this distribution yet;
+	// the family itself has a tracker.
 	ReasonFeedMissing = "feed_missing"
 	// ReasonFamilyUnsupported means a system family no tracker of the panel
-	// speaks about at all.
+	// speaks about at all: nothing about such a host arrives later.
 	ReasonFamilyUnsupported = "family_unsupported"
 	// ReasonFeedStale means a snapshot older than the policy allows.
 	ReasonFeedStale = "feed_stale"
