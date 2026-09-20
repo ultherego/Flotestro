@@ -73,7 +73,7 @@ func TestAGlobalSilenceIsTheOnlyOneThatKeepsSecurityAlertsBack(t *testing.T) {
 	receiver := newRecipient(t, http.StatusOK)
 	channel := createChannel(h, map[string]any{
 		"name": fmt.Sprintf("integration-silence-%d", time.Now().UnixNano()), "kind": "webhook",
-		"config": map[string]any{"url": receiver.server.URL},
+		"config": map[string]any{"url": receiver.server.URL, "secret": "integration-signing-secret"},
 		"events": []string{"security.alert", "host.offline"},
 		"reason": notificationReason,
 	})

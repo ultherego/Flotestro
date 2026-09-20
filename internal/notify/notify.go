@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/mail"
 	"net/url"
 	"regexp"
@@ -218,11 +219,15 @@ func ChannelSecretName(channelID string) string {
 	return ChannelSecretPrefix + channelID
 }
 
+// CodeWebhookSecretRequired: the webhook has no signing key, and a header
+// computed with an empty key is a signature only in shape.
+const CodeWebhookSecretRequired = "webhook_secret_required"
+
 // WebhookConfig is the address of a webhook of the installation's own.
 type WebhookConfig struct {
 	URL string `json:"url"`
-	// Secret signs the deliveries; empty means unsigned, and the API says
-	// so on the channel. It is in the configuration only on the way in.
+	// Secret signs the deliveries and is required. It is in the
+	// configuration only on the way in.
 	Secret string `json:"secret,omitempty"`
 	// SecretSet is what the API shows in place of the secret.
 	SecretSet bool `json:"secret_set,omitempty"`
@@ -325,6 +330,12 @@ func decodeConfig(kind string, raw json.RawMessage) (any, error) {
 		if err := checkHTTPURL(config.URL); err != nil {
 			return nil, err
 		}
+		// A webhook is signed or it is not a channel: an empty HMAC key is a
+		// legal key, so a body "signed" with it is forgeable by anyone.
+		if config.Secret == "" && !config.SecretSet {
+			return nil, Error{Code: CodeWebhookSecretRequired,
+				Message: "the webhook needs a signing secret; a delivery signed with an empty key is one anybody can forge"}
+		}
 		// A typed secret replaces the stored one; "the secret is set" with none
 		// typed keeps it; neither clears it.
 		if config.Secret != "" {
@@ -408,6 +419,18 @@ func checkHTTPURL(address string) error {
 	parsed, err := url.Parse(address)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
 		return Error{Code: "invalid_config", Message: "the address has to be an http or https URL"}
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return Error{Code: CodeAddressNotAllowed, Message: "the address is the panel itself; a channel reports to a receiver outside it"}
+	}
+	// A literal address is judged now; a name is judged when it is dialled,
+	// because what it answers is only true at that moment.
+	if ip := net.ParseIP(host); ip != nil && !allowedAddress(ip) {
+		if reason := addressRefusal(ip); reason != "" {
+			return Error{Code: CodeAddressNotAllowed,
+				Message: "the address is " + reason + "; a receiver of this installation is declared in " + AllowEnv}
+		}
 	}
 	return nil
 }

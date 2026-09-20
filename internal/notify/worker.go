@@ -390,6 +390,10 @@ func Classify(err error, attempt, maxAttempts int) Outcome {
 		return retry()
 	case CodeInvalidConfig:
 		return Outcome{State: StateDeadLetter, ErrorCode: CodeChannelMisconfigured, Error: sentence}
+	case CodeAddressNotAllowed, CodeWebhookSecretRequired:
+		// Neither passes with time: the channel has to be written differently,
+		// or the installation has to declare the network it sends into.
+		return Outcome{State: StateDeadLetter, ErrorCode: failure.Code, Error: sentence}
 	case CodeConnectionRefused, CodeDNSFailure, CodeTimeout, CodeTLSFailure, CodeUnreachable, CodeSecretUnavailable:
 		// A network error, and a secret store that did not answer, pass: the
 		// receiver may be back, the key may be back, and the operator who replaces a

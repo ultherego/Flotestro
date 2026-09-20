@@ -26,7 +26,8 @@ describe("channelBody", () => {
     expect(channelBody({ ...emptyForm(), reason: "a proper reason" }).problem).toBe("name");
     expect(channelBody({ ...emptyForm(), name: "x", events: [] }).problem).toBe("events");
     expect(channelBody({ ...emptyForm(), name: "x", url: "ftp://x" }).problem).toBe("url");
-    expect(channelBody({ ...emptyForm(), name: "x", url: "https://x" }).problem).toBe("reason");
+    expect(channelBody({ ...emptyForm(), name: "x", url: "https://x" }).problem).toBe("secret");
+    expect(channelBody({ ...emptyForm(), name: "x", url: "https://x", secret: "k" }).problem).toBe("reason");
     const mail = { ...emptyForm("email"), name: "x", reason: "a proper reason" };
     expect(channelBody(mail).problem).toBe("host");
     expect(channelBody({ ...mail, host: "relay", port: "70000" }).problem).toBe("port");
@@ -52,11 +53,11 @@ describe("channelBody", () => {
     });
   });
 
-  it("keeps a stored webhook secret unless a new one is typed or the stored one is cleared", () => {
+  it("keeps a stored webhook secret unless a new one is typed, and never lets a webhook go unsigned", () => {
     const form = { ...formOf(stored), reason: "edited the address" };
     expect(channelBody(form).body?.config).toEqual({ url: "https://hooks.example.com/flotestro", secret_set: true });
     expect(channelBody({ ...form, secret: "fresh" }).body?.config).toEqual({ url: "https://hooks.example.com/flotestro", secret: "fresh" });
-    expect(channelBody({ ...form, keepSecret: false }).body?.config).toEqual({ url: "https://hooks.example.com/flotestro" });
+    expect(channelBody({ ...form, secretSet: false }).problem).toBe("secret");
   });
 
   it("keeps the withheld address of an incoming webhook unless a new one is typed", () => {

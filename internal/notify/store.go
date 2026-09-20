@@ -221,6 +221,9 @@ func (s *Store) Create(ctx context.Context, channel Channel) (*Channel, error) {
 	if slack, ok := config.(SlackConfig); ok && slack.URL == "" {
 		return nil, Error{Code: "invalid_config", Message: "the incoming webhook needs its address"}
 	}
+	if webhook, ok := config.(WebhookConfig); ok && webhook.Secret == "" {
+		return nil, Error{Code: CodeWebhookSecretRequired, Message: "the webhook needs its signing secret; a new channel has none stored to keep"}
+	}
 	credential, stored := credentialOf(config)
 	if credential != "" && s.secrets == nil {
 		return nil, Error{Code: "secret_store_unavailable", Message: "this installation has no secret store to hold the credential of the channel"}
@@ -250,7 +253,7 @@ func (s *Store) Create(ctx context.Context, channel Channel) (*Channel, error) {
 		values ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7, $8, $9::jsonb, $10, $11, $12)`,
 		id, channel.Name, channel.Kind, encodedConfig, publicConfigOf(channel.Kind, config, ""),
 		nullableID(passwordRef), rotated, channel.Events, encodedFilter,
-		channel.Enabled, channel.CreatedBy, channel.Reason)
+		channel.Enabled && credential == "", channel.CreatedBy, channel.Reason)
 	if isUniqueViolation(err) {
 		return nil, Error{Code: "name_taken", Message: fmt.Sprintf("a channel named %q exists already", channel.Name)}
 	}
@@ -261,11 +264,21 @@ func (s *Store) Create(ctx context.Context, channel Channel) (*Channel, error) {
 		return nil, err
 	}
 	if credential != "" {
+		// The row was committed disabled: the secret store joins no transaction,
+		// so a crash leaves a channel that sends nothing rather than unsigned.
 		if err := s.putCredential(ctx, id, credential, channel.CreatedBy); err != nil {
 			// A channel whose credential could not be sealed is not a
 			// channel: the row goes, and the refusal names the store.
 			_, _ = s.pool.Exec(ctx, `delete from notification_channels where id = $1`, id)
 			return nil, err
+		}
+		if channel.Enabled {
+			if _, err := s.pool.Exec(ctx, `
+				update notification_channels
+				   set enabled = true, revision = revision + 1, updated_at = now()
+				 where id = $1`, id); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return s.Get(ctx, id)

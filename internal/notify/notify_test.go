@@ -152,10 +152,22 @@ func TestWebhookSenderSignsAndTypesTheRefusal(t *testing.T) {
 		t.Errorf("a 502 was typed as %v", err)
 	}
 
-	refused := Channel{ID: "c", Name: "hook", Kind: KindWebhook, Config: json.RawMessage(`{"url":"http://127.0.0.1:1/"}`)}
-	err = (WebhookSender{}).Send(context.Background(), refused, message)
+	// A plain client stands in for the guarded one here: the loopback the test
+	// dials is exactly what the guard refuses.
+	refused := Channel{ID: "c", Name: "hook", Kind: KindWebhook,
+		Config: json.RawMessage(`{"url":"http://127.0.0.1:1/","secret":"secret"}`)}
+	err = (WebhookSender{Client: &http.Client{}}).Send(context.Background(), refused, message)
 	if !asSendError(err, &failure) || failure.Code != CodeConnectionRefused {
 		t.Errorf("a closed port was typed as %v", err)
+	}
+
+	// A channel with no signing key sends nothing: an empty HMAC key would
+	// produce a header anybody can compute.
+	unsigned := Channel{ID: "c", Name: "hook", Kind: KindWebhook,
+		Config: json.RawMessage(`{"url":"` + server.URL + `"}`)}
+	err = (WebhookSender{Client: server.Client()}).Send(context.Background(), unsigned, message)
+	if !asSendError(err, &failure) || failure.Code != CodeWebhookSecretRequired {
+		t.Errorf("a webhook without a signing key was typed as %v", err)
 	}
 
 	// The signing key comes from the secret store with the channel; a row that
@@ -175,7 +187,7 @@ func TestWebhookSenderSignsAndTypesTheRefusal(t *testing.T) {
 func TestTheFailureSentenceKeepsTheAddressOut(t *testing.T) {
 	channel := Channel{ID: "c", Name: "room", Kind: KindSlackWebhook, Config: json.RawMessage(`{}`)}.
 		WithSecret("http://127.0.0.1:1/services/T0/B0/the-token")
-	err := (SlackSender{}).Send(context.Background(), channel, Message{Title: "x"})
+	err := (SlackSender{Client: &http.Client{}}).Send(context.Background(), channel, Message{Title: "x"})
 	var failure SendError
 	if !asSendError(err, &failure) || failure.Code != CodeConnectionRefused {
 		t.Fatalf("a closed port was typed as %v", err)
@@ -223,6 +235,8 @@ func TestClassifyFollowsTheTable(t *testing.T) {
 		{"a 4xx reply passes", SendError{Code: CodeSMTPRejected, Status: 451, Err: errors.New("try later")}, 1, StateRetryWait, CodeSMTPRejected},
 		{"a 5xx reply is permanent", SendError{Code: CodeSMTPRejected, Status: 550, Err: errors.New("no such user")}, 1, StateDeadLetter, CodePermanentSMTP},
 		{"a configuration that does not read", SendError{Code: CodeInvalidConfig, Err: errors.New("bad json")}, 1, StateDeadLetter, CodeChannelMisconfigured},
+		{"an address the panel may not reach", SendError{Code: CodeAddressNotAllowed, Err: errors.New("loopback")}, 1, StateDeadLetter, CodeAddressNotAllowed},
+		{"a webhook without a signing key", SendError{Code: CodeWebhookSecretRequired, Err: errors.New("no key")}, 1, StateDeadLetter, CodeWebhookSecretRequired},
 	}
 	for _, c := range cases {
 		outcome := Classify(c.err, c.attempt, 20)

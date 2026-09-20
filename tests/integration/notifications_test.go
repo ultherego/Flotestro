@@ -172,8 +172,8 @@ func TestNotificationChannelKeepsItsSecretAndLogsTypedFailures(t *testing.T) {
 		t.Errorf("the channel does not carry its last delivery: %+v", fetched.LastDelivery)
 	}
 
-	// An edit that does not retype the secret keeps it; one that says the
-	// secret is not set clears it. The secret itself never comes back.
+	// An edit that does not retype the secret keeps it; one that carries none
+	// at all is refused. The secret itself never comes back.
 	var edited channelView
 	h.do(http.MethodPut, "/api/v1/notifications/channels/"+webhook.ID, map[string]any{
 		"name": name, "kind": "webhook",
@@ -185,15 +185,27 @@ func TestNotificationChannelKeepsItsSecretAndLogsTypedFailures(t *testing.T) {
 	if !config.SecretSet || config.URL != "http://127.0.0.1:1/hooks" || config.Secret != nil {
 		t.Errorf("the edit lost the secret or the address: %s", edited.Config)
 	}
+	var refusal struct {
+		Code string `json:"code"`
+	}
 	h.do(http.MethodPut, "/api/v1/notifications/channels/"+webhook.ID, map[string]any{
 		"name": name, "kind": "webhook",
 		"config": map[string]any{"url": "http://127.0.0.1:1/hooks"},
 		"events": []string{"alert.fired"}, "enabled": false, "reason": notificationReason,
+	}, &refusal, http.StatusBadRequest)
+	if refusal.Code != "webhook_secret_required" {
+		t.Errorf("an edit that drops the signing secret came back as %+v", refusal)
+	}
+	// Disabling the channel is an edit like any other, and keeps the secret.
+	h.do(http.MethodPut, "/api/v1/notifications/channels/"+webhook.ID, map[string]any{
+		"name": name, "kind": "webhook",
+		"config": map[string]any{"url": "http://127.0.0.1:1/hooks", "secret_set": true},
+		"events": []string{"alert.fired"}, "enabled": false, "reason": notificationReason,
 	}, &edited, http.StatusOK)
 	config = webhookConfigView{}
 	_ = json.Unmarshal(edited.Config, &config)
-	if config.SecretSet || edited.Enabled {
-		t.Errorf("the edit did not clear the secret or disable the channel: %+v %s", edited, edited.Config)
+	if !config.SecretSet || edited.Enabled {
+		t.Errorf("the edit lost the secret or left the channel enabled: %+v %s", edited, edited.Config)
 	}
 
 	// A mailbox behind a name that never resolves fails the same typed way; a

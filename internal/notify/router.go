@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"strings"
 	"time"
 
@@ -34,7 +33,7 @@ type Router struct {
 
 // NewRouter creates the router with the three senders.
 func NewRouter(pool *pgxpool.Pool, store *Store, secrets SecretReader, publicURL string, log *slog.Logger) *Router {
-	client := &http.Client{Timeout: sendTimeout}
+	client := guardedClient()
 	return &Router{
 		pool: pool, store: store, log: log, publicURL: publicURL,
 		senders: map[string]Sender{

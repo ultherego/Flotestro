@@ -129,6 +129,12 @@ func (w WebhookSender) Send(ctx context.Context, channel Channel, message Messag
 	if secret == "" {
 		secret = config.Secret
 	}
+	// A row from before the requirement may still have none, and nothing goes
+	// out for it: the receiver could not tell such a body from a forged one.
+	if secret == "" {
+		return SendError{Code: CodeWebhookSecretRequired,
+			Err: errors.New("the channel has no signing secret; set one on the channel")}
+	}
 	body, err := json.Marshal(message)
 	if err != nil {
 		return err
@@ -211,7 +217,7 @@ func post(ctx context.Context, client *http.Client, address string, body []byte,
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("User-Agent", "flotestro-notifications")
 	if client == nil {
-		client = http.DefaultClient
+		client = defaultClient()
 	}
 	response, err := client.Do(request)
 	if err != nil {

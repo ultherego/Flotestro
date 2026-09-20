@@ -113,7 +113,7 @@ func TestTheQueueHoldsAMessageUntilTheReceiverTakesIt(t *testing.T) {
 	})
 	refusing := createChannel(h, map[string]any{
 		"name": name + "-refusing", "kind": "webhook",
-		"config": map[string]any{"url": rejecting.server.URL},
+		"config": map[string]any{"url": rejecting.server.URL, "secret": "integration-signing-secret"},
 		"events": []string{subject}, "reason": notificationReason,
 	})
 

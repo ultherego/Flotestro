@@ -260,7 +260,7 @@ func TestNotificationChannelsAreVisibleInTheirScope(t *testing.T) {
 	})
 	elsewhereOnly := createChannel(h, map[string]any{
 		"name": fmt.Sprintf("scope-elsewhere-%d", stamp), "kind": "webhook",
-		"config": map[string]any{"url": "http://127.0.0.1:1/"},
+		"config": map[string]any{"url": "http://127.0.0.1:1/", "secret": "scope-signing-secret"},
 		"events": []string{"alert.fired"}, "filter": map[string]any{"site": "elsewhere", "environment": "test"},
 		"reason": scopeReason,
 	})

@@ -103,8 +103,6 @@ export type ChannelForm = {
   secretSet: boolean;
   /** When that credential was last set or replaced; "" when there is none. */
   secretRotatedAt: string;
-  /** False when the operator asked for the stored secret to be cleared. */
-  keepSecret: boolean;
   host: string;
   port: string;
   starttls: boolean;
@@ -123,7 +121,7 @@ export type ChannelForm = {
 
 export function emptyForm(kind: ChannelKind = "webhook"): ChannelForm {
   return {
-    name: "", kind, url: "", urlSet: false, secret: "", secretSet: false, secretRotatedAt: "", keepSecret: true,
+    name: "", kind, url: "", urlSet: false, secret: "", secretSet: false, secretRotatedAt: "",
     host: "", port: "587", starttls: true, from: "", to: "", username: "", passwordSecret: "",
     events: ["alert.fired", "alert.resolved"], severityMin: "", site: "", environment: "",
     enabled: true, reason: "",
@@ -145,7 +143,6 @@ export function formOf(channel: Channel): ChannelForm {
     // flag in the configuration is the same fact in the older shape.
     secretSet: channel.secret_configured === true || config.secret_set === true,
     secretRotatedAt: channel.secret_last_rotated_at ?? "",
-    keepSecret: true,
     host: text("host"),
     port: config.port ? String(config.port) : "587",
     starttls: config.starttls !== false,
@@ -178,8 +175,11 @@ export function channelBody(form: ChannelForm): { body?: Record<string, unknown>
     case "webhook": {
       if (!/^https?:\/\/\S+/.test(form.url.trim())) return { problem: "url" };
       config = { url: form.url.trim() };
+      // A webhook is signed or it is not a channel: a body signed with an
+      // empty key is one anybody can forge.
       if (form.secret) config.secret = form.secret;
-      else if (form.secretSet && form.keepSecret) config.secret_set = true;
+      else if (form.secretSet) config.secret_set = true;
+      else return { problem: "secret" };
       break;
     }
     case "slack_webhook": {
@@ -228,6 +228,7 @@ export function problemWords(t: (text: string, params?: Record<string, string | 
     case "port": return t("the port has to lie between 1 and 65535");
     case "from": return t("the sender has to be a mail address");
     case "to": return t("every recipient has to be a mail address, and there has to be one");
+    case "secret": return t("a webhook needs a signing secret; a delivery signed with an empty key is one anybody can forge");
     case "auth_secret": return t("a username needs the name of the secret that holds its password");
     case "auth_tls": return t("a password is sent only over STARTTLS");
     case "reason": return t("the reason needs at least 8 characters");
@@ -761,19 +762,10 @@ function ChannelFields({ form, subjects, severities, onChange }: {
       )}
       {form.kind === "webhook" && (
         <Field label={t("Signing secret")} wide
-          hint={secretWords(t, form, t("Empty means the deliveries are not signed in a way the receiver can verify."))}>
+          hint={secretWords(t, form, t("Required: the receiver verifies the signature, and an empty key signs nothing."))}>
           <input type="password" autoComplete="new-password" value={form.secret} onChange={(e) => set({ secret: e.target.value })} className="mono" />
         </Field>
       )}
-      {form.kind === "webhook" && form.secretSet && (
-        <div className="field">
-          <label className="toggle">
-            <input type="checkbox" checked={!form.keepSecret} onChange={(e) => set({ keepSecret: !e.target.checked })} />{" "}
-            {t("clear the stored secret")}
-          </label>
-        </div>
-      )}
-
       {form.kind === "email" && (
         <>
           <Field label={t("Mail relay host")}>
