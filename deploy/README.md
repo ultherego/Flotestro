@@ -416,8 +416,7 @@ docker compose logs -f control-plane        # wait for "the database schema is c
 docker compose cp control-plane:/var/lib/flotestro/bootstrap-token ./bootstrap-token
 
 # 5. Back up the database and the state volume together, now - the CA was
-#    just created. See "Taking the pair" below.
-mkdir -p backups && chown 65532:65532 backups && chmod 700 backups
+#    just created. ./backups is ready: init made it. See "Taking the pair".
 docker compose --profile tools run --rm admin-tools backup
 ```
 
@@ -681,7 +680,6 @@ job written by hand.
 Once, before the first backup:
 
 ```
-mkdir -p backups && chown 65532:65532 backups && chmod 700 backups
 ```
 
 Then, with the control plane stopped - or at the very least with the rotation

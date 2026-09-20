@@ -32,6 +32,8 @@ services:
       - shared_secrets:/run/flotestro
       # Read-only, and created empty by the runtime when it is not there.
       - ./secrets:/import:ro,z
+      # The backup pair lands here, written by a container running as 65532.
+      - ./backups:/backups:z
 
     command:
       - /bin/sh
@@ -62,6 +64,10 @@ services:
           chmod 0400 /run/flotestro/postgres-password
           chown 999:999 /run/flotestro/postgres-password
         fi
+        # The backup directory belongs to the account admin-tools writes as,
+        # for the same reason and with the same one line.
+        chmod 0700 /backups
+        chown 65532:65532 /backups
 
     cap_drop: [ALL]
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]

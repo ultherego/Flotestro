@@ -228,6 +228,15 @@
     while its owner finishes the handshake. An installation with one instance
     never writes an order at all.</p>
 
+    <p>Adding instances spreads the agent sessions and the browser requests, and
+    it does not spread the alert evaluation: that runs under a single lease, so
+    one instance judges every rule and the others stand ready to take over. It
+    is a ceiling worth knowing rather than a fault to work around &mdash; a
+    fleet of 10&nbsp;000 simulated hosts takes its snapshot in about four
+    seconds, well inside the evaluation interval. An installation large enough
+    to feel that ceiling would need the rules partitioned across leases, which
+    this release does not do.</p>
+
     <h2 id="agent">The agent</h2>
 
     <p>The agent runs as an unprivileged user and holds one stream to the
