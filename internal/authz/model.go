@@ -477,7 +477,8 @@ var rolePermissions = map[Role][]Permission{
 		PermLocalUserRead, PermLocalUserCreate, PermLocalUserLock,
 		PermLocalUserUnlock, PermLocalSSHKeyWrite,
 		PermLocalSSHKeyAdd, PermLocalSSHKeyRemove, PermLocalSSHKeyReplace,
-		// Not accounts.
+		// Not accounts.privileged_groups: this role opens ordinary accounts, and an
+		// account that is root by another name is opened by whoever may grant root.
 		PermNotificationRead,
 		PermScheduleRootExec,
 	},

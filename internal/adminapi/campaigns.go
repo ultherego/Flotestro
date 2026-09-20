@@ -272,7 +272,9 @@ func (s *Server) orderCampaign(w http.ResponseWriter, r *http.Request, request c
 
 	// A campaign must not be a way around the single-host gate.
 	var stepUpEvidence map[string]any
-	if opspec.PayloadRequiresFreshAuth(action, payload) {
+	// A campaign has no one host to ask about the account, so an order that
+	// hands over an account's access is judged as if it were privileged.
+	if opspec.PayloadRequiresFreshAuthForAccount(action, payload, opspec.AccountPrivilegeUnknown) {
 		evidence, ok := s.requireStepUp(w, r, principal, request.Reason,
 			"campaign.create", "campaign", "")
 		if !ok {
@@ -1770,5 +1772,5 @@ func campaignRequiresFreshAuth(campaign *campaigns.Campaign) bool {
 			return action.RequiresFreshAuth()
 		}
 	}
-	return opspec.PayloadRequiresFreshAuth(action, payload)
+	return opspec.PayloadRequiresFreshAuthForAccount(action, payload, opspec.AccountPrivilegeUnknown)
 }

@@ -575,6 +575,68 @@ func PayloadRequiresFreshAuth(action ActionType, payload Payload) bool {
 	return false
 }
 
+// AccountPrivilege is the host's word on the account an order names. Whether
+// an account is root by another name is a fact of the host, not of the order.
+type AccountPrivilege string
+
+const (
+	// AccountPrivilegeUnknown is an inventory that could not answer: no
+	// observation, an unreadable one, or one too old to describe the host now.
+	AccountPrivilegeUnknown AccountPrivilege = "unknown"
+	// AccountPrivilegeOrdinary is an account the host reported in no privileged
+	// group.
+	AccountPrivilegeOrdinary AccountPrivilege = "ordinary"
+	// AccountPrivilegePrivileged is an account the host reported in a group that
+	// is root by another name.
+	AccountPrivilegePrivileged AccountPrivilege = "privileged"
+)
+
+// HandsOverAccountAccess says whether one order gives somebody the access the
+// named account has: a key added, the key list rewritten, a lock or expiry off.
+func HandsOverAccountAccess(action ActionType, payload Payload) bool {
+	if payload.LocalUser == nil {
+		return false
+	}
+	switch action {
+	case ActionLocalSSHKeysAdd, ActionLocalUserUnlock:
+		return true
+	case ActionLocalSSHKeysReplaceAll, ActionLocalSSHKeysSet:
+		// A rewrite that leaves no key takes the access away instead of handing
+		// it over: it is the removal the security remediation orders.
+		return len(payload.LocalUser.SSHKeys) > 0
+	case ActionLocalUserExpirySet:
+		// Clearing the date gives the access back; setting one takes it away.
+		return payload.LocalUser.ExpiresAt == ""
+	}
+	return false
+}
+
+// GrantsPrivilegedAccess says whether the order hands over the access of an
+// account privileged on the host, or of one nothing current could be read about.
+func GrantsPrivilegedAccess(action ActionType, payload Payload, privilege AccountPrivilege) bool {
+	return privilege != AccountPrivilegeOrdinary && HandsOverAccountAccess(action, payload)
+}
+
+// PayloadRiskForAccount is PayloadRisk with the host's word on the account:
+// opening a privileged account ranks with granting the membership itself.
+func PayloadRiskForAccount(action ActionType, payload Payload, privilege AccountPrivilege) RiskLevel {
+	if GrantsPrivilegedAccess(action, payload, privilege) {
+		return RiskCritical
+	}
+	return PayloadRisk(action, payload)
+}
+
+// PayloadRequiresFreshAuthForAccount is PayloadRequiresFreshAuth with the
+// host's word on the account the order names.
+func PayloadRequiresFreshAuthForAccount(action ActionType, payload Payload,
+	privilege AccountPrivilege) bool {
+	switch PayloadRiskForAccount(action, payload, privilege) {
+	case RiskCritical, RiskDestructive:
+		return true
+	}
+	return false
+}
+
 // defaultOutputLimit applies to operations that do not state their own.
 const defaultOutputLimit = 64 << 10
 

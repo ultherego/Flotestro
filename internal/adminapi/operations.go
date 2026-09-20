@@ -190,7 +190,7 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 	// A highest-risk operation requires fresh authentication: one that can cut
 	// off access to the host or wipe data must not go from an hour-old session.
 	var stepUpProof map[string]any
-	if opspec.PayloadRequiresFreshAuth(action, payload) {
+	if s.requiresFreshAuth(r.Context(), hostID, action, payload) {
 		proof, ok := s.requireStepUp(w, r, principal, request.Reason,
 			string(action), "host", hostID)
 		if !ok {
