@@ -21,6 +21,14 @@ here="$(cd "$(dirname "$0")" && pwd)"
 topdir="$(mktemp -d)"
 trap 'rm -rf "$topdir"' EXIT
 
+# rpm refuses a hyphen in Version, and a pre-release belongs in Release
+# anyway: Release "0.rc1" sorts before the "1" of the finished version, so a
+# host that tried the candidate is offered the release as an upgrade.
+case "$VERSION" in
+*-*) RPM_VERSION="${VERSION%%-*}"; RPM_RELEASE="0.${VERSION#*-}" ;;
+*)   RPM_VERSION="$VERSION";       RPM_RELEASE="1" ;;
+esac
+
 case "$COMPONENT" in
 agent)         cp "$here/agent.env" "$STAGE/agent.env"
                cp "$here/agent.yaml" "$STAGE/agent.yaml" ;;
@@ -32,7 +40,8 @@ esac
 rpmbuild -bb "$here/rpm/flotestro-$COMPONENT.spec" \
     --target "$ARCH" \
     --define "_topdir $topdir" \
-    --define "_flotestro_version $VERSION" \
+    --define "_flotestro_version $RPM_VERSION" \
+    --define "_flotestro_release $RPM_RELEASE" \
     --define "_flotestro_stage $STAGE" \
     --define "_flotestro_units $here/systemd" \
     > "$topdir/rpmbuild.log" 2>&1 || { cat "$topdir/rpmbuild.log" >&2; exit 1; }

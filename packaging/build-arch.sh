@@ -26,6 +26,12 @@ here="$(cd "$(dirname "$0")" && pwd)"
 build="$(mktemp -d)"
 trap 'rm -rf "$build"' EXIT
 
+# A hyphen separates pkgver from pkgrel, so it cannot be in pkgver itself.
+# Dropping it is enough: pacman's own vercmp puts 0.61.0rc1 before 0.61.0
+# (measured, not assumed - and beta1 before rc1, rc1 after 0.60.9), so a host
+# that tried a candidate is offered the release as an upgrade.
+PKGVER="$(printf '%s' "$VERSION" | tr -d '-')"
+
 # makepkg refuses to work as root; the sources go into a directory owned by
 # the building user.
 if [ "$COMPONENT" = relay ]; then
@@ -79,7 +85,7 @@ for file in $FILES; do
     sums="$sums'$(sha256sum "$build/$file" | cut -d' ' -f1)' "
 done
 
-sed -e "s/__VERSION__/$VERSION/" -e "s/__SUMS__/${sums% }/" -e "s/__SBOM__/${bills% }/" \
+sed -e "s/__VERSION__/$PKGVER/" -e "s/__SUMS__/${sums% }/" -e "s/__SBOM__/${bills% }/" \
     "$TEMPLATE" > "$build/PKGBUILD"
 
 # makepkg.conf is the build machine's, and both the architecture and the

@@ -20,8 +20,12 @@ root="$(mktemp -d)"
 trap 'rm -rf "$root"' EXIT
 here="$(cd "$(dirname "$0")" && pwd)"
 
+# dpkg reads "0.61.0-rc1" as revision rc1 of 0.61.0, which is newer than the
+# release; "0.61.0~rc1" is the one thing that sorts before it.
+DEB_VERSION="$(printf '%s' "$VERSION" | sed 's/-/~/')"
+
 install -d -m 0755 "$root/DEBIAN"
-sed -e "s/__VERSION__/$VERSION/" -e "s/__ARCH__/$ARCH/" \
+sed -e "s/__VERSION__/$DEB_VERSION/" -e "s/__ARCH__/$ARCH/" \
     "$here/deb/$COMPONENT.control" > "$root/DEBIAN/control"
 install -m 0644 "$here/deb/$COMPONENT.conffiles" "$root/DEBIAN/conffiles"
 for script in postinst prerm postrm; do
@@ -112,5 +116,5 @@ control-plane)
     ;;
 esac
 
-dpkg-deb --root-owner-group --build "$root" "$OUT/${name}_${VERSION}_${ARCH}.deb" >/dev/null
-echo "$OUT/${name}_${VERSION}_${ARCH}.deb"
+dpkg-deb --root-owner-group --build "$root" "$OUT/${name}_${DEB_VERSION}_${ARCH}.deb" >/dev/null
+echo "$OUT/${name}_${DEB_VERSION}_${ARCH}.deb"

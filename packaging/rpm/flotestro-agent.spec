@@ -1,6 +1,6 @@
 Name:           flotestro-agent
 Version:        %{?_flotestro_version}%{!?_flotestro_version:0.1.0}
-Release:        1%{?dist}
+Release:        %{?_flotestro_release}%{!?_flotestro_release:1}%{?dist}
 Summary:        Flotestro fleet agent
 License:        Proprietary
 URL:            https://github.com/ultherego/flotestro
