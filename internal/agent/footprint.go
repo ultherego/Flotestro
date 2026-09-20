@@ -65,18 +65,34 @@ type processCPU struct {
 // it no longer uses back to the host.
 const (
 	releaseThreshold = 24 << 20
+	// releaseUrgent is where holding the pages costs more than the collection
+	// that hands them back. A large read - the package list of a Debian host -
+	// leaves the process here, and waiting out the ordinary interval keeps it
+	// near the budget for as long as the tasks keep arriving.
+	releaseUrgent    = 28 << 20
 	releaseEvery     = 5 * time.Minute
 	taskReleaseEvery = 30 * time.Second
+	// taskReleaseFloor bounds the forced collections when task after task
+	// leaves the process above releaseUrgent: prompt, but not every task.
+	taskReleaseFloor = 5 * time.Second
 )
 
-// pagesHeld says whether this process holds more than the threshold.
-func pagesHeld(procRoot string) bool {
+// pagesHeld reads what this process holds, and whether it could be read.
+func pagesHeld(procRoot string) (uint64, bool) {
 	data, err := os.ReadFile(filepath.Join(procRoot, "self", "status"))
 	if err != nil {
-		return false
+		return 0, false
 	}
-	rss, ok := parseVmRSS(string(data))
-	return ok && rss >= releaseThreshold
+	return parseVmRSS(string(data))
+}
+
+// releaseInterval is how long a finished task waits before handing the pages
+// back again. Close to the budget it is the floor rather than the interval.
+func releaseInterval(rss uint64) time.Duration {
+	if rss >= releaseUrgent {
+		return taskReleaseFloor
+	}
+	return taskReleaseEvery
 }
 
 // taskRelease is the release after a task. It is its own clock, so the
@@ -88,12 +104,13 @@ var taskRelease struct {
 
 // releaseAfterTask hands back what a finished task no longer needs.
 func releaseAfterTask() {
-	if !pagesHeld("/proc") {
+	rss, ok := pagesHeld("/proc")
+	if !ok || rss < releaseThreshold {
 		return
 	}
 	taskRelease.mu.Lock()
 	now := time.Now()
-	if !taskRelease.at.IsZero() && now.Sub(taskRelease.at) < taskReleaseEvery {
+	if !taskRelease.at.IsZero() && now.Sub(taskRelease.at) < releaseInterval(rss) {
 		taskRelease.mu.Unlock()
 		return
 	}
