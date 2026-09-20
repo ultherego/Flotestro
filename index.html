@@ -321,18 +321,18 @@
     <h3>The panel, with a database of its own</h3>
 
     <pre><code>curl -fsSLO https://raw.githubusercontent.com/ultherego/Flotestro/main/deploy/compose.yaml
-printf '%s\n' FLOTESTRO_VERSION=0.60.0 FLOTESTRO_GATEWAY_ID=cp-01 \
-  FLOTESTRO_ADVERTISE=panel.example.org FLOTESTRO_PUBLIC_URL=http://panel.example.org:8080 &gt; .env
-mkdir -p secrets &amp;&amp; chmod 700 secrets
-printf '%s' 'a-long-random-password' &gt; secrets/postgres-password
-printf '%s' 'postgresql://flotestro:a-long-random-password@postgres:5432/flotestro?sslmode=disable' &gt; secrets/database-url
-sudo chown 65532:65532 secrets/* &amp;&amp; chmod 400 secrets/*
 docker compose --profile quickstart up -d
 docker compose cp control-plane:/var/lib/flotestro/bootstrap-token .</code></pre>
 
-    <p class="prose"><code>FLOTESTRO_ADVERTISE</code> is the name the fleet really reaches this
-      panel at: it enters the agent gateway&rsquo;s certificate. The bootstrap token is the first
-      sign-in; map the identity provider&rsquo;s groups to roles, then delete it.</p>
+    <p class="prose">Every setting has a working default, so that is a panel on
+      <code>http://localhost:8080</code>. The bootstrap token is the first sign-in; map the
+      identity provider&rsquo;s groups to roles, then delete it.</p>
+
+    <p class="prose">To serve hosts on other machines, set <code>FLOTESTRO_ADVERTISE</code> in
+      <code>.env</code> to the name the fleet really reaches this panel at: it enters the agent
+      gateway&rsquo;s certificate, and a panel left on loopback refuses a remote enrollment
+      rather than issuing a certificate that host would reject.
+      <code>env.example</code> carries the whole list.</p>
 
     <p class="prose">Against a database you already run, leave the profile out and write its
       DSN into <code>secrets/database-url</code> before the first start; the same file works

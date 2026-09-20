@@ -126,41 +126,45 @@
 
     <h3>The first start</h3>
 
-    <p>Production basic, from an empty directory. The files are in
-    <code>deploy/</code> of the repository.</p>
+    <p>The quick start needs nothing prepared. One file, one command, and the
+    panel is up with a database of its own:</p>
 
     <p class="filename">On the panel host</p>
-<pre><code>cd deploy
+<pre><code>curl -fsSLO https://raw.githubusercontent.com/ultherego/Flotestro/main/deploy/compose.yaml
+docker compose --profile quickstart up -d
+docker compose cp control-plane:/var/lib/flotestro/bootstrap-token .</code></pre>
 
-# 1. The non-secret settings.
-cat &gt; .env &lt;&lt;'SETTINGS'
-FLOTESTRO_VERSION=0.60.0
+    <p>Every setting has a working default, so the panel answers on
+    <code>http://localhost:8080</code> straight away. To serve hosts on other
+    machines, put the address they reach it at in <code>.env</code> beside the
+    file &mdash; <code>env.example</code> lists every setting and names the
+    three that matter.</p>
+
+    <p>Production basic, against a database somebody else runs. Leave the
+    profile out and write the DSN before the first start; the
+    <code>init</code> service reads it and hands the copy to the account the
+    panel runs as, so no ownership is yours to get right:</p>
+
+<pre><code>cat &gt; .env &lt;&lt;'SETTINGS'
+FLOTESTRO_VERSION=0.60.1
 FLOTESTRO_GATEWAY_ID=cp-prod-01
 FLOTESTRO_ADVERTISE=panel.example.org
 FLOTESTRO_PUBLIC_URL=https://panel.example.org
 SETTINGS
 
-# 2. The database DSN, as a file.
 mkdir -p secrets &amp;&amp; chmod 700 secrets
 printf '%s' 'postgresql://flotestro:PASSWORD@db.example.org:5432/flotestro?sslmode=verify-full&amp;application_name=flotestro-control-plane' &gt; secrets/database-url
-sudo chown 65532:65532 secrets/database-url
-chmod 400 secrets/database-url
-command -v chcon &gt;/dev/null &amp;&amp; sudo chcon -Rt container_file_t secrets
+chmod 600 secrets/database-url
 
-# 3. Start. The panel migrates the schema itself before it listens.
 docker compose up -d
 docker compose logs -f control-plane        # wait for "the database schema is current"
 curl -fsS http://127.0.0.1:8080/healthz</code></pre>
 
-    <p>For the quick-start profile, write the database password first and point
-    the DSN at the local service:</p>
-
-<pre><code>printf '%s' 'a-long-random-password' &gt; secrets/postgres-password &amp;&amp; chmod 600 secrets/postgres-password
-printf '%s' 'postgresql://flotestro:a-long-random-password@postgres:5432/flotestro?sslmode=disable&amp;application_name=flotestro-control-plane' &gt; secrets/database-url
-docker compose --profile quickstart up -d</code></pre>
-
-    <p><code>sslmode=disable</code> is acceptable only there, on one host with an
-    internal network. An external database requires
+    <p>A DSN found in <code>secrets/database-url</code> always wins over
+    anything generated earlier, so that is also how an installation moves off
+    the quick-start database and how its password is changed.
+    <code>sslmode=disable</code> is acceptable only for the quick start, on one
+    host with an internal network. An external database requires
     <code>verify-full</code>.</p>
 
     <div class="note">
@@ -361,7 +365,8 @@ docker compose --profile quickstart up -d</code></pre>
     on it.</p>
 
     <p class="filename">Once, before the first backup</p>
-<pre><code>mkdir -p backups &amp;&amp; chown 65532:65532 backups &amp;&amp; chmod 700 backups</code></pre>
+<pre><code># ./backups is made and given to the right account by the init service.
+docker compose --profile tools run --rm admin-tools backup</code></pre>
 
     <p class="filename">The backup itself, with the control plane stopped - or at least with the CA and key rotation held</p>
 <pre><code>docker compose --profile tools run --rm admin-tools backup</code></pre>
