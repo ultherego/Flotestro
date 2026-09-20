@@ -1,4 +1,4 @@
-# The build context of the images in deploy/Containerfile.
+# The build context of the images in docker/Containerfile.
 #
 # The file lies at the repository root because that is the context the build
 # runs with: the Containerfile copies go.mod, cmd/, internal/, db/ and web/,
@@ -43,4 +43,4 @@
 
 # The Containerfile itself, for a build that reads it from the context
 # instead of through -f.
-!deploy/Containerfile
+!docker/Containerfile

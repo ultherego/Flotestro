@@ -2,7 +2,7 @@
 # before a tag exists.
 #
 # A release of the images is a supply chain and not a build. The three images
-# of deploy/Containerfile are built for both official platforms, pushed under
+# of docker/Containerfile are built for both official platforms, pushed under
 # a tag that is never rewritten, described by a bill of materials and a
 # provenance statement, signed where the run has an identity to sign with,
 # and finally reported as digests - because a digest is what a deployment
@@ -30,7 +30,7 @@ on:
   # rather than at the moment somebody tags a release.
   pull_request:
     paths:
-      - "deploy/**"
+      - "docker/**"
       - ".dockerignore"
       - "cmd/**"
       - "internal/**"
@@ -157,7 +157,7 @@ jobs:
     timeout-minutes: 10
     defaults:
       run:
-        working-directory: deploy
+        working-directory: docker
     steps:
       - uses: actions/checkout@v4.2.2
 
@@ -385,7 +385,7 @@ jobs:
           SOURCE_DATE_EPOCH: ${{ steps.facts.outputs.epoch }}
         with:
           context: .
-          file: deploy/Containerfile
+          file: docker/Containerfile
           target: ${{ matrix.target }}
           # The two official platforms. Nothing else is published: a
           # platform that is published is a platform that is supported.
@@ -429,7 +429,7 @@ jobs:
             architecture="${platform#linux/}"
             built="$RUNNER_TEMP/artefacts/$architecture"
             SOURCE_DATE_EPOCH="${{ steps.facts.outputs.epoch }}" \
-            docker buildx build --file deploy/Containerfile --target artifacts \
+            docker buildx build --file docker/Containerfile --target artifacts \
               --platform "$platform" \
               --build-arg "VERSION=${{ steps.facts.outputs.version }}" \
               --build-arg "COMMIT=${{ steps.facts.outputs.commit }}" \
@@ -580,7 +580,7 @@ jobs:
             echo "#"
             echo "# The tag stays in the reference because it is what a human reads;"
             echo "# the digest is what is deployed. Verify the signature before"
-            echo "# pinning - the command is in deploy/README.md."
+            echo "# pinning - the command is in docker/README.md."
             echo "services:"
             echo "  control-plane:"
             echo "    image: ghcr.io/$owner/flotestro-control-plane:$version@$control_plane"
@@ -593,7 +593,7 @@ jobs:
           {
             echo "### The digests of $GITHUB_REF_NAME"
             echo
-            echo 'In `deploy/.env`:'
+            echo 'In `docker/.env`:'
             echo
             echo '```'
             echo "FLOTESTRO_VERSION=$version"

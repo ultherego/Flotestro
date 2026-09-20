@@ -9,14 +9,14 @@ path a customer takes, and it ends with a fleet the panel can see and order work
 The server runs in a container; the hosts do not. The agent and its helper are native
 packages, because a host agent that has to see the real `/proc`, the real disks and the
 real systemd is a `--privileged` container with nothing isolated about it
-(`deploy/README.md`, ADR-OCI-01).
+(`docker/README.md`, ADR-OCI-01).
 
 ## Preconditions
 
 - A PostgreSQL 16 or newer the installation will own, reachable from the panel's host, or
   the quick-start profile that brings one up beside it.
 - A container runtime: Docker Engine with the Compose plugin, or Podman - see the Podman
-  section of `deploy/README.md` for what differs.
+  section of `docker/README.md` for what differs.
 - DNS that resolves the names the panel will advertise, from the hosts and from the
   operator's browser. They enter the agent gateway's certificate, so they are the names
   the fleet really reaches, never a Compose service name.
@@ -29,7 +29,7 @@ real systemd is a `--privileged` container with nothing isolated about it
 
 ### 1. The control plane
 
-Follow "The first start" in `deploy/README.md`, which carries the exact files. Three things
+Follow "The first start" in `docker/README.md`, which carries the exact files. Three things
 that are easy to get wrong and cost an hour each:
 
 - **The DSN is a file you write, and nothing else.** `./secrets/database-url`, mode 0600,
@@ -65,7 +65,7 @@ The database and the state directory are one pair: the state holds the fleet CA,
 of the secret store and the helper's signing key, and a database restored beside a
 different state is an installation that cannot talk to its own fleet. Take the pair now,
 while the CA is minutes old, and prove the restore before the fleet depends on it -
-"The database and the state are one backup pair" in `deploy/README.md`.
+"The database and the state are one backup pair" in `docker/README.md`.
 
 ### 4. The hosts
 
@@ -96,7 +96,7 @@ removed explicitly - a new fleet CA does not recognise certificates the previous
 Create `relay.yaml` and `relay-ca.pem` next to `compose.relay.yaml` before the first start -
 a bind mount whose source does not exist becomes a directory - then register the relay with
 a one-time token from the panel. The relay's spool is on disk and survives its restart, so
-give it room: `deploy/README.md` and `docs/runbooks/relay-disk-full.md`.
+give it room: `docker/README.md` and `docs/runbooks/relay-disk-full.md`.
 
 ## Verification
 
@@ -115,7 +115,7 @@ Nothing here is irreversible until hosts are enrolled. Before that, `docker comp
 and an empty database put the machine back. After that, a host is removed with
 `docs/runbooks/golden-image.md`'s sanitisation - the identity, the task state and the
 firewall registry - and the panel decommissions its record; removing the installation
-itself is "Removing an installation" in `deploy/README.md`.
+itself is "Removing an installation" in `docker/README.md`.
 
 ## Codes
 

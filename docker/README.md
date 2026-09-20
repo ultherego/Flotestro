@@ -111,21 +111,21 @@ Rotation is the same either way.
 ## Building the images
 
 ```
-docker buildx build -f deploy/Containerfile --target control-plane \
+docker buildx build -f docker/Containerfile --target control-plane \
   --platform linux/amd64,linux/arm64 \
   --build-arg VERSION=0.60.0 \
   --build-arg COMMIT="$(git rev-parse HEAD)" \
   --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   -t ghcr.io/ultherego/flotestro-control-plane:0.60.0 --push .
 
-docker buildx build -f deploy/Containerfile --target relay \
+docker buildx build -f docker/Containerfile --target relay \
   --platform linux/amd64,linux/arm64 \
   --build-arg VERSION=0.60.0 \
   --build-arg COMMIT="$(git rev-parse HEAD)" \
   --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   -t ghcr.io/ultherego/flotestro-relay:0.60.0 --push .
 
-docker buildx build -f deploy/Containerfile --target admin-tools \
+docker buildx build -f docker/Containerfile --target admin-tools \
   --platform linux/amd64,linux/arm64 \
   --build-arg VERSION=0.60.0 \
   --build-arg COMMIT="$(git rev-parse HEAD)" \
@@ -149,7 +149,7 @@ anything.
 packaging/build-release.sh all 0.60.0 /srv/release
 packaging/sign-repo.sh /srv/release <gpg-key-id> /srv/repo 0.60.0
 
-docker build -f deploy/Containerfile --target package-repository \
+docker build -f docker/Containerfile --target package-repository \
   --build-context repository=/srv/repo \
   --build-arg VERSION=0.60.0 \
   --build-arg COMMIT="$(git rev-parse HEAD)" \
@@ -207,7 +207,7 @@ occasions and they are deliberately different:
 | Trigger | What runs |
 |---|---|
 | A tag `v*` | The build context is checked, every Compose combination is parsed, the three service images are built for `linux/amd64` and `linux/arm64` and **pushed** to GHCR, each with a bill of materials and a provenance statement attached, signed with cosign when the run has an identity, and the digests are printed. |
-| A pull request touching `deploy/`, `cmd/`, `internal/`, `db/`, `web/`, `go.mod`, `go.sum` or `.dockerignore` | The same checks and the same build for both platforms, and **nothing is pushed**: a Containerfile that no longer builds is found while there is still a branch to fix it on. |
+| A pull request touching `docker/`, `cmd/`, `internal/`, `db/`, `web/`, `go.mod`, `go.sum` or `.dockerignore` | The same checks and the same build for both platforms, and **nothing is pushed**: a Containerfile that no longer builds is found while there is still a branch to fix it on. |
 | `workflow_dispatch` | A dry run of the above on a branch. It pushes nothing either. |
 
 What the release publishes for each image is the full version, `0.60.0`, and
@@ -390,7 +390,7 @@ process list of the host, which is why the DSN travels as a path.
 Production basic, from an empty directory:
 
 ```
-cd deploy
+cd docker
 
 # 1. The non-secret settings.
 cat > .env <<'SETTINGS'

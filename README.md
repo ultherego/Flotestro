@@ -1,6 +1,6 @@
 <div align="center">
 
-![Flotestro](docs/logo.webp)
+![Flotestro](docs/site/img/logo.webp)
 
 **Run your Linux fleet from one panel.**
 
@@ -46,14 +46,14 @@ database.
 **The panel**, with a database of its own:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/ultherego/Flotestro/main/deploy/compose.yaml
+curl -fsSLO https://raw.githubusercontent.com/ultherego/Flotestro/main/docker/compose.yaml
 docker compose --profile quickstart up -d
 docker compose cp control-plane:/var/lib/flotestro/bootstrap-token .
 ```
 
 Open <http://localhost:8080>, sign in with the token, and add your first host.
 Every setting has a working default; to serve hosts on other machines, put your
-own address in `.env` — [`env.example`](deploy/env.example) lists all of them
+own address in `.env` — [`env.example`](docker/env.example) lists all of them
 and names the three that matter.
 
 **A host:**
@@ -66,7 +66,7 @@ sudo apt update && sudo apt install flotestro-agent
 
 `dnf` and `pacman` are in the [documentation](https://ultherego.github.io/Flotestro/docs/installation.html).
 The panel writes the enrollment command for each host under **Add host**, and
-[`deploy/ansible`](deploy/ansible) does the same for a hundred hosts at once.
+[`ansible`](ansible) does the same for a hundred hosts at once.
 
 Everything else — an external database, a relay for a remote site, an
 air-gapped installation, backups, upgrades — is in the
@@ -76,16 +76,16 @@ air-gapped installation, backups, upgrades — is in the
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/screenshots/dashboard.png" alt="Fleet dashboard" width="400"></td>
-    <td width="50%"><img src="docs/screenshots/host-packages.png" alt="Packages of a host" width="400"></td>
+    <td width="50%"><img src="docs/site/img/dashboard.png" alt="Fleet dashboard" width="400"></td>
+    <td width="50%"><img src="docs/site/img/host-packages.png" alt="Packages of a host" width="400"></td>
   </tr>
   <tr>
     <td>What needs a decision, and the fleet at a glance.</td>
     <td>A host's packages: the plan, its digest, and what may be asked for.</td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/screenshots/campaign.png" alt="Campaign" width="400"></td>
-    <td width="50%"><img src="docs/screenshots/audit.png" alt="Audit" width="400"></td>
+    <td width="50%"><img src="docs/site/img/campaign.png" alt="Campaign" width="400"></td>
+    <td width="50%"><img src="docs/site/img/audit.png" alt="Audit" width="400"></td>
   </tr>
   <tr>
     <td>A campaign across the fleet: canary, waves, gates and thresholds.</td>

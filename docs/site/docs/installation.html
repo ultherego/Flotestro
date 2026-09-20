@@ -130,7 +130,7 @@
     panel is up with a database of its own:</p>
 
     <p class="filename">On the panel host</p>
-<pre><code>curl -fsSLO https://raw.githubusercontent.com/ultherego/Flotestro/main/deploy/compose.yaml
+<pre><code>curl -fsSLO https://raw.githubusercontent.com/ultherego/Flotestro/main/docker/compose.yaml
 docker compose --profile quickstart up -d
 docker compose cp control-plane:/var/lib/flotestro/bootstrap-token .</code></pre>
 
@@ -492,7 +492,7 @@ flotestro-agentctl diagnose                            # explains a host that do
     </div>
 
     <p>For a whole inventory at once there is an Ansible role in
-    <a href="https://github.com/ultherego/Flotestro/tree/main/deploy/ansible"><code>deploy/ansible</code></a>.
+    <a href="https://github.com/ultherego/Flotestro/tree/main/ansible"><code>ansible</code></a>.
     For machines started from an image, the agent package installs
     <code>flotestro-enroll.service</code>, which runs on the first boot only -
     when <code>identity/current/agent.pem</code> does not exist - so every clone

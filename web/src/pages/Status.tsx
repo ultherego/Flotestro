@@ -465,7 +465,7 @@ function About({ block }: { block: StatusBlock }) {
         <Pair label={t("Started")}><Time value={typeof facts.started_at === "string" ? facts.started_at : null} /></Pair>
         <Pair label={t("Documentation")}>
           <span>
-            <a href="https://github.com/ultherego/flotestro/blob/main/docs/configuration.md" target="_blank" rel="noreferrer">{t("Configuration reference")}</a>
+            <a href="https://ultherego.github.io/Flotestro/docs/configuration.html" target="_blank" rel="noreferrer">{t("Configuration reference")}</a>
             {" · "}
             <a href="https://github.com/ultherego/flotestro/blob/main/docs/runbooks/index.md" target="_blank" rel="noreferrer">{t("Runbooks")}</a>
           </span>

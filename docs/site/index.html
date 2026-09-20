@@ -320,7 +320,7 @@
 
     <h3>The panel, with a database of its own</h3>
 
-    <pre><code>curl -fsSLO https://raw.githubusercontent.com/ultherego/Flotestro/main/deploy/compose.yaml
+    <pre><code>curl -fsSLO https://raw.githubusercontent.com/ultherego/Flotestro/main/docker/compose.yaml
 docker compose --profile quickstart up -d
 docker compose cp control-plane:/var/lib/flotestro/bootstrap-token .</code></pre>
 
@@ -338,7 +338,7 @@ docker compose cp control-plane:/var/lib/flotestro/bootstrap-token .</code></pre
       DSN into <code>secrets/database-url</code> before the first start; the same file works
       under Docker and rootless Podman, on a host with SELinux and without. The backup pair,
       an isolated site, pinning a digest and upgrading are in
-      <a href="https://github.com/ultherego/Flotestro/blob/main/deploy/README.md">deploy/README.md</a>.</p>
+      <a href="https://github.com/ultherego/Flotestro/blob/main/docker/README.md">docker/README.md</a>.</p>
 
     <div class="note">
       <p class="note__title">Which image</p>
@@ -403,8 +403,8 @@ flotestro-agentctl diagnose                                        # explains a 
     </div>
 
     <p class="prose">For a whole inventory at once there is an Ansible role in
-      <a href="https://github.com/ultherego/Flotestro/tree/main/deploy/ansible">deploy/ansible</a>;
-      for a site behind a relay, <code>deploy/compose.relay.yaml</code>. Installing from nothing,
+      <a href="https://github.com/ultherego/Flotestro/tree/main/ansible">ansible</a>;
+      for a site behind a relay, <code>docker/compose.relay.yaml</code>. Installing from nothing,
       end to end, is the
       <a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/install.md">installation runbook</a>.</p>
 

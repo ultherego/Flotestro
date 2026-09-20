@@ -165,7 +165,7 @@ the machine.
 
 ### The Ansible alternative
 
-`deploy/ansible/roles/flotestro_agent` does the same without cloud-init: it installs the
+`ansible/roles/flotestro_agent` does the same without cloud-init: it installs the
 package, writes `ca.pem` and `agent.yaml`, and only when
 `/var/lib/flotestro-agent/identity/current/agent.pem` is absent orders a token bound to the
 machine (`expected_machine_id` read from `/etc/machine-id`, `max_uses: 1`,

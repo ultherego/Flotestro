@@ -573,7 +573,7 @@ jobs:
           else
             # A new branch or a first push: only the commit itself is
             # known to be new. The whole history is swept by hand, from
-            # the laboratory, as docs/ci.md describes.
+            # the laboratory, as CONTRIBUTING.md describes.
             range="${{ github.sha }}~1..${{ github.sha }}"
           fi
           echo "scanning $range"
