@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -152,7 +153,7 @@ func TestTheDroppedLinesAreCountedInTheBatchAndInTheTotal(t *testing.T) {
 	// The rate budget is far smaller than the text, so the first lines go
 	// through and the rest are dropped by the limit.
 	long := strings.Repeat("x", 4<<10) + "\n"
-	sent, dropped := executor.forwardLines(context.Background(), "task-1",
+	sent, dropped, _ := executor.forwardLines(context.Background(), "task-1",
 		strings.NewReader(strings.Repeat(long, 32)))
 	if sent == 0 {
 		t.Fatal("no line went through")
@@ -175,11 +176,118 @@ func TestTheDroppedLinesAreCountedInTheBatchAndInTheTotal(t *testing.T) {
 // A view that loses nothing says so plainly, and one that does names the
 // number: the result is what a panel reads after the view has ended.
 func TestThePreviewSummaryNamesTheLostLines(t *testing.T) {
-	if summary := previewSummary(12, 0); strings.Contains(summary, "could not carry") {
+	if summary := previewSummary(12, 0, hostSuppression{}); strings.Contains(summary, "could not carry") {
 		t.Errorf("a view that lost nothing reports a loss: %q", summary)
 	}
-	summary := previewSummary(12, 7)
+	summary := previewSummary(12, 7, hostSuppression{})
 	if !strings.Contains(summary, "12") || !strings.Contains(summary, "7") {
 		t.Errorf("summary = %q, want both numbers in it", summary)
+	}
+}
+
+// What the host silenced is a different fact from what the view could not
+// carry, so the summary names the two apart.
+func TestThePreviewSummaryKeepsTheHostGapApartFromTheViewGap(t *testing.T) {
+	summary := previewSummary(12, 7, hostSuppression{messages: 4213})
+	if !strings.Contains(summary, "lines the view could not carry: 7") ||
+		!strings.Contains(summary, "messages the host never recorded: 4213") {
+		t.Errorf("summary = %q, want both gaps named apart", summary)
+	}
+	quiet := previewSummary(12, 0, hostSuppression{})
+	if strings.Contains(quiet, "never recorded") {
+		t.Errorf("a host that suppressed nothing is spoken of: %q", quiet)
+	}
+	// A filter that hides journald's notice makes the number unknown, and
+	// unknown is said out loud rather than shown as a zero.
+	hidden := previewSummary(12, 0, hostSuppression{unknown: "priority_filter"})
+	if !strings.Contains(hidden, "unknown") || strings.Contains(hidden, "never recorded: 0") {
+		t.Errorf("summary = %q, want the unknown count named", hidden)
+	}
+}
+
+// journald counts what it dropped at the source; the agent reads that count
+// and leaves the notice in the stream where the operator can see it.
+func TestTheSuppressionOfJournaldIsCountedApartFromTheDroppedLines(t *testing.T) {
+	var batches []*agentv1.TaskLogLines
+	executor := &TaskExecutor{logLines: func(lines *agentv1.TaskLogLines) {
+		batches = append(batches, lines)
+	}}
+
+	const notice = "2026-09-20T12:00:03+0200 web-1 systemd-journald[412]: Suppressed 4213 messages from unit-x.service"
+	stream := "2026-09-20T12:00:01+0200 web-1 unit-x[900]: work\n" + notice + "\n"
+	sent, dropped, suppressed := executor.forwardLines(context.Background(), "task-1",
+		strings.NewReader(stream))
+	if sent != 2 || dropped != 0 {
+		t.Fatalf("lines sent %d, dropped %d, want 2 and 0", sent, dropped)
+	}
+	if suppressed != 4213 {
+		t.Errorf("the host suppressed %d messages, want 4213", suppressed)
+	}
+	var carried int
+	for _, batch := range batches {
+		carried += len(batch.GetLines())
+		if batch.GetDropped() != 0 {
+			t.Errorf("what the host silenced was counted as a line the view lost: %v", batch)
+		}
+	}
+	if carried != 2 {
+		t.Errorf("the batches carry %d lines, want both of them", carried)
+	}
+}
+
+// The notice is written at priority info. A view filtered below it never sees
+// the notice, so the count is unknown there and must not travel as a zero.
+func TestTheSuppressionCountIsUnknownWhenTheFilterHidesTheNotice(t *testing.T) {
+	strict := uint32(3)
+	if reason := suppressionHiddenBy(&opspec.JournalPayload{MaxPriority: &strict}); reason != "priority_filter" {
+		t.Errorf("reason = %q, want priority_filter", reason)
+	}
+	debug := uint32(7)
+	if reason := suppressionHiddenBy(&opspec.JournalPayload{MaxPriority: &debug}); reason != "" {
+		t.Errorf("a view that sees the notice reports %q", reason)
+	}
+	if reason := suppressionHiddenBy(&opspec.JournalPayload{}); reason != "" {
+		t.Errorf("a view without a priority filter reports %q", reason)
+	}
+}
+
+// An unknown count leaves the field out of the summary. An agent one release
+// behind leaves it out too, and both mean the same thing to the panel: not a
+// quiet host, but a number nobody could read.
+func TestAnUnknownSuppressionCountLeavesTheFieldOutOfTheSummary(t *testing.T) {
+	hidden, err := json.Marshal(newFollowSummary(12, 0,
+		hostSuppression{unknown: "priority_filter"}, 5*time.Minute))
+	if err != nil {
+		t.Fatalf("the summary was not written: %v", err)
+	}
+	if strings.Contains(string(hidden), "\"host_suppressed\"") {
+		t.Errorf("summary = %s, want no count where none could be read", hidden)
+	}
+	if !strings.Contains(string(hidden), "\"host_suppressed_unknown_reason\":\"priority_filter\"") {
+		t.Errorf("summary = %s, want the reason in place of the count", hidden)
+	}
+
+	// A view that could see the notice and saw none reports a real zero.
+	seen, err := json.Marshal(newFollowSummary(12, 0, hostSuppression{}, 5*time.Minute))
+	if err != nil {
+		t.Fatalf("the summary was not written: %v", err)
+	}
+	if !strings.Contains(string(seen), "\"host_suppressed\":0") {
+		t.Errorf("summary = %s, want the zero the view really observed", seen)
+	}
+}
+
+// A backlog larger than the limit is refused. Trimming it in silence would
+// answer a question the operator did not ask.
+func TestABacklogAboveTheLimitIsRefusedAndNotTrimmed(t *testing.T) {
+	if _, err := previewArguments(&opspec.JournalPayload{Lines: maxBacklog + 1}); err == nil {
+		t.Error("a backlog above the limit passed into the arguments")
+	}
+	args, err := previewArguments(&opspec.JournalPayload{Lines: maxBacklog})
+	if err != nil {
+		t.Fatalf("the backlog at the limit was refused: %v", err)
+	}
+	if !strings.Contains(strings.Join(args, " "), "--lines 500") {
+		t.Errorf("arguments = %v, want the backlog that was asked for", args)
 	}
 }

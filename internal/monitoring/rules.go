@@ -583,24 +583,47 @@ type AlertFilter struct {
 	// nobody did; nil narrows nothing.
 	Acknowledged *bool
 	Limit        int
+	// After is the last alert of the page before; nil reads from the newest.
+	After *AlertKey
 }
+
+// AlertKey keys an alert in the order the history is read: when the episode
+// started, and the identifier that settles a tie.
+type AlertKey struct {
+	StartedAt time.Time
+	ID        string
+}
+
+// KeyOf keys an alert, for the cursor that carries a reader to the next page.
+func KeyOf(alert Alert) AlertKey {
+	return AlertKey{StartedAt: alert.StartedAt, ID: alert.ID}
+}
+
+// AlertPageMax is the most alerts one answer carries; beyond it a caller
+// pages on with the cursor.
+const AlertPageMax = 500
+
+// silencedPredicate is true of an alert an active silence covers. A global
+// silence is written for the security alerts of the installation; it is not a
+// silence of every alert of every host.
+const silencedPredicate = `exists (select 1 from silences s
+	        where s.expired_at is null and s.until > now()
+	          and not s.global
+	          and (s.host_id is null or s.host_id = a.host_id)
+	          and (s.rule_id is null or s.rule_id = a.rule_id))`
 
 // alertColumns is the projection every alert query shares; a is the
 // alerts alias and h the host.
 const alertColumns = `
 	a.id, coalesce(a.rule_id::text, ''), a.rule_name, a.metric, a.severity, a.state,
 	a.value, a.detail, a.started_at, a.fired_at, a.resolved_at,
-	exists (select 1 from silences s
-	        where s.expired_at is null and s.until > now()
-	          -- A global silence is written for the security alerts of the
-	          -- installation; it is not a silence of every alert of every host.
-	          and not s.global
-	          and (s.host_id is null or s.host_id = a.host_id)
-	          and (s.rule_id is null or s.rule_id = a.rule_id)),
+	` + silencedPredicate + `,
 	a.host_id, h.hostname, coalesce(a.acknowledged_by, ''), a.acknowledged_at, a.note`
 
-// ListAlerts reads the alert history, newest first.
-func (s *Store) ListAlerts(ctx context.Context, filter AlertFilter) ([]Alert, error) {
+// alertConditions renders a filter as a where clause with its arguments. The
+// last result is false for a filter no row can match. Paged adds the keyset of
+// the cursor, which a count over the whole history leaves out.
+func alertConditions(filter AlertFilter, paged bool) (string, []any, bool) {
 	var conditions []string
 	var args []any
 	add := func(column, value string) {
@@ -614,7 +637,7 @@ func (s *Store) ListAlerts(ctx context.Context, filter AlertFilter) ([]Alert, er
 	add("a.severity", filter.Severity)
 	if filter.HostID != "" {
 		if _, err := uuid.Parse(filter.HostID); err != nil {
-			return []Alert{}, nil
+			return "", nil, false
 		}
 		add("a.host_id", filter.HostID)
 	}
@@ -631,12 +654,27 @@ func (s *Store) ListAlerts(ctx context.Context, filter AlertFilter) ([]Alert, er
 			conditions = append(conditions, "a.acknowledged_at is null")
 		}
 	}
-	where := ""
-	if len(conditions) > 0 {
-		where = "where " + strings.Join(conditions, " and ")
+	// The keyset follows the order of the list: older than the last row, or
+	// as old and further along the identifier.
+	if paged && filter.After != nil {
+		args = append(args, filter.After.StartedAt, filter.After.ID)
+		conditions = append(conditions, fmt.Sprintf("(a.started_at < $%d or (a.started_at = $%d and a.id > $%d))",
+			len(args)-1, len(args)-1, len(args)))
+	}
+	if len(conditions) == 0 {
+		return "", args, true
+	}
+	return "where " + strings.Join(conditions, " and "), args, true
+}
+
+// ListAlerts reads one page of the alert history, newest first.
+func (s *Store) ListAlerts(ctx context.Context, filter AlertFilter) ([]Alert, error) {
+	where, args, ok := alertConditions(filter, true)
+	if !ok {
+		return []Alert{}, nil
 	}
 	limit := filter.Limit
-	if limit <= 0 || limit > 500 {
+	if limit <= 0 || limit > AlertPageMax {
 		limit = 100
 	}
 	args = append(args, limit)
@@ -648,20 +686,82 @@ func (s *Store) ListAlerts(ctx context.Context, filter AlertFilter) ([]Alert, er
 		limit $`+fmt.Sprint(len(args)), args...)
 }
 
+// CountAlerts counts the whole history the filter keeps, whatever one page
+// carries: a list that stops short is to say how much it left behind.
+func (s *Store) CountAlerts(ctx context.Context, filter AlertFilter) (int, error) {
+	where, args, ok := alertConditions(filter, false)
+	if !ok {
+		return 0, nil
+	}
+	var count int
+	err := s.pool.QueryRow(ctx, `
+		select count(*) from alerts a join hosts h on h.id = a.host_id
+		`+where, args...).Scan(&count)
+	return count, err
+}
+
+// FiringBoardLimit bounds the board one answer carries. The counts beside it
+// are taken over every firing alert, so a bounded board is not a low count.
+const FiringBoardLimit = 500
+
 // Firing reads what is somebody's business now: the firing alerts and the
-// no-data episodes, on the hosts the caller's scopes make visible.
-func (s *Store) Firing(ctx context.Context, scopes []authz.Scope) ([]Alert, error) {
+// no-data episodes, on the hosts the caller's scopes make visible. The most
+// pressing come first, and at most limit of them.
+func (s *Store) Firing(ctx context.Context, scopes []authz.Scope, limit int) ([]Alert, error) {
 	condition, args := authz.ScopeSQL(scopes, "h.site", "h.environment", 0)
 	if condition == "" {
 		condition = "true"
 	}
+	if limit <= 0 || limit > FiringBoardLimit {
+		limit = FiringBoardLimit
+	}
+	args = append(args, limit)
 	return s.queryAlerts(ctx, `
 		select `+alertColumns+`
 		from alerts a join hosts h on h.id = a.host_id
 		where a.state in ('firing', 'no_data') and `+condition+`
 		order by a.acknowledged_at is not null,
 		         case a.severity when 'critical' then 0 when 'warning' then 1 else 2 end,
-		         coalesce(a.fired_at, a.started_at), a.id`, args...)
+		         coalesce(a.fired_at, a.started_at), a.id
+		limit $`+fmt.Sprint(len(args)), args...)
+}
+
+// FiringGroup counts the alerts of the board that share everything the
+// counts are taken by; what a group means stays with the caller.
+type FiringGroup struct {
+	State        string
+	Severity     string
+	Acknowledged bool
+	Silenced     bool
+	Count        int
+}
+
+// FiringCounts groups every firing alert of the visible hosts, board or no
+// board: the board a request carries is bounded, these counts are not.
+func (s *Store) FiringCounts(ctx context.Context, scopes []authz.Scope) ([]FiringGroup, error) {
+	condition, args := authz.ScopeSQL(scopes, "h.site", "h.environment", 0)
+	if condition == "" {
+		condition = "true"
+	}
+	rows, err := s.pool.Query(ctx, `
+		select a.state, a.severity, a.acknowledged_at is not null, `+silencedPredicate+`, count(*)
+		from alerts a join hosts h on h.id = a.host_id
+		where a.state in ('firing', 'no_data') and `+condition+`
+		group by 1, 2, 3, 4`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	groups := []FiringGroup{}
+	for rows.Next() {
+		var group FiringGroup
+		if err := rows.Scan(&group.State, &group.Severity, &group.Acknowledged,
+			&group.Silenced, &group.Count); err != nil {
+			return nil, err
+		}
+		groups = append(groups, group)
+	}
+	return groups, rows.Err()
 }
 
 // ErrNotFiring says the alert is not open on the board, so it cannot be taken:

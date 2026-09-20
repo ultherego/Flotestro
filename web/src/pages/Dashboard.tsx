@@ -7,6 +7,7 @@ import { relativeTime } from "../lib/format";
 import { ErrorBox, ErrorCode, Time, Empty, JobState } from "../components/ui";
 import { Card, PageHeader, Stat, StatGrid } from "../components/layout";
 import { BarChart, Breakdown, StatusBar } from "../components/widgets";
+import { FleetCoverage, type Coverage } from "../components/FleetCoverage";
 import { useT } from "../i18n";
 
 /**
@@ -49,9 +50,11 @@ export function Dashboard() {
     queryFn: () => api.get<FleetActivity>("/api/v1/fleet/activity?hours=24"),
     refetchInterval: REFRESH_INTERVAL,
   });
+  // The head of the answer comes with the checks: the sweep behind it has a
+  // time budget, and a count taken over a part of the fleet says so.
   const security = useQuery({
     queryKey: ["security"],
-    queryFn: () => api.get<{ checks: { failed: number; unknown: number }[] }>("/api/v1/security"),
+    queryFn: () => api.get<{ checks: { failed: number; unknown: number }[] } & Coverage>("/api/v1/security"),
     retry: false,
   });
   const failures = useQuery({
@@ -81,6 +84,11 @@ export function Dashboard() {
   // has not answered: the segment then shows a dash.
   const securityFailed = security.data ? security.data.checks.reduce((sum, c) => sum + c.failed, 0) : undefined;
   const securityUnknown = security.data ? security.data.checks.reduce((sum, c) => sum + c.unknown, 0) : undefined;
+  // The two security segments are sums over the hosts the sweep judged. The
+  // coverage line goes under the bar whenever that is not the whole fleet.
+  const securityCoverage = security.data && (security.data.partial || security.data.unknown_hosts > 0)
+    ? security.data
+    : undefined;
   const hourLabel = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit" });
   // A facet the hosts have not reported is a badge, not a value named
   // "unknown" that reads like a system called that.
@@ -164,6 +172,7 @@ export function Dashboard() {
             { label: t("Unpatched"), value: s?.hosts_with_security_updates, tone: "warn", to: "/hosts?security_updates=true" },
             { label: t("Unknown checks"), value: securityUnknown, tone: "unknown", to: "/security" },
           ]} />
+          <FleetCoverage coverage={securityCoverage} />
         </Card>
 
         <Card className="span-5" title={t("Operations, last 24 h")} description={t("Finished per hour, by outcome.")}>

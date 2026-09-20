@@ -8,10 +8,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/monitoring"
 	"github.com/ultherego/flotestro/internal/opspec"
+	"github.com/ultherego/flotestro/internal/paging"
 	"github.com/ultherego/flotestro/internal/selector"
 )
 
@@ -200,10 +203,39 @@ type alertCounts struct {
 	Pending int `json:"pending"`
 }
 
+// countFiring adds one group of the board to the counts. A no-data episode is
+// not firing and a taken alert waits for nobody, so each is counted apart.
+func countFiring(counts *alertCounts, group monitoring.FiringGroup) {
+	switch {
+	case group.State == "no_data":
+		counts.NoData += group.Count
+		return
+	case group.Acknowledged:
+		counts.Acknowledged += group.Count
+		return
+	}
+	switch group.Severity {
+	case "critical":
+		counts.Critical += group.Count
+	case "warning":
+		counts.Warning += group.Count
+	default:
+		counts.Info += group.Count
+	}
+	if group.Silenced {
+		counts.Silenced += group.Count
+	}
+}
+
 // fleetMonitoringView is the answer of the fleet view.
 type fleetMonitoringView struct {
 	Firing []monitoring.Alert `json:"firing"`
 	Counts alertCounts        `json:"counts"`
+	// FiringTotal is every alert on the board, whatever this answer carries
+	// of it; Partial says the board stops short of that total.
+	FiringTotal   int    `json:"firing_total"`
+	Partial       bool   `json:"partial"`
+	PartialReason string `json:"partial_reason,omitempty"`
 	// HostsReporting counts the hosts that sent a sample within the last three
 	// intervals, HostsSilent those that did not.
 	HostsReporting int `json:"hosts_reporting"`
@@ -214,6 +246,14 @@ type fleetMonitoringView struct {
 	// release gate's question, answered on the fleet that runs.
 	AgentFootprint monitoring.FleetFootprint `json:"agent_footprint"`
 	GeneratedAt    time.Time                 `json:"generated_at"`
+}
+
+// bound marks a view whose board stops short of what is firing: the counts
+// stay whole, and the rows say they are a part of them.
+func (view *fleetMonitoringView) bound() {
+	if len(view.Firing) < view.FiringTotal {
+		view.Partial, view.PartialReason = true, partialCapReached
+	}
 }
 
 // handleFleetMonitoring returns the firing alerts of the visible fleet.
@@ -227,33 +267,25 @@ func (s *Server) handleFleetMonitoring(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	scopes := principal.ScopesFor(authz.PermMonitoringRead)
-	firing, err := s.monitoring.Firing(ctx, scopes)
+	// The board is bounded and the most pressing alerts come first; the counts
+	// under it are taken over the whole of it, so a bounded board is not a
+	// quiet fleet.
+	firing, err := s.monitoring.Firing(ctx, scopes, monitoring.FiringBoardLimit)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	view := fleetMonitoringView{Firing: firing, GeneratedAt: time.Now().UTC()}
-	for _, alert := range firing {
-		if alert.State == "no_data" {
-			view.Counts.NoData++
-			continue
-		}
-		if alert.Acknowledged() {
-			view.Counts.Acknowledged++
-			continue
-		}
-		switch alert.Severity {
-		case "critical":
-			view.Counts.Critical++
-		case "warning":
-			view.Counts.Warning++
-		default:
-			view.Counts.Info++
-		}
-		if alert.Silenced {
-			view.Counts.Silenced++
-		}
+	groups, err := s.monitoring.FiringCounts(ctx, scopes)
+	if err != nil {
+		s.fail(w, err)
+		return
 	}
+	for _, group := range groups {
+		view.FiringTotal += group.Count
+		countFiring(&view.Counts, group)
+	}
+	view.bound()
 	if view.Counts.Pending, err = s.monitoring.Pending(ctx, scopes); err != nil {
 		s.fail(w, err)
 		return
@@ -472,7 +504,7 @@ func ruleDetail(rule monitoring.Rule) map[string]any {
 	}
 }
 
-// handleListAlerts returns the alert history, newest first.
+// handleListAlerts returns one page of the alert history, newest first.
 func (s *Server) handleListAlerts(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermMonitoringRead, "fleet")
 	if !ok {
@@ -486,11 +518,13 @@ func (s *Server) handleListAlerts(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	limit, _ := strconv.Atoi(query.Get("limit"))
-	if asCSV {
-		// The file takes the most the store hands out at once: the alert
-		// history has no cursor, so the export is the newest page.
-		limit = alertHistoryCeiling
+	limit, cursor, ok := parseFleetPage(w, r)
+	if !ok {
+		return
+	}
+	after, ok := parseAlertCursor(w, cursor)
+	if !ok {
+		return
 	}
 	var acknowledged *bool
 	switch query.Get("acknowledged") {
@@ -500,28 +534,69 @@ func (s *Server) handleListAlerts(w http.ResponseWriter, r *http.Request) {
 	case "false":
 		acknowledged = new(bool)
 	}
-	alerts, err := s.monitoring.ListAlerts(r.Context(), monitoring.AlertFilter{
+	filter := monitoring.AlertFilter{
 		State:        query.Get("state"),
 		Severity:     query.Get("severity"),
 		HostID:       query.Get("host_id"),
 		Scopes:       principal.ScopesFor(authz.PermMonitoringRead),
 		Acknowledged: acknowledged,
 		Limit:        limit,
-	})
+		After:        after,
+	}
+	if asCSV {
+		s.writeAlertsCSV(w, r, filter)
+		return
+	}
+	alerts, err := s.monitoring.ListAlerts(r.Context(), filter)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	if asCSV {
-		s.writeAlertsCSV(w, r, alerts)
+	// The history the filter keeps, not the page: a screen that shows fifty
+	// rows is to say how many it did not show.
+	total, err := s.monitoring.CountAlerts(r.Context(), filter)
+	if err != nil {
+		s.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": alerts, "count": len(alerts)})
+	next := ""
+	if len(alerts) >= limit && len(alerts) > 0 {
+		next = alertCursor(alerts[len(alerts)-1])
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": alerts, "count": len(alerts), "total": total, "next_cursor": next,
+	})
 }
 
-// alertHistoryCeiling is the most alerts the store lists in one answer,
-// and so the most an export carries.
-const alertHistoryCeiling = 500
+// alertCursor keys the last alert of a page, so the next page begins where
+// this one ended.
+func alertCursor(alert monitoring.Alert) string {
+	key := monitoring.KeyOf(alert)
+	return paging.Encode(paging.FormatTime(key.StartedAt), key.ID)
+}
+
+// parseAlertCursor reads a cursor of the alert history. The answer has been
+// written when the second result is false.
+func parseAlertCursor(w http.ResponseWriter, cursor string) (*monitoring.AlertKey, bool) {
+	parts, err := paging.Decode(cursor, 2)
+	if err != nil {
+		invalidCursor(w, err)
+		return nil, false
+	}
+	if parts == nil {
+		return nil, true
+	}
+	startedAt, err := paging.ParseTime(parts[0])
+	if err != nil {
+		invalidCursor(w, err)
+		return nil, false
+	}
+	if _, err := uuid.Parse(parts[1]); err != nil {
+		invalidCursor(w, err)
+		return nil, false
+	}
+	return &monitoring.AlertKey{StartedAt: startedAt, ID: parts[1]}, true
+}
 
 // alertsCSVColumns is the header of the alert export. The order is fixed:
 // a sheet built against one export reads the next one.
@@ -530,16 +605,35 @@ var alertsCSVColumns = []string{
 	"started_at", "fired_at", "resolved_at", "silenced", "acknowledged_by", "acknowledged_at", "note",
 }
 
-// writeAlertsCSV streams the alert history as a file, newest first as the
-// screen lists it, with the same state, severity and host filter.
-func (s *Server) writeAlertsCSV(w http.ResponseWriter, r *http.Request, alerts []monitoring.Alert) {
+// writeAlertsCSV streams the whole history the filter keeps, newest first as
+// the screen lists it, paging on with the cursor of the list. A file that
+// stops before the last alert says so in its last row.
+func (s *Server) writeAlertsCSV(w http.ResponseWriter, r *http.Request, filter monitoring.AlertFilter) {
 	s.writeCSV(w, r, exportFileName("alerts", time.Now()), alertsCSVColumns, func(yield func([]string) bool) error {
-		for _, alert := range alerts {
-			if !yield(alertCSVRow(alert)) {
+		filter.Limit = monitoring.AlertPageMax
+		deadline := time.Now().Add(fleetSweepBudget)
+		written := 0
+		for {
+			page, err := s.monitoring.ListAlerts(r.Context(), filter)
+			if err != nil {
+				return err
+			}
+			for _, alert := range page {
+				if !yield(alertCSVRow(alert)) {
+					return nil
+				}
+				written++
+			}
+			if len(page) < filter.Limit {
 				return nil
 			}
+			key := monitoring.KeyOf(page[len(page)-1])
+			filter.After = &key
+			if time.Now().After(deadline) {
+				return exportPartialError{reason: "the history ran out of its time budget after " +
+					strconv.Itoa(written) + " alerts; narrow the filter or ask again"}
+			}
 		}
-		return nil
 	})
 }
 

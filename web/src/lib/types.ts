@@ -1288,6 +1288,10 @@ export type FleetFootprint = {
 export type FleetMonitoring = {
   firing: Alert[];
   counts: { critical: number; warning: number; info: number; silenced: number; pending: number };
+  /** Every firing alert, counted apart from the board, which is bounded. */
+  firing_total?: number;
+  partial?: boolean;
+  partial_reason?: string;
   hosts_reporting: number;
   hosts_silent: number;
   rules: number;

@@ -537,13 +537,12 @@ var queryParameters = map[string][]queryParameter{
 		{"state", "string", "planned, awaiting_approval, running, succeeded, partially_applied, failed or canceled."},
 		{"limit", "integer", "The most changes to return: 50 by default, 200 at most."},
 	},
-	"GET /api/v1/monitoring/alerts": {
+	"GET /api/v1/monitoring/alerts": append([]queryParameter{
 		{"state", "string", "pending, firing or resolved."},
 		{"acknowledged", "string", "true keeps the alerts somebody took, false the ones still waiting."},
 		{"severity", "string", "critical, warning or info."},
 		{"host_id", "string", ""},
-		{"limit", "integer", "The most alerts to return: 100 by default, 500 at most."},
-	},
+	}, pagingParameters...),
 	"GET /api/v1/hosts/{id}/audit": append([]queryParameter{
 		{"actor", "string", "The identity that acted."},
 		{"actor_kind", "string", "user, service, anonymous, agent, relay, machine or system."},

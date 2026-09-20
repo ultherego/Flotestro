@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type Collection } from "../lib/api";
+import { api, type Collection, type Page } from "../lib/api";
 import type {
   Alert, AlertRule, AlertRuleInput, AlertSeverity, AlertState, FleetFootprint, FleetMonitoring as FleetView,
   RuleCatalogue, RuleOperator, RuleSelector, Silence, Whoami,
@@ -9,6 +9,7 @@ import type {
 import { ErrorBox, Time, Empty } from "../components/ui";
 import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, Stat, StatGrid, Toolbar } from "../components/layout";
 import { ExportButton } from "../components/ExportButton";
+import { PARTIAL_REASONS } from "../components/FleetCoverage";
 import { StatusBar } from "../components/widgets";
 import { useConfirm } from "../components/Modal";
 import { useToast } from "../components/Toast";
@@ -157,6 +158,16 @@ export function AlertStateBadge({ state, silenced }: { state: AlertState; silenc
 }
 
 /**
+ * The fleet view with the bound of its board: the server carries at most a
+ * page of the firing alerts, and the counts beside it cover the whole board.
+ */
+export type BoundedFleetView = FleetView & {
+  firing_total?: number;
+  partial?: boolean;
+  partial_reason?: string;
+};
+
+/**
  * An alert with what an operator wrote on it.
  */
 export type NotedAlert = Alert & {
@@ -199,6 +210,18 @@ export function SilenceBadges({ silence }: { silence: ScopedSilence }) {
 
 /** The filter of the firing table: everything, what waits, or what somebody took. */
 export type FiringFilter = "" | "waiting" | "acknowledged";
+
+/** The page of the alert history the screen reads; the file carries the rest. */
+export const HISTORY_PAGE = 50;
+
+/**
+ * How much of a list is on screen, for the note under a table that carries a
+ * page of a longer list. Empty when the table carries all of it.
+ */
+export function shownOf(shown: number, total: number | undefined): { shown: number; total: number } | undefined {
+  if (total === undefined || total <= shown) return undefined;
+  return { shown, total };
+}
 
 /** The firing alerts the filter keeps. */
 export function filterFiring<T extends NotedAlert>(alerts: T[], filter: FiringFilter): T[] {
@@ -253,7 +276,7 @@ export function FleetMonitoring() {
 
   const overview = useQuery({
     queryKey: ["monitoring", "fleet"],
-    queryFn: () => api.get<FleetView>("/api/v1/monitoring"),
+    queryFn: () => api.get<BoundedFleetView>("/api/v1/monitoring"),
     refetchInterval: 30000,
   });
   const rules = useQuery({
@@ -264,12 +287,14 @@ export function FleetMonitoring() {
   const historyParams = new URLSearchParams();
   if (historyState) historyParams.set("state", historyState);
   if (historyTaken) historyParams.set("acknowledged", historyTaken === "acknowledged" ? "true" : "false");
+  // The answer says how long the history is, so a table of fifty rows is not
+  // read as the whole of it; the file the button fetches carries every row.
   const history = useQuery({
     queryKey: ["monitoring", "alerts", historyState, historyTaken],
     queryFn: () => {
       const params = new URLSearchParams(historyParams);
-      params.set("limit", "50");
-      return api.get<Collection<NotedAlert>>(`/api/v1/monitoring/alerts?${params}`);
+      params.set("limit", String(HISTORY_PAGE));
+      return api.get<Page<NotedAlert>>(`/api/v1/monitoring/alerts?${params}`);
     },
     refetchInterval: 30000,
   });
@@ -333,6 +358,11 @@ export function FleetMonitoring() {
   // then, not a fleet with nothing firing.
   const counts = data?.counts as (FleetView["counts"] & { acknowledged?: number }) | undefined;
   const firing = filterFiring((data?.firing ?? []) as NotedAlert[], firingFilter);
+  // The board the server sent may stop at its cap: a full page is not a
+  // whole board, and the note under the table says which this is.
+  const boardShown = data?.partial ? shownOf(data.firing.length, data.firing_total) : undefined;
+  const boardReason = data?.partial_reason ?? "";
+  const historyShown = shownOf(history.data?.items.length ?? 0, history.data?.total);
   const ruleItems = rules.data?.items ?? [];
   const silenceItems = silences.data?.items ?? [];
   // Who may write what is the server's answer, not a guess from the roles:
@@ -402,6 +432,17 @@ export function FleetMonitoring() {
             <Empty>{firingFilter ? t("No firing alert matches the filter.") : t("Nothing is firing on the hosts you can see.")}</Empty>
           ) : (
             <FiringTable alerts={firing} canAcknowledge={canAcknowledge} onChanged={refresh} onMessage={setMessage} />
+          )}
+          {/* The board stops at its cap; the counts above are taken over
+              every firing alert, so the two do not have to agree. */}
+          {boardShown && (
+            <p className="fp-note" data-testid="board-partial">
+              {t("{shown} of {total} shown", boardShown)}
+              {" "}
+              <span className="badge warn">{t("partial answer")}</span>
+              {" "}
+              {PARTIAL_REASONS[boardReason] ? t(PARTIAL_REASONS[boardReason]) : boardReason}
+            </p>
           )}
         </Card>
 
@@ -554,6 +595,13 @@ export function FleetMonitoring() {
                 ))}
               </tbody>
             </table>
+          )}
+          {/* The table is a page of the history; the file the button fetches
+              pages on to the end, or says in its last row where it stopped. */}
+          {historyShown && (
+            <p className="fp-note" data-testid="history-shown">
+              {t("{shown} of {total} shown", historyShown)}
+            </p>
           )}
         </Card>
 

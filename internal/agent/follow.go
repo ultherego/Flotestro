@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os/exec"
 	"strconv"
 	"sync"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
+	"github.com/ultherego/flotestro/internal/modules/logs"
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
@@ -26,6 +28,12 @@ const (
 	maxBatch = 6 << 10
 	// defaultPreviewTime applies when the operator gives none of their own.
 	defaultPreviewTime = 5 * time.Minute
+	// defaultBacklog applies when the request names no past of its own.
+	defaultBacklog = 50
+	// maxBacklog bounds the past a live view opens with. More than this is
+	// refused, not trimmed: a view that answers a different question than the
+	// one asked has to say so.
+	maxBacklog = 500
 )
 
 // cancellations holds the functions that interrupt the tasks which can be
@@ -100,48 +108,106 @@ func (e *TaskExecutor) followJournal(ctx context.Context, task *agentv1.TaskEnve
 		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectInternalError, err.Error())
 	}
 
-	sent, dropped := e.forwardLines(followCtx, task.GetTaskId(), stdout)
+	sent, dropped, suppressed := e.forwardLines(followCtx, task.GetTaskId(), stdout)
 	_ = cmd.Wait()
 
+	host := hostSuppression{messages: uint32(suppressed), unknown: suppressionHiddenBy(payload)}
 	// The end of the preview is a success: the stream was meant to end.
-	summary, err := json.Marshal(followSummary{
-		Kind:         "journal_follow",
-		LinesSent:    uint32(sent),
-		LinesDropped: uint32(dropped),
-		Seconds:      uint32(duration.Seconds()),
-	})
+	summary, err := json.Marshal(newFollowSummary(sent, dropped, host, duration))
 	if err != nil {
 		summary = nil
 	}
 	return &agentv1.TaskResult{
 		TaskId:  task.GetTaskId(),
 		Status:  agentv1.TaskResult_STATUS_SUCCEEDED,
-		Message: previewSummary(sent, dropped),
+		Message: previewSummary(sent, dropped, host),
 		Stdout:  summary,
 	}
 }
 
 // followSummary is what a live view leaves behind once it has ended: how much
-// of the journal reached the panel and how much the view could not carry.
+// of the journal reached the panel, how much the view could not carry and how
+// much the host never recorded.
 type followSummary struct {
 	Kind         string `json:"kind"`
 	LinesSent    uint32 `json:"lines_sent"`
 	LinesDropped uint32 `json:"lines_dropped"`
-	Seconds      uint32 `json:"follow_seconds"`
+	// HostSuppressed counts what journald dropped at the source. It is absent,
+	// never zero, when the view could not have seen journald's notice: a zero
+	// here would read as a quiet host.
+	HostSuppressed *uint32 `json:"host_suppressed,omitempty"`
+	// HostSuppressedUnknownReason says why the count is absent.
+	HostSuppressedUnknownReason string `json:"host_suppressed_unknown_reason,omitempty"`
+	Seconds                     uint32 `json:"follow_seconds"`
+}
+
+// hostSuppression is what the host says it never recorded, or the reason that
+// number could not be read at all.
+type hostSuppression struct {
+	messages uint32
+	// unknown names the filter that hid journald's notice; empty when the
+	// count stands for the whole view.
+	unknown string
+}
+
+// suppressionHiddenBy names the filter of the view that keeps journald's
+// rate-limit notice out of it. The notice is written at priority info, so a
+// stricter priority drops it and the count cannot be read from this view.
+func suppressionHiddenBy(payload *opspec.JournalPayload) string {
+	if priority := payload.MaxPriority; priority != nil && *priority < logs.SuppressionNoticePriority {
+		return "priority_filter"
+	}
+	return ""
+}
+
+// suppressionReasonText spells a reason for the operator, who reads the
+// message and not the code beside it.
+func suppressionReasonText(reason string) string {
+	if reason == "priority_filter" {
+		return "the priority filter hides journald's own notice"
+	}
+	return "the filters of the view hide journald's own notice"
+}
+
+// newFollowSummary builds what the panel reads after the view: a count the
+// panel can trust, or a reason in its place.
+func newFollowSummary(sent, dropped int, host hostSuppression, duration time.Duration) followSummary {
+	summary := followSummary{
+		Kind:         "journal_follow",
+		LinesSent:    uint32(sent),
+		LinesDropped: uint32(dropped),
+		Seconds:      uint32(duration.Seconds()),
+	}
+	if host.unknown != "" {
+		summary.HostSuppressedUnknownReason = host.unknown
+		return summary
+	}
+	counted := host.messages
+	summary.HostSuppressed = &counted
+	return summary
 }
 
 // forwardLines reads the output and sends it in batches at a limited rate.
+// What journald suppressed at the source is counted apart from what the view
+// could not carry: one is a gap in the host's journal, the other in the view.
 func (e *TaskExecutor) forwardLines(ctx context.Context, taskID string,
-	output interface{ Read([]byte) (int, error) }) (sent, dropped int) {
+	output interface{ Read([]byte) (int, error) }) (sent, dropped, suppressed int) {
 	lines := make(chan string, 256)
 	var overflow atomic.Uint64
+	var suppressedByHost atomic.Uint64
 	go func() {
 		defer close(lines)
 		scanner := bufio.NewScanner(output)
 		scanner.Buffer(make([]byte, 0, 16<<10), 256<<10)
 		for scanner.Scan() {
+			line := scanner.Text()
+			// The notice is counted as it is read, before the view decides whether
+			// it can carry it: a dropped notice is still a fact about the host.
+			if messages, notice := logs.SuppressedMessages(line); notice {
+				suppressedByHost.Add(uint64(messages))
+			}
 			select {
-			case lines <- scanner.Text():
+			case lines <- line:
 			default:
 				// A full channel means the host produces faster than we manage to send.
 				// The line is lost, but the number of lost ones travels on.
@@ -178,17 +244,20 @@ func (e *TaskExecutor) forwardLines(ctx context.Context, taskID string,
 		droppedInBatch = 0
 	}
 
+	finish := func() (int, int, int) {
+		flush()
+		return sent, dropped, int(suppressedByHost.Load())
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
-			flush()
-			return sent, dropped
+			return finish()
 		case <-ticker.C:
 			flush()
 		case line, open := <-lines:
 			if !open {
-				flush()
-				return sent, dropped
+				return finish()
 			}
 			if !rate.allows(len(line) + 1) {
 				droppedInBatch++
@@ -234,8 +303,12 @@ func (b *rateBudget) allows(bytes int) bool {
 func previewArguments(payload *opspec.JournalPayload) ([]string, error) {
 	args := []string{"--follow", "--no-pager", "--output=short-iso"}
 	backlog := payload.Lines
-	if backlog == 0 || backlog > 500 {
-		backlog = 50
+	if backlog > maxBacklog {
+		return nil, fmt.Errorf("a live view opens with at most %d lines of the past, %d were asked for",
+			maxBacklog, backlog)
+	}
+	if backlog == 0 {
+		backlog = defaultBacklog
 	}
 	args = append(args, "--lines", number(backlog))
 	filters, err := journalFilters(payload)
@@ -245,12 +318,18 @@ func previewArguments(payload *opspec.JournalPayload) ([]string, error) {
 	return append(args, filters...), nil
 }
 
-func previewSummary(sent, dropped int) string {
-	if dropped == 0 {
-		return "the preview ended, lines: " + number(uint32(sent))
+func previewSummary(sent, dropped int, host hostSuppression) string {
+	text := "the preview ended, lines: " + number(uint32(sent))
+	if dropped > 0 {
+		text += ", lines the view could not carry: " + number(uint32(dropped))
 	}
-	return "the preview ended, lines: " + number(uint32(sent)) +
-		", lines the view could not carry: " + number(uint32(dropped))
+	switch {
+	case host.unknown != "":
+		text += ", messages the host never recorded: unknown, " + suppressionReasonText(host.unknown)
+	case host.messages > 0:
+		text += ", messages the host never recorded: " + number(host.messages)
+	}
+	return text
 }
 
 // number turns a counter into the text of an argument.

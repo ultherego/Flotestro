@@ -657,7 +657,8 @@
 <tr><td><code>acknowledged</code></td><td><code>string</code></td><td>true keeps the alerts somebody took, false the ones still waiting.</td></tr>
 <tr><td><code>severity</code></td><td><code>string</code></td><td>critical, warning or info.</td></tr>
 <tr><td><code>host_id</code></td><td><code>string</code></td><td></td></tr>
-<tr><td><code>limit</code></td><td><code>integer</code></td><td>The most alerts to return: 100 by default, 500 at most.</td></tr>
+<tr><td><code>limit</code></td><td><code>integer</code></td><td>The page size: 100 by default, 500 at most.</td></tr>
+<tr><td><code>cursor</code></td><td><code>string</code></td><td>The next_cursor of the previous page; empty for the first page.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-notifications-deliveries"><code>GET /api/v1/notifications/deliveries</code></h3>
 <div class="table-scroll">
