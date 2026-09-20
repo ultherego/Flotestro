@@ -24,6 +24,14 @@ day the tag was published.
   lines the view itself could not carry. A rate-limited unit used to produce a
   view that said nothing was dropped.
 - `SECURITY.md`, `CONTRIBUTING.md`, this file, and `.editorconfig`.
+- Both mount operations bind to a plan computed on the host. What a mount
+  point already holds is the whole question — a mount hides it, an unmount
+  takes it away — and the panel now plans both before it offers either.
+- A blocked package says which kind of block it is: a database fault a repair
+  fixes, or an update nothing classifies. An agent from before the field
+  names no kind, which is read as the database fault every block used to be.
+- `FLOTESTRO_NOTIFY_ALLOW` declares the networks a notification channel may
+  reach, for an installation whose receivers sit on its own network.
 
 ### Changed
 
@@ -37,6 +45,48 @@ day the tag was published.
 
 ### Fixed
 
+- A notification channel could be pointed at the control plane's own
+  loopback, at a cloud metadata service or at the fleet network, and the panel
+  would fetch it: the shape of a server-side request forgery. Every delivery
+  is dialled through a guard that judges the address actually resolved, and a
+  redirect may only go to the receiver's own host.
+- A webhook with no signing secret is refused where it is written and where it
+  would be sent. An HMAC computed with an empty key is a signature only in
+  shape, and the panel no longer offers to clear a stored secret.
+- A security-only plan on dnf silently left out every update no advisory
+  covers — a package from a repository that publishes none — and reported the
+  host patched. Those updates now stay in the plan, named, with the reason,
+  and a host whose advisories cannot be read is refused rather than planned
+  from half an answer.
+- Adopting a cron entry removed the file it was found in, taking every other
+  line of that file with it. The file is removed only when the adopted entry
+  is the whole of it.
+- The helper mounted by running `mount <target>`, which reads `/etc/fstab`:
+  an entry written on the host decided what got mounted, not the order.
+- Adding an SSH key to an account that is already in a privileged group
+  granted root while needing only the key permission. The host's inventory is
+  asked what the account is, and an account it has not reported is refused
+  rather than treated as ordinary.
+- A mount verified against the mount point and the filesystem type but never
+  the source, so a filesystem mounted at the right place from the wrong device
+  passed.
+- An upgrade plan on apt simulated a different transaction from the one that
+  runs, and never read the removals at all: the branch that would have seen
+  them sat behind a parse of the install line, so no upgrade plan ever carried
+  a removal and the protected-package guard was empty by construction.
+- The "for" window of an alert rule was counted from the timestamps of the
+  samples rather than from the readings, so a dip across a missed evaluation
+  pass read as an unbroken run and the alert fired on a window the condition
+  had not held through.
+- A host whose clock runs slow was treated as silent: freshness was judged by
+  the moment the host said it took the reading, so every rule saw a permanent
+  gap while host_offline said the same host was fine.
+- The agent handed its free pages back at most once every five minutes, so the
+  size reported to the fleet budget was the peak of the last large read rather
+  than the size it keeps.
+- The container image built the panel with npm lifecycle scripts enabled, and
+  a backup could pair a database dump with a state archive the key material had
+  moved out from under.
 - A network change verified as applied without the gateway or the DNS servers
   ever being read back: an order of `method: auto` carrying both would pass on
   a DHCP lease alone.
