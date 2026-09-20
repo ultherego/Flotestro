@@ -1,0 +1,80 @@
+Package: flotestro-agent
+Version: 0.60.4
+Architecture: arm64
+Maintainer: Flotestro <flotestro@localhost>
+Depends: systemd, ca-certificates, passwd
+Filename: pool/stable/flotestro-agent_0.60.4_arm64.deb
+Size: 10663566
+MD5sum: 49e7c7460cc6b74d283301df296471a9
+SHA1: 125b3438f781d344131774a338d56247496a3582
+SHA256: 3e909dfed07e70f870be3abb0ca21d0c1e2ab166e0a143c9042f9418cd20198f
+Section: admin
+Priority: optional
+Description: Flotestro fleet agent
+ The agent connects a host to the Linux fleet management panel. It keeps an
+ mTLS session to the control plane, reports the inventory and carries out
+ only typed operations - the contract has no field for an arbitrary shell
+ command.
+ .
+ Operations that require root are carried out by a separate helper process
+ started by a systemd socket, which verifies the caller by SO_PEERCRED. The
+ agent itself runs without root privileges.
+ .
+ The package installs the minimum: systemd, the trust store and the shadow
+ tools the local account module changes accounts with. Every other module
+ drives a tool the host already has, and a tool that is not there disables
+ exactly one capability, which the agent reports as unavailable with the
+ reason and the name of the missing package - it installs neither a network
+ backend, nor a firewall, nor a backup tool, nor a journal forwarder of its
+ own.
+
+Package: flotestro-control-plane
+Version: 0.60.4
+Architecture: arm64
+Maintainer: Flotestro <flotestro@localhost>
+Depends: systemd, ca-certificates, passwd
+Suggests: postgresql-client
+Filename: pool/stable/flotestro-control-plane_0.60.4_arm64.deb
+Size: 7462762
+MD5sum: c018902bf1c0a8d85009aceaef30a91b
+SHA1: d9d6ef29c8670d6c738fdbe408eb1d18b7c14e92
+SHA256: ce2dadf30dea820422ebc46a5843c20b585518d40960efb2769f8cbdec179a17
+Section: admin
+Priority: optional
+Description: Flotestro Linux fleet management panel
+ The control plane accepts agent sessions over mTLS, plans typed operations
+ and runs campaigns on the fleet. It serves the web panel and the REST API.
+ .
+ PostgreSQL is the only source of truth; the schema is created and migrated
+ at startup. The database may be local or remote - the package installs
+ neither the server nor its client: the panel speaks to the database over
+ the network protocol, and psql is a tool for the administrator rather than
+ a dependency of the service.
+ .
+ The identity directory integration and the OIDC login provider are
+ optional. Without them the panel works on API tokens and manages the local
+ accounts of the hosts.
+
+Package: flotestro-relay
+Version: 0.60.4
+Architecture: arm64
+Maintainer: Flotestro <flotestro@localhost>
+Depends: systemd, ca-certificates, passwd
+Filename: pool/stable/flotestro-relay_0.60.4_arm64.deb
+Size: 6722776
+MD5sum: be8afca5a5cf43d17db80abbd872f827
+SHA1: df4d85517e07ef4be6272911604e62458826c668
+SHA256: 0fbdef30a7106631108468dff103f8bc1f8fc8feac0aa0c87fd5a8b4cf1575ab
+Section: admin
+Priority: optional
+Description: Flotestro site relay
+ The relay mediates between the agents of one site and the centre: it keeps
+ one upstream connection instead of hundreds, buffers results for the
+ duration of a link outage and does not forward jobs whose time to live has
+ passed.
+ .
+ The relay is a separate trust boundary. It has its own certificate of a
+ different kind than a host certificate, its own service account and its own
+ state directory; it signs no certificate and carries out no operations on
+ hosts.
+

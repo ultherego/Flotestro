@@ -1,0 +1,31 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA512
+
+Origin: Flotestro
+Label: Flotestro
+Suite: stable
+Codename: stable
+Architectures: amd64 arm64
+Components: main
+Date: Sun, 20 Sep 2026 08:46:45 +0000
+SHA256:
+ 589e6e33325f24cbbb1e5471d9f3fe5cf0ed2f3d852a1d44f14447a93f266caf             3413 main/binary-amd64/Packages
+ 717e972bb93f1f50cde16b2d31a1925d4a5b335aec17697569a8048ea4bd9c7e             1609 main/binary-amd64/Packages.gz
+ da50a1f5642b5ad7981aadcfd1c0b9028a75e9627e61932034fe9be0cace0fe7             3413 main/binary-arm64/Packages
+ 7e31f04a095eb8e9c336f430bbc054e190fc586aa5d23f5f87d15db1618ed61c             1604 main/binary-arm64/Packages.gz
+-----BEGIN PGP SIGNATURE-----
+
+iQIyBAEBCgAdFiEEzbZuZxmzGwx/7TZnY+N4pQLIX7IFAmqvnXUACgkQY+N4pQLI
+X7K0Ig/42CrEii0qGd95PJ2HP4gz9cbJXVHWD3ZKv0cwtlSOZ0rPFYHHwcDdlxQn
+VH3hvRCSdsWqaWc6QAzPICBpvidTm9z57iuIzkcRQa0vCjGjTTzL38ZEFCyBDw4c
+1ZjpkB9gke9zv1rx4hvUGonnthMuKfJu6iLCtioVQRyIpgfAHgYERSIx8AymsMow
+q2X2tWR9ADSMEbN6bkkolc/JD2SYhPGno+oS/qLBu/eNk/aQevxtsuzZ9DTKulv8
+rxban/yVYjfYjQmtCXBnxb7CroD5bbQiakS0RmfvbhqBqaAdXqLy4K05jXkGalPg
+PhWzeu43Rdzkw0HY9ImcbpZklEFo/dU6pbMx3gt77Yg0C5ZKEA6F47ZEoWTpMxC1
+/j6CDv4OF1U1Dwxw+GbEGGji9epKjo1WR/hxGJO9nOQIf6DD6qVnXoJJsQ8UJzro
+wjPuJtsWNw8wdzh+7oMpdHbPnklt/XWGzAreM0qGvlWa0H0VhIMv7MoOq0vROLl0
+RJpecWKhW7oOZ4F7rL1loQYb1vv8dfDNmeAF85SOl6YC77GTDt1i0BRNyGSNlNtR
+PfmpLnqBKBVhIEZKAWGEhLJVGGkEqTidIZ2p9OYbngmcA1UPnIv+oF9FQDfdAxoo
+NZH5MO3vhkrvffRwfFym/o1ChfkMxA0kGdz9d82WDp+G0VsQEA==
+=y2V6
+-----END PGP SIGNATURE-----

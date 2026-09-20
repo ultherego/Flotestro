@@ -1,0 +1,12 @@
+Origin: Flotestro
+Label: Flotestro
+Suite: stable
+Codename: stable
+Architectures: amd64 arm64
+Components: main
+Date: Sun, 20 Sep 2026 08:46:45 +0000
+SHA256:
+ 589e6e33325f24cbbb1e5471d9f3fe5cf0ed2f3d852a1d44f14447a93f266caf             3413 main/binary-amd64/Packages
+ 717e972bb93f1f50cde16b2d31a1925d4a5b335aec17697569a8048ea4bd9c7e             1609 main/binary-amd64/Packages.gz
+ da50a1f5642b5ad7981aadcfd1c0b9028a75e9627e61932034fe9be0cace0fe7             3413 main/binary-arm64/Packages
+ 7e31f04a095eb8e9c336f430bbc054e190fc586aa5d23f5f87d15db1618ed61c             1604 main/binary-arm64/Packages.gz
