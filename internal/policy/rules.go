@@ -13,6 +13,7 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/files"
 	"github.com/ultherego/flotestro/internal/modules/kernel"
 	"github.com/ultherego/flotestro/internal/opspec"
+	"github.com/ultherego/flotestro/internal/systemd"
 )
 
 // The inventory modules the rules are judged from.
@@ -284,7 +285,9 @@ func judgeUnit(rule Rule, facts Facts) Judgement {
 				unit.UnitFileState == "static" || unit.UnitFileState == "alias" || unit.UnitFileState == "indirect"
 			enabled = &value
 		}
-		if unit.ActiveState != "" {
+		// A unit file systemd has never loaded reports its runtime state as
+		// unknown. That is a fact nobody read, not a unit that is stopped.
+		if unit.ActiveState != "" && unit.ActiveState != systemd.StateUnknown {
 			value := unit.ActiveState == "active" || unit.ActiveState == "reloading" || unit.ActiveState == "activating"
 			active = &value
 		}

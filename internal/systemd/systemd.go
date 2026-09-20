@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -285,9 +286,19 @@ const (
 // maxUnits bounds the full list.
 const maxUnits = 500
 
+// StateUnknown marks a runtime field nobody read: a unit file systemd has
+// never loaded has no runtime state, and "inactive" would be a claim.
+const StateUnknown = "unknown"
+
+// listedTypes are the unit types the listing covers. The same set goes to
+// systemctl and filters the unit files, so the two cannot drift apart.
+var listedTypes = []string{"service", "socket", "timer", "target", "path", "mount"}
+
 // Unit describes a unit on the list.
 type Unit struct {
-	Name        string `json:"name"`
+	Name string `json:"name"`
+	// The runtime states carry StateUnknown for a unit file systemd has never
+	// loaded; such a unit runs nowhere, but nobody read its state either.
 	LoadState   string `json:"load_state"`
 	ActiveState string `json:"active_state"`
 	SubState    string `json:"sub_state"`
@@ -297,23 +308,39 @@ type Unit struct {
 	UnitFileState string `json:"unit_file_state,omitempty"`
 }
 
-// List returns the units loaded on the host.
+// List returns the units of the host: the ones systemd has loaded and the unit
+// files it has never loaded.
 func List(ctx context.Context) ([]Unit, bool, error) {
 	stdout, _, err := run(ctx, 30*time.Second,
-		"list-units", "--all", "--no-pager", "--no-legend", "--plain", "--type=service,socket,timer,target,path,mount")
+		"list-units", "--all", "--no-pager", "--no-legend", "--plain", "--type="+strings.Join(listedTypes, ","))
 	if err != nil {
 		return nil, false, err
 	}
-	// The state of the unit files is a separate query: list-units does not give
-	// it, and without it what the host will do after a reboot is not visible.
-	files := unitFileStates(ctx)
+	// The unit files are a separate query: list-units gives neither the state
+	// after a reboot nor the units systemd has never loaded.
+	units, truncated := mergeUnits(stdout, unitFileStates(ctx))
+	return units, truncated, nil
+}
 
+// mergeUnits joins the loaded units with the unit files on disk. A host that
+// has never loaded a unit still has it, and the panel must be able to tell
+// "this host has no nginx" from "nginx is here and switched off".
+func mergeUnits(listing string, files map[string]string) ([]Unit, bool) {
 	var units []Unit
-	for _, line := range strings.Split(stdout, "\n") {
+	loaded := map[string]struct{}{}
+	truncated := false
+
+	for _, line := range strings.Split(listing, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 4 || !strings.Contains(fields[0], ".") {
 			continue
 		}
+		if len(units) >= maxUnits {
+			// A truncated list is marked so that it does not look complete.
+			truncated = true
+			break
+		}
+		loaded[fields[0]] = struct{}{}
 		unit := Unit{
 			Name:          fields[0],
 			LoadState:     fields[1],
@@ -325,15 +352,66 @@ func List(ctx context.Context) ([]Unit, bool, error) {
 			unit.Description = strings.Join(fields[4:], " ")
 		}
 		units = append(units, unit)
-		if len(units) >= maxUnits {
-			// A truncated list is marked so that it does not look complete.
-			return units, true, nil
-		}
 	}
-	return units, false, nil
+
+	// The loaded units went in first, so the limit cuts never-loaded units
+	// before running ones; the order here decides which of them still fit.
+	for _, name := range sortedNames(files) {
+		if _, found := loaded[name]; found || !listedType(name) || isTemplate(name) {
+			continue
+		}
+		if len(units) >= maxUnits {
+			truncated = true
+			break
+		}
+		units = append(units, Unit{
+			Name:          name,
+			LoadState:     StateUnknown,
+			ActiveState:   StateUnknown,
+			SubState:      StateUnknown,
+			UnitFileState: files[name],
+		})
+	}
+
+	sort.Slice(units, func(i, j int) bool { return units[i].Name < units[j].Name })
+	return units, truncated
 }
 
-// unitFileStates reads what the host will do after a reboot.
+// sortedNames orders the unit files by name: which of them the limit lets
+// through must not depend on the order a map hands them out.
+func sortedNames(files map[string]string) []string {
+	names := make([]string, 0, len(files))
+	for name := range files {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// listedType says whether the unit file is of a type the listing covers.
+func listedType(name string) bool {
+	dot := strings.LastIndex(name, ".")
+	if dot < 0 {
+		return false
+	}
+	for _, listed := range listedTypes {
+		if name[dot+1:] == listed {
+			return true
+		}
+	}
+	return false
+}
+
+// isTemplate says whether the name is a template file (foo@.service). A
+// template is a file and not a runnable unit: only its instances are, and an
+// instance that runs is a loaded unit already.
+func isTemplate(name string) bool {
+	dot := strings.LastIndex(name, ".")
+	return dot > 0 && strings.HasSuffix(name[:dot], "@")
+}
+
+// unitFileStates reads every unit file on the host and what it will do after
+// a reboot.
 func unitFileStates(ctx context.Context) map[string]string {
 	stdout, _, err := run(ctx, 30*time.Second, "list-unit-files", "--no-pager", "--no-legend", "--plain")
 	if err != nil {

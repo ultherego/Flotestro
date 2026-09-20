@@ -2,6 +2,7 @@ package systemd
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -144,5 +145,160 @@ func TestApplyArgsPassesNoArgumentToNoBlock(t *testing.T) {
 		if arg == "--no-block" {
 			t.Fatal("--no-block makes the state after the operation be read too early")
 		}
+	}
+}
+
+// loadedLine is one row of "systemctl list-units --all --plain".
+func loadedLine(name, active, sub, description string) string {
+	return name + " loaded " + active + " " + sub + " " + description
+}
+
+func unitByName(units []Unit, name string) (Unit, bool) {
+	for _, unit := range units {
+		if unit.Name == name {
+			return unit, true
+		}
+	}
+	return Unit{}, false
+}
+
+func TestMergeUnitsShowsUnitFilesSystemdNeverLoaded(t *testing.T) {
+	// A service that is installed and switched off is never loaded, and a list
+	// without it cannot be told from a host that does not have it at all.
+	listing := strings.Join([]string{
+		loadedLine("cron.service", "active", "running", "Regular background program"),
+		loadedLine("nginx.service", "failed", "failed", "A high performance web server"),
+	}, "\n")
+	files := map[string]string{
+		"cron.service":    "enabled",
+		"nginx.service":   "enabled",
+		"apache2.service": "disabled",
+	}
+	units, truncated := mergeUnits(listing, files)
+	if truncated {
+		t.Error("a short list was reported as truncated")
+	}
+	if len(units) != 3 {
+		t.Fatalf("units = %d, want 3: %+v", len(units), units)
+	}
+	// The list stays in name order, as the loaded listing alone used to be.
+	if units[0].Name != "apache2.service" || units[1].Name != "cron.service" || units[2].Name != "nginx.service" {
+		t.Errorf("the merged list is out of order: %+v", units)
+	}
+	// A loaded row keeps exactly what the host said about it.
+	loaded, _ := unitByName(units, "cron.service")
+	if loaded.LoadState != "loaded" || loaded.ActiveState != "active" || loaded.SubState != "running" ||
+		loaded.UnitFileState != "enabled" || loaded.Description != "Regular background program" {
+		t.Errorf("the loaded unit was changed: %+v", loaded)
+	}
+	// The never-loaded one has a file state and no invented runtime state.
+	never, _ := unitByName(units, "apache2.service")
+	if never.UnitFileState != "disabled" {
+		t.Errorf("unit file state = %q, want disabled", never.UnitFileState)
+	}
+	if never.LoadState != StateUnknown || never.ActiveState != StateUnknown || never.SubState != StateUnknown {
+		t.Errorf("a unit nobody loaded got a runtime state: %+v", never)
+	}
+}
+
+func TestMergeUnitsLeavesTemplatesOut(t *testing.T) {
+	// A template is a file, not a unit an operator can start; the instances
+	// are the runnable ones, and an instance that runs is loaded anyway.
+	files := map[string]string{
+		"getty@.service":     "enabled",
+		"user@.service":      "static",
+		"getty@tty1.service": "enabled",
+	}
+	units, _ := mergeUnits("", files)
+	for _, unit := range units {
+		if strings.Contains(unit.Name, "@.") {
+			t.Errorf("the template %q was listed as a unit", unit.Name)
+		}
+	}
+	if _, found := unitByName(units, "getty@tty1.service"); !found {
+		t.Error("the instance of a template is a unit and should be listed")
+	}
+}
+
+func TestMergeUnitsIgnoresUnitFilesOfOtherTypes(t *testing.T) {
+	// The unit files cover types the loaded listing does not ask for; a merge
+	// that took them in would show slices and devices no one asked about.
+	files := map[string]string{
+		"user.slice":        "static",
+		"session-1.scope":   "transient",
+		"dev-sda.device":    "static",
+		"swapfile.swap":     "generated",
+		"backup.timer":      "disabled",
+		"docker.socket":     "enabled",
+		"srv-data.mount":    "generated",
+		"multi-user.target": "static",
+		"a-path.path":       "disabled",
+	}
+	units, _ := mergeUnits("", files)
+	if len(units) != 5 {
+		t.Fatalf("units = %+v, want only the listed types", units)
+	}
+	for _, unit := range units {
+		if !listedType(unit.Name) {
+			t.Errorf("the unit %q is not of a listed type", unit.Name)
+		}
+	}
+}
+
+func TestMergeUnitsKeepsLoadedUnitsWhenTruncating(t *testing.T) {
+	// The limit has to fall on the units nobody loaded first: a running unit
+	// dropped for a disabled unit file would be a worse list than before.
+	var lines []string
+	files := map[string]string{}
+	for i := 0; i < maxUnits; i++ {
+		name := fmt.Sprintf("loaded-%03d.service", i)
+		lines = append(lines, loadedLine(name, "active", "running", "a loaded unit"))
+		files[name] = "enabled"
+	}
+	files["aaa-never-loaded.service"] = "disabled"
+
+	units, truncated := mergeUnits(strings.Join(lines, "\n"), files)
+	if !truncated {
+		t.Error("a list cut off by the limit was not marked truncated")
+	}
+	if len(units) != maxUnits {
+		t.Fatalf("units = %d, want %d", len(units), maxUnits)
+	}
+	if _, found := unitByName(units, "aaa-never-loaded.service"); found {
+		t.Error("a never-loaded unit took the place of a loaded one")
+	}
+}
+
+func TestMergeUnitsDoesNotMarkAFullListTruncated(t *testing.T) {
+	// Exactly as many units as the limit allows is a complete list.
+	var lines []string
+	for i := 0; i < maxUnits; i++ {
+		lines = append(lines, loadedLine(fmt.Sprintf("loaded-%03d.service", i), "active", "running", "a loaded unit"))
+	}
+	units, truncated := mergeUnits(strings.Join(lines, "\n"), map[string]string{})
+	if truncated || len(units) != maxUnits {
+		t.Fatalf("units = %d, truncated = %v", len(units), truncated)
+	}
+}
+
+func TestMergeUnitsTruncatesNeverLoadedUnitsInNameOrder(t *testing.T) {
+	// Which units the limit lets through must not depend on the order a map
+	// hands its keys out, or two reads of one host would disagree.
+	files := map[string]string{}
+	for i := 0; i < maxUnits+10; i++ {
+		files[fmt.Sprintf("file-%03d.service", i)] = "disabled"
+	}
+	first, truncated := mergeUnits("", files)
+	if !truncated {
+		t.Error("a list cut off by the limit was not marked truncated")
+	}
+	second, _ := mergeUnits("", files)
+	for i := range first {
+		if first[i].Name != second[i].Name {
+			t.Fatalf("two merges of the same host disagree at %d: %q vs %q", i, first[i].Name, second[i].Name)
+		}
+	}
+	if first[len(first)-1].Name != fmt.Sprintf("file-%03d.service", maxUnits-1) {
+		t.Errorf("the list was not cut in name order: last = %q", first[len(first)-1].Name)
 	}
 }
