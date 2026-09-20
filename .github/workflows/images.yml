@@ -232,11 +232,23 @@ jobs:
               exit 1
             fi
           done
-          if docker compose -f compose.yaml config | grep -qE '^ *depends_on:'; then
-            echo "compose.yaml makes the control plane depend on a service the profile may not start" >&2
-            exit 1
-          fi
-          echo "nothing without its profile, everything with it, and no dependency either way"
+          # A dependency is allowed only on a service every profile starts.
+          # Depending on a profiled one would stop the deployment dead when
+          # that profile is not named.
+          docker compose -f compose.yaml --profile quickstart --profile tools \
+            --profile restore --profile airgap config --format json > /tmp/profiles.json
+          python3 - <<'CHECK'
+          import json, sys
+          services = json.load(open("/tmp/profiles.json"))["services"]
+          profiled = {n for n, s in services.items() if s.get("profiles")}
+          for name, service in services.items():
+              for other in service.get("depends_on") or {}:
+                  if other in profiled:
+                      print(f"{name} depends on {other}, which only a profile starts",
+                            file=sys.stderr)
+                      sys.exit(1)
+          CHECK
+          echo "nothing without its profile, everything with it, and no dependency on one"
 
       - name: Our own services run as nobody and write nowhere
         # The execution contract of the document, read back out of the files
