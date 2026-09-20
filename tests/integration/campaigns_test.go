@@ -2614,6 +2614,7 @@ func TestTimeSourceCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) 
 			"failed": true, "paused": true}, 6*time.Minute)
 	// A host that cannot reach the time server refuses the change, and it is
 	// right to: a source nothing answers is not a source.
+	unreachable := map[string]bool{}
 	if final.State == "completed_with_issues" {
 		for _, target := range h.campaignTargets(campaign.ID) {
 			if target.State != "failed" {
@@ -2624,14 +2625,18 @@ func TestTimeSourceCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) 
 				t.Fatalf("host %s failed the time source change: %s/%s: %s",
 					target.Hostname, target.State, target.ErrorCode, target.Message)
 			}
+			unreachable[target.HostID] = true
 			t.Logf("host %s does not reach the time server from this laboratory: %s",
 				target.Hostname, target.Message)
 		}
 	} else if final.State != "completed" {
 		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
 	}
+	// A host that refused has nothing to have recorded - the point of the
+	// refusal is that the change did not happen.
+	applied := 0
 	for _, target := range h.campaignTargets(campaign.ID) {
-		if refusals[target.HostID] {
+		if refusals[target.HostID] || unreachable[target.HostID] {
 			continue
 		}
 		var recorded bool
@@ -2640,7 +2645,12 @@ func TestTimeSourceCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) 
 		}
 		if !recorded {
 			t.Errorf("host %s after the campaign does not have the server %s in the panel file", target.Hostname, server)
+			continue
 		}
+		applied++
+	}
+	if applied == 0 {
+		t.Skip("no host in this laboratory reaches the time server; only the refusals were checked")
 	}
 }
 
