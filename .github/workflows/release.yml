@@ -444,10 +444,15 @@ jobs:
         # packaged for Debian and Ubuntu as pacman-package-manager - writes
         # the pacman database. repo-add reads the packages with bsdtar, which
         # on Ubuntu is libarchive-tools and is not pulled in by pacman itself.
+        #
+        # makepkg is here for its shell libraries, not for building: repo-add
+        # sources /usr/share/makepkg/util/*.sh and dies on the first line
+        # without them. The build job needs the mirror of this - pacman beside
+        # makepkg - so the two jobs want both packages for opposite reasons.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            dpkg-dev rpm createrepo-c pacman-package-manager libarchive-tools
+            dpkg-dev rpm createrepo-c pacman-package-manager makepkg libarchive-tools
 
       - name: The script that composes them
         if: env.RELEASE_SIGNING_KEY != ''
