@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   byIdName, carriesData, destructiveRefusal, deviceInUse, hasStableIdentity, identity, isSnapshot,
-  memberRefusal, mountRows, mountpointWords,
+  memberRefusal, mountOrder, mountPlanBinding, mountRows, mountpointWords,
 } from "./Storage";
 
 /* The table folds a filesystem mounted twice at one point into one row,
@@ -145,5 +145,29 @@ describe("isSnapshot", () => {
     expect(isSnapshot({ name: "snap", group: "vg0", path: "/dev/vg0/snap", size_bytes: 1, attributes: "swi-a-s---" })).toBe(true);
     expect(isSnapshot({ name: "data", group: "vg0", path: "/dev/vg0/data", size_bytes: 1, attributes: "-wi-ao----" })).toBe(false);
     expect(isSnapshot({ name: "data", group: "vg0", path: "/dev/vg0/data", size_bytes: 1 })).toBe(false);
+  });
+});
+
+describe("mountPlanBinding", () => {
+  const values = { source: "UUID=abc", target: "/srv/data", fs_type: "ext4", options: "defaults", persist: true };
+
+  it("reads the digest of a mount plan and nothing else", () => {
+    expect(mountPlanBinding({ kind: "mount_plan", plan_hash: "abc123", plan: { action: "create" } }))
+      .toEqual({ hash: "abc123", plan: { action: "create" } });
+    expect(mountPlanBinding({ kind: "device_plan", plan_hash: "abc123" })).toBeNull();
+    expect(mountPlanBinding({ kind: "mount_plan" })).toBeNull();
+    expect(mountPlanBinding(undefined)).toBeNull();
+  });
+
+  it("keeps a refusal, which the wizard reads before it offers the change", () => {
+    const binding = mountPlanBinding({ kind: "mount_plan", plan_hash: "abc123", plan: { refusal: "the target /srv/data is taken by /dev/sdc1" } });
+    expect(binding?.plan.refusal).toContain("/dev/sdc1");
+  });
+
+  it("ties the plan to the values it was computed for", () => {
+    expect(mountOrder(values)).toBe(mountOrder({ ...values }));
+    expect(mountOrder({ ...values, source: "UUID=def" })).not.toBe(mountOrder(values));
+    expect(mountOrder({ ...values, persist: false })).not.toBe(mountOrder(values));
+    expect(mountOrder({ ...values, options: "defaults,ro" })).not.toBe(mountOrder(values));
   });
 });

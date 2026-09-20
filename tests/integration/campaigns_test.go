@@ -1658,10 +1658,7 @@ func TestMountCampaignResolvesTheUUIDOnEveryHost(t *testing.T) {
 
 	t.Cleanup(func() {
 		for _, hostID := range hosts {
-			h.runOperation(hostID, map[string]any{
-				"action": "mount.remove", "reason": "cleanup after the mount campaign test",
-				"payload": map[string]any{"storage": map[string]any{"target": target}},
-			}, 2*time.Minute)
+			unmountBound(t, h, hostID, target)
 		}
 	})
 

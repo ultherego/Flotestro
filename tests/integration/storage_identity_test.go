@@ -104,6 +104,36 @@ func storagePlanDetail(t *testing.T, h *harness, jobID, kind string) json.RawMes
 	return nil
 }
 
+// unmountBound plans the unmount on the host and orders it with that plan's
+// digest, which is the only way a mount point can be taken away.
+func unmountBound(t *testing.T, h *harness, hostID, target string) {
+	t.Helper()
+	job, attempts := h.runOperation(hostID, map[string]any{
+		"action": "storage.plan", "reason": identityReason,
+		"payload": map[string]any{"storage": map[string]any{"target": target}},
+	}, 2*time.Minute)
+	if job.State != "succeeded" {
+		t.Logf("planning the unmount of %s: %s, %s", target, job.State, lastMessage(attempts))
+		return
+	}
+	var plan struct {
+		Action   string `json:"action"`
+		PlanHash string `json:"plan_hash"`
+	}
+	if err := json.Unmarshal(storagePlanDetail(t, h, job.ID, "mount_plan"), &plan); err != nil {
+		t.Logf("the unmount plan of %s does not read: %v", target, err)
+		return
+	}
+	if plan.Action == "remove_absent" {
+		return
+	}
+	h.runOperation(hostID, map[string]any{
+		"action": "mount.remove", "reason": identityReason,
+		"payload": map[string]any{"storage": map[string]any{
+			"target": target, "plan_hash": plan.PlanHash}},
+	}, 2*time.Minute)
+}
+
 // TestDevicesCarryAStableIdentity checks the thing every destructive operation
 // binds to: a disk is named by its /dev/disk/by-id link, its serial or WWN,
 // and the topology says what stands on it.
@@ -313,12 +343,7 @@ func TestMountPlanCarriesTheFstabRevision(t *testing.T) {
 	// A target of this run alone: a mount that an older helper let through
 	// on a stale plan would otherwise stand in the way of the next run.
 	target := fmt.Sprintf("/mnt/flotestro-identity-%d", time.Now().UnixNano())
-	t.Cleanup(func() {
-		h.createOperation(host.ID, map[string]any{
-			"action": "mount.remove", "reason": identityReason,
-			"payload": map[string]any{"storage": map[string]any{"target": target}},
-		})
-	})
+	t.Cleanup(func() { unmountBound(t, h, host.ID, target) })
 	job, attempts := h.runOperation(host.ID, map[string]any{
 		"action": "storage.plan", "reason": identityReason,
 		"payload": map[string]any{"storage": map[string]any{

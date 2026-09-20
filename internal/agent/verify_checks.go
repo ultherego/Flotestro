@@ -615,6 +615,9 @@ func verifyMountState(ctx context.Context, readers *hostReaders, in verifyInput)
 	if !mount.Mounted {
 		return unverified(expected, observed, "the filesystem is not mounted at "+payload.Target)
 	}
+	if reason := sourceMismatch(payload.Source, mount.Source, payload.Target); reason != "" {
+		return unverified(expected, observed, reason)
+	}
 	if payload.FSType != "" && mount.FSType != "" && mount.FSType != payload.FSType {
 		return unverified(expected, observed,
 			"the filesystem at "+payload.Target+" is "+mount.FSType+" and not "+payload.FSType)
@@ -624,6 +627,19 @@ func verifyMountState(ctx context.Context, readers *hostReaders, in verifyInput)
 			"the mount at "+payload.Target+" is not in fstab and would not survive a reboot")
 	}
 	return verified(expected, observed)
+}
+
+// sourceMismatch names the fault when the mount point carries another
+// filesystem. A tag and a device path name one thing, so only like forms are.
+func sourceMismatch(ordered, observed, target string) string {
+	if ordered == "" || observed == "" || ordered == observed {
+		return ""
+	}
+	tag := func(name string) bool { return strings.Contains(name, "=") }
+	if tag(ordered) != tag(observed) {
+		return ""
+	}
+	return "the filesystem at " + target + " comes from " + observed + " and not from " + ordered
 }
 
 // verifyStorageLayout reads the device after the change: the host's own

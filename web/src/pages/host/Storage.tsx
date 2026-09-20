@@ -11,6 +11,7 @@ import {
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
+import { PlanSummary, type HostPlan } from "../../components/plan";
 import { OperationForm } from "../../components/OperationForm";
 import { emptyForm, operationForm, type FieldSuggestions, type FormValue } from "../../lib/operations";
 import { useT } from "../../i18n";
@@ -340,6 +341,10 @@ export function Storage() {
   // change is over: every operation sends it back after itself.
   const refresh = useModuleRefresh(host.id, ["storage"]);
   const [intent, setIntent] = useState<Intent | null>(null);
+  // An unmount binds to a plan too: the host is asked what it would take
+  // away, and the change carries the digest of that answer.
+  const unmountPlan = useReadOperation<MountPlanDetail>(host);
+  const [unmounting, setUnmounting] = useState("");
   const [smartOf, setSmartOf] = useState<Device | null>(null);
   const [message, setMessage] = useState("");
   const [wizard, setWizard] = useState(false);
@@ -359,6 +364,7 @@ export function Storage() {
           : t("Job {id} has been queued.", { id: job.id.slice(0, 8) }),
       );
       setIntent(null);
+      setUnmounting("");
       setWizard(false);
       setLayer(null);
       queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
@@ -368,6 +374,18 @@ export function Storage() {
   });
 
   const snapshot = module.data?.payload;
+  const unmountBinding = unmounting ? mountPlanBinding(unmountPlan.attempt?.detail) : null;
+  // The confirmation appears once the host has answered with a digest; a
+  // refusal is shown where the button is instead.
+  const plannedUnmount: Intent | null = unmountBinding && !unmountBinding.plan.refusal
+    ? {
+        action: "mount.remove",
+        label: t("Unmount"),
+        description: t("{target} will be unmounted and its fstab entry removed. Processes holding it are checked first.", { target: unmounting }),
+        payload: { storage: { target: unmounting, plan_hash: unmountBinding.hash } },
+      }
+    : null;
+  const confirming = intent ?? plannedUnmount;
   if (!module.data) return <Empty>{t("This host has not reported its storage yet.")}</Empty>;
 
   const mounts = snapshot?.mounts ?? [];
@@ -541,16 +559,14 @@ export function Storage() {
                     <ActionGuard action="mount.remove" host={host.id}>
                       <button
                         className="hm-danger"
-                        onClick={() =>
-                          setIntent({
-                            action: "mount.remove",
-                            label: t("Unmount"),
-                            description: t("{target} will be unmounted and its fstab entry removed. Processes holding it are checked first.", { target: mount.target }),
-                            payload: { storage: { target: mount.target } },
-                          })
-                        }
+                        disabled={unmountPlan.busy}
+                        onClick={() => {
+                          unmountPlan.reset();
+                          setUnmounting(mount.target);
+                          unmountPlan.order({ action: "storage.plan", payload: { storage: { target: mount.target } } });
+                        }}
                       >
-                        {t("Unmount")}
+                        {unmountPlan.busy && unmounting === mount.target ? t("Planning…") : t("Unmount")}
                       </button>
                     </ActionGuard>
                   )}
@@ -1003,22 +1019,27 @@ export function Storage() {
         </p>
       )}
 
-      {intent && (
+      {/* The host refused to plan the unmount: nothing is offered to confirm. */}
+      {unmounting && unmountPlan.attempt && !plannedUnmount && (
+        <Message error text={unmountBinding?.plan.refusal || unmountPlan.attempt.message ||
+          t("The host refused to plan the unmount of {target}.", { target: unmounting })} />
+      )}
+      {confirming && (
         <TargetConfirmation
           host={host}
-          label={intent.label}
-          description={intent.description}
+          label={confirming.label}
+          description={confirming.description}
           busy={request.isPending}
           onConfirm={(reason, confirmation) =>
             request.mutate({
-              action: intent.action,
+              action: confirming.action,
               reason,
               // A destructive operation requires the target name typed out.
               target_confirmation: confirmation,
-              payload: intent.payload,
+              payload: confirming.payload,
             })
           }
-          onCancel={() => setIntent(null)}
+          onCancel={() => { setIntent(null); setUnmounting(""); unmountPlan.reset(); }}
         />
       )}
     </ModulePage>
@@ -1388,16 +1409,45 @@ export function identity(device: Device): Record<string, unknown> {
   };
 }
 
+/** The values a mount plan was computed for. */
+export type MountValues = { source: string; target: string; fs_type: string; options: string; persist: boolean };
+
 /**
- * The mount wizard.
+ * The order a plan belongs to. A field edited after the planning leaves the
+ * digest bound to values nobody looked at, so the two are compared as text.
+ */
+export function mountOrder(values: MountValues): string {
+  return [values.source, values.target, values.fs_type, values.options, values.persist ? "fstab" : "boot"].join("\u0000");
+}
+
+/** The mount plan of a planning job: the digest the change binds to, and what the host would do. */
+export function mountPlanBinding(detail?: MountPlanDetail): { hash: string; plan: HostPlan } | null {
+  if (detail?.kind !== "mount_plan" || !detail.plan_hash) return null;
+  return { hash: detail.plan_hash, plan: detail.plan ?? {} };
+}
+
+type MountPlanDetail = { kind?: string; plan_hash?: string; plan?: HostPlan };
+
+/**
+ * The mount wizard. The host plans the mount first and the change carries the
+ * digest of that plan: an fstab entry already naming the mount point is then
+ * refused instead of deciding what gets mounted.
  */
 function MountWizard({ devices, onIntent }: { devices: Device[]; onIntent: (intent: Intent) => void }) {
   const t = useT();
+  const host = useHost();
   const [source, setSource] = useState("");
   const [target, setTarget] = useState("");
   const [type, setType] = useState("ext4");
   const [options, setOptions] = useState("defaults,nofail");
   const [persist, setPersist] = useState(true);
+  const plan = useReadOperation<MountPlanDetail>(host);
+  // The order the plan was asked for, kept next to the plan itself.
+  const [planned, setPlanned] = useState("");
+  const order = mountOrder({ source, target, fs_type: type, options, persist });
+  const binding = planned === order ? mountPlanBinding(plan.attempt?.detail) : null;
+  const refused = planned === order && plan.attempt && plan.attempt.status !== "succeeded";
+  const hash = binding && !binding.plan.refusal ? binding.hash : "";
   // A filesystem the host reported and named by a UUID: that is what can
   // be mounted and what survives a reboot under the same name.
   const known = devices.filter((device) => device.uuid && device.fs_type);
@@ -1450,7 +1500,30 @@ function MountWizard({ devices, onIntent }: { devices: Device[]; onIntent: (inte
         <Check checked={persist} onChange={setPersist}>
           {t("Keep it after reboot (write an fstab entry)")}
         </Check>
+        <Message text={plan.message} error />
+        {refused && <Message text={plan.attempt?.message || plan.attempt?.error_code || t("The host refused the planning.")} error />}
+        {/* What the host says it would do, and the digest the change is bound
+            to; without it the order is refused on the host. */}
+        <div className="source">
+          {binding
+            ? <PlanSummary plan={binding.plan} />
+            : plan.busy
+              ? t("The host is planning this mount…")
+              : t("Plan the mount on the host first: the change is carried out only against the plan it answers with.")}
+        </div>
         <FormActions>
+          <ActionGuard action="storage.plan" host={host.id} explain>
+            <button
+              className="secondary"
+              onClick={() => {
+                setPlanned(order);
+                plan.order({ action: "storage.plan", payload: { storage: { source, target, fs_type: type, options, persist } } });
+              }}
+              disabled={!source || !target || !type || plan.busy || host.connection_state !== "online"}
+            >
+              {plan.busy ? t("Planning…") : t("Plan on the host")}
+            </button>
+          </ActionGuard>
           <button
             onClick={() =>
               onIntent({
@@ -1460,11 +1533,11 @@ function MountWizard({ devices, onIntent }: { devices: Device[]; onIntent: (inte
                   ? t("{source} will be mounted at {target} as {type} and written to fstab.", { source, target, type })
                   : t("{source} will be mounted at {target} as {type} for this boot only.", { source, target, type }),
                 payload: {
-                  storage: { source, target, fs_type: type, options, persist },
+                  storage: { source, target, fs_type: type, options, persist, plan_hash: hash },
                 },
               })
             }
-            disabled={!source || !target || !type}
+            disabled={!hash}
           >
             {t("Mount")}
           </button>

@@ -30,6 +30,10 @@ const (
 // operator approved.
 const errorStalePlan = planenvelope.ErrorStalePlan
 
+// errorPlanMissing is the answer to a change that carries nothing binding it
+// to a plan this host computed; the control plane refuses such orders too.
+const errorPlanMissing = opspec.RefusalPlanBindingMissing
+
 // applyStorage handles the operations on the disk space of the host.
 func (s *Server) applyStorage(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.StorageRequest) *helperv1.HelperResponse {
@@ -256,7 +260,7 @@ func targetState(target string) string {
 }
 
 // checkMountPlanDigest compares the plan computed now with the one the
-// operator consented to.
+// operator consented to; a mount without a digest is refused before here.
 func (s *Server) checkMountPlanDigest(ctx context.Context, action *helperv1.StorageRequest) *helperv1.HelperResponse {
 	expected := action.GetPlanHash()
 	if expected == "" {
@@ -304,6 +308,12 @@ func (s *Server) mount(ctx context.Context, action *helperv1.StorageRequest) *he
 	if err := storage.ValidateOptions(action.GetOptions(), action.GetFsType()); err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
+	// Without a digest nothing compared the order with what the target already
+	// holds, and an fstab entry of somebody else's for it stays unseen.
+	if action.GetPlanHash() == "" {
+		return reject(errorPlanMissing, "the mount of "+action.GetTarget()+
+			" carries no plan digest; plan the mount on this host and order the change with the digest the plan returned")
+	}
 
 	if err := sharedMountNamespace(); err != nil {
 		return reject(ErrorUnsupported, err.Error())
@@ -329,7 +339,7 @@ func (s *Server) mount(ctx context.Context, action *helperv1.StorageRequest) *he
 		}
 	}
 
-	output, err := runTool(ctx, []string{mountPath, action.GetTarget()})
+	output, err := runTool(ctx, mountArguments(action))
 	if err != nil {
 		// An entry that cannot be mounted now would stop the host at the
 		// restart. It is withdrawn together with the failed mount.
@@ -346,10 +356,28 @@ func (s *Server) mount(ctx context.Context, action *helperv1.StorageRequest) *he
 	return storageResponse(s.readLVM(ctx), message, "")
 }
 
+// mountArguments names the source, the type and the options: mount given only
+// a mount point reads fstab, where somebody else's entry would decide.
+func mountArguments(action *helperv1.StorageRequest) []string {
+	options := action.GetOptions()
+	if options == "" {
+		// The same default the fstab entry is written with.
+		options = "defaults"
+	}
+	return []string{mountPath, "-t", action.GetFsType(), "-o", options,
+		action.GetSource(), action.GetTarget()}
+}
+
 // unmount removes the mount and the panel entry.
 func (s *Server) unmount(ctx context.Context, action *helperv1.StorageRequest) *helperv1.HelperResponse {
 	if err := storage.ValidateTarget(action.GetTarget()); err != nil {
 		return reject(ErrorMalformed, err.Error())
+	}
+	// The digest says the mount point still holds what the operator was shown;
+	// without it the unmount takes away whatever happens to be there now.
+	if action.GetPlanHash() == "" {
+		return reject(errorPlanMissing, "the unmount of "+action.GetTarget()+
+			" carries no plan digest; plan the unmount on this host and order the change with the digest the plan returned")
 	}
 	if err := sharedMountNamespace(); err != nil {
 		return reject(ErrorUnsupported, err.Error())

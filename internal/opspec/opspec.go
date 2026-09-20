@@ -719,12 +719,14 @@ var actionSpecs = map[ActionType]actionSpec{
 	// Reading the topology on request.
 	ActionStoragePlan: {mutating: false, capability: "storage", permission: "storage.read",
 		timeoutSeconds: 120, risk: RiskLow, maxOutputBytes: 512 << 10},
-	// Mounting is reversible, but the fstab entry decides whether the host
-	// comes back from a reboot the way it stands now.
+	// The fstab entry decides how the host comes back from a reboot, and what
+	// the mount point already holds is read on the host: both bind to a plan.
 	ActionMountEnsure: {mutating: true, capability: "storage", permission: "storage.mount.write",
-		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockStorage, verifier: VerifierMountState},
+		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockStorage, requiresPlan: true,
+		verifier: VerifierMountState},
 	ActionMountRemove: {mutating: true, capability: "storage", permission: "storage.mount.remove",
-		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockStorage, verifier: VerifierMountState},
+		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockStorage, requiresPlan: true,
+		verifier: VerifierMountState},
 	// A filesystem check takes long and requires that nobody is using it.
 	ActionFilesystemCheck: {mutating: true, capability: "storage", permission: "storage.fsck",
 		timeoutSeconds: 3600, risk: RiskHigh, lockClass: LockStorage, verifier: VerifierStorageLayout},
@@ -1661,6 +1663,11 @@ func CheckPlanBinding(action ActionType, payload Payload) error {
 	case ActionPackageRemove:
 		// A removal binds to the set of packages the operator saw go, which
 		// the package branch of Validate already requires.
+	case ActionMountEnsure, ActionMountRemove:
+		if payload.Storage == nil || payload.Storage.PlanHash == "" {
+			return &RefusalError{Code: RefusalPlanBindingMissing,
+				Err: fmt.Errorf("%s needs the hash of a mount plan computed on the host", action)}
+		}
 	}
 	return nil
 }
