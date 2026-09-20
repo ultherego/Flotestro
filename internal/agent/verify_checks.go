@@ -728,62 +728,157 @@ func verifyStorageLayout(ctx context.Context, readers *hostReaders, in verifyInp
 		return unverified(expected, observed, "the device "+device+" still carries "+observed)
 	}
 
-	// An extension: the promise is relative, so it needs the size read
-	// before the change.
+	// What is left is a growth: a volume by the amount the order names, or a
+	// filesystem up to the device under it.
+	if in.action == opspec.ActionFilesystemResize {
+		return verifyFilesystemGrowth(ctx, readers, device)
+	}
+	return verifyVolumeExtension(ctx, readers, in, device)
+}
+
+// inMiB prints a size the way the storage pages speak about one.
+func inMiB(bytes uint64) string { return strconv.FormatUint(bytes>>20, 10) }
+
+// verifyVolumeExtension reads the volume back after an extension. The order
+// names the amount to add, so the size before the change is the floor that
+// amount is added to: a volume that merely grew is not the one ordered.
+func verifyVolumeExtension(ctx context.Context, readers *hostReaders,
+	in verifyInput, device string) observation {
+	size := in.payload.Storage.Size
+	added, byAmount := storage.SizeInBytes(size)
+	// A share of what is free (+100%FREE) names no amount to measure
+	// against; what it promises is a volume that grew.
 	expected := device + " larger than before"
-	if in.before == nil || len(in.before.volumeSizes) == 0 {
+	if byAmount {
+		expected = device + " larger by " + size
+	}
+	path, sizeNow, reason := volumeSizeNow(ctx, readers, device)
+	if reason != "" {
+		return unreadable(expected, reason)
+	}
+	if in.before == nil {
 		return unreadable(expected, "the size before the change was not read")
 	}
-	if readers.volumes == nil && readers.storage == nil {
-		return unreadable(expected, noReader("the volumes of the host"))
+	sizeBefore, known := in.before.volumeSizes[path]
+	if !known {
+		sizeBefore, known = in.before.volumeSizes[device]
 	}
+	if !known {
+		return unreadable(expected, "the size of "+path+" before the change was not read")
+	}
+	observed := path + " " + inMiB(sizeNow) + " MiB, before " + inMiB(sizeBefore) + " MiB"
+	if sizeNow <= sizeBefore {
+		return unverified(expected, observed, "the size of "+path+" did not grow: "+observed)
+	}
+	// LVM allocates whole extents and rounds a request up, so the amount
+	// asked for is a floor and not the exact number.
+	if byAmount && sizeNow-sizeBefore < added {
+		return unverified(expected, observed, "the volume "+path+" grew by "+
+			inMiB(sizeNow-sizeBefore)+" MiB and the order asked for "+inMiB(added)+" MiB")
+	}
+	return verified(expected, observed)
+}
 
-	sizeNow := uint64(0)
-	target := device
+// grownFilesystemShare is the share of the device a grown filesystem covers.
+// A filesystem spends a part of the device on its own structures and reports
+// a little less than the device holds; below this it did not follow the
+// device it sits on.
+const grownFilesystemShare = 95
+
+// verifyFilesystemGrowth reads the filesystem back after a resize. The order
+// grows it to the device under it, so the device is what it is measured
+// against - and the size is read from the filesystem itself, because the
+// volume under it is larger already and would pass for a resize that never ran.
+func verifyFilesystemGrowth(ctx context.Context, readers *hostReaders, device string) observation {
+	expected := "the filesystem on " + device + " grown to the size of the device"
+	if readers.storage == nil {
+		return unreadable(expected, noReader("the disk space of the host"))
+	}
+	snapshot := readers.storage(ctx)
+	if snapshot.UnavailableReason != "" {
+		return unreadable(expected, snapshot.UnavailableReason)
+	}
+	// The device goes by two names when it is a logical volume, and the order
+	// carries whichever of them the operator copied.
+	found := snapshot.DeviceAt(device)
+	deviceSize := uint64(0)
+	if found != nil {
+		deviceSize = found.SizeBytes
+	}
+	if readers.volumes != nil {
+		if volumes, err := readers.volumes(ctx); err == nil {
+			if volume := volumes.VolumeAt(device); volume != nil {
+				deviceSize = volume.SizeBytes
+				if found == nil {
+					found = snapshot.DeviceForVolume(*volume)
+				}
+			}
+		}
+	}
+	if deviceSize == 0 {
+		return unreadable(expected, "the host did not report the size of "+device+" after the change")
+	}
+	sizeNow, reason := filesystemSizeNow(snapshot, device, found)
+	if reason != "" {
+		return unreadable(expected, reason)
+	}
+	observed := device + " carries " + inMiB(sizeNow) + " MiB of the " +
+		inMiB(deviceSize) + " MiB device"
+	if sizeNow*100 < deviceSize*grownFilesystemShare {
+		return unverified(expected, observed,
+			"the filesystem on "+device+" did not grow to the device: "+observed)
+	}
+	return verified(expected, observed)
+}
+
+// volumeSizeNow reads the size of the volume after the change, together with
+// the path the host names it by. Zero is no size here: a volume nobody read
+// is unknown, with the reason next to it.
+func volumeSizeNow(ctx context.Context, readers *hostReaders, device string) (string, uint64, string) {
+	if readers.volumes == nil && readers.storage == nil {
+		return device, 0, noReader("the volumes of the host")
+	}
 	if readers.volumes != nil {
 		if snapshot, err := readers.volumes(ctx); err == nil {
-			for _, volume := range snapshot.Volumes {
-				if volume.Path == device {
-					sizeNow = volume.SizeBytes
-				}
+			if volume := snapshot.VolumeAt(device); volume != nil && volume.SizeBytes > 0 {
+				return volume.Path, volume.SizeBytes, ""
 			}
 		}
 	}
 	if readers.storage != nil {
 		snapshot := readers.storage(ctx)
-		for _, mount := range snapshot.Mounts {
-			if mount.Source != device && mount.Target != device {
-				continue
-			}
-			if mount.SizeBytes != nil && *mount.SizeBytes > 0 {
-				// A filesystem resize is measured on the filesystem, not on
-				// the volume under it: the volume can be larger already.
-				if in.action == opspec.ActionFilesystemResize {
-					sizeNow = *mount.SizeBytes
-					target = mount.Target
-				} else if sizeNow == 0 {
-					sizeNow = *mount.SizeBytes
-					target = mount.Target
-				}
-			}
+		if volume := snapshot.VolumeAt(device); volume != nil && volume.SizeBytes > 0 {
+			return volume.Path, volume.SizeBytes, ""
+		}
+		if found := snapshot.DeviceAt(device); found != nil && found.SizeBytes > 0 {
+			return found.Path, found.SizeBytes, ""
 		}
 	}
-	sizeBefore, known := in.before.volumeSizes[target]
-	if !known {
-		sizeBefore, known = in.before.volumeSizes[device]
+	return device, 0, "the host did not report the size of " + device + " after the change"
+}
+
+// filesystemSizeNow reads how much of the device the filesystem on it covers,
+// from the filesystem and not from the device.
+func filesystemSizeNow(snapshot storage.Snapshot, device string, found *storage.Device) (uint64, string) {
+	names, points := map[string]bool{device: true}, map[string]bool{}
+	if found != nil {
+		names[found.Path] = true
+		for _, point := range found.Mountpoints {
+			points[point] = true
+		}
 	}
-	if !known {
-		return unreadable(expected, "the size of "+target+" before the change was not read")
+	for _, mount := range snapshot.Mounts {
+		if !names[mount.Source] && !names[mount.Target] && !points[mount.Target] {
+			continue
+		}
+		if mount.SizeBytes != nil && *mount.SizeBytes > 0 {
+			return *mount.SizeBytes, ""
+		}
 	}
-	if sizeNow == 0 {
-		return unreadable(expected, "the host did not report the size of "+target+" after the change")
+	if found != nil && found.FSSizeBytes != nil && *found.FSSizeBytes > 0 {
+		return *found.FSSizeBytes, ""
 	}
-	observed := target + " " + strconv.FormatUint(sizeNow/(1<<20), 10) + " MiB, before " +
-		strconv.FormatUint(sizeBefore/(1<<20), 10) + " MiB"
-	if sizeNow > sizeBefore {
-		return verified(expected, observed)
-	}
-	return unverified(expected, observed, "the size of "+target+" did not grow: "+observed)
+	return 0, "the host did not report the size of the filesystem on " + device + " after the change"
 }
 
 // storageLayers reads the whole picture of the host's disks: the block
@@ -1632,10 +1727,21 @@ func verifyOrderedServers(ctx context.Context, readers *hostReaders, expected, s
 // host does not have what was asked for.
 func verifyIPv6Switches(expected, subject string, payload *opspec.NetworkPayload,
 	settings *network.IPv6Settings) *observation {
-	if settings == nil {
+	if payload.AcceptRA == "" && payload.Privacy == "" {
 		return nil
 	}
-	if payload.AcceptRA != "" && settings.AcceptRA != nil {
+	// A switch the host did not report is unknown, the way an unread routing
+	// table is: nobody saw the ordered switch take.
+	if settings == nil {
+		failed := unreadable(expected, "the host reported nothing about the second family on "+
+			subject+" after the change")
+		return &failed
+	}
+	if payload.AcceptRA != "" {
+		if settings.AcceptRA == nil {
+			failed := unreadable(expected, "the host did not report accept_ra on "+subject+" after the change")
+			return &failed
+		}
 		// on-forwarding is its own setting, not a stronger "on": a host that
 		// took the one when the other was ordered took another change.
 		word := network.AcceptRAWord(*settings.AcceptRA)
@@ -1646,7 +1752,11 @@ func verifyIPv6Switches(expected, subject string, payload *opspec.NetworkPayload
 			return &failed
 		}
 	}
-	if payload.Privacy != "" && settings.Privacy != nil {
+	if payload.Privacy != "" {
+		if settings.Privacy == nil {
+			failed := unreadable(expected, "the host did not report use_tempaddr on "+subject+" after the change")
+			return &failed
+		}
 		word := network.PrivacyWord(*settings.Privacy)
 		if word != payload.Privacy {
 			failed := unverified(expected, subject+" privacy "+word,

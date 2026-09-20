@@ -282,7 +282,7 @@ func (e *Evaluator) judge(ctx context.Context, document Document, version int,
 			facts.Fragments[fragment.Module] = fragment
 		}
 		if needsPackages && e.packages != nil {
-			facts.Packages = e.packageFacts(ctx, host.ID, packageStates[host.ID])
+			facts.Packages = e.packageFacts(ctx, host.ID, host.OSDistribution, packageStates[host.ID])
 		}
 		entry := hostFindings{host: host}
 		for index, rule := range document.Rules {
@@ -301,11 +301,17 @@ func (e *Evaluator) judge(ctx context.Context, document Document, version int,
 
 // packageFacts reads the panel's copy of one host's package list. The state
 // row says whether the copy exists; the list itself is read only when it does.
-func (e *Evaluator) packageFacts(ctx context.Context, hostID string, state vuln.PackageListState) PackageFacts {
+func (e *Evaluator) packageFacts(ctx context.Context, hostID, distribution string,
+	state vuln.PackageListState) PackageFacts {
 	facts := PackageFacts{Loaded: true, Digest: state.Digest, CollectedAt: state.CollectedAt,
 		UnavailableReason: state.UnavailableReason, Installed: map[string]bool{}}
 	if state.HostID == "" {
+		// A family nothing reads packages from has no list coming, and saying
+		// it has not arrived yet would be waiting for something that will not.
 		facts.UnavailableReason = vuln.ReasonPackageListMissing
+		if vuln.FamilyWithoutFeed(distribution) {
+			facts.UnavailableReason = vuln.ReasonFamilyUnsupported
+		}
 		return facts
 	}
 	if state.Digest == "" {

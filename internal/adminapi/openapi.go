@@ -478,7 +478,8 @@ var queryParameters = map[string][]queryParameter{
 		{"to", "string", "RFC 3339; the end of the period, a year after from at most."},
 		{"site", "string", "Narrows the report to one site."},
 		{"environment", "string", "Narrows the report to one environment."},
-		{"limit", "integer", "patch-status only: the most host rows in JSON, 1000 by default and 5000 at most; the file carries them all."},
+		{"limit", "integer", "patch-status only: the page of host rows, 1000 by default and 5000 at most; next_cursor pages on, and the file carries them all."},
+		{"cursor", "string", "patch-status only: the next page of host rows, as next_cursor gives it."},
 		{"section", "string", "compliance with format=csv: policies (default), hosts or security."},
 	},
 	"GET /api/v1/notifications/deliveries": {

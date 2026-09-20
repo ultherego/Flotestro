@@ -46,8 +46,8 @@ type FleetSummary struct {
 	// HostsAffected counts the hosts with at least one affected finding.
 	HostsAffected int
 	// CoverageReasons counts the hosts by the reason their assessment is
-	// incomplete; a host without an assessment stands under
-	// ReasonPackageListMissing.
+	// incomplete; a host without an assessment stands under the reason
+	// unassessedReason gives it.
 	CoverageReasons map[string]int
 }
 
@@ -134,6 +134,20 @@ func scopeCondition(scopes []authz.Scope, offset int) (string, []any) {
 // state row, or one that was never evaluated.
 const unassessedSQL = "(v.host_id is null or v.evaluated_at is null)"
 
+// hostFamilySQL is the distribution a host is judged by while nothing has been
+// evaluated for it: the state's, or the one the host itself last reported.
+const hostFamilySQL = "coalesce(nullif(v.distribution, ''), h.os_distribution, '')"
+
+// unassessedReason says why a host has no assessment yet. A family no tracker
+// describes is not waiting for a package list, and CoverageReasonFor already
+// says so once the first pass runs; until then the fleet says the same.
+func unassessedReason(distribution string) string {
+	if FamilyWithoutFeed(distribution) {
+		return ReasonFamilyUnsupported
+	}
+	return ReasonPackageListMissing
+}
+
 // fullAssessmentSQL is FullAssessment in the database.
 const fullAssessmentSQL = "(v.evaluated_at is not null and v.coverage_reason = '' and v.packages_total > 0" +
 	" and v.packages_covered = v.packages_total and v.unknown = 0)"
@@ -160,27 +174,35 @@ func (s *Store) FleetSummary(ctx context.Context, scopes []authz.Scope) (FleetSu
 	if err != nil {
 		return summary, err
 	}
-	// A host without an assessment has the most common reason of all, and
-	// the one most dangerous to pass over: nobody has read its packages.
+	// A host without an assessment is counted under the reason it would be
+	// given, so the family is read here and judged in Go by the correlator's
+	// own test rather than by a second list of families in SQL.
 	rows, err := s.pool.Query(ctx, `
-		select case when `+unassessedSQL+` then '`+ReasonPackageListMissing+`'
-		            else v.coverage_reason end as reason, count(*)
+		select `+unassessedSQL+` as unassessed,
+		       coalesce(v.coverage_reason, '') as reason,
+		       case when `+unassessedSQL+` then `+hostFamilySQL+` else '' end as family,
+		       count(*)
 		from hosts h
 		left join vuln_host_state v on v.host_id = h.id
 		where `+condition+`
-		group by reason`, args...)
+		group by unassessed, reason, family`, args...)
 	if err != nil {
 		return summary, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var reason string
+		var unassessed bool
+		var reason, family string
 		var count int
-		if err := rows.Scan(&reason, &count); err != nil {
+		if err := rows.Scan(&unassessed, &reason, &family, &count); err != nil {
 			return summary, err
 		}
+		if unassessed {
+			reason = unassessedReason(family)
+		}
+		// Two families with no tracker land on one reason, so the counts add up.
 		if reason != "" {
-			summary.CoverageReasons[reason] = count
+			summary.CoverageReasons[reason] += count
 		}
 	}
 	return summary, rows.Err()
@@ -302,7 +324,7 @@ func (s *Store) FleetPage(ctx context.Context, filter FleetFilter, cursor FleetC
 	// One row more than the page says whether there is a next page
 	// without a second count.
 	args = append(args, limit+1)
-	query := "select " + hostStateColumns + ", " + primary + ", " + secondary + from +
+	query := "select " + hostStateColumns + ", " + hostFamilySQL + ", " + primary + ", " + secondary + from +
 		strings.Join(conditions, " and ") +
 		fmt.Sprintf(" order by %s, %s, h.hostname, h.id limit $%d", primary, secondary, len(args))
 	if offset > 0 && !cursor.Set {
@@ -317,6 +339,7 @@ func (s *Store) FleetPage(ctx context.Context, filter FleetFilter, cursor FleetC
 	var keys [][2]int
 	for rows.Next() {
 		var state HostState
+		var family string
 		var key [2]int
 		if err := rows.Scan(&state.HostID, &state.Hostname, &state.Distribution, &state.Release, &state.Provider,
 			&state.SnapshotDigest, &state.InventoryDigest, &state.AdvisoryDigest,
@@ -325,12 +348,12 @@ func (s *Store) FleetPage(ctx context.Context, filter FleetFilter, cursor FleetC
 			&state.UniqueCVEs, &state.CoverageReason, &state.AdvisoriesReason, &state.EvaluatedAt,
 			&state.GenerationID, &state.GenerationAt, &state.EvaluationFailedReason,
 			&state.EvaluationFailedSource, &state.EvaluationFailedAt, &state.LastSuccessfulAt,
-			&state.ReleaseDigest, &key[0], &key[1]); err != nil {
+			&state.ReleaseDigest, &family, &key[0], &key[1]); err != nil {
 			return page, err
 		}
 		if state.EvaluatedAt == nil {
 			// A host not assessed yet is not a host without vulnerabilities.
-			state.CoverageReason = ReasonPackageListMissing
+			state.CoverageReason = unassessedReason(family)
 		}
 		page.Items = append(page.Items, state)
 		keys = append(keys, key)

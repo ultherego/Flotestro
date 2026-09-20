@@ -117,3 +117,47 @@ func TestUnassessedReadsBothWaysAHostCanBeSilent(t *testing.T) {
 		t.Errorf("the unassessed condition is %q", unassessedSQL)
 	}
 }
+
+// Until the first pass gives a host a row, the fleet says why it has no
+// assessment. For a family no tracker describes that reason is the family, not
+// a package list that is on its way - nothing will ever ask for that list.
+func TestAnUnassessedHostOfAFamilyWithoutATrackerIsNamedForTheFamily(t *testing.T) {
+	for _, distribution := range []string{"sles", "opensuse", "alpine", "rocky", "arch"} {
+		if got := unassessedReason(distribution); got != ReasonFamilyUnsupported {
+			t.Errorf("%q is counted as %q, expected %q", distribution, got, ReasonFamilyUnsupported)
+		}
+	}
+	// A supported family, and a host whose system nobody has read yet, are both
+	// waiting for a package list.
+	for _, distribution := range []string{"debian", "Ubuntu", " fedora ", "rhel", ""} {
+		if got := unassessedReason(distribution); got != ReasonPackageListMissing {
+			t.Errorf("%q is counted as %q, expected %q", distribution, got, ReasonPackageListMissing)
+		}
+	}
+}
+
+// The correlator owns the question; the fleet only asks it, so the two cannot
+// answer a host differently.
+func TestTheFleetTakesTheFamilyVerdictFromTheCorrelator(t *testing.T) {
+	for _, distribution := range []string{
+		"debian", "ubuntu", "fedora", "rhel", "sles", "opensuse", "alpine",
+		"centos", "rocky", "almalinux", "amzn", "cachyos", "",
+	} {
+		want := ReasonPackageListMissing
+		if FamilyWithoutFeed(distribution) {
+			want = ReasonFamilyUnsupported
+		}
+		if got := unassessedReason(distribution); got != want {
+			t.Errorf("%q: the fleet says %q, the correlator says %q", distribution, got, want)
+		}
+	}
+}
+
+// A row written by a failed pass carries no distribution, so the family has to
+// fall back to what the host itself last reported.
+func TestTheFamilyExpressionFallsBackToWhatTheHostReported(t *testing.T) {
+	if !strings.Contains(hostFamilySQL, "v.distribution") ||
+		!strings.Contains(hostFamilySQL, "h.os_distribution") {
+		t.Errorf("the family expression is %q", hostFamilySQL)
+	}
+}

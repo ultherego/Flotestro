@@ -116,9 +116,29 @@ export function bootFilterSupport(
   return { supported: true };
 }
 
+/**
+ * Whether the agent of the host counts the messages journald suppressed at
+ * the source, and the reason when it does not.
+ */
+export function suppressionCountSupport(
+  capabilities: Capabilities | undefined,
+  t: (text: string) => string,
+): { supported: boolean; reason?: string } {
+  const journald = (capabilities ?? []).find((capability) => capability.name === "journald");
+  if (!journald || !journald.available) {
+    return { supported: false, reason: t("This host has no journald adapter; nothing here counts the messages the host never recorded.") };
+  }
+  if (journald.features?.suppression_notice !== true) {
+    return { supported: false, reason: t("The agent of this host does not count the messages journald suppressed; a view from it says unknown, never zero. Upgrade the agent.") };
+  }
+  return { supported: true };
+}
+
 /** How long a live view lasts and how much of the past it opens with. */
 export const FOLLOW_SECONDS = 300;
 export const FOLLOW_BACKLOG = 50;
+/** How long the screen waits for the summary the host writes when a view ends. */
+export const SUMMARY_TRIES = 4;
 
 /**
  * The journal payload of a live view.
@@ -150,6 +170,58 @@ export function droppedNotice(
 ): string {
   if (!dropped || dropped <= 0) return "";
   return t("{n} lines were dropped while you watched; the host wrote them faster than the view could carry.", { n: dropped });
+}
+
+/** What a live view leaves behind on its job: the counts of its summary. */
+export type FollowSummary = {
+  lines_sent?: number;
+  lines_dropped?: number;
+  host_suppressed?: number;
+  host_suppressed_unknown_reason?: string;
+};
+
+/** The summary of a live view, or nothing when its job carried none. */
+export function followSummary(stdout: string | undefined): FollowSummary | null {
+  if (!stdout) return null;
+  try {
+    const parsed = JSON.parse(stdout) as FollowSummary & { kind?: string };
+    return parsed?.kind === "journal_follow" ? parsed : null;
+  } catch {
+    // A summary that cannot be read says nothing; it must not read as zero.
+    return null;
+  }
+}
+
+/** Why a view could not see journald's own notice, as the agent names it. */
+export function suppressionReason(reason: string, t: (text: string) => string): string {
+  if (reason === "priority_filter") return t("the priority filter hides journald's own notice");
+  return t("the filters of this view hide journald's own notice");
+}
+
+/**
+ * What the host itself never recorded: a count, a zero that means the view
+ * saw no notice, or unknown with the reason. Never the dropped lines of the
+ * view, which are a different loss.
+ */
+export function suppressedNotice(
+  summary: FollowSummary | null,
+  support: { supported: boolean; reason?: string },
+  t: (text: string, params?: Record<string, string | number>) => string,
+): { count?: number; text: string } {
+  const count = summary?.host_suppressed;
+  if (typeof count === "number") {
+    return {
+      count,
+      text: count > 0
+        ? t("journald suppressed {n} messages on the host; they were never written and are in no view.", { n: count })
+        : t("journald suppressed nothing while you watched: this view would have carried its notice, and there was none."),
+    };
+  }
+  const reason = summary?.host_suppressed_unknown_reason;
+  if (reason) {
+    return { text: t("How many messages the host never recorded is unknown: {reason}.", { reason: suppressionReason(reason, t) }) };
+  }
+  return { text: support.reason ?? t("How many messages the host never recorded is unknown; this view said nothing about it.") };
 }
 
 /**
@@ -185,6 +257,9 @@ export function Logs() {
   const [paused, setPaused] = useState(false);
   // What the last live view could not carry.
   const [watched, setWatched] = useState<number | null>(null);
+  // What the host never recorded during the last live view: a count, or
+  // unknown with its reason. It is set only once the summary has been read.
+  const [hostGap, setHostGap] = useState<{ count?: number; text: string } | null>(null);
   // The unit detail on the Services tab hands over the unit and the cursor
   // of its last journal line, so the read here starts where that ended.
   const [params, setParams] = useSearchParams();
@@ -194,6 +269,7 @@ export function Logs() {
   // in the address, so the view of one boot is a thing to hand over.
   const boot = bootParam(params.get("boot"));
   const bootFilter = bootFilterSupport(host.capabilities, t);
+  const suppressionCount = suppressionCountSupport(host.capabilities, t);
   const clearBoot = () => {
     const next = new URLSearchParams(params);
     next.delete("boot");
@@ -261,6 +337,7 @@ export function Logs() {
       setLines(null);
       setPaused(false);
       setWatched(null);
+      setHostGap(null);
       setPreviewJob(job.id);
       setPreview(`/api/v1/jobs/${job.id}/events`);
     },
@@ -268,17 +345,24 @@ export function Logs() {
   });
 
   const stop = useMutation({
+    // The screen stops watching at once; the summary of the view comes after,
+    // once the host has written it.
+    onMutate: () => {
+      setPreview(null);
+      setWatched(stream.dropped);
+    },
     mutationFn: async () => {
       // Closing the stream is not enough: the follow is a task on the host,
       // and only a cancellation of the job interrupts it there.
-      if (previewJob) {
-        await api.post(`/api/v1/jobs/${previewJob}/cancel`, { reason: "preview stopped from the panel" });
-      }
+      if (!previewJob) return undefined;
+      await api.post(`/api/v1/jobs/${previewJob}/cancel`, { reason: "preview stopped from the panel" });
+      // What journald suppressed at the source is only in the summary of the
+      // view: the stream itself carries the lines, not the host's own gap.
+      return awaitJob<Record<string, unknown>>(api, previewJob, { tries: SUMMARY_TRIES });
     },
-    onSettled: () => {
-      setPreview(null);
+    onSettled: (attempt) => {
       setPreviewJob(null);
-      setWatched(stream.dropped);
+      setHostGap(suppressedNotice(followSummary(attempt?.stdout), suppressionCount, t));
       queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
     },
   });
@@ -395,6 +479,9 @@ export function Logs() {
           belongs to the lines that came back, not to the moment they
           stopped arriving. */}
       {!preview && watched !== null && watched > 0 && <Message text={droppedNotice(watched, t)} />}
+      {/* A second gap, and not the same one: these messages never reached the
+          host's journal at all, so they are in no view and in no read. */}
+      {!preview && hostGap && <Message text={hostGap.text} />}
 
       <Widgets>
       {/* What the lines on screen say of themselves, by the words in them:
@@ -409,6 +496,9 @@ export function Logs() {
           { label: t("warnings"), value: countWhere(output, (line) => !severe.test(line) && warning.test(line)), tone: "warn" },
           { label: t("other"), value: countWhere(output, (line) => !severe.test(line) && !warning.test(line)), tone: "neutral" },
           { label: t("dropped"), value: preview ? stream.dropped : undefined, tone: "unknown" },
+          // A count the host answered with stands, zero included; a count it
+          // could not answer with stays a dash and never borrows the one above.
+          ...(hostGap ? [{ label: t("suppressed by the host"), value: hostGap.count, tone: "unknown" as const }] : []),
         ]}
       />
       <Section title={t("Reading")} span={4} flush>

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/compliance"
 	"github.com/ultherego/flotestro/internal/hosts"
@@ -26,7 +28,8 @@ const (
 	maxReportPeriod     = 366 * 24 * time.Hour
 )
 
-// The most host rows the patch status carries in JSON.
+// The most host rows the patch status carries in one JSON page; beyond that a
+// caller pages on with the cursor, as the other fleet lists are paged.
 const (
 	defaultReportHosts = 1000
 	maxReportHosts     = 5000
@@ -128,6 +131,42 @@ func (request reportRequest) filter(principal authz.Principal, permission authz.
 
 func (s *Server) reportStore() *reports.Store { return reports.NewStore(s.pool) }
 
+// parseReportPage reads the page of host rows a report answers with: the page
+// sizes of a report, the cursor of the fleet lists. The answer has been
+// written when the result is false.
+func parseReportPage(w http.ResponseWriter, r *http.Request) (limit int, afterName, afterID string, ok bool) {
+	requested, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if r.URL.Query().Get("limit") != "" && (err != nil || requested < 0) {
+		problem(w, http.StatusBadRequest, "invalid_limit", "limit must be a positive whole number")
+		return 0, "", "", false
+	}
+	parts, err := paging.Decode(r.URL.Query().Get("cursor"), 2)
+	if err != nil {
+		invalidCursor(w, err)
+		return 0, "", "", false
+	}
+	if parts != nil {
+		if _, err := uuid.Parse(parts[1]); err != nil {
+			invalidCursor(w, err)
+			return 0, "", "", false
+		}
+		afterName, afterID = parts[0], parts[1]
+	}
+	return paging.Limit(requested, defaultReportHosts, maxReportHosts), afterName, afterID, true
+}
+
+// afterCursor says a report row belongs to the page that begins after the
+// cursor, by the key the host list orders itself on.
+func afterCursor(hostname, id, afterName, afterID string) bool {
+	if afterName == "" && afterID == "" {
+		return true
+	}
+	if hostname != afterName {
+		return hostname > afterName
+	}
+	return id > afterID
+}
+
 // The patch status of the fleet: every visible host with its pending updates
 // and the work of the period on it, and the totals by site and by environment.
 func (s *Server) handlePatchStatusReport(w http.ResponseWriter, r *http.Request) {
@@ -145,17 +184,24 @@ func (s *Server) handlePatchStatusReport(w http.ResponseWriter, r *http.Request)
 		s.writePatchStatusCSV(w, r, request, filter, seesCampaigns)
 		return
 	}
+	limit, afterName, afterID, ok := parseReportPage(w, r)
+	if !ok {
+		return
+	}
 	store := s.reportStore()
 	report, err := store.PatchStatus(r.Context(), request.period, filter)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	requested, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	limit := paging.Limit(requested, defaultReportHosts, maxReportHosts)
 	rows := make([]reports.PatchHost, 0, min(limit, report.Totals.Hosts))
 	truncated := false
 	err = store.PatchHosts(r.Context(), request.period, filter, func(host reports.PatchHost) bool {
+		// The store reads the rows in the order of the host list, so the page
+		// is the run of rows that begins after the cursor's host.
+		if !afterCursor(host.Hostname, host.HostID, afterName, afterID) {
+			return true
+		}
 		if len(rows) >= limit {
 			truncated = true
 			return false
@@ -170,14 +216,22 @@ func (s *Server) handlePatchStatusReport(w http.ResponseWriter, r *http.Request)
 		s.fail(w, err)
 		return
 	}
+	next := ""
+	if truncated {
+		last := rows[len(rows)-1]
+		next = paging.Encode(last.Hostname, last.HostID)
+	}
 	writeJSON(w, http.StatusOK, struct {
 		reportEnvelope
 		*reports.PatchStatus
-		Hosts          []reports.PatchHost `json:"hosts"`
-		HostsListed    int                 `json:"hosts_listed"`
-		HostsTruncated bool                `json:"hosts_truncated"`
-		CampaignsRead  bool                `json:"campaigns_read"`
-	}{request.envelope("patch-status", principal), report, rows, len(rows), truncated, seesCampaigns})
+		Hosts       []reports.PatchHost `json:"hosts"`
+		HostsListed int                 `json:"hosts_listed"`
+		// HostsTruncated says rows are left out of this page; NextCursor
+		// fetches the next one, and the file carries them all.
+		HostsTruncated bool   `json:"hosts_truncated"`
+		NextCursor     string `json:"next_cursor"`
+		CampaignsRead  bool   `json:"campaigns_read"`
+	}{request.envelope("patch-status", principal), report, rows, len(rows), truncated, next, seesCampaigns})
 }
 
 // patchStatusCSVColumns is the header of the patch status file. The
@@ -309,17 +363,17 @@ type checkSummary struct {
 // of the built-in checks over the hosts the reader may read the security of,
 // judged now from the facts the hosts last reported.
 type securitySummary struct {
+	// The head of the section: the fleet it stands for, the hosts judged and
+	// the hosts unknown, so a percentage here has a denominator.
+	fleetCoverage
+	// Hosts counts the hosts the sweep reached; it equals TotalHosts unless
+	// the answer is partial.
 	Hosts int `json:"hosts"`
 	// HostsWithFindings counts the hosts that fail at least one check.
 	HostsWithFindings int            `json:"hosts_with_findings"`
 	BySeverity        []severityView `json:"by_severity"`
 	Checks            []checkSummary `json:"checks"`
 	EvaluatedAt       time.Time      `json:"evaluated_at"`
-	// Partial says the sweep did not reach every host of the filter within its
-	// time budget; the numbers then describe the hosts it reached, and
-	// PartialReason says why it stopped.
-	Partial       bool   `json:"partial"`
-	PartialReason string `json:"partial_reason,omitempty"`
 }
 
 // severityRank orders the severities of the checks, the gravest first;
@@ -335,6 +389,10 @@ func (s *Server) securityReport(ctx context.Context, request reportRequest, prin
 		Site: request.site, Environment: request.environment,
 		Scopes: principal.ScopesFor(authz.PermSecurityRead),
 	}
+	total, err := s.hosts.Count(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
 	checks := map[string]*checkSummary{}
 	order := make([]string, 0, len(compliance.Checks))
 	for _, check := range compliance.Checks {
@@ -342,11 +400,15 @@ func (s *Server) securityReport(ctx context.Context, request reportRequest, prin
 		order = append(order, check.ID)
 	}
 	summary := &securitySummary{BySeverity: []severityView{}, Checks: []checkSummary{}, EvaluatedAt: request.generatedAt}
+	judged := 0
 	sweep, err := s.sweepFleet(ctx, filter, "", "", complianceModules(),
 		func(host hosts.Host, fragments []inventory.Fragment) bool {
 			summary.Hosts++
 			failed := false
 			report := compliance.Evaluate(host.ID, hostInput(host, fragments), request.generatedAt)
+			if evaluated(report) {
+				judged++
+			}
 			for _, finding := range report.Findings {
 				check, ok := checks[finding.CheckID]
 				if !ok {
@@ -365,7 +427,7 @@ func (s *Server) securityReport(ctx context.Context, request reportRequest, prin
 	if err != nil {
 		return nil, err
 	}
-	summary.Partial, summary.PartialReason = sweep.Partial, sweep.Reason
+	summary.fleetCoverage = sweepCoverage(total, sweep, judged)
 	severities := map[string]*severityView{}
 	for _, id := range order {
 		check := checks[id]
@@ -469,22 +531,22 @@ func (s *Server) writeComplianceCSV(w http.ResponseWriter, r *http.Request, requ
 			problem(w, http.StatusForbidden, "permission_denied", "missing permission policy.read in any scope")
 			return
 		}
-		report, err := s.reportStore().Policies(r.Context(), request.period, request.filter(principal, authz.PermHostRead))
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
+		store, filter := s.reportStore(), request.filter(principal, authz.PermHostRead)
+		// The document carries a sample of the hosts in drift; the file carries
+		// every one of them, read straight from the query.
 		if section == "hosts" {
 			s.writeCSV(w, r, exportFileName("report-compliance-hosts", request.generatedAt), complianceHostsCSVColumns,
 				func(yield func([]string) bool) error {
-					for _, host := range report.DriftHosts {
-						if !yield([]string{host.Hostname, host.HostID, host.Site, host.Environment,
-							strconv.Itoa(host.Policies), strconv.Itoa(host.Rules)}) {
-							return nil
-						}
-					}
-					return nil
+					return store.DriftHosts(r.Context(), request.period, filter, func(host reports.DriftHost) bool {
+						return yield([]string{host.Hostname, host.HostID, host.Site, host.Environment,
+							strconv.Itoa(host.Policies), strconv.Itoa(host.Rules)})
+					})
 				})
+			return
+		}
+		report, err := store.Policies(r.Context(), request.period, filter)
+		if err != nil {
+			s.fail(w, err)
 			return
 		}
 		s.writeCSV(w, r, exportFileName("report-compliance-policies", request.generatedAt), compliancePoliciesCSVColumns,

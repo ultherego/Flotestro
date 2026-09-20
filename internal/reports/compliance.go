@@ -3,7 +3,6 @@ package reports
 import (
 	"context"
 	"fmt"
-	"sort"
 	"time"
 )
 
@@ -77,14 +76,23 @@ type PolicyTotals struct {
 
 // PolicyCompliance is the policy part of the compliance report.
 type PolicyCompliance struct {
-	Policies   []PolicyRow  `json:"policies"`
-	DriftHosts []DriftHost  `json:"drift_hosts"`
-	Totals     PolicyTotals `json:"totals"`
+	Policies []PolicyRow `json:"policies"`
+	// DriftHosts names the hosts in drift, the first driftHostSample of them
+	// by name; Totals.HostsInDrift is the exact count.
+	DriftHosts []DriftHost `json:"drift_hosts"`
+	// DriftHostsTruncated says hosts are left out of the sample; the file of
+	// the hosts section carries them all.
+	DriftHostsTruncated bool         `json:"drift_hosts_truncated"`
+	Totals              PolicyTotals `json:"totals"`
 }
 
 // driftHostLimit bounds the host names a policy row carries. The count is
 // exact; the names are a sample, and the drift host table lists the rest.
 const driftHostLimit = 50
+
+// driftHostSample bounds the hosts in drift the report itself carries, so a
+// fleet where everything drifts has a ceiling rather than a body per host.
+const driftHostSample = 200
 
 // hostVerdictsSQL judges every visible host under every policy: the worst
 // verdict of its rules, with the verdicts recorded after the end of the period
@@ -180,49 +188,80 @@ func (s *Store) Policies(ctx context.Context, period Period, filter Filter) (*Po
 		return nil, err
 	}
 
-	// The hosts in drift: named under their policies, a sample per policy,
-	// and listed once each with how many policies they drift from.
-	drift, err := s.pool.Query(ctx, fmt.Sprintf(hostVerdictsSQL, clause)+`
+	// The hosts in drift: named under their policies, a sample per policy, and
+	// listed once each with how many policies they drift from - a sample too,
+	// with the exact count in the totals.
+	if err := s.scanDrift(ctx, period, filter,
+		func(policyID string, host HostRef) {
+			if i, ok := index[policyID]; ok && len(report.Policies[i].DriftHosts) < driftHostLimit {
+				report.Policies[i].DriftHosts = append(report.Policies[i].DriftHosts, host)
+			}
+		},
+		func(host DriftHost) bool {
+			report.Totals.HostsInDrift++
+			if len(report.DriftHosts) < driftHostSample {
+				report.DriftHosts = append(report.DriftHosts, host)
+			} else {
+				report.DriftHostsTruncated = true
+			}
+			return true
+		}); err != nil {
+		return nil, err
+	}
+	return report, nil
+}
+
+// DriftHosts hands every host in drift to yield, once each, in the order of
+// the host list: what the report samples, the file carries in full.
+func (s *Store) DriftHosts(ctx context.Context, period Period, filter Filter, yield func(DriftHost) bool) error {
+	return s.scanDrift(ctx, period, filter, nil, yield)
+}
+
+// scanDrift walks the hosts in drift, a row per host and policy. perPolicy
+// sees every row; perHost sees each host once with its totals and ends the
+// walk by returning false. The rows arrive grouped by host, so one host at a
+// time is held.
+func (s *Store) scanDrift(ctx context.Context, period Period, filter Filter,
+	perPolicy func(policyID string, host HostRef), perHost func(DriftHost) bool) error {
+	clause, args := hostClause(filter, 1)
+	args = append([]any{period.To}, args...)
+	rows, err := s.pool.Query(ctx, fmt.Sprintf(hostVerdictsSQL, clause)+`
 		select policy_id::text, host_id::text, hostname, site, environment, drift_rules
 		  from judged where verdict = 'drift'
 		 order by hostname, host_id, policy_id`, args...)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	defer drift.Close()
-	hosts := map[string]*DriftHost{}
-	for drift.Next() {
+	defer rows.Close()
+	var current DriftHost
+	open := false
+	for rows.Next() {
 		var policyID string
 		var host DriftHost
 		var driftRules int
-		if err := drift.Scan(&policyID, &host.HostID, &host.Hostname, &host.Site, &host.Environment, &driftRules); err != nil {
-			return nil, err
+		if err := rows.Scan(&policyID, &host.HostID, &host.Hostname, &host.Site, &host.Environment, &driftRules); err != nil {
+			return err
 		}
-		if i, ok := index[policyID]; ok && len(report.Policies[i].DriftHosts) < driftHostLimit {
-			report.Policies[i].DriftHosts = append(report.Policies[i].DriftHosts, host.HostRef)
+		if perPolicy != nil {
+			perPolicy(policyID, host.HostRef)
 		}
-		listed, ok := hosts[host.HostID]
-		if !ok {
-			listed = &host
-			hosts[host.HostID] = listed
+		if open && current.HostID != host.HostID {
+			if !perHost(current) {
+				return nil
+			}
+			open = false
 		}
-		listed.Policies++
-		listed.Rules += driftRules
+		if !open {
+			current, open = host, true
+		}
+		current.Policies++
+		current.Rules += driftRules
 	}
-	if err := drift.Err(); err != nil {
-		return nil, err
+	if err := rows.Err(); err != nil {
+		return err
 	}
-	for _, host := range hosts {
-		report.DriftHosts = append(report.DriftHosts, *host)
+	if open {
+		perHost(current)
 	}
-	// By name, then by identifier, the way the host list orders itself.
-	sort.Slice(report.DriftHosts, func(i, j int) bool {
-		a, b := report.DriftHosts[i], report.DriftHosts[j]
-		if a.Hostname != b.Hostname {
-			return a.Hostname < b.Hostname
-		}
-		return a.HostID < b.HostID
-	})
-	report.Totals.HostsInDrift = len(report.DriftHosts)
-	return report, nil
+	return nil
 }

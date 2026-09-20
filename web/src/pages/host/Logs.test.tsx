@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  bootFilterSupport, bootParam, droppedNotice, findMatches, followPayload, jobWindow,
-  logFileName, splitMatches, utcStamp,
+  bootFilterSupport, bootParam, droppedNotice, findMatches, followPayload, followSummary,
+  jobWindow, logFileName, splitMatches, suppressedNotice, suppressionCountSupport,
+  suppressionReason, utcStamp,
 } from "./Logs";
 import type { Attempt, Capabilities, Job } from "../../lib/types";
 
@@ -180,5 +181,88 @@ describe("droppedNotice", () => {
 
   it("says nothing when nothing was lost", () => {
     expect(droppedNotice(0, t)).toBe("");
+  });
+});
+
+/* What journald suppressed at the source is the host's own gap and not the
+   view's: it is counted apart, a zero means the view saw no notice, and an
+   agent that cannot count it says unknown rather than zero. */
+
+describe("suppressionCountSupport", () => {
+  it("is supported only when the journald adapter names the feature", () => {
+    expect(suppressionCountSupport(journald({ suppression_notice: true }), t)).toEqual({ supported: true });
+  });
+
+  it("names the reason for an old agent, an adapter without the feature and a host without journald", () => {
+    const silent = suppressionCountSupport(journald(), t);
+    expect(silent.supported).toBe(false);
+    expect(silent.reason).toContain("does not count the messages journald suppressed");
+    expect(suppressionCountSupport(journald({ suppression_notice: false }), t).supported).toBe(false);
+    expect(suppressionCountSupport(journald({ suppression_notice: true }, false), t).reason)
+      .toContain("no journald adapter");
+    expect(suppressionCountSupport([], t).supported).toBe(false);
+    expect(suppressionCountSupport(undefined, t).supported).toBe(false);
+  });
+});
+
+describe("followSummary", () => {
+  it("reads the summary of a live view", () => {
+    const summary = followSummary(JSON.stringify({
+      kind: "journal_follow", lines_sent: 9, lines_dropped: 2, host_suppressed: 7,
+    }));
+    expect(summary?.host_suppressed).toBe(7);
+    expect(summary?.lines_dropped).toBe(2);
+  });
+
+  it("reads nothing out of a missing, an unreadable or a foreign summary", () => {
+    expect(followSummary(undefined)).toBeNull();
+    expect(followSummary("")).toBeNull();
+    expect(followSummary("{not json")).toBeNull();
+    expect(followSummary(JSON.stringify({ kind: "journal_read", host_suppressed: 3 }))).toBeNull();
+  });
+});
+
+describe("suppressionReason", () => {
+  it("spells the filter that hid journald's notice, and falls back to the filters of the view", () => {
+    expect(suppressionReason("priority_filter", t)).toContain("priority filter");
+    expect(suppressionReason("something_new", t)).toContain("filters of this view");
+  });
+});
+
+describe("suppressedNotice", () => {
+  const counts = { supported: true };
+  const cannot = suppressionCountSupport(journald(), t);
+
+  it("keeps a count the host answered with, zero included", () => {
+    const many = suppressedNotice({ host_suppressed: 7 }, counts, t);
+    expect(many.count).toBe(7);
+    expect(many.text).toContain("journald suppressed {n} messages on the host");
+    const none = suppressedNotice({ host_suppressed: 0 }, counts, t);
+    expect(none.count).toBe(0);
+    expect(none.text).toContain("journald suppressed nothing while you watched");
+  });
+
+  it("says unknown with the reason when the view could not see the notice", () => {
+    const hidden = suppressedNotice({ host_suppressed_unknown_reason: "priority_filter" }, counts, t);
+    expect(hidden.count).toBeUndefined();
+    expect(hidden.text).toContain("is unknown: {reason}");
+  });
+
+  it("says unknown for an agent that cannot count, and never zero", () => {
+    const old = suppressedNotice(null, cannot, t);
+    expect(old.count).toBeUndefined();
+    expect(old.text).toBe(cannot.reason);
+  });
+
+  it("says unknown when a supported agent said nothing at all", () => {
+    const quiet = suppressedNotice(null, counts, t);
+    expect(quiet.count).toBeUndefined();
+    expect(quiet.text).toContain("this view said nothing about it");
+  });
+
+  it("never borrows the lines the view itself could not carry", () => {
+    const dropped = suppressedNotice({ lines_dropped: 12 }, counts, t);
+    expect(dropped.count).toBeUndefined();
+    expect(dropped.text).not.toContain("dropped");
   });
 });

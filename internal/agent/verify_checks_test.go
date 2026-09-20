@@ -532,3 +532,77 @@ func TestVerifyingAFilesystemCheck(t *testing.T) {
 	expectUnreadable(t, verifyStorageLayout(context.Background(),
 		host(storage.Snapshot{UnavailableReason: "the disk space was not read"}), in))
 }
+
+// An extension is measured against the amount the order asked for: a volume
+// that grew by a gigabyte when fifty were ordered is the false success this
+// verifier exists for.
+func TestVerifyingAnExtendedVolume(t *testing.T) {
+	host := func(size uint64) *hostReaders {
+		snapshot := storage.Snapshot{Volumes: []storage.LogicalVolume{
+			{Name: "data", Group: "vg0", Path: "/dev/vg0/data", SizeBytes: size}}}
+		return &hostReaders{volumes: func(context.Context) (storage.Snapshot, error) {
+			return snapshot, nil
+		}}
+	}
+	in := verifyInput{
+		action:  opspec.ActionLVMExtend,
+		payload: opspec.Payload{Storage: &opspec.StoragePayload{Device: "/dev/vg0/data", Size: "+50G"}},
+		before:  &baseline{volumeSizes: map[string]uint64{"/dev/vg0/data": 50 << 30}},
+	}
+
+	expectVerified(t, verifyStorageLayout(context.Background(), host(100<<30), in))
+	// LVM allocates whole extents and rounds the request up.
+	expectVerified(t, verifyStorageLayout(context.Background(), host((100<<30)+(4<<20)), in))
+	expectMismatch(t, verifyStorageLayout(context.Background(), host(51<<30), in))
+	expectMismatch(t, verifyStorageLayout(context.Background(), host(50<<30), in))
+
+	// A size the host does not report after the change is unknown, not a pass.
+	expectUnreadable(t, verifyStorageLayout(context.Background(), host(0), in))
+	expectUnreadable(t, verifyStorageLayout(context.Background(), &hostReaders{}, in))
+
+	// A share of what is free names no amount to measure against; what it
+	// promises is a volume that grew.
+	share := in
+	share.payload = opspec.Payload{Storage: &opspec.StoragePayload{
+		Device: "/dev/vg0/data", Size: "+100%FREE"}}
+	expectVerified(t, verifyStorageLayout(context.Background(), host(51<<30), share))
+	expectMismatch(t, verifyStorageLayout(context.Background(), host(50<<30), share))
+}
+
+// A filesystem grows to the device under it, so the device is what it is
+// measured against - and its size is read from the filesystem, because the
+// volume is larger already and would pass for a resize that never ran.
+func TestVerifyingAFilesystemThatWasGrown(t *testing.T) {
+	host := func(filesystem *uint64) *hostReaders {
+		// The order names the volume and the kernel mounts it under its other
+		// name, the way lsblk and mountinfo print it.
+		disks := storage.Snapshot{
+			Devices: []storage.Device{{Path: "/dev/mapper/vg0-data", SizeBytes: 100 << 30,
+				FSType: "ext4", Mountpoints: []string{"/srv"}}},
+			Mounts: []storage.Mount{{Target: "/srv", Source: "/dev/mapper/vg0-data",
+				FSType: "ext4", Mounted: true, SizeBytes: filesystem}},
+		}
+		volumes := storage.Snapshot{Volumes: []storage.LogicalVolume{
+			{Name: "data", Group: "vg0", Path: "/dev/vg0/data", SizeBytes: 100 << 30}}}
+		return &hostReaders{
+			storage: func(context.Context) storage.Snapshot { return disks },
+			volumes: func(context.Context) (storage.Snapshot, error) { return volumes, nil },
+		}
+	}
+	size := func(bytes uint64) *uint64 { return &bytes }
+	in := verifyInput{
+		action:  opspec.ActionFilesystemResize,
+		payload: opspec.Payload{Storage: &opspec.StoragePayload{Device: "/dev/vg0/data"}},
+		// The size before the change decides nothing here: the device does.
+		before: &baseline{volumeSizes: map[string]uint64{"/srv": 50 << 30}},
+	}
+
+	// The filesystem covers the device but for its own structures.
+	expectVerified(t, verifyStorageLayout(context.Background(), host(size(98<<30)), in))
+	// The volume was extended and the filesystem stayed where it was.
+	expectMismatch(t, verifyStorageLayout(context.Background(), host(size(50<<30)), in))
+	// The filesystem size nobody read is unknown, and never the size of the
+	// volume under it.
+	expectUnreadable(t, verifyStorageLayout(context.Background(), host(nil), in))
+	expectUnreadable(t, verifyStorageLayout(context.Background(), &hostReaders{}, in))
+}

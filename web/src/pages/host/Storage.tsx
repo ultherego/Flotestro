@@ -324,6 +324,13 @@ export function isSnapshot(volume: LogicalVolume): boolean {
 const ARRAY_LIFECYCLE_REFUSAL =
   "The panel manages the members of an array that exists. Creating an array and destroying one are decisions about a machine's whole disk layout, taken on the machine when it is built, not operations run over a running fleet.";
 
+/**
+ * The same for the volume manager, so that a missing button is read here
+ * rather than guessed at.
+ */
+const GROUP_LIFECYCLE_REFUSAL =
+  "The panel manages what a group that exists holds: its volumes, its snapshots and the disks it is built out of. Creating a volume group and taking one apart belong to a machine's disk layout, settled when the machine is built, not run over a running fleet.";
+
 export function Storage() {
   const t = useT();
   const host = useHost();
@@ -754,6 +761,7 @@ export function Storage() {
           above says so, and an empty section would say it twice. */}
       {!snapshot?.lvm_unavailable_reason && (
       <Section title={t("Volume groups")} count={snapshot?.groups?.length} span={snapshot?.volumes?.length ? 6 : 12} flush>
+        <p className="source hm-section-body">{t(GROUP_LIFECYCLE_REFUSAL)}</p>
         {!snapshot?.groups?.length ? (
           <Empty>{t("This host has LVM but no volume groups.")}</Empty>
         ) : (

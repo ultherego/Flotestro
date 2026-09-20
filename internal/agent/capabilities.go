@@ -479,9 +479,14 @@ func DetectCapabilities() Capabilities {
 			Name:      CapJournald,
 			Version:   adapterVersion,
 			Available: journald,
-			// boot_filter says this agent applies a boot identifier to a journal read.
-			Features: map[string]bool{"boot_filter": journald && isExecutable(journalctlPath)},
-			Reason:   reason(journald, "this host has no journald socket"),
+			// boot_filter says this agent applies a boot identifier to a journal read;
+			// suppression_notice says it counts what journald suppressed at the source,
+			// so the panel reads a missing count as unknown and not as zero.
+			Features: map[string]bool{
+				"boot_filter":        journald && isExecutable(journalctlPath),
+				"suppression_notice": journald && isExecutable(journalctlPath),
+			},
+			Reason: reason(journald, "this host has no journald socket"),
 		},
 		{
 			Name:      CapCompose,

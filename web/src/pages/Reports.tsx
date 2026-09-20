@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import type { Whoami } from "../lib/types";
 import { absoluteTime, toInstant } from "../lib/format";
@@ -9,6 +9,7 @@ import { ErrorBox, Empty, OptionalFlag, OptionalNumber } from "../components/ui"
 import { Card, PageHeader, Toolbar } from "../components/layout";
 import { ExportButton } from "../components/ExportButton";
 import { Breakdown, StatusBar, type WidgetTone } from "../components/widgets";
+import { FleetCoverage, type Coverage } from "../components/FleetCoverage";
 import { FacetList, useFleetFacets } from "./Bulk";
 import { useT } from "../i18n";
 
@@ -152,7 +153,10 @@ type PatchStatus = Envelope & {
   by_environment: ({ key: string } & PatchCounts)[];
   hosts: PatchHost[];
   hosts_listed: number;
+  // The page ends before the last host; the cursor asks for the next page,
+  // and the file carries them all.
   hosts_truncated: boolean;
+  next_cursor?: string;
   campaigns_read: boolean;
 };
 
@@ -211,20 +215,21 @@ type SecurityCounts = { failed: number; passed: number; unknown: number; not_app
 type ComplianceReport = Envelope & {
   policies: {
     policies: PolicyRow[];
+    // A sample of the hosts in drift; totals.hosts_in_drift is the count.
     drift_hosts: DriftHost[];
+    drift_hosts_truncated: boolean;
     totals: { policies: number; compliant: number; drift: number; error: number; not_applicable: number; unknown: number; hosts_in_drift: number };
   } | null;
-  security: {
+  // The section carries the head of a fleet view: the sweep stops at its time
+  // budget on a large fleet, and the hosts it never read are unknown, not
+  // clean.
+  security: (Coverage & {
     hosts: number;
     hosts_with_findings: number;
     by_severity: ({ severity: string; checks: number } & SecurityCounts)[];
     checks: ({ check_id: string; title: string; severity: string } & SecurityCounts)[];
     evaluated_at: string;
-    // The sweep stops at its time budget on a large fleet; then the
-    // numbers describe the hosts it reached and say so.
-    partial?: boolean;
-    partial_reason?: string;
-  } | null;
+  }) | null;
 };
 
 /** The states of a closed campaign in the order the summary shows them,
@@ -310,12 +315,19 @@ export function Reports() {
   };
 
   const key = query.toString();
-  const patch = useQuery({
+  // The host rows of the patch status are paged like the fleet lists: the
+  // first page carries the document, the next ones only more rows.
+  const patch = useInfiniteQuery({
     queryKey: ["reports", "patch-status", key],
-    queryFn: () => api.get<PatchStatus>(`/api/v1/reports/patch-status?${key}`),
+    queryFn: ({ pageParam }) => api.get<PatchStatus>(`/api/v1/reports/patch-status?${key}`
+      + (pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : "")),
+    initialPageParam: "",
+    getNextPageParam: (last) => last.next_cursor || undefined,
     enabled: ready,
     retry: false,
   });
+  const patchReport = patch.data?.pages[0];
+  const patchHosts = patch.data?.pages.flatMap((page) => page.hosts) ?? [];
   const seesCampaigns = permissions.has("campaign.read");
   const campaigns = useQuery({
     queryKey: ["reports", "campaigns", key],
@@ -332,7 +344,7 @@ export function Reports() {
 
   const scope = [site.trim() && t("site {site}", { site: site.trim() }), environment.trim() && t("environment {environment}", { environment: environment.trim() })]
     .filter(Boolean).join(", ") || t("the whole visible fleet");
-  const generatedAt = patch.data?.generated_at ?? campaigns.data?.generated_at ?? compliance.data?.generated_at;
+  const generatedAt = patchReport?.generated_at ?? campaigns.data?.generated_at ?? compliance.data?.generated_at;
   const author = whoami.data?.display_name || whoami.data?.subject || "";
 
   return (
@@ -401,7 +413,15 @@ export function Reports() {
       </Card>
 
       <div className="widgets">
-        <PatchStatusCard report={patch.data} error={patch.error} ready={ready} params={query} />
+        <PatchStatusCard
+          report={patchReport}
+          hosts={patchHosts}
+          more={patch.hasNextPage ? () => patch.fetchNextPage() : undefined}
+          loading={patch.isFetchingNextPage}
+          error={patch.error}
+          ready={ready}
+          params={query}
+        />
         {seesCampaigns && <CampaignsCard report={campaigns.data} error={campaigns.error} ready={ready} params={query} />}
         <ComplianceCard report={compliance.data} error={compliance.error} ready={ready} params={query} />
       </div>
@@ -417,7 +437,10 @@ function Pending({ ready, error, children }: { ready: boolean; error: unknown; c
   return <>{children ?? <Empty>{t("Reading the report…")}</Empty>}</>;
 }
 
-function PatchStatusCard({ report, error, ready, params }: { report?: PatchStatus; error: unknown; ready: boolean; params: URLSearchParams }) {
+function PatchStatusCard({ report, hosts, more, loading, error, ready, params }: {
+  report?: PatchStatus; hosts: PatchHost[]; more?: () => void; loading: boolean;
+  error: unknown; ready: boolean; params: URLSearchParams;
+}) {
   const t = useT();
   const totals = report?.totals;
   const pendingSecurity = totals ? totals.hosts - totals.fully_patched - totals.security_unknown : undefined;
@@ -448,7 +471,7 @@ function PatchStatusCard({ report, error, ready, params }: { report?: PatchStatu
               <GroupBreakdown title={t("Security updates pending, by site")} groups={report.by_site} />
               <GroupBreakdown title={t("Security updates pending, by environment")} groups={report.by_environment} />
             </div>
-            {report.hosts.length === 0 ? (
+            {hosts.length === 0 ? (
               <Empty>{t("No host in this part of the fleet.")}</Empty>
             ) : (
               <table data-testid="patch-hosts">
@@ -462,7 +485,7 @@ function PatchStatusCard({ report, error, ready, params }: { report?: PatchStatu
                   </tr>
                 </thead>
                 <tbody>
-                  {report.hosts.map((host) => (
+                  {hosts.map((host) => (
                     <tr key={host.host_id}>
                       <td><Link to={`/hosts/${host.host_id}`}>{host.hostname}</Link></td>
                       <td>{host.site}</td>
@@ -479,9 +502,17 @@ function PatchStatusCard({ report, error, ready, params }: { report?: PatchStatu
                 </tbody>
               </table>
             )}
-            {report.hosts_truncated && (
+            {hosts.length < totals.hosts && (
               <p className="fp-note">
-                {t("The table shows the first {listed} of {total} hosts; the file carries them all.", { listed: report.hosts_listed, total: totals.hosts })}
+                {t("The table shows the first {listed} of {total} hosts; the file carries them all.", { listed: hosts.length, total: totals.hosts })}
+                {more && (
+                  <>
+                    {" "}
+                    <button type="button" className="secondary no-print" onClick={more} disabled={loading}>
+                      {t("Load more")}
+                    </button>
+                  </>
+                )}
               </p>
             )}
           </>
@@ -716,6 +747,13 @@ function ComplianceCard({ report, error, ready, params }: { report?: ComplianceR
                         ))}
                       </tbody>
                     </table>
+                    {policies.drift_hosts_truncated && (
+                      <p className="fp-note">
+                        {t("The table shows the first {listed} of {total} hosts in drift; the file carries them all.", {
+                          listed: policies.drift_hosts.length, total: policies.totals.hosts_in_drift,
+                        })}
+                      </p>
+                    )}
                   </>
                 )}
               </>
@@ -729,19 +767,12 @@ function ComplianceCard({ report, error, ready, params }: { report?: ComplianceR
                 <StatusBar compact segments={security.by_severity.map((row) => ({
                   label: t("{severity} failed", { severity: row.severity }), value: row.failed, tone: row.failed ? severityTone(row.severity) : "ok",
                 }))} />
+                <FleetCoverage coverage={security} />
                 <p className="fp-note">
                   {t("{hosts} hosts judged from their last reported facts, {failing} with at least one failed check.", {
-                    hosts: security.hosts, failing: security.hosts_with_findings,
+                    hosts: security.evaluated_hosts, failing: security.hosts_with_findings,
                   })}
                 </p>
-                {security.partial && (
-                  <p className="warning" data-testid="report-security-partial">
-                    <span>
-                      {t("The sweep did not reach every host: these numbers describe the hosts it read.")}
-                      {security.partial_reason ? ` ${security.partial_reason}` : ""}
-                    </span>
-                  </p>
-                )}
                 <table data-testid="report-security">
                   <thead>
                     <tr>

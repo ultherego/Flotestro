@@ -9,6 +9,7 @@ import {
   Fact, Facts, Foot, Message, ModuleHeader, ModulePage, Section, Summary, Table, Widgets, countWhere, useHost,
 } from "./shared";
 import { bulkPrefill } from "../Bulk";
+import { ActionGuard } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
 
 type Finding = {
@@ -296,10 +297,12 @@ export function Vulnerabilities() {
                 {t("Patch all fixable")}
               </button>
             )}
-            <button disabled={reread.isPending || host.connection_state !== "online"}
-                    onClick={() => reread.mutate()}>
-              {t("Re-read packages")}
-            </button>
+            <ActionGuard action="packages.list" host={host.id} explain>
+              <button disabled={reread.isPending || host.connection_state !== "online"}
+                      onClick={() => reread.mutate()}>
+                {t("Re-read packages")}
+              </button>
+            </ActionGuard>
           </>
         }
       />

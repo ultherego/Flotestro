@@ -196,3 +196,35 @@ func TestVerifyingTheRouterAdvertisementSwitch(t *testing.T) {
 	expectVerified(t, verifyNetworkState(context.Background(), networkHost(host(2), dns.Snapshot{}), forwarding))
 	expectMismatch(t, verifyNetworkState(context.Background(), networkHost(host(1), dns.Snapshot{}), forwarding))
 }
+
+// A switch the host does not report is unknown: an ordered change nobody
+// read back is not an applied one.
+func TestVerifyingASwitchTheHostDoesNotReport(t *testing.T) {
+	in := networkOrder(&opspec.NetworkPayload{Interface: "eth0", AcceptRA: network.AcceptRAOn})
+
+	// The kernel said nothing about the second family on this interface.
+	silent := network.Snapshot{Interfaces: []network.Interface{addressed("eth0", "2001:db8::10/64")}}
+	expectUnreadable(t, verifyNetworkState(context.Background(), networkHost(silent, dns.Snapshot{}), in))
+
+	// It reported the family and the other switch, and not the one ordered.
+	privacy := 0
+	other := addressed("eth0", "2001:db8::10/64")
+	other.IPv6 = &network.IPv6Settings{Disabled: boolOf(false), Privacy: &privacy}
+	half := network.Snapshot{Interfaces: []network.Interface{other}}
+	expectUnreadable(t, verifyNetworkState(context.Background(), networkHost(half, dns.Snapshot{}), in))
+
+	// The privacy extensions are read the same way.
+	tempaddr := networkOrder(&opspec.NetworkPayload{
+		Interface: "eth0", Privacy: network.PrivacyPreferTemporary})
+	acceptRA := 1
+	without := addressed("eth0", "2001:db8::10/64")
+	without.IPv6 = &network.IPv6Settings{Disabled: boolOf(false), AcceptRA: &acceptRA}
+	unread := network.Snapshot{Interfaces: []network.Interface{without}}
+	expectUnreadable(t, verifyNetworkState(context.Background(), networkHost(unread, dns.Snapshot{}), tempaddr))
+
+	applied := addressed("eth0", "2001:db8::10/64")
+	temporary := 2
+	applied.IPv6 = &network.IPv6Settings{Disabled: boolOf(false), Privacy: &temporary}
+	reported := network.Snapshot{Interfaces: []network.Interface{applied}}
+	expectVerified(t, verifyNetworkState(context.Background(), networkHost(reported, dns.Snapshot{}), tempaddr))
+}
