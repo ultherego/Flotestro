@@ -652,15 +652,8 @@ jobs:
     permissions:
       contents: read
       packages: write
-    # The fourth image of the product, and the only one that cannot be built
-    # from a checkout: it serves an already-signed package tree, so it can
-    # only be made after the tree exists. compose.yaml names it under
-    # --profile airgap, so without this job that profile pulls a manifest
-    # nobody published.
-    #
-    # It is built here rather than in the signing job on purpose: this needs
-    # a registry token and the signing job holds the release key. Neither
-    # wants the other's credential.
+    # The image --profile airgap pulls. Its own job because it needs a
+    # registry token and the signing job holds the release key.
     steps:
       - uses: actions/checkout@v4.2.2
         with:
@@ -669,9 +662,8 @@ jobs:
       - name: The published tree this image serves
         env:
           GH_TOKEN: ${{ github.token }}
-        # From the branch rather than from the signing job's working copy:
-        # what an isolated site receives is what the connected world can see,
-        # and a tree carried between jobs would be neither.
+        # From the branch, so an isolated site gets what the connected
+        # world can see.
         run: |
           set -euo pipefail
           url="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
@@ -696,8 +688,7 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/flotestro-package-repository"
           tags="--tag $image:$version"
-          # latest and the minor alias follow a finished release only, the
-          # same rule the other three images keep.
+          # latest and the minor alias follow a finished release only.
           case "$version" in
           *-*) ;;
           *)   tags="$tags --tag $image:latest --tag $image:${version%.*}" ;;
