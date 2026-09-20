@@ -23,6 +23,7 @@ import (
 
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
+	"github.com/ultherego/flotestro/internal/opspec"
 	"github.com/ultherego/flotestro/internal/pki"
 	"github.com/ultherego/flotestro/internal/relay"
 	"github.com/ultherego/flotestro/internal/relay/spool"
@@ -261,8 +262,19 @@ func jobResult(taskID string) *agentv1.AgentMessage {
 		TaskResult: &agentv1.TaskResult{
 			TaskId: taskID, IdempotencyKey: taskID,
 			Status: agentv1.TaskResult_STATUS_SUCCEEDED, Message: "the unit was restarted",
+			Verification: restartVerification(),
 		},
 	}}
+}
+
+// restartVerification is the reading a real agent sends with a restart it
+// carried out. The panel refuses a change nothing read the host after, so a
+// synthetic result without it is a message no fleet can produce.
+func restartVerification() *agentv1.Verification {
+	return &agentv1.Verification{
+		Verifier: string(opspec.VerifierUnitState), Verified: true,
+		Expected: "active", Observed: "active",
+	}
 }
 
 // TestAResultWithoutAnEnvelopeSurvivesAPanelThatNeverCommitted is the gap: the

@@ -101,6 +101,10 @@ func TestARelayRestartLosesNoResult(t *testing.T) {
 			IdempotencyKey: task.GetIdempotencyKey(),
 			Status:         agentv1.TaskResult_STATUS_SUCCEEDED,
 			Message:        "the unit was restarted",
+			// What a real agent sends: a change with no reading of the host
+			// behind it is refused, so a synthetic one that left it out would
+			// be testing a message the fleet cannot produce.
+			Verification: restartVerification(),
 		}},
 	}); err != nil {
 		t.Fatalf("the result was not sent through the relay: %v", err)
