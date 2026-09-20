@@ -179,6 +179,10 @@ curl -fsS http://127.0.0.1:8080/healthz</code></pre>
         <li><code>./secrets</code> is mounted <code>:ro,z</code>, so a host
         with SELinux relabels it by itself instead of failing with a plain
         &ldquo;permission denied&rdquo;.</li>
+        <li>One difference remains: <code>podman-compose</code> has no
+        <code>cp</code>, so the bootstrap token is fetched with
+        <code>podman cp flotestro_control-plane_1:/var/lib/flotestro/bootstrap-token .</code>
+        instead.</li>
       </ul>
     </div>
 
