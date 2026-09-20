@@ -16,6 +16,7 @@ import (
 	"connectrpc.com/connect"
 	"golang.org/x/net/http2"
 
+	"github.com/ultherego/flotestro/internal/endpoints"
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
 	"github.com/ultherego/flotestro/internal/identitystore"
@@ -94,8 +95,11 @@ func (z *Live) MediatesRegistration(enabled bool) { z.registration.Store(enabled
 
 // RenewalOptions describe the renewal of the certificate of a relay.
 type RenewalOptions struct {
-	StateDir   string
-	GatewayURL string
+	StateDir string
+	// Gateways are the addresses of the centre in order of priority - the same
+	// list the data path uses. The certificate of a relay carries a whole site,
+	// so its renewal must not depend on one instance of the centre being up.
+	Gateways []string
 	// Names are a wish of the relay.
 	Names   []string
 	Version string
@@ -115,7 +119,7 @@ func KeepCertificate(ctx context.Context, live *Live, options RenewalOptions) {
 
 	for {
 		if needsRenewal(live.Current()) {
-			renewed, err := renew(ctx, live.Current(), options)
+			renewed, answered, err := renew(ctx, live.Current(), options)
 			if err != nil {
 				log.Warn("the certificate of the relay could not be renewed",
 					"err", err, "expires", live.Current().NotAfter.Format(time.RFC3339))
@@ -131,7 +135,7 @@ func KeepCertificate(ctx context.Context, live *Live, options RenewalOptions) {
 			// where somebody finishes handling an event.
 			live.Swap(renewed)
 			log.Info("the certificate of the relay was renewed",
-				"relay_id", renewed.RelayID,
+				"relay_id", renewed.RelayID, "gateway", answered,
 				"expires", renewed.NotAfter.Format(time.RFC3339))
 			if options.AfterRenewal != nil {
 				options.AfterRenewal(renewed)
@@ -192,21 +196,92 @@ func startOf(identity Identity) time.Time {
 }
 
 // renew exchanges a new key pair for a certificate and writes it atomically.
-func renew(ctx context.Context, current_ Identity, options RenewalOptions) (Identity, error) {
+// It also returns the address of the gateway that answered.
+func renew(ctx context.Context, current_ Identity, options RenewalOptions) (Identity, string, error) {
 	store := identitystore.New(options.StateDir)
 	key, err := store.NewKey()
 	if err != nil {
-		return Identity{}, err
+		return Identity{}, "", err
 	}
 	dns, addresses := splitNames(options.Names)
 	csrPEM, err := identitystore.Request(key, current_.RelayID, dns, addresses)
 	if err != nil {
-		return Identity{}, err
+		return Identity{}, "", err
 	}
 
-	// The renewal goes over mTLS with the current certificate: it is the proof of
-	// the identity of the relay.
-	client_ := agentv1connect.NewRelayServiceClient(&http.Client{
+	// The addresses are tried in order of priority, with the same classes and the
+	// same jittered pause the data path uses.
+	message, answered, err := requestCertificate(ctx,
+		endpoints.New(options.Gateways, 0, 0),
+		func(ctx context.Context, gatewayURL string) (*agentv1.RenewRelayCertificateResponse, error) {
+			response, err := renewalClient(current_, gatewayURL).RenewCertificate(ctx,
+				connect.NewRequest(&agentv1.RenewRelayCertificateRequest{
+					CsrPem:          csrPEM,
+					Build:           &agentv1.AgentBuild{AgentVersion: options.Version},
+					AdvertisedNames: options.Names,
+				}))
+			if err != nil {
+				return nil, fmt.Errorf("the renewal was rejected: %w", err)
+			}
+			return response.Msg, nil
+		})
+	if err != nil {
+		return Identity{}, "", err
+	}
+
+	// The trust bundle changes only at a rotation of the CA of the fleet.
+	bundle := message.GetClientCaBundlePem()
+	if len(bundle) == 0 {
+		bundle = current_.TrustPEM
+	}
+	if len(bundle) == 0 {
+		return Identity{}, "", fmt.Errorf("a renewal without a trust bundle")
+	}
+
+	saved, err := store.Commit(identitystore.Generation{
+		Key:            key,
+		CertificatePEM: message.GetCertificatePem(),
+		TrustPEM:       bundle,
+	})
+	if err != nil {
+		// A rejected generation does not touch what the relay works with: better to
+		// stay on the old certificate and try again in a moment than to be left with
+		// half a pair and cut off a whole site.
+		return Identity{}, "", fmt.Errorf("the new identity was rejected: %w", err)
+	}
+	return Identity{
+		RelayID:     saved.HostID,
+		Certificate: saved.Certificate,
+		CAPool:      saved.CAPool,
+		NotAfter:    saved.NotAfter,
+		TrustPEM:    saved.TrustPEM,
+	}, answered, nil
+}
+
+// requestCertificate asks the gateways in order until one answers and says
+// which one did. When none does, the answer names every address tried.
+func requestCertificate(ctx context.Context, gateways *endpoints.Manager,
+	exchange func(ctx context.Context, gatewayURL string) (*agentv1.RenewRelayCertificateResponse, error),
+) (*agentv1.RenewRelayCertificateResponse, string, error) {
+	var message *agentv1.RenewRelayCertificateResponse
+	answered, err := gateways.Try(ctx, func(ctx context.Context, gatewayURL string) error {
+		response, err := exchange(ctx, gatewayURL)
+		if err != nil {
+			return err
+		}
+		message = response
+		return nil
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	return message, answered, nil
+}
+
+// renewalClient speaks to one gateway over mTLS with the current certificate:
+// it is the proof of the identity of the relay.
+func renewalClient(current_ Identity, gatewayURL string) agentv1connect.RelayServiceClient {
+	return agentv1connect.NewRelayServiceClient(&http.Client{
 		Timeout: 60 * time.Second,
 		Transport: &http2.Transport{
 			TLSClientConfig: &tls.Config{
@@ -215,45 +290,7 @@ func renew(ctx context.Context, current_ Identity, options RenewalOptions) (Iden
 				MinVersion:   tls.VersionTLS13,
 			},
 		},
-	}, options.GatewayURL)
-
-	response, err := client_.RenewCertificate(ctx,
-		connect.NewRequest(&agentv1.RenewRelayCertificateRequest{
-			CsrPem:          csrPEM,
-			Build:           &agentv1.AgentBuild{AgentVersion: options.Version},
-			AdvertisedNames: options.Names,
-		}))
-	if err != nil {
-		return Identity{}, fmt.Errorf("the renewal was rejected: %w", err)
-	}
-
-	// The trust bundle changes only at a rotation of the CA of the fleet.
-	bundle := response.Msg.GetClientCaBundlePem()
-	if len(bundle) == 0 {
-		bundle = current_.TrustPEM
-	}
-	if len(bundle) == 0 {
-		return Identity{}, fmt.Errorf("a renewal without a trust bundle")
-	}
-
-	saved, err := store.Commit(identitystore.Generation{
-		Key:            key,
-		CertificatePEM: response.Msg.GetCertificatePem(),
-		TrustPEM:       bundle,
-	})
-	if err != nil {
-		// A rejected generation does not touch what the relay works with: better to
-		// stay on the old certificate and try again in a moment than to be left with
-		// half a pair and cut off a whole site.
-		return Identity{}, fmt.Errorf("the new identity was rejected: %w", err)
-	}
-	return Identity{
-		RelayID:     saved.HostID,
-		Certificate: saved.Certificate,
-		CAPool:      saved.CAPool,
-		NotAfter:    saved.NotAfter,
-		TrustPEM:    saved.TrustPEM,
-	}, nil
+	}, gatewayURL)
 }
 
 // splitNames divides the network names into IP addresses and DNS names.

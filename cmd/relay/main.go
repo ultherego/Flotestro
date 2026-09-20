@@ -268,11 +268,13 @@ func runCommand(args []string, log *slog.Logger) error {
 	}
 
 	go relay.KeepCertificate(ctx, live, relay.RenewalOptions{
-		StateDir:   cfg.Relay.StateDir,
-		GatewayURL: gateway,
-		Names:      cfg.Relay.AdvertisedNames,
-		Version:    version,
-		Log:        log,
+		StateDir: cfg.Relay.StateDir,
+		// Every gateway, in the order of the configuration: the renewal fails over
+		// the same way the data path does.
+		Gateways: cfg.Upstream.GatewayURLs,
+		Names:    cfg.Relay.AdvertisedNames,
+		Version:  version,
+		Log:      log,
 		AfterRenewal: func(renewed relay.Identity) {
 			proxy.RefreshIdentity(renewed.Certificate, renewed.CAPool)
 			state.Update(func(s *ctl.RelayState) { s.CertificateNotAfter = renewed.NotAfter })
