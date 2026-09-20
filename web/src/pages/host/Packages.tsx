@@ -143,6 +143,12 @@ export function planBinding(detail: Record<string, unknown> | undefined): Approv
  * envelope's header with the approved elements when the host's planner built
  * one.
  */
+// The body the operations endpoint takes. The payload alone was posted here
+// once, and the panel could not install a package until it was noticed.
+export function operationBody(action: string, payload: Record<string, unknown>): Record<string, unknown> {
+  return { action, payload };
+}
+
 export function changePayload(action: string, packages: string[],
   plan: ApprovedPlan | null): Record<string, unknown> | null {
   if (!plan?.plan_hash || packages.length === 0) return null;
@@ -787,7 +793,7 @@ function PlanThenApply({ host, action, packages, planLabel, applyLabel, busy, on
           {planning.isPending ? t("Planning…") : planLabel}
         </button>
         {payload && (
-          <button disabled={apply.isPending || busy} onClick={() => apply.mutate(payload)}>
+          <button disabled={apply.isPending || busy} onClick={() => apply.mutate(operationBody(action, payload))}>
             {apply.isPending ? t("Requesting…") : applyLabel}
           </button>
         )}

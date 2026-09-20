@@ -616,7 +616,7 @@ func (s *Store) Record(ctx context.Context, hostID string, sample Sample) (Recor
 		}
 	}
 
-	if _, err := tx.Exec(ctx, `
+	stored, err := tx.Exec(ctx, `
 		insert into host_metrics (host_id, at, cpu_percent, load1, load5, load15,
 		    memory_total, memory_used, memory_available, swap_total, swap_used,
 		    uptime_seconds, filesystems, interfaces,
@@ -631,8 +631,15 @@ func (s *Store) Record(ctx context.Context, hostID string, sample Sample) (Recor
 		filesystems, interfaces,
 		nullableUint64(sample.AgentRSSBytes), sample.AgentCPUPercent,
 		nullableUint32(sample.AgentGoroutines), nullableUint32(sample.AgentOpenFDs),
-		nullableUint64(sample.HelperRSSBytes), orNullTime(sample.ReceivedAt)); err != nil {
+		nullableUint64(sample.HelperRSSBytes), orNullTime(sample.ReceivedAt))
+	if err != nil {
 		return OutcomeUnknown, err
+	}
+	// The identity is taken and the reading is not: two samples fell in the
+	// same second. Calling that persisted would let the host delete a reading
+	// nobody holds.
+	if stored.RowsAffected() == 0 {
+		return OutcomeDuplicate, nil
 	}
 	// The quarter-hour this reading falls in has to be computed again.
 	if _, err := tx.Exec(ctx, `

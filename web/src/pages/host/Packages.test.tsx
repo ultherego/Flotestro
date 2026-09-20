@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { changePayload, filterRows, heldCount, packageRows, packageVersion, planBinding, planExpired, planMode, type InstalledPackage, type PlanChange } from "./Packages";
+import { changePayload, operationBody, filterRows, heldCount, packageRows, packageVersion, planBinding, planExpired, planMode, type InstalledPackage, type PlanChange } from "./Packages";
 
 /* The table joins three answers of the host - the installed list, the
    holds and the last upgrade plan - and the join decides what a row says
@@ -127,6 +127,22 @@ describe("planBinding", () => {
     expect(planBinding({ kind: "package_apply", plan_hash: "abc" })).toBeNull();
     expect(planBinding({ kind: "package_plan" })).toBeNull();
     expect(planBinding({ kind: "package_plan", plan_hash: "" })).toBeNull();
+  });
+});
+
+describe("operationBody", () => {
+  it("names the operation beside its payload", () => {
+    const body = operationBody("packages.install", { package_change: { packages: ["curl"] } });
+    expect(body.action).toBe("packages.install");
+    expect(body.payload).toEqual({ package_change: { packages: ["curl"] } });
+  });
+
+  // The payload was posted on its own, so the endpoint read an empty action
+  // and refused every install and upgrade the screen offered.
+  it("does not post the payload as the whole body", () => {
+    const body = operationBody("packages.upgrade", { package_upgrade: { packages: ["curl"] } });
+    expect(body).not.toHaveProperty("package_upgrade");
+    expect(Object.keys(body).sort()).toEqual(["action", "payload"]);
   });
 });
 

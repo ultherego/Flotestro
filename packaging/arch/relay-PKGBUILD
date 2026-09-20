@@ -8,7 +8,7 @@ pkgrel=1
 pkgdesc='Flotestro site relay'
 arch=('x86_64' 'aarch64')
 url='https://github.com/ultherego/flotestro'
-license=('LicenseRef-Flotestro')
+license=('Apache-2.0')
 depends=('systemd' 'ca-certificates' 'shadow')
 # The site configuration survives package updates; the new version lands
 # next to it as .pacnew.

@@ -12,7 +12,7 @@ pkgrel=1
 pkgdesc='Flotestro fleet agent'
 arch=('x86_64' 'aarch64')
 url='https://github.com/ultherego/flotestro'
-license=('LicenseRef-Flotestro')
+license=('Apache-2.0')
 # The whole of what the agent needs at run time: the units and the journal,
 # the trust store for the session to the control plane, and the shadow tools
 # the local account module mutates accounts with. Every other module drives a

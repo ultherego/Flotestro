@@ -467,9 +467,15 @@ jobs:
           # dependencies: npm sbom validates every edge of package-lock.json
           # first and refuses a tree with anything missing from it.
           npm ci --no-audit --no-fund --ignore-scripts
-          mkdir -p "$RUNNER_TEMP/bills"
           npm sbom --sbom-format cyclonedx --omit=dev \
-            > "$RUNNER_TEMP/bills/flotestro-web.cdx.json"
+            > "$RUNNER_TEMP/flotestro-web.cdx.json"
+          # The attestation reads bills/<architecture>/, and the panel is the
+          # same tree in both images, so its bill belongs in each.
+          for architecture in amd64 arm64; do
+            directory="$RUNNER_TEMP/bills/$architecture"
+            [ -d "$directory" ] || { echo "no bills for $architecture; the artefacts step did not run" >&2; exit 1; }
+            cp "$RUNNER_TEMP/flotestro-web.cdx.json" "$directory/"
+          done
 
       - uses: sigstore/cosign-installer@v3.7.0
         if: steps.facts.outputs.push == 'true'

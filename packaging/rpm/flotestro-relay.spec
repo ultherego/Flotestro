@@ -2,7 +2,7 @@ Name:           flotestro-relay
 Version:        %{?_flotestro_version}%{!?_flotestro_version:0.1.0}
 Release:        %{?_flotestro_release}%{!?_flotestro_release:1}%{?dist}
 Summary:        Flotestro site relay
-License:        Proprietary
+License:        Apache-2.0
 URL:            https://github.com/ultherego/flotestro
 BuildArch:      %{_target_cpu}
 
