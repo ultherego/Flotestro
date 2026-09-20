@@ -3395,9 +3395,31 @@ func blockedJSON(blocked []*agentv1.BlockedPackage) []map[string]any {
 		}
 		result = append(result, map[string]any{
 			"name": pkg.GetName(), "status": pkg.GetStatus(), "questions": questions,
+			"kind": blockKind(pkg.GetKind()),
 		})
 	}
 	return result
+}
+
+// blockKind names the kind of a block, reading an agent that does not name
+// one as the database fault every block used to be.
+func blockKind(kind string) string {
+	if kind == "" {
+		return packagestore.BlockedDatabase
+	}
+	return kind
+}
+
+// databaseBlocks counts the blocks a repair would fix. An update no advisory
+// classifies is not one: the database is intact.
+func databaseBlocks(blocked []*agentv1.BlockedPackage) int {
+	count := 0
+	for _, pkg := range blocked {
+		if blockKind(pkg.GetKind()) == packagestore.BlockedDatabase {
+			count++
+		}
+	}
+	return count
 }
 
 // packageDatabaseState reads the state of the package database out of the
@@ -3407,9 +3429,9 @@ func packageDatabaseState(result *agentv1.TaskResult) (broken bool, known bool) 
 	case *agentv1.TaskResult_PackageApply:
 		return detail.PackageApply.GetPackageDatabaseBroken(), true
 	case *agentv1.TaskResult_PackagePlan:
-		return len(detail.PackagePlan.GetBlocked()) > 0, true
+		return databaseBlocks(detail.PackagePlan.GetBlocked()) > 0, true
 	case *agentv1.TaskResult_PackageRepair:
-		return len(detail.PackageRepair.GetStillBlocked()) > 0, true
+		return databaseBlocks(detail.PackageRepair.GetStillBlocked()) > 0, true
 	}
 	return false, false
 }

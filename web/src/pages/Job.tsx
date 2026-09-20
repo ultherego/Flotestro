@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api, type Collection } from "../lib/api";
 import { absoluteTime } from "../lib/format";
-import { isHostPlan, PlanChanges, PlanFacts, PlanSummary, planWords, type HostPlan, type PackagePlanFacts } from "../components/plan";
+import { isHostPlan, PlanBlocked, PlanChanges, PlanFacts, PlanSummary, planWords, type HostPlan, type PackagePlanFacts } from "../components/plan";
 import type { Attempt, Job } from "../lib/types";
 import { ErrorBox, ErrorCode, Time, Pair, Pairs, ProgressBar, Empty, JobState } from "../components/ui";
 import { Actions, Card, Field, FieldGrid, PageHeader } from "../components/layout";
@@ -448,7 +448,7 @@ export function JobPage() {
                 {/* A package plan reads as a table of packages below; the
                     summary line of a host plan names its action and change. */}
                 <Pair label={t("Summary")}>
-                  {packagePlan ? <><span>{planWords(plan, t)}</span><PlanFacts plan={plan} /></> : <PlanSummary plan={plan} />}
+                  {packagePlan ? <><span>{planWords(plan, t)}</span><PlanFacts plan={plan} /><PlanBlocked plan={plan} /></> : <PlanSummary plan={plan} />}
                 </Pair>
               </Pairs>
               {packagePlan && <PlanChanges changes={plan.changes} />}

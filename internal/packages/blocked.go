@@ -6,10 +6,24 @@ import (
 	"time"
 )
 
+// The kinds of block. They are read apart because only the first is a fault
+// of the host that a repair fixes.
+const (
+	// BlockedDatabase: the package database needs repairing before any
+	// package operation runs.
+	BlockedDatabase = "database"
+	// BlockedAdvisory: the update is left out of a security plan because no
+	// advisory of the host says whether it closes a vulnerability.
+	BlockedAdvisory = "advisory"
+)
+
 // Blocked describes a package that blocks package operations.
 type Blocked struct {
-	Name      string     `json:"name"`
-	Status    string     `json:"status"`
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	// Kind is empty on an agent older than the field, and empty means
+	// BlockedDatabase: that is what every block meant before it.
+	Kind      string     `json:"kind,omitempty"`
 	Questions []Question `json:"questions,omitempty"`
 }
 

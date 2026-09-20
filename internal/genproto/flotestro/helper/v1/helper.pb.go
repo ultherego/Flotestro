@@ -10221,10 +10221,12 @@ func (x *PackageRepairResponse) GetRepaired() bool {
 }
 
 type BlockedPackageDetail struct {
-	state         protoimpl.MessageState   `protogen:"open.v1"`
-	Name          string                   `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Status        string                   `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
-	Questions     []*DebconfQuestionDetail `protobuf:"bytes,3,rep,name=questions,proto3" json:"questions,omitempty"`
+	state     protoimpl.MessageState   `protogen:"open.v1"`
+	Name      string                   `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Status    string                   `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
+	Questions []*DebconfQuestionDetail `protobuf:"bytes,3,rep,name=questions,proto3" json:"questions,omitempty"`
+	// See BlockedPackage.kind in the agent contract.
+	Kind          string `protobuf:"bytes,4,opt,name=kind,proto3" json:"kind,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -10278,6 +10280,13 @@ func (x *BlockedPackageDetail) GetQuestions() []*DebconfQuestionDetail {
 		return x.Questions
 	}
 	return nil
+}
+
+func (x *BlockedPackageDetail) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
 }
 
 type DebconfQuestionDetail struct {
@@ -11488,11 +11497,12 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\amanager\x18\x01 \x01(\tR\amanager\x12N\n" +
 	"\rstill_blocked\x18\x02 \x03(\v2).flotestro.helper.v1.BlockedPackageDetailR\fstillBlocked\x12\x1a\n" +
 	"\banswered\x18\x03 \x03(\tR\banswered\x12\x1a\n" +
-	"\brepaired\x18\x04 \x01(\bR\brepaired\"\x8c\x01\n" +
+	"\brepaired\x18\x04 \x01(\bR\brepaired\"\xa0\x01\n" +
 	"\x14BlockedPackageDetail\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12H\n" +
-	"\tquestions\x18\x03 \x03(\v2*.flotestro.helper.v1.DebconfQuestionDetailR\tquestions\"o\n" +
+	"\tquestions\x18\x03 \x03(\v2*.flotestro.helper.v1.DebconfQuestionDetailR\tquestions\x12\x12\n" +
+	"\x04kind\x18\x04 \x01(\tR\x04kind\"o\n" +
 	"\x15DebconfQuestionDetail\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value\x12\x1f\n" +

@@ -87,23 +87,25 @@ func (d *DNF) plan(ctx context.Context, options Options) (Plan, error) {
 		return d.planInstall(ctx, plan, options)
 	}
 
-	result := run(ctx, 5*time.Minute, dnfPath, append([]string{"--quiet"}, append(dnfReadArgs(), "check-update")...)...)
-	if !result.Ran || (result.ExitCode != 0 && result.ExitCode != 100) {
-		return plan, fmt.Errorf("dnf check-update: %s", result.Reason())
+	result, pending, err := d.pendingUpdates(ctx, options)
+	if err != nil {
+		return plan, err
 	}
-
 	installed := d.installedVersions(ctx)
-	for _, line := range strings.Split(result.Stdout, "\n") {
-		change, ok := parseDNFUpdateLine(line)
-		if !ok || !matchesFilter(change, options) {
-			continue
-		}
+	for i := range pending {
 		// check-update names the candidate and nothing about what is there now; the
 		// rpm database does, and the direction of the change follows from the two.
-		change.CurrentVersion = installed[change.Name]
-		change.Action = ActionUpgrade
-		plan.Changes = append(plan.Changes, change)
+		pending[i].CurrentVersion = installed[pending[i].Name]
+		pending[i].Action = ActionUpgrade
 	}
+	// The advisories decide what a security-only plan may carry; what they do
+	// not cover stays in the plan as blocked instead of disappearing from it.
+	if options.SecurityOnly && len(pending) > 0 {
+		if pending, plan.Blocked, err = d.classifySecurity(ctx, pending, result.Truncated); err != nil {
+			return plan, err
+		}
+	}
+	plan.Changes = pending
 	plan.RebootPredicted = d.rebootPredicted(plan.Changes)
 	// check-update lists the versions and nothing about their size.
 	plan.DownloadBytes, plan.Space = d.planSpace(ctx, plan.Changes, func() string {
@@ -189,11 +191,154 @@ func parseDNFUpdateLine(line string) (Change, bool) {
 		Architecture:     arch,
 		CandidateVersion: fields[1],
 		Origin:           fields[2],
-		// Fedora does not publish consistent security metadata for every repository,
-		// so we do not mark changes as security on the basis of the name of the
-		// repository alone.
+		// The name of a repository classifies nothing; only an advisory does, and a
+		// security-only plan reads them through securityFilter.
 		Security: false,
 	}, true
+}
+
+// checkUpdate reads the pending updates from the cache; code 100 is what dnf
+// answers when there are any.
+func (d *DNF) checkUpdate(ctx context.Context) (commandResult, error) {
+	result := run(ctx, 5*time.Minute, dnfPath,
+		append([]string{"--quiet"}, append(dnfReadArgs(), "check-update")...)...)
+	if !result.Ran || (result.ExitCode != 0 && result.ExitCode != 100) {
+		return result, fmt.Errorf("dnf check-update: %s", result.Reason())
+	}
+	return result, nil
+}
+
+// dnfSecurityUnknown is the refusal of a security-only operation this host
+// cannot classify: the code of pacman, the sentence of this family.
+type dnfSecurityUnknown struct{ reason string }
+
+func (e dnfSecurityUnknown) Error() string { return e.reason }
+
+// Is answers the shared sentinel, so the refusal carries ErrorSecurityUnknown
+// and counts as a refusal of the host rather than a failed transaction.
+func (e dnfSecurityUnknown) Is(target error) bool { return target == ErrSecurityUnknown }
+
+// DNFAdvisoryTypes says, per package, whether an advisory of this host marks
+// its pending update as a security fix. A package that is not in it is unknown.
+type DNFAdvisoryTypes map[string]bool
+
+// Security answers for one package: the exact architecture first, the bare
+// name after it, because a vendor names the same fix in both spellings.
+func (t DNFAdvisoryTypes) Security(name, architecture string) (security, known bool) {
+	if value, ok := t[name+"."+architecture]; ok {
+		return value, true
+	}
+	value, ok := t[name]
+	return value, ok
+}
+
+// ParseDNFUpdateinfoList reads "dnf updateinfo list": the advisory, its type
+// and severity, and the package the advisory closes.
+func ParseDNFUpdateinfoList(output string) DNFAdvisoryTypes {
+	types := DNFAdvisoryTypes{}
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) < 3 {
+			continue
+		}
+		pkg, ok := ParseNEVRA(fields[len(fields)-1])
+		if !ok {
+			continue
+		}
+		// dnf4 writes the type and the severity in one column ("Moderate/Sec."),
+		// dnf5 in two; in both the word stands between the advisory and the package.
+		security := strings.Contains(strings.ToLower(strings.Join(fields[1:len(fields)-1], " ")), "sec")
+		key := pkg.Name + "." + pkg.Architecture
+		types[key] = types[key] || security
+		types[pkg.Name] = types[pkg.Name] || security
+	}
+	return types
+}
+
+// pendingUpdates reads the updates dnf has for this host, narrowed by the
+// names of the order; the security filter needs the advisories and comes after.
+func (d *DNF) pendingUpdates(ctx context.Context, options Options) (commandResult, []Change, error) {
+	result, err := d.checkUpdate(ctx)
+	if err != nil {
+		return result, nil, err
+	}
+	byName := options
+	byName.SecurityOnly = false
+	var pending []Change
+	for _, line := range strings.Split(result.Stdout, "\n") {
+		if change, ok := parseDNFUpdateLine(line); ok && matchesFilter(change, byName) {
+			pending = append(pending, change)
+		}
+	}
+	return result, pending, nil
+}
+
+// unclassifiedStatus is what the operator reads next to an update the
+// advisories of this host say nothing about.
+const unclassifiedStatus = "no advisory of this host says whether this update closes a " +
+	"vulnerability, so a security-only plan leaves it out rather than calling it harmless"
+
+// classifySecurity divides the pending updates by the advisories of the host:
+// security stays, a known bug fix goes, what nothing covers leaves as blocked.
+func (d *DNF) classifySecurity(ctx context.Context, pending []Change,
+	truncated bool) ([]Change, []Blocked, error) {
+	if truncated {
+		return nil, nil, dnfSecurityUnknown{"dnf listed more pending updates than the agent reads, " +
+			"so this host cannot say which of them are security updates"}
+	}
+	args := append([]string{"--quiet"}, append(dnfReadArgs(), "updateinfo", "list", "--updates")...)
+	result := run(ctx, 5*time.Minute, dnfPath, args...)
+	if !result.Complete() {
+		return nil, nil, dnfSecurityUnknown{"the advisories of this host could not be read (" +
+			result.unreadable("dnf updateinfo list") +
+			"), so a security-only plan cannot be computed"}
+	}
+	return classifyPending(pending, ParseDNFUpdateinfoList(result.Stdout))
+}
+
+// classifyPending divides the pending updates by what the advisories say.
+func classifyPending(pending []Change, types DNFAdvisoryTypes) ([]Change, []Blocked, error) {
+	var changes []Change
+	var blocked []Blocked
+	for _, change := range pending {
+		security, known := types.Security(change.Name, change.Architecture)
+		switch {
+		case !known:
+			// Unknown is not "not a security update": the update leaves the plan
+			// named and with its reason, never in silence.
+			blocked = append(blocked, Blocked{Name: change.Name, Status: unclassifiedStatus,
+				Kind: BlockedAdvisory})
+		case security:
+			change.Security = true
+			changes = append(changes, change)
+		}
+	}
+	// A plan with nothing to carry out and updates it cannot classify would read
+	// as a clean host at every later step; that is what this code is for.
+	if len(changes) == 0 && len(blocked) > 0 {
+		return nil, nil, dnfSecurityUnknown{"no advisory of this host classifies " +
+			strings.Join(blockedNames(blocked), ", ") +
+			", so nothing here can be planned as a security update"}
+	}
+	return changes, blocked, nil
+}
+
+// maxUnclassifiedNamed bounds the refusal: a host behind on everything would
+// otherwise carry its whole pending list into one message.
+const maxUnclassifiedNamed = 10
+
+// blockedNames lists the blocked packages for a message, bounded.
+func blockedNames(blocked []Blocked) []string {
+	names := make([]string, 0, len(blocked))
+	for _, entry := range blocked {
+		names = append(names, entry.Name)
+	}
+	names = unique(names)
+	if len(names) > maxUnclassifiedNamed {
+		rest := fmt.Sprintf("and %d more", len(names)-maxUnclassifiedNamed)
+		names = append(names[:maxUnclassifiedNamed:maxUnclassifiedNamed], rest)
+	}
+	return names
 }
 
 func (d *DNF) rebootPredicted(changes []Change) bool {
@@ -230,6 +375,20 @@ func (d *DNF) Upgrade(ctx context.Context, options Options) (Apply, error) {
 	// up.
 	if hidden, dir := modulesHidden(); hidden {
 		return apply, fmt.Errorf("%w: %s", ErrModulesHidden, dir)
+	}
+
+	// "dnf --security" upgrades nothing and succeeds where nothing is
+	// classified, so this path asks the plan's question and answers it alike.
+	if options.SecurityOnly {
+		result, pending, err := d.pendingUpdates(ctx, options)
+		if err != nil {
+			return apply, err
+		}
+		if len(pending) > 0 {
+			if _, _, err := d.classifySecurity(ctx, pending, result.Truncated); err != nil {
+				return apply, err
+			}
+		}
 	}
 
 	before := d.installedVersions(ctx)

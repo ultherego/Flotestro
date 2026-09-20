@@ -1741,6 +1741,8 @@ message BlockedPackageDetail {
   string name = 1;
   string status = 2;
   repeated DebconfQuestionDetail questions = 3;
+  // See BlockedPackage.kind in the agent contract.
+  string kind = 4;
 }
 
 message DebconfQuestionDetail {

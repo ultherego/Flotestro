@@ -92,6 +92,16 @@ export type PackagePlanFacts = {
   resource_revision?: string;
   rollback?: PlanRollback;
   description?: string;
+  // What the plan leaves out and why. A "database" block is a fault of the
+  // host; an "advisory" block is an update nothing classifies.
+  blocked?: BlockedPackage[];
+};
+
+/** A package the plan does not carry, with the reason the host gave. */
+export type BlockedPackage = {
+  name: string;
+  status?: string;
+  kind?: string;
 };
 
 export type HostPlan = {
@@ -363,6 +373,33 @@ export function PlanFacts({ plan }: { plan: PackagePlanFacts }) {
   );
 }
 
+/**
+ * What the plan leaves out. An update no advisory classifies is not a fault
+ * of the host, so it reads as a note; a broken package database is.
+ */
+export function PlanBlocked({ plan }: { plan: PackagePlanFacts }) {
+  const t = useT();
+  const blocked = plan.blocked ?? [];
+  if (blocked.length === 0) return null;
+  const database = blocked.filter((entry) => (entry.kind ?? "database") === "database");
+  return (
+    <div className="plan-blocked">
+      <p className={database.length > 0 ? "warning" : "source"}>
+        {database.length > 0
+          ? t("{n} packages block the package operations of this host; a repair has to run before the plan is applied.", { n: database.length })
+          : t("{n} packages stay out of this plan: no advisory of this host says whether their update closes a vulnerability.", { n: blocked.length })}
+      </p>
+      <ul className="plan-changes-list">
+        {blocked.map((entry) => (
+          <li key={`${entry.kind ?? "database"}:${entry.name}`}>
+            <span className="mono">{entry.name}</span>{entry.status ? ` — ${entry.status}` : ""}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /** One shape of a campaign's change and the hosts that get it, as the panel serves it. */
 export type PlanGroup = {
   plan_hash: string;
@@ -461,6 +498,7 @@ export function PlanGroupView({ group, action, stale = [] }: { group: PlanGroup;
               )}
             </div>
             <PlanFacts plan={plan} />
+            <PlanBlocked plan={plan} />
             <PlanChanges changes={plan.changes} />
             <PlanVerbatim plan={plan} />
           </>

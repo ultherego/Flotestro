@@ -291,7 +291,7 @@ func blockedPlanToProto(blocked []packages.Blocked) []*agentv1.BlockedPackage {
 			})
 		}
 		result = append(result, &agentv1.BlockedPackage{
-			Name: pkg.Name, Status: pkg.Status, Questions: questions,
+			Name: pkg.Name, Status: pkg.Status, Kind: pkg.Kind, Questions: questions,
 		})
 	}
 	return result

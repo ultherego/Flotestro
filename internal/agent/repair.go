@@ -92,7 +92,7 @@ func blockedToAgent(blocked []*helperv1.BlockedPackageDetail) []*agentv1.Blocked
 			})
 		}
 		result = append(result, &agentv1.BlockedPackage{
-			Name: pkg.GetName(), Status: pkg.GetStatus(), Questions: questions,
+			Name: pkg.GetName(), Status: pkg.GetStatus(), Kind: pkg.GetKind(), Questions: questions,
 		})
 	}
 	return result

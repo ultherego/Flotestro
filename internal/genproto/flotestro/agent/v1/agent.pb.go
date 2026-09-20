@@ -9979,10 +9979,14 @@ func (x *SpaceFact) GetBasis() string {
 // guess the answers: the choice may concern, for example, the device the
 // bootloader is written to.
 type BlockedPackage struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Status        string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
-	Questions     []*DebconfQuestion     `protobuf:"bytes,3,rep,name=questions,proto3" json:"questions,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Name      string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Status    string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
+	Questions []*DebconfQuestion     `protobuf:"bytes,3,rep,name=questions,proto3" json:"questions,omitempty"`
+	// What the block is: "database" when the package database needs repairing,
+	// "advisory" when nothing says whether an update closes a vulnerability.
+	// Empty is "database": that is what an agent before this field meant.
+	Kind          string `protobuf:"bytes,4,opt,name=kind,proto3" json:"kind,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -10036,6 +10040,13 @@ func (x *BlockedPackage) GetQuestions() []*DebconfQuestion {
 		return x.Questions
 	}
 	return nil
+}
+
+func (x *BlockedPackage) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
 }
 
 type DebconfQuestion struct {
@@ -16805,11 +16816,12 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x0favailable_bytes\x18\x03 \x01(\x04R\x0eavailableBytes\x12!\n" +
 	"\fneeded_bytes\x18\x04 \x01(\x04R\vneededBytes\x12\x18\n" +
 	"\apurpose\x18\x05 \x01(\tR\apurpose\x12\x14\n" +
-	"\x05basis\x18\x06 \x01(\tR\x05basis\"\x7f\n" +
+	"\x05basis\x18\x06 \x01(\tR\x05basis\"\x93\x01\n" +
 	"\x0eBlockedPackage\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12A\n" +
-	"\tquestions\x18\x03 \x03(\v2#.flotestro.agent.v1.DebconfQuestionR\tquestions\"i\n" +
+	"\tquestions\x18\x03 \x03(\v2#.flotestro.agent.v1.DebconfQuestionR\tquestions\x12\x12\n" +
+	"\x04kind\x18\x04 \x01(\tR\x04kind\"i\n" +
 	"\x0fDebconfQuestion\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value\x12\x1f\n" +

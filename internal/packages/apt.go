@@ -522,7 +522,7 @@ func blockedFromStatusFile(path string) []Blocked {
 		case "installed", "config-files", "not-installed":
 			return
 		}
-		blocked = append(blocked, Blocked{Name: name, Status: status})
+		blocked = append(blocked, Blocked{Name: name, Status: status, Kind: BlockedDatabase})
 	}
 
 	scanner := bufio.NewScanner(file)

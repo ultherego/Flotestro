@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@testing-library/jest-dom/vitest";
 import type { ReactElement } from "react";
 import {
-  changeAction, changesSummary, isHostPlan, JobPlan, PlanChanges, PlanFacts, PlanGroupView, PlanSummary, planStatus,
+  changeAction, changesSummary, isHostPlan, JobPlan, PlanBlocked, PlanChanges, PlanFacts, PlanGroupView, PlanSummary, planStatus,
   STALE_PLAN_CODES, unknownPlanHosts, type HostPlan, type PlanGroup,
 } from "./plan";
 
@@ -231,6 +231,29 @@ describe("PlanChanges", () => {
     expect([...container.querySelectorAll("li")].map((item) => item.textContent)).toEqual(["content", "mode 0644 → 0600"]);
     const { container: none } = render(<PlanChanges changes={[]} />);
     expect(none.innerHTML).toBe("");
+  });
+});
+
+describe("PlanBlocked", () => {
+  it("separates a broken package database from an update nothing classifies", () => {
+    const advisory = render(<PlanBlocked plan={{
+      blocked: [{ name: "docker-ce", status: "no advisory covers it", kind: "advisory" }],
+    }} />);
+    expect(advisory.container).toHaveTextContent("stay out of this plan");
+    expect(advisory.container.querySelectorAll(".warning")).toHaveLength(0);
+
+    const broken = render(<PlanBlocked plan={{
+      blocked: [{ name: "libc6", status: "half-configured", kind: "database" }],
+    }} />);
+    expect(broken.container).toHaveTextContent("a repair has to run");
+    expect(broken.container.querySelectorAll(".warning")).toHaveLength(1);
+
+    // An agent from before the field names no kind, and that is the fault
+    // every block used to be.
+    const older = render(<PlanBlocked plan={{ blocked: [{ name: "libc6" }] }} />);
+    expect(older.container).toHaveTextContent("a repair has to run");
+
+    expect(render(<PlanBlocked plan={{}} />).container.innerHTML).toBe("");
   });
 });
 

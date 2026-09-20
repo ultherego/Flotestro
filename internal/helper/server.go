@@ -887,7 +887,7 @@ func blockedToProto(blocked []packages.Blocked) []*helperv1.BlockedPackageDetail
 			})
 		}
 		result = append(result, &helperv1.BlockedPackageDetail{
-			Name: pkg.Name, Status: pkg.Status, Questions: questions,
+			Name: pkg.Name, Status: pkg.Status, Kind: pkg.Kind, Questions: questions,
 		})
 	}
 	return result

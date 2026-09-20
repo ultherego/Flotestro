@@ -1647,6 +1647,9 @@ message BlockedPackage {
   string name = 1;
   string status = 2;
   repeated DebconfQuestion questions = 3;
+  // "database" when the package database needs repairing, "advisory" when
+  // nothing classifies an update. Empty is "database", as it always meant.
+  string kind = 4;
 }
 
 message DebconfQuestion {

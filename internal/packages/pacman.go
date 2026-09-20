@@ -136,8 +136,9 @@ func (p *Pacman) plan(ctx context.Context, options Options) (Plan, error) {
 	// A lock left by a crashed pacman stops every transaction; the plan says
 	// so before anyone orders one.
 	if held, path := p.LockHeld(); held {
-		plan.Blocked = []Blocked{{Name: "pacman", Status: "the database lock " + path +
-			" exists; a transaction will need the repair unless a pacman process holds it"}}
+		plan.Blocked = []Blocked{{Name: "pacman", Kind: BlockedDatabase,
+			Status: "the database lock " + path +
+				" exists; a transaction will need the repair unless a pacman process holds it"}}
 	}
 
 	switch options.Mode {
@@ -1300,7 +1301,7 @@ func ParsePacmanDatabaseCheck(output string) []Blocked {
 			continue
 		}
 		seen[name+"\x1f"+status] = true
-		blocked = append(blocked, Blocked{Name: name, Status: status})
+		blocked = append(blocked, Blocked{Name: name, Status: status, Kind: BlockedDatabase})
 	}
 	return blocked
 }
