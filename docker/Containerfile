@@ -18,7 +18,7 @@ WORKDIR /src/web
 # then rebuilt when the dependencies change and not when a component does.
 COPY web/package.json web/package-lock.json ./
 RUN --mount=type=cache,id=flotestro-npm,target=/root/.npm \
-    npm ci --no-audit --no-fund
+    npm ci --no-audit --no-fund --ignore-scripts
 COPY web/ ./
 # The panel is built with the network switched off. Everything it needs came
 # from the lockfile above, and a build that could still reach out might pull
@@ -291,6 +291,11 @@ backup() {
     note "the pair $id: the database and $state_dir"
     note "the two halves belong to one point in time - stop the control plane for the dump, or at the very least hold the rotation of the CA and of the key encryption keys while it runs"
 
+    # The revision of the crypto state before the dump and after the archive.
+    # A rotation between the two makes a pair that does not belong together.
+    local revision_before
+    revision_before="$(query 'select revision from crypto_installation_state' 2>/dev/null || true)"
+
     # --no-owner and --no-privileges: the restore is done by whoever owns
     # the empty database it goes into, which on a rebuilt installation is
     pg_dump --format=custom --no-owner --no-privileges \
@@ -299,6 +304,13 @@ backup() {
     # about the host the archive goes back onto; 65532 is what matters and
     tar --numeric-owner --zstd --create --file "$dir/state.tar.zst" \
         --directory "$state_dir" .
+
+    local revision_after
+    revision_after="$(query 'select revision from crypto_installation_state' 2>/dev/null || true)"
+    if [ -n "$revision_before" ] && [ "$revision_before" != "$revision_after" ]; then
+        rm -rf "$dir"
+        fail "the key material was rotated while the backup ran (revision $revision_before -> $revision_after); the two halves would not open each other, so nothing was kept - run it again"
+    fi
 
     ( cd "$dir" && sha256sum database.dump state.tar.zst > SHA256SUMS )
     local database_sha state_sha
