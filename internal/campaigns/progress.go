@@ -279,12 +279,17 @@ func (o *Orchestrator) lastAttempt(ctx context.Context, jobID string) (*jobs.Att
 // unverifiedChange says why a task that reports success is not one, from the
 // verification the host sent with its result.
 func unverifiedChange(action opspec.ActionType, attempt *jobs.Attempt) string {
-	if attempt == nil || len(attempt.Verification) == 0 {
-		return ""
-	}
 	verifier := action.Verifier()
 	if verifier == opspec.VerifierNone || verifier.PanelSettled() {
 		return ""
+	}
+	// A success with no read of the host behind it is not a success. The
+	// campaign read the host's verdict and took its absence for agreement,
+	// so a result that lost the block on the way - or never carried one -
+	// counted as a change that landed.
+	if attempt == nil || len(attempt.Verification) == 0 {
+		return "the change was made and nothing read the host afterwards: " +
+			"the result carries no verification from the verifier " + string(verifier)
 	}
 	var observation struct {
 		Verifier string `json:"verifier"`

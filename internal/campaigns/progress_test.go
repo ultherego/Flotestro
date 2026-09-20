@@ -257,19 +257,22 @@ func TestOnlyAConfirmedChangeCarriesTheHostForward(t *testing.T) {
 		!strings.Contains(said, "failed") {
 		t.Errorf("the observation says nothing: %s", said)
 	}
-	// A read is its own observation, a restart is settled by the panel on the
-	// host's return, and an attempt from an agent before the verifiers sends none
-	// at all: none of the three is a failed verification.
+	// A read is its own observation and a restart is settled by the panel on
+	// the host's return: neither is a failed verification.
 	if reason := unverifiedChange(opspec.ActionUnitStatus, failed); reason != "" {
 		t.Errorf("an operation without a verifier was held back: %s", reason)
 	}
 	if reason := unverifiedChange(opspec.ActionSystemReboot, failed); reason != "" {
 		t.Errorf("an operation the panel settles was held back: %s", reason)
 	}
-	if reason := unverifiedChange(opspec.ActionUnitRestart, &jobs.Attempt{}); reason != "" {
-		t.Errorf("an attempt without a verification was held back: %s", reason)
+	// A missing verification is not agreement. verifyOutcome sets the block on
+	// every mutating success whose verifier the host settles, so its absence
+	// means the read never happened or the block was lost on the way - and a
+	// change nothing read is not a change that landed.
+	if reason := unverifiedChange(opspec.ActionUnitRestart, &jobs.Attempt{}); reason == "" {
+		t.Error("an attempt carrying no verification was taken for a confirmed change")
 	}
-	if reason := unverifiedChange(opspec.ActionUnitRestart, nil); reason != "" {
-		t.Errorf("a task without an attempt was held back: %s", reason)
+	if reason := unverifiedChange(opspec.ActionUnitRestart, nil); reason == "" {
+		t.Error("a task with no attempt at all was taken for a confirmed change")
 	}
 }
