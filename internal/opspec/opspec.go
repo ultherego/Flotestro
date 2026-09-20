@@ -1647,8 +1647,14 @@ func CheckPlanBinding(action ActionType, payload Payload) error {
 		return nil
 	}
 	switch action {
-	case ActionPackageInstall, ActionPackageUpgrade:
+	case ActionPackageInstall:
 		if payload.PackageChange == nil || payload.PackageChange.PlanHash == "" {
+			return &RefusalError{Code: RefusalPlanBindingMissing,
+				Err: fmt.Errorf("%s needs the hash of an approved plan", action)}
+		}
+	case ActionPackageUpgrade:
+		// An upgrade carries its own payload, not the one an install uses.
+		if payload.PackageUpgrade == nil || payload.PackageUpgrade.PlanHash == "" {
 			return &RefusalError{Code: RefusalPlanBindingMissing,
 				Err: fmt.Errorf("%s needs the hash of an approved plan", action)}
 		}

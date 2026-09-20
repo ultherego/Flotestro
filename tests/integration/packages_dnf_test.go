@@ -20,11 +20,13 @@ func TestPackageLifecycleOnDNF(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("rhel")
 
-	// Installation.
+	// Installation. The plan comes first: an install is bound to the plan it
+	// was approved from, and the panel orders the two in this order too.
+	installPlan := dnfInstallPlan(t, h, host.ID, testPackage)
 	job, attempts := h.runOperation(host.ID, map[string]any{
 		"action": "packages.install", "reason": lifecycleReason,
 		"payload": map[string]any{"package_change": map[string]any{
-			"packages": []string{testPackage},
+			"packages": []string{testPackage}, "plan_hash": installPlan.PlanHash,
 		}},
 	}, 10*time.Minute)
 	if job.State != "succeeded" {
@@ -145,6 +147,24 @@ func TestRemovalPlanDoesNotStayQuietAboutARefusal(t *testing.T) {
 	if len(attempts) == 0 || attempts[len(attempts)-1].Message == "" {
 		t.Fatal("the plan was refused without an explanation")
 	}
+}
+
+func dnfInstallPlan(t *testing.T, h *harness, hostID, pkg string) packageDetail {
+	t.Helper()
+	job, attempts := h.runOperation(hostID, map[string]any{
+		"action": "packages.plan", "reason": lifecycleReason,
+		"payload": map[string]any{"package_plan": map[string]any{
+			"mode": "install", "only_packages": []string{pkg}, "refresh_metadata": true,
+		}},
+	}, 5*time.Minute)
+	if job.State != "succeeded" {
+		t.Fatalf("the installation plan ended in state %s: %+v", job.State, attempts)
+	}
+	plan := removalPlanFromAttempts(t, attempts)
+	if plan.PlanHash == "" {
+		t.Fatal("the installation plan carries no hash to bind the change to")
+	}
+	return plan
 }
 
 func dnfRemovalPlan(t *testing.T, h *harness, hostID, pkg string) packageDetail {

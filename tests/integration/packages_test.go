@@ -581,11 +581,23 @@ func brokenMaintainerScriptScenario(t *testing.T, h *harness, host hostView, exp
 	})
 
 	// The installation. The maintainer script is what fails, so the manager
-	// has to download and unpack the package first.
+	// has to download and unpack the package first. The plan comes first as
+	// it does everywhere: the change is bound to the plan it was approved from.
+	planJob, planAttempts := h.runOperation(host.ID, map[string]any{
+		"action": "packages.plan", "reason": labBrokenReason,
+		"payload": map[string]any{"package_plan": map[string]any{
+			"mode": "install", "only_packages": []string{labBrokenPackage},
+			"refresh_metadata": true,
+		}},
+	}, 5*time.Minute)
+	if planJob.State != "succeeded" {
+		t.Fatalf("the installation plan ended in state %s: %+v", planJob.State, planAttempts)
+	}
+	plan := removalPlanFromAttempts(t, planAttempts)
 	job, attempts := h.runOperation(host.ID, map[string]any{
 		"action": "packages.install", "reason": labBrokenReason,
 		"payload": map[string]any{"package_change": map[string]any{
-			"packages": []string{labBrokenPackage},
+			"packages": []string{labBrokenPackage}, "plan_hash": plan.PlanHash,
 		}},
 	}, 10*time.Minute)
 	if len(attempts) == 0 {

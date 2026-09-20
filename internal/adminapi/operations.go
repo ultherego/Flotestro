@@ -118,12 +118,6 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, opspec.RefusalCode(err), err.Error())
 		return
 	}
-	// Asked here as well as at the job, so an order that forgot its plan is
-	// refused with the reason rather than failing deeper in.
-	if err := opspec.CheckPlanBinding(action, payload); err != nil {
-		problem(w, http.StatusBadRequest, opspec.RefusalCode(err), err.Error())
-		return
-	}
 	// The content of the order can ask for more than the operation does: an entry
 	// for root, a write allowed to skip its validator.
 	if _, ok := s.authorizePayload(w, r, action, payload, scope, "host", hostID); !ok {
@@ -159,6 +153,14 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 		})
 		problem(w, http.StatusConflict, "host_"+host.LifecycleState,
 			lifecycleRefusal(host.LifecycleState))
+		return
+	}
+
+	// After the state of the host, not before it. A broken package database
+	// or a host that takes no orders at all is the more useful answer, and
+	// an approved plan would not have helped in either case.
+	if err := opspec.CheckPlanBinding(action, payload); err != nil {
+		problem(w, http.StatusBadRequest, opspec.RefusalCode(err), err.Error())
 		return
 	}
 

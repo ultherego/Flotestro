@@ -30,6 +30,16 @@ func dnfCacheDir() string {
 	return "/var/cache/libdnf5"
 }
 
+// dnfReadArgs are the arguments every read of the metadata carries. The
+// metadata is refreshed by the helper, which runs as root and writes the
+// system cache; the agent plans unprivileged and would otherwise read a cache
+// of its own that the refresh never touched - so a package added to a
+// repository since that cache was filled is simply not there, and the plan
+// says the package does not exist.
+func dnfReadArgs() []string {
+	return []string{"--cacheonly", "--setopt=cachedir=" + dnfCacheDir()}
+}
+
 // dnfLockFiles are the files locked for the duration of an RPM transaction.
 var dnfLockFiles = []string{
 	"/var/lib/rpm/.rpm.lock",
@@ -77,7 +87,7 @@ func (d *DNF) plan(ctx context.Context, options Options) (Plan, error) {
 		return d.planInstall(ctx, plan, options)
 	}
 
-	result := run(ctx, 5*time.Minute, dnfPath, "--quiet", "--cacheonly", "check-update")
+	result := run(ctx, 5*time.Minute, dnfPath, append([]string{"--quiet"}, append(dnfReadArgs(), "check-update")...)...)
 	if !result.Ran || (result.ExitCode != 0 && result.ExitCode != 100) {
 		return plan, fmt.Errorf("dnf check-update: %s", result.Reason())
 	}
@@ -97,7 +107,7 @@ func (d *DNF) plan(ctx context.Context, options Options) (Plan, error) {
 	plan.RebootPredicted = d.rebootPredicted(plan.Changes)
 	// check-update lists the versions and nothing about their size.
 	plan.DownloadBytes, plan.Space = d.planSpace(ctx, plan.Changes, func() string {
-		args := []string{"--assumeno", "--cacheonly", "upgrade"}
+		args := append([]string{"--assumeno"}, append(dnfReadArgs(), "upgrade")...)
 		if options.SecurityOnly {
 			args = append(args, "--security")
 		}
@@ -383,7 +393,7 @@ func (d *DNF) planRemove(ctx context.Context, plan Plan, options Options) (Plan,
 	}
 	// --assumeno ends with the code 1 and a message about the interruption: that
 	// is how dnf shows a transaction it does not carry out.
-	args := append([]string{"--assumeno", "--cacheonly", "remove"}, options.Packages...)
+	args := append(append([]string{"--assumeno"}, append(dnfReadArgs(), "remove")...), options.Packages...)
 	result := run(ctx, 10*time.Minute, dnfPath, args...)
 	if !result.Ran {
 		return plan, fmt.Errorf("dnf remove: %s", result.Reason())
@@ -423,7 +433,7 @@ func (d *DNF) planInstall(ctx context.Context, plan Plan, options Options) (Plan
 	if len(options.Packages) == 0 {
 		return plan, fmt.Errorf("an installation plan requires a list of packages")
 	}
-	args := append([]string{"--assumeno", "--cacheonly", "install"}, options.Packages...)
+	args := append(append([]string{"--assumeno"}, append(dnfReadArgs(), "install")...), options.Packages...)
 	result := run(ctx, 10*time.Minute, dnfPath, args...)
 	if !result.Ran {
 		return plan, fmt.Errorf("dnf install: %s", result.Reason())
