@@ -212,7 +212,9 @@ func NewServer(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inven
 // Routes builds the API router.
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
-	s.route(mux, "GET /healthz", s.handleHealth)
+	s.route(mux, "GET /healthz", s.handleLive)
+	s.route(mux, "GET /livez", s.handleLive)
+	s.route(mux, "GET /readyz", s.handleReady)
 	s.route(mux, "GET /api/v1/openapi.json", s.handleOpenAPI)
 	s.route(mux, "GET /api/v1/capabilities", s.handleCapabilities)
 	s.route(mux, "GET /metrics", s.handleMetrics)
@@ -586,7 +588,18 @@ func securityHeaders(next http.Handler, scriptHashes []string) http.Handler {
 	})
 }
 
-func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+// handleLive answers whether this process is worth keeping. A database that
+// stopped answering is not a reason to restart the panel, so it is not asked.
+func (s *Server) handleLive(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":          "ok",
+		"active_sessions": s.registry.Count(),
+	})
+}
+
+// handleReady answers whether it can serve, which is a question about the
+// database rather than about the process.
+func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	if err := s.pool.Ping(r.Context()); err != nil {
 		problem(w, http.StatusServiceUnavailable, "database_unavailable", "the database is not responding")
 		return

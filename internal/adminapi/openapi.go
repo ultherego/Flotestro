@@ -231,7 +231,7 @@ func (s *Server) openAPI() map[string]any {
 
 	paths := map[string]map[string]any{}
 	for _, route := range s.contract {
-		if !strings.HasPrefix(route.Path, "/api/") && route.Path != "/healthz" && route.Path != "/metrics" {
+		if !strings.HasPrefix(route.Path, "/api/") && !isProbePath(route.Path) && route.Path != "/metrics" {
 			// The browser login flow is not a programmable interface.
 			continue
 		}
@@ -1000,4 +1000,10 @@ func schemaOf(t reflect.Type, schemas map[string]any) map[string]any {
 		return map[string]any{}
 	}
 	return map[string]any{}
+}
+
+// isProbePath names the endpoints a container runtime asks, which are not
+// part of the API document.
+func isProbePath(path string) bool {
+	return path == "/healthz" || path == "/livez" || path == "/readyz"
 }

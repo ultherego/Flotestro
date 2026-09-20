@@ -172,7 +172,9 @@ services:
 
     healthcheck:
       # The image carries no curl and no shell; this is the static client from
-      # cmd/container-healthcheck. It asks /healthz, which pings the database.
+      # cmd/container-healthcheck. It asks /healthz, which is liveness: a
+      # database that stopped answering is not a reason to restart the panel.
+      # An orchestrator that wants readiness asks /readyz.
       test: ["CMD", "/usr/local/bin/flotestro-healthcheck"]
       interval: 15s
       timeout: 5s
