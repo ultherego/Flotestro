@@ -751,7 +751,7 @@ var reportedGuides = []ErrorGuide{
 		Action:  "Sign the repository index - packaging/sign-repo.sh writes InRelease and Release.gpg - and let the host refresh its metadata. A source the operator marked trusted looks exactly like this."},
 	{Code: "apt_index_key_untrusted", Stage: "helper", Retry: RetryAfterChange,
 		Meaning: "The index of that repository is signed, and by a key the host does not hold in the key store apt reads. The package was still checked against the digest the order named.",
-		Action:  "Put the release key where apt looks for it - a keyring named by Signed-By in the source, or /etc/apt/trusted.gpg.d - and refresh the metadata. A key that was rotated without the fleet being told looks like this."},
+		Action:  "Put the release key where apt looks for it - a keyring named by Signed-By, the key itself in a deb822 Signed-By field, or /etc/apt/trusted.gpg.d - and refresh the metadata. A key that was rotated without the fleet being told looks like this."},
 	{Code: "apt_index_unreadable", Stage: "helper", Retry: RetryAfterChange,
 		Meaning: "The host holds no release file of the repository that publishes the package file, or could not read it: the metadata was never fetched, or the file names no checksum for that package. The package was still checked against the digest the order named.",
 		Action:  "Refresh the repository metadata on the host and order again. A host that has never reached the repository it installs from reports this."},

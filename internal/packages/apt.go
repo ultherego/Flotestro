@@ -1107,7 +1107,8 @@ func APTFileName(uri string) string {
 // aptIndexSigner verifies a release file with gpgv against the keys apt itself
 // trusts and names the key that signed it.
 var aptIndexSigner = func(ctx context.Context, index, signature string) (string, error) {
-	keyrings := APTTrustedKeyrings()
+	keyrings, release := aptKeyringsForVerification()
+	defer release()
 	if len(keyrings) == 0 {
 		return "", fmt.Errorf("%w: apt holds no repository keys", errAPTIndexUnreadable)
 	}
@@ -1133,6 +1134,43 @@ var aptIndexSigner = func(ctx context.Context, index, signature string) (string,
 		return "", fmt.Errorf("gpgv accepted %s without naming the key", filepath.Base(index))
 	}
 	return signer, nil
+}
+
+// aptKeyringsForVerification is APTTrustedKeyrings plus the keys a source
+// carries in the file itself. An inline key is a trust anchor exactly like a
+// named keyring, so reporting its repository as untrusted was a hole in the
+// reading, not a property of the host. It names no file, so one is made for
+// the length of the verification and removed again.
+func aptKeyringsForVerification() ([]string, func()) {
+	keyrings := APTTrustedKeyrings()
+	blocks := aptInlineKeys()
+	if len(blocks) == 0 {
+		return keyrings, func() {}
+	}
+	dir, err := os.MkdirTemp("", "flotestro-apt-keys-")
+	if err != nil {
+		return keyrings, func() {}
+	}
+	for i, block := range blocks {
+		path := filepath.Join(dir, fmt.Sprintf("inline-%d.asc", i))
+		if os.WriteFile(path, []byte(block), 0o600) == nil {
+			keyrings = append(keyrings, path)
+		}
+	}
+	return keyrings, func() { _ = os.RemoveAll(dir) }
+}
+
+// aptInlineKeys collects the armoured keys the sources carry themselves.
+func aptInlineKeys() []string {
+	var blocks []string
+	for _, path := range aptSourceFiles() {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		blocks = append(blocks, ParseAPTInlineKeys(string(data))...)
+	}
+	return blocks
 }
 
 // APTTrustedKeyrings lists the key stores apt reads: its own trusted set and
@@ -1161,15 +1199,8 @@ func APTTrustedKeyrings() []string {
 // aptSignedByKeyrings lists the keyrings the sources themselves name: apt
 // trusts such a key for that one source, so the store is short without them.
 func aptSignedByKeyrings() []string {
-	files := []string{aptSourcesFile}
-	entries, _ := os.ReadDir(aptSourcesDir)
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			files = append(files, filepath.Join(aptSourcesDir, entry.Name()))
-		}
-	}
 	var paths []string
-	for _, path := range files {
+	for _, path := range aptSourceFiles() {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			continue
@@ -1179,8 +1210,20 @@ func aptSignedByKeyrings() []string {
 	return paths
 }
 
+// aptSourceFiles is sources.list and everything in sources.list.d.
+func aptSourceFiles() []string {
+	files := []string{aptSourcesFile}
+	entries, _ := os.ReadDir(aptSourcesDir)
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			files = append(files, filepath.Join(aptSourcesDir, entry.Name()))
+		}
+	}
+	return files
+}
+
 // ParseAPTSignedBy reads the keyring paths a source names, in both formats apt
-// understands. Inline key material names no file and is passed over.
+// understands. Key material carried in the file is ParseAPTInlineKeys's.
 func ParseAPTSignedBy(content string) []string {
 	var paths []string
 	add := func(value string) {
@@ -1209,6 +1252,44 @@ func ParseAPTSignedBy(content string) []string {
 		}
 	}
 	return paths
+}
+
+// ParseAPTInlineKeys reads the armoured keys a deb822 source carries in the
+// Signed-By field itself, as apt allows instead of naming a keyring:
+//
+//	Signed-By:
+//	 -----BEGIN PGP PUBLIC KEY BLOCK-----
+//	 .
+//	 mQINBF...
+//	 -----END PGP PUBLIC KEY BLOCK-----
+//
+// A continuation line carries one leading space that is not part of the key,
+// and a line holding only a dot is an empty line.
+func ParseAPTInlineKeys(content string) []string {
+	var blocks []string
+	lines := strings.Split(content, "\n")
+	for i := 0; i < len(lines); i++ {
+		key, value, found := strings.Cut(lines[i], ":")
+		if !found || !strings.EqualFold(strings.TrimSpace(key), "signed-by") ||
+			strings.TrimSpace(value) != "" {
+			continue
+		}
+		var body []string
+		for i+1 < len(lines) && (strings.HasPrefix(lines[i+1], " ") ||
+			strings.HasPrefix(lines[i+1], "\t")) {
+			i++
+			line := lines[i][1:]
+			if strings.TrimSpace(line) == "." {
+				line = ""
+			}
+			body = append(body, line)
+		}
+		block := strings.Join(body, "\n")
+		if strings.Contains(block, "BEGIN PGP PUBLIC KEY BLOCK") {
+			blocks = append(blocks, block+"\n")
+		}
+	}
+	return blocks
 }
 
 // PGPStatusSigner reads the fingerprint out of the status output of gpg or
