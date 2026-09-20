@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -209,9 +210,11 @@ func TestTheAgentHandsBackWhatItNoLongerUses(t *testing.T) {
 		t.Errorf("the agent freed %d times, want once: below the threshold it has nothing to hand back", released)
 	}
 
-	// It grows again within the same five minutes: the release waits, so
-	// a burst of tasks is not paid for with a collection every minute.
-	if err := os.WriteFile(filepath.Join(root, "self", "status"), []byte(statusFixture), 0o644); err != nil {
+	// It grows again within the same five minutes, but stays below the urgent
+	// mark: the release waits, so a burst of small tasks is not paid for with
+	// a collection every minute.
+	middling := strings.Replace(statusFixture, "34568 kB", "26000 kB", 1)
+	if err := os.WriteFile(filepath.Join(root, "self", "status"), []byte(middling), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := sampler.Sample(); err != nil {
@@ -219,5 +222,19 @@ func TestTheAgentHandsBackWhatItNoLongerUses(t *testing.T) {
 	}
 	if released != 1 {
 		t.Errorf("the agent freed %d times within five minutes, want once", released)
+	}
+
+	// Near the budget the wait is dropped: the sampler reports the size it has
+	// after the release, so waiting five minutes would report the peak of a
+	// large read for four samples out of five - and that is what the fleet
+	// budget gets measured against.
+	if err := os.WriteFile(filepath.Join(root, "self", "status"), []byte(statusFixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sampler.Sample(); err != nil {
+		t.Fatalf("fourth sample: %v", err)
+	}
+	if released != 2 {
+		t.Errorf("the agent freed %d times, want twice: near the budget every sample hands the pages back", released)
 	}
 }

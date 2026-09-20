@@ -46,3 +46,25 @@ func TestTheReleaseMarksStandInOrder(t *testing.T) {
 		t.Errorf("the urgent mark %d is not below the fleet budget %d", releaseUrgent, fleetBudget)
 	}
 }
+
+// The sampler reports the size it has after handing pages back, so how often
+// it may hand them back decides what the fleet budget is measured against.
+// Once every five minutes left four samples in five carrying the peak of a
+// large read, and the ninety-fifth percentile of the hour was that peak.
+func TestTheSamplerReleasesEverySampleOnceItIsNearTheBudget(t *testing.T) {
+	cases := []struct {
+		name string
+		rss  uint64
+		want time.Duration
+	}{
+		{"just over the threshold", releaseThreshold, releaseEvery},
+		{"one byte below urgent", releaseUrgent - 1, releaseEvery},
+		{"at the urgent mark", releaseUrgent, 0},
+		{"well past it", releaseUrgent * 2, 0},
+	}
+	for _, test := range cases {
+		if got := samplerReleaseInterval(test.rss); got != test.want {
+			t.Errorf("%s (%d bytes): waits %s, want %s", test.name, test.rss, got, test.want)
+		}
+	}
+}

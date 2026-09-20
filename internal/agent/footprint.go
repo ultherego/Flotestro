@@ -36,13 +36,22 @@ type Footprint struct {
 
 // mayRelease says whether enough time has passed since the last release.
 // The sampler is the only caller, so the clock of the sample decides.
-func (s *Sampler) mayRelease() bool {
+func (s *Sampler) mayRelease(rss uint64) bool {
 	now := s.Now()
-	if !s.releasedAt.IsZero() && now.Sub(s.releasedAt) < releaseEvery {
+	if !s.releasedAt.IsZero() && now.Sub(s.releasedAt) < samplerReleaseInterval(rss) {
 		return false
 	}
 	s.releasedAt = now
 	return true
+}
+
+// samplerReleaseInterval is how long the sampler waits between releases: the
+// ordinary five minutes, or every sample once the process is near the budget.
+func samplerReleaseInterval(rss uint64) time.Duration {
+	if rss >= releaseUrgent {
+		return 0
+	}
+	return releaseEvery
 }
 
 // release hands the free pages back to the host. Replaced in tests.
@@ -129,7 +138,7 @@ func (s *Sampler) footprint(ctx context.Context) Footprint {
 			fp.RSSBytes = &rss
 		}
 	}
-	if rss := fp.RSSBytes; rss != nil && *rss >= releaseThreshold && s.mayRelease() {
+	if rss := fp.RSSBytes; rss != nil && *rss >= releaseThreshold && s.mayRelease(*rss) {
 		s.release()
 		if data, err := os.ReadFile(filepath.Join(self, "status")); err == nil {
 			if released, ok := parseVmRSS(string(data)); ok {
