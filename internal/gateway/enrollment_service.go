@@ -55,12 +55,10 @@ func (s *EnrollmentService) SetAdvertised(names []string) {
 	s.advertisedLoopback = allLoopback(names)
 }
 
-// allLoopback is true when the list is not empty and names nothing a host on
-// another machine could reach.
+// allLoopback is true when the list names nothing a host on another machine
+// could reach. An empty list counts: the certificate is then issued for
+// 127.0.0.1 alone, and the packaged control-plane.env ships it empty.
 func allLoopback(names []string) bool {
-	if len(names) == 0 {
-		return false
-	}
 	for _, name := range names {
 		name = strings.TrimSpace(name)
 		if name == "" {

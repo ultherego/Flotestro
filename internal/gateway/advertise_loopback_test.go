@@ -11,8 +11,12 @@ func TestAdvertisedLoopbackIsRecognised(t *testing.T) {
 		names    []string
 		loopback bool
 	}{
-		{nil, false},
-		{[]string{}, false},
+		// Nothing set at all: the packaged control-plane.env ships
+		// FLOTESTRO_ADVERTISE empty, and the certificate is then issued for
+		// 127.0.0.1 alone - the very case this refusal exists for.
+		{nil, true},
+		{[]string{}, true},
+		{[]string{""}, true},
 		{[]string{"127.0.0.1"}, true},
 		{[]string{"::1"}, true},
 		{[]string{"localhost"}, true},
@@ -23,6 +27,7 @@ func TestAdvertisedLoopbackIsRecognised(t *testing.T) {
 		{[]string{"panel.example.org"}, false},
 		// An empty entry of a comma-separated list decides nothing.
 		{[]string{"127.0.0.1", ""}, true},
+		{[]string{"", "panel.example.org"}, false},
 	}
 	for _, test := range cases {
 		if got := allLoopback(test.names); got != test.loopback {
