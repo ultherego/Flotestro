@@ -1632,6 +1632,33 @@ func checkDockerDeclaration(action ActionType, payload *DockerEnsurePayload) err
 	return nil
 }
 
+// RefusalPlanBindingMissing refuses an order for an operation that declares
+// it needs an approved plan and carries nothing to bind it to one.
+const RefusalPlanBindingMissing = "plan_binding_missing"
+
+// CheckPlanBinding holds an order to the plan its operation declares it needs.
+//
+// It is not part of Validate, because Validate also judges a campaign template
+// - a shape an operator fills in before any host has been planned - and a
+// template legitimately carries no binding yet. This is asked of an order
+// about to become a job, where the plan either exists or never will.
+func CheckPlanBinding(action ActionType, payload Payload) error {
+	if !action.RequiresPlan() {
+		return nil
+	}
+	switch action {
+	case ActionPackageInstall, ActionPackageUpgrade:
+		if payload.PackageChange == nil || payload.PackageChange.PlanHash == "" {
+			return &RefusalError{Code: RefusalPlanBindingMissing,
+				Err: fmt.Errorf("%s needs the hash of an approved plan", action)}
+		}
+	case ActionPackageRemove:
+		// A removal binds to the set of packages the operator saw go, which
+		// the package branch of Validate already requires.
+	}
+	return nil
+}
+
 // validDockerKind says whether the payload names a kind of object the
 // module declares.
 func validDockerKind(kind string) bool {

@@ -185,6 +185,12 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec) (*Job, error) 
 	if err := opspec.Validate(spec.Action, spec.Payload); err != nil {
 		return nil, err
 	}
+	// Every job passes here, whoever ordered it: the panel, the API, a
+	// campaign or a remediation plan. It is the one place an operation that
+	// needs an approved plan can be held to having one.
+	if err := opspec.CheckPlanBinding(spec.Action, spec.Payload); err != nil {
+		return nil, err
+	}
 	payloadHash, err := opspec.PayloadHash(spec.Action, opspec.ActionVersion, spec.Payload)
 	if err != nil {
 		return nil, err

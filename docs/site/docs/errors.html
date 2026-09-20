@@ -282,6 +282,7 @@
 <tr><td><a href="#err-permanent-http-error"><code class="refusal">permanent_http_error</code></a></td><td>notification</td><td><span class="badge retry-after-change">after_change</span></td><td>no</td></tr>
 <tr><td><a href="#err-permanent-smtp-error"><code class="refusal">permanent_smtp_error</code></a></td><td>notification</td><td><span class="badge retry-after-change">after_change</span></td><td>no</td></tr>
 <tr><td><a href="#err-pki-state-mismatch"><code class="refusal">pki_state_mismatch</code></a></td><td>startup</td><td><span class="badge retry-after-change">after_change</span></td><td>no</td></tr>
+<tr><td><a href="#err-plan-binding-missing"><code class="refusal">plan_binding_missing</code></a></td><td>admission</td><td><span class="badge retry-after-change">after_change</span></td><td>no</td></tr>
 <tr><td><a href="#err-plan-changed-offline"><code class="refusal">plan_changed_offline</code></a></td><td>planning</td><td><span class="badge retry-after-replan">after_replan</span></td><td>no</td></tr>
 <tr><td><a href="#err-plan-create-failed"><code class="refusal">plan_create_failed</code></a></td><td>planning</td><td><span class="badge retry-after-change">after_change</span></td><td>no</td></tr>
 <tr><td><a href="#err-plan-expired"><code class="refusal">plan_expired</code></a></td><td>helper</td><td><span class="badge retry-after-replan">after_replan</span></td><td>yes</td></tr>
@@ -400,6 +401,8 @@
 <dd><p>The operation is excluded from campaigns on purpose.</p><p><span class="label">What to do</span> Run it host by host with an operator present.</p><p><span class="badge retry-never">retry: never</span> <span class="badge not-failure">not a failure</span></p></dd>
 <dt id="err-offline-policy-loosened"><code class="refusal">offline_policy_loosened</code></dt>
 <dd><p>The request asked for a weaker offline policy than the operation declares.</p><p><span class="label">What to do</span> Keep the operation's policy or tighten it; it may not be loosened.</p><p><span class="badge retry-never">retry: never</span> <span class="badge not-failure">not a failure</span></p></dd>
+<dt id="err-plan-binding-missing"><code class="refusal">plan_binding_missing</code></dt>
+<dd><p>The operation declares that it must be ordered from an approved plan, and the order carried nothing binding it to one. Nothing was sent to the host: a package change resolved at the moment it runs is not the change anybody approved.</p><p><span class="label">What to do</span> Order the plan first, read what it would do, and send the change with the hash the plan returned. The panel does this by itself; an API caller has to ask for the plan and pass its hash.</p><p><span class="badge retry-after-change">retry: after_change</span> <span class="badge not-failure">not a failure</span></p></dd>
 <dt id="err-plan-changed-offline"><code class="refusal">plan_changed_offline</code></dt>
 <dd><p>The host came back with a state that gives a different plan than the one approved.</p><p><span class="label">What to do</span> Read the new plan and order a campaign that approves it; the consent covered the old one. Not a failure.</p><p><span class="badge retry-after-replan">retry: after_replan</span> <span class="badge not-failure">not a failure</span></p></dd>
 <dt id="err-plan-create-failed"><code class="refusal">plan_create_failed</code></dt>
