@@ -148,10 +148,15 @@ jobs:
         # it build-release.sh quietly skips the pacman packages and the release
         # ships two families out of three. The tools it drives are named here
         # rather than left to whatever the runner image happens to carry.
+        #
+        # pacman-package-manager is not optional beside it: makepkg looks up
+        # `pacman` while it reads its own configuration, and without it exits
+        # with "An unknown error has occurred" before it reads the PKGBUILD.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            dpkg-dev rpm makepkg fakeroot libarchive-tools zstd binutils file
+            dpkg-dev rpm makepkg pacman-package-manager fakeroot \
+            libarchive-tools zstd binutils file
 
       - uses: actions/download-artifact@v4.1.8
         with:

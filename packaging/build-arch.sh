@@ -88,6 +88,11 @@ done
 sed -e "s/__VERSION__/$PKGVER/" -e "s/__SUMS__/${sums% }/" -e "s/__SBOM__/${bills% }/" \
     "$TEMPLATE" > "$build/PKGBUILD"
 
+# makepkg reads its configuration through pacman and says only "An unknown
+# error has occurred" when it is missing, before it reaches the PKGBUILD.
+command -v pacman >/dev/null ||
+    { echo "makepkg needs pacman on the PATH; on Debian and Ubuntu that is the pacman-package-manager package" >&2; exit 1; }
+
 # makepkg.conf is the build machine's, and both the architecture and the
 # compressor are part of the package name; the environment keeps the last word.
 ( cd "$build" && CARCH="$ARCH" PKGEXT=.pkg.tar.zst \
