@@ -179,3 +179,48 @@ func TestProfileReadsAndWritesRestOfResolver(t *testing.T) {
 		t.Errorf("the profile write loses the rest of the resolver: %s", write)
 	}
 }
+
+// A resolver is a resolver whichever family it belongs to. The panel asked
+// NetworkManager only about ipv4.dns, so a host with an IPv6 resolver
+// reported an incomplete list as its whole resolver configuration - and an
+// IPv6 server the operator set was written into ipv4.dns, where nmcli
+// refuses it.
+func TestBothResolverFamiliesAreReadAndWritten(t *testing.T) {
+	const output = `connection.id:lab
+ipv4.method:manual
+ipv4.dns:10.0.0.53
+ipv4.dns-search:lab.example
+ipv4.ignore-auto-dns:yes
+ipv6.method:manual
+ipv6.dns:2001:db8::53
+ipv6.dns-search:lab.example
+ipv6.ignore-auto-dns:yes
+`
+	profile := ParseProfile(output)
+	if len(profile.DNS) != 2 || profile.DNS[0] != "10.0.0.53" || profile.DNS[1] != "2001:db8::53" {
+		t.Fatalf("the resolvers read as %v", profile.DNS)
+	}
+	// The search domains are one list on the host, not one per family.
+	if len(profile.DNSSearch) != 1 || profile.DNSSearch[0] != "lab.example" {
+		t.Errorf("the search domains read as %v", profile.DNSSearch)
+	}
+	if !profile.IgnoreAutoDNS {
+		t.Error("the profile rejects the DHCP servers and the read did not say so")
+	}
+
+	commands, err := DNSArguments("lab", []string{"10.0.0.53", "2001:db8::53"},
+		[]string{"lab.example"}, true)
+	if err != nil {
+		t.Fatalf("composing the resolver change: %v", err)
+	}
+	command := strings.Join(commands[0], " ")
+	if !strings.Contains(command, "ipv4.dns 10.0.0.53") {
+		t.Errorf("the first family is not written: %s", command)
+	}
+	if !strings.Contains(command, "ipv6.dns 2001:db8::53") {
+		t.Errorf("the second family is not written: %s", command)
+	}
+	if strings.Contains(command, "ipv4.dns 10.0.0.53,2001:db8::53") {
+		t.Errorf("an IPv6 server was written into the first family: %s", command)
+	}
+}

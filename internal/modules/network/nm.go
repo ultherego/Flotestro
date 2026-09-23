@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -67,7 +68,7 @@ var ProfileFields = []string{
 	"ipv4.ignore-auto-dns", "ipv4.routes", "802-3-ethernet.mtu",
 	// The second family is asked for by name as well.
 	"ipv6.method", "ipv6.addresses", "ipv6.gateway", "ipv6.routes",
-	"ipv6.ip6-privacy",
+	"ipv6.ip6-privacy", "ipv6.dns", "ipv6.dns-search", "ipv6.ignore-auto-dns",
 }
 
 // ParseConnections reads the output of "nmcli -t -f NAME,UUID,DEVICE,TYPE,STATE con show".
@@ -142,6 +143,14 @@ func ParseProfile(output string) Profile {
 			profile.Routes6 = valueList(value)
 		case "ipv6.ip6-privacy":
 			profile.Privacy = nmPrivacyWord(value)
+		// A resolver is a resolver whichever family its address belongs to.
+		// Asking only about the first one reported an incomplete list as whole.
+		case "ipv6.dns":
+			profile.DNS = append(profile.DNS, valueList(value)...)
+		case "ipv6.dns-search":
+			profile.DNSSearch = appendMissing(profile.DNSSearch, valueList(value))
+		case "ipv6.ignore-auto-dns":
+			profile.IgnoreAutoDNS = profile.IgnoreAutoDNS || value == "yes"
 		case "802-3-ethernet.mtu":
 			profile.MTU = value
 		}
@@ -236,13 +245,42 @@ func DNSArguments(connection string, servers, domains []string, ignoreAuto bool)
 	if ignoreAuto {
 		ignore = "yes"
 	}
+	// Each family takes its own key: an IPv6 server written into ipv4.dns is
+	// refused by nmcli, and the operator sees the refusal of a command they
+	// never composed.
+	v4, v6 := splitDNSFamilies(servers)
 	return [][]string{
 		{NmcliPath, "connection", "modify", connection,
-			"ipv4.dns", strings.Join(servers, ","),
+			"ipv4.dns", strings.Join(v4, ","),
 			"ipv4.dns-search", strings.Join(domains, ","),
-			"ipv4.ignore-auto-dns", ignore},
+			"ipv4.ignore-auto-dns", ignore,
+			"ipv6.dns", strings.Join(v6, ","),
+			"ipv6.dns-search", strings.Join(domains, ","),
+			"ipv6.ignore-auto-dns", ignore},
 		{NmcliPath, "connection", "up", connection},
 	}, nil
+}
+
+// splitDNSFamilies divides the servers by the family of their address.
+func splitDNSFamilies(servers []string) (v4, v6 []string) {
+	for _, server := range servers {
+		if strings.Contains(server, ":") {
+			v6 = append(v6, server)
+			continue
+		}
+		v4 = append(v4, server)
+	}
+	return v4, v6
+}
+
+// appendMissing adds what is not in the list already, keeping its order.
+func appendMissing(list, extra []string) []string {
+	for _, value := range extra {
+		if !slices.Contains(list, value) {
+			list = append(list, value)
+		}
+	}
+	return list
 }
 
 // ProfileArguments assembles the write of the whole address profile.
@@ -262,13 +300,17 @@ func ProfileArguments(profile Profile) ([][]string, error) {
 	if profile.IgnoreAutoDNS {
 		ignore = "yes"
 	}
+	v4, v6 := splitDNSFamilies(profile.DNS)
 	modification := []string{NmcliPath, "connection", "modify", profile.Connection,
 		"ipv4.method", profile.Method,
 		"ipv4.addresses", strings.Join(profile.Addresses, ","),
 		"ipv4.gateway", profile.Gateway,
-		"ipv4.dns", strings.Join(profile.DNS, ","),
+		"ipv4.dns", strings.Join(v4, ","),
 		"ipv4.dns-search", strings.Join(profile.DNSSearch, ","),
 		"ipv4.ignore-auto-dns", ignore,
+		"ipv6.dns", strings.Join(v6, ","),
+		"ipv6.dns-search", strings.Join(profile.DNSSearch, ","),
+		"ipv6.ignore-auto-dns", ignore,
 		"ipv4.routes", strings.Join(profile.Routes, ",")}
 	// The second family is written only when the profile says something about it.
 	if profile.Method6 != "" {
