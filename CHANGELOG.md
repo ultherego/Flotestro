@@ -6,6 +6,8 @@ day the tag was published.
 
 ## [Unreleased]
 
+## [0.61.0] - 2026-09-23
+
 ### Added
 
 - `packages.install` and `packages.upgrade` must now carry the hash of an
@@ -172,7 +174,8 @@ across those five tags.
 
 The first tag. It did not build.
 
-[Unreleased]: https://github.com/ultherego/Flotestro/compare/v0.60.5...HEAD
+[Unreleased]: https://github.com/ultherego/Flotestro/compare/v0.61.0...HEAD
+[0.61.0]: https://github.com/ultherego/Flotestro/compare/v0.60.5...v0.61.0
 [0.60.5]: https://github.com/ultherego/Flotestro/compare/v0.60.4...v0.60.5
 [0.60.4]: https://github.com/ultherego/Flotestro/compare/v0.60.3...v0.60.4
 [0.60.3]: https://github.com/ultherego/Flotestro/compare/v0.60.2...v0.60.3
