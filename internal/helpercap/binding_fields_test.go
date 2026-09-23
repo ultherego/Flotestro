@@ -24,19 +24,25 @@ func TestTheCapabilityBindsWhatAFileOrderWouldWriteAndNotOnlyWhere(t *testing.T)
 		t.Fatalf("the request the panel approved was refused: %v", err)
 	}
 
-	forged := *honest
-	forged.Content = []byte("flotestro-agent ALL=(ALL) NOPASSWD: ALL\n")
-	if err := sameFile(&forged, approved); err == nil {
+	// Each substitution is built fresh: a protobuf message is not copied.
+	fileWith := func(change func(*helperv1.FileRequest)) *helperv1.FileRequest {
+		request := &helperv1.FileRequest{
+			Path: approved.Path, Content: []byte(approved.Content),
+			Mode: approved.Mode, Owner: approved.Owner, Group: approved.Group,
+		}
+		change(request)
+		return request
+	}
+	forged := fileWith(func(r *helperv1.FileRequest) {
+		r.Content = []byte("flotestro-agent ALL=(ALL) NOPASSWD: ALL\n")
+	})
+	if err := sameFile(forged, approved); err == nil {
 		t.Error("other content at the approved path was accepted")
 	}
-	widened := *honest
-	widened.Mode = "0666"
-	if err := sameFile(&widened, approved); err == nil {
+	if err := sameFile(fileWith(func(r *helperv1.FileRequest) { r.Mode = "0666" }), approved); err == nil {
 		t.Error("another mode at the approved path was accepted")
 	}
-	handedOver := *honest
-	handedOver.Owner = "flotestro-agent"
-	if err := sameFile(&handedOver, approved); err == nil {
+	if err := sameFile(fileWith(func(r *helperv1.FileRequest) { r.Owner = "flotestro-agent" }), approved); err == nil {
 		t.Error("another owner at the approved path was accepted")
 	}
 }
@@ -84,19 +90,27 @@ func TestTheCapabilityBindsTheKeysAndNotOnlyTheAccount(t *testing.T) {
 		t.Fatalf("the request the panel approved was refused: %v", err)
 	}
 
-	substituted := *honest
-	substituted.SshKeys = []string{"ssh-ed25519 AAAAC3NzaC1 attacker"}
-	if err := sameAccount(&substituted, approved); err == nil {
+	accountWith := func(change func(*helperv1.LocalUserActionRequest)) *helperv1.LocalUserActionRequest {
+		request := &helperv1.LocalUserActionRequest{
+			Name: approved.Name, SshKeys: approved.SSHKeys,
+			Groups: approved.Groups, Shell: approved.Shell,
+		}
+		change(request)
+		return request
+	}
+	substituted := accountWith(func(r *helperv1.LocalUserActionRequest) {
+		r.SshKeys = []string{"ssh-ed25519 AAAAC3NzaC1 attacker"}
+	})
+	if err := sameAccount(substituted, approved); err == nil {
 		t.Error("another key on the approved account was accepted")
 	}
-	widened := *honest
-	widened.Groups = []string{"wheel", "sudo"}
-	if err := sameAccount(&widened, approved); err == nil {
+	widened := accountWith(func(r *helperv1.LocalUserActionRequest) {
+		r.Groups = []string{"wheel", "sudo"}
+	})
+	if err := sameAccount(widened, approved); err == nil {
 		t.Error("another group list on the approved account was accepted")
 	}
-	shell := *honest
-	shell.Shell = "/bin/sh"
-	if err := sameAccount(&shell, approved); err == nil {
+	if err := sameAccount(accountWith(func(r *helperv1.LocalUserActionRequest) { r.Shell = "/bin/sh" }), approved); err == nil {
 		t.Error("another shell on the approved account was accepted")
 	}
 }
