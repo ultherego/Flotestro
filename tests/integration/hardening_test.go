@@ -273,14 +273,25 @@ func TestSupersededCertificateIsRevokedWhenTheNewOneConnects(t *testing.T) {
 	staged := uuid.NewString()
 	serial := fmt.Sprintf("staged-%d", time.Now().UnixNano())
 	fingerprint := []byte(uuid.NewString())
+	// Older than the certificate the host holds, whatever its age: the rule
+	// under test is "issued before the one that connected", and a lab whose
+	// identities are a week old would otherwise stage a newer certificate.
 	if _, err := db.Exec(ctx, `
 		insert into agent_certificates
 			(id, host_id, serial, fingerprint_sha256, subject_common_name,
 			 not_before, not_after, created_at)
-		values ($1, $2::uuid, $3, $4, $5,
-		        now() - interval '2 days', now() + interval '20 days', now() - interval '2 days')`,
+		select $1, $2::uuid, $3, $4, $5,
+		       min(created_at) - interval '1 day', now() + interval '20 days',
+		       min(created_at) - interval '1 day'
+		  from agent_certificates
+		 where host_id = $2::uuid and revoked_at is null and not_after > now()`,
 		staged, host.ID, serial, fingerprint, host.Hostname); err != nil {
 		t.Fatalf("staging the older certificate: %v", err)
+	}
+	var stagedAt time.Time
+	if err := db.QueryRow(ctx, `select created_at from agent_certificates where id = $1::uuid`,
+		staged).Scan(&stagedAt); err != nil {
+		t.Fatalf("the host holds no live certificate to stage an older one against: %v", err)
 	}
 	t.Cleanup(func() {
 		_, _ = db.Exec(ctx, `delete from agent_certificates where id = $1::uuid`, staged)
