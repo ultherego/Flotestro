@@ -531,11 +531,12 @@ func SortAdvisories(advisories []vuln.Advisory) {
 // Digest computes the digest of the canonical form of the findings.
 func Digest(advisories []vuln.Advisory) string {
 	sum := sha256.New()
-	sum.Write([]byte("flotestro/vuln/ubuntu/v1\n"))
+	sum.Write([]byte("flotestro/vuln/ubuntu/v2\n"))
 	for _, advisoryFor := range advisories {
 		sum.Write([]byte(strings.Join([]string{
 			advisoryFor.SourcePackage, advisoryFor.Release, advisoryFor.AdvisoryID,
 			advisoryFor.Status, advisoryFor.FixedVersion, advisoryFor.VendorSeverity,
+			strings.Join(advisoryFor.CVEIDs, ","),
 		}, "\x1f")))
 		sum.Write([]byte{'\n'})
 	}
