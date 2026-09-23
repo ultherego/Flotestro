@@ -87,6 +87,17 @@ day the tag was published.
 - The container image built the panel with npm lifecycle scripts enabled, and
   a backup could pair a database dump with a state archive the key material had
   moved out from under.
+- The root helper's capability bound the target of an order but not what the
+  order would do to it: a capability issued for writing one reviewed line into
+  a file authorised writing anything into that path, with any mode and owner,
+  and a capability for one key on an account authorised any key. Both now bind
+  the content, the permissions and the key list.
+- A cancel that arrived while a task was on the wire settled the job outright,
+  so the panel reported "canceled" for a change the host went on to carry out.
+  Such a job now carries an unknown outcome and says so.
+- A campaign's authorisation scope was narrowed to the targets the panel could
+  read, so a host the store would not answer for silently dropped out of the
+  scope — and out of the two-person rule.
 - A network change verified as applied without the gateway or the DNS servers
   ever being read back: an order of `method: auto` carrying both would pass on
   a DHCP lease alone.
