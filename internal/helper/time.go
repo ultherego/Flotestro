@@ -3,6 +3,7 @@ package helper
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -142,7 +143,11 @@ func (s *Server) writeChrony(ctx context.Context, servers []string,
 	if err := os.MkdirAll(filepath.Dir(snapshot.ManagedPath), 0o755); err != nil {
 		return reject(ErrorExecFailed, err.Error())
 	}
-	previous, _ := os.ReadFile(snapshot.ManagedPath)
+	previous, existed, err := contentBefore(snapshot.ManagedPath)
+	if err != nil {
+		return reject(ErrorExecFailed, "reading "+snapshot.ManagedPath+
+			" before the change: "+err.Error()+"; nothing was written, because a change that cannot be taken back is not started")
+	}
 	if err := writeKernelFile(snapshot.ManagedPath, content, 0o644); err != nil {
 		return reject(ErrorExecFailed, "writing "+snapshot.ManagedPath+": "+err.Error())
 	}
@@ -152,7 +157,7 @@ func (s *Server) writeChrony(ctx context.Context, servers []string,
 	message := "the servers were written"
 	if kind == hosttime.KindSources && !restartNeeded {
 		if output, err := toolOutput(ctx, hosttime.ChronycPath, "reload", "sources"); err != nil {
-			restore(snapshot.ManagedPath, previous)
+			restore(snapshot.ManagedPath, previous, existed)
 			return reject(ErrorExecFailed, "chronyc reload sources: "+err.Error()+" "+output)
 		}
 		message = "the servers were written and reloaded without restarting the daemon"
@@ -164,7 +169,7 @@ func (s *Server) writeChrony(ctx context.Context, servers []string,
 		if output, err := toolOutput(ctx, systemctlPath, "restart", unit); err != nil {
 			// A daemon that does not come up with the new configuration would leave the
 			// host without a clock.
-			restore(snapshot.ManagedPath, previous)
+			restore(snapshot.ManagedPath, previous, existed)
 			_, _ = toolOutput(ctx, systemctlPath, "restart", unit)
 			return reject(ErrorExecFailed, "restart "+unit+": "+err.Error()+" "+output)
 		}
@@ -212,7 +217,11 @@ func (s *Server) writeTimesyncd(ctx context.Context, servers []string) *helperv1
 	if err := os.MkdirAll(hosttime.TimesyncdDir, 0o755); err != nil {
 		return reject(ErrorExecFailed, err.Error())
 	}
-	previous, _ := os.ReadFile(hosttime.TimesyncdFile)
+	previous, existed, err := contentBefore(hosttime.TimesyncdFile)
+	if err != nil {
+		return reject(ErrorExecFailed, "reading "+hosttime.TimesyncdFile+
+			" before the change: "+err.Error()+"; nothing was written, because a change that cannot be taken back is not started")
+	}
 	if err := writeKernelFile(hosttime.TimesyncdFile, content, 0o644); err != nil {
 		return reject(ErrorExecFailed, "writing "+hosttime.TimesyncdFile+": "+err.Error())
 	}
@@ -220,14 +229,14 @@ func (s *Server) writeTimesyncd(ctx context.Context, servers []string) *helperv1
 	// the file is written: timesyncd does not run until timedated enables it.
 	if exists(hosttime.TimedatectlPath) {
 		if output, err := toolOutput(ctx, hosttime.TimedatectlPath, "set-ntp", "true"); err != nil {
-			restore(hosttime.TimesyncdFile, previous)
+			restore(hosttime.TimesyncdFile, previous, existed)
 			return reject(ErrorExecFailed, "timedatectl set-ntp: "+err.Error()+" "+output)
 		}
 	}
 	if output, err := toolOutput(ctx, systemctlPath, "restart", "systemd-timesyncd.service"); err != nil {
 		// As above: a host without a time daemon is worse than a host with old
 		// servers, so on an error the previous content comes back.
-		restore(hosttime.TimesyncdFile, previous)
+		restore(hosttime.TimesyncdFile, previous, existed)
 		_, _ = toolOutput(ctx, systemctlPath, "restart", "systemd-timesyncd.service")
 		return reject(ErrorExecFailed, "restart systemd-timesyncd: "+err.Error()+" "+output)
 	}
@@ -301,14 +310,30 @@ func describeSynchronization(snapshot hosttime.Snapshot, synchronized bool) stri
 	return description
 }
 
-// restore gives the file its previous content back or removes it when there
-// was none.
-func restore(path string, previous []byte) {
-	if len(previous) == 0 {
+// restore gives the file its previous content back, or removes it when there
+// was none. An empty file and a file nobody could read are not the same
+// thing: taking the second for the first deleted the operator's own
+// configuration on a rollback.
+func restore(path string, previous []byte, existed bool) {
+	if !existed {
 		_ = os.Remove(path)
 		return
 	}
 	_ = writeKernelFile(path, string(previous), 0o644)
+}
+
+// contentBefore reads what the file holds now, and says whether it is there.
+// A file that exists and cannot be read stops the change: a rollback that
+// cannot put the content back is not a rollback.
+func contentBefore(path string) (content []byte, existed bool, err error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return data, true, nil
 }
 
 func timeResponse(snapshot hosttime.Snapshot, message string) *helperv1.HelperResponse {
