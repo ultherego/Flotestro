@@ -476,3 +476,34 @@ func fragmentWithError(t *testing.T, module, reason string) Fragment {
 	fragment.UnavailableReason = reason
 	return fragment
 }
+
+// A host whose clock runs ahead stamps every read in the panel's future, and
+// the age test then passes for ever: a month-old picture read as current, and
+// a machine nobody had heard from reported compliant.
+func TestAReadStampedInTheFutureIsUnknownRatherThanCurrent(t *testing.T) {
+	ahead := fragmentOf(t, moduleSecurity, security.Snapshot{})
+	ahead.ObservedAt = testNow.Add(30 * 24 * time.Hour)
+	report := Evaluate("host", Input{Fragments: map[string]Fragment{moduleSecurity: ahead}}, testNow)
+
+	result := finding(report, "mac.enforcing")
+	if !result.Unknown || result.ReasonCode != ReasonClockAhead {
+		t.Fatalf("a read a month in the future was judged: %+v", result)
+	}
+
+	// A clock a little ahead is the ordinary case and stays believed: hosts
+	// and panels do not agree to the second.
+	slightly := fragmentOf(t, moduleSecurity, security.Snapshot{})
+	slightly.ObservedAt = testNow.Add(MaxClockAhead / 2)
+	report = Evaluate("host", Input{Fragments: map[string]Fragment{moduleSecurity: slightly}}, testNow)
+	if result := finding(report, "mac.enforcing"); result.ReasonCode == ReasonClockAhead {
+		t.Errorf("a clock a couple of minutes ahead made the read unknown: %+v", result)
+	}
+
+	// And a read that is genuinely too old still reads as stale, not as ahead.
+	old := fragmentOf(t, moduleSecurity, security.Snapshot{})
+	old.ObservedAt = testNow.Add(-2 * MaxReadAge)
+	report = Evaluate("host", Input{Fragments: map[string]Fragment{moduleSecurity: old}}, testNow)
+	if result := finding(report, "mac.enforcing"); result.ReasonCode != ReasonStaleInventory {
+		t.Errorf("an old read is reported as %q", result.ReasonCode)
+	}
+}

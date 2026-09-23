@@ -35,6 +35,9 @@ const (
 	ReasonPermissionDenied = "permission_denied"
 	// ReasonStaleInventory: the read is too old to judge anything from it.
 	ReasonStaleInventory = "inventory_stale"
+	// ReasonClockAhead: the host stamped the read in the panel's future, so
+	// how old it is cannot be established.
+	ReasonClockAhead = "host_clock_ahead"
 	// ReasonParseError: the fact was read, but the parser did not understand all
 	// of it - a line it skipped or an included file it could not open.
 	ReasonParseError = "parse_error"
@@ -48,6 +51,10 @@ const (
 
 // MaxReadAge sets how old a fact may be for an assessment to rest on it.
 const MaxReadAge = 6 * time.Hour
+
+// MaxClockAhead is how far into the panel's future a host may stamp a read
+// and still be believed: beyond it the age of the read means nothing.
+const MaxClockAhead = 5 * time.Minute
 
 // CanonicalVersion versions the form the plan digest is computed from.
 const CanonicalVersion = 1
@@ -218,10 +225,18 @@ func run(check Check, input Input, now time.Time) Finding {
 		}
 		// A read from a day ago describes the host of a day ago. An assessment
 		// resting on it would speak about a state that may no longer exist.
-		if !fragment.ObservedAt.IsZero() && now.Sub(fragment.ObservedAt) > MaxReadAge {
+		if age := now.Sub(fragment.ObservedAt); !fragment.ObservedAt.IsZero() && age > MaxReadAge {
 			finding.Unknown = true
 			finding.ReasonCode = ReasonStaleInventory
 			finding.Observed = "last read: " + fragment.ObservedAt.Format(time.RFC3339)
+			return finding
+		} else if !fragment.ObservedAt.IsZero() && age < -MaxClockAhead {
+			// A host whose clock runs ahead stamps every read in the future, and
+			// the age test then passes for ever. Unknown, not current.
+			finding.Unknown = true
+			finding.ReasonCode = ReasonClockAhead
+			finding.Observed = "the host stamped the read at " +
+				fragment.ObservedAt.Format(time.RFC3339) + ", ahead of the panel"
 			return finding
 		}
 	}

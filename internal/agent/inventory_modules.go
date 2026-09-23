@@ -125,9 +125,19 @@ var moduleCollectors = map[string]InventoryModule{
 			if len(names) == 0 {
 				return
 			}
-			if result, err := privilegedAccounts(ctx, names); err == nil {
-				facts.LocalAccounts = mergePrivilegedAccounts(facts.LocalAccounts, result)
+			result, err := privilegedAccounts(ctx, names)
+			if err != nil {
+				// An account list the helper could not read must not look like
+				// a host whose accounts hold no keys and belong to no group.
+				for i := range facts.LocalAccounts {
+					if facts.LocalAccounts[i].Source == SourceLocal &&
+						facts.LocalAccounts[i].UnavailableReason == "" {
+						facts.LocalAccounts[i].UnavailableReason = "helper: " + err.Error()
+					}
+				}
+				return
 			}
+			facts.LocalAccounts = mergePrivilegedAccounts(facts.LocalAccounts, result)
 		},
 		carry: func(facts *Facts, previous Facts) { facts.LocalAccounts = previous.LocalAccounts },
 	},

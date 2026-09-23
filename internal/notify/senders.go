@@ -147,15 +147,15 @@ func (w WebhookSender) Send(ctx context.Context, channel Channel, message Messag
 	return post(ctx, w.Client, config.URL, body, headers)
 }
 
-// deliveryIdentifier is what the receiver deduplicates by: the event of the
-// trail, which is the same on every attempt of the same row, so a receiver
-// that took the first attempt and answered too late drops the second.
+// deliveryIdentifier is what the receiver deduplicates by: the row of the
+// queue, the same on every attempt of that row and different per channel.
+// Naming the event gave two channels at one receiver the same identifier.
 func deliveryIdentifier(message Message) string {
-	if message.EventID > 0 {
-		return "notification-" + strconv.FormatInt(message.EventID, 10)
-	}
 	if message.DeliveryID != "" {
 		return "notification-" + message.DeliveryID
+	}
+	if message.EventID > 0 {
+		return "notification-" + strconv.FormatInt(message.EventID, 10)
 	}
 	return "notification-test-" + strconv.FormatInt(message.OccurredAt.UnixNano(), 10)
 }
