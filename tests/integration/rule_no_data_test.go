@@ -143,15 +143,18 @@ func (h *harness) cadenceRule(t *testing.T, store *monitoring.Store,
 
 // writeSample puts one reading on the host, dated the given time ago, and sets
 // the moment the host row carries with it.
+// Both moments move: a host that stopped reporting twenty minutes ago has a
+// reading the panel received twenty minutes ago, and freshness is judged on it.
 func (h *harness) writeSample(t *testing.T, hostID string, ago time.Duration) {
 	t.Helper()
 	ctx := context.Background()
 	pool := h.database(ctx)
 	if _, err := pool.Exec(ctx, `
-		insert into host_metrics (host_id, at, cpu_percent, load1, load5, load15,
+		insert into host_metrics (host_id, at, received_at, cpu_percent, load1, load5, load15,
 		    memory_total, memory_used, memory_available, swap_total, swap_used,
 		    uptime_seconds)
 		values ($1::uuid, now() - make_interval(secs => $2::double precision),
+		        now() - make_interval(secs => $2::double precision),
 		        7, 0.5, 0.5, 0.5, 1000, 400, 600, 0, 0, 3600)
 		on conflict (host_id, at) do nothing`, hostID, ago.Seconds()); err != nil {
 		t.Fatalf("writing a reading for the host: %v", err)
