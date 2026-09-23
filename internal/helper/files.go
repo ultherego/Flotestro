@@ -249,7 +249,14 @@ func (s *Server) writeFile(ctx context.Context, request *helperv1.HelperRequest,
 		return reject(ErrorExecFailed, err.Error())
 	}
 	fromSecret := action.GetFromSecret() || (restored != nil && restored.FromSecret)
-	s.rememberManagedFile(path, fromSecret)
+	if err := s.rememberManagedFile(path, fromSecret); err != nil {
+		// The content is on the host and correct; what failed is the note that
+		// the panel manages it. Saying "written" would hide that, and for a
+		// file filled from the store it would also let the host go on
+		// reporting the digest of secret content.
+		return reject(ErrorExecFailed, "the content was written to "+path+
+			", but this host could not record that the panel manages it: "+err.Error())
+	}
 
 	message := "the file was written" + unvalidated
 	if restored != nil {
@@ -530,7 +537,10 @@ func (s *Server) removeFile(allowlist files.Allowlist, action *helperv1.FileRequ
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return reject(ErrorExecFailed, err.Error())
 	}
-	s.forgetManagedFile(path)
+	if err := s.forgetManagedFile(path); err != nil {
+		return reject(ErrorExecFailed, "the file "+path+
+			" was removed, but this host could not record that: "+err.Error())
+	}
 	return fileResponse(s.fileState(), "the file was removed"+kept, nil, "")
 }
 
@@ -661,7 +671,13 @@ func writeFsyncRewind(file *os.File, content []byte) error {
 func (s *Server) fileState() files.Snapshot {
 	snapshot := files.Snapshot{ObservedAt: time.Now().UTC()}
 	store := fileVersions()
-	for _, entry := range s.fileRegistry() {
+	entries, err := s.fileRegistry()
+	if err != nil {
+		// A registry nobody could read is not a host that manages no files.
+		snapshot.UnavailableReason = "the registry of managed files could not be read: " + err.Error()
+		return snapshot
+	}
+	for _, entry := range entries {
 		description := files.Describe(entry.Path)
 		description.Managed = true
 		description.FromSecret = entry.FromSecret
@@ -695,63 +711,110 @@ type registryEntry struct {
 	FromSecret bool `json:"from_secret,omitempty"`
 }
 
-func (s *Server) fileRegistry() []registryEntry {
+// fileRegistry reads what the panel manages on this host. A registry that
+// exists and cannot be read is an error: reported as an empty list it would
+// say the panel manages nothing here.
+func (s *Server) fileRegistry() ([]registryEntry, error) {
 	data, err := os.ReadFile(FileRegistryPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	var entries []registryEntry
 	if err := json.Unmarshal(data, &entries); err == nil {
-		return entries
+		return entries, nil
 	}
 	// The registry from before secrets were introduced was a bare list of paths.
 	var paths []string
 	if err := json.Unmarshal(data, &paths); err != nil {
-		return nil
+		return nil, fmt.Errorf("%s does not read: %w", FileRegistryPath, err)
 	}
 	entries = make([]registryEntry, 0, len(paths))
 	for _, path := range paths {
 		entries = append(entries, registryEntry{Path: path})
 	}
-	return entries
+	return entries, nil
 }
 
-func (s *Server) rememberManagedFile(path string, fromSecret bool) {
-	entries := s.fileRegistry()
+func (s *Server) rememberManagedFile(path string, fromSecret bool) error {
+	entries, err := s.fileRegistry()
+	if err != nil {
+		return err
+	}
 	for i := range entries {
 		if entries[i].Path == path {
 			entries[i].FromSecret = fromSecret
-			s.writeFileRegistry(entries)
-			return
+			return s.writeFileRegistry(entries)
 		}
 	}
 	entries = append(entries, registryEntry{Path: path, FromSecret: fromSecret})
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
-	s.writeFileRegistry(entries)
+	return s.writeFileRegistry(entries)
 }
 
-func (s *Server) forgetManagedFile(path string) {
-	entries := s.fileRegistry()
+func (s *Server) forgetManagedFile(path string) error {
+	entries, err := s.fileRegistry()
+	if err != nil {
+		return err
+	}
 	remaining := make([]registryEntry, 0, len(entries))
 	for _, entry := range entries {
 		if entry.Path != path {
 			remaining = append(remaining, entry)
 		}
 	}
-	s.writeFileRegistry(remaining)
+	return s.writeFileRegistry(remaining)
 }
 
-func (s *Server) writeFileRegistry(entries []registryEntry) {
+// writeFileRegistry replaces the registry as a whole. The staging name is of
+// this write alone, and both the file and its directory are flushed: a
+// registry that half survives a power cut is worse than none.
+func (s *Server) writeFileRegistry(entries []registryEntry) error {
 	data, err := json.Marshal(entries)
 	if err != nil {
-		return
+		return err
 	}
-	_ = os.MkdirAll(filepath.Dir(FileRegistryPath), 0o700)
-	temporary := FileRegistryPath + ".new"
-	if err := os.WriteFile(temporary, data, 0o600); err != nil {
-		return
+	directory := filepath.Dir(FileRegistryPath)
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		return err
 	}
-	_ = os.Rename(temporary, FileRegistryPath)
+	staged, err := os.CreateTemp(directory, ".registry-*.new")
+	if err != nil {
+		return err
+	}
+	temporary := staged.Name()
+	defer func() { _ = os.Remove(temporary) }()
+	if _, err := staged.Write(data); err != nil {
+		_ = staged.Close()
+		return err
+	}
+	if err := staged.Chmod(0o600); err != nil {
+		_ = staged.Close()
+		return err
+	}
+	if err := staged.Sync(); err != nil {
+		_ = staged.Close()
+		return err
+	}
+	if err := staged.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(temporary, FileRegistryPath); err != nil {
+		return err
+	}
+	return syncDirectory(directory)
+}
+
+// syncDirectory flushes the directory entry, so the rename survives a crash.
+func syncDirectory(path string) error {
+	handle, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer handle.Close()
+	return handle.Sync()
 }
 
 func checkScope(allowlist files.Allowlist, path string) *helperv1.HelperResponse {
@@ -794,9 +857,15 @@ func readFileContent(path string) ([]byte, error) {
 }
 
 // managedFromSecret says whether the content of a file the panel manages came
-// from the secret store.
+// from the secret store. A registry that could not be read answers yes: the
+// digest of content from the store is never reported, and a read that failed
+// is not permission to report it.
 func (s *Server) managedFromSecret(path string) bool {
-	for _, entry := range s.fileRegistry() {
+	entries, err := s.fileRegistry()
+	if err != nil {
+		return true
+	}
+	for _, entry := range entries {
 		if entry.Path == path {
 			return entry.FromSecret
 		}
