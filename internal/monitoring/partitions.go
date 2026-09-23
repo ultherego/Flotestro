@@ -38,14 +38,19 @@ func (s *Store) EnsurePartitions(ctx context.Context, now time.Time) error {
 		return err
 	}
 	today := now.UTC().Truncate(partitionWidth)
-	from := today
-	if len(days) > 0 {
-		if newest := days[len(days)-1]; !newest.Before(from) {
-			from = newest.Add(partitionWidth)
-		}
+	// The window starts as far back as a sample may still arrive from: a panel
+	// that was down longer than its margin comes back with days missing behind
+	// it, and a spooled reading for one of them has nowhere to land.
+	from := today.Add(-options.MaxLateness).UTC().Truncate(partitionWidth)
+	have := make(map[time.Time]bool, len(days))
+	for _, day := range days {
+		have[day.UTC().Truncate(partitionWidth)] = true
 	}
 	upto := today.Add(time.Duration(options.PartitionsAhead) * partitionWidth)
 	for at := from; !at.After(upto); at = at.Add(partitionWidth) {
+		if have[at] {
+			continue
+		}
 		if err := s.createPartition(ctx, at); err != nil {
 			return err
 		}

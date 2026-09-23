@@ -252,10 +252,14 @@ func (s *Sweeper) sweep(ctx context.Context) {
 
 // SweepSessions deletes the agent sessions that ended before the retention.
 func (s *Sweeper) SweepSessions(ctx context.Context) (int64, error) {
+	// Bounded like every other sweep: the first run on an aged installation
+	// would otherwise be one transaction over the whole backlog.
 	tag, err := s.pool.Exec(ctx, `
 		delete from agent_sessions
-		where ended_at is not null and ended_at < now() - $1::interval`,
-		interval(s.options.Sessions))
+		 where id in (select id from agent_sessions
+		               where ended_at is not null and ended_at < now() - $1::interval
+		               order by ended_at limit $2)`,
+		interval(s.options.Sessions), SweepBatch)
 	if err != nil {
 		return 0, fmt.Errorf("sweeping the agent sessions: %w", err)
 	}
