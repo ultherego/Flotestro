@@ -1,6 +1,8 @@
 package helpercap
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"slices"
 	"strings"
@@ -430,6 +432,10 @@ func CheckBinding(request *helperv1.HelperRequest, bound *BoundPayload) error {
 			if err := sameList("schedule command", action.Schedule.GetCommand(), payload.Schedule.Command); err != nil {
 				return err
 			}
+			// When the entry runs is as much of the order as what it runs.
+			if err := same("schedule expression", action.Schedule.GetExpression(), payload.Schedule.Expression); err != nil {
+				return err
+			}
 		}
 		return nil
 
@@ -437,13 +443,13 @@ func CheckBinding(request *helperv1.HelperRequest, bound *BoundPayload) error {
 		if payload.File == nil {
 			return binding("the bound payload describes no file")
 		}
-		return same("file path", action.File.GetPath(), payload.File.Path)
+		return sameFile(action.File, payload.File)
 
 	case *helperv1.HelperRequest_LocalUserAction:
 		if payload.LocalUser == nil {
 			return binding("the bound payload describes no account")
 		}
-		return same("account name", action.LocalUserAction.GetName(), payload.LocalUser.Name)
+		return sameAccount(action.LocalUserAction, payload.LocalUser)
 
 	case *helperv1.HelperRequest_Storage:
 		// A destructive storage request is bound to the device and to its
@@ -482,6 +488,92 @@ func agentPackagesOnly(action *helperv1.PackageActionRequest, upgrade *opspec.Ag
 		return err
 	}
 	return same("rollback version", action.GetRollbackVersion(), upgrade.RollbackVersion)
+}
+
+// sameFile binds what will be written, and not only where. A capability for
+// one path used to authorise any content, mode and owner at that path.
+func sameFile(request *helperv1.FileRequest, payload *opspec.FilePayload) error {
+	if err := same("file path", request.GetPath(), payload.Path); err != nil {
+		return err
+	}
+	if err := same("file mode", request.GetMode(), payload.Mode); err != nil {
+		return err
+	}
+	if err := same("file owner", request.GetOwner(), payload.Owner); err != nil {
+		return err
+	}
+	if err := same("file group", request.GetGroup(), payload.Group); err != nil {
+		return err
+	}
+	if err := same("file validator", request.GetValidator(), payload.Validator); err != nil {
+		return err
+	}
+	return sameContent(request, payload)
+}
+
+// sameContent binds the bytes. The panel does not hold them in two cases: a
+// value fetched from the secret store on the host, and a return to a version
+// only the host kept - each is bound by the name it travels under instead.
+func sameContent(request *helperv1.FileRequest, payload *opspec.FilePayload) error {
+	if request.GetFromSecret() != !payload.ContentSecret.Empty() {
+		return binding("the request and the bound payload disagree about filling the file from a secret")
+	}
+	if request.GetFromSecret() {
+		return nil
+	}
+	if err := same("file version", request.GetVersionSha256(), payload.VersionSHA256); err != nil {
+		return err
+	}
+	if request.GetVersionSha256() != "" {
+		return nil
+	}
+	return same("file content", contentDigest(request.GetContent()), contentDigest([]byte(payload.Content)))
+}
+
+// contentDigest names the bytes without carrying them into a refusal message.
+func contentDigest(content []byte) string {
+	sum := sha256.Sum256(content)
+	return hex.EncodeToString(sum[:])
+}
+
+// sameAccount binds who the access is handed to, and not only whose account it
+// is: a capability for one account used to authorise any key list on it.
+func sameAccount(request *helperv1.LocalUserActionRequest, payload *opspec.LocalUserPayload) error {
+	if err := same("account name", request.GetName(), payload.Name); err != nil {
+		return err
+	}
+	if err := sameList("ssh keys", request.GetSshKeys(), payload.SSHKeys); err != nil {
+		return err
+	}
+	if err := sameList("keys", publicKeys(request.GetKeys()), payloadKeys(payload.Keys)); err != nil {
+		return err
+	}
+	if err := sameList("fingerprints", request.GetFingerprints(), payload.Fingerprints); err != nil {
+		return err
+	}
+	if err := sameList("groups", request.GetGroups(), payload.Groups); err != nil {
+		return err
+	}
+	if err := same("shell", request.GetShell(), payload.Shell); err != nil {
+		return err
+	}
+	return same("expiry", request.GetExpiresAt(), payload.ExpiresAt)
+}
+
+func publicKeys(keys []*helperv1.LocalSSHKeyInput) []string {
+	out := make([]string, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, key.GetPublicKey())
+	}
+	return out
+}
+
+func payloadKeys(keys []opspec.SSHKeyInput) []string {
+	out := make([]string, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, key.PublicKey)
+	}
+	return out
 }
 
 func same(what, got, want string) error {
