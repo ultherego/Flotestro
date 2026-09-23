@@ -6,6 +6,34 @@ day the tag was published.
 
 ## [Unreleased]
 
+### Fixed
+
+- A compliance check rested on a read stamped in the panel's future: a host
+  whose clock runs ahead was assessed against a month-old picture and reported
+  compliant, because the age test can never fire on a negative age.
+- The accounts module swallowed the helper's error, so a host whose account
+  list could not be read reported accounts with no keys and no groups.
+- One notification event fanned out to two channels carried the same
+  identifier to the receiver, which then dropped the second as a repeat.
+- A backup that left unreadable files behind, or whose retention failed, was
+  recorded as a full success and kept the definition green.
+- Daily partitions were only created ahead of today, so a panel that was down
+  longer than its margin came back with days missing behind it and spooled
+  readings for those days had nowhere to land.
+- The agent-session sweep was unbounded: the first run on an aged installation
+  was one transaction over the whole backlog.
+- The vulnerability feed digest ignored the CVE identifiers, so a vendor that
+  added one to an existing advisory was not noticed.
+- NetworkManager was asked only about `ipv4.dns`, so an IPv6 resolver was
+  invisible, and one the operator set was written into the IPv4 key where
+  nmcli refuses it.
+- Every write to the host's registry of managed files discarded its error, and
+  every read of it turned a failure into an empty list. A file rewritten from
+  the secret store whose registry update was lost went on publishing the
+  digest of secret-derived content.
+- A failed time change deleted the drop-in it could not read instead of
+  restoring it.
+
 ## [0.61.0] - 2026-09-23
 
 ### Added
