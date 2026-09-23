@@ -29,6 +29,10 @@ var (
 	// host's open one: another gateway took the host over between the send and
 	// the record.
 	ErrSessionStale = errors.New("session_stale: the session is no longer the open session of the host")
+	// ErrDispatchLost means the envelope left the panel and the job was settled
+	// before the delivery could be recorded: what the host did with it is not
+	// the panel's to say.
+	ErrDispatchLost = errors.New("dispatch_lost: the task left the panel and the job was settled meanwhile")
 )
 
 // Spec describes the task to create.
@@ -608,14 +612,24 @@ func (s *Store) MarkDispatchedWithLease(ctx context.Context, jobID, attemptID st
 		return err
 	}
 
-	if _, err := tx.Exec(ctx,
+	moved, err := tx.Exec(ctx,
 		`update jobs set state = $2, updated_at = now() where id = $1 and state = $3`,
-		jobID, string(StateDispatched), string(StateLeased)); err != nil {
+		jobID, string(StateDispatched), string(StateLeased))
+	if err != nil {
 		return err
+	}
+	if moved.RowsAffected() == 0 {
+		if err := dispatchAfterSettlement(ctx, tx, jobID); err != nil {
+			if errors.Is(err, ErrDispatchLost) {
+				return errors.Join(tx.Commit(ctx), err)
+			}
+			return err
+		}
 	}
 	// The envelope leaves before this row is written, and a quick agent
 	// acknowledges it in between: an attempt that was accepted already keeps the
-	// lease the acceptance gave it, and the job stays where the acknowledgement.
+	// lease the acceptance gave it, and the job stays where that acknowledgement
+	// put it.
 	if _, err := tx.Exec(ctx, `
 		update job_attempts
 		   set dispatched_at = now(), session_id = $2,
@@ -627,6 +641,31 @@ func (s *Store) MarkDispatchedWithLease(ctx context.Context, jobID, attemptID st
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// dispatchAfterSettlement judges a job that is no longer leased by the time
+// the delivery is recorded. A job that moved forward is the ordinary case: a
+// quick agent acknowledged the task first. A job settled meanwhile was settled
+// on a task the host is holding, so the panel does not get to say what became
+// of it.
+func dispatchAfterSettlement(ctx context.Context, tx pgx.Tx, jobID string) error {
+	var state string
+	if err := tx.QueryRow(ctx, `select state from jobs where id = $1`, jobID).Scan(&state); err != nil {
+		return err
+	}
+	switch State(state) {
+	case StateDispatched, StateRunning, StateCancelRequested:
+		return nil
+	}
+	const message = "the task had already left the panel when this job was settled; " +
+		"the host may have carried it out - read the host before ordering again"
+	if _, err := tx.Exec(ctx, `
+		update jobs set result_status = $2, result_message = $3, updated_at = now()
+		 where id = $1 and coalesce(result_status, '') <> $2`,
+		jobID, ResultStatusUnknown, message); err != nil {
+		return err
+	}
+	return ErrDispatchLost
 }
 
 // AcceptAttempt records the agent's word that it holds the task: the

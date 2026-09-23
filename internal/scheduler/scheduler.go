@@ -452,6 +452,14 @@ func (s *Scheduler) deliver(ctx context.Context, item jobs.LeasedJob, owner jobs
 		metrics.SessionFence.Inc("dispatch_refused")
 		return
 	}
+	if errors.Is(err, jobs.ErrDispatchLost) {
+		// The task is on the host and the job was settled without it. The lease
+		// is not given back: requeueing would send the same change a second time.
+		s.log.Warn("the task left the panel and the job was settled meanwhile; the outcome on the host is unknown",
+			"job_id", item.Job.ID, "host_id", item.Job.HostID, "session_id", sessionID)
+		metrics.JobDispatch.Inc("dispatch_lost", s.options.GatewayID)
+		return
+	}
 	if err != nil {
 		s.log.Error("the delivery was not recorded", "job_id", item.Job.ID, "err", err)
 		metrics.JobDispatch.Inc("unrecorded", s.options.GatewayID)
