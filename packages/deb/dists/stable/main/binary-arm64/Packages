@@ -58,6 +58,36 @@ Description: Flotestro fleet agent
  backend, nor a firewall, nor a backup tool, nor a journal forwarder of its
  own.
 
+Package: flotestro-agent
+Version: 0.61.0
+Architecture: arm64
+Maintainer: Flotestro <flotestro@localhost>
+Depends: systemd, ca-certificates, passwd
+Filename: pool/stable/flotestro-agent_0.61.0_arm64.deb
+Size: 10678774
+MD5sum: c744d5ef077b069bda13bf0aaec196cf
+SHA1: 22b1a844753070d646fefcfa13f5ec1c5ba8c02c
+SHA256: ebc2fbfa6cea62c91faddef83234830ccbbf8b83ada8f5625bc0d0aa64aee537
+Section: admin
+Priority: optional
+Description: Flotestro fleet agent
+ The agent connects a host to the Linux fleet management panel. It keeps an
+ mTLS session to the control plane, reports the inventory and carries out
+ only typed operations - the contract has no field for an arbitrary shell
+ command.
+ .
+ Operations that require root are carried out by a separate helper process
+ started by a systemd socket, which verifies the caller by SO_PEERCRED. The
+ agent itself runs without root privileges.
+ .
+ The package installs the minimum: systemd, the trust store and the shadow
+ tools the local account module changes accounts with. Every other module
+ drives a tool the host already has, and a tool that is not there disables
+ exactly one capability, which the agent reports as unavailable with the
+ reason and the name of the missing package - it installs neither a network
+ backend, nor a firewall, nor a backup tool, nor a journal forwarder of its
+ own.
+
 Package: flotestro-control-plane
 Version: 0.60.4
 Architecture: arm64
@@ -112,6 +142,33 @@ Description: Flotestro Linux fleet management panel
  optional. Without them the panel works on API tokens and manages the local
  accounts of the hosts.
 
+Package: flotestro-control-plane
+Version: 0.61.0
+Architecture: arm64
+Maintainer: Flotestro <flotestro@localhost>
+Depends: systemd, ca-certificates, passwd
+Suggests: postgresql-client
+Filename: pool/stable/flotestro-control-plane_0.61.0_arm64.deb
+Size: 7490236
+MD5sum: 0bdd7c67d727afee9b79560946c9de11
+SHA1: 472ea112a9027ffd5564de2fb532a1892ad269f0
+SHA256: 4886f7fcc6d550871def49a555791279e2a5620e48f9df4e696f188a6d52a7e9
+Section: admin
+Priority: optional
+Description: Flotestro Linux fleet management panel
+ The control plane accepts agent sessions over mTLS, plans typed operations
+ and runs campaigns on the fleet. It serves the web panel and the REST API.
+ .
+ PostgreSQL is the only source of truth; the schema is created and migrated
+ at startup. The database may be local or remote - the package installs
+ neither the server nor its client: the panel speaks to the database over
+ the network protocol, and psql is a tool for the administrator rather than
+ a dependency of the service.
+ .
+ The identity directory integration and the OIDC login provider are
+ optional. Without them the panel works on API tokens and manages the local
+ accounts of the hosts.
+
 Package: flotestro-relay
 Version: 0.60.4
 Architecture: arm64
@@ -145,6 +202,29 @@ Size: 6725186
 MD5sum: 7afee163301639ff3ccb69d6b685bd2a
 SHA1: 2767d2ed99cef6c3146fc0102a12503067ab60fd
 SHA256: 9de32296ed8a9bde1e72099bfdefd031d63c2b19f89a7145fa3938204b641787
+Section: admin
+Priority: optional
+Description: Flotestro site relay
+ The relay mediates between the agents of one site and the centre: it keeps
+ one upstream connection instead of hundreds, buffers results for the
+ duration of a link outage and does not forward jobs whose time to live has
+ passed.
+ .
+ The relay is a separate trust boundary. It has its own certificate of a
+ different kind than a host certificate, its own service account and its own
+ state directory; it signs no certificate and carries out no operations on
+ hosts.
+
+Package: flotestro-relay
+Version: 0.61.0
+Architecture: arm64
+Maintainer: Flotestro <flotestro@localhost>
+Depends: systemd, ca-certificates, passwd
+Filename: pool/stable/flotestro-relay_0.61.0_arm64.deb
+Size: 6722016
+MD5sum: 5c3b6c4e58cf099f962c1e267a493769
+SHA1: 2252473a79307e91e79ea2a67ac06fecb06f1513
+SHA256: b5d1bec2c1e7467a90b12a8675fa54f086459f275a59d4a6c7afcd5535252446
 Section: admin
 Priority: optional
 Description: Flotestro site relay

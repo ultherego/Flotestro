@@ -1,0 +1,33 @@
+{
+  "version": "0.61.0",
+  "tag": "v0.61.0",
+  "commit": "888120dcf1fd10dd92e277d1d1706ae3284968a8",
+  "description": "v0.61.0",
+  "repository": "ultherego/Flotestro",
+  "workflow": "Release",
+  "run_id": "35907703233",
+  "run_attempt": "1",
+  "run_url": "https://github.com/ultherego/Flotestro/actions/runs/35907703233",
+  "builder": "Linux/X64 ubuntu24 (GitHub-hosted)",
+  "toolchain": "go version go1.25.13 linux/amd64",
+  "node": "v22.23.2",
+  "flags": "-trimpath -ldflags '-s -w' CGO_ENABLED=0",
+  "sbom_format": "CycloneDX 1.5",
+  "sbom": [
+    "flotestro-agent-helper_0.61.0_amd64.cdx.json",
+    "flotestro-agent-helper_0.61.0_arm64.cdx.json",
+    "flotestro-agent_0.61.0_amd64.cdx.json",
+    "flotestro-agent_0.61.0_arm64.cdx.json",
+    "flotestro-agentctl_0.61.0_amd64.cdx.json",
+    "flotestro-agentctl_0.61.0_arm64.cdx.json",
+    "flotestro-auditverify_0.61.0_amd64.cdx.json",
+    "flotestro-auditverify_0.61.0_arm64.cdx.json",
+    "flotestro-control-plane_0.61.0_amd64.cdx.json",
+    "flotestro-control-plane_0.61.0_arm64.cdx.json",
+    "flotestro-relay_0.61.0_amd64.cdx.json",
+    "flotestro-relay_0.61.0_arm64.cdx.json",
+    "flotestro-relayctl_0.61.0_amd64.cdx.json",
+    "flotestro-relayctl_0.61.0_arm64.cdx.json"
+  ],
+  "built_at": "2026-09-23T19:15:49Z"
+}
