@@ -1677,7 +1677,10 @@ func (s *Server) campaignScope(r *http.Request, campaignID string) (authz.Scope,
 	for index, target := range targets {
 		host, err := s.hosts.Get(r.Context(), target.HostID)
 		if err != nil {
-			continue
+			// A target the panel cannot read is a target it cannot authorise
+			// against; skipping it narrowed the scope to the hosts it could read,
+			// and an operator of one site could then drive a campaign over two.
+			return authz.Scope{}, err
 		}
 		if index == 0 {
 			scope = hosts.ScopeOf(host)
@@ -1708,7 +1711,9 @@ func (s *Server) campaignNeedsSecondPerson(r *http.Request, campaign *campaigns.
 	for _, target := range targets {
 		host, err := s.hosts.Get(r.Context(), target.HostID)
 		if err != nil {
-			continue
+			// The same rule as above the loop: what cannot be read does not
+			// weaken the control.
+			return true
 		}
 		if s.requiresSecondPerson(host.Environment) {
 			return true
