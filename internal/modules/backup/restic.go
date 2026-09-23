@@ -211,15 +211,21 @@ func (r *Restic) Run(ctx context.Context, order Order, progress ProgressFunc) (R
 			summary.SnapshotID, humanSize(summary.DataAdded), summary.FilesNew)
 	}
 	if execution.ExitCode == 3 || len(errorsSeen) > 0 {
+		incomplete := false
+		result.Complete = &incomplete
 		result.Message += "; some files could not be read"
 		if len(errorsSeen) > 0 {
 			result.Message += ": " + strings.Join(first(errorsSeen, 3), "; ")
 		}
+	} else {
+		complete := true
+		result.Complete = &complete
 	}
 
 	if removed, err := r.retention(ctx, order); err != nil {
 		// The copy is made; a failed cleanup cannot invalidate it, but
 		// cannot vanish from the result either.
+		result.RetentionFailed = true
 		result.Message += "; retention failed: " + err.Error()
 	} else if removed != nil {
 		result.Removed = removed

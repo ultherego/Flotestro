@@ -178,11 +178,14 @@ func (b *Borg) Run(ctx context.Context, order Order, progress ProgressFunc) (Res
 		result.DurationSeconds = &duration
 	}
 	result.Message = "archive " + name + " created"
+	complete := execution.ExitCode != 1
+	result.Complete = &complete
 	if execution.ExitCode == 1 {
 		result.Message += "; some files could not be read"
 	}
 
 	if err := b.retention(ctx, order); err != nil {
+		result.RetentionFailed = true
 		result.Message += "; retention failed: " + err.Error()
 	}
 	return result, nil

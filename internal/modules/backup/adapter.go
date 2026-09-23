@@ -135,8 +135,14 @@ type Result struct {
 	FilesRestored       *uint64  `json:"files_restored,omitempty"`
 	DurationSeconds     *float64 `json:"duration_seconds,omitempty"`
 	// Removed counts the copies deleted by retention.
-	Removed *int   `json:"snapshots_removed,omitempty"`
-	Message string `json:"message,omitempty"`
+	Removed *int `json:"snapshots_removed,omitempty"`
+	// Complete is false when the tool copied what it could and said so: files
+	// it could not read. The copy exists and does not hold everything.
+	Complete *bool `json:"complete,omitempty"`
+	// RetentionFailed marks a cleanup that did not run. The copy stands; the
+	// repository keeps growing.
+	RetentionFailed bool   `json:"retention_failed,omitempty"`
+	Message         string `json:"message,omitempty"`
 	// Output is the tool output after masking the credentials.
 	Output string `json:"output,omitempty"`
 }

@@ -3818,6 +3818,12 @@ func (s *AgentService) saveBackupRun(ctx context.Context, hostID, jobID string,
 		}
 	}
 	if outcome, ok := backupOutcome(result.GetOutcome()); ok {
+		// A copy that left files behind, or whose cleanup did not run, is not
+		// the copy the definition asks for: freshness counts only "succeeded".
+		if run.Outcome == "succeeded" &&
+			((outcome.Complete != nil && !*outcome.Complete) || outcome.RetentionFailed) {
+			run.Outcome = "partial"
+		}
 		run.SnapshotID = outcome.SnapshotID
 		run.BytesAdded = countFromBytes(outcome.BytesAdded)
 		run.TotalBytes = countFromBytes(outcome.TotalBytesProcessed)
