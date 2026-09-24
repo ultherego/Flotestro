@@ -139,13 +139,45 @@ func (j *IdempotencyJournal) readInFlight(path string) (InFlight, bool) {
 }
 
 // writeAtomically puts the content in place through a temporary file and a
-// rename. The caller holds the lock.
+// rename, flushing both the file and the directory. The caller holds the lock.
+// A rename that is only in the page cache is no record at all: the event this
+// journal exists for - a host that stops in the middle of a change - is
+// exactly the event that would lose it.
 func (j *IdempotencyJournal) writeAtomically(path string, data []byte) error {
 	temporary := path + ".tmp"
-	if err := os.WriteFile(temporary, data, 0o600); err != nil {
+	file, err := os.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
 		return err
 	}
-	return os.Rename(temporary, path)
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		_ = os.Remove(temporary)
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		_ = os.Remove(temporary)
+		return err
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(temporary)
+		return err
+	}
+	if err := os.Rename(temporary, path); err != nil {
+		_ = os.Remove(temporary)
+		return err
+	}
+	return syncPath(filepath.Dir(path))
+}
+
+// syncPath flushes a directory entry, so a rename survives a power cut.
+func syncPath(dir string) error {
+	handle, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer handle.Close()
+	return handle.Sync()
 }
 
 // Prune removes the entries older than the TTL. The journal must not grow
@@ -160,6 +192,13 @@ func (j *IdempotencyJournal) Prune() {
 	}
 	deadline := time.Now().Add(-j.ttl)
 	for _, entry := range entries {
+		// A marker of a task nobody resolved is the record that the outcome is
+		// unknown. Aging it out turns "the host may have carried this out" into
+		// "it never ran", and the task is then carried out a second time. It
+		// leaves when the result replaces it or reconciliation resolves it.
+		if strings.HasSuffix(entry.Name(), inFlightSuffix) {
+			continue
+		}
 		info, err := entry.Info()
 		if err != nil {
 			continue
