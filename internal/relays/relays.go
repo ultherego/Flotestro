@@ -121,15 +121,71 @@ func (s *Store) Upsert(ctx context.Context, tx pgx.Tx, name, site, environment s
 	return id, nil
 }
 
-// SaveCertificate writes the current certificate of a relay. The previous
-// fingerprint is replaced: a relay has exactly one identity at a time.
+// SaveCertificate writes the current certificate of a relay and keeps the one
+// it replaces. The answer to a renewal can be lost, and the relay commits its
+// new identity only when the answer arrives: without the overlap it would then
+// hold a certificate the panel no longer knows, and the renewal that could fix
+// that refuses an unknown certificate.
 func (s *Store) SaveCertificate(ctx context.Context, tx pgx.Tx, id, serial string,
-	fingerprint []byte, notAfter time.Time) error {
+	fingerprint []byte, notAfter time.Time, issuer Issuer) error {
 	const query = `
-		update relays set fingerprint_sha256 = $2, serial = $3, not_after = $4, revoked_at = null
-		where id = $1`
-	_, err := tx.Exec(ctx, query, id, fingerprint, serial, notAfter)
+		update relays
+		   set previous_fingerprint_sha256 = case
+		           when fingerprint_sha256 is null or fingerprint_sha256 = $2 then previous_fingerprint_sha256
+		           else fingerprint_sha256 end,
+		       previous_not_after = case
+		           when fingerprint_sha256 is null or fingerprint_sha256 = $2 then previous_not_after
+		           else not_after end,
+		       fingerprint_sha256 = $2, serial = $3, not_after = $4, revoked_at = null,
+		       issuer_subject = nullif($5, ''), issuer_serial = nullif($6, '')
+		 where id = $1`
+	_, err := tx.Exec(ctx, query, id, fingerprint, serial, notAfter,
+		issuer.Subject, issuer.Serial)
 	return err
+}
+
+// Issuer names the authority that signed a relay certificate, so that
+// retiring an authority can count the relays that rest on it.
+type Issuer struct {
+	Subject string
+	Serial  string
+}
+
+// ForgetPreviousCertificate drops the overlap once the relay has arrived with
+// its new certificate: the renewal went through, so the old one is spent.
+func (s *Store) ForgetPreviousCertificate(ctx context.Context, id string) error {
+	const query = `
+		update relays set previous_fingerprint_sha256 = null, previous_not_after = null
+		 where id = $1 and previous_fingerprint_sha256 is not null`
+	_, err := s.pool.Exec(ctx, query, id)
+	return err
+}
+
+// CertificateIssuers counts the live relay certificates by the authority that
+// signed them. A relay enrolled before the issuer was recorded counts under
+// the empty subject: unknown, which is not none.
+func (s *Store) CertificateIssuers(ctx context.Context) (map[string]int, error) {
+	const query = `
+		select coalesce(issuer_subject, ''), count(*)
+		  from relays
+		 where revoked_at is null and fingerprint_sha256 is not null
+		   and (not_after is null or not_after > now())
+		 group by 1`
+	rows, err := s.pool.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	counts := map[string]int{}
+	for rows.Next() {
+		var subject string
+		var count int
+		if err := rows.Scan(&subject, &count); err != nil {
+			return nil, err
+		}
+		counts[subject] = count
+	}
+	return counts, rows.Err()
 }
 
 // SaveNames writes the network names the relay is visible under.
@@ -165,16 +221,28 @@ type Status struct {
 	Environment string
 	Revoked     bool
 	Known       bool
+	// Current is false for a relay recognised by the certificate its last
+	// renewal replaced: the renewal went out and its answer never arrived.
+	Current bool
 }
 
-// LookupCertificate recognises a relay by the fingerprint of its certificate.
+// LookupCertificate recognises a relay by the fingerprint of its certificate,
+// current or the one it replaced. The overlap ends when the relay first
+// arrives with the new certificate, or when the old one expires.
 func (s *Store) LookupCertificate(ctx context.Context, fingerprint []byte) (Status, error) {
 	const query = `
-		select id, name, site, coalesce(environment, ''), revoked_at is not null
-		from relays where fingerprint_sha256 = $1`
+		select id, name, site, coalesce(environment, ''), revoked_at is not null,
+		       fingerprint_sha256 = $1
+		  from relays
+		 where fingerprint_sha256 = $1
+		    or (previous_fingerprint_sha256 = $1
+		        and (previous_not_after is null or previous_not_after > now()))
+		 order by (fingerprint_sha256 = $1) desc
+		 limit 1`
 	var status Status
 	err := s.pool.QueryRow(ctx, query, fingerprint).
-		Scan(&status.ID, &status.Name, &status.Site, &status.Environment, &status.Revoked)
+		Scan(&status.ID, &status.Name, &status.Site, &status.Environment, &status.Revoked,
+			&status.Current)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Status{}, nil
 	}

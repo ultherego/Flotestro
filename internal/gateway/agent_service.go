@@ -3105,6 +3105,14 @@ func (s *AgentService) identifyPeer(ctx context.Context, cert *x509.Certificate,
 		s.denied(ctx, relayIdentity, "relay_identity_mismatch")
 		return peer{}, connect.NewError(connect.CodeUnauthenticated, errors.New("the identity of the relay does not match the certificate"))
 	}
+	if status.Current {
+		// The relay arrived with the certificate of its last renewal, so that
+		// renewal went through: the one it replaced is spent.
+		if err := s.relays.ForgetPreviousCertificate(ctx, status.ID); err != nil {
+			s.log.Warn("the previous certificate of the relay was not forgotten",
+				"relay_id", status.ID, "err", err)
+		}
+	}
 
 	host, err := s.hosts.Get(ctx, asserted)
 	if err != nil {

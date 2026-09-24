@@ -160,7 +160,8 @@ func (s *RelayService) RenewCertificate(ctx context.Context,
 	// by, but stays valid until the end of its term: the relay switches the
 	// listener without tearing down the sessions of the agents.
 	if err := s.relays.SaveCertificate(ctx, tx, relayID, issued.Serial,
-		issued.Fingerprint, issued.NotAfter); err != nil {
+		issued.Fingerprint, issued.NotAfter,
+		relays.Issuer{Subject: issued.IssuerSubject, Serial: issued.IssuerSerial}); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	if err := s.relays.RecordRenewal(ctx, tx, relayID); err != nil {

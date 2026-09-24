@@ -421,7 +421,8 @@ func (s *EnrollmentService) enrollRelay(ctx context.Context, tx pgx.Tx,
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	if err := s.relays.SaveCertificate(ctx, tx, relayID, issued.Serial,
-		issued.Fingerprint, issued.NotAfter); err != nil {
+		issued.Fingerprint, issued.NotAfter,
+		relays.Issuer{Subject: issued.IssuerSubject, Serial: issued.IssuerSerial}); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	// The network names from the first CSR become a record in the registry.

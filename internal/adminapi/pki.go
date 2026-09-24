@@ -184,12 +184,26 @@ func (s *Server) handleRetireCA(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	// The host count is taken from the database, not from the request: the
-	// operator must not bypass the safeguard by giving their own number.
+	// A relay is signed by the same authority and lives in another table. The
+	// count used to be of hosts alone, so an authority underwriting every relay
+	// of the fleet retired cleanly and the relays stopped verifying.
+	relayUsage := map[string]int{}
+	if s.relays != nil {
+		relayUsage, err = s.relays.CertificateIssuers(r.Context())
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+	}
+	// The count is taken from the database, not from the request: the operator
+	// must not bypass the safeguard by giving their own number.
 	hostCount := 0
 	for _, ca := range s.trust.Authorities() {
 		if ca.Fingerprint == fingerprint {
-			hostCount = usage[ca.Subject+" "+ca.Serial]
+			hostCount = usage[ca.Subject+" "+ca.Serial] + relayUsage[ca.Subject]
+			// A relay enrolled before the issuer was recorded counts here too:
+			// what nobody can attribute is not evidence that nobody uses it.
+			hostCount += relayUsage[""]
 		}
 	}
 
