@@ -8,6 +8,32 @@ day the tag was published.
 
 ### Fixed
 
+- A relay renewal whose answer was lost left the relay holding a certificate
+  the panel no longer knew, and the renewal that could have fixed it refuses an
+  unknown certificate — so a whole site stayed down until somebody enrolled the
+  relay by hand. The replaced certificate is kept and still recognised until
+  the relay arrives with the new one.
+- Retiring a certificate authority counted the hosts resting on it and never
+  the relays, which are signed by the same authority.
+- The agent's journal wrote without flushing, and pruned the markers of tasks
+  nobody had resolved, so an agent down for longer than a day came back having
+  forgotten that an outcome was unknown — and carried the change out twice.
+- The audit retention sweep is now the privileged path rather than the polite
+  one, and refuses a retention that is not positive.
+- `certificate.deploy` now requires the plan the helper already computes; the
+  panel plans on the host and shows what would be replaced.
+- An idempotency key already used on a host for a different order returned the
+  first task with 200 OK, telling the caller an order had gone through that
+  never existed.
+- A restart never asked logind what it would interrupt, although a shutdown
+  did, and the panel's override checkbox governed only the shutdown.
+- A stable container tag could be published unsigned, with a warning, when a
+  run received no OIDC identity.
+- The release signing job carried its key and passphrase in the environment of
+  every step, and the passphrase travelled on gpg's command line.
+
+### Fixed
+
 - A compliance check rested on a read stamped in the panel's future: a host
   whose clock runs ahead was assessed against a month-old picture and reported
   compliant, because the age test can never fire on a negative age.
