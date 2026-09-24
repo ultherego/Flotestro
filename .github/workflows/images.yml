@@ -327,16 +327,20 @@ jobs:
             # somebody who has just found the project can start without first
             # having to learn which version is current. A pre-release moves
             # neither: a host that follows latest must never be handed one.
+            stable=false
             case "$version" in
             *-*) ;;
-            *)   tags="$tags,$repository:latest,$repository:${version%.*}" ;;
+            *)   stable=true
+                 tags="$tags,$repository:latest,$repository:${version%.*}" ;;
             esac
           else
             version="0.0.0-sha-${commit:0:12}"
             push=false
+            stable=false
             tags="$repository:$version"
           fi
           {
+            echo "stable=$stable"
             echo "repository=$repository"
             echo "version=$version"
             echo "commit=$commit"
@@ -493,9 +497,17 @@ jobs:
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
           REFERENCE: ${{ steps.facts.outputs.repository }}
+          STABLE: ${{ steps.facts.outputs.stable }}
         run: |
           set -euo pipefail
           if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            # A stable tag moves latest and the minor alias. Publishing those
+            # unsigned and calling the run green would hand every "download and
+            # run" installation an image nothing attests to.
+            if [ "$STABLE" = true ]; then
+              echo "::error title=Unsigned stable image::this run received no OIDC identity, so $REFERENCE@$DIGEST cannot be signed; a stable release is not published unsigned" >&2
+              exit 1
+            fi
             echo "::warning title=Unsigned image::this run received no OIDC identity, so $REFERENCE@$DIGEST is published without a cosign signature"
             echo "the run has no OIDC identity; nothing was signed and nothing pretends to be"
             exit 0

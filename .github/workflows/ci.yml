@@ -97,11 +97,12 @@ jobs:
         # Known vulnerabilities in the modules the binaries actually call
         # into; the release carries a CycloneDX bill for the rest. The tool
         # follows the toolchain and the format of the vulnerability
-        # database, so it is taken at its newest: a pinned older build stops
-        # understanding a newer standard library. It downloads the database
-        # and sends nothing.
+        # database, so the database is what stays current; the tool itself is
+        # pinned, because a gate that must pass does not fetch whatever was
+        # tagged latest this morning. It downloads the database and sends
+        # nothing.
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
           "$(go env GOPATH)/bin/govulncheck" ./...
 
   fuzz:
