@@ -2843,12 +2843,14 @@ func TestCertificateCampaignComputesTheDiffAndProtectsTheKey(t *testing.T) {
 
 	// The first host gets an older certificate under the same path: the
 	// host plans are to differ by the state found, not by the order.
+	preparation := map[string]any{
+		"path": path, "key_path": keyPath, "certificate": old,
+		"key_secret": map[string]any{"name": oldSecret.Name},
+	}
+	preparation["plan_hash"] = certificatePlanHash(t, h, targets[0], preparation)
 	job, attempts := h.runOperation(targets[0], map[string]any{
 		"action": "certificate.deploy", "reason": "preparation of the certificate campaign test",
-		"payload": map[string]any{"certificate": map[string]any{
-			"path": path, "key_path": keyPath, "certificate": old,
-			"key_secret": map[string]any{"name": oldSecret.Name},
-		}},
+		"payload": map[string]any{"certificate": preparation},
 	}, 3*time.Minute)
 	if job.State != "succeeded" {
 		t.Fatalf("preparation: state = %s, %s", job.State, lastMessage(attempts))

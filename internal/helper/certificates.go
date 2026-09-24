@@ -200,11 +200,14 @@ func (s *Server) deployCertificate(ctx context.Context,
 	// A deployment approved on the basis of a plan is to enter the state the
 	// operator looked at: a different certificate under that path than at
 	// planning time is a refusal, not a warning.
-	if expected := action.GetPlanHash(); expected != "" {
-		if now := s.certificatePlan(action); now.PlanHash != expected {
-			return reject(ErrorPreconditionFailed,
-				"the certificate under "+action.GetPath()+" changed since the planning; the deployment needs a new plan")
-		}
+	expected := action.GetPlanHash()
+	if expected == "" {
+		return reject(errorPlanMissing, "the deployment of "+action.GetPath()+
+			" carries no plan digest; plan the certificate on this host and order the change with the digest the plan returned")
+	}
+	if now := s.certificatePlan(action); now.PlanHash != expected {
+		return reject(ErrorPreconditionFailed,
+			"the certificate under "+action.GetPath()+" changed since the planning; the deployment needs a new plan")
 	}
 	deployment := certificates.Deployment{
 		Path:        action.GetPath(),

@@ -7,10 +7,11 @@ import { absoluteTime } from "../../lib/format";
 import { Breakdown } from "../../components/widgets";
 import {
   Fact, Facts, Field, Fields, Form, FormActions, JobNotice, Message, ModuleFreshness, ModuleHeader, ModulePage, Section,
-  Summary, Table, Widgets, countWhere, useHost, useModule,
+  Summary, Table, Widgets, countWhere, useHost, useModule, useReadOperation,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
+import { PlanSummary, type HostPlan } from "../../components/plan";
 import { useT } from "../../i18n";
 
 type KeyMetadata = {
@@ -660,7 +661,26 @@ function WatchForm({ onSave }: { onSave: (body: Record<string, unknown>) => void
   );
 }
 
-/** The certificate deployment form. The key is named by a secret. */
+/** The certificate plan of a planning job: the digest the change binds to. */
+type CertificatePlanDetail = { kind?: string; plan_hash?: string; plan?: HostPlan };
+
+/** The values a certificate plan was computed for. */
+export function certificateOrder(path: string, content: string): string {
+  return path + "\u0000" + content;
+}
+
+/** The deployment plan and its digest, or null when the job carries none. */
+export function certificatePlanBinding(detail?: CertificatePlanDetail):
+  { hash: string; plan: HostPlan } | null {
+  if (detail?.kind !== "certificate_plan" || !detail.plan_hash) return null;
+  return { hash: detail.plan_hash, plan: detail.plan ?? {} };
+}
+
+/**
+ * The certificate deployment form. The key is named by a secret, and the host
+ * plans the swap first: what already lies under the path decides what is
+ * replaced, and only the host can read that.
+ */
 function DeployForm({
   targets, hostname, onIntent,
 }: {
@@ -669,9 +689,18 @@ function DeployForm({
   onIntent: (intent: Intent) => void;
 }) {
   const t = useT();
+  const host = useHost();
   const [path, setPath] = useState(targets[0]?.path ?? "");
   const [content, setContent] = useState("");
   const chosen = targets.find((target) => target.path === path);
+  const plan = useReadOperation<CertificatePlanDetail>(host);
+  // The order the plan was asked for, kept beside the plan: a field edited
+  // after the planning leaves the digest bound to values nobody looked at.
+  const [planned, setPlanned] = useState("");
+  const order = certificateOrder(path, content);
+  const binding = planned === order ? certificatePlanBinding(plan.attempt?.detail) : null;
+  const refused = planned === order && plan.attempt && plan.attempt.status !== "succeeded";
+  const hash = binding && !binding.plan.refusal ? binding.hash : "";
 
   return (
     <Section
@@ -705,9 +734,44 @@ function DeployForm({
               placeholder="-----BEGIN CERTIFICATE-----" />
           </Field>
         </Fields>
+        <Message text={plan.message} error />
+        {refused && <Message error text={plan.attempt?.message || plan.attempt?.error_code ||
+          t("The host refused to plan the deployment.")} />}
+        {/* What the host says it would replace, and the digest the change is
+            bound to; without it the order is refused on the host. */}
+        <div className="source">
+          {binding
+            ? <PlanSummary plan={binding.plan} />
+            : plan.busy
+              ? t("The host is planning this deployment…")
+              : t("Plan the deployment on the host first: the certificate is replaced only against the plan it answers with.")}
+        </div>
         <FormActions>
+          <ActionGuard action="certificate.plan" host={host.id} explain>
+            <button
+              className="secondary"
+              disabled={!path || !content.includes("BEGIN CERTIFICATE") || plan.busy ||
+                host.connection_state !== "online"}
+              onClick={() => {
+                setPlanned(order);
+                plan.order({
+                  action: "certificate.plan",
+                  payload: {
+                    certificate: {
+                      path, key_path: chosen?.key_path ?? "", certificate: content,
+                      // The plan covers whether the order brings a key: the
+                      // digest would not match the deployment without it.
+                      ...(chosen?.key_secret ? { key_secret: { name: chosen.key_secret } } : {}),
+                    },
+                  },
+                });
+              }}
+            >
+              {plan.busy ? t("Planning…") : t("Plan on the host")}
+            </button>
+          </ActionGuard>
           <button
-            disabled={!path || !content.includes("BEGIN CERTIFICATE")}
+            disabled={!hash}
             onClick={() =>
               onIntent({
                 action: "certificate.deploy",
@@ -726,6 +790,7 @@ function DeployForm({
                     reload_unit: chosen?.reload_unit ?? "",
                     probe_target: chosen?.probe_target ?? "",
                     ...(chosen?.key_secret ? { key_secret: { name: chosen.key_secret } } : {}),
+                    plan_hash: hash,
                   },
                 },
               })

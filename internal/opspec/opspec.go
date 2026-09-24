@@ -877,7 +877,9 @@ var actionSpecs = map[ActionType]actionSpec{
 	// still signs anything. The host checks that at its own end.
 	ActionCertificateTrustRemove: {mutating: true, capability: "certificates", permission: "certificate.trust.remove",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockCertificates, verifier: VerifierTrustAnchor},
-	ActionCertificateDeploy: {mutating: true, capability: "certificates", permission: "certificate.deploy",
+	// What already lies under the path decides what the deployment replaces,
+	// and only the host can read that: the order binds to the plan that did.
+	ActionCertificateDeploy: {mutating: true, requiresPlan: true, capability: "certificates", permission: "certificate.deploy",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockUnits, verifier: VerifierCertificate},
 	// A renewal ends the same way a deployment does: with a new file and a
 	// service that reads it.
@@ -1729,6 +1731,11 @@ func CheckPlanBinding(action ActionType, payload Payload) error {
 		if payload.Storage == nil || payload.Storage.PlanHash == "" {
 			return &RefusalError{Code: RefusalPlanBindingMissing,
 				Err: fmt.Errorf("%s needs the hash of a mount plan computed on the host", action)}
+		}
+	case ActionCertificateDeploy:
+		if payload.Certificate == nil || payload.Certificate.PlanHash == "" {
+			return &RefusalError{Code: RefusalPlanBindingMissing,
+				Err: fmt.Errorf("%s needs the hash of a certificate plan computed on the host", action)}
 		}
 	}
 	return nil

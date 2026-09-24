@@ -11,6 +11,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"math/big"
@@ -125,12 +126,14 @@ func TestCertificateDeploymentFromTheStore(t *testing.T) {
 		}
 	})
 
+	deployment := map[string]any{
+		"path": path, "key_path": keyPath, "certificate": certPEM,
+		"key_secret": map[string]any{"name": secret.Name},
+	}
+	deployment["plan_hash"] = certificatePlanHash(t, h, host.ID, deployment)
 	job, attempts := h.runOperation(host.ID, map[string]any{
 		"action": "certificate.deploy", "reason": certificateReason,
-		"payload": map[string]any{"certificate": map[string]any{
-			"path": path, "key_path": keyPath, "certificate": certPEM,
-			"key_secret": map[string]any{"name": secret.Name},
-		}},
+		"payload": map[string]any{"certificate": deployment},
 	}, 3*time.Minute)
 	if job.State != "succeeded" {
 		t.Fatalf("the deployment ended in state %s: %+v", job.State, attempts)
@@ -174,6 +177,12 @@ func TestCertificateDeploymentFromTheStore(t *testing.T) {
 		"payload": map[string]any{"certificate": map[string]any{
 			"path": path, "key_path": keyPath, "certificate": foreignCert,
 			"key_secret": map[string]any{"name": secret.Name},
+			// The digest is of a plan for this order: the refusal under test is
+			// the mismatched pair, not the missing binding.
+			"plan_hash": certificatePlanHash(t, h, host.ID, map[string]any{
+				"path": path, "key_path": keyPath, "certificate": foreignCert,
+				"key_secret": map[string]any{"name": secret.Name},
+			}),
 		}},
 	}, 3*time.Minute)
 	if rejected.State == "succeeded" {
@@ -483,6 +492,10 @@ func TestPrivateKeyDoesNotReachTheHostJournal(t *testing.T) {
 		"payload": map[string]any{"certificate": map[string]any{
 			"path": path, "key_path": keyPath, "certificate": certPEM,
 			"key_secret": map[string]any{"name": secret.Name},
+			"plan_hash": certificatePlanHash(t, h, host.ID, map[string]any{
+				"path": path, "key_path": keyPath, "certificate": certPEM,
+				"key_secret": map[string]any{"name": secret.Name},
+			}),
 		}},
 	}, 3*time.Minute)
 	if job.State != "succeeded" {
@@ -513,4 +526,61 @@ func TestPrivateKeyDoesNotReachTheHostJournal(t *testing.T) {
 			}
 		}
 	}
+}
+
+// certificatePlanHash plans the deployment on the host and returns the digest
+// the change has to carry. A deployment without one is refused: what already
+// lies under the path decides what is replaced, and only the host reads that.
+func certificatePlanHash(t *testing.T, h *harness, hostID string, certificate map[string]any) string {
+	t.Helper()
+	planned := map[string]any{}
+	for key, value := range certificate {
+		planned[key] = value
+	}
+	// The plan covers the key reference too: whether the order brings a key
+	// decides what the deployment does, so it is part of what was approved.
+	delete(planned, "plan_hash")
+	job, attempts := h.runOperation(hostID, map[string]any{
+		"action": "certificate.plan", "reason": certificateReason,
+		"payload": map[string]any{"certificate": planned},
+	}, 2*time.Minute)
+	if job.State != "succeeded" {
+		t.Fatalf("planning the deployment: state = %s, %s", job.State, lastMessage(attempts))
+	}
+	var plan struct {
+		PlanHash string `json:"plan_hash"`
+	}
+	if err := json.Unmarshal(certificatePlanDetail(t, h, job.ID), &plan); err != nil {
+		t.Fatalf("the certificate plan does not read: %v", err)
+	}
+	if plan.PlanHash == "" {
+		t.Fatal("the certificate plan carries no digest")
+	}
+	return plan.PlanHash
+}
+
+// certificatePlanDetail reads the plan out of the newest attempt of a job.
+func certificatePlanDetail(t *testing.T, h *harness, jobID string) json.RawMessage {
+	t.Helper()
+	var response struct {
+		Items []struct {
+			Detail struct {
+				Kind     string          `json:"kind"`
+				PlanHash string          `json:"plan_hash"`
+				Plan     json.RawMessage `json:"plan"`
+			} `json:"detail"`
+		} `json:"items"`
+	}
+	h.get("/api/v1/jobs/"+jobID+"/attempts", &response)
+	for i := len(response.Items) - 1; i >= 0; i-- {
+		if response.Items[i].Detail.Kind == "certificate_plan" {
+			encoded, err := json.Marshal(map[string]any{"plan_hash": response.Items[i].Detail.PlanHash})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return encoded
+		}
+	}
+	t.Fatalf("the job %s carries no certificate plan", jobID)
+	return nil
 }
