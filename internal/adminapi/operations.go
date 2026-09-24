@@ -298,6 +298,12 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 		Preconditions:    preconditions,
 		Class:            class,
 	})
+	if errors.Is(err, jobs.ErrKeyReused) {
+		// The key is the caller's own word: answering with somebody else's task
+		// would tell them their order went through when it never existed.
+		problem(w, http.StatusConflict, "idempotency_key_reused", err.Error())
+		return
+	}
 	if err != nil {
 		problem(w, http.StatusBadRequest, "invalid_operation", err.Error())
 		return

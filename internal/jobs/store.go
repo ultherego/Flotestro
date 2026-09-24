@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,6 +34,9 @@ var (
 	// before the delivery could be recorded: what the host did with it is not
 	// the panel's to say.
 	ErrDispatchLost = errors.New("dispatch_lost: the task left the panel and the job was settled meanwhile")
+	// ErrKeyReused means an idempotency key already used on this host for a
+	// different order. The first task stands; the second was not created.
+	ErrKeyReused = errors.New("idempotency_key_reused: the key was used for another order on this host")
 )
 
 // Spec describes the task to create.
@@ -246,8 +250,20 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec) (*Job, error) 
 		spec.FanoutID, string(spec.Class)).Scan(&jobID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// The same idempotency key returns the existing task instead of
-		// creating a second one. A repeated order is not an error.
-		return s.getTx(ctx, tx, "where host_id = $1 and idempotency_key = $2", spec.HostID, idempotencyKey)
+		// creating a second one. A repeated order is not an error - but only a
+		// repeat of the same order: the key is the caller's word, and answering
+		// a different order with somebody else's task is not idempotence.
+		existing, err := s.getTx(ctx, tx,
+			"where host_id = $1 and idempotency_key = $2", spec.HostID, idempotencyKey)
+		if err != nil {
+			return nil, err
+		}
+		if existing.ActionType != string(spec.Action) ||
+			existing.PayloadHash != hex.EncodeToString(payloadHash) {
+			return nil, fmt.Errorf("%w: the key names the task %s, which is %s",
+				ErrKeyReused, existing.ID, existing.ActionType)
+		}
+		return existing, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("creating the task: %w", err)
