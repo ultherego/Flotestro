@@ -256,7 +256,8 @@ export function HostPicker() {
   const settled = useDebounced(query.trim(), DEBOUNCE);
   const search = useQuery({
     queryKey: ["search", settled],
-    queryFn: () => api.get<{ items: SearchItem[] }>(`/api/v1/search?q=${encodeURIComponent(settled)}&limit=${LIMIT}`),
+    queryFn: () => api.get<{ items: SearchItem[]; truncated?: string[] }>(
+      `/api/v1/search?q=${encodeURIComponent(settled)}&limit=${LIMIT}`),
     enabled: open && settled.length >= MINIMUM,
     staleTime: 30_000,
     placeholderData: keepPreviousData,
@@ -351,10 +352,10 @@ export function HostPicker() {
     }
   }
 
-  // The server bounds every kind on its own, so the note about the rest
-  // is due when any one kind filled its share.
-  const truncated = searching && KIND_ORDER.some((kind) =>
-    (search.data?.items.filter((item) => item.kind === kind).length ?? 0) >= LIMIT);
+  // The server bounds every kind on its own and says which ones it cut, so
+  // the note is due exactly when something was left out - a kind whose hits
+  // happen to fill the share exactly is not cut.
+  const truncated = searching && (search.data?.truncated?.length ?? 0) > 0;
 
   return (
     <div className="host-picker" ref={container}>

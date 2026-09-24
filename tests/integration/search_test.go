@@ -106,7 +106,11 @@ func TestSearchKeepsTheIdentitiesFromAViewer(t *testing.T) {
 	}))
 
 	// The administrator finds the identity by the beginning of its subject.
-	adminHits := h.search("search-viewer")
+	// The prefix carries the unique part: every run of this suite leaves an
+	// identity behind, and the search is bounded per kind, so "search-viewer"
+	// alone stops finding the newest one once a lab has a few runs on it.
+	prefix := subject[:len(subject)-6]
+	adminHits := h.search(prefix)
 	found := false
 	for _, hit := range adminHits {
 		if hit.Kind == "principal" && hit.Title == subject {
@@ -122,7 +126,7 @@ func TestSearchKeepsTheIdentitiesFromAViewer(t *testing.T) {
 
 	// The viewer gets no identity for the same query, and sees the host of
 	// their scope by name.
-	for _, hit := range viewer.search("search-viewer") {
+	for _, hit := range viewer.search(prefix) {
 		if hit.Kind == "principal" {
 			t.Errorf("the viewer's search carries identity %q", hit.Title)
 		}

@@ -66,11 +66,14 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		limit = searchLimitDefault
 	}
 	items := []searchItem{}
+	// The kinds whose hits did not fit. A bounded list that does not say it is
+	// bounded reads as "this is everything there is".
+	truncated := []string{}
 	// A query too short to mean anything is answered with nothing rather than
 	// refused: the palette asks on every keystroke, and an empty answer is what
 	// an empty field deserves.
 	if len([]rune(query)) < searchMinimum {
-		writeJSON(w, http.StatusOK, map[string]any{"items": items})
+		writeJSON(w, http.StatusOK, map[string]any{"items": items, "truncated": truncated})
 		return
 	}
 	ctx := r.Context()
@@ -80,14 +83,20 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		s.searchHosts, s.searchCampaigns, s.searchJobs, s.searchPolicies, s.searchGroups,
 		s.searchRelays, s.searchSecrets, s.searchPrincipals, s.searchCVEs,
 	} {
-		found, err := kind(ctx, principal, query, limit)
+		// One more than the limit, so the answer can tell a full page from a
+		// page that happens to end there.
+		found, err := kind(ctx, principal, query, limit+1)
 		if err != nil {
 			s.fail(w, err)
 			return
 		}
+		if len(found) > limit {
+			truncated = append(truncated, found[0].Kind)
+			found = found[:limit]
+		}
 		items = append(items, found...)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "truncated": truncated})
 }
 
 // namePrefixes returns the two LIKE patterns a name is matched with: the name
