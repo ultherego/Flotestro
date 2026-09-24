@@ -3381,13 +3381,15 @@ func TestTrustCampaignDistributesTheAuthorityAndProtectsTheOneInUse(t *testing.T
 		h.do(http.MethodDelete,
 			"/api/v1/hosts/"+targets[0]+"/certificates/targets?path="+path, nil, nil, 0)
 	})
+	preparation := map[string]any{
+		"path": path, "key_path": strings.Replace(path, ".crt", ".key", 1),
+		"certificate": leaf.certificate,
+		"key_secret":  map[string]any{"name": secret.Name},
+	}
+	preparation["plan_hash"] = certificatePlanHash(t, h, targets[0], preparation)
 	job, attempts := h.runOperation(targets[0], map[string]any{
 		"action": "certificate.deploy", "reason": "preparation of the authority withdrawal test",
-		"payload": map[string]any{"certificate": map[string]any{
-			"path": path, "key_path": strings.Replace(path, ".crt", ".key", 1),
-			"certificate": leaf.certificate,
-			"key_secret":  map[string]any{"name": secret.Name},
-		}},
+		"payload": map[string]any{"certificate": preparation},
 	}, 3*time.Minute)
 	if job.State != "succeeded" {
 		t.Fatalf("deploying the leaf: state = %s, %s", job.State, lastMessage(attempts))
