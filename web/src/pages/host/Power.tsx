@@ -263,7 +263,9 @@ export function Power() {
                   action: "system.reboot",
                   label: t("Reboot host"),
                   description: t("{host} will reboot. The panel treats the operation as finished only when the host comes back with a new boot ID, so a host that does not return shows up as failed, not as done.", { host: host.hostname }),
-                  payload: { reboot: { delay_seconds: 15, reason: "operator reboot" } },
+                  // The checkbox stands over both buttons and now governs both:
+                  // a restart interrupts the same work a shutdown does.
+                  payload: { reboot: { delay_seconds: 15, reason: "operator reboot", ignore_inhibitors: ignoreInhibitors } },
                 })
               }
             >

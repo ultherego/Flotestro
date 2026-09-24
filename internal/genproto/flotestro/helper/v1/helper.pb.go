@@ -3048,11 +3048,14 @@ func (x *IdentityProbeRequest) GetDomain() string {
 
 // RebootRequest orders a controlled reboot of the host.
 type RebootRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	DelaySeconds  uint32                 `protobuf:"varint,1,opt,name=delay_seconds,json=delaySeconds,proto3" json:"delay_seconds,omitempty"`
-	Reason        string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	DelaySeconds uint32                 `protobuf:"varint,1,opt,name=delay_seconds,json=delaySeconds,proto3" json:"delay_seconds,omitempty"`
+	Reason       string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	// ignore_inhibitors overrides what logind says is holding the restart back,
+	// exactly as it does for a shutdown. A restart interrupts the same work.
+	IgnoreInhibitors bool `protobuf:"varint,3,opt,name=ignore_inhibitors,json=ignoreInhibitors,proto3" json:"ignore_inhibitors,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *RebootRequest) Reset() {
@@ -3097,6 +3100,13 @@ func (x *RebootRequest) GetReason() string {
 		return x.Reason
 	}
 	return ""
+}
+
+func (x *RebootRequest) GetIgnoreInhibitors() bool {
+	if x != nil {
+		return x.IgnoreInhibitors
+	}
+	return false
 }
 
 // ShutdownRequest powers the host off. The delay gives the agent time to
@@ -10654,10 +10664,11 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\x06domain\x18\x01 \x01(\tR\x06domain\x12\x14\n" +
 	"\x05realm\x18\x02 \x01(\tR\x05realm\".\n" +
 	"\x14IdentityProbeRequest\x12\x16\n" +
-	"\x06domain\x18\x01 \x01(\tR\x06domain\"L\n" +
+	"\x06domain\x18\x01 \x01(\tR\x06domain\"y\n" +
 	"\rRebootRequest\x12#\n" +
 	"\rdelay_seconds\x18\x01 \x01(\rR\fdelaySeconds\x12\x16\n" +
-	"\x06reason\x18\x02 \x01(\tR\x06reason\"\x8f\x01\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\x12+\n" +
+	"\x11ignore_inhibitors\x18\x03 \x01(\bR\x10ignoreInhibitors\"\x8f\x01\n" +
 	"\x0fShutdownRequest\x12#\n" +
 	"\rdelay_seconds\x18\x01 \x01(\rR\fdelaySeconds\x12\x16\n" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\x12\x12\n" +

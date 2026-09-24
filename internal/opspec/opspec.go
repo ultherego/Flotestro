@@ -1931,6 +1931,9 @@ type RebootPayload struct {
 	// before the host disappears from the network.
 	DelaySeconds uint32 `json:"delay_seconds,omitempty"`
 	Reason       string `json:"reason,omitempty"`
+	// IgnoreInhibitors overrides logind's inhibitors, as it does for a
+	// shutdown: a restart interrupts the same work.
+	IgnoreInhibitors bool `json:"ignore_inhibitors,omitempty"`
 }
 
 // UnitStatusPayload describes a read of unit state. An empty list means the

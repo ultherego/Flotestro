@@ -9983,9 +9983,8 @@ type BlockedPackage struct {
 	Name      string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	Status    string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
 	Questions []*DebconfQuestion     `protobuf:"bytes,3,rep,name=questions,proto3" json:"questions,omitempty"`
-	// What the block is: "database" when the package database needs repairing,
-	// "advisory" when nothing says whether an update closes a vulnerability.
-	// Empty is "database": that is what an agent before this field meant.
+	// "database" when the package database needs repairing, "advisory" when
+	// nothing classifies an update. Empty is "database", as it always meant.
 	Kind          string `protobuf:"bytes,4,opt,name=kind,proto3" json:"kind,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

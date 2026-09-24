@@ -283,6 +283,9 @@ message IdentityProbeRequest {
 message RebootRequest {
   uint32 delay_seconds = 1;
   string reason = 2;
+  // ignore_inhibitors overrides what logind says is holding the restart back,
+  // exactly as it does for a shutdown. A restart interrupts the same work.
+  bool ignore_inhibitors = 3;
 }
 
 // ShutdownRequest powers the host off. The delay gives the agent time to

@@ -570,6 +570,23 @@ func (s *Server) applyReboot(ctx context.Context, request *helperv1.HelperReques
 	scheduleCtx, cancel := deadline(ctx, request, 2*time.Minute, 10*time.Minute)
 	defer cancel()
 
+	// A restart interrupts work on the host exactly as a shutdown does, and it
+	// used to be the one power operation that never asked.
+	inhibitors, known := powerInhibitors(scheduleCtx, "shutdown")
+	if !known && !action.GetIgnoreInhibitors() {
+		return reject(ErrorInhibitorsUnknown, "this host could not be asked whether anything is holding a restart back, "+
+			"so the restart was not ordered on an unread answer")
+	}
+	if len(inhibitors) > 0 && !action.GetIgnoreInhibitors() {
+		refusal := reject(ErrorPreconditionFailed,
+			"the restart was held back by inhibitors: "+describeInhibitors(inhibitors))
+		refusal.PowerResult = &helperv1.PowerResult{
+			Message:    refusal.Message,
+			Inhibitors: encodeInhibitors(inhibitors),
+		}
+		return refusal
+	}
+
 	// shutdown -r takes time in minutes or the word now, so short delays are
 	// carried out through a transient systemd timer.
 	stdout, stderr, exitCode, err := systemd.ScheduleReboot(scheduleCtx, time.Duration(delay)*time.Second, reason)

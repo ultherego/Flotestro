@@ -790,7 +790,8 @@ func (e *TaskExecutor) rebootHost(ctx context.Context, task *agentv1.TaskEnvelop
 		TimeoutSeconds: uint32(timeout.Seconds()),
 		MaxOutputBytes: task.GetLimits().GetMaxOutputBytes(),
 		Action: &helperv1.HelperRequest_Reboot{
-			Reboot: &helperv1.RebootRequest{DelaySeconds: delay, Reason: payload.Reason},
+			Reboot: &helperv1.RebootRequest{DelaySeconds: delay, Reason: payload.Reason,
+				IgnoreInhibitors: payload.IgnoreInhibitors},
 		},
 	}, timeout)
 	if err != nil {

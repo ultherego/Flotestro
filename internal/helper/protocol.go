@@ -40,6 +40,10 @@ const (
 	// ErrorPreconditionFailed means an order placed against a host state other
 	// than the one the host has now.
 	ErrorPreconditionFailed = "precondition_failed"
+	// ErrorInhibitorsUnknown: the host could not be asked whether anything is
+	// holding a restart or a shutdown back, so it was not ordered on an
+	// unread answer.
+	ErrorInhibitorsUnknown = "inhibitors_unknown"
 	// Refusals of container engine cleanup.
 	ErrorDockerInUse         = "docker_object_in_use"
 	ErrorDockerPredefined    = "docker_network_predefined"

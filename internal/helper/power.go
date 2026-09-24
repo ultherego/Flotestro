@@ -34,7 +34,11 @@ func (s *Server) applyShutdown(ctx context.Context, request *helperv1.HelperRequ
 
 	// A logind inhibitor is the answer of the host to the question "is it allowed
 	// now": an update in flight or a session with open work.
-	inhibitors := shutdownInhibitors(actionCtx)
+	inhibitors, known := powerInhibitors(actionCtx, "shutdown")
+	if !known && !action.GetIgnoreInhibitors() {
+		return reject(ErrorInhibitorsUnknown, "this host could not be asked whether anything is holding a shutdown back, "+
+			"so the shutdown was not ordered on an unread answer")
+	}
 	if len(inhibitors) > 0 && !action.GetIgnoreInhibitors() {
 		refusal := reject(ErrorPreconditionFailed,
 			"the shutdown was held back by inhibitors: "+describeInhibitors(inhibitors))
@@ -76,24 +80,28 @@ func (s *Server) applyShutdown(ctx context.Context, request *helperv1.HelperRequ
 	}
 }
 
-// shutdownInhibitors returns the inhibitors that do not allow a shutdown. A
-// delay is not an obstacle: logind waits it out on its own.
-func shutdownInhibitors(ctx context.Context) []power.Inhibitor {
+// powerInhibitors returns the inhibitors that do not allow the named
+// operation, and whether the host could be asked at all. A delay is not an
+// obstacle: logind waits it out on its own.
+//
+// The second return used to be dropped: a host without systemd-inhibit, or one
+// whose output the parser did not recognise, answered "nothing blocks". That
+// is a read that failed, not a host with nothing to say.
+func powerInhibitors(ctx context.Context, what string) (blocking []power.Inhibitor, known bool) {
 	if !exists(power.InhibitPath) {
-		return nil
+		return nil, false
 	}
 	output, _, _ := outputWithWarnings(ctx, power.InhibitPath, "--list", "--no-pager")
-	all, known := power.ParseInhibitors(output)
-	if !known {
-		return nil
+	all, read := power.ParseInhibitors(output)
+	if !read {
+		return nil, false
 	}
-	var blocking []power.Inhibitor
 	for _, inhibitor := range all {
-		if inhibitor.Blocks() && (inhibitor.What == "" || strings.Contains(inhibitor.What, "shutdown")) {
+		if inhibitor.Blocks() && (inhibitor.What == "" || strings.Contains(inhibitor.What, what)) {
 			blocking = append(blocking, inhibitor)
 		}
 	}
-	return blocking
+	return blocking, true
 }
 
 func describeInhibitors(inhibitors []power.Inhibitor) string {
