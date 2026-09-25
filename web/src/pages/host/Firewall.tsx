@@ -583,6 +583,10 @@ function ZonePort({
                   ports: [number],
                   protocol,
                   enable: operation === "open",
+                  // The same watchdog a rule change asks for: firewalld keeps an
+                  // established connection alive across a reload, so a change
+                  // that locks the host out looks like a success.
+                  rollback_seconds: 120,
                 },
               },
             });
@@ -644,6 +648,7 @@ function ZoneService({
                   zone,
                   service: name,
                   enable: operation === "add",
+                  rollback_seconds: 120,
                 },
               },
             })

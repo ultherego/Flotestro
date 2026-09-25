@@ -3,6 +3,7 @@ package firewall
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -97,6 +98,20 @@ func ServiceArguments(zone, service string, enable bool) ([][]string, error) {
 		{FirewallCmdPath, "--permanent", "--zone=" + zone, operation},
 		{FirewallCmdPath, "--reload"},
 	}, nil
+}
+
+// ParseServicePorts reads the answer of "firewall-cmd --service=X --get-ports":
+// entries of the form 443/tcp separated by spaces. A word that is not a port
+// is left out rather than guessed at.
+func ParseServicePorts(output string) []int {
+	var ports []int
+	for _, field := range strings.Fields(output) {
+		number, _, _ := strings.Cut(field, "/")
+		if value, err := strconv.Atoi(number); err == nil && value > 0 && value <= 65535 {
+			ports = append(ports, value)
+		}
+	}
+	return ports
 }
 
 var (

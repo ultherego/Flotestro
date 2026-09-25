@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -303,8 +304,9 @@ func (s *Server) changeZone(ctx context.Context, action *helperv1.FirewallReques
 		}
 	}
 
-	var steps [][]string
+	var steps, undo [][]string
 	var err error
+	management := int(action.GetManagementPort())
 	if action.GetOperation() == helperv1.FirewallRequest_OPERATION_ZONE_PORT {
 		if len(action.GetPorts()) != 1 {
 			return reject(ErrorMalformed, "the operation concerns exactly one port")
@@ -312,26 +314,100 @@ func (s *Server) changeZone(ctx context.Context, action *helperv1.FirewallReques
 		// Closing the port the host talks to the panel through cuts the panel
 		// off.
 		if !action.GetEnable() && !action.GetBreakGlass() &&
-			action.GetPorts()[0] == strconv.Itoa(int(action.GetManagementPort())) {
+			action.GetPorts()[0] == strconv.Itoa(management) {
 			return reject(ErrorUnsupported,
 				"the port "+action.GetPorts()[0]+" is the management channel; "+
 					"closing it deliberately needs explicit operator consent")
 		}
 		steps, err = firewall.PortArguments(action.GetZone(), action.GetPorts()[0],
 			action.GetProtocol(), action.GetEnable())
+		if err == nil {
+			undo, err = firewall.PortArguments(action.GetZone(), action.GetPorts()[0],
+				action.GetProtocol(), !action.GetEnable())
+		}
 	} else {
+		// A service is a name for a set of ports, and removing it closes every
+		// one of them. The guard above compared one number with one number and
+		// never saw that "remove https" takes 443 away.
+		if !action.GetEnable() && !action.GetBreakGlass() && management > 0 {
+			ports, known := s.servicePorts(ctx, action.GetService())
+			switch {
+			case !known:
+				return reject(ErrorUnsupported,
+					"this host could not say which ports the service "+action.GetService()+
+						" stands for, so the panel cannot tell whether closing it closes the management channel")
+			case slices.Contains(ports, management):
+				return reject(ErrorUnsupported,
+					"the service "+action.GetService()+" carries the management port "+
+						strconv.Itoa(management)+"; closing it deliberately needs explicit operator consent")
+			}
+		}
 		steps, err = firewall.ServiceArguments(action.GetZone(), action.GetService(), action.GetEnable())
+		if err == nil {
+			undo, err = firewall.ServiceArguments(action.GetZone(), action.GetService(), !action.GetEnable())
+		}
 	}
 	if err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
 
+	// The way back is armed before the change, exactly as it is for a rule
+	// change: firewalld keeps an established connection alive across a reload,
+	// so a change that locks the host out reports success and is found at the
+	// next connection.
+	plan, response := s.armZoneRollback(ctx, undo, action.GetRollbackSeconds())
+	if response != nil {
+		return response
+	}
 	for _, step := range steps {
 		if output, err := runTool(ctx, step); err != nil {
-			return reject(ErrorExecFailed, err.Error()+": "+output)
+			// The rollback stays armed: a change that stopped halfway is taken
+			// back by the same timer.
+			failure := reject(ErrorExecFailed, err.Error()+": "+output)
+			failure.FirewallResult = &helperv1.FirewallResult{
+				Message:          err.Error(),
+				RollbackId:       plan.ID,
+				RollbackDeadline: plan.Deadline.Format(time.RFC3339),
+			}
+			return failure
 		}
 	}
-	return firewallResponse(s.readFirewall(ctx), "the zone was changed", nil)
+	return firewallResponse(s.readFirewall(ctx),
+		"the zone was changed; rollback at "+plan.Deadline.Format(time.RFC3339)+
+			" unless the agent confirms connectivity", &plan)
+}
+
+// armZoneRollback writes the inverse of a zone change and arms the timer that
+// carries it out unless the agent confirms it can still reach the panel.
+func (s *Server) armZoneRollback(ctx context.Context, undo [][]string,
+	seconds uint32) (firewallPlan, *helperv1.HelperResponse) {
+	plan := firewallPlan{
+		ID:        rollbackIdentifier(),
+		ZoneSteps: undo,
+		CreatedAt: time.Now().UTC(),
+	}
+	window := rollbackWindow(seconds)
+	plan.Deadline = plan.CreatedAt.Add(window)
+
+	if err := writeFirewallPlan(plan); err != nil {
+		return plan, reject(ErrorExecFailed, "writing the rollback plan: "+err.Error())
+	}
+	if err := s.armTimer(ctx, firewallRollbackUnit+plan.ID, window, "-rollback-firewall", plan.ID); err != nil {
+		_ = removeFirewallPlan(plan.ID)
+		return plan, reject(ErrorExecFailed, "arming the rollback: "+err.Error())
+	}
+	return plan, nil
+}
+
+// servicePorts asks firewalld which ports a service name stands for, and says
+// whether it could be asked at all.
+func (s *Server) servicePorts(ctx context.Context, service string) ([]int, bool) {
+	output, err := runTool(ctx,
+		[]string{firewall.FirewallCmdPath, "--permanent", "--service=" + service, "--get-ports"})
+	if err != nil {
+		return nil, false
+	}
+	return firewall.ParseServicePorts(output), true
 }
 
 // applyRegistry brings the host to the given registry: nftables by
@@ -356,6 +432,16 @@ func (s *Server) applyRegistry(ctx context.Context, adapter string, registry fir
 
 // restoreRegistry returns to the registry of a rollback plan.
 func (s *Server) restoreRegistry(ctx context.Context, plan firewallPlan) error {
+	if len(plan.ZoneSteps) > 0 {
+		// A zone change is undone by its inverse; there is no registry of the
+		// panel's own behind it.
+		for _, step := range plan.ZoneSteps {
+			if output, err := runTool(ctx, step); err != nil {
+				return fmt.Errorf("undoing the zone change: %w: %s", err, output)
+			}
+		}
+		return nil
+	}
 	var steps [][]string
 	if plan.Adapter == firewall.AdapterUFW {
 		current, err := loadRuleRegistry(plan.Adapter)
@@ -612,6 +698,10 @@ type firewallPlan struct {
 	Registry  firewall.Registry `json:"registry"`
 	CreatedAt time.Time         `json:"created_at"`
 	Deadline  time.Time         `json:"deadline"`
+	// ZoneSteps undo a firewalld zone change. A zone is not a registry the
+	// panel owns - it is the host's own configuration - so the way back is the
+	// inverse command rather than a rebuild.
+	ZoneSteps [][]string `json:"zone_steps,omitempty"`
 }
 
 func firewallPlanPath(id string) (string, error) {
