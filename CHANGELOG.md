@@ -28,6 +28,19 @@ day the tag was published.
 - A compose plan stood still for the whole operation's timeout when the
   registry would not answer, instead of falling back to the digest the host
   already held.
+- The start checked only the active secrets key, so a key that live secret
+  versions were sealed with and the provider no longer held surfaced at the
+  first read of that secret rather than at the start.
+- The host page could order an agent upgrade by version alone, and the whole
+  digest-and-signer verification on the host sits behind "if a digest was
+  given". The form now carries the checksum and the fall-back version.
+- A webhook consumer that an installation stopped running kept its cursor and
+  pinned the retention of the durable trail for ever.
+- Every replica downloaded every vulnerability feed and rewrote every host's
+  findings; the pass now runs under a lease, like the alert evaluator.
+- The container guide names the two database facts an external installation
+  needs: a pooler in transaction mode breaks the panel silently, and the
+  migration switches existed in no document.
 
 - A relay renewal whose answer was lost left the relay holding a certificate
   the panel no longer knew, and the renewal that could have fixed it refuses an
