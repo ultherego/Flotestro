@@ -3,6 +3,7 @@ package backup
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -288,6 +289,14 @@ func ValidateRestore(restore Restore) error {
 
 // CheckTarget checks the target directory right before unpacking.
 func CheckTarget(restore Restore) error {
+	// The unpacking runs as root and resolves the name a second time, so what
+	// the name means has to be fixed before it is handed over: a component that
+	// is a symbolic link, or a directory above the target that somebody other
+	// than root may write, is a target that can be moved between this check and
+	// the extraction.
+	if err := checkTargetPath(restore.Target); err != nil {
+		return err
+	}
 	info, err := os.Stat(restore.Target)
 	if os.IsNotExist(err) {
 		// A directory that does not exist is not created half-way down the tree: the
@@ -317,6 +326,56 @@ func CheckTarget(restore Restore) error {
 			restore.Target)
 	}
 	return nil
+}
+
+// checkTargetPath walks the target from the root down and refuses a path whose
+// meaning somebody else can change: a symbolic link anywhere in it, or a
+// directory that is group- or world-writable without the sticky bit and not
+// owned by root.
+func checkTargetPath(target string) error {
+	walked := "/"
+	for _, part := range strings.Split(strings.Trim(filepath.Clean(target), "/"), "/") {
+		if part == "" {
+			continue
+		}
+		walked = filepath.Join(walked, part)
+		info, err := os.Lstat(walked)
+		if errors.Is(err, os.ErrNotExist) {
+			// The rest of the path does not exist yet, so nobody holds it.
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("%w: %s could not be read: %v", ErrUnsafeTarget, walked, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%w: %s is a symbolic link, so what is written there is not decided by the order",
+				ErrUnsafeTarget, walked)
+		}
+		if err := checkWritableByOthers(walked, info); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ErrUnsafeTarget means a restore target whose meaning is not fixed: the
+// unpacking runs as root and would write wherever the path led at that moment.
+var ErrUnsafeTarget = errors.New("unsafe_restore_target")
+
+// checkWritableByOthers refuses a directory somebody other than its owner may
+// replace an entry in. Who owns it does not help: a mode that lets the group
+// or the world write lets them move the target between this check and the
+// extraction. The sticky bit is the exemption, because there only the owner of
+// an entry may remove it - that is what makes /tmp usable.
+func checkWritableByOthers(path string, info os.FileInfo) error {
+	if !info.IsDir() {
+		return nil
+	}
+	if info.Mode().Perm()&0o022 == 0 || info.Mode()&os.ModeSticky != 0 {
+		return nil
+	}
+	return fmt.Errorf("%w: %s is writable by others without the sticky bit, so the target can be moved while the restore runs",
+		ErrUnsafeTarget, path)
 }
 
 // ValidateEnvironment checks the names of the variables the panel sets for

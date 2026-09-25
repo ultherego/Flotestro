@@ -44,6 +44,9 @@ const (
 	// holding a restart or a shutdown back, so it was not ordered on an
 	// unread answer.
 	ErrorInhibitorsUnknown = "inhibitors_unknown"
+	// ErrorUnsafeRestoreTarget: the restore target, or a directory above it,
+	// is one somebody other than its owner can move while the restore runs.
+	ErrorUnsafeRestoreTarget = "unsafe_restore_target"
 	// Refusals of container engine cleanup.
 	ErrorDockerInUse         = "docker_object_in_use"
 	ErrorDockerPredefined    = "docker_network_predefined"

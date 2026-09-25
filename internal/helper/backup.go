@@ -167,7 +167,11 @@ func (s *Server) applyBackup(ctx context.Context, request *helperv1.HelperReques
 		// The target is checked right before unpacking: only the host knows what
 		// really lies in that directory, and it knows it only now.
 		if err := backup.CheckTarget(order.Restore); err != nil {
-			return reject(ErrorPreconditionFailed, err.Error())
+			code := ErrorPreconditionFailed
+			if errors.Is(err, backup.ErrUnsafeTarget) {
+				code = ErrorUnsafeRestoreTarget
+			}
+			return reject(code, err.Error())
 		}
 		result, err := adapter.RestoreData(actionCtx, order)
 		response := backupResponse(result, err)
