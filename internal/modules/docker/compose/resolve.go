@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // ResolvedImage is the digest an image reference resolves to and where
@@ -56,11 +57,22 @@ func repositoryOf(image string) string {
 	return repository
 }
 
+// registryDeadline bounds the ask of the registry. A registry that has not
+// answered in this long is not going to during an operation, and the digest
+// the host already holds is the better answer than an operation that stands
+// still until its own timeout runs out.
+var registryDeadline = 30 * time.Second
+
 // ResolveWithDocker resolves tags with the Docker client on the host.
 func ResolveWithDocker(docker Runner) ImageResolver {
 	return func(ctx context.Context, image string) (ResolvedImage, error) {
 		var registryErr error
-		stdout, stderr, err := docker(ctx, "manifest", "inspect", "--verbose", image)
+		askCtx, cancel := context.WithTimeout(ctx, registryDeadline)
+		stdout, stderr, err := docker(askCtx, "manifest", "inspect", "--verbose", image)
+		cancel()
+		if err != nil && askCtx.Err() != nil && ctx.Err() == nil {
+			stderr = "the registry did not answer within " + registryDeadline.String()
+		}
 		if err != nil {
 			registryErr = fmt.Errorf("%s", firstLine(stderr))
 		} else if digest, err := digestFromManifest(stdout, runtime.GOARCH); err != nil {
