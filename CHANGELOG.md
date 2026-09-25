@@ -8,6 +8,19 @@ day the tag was published.
 
 ### Fixed
 
+- A reading that landed while its quarter-hour was being recomputed had its
+  mark swallowed by the pass that had already claimed the bucket, so the
+  reading never reached the fifteen-minute series — a relay draining its spool
+  lost the readings it was carrying.
+- A second cancel of the same job was recorded and never delivered, and the
+  panel then failed the job on its own timeout without ever asking the host.
+  The cancel acknowledgement is also fenced now, like every other settlement.
+- `schema_migrations` records the digest of what was applied, so a migration
+  edited after it ran somewhere cannot describe two schemas under one label.
+- A restore target was checked by name and then resolved again by the tool
+  that unpacks as root, so anybody who could write a directory on the path
+  could point it elsewhere in between.
+
 - A relay renewal whose answer was lost left the relay holding a certificate
   the panel no longer knew, and the renewal that could have fixed it refuses an
   unknown certificate — so a whole site stayed down until somebody enrolled the
