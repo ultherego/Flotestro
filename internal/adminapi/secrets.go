@@ -89,21 +89,40 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	secret, err := s.secrets.Create(r.Context(), request.Name, request.Description,
-		[]byte(request.Value), principal.Subject)
+	tx, err := s.pool.Begin(r.Context())
 	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	if _, err := s.secrets.CreateTx(r.Context(), tx, request.Name, request.Description,
+		[]byte(request.Value), principal.Subject); err != nil {
 		problem(w, http.StatusBadRequest, "invalid_secret", err.Error())
 		return
 	}
-	// The audit log records the creation and the size - never the value.
-	s.audit.Record(r.Context(), audit.Event{
+	// The entry records the creation and the size - never the value. It is also
+	// the only record that this value ever entered the store, because the value
+	// is never readable again, so it commits with the secret or not at all.
+	if err := s.audit.RecordTx(r.Context(), tx, audit.Event{
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
-		Action: "secret.create", TargetType: "secret", TargetID: secret.Name,
+		Action: "secret.create", TargetType: "secret", TargetID: request.Name,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		Detail: withStepUp(map[string]any{
-			"version": secret.CurrentVersion, "size_bytes": len(request.Value),
+			"version": 1, "size_bytes": len(request.Value),
 		}, evidence),
-	})
+	}); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		s.fail(w, err)
+		return
+	}
+	secret, err := s.secrets.Secret(r.Context(), request.Name)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	writeJSON(w, http.StatusCreated, secret)
 }
 
@@ -126,7 +145,14 @@ func (s *Server) handleRotateSecret(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	secret, err := s.secrets.Rotate(r.Context(), r.PathValue("name"), []byte(request.Value), principal.Subject)
+	name := r.PathValue("name")
+	tx, err := s.pool.Begin(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	version, err := s.secrets.RotateTx(r.Context(), tx, name, []byte(request.Value), principal.Subject)
 	switch {
 	case errors.Is(err, secrets.ErrNotFound):
 		problem(w, http.StatusNotFound, "secret_not_found", "no such secret")
@@ -140,14 +166,26 @@ func (s *Server) handleRotateSecret(w http.ResponseWriter, r *http.Request) {
 	}
 	// The previous versions stay: a host with a lease on an earlier version
 	// is meant to get it also after the rotation.
-	s.audit.Record(r.Context(), audit.Event{
+	if err := s.audit.RecordTx(r.Context(), tx, audit.Event{
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
-		Action: "secret.rotate", TargetType: "secret", TargetID: secret.Name,
+		Action: "secret.rotate", TargetType: "secret", TargetID: name,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		Detail: withStepUp(map[string]any{
-			"version": secret.CurrentVersion, "size_bytes": len(request.Value),
+			"version": version, "size_bytes": len(request.Value),
 		}, evidence),
-	})
+	}); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		s.fail(w, err)
+		return
+	}
+	secret, err := s.secrets.Secret(r.Context(), name)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, secret)
 }
 
@@ -169,7 +207,13 @@ func (s *Server) handleRetireSecret(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := s.secrets.Retire(r.Context(), name); err != nil {
+	tx, err := s.pool.Begin(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	if err := s.secrets.RetireTx(r.Context(), tx, name); err != nil {
 		if errors.Is(err, secrets.ErrNotFound) {
 			problem(w, http.StatusNotFound, "secret_not_found", "no such secret")
 			return
@@ -177,12 +221,19 @@ func (s *Server) handleRetireSecret(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	s.audit.Record(r.Context(), audit.Event{
+	if err := s.audit.RecordTx(r.Context(), tx, audit.Event{
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
 		Action: "secret.retire", TargetType: "secret", TargetID: name,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		Detail: withStepUp(map[string]any{}, evidence),
-	})
+	}); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		s.fail(w, err)
+		return
+	}
 	secret, err := s.secrets.Secret(r.Context(), name)
 	if err != nil {
 		s.fail(w, err)
@@ -214,7 +265,13 @@ func (s *Server) handleDestroySecretVersion(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	if err := s.secrets.Destroy(r.Context(), name, version); err != nil {
+	tx, err := s.pool.Begin(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	if err := s.secrets.DestroyTx(r.Context(), tx, name, version); err != nil {
 		if errors.Is(err, secrets.ErrNotFound) {
 			problem(w, http.StatusNotFound, "version_not_found", "no such secret version")
 			return
@@ -222,12 +279,21 @@ func (s *Server) handleDestroySecretVersion(w http.ResponseWriter, r *http.Reque
 		s.fail(w, err)
 		return
 	}
-	s.audit.Record(r.Context(), audit.Event{
+	// The overwrite cannot be undone, so the entry naming who ordered it is the
+	// last evidence there is: it commits with the overwrite.
+	if err := s.audit.RecordTx(r.Context(), tx, audit.Event{
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
 		Action: "secret.destroy", TargetType: "secret", TargetID: name,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		Detail: withStepUp(map[string]any{"version": version}, evidence),
-	})
+	}); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		s.fail(w, err)
+		return
+	}
 	secret, err := s.secrets.Secret(r.Context(), name)
 	if err != nil {
 		s.fail(w, err)

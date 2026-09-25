@@ -4248,7 +4248,8 @@ func TestTrailConsumerMovesOnlyAfterDelivery(t *testing.T) {
 	var poison int64
 	if err := pool.QueryRow(ctx, `
 		insert into outbox_events (aggregate_type, aggregate_id, event_type, payload)
-		values ('host', 'consumer-poison', 'host.refused', '{"reason":"the receiver will not take it"}'::jsonb)
+		values ('host', gen_random_uuid(), 'host.refused',
+		        '{"reason":"the receiver will not take it"}'::jsonb)
 		returning id`).Scan(&poison); err != nil {
 		t.Fatalf("writing the refused event: %v", err)
 	}

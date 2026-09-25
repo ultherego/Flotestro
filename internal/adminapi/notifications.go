@@ -272,17 +272,40 @@ func (s *Server) handleDeleteNotificationChannel(w http.ResponseWriter, r *http.
 	if s.channelProblem(w, err) {
 		return
 	}
-	if err := s.notifications.Delete(r.Context(), id); s.channelProblem(w, err) {
+	tx, err := s.pool.Begin(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	retire, err := s.notifications.DeleteTx(r.Context(), tx, id)
+	if s.channelProblem(w, err) {
 		return
 	}
 	detail := channelDetail(*channel)
 	detail["delete_reason"] = reason
-	s.audit.Record(r.Context(), audit.Event{
+	if err := s.audit.RecordTx(r.Context(), tx, audit.Event{
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
 		Action: "notification.channel.delete", TargetType: "notification_channel", TargetID: id,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		Detail: detail,
-	})
+	}); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		s.fail(w, err)
+		return
+	}
+	// The secret store joins no transaction, so the retirement follows the
+	// commit: a failure here leaves a secret nobody issues, not a channel
+	// nobody recorded.
+	if retire {
+		if err := s.notifications.RetireChannelSecret(r.Context(), id); err != nil {
+			s.fail(w, err)
+			return
+		}
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

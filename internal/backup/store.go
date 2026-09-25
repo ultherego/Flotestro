@@ -72,6 +72,7 @@ type Run struct {
 // executor allows calling the same queries inside and outside a transaction.
 type executor interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
 // Store provides access to the backup tables.
@@ -137,8 +138,10 @@ func readDefinition(rows pgx.Rows) (Definition, error) {
 	return definition, nil
 }
 
-// Set creates or updates a definition.
-func (s *Store) Set(ctx context.Context, definition Definition) (Definition, error) {
+// Set creates or updates a definition inside the transaction of the caller, so
+// that the definition and the audit entry naming who changed it commit
+// together.
+func (s *Store) Set(ctx context.Context, q executor, definition Definition) (Definition, error) {
 	// An empty list and a missing list mean the same thing in the database - the
 	// column does not accept an empty value, and a definition without exclusions
 	// is an ordinary definition.
@@ -171,7 +174,7 @@ func (s *Store) Set(ctx context.Context, definition Definition) (Definition, err
 			env_secrets = excluded.env_secrets, note = excluded.note,
 			updated_by = excluded.updated_by, updated_at = now()
 		returning id::text, created_at, updated_at`
-	err = s.pool.QueryRow(ctx, query, definition.HostID, definition.Name, definition.Tool,
+	err = q.QueryRow(ctx, query, definition.HostID, definition.Name, definition.Tool,
 		definition.Repository, definition.Paths, definition.Excludes, definition.Tags,
 		definition.KeepLast, definition.KeepDaily, definition.KeepWeekly, definition.KeepMonthly,
 		definition.Prune, definition.Runbook, definition.Initialize,
@@ -182,8 +185,8 @@ func (s *Store) Set(ctx context.Context, definition Definition) (Definition, err
 }
 
 // Delete removes a definition. The history of runs stays.
-func (s *Store) Delete(ctx context.Context, hostID, name string) error {
-	tag, err := s.pool.Exec(ctx,
+func (s *Store) Delete(ctx context.Context, q executor, hostID, name string) error {
+	tag, err := q.Exec(ctx,
 		`delete from backup_definitions where host_id = $1 and name = $2`, hostID, name)
 	if err != nil {
 		return err
@@ -208,7 +211,7 @@ func (s *Store) RecordRun(ctx context.Context, q executor, run Run) error {
 	return err
 }
 
-const kolumnyPrzebiegu = `host_id::text, definition, kind, coalesce(job_id::text, ''), outcome,
+const runColumns = `host_id::text, definition, kind, coalesce(job_id::text, ''), outcome,
 	snapshot_id, bytes_added, total_bytes, files_new, duration_seconds, snapshots,
 	repository_size, last_success_at, message, started_by, recorded_at`
 
@@ -217,7 +220,7 @@ func (s *Store) Runs(ctx context.Context, hostID, definition string, limit int) 
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	rows, err := s.pool.Query(ctx, `select `+kolumnyPrzebiegu+`
+	rows, err := s.pool.Query(ctx, `select `+runColumns+`
 		from backup_runs where host_id = $1 and ($2 = '' or definition = $2)
 		order by recorded_at desc limit $3`, hostID, definition, limit)
 	if err != nil {
@@ -237,7 +240,7 @@ func (s *Store) Runs(ctx context.Context, hostID, definition string, limit int) 
 
 // Latest returns the newest run of every kind for every definition.
 func (s *Store) Latest(ctx context.Context, hostID string) (map[string]map[string]Run, error) {
-	rows, err := s.pool.Query(ctx, `select distinct on (definition, kind) `+kolumnyPrzebiegu+`
+	rows, err := s.pool.Query(ctx, `select distinct on (definition, kind) `+runColumns+`
 		from backup_runs where host_id = $1 and outcome = 'succeeded'
 		order by definition, kind, recorded_at desc`, hostID)
 	if err != nil {
@@ -264,7 +267,7 @@ func (s *Store) LatestInFleet(ctx context.Context, hostIDs []string, kind string
 	if len(hostIDs) == 0 {
 		return nil, nil
 	}
-	rows, err := s.pool.Query(ctx, `select distinct on (host_id, definition) `+kolumnyPrzebiegu+`
+	rows, err := s.pool.Query(ctx, `select distinct on (host_id, definition) `+runColumns+`
 		from backup_runs where host_id = any($1) and kind = $2 and outcome = 'succeeded'
 		order by host_id, definition, recorded_at desc`, hostIDs, kind)
 	if err != nil {

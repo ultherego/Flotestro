@@ -429,29 +429,59 @@ func (s *Store) Update(ctx context.Context, id string, channel Channel) (*Channe
 	return s.Get(ctx, id)
 }
 
-// Delete removes a channel and, through the schema, its queue; the
-// secret it held is retired.
-func (s *Store) Delete(ctx context.Context, id string) error {
+// DeleteTx removes the channel row inside the transaction of the caller and
+// says whether the secret it held is now to be retired. The retirement is not
+// part of the transaction: the secret store joins none, as Create says, so the
+// caller does it after the commit.
+func (s *Store) DeleteTx(ctx context.Context, tx pgx.Tx, id string) (bool, error) {
 	if _, err := uuid.Parse(id); err != nil {
-		return ErrNotFound
+		return false, ErrNotFound
 	}
 	existing, err := s.get(ctx, id)
 	if err != nil {
+		return false, err
+	}
+	tag, err := tx.Exec(ctx, `delete from notification_channels where id = $1`, id)
+	if err != nil {
+		return false, err
+	}
+	if tag.RowsAffected() == 0 {
+		return false, ErrNotFound
+	}
+	return existing.Kind != KindEmail && existing.secretRef != "" && s.secrets != nil, nil
+}
+
+// RetireChannelSecret retires the secret a deleted channel held. A failure here
+// leaves a secret nobody issues rather than a channel nobody recorded.
+func (s *Store) RetireChannelSecret(ctx context.Context, id string) error {
+	if s.secrets == nil {
+		return nil
+	}
+	if err := s.secrets.Retire(ctx, ChannelSecretName(id)); err != nil && !errors.Is(err, secrets.ErrNotFound) {
 		return err
 	}
-	tag, err := s.pool.Exec(ctx, `delete from notification_channels where id = $1`, id)
+	return nil
+}
+
+// Delete removes a channel and, through the schema, its queue; the
+// secret it held is retired.
+func (s *Store) Delete(ctx context.Context, id string) error {
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
+	defer func() { _ = tx.Rollback(ctx) }()
+	retire, err := s.DeleteTx(ctx, tx, id)
+	if err != nil {
+		return err
 	}
-	if existing.Kind != KindEmail && existing.secretRef != "" && s.secrets != nil {
-		if err := s.secrets.Retire(ctx, ChannelSecretName(id)); err != nil && !errors.Is(err, secrets.ErrNotFound) {
-			return err
-		}
+	if err := tx.Commit(ctx); err != nil {
+		return err
 	}
-	return nil
+	if !retire {
+		return nil
+	}
+	return s.RetireChannelSecret(ctx, id)
 }
 
 // checkSecret refuses a mail configuration whose password names a secret the

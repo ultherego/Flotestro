@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -25,28 +26,41 @@ func NewStore(pool *pgxpool.Pool, keys KeyProvider) *Store {
 // Pool exposes the pool for transactions combined with other writes.
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
-// Create creates a secret together with its first version.
-func (s *Store) Create(ctx context.Context, name, description string, value []byte, author string) (*Secret, error) {
+// executor lets a write run through the pool or inside the transaction of the
+// caller, so that a change and the audit entry about it commit together.
+type executor interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// CreateTx creates a secret and its first version inside the transaction of the
+// caller and returns the identifier. The metadata is read after the commit,
+// because a read through the pool would not see rows that are not there yet.
+func (s *Store) CreateTx(ctx context.Context, q executor,
+	name, description string, value []byte, author string) (string, error) {
 	if err := ValidateName(name); err != nil {
-		return nil, err
+		return "", err
 	}
 	if err := ValidateValue(value); err != nil {
-		return nil, err
+		return "", err
 	}
+	var id string
+	if err := q.QueryRow(ctx, `
+		insert into secrets (name, description, created_by) values ($1, $2, $3)
+		returning id`, name, nullable(description), author).Scan(&id); err != nil {
+		return "", err
+	}
+	return id, s.saveVersion(ctx, q, id, 1, value, author)
+}
 
+// Create creates a secret together with its first version.
+func (s *Store) Create(ctx context.Context, name, description string, value []byte, author string) (*Secret, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-
-	var id string
-	if err := tx.QueryRow(ctx, `
-		insert into secrets (name, description, created_by) values ($1, $2, $3)
-		returning id`, name, nullable(description), author).Scan(&id); err != nil {
-		return nil, err
-	}
-	if err := s.saveVersion(ctx, tx, id, 1, value, author); err != nil {
+	if _, err := s.CreateTx(ctx, tx, name, description, value, author); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -55,26 +69,42 @@ func (s *Store) Create(ctx context.Context, name, description string, value []by
 	return s.Secret(ctx, name)
 }
 
+// RotateTx adds a version inside the transaction of the caller and returns the
+// number it was given. The current version is read under a row lock: two
+// rotations at once used to read the same number, compute the same next one and
+// leave one of them refused by the key of secret_versions.
+func (s *Store) RotateTx(ctx context.Context, q executor,
+	name string, value []byte, author string) (int, error) {
+	if err := ValidateValue(value); err != nil {
+		return 0, err
+	}
+	var id string
+	var current int
+	var retired *time.Time
+	err := q.QueryRow(ctx, `
+		select id, current_version, retired_at from secrets where name = $1 for update`, name).
+		Scan(&id, &current, &retired)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, ErrNotFound
+	}
+	if err != nil {
+		return 0, err
+	}
+	if retired != nil {
+		return 0, ErrRetired
+	}
+	version := current + 1
+	return version, s.saveVersion(ctx, q, id, version, value, author)
+}
+
 // Rotate adds a new version and makes it the current one.
 func (s *Store) Rotate(ctx context.Context, name string, value []byte, author string) (*Secret, error) {
-	if err := ValidateValue(value); err != nil {
-		return nil, err
-	}
-	secret, err := s.Secret(ctx, name)
-	if err != nil {
-		return nil, err
-	}
-	if secret.RetiredAt != nil {
-		return nil, ErrRetired
-	}
-
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-
-	if err := s.saveVersion(ctx, tx, secret.ID, secret.CurrentVersion+1, value, author); err != nil {
+	if _, err := s.RotateTx(ctx, tx, name, value, author); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -84,7 +114,7 @@ func (s *Store) Rotate(ctx context.Context, name string, value []byte, author st
 }
 
 // saveVersion records the encrypted value and moves the current version.
-func (s *Store) saveVersion(ctx context.Context, tx pgx.Tx, secretID string,
+func (s *Store) saveVersion(ctx context.Context, tx executor, secretID string,
 	version int, value []byte, author string) error {
 	envelope, err := Seal(ctx, s.keys, value, AssociatedData(secretID, version, kindSecret, EnvelopeVersion))
 	if err != nil {
@@ -170,9 +200,12 @@ func (s *Store) versions(ctx context.Context, secretID string) ([]Version, error
 	return versions, rows.Err()
 }
 
-// Retire closes a secret: the metadata stays, the issuing ends.
-func (s *Store) Retire(ctx context.Context, name string) error {
-	tag, err := s.pool.Exec(ctx, `
+// RetireTx closes a secret inside the transaction of the caller. The two
+// statements belong in one: they used to run separately on the pool, so a
+// failure between them left a retired secret whose leases were still live -
+// a secret nobody may be issued that hosts could still redeem.
+func (s *Store) RetireTx(ctx context.Context, q executor, name string) error {
+	tag, err := q.Exec(ctx, `
 		update secrets set retired_at = now(), updated_at = now()
 		 where name = $1 and retired_at is null`, name)
 	if err != nil {
@@ -182,17 +215,37 @@ func (s *Store) Retire(ctx context.Context, name string) error {
 		return ErrNotFound
 	}
 	// The leases issued earlier lose their validity together with the secret.
-	_, err = s.pool.Exec(ctx, `
+	_, err = q.Exec(ctx, `
 		update secret_leases set revoked_at = now()
 		 where secret_id = (select id from secrets where name = $1)
 		   and redeemed_at is null and revoked_at is null`, name)
 	return err
 }
 
+// Retire closes a secret: the metadata stays, the issuing ends.
+func (s *Store) Retire(ctx context.Context, name string) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := s.RetireTx(ctx, tx, name); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 // Destroy deletes the content of one version, leaving a trace that it
 // existed.
 func (s *Store) Destroy(ctx context.Context, name string, version int) error {
-	tag, err := s.pool.Exec(ctx, `
+	return s.DestroyTx(ctx, s.pool, name, version)
+}
+
+// DestroyTx does the same inside the transaction of the caller: the overwrite
+// cannot be undone, so the entry naming who ordered it belongs in the same
+// commit.
+func (s *Store) DestroyTx(ctx context.Context, q executor, name string, version int) error {
+	tag, err := q.Exec(ctx, `
 		update secret_versions
 		   set ciphertext = '\x'::bytea, nonce = '\x'::bytea, wrapped_dek = null, destroyed_at = now()
 		 where secret_id = (select id from secrets where name = $1)

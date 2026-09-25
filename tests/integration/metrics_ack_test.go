@@ -162,7 +162,12 @@ func TestALateSampleIsRolledUpIntoItsOwnQuarter(t *testing.T) {
 	// than this test may take, so the test drives the panel's own store itself.
 	store := monitoring.NewStore(pool, slog.New(slog.NewTextHandler(io.Discard, nil)), monitoring.Options{})
 
-	taken := time.Now().UTC().Add(-40 * time.Minute).Truncate(time.Second)
+	// The late reading arrives a minute after the first and has to land in the
+	// same quarter. The moment is put at the start of a quarter rather than
+	// wherever the clock happens to be: a first reading in the last minute of
+	// its quarter pushed the second into the next one, and the test then looked
+	// for it in the quarter it never reached.
+	taken := quarterOf(time.Now().UTC().Add(-40 * time.Minute)).Add(time.Minute)
 	sendSample := func(sequence uint64, at time.Time) {
 		t.Helper()
 		if err := session.stream.Send(&agentv1.AgentMessage{

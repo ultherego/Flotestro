@@ -235,7 +235,15 @@ func (s *Server) handleSetBackupDefinition(w http.ResponseWriter, r *http.Reques
 	if !s.requireBackupDefinitionsMatch(w, r, hostID) {
 		return
 	}
-	saved, err := s.backups.Set(r.Context(), backupstore.Definition{
+	// The definition and the entry naming who changed it go in together: a
+	// definition that commits without its trail is a change nobody made.
+	tx, err := s.pool.Begin(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	saved, err := s.backups.Set(r.Context(), tx, backupstore.Definition{
 		HostID: hostID, Name: request.Name, Tool: request.Tool,
 		Repository: request.Repository, Paths: request.Paths,
 		Excludes: request.Excludes, Tags: request.Tags,
@@ -249,7 +257,7 @@ func (s *Server) handleSetBackupDefinition(w http.ResponseWriter, r *http.Reques
 		s.fail(w, err)
 		return
 	}
-	s.audit.Record(r.Context(), audit.Event{
+	if err := s.audit.RecordTx(r.Context(), tx, audit.Event{
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
 		Action: "backup.definition.set", TargetType: "host", TargetID: hostID,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
@@ -257,7 +265,14 @@ func (s *Server) handleSetBackupDefinition(w http.ResponseWriter, r *http.Reques
 			"name": saved.Name, "tool": saved.Tool,
 			"repository": saved.Repository, "password_secret": saved.PasswordSecret,
 		},
-	})
+	}); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		s.fail(w, err)
+		return
+	}
 	s.setBackupDefinitionsTag(w, r, hostID)
 	writeJSON(w, http.StatusOK, saved)
 }
@@ -281,7 +296,13 @@ func (s *Server) handleDeleteBackupDefinition(w http.ResponseWriter, r *http.Req
 	if !s.requireBackupDefinitionsMatch(w, r, hostID) {
 		return
 	}
-	err := s.backups.Delete(r.Context(), hostID, name)
+	tx, err := s.pool.Begin(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	err = s.backups.Delete(r.Context(), tx, hostID, name)
 	if errors.Is(err, backupstore.ErrNotFound) {
 		problem(w, http.StatusNotFound, "definition_not_found", "no such backup definition")
 		return
@@ -290,12 +311,19 @@ func (s *Server) handleDeleteBackupDefinition(w http.ResponseWriter, r *http.Req
 		s.fail(w, err)
 		return
 	}
-	s.audit.Record(r.Context(), audit.Event{
+	if err := s.audit.RecordTx(r.Context(), tx, audit.Event{
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
 		Action: "backup.definition.remove", TargetType: "host", TargetID: hostID,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		Detail: map[string]any{"name": name},
-	})
+	}); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		s.fail(w, err)
+		return
+	}
 	s.setBackupDefinitionsTag(w, r, hostID)
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -162,6 +163,26 @@ func TestRotationKeepsTheOlderVersions(t *testing.T) {
 	}
 	if afterDestruction.CurrentVersion != 2 {
 		t.Errorf("destroying the old version moved the current version: %d", afterDestruction.CurrentVersion)
+	}
+
+	// Every change to a secret is written into the trail in the same transaction
+	// as the change itself. Nothing used to check the trail was written at all,
+	// and for a store whose values can never be read back the trail is the only
+	// record that anything happened.
+	h.do(http.MethodPost, "/api/v1/secrets/"+secret.Name+"/retire",
+		map[string]any{"reason": secretReason}, nil, http.StatusOK)
+	ctx := context.Background()
+	for _, action := range []string{"secret.create", "secret.rotate", "secret.destroy", "secret.retire"} {
+		var entries int
+		if err := h.database(ctx).QueryRow(ctx, `
+			select count(*) from audit_events
+			 where action = $1 and target_type = 'secret' and target_id = $2`,
+			action, secret.Name).Scan(&entries); err != nil {
+			t.Fatalf("reading the trail of %s: %v", action, err)
+		}
+		if entries == 0 {
+			t.Errorf("%s left no entry on the trail of %s", action, secret.Name)
+		}
 	}
 }
 
