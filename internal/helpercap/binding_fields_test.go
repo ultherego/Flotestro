@@ -114,3 +114,79 @@ func TestTheCapabilityBindsTheKeysAndNotOnlyTheAccount(t *testing.T) {
 		t.Error("another shell on the approved account was accepted")
 	}
 }
+
+// One capability for one process used to authorise signalling any process with
+// any signal: the request carried the numbers and nothing compared them.
+func TestTheCapabilityBindsWhichProcessAndWhichSignal(t *testing.T) {
+	approved := &opspec.ProcessSignalPayload{PID: 4242, Signal: "TERM", ExpectedStart: 99}
+	payload := opspec.Payload{ProcessSignal: approved}
+	honest := &helperv1.HelperRequest{Action: &helperv1.HelperRequest_ProcessSignal{
+		ProcessSignal: &helperv1.ProcessSignalRequest{
+			Pid: 4242, Signal: "TERM", ExpectedStartTicks: 99,
+		},
+	}}
+	if err := CheckBinding(honest, &BoundPayload{Payload: payload}); err != nil {
+		t.Fatalf("the request the panel approved was refused: %v", err)
+	}
+	for _, change := range []struct {
+		name    string
+		request *helperv1.ProcessSignalRequest
+	}{
+		{"another process", &helperv1.ProcessSignalRequest{Pid: 1, Signal: "TERM", ExpectedStartTicks: 99}},
+		{"another signal", &helperv1.ProcessSignalRequest{Pid: 4242, Signal: "KILL", ExpectedStartTicks: 99}},
+		{"another incarnation", &helperv1.ProcessSignalRequest{Pid: 4242, Signal: "TERM", ExpectedStartTicks: 7}},
+	} {
+		forged := &helperv1.HelperRequest{Action: &helperv1.HelperRequest_ProcessSignal{
+			ProcessSignal: change.request,
+		}}
+		if err := CheckBinding(forged, &BoundPayload{Payload: payload}); err == nil {
+			t.Errorf("%s was accepted under the approved capability", change.name)
+		}
+	}
+}
+
+// The same for the host's own name, the declared objects, the repositories, the
+// backup definitions and a certificate deployment: each names one thing, and
+// the capability now says which.
+func TestTheCapabilityBindsTheTargetOfTheRemainingOrders(t *testing.T) {
+	cases := []struct {
+		name    string
+		payload opspec.Payload
+		honest  *helperv1.HelperRequest
+		forged  *helperv1.HelperRequest
+	}{
+		{
+			name:    "hostname",
+			payload: opspec.Payload{Hostname: &opspec.HostnamePayload{Hostname: "web-01"}},
+			honest: &helperv1.HelperRequest{Action: &helperv1.HelperRequest_Hostname{
+				Hostname: &helperv1.HostnameRequest{Hostname: "web-01"}}},
+			forged: &helperv1.HelperRequest{Action: &helperv1.HelperRequest_Hostname{
+				Hostname: &helperv1.HostnameRequest{Hostname: "db-01"}}},
+		},
+		{
+			name:    "repository",
+			payload: opspec.Payload{Repository: &opspec.RepositoryPayload{ID: "vendor", URL: "https://vendor.example/deb"}},
+			honest: &helperv1.HelperRequest{Action: &helperv1.HelperRequest_Repository{
+				Repository: &helperv1.RepositoryRequest{Id: "vendor", Url: "https://vendor.example/deb"}}},
+			forged: &helperv1.HelperRequest{Action: &helperv1.HelperRequest_Repository{
+				Repository: &helperv1.RepositoryRequest{Id: "vendor", Url: "https://elsewhere.example/deb"}}},
+		},
+		{
+			name:    "backup definition",
+			payload: opspec.Payload{Backup: &opspec.BackupPayload{ID: "nightly"}},
+			honest: &helperv1.HelperRequest{Action: &helperv1.HelperRequest_Backup{
+				Backup: &helperv1.BackupRequest{Id: "nightly"}}},
+			forged: &helperv1.HelperRequest{Action: &helperv1.HelperRequest_Backup{
+				Backup: &helperv1.BackupRequest{Id: "archive"}}},
+		},
+	}
+	for _, test := range cases {
+		bound := &BoundPayload{Payload: test.payload}
+		if err := CheckBinding(test.honest, bound); err != nil {
+			t.Errorf("%s: the approved request was refused: %v", test.name, err)
+		}
+		if err := CheckBinding(test.forged, bound); err == nil {
+			t.Errorf("%s: another target was accepted under the approved capability", test.name)
+		}
+	}
+}

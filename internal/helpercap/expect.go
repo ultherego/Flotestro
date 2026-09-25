@@ -451,6 +451,76 @@ func CheckBinding(request *helperv1.HelperRequest, bound *BoundPayload) error {
 		}
 		return sameAccount(action.LocalUserAction, payload.LocalUser)
 
+	case *helperv1.HelperRequest_ProcessSignal:
+		if payload.ProcessSignal == nil {
+			return binding("the bound payload describes no process")
+		}
+		// One capability used to signal any process with any signal: the
+		// request's own numbers decided, and nothing compared them.
+		if request := action.ProcessSignal; request.GetPid() != payload.ProcessSignal.PID ||
+			request.GetSignal() != payload.ProcessSignal.Signal ||
+			request.GetExpectedStartTicks() != payload.ProcessSignal.ExpectedStart {
+			return binding(fmt.Sprintf(
+				"the request signals the process %d with %s, the bound payload %d with %s",
+				request.GetPid(), request.GetSignal(),
+				payload.ProcessSignal.PID, payload.ProcessSignal.Signal))
+		}
+		return nil
+
+	case *helperv1.HelperRequest_Hostname:
+		if payload.Hostname == nil {
+			return binding("the bound payload describes no hostname")
+		}
+		if err := same("hostname", action.Hostname.GetHostname(), payload.Hostname.Hostname); err != nil {
+			return err
+		}
+		return same("pretty hostname", action.Hostname.GetPretty(), payload.Hostname.Pretty)
+
+	case *helperv1.HelperRequest_DockerEnsure:
+		if payload.DockerEnsure == nil {
+			return binding("the bound payload describes no declared object")
+		}
+		// The panel describes an object it creates and names one it removes, so
+		// the kind and the name come from whichever of the two the payload has.
+		if err := same("object kind", action.DockerEnsure.GetKind(),
+			payload.DockerEnsure.ObjectKind()); err != nil {
+			return err
+		}
+		if err := same("object name", action.DockerEnsure.GetName(),
+			payload.DockerEnsure.ObjectName()); err != nil {
+			return err
+		}
+		return same("plan digest", action.DockerEnsure.GetPlanDigest(), payload.DockerEnsure.PlanDigest)
+
+	case *helperv1.HelperRequest_Repository:
+		if payload.Repository == nil {
+			return binding("the bound payload describes no repository")
+		}
+		if err := same("repository", action.Repository.GetId(), payload.Repository.ID); err != nil {
+			return err
+		}
+		return same("repository address", action.Repository.GetUrl(), payload.Repository.URL)
+
+	case *helperv1.HelperRequest_Backup:
+		if payload.Backup == nil {
+			return binding("the bound payload describes no backup definition")
+		}
+		return same("backup definition", action.Backup.GetId(), payload.Backup.ID)
+
+	case *helperv1.HelperRequest_Certificate:
+		if action.Certificate.GetOperation() != helperv1.CertificateRequest_OPERATION_DEPLOY {
+			// A renewal and a trust change name an anchor rather than a path;
+			// they have no rule yet and are listed as such.
+			return nil
+		}
+		if payload.Certificate == nil {
+			return binding("the bound payload describes no certificate")
+		}
+		if err := same("certificate path", action.Certificate.GetPath(), payload.Certificate.Path); err != nil {
+			return err
+		}
+		return same("plan digest", action.Certificate.GetPlanHash(), payload.Certificate.PlanHash)
+
 	case *helperv1.HelperRequest_Storage:
 		// A destructive storage request is bound to the device and to its
 		// stable identity: a capability for one disk must not format another.
