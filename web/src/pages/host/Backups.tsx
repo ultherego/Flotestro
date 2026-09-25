@@ -14,7 +14,7 @@ import { useConfirm } from "../../components/Modal";
 import { useToast } from "../../components/Toast";
 import { useT } from "../../i18n";
 
-type Definition = {
+export type Definition = {
   id: string;
   name: string;
   tool: string;
@@ -132,6 +132,9 @@ export function Backups() {
   const [intent, setIntent] = useState<Intent | null>(null);
   const [message, setMessage] = useState("");
   const [form, setForm] = useState(false);
+  // The definition being changed. The panel writes the whole definition, so a
+  // form that starts empty is a form that clears what it does not show.
+  const [editing, setEditing] = useState<Definition | null>(null);
   const [selected, setSelected] = useState("");
   const [planJob, setPlanJob] = useState("");
   const confirm = useConfirm();
@@ -195,6 +198,7 @@ export function Backups() {
     onSuccess: (definition) => {
       setMessage(t("Definition {name} saved. Plan it to read the repository.", { name: definition.name }));
       setForm(false);
+      setEditing(null);
       queryClient.invalidateQueries({ queryKey: ["backups", host.id] });
     },
     onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
@@ -293,7 +297,7 @@ export function Backups() {
         title={t("Backups")}
         description={t("Backups run with the tools this host already has. The data never passes through the panel — the host talks to the repository directly, and what you see here is metadata: when a copy last succeeded, how much it takes and whether anyone has ever read it back.")}
         actions={
-          <button onClick={() => setForm((open) => !open)}>
+          <button onClick={() => { setEditing(null); setForm((open) => !open); }}>
             {form ? t("Cancel") : t("Define a backup")}
           </button>
         }
@@ -349,7 +353,14 @@ export function Backups() {
         )}
       </Section>
 
-      {form && <DefinitionForm runbooks={runbooks} onSave={(body) => save.mutate(body)} />}
+      {form && (
+        <DefinitionForm
+          key={editing?.name ?? "new"}
+          runbooks={runbooks}
+          existing={editing}
+          onSave={(body) => save.mutate(body)}
+        />
+      )}
 
       <Section title={t("Backups")} count={definitions.length} span={12} flush>
         {!definitions.length ? (
@@ -371,7 +382,11 @@ export function Backups() {
                     <button
                       type="button"
                       className="hm-link hm-primary"
-                      onClick={() => setSelected(selected === item.name ? "" : item.name)}
+                      onClick={() => {
+                        // The plan belongs to the definition it was read for.
+                        setPlanJob("");
+                        setSelected(selected === item.name ? "" : item.name);
+                      }}
                     >
                       {item.name}
                     </button>
@@ -465,6 +480,12 @@ export function Backups() {
                           {t("Verify")}
                         </button>
                       </ActionGuard>
+                      <button
+                        className="secondary"
+                        onClick={() => { setEditing(item); setForm(true); }}
+                      >
+                        {t("Edit")}
+                      </button>
                       <button className="hm-danger" onClick={() => remove.mutate(item.name)}>
                         {t("Forget")}
                       </button>
@@ -576,23 +597,32 @@ export function Backups() {
   );
 }
 
-/** The backup definition form. The repository password is named by a secret. */
-function DefinitionForm({
-  runbooks, onSave,
+/** The backup definition form. The repository password is named by a secret.
+    An edit starts from the definition as it stands: the panel writes the whole
+    definition back, so a field the form did not carry used to be cleared. */
+export function DefinitionForm({
+  runbooks, existing, onSave,
 }: {
   runbooks: string[];
+  existing: Definition | null;
   onSave: (body: Record<string, unknown>) => void;
 }) {
   const t = useT();
-  const [name, setName] = useState("");
-  const [tool, setTool] = useState("restic");
-  const [repository, setRepository] = useState("");
-  const [paths, setPaths] = useState("");
-  const [excludes, setExcludes] = useState("");
-  const [secret, setSecret] = useState("");
-  const [runbook, setRunbook] = useState("");
-  const [keepLast, setKeepLast] = useState("7");
-  const [initialize, setInitialize] = useState(true);
+  const [name, setName] = useState(existing?.name ?? "");
+  const [tool, setTool] = useState(existing?.tool ?? "restic");
+  const [repository, setRepository] = useState(existing?.repository ?? "");
+  const [paths, setPaths] = useState((existing?.paths ?? []).join(" "));
+  const [excludes, setExcludes] = useState((existing?.excludes ?? []).join(" "));
+  const [tags, setTags] = useState((existing?.tags ?? []).join(" "));
+  const [secret, setSecret] = useState(existing?.password_secret ?? "");
+  const [runbook, setRunbook] = useState(existing?.runbook ?? "");
+  const [keepLast, setKeepLast] = useState(String(existing?.keep_last ?? 7));
+  const [keepDaily, setKeepDaily] = useState(String(existing?.keep_daily ?? 0));
+  const [keepWeekly, setKeepWeekly] = useState(String(existing?.keep_weekly ?? 0));
+  const [keepMonthly, setKeepMonthly] = useState(String(existing?.keep_monthly ?? 0));
+  const [prune, setPrune] = useState(existing?.prune ?? false);
+  const [note, setNote] = useState(existing?.note ?? "");
+  const [initialize, setInitialize] = useState(existing ? existing.initialize ?? false : true);
 
   const byRunbook = tool === "runbook";
   const ready = name !== "" && (byRunbook ? runbook !== "" : repository !== "" && paths !== "");
@@ -600,13 +630,18 @@ function DefinitionForm({
   return (
     <Section
       title={t("Backup definition")}
-      description={t("The repository password is named, not pasted: the host fetches its value from the secret store once, while the backup runs, and passes it to the tool through the environment — never as a command-line argument, which every user on the host can read.")}
+      description={
+        existing
+          ? t("What stands here is the definition as it is now. Saving writes all of it back, so a field cleared here is cleared on the host as well.")
+          : t("The repository password is named, not pasted: the host fetches its value from the secret store once, while the backup runs, and passes it to the tool through the environment — never as a command-line argument, which every user on the host can read.")
+      }
       span={12}
     >
       <Form>
         <Fields>
           <Field label={t("Name")}>
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="nightly" />
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="nightly"
+                   disabled={existing !== null} />
           </Field>
           <Field label={t("Tool")} narrow>
             <select value={tool} onChange={(e) => setTool(e.target.value)}>
@@ -635,31 +670,56 @@ function DefinitionForm({
           <Field label={t("Excludes (*.tmp)")}>
             <input value={excludes} onChange={(e) => setExcludes(e.target.value)} />
           </Field>
+          <Field label={t("Tags")}>
+            <input value={tags} onChange={(e) => setTags(e.target.value)} />
+          </Field>
           <Field label={t("Password secret (name only)")}>
             <input value={secret} onChange={(e) => setSecret(e.target.value)} />
           </Field>
           <Field label={t("Keep last")} narrow>
             <input value={keepLast} onChange={(e) => setKeepLast(e.target.value)} />
           </Field>
+          <Field label={t("Keep daily")} narrow>
+            <input value={keepDaily} onChange={(e) => setKeepDaily(e.target.value)} />
+          </Field>
+          <Field label={t("Keep weekly")} narrow>
+            <input value={keepWeekly} onChange={(e) => setKeepWeekly(e.target.value)} />
+          </Field>
+          <Field label={t("Keep monthly")} narrow>
+            <input value={keepMonthly} onChange={(e) => setKeepMonthly(e.target.value)} />
+          </Field>
+          <Field label={t("Note")} wide>
+            <input value={note} onChange={(e) => setNote(e.target.value)} />
+          </Field>
         </Fields>
         <Check checked={initialize} onChange={setInitialize}>
           {t("Create the repository on the first backup if it does not exist yet")}
+        </Check>
+        <Check checked={prune} onChange={setPrune}>
+          {t("Delete from the repository what the retention above no longer keeps")}
         </Check>
         <FormActions>
           <button
             disabled={!ready}
             onClick={() =>
               onSave({
-                name, tool, repository, initialize,
+                name, tool, repository, initialize, prune, note,
                 paths: paths.split(/[\s,]+/).filter(Boolean),
                 excludes: excludes.split(/[\s,]+/).filter(Boolean),
+                tags: tags.split(/[\s,]+/).filter(Boolean),
                 keep_last: Number(keepLast) || 0,
+                keep_daily: Number(keepDaily) || 0,
+                keep_weekly: Number(keepWeekly) || 0,
+                keep_monthly: Number(keepMonthly) || 0,
                 runbook: byRunbook ? runbook : "",
                 password_secret: secret,
+                // The form has no place for the environment of the tool, and a
+                // save must not be what removes it.
+                ...(existing?.env_secrets ? { env_secrets: existing.env_secrets } : {}),
               })
             }
           >
-            {t("Save definition")}
+            {existing ? t("Save changes") : t("Save definition")}
           </button>
         </FormActions>
       </Form>

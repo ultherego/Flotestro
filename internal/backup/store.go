@@ -121,18 +121,18 @@ func (s *Store) Definition(ctx context.Context, hostID, name string) (Definition
 
 func readDefinition(rows pgx.Rows) (Definition, error) {
 	var definition Definition
-	var zmienne []byte
+	var environment []byte
 	if err := rows.Scan(&definition.ID, &definition.HostID, &definition.Name, &definition.Tool,
 		&definition.Repository, &definition.Paths, &definition.Excludes, &definition.Tags,
 		&definition.KeepLast, &definition.KeepDaily, &definition.KeepWeekly, &definition.KeepMonthly,
 		&definition.Prune, &definition.Runbook, &definition.Initialize,
-		&definition.PasswordSecret, &zmienne,
+		&definition.PasswordSecret, &environment,
 		&definition.Note, &definition.CreatedBy, &definition.CreatedAt,
 		&definition.UpdatedBy, &definition.UpdatedAt); err != nil {
 		return Definition{}, err
 	}
-	if len(zmienne) > 0 {
-		_ = json.Unmarshal(zmienne, &definition.EnvSecrets)
+	if len(environment) > 0 {
+		_ = json.Unmarshal(environment, &definition.EnvSecrets)
 	}
 	return definition, nil
 }
@@ -145,12 +145,12 @@ func (s *Store) Set(ctx context.Context, definition Definition) (Definition, err
 	definition.Paths = nonNilList(definition.Paths)
 	definition.Excludes = nonNilList(definition.Excludes)
 	definition.Tags = nonNilList(definition.Tags)
-	zmienne, err := json.Marshal(definition.EnvSecrets)
+	environment, err := json.Marshal(definition.EnvSecrets)
 	if err != nil {
 		return Definition{}, err
 	}
 	if definition.EnvSecrets == nil {
-		zmienne = []byte("{}")
+		environment = []byte("{}")
 	}
 	const query = `
 		insert into backup_definitions (host_id, name, tool, repository, paths, excludes, tags,
@@ -164,7 +164,10 @@ func (s *Store) Set(ctx context.Context, definition Definition) (Definition, err
 			keep_daily = excluded.keep_daily, keep_weekly = excluded.keep_weekly,
 			keep_monthly = excluded.keep_monthly, prune = excluded.prune,
 			runbook = excluded.runbook, initialize = excluded.initialize,
-			password_secret = excluded.password_secret,
+			-- A client that names no secret keeps the one already there: the
+			-- panel does not show a secret's value, so an empty field is
+			-- "unchanged" and never "remove the password of this repository".
+			password_secret = coalesce(nullif(excluded.password_secret, ''), backup_definitions.password_secret),
 			env_secrets = excluded.env_secrets, note = excluded.note,
 			updated_by = excluded.updated_by, updated_at = now()
 		returning id::text, created_at, updated_at`
@@ -172,7 +175,7 @@ func (s *Store) Set(ctx context.Context, definition Definition) (Definition, err
 		definition.Repository, definition.Paths, definition.Excludes, definition.Tags,
 		definition.KeepLast, definition.KeepDaily, definition.KeepWeekly, definition.KeepMonthly,
 		definition.Prune, definition.Runbook, definition.Initialize,
-		definition.PasswordSecret, zmienne, definition.Note, definition.UpdatedBy).
+		definition.PasswordSecret, environment, definition.Note, definition.UpdatedBy).
 		Scan(&definition.ID, &definition.CreatedAt, &definition.UpdatedAt)
 	definition.CreatedBy = definition.UpdatedBy
 	return definition, err
