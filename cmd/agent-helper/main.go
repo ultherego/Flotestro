@@ -169,7 +169,8 @@ func run() error {
 		return fmt.Errorf("the replay store of the helper: %w", err)
 	}
 	defer replay.Close()
-	trust := helpercap.TrustStore{Dir: settings.TrustDir, HostIDPath: settings.HostIDPath, RequireRoot: true}
+	trust := helpercap.TrustStore{Dir: settings.TrustDir, HostIDPath: settings.HostIDPath,
+		RequireRoot: true, PinPath: settings.PinPath, Bootstrap: settings.Bootstrap}
 	server.SetCapabilityPolicy(helpercap.NewPolicy(settings.Mode, helpercap.NewVerifier(trust, replay, log)), trust)
 	hostID, _ := trust.HostID()
 	keyring, skipped, _ := trust.Keyring()

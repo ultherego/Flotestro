@@ -180,6 +180,17 @@ func (s *Signer) Issue(mint Mint) (*helperv1.HelperCapability, []byte, error) {
 	return capability, Sign(s.key, capability), nil
 }
 
+// Fingerprints are the whole SHA-256 of the keys this panel signs a first
+// bundle with: the current one, and the previous one while a rotation is still
+// in the air. An operator pins these, not the short identifier.
+func (s *Signer) Fingerprints() []string {
+	out := []string{KeyFingerprint(s.public)}
+	if s.previous != nil {
+		out = append(out, KeyFingerprint(s.previous.public))
+	}
+	return out
+}
+
 // TrustBundle is the signed keyring for one host.
 func (s *Signer) TrustBundle(hostID string, now time.Time) *helperv1.HelperTrustBundle {
 	if now.IsZero() {

@@ -21,6 +21,14 @@ flotestro_repo_channel: stable
 # address.
 flotestro_ca_url: "{{ flotestro_repo_url }}/flotestro-ca.pem"
 
+# The panel this host may be enrolled by: the SHA-256 fingerprints of its
+# capability signing key, as the panel prints them when it starts. Empty means
+# the host takes the first panel it hears from on trust, which is how every
+# host enrolled before this existed. Give it and the host enrolls with that
+# panel and with no other - including during a rotation, when the panel prints
+# two.
+flotestro_agent_panel_pin: []
+
 flotestro_agent_config_path: /etc/flotestro/agent.yaml
 flotestro_agent_state_dir: /var/lib/flotestro-agent
 flotestro_agent_site: default

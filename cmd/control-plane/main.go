@@ -817,9 +817,12 @@ func run() error {
 		log.Warn("the helper signing key was generated; the hosts learn it at their next session",
 			"path", signingKeyPath, "key_id", helperSigner.KeyID())
 	}
+	// The fingerprints are what an operator writes into a host's pin file, so
+	// that the host enrolls with this panel and with no other.
 	log.Info("the helper capability policy of the panel",
 		"mode", string(helperCapabilityMode), "key_id", helperSigner.KeyID(),
-		"trusted_keys", len(helperSigner.TrustedKeys()))
+		"trusted_keys", len(helperSigner.TrustedKeys()),
+		"signing_fingerprints", strings.Join(helperSigner.Fingerprints(), ","))
 	agentService.SetHelperSigner(helperSigner)
 	// The session rows stay open after a crash of the process and inflate
 	// every measurement that counts connections from the database.

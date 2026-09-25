@@ -20,3 +20,13 @@ capabilities:
   # observe: never refuses, only counts. For finding out what a fleet would
   # refuse before switching it.
   mode: enforce
+
+  # What happens to the very first trust bundle, when the helper trusts nothing
+  # yet. tofu takes it on trust - whoever reaches the helper's socket first
+  # decides which panel owns this host for good. pinned takes it only when its
+  # signing key is one written into the file below beforehand, with
+  # "flotestro-agentctl helper-trust pin <fingerprint>"; the panel prints the
+  # fingerprint when it starts. A host on pinned with no pin enrolls with
+  # nobody, which is the point.
+  bootstrap: tofu
+  pin_file: /etc/flotestro/panel-trust.pin

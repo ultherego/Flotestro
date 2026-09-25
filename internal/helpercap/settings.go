@@ -22,7 +22,11 @@ type helperConfig struct {
 	Capabilities struct {
 		// Mode is observe, prefer or enforce (the document also spells the
 		// first "audit").
-		Mode           string `yaml:"mode"`
+		Mode string `yaml:"mode"`
+		// Bootstrap is tofu or pinned: what the helper does with the first
+		// bundle, when it trusts nothing yet.
+		Bootstrap      string `yaml:"bootstrap"`
+		PinFile        string `yaml:"pin_file"`
 		TrustedKeysDir string `yaml:"trusted_keys_dir"`
 		ReplayDir      string `yaml:"replay_dir"`
 	} `yaml:"capabilities"`
@@ -31,7 +35,11 @@ type helperConfig struct {
 // Settings is what the helper runs with after the file and the environment
 // were read.
 type Settings struct {
-	Mode       Mode
+	Mode Mode
+	// Bootstrap decides the first bundle; PinPath is where the keys the
+	// operator wrote down are read from.
+	Bootstrap  Bootstrap
+	PinPath    string
 	TrustDir   string
 	ReplayDir  string
 	HostIDPath string
@@ -45,6 +53,8 @@ type Settings struct {
 func LoadSettings(path string) (Settings, error) {
 	settings := Settings{
 		Mode:       ModePrefer,
+		Bootstrap:  BootstrapTOFU,
+		PinPath:    DefaultPinPath,
 		TrustDir:   DefaultTrustDir,
 		ReplayDir:  DefaultReplayDir,
 		HostIDPath: DefaultHostIDPath,
@@ -64,6 +74,16 @@ func LoadSettings(path string) (Settings, error) {
 			}
 			settings.Mode = mode
 			settings.Source = path
+		}
+		if file.Capabilities.Bootstrap != "" {
+			bootstrap, err := ParseBootstrap(file.Capabilities.Bootstrap)
+			if err != nil {
+				return settings, fmt.Errorf("%s: capabilities.bootstrap: %w", path, err)
+			}
+			settings.Bootstrap = bootstrap
+		}
+		if file.Capabilities.PinFile != "" {
+			settings.PinPath = file.Capabilities.PinFile
 		}
 		if file.Capabilities.TrustedKeysDir != "" {
 			settings.TrustDir = file.Capabilities.TrustedKeysDir
@@ -86,6 +106,14 @@ func LoadSettings(path string) (Settings, error) {
 		settings.Mode = mode
 		settings.Source = "FLOTESTRO_HELPER_CAPABILITY_MODE"
 	}
+	if value := os.Getenv("FLOTESTRO_HELPER_BOOTSTRAP"); value != "" {
+		bootstrap, err := ParseBootstrap(value)
+		if err != nil {
+			return settings, fmt.Errorf("FLOTESTRO_HELPER_BOOTSTRAP: %w", err)
+		}
+		settings.Bootstrap = bootstrap
+	}
+	settings.PinPath = config.Env("FLOTESTRO_HELPER_PIN_FILE", settings.PinPath)
 	settings.TrustDir = config.Env("FLOTESTRO_HELPER_TRUST_DIR", settings.TrustDir)
 	settings.ReplayDir = config.Env("FLOTESTRO_HELPER_REPLAY_DIR", settings.ReplayDir)
 	settings.HostIDPath = config.Env("FLOTESTRO_HELPER_HOST_ID_FILE", settings.HostIDPath)

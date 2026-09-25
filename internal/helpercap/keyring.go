@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -71,6 +72,95 @@ type TrustStore struct {
 	// RequireRoot refuses key files not owned by root or writable by
 	// anybody else. Off only in tests, which do not run as root.
 	RequireRoot bool
+	// PinPath names the file of fingerprints the first bundle is held to;
+	// Bootstrap says what happens when the file is not there.
+	PinPath   string
+	Bootstrap Bootstrap
+}
+
+// Pins reads the fingerprints the operator wrote down on this host. A missing
+// file is no pin at all, which is the state of every host enrolled before the
+// pin existed.
+func (t TrustStore) Pins() ([]string, error) {
+	if t.PinPath == "" {
+		return nil, nil
+	}
+	raw, err := os.ReadFile(t.PinPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var pins []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		line = strings.ToLower(strings.TrimPrefix(line, "sha256:"))
+		if len(line) != sha256HexLength {
+			return nil, fmt.Errorf("%s: %q is not a SHA-256 fingerprint", t.PinPath, line)
+		}
+		pins = append(pins, line)
+	}
+	return pins, nil
+}
+
+// sha256HexLength is a SHA-256 written in hex.
+const sha256HexLength = 64
+
+// WritePins replaces the fingerprints this host enrolls with. An empty list
+// removes the file, which puts a host on tofu back where it was.
+func (t TrustStore) WritePins(pins []string) error {
+	if t.PinPath == "" {
+		return errors.New("this helper keeps no pin file")
+	}
+	if len(pins) == 0 {
+		if err := os.Remove(t.PinPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+	body := "# The panels this host may be enrolled by: the SHA-256 of the signing\n" +
+		"# key of the bundle, as the panel prints it when it starts.\n"
+	for _, pin := range pins {
+		pin = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(pin, "sha256:")))
+		if len(pin) != sha256HexLength {
+			return fmt.Errorf("%q is not a SHA-256 fingerprint", pin)
+		}
+		if _, err := hex.DecodeString(pin); err != nil {
+			return fmt.Errorf("%q is not hexadecimal", pin)
+		}
+		body += pin + "\n"
+	}
+	return writeRootFile(t.PinPath, []byte(body), 0o644)
+}
+
+// checkPin holds the first bundle a host is ever handed to the panel the
+// operator named. Without it the helper trusts whoever reaches its socket
+// first: the bundle is verified with a key carried inside the bundle, so any
+// signer at all verifies against itself.
+func (t TrustStore) checkPin(signer ed25519.PublicKey) error {
+	pins, err := t.Pins()
+	if err != nil {
+		return err
+	}
+	if len(pins) == 0 {
+		if t.Bootstrap == BootstrapPinned {
+			return refusal(ErrorTrustPin, fmt.Sprintf(
+				"this host enrolls only with a panel named in %s, and the file names none", t.PinPath))
+		}
+		return nil
+	}
+	fingerprint := KeyFingerprint(signer)
+	for _, pin := range pins {
+		if pin == fingerprint {
+			return nil
+		}
+	}
+	return refusal(ErrorTrustPin, fmt.Sprintf(
+		"the first bundle is signed by the key %s, which %s does not name", fingerprint, t.PinPath))
 }
 
 // DefaultTrustDir and DefaultHostIDPath are where a packaged helper keeps
@@ -78,6 +168,9 @@ type TrustStore struct {
 const (
 	DefaultTrustDir   = "/etc/flotestro/helper-trust.d"
 	DefaultHostIDPath = "/var/lib/flotestro-helper/host-id"
+	// DefaultPinPath holds the fingerprints of the panels this host may be
+	// enrolled by. One per line, SHA-256 of the signing key in hex.
+	DefaultPinPath = "/etc/flotestro/panel-trust.pin"
 )
 
 // Keyring loads the keys.
@@ -217,6 +310,11 @@ func (t TrustStore) Apply(bundle *helperv1.HelperTrustBundle) (*TrustUpdate, err
 	signer, trusted := current.Lookup(bundle.GetSignedByKeyId())
 	if bootstrap {
 		signer, trusted = keys[bundle.GetSignedByKeyId()]
+		if trusted {
+			if err := t.checkPin(signer); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if !trusted {
 		return nil, refusal(ErrorTrustUntrusted,

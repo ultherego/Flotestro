@@ -77,6 +77,9 @@ const (
 	// this kind with the payload the capability binds, so it refuses rather than
 	// carry out a change nothing compared.
 	ErrorPayloadUnchecked = "payload_binding_unchecked"
+	// ErrorTrustPin: the first bundle a host is handed is signed by a key the
+	// operator did not write down on that host beforehand.
+	ErrorTrustPin = "trust_pin_mismatch"
 	// ErrorUnknownKey: the keyring holds no key of that identifier.
 	ErrorUnknownKey = "capability_unknown_key"
 	// ErrorBadSignature: the signature does not verify under the named key.
@@ -148,6 +151,40 @@ func TTLOf(action string) time.Duration {
 func KeyID(public ed25519.PublicKey) string {
 	sum := sha256.Sum256(public)
 	return hex.EncodeToString(sum[:8])
+}
+
+// KeyFingerprint is the whole SHA-256 of a public key, as a pin names it. The
+// key identifier is eight bytes of the same digest, which is enough to look a
+// key up and not enough to decide, once, which panel owns a host for good.
+func KeyFingerprint(public ed25519.PublicKey) string {
+	sum := sha256.Sum256(public)
+	return hex.EncodeToString(sum[:])
+}
+
+// Bootstrap says what the helper does with the first bundle it is handed, when
+// its keyring is empty and it has no identity yet.
+type Bootstrap string
+
+const (
+	// BootstrapTOFU takes that first bundle on trust. It is how an installation
+	// made before the pin existed enrolls, and it means whoever reaches the
+	// helper's socket first decides which panel owns the host.
+	BootstrapTOFU Bootstrap = "tofu"
+	// BootstrapPinned takes it only when its signing key is one the operator
+	// wrote down on the host beforehand. A host with no pin enrolls with
+	// nobody.
+	BootstrapPinned Bootstrap = "pinned"
+)
+
+// ParseBootstrap reads the bootstrap policy from configuration.
+func ParseBootstrap(value string) (Bootstrap, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "tofu", "":
+		return BootstrapTOFU, nil
+	case "pinned":
+		return BootstrapPinned, nil
+	}
+	return "", errors.New("the bootstrap policy has to be tofu or pinned")
 }
 
 // signingPrefix separates capability signatures from every other use of the

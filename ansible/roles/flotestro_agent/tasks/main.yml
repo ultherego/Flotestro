@@ -107,6 +107,42 @@
     group: flotestro-agent
     mode: "0644"
 
+- name: Panel the host may be enrolled by
+  # The helper verifies its first bundle with a key inside that bundle, so
+  # without this whoever reaches its socket first owns the host. The list comes
+  # over the same channel as the rest of the installation, which is the channel
+  # the host already trusts.
+  when: flotestro_agent_panel_pin | length > 0
+  block:
+    - name: Pinned panel
+      ansible.builtin.copy:
+        content: |
+          # Written by Ansible: the panels this host may be enrolled by.
+          {% for pin in flotestro_agent_panel_pin %}
+          {{ pin }}
+          {% endfor %}
+        dest: /etc/flotestro/panel-trust.pin
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Helper settings present
+      ansible.builtin.stat:
+        path: /etc/flotestro/helper.yaml
+      register: flotestro_helper_yaml
+
+    - name: Helper takes no panel on trust
+      # Only a host with no pin at all needs this line; the pin above is
+      # enforced whatever the mode says. An installation from before the file
+      # existed simply has no file to change.
+      when: flotestro_helper_yaml.stat.exists
+      ansible.builtin.lineinfile:
+        path: /etc/flotestro/helper.yaml
+        regexp: '^(\s*)bootstrap:'
+        line: '  bootstrap: pinned'
+        insertafter: '^capabilities:'
+      notify: Restart flotestro agent
+
 - name: Agent configuration
   ansible.builtin.template:
     src: agent.yaml.j2
