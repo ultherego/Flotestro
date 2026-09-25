@@ -844,8 +844,31 @@ func (s *Store) refreshSettings(ctx context.Context) {
 
 func (s *Store) maintain(ctx context.Context) {
 	// Every maintenance pass begins on the settings in force now; a pass
-	// already under way keeps the ones it started with.
+	// already under way keeps the ones it started with. Every replica reads
+	// them, because every replica answers with them.
 	s.refreshSettings(ctx)
+	// The rest belongs to the installation and not to this instance. Every
+	// replica used to prepare the same partitions, compute the same buckets
+	// from the same rows and apply the same retention at the same moment -
+	// duplicated work whose last writer won, with the retention deleting under
+	// the rollup that was reading.
+	lease, held, err := s.acquireLease(ctx, maintenanceLeaseName, maintenanceLease)
+	if err != nil {
+		if ctx.Err() == nil {
+			s.log.Error("the lease of the maintenance pass was not taken", "err", err)
+		}
+		return
+	}
+	if !held {
+		s.log.Debug("another instance holds the lease of the maintenance pass; the samples are kept there")
+		return
+	}
+	defer func() {
+		if err := s.releaseEvaluatorLease(context.WithoutCancel(ctx), lease); err != nil {
+			s.log.Warn("the lease of the maintenance pass was not given back; it runs out by itself",
+				"err", err)
+		}
+	}()
 	// The partitions of the days ahead come first.
 	if err := s.EnsurePartitions(ctx, time.Now()); err != nil && ctx.Err() == nil {
 		s.log.Error("the partitions of the raw samples were not prepared", "err", err)

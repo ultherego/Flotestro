@@ -32,6 +32,15 @@ const ErrorAlertFenceStale = "alert_fence_stale"
 // evaluatorLeaseName is the row of monitoring_leases the evaluator holds.
 const evaluatorLeaseName = "alert_evaluator"
 
+// maintenanceLeaseName is the row the maintenance pass holds: preparing the
+// partitions, rolling the samples up and applying their retention is the work
+// of the installation, not of every replica of the panel.
+const maintenanceLeaseName = "monitoring_maintenance"
+
+// maintenanceLease is the term of that lease. It covers a whole pass over a
+// large fleet and runs out on its own when the instance holding it goes.
+const maintenanceLease = 10 * time.Minute
+
 // Lease is one lease as the database holds it.
 type Lease struct {
 	Name string
@@ -104,10 +113,15 @@ func (s *Store) ReleaseEvaluatorLease(ctx context.Context, lease Lease) error {
 	return s.releaseEvaluatorLease(ctx, lease)
 }
 
-// acquireEvaluatorLease takes the lease for this instance, or renews it when
-// this instance holds it already, and says whether it holds it afterwards.
+// acquireEvaluatorLease takes the lease of the alert evaluator.
 func (s *Store) acquireEvaluatorLease(ctx context.Context) (Lease, bool, error) {
-	lease := Lease{Name: evaluatorLeaseName, Holder: s.instanceID}
+	return s.acquireLease(ctx, evaluatorLeaseName, s.options.EvaluatorLease)
+}
+
+// acquireLease takes the named lease for this instance, or renews it when this
+// instance holds it already, and says whether it holds it afterwards.
+func (s *Store) acquireLease(ctx context.Context, name string, term time.Duration) (Lease, bool, error) {
+	lease := Lease{Name: name, Holder: s.instanceID}
 	var until *time.Time
 	err := s.pool.QueryRow(ctx, `
 		with candidate as (
@@ -126,13 +140,13 @@ func (s *Store) acquireEvaluatorLease(ctx context.Context) (Lease, bool, error) 
 		  from candidate
 		 where l.name = candidate.name
 		returning l.token, l.lease_until`,
-		evaluatorLeaseName, s.instanceID, s.options.EvaluatorLease.Seconds()).
+		name, s.instanceID, term.Seconds()).
 		Scan(&lease.Token, &until)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return Lease{Name: evaluatorLeaseName}, false, nil
+		return Lease{Name: name}, false, nil
 	}
 	if err != nil {
-		return Lease{Name: evaluatorLeaseName}, false, err
+		return Lease{Name: name}, false, err
 	}
 	if until != nil {
 		lease.Until = *until
@@ -157,8 +171,8 @@ func (s *Store) renewEvaluatorLease(ctx context.Context, lease Lease) error {
 	return nil
 }
 
-// releaseEvaluatorLease gives the lease up at the end of a pass, so the next
-// instance may take it at once rather than waiting out the term.
+// releaseEvaluatorLease gives the named lease up at the end of a pass, so the
+// next instance may take it at once rather than waiting out the term.
 func (s *Store) releaseEvaluatorLease(ctx context.Context, lease Lease) error {
 	_, err := s.pool.Exec(ctx, `
 		update monitoring_leases
