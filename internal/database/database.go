@@ -4,6 +4,9 @@ package database
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -158,19 +161,26 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, opts MigrateOptions) error
 		)`); err != nil {
 		return fmt.Errorf("the schema_migrations table: %w", err)
 	}
+	// The digest of what was applied under each version. Without it the same
+	// version label can describe two different schemas and nothing can tell.
+	// A database from before the column adopts its digests on the next run.
+	if _, err := conn.Exec(ctx,
+		"alter table schema_migrations add column if not exists sha256 text"); err != nil {
+		return fmt.Errorf("the schema_migrations digest column: %w", err)
+	}
 
-	applied := map[string]bool{}
-	rows, err := conn.Query(ctx, "select version from schema_migrations")
+	applied := map[string]string{}
+	rows, err := conn.Query(ctx, "select version, coalesce(sha256, '') from schema_migrations")
 	if err != nil {
 		return fmt.Errorf("reading the applied migrations: %w", err)
 	}
 	for rows.Next() {
-		var version string
-		if err := rows.Scan(&version); err != nil {
+		var version, digest string
+		if err := rows.Scan(&version, &digest); err != nil {
 			rows.Close()
 			return err
 		}
-		applied[version] = true
+		applied[version] = digest
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
@@ -180,7 +190,8 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, opts MigrateOptions) error
 	// Migrations recorded under their former file names are re-labelled, so
 	// that a database migrated before the rename does not run them again.
 	for former, current := range renamedMigrations {
-		if !applied[former] {
+		digest, ok := applied[former]
+		if !ok {
 			continue
 		}
 		if _, err := conn.Exec(ctx,
@@ -188,7 +199,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, opts MigrateOptions) error
 			return fmt.Errorf("re-labelling the migration %s: %w", former, err)
 		}
 		delete(applied, former)
-		applied[current] = true
+		applied[current] = digest
 	}
 
 	entries, err := fs.Glob(db.Migrations, "migrations/*.sql")
@@ -199,12 +210,27 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, opts MigrateOptions) error
 
 	for _, entry := range entries {
 		version := versionOf(entry)
-		if applied[version] {
-			continue
-		}
 		body, err := db.Migrations.ReadFile(entry)
 		if err != nil {
 			return err
+		}
+		digest := migrationDigest(body)
+		if recorded, ok := applied[version]; ok {
+			switch recorded {
+			case digest:
+				continue
+			case "":
+				// A database from before the digests: adopt what it has rather
+				// than refuse an installation that did nothing wrong.
+				if _, err := conn.Exec(ctx,
+					"update schema_migrations set sha256 = $2 where version = $1", version, digest); err != nil {
+					return fmt.Errorf("recording the digest of %s: %w", version, err)
+				}
+				continue
+			default:
+				return fmt.Errorf("%w: the migration %s applied here has digest %s, this build carries %s",
+					ErrMigrationChanged, version, recorded, digest)
+			}
 		}
 
 		tx, err := conn.Begin(ctx)
@@ -215,7 +241,8 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, opts MigrateOptions) error
 			_ = tx.Rollback(ctx)
 			return fmt.Errorf("the migration %s: %w", version, err)
 		}
-		if _, err := tx.Exec(ctx, "insert into schema_migrations (version) values ($1)", version); err != nil {
+		if _, err := tx.Exec(ctx,
+			"insert into schema_migrations (version, sha256) values ($1, $2)", version, digest); err != nil {
 			_ = tx.Rollback(ctx)
 			return err
 		}
@@ -225,6 +252,17 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, opts MigrateOptions) error
 		log.Info("a migration was applied", "version", version)
 	}
 	return nil
+}
+
+// ErrMigrationChanged means a migration this build carries is not the one the
+// database records under that version: the same label describes two schemas,
+// and nothing downstream can tell which one it is talking to.
+var ErrMigrationChanged = errors.New("migration_checksum_mismatch")
+
+// migrationDigest names the bytes of a migration.
+func migrationDigest(body []byte) string {
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])
 }
 
 // migrationConn is what the role and the lock need: one connection, not a
