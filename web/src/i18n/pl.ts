@@ -5008,6 +5008,8 @@ export const pl: Record<string, string> = {
   "The version that has to report in after the restart.": "Wersja, która ma się zgłosić po restarcie.",
   "Package checksum": "Suma kontrolna pakietu",
   "The SHA-256 from the release. The manager checks the repository's signature; this is the panel's own, independent check.": "SHA-256 z wydania. Menedżer sprawdza podpis repozytorium; to jest własna, niezależna kontrola panelu.",
+  "64 hexadecimal characters, or empty": "64 znaki szesnastkowe albo puste",
+  "The SHA-256 from the release. Without it the host installs whatever its repository serves under that version: the repository's own signature is then the only proof, and the panel has none of its own.": "SHA-256 z wydania. Bez niego host zainstaluje to, co jego repozytorium poda pod tą wersją: dowodem jest wtedy wyłącznie podpis repozytorium, a panel nie ma własnego.",
   "Fall back to": "Wróć do wersji",
   "The version to return to when the host does not come back with the new one. Empty means no prepared return.": "Wersja, do której wrócić, gdy host nie wróci z nową. Puste oznacza brak przygotowanego powrotu.",
   "Name the version the host is to run.": "Podaj wersję, którą host ma uruchomić.",

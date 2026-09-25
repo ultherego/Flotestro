@@ -307,6 +307,10 @@ export function Packages() {
   const [toRemove, setToRemove] = useState<{ requested: string[]; removals: string[] } | null>(null);
   const [sourceIntent, setSourceIntent] = useState<SourceIntent | null>(null);
   const [agentVersion, setAgentVersion] = useState("");
+  // The digest the panel pins the bytes to, and the version to fall back to.
+  // Both were in the operation's contract and in no form the operator sees.
+  const [agentDigest, setAgentDigest] = useState("");
+  const [agentRollback, setAgentRollback] = useState("");
   const [repairing, setRepairing] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -581,6 +585,26 @@ export function Packages() {
                 placeholder={t("e.g. {version}", { version: host.agent_version || "0.51.0" })}
               />
             </Field>
+            <Field
+              label={t("Package checksum")}
+              wide
+              help={t("The SHA-256 from the release. Without it the host installs whatever its repository serves under that version: the repository's own signature is then the only proof, and the panel has none of its own.")}
+            >
+              <input
+                className="mono"
+                value={agentDigest}
+                onChange={(e) => setAgentDigest(e.target.value.trim())}
+                placeholder={t("64 hexadecimal characters, or empty")}
+              />
+            </Field>
+            <Field label={t("Fall back to")} narrow
+              help={t("The version to return to when the host does not come back with the new one. Empty means no prepared return.")}>
+              <input
+                value={agentRollback}
+                onChange={(e) => setAgentRollback(e.target.value.trim())}
+                placeholder={t("e.g. {version}", { version: host.agent_version || "0.51.0" })}
+              />
+            </Field>
           </Fields>
           <FormActions>
             <ActionGuard action="agent.upgrade" host={host.id}>
@@ -589,7 +613,13 @@ export function Packages() {
               onClick={() =>
                 request.mutate({
                   action: "agent.upgrade",
-                  payload: { agent_upgrade: { target_version: agentVersion } },
+                  payload: {
+                    agent_upgrade: {
+                      target_version: agentVersion,
+                      ...(agentDigest ? { package_sha256: agentDigest } : {}),
+                      ...(agentRollback ? { rollback_version: agentRollback } : {}),
+                    },
+                  },
                 })
               }
             >
