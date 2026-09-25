@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/ultherego/flotestro/internal/leases"
 	"github.com/ultherego/flotestro/internal/vuln"
 )
 
@@ -35,11 +36,15 @@ func TestOnlyOneInstanceCorrelatesVulnerabilities(t *testing.T) {
 	})
 
 	store := vuln.NewStore(pool)
+	var taken leases.Lease
 	take := func(instance string) bool {
 		t.Helper()
-		held, err := store.TakeCorrelatorLease(ctx, instance)
+		lease, held, err := store.TakeCorrelatorLease(ctx, instance)
 		if err != nil {
 			t.Fatalf("taking the lease: %v", err)
+		}
+		if held {
+			taken = lease
 		}
 		return held
 	}
@@ -54,7 +59,7 @@ func TestOnlyOneInstanceCorrelatesVulnerabilities(t *testing.T) {
 	if !take(first) {
 		t.Error("the holder could not renew its own lease")
 	}
-	if err := store.ReleaseCorrelatorLease(ctx, first); err != nil {
+	if err := store.ReleaseCorrelatorLease(ctx, taken); err != nil {
 		t.Fatalf("giving the lease back: %v", err)
 	}
 	if !take(second) {

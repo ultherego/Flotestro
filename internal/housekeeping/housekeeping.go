@@ -247,7 +247,7 @@ func (s *Sweeper) Sweep(ctx context.Context) (err error) {
 func (s *Sweeper) sweep(ctx context.Context) {
 	// The retention of the installation is applied by one instance at a time.
 	// Sweep itself stays unfenced, so a panel asked for a sweep still runs one.
-	held, err := s.takeLease(ctx)
+	lease, held, err := s.takeLease(ctx)
 	if err != nil {
 		if ctx.Err() == nil {
 			s.log.Error("the lease of the retention sweep was not taken", "err", err)
@@ -259,7 +259,7 @@ func (s *Sweeper) sweep(ctx context.Context) {
 		return
 	}
 	defer func() {
-		if err := s.releaseLease(context.WithoutCancel(ctx)); err != nil {
+		if err := s.releaseLease(context.WithoutCancel(ctx), lease); err != nil {
 			s.log.Warn("the lease of the retention sweep was not given back; it runs out by itself",
 				"err", err)
 		}

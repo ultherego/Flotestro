@@ -191,8 +191,7 @@ func (h *Scheduler) Cycle(ctx context.Context) {
 	// to a million findings for a Red Hat release - and then rewriting the
 	// findings of every host is duplicated work whose last commit wins, whichever
 	// of them read the fresher inputs.
-	instance := jobs.InstanceID()
-	held, err := h.store.TakeCorrelatorLease(ctx, instance)
+	lease, held, err := h.store.TakeCorrelatorLease(ctx, jobs.InstanceID())
 	if err != nil {
 		h.log.Error("the correlator lease was not read", "err", err)
 		return
@@ -202,7 +201,7 @@ func (h *Scheduler) Cycle(ctx context.Context) {
 		return
 	}
 	defer func() {
-		if err := h.store.ReleaseCorrelatorLease(context.WithoutCancel(ctx), instance); err != nil {
+		if err := h.store.ReleaseCorrelatorLease(context.WithoutCancel(ctx), lease); err != nil {
 			h.log.Warn("the correlator lease was not given back", "err", err)
 		}
 	}()
