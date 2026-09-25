@@ -63,6 +63,11 @@ type Storage interface {
 	// AssignIssuer fills in the issuer identifier of the certificates
 	// issued by the named CA that carry none yet.
 	AssignIssuer(ctx context.Context, subject, serial, issuerID string) (int64, error)
+	// LiveKeyIDs names every key that a secret version still in use was
+	// sealed with. A key named here and absent from the provider is a secret
+	// nobody can read, and the panel is to find that at the start rather than
+	// at the moment an operation needs the value.
+	LiveKeyIDs(ctx context.Context) ([]string, error)
 }
 
 // installationLockID is the advisory lock of the initialisation: "FCRY".
@@ -75,6 +80,28 @@ type Postgres struct {
 
 // NewPostgres builds the storage over the pool.
 func NewPostgres(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
+
+// LiveKeyIDs names the keys the live secret versions were sealed with. Rows of
+// the form that predates the key identifiers carry none and are left out: the
+// rewrap reaches them, and the legacy key is adopted separately.
+func (p *Postgres) LiveKeyIDs(ctx context.Context) ([]string, error) {
+	rows, err := p.pool.Query(ctx, `
+		select distinct key_id from secret_versions
+		 where destroyed_at is null and coalesce(key_id, '') <> ''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var keys []string
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	return keys, rows.Err()
+}
 
 // Lock implements Storage with a session-level advisory lock on a
 // connection taken from the pool for the purpose.

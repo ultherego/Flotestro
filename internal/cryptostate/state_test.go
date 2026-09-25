@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -27,6 +28,14 @@ type memoryStorage struct {
 	facts    Facts
 	assigned map[string]string
 	inserts  int
+	// liveKeys are the keys the live secret versions were sealed with.
+	liveKeys []string
+}
+
+func (m *memoryStorage) LiveKeyIDs(context.Context) ([]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.liveKeys...), nil
 }
 
 func (m *memoryStorage) Lock(context.Context) (func(), error) {
@@ -621,5 +630,36 @@ func TestAKeyRotationIsResumableAndKeepsTheOldKey(t *testing.T) {
 	options.RotateTo = secrets.LegacyKeyID
 	if _, err := Open(context.Background(), options); err == nil {
 		t.Error("a rotation to the legacy key was accepted")
+	}
+}
+
+// The start checked the active key and nothing else, so a key that live secret
+// versions were sealed with and the provider no longer holds went unnoticed:
+// the panel came up green, the status screen said a rewrap was running in the
+// background - it could not - and the fault surfaced at the first read of that
+// particular secret, which is the moment it must not.
+func TestAKeyOfLiveSecretsThatTheProviderLostStopsTheStart(t *testing.T) {
+	l := newLab(t)
+	record := l.open(t).Record()
+
+	// A secret still in use was sealed with a key of an earlier rotation.
+	l.storage.mu.Lock()
+	l.storage.liveKeys = []string{record.ActiveKeyID, "key-of-an-earlier-rotation"}
+	l.storage.mu.Unlock()
+
+	fatal := l.openFatal(t, CodeSecretsKeyUnavailable)
+	if fatal.Reason == "" {
+		t.Fatal("the refusal says nothing")
+	}
+	if !strings.Contains(fatal.Reason, "key-of-an-earlier-rotation") {
+		t.Errorf("the refusal does not name the key nobody holds: %s", fatal.Reason)
+	}
+
+	// The same census with every key present is an ordinary start.
+	l.storage.mu.Lock()
+	l.storage.liveKeys = []string{record.ActiveKeyID}
+	l.storage.mu.Unlock()
+	if runtime := l.open(t); runtime == nil {
+		t.Fatal("a start whose keys are all present was refused")
 	}
 }

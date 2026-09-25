@@ -181,6 +181,25 @@ func (r *Runtime) verify(ctx context.Context, o Options, record Record) error {
 			fmt.Sprintf("the key %s does not open the sentinel of the installation %s: it is not the key the installation was sealed with",
 				record.Sentinel.KeyID, record.InstallationID), err)
 	}
+	// Every key a live secret was sealed with, not only the active one. A key
+	// the provider no longer holds is a secret nobody can read, and the panel
+	// used to find that at the first read of that particular secret - a backup
+	// credential, a repository token - which is the moment it must not.
+	live, err := o.Storage.LiveKeyIDs(ctx)
+	if err != nil {
+		return fatal(CodeStateAmbiguous, "the keys of the live secret versions could not be read", err)
+	}
+	for _, keyID := range live {
+		if keyID == record.ActiveKeyID || keyID == secrets.LegacyKeyID {
+			continue
+		}
+		if err := o.Provider.RequireKey(ctx, keyID); err != nil {
+			return fatal(CodeSecretsKeyUnavailable,
+				fmt.Sprintf("secret versions of this installation are sealed with the key %s and the provider does not hold it",
+					keyID), err)
+		}
+	}
+
 	// The legacy key stays registered as long as it is on disk; a row of
 	// the first form needs it until the rewrap reaches the row.
 	if o.LegacyKeyPath != "" {
