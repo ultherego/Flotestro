@@ -4241,6 +4241,41 @@ func TestTrailConsumerMovesOnlyAfterDelivery(t *testing.T) {
 	if lastID != receiver.got[len(receiver.got)-1].ID {
 		t.Fatalf("the cursor %d is not on the last delivered event %d", lastID, receiver.got[len(receiver.got)-1].ID)
 	}
+
+	// An event the receiver will never take used to stop the trail at its own
+	// identifier for ever. After a bounded number of attempts on that event
+	// alone it is set aside whole and everything behind it flows again.
+	var poison int64
+	if err := pool.QueryRow(ctx, `
+		insert into outbox_events (aggregate_type, aggregate_id, event_type, payload)
+		values ('host', 'consumer-poison', 'host.refused', '{"reason":"the receiver will not take it"}'::jsonb)
+		returning id`).Scan(&poison); err != nil {
+		t.Fatalf("writing the refused event: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		update outbox_consumers set failures = 11, next_attempt_at = now() where name = $1`, name); err != nil {
+		t.Fatalf("bringing the consumer to the bound: %v", err)
+	}
+	receiver.refuse = true
+	if _, err := consumer.Deliver(ctx); err == nil {
+		t.Fatal("the refusal at the bound counted as a success")
+	}
+	var setAside int64
+	if err := pool.QueryRow(ctx, `
+		select count(*) from outbox_dead_letters where consumer = $1 and event_id = $2`,
+		name, poison).Scan(&setAside); err != nil {
+		t.Fatalf("reading what was set aside: %v", err)
+	}
+	if setAside != 1 {
+		t.Fatalf("the refused event was not set aside: %d rows", setAside)
+	}
+	if err := pool.QueryRow(ctx, `select last_id from outbox_consumers where name = $1`, name).
+		Scan(&lastID); err != nil {
+		t.Fatalf("reading the cursor: %v", err)
+	}
+	if lastID < poison {
+		t.Fatalf("the trail still waits at %d for the event %d nobody will take", lastID, poison)
+	}
 }
 
 type recordingReceiver struct {

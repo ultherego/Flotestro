@@ -246,6 +246,12 @@ var (
 
 	// AgentReconnect counts the sessions a host opened within ten minutes of its
 	// previous one ending: the shape of a flapping link or a restarting agent.
+	OutboxDeadLettered = Default.NewCounter("flotestro_outbox_dead_lettered_total",
+		"Events set aside because a consumer refused them often enough that the trail would wait for ever.",
+		"consumer")
+	AuditWriteFailed = Default.NewCounter("flotestro_audit_write_failed_total",
+		"Audit events that were not written. The operation itself may well have succeeded, so this is the count of what the trail is missing.",
+		"action")
 	AgentReconnect = Default.NewCounter("flotestro_agent_reconnect_total",
 		"Agent sessions opened within ten minutes of the host's previous session ending, by host family.",
 		"host_family")
