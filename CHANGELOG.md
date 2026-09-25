@@ -20,6 +20,14 @@ day the tag was published.
 - A restore target was checked by name and then resolved again by the tool
   that unpacks as root, so anybody who could write a directory on the path
   could point it elsewhere in between.
+- A firewalld zone change had none of the rollback and connectivity proof a
+  rule change has, although firewalld keeps an established connection alive
+  across a reload — so a change that locked the host out reported success. And
+  the management-channel guard compared one port with one port, so removing a
+  service took every port it stands for, including 443.
+- A compose plan stood still for the whole operation's timeout when the
+  registry would not answer, instead of falling back to the digest the host
+  already held.
 
 - A relay renewal whose answer was lost left the relay holding a certificate
   the panel no longer knew, and the renewal that could have fixed it refuses an
