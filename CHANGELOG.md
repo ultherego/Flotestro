@@ -46,6 +46,15 @@ day the tag was published.
   new one. Each instance now follows the record, and one that cannot catch up
   reports itself unready instead of handing out certificates nobody trusts.
 
+### Changed
+
+- A first installation of the agent package now writes
+  `/etc/flotestro/helper.yaml` with `capabilities.mode: enforce`, so the root
+  helper carries out a change only against the panel's signed capability for
+  exactly that change. An upgrade does not write it: switching a running fleet
+  is the operator's decision, and an agent from before the capability would
+  stop working the moment the helper refused it.
+
 - A relay renewal whose answer was lost left the relay holding a certificate
   the panel no longer knew, and the renewal that could have fixed it refuses an
   unknown certificate — so a whole site stayed down until somebody enrolled the
