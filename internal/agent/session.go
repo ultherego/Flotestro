@@ -626,6 +626,8 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 						Outcome:            outcome,
 						Phase:              phase,
 						ObservedResultHash: resultHash,
+						// The answer names the request it answers.
+						RequestRevision: cancel.GetRequestRevision(),
 					}},
 				}); err != nil {
 					opts.Log.Error("the cancel acknowledgement was not sent back",

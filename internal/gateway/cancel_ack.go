@@ -13,6 +13,7 @@ import (
 	"github.com/ultherego/flotestro/internal/events"
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/jobs"
+	"github.com/ultherego/flotestro/internal/metrics"
 )
 
 // The cancel protocol on the gateway side. A cancel of a task the host holds
@@ -45,8 +46,46 @@ func (s *AgentService) recordCancelAck(ctx context.Context, session *Session, ac
 		return fmt.Errorf("a cancel acknowledgement for the unknown attempt %s: %w", attemptID, err)
 	}
 	outcome := cancelOutcomeName(ack.GetOutcome())
-	settlement, err := s.jobs.RecordCancelAck(ctx, jobID, outcome, ack.GetPhase())
-	if err != nil {
+	// An agent from before the revision field sends zero, which the store reads
+	// as "whatever is outstanding": that is the behaviour it had, and the fence
+	// below is what a fleet of that age gains regardless.
+	revision := ack.GetRequestRevision()
+	if revision == 0 {
+		revision = s.jobs.OutstandingCancelRevision(ctx, jobID)
+	}
+	settlement, err := s.jobs.RecordCancelAck(ctx, jobID, revision, outcome, ack.GetPhase(), session.Fence())
+	switch {
+	case errors.Is(err, jobs.ErrStaleFence):
+		// The session no longer owns the host: another one does, and settling
+		// a job and freeing its budget is the owner's to do.
+		metrics.SessionFence.Inc("cancel_ack_refused")
+		s.audit.Record(ctx, audit.Event{
+			ActorType: audit.ActorAgent, ActorID: hostID,
+			Action: "job.cancel_ack", TargetType: "job", TargetID: jobID,
+			Outcome: audit.OutcomeDenied,
+			Detail: map[string]any{
+				"attempt_id": attemptID, "host_id": hostID, "outcome": outcome,
+				"error_code": jobs.ErrorSessionFenceStale,
+			},
+		})
+		session.End("superseded")
+		return fmt.Errorf("the cancel acknowledgement of job %s came over a superseded session: %w", jobID, err)
+	case errors.Is(err, jobs.ErrCancelAckStale):
+		// The host answered the question it was asked and the question moved.
+		// The answer goes on the trail and settles nothing.
+		s.audit.Record(ctx, audit.Event{
+			ActorType: audit.ActorAgent, ActorID: hostID,
+			Action: "job.cancel_ack", TargetType: "job", TargetID: jobID,
+			Outcome: audit.OutcomeDenied,
+			Detail: map[string]any{
+				"attempt_id": attemptID, "host_id": hostID, "outcome": outcome,
+				"request_revision": revision, "error_code": "cancel_ack_stale",
+			},
+		})
+		s.log.Info("the host answered a cancel request the panel had already replaced",
+			"host_id", hostID, "job_id", jobID, "request_revision", revision)
+		return nil
+	case err != nil:
 		return fmt.Errorf("recording the cancel acknowledgement of job %s: %w", jobID, err)
 	}
 

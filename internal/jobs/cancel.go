@@ -74,19 +74,23 @@ type CancelRequest struct {
 // records the request on the trail, inside the caller's transaction.
 func requestCancel(ctx context.Context, tx pgx.Tx, jobID, actor, reason string) error {
 	var hostID, campaignID, attemptID string
-	var attemptNumber int64
+	var revision int64
 	var deadline time.Time
 	err := tx.QueryRow(ctx, `
 		update jobs j
 		   set state = $2, canceled_by = $3, cancel_reason = $4,
-		       cancel_requested_at = now(), updated_at = now()
+		       cancel_requested_at = now(), updated_at = now(),
+		       -- A new request is not the old one: the answer to the previous
+		       -- one goes, or the relay would take this job for answered.
+		       cancel_revision = j.cancel_revision + 1,
+		       cancel_ack_at = null, cancel_outcome = null, cancel_phase = null
 		  from (select a.id, a.attempt_number from job_attempts a
 		         where a.job_id = $1 order by a.attempt_number desc limit 1) last
 		 where j.id = $1
-		returning j.host_id::text, coalesce(j.campaign_id::text, ''), last.id::text, last.attempt_number,
-		          now() + make_interval(secs => j.timeout_seconds)`,
+		returning j.host_id::text, coalesce(j.campaign_id::text, ''), last.id::text,
+		          j.cancel_revision, now() + make_interval(secs => j.timeout_seconds)`,
 		jobID, string(StateCancelRequested), actor, nullable(reason)).
-		Scan(&hostID, &campaignID, &attemptID, &attemptNumber, &deadline)
+		Scan(&hostID, &campaignID, &attemptID, &revision, &deadline)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// A dispatched job without an attempt is a row somebody edited by
 		// hand; there is no delivery to ask the host about.
@@ -99,7 +103,7 @@ func requestCancel(ctx context.Context, tx pgx.Tx, jobID, actor, reason string) 
 		"host_id":          hostID,
 		"campaign_id":      campaignID,
 		"attempt_id":       attemptID,
-		"request_revision": attemptNumber,
+		"request_revision": revision,
 		"requested_by":     actor,
 		"reason":           reason,
 		"deadline_unix":    deadline.Unix(),
@@ -140,7 +144,7 @@ func (s *Store) PendingCancels(ctx context.Context, hostIDs []string) ([]CancelR
 	}
 	rows, err := s.pool.Query(ctx, `
 		select j.id::text, j.host_id::text, coalesce(j.campaign_id::text, ''),
-		       coalesce(last.id::text, ''), coalesce(last.attempt_number, 0),
+		       coalesce(last.id::text, ''), j.cancel_revision,
 		       coalesce(j.cancel_reason, ''), j.cancel_requested_at,
 		       j.cancel_requested_at + make_interval(secs => j.timeout_seconds)
 		  from jobs j
@@ -171,6 +175,11 @@ func (s *Store) PendingCancels(ctx context.Context, hostIDs []string) ([]CancelR
 	return pending, rows.Err()
 }
 
+// ErrCancelAckStale means an acknowledgement of a cancel request the panel has
+// already replaced: the host answered the question it was asked, and the
+// question moved. The answer goes on the trail and settles nothing.
+var ErrCancelAckStale = errors.New("cancel_ack_stale: the answer names a cancel request that was replaced")
+
 // CancelSettlement says what an acknowledgement did to the job.
 type CancelSettlement struct {
 	JobID      string
@@ -183,7 +192,8 @@ type CancelSettlement struct {
 
 // RecordCancelAck records the agent's answer to a cancel request and settles
 // the job by it.
-func (s *Store) RecordCancelAck(ctx context.Context, jobID, outcome, phase string) (CancelSettlement, error) {
+func (s *Store) RecordCancelAck(ctx context.Context, jobID string, revision uint64,
+	outcome, phase string, fence Fence) (CancelSettlement, error) {
 	if !KnownCancelOutcome(outcome) {
 		return CancelSettlement{}, fmt.Errorf("%w: unknown cancel outcome %q", ErrConflict, outcome)
 	}
@@ -193,19 +203,35 @@ func (s *Store) RecordCancelAck(ctx context.Context, jobID, outcome, phase strin
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// Settling a job and freeing its budget is the owner's to do, exactly as
+	// recording a result is: a session that no longer owns the host does not
+	// get to say what became of its tasks.
+	if err := fenceHolds(ctx, tx, jobID, fence); err != nil {
+		return CancelSettlement{}, err
+	}
+
 	settlement := CancelSettlement{JobID: jobID}
 	var previous string
+	var current int64
 	err = tx.QueryRow(ctx, `
 		update jobs
 		   set cancel_ack_at = coalesce(cancel_ack_at, now()),
 		       cancel_outcome = coalesce(cancel_outcome, $2),
 		       cancel_phase = coalesce(cancel_phase, $3),
 		       updated_at = now()
-		 where id = $1
-		returning state, coalesce(campaign_id::text, '')`,
-		jobID, outcome, nullable(phase)).Scan(&previous, &settlement.CampaignID)
+		 where id = $1 and cancel_revision = $4
+		returning state, coalesce(campaign_id::text, ''), cancel_revision`,
+		jobID, outcome, nullable(phase), int64(revision)).
+		Scan(&previous, &settlement.CampaignID, &current)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return CancelSettlement{}, ErrNotFound
+		// Either there is no such job, or the answer names a request the panel
+		// has already replaced. The second is not an error of the host: it
+		// answered the question it was asked, and the question moved.
+		var known bool
+		if scanErr := tx.QueryRow(ctx, `select true from jobs where id = $1`, jobID).Scan(&known); scanErr != nil {
+			return CancelSettlement{}, ErrNotFound
+		}
+		return CancelSettlement{JobID: jobID}, ErrCancelAckStale
 	}
 	if err != nil {
 		return CancelSettlement{}, err
@@ -252,6 +278,21 @@ func (s *Store) RecordCancelAck(ctx context.Context, jobID, outcome, phase strin
 		// The result settles the job; nothing to move.
 	}
 	return settlement, tx.Commit(ctx)
+}
+
+// OutstandingCancelRevision is the revision of the cancel request the job is
+// waiting for an answer to. Zero when there is none, which makes the answer of
+// an agent that names no revision land on nothing.
+func (s *Store) OutstandingCancelRevision(ctx context.Context, jobID string) uint64 {
+	var revision int64
+	if err := s.pool.QueryRow(ctx,
+		`select cancel_revision from jobs where id = $1`, jobID).Scan(&revision); err != nil {
+		return 0
+	}
+	if revision < 0 {
+		return 0
+	}
+	return uint64(revision)
 }
 
 // SettleCancelTimeouts ends the cancel requests nobody answered in time: the

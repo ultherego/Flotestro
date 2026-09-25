@@ -170,6 +170,7 @@
 <tr><td><a href="#err-capability-bad-signature"><code class="refusal">capability_bad_signature</code></a></td><td>helper</td><td><span class="badge retry-never">never</span></td><td>yes</td></tr>
 <tr><td><a href="#err-capability-expired"><code class="refusal">capability_expired</code></a></td><td>helper</td><td><span class="badge retry-after-change">after_change</span></td><td>yes</td></tr>
 <tr><td><a href="#err-capability-invalid-nonce"><code class="refusal">capability_invalid_nonce</code></a></td><td>helper</td><td><span class="badge retry-never">never</span></td><td>yes</td></tr>
+<tr><td><a href="#err-cancel-ack-stale"><code class="refusal">cancel_ack_stale</code></a></td><td>dispatch</td><td><span class="badge retry-automatic">automatic</span></td><td>no</td></tr>
 <tr><td><a href="#err-capability-missing"><code class="refusal">capability_missing</code></a></td><td>preflight</td><td><span class="badge retry-after-change">after_change</span></td><td>no</td></tr>
 <tr><td><a href="#err-capability-replay"><code class="refusal">capability_replay</code></a></td><td>helper</td><td><span class="badge retry-never">never</span></td><td>yes</td></tr>
 <tr><td><a href="#err-capability-required"><code class="refusal">capability_required</code></a></td><td>helper</td><td><span class="badge retry-after-change">after_change</span></td><td>yes</td></tr>
@@ -451,6 +452,8 @@
 <dl class="kv">
 <dt id="err-boot-filter-unsupported"><code class="refusal">boot_filter_unsupported</code></dt>
 <dd><p>The read asked for one boot of the host and the agent of the host does not apply a boot filter: an older agent would ignore it and answer with every boot under the name of one, so the read was not sent.</p><p><span class="label">What to do</span> Read the journal without the boot filter and narrow it by time, or upgrade the agent on the host; not a failure.</p><p><span class="badge retry-after-change">retry: after_change</span> <span class="badge not-failure">not a failure</span></p></dd>
+<dt id="err-cancel-ack-stale"><code class="refusal">cancel_ack_stale</code></dt>
+<dd><p>The host answered a cancel request the panel had already replaced with a newer one - an operator cancelled the same job twice, and the first answer arrived after the second request went out. The host answered the question it was asked; the question moved.</p><p><span class="label">What to do</span> Nothing. The answer is recorded on the trail and changes nothing, and the request that is outstanding is still waiting for its own.</p><p><span class="badge retry-automatic">retry: automatic</span> <span class="badge not-failure">not a failure</span></p></dd>
 <dt id="err-capability-missing"><code class="refusal">capability_missing</code></dt>
 <dd><p>The host has no adapter for this operation.</p><p><span class="label">What to do</span> Exclude the host or install what the adapter needs; not a failure.</p><p><span class="badge retry-after-change">retry: after_change</span> <span class="badge not-failure">not a failure</span></p></dd>
 <dt id="err-capability-unknown"><code class="refusal">capability_unknown</code></dt>

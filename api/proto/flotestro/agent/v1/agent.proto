@@ -1213,9 +1213,8 @@ message PackageRepairResult {
 message CancelTask {
   string task_id = 1;
   string reason = 2;
-  // request_revision names the delivery the cancel is about - the number
-  // of the attempt the panel holds - so that an acknowledgement is read
-  // against the request that asked for it.
+  // request_revision counts the cancel requests of this job, so that an
+  // acknowledgement is read against the request that asked for it.
   uint64 request_revision = 3;
   // deadline_unix is when the panel stops waiting for the acknowledgement
   // and settles the task as unknown; the agent answers before it or the
@@ -1246,6 +1245,11 @@ message CancelAck {
   // observed_result_hash is the SHA-256 of the deterministic encoding of
   // the TaskResult the journal holds, with ALREADY_DONE; empty otherwise.
   bytes observed_result_hash = 4;
+  // request_revision echoes the revision of the CancelTask this answers, so
+  // an answer to a request the panel has already replaced settles nothing.
+  // An agent from before this field sends zero, which the panel reads as
+  // "whatever is outstanding" - the behaviour it had.
+  uint64 request_revision = 5;
 }
 
 // FinalTask tells the agent the host is leaving the fleet. From this message

@@ -7881,9 +7881,8 @@ type CancelTask struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	TaskId string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
 	Reason string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
-	// request_revision names the delivery the cancel is about - the number
-	// of the attempt the panel holds - so that an acknowledgement is read
-	// against the request that asked for it.
+	// request_revision counts the cancel requests of this job, so that an
+	// acknowledgement is read against the request that asked for it.
 	RequestRevision uint64 `protobuf:"varint,3,opt,name=request_revision,json=requestRevision,proto3" json:"request_revision,omitempty"`
 	// deadline_unix is when the panel stops waiting for the acknowledgement
 	// and settles the task as unknown; the agent answers before it or the
@@ -7964,8 +7963,13 @@ type CancelAck struct {
 	// observed_result_hash is the SHA-256 of the deterministic encoding of
 	// the TaskResult the journal holds, with ALREADY_DONE; empty otherwise.
 	ObservedResultHash []byte `protobuf:"bytes,4,opt,name=observed_result_hash,json=observedResultHash,proto3" json:"observed_result_hash,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// request_revision echoes the revision of the CancelTask this answers, so
+	// an answer to a request the panel has already replaced settles nothing.
+	// An agent from before this field sends zero, which the panel reads as
+	// "whatever is outstanding" - the behaviour it had.
+	RequestRevision uint64 `protobuf:"varint,5,opt,name=request_revision,json=requestRevision,proto3" json:"request_revision,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *CancelAck) Reset() {
@@ -8024,6 +8028,13 @@ func (x *CancelAck) GetObservedResultHash() []byte {
 		return x.ObservedResultHash
 	}
 	return nil
+}
+
+func (x *CancelAck) GetRequestRevision() uint64 {
+	if x != nil {
+		return x.RequestRevision
+	}
+	return 0
 }
 
 // FinalTask tells the agent the host is leaving the fleet. From this message
@@ -16613,12 +16624,13 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x16\n" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\x12)\n" +
 	"\x10request_revision\x18\x03 \x01(\x04R\x0frequestRevision\x12#\n" +
-	"\rdeadline_unix\x18\x04 \x01(\x03R\fdeadlineUnix\"\x83\x02\n" +
+	"\rdeadline_unix\x18\x04 \x01(\x03R\fdeadlineUnix\"\xae\x02\n" +
 	"\tCancelAck\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12?\n" +
 	"\aoutcome\x18\x02 \x01(\x0e2%.flotestro.agent.v1.CancelAck.OutcomeR\aoutcome\x12\x14\n" +
 	"\x05phase\x18\x03 \x01(\tR\x05phase\x120\n" +
-	"\x14observed_result_hash\x18\x04 \x01(\fR\x12observedResultHash\"T\n" +
+	"\x14observed_result_hash\x18\x04 \x01(\fR\x12observedResultHash\x12)\n" +
+	"\x10request_revision\x18\x05 \x01(\x04R\x0frequestRevision\"T\n" +
 	"\aOutcome\x12\x0f\n" +
 	"\vNOT_STARTED\x10\x00\x12\x0f\n" +
 	"\vINTERRUPTED\x10\x01\x12\x15\n" +
