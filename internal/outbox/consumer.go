@@ -46,6 +46,11 @@ func (c *Consumer) Wake() {
 
 // Run delivers until the context ends.
 func (c *Consumer) Run(ctx context.Context) {
+	// This process is the consumer, so its cursor holds the trail back. An
+	// installation that stops running it says so through Retire.
+	if err := c.claim(ctx); err != nil && ctx.Err() == nil {
+		c.log.Error("the consumer was not claimed", "consumer", c.name, "err", err)
+	}
 	ticker := time.NewTicker(c.interval)
 	defer ticker.Stop()
 	for {
@@ -68,6 +73,26 @@ func (c *Consumer) Run(ctx context.Context) {
 		case <-c.wake:
 		}
 	}
+}
+
+// claim records that this installation runs the consumer, so the retention of
+// the trail waits for its cursor.
+func (c *Consumer) claim(ctx context.Context) error {
+	_, err := c.pool.Exec(ctx, `
+		insert into outbox_consumers (name) values ($1)
+		on conflict (name) do update set active = true, updated_at = now()`, c.name)
+	return err
+}
+
+// Retire says this installation no longer runs the named consumer. The cursor
+// stays, so switching it on again resumes where it stopped, but it stops
+// holding the whole trail back - which is what a webhook switched off used to
+// do, for ever.
+func Retire(ctx context.Context, pool *pgxpool.Pool, name string) error {
+	_, err := pool.Exec(ctx, `
+		update outbox_consumers set active = false, updated_at = now()
+		 where name = $1 and active`, name)
+	return err
 }
 
 // maxBackoff bounds how long a failing receiver is left alone.

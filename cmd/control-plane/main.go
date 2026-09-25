@@ -932,6 +932,10 @@ func run() error {
 			URL: *webhookURL, Secret: *webhookSecret, Prefixes: splitList(*webhookEvents),
 		}, log, 2*time.Second)
 		go webhook.Run(ctx)
+	} else if err := outbox.Retire(ctx, pool, "webhook"); err != nil {
+		// A consumer this installation no longer runs must not hold the whole
+		// trail back: its cursor pinned the retention for ever.
+		log.Warn("the webhook consumer was not retired", "err", err)
 	}
 	go func() {
 		wakes, unsubscribe := eventBus.Subscribe(func(event events.Event) bool {
