@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/ultherego/flotestro/internal/metrics"
 	"github.com/ultherego/flotestro/internal/paging"
 )
 
@@ -76,7 +77,10 @@ func NewRecorder(pool *pgxpool.Pool, log *slog.Logger) *Recorder {
 func (r *Recorder) Record(ctx context.Context, event Event) {
 	if err := r.record(ctx, r.pool, event); err != nil {
 		// A missing audit entry must not disappear silently, even when the
-		// operation succeeded.
+		// operation succeeded. The log says which one; the counter is what an
+		// alert rule can be written against, because a trail with holes in it
+		// is not a trail and nobody reads every log line to find that out.
+		metrics.AuditWriteFailed.Inc(event.Action)
 		r.log.Error("the audit event was not written",
 			"action", event.Action, "target", event.TargetID, "err", err)
 	}
