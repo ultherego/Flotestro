@@ -187,6 +187,26 @@ func (h *Scheduler) describedHosts(ctx context.Context,
 // Cycle makes one pass: the synchronisation of the feeds and the assessment
 // of the hosts.
 func (h *Scheduler) Cycle(ctx context.Context) {
+	// One instance does this pass. Every replica downloading every feed - close
+	// to a million findings for a Red Hat release - and then rewriting the
+	// findings of every host is duplicated work whose last commit wins, whichever
+	// of them read the fresher inputs.
+	instance := jobs.InstanceID()
+	held, err := h.store.TakeCorrelatorLease(ctx, instance)
+	if err != nil {
+		h.log.Error("the correlator lease was not read", "err", err)
+		return
+	}
+	if !held {
+		h.log.Debug("another instance holds the correlator lease; this pass does nothing")
+		return
+	}
+	defer func() {
+		if err := h.store.ReleaseCorrelatorLease(context.WithoutCancel(ctx), instance); err != nil {
+			h.log.Warn("the correlator lease was not given back", "err", err)
+		}
+	}()
+
 	descriptions, err := h.hostDescriptions(ctx)
 	if err != nil {
 		h.log.Error("the fleet to assess for vulnerabilities was not read", "err", err)
