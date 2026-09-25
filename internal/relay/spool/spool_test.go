@@ -291,6 +291,11 @@ func TestTheReserveIsKeptForTheDurableClasses(t *testing.T) {
 	if !spool.Stats().Critical {
 		t.Fatal("a spool in its reserve does not say it is critical")
 	}
+	// A durable class the spool did not take is a failure of the spool: the
+	// relay used to forward the message anyway and look healthy doing it.
+	if spool.FlushError() == nil {
+		t.Fatal("a job result the spool refused left the spool looking healthy")
+	}
 }
 
 // TestAFullInventoryCoalescesTheEarlierOnes guards the policy of the inventory

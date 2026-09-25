@@ -48,7 +48,7 @@ func TestLivenessSurvivesAnOutageOfTheCentre(t *testing.T) {
 	// The link is down and the spool holds what the site produced
 	// meanwhile: the state of a relay in an outage.
 	relay.upstream.Store(false)
-	if relay.keep("host-1", signed(heartbeat(1), "session-a", 1)) == nil {
+	if record, _ := relay.keep("host-1", signed(heartbeat(1), "session-a", 1)); record == nil {
 		t.Fatal("the spool did not take the message of the outage")
 	}
 	health := NewHealth(HealthOptions{Relay: relay, Identity: validIdentity})
@@ -108,7 +108,7 @@ func TestReadinessNamesTheSpoolAndTheCertificate(t *testing.T) {
 	// reserve, which is the state in which the relay refuses new sessions.
 	relay := newTestRelay(t, spool.Options{MaxBytes: 4096, CriticalReserveBytes: 4000})
 	relay.upstream.Store(true)
-	if relay.keep("host-1", signed(heartbeat(1), "session-a", 1)) == nil {
+	if record, _ := relay.keep("host-1", signed(heartbeat(1), "session-a", 1)); record == nil {
 		t.Fatal("the spool did not take the message")
 	}
 	expired := func() Identity {

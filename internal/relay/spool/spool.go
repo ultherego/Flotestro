@@ -260,11 +260,11 @@ func (s *Spool) Append(record *Record) error {
 		}
 		if err != nil {
 			s.dropped++
-			return err
+			return s.notKeptLocked(record, err)
 		}
 	}
 	if err := s.writeLocked(record); err != nil {
-		return err
+		return s.notKeptLocked(record, err)
 	}
 	if Durable(record.Stream) {
 		// Every durable class reaches the disk before the caller goes on: what the
@@ -281,8 +281,19 @@ func (s *Spool) Append(record *Record) error {
 	return nil
 }
 
-// FlushError returns the last failure of the batched sync of the light
-// classes, nil once a sync succeeded again.
+// notKeptLocked records a refusal of a durable class as a failure of the spool.
+// What the relay did not keep is what the health of the relay is about: a spool
+// that takes nothing durable is a relay that promises what it cannot hold.
+func (s *Spool) notKeptLocked(record *Record, err error) error {
+	if Durable(record.Stream) {
+		s.flushErr = err
+	}
+	return err
+}
+
+// FlushError returns the last failure of the spool: a record of a durable class
+// it did not take, or a batched sync of the light classes that did not reach
+// the disk. It is nil once the spool took and synced again.
 func (s *Spool) FlushError() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

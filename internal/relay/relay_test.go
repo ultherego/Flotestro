@@ -72,7 +72,7 @@ func TestTheSpoolHasALimit(t *testing.T) {
 
 	accepted := 0
 	for i := uint64(1); i <= 100; i++ {
-		if relay.keep("host-1", signed(heartbeat(1), "session-a", i)) == nil {
+		if record, _ := relay.keep("host-1", signed(heartbeat(1), "session-a", i)); record == nil {
 			break
 		}
 		accepted++
@@ -103,7 +103,7 @@ func TestTheSpoolSendsBackInTheSessionOfTheHost(t *testing.T) {
 		session string
 		mark    int64
 	}{{"host-1", "a", 1}, {"host-2", "b", 2}, {"host-1", "a", 3}} {
-		if relay.keep(entry.host, signed(heartbeat(entry.mark), entry.session, uint64(entry.mark))) == nil {
+		if record, _ := relay.keep(entry.host, signed(heartbeat(entry.mark), entry.session, uint64(entry.mark))); record == nil {
 			t.Fatal("the message was refused")
 		}
 	}
@@ -135,7 +135,7 @@ func TestTheSpoolSendsBackInTheSessionOfTheHost(t *testing.T) {
 // the panel, not on a send.
 func TestAMessageDisappearsOnlyOnTheAcknowledgement(t *testing.T) {
 	relay := newTestRelay(t, spool.Options{})
-	record := relay.keep("host-1", signed(heartbeat(1), "session-a", 4))
+	record, _ := relay.keep("host-1", signed(heartbeat(1), "session-a", 4))
 	if record == nil {
 		t.Fatal("the message was refused")
 	}
@@ -195,7 +195,7 @@ func TestAJobAfterItsTTLIsNotForwarded(t *testing.T) {
 func TestHelloIsNeverSpooled(t *testing.T) {
 	relay := newTestRelay(t, spool.Options{})
 	hello := &agentv1.AgentMessage{Payload: &agentv1.AgentMessage_Hello{Hello: &agentv1.Hello{AgentVersion: "test"}}}
-	if relay.keep("host-1", signed(hello, "session-a", 1)) != nil {
+	if record, _ := relay.keep("host-1", signed(hello, "session-a", 1)); record != nil {
 		t.Fatal("a Hello was written to the spool")
 	}
 }
@@ -224,7 +224,7 @@ func TestTheUpstreamStateIsNamed(t *testing.T) {
 // so its message is named by the record identifier and by nothing else.
 func TestAMessageWithoutASequenceLeavesOnTheAcknowledgementToo(t *testing.T) {
 	relay := newTestRelay(t, spool.Options{})
-	record := relay.keep("host-1", heartbeat(1))
+	record, _ := relay.keep("host-1", heartbeat(1))
 	if record == nil {
 		t.Fatal("the message was refused")
 	}
@@ -254,7 +254,7 @@ func TestAMessageWithoutASequenceLeavesOnTheAcknowledgementToo(t *testing.T) {
 // falls back to the older behaviour instead of holding the record for ever.
 func TestTheWaitForANamedAcknowledgementIsBounded(t *testing.T) {
 	relay := newTestRelay(t, spool.Options{AckTimeout: 20 * time.Millisecond})
-	record := relay.keep("host-1", heartbeat(1))
+	record, _ := relay.keep("host-1", heartbeat(1))
 	if record == nil {
 		t.Fatal("the message was refused")
 	}
@@ -271,7 +271,7 @@ func TestTheWaitForANamedAcknowledgementIsBounded(t *testing.T) {
 
 	// A centre that does name records keeps the wait open: the record stays
 	// until its own acknowledgement arrives.
-	second := relay.keep("host-1", heartbeat(2))
+	second, _ := relay.keep("host-1", heartbeat(2))
 	if second == nil {
 		t.Fatal("the second message was refused")
 	}

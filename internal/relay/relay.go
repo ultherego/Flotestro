@@ -401,10 +401,17 @@ func (r *Relay) Connect(ctx context.Context,
 		select {
 		case <-lost:
 			// The centre is unreachable: the message waits in the spool instead of
-			// being lost.
-			r.keep(hostID, message)
+			// being lost. A durable class the spool will not take ends the session,
+			// so that the agent keeps it rather than believe the relay holds it.
+			if _, err := r.keep(hostID, message); err != nil && spool.Durable(spool.Classify(message)) {
+				return connect.NewError(connect.CodeResourceExhausted, err)
+			}
 		default:
-			if r.forward(hostID, message, upstream, &once, lost) && first {
+			sent, err := r.forward(hostID, message, upstream, &once, lost)
+			if err != nil {
+				return connect.NewError(connect.CodeResourceExhausted, err)
+			}
+			if sent && first {
 				first = false
 				r.flush(hostID, upstream, &once, lost)
 			}
@@ -424,10 +431,17 @@ func (r *Relay) ackTimeout() time.Duration {
 // class, straight for the rest.
 func (r *Relay) forward(hostID string, message *agentv1.AgentMessage,
 	upstream *connect.BidiStreamForClient[agentv1.AgentMessage, agentv1.ServerMessage],
-	once *sync.Once, lost chan struct{}) bool {
+	once *sync.Once, lost chan struct{}) (bool, error) {
 	var record *spool.Record
-	if message.GetHello() == nil && spool.Durable(spool.Classify(message)) {
-		record = r.keep(hostID, message)
+	durable := message.GetHello() == nil && spool.Durable(spool.Classify(message))
+	if durable {
+		kept, err := r.keep(hostID, message)
+		if err != nil {
+			// A durable class the spool did not take must not travel as though it
+			// had: the session ends and the agent keeps the message instead.
+			return false, err
+		}
+		record = kept
 	}
 	// The identifier is the relay's own word about its spool: an agent never
 	// sets it, and whatever it did send is overwritten here.
@@ -439,29 +453,32 @@ func (r *Relay) forward(hostID string, message *agentv1.AgentMessage,
 		r.upstream.Store(false)
 		once.Do(func() { close(lost) })
 		if record == nil {
-			r.keep(hostID, message)
+			if _, keepErr := r.keep(hostID, message); keepErr != nil && durable {
+				return false, keepErr
+			}
 		}
-		return false
+		return false, nil
 	}
 	if record != nil {
 		// The send is not the confirmation: the record leaves the spool on the
 		// acknowledgement that names it, and on nothing else.
 		r.spool.MarkSent(record.ID)
 	}
-	return true
+	return true, nil
 }
 
 // keep writes a message to the spool by the policy of its class and says which
-// record it became; nil when the class refused it.
-func (r *Relay) keep(hostID string, message *agentv1.AgentMessage) *spool.Record {
+// record it became, together with the refusal of the spool. A nil record with
+// no error is a class the spool does not keep at all.
+func (r *Relay) keep(hostID string, message *agentv1.AgentMessage) (*spool.Record, error) {
 	if message.GetHello() != nil {
 		// Hello opens a session and is never carried into another one.
-		return nil
+		return nil, nil
 	}
 	record, err := spool.FromMessage(r.options.Spool.Site, hostID, message, time.Now())
 	if err != nil {
 		r.log.Error("the message could not be encoded for the spool", "host_id", hostID, "err", err)
-		return nil
+		return nil, err
 	}
 	if err := r.spool.Append(record); err != nil {
 		switch {
@@ -474,9 +491,9 @@ func (r *Relay) keep(hostID string, message *agentv1.AgentMessage) *spool.Record
 		default:
 			r.log.Error("the spool did not take a message", "host_id", hostID, "stream", record.Stream, "err", err)
 		}
-		return nil
+		return nil, err
 	}
-	return record
+	return record, nil
 }
 
 // flush sends the records of the host that are due: what waited through an
