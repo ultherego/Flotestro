@@ -642,11 +642,15 @@ func (s *Store) Record(ctx context.Context, hostID string, sample Sample) (Recor
 		return OutcomeDuplicate, nil
 	}
 	// The quarter-hour this reading falls in has to be computed again.
+	// The moment moves on a repeat mark. A pass that claimed the bucket before
+	// this reading was visible deletes only the mark it claimed, so this one
+	// survives and the bucket is computed again with the reading in it.
 	if _, err := tx.Exec(ctx, `
 		insert into metric_rollup_dirty (host_id, bucket_at)
 		values ($1, date_trunc('hour', $2::timestamptz)
 		            + (extract(minute from $2::timestamptz)::int / 15) * interval '15 minutes')
-		on conflict (host_id, bucket_at) do nothing`, hostID, sample.At); err != nil {
+		on conflict (host_id, bucket_at) do update set dirty_at = clock_timestamp()`,
+		hostID, sample.At); err != nil {
 		return OutcomeUnknown, err
 	}
 	// The host row carries the moment the panel last heard from the host, by
@@ -899,7 +903,7 @@ func (s *Store) queueFinishedBuckets(ctx context.Context) error {
 		queued as (
 		    insert into metric_rollup_dirty (host_id, bucket_at)
 		    select host_id, bucket from pending
-		    on conflict (host_id, bucket_at) do nothing
+		    on conflict (host_id, bucket_at) do update set dirty_at = clock_timestamp()
 		    returning host_id
 		)
 		insert into metric_rollup_watermarks (host_id, complete_through)
@@ -917,7 +921,7 @@ func (s *Store) queueFinishedBuckets(ctx context.Context) error {
 func (s *Store) rollupBatch(ctx context.Context) (int64, error) {
 	const recompute = `
 		with claimed as (
-		    select host_id, bucket_at
+		    select host_id, bucket_at, dirty_at
 		      from metric_rollup_dirty
 		     where bucket_at < date_trunc('hour', now())
 		             + (extract(minute from now())::int / 15) * interval '15 minutes'
@@ -980,7 +984,11 @@ func (s *Store) rollupBatch(ctx context.Context) (int64, error) {
 		)
 		delete from metric_rollup_dirty d
 		 using claimed c
-		 where d.host_id = c.host_id and d.bucket_at = c.bucket_at`
+		 where d.host_id = c.host_id and d.bucket_at = c.bucket_at
+		   -- A reading that landed while this pass ran moved the moment: the
+		   -- mark is not this pass's to clear, or the reading would be left
+		   -- out of the quarter for good.
+		   and d.dirty_at = c.dirty_at`
 	tag, err := s.pool.Exec(ctx, recompute, rollupBatchSize)
 	if err != nil {
 		return 0, err
