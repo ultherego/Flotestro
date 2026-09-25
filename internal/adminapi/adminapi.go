@@ -116,6 +116,8 @@ type Server struct {
 	// relays is the registry of the site relays; the installation of a host in an
 	// isolated site goes through one of them.
 	relays *relays.Store
+	// crypto answers whether this instance's key material is current.
+	crypto cryptoState
 	// installation is what the panel knows about how the hosts reach it.
 	installation Installation
 	// groups holds the saved host selections: static member lists and
@@ -599,10 +601,27 @@ func (s *Server) handleLive(w http.ResponseWriter, r *http.Request) {
 
 // handleReady answers whether it can serve, which is a question about the
 // database rather than about the process.
+// cryptoState is what readiness asks about the installation's key material: an
+// instance behind the record signs with an authority the installation may have
+// retired.
+type cryptoState interface{ Stale() string }
+
+// SetCryptoState connects the crypto runtime to the readiness answer.
+func (s *Server) SetCryptoState(state cryptoState) { s.crypto = state }
+
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	if err := s.pool.Ping(r.Context()); err != nil {
 		problem(w, http.StatusServiceUnavailable, "database_unavailable", "the database is not responding")
 		return
+	}
+	// An instance whose key material is behind the installation record answers
+	// every query and signs with an authority the installation may have retired.
+	// It is alive; it is not fit to be sent work.
+	if s.crypto != nil {
+		if reason := s.crypto.Stale(); reason != "" {
+			problem(w, http.StatusServiceUnavailable, "crypto_state_stale", reason)
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":          "ok",

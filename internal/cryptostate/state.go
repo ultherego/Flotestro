@@ -92,9 +92,16 @@ type Runtime struct {
 	provider Provider
 	trust    *pki.Trust
 	log      *slog.Logger
+	// caDir is where the fleet CA lives, so a reload reads what another
+	// instance wrote there.
+	caDir string
 
 	mu     sync.RWMutex
 	record Record
+	// stale says this instance's picture of the crypto state is older than the
+	// record and could not be brought up to date. It signs and seals with what
+	// it has; the readiness answer says it is not fit to serve.
+	stale string
 	// initialised and adopted say what this start did: made a new
 	// installation, or wrote the record for an existing one.
 	initialised bool
@@ -113,7 +120,7 @@ func Open(ctx context.Context, o Options) (*Runtime, error) {
 	}
 	defer unlock()
 
-	r := &Runtime{storage: o.Storage, provider: o.Provider, log: o.Log}
+	r := &Runtime{storage: o.Storage, provider: o.Provider, log: o.Log, caDir: o.CADir}
 	record, err := o.Storage.Load(ctx)
 	switch {
 	case errors.Is(err, ErrNoRecord):
@@ -501,7 +508,7 @@ func (r *Runtime) rotate(ctx context.Context, to string) error {
 	moved := r.record
 	moved.ActiveKeyID = to
 	moved.Sentinel = sentinel
-	if err := r.storage.Update(ctx, moved); err != nil {
+	if err := r.storage.UpdateIfRevision(ctx, moved, r.record.Revision); err != nil {
 		return fmt.Errorf("recording the key rotation: %w", err)
 	}
 	loaded, err := r.storage.Load(ctx)
@@ -579,11 +586,32 @@ const rewrapBatch = 200
 // written without one.
 const maintainInterval = 5 * time.Minute
 
+// reloadInterval is how often an instance asks whether the record moved. The
+// window is what another instance's rotation costs: until this one reloads it
+// signs with the old authority, and an agent that renewed against the new one
+// does not verify here.
+const reloadInterval = 15 * time.Second
+
 // Maintain runs the background work until the context ends: once at start and
 // then at every interval.
 func (r *Runtime) Maintain(ctx context.Context) {
 	ticker := time.NewTicker(maintainInterval)
 	defer ticker.Stop()
+	// The reload runs on its own, faster clock: an authority another instance
+	// activated has to reach this one in seconds, not in the five minutes a
+	// rewrap pass is happy with.
+	reload := time.NewTicker(reloadInterval)
+	defer reload.Stop()
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-reload.C:
+				r.Reload(ctx)
+			}
+		}
+	}()
 	for {
 		r.Rewrap(ctx)
 		r.assignIssuers(ctx)
@@ -593,6 +621,78 @@ func (r *Runtime) Maintain(ctx context.Context) {
 		case <-ticker.C:
 		}
 	}
+}
+
+// Reload brings this instance up to the record when another one has moved it:
+// a key rotated, an authority activated. The state directory is shared - the
+// installation check refuses a replica with one of its own - so what another
+// instance wrote is on disk here, and reading it is the whole of the work.
+//
+// Without this, an authority activated on one replica left every other replica
+// signing with the old one and rejecting the agents that had renewed against
+// the new one: a routine, documented maintenance action taking a site down.
+func (r *Runtime) Reload(ctx context.Context) {
+	loaded, err := r.storage.Load(ctx)
+	if err != nil || loaded == nil {
+		if err != nil {
+			r.log.Warn("the installation record was not read", "err", err)
+		}
+		return
+	}
+	r.mu.RLock()
+	known := r.record.Revision
+	r.mu.RUnlock()
+	if loaded.Revision == known {
+		return
+	}
+
+	// The key first: a seal with a key this instance does not hold fails at the
+	// moment a secret is written, which is too late to be useful.
+	if err := r.provider.RequireKey(ctx, loaded.ActiveKeyID); err != nil {
+		r.markStale("the record names the key " + loaded.ActiveKeyID + " and this instance does not hold it")
+		return
+	}
+	trust, err := openTrust(r.caDir)
+	if err != nil {
+		r.markStale("the fleet authority on disk could not be read: " + err.Error())
+		return
+	}
+	if active := trust.Active(); active.IssuerID() != loaded.IssuerID {
+		// The files and the record disagree, which is not this instance's to
+		// resolve: it says so and keeps what it had.
+		r.markStale("the authority on disk is " + active.IssuerID() +
+			" and the record names " + loaded.IssuerID)
+		return
+	}
+
+	r.mu.Lock()
+	r.record = *loaded
+	r.trust = trust
+	r.stale = ""
+	r.mu.Unlock()
+	r.provider.SetActive(loaded.ActiveKeyID)
+	r.log.Info("the crypto state of this instance was brought up to the record",
+		"revision", loaded.Revision, "active_key", loaded.ActiveKeyID, "issuer", loaded.IssuerID)
+}
+
+// markStale records why this instance could not keep up, once per reason.
+func (r *Runtime) markStale(reason string) {
+	r.mu.Lock()
+	changed := r.stale != reason
+	r.stale = reason
+	r.mu.Unlock()
+	if changed {
+		r.log.Error("this instance is behind the installation record and could not catch up", "reason", reason)
+	}
+}
+
+// Stale says why this instance is behind the record, and is empty when it is
+// not. The readiness answer reads it: an instance signing with an authority the
+// installation has retired is not fit to serve.
+func (r *Runtime) Stale() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.stale
 }
 
 // Rewrap moves every live version onto the active key, a batch at a time, and

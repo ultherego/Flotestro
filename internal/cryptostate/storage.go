@@ -59,6 +59,10 @@ type Storage interface {
 	Insert(ctx context.Context, record Record) error
 	// Update replaces the record, raising its revision.
 	Update(ctx context.Context, record Record) error
+	// UpdateIfRevision replaces the record only while it still stands at the
+	// revision the caller read. Two replicas rotating at once would otherwise
+	// each write over the other's work with no sign of it.
+	UpdateIfRevision(ctx context.Context, record Record, expected int64) error
 	Facts(ctx context.Context) (Facts, error)
 	// AssignIssuer fills in the issuer identifier of the certificates
 	// issued by the named CA that carry none yet.
@@ -174,6 +178,30 @@ func (p *Postgres) Update(ctx context.Context, record Record) error {
 	}
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("the installation record of %s is gone", record.InstallationID)
+	}
+	return nil
+}
+
+// ErrRevisionMoved means the record changed under the caller: another instance
+// rotated the key or the authority since this one read it.
+var ErrRevisionMoved = errors.New("the installation record moved to another revision")
+
+// UpdateIfRevision implements Storage.
+func (p *Postgres) UpdateIfRevision(ctx context.Context, record Record, expected int64) error {
+	tag, err := p.pool.Exec(ctx, `
+		update crypto_installation_state
+		   set active_secrets_key_id = $1, active_agent_ca_id = $2, active_agent_ca_fingerprint = $3,
+		       sentinel_key_id = $4, sentinel_wrapped_dek = $5, sentinel_nonce = $6, sentinel_ciphertext = $7,
+		       updated_at = now(), revision = revision + 1
+		 where singleton and installation_id = $8 and revision = $9`,
+		record.ActiveKeyID, record.IssuerID, record.IssuerFingerprint,
+		record.Sentinel.KeyID, record.Sentinel.WrappedDEK, record.Sentinel.Nonce, record.Sentinel.Ciphertext,
+		record.InstallationID, expected)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("%w: this instance read revision %d", ErrRevisionMoved, expected)
 	}
 	return nil
 }

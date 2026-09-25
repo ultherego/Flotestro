@@ -1040,6 +1040,10 @@ func run() error {
 	// The secret store.
 	secretStore := secrets.NewStore(pool, keyProvider)
 	cryptoRuntime.SetSecrets(secretStore)
+	// Readiness asks the crypto runtime whether this instance is current: one
+	// behind the record signs with an authority the installation may have
+	// retired, and answers every query while it does.
+	panelServer.SetCryptoState(cryptoRuntime)
 	go cryptoRuntime.Maintain(ctx)
 	panelServer.SetSecrets(secretStore)
 	agentService.SetSecrets(secretStore)

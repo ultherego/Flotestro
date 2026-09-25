@@ -32,6 +32,16 @@ type memoryStorage struct {
 	liveKeys []string
 }
 
+func (m *memoryStorage) UpdateIfRevision(ctx context.Context, record Record, expected int64) error {
+	m.mu.Lock()
+	if m.record != nil && m.record.Revision != expected {
+		m.mu.Unlock()
+		return ErrRevisionMoved
+	}
+	m.mu.Unlock()
+	return m.Update(ctx, record)
+}
+
 func (m *memoryStorage) LiveKeyIDs(context.Context) ([]string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -661,5 +671,51 @@ func TestAKeyOfLiveSecretsThatTheProviderLostStopsTheStart(t *testing.T) {
 	l.storage.mu.Unlock()
 	if runtime := l.open(t); runtime == nil {
 		t.Fatal("a start whose keys are all present was refused")
+	}
+}
+
+// An authority activated on one instance used to leave every other instance
+// signing with the old one, and rejecting the agents that had renewed against
+// the new one: a documented maintenance action taking a site down. The state
+// directory is shared, so keeping up is a matter of reading it.
+func TestAnInstanceBroughtUpToTheRecordOfAnother(t *testing.T) {
+	l := newLab(t)
+	runtime := l.open(t)
+	record := runtime.Record()
+
+	// Another instance moved the record: a key rotation it also wrote the key
+	// for, which this instance's provider holds because the material is shared.
+	moved := record
+	moved.ActiveKeyID = "key-of-the-other-instance"
+	if err := l.provider.GenerateNamed(context.Background(), moved.ActiveKeyID); err != nil {
+		t.Fatalf("the key of the other instance: %v", err)
+	}
+	sentinel, err := sealSentinel(context.Background(), l.provider, moved.ActiveKeyID, record.InstallationID)
+	if err != nil {
+		t.Fatalf("resealing the sentinel: %v", err)
+	}
+	moved.Sentinel = sentinel
+	if err := l.storage.Update(context.Background(), moved); err != nil {
+		t.Fatalf("the other instance's write: %v", err)
+	}
+
+	runtime.Reload(context.Background())
+	if reason := runtime.Stale(); reason != "" {
+		t.Fatalf("the instance reports itself behind: %s", reason)
+	}
+	if now := runtime.Record(); now.ActiveKeyID != moved.ActiveKeyID {
+		t.Errorf("the instance still names the key %s", now.ActiveKeyID)
+	}
+
+	// A record naming a key this instance does not hold is what staleness is
+	// for: it keeps working with what it has and says it is not fit to serve.
+	unreachable := runtime.Record()
+	unreachable.ActiveKeyID = "key-nobody-here-holds"
+	if err := l.storage.Update(context.Background(), unreachable); err != nil {
+		t.Fatal(err)
+	}
+	runtime.Reload(context.Background())
+	if reason := runtime.Stale(); reason == "" {
+		t.Error("an instance that could not catch up reports itself current")
 	}
 }
