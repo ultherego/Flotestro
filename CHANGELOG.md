@@ -41,6 +41,10 @@ day the tag was published.
 - The container guide names the two database facts an external installation
   needs: a pooler in transaction mode breaks the panel silently, and the
   migration switches existed in no document.
+- A fleet authority activated on one replica left every other replica signing
+  with the retired one and rejecting the agents that had renewed against the
+  new one. Each instance now follows the record, and one that cannot catch up
+  reports itself unready instead of handing out certificates nobody trusts.
 
 - A relay renewal whose answer was lost left the relay holding a certificate
   the panel no longer knew, and the renewal that could have fixed it refuses an
