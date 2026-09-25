@@ -54,6 +54,10 @@ day the tag was published.
   exactly that change. An upgrade does not write it: switching a running fleet
   is the operator's decision, and an agent from before the capability would
   stop working the moment the helper refused it.
+- The capability now binds the target of five more orders: a signal to a
+  process (the pid, the signal and the incarnation), the host's own name, a
+  declared container, network or volume, a repository, a backup definition and
+  a certificate deployment.
 
 - A relay renewal whose answer was lost left the relay holding a certificate
   the panel no longer knew, and the renewal that could have fixed it refuses an
