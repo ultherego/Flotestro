@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
+	"github.com/ultherego/flotestro/internal/modules/network"
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
@@ -521,6 +522,298 @@ func CheckBinding(request *helperv1.HelperRequest, bound *BoundPayload) error {
 		}
 		return same("plan digest", action.Certificate.GetPlanHash(), payload.Certificate.PlanHash)
 
+	case *helperv1.HelperRequest_DockerAction:
+		container := action.DockerAction
+		switch container.GetOperation() {
+		case helperv1.DockerActionRequest_OPERATION_START,
+			helperv1.DockerActionRequest_OPERATION_STOP,
+			helperv1.DockerActionRequest_OPERATION_RESTART,
+			helperv1.DockerActionRequest_OPERATION_REMOVE:
+			if payload.DockerContainer == nil {
+				return binding("the bound payload describes no container")
+			}
+			if err := same("container", container.GetContainerId(),
+				payload.DockerContainer.ContainerID); err != nil {
+				return err
+			}
+			// Taking the volumes with the container destroys the data it kept,
+			// and the order decides that, not the request.
+			if container.GetRemoveVolumes() != payload.DockerContainer.RemoveVolumes {
+				return binding("the request removes the volumes of the container against the bound payload")
+			}
+			if container.GetTimeoutSeconds() != payload.DockerContainer.TimeoutSeconds {
+				return binding(fmt.Sprintf(
+					"the request gives the container %ds to shut down, the bound payload %ds",
+					container.GetTimeoutSeconds(), payload.DockerContainer.TimeoutSeconds))
+			}
+			return nil
+		case helperv1.DockerActionRequest_OPERATION_PULL_IMAGE:
+			if payload.DockerImage == nil {
+				return binding("the bound payload describes no image")
+			}
+			return same("image", container.GetImageReference(), payload.DockerImage.Reference)
+		case helperv1.DockerActionRequest_OPERATION_PRUNE:
+			if payload.DockerPrune == nil {
+				return binding("the bound payload describes no cleanup")
+			}
+			if err := sameList("images", container.GetImageIds(), payload.DockerPrune.ImageIDs); err != nil {
+				return err
+			}
+			if err := sameList("volumes", container.GetVolumeNames(), payload.DockerPrune.VolumeName); err != nil {
+				return err
+			}
+			return sameList("networks", container.GetNetworkIds(), payload.DockerPrune.NetworkIDs)
+		}
+		return nil
+
+	case *helperv1.HelperRequest_Compose:
+		if payload.Compose == nil {
+			return binding("the bound payload describes no project")
+		}
+		if err := same("project", action.Compose.GetProject(), payload.Compose.Project); err != nil {
+			return err
+		}
+		// The manifest is what will run; the digest names it without carrying it
+		// into a refusal message.
+		if err := same("manifest", contentDigest([]byte(action.Compose.GetManifest())),
+			contentDigest([]byte(payload.Compose.Manifest))); err != nil {
+			return err
+		}
+		if err := same("plan digest", action.Compose.GetPlanDigest(), payload.Compose.PlanDigest); err != nil {
+			return err
+		}
+		return sameList("image digests", serviceDigests(action.Compose.GetImageDigests()),
+			serviceDigests(payload.Compose.ImageDigests))
+
+	case *helperv1.HelperRequest_DomainEnroll:
+		if payload.DomainEnroll == nil {
+			return binding("the bound payload describes no domain")
+		}
+		if err := same("domain", action.DomainEnroll.GetDomain(), payload.DomainEnroll.Domain); err != nil {
+			return err
+		}
+		if err := same("realm", action.DomainEnroll.GetRealm(), payload.DomainEnroll.Realm); err != nil {
+			return err
+		}
+		if err := same("directory server", action.DomainEnroll.GetServer(), payload.DomainEnroll.Server); err != nil {
+			return err
+		}
+		// The one-time password is not in the payload: the panel puts it into the
+		// envelope at delivery, after the capability is signed.
+		return same("hostname", action.DomainEnroll.GetHostname(), payload.DomainEnroll.Hostname)
+
+	case *helperv1.HelperRequest_DomainLeave:
+		if payload.DomainLeave == nil {
+			return binding("the bound payload describes no domain")
+		}
+		if err := same("domain", action.DomainLeave.GetDomain(), payload.DomainLeave.Domain); err != nil {
+			return err
+		}
+		return same("realm", action.DomainLeave.GetRealm(), payload.DomainLeave.Realm)
+
+	case *helperv1.HelperRequest_KeytabRenew:
+		if payload.Keytab == nil {
+			return binding("the bound payload describes no principal")
+		}
+		return same("principal", action.KeytabRenew.GetPrincipal(), payload.Keytab.Principal)
+
+	case *helperv1.HelperRequest_PackageRepair:
+		// An order that answers nothing leaves no payload behind at all, so an
+		// empty request under an empty payload is the honest case.
+		var answers []opspec.DebconfAnswer
+		if payload.PackageRepair != nil {
+			answers = payload.PackageRepair.Answers
+		}
+		return sameList("configuration answers", selectedAnswers(action.PackageRepair.GetAnswers()),
+			approvedAnswers(answers))
+
+	case *helperv1.HelperRequest_Reboot:
+		// A restart of every default leaves no payload behind, and the agent
+		// fills an unset delay with its own; the reason always travels.
+		reason, delay, inhibitors := "", uint32(0), false
+		if payload.Reboot != nil {
+			reason = payload.Reboot.Reason
+			delay = payload.Reboot.DelaySeconds
+			inhibitors = payload.Reboot.IgnoreInhibitors
+		}
+		if err := same("reboot reason", action.Reboot.GetReason(), reason); err != nil {
+			return err
+		}
+		if delay != 0 && action.Reboot.GetDelaySeconds() != delay {
+			return binding(fmt.Sprintf("the request restarts in %ds, the bound payload in %ds",
+				action.Reboot.GetDelaySeconds(), delay))
+		}
+		if action.Reboot.GetIgnoreInhibitors() != inhibitors {
+			return binding("the request steps over the inhibitors against the bound payload")
+		}
+		return nil
+
+	case *helperv1.HelperRequest_Shutdown:
+		if payload.Power == nil {
+			return binding("the bound payload describes no power operation")
+		}
+		if err := same("shutdown reason", action.Shutdown.GetReason(), payload.Power.Reason); err != nil {
+			return err
+		}
+		// The agent fills an unnamed mode and an unset delay with its own
+		// defaults, so only a value the payload named is compared.
+		if payload.Power.Mode != "" {
+			if err := same("shutdown mode", action.Shutdown.GetMode(), payload.Power.Mode); err != nil {
+				return err
+			}
+		}
+		if payload.Power.DelaySeconds != 0 &&
+			action.Shutdown.GetDelaySeconds() != payload.Power.DelaySeconds {
+			return binding(fmt.Sprintf("the request powers off in %ds, the bound payload in %ds",
+				action.Shutdown.GetDelaySeconds(), payload.Power.DelaySeconds))
+		}
+		if action.Shutdown.GetIgnoreInhibitors() != payload.Power.IgnoreInhibitors {
+			return binding("the request steps over the inhibitors against the bound payload")
+		}
+		return nil
+
+	case *helperv1.HelperRequest_Network:
+		if payload.Network == nil {
+			return binding("the bound payload describes no network change")
+		}
+		// The management address is the host's own knowledge of the way home;
+		// every other field of a mutating request comes from the payload.
+		change := action.Network
+		if err := same("interface", change.GetInterface(), payload.Network.Interface); err != nil {
+			return err
+		}
+		if err := same("plan digest", change.GetPlanHash(), payload.Network.PlanHash); err != nil {
+			return err
+		}
+		if err := same("rollback plan", change.GetRollbackId(), payload.Network.RollbackID); err != nil {
+			return err
+		}
+		switch change.GetOperation() {
+		case helperv1.NetworkRequest_OPERATION_SET_MTU:
+			return same("mtu", change.GetMtu(), payload.Network.MTU)
+		case helperv1.NetworkRequest_OPERATION_ENSURE_ROUTES:
+			return sameList("routes", change.GetRoutes(), payload.Network.Routes)
+		case helperv1.NetworkRequest_OPERATION_APPLY_PROFILE:
+			return sameProfile(change, payload.Network)
+		case helperv1.NetworkRequest_OPERATION_APPLY_LINK:
+			return sameLink(change.GetLink(), payload.Network.Link)
+		}
+		// A removal and a rollback name the interface and the plan, and carry
+		// nothing else of their own.
+		return nil
+
+	case *helperv1.HelperRequest_Dns:
+		if payload.DNS == nil {
+			return binding("the bound payload describes no resolver change")
+		}
+		// A capability for one resolver must not point the host at another.
+		resolver := action.Dns
+		if err := same("interface", resolver.GetInterface(), payload.DNS.Interface); err != nil {
+			return err
+		}
+		if err := sameList("resolvers", resolver.GetServers(), payload.DNS.Servers); err != nil {
+			return err
+		}
+		if err := sameList("search domains", resolver.GetSearchDomains(), payload.DNS.SearchDomains); err != nil {
+			return err
+		}
+		if resolver.GetIgnoreAutoDns() != payload.DNS.IgnoreAutoDNS {
+			return binding("the request and the bound payload disagree about rejecting the servers from DHCP")
+		}
+		return same("plan digest", resolver.GetPlanHash(), payload.DNS.PlanHash)
+
+	case *helperv1.HelperRequest_Firewall:
+		if payload.Firewall == nil {
+			return binding("the bound payload describes no firewall change")
+		}
+		// The management address and port are the agent's own knowledge of the
+		// channel it answers on; the rest of the request is the payload.
+		rules := action.Firewall
+		if err := same("rule", rules.GetRuleId(), payload.Firewall.RuleID); err != nil {
+			return err
+		}
+		if err := same("zone", rules.GetZone(), payload.Firewall.Zone); err != nil {
+			return err
+		}
+		if err := same("ruleset digest", rules.GetExpectedHash(), payload.Firewall.ExpectedHash); err != nil {
+			return err
+		}
+		if rules.GetBreakGlass() != payload.Firewall.BreakGlass {
+			return binding("the request and the bound payload disagree about overriding the protection of the management channel")
+		}
+		switch rules.GetOperation() {
+		case helperv1.FirewallRequest_OPERATION_RULE_ENSURE:
+			return sameRule(rules, payload.Firewall)
+		case helperv1.FirewallRequest_OPERATION_ZONE_PORT:
+			if err := sameList("ports", rules.GetPorts(), payload.Firewall.Ports); err != nil {
+				return err
+			}
+			if err := same("protocol", rules.GetProtocol(), payload.Firewall.Protocol); err != nil {
+				return err
+			}
+			return sameSwitch(rules.GetEnable(), payload.Firewall.Enable)
+		case helperv1.FirewallRequest_OPERATION_ZONE_SERVICE:
+			if err := same("service", rules.GetService(), payload.Firewall.Service); err != nil {
+				return err
+			}
+			return sameSwitch(rules.GetEnable(), payload.Firewall.Enable)
+		case helperv1.FirewallRequest_OPERATION_RESTORE:
+			return same("rollback plan", rules.GetRollbackId(), payload.Firewall.RollbackID)
+		}
+		// A removal names the rule and nothing of the rule's content.
+		return nil
+
+	case *helperv1.HelperRequest_Ssh:
+		if payload.SSH == nil {
+			return binding("the bound payload describes no sshd change")
+		}
+		return sameSSH(action.Ssh, payload.SSH)
+
+	case *helperv1.HelperRequest_Kernel:
+		if payload.Kernel == nil {
+			return binding("the bound payload describes no kernel change")
+		}
+		switch action.Kernel.GetOperation() {
+		case helperv1.KernelRequest_OPERATION_SYSCTL_ENSURE:
+			// Only the keys: an unverified change is rolled back with the host's
+			// previous values under this very capability.
+			return boundSysctlKeys(action.Kernel.GetSettings(), payload.Kernel.Settings)
+		case helperv1.KernelRequest_OPERATION_MODULE_LOAD:
+			return same("module", action.Kernel.GetModule(), payload.Kernel.Module)
+		case helperv1.KernelRequest_OPERATION_MODULE_BLACKLIST:
+			if err := same("module", action.Kernel.GetModule(), payload.Kernel.Module); err != nil {
+				return err
+			}
+			if action.Kernel.GetBlacklist() != payload.Kernel.Blacklist {
+				return binding("the request blocks or unblocks the module the other way than the bound payload")
+			}
+			return same("plan digest", action.Kernel.GetPlanHash(), payload.Kernel.PlanHash)
+		}
+		return nil
+
+	case *helperv1.HelperRequest_Time:
+		if payload.Time == nil {
+			return binding("the bound payload describes no time change")
+		}
+		switch action.Time.GetOperation() {
+		case helperv1.TimeRequest_OPERATION_TIMEZONE_SET:
+			return same("timezone", action.Time.GetTimezone(), payload.Time.Timezone)
+		case helperv1.TimeRequest_OPERATION_CONFIG_APPLY:
+			return sameTimeSources(action.Time, payload.Time)
+		}
+		return nil
+
+	case *helperv1.HelperRequest_Security:
+		if action.Security.GetOperation() != helperv1.SecurityRequest_OPERATION_SELINUX_MODE {
+			// A rules reload names nothing, and the check that orders it carries
+			// no payload at all.
+			return nil
+		}
+		if payload.Security == nil {
+			return binding("the bound payload describes no protection mode")
+		}
+		return same("protection mode", action.Security.GetMode(), payload.Security.Mode)
+
 	case *helperv1.HelperRequest_Storage:
 		// A destructive storage request is bound to the device and to its
 		// stable identity: a capability for one disk must not format another.
@@ -539,7 +832,13 @@ func CheckBinding(request *helperv1.HelperRequest, bound *BoundPayload) error {
 		}
 		return nil
 	}
-	return nil
+	// The default is a refusal. A request nothing compares with the payload is a
+	// capability for one change authorising every other change of its kind, which
+	// is what every rule above exists to end; a kind added without a rule is
+	// refused here and named by the test that walks the whole union.
+	return refusal(ErrorPayloadUnchecked,
+		fmt.Sprintf("the helper holds no rule comparing a request of %T with the bound payload",
+			request.GetAction()))
 }
 
 func agentPackagesOnly(action *helperv1.PackageActionRequest, upgrade *opspec.AgentUpgradePayload) error {
@@ -642,6 +941,224 @@ func payloadKeys(keys []opspec.SSHKeyInput) []string {
 	out := make([]string, 0, len(keys))
 	for _, key := range keys {
 		out = append(out, key.PublicKey)
+	}
+	return out
+}
+
+// sameProfile binds what the interface will carry: a capability for one
+// address profile must not write another.
+func sameProfile(request *helperv1.NetworkRequest, payload *opspec.NetworkPayload) error {
+	if err := same("method", request.GetMethod(), payload.Method); err != nil {
+		return err
+	}
+	if err := sameList("addresses", request.GetAddresses(), payload.Addresses); err != nil {
+		return err
+	}
+	if err := same("gateway", request.GetGateway(), payload.Gateway); err != nil {
+		return err
+	}
+	if err := sameList("resolvers", request.GetDns(), payload.DNS); err != nil {
+		return err
+	}
+	if err := sameList("routes", request.GetRoutes(), payload.Routes); err != nil {
+		return err
+	}
+	if err := same("mtu", request.GetMtu(), payload.MTU); err != nil {
+		return err
+	}
+	if err := same("method6", request.GetMethod6(), payload.Method6); err != nil {
+		return err
+	}
+	if err := sameList("addresses6", request.GetAddresses6(), payload.Addresses6); err != nil {
+		return err
+	}
+	if err := same("gateway6", request.GetGateway6(), payload.Gateway6); err != nil {
+		return err
+	}
+	if err := same("router advertisements", request.GetAcceptRa(), payload.AcceptRA); err != nil {
+		return err
+	}
+	return same("privacy", request.GetPrivacy(), payload.Privacy)
+}
+
+// sameLink binds the layer itself: a capability for one bond must not enslave
+// other interfaces or tag another VLAN.
+func sameLink(request *helperv1.NetworkLink, payload *network.LinkSpec) error {
+	if request == nil || payload == nil {
+		if request == nil && payload == nil {
+			return nil
+		}
+		return binding("the request and the bound payload disagree about ordering a layer")
+	}
+	if err := same("layer", request.GetName(), payload.Name); err != nil {
+		return err
+	}
+	if err := same("layer kind", request.GetKind(), payload.Kind); err != nil {
+		return err
+	}
+	if err := sameList("layer members", request.GetMembers(), payload.Members); err != nil {
+		return err
+	}
+	if err := same("bond mode", request.GetMode(), payload.Mode); err != nil {
+		return err
+	}
+	if err := same("bond primary", request.GetPrimary(), payload.Primary); err != nil {
+		return err
+	}
+	if err := same("lacp rate", request.GetLacpRate(), payload.LACPRate); err != nil {
+		return err
+	}
+	if err := same("link monitoring", fmt.Sprint(request.GetMiimonMs()), fmt.Sprint(uint32(payload.MIIMonMS))); err != nil {
+		return err
+	}
+	if request.GetStp() != payload.STP || request.GetVlanFiltering() != payload.VLANFiltering {
+		return binding("the request switches the bridge settings the other way than the bound payload")
+	}
+	if err := same("vlan parent", request.GetParent(), payload.Parent); err != nil {
+		return err
+	}
+	if err := same("vlan tag", fmt.Sprint(request.GetVlanId()), fmt.Sprint(uint32(payload.VLANID))); err != nil {
+		return err
+	}
+	if err := same("vlan protocol", request.GetProtocol(), payload.Protocol); err != nil {
+		return err
+	}
+	return same("layer mtu", request.GetMtu(), payload.MTU)
+}
+
+// sameRule binds the content of the rule and not only its name: a capability
+// for one rule used to authorise any ports and sources under that name.
+func sameRule(request *helperv1.FirewallRequest, payload *opspec.FirewallPayload) error {
+	if err := same("chain", request.GetChain(), payload.Chain); err != nil {
+		return err
+	}
+	if err := same("verdict", request.GetAction(), payload.Action); err != nil {
+		return err
+	}
+	if err := same("protocol", request.GetProtocol(), payload.Protocol); err != nil {
+		return err
+	}
+	if err := sameList("ports", request.GetPorts(), payload.Ports); err != nil {
+		return err
+	}
+	if err := sameList("sources", request.GetSources(), payload.Sources); err != nil {
+		return err
+	}
+	return same("interface", request.GetInterface(), payload.Interface)
+}
+
+// sameSwitch binds the direction of a zone change: a capability must not open
+// what the operator ordered closed.
+func sameSwitch(got, want bool) error {
+	if got != want {
+		return binding("the request opens or closes the zone the other way than the bound payload")
+	}
+	return nil
+}
+
+// sameSSH binds what the change would set, and not only that it is an sshd
+// change: the consent to leave no login method is part of the order.
+func sameSSH(request *helperv1.SshRequest, payload *opspec.SSHPayload) error {
+	if request.GetOperation() == helperv1.SshRequest_OPERATION_ROTATE_HOSTKEY {
+		// A rotation names a key type; no setting plays a part in it.
+		return same("host key type", request.GetKeyType(), payload.KeyType)
+	}
+	if err := same("sshd port", request.GetPort(), payload.Port); err != nil {
+		return err
+	}
+	if err := same("root login", request.GetPermitRootLogin(), payload.PermitRootLogin); err != nil {
+		return err
+	}
+	if err := same("password authentication", request.GetPasswordAuthentication(),
+		payload.PasswordAuthentication); err != nil {
+		return err
+	}
+	if err := same("public key authentication", request.GetPubkeyAuthentication(),
+		payload.PubkeyAuthentication); err != nil {
+		return err
+	}
+	if err := same("keyboard-interactive authentication", request.GetKbdInteractiveAuthentication(),
+		payload.KbdInteractive); err != nil {
+		return err
+	}
+	if err := same("authentication attempts", request.GetMaxAuthTries(), payload.MaxAuthTries); err != nil {
+		return err
+	}
+	if err := sameList("allowed users", request.GetAllowUsers(), payload.AllowUsers); err != nil {
+		return err
+	}
+	if err := sameList("allowed groups", request.GetAllowGroups(), payload.AllowGroups); err != nil {
+		return err
+	}
+	if err := sameList("denied users", request.GetDenyUsers(), payload.DenyUsers); err != nil {
+		return err
+	}
+	if request.GetAllowLockout() != payload.AllowLockout {
+		return binding("the request and the bound payload disagree about consent to leave no login method")
+	}
+	return same("plan digest", request.GetPlanHash(), payload.PlanHash)
+}
+
+// sameTimeSources binds the servers and the two consents; the helper checks
+// the plan only when the request carries it, so the digest is bound as well.
+func sameTimeSources(request *helperv1.TimeRequest, payload *opspec.TimePayload) error {
+	if err := sameList("time servers", request.GetServers(), payload.Servers); err != nil {
+		return err
+	}
+	if request.GetAllowStep() != payload.AllowStep {
+		return binding("the request and the bound payload disagree about consent to step the clock")
+	}
+	if request.GetEnableDropin() != payload.EnableDropIn {
+		return binding("the request and the bound payload disagree about writing the source directory into the daemon's file")
+	}
+	return same("plan digest", request.GetPlanHash(), payload.PlanHash)
+}
+
+// boundSysctlKeys binds the keys and not their values: an unverified change is
+// rolled back with the host's previous readings under the same capability, and
+// the baseline drops the keys the agent could not read.
+func boundSysctlKeys(got, want map[string]string) error {
+	if len(got) == 0 {
+		return binding("the request names no kernel setting")
+	}
+	keys := make([]string, 0, len(got))
+	for key := range got {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	for _, key := range keys {
+		if _, named := want[key]; !named {
+			return binding(fmt.Sprintf("the request sets the kernel setting %q, which the bound payload does not name", key))
+		}
+	}
+	return nil
+}
+
+// serviceDigests flattens the per-service image digests into a comparable list.
+func serviceDigests(digests map[string]string) []string {
+	out := make([]string, 0, len(digests))
+	for service, digest := range digests {
+		out = append(out, service+"="+digest)
+	}
+	return out
+}
+
+// selectedAnswers names each answer by all four of its parts: the value is
+// what configures the package, not only the question it answers.
+func selectedAnswers(answers []*helperv1.DebconfSelection) []string {
+	out := make([]string, 0, len(answers))
+	for _, answer := range answers {
+		out = append(out, strings.Join([]string{answer.GetPackage(), answer.GetQuestion(),
+			answer.GetType(), answer.GetValue()}, "\x00"))
+	}
+	return out
+}
+
+func approvedAnswers(answers []opspec.DebconfAnswer) []string {
+	out := make([]string, 0, len(answers))
+	for _, answer := range answers {
+		out = append(out, strings.Join([]string{answer.Package, answer.Question,
+			answer.Type, answer.Value}, "\x00"))
 	}
 	return out
 }

@@ -6872,10 +6872,12 @@ type SystemReboot struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The delay gives the agent time to send the result back before the host
 	// disappears.
-	DelaySeconds  uint32 `protobuf:"varint,1,opt,name=delay_seconds,json=delaySeconds,proto3" json:"delay_seconds,omitempty"`
-	Reason        string `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	DelaySeconds uint32 `protobuf:"varint,1,opt,name=delay_seconds,json=delaySeconds,proto3" json:"delay_seconds,omitempty"`
+	Reason       string `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	// IgnoreInhibitors steps over the logind inhibitors, as on a shutdown.
+	IgnoreInhibitors bool `protobuf:"varint,3,opt,name=ignore_inhibitors,json=ignoreInhibitors,proto3" json:"ignore_inhibitors,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *SystemReboot) Reset() {
@@ -6920,6 +6922,13 @@ func (x *SystemReboot) GetReason() string {
 		return x.Reason
 	}
 	return ""
+}
+
+func (x *SystemReboot) GetIgnoreInhibitors() bool {
+	if x != nil {
+		return x.IgnoreInhibitors
+	}
+	return false
 }
 
 // SystemShutdown powers the host off. Unlike a reboot, it ends in a state
@@ -16527,10 +16536,11 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\fafter_cursor\x18\x05 \x01(\tR\vafterCursor\x12\x14\n" +
 	"\x05until\x18\x06 \x01(\tR\x05until\x12\x17\n" +
 	"\aboot_id\x18\a \x01(\tR\x06bootIdB\x0f\n" +
-	"\r_max_priority\"K\n" +
+	"\r_max_priority\"x\n" +
 	"\fSystemReboot\x12#\n" +
 	"\rdelay_seconds\x18\x01 \x01(\rR\fdelaySeconds\x12\x16\n" +
-	"\x06reason\x18\x02 \x01(\tR\x06reason\"\x8e\x01\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\x12+\n" +
+	"\x11ignore_inhibitors\x18\x03 \x01(\bR\x10ignoreInhibitors\"\x8e\x01\n" +
 	"\x0eSystemShutdown\x12#\n" +
 	"\rdelay_seconds\x18\x01 \x01(\rR\fdelaySeconds\x12\x16\n" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\x12\x12\n" +

@@ -73,6 +73,10 @@ const (
 	// values than the bound payload names - another unit, another user, another
 	// path.
 	ErrorPayloadBinding = "payload_binding_mismatch"
+	// ErrorPayloadUnchecked: the helper holds no rule for comparing a request of
+	// this kind with the payload the capability binds, so it refuses rather than
+	// carry out a change nothing compared.
+	ErrorPayloadUnchecked = "payload_binding_unchecked"
 	// ErrorUnknownKey: the keyring holds no key of that identifier.
 	ErrorUnknownKey = "capability_unknown_key"
 	// ErrorBadSignature: the signature does not verify under the named key.

@@ -1425,8 +1425,9 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 	case opspec.ActionSystemReboot:
 		envelope.Action = &agentv1.TaskEnvelope_SystemReboot{
 			SystemReboot: &agentv1.SystemReboot{
-				DelaySeconds: payload.Reboot.DelaySeconds,
-				Reason:       payload.Reboot.Reason,
+				DelaySeconds:     payload.Reboot.DelaySeconds,
+				Reason:           payload.Reboot.Reason,
+				IgnoreInhibitors: payload.Reboot.IgnoreInhibitors,
 			},
 		}
 

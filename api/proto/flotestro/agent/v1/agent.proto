@@ -1011,6 +1011,8 @@ message SystemReboot {
   // disappears.
   uint32 delay_seconds = 1;
   string reason = 2;
+  // IgnoreInhibitors steps over the logind inhibitors, as on a shutdown.
+  bool ignore_inhibitors = 3;
 }
 
 // SystemShutdown powers the host off. Unlike a reboot, it ends in a state

@@ -987,8 +987,9 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 		request := action.SystemReboot
 		return opspec.ActionSystemReboot, opspec.Payload{
 			Reboot: &opspec.RebootPayload{
-				DelaySeconds: request.GetDelaySeconds(),
-				Reason:       request.GetReason(),
+				DelaySeconds:     request.GetDelaySeconds(),
+				Reason:           request.GetReason(),
+				IgnoreInhibitors: request.GetIgnoreInhibitors(),
 			},
 		}, nil
 
