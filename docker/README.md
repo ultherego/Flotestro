@@ -438,6 +438,24 @@ docker compose --profile quickstart up -d
 That DSN carries `sslmode=disable`, which is acceptable only there, on one
 host and an internal network; an external database requires `verify-full`.
 
+The DSN has to reach the writer directly, or a pooler in session mode. The
+control plane holds two connections for the life of the process - the event bus
+and the epoch watcher, each `LISTEN`ing - and takes session-level advisory
+locks for the schema migration and for the installation check. A pooler in
+transaction mode hands those statements a different backend each time: the
+panel starts, reports itself healthy, and silently stops receiving
+notifications and holding locks. Nothing detects it, because from the panel's
+side every statement succeeds. Use `pool_mode=session`, or point the DSN at the
+writer and let a pooler serve the readers that do not need either.
+
+Two more variables belong to an external database, and neither is set by the
+files here. `FLOTESTRO_AUTO_MIGRATE=false` stops the serving replicas bringing
+the schema forward, so the login they serve on need not hold the right to
+change it; the migration then runs as its own job, `control-plane migrate`,
+before the new version serves. `FLOTESTRO_MIGRATION_ROLE` names the role that
+migration takes on with `SET ROLE`, so the objects it creates belong to the
+schema owner rather than to whoever ran it.
+
 For a relay, create `relay.yaml` and `relay-ca.pem` next to
 `compose.relay.yaml` before the first start - a bind mount whose source does
 not exist becomes a directory - then register the relay with a one-time token
