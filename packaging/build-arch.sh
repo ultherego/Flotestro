@@ -52,11 +52,12 @@ else
     cp "$here/arch/flotestro-agent.sysusers" "$here/arch/flotestro-agent.tmpfiles" \
        "$here/arch/flotestro-agent.install" "$build/"
     cp "$here/agent.yaml" "$build/agent.yaml"
+    cp "$here/helper.yaml" "$build/helper.yaml"
     FILES="flotestro-agent flotestro-agentctl flotestro-agent-helper"
     FILES="$FILES flotestro-agent.service flotestro-enroll.service"
     FILES="$FILES flotestro-helper.service flotestro-helper.socket"
     FILES="$FILES flotestro-firewall-restore.service"
-    FILES="$FILES flotestro-agent.sysusers flotestro-agent.tmpfiles agent.yaml"
+    FILES="$FILES flotestro-agent.sysusers flotestro-agent.tmpfiles agent.yaml helper.yaml"
     TEMPLATE="$here/arch/PKGBUILD"
 fi
 

@@ -23,6 +23,13 @@ post_install() {
     systemd-tmpfiles --create /usr/lib/tmpfiles.d/flotestro-agent.conf >/dev/null 2>&1 || true
     chown root:flotestro-agent /etc/flotestro/agent.yaml 2>/dev/null || true
     chmod 0640 /etc/flotestro/agent.yaml 2>/dev/null || true
+    # The helper's settings, on a first installation only. post_upgrade does not
+    # do this: switching a running fleet to enforce is the operator's decision.
+    if [ ! -f /etc/flotestro/helper.yaml ] && [ -f /usr/share/flotestro/helper.yaml ]; then
+        install -m 0644 -o root -g root /usr/share/flotestro/helper.yaml \
+            /etc/flotestro/helper.yaml
+        echo "flotestro-agent: /etc/flotestro/helper.yaml was written with capabilities.mode: enforce" >&2
+    fi
     # The helper socket must exist before the agent tries to connect to it.
     systemctl enable --now flotestro-helper.socket >/dev/null 2>&1 || true
     # The panel's own nftables table is in no boot file of the distribution,

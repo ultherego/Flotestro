@@ -43,11 +43,13 @@ source=(
   'flotestro-agent.sysusers'
   'flotestro-agent.tmpfiles'
   'agent.yaml'
+  'helper.yaml'
   __SBOM__
 )
 sha256sums=(__SUMS__)
 
 package() {
+  install -Dm644 helper.yaml "$pkgdir/usr/share/flotestro/helper.yaml"
   install -Dm755 flotestro-agent        "$pkgdir/usr/bin/flotestro-agent"
   install -Dm755 flotestro-agentctl     "$pkgdir/usr/bin/flotestro-agentctl"
   install -Dm755 flotestro-agent-helper "$pkgdir/usr/bin/flotestro-agent-helper"

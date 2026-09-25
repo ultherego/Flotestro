@@ -73,6 +73,8 @@ install -m 0644 %{_flotestro_units}/flotestro-firewall-restore.service %{buildro
 
 install -d -m 0755 %{buildroot}%{_sysconfdir}/flotestro
 install -m 0640 %{_flotestro_stage}/agent.yaml %{buildroot}%{_sysconfdir}/flotestro/agent.yaml
+install -d -m 0755 %{buildroot}%{_datadir}/flotestro
+install -m 0644 %{_flotestro_stage}/helper.yaml %{buildroot}%{_datadir}/flotestro/helper.yaml
 install -m 0640 %{_flotestro_stage}/agent.env  %{buildroot}%{_sysconfdir}/flotestro/agent.env
 
 install -d -m 0700 %{buildroot}%{_sharedstatedir}/flotestro-agent
@@ -88,6 +90,7 @@ install -d -m 0755 %{buildroot}%{_docdir}/flotestro-agent
     install -m 0644 %{_flotestro_stage}/sbom/flotestro-agentctl.cdx.json %{buildroot}%{_docdir}/flotestro-agent/sbom-flotestro-agentctl.cdx.json || :
 
 %files
+%{_datadir}/flotestro/helper.yaml
 %{_docdir}/flotestro-agent
 %{_bindir}/flotestro-agent
 %{_bindir}/flotestro-agent-helper
@@ -115,6 +118,16 @@ getent passwd flotestro-agent >/dev/null || \
 exit 0
 
 %post
+# The helper's settings go in on a first installation only: $1 is 1 for an
+# install and 2 or more for an upgrade. An upgrade must not switch a running
+# fleet to enforce behind the operator's back, and a new installation must not
+# start in the compatibility mode.
+if [ "$1" = 1 ] && [ ! -f %{_sysconfdir}/flotestro/helper.yaml ] &&
+   [ -f %{_datadir}/flotestro/helper.yaml ]; then
+    install -m 0644 -o root -g root %{_datadir}/flotestro/helper.yaml \
+        %{_sysconfdir}/flotestro/helper.yaml
+    echo "flotestro-agent: %{_sysconfdir}/flotestro/helper.yaml was written with capabilities.mode: enforce" >&2
+fi
 # Reading the journal without root requires membership in the systemd-journal
 # group. A missing group is not an installation error - the journal read is
 # then unavailable, and the agent reports that instead of pretending the

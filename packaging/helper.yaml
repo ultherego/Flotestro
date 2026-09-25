@@ -1,0 +1,22 @@
+# The root helper of Flotestro. This file is read by the helper alone and is
+# written on a first installation only: an upgrade never changes it, because the
+# mode below decides what the helper accepts and that is the operator's to set.
+schema_version: 1
+
+capabilities:
+  # enforce: a request that changes the host is carried out only when it carries
+  # the panel's signed capability for exactly that change. This is what a new
+  # installation gets, and what the product's whole plan-approve-execute chain
+  # rests on: without it the agent account - an unprivileged account, the one an
+  # attacker reaches first - can ask the helper for anything the helper
+  # implements.
+  #
+  # prefer: a request without a capability is carried out and counted. That is
+  # what installations made before this file existed run, so that an agent from
+  # before the capability does not stop working on an upgrade. Moving such an
+  # installation to enforce is a deliberate step: the panel shows which hosts
+  # are still on prefer.
+  #
+  # observe: never refuses, only counts. For finding out what a fleet would
+  # refuse before switching it.
+  mode: enforce
