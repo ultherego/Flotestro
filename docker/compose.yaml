@@ -1,6 +1,6 @@
 # The Flotestro control plane and what it is deployed with, in profiles.
 #
-#   docker compose --profile quickstart up -d           with a database of its own
+#   docker compose up -d                                the whole default deployment
 #   docker compose up -d                                with a database somebody else runs
 #   docker compose --profile airgap up -d               plus the package repository of the release
 #   docker compose --profile tools run --rm admin-tools backup
@@ -13,7 +13,7 @@
 #
 # Nothing but the control plane starts unless its profile is named, so an
 # installation pointed at an external database cannot quietly run a second
-# beside it. Profiles combine: --profile quickstart --profile airgap.
+# beside it. Profiles combine: --profile tools --profile airgap.
 name: flotestro
 
 services:
@@ -100,7 +100,7 @@ services:
 
   # The migration as a run of its own:
   #
-  #   docker compose --profile migrate run --rm migrate
+  #   docker compose -f compose.yaml -f compose.external-db.yaml run --rm migrate
   #
   # Behind a profile and depended on by nothing, so "up" never starts it: an
   # upgrade is migrate once, then roll the replicas, and the order matters.
@@ -110,9 +110,16 @@ services:
   # which still takes the migration out of the serving process.
   migrate:
     image: ghcr.io/ultherego/flotestro-control-plane:${FLOTESTRO_VERSION:-latest}
-    profiles: ["migrate"]
+    # Part of the default start: the schema is brought forward once, by a run of
+    # its own, and never by a replica that serves.
     user: "65532:65532"
     command: ["migrate"]
+    restart: "no"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
     environment:
       FLOTESTRO_DATABASE_URL_FILE: /run/flotestro/database-url
       FLOTESTRO_DATABASE_MODE: ${FLOTESTRO_DATABASE_MODE:-quickstart}
@@ -157,7 +164,8 @@ services:
       # needs the right to change the schema - see db/roles.sql. With it off the
       # panel refuses to start on a schema it does not match rather than
       # quietly reshaping the database.
-      FLOTESTRO_AUTO_MIGRATE: ${FLOTESTRO_AUTO_MIGRATE:-true}
+      # The migrate service does it, so no serving replica reshapes the schema.
+      FLOTESTRO_AUTO_MIGRATE: ${FLOTESTRO_AUTO_MIGRATE:-false}
       # The state directory and the panel are set in the image already; they
       # stand here too so that the deployment can be read in one place.
       FLOTESTRO_STATE_DIR: /var/lib/flotestro
@@ -214,9 +222,11 @@ services:
 
     # The panel waits for a database that answers, not for a container that
     # exists, and says so while it waits - so nothing depends on postgres here.
-    # init is different: it makes the file the DSN is read from.
+    # init makes the file the DSN is read from; migrate settles the schema first.
     depends_on:
       init:
+        condition: service_completed_successfully
+      migrate:
         condition: service_completed_successfully
 
     # The process writes to its state volume and to /tmp, and nowhere else.
@@ -258,9 +268,8 @@ services:
         max-file: "5"
 
   postgres:
-    # A laboratory, a demonstration or a small fleet: one host of failure and
-    # a local backup. Production points FLOTESTRO_DATABASE_URL elsewhere.
-    profiles: ["quickstart"]
+    # The default database. An installation with its own starts from
+    # compose.external-db.yaml, and that is chosen before it is initialised.
     # A major version is not changed by swapping the tag: that is pg_upgrade.
     image: docker.io/library/postgres:17-bookworm
     restart: unless-stopped

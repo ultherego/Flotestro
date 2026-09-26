@@ -1,0 +1,44 @@
+# The deployment against a database somebody else runs. It is the default file
+# with the postgres service taken out, so nothing is duplicated:
+#
+#   docker compose -f compose.yaml -f compose.external-db.yaml run --rm migrate
+#   docker compose -f compose.yaml -f compose.external-db.yaml up -d
+#
+# Chosen before the installation is initialised: moving a live one to another
+# database is a data migration, not a change of a variable.
+#
+services:
+  # Not started here: the database is the installation's own.
+  postgres:
+    profiles: ["unused"]
+
+  control-plane:
+    environment:
+      FLOTESTRO_DATABASE_MODE: external
+      FLOTESTRO_DATABASE_URL_FILE: /run/secrets/database-url
+      FLOTESTRO_AUTO_MIGRATE: "false"
+    # Only postgres goes: init still writes the file the DSN is read from, and
+    # the backup and restore tools read it there.
+    depends_on: !override
+      init:
+        condition: service_completed_successfully
+    secrets:
+      - database-url
+
+  migrate:
+    environment:
+      FLOTESTRO_DATABASE_MODE: external
+      FLOTESTRO_DATABASE_URL_FILE: /run/secrets/database-url
+    # Only postgres goes: init still writes the file the DSN is read from, and
+    # the backup and restore tools read it there.
+    depends_on: !override
+      init:
+        condition: service_completed_successfully
+    secrets:
+      - database-url
+
+# The DSN carries the password, so it arrives as a file and not as a variable.
+# external mode holds it to sslmode=verify-full and target_session_attrs=read-write.
+secrets:
+  database-url:
+    file: ./secrets/database-url
