@@ -4338,39 +4338,11 @@ func TestOpenAPIDescribesTheLiveAPI(t *testing.T) {
 	}
 }
 
-// bareRequestBodies names the orders the contract still describes as an
-// unconstrained object. It is a ratchet, not an aspiration: a route that
-// appears here and is not listed fails the test, so the count only falls.
-var bareRequestBodies = map[string]struct{}{
-	"POST /api/v1/enrollment-requests/{id}/revoke":             {},
-	"POST /api/v1/group-mappings":                              {},
-	"POST /api/v1/hosts/{id}/backups":                          {},
-	"POST /api/v1/hosts/{id}/certificates/targets":             {},
-	"POST /api/v1/hosts/{id}/identity-recovery":                {},
-	"POST /api/v1/hosts/{id}/security/remediation":             {},
-	"POST /api/v1/hosts/{id}/security/remediation/{plan}/stop": {},
-	"POST /api/v1/identity/access/simulate":                    {},
-	"POST /api/v1/identity/changes/{id}/approve":               {},
-	"POST /api/v1/identity/changes/{id}/cancel":                {},
-	"POST /api/v1/identity/directory/provision-preserve":       {},
-	"POST /api/v1/notifications/channels/{id}/test":            {},
-	"POST /api/v1/notifications/deliveries/{id}/retry":         {},
-	"POST /api/v1/pki/activate":                                {},
-	"POST /api/v1/pki/prepare":                                 {},
-	"POST /api/v1/policies/{id}/evaluate":                      {},
-	"POST /api/v1/reads":                                       {},
-	"POST /api/v1/relays/{id}/revoke":                          {},
-	"POST /api/v1/security/remediation":                        {},
-	"POST /api/v1/security/remediation/preview":                {},
-	"POST /api/v1/setup/test-directory":                        {},
-	"POST /api/v1/setup/test-oidc":                             {},
-	"POST /api/v1/vulnerabilities/snapshots/{id}/accept":       {},
-}
-
 // TestTheContractDescribesOrderBodies holds the line on the request half of the
 // contract. A generated client can call every route in the document, but it can
-// only build a body for a route whose schema names the fields, so each entry
-// below is an order a caller has to learn from the source.
+// only build a body for a route whose schema names the fields - so a route that
+// takes an unconstrained object is a route a caller has to learn from the source.
+// There were 56 of them; there are none, and this is what keeps it that way.
 func TestTheContractDescribesOrderBodies(t *testing.T) {
 	h := newHarness(t)
 	var document struct {
@@ -4384,7 +4356,7 @@ func TestTheContractDescribesOrderBodies(t *testing.T) {
 	}
 	h.get("/api/v1/openapi.json", &document)
 
-	bare := map[string]struct{}{}
+	described := 0
 	for path, operations := range document.Paths {
 		for method, operation := range operations {
 			if method != "post" && method != "put" {
@@ -4392,27 +4364,22 @@ func TestTheContractDescribesOrderBodies(t *testing.T) {
 			}
 			schema := operation.RequestBody.Content["application/json"].Schema
 			if schema == nil {
+				// A route that reads no body carries no requestBody at all, and the
+				// document says so in its own description.
 				continue
 			}
-			// An order whose schema says no more than "an object" describes
-			// nothing: every field a caller has to send is still a guess.
+			described++
+			// A schema that says no more than "an object" describes nothing: every
+			// field a caller has to send is still a guess.
 			if len(schema) == 1 && schema["type"] == "object" {
-				bare[strings.ToUpper(method)+" "+path] = struct{}{}
+				t.Errorf("%s %s takes a body the contract does not describe; give it a schema in requestSchemas, or say in bodilessRoutes that it reads none",
+					strings.ToUpper(method), path)
 			}
 		}
 	}
-
-	for route := range bare {
-		if _, known := bareRequestBodies[route]; !known {
-			t.Errorf("%s takes a body the contract does not describe; give it a schema in requestSchemas", route)
-		}
+	if described < 40 {
+		t.Errorf("the contract describes the body of only %d orders; the document looks truncated", described)
 	}
-	for route := range bareRequestBodies {
-		if _, still := bare[route]; !still {
-			t.Errorf("%s is described now: take it out of bareRequestBodies so the count stays honest", route)
-		}
-	}
-	t.Logf("%d of the contract's orders still take an unconstrained body", len(bare))
 }
 
 // TestRepeatedOrdersAreIdempotent guards the contract a pipeline relies on: an

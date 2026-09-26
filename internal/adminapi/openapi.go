@@ -15,10 +15,12 @@ import (
 	"github.com/ultherego/flotestro/internal/campaigns"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/jobs"
+	backupmodule "github.com/ultherego/flotestro/internal/modules/backup"
 	"github.com/ultherego/flotestro/internal/monitoring"
 	"github.com/ultherego/flotestro/internal/notify"
 	"github.com/ultherego/flotestro/internal/opspec"
 	"github.com/ultherego/flotestro/internal/policy"
+	"github.com/ultherego/flotestro/internal/secrets"
 	"github.com/ultherego/flotestro/internal/selector"
 )
 
@@ -109,6 +111,9 @@ func (s *Server) openAPI() map[string]any {
 	register("CampaignSchedule", campaigns.Schedule{})
 	register("NotificationChannel", notify.Channel{})
 	register("NotificationDelivery", notify.Delivery{})
+	register("Team", hosts.Team{})
+	register("Relay", relayView{})
+	register("Secret", secrets.Secret{})
 	describe(schemas, "AuditEvent", "actor",
 		"The actor as it was when the event was written: principal_id, subject, display_name, kind, resource_type, resource_id, resource_name, credential_id.")
 	describe(schemas, "Attempt", "verification",
@@ -343,11 +348,25 @@ func (s *Server) operation(route apiRoute) map[string]any {
 	}
 	op["responses"] = responses
 	if route.Method == http.MethodPost || route.Method == http.MethodPut {
-		body := map[string]any{"type": "object"}
-		if schema, ok := requestSchemas[route.Method+" "+route.Path]; ok {
-			body = schema
+		key := route.Method + " " + route.Path
+		if why, bodiless := bodilessRoutes[key]; bodiless {
+			// No requestBody at all, rather than an object nothing reads: a caller
+			// that sends one gets the same answer as one that does not.
+			said, _ := op["description"].(string)
+			if said != "" {
+				said += "\n\n"
+			}
+			op["description"] = said + "Takes no request body: " + why + "."
+		} else {
+			body, ok := requestSchemas[key]
+			if !ok {
+				// Every writing route declares its body or declares that it reads
+				// none; a test refuses one that declares neither, and this is what
+				// the document says until that test is seen to.
+				body = map[string]any{"type": "object"}
+			}
+			op["requestBody"] = map[string]any{"content": map[string]any{"application/json": map[string]any{"schema": body}}}
 		}
-		op["requestBody"] = map[string]any{"content": map[string]any{"application/json": map[string]any{"schema": body}}}
 	}
 	return op
 }
@@ -601,6 +620,22 @@ func collection(name string) map[string]any {
 // The endpoints whose answers are known resources. The rest answer with
 // module-specific views described by their handlers.
 var responseSchemas = map[string]map[string]any{
+	"GET /api/v1/notifications/channels":               collection("NotificationChannel"),
+	"POST /api/v1/notifications/channels":              ref("NotificationChannel"),
+	"GET /api/v1/notifications/channels/{id}":          ref("NotificationChannel"),
+	"PUT /api/v1/notifications/channels/{id}":          ref("NotificationChannel"),
+	"POST /api/v1/notifications/channels/{id}/test":    ref("NotificationDelivery"),
+	"GET /api/v1/notifications/deliveries":             collection("NotificationDelivery"),
+	"GET /api/v1/teams":                                collection("Team"),
+	"POST /api/v1/teams":                               ref("Team"),
+	"GET /api/v1/teams/{id}":                           ref("Team"),
+	"PUT /api/v1/teams/{id}":                           ref("Team"),
+	"GET /api/v1/relays":                               collection("Relay"),
+	"GET /api/v1/relays/{id}":                          ref("Relay"),
+	"GET /api/v1/secrets":                              collection("Secret"),
+	"GET /api/v1/secrets/{name}":                       ref("Secret"),
+	"GET /api/v1/budgets/{key...}":                     ref("Budget"),
+	"PUT /api/v1/budgets/{key...}":                     ref("Budget"),
 	"GET /api/v1/hosts":                                pagedCollection("Host"),
 	"GET /api/v1/hosts/{id}":                           ref("HostDetail"),
 	"PUT /api/v1/hosts/{id}/tags":                      ref("Host"),
@@ -881,7 +916,204 @@ var groupBodySchema = map[string]any{
 	"required": []string{"name"},
 }
 
+// fanOutActions lists the actions a read may fan out over, taken from the
+// registry that refuses the rest: a contract restating them would be free to
+// offer an action the panel turns down.
+func fanOutActions() []string {
+	names := make([]string, 0, len(opspec.AllActions()))
+	for _, action := range opspec.AllActions() {
+		if opspec.FanOutRefusal(action) == "" {
+			names = append(names, string(action))
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// fleetRemediationBodySchema is a remediation over many hosts: which findings,
+// which hosts, and how carefully it rolls out.
+func fleetRemediationBodySchema(order bool) map[string]any {
+	properties := map[string]any{
+		"check_ids": map[string]any{"type": "array", "items": map[string]any{"type": "string"},
+			"description": "The findings to fix. An empty list does not mean everything: there is no fix-all."},
+		"selector": map[string]any{"type": "object", "description": "Which hosts, the way a campaign names them."},
+	}
+	if order {
+		for name, schema := range map[string]any{
+			"name":   map[string]any{"type": "string"},
+			"reason": map[string]any{"type": "string", "description": "Kept in the audit trail."},
+			"canary_size": map[string]any{"type": []string{"integer", "null"}, "minimum": 1,
+				"description": "How many hosts go first, alone. Left out, the module's policy decides."},
+			"wave_size": map[string]any{"type": []string{"integer", "null"}, "minimum": 1, "maximum": maxRemediationWave},
+			"max_concurrent": map[string]any{"type": []string{"integer", "null"}, "minimum": 1,
+				"description": "How many hosts change at once inside a wave."},
+			"failure_threshold_percent": map[string]any{"type": []string{"integer", "null"}, "minimum": 0, "maximum": 100,
+				"description": "The share of failures in a wave that stops the rollout."},
+			"manual_gate": map[string]any{"type": []string{"boolean", "null"},
+				"description": "Hold after the canary until somebody lets the waves in."},
+			"offline_policy": map[string]any{"type": "string",
+				"enum": []string{string(opspec.OfflineRequireOnline), string(opspec.OfflineSkip),
+					string(opspec.OfflineWait), string(opspec.OfflineReplan)},
+				"description": "What happens to a host that is not connected when its turn comes. It may only tighten what the operation declares; a weaker policy is refused."},
+			"deadline_minutes": map[string]any{"type": []string{"integer", "null"}, "minimum": 1},
+			"idempotency_key":  map[string]any{"type": "string", "description": "Repeating the order under the same key gives the rollout that already exists rather than a second one."},
+		} {
+			properties[name] = schema
+		}
+	}
+	return map[string]any{"type": "object", "properties": properties, "required": []string{"check_ids"}}
+}
+
+// bodilessRoutes are the writing routes that read no body. They act on what the
+// panel already holds - a stored configuration, a row named in the path - and the
+// document said "send an object" for every one of them, which is a promise the
+// panel does not keep. A route belongs here or in requestSchemas, never both and
+// never neither.
+var bodilessRoutes = map[string]string{
+	"POST /auth/logout":                                        "the caller's own session is what ends",
+	"POST /api/v1/enrollment-requests/{id}/revoke":             "the order is named in the path",
+	"POST /api/v1/notifications/channels/{id}/test":            "the channel's own settings are what is tested",
+	"POST /api/v1/notifications/deliveries/{id}/retry":         "the delivery is named in the path",
+	"POST /api/v1/hosts/{id}/security/remediation/{plan}/stop": "the plan is named in the path",
+	"POST /api/v1/policies/{id}/evaluate":                      "the published policy is what is judged",
+	"POST /api/v1/setup/test-oidc":                             "the stored identity provider is what is probed",
+	"POST /api/v1/setup/test-directory":                        "the stored directory connector is what is probed",
+	"POST /api/v1/identity/directory/provision-preserve":       "the stored connector is what is read",
+}
+
 var requestSchemas = map[string]map[string]any{
+	"POST /api/v1/vulnerabilities/snapshots/{id}/accept": reasonOnlyBody(
+		"Why the snapshot is taken as the fleet's picture; kept in the audit trail."),
+	"POST /api/v1/hosts/{id}/certificates/targets": {
+		"type":        "object",
+		"description": "A file on the host the panel watches and, when it has a plan, replaces.",
+		"properties": map[string]any{
+			"path":        map[string]any{"type": "string", "description": "The certificate on the host."},
+			"key_path":    map[string]any{"type": "string", "description": "Its private key, when the panel is to place one."},
+			"key_secret":  map[string]any{"type": "string", "description": "The name of the secret holding that key. The key itself never travels in this body."},
+			"reload_unit": map[string]any{"type": "string", "description": "The unit to reload once the file has changed; without it the new certificate sits on disk unused."},
+			"probe_target": map[string]any{"type": "string",
+				"description": "Where to check afterwards what the service actually presents, so a reload that did not take is not read as success."},
+			"service": map[string]any{"type": "string"},
+			"note":    map[string]any{"type": "string"},
+		},
+		"required": []string{"path"},
+	},
+	"POST /api/v1/hosts/{id}/identity-recovery": {
+		"type":        "object",
+		"description": "A token that lets a host whose key is lost or stolen come back as itself. A retired host does not come back this way.",
+		"properties": mergedProperties(bindingScope(), map[string]any{
+			"description": map[string]any{"type": "string"},
+			"kind":        map[string]any{"type": "string", "description": "What may register with the token: an agent or a relay."},
+			"purpose":     map[string]any{"type": "string", "description": "What may be done with a machine the panel already knows."},
+			"expected_machine_id": map[string]any{"type": "string",
+				"description": "The machine the token is for; a different machine presenting it is refused."},
+			"relay_id": map[string]any{"type": "string", "description": "Confines the token to one site: it works only through this relay."},
+			"owner":    map[string]any{"type": "string"},
+			"tags":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"max_uses": map[string]any{"type": "integer", "minimum": 1},
+			"revoke_old_immediately": map[string]any{"type": "boolean",
+				"description": "Cut the old key off now rather than when the host returns; for a suspected theft."},
+			"ttl_seconds": map[string]any{"type": "integer", "minimum": 1},
+		}),
+	},
+	"POST /api/v1/security/remediation":         fleetRemediationBodySchema(true),
+	"POST /api/v1/security/remediation/preview": fleetRemediationBodySchema(false),
+	"POST /api/v1/hosts/{id}/security/remediation": {
+		"type": "object",
+		"properties": map[string]any{
+			"plan_hash": map[string]any{"type": "string",
+				"description": "Binds the order to the state the operator viewed. A host whose findings moved since then needs a new plan."},
+			"check_ids": map[string]any{"type": "array", "items": map[string]any{"type": "string"},
+				"description": "The findings to fix. An empty list does not mean everything: there is no fix-all."},
+			"reason": map[string]any{"type": "string", "description": "Kept in the audit trail."},
+			"stop_on_failure": map[string]any{"type": []string{"boolean", "null"},
+				"description": "Left out it holds: the later steps assume the earlier ones succeeded."},
+		},
+		"required": []string{"check_ids"},
+	},
+	"POST /api/v1/identity/changes/{id}/approve": {
+		"type": "object",
+		"properties": map[string]any{
+			"payload_hash": map[string]any{"type": "string",
+				"description": "The hash of the change as it was read, so the approval covers that change and not what it became."},
+			"reason": map[string]any{"type": "string", "description": "Kept in the audit trail."},
+		},
+	},
+	"POST /api/v1/identity/changes/{id}/cancel": reasonOnlyBody(
+		"Why the change to the directory is abandoned; kept in the audit trail."),
+	"POST /api/v1/identity/access/simulate": {
+		"type":        "object",
+		"description": "Asks what the rules would say, and changes nothing.",
+		"properties": map[string]any{
+			"user":    map[string]any{"type": "string", "description": "The identity to ask about."},
+			"host":    map[string]any{"type": "string"},
+			"service": map[string]any{"type": "string", "description": "The service on that host, as the access rules name it."},
+		},
+		"required": []string{"user", "host"},
+	},
+	"POST /api/v1/hosts/{id}/backups": {
+		"type": "object",
+		"description": "The whole definition, not a change to it: a field left out is a field cleared. " +
+			"The panel checks it the way the host would, so a definition the host would refuse does not wait until the first copy.",
+		"properties": map[string]any{
+			"name":         map[string]any{"type": "string", "description": "Names the definition on the host; one host keeps one definition under one name."},
+			"tool":         map[string]any{"type": "string", "enum": []string{backupmodule.ToolRestic, backupmodule.ToolBorg}},
+			"repository":   map[string]any{"type": "string", "description": "Where the copies go, in the form the tool reads."},
+			"paths":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "What is copied."},
+			"excludes":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"tags":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Carried into the repository, so a copy can be found by what made it."},
+			"keep_last":    map[string]any{"type": "integer", "minimum": 0, "description": "Zero leaves this rule out of the retention."},
+			"keep_daily":   map[string]any{"type": "integer", "minimum": 0},
+			"keep_weekly":  map[string]any{"type": "integer", "minimum": 0},
+			"keep_monthly": map[string]any{"type": "integer", "minimum": 0},
+			"prune": map[string]any{"type": "boolean",
+				"description": "Delete what the retention no longer keeps. Without it the retention only forgets the copies, and the repository keeps growing."},
+			"runbook":    map[string]any{"type": "string", "description": "What to do when a restore is needed; shown beside the definition."},
+			"initialize": map[string]any{"type": "boolean", "description": "Create the repository if it is not there yet."},
+			"password_secret": map[string]any{"type": "string",
+				"description": "The name of the secret holding the repository password. The value never travels in this body, and an empty field keeps the secret the definition already names."},
+			"env_secrets": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"},
+				"description": "Environment variables of the tool, each naming a secret rather than carrying its value."},
+			"note": map[string]any{"type": "string"},
+		},
+		"required": []string{"name", "tool"},
+	},
+	"POST /api/v1/reads": {
+		"type": "object",
+		"properties": map[string]any{
+			"action":  map[string]any{"type": "string", "enum": fanOutActions(), "description": "A read, or one of the reads the registry opens to a fan-out. A change is never one of them."},
+			"payload": map[string]any{"type": "object", "description": "The payload of that action, as the action's own contract describes it."},
+			"selector": map[string]any{"type": "object",
+				"description": "Which hosts to read, the way a campaign names them: the flat filters, an explicit list, or the typed expression, which decides alone when present. It may not be empty - a read of the whole fleet is never the intent - and the list is bounded by the action's own fan-out limit.",
+				"properties": mergedProperties(bindingScope(), map[string]any{
+					"host_ids":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+					"tags":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+					"groups":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+					"os_family":  map[string]any{"type": "string"},
+					"owner":      map[string]any{"type": "string"},
+					"expression": map[string]any{"type": "string"},
+				})},
+			"reason": map[string]any{"type": "string", "description": "Kept in the audit trail beside the order."},
+		},
+		"required": []string{"action", "selector"},
+	},
+	"POST /api/v1/pki/prepare": reasonOnlyBody(
+		"Why a new fleet authority is being made. It joins the trust set without the right to sign, so the fleet learns it before anything is signed by it."),
+	"POST /api/v1/pki/activate": reasonOnlyBody(
+		"Why the prepared authority takes over the signing. Hosts that have not yet learned it will refuse what it signs, so the order follows the preparation rather than replacing it."),
+	"POST /api/v1/relays/{id}/revoke": reasonOnlyBody(
+		"Why the relay loses the right to mediate; kept in the audit trail."),
+	"POST /api/v1/group-mappings": {
+		"type": "object",
+		"properties": mergedProperties(bindingScope(), map[string]any{
+			"issuer":     map[string]any{"type": "string", "description": "The identity provider the group comes from."},
+			"group_name": map[string]any{"type": "string", "description": "The group as that provider names it."},
+			"role":       map[string]any{"type": "string", "enum": roleNames()},
+			"reason":     map[string]any{"type": "string", "description": "Kept in the audit trail; the mapping grants the role to everyone the provider puts in that group."},
+		}),
+		"required": []string{"issuer", "group_name", "role"},
+	},
 	"POST /api/v1/host-groups":     groupBodySchema,
 	"PUT /api/v1/host-groups/{id}": groupBodySchema,
 	"PUT /api/v1/host-groups/{id}/members": {
