@@ -107,6 +107,36 @@ day the tag was published.
   declared container, network or volume, a repository, a backup definition and
   a certificate deployment.
 
+### Removed
+
+- The `flotestro-control-plane` and `flotestro-relay` packages end here. From
+  this release the panel, the relay, the administration tools, the migrator and
+  the backup tool are published as OCI images and in no other form; what
+  replaces a package installation is the Compose deployment of `docker/`. The
+  agent is not affected: it, its root helper and `flotestro-agentctl` stay .deb,
+  .rpm and pacman packages, because they manage the host itself - its PID 1, its
+  devices, its package database - and that is not work done from a container.
+  What ended the second form is that the two could not both stay true. The
+  packaged panel created and migrated the schema at its own start, which is what
+  `/etc/flotestro/control-plane.env` promises and what an installation with more
+  than one replica must never do, while the deployment here migrates once as a
+  run of its own and refuses to serve a schema it does not match; and every
+  secret reached the packaged panel as a value in the environment of the
+  process, rather than as a file read once at the start and refused when anybody
+  else can read it. Two sets of paths, two ways a secret reaches the process and
+  two upgrade orders is one too many of each.
+- An installation that runs the panel or a relay from a package has to move, and
+  "From packages to Compose" in `docker/README.md` is the procedure. It is not a
+  swap of one binary for another: the package's state directory -
+  `/var/lib/flotestro`, and `/var/lib/flotestro-relay` on a relay host - holds
+  the fleet CA and the key the secret store's ciphertexts open with, and it has
+  to be in the container's volume before the panel starts. A panel that meets
+  the installation's database with a state volume of its own refuses with
+  `installation_state_mismatch` rather than issue a second CA and cut off every
+  host in the fleet, which is that refusal working and not a step of the move.
+  The packages stay installed until the container installation has been proved,
+  because a purge deletes the state directory and with it the way back.
+
 ### Fixed
 
 - An instance whose database has become a standby leaves the rotation. The start

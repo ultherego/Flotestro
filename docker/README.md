@@ -19,7 +19,7 @@ the signed repository.
 local backup. For a laboratory, a demonstration and a small installation.
 
 ```
-docker compose --profile quickstart up -d
+docker compose up -d
 ```
 
 **Production basic** - one control plane against an external, backed-up
@@ -45,7 +45,7 @@ Internet.
 
 ```
 docker compose --profile airgap up -d
-docker compose --profile quickstart --profile airgap up -d   # with a database of its own
+docker compose -f compose.yaml -f compose.external-db.yaml --profile airgap up -d   # against a database of its own
 ```
 
 The backup and the restore are not a deployment of their own: they are two
@@ -428,8 +428,8 @@ psql "$SUPERUSER_DSN" -v ON_ERROR_STOP=1 \
 
 # 4. Migrate, then start. In this order and never the other way: the panel
 #    refuses to serve a schema it does not match rather than reshape it.
-docker compose --profile migrate run --rm migrate
-docker compose up -d
+docker compose -f compose.yaml -f compose.external-db.yaml run --rm migrate
+docker compose -f compose.yaml -f compose.external-db.yaml up -d
 docker compose logs -f control-plane        # wait for "the database schema is current"
 
 # 5. The first administrator. The control plane writes a bootstrap token into
@@ -449,7 +449,7 @@ to import, init makes a password for the local database, writes the DSN and
 gives each file to the account that reads it:
 
 ```
-docker compose --profile quickstart up -d
+docker compose up -d
 ```
 
 That DSN carries `sslmode=disable`, which is acceptable only there, on one
@@ -481,11 +481,10 @@ notifications and holding locks. Nothing detects it, because from the panel's
 side every statement succeeds. Use `pool_mode=session`, or point the DSN at the
 writer and let a pooler serve the readers that do not need either.
 
-Two more variables belong to an external database, and neither is set by the
-files here. `FLOTESTRO_AUTO_MIGRATE=false` stops the serving replicas bringing
-the schema forward, so the login they serve on need not hold the right to
-change it; the migration then runs as its own job, `control-plane migrate`,
-before the new version serves. `FLOTESTRO_MIGRATION_ROLE` names the role that
+One more variable belongs to an external database and is not set by the files
+here. `FLOTESTRO_AUTO_MIGRATE=false` already is, in both deployments: the
+`migrate` service brings the schema forward and the serving login need not hold
+the right to change it. `FLOTESTRO_MIGRATION_ROLE` names the role that
 migration takes on with `SET ROLE`, so the objects it creates belong to the
 schema owner rather than to whoever ran it.
 
@@ -758,8 +757,8 @@ do: the backup belongs on encrypted storage, away from the host it was taken
 from, and it is worth restoring it into an isolated environment now and again
 to find out whether it actually works.
 
-The database of the quick start is on an internal network, so a deployment
-that runs one adds `--profile quickstart` to the commands above.
+The database of the quick start is on an internal network, reachable from this
+deployment and nowhere else.
 
 ### Putting it back
 
@@ -859,11 +858,371 @@ This is why step 1 is not optional and why the two halves of the pair are
 never restored apart: the database holds the encrypted secrets, and the
 state directory holds the key that opens them and the CA the fleet trusts.
 
+## From packages to Compose
+
+Until 0.62.0 the panel and the relay could also be installed as packages, each
+with a systemd unit of its own. Those packages end with this release, and the
+installation they made moves here. It is the same installation afterwards: the
+same fleet CA, the same secret-store key, the same database, the same hosts with
+the certificates they already hold - served by the images instead of by
+`flotestro-control-plane.service` and `flotestro-relay.service`. Nothing on a
+managed host changes; the agent, its root helper and `flotestro-agentctl` remain
+packages and no step below touches them.
+
+Read "The mounts", "Secrets" and "The database and the state are one backup
+pair" first. This section uses them and does not repeat them.
+
+**This is not a reinstallation, and the difference is the state directory.** A
+panel started against this installation's database with a state volume of its
+own refuses to start with `installation_state_mismatch`: a directory holding
+neither the CA nor the secret-store key of that database is a stranger to it,
+and nothing is ever created in place of what is missing, because a regenerated
+CA would cut off every host in the fleet at once. So the state is carried over
+before the panel is started, and once it is, the rest is an ordinary upgrade.
+
+| What | Where the package put it | Where Compose expects it |
+|---|---|---|
+| The state: `ca.pem`, `ca.key`, the secret-store key (`keys/`, or `secrets.key` in an installation from before the key store), `helper-signing.key`, `installation.id`, `bootstrap-token` | `/var/lib/flotestro`, mode 0700, owned by the `flotestro` account | the volume `flotestro-state`, mounted at `/var/lib/flotestro`, mode 0700, owned by 65532 |
+| The settings and the credentials | `/etc/flotestro/control-plane.env`, one `EnvironmentFile` with the DSN and every secret as a value in it | `./.env` for the non-secret values, one file per secret, and the DSN in `./secrets/database-url` |
+| The relay's identity, certificate and spool | `/var/lib/flotestro-relay`, owned by `flotestro-relay` | the volume `flotestro-relay-state`, mounted at `/var/lib/flotestro-relay` |
+| The relay's configuration | `/etc/flotestro/relay.yaml` | `./relay.yaml`, bind-mounted read-only at that same path |
+
+The ports do not move. The package listened on `127.0.0.1:8080` for the API and
+the browser and on `:8443` and `:8444` for the fleet, and the deployment
+publishes exactly those, so a reverse proxy in front of the panel keeps working
+and the agents dial the address they already know.
+
+### The settings have to be written out again
+
+Nothing here reads `/etc/flotestro/control-plane.env`, and the deployment passes
+only the variables `compose.yaml` names. Keep a copy of that file somewhere off
+the host before anything else - it holds the DSN and the credentials, it is the
+only record of what this installation was configured with, and a purge of the
+package deletes it. Then go through it line by line:
+
+* The non-secret values that have a home go into `./.env`:
+  `FLOTESTRO_ADVERTISE`, `FLOTESTRO_PUBLIC_URL`, `FLOTESTRO_GATEWAY_ID`,
+  `FLOTESTRO_PACKAGE_REPOSITORY_URL`. `FLOTESTRO_ADVERTISE` must carry the same
+  names as before, because they go into the certificate of the agent gateway:
+  left at its default that certificate covers `127.0.0.1` alone and every agent
+  in the fleet fails the name check on its next connection.
+  `FLOTESTRO_GATEWAY_ID` was the machine's hostname whenever the package's file
+  left it empty, and a container's hostname is random, so the identifier is
+  written down here; writing down the one the package used leaves the sessions
+  and the job leases in the database with a gateway that still exists.
+* Every secret becomes a file with a `_FILE` variable naming it, as "Secrets"
+  describes: `FLOTESTRO_OIDC_CLIENT_SECRET` becomes
+  `FLOTESTRO_OIDC_CLIENT_SECRET_FILE` at `/run/secrets/oidc_client_secret`,
+  `FLOTESTRO_WEBHOOK_SECRET` becomes `FLOTESTRO_WEBHOOK_SECRET_FILE` at
+  `/run/secrets/webhook_secret`, `FLOTESTRO_VULN_NVD_KEY` becomes
+  `FLOTESTRO_VULN_NVD_KEY_FILE` at `/run/secrets/nvd_key`, and the FreeIPA
+  keytab is a mount at `/run/secrets/ipa.keytab` with `FLOTESTRO_IPA_KEYTAB`
+  naming that path.
+* Everything else the installation set - the OIDC issuer and client, the
+  retentions, `FLOTESTRO_PRODUCTION_ENVIRONMENTS`, the heartbeat contract, the
+  vulnerability feeds - has no line in `compose.yaml` and is added to the
+  `environment:` of the `control-plane` service. A value nobody carries over is
+  not refused: the panel starts on its default, which for the identity provider
+  means no browser login and API tokens alone.
+* `FLOTESTRO_STATE_DIR` and `FLOTESTRO_WEB_ROOT` do not travel. They are the
+  image's own paths and are set there already.
+
+### The two installations point at one database
+
+`FLOTESTRO_DATABASE_URL` becomes `./secrets/database-url`, and it is the same
+database, not a copy of it. Two things about it usually have to change:
+
+* **The address.** A package installation with PostgreSQL on the panel host
+  carries `127.0.0.1` in its DSN, and inside a container that address is the
+  container. The DSN has to name an address of the database that the container
+  network can route to, and PostgreSQL has to be listening on it.
+* **What the DSN promises.** `FLOTESTRO_DATABASE_MODE=external` holds the DSN to
+  `sslmode=verify-full` and `target_session_attrs=read-write` and refuses it
+  otherwise: a DSN with no TLS accepts a server that merely answers, and one
+  without the writer attribute opens happily on a standby and then refuses every
+  change. Either the database gets a certificate the panel can verify, or - in a
+  laboratory and nowhere else - `FLOTESTRO_LAB_ALLOW_INSECURE_DB=true` is added
+  to the `control-plane` service's environment. The pooler rule of "A second
+  control plane" applies unchanged: transaction mode breaks the panel silently.
+
+The schema is the other half of this. The packaged panel created and migrated
+the schema at its own start; the deployment for a database somebody else runs
+keeps `FLOTESTRO_AUTO_MIGRATE=false`, so no process that serves the fleet
+reshapes the database and the serving login need not even hold the right to.
+The migration is the `migrate` run below, and a panel that meets a schema it
+does not match refuses to start with `schema_behind` instead of guessing.
+
+### The move, in order
+
+The first step that changes anything is step 5. Up to there, everything is
+undone by starting the systemd unit again.
+
+1. **Prepare the deployment directory, and start nothing.** Follow "The first
+   start" for the shape of `./.env` and `./secrets/database-url`, with the
+   values carried over above, `FLOTESTRO_VERSION` at the release you are moving
+   to and `FLOTESTRO_DATABASE_MODE=external`. Then let `init` make what the rest
+   reads:
+
+   ```
+   cd docker
+   docker compose -f compose.yaml -f compose.external-db.yaml up init
+   ```
+
+   It writes the DSN into the volume the tools read it from and gives `./backups`
+   to the account that writes a backup into it. It reads the declared kind from
+   the environment rather than from the overlay, which is why `./.env` names it
+   too: told `external` with no DSN in `./secrets/database-url` it stops instead
+   of inventing one that points at a local server.
+
+2. **Stop the panel, and disable it.**
+
+   ```
+   systemctl disable --now flotestro-control-plane.service
+   ```
+
+   Disable it and do not only stop it: a reboot in the middle of the move would
+   otherwise bring the packaged panel back up beside the container one. Two
+   panels serving one database both issue certificates, both lease jobs and both
+   sweep the retention of the audit trail, and each fences the other's sessions. If both
+   carry the same `FLOTESTRO_GATEWAY_ID` the second is refused with
+   `gateway_id_in_use`, but that is a safety net and not a plan: with different
+   identifiers nothing refuses at all.
+
+   Do not remove the package yet, and never purge it. An ordinary removal leaves
+   `/var/lib/flotestro` where it is, on purpose; a purge deletes it, and with it
+   the CA that the whole fleet rests on and the only copy of the installation
+   that is not in a backup.
+
+3. **Take the pair that lets you come back.** The panel is stopped now, so the
+   two halves belong to one moment, which is the whole point of taking it here.
+   On the panel host, as root, because the state directory is 0700:
+
+   ```
+   tar --create --file /var/tmp/flotestro-state.tar --directory /var/lib/flotestro .
+   ```
+
+   and, from the machine that runs PostgreSQL, a dump of the database taken the
+   way this installation's database is always backed up -
+   `pg_dump --format=custom --no-owner --no-privileges`, which is the form the
+   pair uses; give the password through the environment rather than on the
+   command line, where the process list of the host would carry it.
+
+   Both halves or neither. The database holds the hosts, the tasks, the audit
+   trail and the encrypted secrets; the state directory holds the key those
+   ciphertexts open with and the CA that signed every certificate in the fleet.
+   A dump without the state is not a restorable installation - it is a history
+   nothing can read and a fleet nothing can authenticate. The state archive is
+   also what step 4 unpacks, so the backup and the move are the same artefact.
+
+   The pair that `admin-tools` writes, with its manifest and its checksums,
+   cannot be taken yet: that tool reads the state through the volume, and the
+   state is not in it until the next step. It is taken in step 8.
+
+4. **Carry the state into the volume.** The panel runs as 65532 and the
+   package's state belongs to the `flotestro` account, so the ownership has to
+   change - and host uid 65532 is not the container's 65532 under a rootless
+   runtime, which is why the ownership is set inside the runtime, where both
+   runtimes agree. That is the same reason the `init` service exists. Hand the
+   archive to the account that runs the deployment first, because a rootless
+   container cannot read a file it does not own:
+
+   ```
+   chown <the account that runs the deployment> /var/tmp/flotestro-state.tar
+   chmod 0600 /var/tmp/flotestro-state.tar
+
+   docker run --rm --user 0:0 \
+     --volume /var/tmp/flotestro-state.tar:/state.tar:ro \
+     --volume flotestro-state:/var/lib/flotestro \
+     docker.io/library/busybox:1.37 \
+     sh -euc 'tar -xpf /state.tar -C /var/lib/flotestro &&
+              chown -R 65532:65532 /var/lib/flotestro &&
+              chmod 0700 /var/lib/flotestro'
+   ```
+
+   The volume is addressable by that bare name because `compose.yaml` names its
+   volumes explicitly rather than letting the project prefix them. Look at what
+   arrived, and then delete the archive - it carries the CA key and the
+   secret-store key, and it is not a file to leave lying on a host:
+
+   ```
+   docker run --rm --volume flotestro-state:/var/lib/flotestro:ro \
+     docker.io/library/busybox:1.37 ls -la /var/lib/flotestro
+   rm -f /var/tmp/flotestro-state.tar
+   ```
+
+   `ca.pem`, `ca.key` and the secret-store key have to be in that listing, with
+   the directory itself 0700 and the keys 0600. `installation.id` is there too
+   unless the installation predates the marker.
+
+5. **Bring the schema forward, as a run of its own.** This is the step that
+   cannot be undone, because a version can be gone back to and a schema cannot.
+
+   ```
+   docker compose -f compose.yaml -f compose.external-db.yaml run --rm control-plane schema-check
+   docker compose -f compose.yaml -f compose.external-db.yaml run --rm migrate
+   docker compose -f compose.yaml -f compose.external-db.yaml run --rm control-plane schema-check
+   ```
+
+   The first answer says what the new version would do: exit 0 means it needs no
+   migration, and `schema_behind` means it carries some and names how many. Any
+   other answer stops the move. The last run must exit 0. Nothing serves the
+   fleet during any of them - `run` publishes no ports - and two migrators at
+   once do not race: the second waits on the advisory lock and says so. An
+   installation that separated the database roles with `db/roles.sql` mounts the
+   migrator's own DSN and names it in `FLOTESTRO_MIGRATION_DATABASE_URL_FILE`;
+   one that came from a package has a single login, and the run then migrates
+   with it, which still keeps the migration out of the serving process.
+
+6. **Start the panel and read the start.**
+
+   ```
+   docker compose -f compose.yaml -f compose.external-db.yaml up -d
+   docker compose -f compose.yaml -f compose.external-db.yaml logs -f control-plane
+   ```
+
+   Wait for "the database schema is current", and check the installation
+   identifier and the CA fingerprints it prints against the installation you
+   moved. The refusals worth recognising here all mean one thing each:
+   `installation_state_mismatch` is step 4 not done or done with the wrong
+   directory; `gateway_id_in_use` is the systemd unit alive again somewhere;
+   `schema_behind` is step 5 skipped.
+
+7. **Let the agents come back on their own.** Nothing is done on a managed host.
+   Each agent holds its own certificate and the fleet CA that signed it, both
+   from the CA that came over in step 4, and it dials the names in
+   `FLOTESTRO_ADVERTISE` on 8443 as before. A host is called stale after three
+   missed heartbeats of the interval and its spread - 60 and 30 seconds by
+   default - so a fleet that was down for the length of the move is back within
+   a few minutes. What to watch is the panel's status, which the API answers at
+   `GET /api/v1/status`: `agents_on_this_gateway` climbing to the size of the
+   fleet, `hosts_stale` falling back to nothing and `hosts_online` where it was
+   before. A host that does not come back is a name or a port, not a
+   certificate: the gateway certificate covers what `FLOTESTRO_ADVERTISE` names,
+   and nothing else.
+
+8. **Check it, then take the first proper pair.** The queue drains, a host's
+   monitoring shows samples younger than the move, and an export of the audit
+   trail still verifies (`admin-tools auditverify`). Then:
+
+   ```
+   docker compose -f compose.yaml -f compose.external-db.yaml --profile tools run --rm admin-tools backup
+   docker compose -f compose.yaml -f compose.external-db.yaml --profile tools run --rm admin-tools verify <backup-id>
+   ```
+
+   The tool refuses to write a pair at all if the state carries no `ca.pem`, so
+   this is also the last check that step 4 put an installation there and not
+   half of one. From here the installation is backed up the way the rest of this
+   file describes.
+
+### Going back
+
+* **Before step 5.** `docker compose -f compose.yaml -f compose.external-db.yaml down`, then
+  `systemctl enable --now flotestro-control-plane.service`. The state directory
+  on the host was only read, so the packaged panel comes back on the same
+  installation; the record of the container instance under its gateway
+  identifier is taken over by itself within a minute.
+* **After step 5.** The packaged panel is the older release and refuses the
+  migrated schema with `schema_ahead`, which is right - it would read tables
+  whose shape it does not know. Going back then means the pair of step 3:
+  restore the database *and* the state together, into an empty database and an
+  empty state, and lose everything recorded since. "Going back" and "Putting it
+  back" above are that procedure.
+* **Only when the container installation has been proved** is the package
+  removed - `apt remove` or `dnf remove`, the two the panel was ever packaged
+  for, both of which leave `/var/lib/flotestro` alone. Purge it only once the
+  pair is somewhere else: a purge deletes the state directory and
+  `/etc/flotestro/control-plane.env`.
+
+### The relay of a site
+
+A relay moves after the panel, one site at a time, and it moves differently:
+the identity is not carried over. The site is registered again under the same
+name, which is the natural key of the centre's registry, so the relay's record,
+its site and its history stay and only the certificate is new.
+
+What a re-registration does lose is the spool - the results, inventories and
+samples the centre has not acknowledged yet. Empty it before stopping the
+relay, and ask the relay itself whether it is empty. On the site host:
+
+```
+curl -s http://127.0.0.1:8454/readyz
+```
+
+`safe_to_restart` is true when the link to the centre is up, nothing waits in
+the spool and nothing has been dropped since the process started. That is the
+moment to stop it. The address is `relay.health_listen` from
+`/etc/flotestro/relay.yaml`, the loopback on 8454 unless the installation
+changed it; where the listener was turned off, `flotestro-relayctl status`
+prints the same fill of the buffer.
+
+1. **Stop and disable the unit**, `systemctl disable --now
+   flotestro-relay.service`. Two relays on one host cannot both hold 8453: the
+   container fails to publish the port and never starts. The reason to disable
+   the unit rather than only stop it is the reboot after the move, when the unit
+   would take the port first and the site would meet a relay whose certificate
+   the centre has by then forgotten.
+
+2. **Carry the configuration and the CA over**, next to `compose.relay.yaml`:
+
+   ```
+   cp /etc/flotestro/relay.yaml ./relay.yaml
+   cp /var/lib/flotestro-relay/ca.pem ./relay-ca.pem
+   ```
+
+   One line in `./relay.yaml` changes: `upstream.bootstrap_ca_file` names
+   `/var/lib/flotestro-relay/ca.pem` in a package installation, and here the
+   bundle arrives as a read-only mount at `/etc/flotestro/ca.pem`. Both files
+   have to exist before the first start, because a bind mount whose source does
+   not exist becomes a directory. Leave `relay.name`, `relay.site` and
+   `relay.advertised_names` exactly as they are: the name is what the registry
+   is keyed on, and the advertised names go into the new certificate, so a name
+   missing from them is a name the site's agents can no longer verify the relay
+   by. `relay.state_dir` and `relay.listen` are already the path and the port
+   the deployment uses; an installation that changed either has to make the
+   published port and the health check agree with it.
+
+3. **Register the site again and start it.** The token is a one-time secret and
+   is deleted afterwards, and the image is the one the release names:
+
+   ```
+   mkdir -p secrets && chmod 700 secrets
+   printf '%s' '<the enrollment token from the panel>' > secrets/relay-enrollment-token
+   chmod 600 secrets/relay-enrollment-token
+   export FLOTESTRO_RELAY_IMAGE=<the relay image of this release, pinned by digest>
+   docker compose -f compose.relay.yaml --profile enroll run --rm relay-enroll
+   rm -f secrets/relay-enrollment-token
+   docker compose -f compose.relay.yaml up -d
+   ```
+
+   The registration goes into an empty state volume and writes a new
+   certificate; the centre keeps the one it replaces recognised until the relay
+   arrives with the new one, so the site is not cut off in between.
+
+4. **Check the site.** The agents of the site reconnect to the same name and
+   port with the certificates they hold, and the new relay certificate is signed
+   by the same fleet CA, so nothing is re-enrolled on a managed host. The
+   panel's relay list shows the relay under its own name, in its own site, with
+   a certificate issued a moment ago.
+
+5. **Going back is not symmetrical.** Once the container relay has connected
+   with its new certificate the centre forgets the one it replaced, so the
+   identity still lying in `/var/lib/flotestro-relay` is no longer recognised -
+   and `flotestro-relayctl enroll` refuses to replace an identity that has not
+   expired (`machine_already_enrolled`). Going back after that first connection
+   means revoking the relay in the panel and registering it again with a new
+   token. Before it, going back is stopping the containers and starting the
+   unit.
+
+The relay package is removed once the site has been proved, with `apt remove`,
+`dnf remove` or `pacman -R`; all three leave `/var/lib/flotestro-relay` where it
+is, and only a purge deletes it. Until it is deleted, that directory is the way
+back, which is the reason to leave it there for a while.
+
 ## Removing an installation
 
 ```
 docker compose down
-docker compose --profile quickstart --profile airgap down    # name what it was started with
+docker compose --profile airgap down    # name the profiles it was started with
 ```
 
 The volumes survive on purpose: `docker compose down` stops the containers
