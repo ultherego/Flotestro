@@ -1,0 +1,22 @@
+# The protocol between the panel, the agent and the root helper.
+#
+# The product promises that a panel and an agent one release apart work
+# together, and nothing checked it. A field number reused, a type changed, a
+# field removed: each of those is read by the other side as something else
+# entirely, and the first sign of it is a fleet that answers nonsense. buf
+# breaking compares the protocol with the last release and refuses exactly
+# those changes.
+#
+# The lint set is the minimal one on purpose. The protocol was written before
+# this file and the stricter categories would mean renaming what is already in
+# the wire; tightening the set is its own change, made one category at a time
+# with a release between.
+version: v2
+modules:
+  - path: api/proto
+lint:
+  use:
+    - MINIMAL
+breaking:
+  use:
+    - WIRE_JSON

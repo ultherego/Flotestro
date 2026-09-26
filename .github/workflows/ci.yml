@@ -105,6 +105,45 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
           "$(go env GOPATH)/bin/govulncheck" ./...
 
+  protocol:
+    name: Protocol compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          # The comparison reads a tag, so the history has to be there.
+          fetch-depth: 0
+      - uses: bufbuild/buf-setup-action@v1.47.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: The protocol reads as a protocol
+        run: buf lint
+
+      - name: Nothing in it changed meaning since the last release
+        # An agent and a panel one release apart have to work together, so a
+        # field number, a type or a field that goes is a break rather than a
+        # change. The comparison is against the newest release tag and not
+        # against main: main is where this push is going, and comparing a
+        # branch with itself proves nothing.
+        run: |
+          set -euo pipefail
+          tag="$(git tag --list 'v*' --sort=-v:refname | head -1)"
+          if [ -z "$tag" ]; then
+            echo "no release tag yet: there is nothing to have broken"
+            exit 0
+          fi
+          if ! git cat-file -e "$tag:buf.yaml" 2>/dev/null; then
+            echo "::notice::$tag was released before the protocol was described here;" \
+                 "the comparison starts with the next release"
+            exit 0
+          fi
+          echo "comparing the protocol with $tag"
+          buf breaking --against ".git#tag=$tag"
+
   fuzz:
     name: Fuzz the decoders
     runs-on: ubuntu-latest
@@ -299,7 +338,39 @@ jobs:
           # the stamp is of no interest to a migration.
           GOFLAGS=-buildvcs=false FLOTESTRO_DATABASE_URL="$upgraded" \
             go -C "$RUNNER_TEMP/previous" run ./cmd/control-plane migrate
+
+          # Rows of the previous release, written before the upgrade. A schema
+          # that matches says nothing about whether what the installation held
+          # is still there and still says the same thing: a migration that
+          # rewrites a column, changes an enum or recreates a table can leave a
+          # correct schema over lost data.
+          psql_ -d upgraded -v ON_ERROR_STOP=1 <<'ROWS'
+          insert into hosts (hostname, machine_id, site, environment)
+          values ('upgrade-witness.example.org', '0123456789abcdef0123456789abcdef', 'lab', 'test');
+          insert into audit_events (actor_type, actor_id, action, target_type, target_id, outcome)
+          values ('user', 'the-operator', 'host.register', 'host', 'upgrade-witness', 'success');
+          ROWS
+          before="$(psql_ -d upgraded -tAq -c "select hostname || '|' || site || '|' || environment
+            from hosts where hostname = 'upgrade-witness.example.org'")"
+          events_before="$(psql_ -d upgraded -tAq -c "select count(*) from audit_events
+            where actor_id = 'the-operator'")"
+
           FLOTESTRO_DATABASE_URL="$upgraded" go run ./cmd/control-plane migrate
+
+          after="$(psql_ -d upgraded -tAq -c "select hostname || '|' || site || '|' || environment
+            from hosts where hostname = 'upgrade-witness.example.org'")"
+          events_after="$(psql_ -d upgraded -tAq -c "select count(*) from audit_events
+            where actor_id = 'the-operator'")"
+          if [ "$before" != "$after" ] || [ "$events_before" != "$events_after" ]; then
+            echo "the upgrade from $tag did not keep what the installation held:" >&2
+            echo "  host  before=$before after=$after" >&2
+            echo "  trail before=$events_before after=$events_after" >&2
+            exit 1
+          fi
+          # The rows go before the schemas are compared: a witness row would
+          # otherwise be a difference of its own.
+          psql_ -d upgraded -c "delete from audit_events where actor_id = 'the-operator'" >/dev/null
+          psql_ -d upgraded -c "delete from hosts where hostname = 'upgrade-witness.example.org'" >/dev/null
           FLOTESTRO_DATABASE_URL="$fresh" go run ./cmd/control-plane migrate
 
           dump upgraded > upgraded.sql

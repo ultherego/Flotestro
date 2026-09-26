@@ -129,6 +129,26 @@ sboms() {
     rm -rf "$bills"
 }
 
+# migrations is the migration set of this release, named with its digests. A
+# release that carries other migrations than it says is a release whose schema
+# nobody agreed to, and the digests are the ones the panel records in
+# schema_migrations - so an artefact can be held to the database it made.
+migrations() {
+    local out="$OUT/migrations.json" first=1 file
+    {
+        printf '{\n  "version": "%s",\n  "migrations": [\n' "$VERSION"
+        for file in "$here/../db/migrations"/*.sql; do
+            [ -f "$file" ] || continue
+            [ $first -eq 1 ] || printf ',\n'
+            first=0
+            printf '    {"name": "%s", "sha256": "%s"}' \
+                "$(basename "$file")" "$(sha256sum "$file" | cut -d" " -f1)"
+        done
+        printf '\n  ]\n}\n'
+    } > "$out"
+    echo "==> the migration set of $VERSION: $(basename "$out")"
+}
+
 buildPackages() {
     local arch="$1" stage="$OUT/stage-$arch" built=false
     [ -d "$stage" ] || { echo "no binaries in $stage" >&2; exit 1; }
@@ -220,7 +240,7 @@ checksums() {
     echo "==> checksums"
     local published=() file
     for file in "$OUT"/*.deb "$OUT"/*.rpm "$OUT"/*.pkg.tar.* "$OUT"/*.cdx.json \
-                "$OUT"/modules-*.txt "$OUT"/provenance.json; do
+                "$OUT"/modules-*.txt "$OUT"/provenance.json "$OUT"/migrations.json; do
         [ -f "$file" ] && published+=("$(basename "$file")")
     done
     [ ${#published[@]} -gt 0 ] || { echo "nothing to write the checksums of" >&2; return 1; }
@@ -236,6 +256,7 @@ for arch in "${ARCHITECTURES[@]}"; do
     esac
 done
 
+migrations
 case "$MODE" in
 binaries) provenance ;;
 packages) checksums ;;
