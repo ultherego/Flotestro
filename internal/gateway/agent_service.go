@@ -314,13 +314,19 @@ func (s *AgentService) Connect(ctx context.Context,
 	}
 	// What the agent says about its build and its configuration.
 	var report *hosts.AgentReport
-	if hello.GetProtocolMax() > 0 {
+	// An agent that says nothing about its protocol may still say what its helper
+	// does, so either is enough to have something worth writing down.
+	if hello.GetProtocolMax() > 0 || hello.GetHelperCapabilityMode() != "" ||
+		hello.GetHelperCapabilitySupported() {
+		supported := hello.GetHelperCapabilitySupported()
 		report = &hosts.AgentReport{
-			BuildCommit:         hello.GetBuildCommit(),
-			ProtocolMin:         int(hello.GetProtocolMin()),
-			ProtocolMax:         int(hello.GetProtocolMax()),
-			ConfigFingerprint:   hello.GetConfigFingerprint(),
-			ConfigSchemaVersion: int(hello.GetConfigSchemaVersion()),
+			BuildCommit:               hello.GetBuildCommit(),
+			ProtocolMin:               int(hello.GetProtocolMin()),
+			ProtocolMax:               int(hello.GetProtocolMax()),
+			ConfigFingerprint:         hello.GetConfigFingerprint(),
+			ConfigSchemaVersion:       int(hello.GetConfigSchemaVersion()),
+			HelperCapabilityMode:      hello.GetHelperCapabilityMode(),
+			HelperCapabilitySupported: &supported,
 		}
 	}
 	if err := s.hosts.RecordAgentReport(ctx, hostID, report); err != nil {

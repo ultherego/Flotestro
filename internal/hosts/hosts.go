@@ -239,6 +239,11 @@ type Host struct {
 	ConfigFingerprint   string `json:"config_fingerprint,omitempty"`
 	ConfigSchemaVersion *int   `json:"config_schema_version,omitempty"`
 	ConfigLegacy        *bool  `json:"config_legacy,omitempty"`
+	// What the host's root helper does with a capability the panel signed:
+	// observe, prefer or enforce. Empty for a helper that has not said, which is
+	// not the same as observe - an agent from before the capability says nothing.
+	HelperCapabilityMode      string `json:"helper_capability_mode,omitempty"`
+	HelperCapabilitySupported *bool  `json:"helper_capability_supported,omitempty"`
 	// Tags are what operators recorded about the host: 'key' or 'key=value'.
 	Tags []string `json:"tags"`
 	// ReleaseChannel says which agent releases the host follows: stable or beta.
@@ -1528,6 +1533,7 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 		       h.connection_state, h.last_seen_at, coalesce(h.boot_id, ''),
 		       coalesce(h.agent_build_commit, ''), h.agent_protocol_min, h.agent_protocol_max,
 		       coalesce(h.config_fingerprint, ''), h.config_schema_version,
+		       coalesce(h.helper_capability_mode, ''), h.helper_capability_supported,
 		       h.reboot_required, h.failed_units, h.pending_updates, h.pending_security_updates,
 		       coalesce(h.current_inventory_revision, ''), h.package_database_broken, h.enrolled_at,
 		       coalesce(h.management_address, ''), coalesce(h.management_address_source, ''),
@@ -1581,6 +1587,7 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 			&h.AgentVersion, &h.ConnectionState, &h.LastSeenAt, &h.BootID,
 			&h.AgentBuildCommit, &h.AgentProtocolMin, &h.AgentProtocolMax,
 			&h.ConfigFingerprint, &h.ConfigSchemaVersion,
+			&h.HelperCapabilityMode, &h.HelperCapabilitySupported,
 			&h.RebootRequired, &h.FailedUnits, &h.PendingUpdates, &h.PendingSecurityUpdates,
 			&h.CurrentInventoryRevision, &h.PackageDatabaseBroken, &h.EnrolledAt,
 			&h.ManagementAddress, &h.ManagementAddressSource, &h.ManagementAddressObservedAt,
@@ -1635,21 +1642,28 @@ type AgentReport struct {
 	ProtocolMax         int
 	ConfigFingerprint   string
 	ConfigSchemaVersion int
+	// HelperCapabilityMode and HelperCapabilitySupported are what the agent says
+	// its root helper does with a signed capability. Empty and nil mean it has
+	// not said.
+	HelperCapabilityMode      string
+	HelperCapabilitySupported *bool
 }
 
 // RecordAgentReport writes what the agent reported about itself at its Hello.
 func (s *Store) RecordAgentReport(ctx context.Context, hostID string, report *AgentReport) error {
 	const query = `
 		update hosts
-		   set agent_build_commit    = $2,
-		       agent_protocol_min    = $3,
-		       agent_protocol_max    = $4,
-		       config_fingerprint    = $5,
-		       config_schema_version = $6,
-		       updated_at            = now()
+		   set agent_build_commit          = $2,
+		       agent_protocol_min          = $3,
+		       agent_protocol_max          = $4,
+		       config_fingerprint          = $5,
+		       config_schema_version       = $6,
+		       helper_capability_mode      = $7,
+		       helper_capability_supported = $8,
+		       updated_at                  = now()
 		 where id = $1`
 	if report == nil {
-		_, err := s.pool.Exec(ctx, query, hostID, nil, nil, nil, nil, nil)
+		_, err := s.pool.Exec(ctx, query, hostID, nil, nil, nil, nil, nil, nil, nil)
 		return err
 	}
 	var commit, fingerprint *string
@@ -1659,8 +1673,12 @@ func (s *Store) RecordAgentReport(ctx context.Context, hostID string, report *Ag
 	if report.ConfigFingerprint != "" {
 		fingerprint = &report.ConfigFingerprint
 	}
+	var mode *string
+	if report.HelperCapabilityMode != "" {
+		mode = &report.HelperCapabilityMode
+	}
 	_, err := s.pool.Exec(ctx, query, hostID, commit, report.ProtocolMin, report.ProtocolMax,
-		fingerprint, report.ConfigSchemaVersion)
+		fingerprint, report.ConfigSchemaVersion, mode, report.HelperCapabilitySupported)
 	return err
 }
 
