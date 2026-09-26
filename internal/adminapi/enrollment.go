@@ -23,6 +23,7 @@ import (
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/paging"
 	"github.com/ultherego/flotestro/internal/relays"
+	"github.com/ultherego/flotestro/internal/release"
 )
 
 // enrollmentRequestBody is the body of an enrollment order.
@@ -815,6 +816,11 @@ type Installation struct {
 	// PackageRepositoryURL is the base of the signed package repository.
 	// Empty means the instructions name a placeholder the operator replaces.
 	PackageRepositoryURL string
+	// Images is what the release said about its own images, pinned by digest.
+	// The zero value names none, which is what an installation deployed without
+	// a manifest has; an instruction that would need one says so rather than
+	// naming something that cannot be pulled.
+	Images release.Manifest
 }
 
 // SetInstallation tells the panel how the hosts reach it.

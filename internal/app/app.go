@@ -63,6 +63,7 @@ import (
 	"github.com/ultherego/flotestro/internal/pki"
 	"github.com/ultherego/flotestro/internal/policy"
 	"github.com/ultherego/flotestro/internal/relays"
+	"github.com/ultherego/flotestro/internal/release"
 	"github.com/ultherego/flotestro/internal/remediation"
 	"github.com/ultherego/flotestro/internal/scheduler"
 	"github.com/ultherego/flotestro/internal/secrets"
@@ -172,6 +173,9 @@ func Run() error {
 	packageRepositoryURL := flag.String("package-repository-url",
 		config.Env("FLOTESTRO_PACKAGE_REPOSITORY_URL", ""),
 		"the base address of the signed package repository the installation instructions point the hosts at")
+	releaseManifestFile := flag.String("release-manifest-file",
+		config.Env("FLOTESTRO_RELEASE_MANIFEST_FILE", ""),
+		"the manifest published with this release, naming each component's image by digest")
 	groupsClaim := flag.String("oidc-groups-claim",
 		config.Env("FLOTESTRO_OIDC_GROUPS_CLAIM", "groups"), "the field of the token with the list of groups")
 	// Off by default: it needs a Keycloak realm and a service account with
@@ -1003,12 +1007,25 @@ func Run() error {
 	panelServer.SetEvents(eventBus)
 	// The installation profile: the addresses the hosts connect to are the
 	// advertised ones, because those alone are in the gateway certificate.
-	panelServer.SetInstallation(adminapi.Installation{
+	installation := adminapi.Installation{
 		AdvertisedAddresses:  splitList(*advertised),
 		GatewayAddr:          cfg.GatewayAddr,
 		EnrollmentAddr:       cfg.EnrollmentAddr,
 		PackageRepositoryURL: *packageRepositoryURL,
-	})
+	}
+	// A manifest that was named and cannot be read stops the start. The panel was
+	// told where it is, so reading on without it would mean answering an operator
+	// with an instruction nobody can carry out.
+	if path := strings.TrimSpace(*releaseManifestFile); path != "" {
+		manifest, err := release.Load(path)
+		if err != nil {
+			return err
+		}
+		installation.Images = manifest
+		log.Info("the release manifest was read", "path", path,
+			"version", manifest.Version, "images", len(manifest.Images))
+	}
+	panelServer.SetInstallation(installation)
 	panelServer.SetRelays(relayStore)
 	// The buffer history of the relays: the gateway writes a point at every
 	// heartbeat, this loop rolls them up, applies the retention and evaluates the
