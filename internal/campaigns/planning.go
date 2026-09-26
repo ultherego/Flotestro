@@ -19,6 +19,44 @@ import (
 )
 
 // plan runs the planning phase of a campaign.
+// planStep is what the planning pass does with one target. The decision is a
+// function of the target alone, so it can be read and tested without a database
+// behind it.
+type planStep int
+
+const (
+	// planNothing: the target has settled and the pass leaves it alone.
+	planNothing planStep = iota
+	// planOrder: ask the host for its plan.
+	planOrder
+	// planCollect: read the plan the host gave.
+	planCollect
+	// planCollectUnmoved: read the plan of a target that never moved to planning.
+	// The order carries an idempotency key, so ordering again returns the same
+	// job; a pass that ordered instead would re-order for ever a plan whose
+	// result is already written, and the campaign would neither finish nor fail.
+	planCollectUnmoved
+	// planRecheckOffline: the host was away when its plan was ordered.
+	planRecheckOffline
+)
+
+// planStepFor says what the planning pass does with a target.
+func planStepFor(target Target) planStep {
+	switch {
+	case target.State.Finished():
+		return planNothing
+	case target.State == TargetPending && target.PlanJobID != nil:
+		return planCollectUnmoved
+	case target.State == TargetPending:
+		return planOrder
+	case target.State == TargetPlanning:
+		return planCollect
+	case target.State == TargetQueuedOffline:
+		return planRecheckOffline
+	}
+	return planNothing
+}
+
 func (o *Orchestrator) plan(ctx context.Context, campaign Campaign, targets []Target) error {
 	change := opspec.ActionType(campaign.ActionType)
 	// A plan that comes with the order needs no host: the panel splits the
@@ -49,13 +87,19 @@ func (o *Orchestrator) plan(ctx context.Context, campaign Campaign, targets []Ta
 			settled++
 			continue
 		}
-		switch target.State {
-		case TargetPending:
+		step := planStepFor(*target)
+		if step == planCollectUnmoved {
+			o.log.Warn("the campaign is collecting a plan its target was never moved to",
+				"campaign_id", campaign.ID, "host_id", target.HostID, "job_id", *target.PlanJobID,
+				"state", string(target.State))
+		}
+		switch step {
+		case planOrder:
 			if err := o.orderPlan(ctx, campaign, target, action,
 				opspec.ActionType(campaign.ActionType), payload); err != nil {
 				return err
 			}
-		case TargetPlanning:
+		case planCollect, planCollectUnmoved:
 			done, err := o.collectPlan(ctx, campaign, target)
 			if err != nil {
 				return err
@@ -63,7 +107,7 @@ func (o *Orchestrator) plan(ctx context.Context, campaign Campaign, targets []Ta
 			if done {
 				settled++
 			}
-		case TargetQueuedOffline:
+		case planRecheckOffline:
 			// A host that was offline when its plan was ordered: back to the queue when
 			// it returns, closed when the deadline passes.
 			returned, err := o.recheckOfflinePlanning(ctx, campaign, target)
