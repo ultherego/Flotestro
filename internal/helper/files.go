@@ -25,6 +25,13 @@ import (
 // FileRegistryPath holds the paths the panel has written on this host.
 const FileRegistryPath = "/var/lib/flotestro-helper/files.json"
 
+// fileRegistryPath is the registry in use. A var and not the constant, for the
+// same reason as fileVersionRoot below it: a test points it at a directory of
+// its own instead of the helper's state on the machine it runs on. Without it
+// the write tests could only pass where /var/lib/flotestro-helper already
+// exists and is writable, which is the lab and not a build runner.
+var fileRegistryPath = FileRegistryPath
+
 // ErrorValidatorUnavailable means a content check the order relies on that
 // this host cannot run: the tool is not installed.
 const ErrorValidatorUnavailable = "validator_unavailable"
@@ -715,7 +722,7 @@ type registryEntry struct {
 // exists and cannot be read is an error: reported as an empty list it would
 // say the panel manages nothing here.
 func (s *Server) fileRegistry() ([]registryEntry, error) {
-	data, err := os.ReadFile(FileRegistryPath)
+	data, err := os.ReadFile(fileRegistryPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -729,7 +736,7 @@ func (s *Server) fileRegistry() ([]registryEntry, error) {
 	// The registry from before secrets were introduced was a bare list of paths.
 	var paths []string
 	if err := json.Unmarshal(data, &paths); err != nil {
-		return nil, fmt.Errorf("%s does not read: %w", FileRegistryPath, err)
+		return nil, fmt.Errorf("%s does not read: %w", fileRegistryPath, err)
 	}
 	entries = make([]registryEntry, 0, len(paths))
 	for _, path := range paths {
@@ -776,7 +783,7 @@ func (s *Server) writeFileRegistry(entries []registryEntry) error {
 	if err != nil {
 		return err
 	}
-	directory := filepath.Dir(FileRegistryPath)
+	directory := filepath.Dir(fileRegistryPath)
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return err
 	}
@@ -801,7 +808,7 @@ func (s *Server) writeFileRegistry(entries []registryEntry) error {
 	if err := staged.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(temporary, FileRegistryPath); err != nil {
+	if err := os.Rename(temporary, fileRegistryPath); err != nil {
 		return err
 	}
 	return syncDirectory(directory)

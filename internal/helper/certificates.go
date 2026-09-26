@@ -19,6 +19,10 @@ import (
 // host.
 const CertificateRegistryPath = "/var/lib/flotestro-helper/certificates.json"
 
+// certificateRegistryPath is the registry in use; a test points it elsewhere,
+// as it does the registry of files.
+var certificateRegistryPath = CertificateRegistryPath
+
 // certificateFactNames translates the protocol enumeration into fact names.
 var certificateFactNames = map[helperv1.CertificateRequest_Fact]string{
 	helperv1.CertificateRequest_FACT_KEY_METADATA:      certificates.FactKeyMetadata,
@@ -450,7 +454,7 @@ func mergeTargets(registry, targets []certificates.Target) []certificates.Target
 }
 
 func (s *Server) certificateRegistry() []certificates.Target {
-	data, err := os.ReadFile(CertificateRegistryPath)
+	data, err := os.ReadFile(certificateRegistryPath)
 	if err != nil {
 		return nil
 	}
@@ -470,12 +474,12 @@ func (s *Server) writeCertificateRegistry(targets []certificates.Target) {
 	if err != nil {
 		return
 	}
-	_ = os.MkdirAll(filepath.Dir(CertificateRegistryPath), 0o700)
-	temporary := CertificateRegistryPath + ".new"
+	_ = os.MkdirAll(filepath.Dir(certificateRegistryPath), 0o700)
+	temporary := certificateRegistryPath + ".new"
 	if err := os.WriteFile(temporary, data, 0o600); err != nil {
 		return
 	}
-	_ = os.Rename(temporary, CertificateRegistryPath)
+	_ = os.Rename(temporary, certificateRegistryPath)
 }
 
 // trustStore reads the anchors the host has now.

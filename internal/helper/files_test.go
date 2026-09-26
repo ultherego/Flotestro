@@ -202,13 +202,17 @@ func TestTheValidatorReadsTheStagedContent(t *testing.T) {
 	}
 }
 
-// versionStoreInTest points the store of previous contents at a directory
-// of its own, so a test never touches the helper's state on this machine.
+// versionStoreInTest points the store of previous contents and the registry of
+// managed paths at directories of their own, so a test never touches the
+// helper's state on the machine it runs on - and does not need that state to
+// exist, which on a build runner it does not.
 func versionStoreInTest(t *testing.T) files.VersionStore {
 	t.Helper()
-	previous := fileVersionRoot
-	fileVersionRoot = t.TempDir()
-	t.Cleanup(func() { fileVersionRoot = previous })
+	previousRoot, previousRegistry := fileVersionRoot, fileRegistryPath
+	state := t.TempDir()
+	fileVersionRoot = filepath.Join(state, "versions")
+	fileRegistryPath = filepath.Join(state, "files.json")
+	t.Cleanup(func() { fileVersionRoot, fileRegistryPath = previousRoot, previousRegistry })
 	return fileVersions()
 }
 
