@@ -28,6 +28,9 @@ services:
     restart: "no"
     user: "0:0"
 
+    environment:
+      FLOTESTRO_DATABASE_MODE: ${FLOTESTRO_DATABASE_MODE:-quickstart}
+
     volumes:
       - shared_secrets:/run/flotestro
       # Read-only, and created empty by the runtime when it is not there.
@@ -40,6 +43,20 @@ services:
       - -euc
       - |
         umask 077
+        # The declared kind and what is actually there have to agree. An
+        # installation that says it runs on somebody else's database and has no
+        # DSN would otherwise get a generated one pointing at a local server,
+        # and that address would then be the installation's for good.
+        if [ "$${FLOTESTRO_DATABASE_MODE:-quickstart}" = external ] &&
+           [ ! -f /import/database-url ] && [ ! -f /run/flotestro/database-url ]; then
+          echo "FLOTESTRO_DATABASE_MODE=external and there is no ./secrets/database-url." >&2
+          echo "Put the DSN of the database you run there, or drop the setting for a trial." >&2
+          exit 1
+        fi
+        if [ "$${FLOTESTRO_DATABASE_MODE:-quickstart}" = quickstart ] && [ -f /import/database-url ]; then
+          echo "a DSN was given in ./secrets/database-url while the mode is the quickstart:"
+          echo "the DSN is used, and the local database is started only with its profile."
+        fi
         if [ -f /import/database-url ]; then
           cp /import/database-url /run/flotestro/database-url
           # An installation that made its own files before this service
@@ -98,6 +115,7 @@ services:
     command: ["migrate"]
     environment:
       FLOTESTRO_DATABASE_URL_FILE: /run/flotestro/database-url
+      FLOTESTRO_DATABASE_MODE: ${FLOTESTRO_DATABASE_MODE:-quickstart}
       FLOTESTRO_STATE_DIR: /var/lib/flotestro
     volumes:
       - shared_secrets:/run/flotestro:ro
@@ -125,6 +143,12 @@ services:
       # The DSN is a secret and travels as a file, never as a value: an
       # environment variable is visible in "docker inspect" and in a crash dump.
       FLOTESTRO_DATABASE_URL_FILE: /run/flotestro/database-url
+      # Which kind of database this is, declared rather than guessed. quickstart
+      # is the database this deployment starts itself, on one host and an
+      # internal network. external is a database somebody else runs, and the
+      # panel then refuses a DSN that does not verify the server or does not
+      # promise a writer.
+      FLOTESTRO_DATABASE_MODE: ${FLOTESTRO_DATABASE_MODE:-quickstart}
       # Whether this process brings the schema up to date at its own start.
       # A trial keeps it on: an installation somebody has just downloaded is to
       # come up on the first "up" with nothing else asked of them. An

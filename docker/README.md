@@ -405,13 +405,17 @@ FLOTESTRO_PUBLIC_URL=https://panel.example.org
 # The serving process does not change the schema on a database somebody else
 # runs: the migration is a run of its own, below. Leave this on only for a trial.
 FLOTESTRO_AUTO_MIGRATE=false
+# And say so: the panel then holds the DSN to what an installation of this kind
+# promises - a verified server and a writer - instead of inferring the kind from
+# whether a file happened to be there.
+FLOTESTRO_DATABASE_MODE=external
 SETTINGS
 
 # 2. The database DSN, as a file and with no trailing surprises. Nothing else
 #    about it: init reads it at every start and gives the copy it makes to the
 #    account the panel runs as.
 mkdir -p secrets && chmod 700 secrets
-printf '%s' 'postgresql://flotestro:PASSWORD@db.example.org:5432/flotestro?sslmode=verify-full&application_name=flotestro-control-plane' > secrets/database-url
+printf '%s' 'postgresql://flotestro:PASSWORD@db.example.org:5432/flotestro?sslmode=verify-full&target_session_attrs=read-write&application_name=flotestro-control-plane' > secrets/database-url
 chmod 600 secrets/database-url
 
 # 3. The roles, once, as a superuser. The login the panel serves as does not

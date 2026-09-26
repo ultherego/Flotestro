@@ -484,6 +484,20 @@ func run() error {
 		return fmt.Errorf("no database is configured: set FLOTESTRO_DATABASE_URL_FILE, or %s_FILE for the %s command",
 			config.EnvMigrationDatabaseURL, commandMigrate)
 	}
+	// What kind of database this is, as the installation declares it rather than
+	// as the shape of the DSN suggests. An installation on a database somebody
+	// else runs is held to the connection such an installation promises.
+	databaseMode, err := config.DatabaseModeSetting()
+	if err != nil {
+		return err
+	}
+	if err := config.CheckDatabaseDSN(databaseMode, dsn); err != nil {
+		return fmt.Errorf("%s=%s: %w", config.EnvDatabaseMode, databaseMode, err)
+	}
+	if config.DatabaseTrustsSystemRoots(databaseMode, dsn) {
+		log.Info("the database certificate is checked against the system root store; " +
+			"an installation with its own authority names it with sslrootcert in the DSN")
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -493,6 +507,12 @@ func run() error {
 		return err
 	}
 	defer pool.Close()
+	// What answered. A standby accepts the connection and refuses every write,
+	// and a role without the rights the schema needs fails in the middle of a
+	// migration rather than here.
+	if err := database.Preflight(ctx, pool, log); err != nil {
+		return err
+	}
 	log.Info("the connection pool is open", "command", string(cmd),
 		"max_conns", dbPool.MaxConns, "min_conns", dbPool.MinConns,
 		"max_conn_lifetime", dbPool.MaxConnLifetime.String(),
