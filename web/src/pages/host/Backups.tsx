@@ -453,7 +453,11 @@ export function Backups() {
                           onClick={() =>
                             request.mutate({
                               action: "backup.plan",
-                              payload: { backup: definitionRequest(item) },
+                              // "run" asks for the plan of a copy and not only
+                              // for the state of the repository: the plan is
+                              // what carries the fingerprint a copy or a restore
+                              // is then bound to.
+                              payload: { backup: definitionRequest(item, { plan: "run" }) },
                             })
                           }
                         >

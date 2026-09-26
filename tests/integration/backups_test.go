@@ -126,9 +126,17 @@ func TestBackupFullCycle(t *testing.T) {
 
 	// The plan reads the repository: that is where it is known when the
 	// copy was really made - also when cron made it, not the panel.
+	// "run" asks for the plan of a copy: the state of the repository together
+	// with the fingerprint an order is bound to. A bare read gives the state
+	// alone, and then nothing can be bound to it.
+	planOrder := map[string]any{}
+	for key, value := range order {
+		planOrder[key] = value
+	}
+	planOrder["plan"] = "run"
 	plan, attempts := h.runOperation(host.ID, map[string]any{
 		"action": "backup.plan", "reason": backupReason,
-		"payload": map[string]any{"backup": order},
+		"payload": map[string]any{"backup": planOrder},
 	}, 5*time.Minute)
 	if plan.State != "succeeded" {
 		t.Fatalf("reading the repository ended in state %s: %+v", plan.State, attempts)

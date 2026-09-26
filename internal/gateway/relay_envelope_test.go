@@ -66,6 +66,13 @@ func (f *fakeRecords) Claim(_ context.Context, hostID, sessionID string, sequenc
 	return Claim{Fresh: true, Last: last}, nil
 }
 
+func (f *fakeRecords) NoteApplied(_ context.Context, hostID, sessionID string, sequence uint64) error {
+	// The fake already treats a spent number as taken, which is what recording
+	// the Hello as applied means here.
+	f.sequences[hostID+"/"+sessionID] = sequence
+	return nil
+}
+
 // fixedSequences answers the same way every time: what the record of a session
 // says without a database behind it, so that a refusal the real store reaches
 // only in a race can be put in front of the verifier.
@@ -80,6 +87,8 @@ func (f fixedSequences) Claim(context.Context, string, string, uint64) (Claim, e
 	}
 	return Claim{Applied: true, Last: f.last}, nil
 }
+
+func (f fixedSequences) NoteApplied(context.Context, string, string, uint64) error { return nil }
 
 // testHost is a host with a live certificate on record, its key, and the
 // verifier over it.

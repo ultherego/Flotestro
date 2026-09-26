@@ -1908,9 +1908,14 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 		_ = json.Unmarshal(backup.GetPlan(), &plan)
 		encoded, err := json.Marshal(map[string]any{
-			"kind":      "backup_plan",
-			"plan":      json.RawMessage(backup.GetPlan()),
+			"kind": "backup_plan",
+			"plan": json.RawMessage(backup.GetPlan()),
+			// The fingerprint, and the repository the plan was computed against:
+			// the screen lists the copies from the state, and binds an order with
+			// the fingerprint, and both come from this one answer.
 			"plan_hash": plan.PlanHash,
+			"state":     rawJSON(backup.GetState()),
+			"message":   backup.GetMessage(),
 		})
 		if err == nil {
 			return encoded

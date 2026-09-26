@@ -70,6 +70,7 @@ type hostRecords interface {
 // second time.
 type sequenceRecords interface {
 	Claim(ctx context.Context, hostID, sessionID string, sequence uint64) (Claim, error)
+	NoteApplied(ctx context.Context, hostID, sessionID string, sequence uint64) error
 }
 
 // RelayVerifier checks the inner identity envelope of a relayed message the
@@ -229,6 +230,17 @@ func (v *RelayVerifier) verify(ctx context.Context, peer RelayPeer, envelope *ag
 			// This is the case that used to be indistinguishable from a duplicate,
 			// and the message was dropped with an acknowledgement.
 			verified.Redelivered = true
+		case claim.Fresh && kind == helloKind:
+			// A Hello is not work that can be done again. A session either opened
+			// or it did not, and an agent whose Hello was lost comes back with a
+			// new session and a new number - so the Hello counts as done the moment
+			// its number is taken, and a Hello presented a second time is a replay
+			// rather than an unfinished delivery. Without this a relay could turn
+			// one signed Hello into a second session.
+			if err := v.sequences.NoteApplied(ctx, peer.HostID,
+				envelope.GetSessionId(), envelope.GetSequence()); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return verified, nil
@@ -260,6 +272,10 @@ func publicKeyOf(certificate hosts.CertificateStatus, presented *x509.Certificat
 type relaySequences struct {
 	pool *pgxpool.Pool
 }
+
+// helloKind is the payload name of the message that opens a session; it is the
+// oneof field name, as relayproof reads it.
+const helloKind = "hello"
 
 // Claim is what the panel knows about one relayed message.
 type Claim struct {
