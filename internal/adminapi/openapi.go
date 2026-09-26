@@ -139,6 +139,15 @@ func (s *Server) openAPI() map[string]any {
 	register("ManagedFileVersion", files.Version{})
 	register("ComposeProjectVersion", projectVersion{})
 	register("ErrorGuide", opspec.ErrorGuide{})
+	register("Preferences", preferences{})
+	register("AlertRule", monitoring.Rule{})
+	register("Silence", monitoring.Silence{})
+	register("PrincipalSession", authz.SessionView{})
+	register("PrincipalToken", authz.Token{})
+	register("CampaignReport", campaigns.ReportView{})
+	register("FleetMonitoring", fleetMonitoringView{})
+	register("FleetSecurity", fleetSecurityView{})
+	register("RelayBufferHistory", relayBufferHistoryView{})
 	describe(schemas, "AuditEvent", "actor",
 		"The actor as it was when the event was written: principal_id, subject, display_name, kind, resource_type, resource_id, resource_name, credential_id.")
 	describe(schemas, "Attempt", "verification",
@@ -645,6 +654,17 @@ func collection(name string) map[string]any {
 // The endpoints whose answers are known resources. The rest answer with
 // module-specific views described by their handlers.
 var responseSchemas = map[string]map[string]any{
+	"GET /api/v1/monitoring/rules":                      collection("AlertRule"),
+	"GET /api/v1/monitoring/rules/{id}":                 ref("AlertRule"),
+	"GET /api/v1/monitoring/silences":                   collection("Silence"),
+	"GET /api/v1/monitoring":                            ref("FleetMonitoring"),
+	"GET /api/v1/security":                              ref("FleetSecurity"),
+	"GET /api/v1/relays/{id}/buffer-history":            ref("RelayBufferHistory"),
+	"GET /api/v1/me/sessions":                           collection("PrincipalSession"),
+	"GET /api/v1/principals/{id}/sessions":              collection("PrincipalSession"),
+	"GET /api/v1/me/tokens":                             collection("PrincipalToken"),
+	"GET /api/v1/campaigns/{id}/report":                 ref("CampaignReport"),
+	"GET /api/v1/me/preferences":                        ref("Preferences"),
 	"GET /api/v1/host-groups":                           collection("HostGroup"),
 	"GET /api/v1/group-mappings":                        collection("GroupMapping"),
 	"GET /api/v1/hosts/{id}/backups/runs":               collection("BackupRun"),
