@@ -19,6 +19,7 @@ import (
 	"github.com/ultherego/flotestro/internal/notify"
 	"github.com/ultherego/flotestro/internal/opspec"
 	"github.com/ultherego/flotestro/internal/policy"
+	"github.com/ultherego/flotestro/internal/selector"
 )
 
 // The contract of the public API.
@@ -817,7 +818,118 @@ var alertRuleBodySchema = map[string]any{
 	"required": []string{"name", "metric", "operator", "severity"},
 }
 
+// channelBodySchema is a notification channel. The configuration stays free-form
+// because it belongs to the kind - a webhook URL is not an address book - and the
+// panel refuses a configuration its kind does not recognise.
+var channelBodySchema = map[string]any{
+	"type": "object",
+	"properties": map[string]any{
+		"name":   map[string]any{"type": "string"},
+		"kind":   map[string]any{"type": "string", "enum": notify.Kinds},
+		"config": map[string]any{"type": "object", "description": "The settings of that kind; checked against the kind, not against this schema."},
+		"events": map[string]any{"type": "array", "items": map[string]any{"type": "string"},
+			"description": "The event types the channel carries; empty carries every type."},
+		"filter": map[string]any{"type": "object", "description": "Which events reach the channel. A filter naming no part of the fleet is the channel of the whole installation, and the only one an event of unknown place reaches.",
+			"properties": map[string]any{
+				"severity_min": map[string]any{"type": "string", "enum": monitoring.Severities,
+					"description": "The least severity of an alert the channel carries; an event that is not an alert has no severity and passes."},
+				"site":        map[string]any{"type": "string"},
+				"environment": map[string]any{"type": "string"},
+			}},
+		"enabled": map[string]any{"type": []string{"boolean", "null"}, "description": "Left out, a channel written down is meant to carry."},
+		"reason": map[string]any{"type": "string", "minLength": minimalStepUpReason,
+			"description": "What the channel is for, or why it changed; required."},
+	},
+	"required": []string{"name", "kind", "reason"},
+}
+
+// silenceBodySchema keeps alerts back for a while. An open-ended silence cannot
+// be ordered: an alert nobody will ever see again is not silenced, it is lost.
+func silenceBodySchema(scope string) map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"reason": map[string]any{"type": "string", "minLength": monitoring.MinSilenceReason,
+				"description": "Why the alerts are kept back; required."},
+			"minutes": map[string]any{"type": "integer", "minimum": 0,
+				"maximum":     int(monitoring.MaxSilence / time.Minute),
+				"description": "How long, counted from now; zero means an hour."},
+			"rule_id":      map[string]any{"type": "string", "description": "Narrows the silence to one rule. " + scope},
+			"global":       map[string]any{"type": "boolean", "description": "The silence that keeps back the security alerts of the installation. It names no host and no rule, and it needs a right of its own."},
+			"send_summary": map[string]any{"type": "boolean", "description": "Send one message per channel when the silence ends, naming what it kept back."},
+		},
+		"required": []string{"reason"},
+	}
+}
+
+// groupBodySchema is a saved group. A static group keeps the hosts it was given;
+// a dynamic one keeps the expression and is answered when it is read, so its
+// membership follows the fleet.
+var groupBodySchema = map[string]any{
+	"type": "object",
+	"properties": map[string]any{
+		"name":        map[string]any{"type": "string"},
+		"description": map[string]any{"type": "string"},
+		"kind": map[string]any{"type": "string",
+			"enum":        []string{string(selector.KindStatic), string(selector.KindDynamic)},
+			"description": "Left out, the group is static."},
+		"selector": map[string]any{"type": "object",
+			"description": "The expression of a dynamic group, in the campaign selector's own form."},
+		"host_ids": map[string]any{"type": "array", "items": map[string]any{"type": "string"},
+			"description": "The members of a static group, given here so that the group and its members come into being in one order."},
+	},
+	"required": []string{"name"},
+}
+
 var requestSchemas = map[string]map[string]any{
+	"POST /api/v1/host-groups":     groupBodySchema,
+	"PUT /api/v1/host-groups/{id}": groupBodySchema,
+	"PUT /api/v1/host-groups/{id}/members": {
+		"type": "object",
+		"properties": map[string]any{
+			"host_ids": map[string]any{"type": "array", "items": map[string]any{"type": "string"},
+				"description": "The whole member list, not a change to it: a host left out is a host removed."},
+		},
+		"required": []string{"host_ids"},
+	},
+	"PUT /api/v1/hosts/{id}/channel": {
+		"type": "object",
+		"properties": map[string]any{
+			"channel": map[string]any{"type": "string", "enum": []string{hosts.ChannelStable, hosts.ChannelBeta},
+				"description": "Which releases the host is offered. It decides what an upgrade order may name, not when one is placed."},
+		},
+		"required": []string{"channel"},
+	},
+	"POST /api/v1/secrets/{name}/rotate": {
+		"type": "object",
+		"properties": map[string]any{
+			"value": map[string]any{"type": "string",
+				"description": "The new value. The versions before it stay readable to the hosts holding a lease on them until they are destroyed."},
+			"reason": map[string]any{"type": "string", "description": "Why the secret changes; kept in the audit trail."},
+		},
+		"required": []string{"value"},
+	},
+	"POST /api/v1/notifications/channels":     channelBodySchema,
+	"PUT /api/v1/notifications/channels/{id}": channelBodySchema,
+	"POST /api/v1/hosts/{id}/monitoring/silences": silenceBodySchema(
+		"Empty means every alert of this host."),
+	"POST /api/v1/monitoring/silences": silenceBodySchema(
+		"Empty means every alert in the scope of the silence."),
+	"PUT /api/v1/settings/monitoring": {
+		"type":        "object",
+		"description": "Durations are written the way Go reads them: 720h, 15m, 90s.",
+		"properties": map[string]any{
+			"raw_retention":    map[string]any{"type": "string", "description": "How long a single reading is kept."},
+			"rollup_retention": map[string]any{"type": "string", "description": "How long the quarter-hour series is kept."},
+			"max_lateness":     map[string]any{"type": "string", "description": "How late a reading may arrive and still be rolled up into its own quarter."},
+			"raw_query_window": map[string]any{"type": "string", "description": "How far back a chart may ask for single readings before it is answered from the series."},
+			"clock_skew_limit": map[string]any{"type": "string", "description": "How far a host's clock may run ahead of the panel before its readings are refused."},
+			"partitions_ahead": map[string]any{"type": "integer", "minimum": 1, "description": "How many days of partitions are created in advance."},
+			"acknowledge_data_loss": map[string]any{"type": "boolean",
+				"description": "Required to shorten a retention: what falls outside it is deleted and does not come back, so the decision is made here and not by leaving a field at its default."},
+			"reason": map[string]any{"type": "string", "description": "Kept on the audit trail beside the values."},
+		},
+	},
 	"POST /api/v1/monitoring/rules":     alertRuleBodySchema,
 	"PUT /api/v1/monitoring/rules/{id}": alertRuleBodySchema,
 	"POST /api/v1/secrets": {
