@@ -66,6 +66,33 @@ if ls "$RELEASE"/*.deb >/dev/null 2>&1; then
     # was composed, and a stable host would install it without asking.
     pool="pool/$CHANNEL"
     mkdir -p "$apt_dir/binary-amd64" "$apt_dir/binary-arm64" "$REPO/deb/$pool"
+    # A repository published before the pool belonged to a channel keeps those
+    # packages directly under pool/, where no channel index sees them any more.
+    # The files are still served and apt cannot offer them, so the rollback the
+    # --multiversion index exists for is not there. They move into the stable
+    # channel once, because that is the only channel that existed before this
+    # layout; a pre-release stays where it is rather than entering an index a
+    # stable host reads.
+    if [ "$CHANNEL" = stable ] && ls "$REPO/deb/pool"/*.deb >/dev/null 2>&1; then
+        moved=0
+        held=0
+        for package in "$REPO/deb/pool"/*.deb; do
+            name="$(basename "$package")"
+            case "$name" in
+                *"~"*) held=$((held + 1)); continue ;;
+            esac
+            if [ -e "$REPO/deb/$pool/$name" ]; then
+                rm -f "$package"
+            else
+                mv "$package" "$REPO/deb/$pool/$name"
+            fi
+            moved=$((moved + 1))
+        done
+        echo "    $moved package(s) taken into $pool from before the channel layout"
+        if [ "$held" -gt 0 ]; then
+            echo "    $held pre-release package(s) left under pool/: they do not enter $CHANNEL"
+        fi
+    fi
     for package in "$RELEASE"/*.deb; do
         place "$package" "$REPO/deb/$pool/$(basename "$package")" || true
     done
