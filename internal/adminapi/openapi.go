@@ -730,7 +730,67 @@ func mergedProperties(sets ...map[string]any) map[string]any {
 	return merged
 }
 
+// transitionBodySchema is the body of a job transition: why, and the plan the
+// approver saw.
+var transitionBodySchema = map[string]any{
+	"type": "object",
+	"properties": map[string]any{
+		"reason": map[string]any{"type": "string", "description": "Kept in the audit trail."},
+		"payload_hash": map[string]any{"type": "string",
+			"description": "The hash of the payload as the job gives it, so the approval covers the plan that was read. A mismatch means the plan changed between viewing and approving, and the transition is refused."},
+	},
+}
+
+// alertNoteBodySchema is the body of an acknowledgement or a note. The reason is
+// taken in place of the note, so a client that sends every change the same way
+// is not refused.
+func alertNoteBodySchema(what string) map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"note":   map[string]any{"type": "string", "maxLength": maxAlertNote, "description": what},
+			"reason": map[string]any{"type": "string", "maxLength": maxAlertNote, "description": "Taken in place of note when note is empty."},
+		},
+	}
+}
+
 var requestSchemas = map[string]map[string]any{
+	// A transition of one job or one campaign: why, and what the approver saw.
+	"POST /api/v1/jobs/{id}/approve": transitionBodySchema,
+	"POST /api/v1/jobs/{id}/cancel":  transitionBodySchema,
+	"POST /api/v1/campaigns/{id}/approve": {
+		"type": "object",
+		"properties": map[string]any{
+			"approval_fingerprint": map[string]any{"type": "string",
+				"description": "The fingerprint the campaign carries, as the listing gives it. It covers the operation, the payload, the host list and the rollout policy, and a mismatch means one of them changed between viewing and approving."},
+			"reason":        map[string]any{"type": "string", "description": "Part of the evidence; a critical campaign requires it."},
+			"change_ticket": map[string]any{"type": "string", "description": "The ticket the change is carried out under; recorded with the approval."},
+		},
+		"required": []string{"approval_fingerprint"},
+	},
+	"POST /api/v1/campaigns/{id}/pause":   reasonOnlyBody("Why the waves stop here; kept in the audit trail."),
+	"POST /api/v1/campaigns/{id}/resume":  reasonOnlyBody("Why the waves go on; kept in the audit trail."),
+	"POST /api/v1/campaigns/{id}/cancel":  reasonOnlyBody("Why the campaign ends early; kept in the audit trail."),
+	"POST /api/v1/campaigns/{id}/advance": reasonOnlyBody("Why the campaign is let past the manual gate; kept in the audit trail."),
+	"POST /api/v1/campaigns/{id}/retry": {
+		"type": "object",
+		"properties": map[string]any{
+			"reason":          map[string]any{"type": "string", "description": "Why the change is tried again; a second go at a change that failed is a decision, and the record says why."},
+			"include_unknown": map[string]any{"type": "boolean", "description": "Take the hosts that ended without a result as well, not only the ones that failed."},
+		},
+	},
+	"POST /api/v1/campaigns/{id}/targets/{host}/skip": {
+		"type": "object",
+		"properties": map[string]any{
+			"reason": map[string]any{"type": "string", "minLength": minimalStepUpReason,
+				"description": "Why this host is left out of the campaign; required, because the host stays as it is and the trail has to say who decided that."},
+		},
+		"required": []string{"reason"},
+	},
+	"POST /api/v1/monitoring/alerts/{id}/acknowledge": alertNoteBodySchema(
+		"What is being done about the alert; at least 8 characters, because an acknowledgement nobody explains is an alert nobody took."),
+	"POST /api/v1/monitoring/alerts/{id}/annotate": alertNoteBodySchema(
+		"What is worth recording against the alert."),
 	// The orders whose whole body is the reason they were placed.
 	"POST /api/v1/secrets/{name}/retire":           reasonOnlyBody("Why issuing this secret ends; kept in the audit trail."),
 	"POST /api/v1/campaign-schedules/{id}/run-now": reasonOnlyBody("Why the schedule is run off its calendar; kept in the audit trail."),

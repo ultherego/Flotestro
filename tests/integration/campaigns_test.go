@@ -4342,13 +4342,6 @@ func TestOpenAPIDescribesTheLiveAPI(t *testing.T) {
 // unconstrained object. It is a ratchet, not an aspiration: a route that
 // appears here and is not listed fails the test, so the count only falls.
 var bareRequestBodies = map[string]struct{}{
-	"POST /api/v1/campaigns/{id}/advance":                      {},
-	"POST /api/v1/campaigns/{id}/approve":                      {},
-	"POST /api/v1/campaigns/{id}/cancel":                       {},
-	"POST /api/v1/campaigns/{id}/pause":                        {},
-	"POST /api/v1/campaigns/{id}/resume":                       {},
-	"POST /api/v1/campaigns/{id}/retry":                        {},
-	"POST /api/v1/campaigns/{id}/targets/{host}/skip":          {},
 	"POST /api/v1/enrollment-requests/{id}/revoke":             {},
 	"POST /api/v1/group-mappings":                              {},
 	"POST /api/v1/host-groups":                                 {},
@@ -4366,10 +4359,6 @@ var bareRequestBodies = map[string]struct{}{
 	"POST /api/v1/identity/changes/{id}/approve":               {},
 	"POST /api/v1/identity/changes/{id}/cancel":                {},
 	"POST /api/v1/identity/directory/provision-preserve":       {},
-	"POST /api/v1/jobs/{id}/approve":                           {},
-	"POST /api/v1/jobs/{id}/cancel":                            {},
-	"POST /api/v1/monitoring/alerts/{id}/acknowledge":          {},
-	"POST /api/v1/monitoring/alerts/{id}/annotate":             {},
 	"POST /api/v1/monitoring/rules":                            {},
 	"POST /api/v1/monitoring/silences":                         {},
 	"POST /api/v1/notifications/channels":                      {},
