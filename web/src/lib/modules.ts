@@ -1,9 +1,14 @@
-import type { Capability, Host } from "../../lib/types";
-import type { Capabilities as InstallationCapabilities } from "../../lib/capabilities";
-import type { IconName } from "../../components/icons";
+import type { Capability, Host } from "./types";
+import type { Capabilities as InstallationCapabilities } from "./capabilities";
+import type { IconName } from "../components/icons";
 
 /**
- * The host module registry.
+ * The host module registry: which tabs a host has, what each needs of it, and
+ * which heading it sits under.
+ *
+ * It is here and not under pages/ because the shared components read it - the
+ * host picker and the host select both need the default tab - and a component
+ * that imports a page is not shared code, it is a page with extra steps.
  */
 export type Module = {
   /** The path segment: /hosts/:id/<segment>. Part of the address contract. */

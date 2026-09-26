@@ -5,7 +5,7 @@ import { api } from "../../lib/api";
 import { refusalName, type Host, type Job, type Whoami } from "../../lib/types";
 import { relativeTime } from "../../lib/format";
 import { Time, ConnectionState } from "../../components/ui";
-import { module as findModule } from "./modules";
+import { module as findModule } from "../../lib/modules";
 import { hostTitle, useDocumentTitle } from "../../lib/title";
 import { useT } from "../../i18n";
 

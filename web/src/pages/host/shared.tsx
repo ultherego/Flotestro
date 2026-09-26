@@ -7,7 +7,7 @@ import type { Host, InventoryFragment, InventoryRevision, Job } from "../../lib/
 import { Time } from "../../components/ui";
 import { Icon, type IconName } from "../../components/icons";
 import { StatusBar, type Segment, type WidgetTone } from "../../components/widgets";
-import { module as moduleOf } from "./modules";
+import { module as moduleOf } from "../../lib/modules";
 import { useT } from "../../i18n";
 
 /** The host context comes from the layout, so a tab does not fetch it again. */

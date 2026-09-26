@@ -16,7 +16,7 @@ import { useCapabilities } from "../lib/capabilities";
 import { PlanGroupView, type PlanGroup } from "../components/plan";
 import { VirtualRows } from "../components/virtual";
 import { loadedTargets, REBOOT_TIMEOUT, useTargets } from "../lib/targets";
-import { moduleForAction } from "./host/modules";
+import { moduleForAction } from "../lib/modules";
 import { buildExpression, describeExpression, HostChooser, SelectorBuilder, type Rule } from "./Groups";
 import { browserZone, emptyRecurrence, RecurrenceFields, recurrenceProblem, recurrenceText, type RecurrenceForm } from "./Schedules";
 import { useT } from "../i18n";

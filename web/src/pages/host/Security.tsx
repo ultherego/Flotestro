@@ -9,7 +9,7 @@ import {
   Fact, Facts, Foot, JobNotice, Message, ModuleFreshness, ModuleHeader, ModulePage, Section, Summary, Table, Widgets,
   countWhere, useHost, useModule,
 } from "./shared";
-import { capability } from "./modules";
+import { capability } from "../../lib/modules";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";

@@ -17,7 +17,7 @@ import { AddHost } from "./pages/AddHost";
 import { Groups } from "./pages/Groups";
 import { Relays, RelayPage } from "./pages/Relays";
 import { HostLayout } from "./pages/host/Layout";
-import { DEFAULT_MODULE, groupedModules, modules } from "./pages/host/modules";
+import { DEFAULT_MODULE, groupedModules, modules } from "./lib/modules";
 import { REFRESH_INTERVAL } from "./lib/stream";
 import { Overview } from "./pages/host/Overview";
 import { System } from "./pages/host/System";

@@ -6,7 +6,7 @@ import type { Host } from "../lib/types";
 import { useCapabilities } from "../lib/capabilities";
 import { useDebounced } from "../lib/debounce";
 import { isStringList, readStored, useStoredState } from "../lib/storage";
-import { DEFAULT_MODULE } from "../pages/host/modules";
+import { DEFAULT_MODULE } from "../lib/modules";
 import { hostPath } from "./HostPicker";
 import { useT } from "../i18n";
 import { Icon } from "./icons";

@@ -1,12 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   emptyForm, operationForm, OPERATION_FORMS, payloadTextOf, readPayloadText,
   type FieldValue, type FormValue, type OperationEntry, type OperationField,
 } from "./index";
-import { actionConstants, literalBody } from "../actions.test";
+import { ACTION_CAMPAIGN_MODE, ACTION_TYPES } from "../../generated/actions";
 
 /* The registry is data, so it is checked as data: every entry has to read
    back what it wrote, refuse an empty form or produce a payload the server
@@ -15,26 +12,22 @@ import { actionConstants, literalBody } from "../actions.test";
    with the names of the operations still typed as JSON. */
 
 /**
- * The operations the control plane marks campaign-capable, read out of
- * campaignModes itself. A copy of that list would drift the same way the
- * list it copies moves, and the drift would be silent: an operation opened
- * to the fleet with no form is one an operator can only order as raw JSON.
+ * The operations the control plane opens to the fleet, out of the generated
+ * catalogue. This used to be read out of the Go source with a regular
+ * expression; the catalogue is generated from the registry now and a Go test
+ * holds the two together, so the drift this guarded against cannot start here.
+ *
+ * An operation opened to the fleet with no form is one an operator can only
+ * order as raw JSON, which is what the last test in this file is a list of.
  */
 function campaignActions(): string[] {
-  const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
-  const go = readFileSync(join(root, "internal/opspec/campaigns.go"), "utf8");
-  const opspec = readFileSync(join(root, "internal/opspec/opspec.go"), "utf8");
-  const constants = actionConstants(opspec);
-  const body = literalBody(go, "var campaignModes = map[ActionType]CampaignMode{");
-  const out: string[] = [];
-  for (const match of body.matchAll(/^\t(Action[A-Za-z0-9]*):/gm)) {
-    const name = constants.get(match[1]);
-    if (!name) throw new Error(`campaignModes names ${match[1]}, which declares no ActionType`);
-    out.push(name);
-  }
+  const out = ACTION_TYPES.filter((action) => {
+    const mode = ACTION_CAMPAIGN_MODE[action];
+    return mode !== "" && mode !== "none";
+  });
   // An empty read would let this test pass having checked nothing.
-  if (out.length < 20) throw new Error(`campaignModes read as ${out.length} entries`);
-  return out;
+  if (out.length < 20) throw new Error(`the catalogue names ${out.length} campaign operations`);
+  return [...out];
 }
 
 /** A value of the right kind for a field, canonical enough to read back. */

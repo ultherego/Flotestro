@@ -9,7 +9,7 @@ import {
   Fact, Facts, Field, Fields, Form, FormActions, FormNote, Message, ModuleHeader, ModulePage, Section, Summary, Table,
   Unknown, Widgets, countWhere, usageTone, useHost, useReadOperation,
 } from "./shared";
-import { capability } from "./modules";
+import { capability } from "../../lib/modules";
 import { AlertStateBadge, SeverityBadge, SilenceBadges, duration, metricValue, type ScopedSilence } from "../Monitoring";
 import { ActionGuard } from "../../components/ActionGuard";
 import { useT } from "../../i18n";

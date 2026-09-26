@@ -15,7 +15,7 @@ import {
   type CampaignStep, type CompensationLinks, loadedTargets, SETTLED_CAMPAIGN_STATES, TARGET_STATES,
   useTargets, useTargetSteps,
 } from "../lib/targets";
-import { moduleForAction } from "./host/modules";
+import { moduleForAction } from "../lib/modules";
 import {
   bulkPrefill, ContractChips, contractWords, MIN_REASON, type PlanGroups, reasonValid,
   REVERSE_OPERATION, reversePayload, useOperation,

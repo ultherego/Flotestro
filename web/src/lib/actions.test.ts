@@ -3,17 +3,22 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { allowanceOf, type HostActions } from "./actions";
+import { ACTION_TYPES } from "../generated/actions";
 
 /**
  * Every control the panel guards names an operation of the catalogue, and a
  * name the catalogue does not have is not an error on the screen: the control
  * is simply not drawn. A rename in Go would take a button away silently, so
- * the names are pinned here - against the Go sources themselves rather than
- * against a copy of them, which would drift the same way.
+ * the names are pinned here.
+ *
+ * They used to be pinned by reading the Go sources with regular expressions -
+ * three files, three patterns, and a silent pass the moment any of them was
+ * written differently. The catalogue is generated now
+ * (cmd/tools/contractgen), and a Go test fails when the generated file and the
+ * registry disagree, so this side has one thing to read and no parser.
  */
 
 const SRC = join(dirname(fileURLToPath(import.meta.url)), "..");
-const ROOT = join(SRC, "..", "..");
 
 type Usage = { action: string; file: string; line: number };
 
@@ -55,45 +60,13 @@ function panelActions(): Usage[] {
   return out;
 }
 
-/** The ActionType constants of a Go file, by their name. */
-export function actionConstants(go: string): Map<string, string> {
-  const constants = new Map<string, string>();
-  const declaration = /\b(Action[A-Za-z0-9]*)\s+ActionType\s*=\s*"([^"]+)"/g;
-  for (const match of go.matchAll(declaration)) constants.set(match[1], match[2]);
-  return constants;
-}
-
-/** The body of a Go map or slice literal opened by this line. */
-export function literalBody(go: string, opening: string): string {
-  const start = go.indexOf(opening);
-  if (start < 0) throw new Error(`the Go sources no longer contain ${opening}`);
-  const end = go.indexOf("\n}\n", start);
-  if (end < 0) throw new Error(`${opening} is not closed the way this test reads it`);
-  return go.slice(start + opening.length, end);
-}
-
 /**
  * The catalogue GET /hosts/{id}/actions serves: the operations that have a
- * spec, and the lifecycle orders judged after them.
+ * spec, and the lifecycle orders judged after them. Both come from the
+ * generated file, which a Go test holds to the registry.
  */
 function catalogue(): Set<string> {
-  const opspec = readFileSync(join(ROOT, "internal/opspec/opspec.go"), "utf8");
-  const constants = actionConstants(opspec);
-  const specs = literalBody(opspec, "var actionSpecs = map[ActionType]actionSpec{");
-  const served = new Set<string>();
-  for (const match of specs.matchAll(/^\t(Action[A-Za-z0-9]*):/gm)) {
-    const name = constants.get(match[1]);
-    // A key this test cannot resolve means the parsing below has drifted
-    // from the Go sources, and a silent pass would be worse than a failure.
-    if (!name) throw new Error(`actionSpecs names ${match[1]}, which declares no ActionType`);
-    served.add(name);
-  }
-  const lifecycle = readFileSync(join(ROOT, "internal/adminapi/actions.go"), "utf8");
-  for (const match of literalBody(lifecycle, "var hostLifecycleActions = []lifecycleAction{")
-    .matchAll(/\bAction:\s*"([^"]+)"/g)) {
-    served.add(match[1]);
-  }
-  return served;
+  return new Set<string>(ACTION_TYPES);
 }
 
 describe("the action names of the panel", () => {
@@ -103,14 +76,8 @@ describe("the action names of the panel", () => {
     expect(extractActions("const action = \"x\";", "x.tsx")).toEqual([]);
   });
 
-  it("reads the ActionType constants of a Go file", () => {
-    const go = '\tActionUnitStart   ActionType = "unit.start"\n\tActionUnitStop ActionType = "unit.stop"\n';
-    expect([...actionConstants(go)]).toEqual([["ActionUnitStart", "unit.start"], ["ActionUnitStop", "unit.stop"]]);
-  });
-
-  /* The parsers above read the Go sources, so a change of shape there would
-     leave them with nothing and every check below would pass on an empty
-     set. Both ends are counted first. */
+  /* A generated file that came back empty would let every check below pass on
+     an empty set, so both ends are counted first. */
   it("finds the catalogue and the panel's names at all", () => {
     expect(catalogue().size).toBeGreaterThan(100);
     expect(new Set(panelActions().map((usage) => usage.action)).size).toBeGreaterThan(50);

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/ultherego/flotestro/internal/authz"
+	"github.com/ultherego/flotestro/internal/contract"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/opspec"
 )
@@ -100,26 +101,12 @@ func hostActions(principal authz.Principal, host *hosts.Host, scope authz.Scope)
 	return items
 }
 
-// lifecycleAction is one of the orders that change what the panel thinks of a
-// host rather than the host itself: they are not in the operation catalogue,
-// have no adapter and no job, and take a host in some states only.
-type lifecycleAction struct {
-	// Action is the name the audit trail records the order under, which is
-	// also its permission.
-	Action     string
-	Permission authz.Permission
-	FromStates []string
-}
+// lifecycleAction and the table of transitions live in internal/contract: the
+// generator that writes the interface's copy of the catalogue reads them from
+// there, so the two cannot drift.
+type lifecycleAction = contract.LifecycleAction
 
-// lifecycleActions mirrors the transitions of lifecycle.
-var hostLifecycleActions = []lifecycleAction{
-	{Action: "host.quarantine", Permission: authz.PermHostQuarantine,
-		FromStates: []string{hosts.StateActive, hosts.StateRecovery, hosts.StateQuarantined}},
-	{Action: "host.quarantine.release", Permission: authz.PermHostQuarantineRelease,
-		FromStates: []string{hosts.StateQuarantined}},
-	{Action: "host.decommission", Permission: authz.PermHostDecommission,
-		FromStates: []string{hosts.StateActive, hosts.StateQuarantined, hosts.StateRecovery, hosts.StateRetiring}},
-}
+var hostLifecycleActions = contract.HostLifecycleActions
 
 // judgeLifecycleAction is the verdict on one lifecycle order: the
 // permission in the host's scope, then the state the host is in.

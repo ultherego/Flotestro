@@ -6,7 +6,7 @@ import type { Host, Whoami } from "../lib/types";
 import { useCapabilities, type Capabilities } from "../lib/capabilities";
 import { useDebounced } from "../lib/debounce";
 import { isStringList, useStoredState } from "../lib/storage";
-import { module as findModule, DEFAULT_MODULE } from "../pages/host/modules";
+import { module as findModule, DEFAULT_MODULE } from "../lib/modules";
 import { useT } from "../i18n";
 import { Icon, type IconName } from "./icons";
 

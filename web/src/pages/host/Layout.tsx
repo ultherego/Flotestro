@@ -7,7 +7,7 @@ import { EmptyState } from "../../components/layout";
 import { ModuleHeader } from "./shared";
 import { useCapabilities } from "../../lib/capabilities";
 import { ContextBar } from "./ContextBar";
-import { modules, DEFAULT_MODULE } from "./modules";
+import { modules, DEFAULT_MODULE } from "../../lib/modules";
 import { REFRESH_INTERVAL } from "../../lib/stream";
 import { useT } from "../../i18n";
 
