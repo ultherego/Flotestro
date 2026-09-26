@@ -8179,8 +8179,18 @@ type FinalCommit struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	LocalIdentityWipe bool                   `protobuf:"varint,1,opt,name=local_identity_wipe,json=localIdentityWipe,proto3" json:"local_identity_wipe,omitempty"`
 	Reason            string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// The panel's proof that this host's membership was ended by an operator.
+	// A relay carries this message and can fabricate everything in it, so the
+	// wipe itself is not carried out on the strength of the message: the helper
+	// is handed the capability below and refuses without it. The task
+	// identifier is the order's, so one order's proof cannot be replayed as
+	// another's.
+	TaskId              string               `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	CanonicalPayload    []byte               `protobuf:"bytes,4,opt,name=canonical_payload,json=canonicalPayload,proto3" json:"canonical_payload,omitempty"`
+	Capability          *v1.HelperCapability `protobuf:"bytes,5,opt,name=capability,proto3" json:"capability,omitempty"`
+	CapabilitySignature []byte               `protobuf:"bytes,6,opt,name=capability_signature,json=capabilitySignature,proto3" json:"capability_signature,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *FinalCommit) Reset() {
@@ -8225,6 +8235,34 @@ func (x *FinalCommit) GetReason() string {
 		return x.Reason
 	}
 	return ""
+}
+
+func (x *FinalCommit) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *FinalCommit) GetCanonicalPayload() []byte {
+	if x != nil {
+		return x.CanonicalPayload
+	}
+	return nil
+}
+
+func (x *FinalCommit) GetCapability() *v1.HelperCapability {
+	if x != nil {
+		return x.Capability
+	}
+	return nil
+}
+
+func (x *FinalCommit) GetCapabilitySignature() []byte {
+	if x != nil {
+		return x.CapabilitySignature
+	}
+	return nil
 }
 
 // TaskLogLines carries a piece of the journal preview. The lines are
@@ -16653,10 +16691,16 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\n" +
 	"FinalReady\x12#\n" +
 	"\rrunning_tasks\x18\x01 \x03(\tR\frunningTasks\x12%\n" +
-	"\x0eleases_dropped\x18\x02 \x01(\bR\rleasesDropped\"U\n" +
+	"\x0eleases_dropped\x18\x02 \x01(\bR\rleasesDropped\"\x95\x02\n" +
 	"\vFinalCommit\x12.\n" +
 	"\x13local_identity_wipe\x18\x01 \x01(\bR\x11localIdentityWipe\x12\x16\n" +
-	"\x06reason\x18\x02 \x01(\tR\x06reason\"W\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12+\n" +
+	"\x11canonical_payload\x18\x04 \x01(\fR\x10canonicalPayload\x12E\n" +
+	"\n" +
+	"capability\x18\x05 \x01(\v2%.flotestro.helper.v1.HelperCapabilityR\n" +
+	"capability\x121\n" +
+	"\x14capability_signature\x18\x06 \x01(\fR\x13capabilitySignature\"W\n" +
 	"\fTaskLogLines\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x14\n" +
 	"\x05lines\x18\x02 \x03(\tR\x05lines\x12\x18\n" +
@@ -17846,113 +17890,114 @@ var file_flotestro_agent_v1_agent_proto_depIdxs = []int32{
 	85,  // 106: flotestro.agent.v1.PackagesRepair.answers:type_name -> flotestro.agent.v1.DebconfAnswer
 	104, // 107: flotestro.agent.v1.PackageRepairResult.still_blocked:type_name -> flotestro.agent.v1.BlockedPackage
 	5,   // 108: flotestro.agent.v1.CancelAck.outcome:type_name -> flotestro.agent.v1.CancelAck.Outcome
-	6,   // 109: flotestro.agent.v1.TaskResult.status:type_name -> flotestro.agent.v1.TaskResult.Status
-	174, // 110: flotestro.agent.v1.TaskResult.started_at:type_name -> google.protobuf.Timestamp
-	174, // 111: flotestro.agent.v1.TaskResult.finished_at:type_name -> google.protobuf.Timestamp
-	97,  // 112: flotestro.agent.v1.TaskResult.unit_state_before:type_name -> flotestro.agent.v1.UnitState
-	97,  // 113: flotestro.agent.v1.TaskResult.unit_state_after:type_name -> flotestro.agent.v1.UnitState
-	102, // 114: flotestro.agent.v1.TaskResult.package_plan:type_name -> flotestro.agent.v1.PackagePlanResult
-	106, // 115: flotestro.agent.v1.TaskResult.package_apply:type_name -> flotestro.agent.v1.PackageApplyResult
-	164, // 116: flotestro.agent.v1.TaskResult.unit_status:type_name -> flotestro.agent.v1.UnitStatusResult
-	167, // 117: flotestro.agent.v1.TaskResult.domain_enroll:type_name -> flotestro.agent.v1.DomainEnrollResult
-	83,  // 118: flotestro.agent.v1.TaskResult.local_user:type_name -> flotestro.agent.v1.LocalUserResult
-	86,  // 119: flotestro.agent.v1.TaskResult.package_repair:type_name -> flotestro.agent.v1.PackageRepairResult
-	155, // 120: flotestro.agent.v1.TaskResult.docker_result:type_name -> flotestro.agent.v1.DockerReadResult
-	156, // 121: flotestro.agent.v1.TaskResult.docker_events_result:type_name -> flotestro.agent.v1.DockerEventsResult
-	154, // 122: flotestro.agent.v1.TaskResult.docker_action_result:type_name -> flotestro.agent.v1.DockerActionResult
-	153, // 123: flotestro.agent.v1.TaskResult.compose_result:type_name -> flotestro.agent.v1.ComposeResult
-	151, // 124: flotestro.agent.v1.TaskResult.log_file_result:type_name -> flotestro.agent.v1.LogFileResult
-	147, // 125: flotestro.agent.v1.TaskResult.process_list_result:type_name -> flotestro.agent.v1.ProcessListResult
-	148, // 126: flotestro.agent.v1.TaskResult.process_signal_result:type_name -> flotestro.agent.v1.ProcessSignalResult
-	112, // 127: flotestro.agent.v1.TaskResult.schedule_result:type_name -> flotestro.agent.v1.ScheduleResult
-	115, // 128: flotestro.agent.v1.TaskResult.network_result:type_name -> flotestro.agent.v1.NetworkResult
-	117, // 129: flotestro.agent.v1.TaskResult.dns_result:type_name -> flotestro.agent.v1.DnsResult
-	119, // 130: flotestro.agent.v1.TaskResult.firewall_result:type_name -> flotestro.agent.v1.FirewallResult
-	121, // 131: flotestro.agent.v1.TaskResult.storage_result:type_name -> flotestro.agent.v1.StorageResult
-	123, // 132: flotestro.agent.v1.TaskResult.ssh_result:type_name -> flotestro.agent.v1.SshResult
-	140, // 133: flotestro.agent.v1.TaskResult.kernel_result:type_name -> flotestro.agent.v1.KernelResult
-	143, // 134: flotestro.agent.v1.TaskResult.file_result:type_name -> flotestro.agent.v1.FileResult
-	138, // 135: flotestro.agent.v1.TaskResult.time_result:type_name -> flotestro.agent.v1.TimeResult
-	76,  // 136: flotestro.agent.v1.TaskResult.power_result:type_name -> flotestro.agent.v1.PowerResult
-	125, // 137: flotestro.agent.v1.TaskResult.security_result:type_name -> flotestro.agent.v1.SecurityResult
-	136, // 138: flotestro.agent.v1.TaskResult.certificate_result:type_name -> flotestro.agent.v1.CertificateResult
-	133, // 139: flotestro.agent.v1.TaskResult.repository_result:type_name -> flotestro.agent.v1.RepositoryResult
-	131, // 140: flotestro.agent.v1.TaskResult.backup_result:type_name -> flotestro.agent.v1.BackupResult
-	129, // 141: flotestro.agent.v1.TaskResult.monitoring_result:type_name -> flotestro.agent.v1.MonitoringResult
-	127, // 142: flotestro.agent.v1.TaskResult.installed_packages_result:type_name -> flotestro.agent.v1.InstalledPackagesResult
-	96,  // 143: flotestro.agent.v1.TaskResult.inventory_refresh_result:type_name -> flotestro.agent.v1.InventoryRefreshResult
-	162, // 144: flotestro.agent.v1.TaskResult.smart_result:type_name -> flotestro.agent.v1.SmartResult
-	158, // 145: flotestro.agent.v1.TaskResult.docker_logs_result:type_name -> flotestro.agent.v1.DockerLogsResult
-	160, // 146: flotestro.agent.v1.TaskResult.hostname_result:type_name -> flotestro.agent.v1.HostnameResult
-	161, // 147: flotestro.agent.v1.TaskResult.keytab_renew_result:type_name -> flotestro.agent.v1.KeytabRenewResult
-	95,  // 148: flotestro.agent.v1.TaskResult.verification:type_name -> flotestro.agent.v1.Verification
-	66,  // 149: flotestro.agent.v1.TaskResult.docker_ensure_result:type_name -> flotestro.agent.v1.DockerEnsureResult
-	100, // 150: flotestro.agent.v1.PackageUpgrade.plan_reference:type_name -> flotestro.agent.v1.PackagePlanReference
-	101, // 151: flotestro.agent.v1.PackagePlanReference.changes:type_name -> flotestro.agent.v1.PackageChange
-	101, // 152: flotestro.agent.v1.PackagePlanResult.changes:type_name -> flotestro.agent.v1.PackageChange
-	104, // 153: flotestro.agent.v1.PackagePlanResult.blocked:type_name -> flotestro.agent.v1.BlockedPackage
-	103, // 154: flotestro.agent.v1.PackagePlanResult.space:type_name -> flotestro.agent.v1.SpaceFact
-	105, // 155: flotestro.agent.v1.BlockedPackage.questions:type_name -> flotestro.agent.v1.DebconfQuestion
-	101, // 156: flotestro.agent.v1.PackageApplyResult.applied:type_name -> flotestro.agent.v1.PackageChange
-	7,   // 157: flotestro.agent.v1.DockerAction.operation:type_name -> flotestro.agent.v1.DockerAction.Operation
-	8,   // 158: flotestro.agent.v1.UnitToggle.property:type_name -> flotestro.agent.v1.UnitToggle.Property
-	9,   // 159: flotestro.agent.v1.ScheduleAction.operation:type_name -> flotestro.agent.v1.ScheduleAction.Operation
-	10,  // 160: flotestro.agent.v1.NetworkAction.operation:type_name -> flotestro.agent.v1.NetworkAction.Operation
-	114, // 161: flotestro.agent.v1.NetworkAction.link:type_name -> flotestro.agent.v1.NetworkLink
-	11,  // 162: flotestro.agent.v1.DnsAction.operation:type_name -> flotestro.agent.v1.DnsAction.Operation
-	12,  // 163: flotestro.agent.v1.FirewallAction.operation:type_name -> flotestro.agent.v1.FirewallAction.Operation
-	13,  // 164: flotestro.agent.v1.StorageAction.operation:type_name -> flotestro.agent.v1.StorageAction.Operation
-	14,  // 165: flotestro.agent.v1.SshAction.operation:type_name -> flotestro.agent.v1.SshAction.Operation
-	15,  // 166: flotestro.agent.v1.SecurityAction.operation:type_name -> flotestro.agent.v1.SecurityAction.Operation
-	16,  // 167: flotestro.agent.v1.BackupAction.operation:type_name -> flotestro.agent.v1.BackupAction.Operation
-	141, // 168: flotestro.agent.v1.BackupAction.password_secret:type_name -> flotestro.agent.v1.SecretRef
-	171, // 169: flotestro.agent.v1.BackupAction.env_secrets:type_name -> flotestro.agent.v1.BackupAction.EnvSecretsEntry
-	141, // 170: flotestro.agent.v1.RepositoryAction.password_secret:type_name -> flotestro.agent.v1.SecretRef
-	17,  // 171: flotestro.agent.v1.CertificateAction.operation:type_name -> flotestro.agent.v1.CertificateAction.Operation
-	134, // 172: flotestro.agent.v1.CertificateAction.targets:type_name -> flotestro.agent.v1.CertificateTarget
-	141, // 173: flotestro.agent.v1.CertificateAction.key_secret:type_name -> flotestro.agent.v1.SecretRef
-	18,  // 174: flotestro.agent.v1.TimeAction.operation:type_name -> flotestro.agent.v1.TimeAction.Operation
-	19,  // 175: flotestro.agent.v1.KernelAction.operation:type_name -> flotestro.agent.v1.KernelAction.Operation
-	172, // 176: flotestro.agent.v1.KernelAction.settings:type_name -> flotestro.agent.v1.KernelAction.SettingsEntry
-	20,  // 177: flotestro.agent.v1.FileAction.operation:type_name -> flotestro.agent.v1.FileAction.Operation
-	141, // 178: flotestro.agent.v1.FileAction.content_secret:type_name -> flotestro.agent.v1.SecretRef
-	21,  // 179: flotestro.agent.v1.PackageLifecycle.operation:type_name -> flotestro.agent.v1.PackageLifecycle.Operation
-	100, // 180: flotestro.agent.v1.PackageLifecycle.plan_reference:type_name -> flotestro.agent.v1.PackagePlanReference
-	22,  // 181: flotestro.agent.v1.ComposeAction.operation:type_name -> flotestro.agent.v1.ComposeAction.Operation
-	173, // 182: flotestro.agent.v1.ComposeAction.image_digests:type_name -> flotestro.agent.v1.ComposeAction.ImageDigestsEntry
-	168, // 183: flotestro.agent.v1.HostnameResult.checks:type_name -> flotestro.agent.v1.PreflightCheck
-	163, // 184: flotestro.agent.v1.SmartResult.attributes:type_name -> flotestro.agent.v1.SmartAttribute
-	97,  // 185: flotestro.agent.v1.UnitStatusResult.units:type_name -> flotestro.agent.v1.UnitState
-	165, // 186: flotestro.agent.v1.UnitStatusResult.details:type_name -> flotestro.agent.v1.UnitDetail
-	97,  // 187: flotestro.agent.v1.UnitDetail.state:type_name -> flotestro.agent.v1.UnitState
-	166, // 188: flotestro.agent.v1.UnitDetail.drop_ins:type_name -> flotestro.agent.v1.UnitDropIn
-	168, // 189: flotestro.agent.v1.DomainEnrollResult.checks:type_name -> flotestro.agent.v1.PreflightCheck
-	168, // 190: flotestro.agent.v1.DomainEnrollResult.verifications:type_name -> flotestro.agent.v1.PreflightCheck
-	141, // 191: flotestro.agent.v1.DockerEnsureAction.EnvSecretsEntry.value:type_name -> flotestro.agent.v1.SecretRef
-	141, // 192: flotestro.agent.v1.BackupAction.EnvSecretsEntry.value:type_name -> flotestro.agent.v1.SecretRef
-	36,  // 193: flotestro.agent.v1.EnrollmentService.Enroll:input_type -> flotestro.agent.v1.EnrollRequest
-	39,  // 194: flotestro.agent.v1.AgentService.Connect:input_type -> flotestro.agent.v1.AgentMessage
-	34,  // 195: flotestro.agent.v1.AgentService.RenewCertificate:input_type -> flotestro.agent.v1.RenewCertificateRequest
-	32,  // 196: flotestro.agent.v1.AgentService.Ping:input_type -> flotestro.agent.v1.PingRequest
-	28,  // 197: flotestro.agent.v1.AgentService.FetchSecret:input_type -> flotestro.agent.v1.FetchSecretRequest
-	30,  // 198: flotestro.agent.v1.AgentService.RequestIdentityChallenge:input_type -> flotestro.agent.v1.IdentityChallengeRequest
-	24,  // 199: flotestro.agent.v1.RelayService.RenewCertificate:input_type -> flotestro.agent.v1.RenewRelayCertificateRequest
-	26,  // 200: flotestro.agent.v1.RelayService.Ping:input_type -> flotestro.agent.v1.RelayPingRequest
-	23,  // 201: flotestro.agent.v1.RelayService.ProxyEnroll:input_type -> flotestro.agent.v1.ProxyEnrollRequest
-	37,  // 202: flotestro.agent.v1.EnrollmentService.Enroll:output_type -> flotestro.agent.v1.EnrollResponse
-	41,  // 203: flotestro.agent.v1.AgentService.Connect:output_type -> flotestro.agent.v1.ServerMessage
-	35,  // 204: flotestro.agent.v1.AgentService.RenewCertificate:output_type -> flotestro.agent.v1.RenewCertificateResponse
-	33,  // 205: flotestro.agent.v1.AgentService.Ping:output_type -> flotestro.agent.v1.PingResponse
-	29,  // 206: flotestro.agent.v1.AgentService.FetchSecret:output_type -> flotestro.agent.v1.FetchSecretResponse
-	31,  // 207: flotestro.agent.v1.AgentService.RequestIdentityChallenge:output_type -> flotestro.agent.v1.IdentityChallengeResponse
-	25,  // 208: flotestro.agent.v1.RelayService.RenewCertificate:output_type -> flotestro.agent.v1.RenewRelayCertificateResponse
-	27,  // 209: flotestro.agent.v1.RelayService.Ping:output_type -> flotestro.agent.v1.RelayPingResponse
-	37,  // 210: flotestro.agent.v1.RelayService.ProxyEnroll:output_type -> flotestro.agent.v1.EnrollResponse
-	202, // [202:211] is the sub-list for method output_type
-	193, // [193:202] is the sub-list for method input_type
-	193, // [193:193] is the sub-list for extension type_name
-	193, // [193:193] is the sub-list for extension extendee
-	0,   // [0:193] is the sub-list for field type_name
+	176, // 109: flotestro.agent.v1.FinalCommit.capability:type_name -> flotestro.helper.v1.HelperCapability
+	6,   // 110: flotestro.agent.v1.TaskResult.status:type_name -> flotestro.agent.v1.TaskResult.Status
+	174, // 111: flotestro.agent.v1.TaskResult.started_at:type_name -> google.protobuf.Timestamp
+	174, // 112: flotestro.agent.v1.TaskResult.finished_at:type_name -> google.protobuf.Timestamp
+	97,  // 113: flotestro.agent.v1.TaskResult.unit_state_before:type_name -> flotestro.agent.v1.UnitState
+	97,  // 114: flotestro.agent.v1.TaskResult.unit_state_after:type_name -> flotestro.agent.v1.UnitState
+	102, // 115: flotestro.agent.v1.TaskResult.package_plan:type_name -> flotestro.agent.v1.PackagePlanResult
+	106, // 116: flotestro.agent.v1.TaskResult.package_apply:type_name -> flotestro.agent.v1.PackageApplyResult
+	164, // 117: flotestro.agent.v1.TaskResult.unit_status:type_name -> flotestro.agent.v1.UnitStatusResult
+	167, // 118: flotestro.agent.v1.TaskResult.domain_enroll:type_name -> flotestro.agent.v1.DomainEnrollResult
+	83,  // 119: flotestro.agent.v1.TaskResult.local_user:type_name -> flotestro.agent.v1.LocalUserResult
+	86,  // 120: flotestro.agent.v1.TaskResult.package_repair:type_name -> flotestro.agent.v1.PackageRepairResult
+	155, // 121: flotestro.agent.v1.TaskResult.docker_result:type_name -> flotestro.agent.v1.DockerReadResult
+	156, // 122: flotestro.agent.v1.TaskResult.docker_events_result:type_name -> flotestro.agent.v1.DockerEventsResult
+	154, // 123: flotestro.agent.v1.TaskResult.docker_action_result:type_name -> flotestro.agent.v1.DockerActionResult
+	153, // 124: flotestro.agent.v1.TaskResult.compose_result:type_name -> flotestro.agent.v1.ComposeResult
+	151, // 125: flotestro.agent.v1.TaskResult.log_file_result:type_name -> flotestro.agent.v1.LogFileResult
+	147, // 126: flotestro.agent.v1.TaskResult.process_list_result:type_name -> flotestro.agent.v1.ProcessListResult
+	148, // 127: flotestro.agent.v1.TaskResult.process_signal_result:type_name -> flotestro.agent.v1.ProcessSignalResult
+	112, // 128: flotestro.agent.v1.TaskResult.schedule_result:type_name -> flotestro.agent.v1.ScheduleResult
+	115, // 129: flotestro.agent.v1.TaskResult.network_result:type_name -> flotestro.agent.v1.NetworkResult
+	117, // 130: flotestro.agent.v1.TaskResult.dns_result:type_name -> flotestro.agent.v1.DnsResult
+	119, // 131: flotestro.agent.v1.TaskResult.firewall_result:type_name -> flotestro.agent.v1.FirewallResult
+	121, // 132: flotestro.agent.v1.TaskResult.storage_result:type_name -> flotestro.agent.v1.StorageResult
+	123, // 133: flotestro.agent.v1.TaskResult.ssh_result:type_name -> flotestro.agent.v1.SshResult
+	140, // 134: flotestro.agent.v1.TaskResult.kernel_result:type_name -> flotestro.agent.v1.KernelResult
+	143, // 135: flotestro.agent.v1.TaskResult.file_result:type_name -> flotestro.agent.v1.FileResult
+	138, // 136: flotestro.agent.v1.TaskResult.time_result:type_name -> flotestro.agent.v1.TimeResult
+	76,  // 137: flotestro.agent.v1.TaskResult.power_result:type_name -> flotestro.agent.v1.PowerResult
+	125, // 138: flotestro.agent.v1.TaskResult.security_result:type_name -> flotestro.agent.v1.SecurityResult
+	136, // 139: flotestro.agent.v1.TaskResult.certificate_result:type_name -> flotestro.agent.v1.CertificateResult
+	133, // 140: flotestro.agent.v1.TaskResult.repository_result:type_name -> flotestro.agent.v1.RepositoryResult
+	131, // 141: flotestro.agent.v1.TaskResult.backup_result:type_name -> flotestro.agent.v1.BackupResult
+	129, // 142: flotestro.agent.v1.TaskResult.monitoring_result:type_name -> flotestro.agent.v1.MonitoringResult
+	127, // 143: flotestro.agent.v1.TaskResult.installed_packages_result:type_name -> flotestro.agent.v1.InstalledPackagesResult
+	96,  // 144: flotestro.agent.v1.TaskResult.inventory_refresh_result:type_name -> flotestro.agent.v1.InventoryRefreshResult
+	162, // 145: flotestro.agent.v1.TaskResult.smart_result:type_name -> flotestro.agent.v1.SmartResult
+	158, // 146: flotestro.agent.v1.TaskResult.docker_logs_result:type_name -> flotestro.agent.v1.DockerLogsResult
+	160, // 147: flotestro.agent.v1.TaskResult.hostname_result:type_name -> flotestro.agent.v1.HostnameResult
+	161, // 148: flotestro.agent.v1.TaskResult.keytab_renew_result:type_name -> flotestro.agent.v1.KeytabRenewResult
+	95,  // 149: flotestro.agent.v1.TaskResult.verification:type_name -> flotestro.agent.v1.Verification
+	66,  // 150: flotestro.agent.v1.TaskResult.docker_ensure_result:type_name -> flotestro.agent.v1.DockerEnsureResult
+	100, // 151: flotestro.agent.v1.PackageUpgrade.plan_reference:type_name -> flotestro.agent.v1.PackagePlanReference
+	101, // 152: flotestro.agent.v1.PackagePlanReference.changes:type_name -> flotestro.agent.v1.PackageChange
+	101, // 153: flotestro.agent.v1.PackagePlanResult.changes:type_name -> flotestro.agent.v1.PackageChange
+	104, // 154: flotestro.agent.v1.PackagePlanResult.blocked:type_name -> flotestro.agent.v1.BlockedPackage
+	103, // 155: flotestro.agent.v1.PackagePlanResult.space:type_name -> flotestro.agent.v1.SpaceFact
+	105, // 156: flotestro.agent.v1.BlockedPackage.questions:type_name -> flotestro.agent.v1.DebconfQuestion
+	101, // 157: flotestro.agent.v1.PackageApplyResult.applied:type_name -> flotestro.agent.v1.PackageChange
+	7,   // 158: flotestro.agent.v1.DockerAction.operation:type_name -> flotestro.agent.v1.DockerAction.Operation
+	8,   // 159: flotestro.agent.v1.UnitToggle.property:type_name -> flotestro.agent.v1.UnitToggle.Property
+	9,   // 160: flotestro.agent.v1.ScheduleAction.operation:type_name -> flotestro.agent.v1.ScheduleAction.Operation
+	10,  // 161: flotestro.agent.v1.NetworkAction.operation:type_name -> flotestro.agent.v1.NetworkAction.Operation
+	114, // 162: flotestro.agent.v1.NetworkAction.link:type_name -> flotestro.agent.v1.NetworkLink
+	11,  // 163: flotestro.agent.v1.DnsAction.operation:type_name -> flotestro.agent.v1.DnsAction.Operation
+	12,  // 164: flotestro.agent.v1.FirewallAction.operation:type_name -> flotestro.agent.v1.FirewallAction.Operation
+	13,  // 165: flotestro.agent.v1.StorageAction.operation:type_name -> flotestro.agent.v1.StorageAction.Operation
+	14,  // 166: flotestro.agent.v1.SshAction.operation:type_name -> flotestro.agent.v1.SshAction.Operation
+	15,  // 167: flotestro.agent.v1.SecurityAction.operation:type_name -> flotestro.agent.v1.SecurityAction.Operation
+	16,  // 168: flotestro.agent.v1.BackupAction.operation:type_name -> flotestro.agent.v1.BackupAction.Operation
+	141, // 169: flotestro.agent.v1.BackupAction.password_secret:type_name -> flotestro.agent.v1.SecretRef
+	171, // 170: flotestro.agent.v1.BackupAction.env_secrets:type_name -> flotestro.agent.v1.BackupAction.EnvSecretsEntry
+	141, // 171: flotestro.agent.v1.RepositoryAction.password_secret:type_name -> flotestro.agent.v1.SecretRef
+	17,  // 172: flotestro.agent.v1.CertificateAction.operation:type_name -> flotestro.agent.v1.CertificateAction.Operation
+	134, // 173: flotestro.agent.v1.CertificateAction.targets:type_name -> flotestro.agent.v1.CertificateTarget
+	141, // 174: flotestro.agent.v1.CertificateAction.key_secret:type_name -> flotestro.agent.v1.SecretRef
+	18,  // 175: flotestro.agent.v1.TimeAction.operation:type_name -> flotestro.agent.v1.TimeAction.Operation
+	19,  // 176: flotestro.agent.v1.KernelAction.operation:type_name -> flotestro.agent.v1.KernelAction.Operation
+	172, // 177: flotestro.agent.v1.KernelAction.settings:type_name -> flotestro.agent.v1.KernelAction.SettingsEntry
+	20,  // 178: flotestro.agent.v1.FileAction.operation:type_name -> flotestro.agent.v1.FileAction.Operation
+	141, // 179: flotestro.agent.v1.FileAction.content_secret:type_name -> flotestro.agent.v1.SecretRef
+	21,  // 180: flotestro.agent.v1.PackageLifecycle.operation:type_name -> flotestro.agent.v1.PackageLifecycle.Operation
+	100, // 181: flotestro.agent.v1.PackageLifecycle.plan_reference:type_name -> flotestro.agent.v1.PackagePlanReference
+	22,  // 182: flotestro.agent.v1.ComposeAction.operation:type_name -> flotestro.agent.v1.ComposeAction.Operation
+	173, // 183: flotestro.agent.v1.ComposeAction.image_digests:type_name -> flotestro.agent.v1.ComposeAction.ImageDigestsEntry
+	168, // 184: flotestro.agent.v1.HostnameResult.checks:type_name -> flotestro.agent.v1.PreflightCheck
+	163, // 185: flotestro.agent.v1.SmartResult.attributes:type_name -> flotestro.agent.v1.SmartAttribute
+	97,  // 186: flotestro.agent.v1.UnitStatusResult.units:type_name -> flotestro.agent.v1.UnitState
+	165, // 187: flotestro.agent.v1.UnitStatusResult.details:type_name -> flotestro.agent.v1.UnitDetail
+	97,  // 188: flotestro.agent.v1.UnitDetail.state:type_name -> flotestro.agent.v1.UnitState
+	166, // 189: flotestro.agent.v1.UnitDetail.drop_ins:type_name -> flotestro.agent.v1.UnitDropIn
+	168, // 190: flotestro.agent.v1.DomainEnrollResult.checks:type_name -> flotestro.agent.v1.PreflightCheck
+	168, // 191: flotestro.agent.v1.DomainEnrollResult.verifications:type_name -> flotestro.agent.v1.PreflightCheck
+	141, // 192: flotestro.agent.v1.DockerEnsureAction.EnvSecretsEntry.value:type_name -> flotestro.agent.v1.SecretRef
+	141, // 193: flotestro.agent.v1.BackupAction.EnvSecretsEntry.value:type_name -> flotestro.agent.v1.SecretRef
+	36,  // 194: flotestro.agent.v1.EnrollmentService.Enroll:input_type -> flotestro.agent.v1.EnrollRequest
+	39,  // 195: flotestro.agent.v1.AgentService.Connect:input_type -> flotestro.agent.v1.AgentMessage
+	34,  // 196: flotestro.agent.v1.AgentService.RenewCertificate:input_type -> flotestro.agent.v1.RenewCertificateRequest
+	32,  // 197: flotestro.agent.v1.AgentService.Ping:input_type -> flotestro.agent.v1.PingRequest
+	28,  // 198: flotestro.agent.v1.AgentService.FetchSecret:input_type -> flotestro.agent.v1.FetchSecretRequest
+	30,  // 199: flotestro.agent.v1.AgentService.RequestIdentityChallenge:input_type -> flotestro.agent.v1.IdentityChallengeRequest
+	24,  // 200: flotestro.agent.v1.RelayService.RenewCertificate:input_type -> flotestro.agent.v1.RenewRelayCertificateRequest
+	26,  // 201: flotestro.agent.v1.RelayService.Ping:input_type -> flotestro.agent.v1.RelayPingRequest
+	23,  // 202: flotestro.agent.v1.RelayService.ProxyEnroll:input_type -> flotestro.agent.v1.ProxyEnrollRequest
+	37,  // 203: flotestro.agent.v1.EnrollmentService.Enroll:output_type -> flotestro.agent.v1.EnrollResponse
+	41,  // 204: flotestro.agent.v1.AgentService.Connect:output_type -> flotestro.agent.v1.ServerMessage
+	35,  // 205: flotestro.agent.v1.AgentService.RenewCertificate:output_type -> flotestro.agent.v1.RenewCertificateResponse
+	33,  // 206: flotestro.agent.v1.AgentService.Ping:output_type -> flotestro.agent.v1.PingResponse
+	29,  // 207: flotestro.agent.v1.AgentService.FetchSecret:output_type -> flotestro.agent.v1.FetchSecretResponse
+	31,  // 208: flotestro.agent.v1.AgentService.RequestIdentityChallenge:output_type -> flotestro.agent.v1.IdentityChallengeResponse
+	25,  // 209: flotestro.agent.v1.RelayService.RenewCertificate:output_type -> flotestro.agent.v1.RenewRelayCertificateResponse
+	27,  // 210: flotestro.agent.v1.RelayService.Ping:output_type -> flotestro.agent.v1.RelayPingResponse
+	37,  // 211: flotestro.agent.v1.RelayService.ProxyEnroll:output_type -> flotestro.agent.v1.EnrollResponse
+	203, // [203:212] is the sub-list for method output_type
+	194, // [194:203] is the sub-list for method input_type
+	194, // [194:194] is the sub-list for extension type_name
+	194, // [194:194] is the sub-list for extension extendee
+	0,   // [0:194] is the sub-list for field type_name
 }
 
 func init() { file_flotestro_agent_v1_agent_proto_init() }

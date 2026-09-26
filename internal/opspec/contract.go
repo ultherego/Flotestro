@@ -336,6 +336,9 @@ var contracts = map[ActionType]contract{
 	// shutdown is not brought back through the panel.
 	ActionSystemReboot:   {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackNone, verify: VerifyCustom, extra: []ResourceClaim{exclusive(ClaimHost)}},
 	ActionSystemShutdown: {cancel: CancelImpossibleAfterStart, retry: RetryNever, rollback: RollbackNone, verify: VerifyNone, extra: []ResourceClaim{exclusive(ClaimHost)}},
+	// Nothing stops a wipe once it starts, nothing repeats it - the host is no
+	// longer a member after the first one - and nothing takes it back.
+	ActionHostFinalWipe: {cancel: CancelImpossibleAfterStart, retry: RetryNever, rollback: RollbackNone, verify: VerifyNone, extra: []ResourceClaim{exclusive(ClaimHost)}},
 	// A rename is one hostnamectl call and is undone by renaming back; the host
 	// lock is the registry's lock class, so the claim comes with it.
 	ActionSystemHostnameSet: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom},

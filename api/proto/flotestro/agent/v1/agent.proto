@@ -1285,6 +1285,16 @@ message FinalReady {
 message FinalCommit {
   bool local_identity_wipe = 1;
   string reason = 2;
+  // The panel's proof that this host's membership was ended by an operator.
+  // A relay carries this message and can fabricate everything in it, so the
+  // wipe itself is not carried out on the strength of the message: the helper
+  // is handed the capability below and refuses without it. The task
+  // identifier is the order's, so one order's proof cannot be replayed as
+  // another's.
+  string task_id = 3;
+  bytes canonical_payload = 4;
+  flotestro.helper.v1.HelperCapability capability = 5;
+  bytes capability_signature = 6;
 }
 
 // TaskLogLines carries a piece of the journal preview. The lines are

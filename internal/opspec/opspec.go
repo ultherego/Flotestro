@@ -192,6 +192,11 @@ const (
 	// Shutting a host down is an operation the panel cannot bring it back from:
 	// powering it on needs out-of-band access.
 	ActionSystemShutdown ActionType = "system.shutdown"
+	// ActionHostFinalWipe ends this host's membership in the fleet: the
+	// identity, the journal and the service. It is the last step of the
+	// decommission handshake and it is the most destructive thing the product
+	// does, so it carries a capability like every other change.
+	ActionHostFinalWipe ActionType = "host.final_wipe"
 	// Renaming a host changes its identity towards everything that knows it by
 	// name: DNS, Kerberos and the certificates of its services.
 	ActionSystemHostnameSet ActionType = "system.hostname.set"
@@ -1011,6 +1016,11 @@ var actionSpecs = map[ActionType]actionSpec{
 		timeoutSeconds: 120, risk: RiskCritical, verifier: VerifierReboot},
 	// Shutting a host down ends in a state the panel cannot undo: nobody will
 	// power this machine on remotely.
+	// The wipe is ordered by the decommission handler and never by the operation
+	// endpoint: the permission is the one the decommission itself asks for.
+	ActionHostFinalWipe: {mutating: true, capability: "systemd", permission: "host.decommission",
+		timeoutSeconds: 300, risk: RiskDestructive, lockClass: LockIdentity, verifier: VerifierNone},
+
 	ActionSystemShutdown: {mutating: true, capability: "systemd", permission: "system.shutdown",
 		timeoutSeconds: 120, risk: RiskCritical, lockClass: LockUnits, verifier: VerifierReboot},
 	// A rename changes the host's identity towards everything that knows it by
@@ -1962,6 +1972,7 @@ type Payload struct {
 	PackagePlan     *PackagePlanPayload     `json:"package_plan,omitempty"`
 	PackageUpgrade  *PackageUpgradePayload  `json:"package_upgrade,omitempty"`
 	Reboot          *RebootPayload          `json:"reboot,omitempty"`
+	FinalWipe       *FinalWipePayload       `json:"final_wipe,omitempty"`
 	UnitStatus      *UnitStatusPayload      `json:"unit_status,omitempty"`
 	DomainEnroll    *DomainEnrollPayload    `json:"domain_enroll,omitempty"`
 	DomainLeave     *DomainLeavePayload     `json:"domain_leave,omitempty"`
@@ -2153,6 +2164,12 @@ type CertificatePayload struct {
 	// PlanHash binds the deployment to the plan computed on this host; the
 	// host computes the plan once more before swapping the files.
 	PlanHash string `json:"plan_hash,omitempty"`
+}
+
+// FinalWipePayload is the end of a host's membership. The reason is what binds
+// it: the capability names one order, and the reason in it is the operator's.
+type FinalWipePayload struct {
+	Reason string `json:"reason"`
 }
 
 // PowerPayload describes shutting a host down.
@@ -3349,6 +3366,11 @@ func Validate(action ActionType, payload Payload) error {
 			return err
 		}
 		return hostname.ValidatePretty(payload.Hostname.Pretty)
+
+	case ActionHostFinalWipe:
+		if payload.FinalWipe == nil || strings.TrimSpace(payload.FinalWipe.Reason) == "" {
+			return fmt.Errorf("the operation %s requires the reason of the decommission", action)
+		}
 
 	case ActionSystemShutdown:
 		if payload.Power == nil {

@@ -26,6 +26,7 @@ import (
 	managedfiles "github.com/ultherego/flotestro/internal/files"
 	"github.com/ultherego/flotestro/internal/freeipa"
 	"github.com/ultherego/flotestro/internal/gateway"
+	"github.com/ultherego/flotestro/internal/helpercap"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/identity"
 	"github.com/ultherego/flotestro/internal/inventory"
@@ -605,6 +606,15 @@ func (s *Server) handleLive(w http.ResponseWriter, r *http.Request) {
 // instance behind the record signs with an authority the installation may have
 // retired.
 type cryptoState interface{ Stale() string }
+
+// SetHelperSigner gives the decommission coordinator the key the final wipe is
+// proved with. Without it the commit goes unproved and a host in enforce mode
+// refuses to wipe, which is better than a wipe anybody on the path can order.
+func (s *Server) SetHelperSigner(signer *helpercap.Signer) {
+	if s.decommissioner != nil {
+		s.decommissioner.SetHelperSigner(signer)
+	}
+}
 
 // SetCryptoState connects the crypto runtime to the readiness answer.
 func (s *Server) SetCryptoState(state cryptoState) { s.crypto = state }

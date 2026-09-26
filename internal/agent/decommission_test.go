@@ -133,8 +133,8 @@ func TestFinalCommitWipesThroughTheHelperAndEndsTheAgent(t *testing.T) {
 	handshake.begin("handed over")
 
 	var reasons []string
-	wipe := func(_ context.Context, reason string) (*helperv1.HelperResponse, error) {
-		reasons = append(reasons, reason)
+	wipe := func(_ context.Context, commit *agentv1.FinalCommit) (*helperv1.HelperResponse, error) {
+		reasons = append(reasons, commit.GetReason())
 		return &helperv1.HelperResponse{Accepted: true, FinalWipeResult: &helperv1.FinalWipeResult{
 			Removed: []string{"/var/lib/flotestro-agent/identity"}, ServiceDisabled: true,
 		}}, nil
@@ -159,14 +159,14 @@ func TestFinalCommitRefusedByTheHelperKeepsTheAgentRunning(t *testing.T) {
 	handshake := newFinalHandshake()
 	handshake.begin("handed over")
 
-	refusing := func(context.Context, string) (*helperv1.HelperResponse, error) {
+	refusing := func(context.Context, *agentv1.FinalCommit) (*helperv1.HelperResponse, error) {
 		return &helperv1.HelperResponse{Accepted: false, ErrorCode: "exec_failed", Message: "no"}, nil
 	}
 	if err := applyFinalCommit(context.Background(),
 		&agentv1.FinalCommit{LocalIdentityWipe: true}, handshake, refusing, quietLogger()); err != nil {
 		t.Fatalf("a refused wipe ended the agent: %v", err)
 	}
-	unreachable := func(context.Context, string) (*helperv1.HelperResponse, error) {
+	unreachable := func(context.Context, *agentv1.FinalCommit) (*helperv1.HelperResponse, error) {
 		return nil, errors.New("connecting to the helper: no such file")
 	}
 	if err := applyFinalCommit(context.Background(),
@@ -188,7 +188,7 @@ func TestFinalCommitWithoutAWipeOnlyEndsTheAgent(t *testing.T) {
 	handshake := newFinalHandshake()
 	handshake.begin("handed over")
 	called := false
-	wipe := func(context.Context, string) (*helperv1.HelperResponse, error) {
+	wipe := func(context.Context, *agentv1.FinalCommit) (*helperv1.HelperResponse, error) {
 		called = true
 		return &helperv1.HelperResponse{Accepted: true}, nil
 	}
@@ -204,7 +204,7 @@ func TestFinalCommitWithoutAWipeOnlyEndsTheAgent(t *testing.T) {
 func TestFinalCommitWithoutAFinalTaskIsIgnored(t *testing.T) {
 	handshake := newFinalHandshake()
 	called := false
-	wipe := func(context.Context, string) (*helperv1.HelperResponse, error) {
+	wipe := func(context.Context, *agentv1.FinalCommit) (*helperv1.HelperResponse, error) {
 		called = true
 		return &helperv1.HelperResponse{Accepted: true}, nil
 	}

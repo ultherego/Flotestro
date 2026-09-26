@@ -915,6 +915,7 @@ func run() error {
 	// carried out here, by the instance that does.
 	commandOptions.Registry = registry
 	commandOptions.Decommissioner = gateway.NewDecommissioner(pool, hostStore, jobStore, recorder, registry, log)
+	commandOptions.Decommissioner.SetHelperSigner(helperSigner)
 	commandOptions.Audit = recorder
 	commandOptions.Events = eventBus
 	go gateway.NewCommands(pool, log, commandOptions).RunCommandLoop(ctx)
@@ -1047,6 +1048,7 @@ func run() error {
 	// behind the record signs with an authority the installation may have
 	// retired, and answers every query while it does.
 	panelServer.SetCryptoState(cryptoRuntime)
+	panelServer.SetHelperSigner(helperSigner)
 	go cryptoRuntime.Maintain(ctx)
 	panelServer.SetSecrets(secretStore)
 	agentService.SetSecrets(secretStore)

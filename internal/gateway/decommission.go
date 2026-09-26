@@ -2,19 +2,23 @@ package gateway
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ultherego/flotestro/internal/audit"
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
+	"github.com/ultherego/flotestro/internal/helpercap"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/jobs"
+	"github.com/ultherego/flotestro/internal/opspec"
 )
 
 // The timing of the handshake.
@@ -100,12 +104,54 @@ type Decommissioner struct {
 	// commands carries the handshake to the instance that holds the host's
 	// session when this one does not.
 	commands *Commands
+	// signer proves the wipe to the host's root helper. A relay carries the
+	// commit and could write one itself, so the wipe is not done on the
+	// strength of the message.
+	signer *helpercap.Signer
 	// readyTimeout and leaveTimeout are fields so a test does not wait two
 	// minutes for an agent that never answers, and handoverWait so it does not
 	// wait a minute for an owner that does not exist.
 	readyTimeout time.Duration
 	leaveTimeout time.Duration
 	handoverWait time.Duration
+}
+
+// SetHelperSigner gives the coordinator the key the wipe is proved with. A
+// coordinator without one sends the commit unproved and says so; a helper in
+// enforce mode then refuses the wipe, which is the right way round.
+func (d *Decommissioner) SetHelperSigner(signer *helpercap.Signer) { d.signer = signer }
+
+// proveWipe builds the proof that this host's membership was ended by an
+// operator: the canonical payload the helper will hash, and the capability over
+// it. The task identifier is the order's, so the proof of one decommission
+// cannot be presented as another's.
+func (d *Decommissioner) proveWipe(order Decommission, orderID string) (*agentv1.FinalCommit, error) {
+	commit := &agentv1.FinalCommit{
+		LocalIdentityWipe: order.LocalIdentityWipe, Reason: order.Reason, TaskId: orderID,
+	}
+	if d.signer == nil {
+		d.log.Warn("this control plane holds no helper signing key: the final commit goes unproved and a host in enforce mode will refuse the wipe",
+			"host_id", order.HostID)
+		return commit, nil
+	}
+	canonical, err := helpercap.CanonicalPayload(opspec.ActionHostFinalWipe, opspec.ActionVersion,
+		opspec.Payload{FinalWipe: &opspec.FinalWipePayload{Reason: order.Reason}})
+	if err != nil {
+		return nil, err
+	}
+	digest := sha256.Sum256(canonical)
+	capability, signature, err := d.signer.Issue(helpercap.Mint{
+		HostID: order.HostID, TaskID: orderID,
+		ActionType:    string(opspec.ActionHostFinalWipe),
+		PayloadSHA256: digest[:],
+	})
+	if err != nil {
+		return nil, err
+	}
+	commit.CanonicalPayload = canonical
+	commit.Capability = capability
+	commit.CapabilitySignature = signature
+	return commit, nil
 }
 
 func NewDecommissioner(pool *pgxpool.Pool, hostStore *hosts.Store, jobStore *jobs.Store,
@@ -194,10 +240,12 @@ func (d *Decommissioner) carryOut(ctx context.Context, order Decommission,
 	}
 	outcome.CertificatesRevoked = revoked
 
+	commit, err := d.proveWipe(order, uuid.NewString())
+	if err != nil {
+		return outcome, err
+	}
 	if err := session.Send(&agentv1.ServerMessage{
-		Payload: &agentv1.ServerMessage_FinalCommit{FinalCommit: &agentv1.FinalCommit{
-			LocalIdentityWipe: order.LocalIdentityWipe, Reason: order.Reason,
-		}},
+		Payload: &agentv1.ServerMessage_FinalCommit{FinalCommit: commit},
 	}, finalSendTimeout); err != nil {
 		// The host is ready and revoked; the commit did not get through.
 		d.log.Warn("the final commit was not delivered", "host_id", order.HostID, "err", err)

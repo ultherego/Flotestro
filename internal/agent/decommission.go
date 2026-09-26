@@ -159,19 +159,30 @@ func answerFinalTask(ctx context.Context, task *agentv1.FinalTask, handshake *fi
 
 // finalWiper asks the root helper to remove what makes this host a member of
 // the fleet.
-type finalWiper func(ctx context.Context, reason string) (*helperv1.HelperResponse, error)
+type finalWiper func(ctx context.Context, commit *agentv1.FinalCommit) (*helperv1.HelperResponse, error)
 
-// helperWiper builds the wiper over the real helper client.
+// helperWiper builds the wiper over the real helper client. The proof travels
+// from the commit into the request untouched: the agent does not vouch for the
+// wipe, the panel does, and the helper checks it.
 func helperWiper(client *HelperClient) finalWiper {
 	if client == nil {
 		return nil
 	}
-	return func(ctx context.Context, reason string) (*helperv1.HelperResponse, error) {
+	return func(ctx context.Context, commit *agentv1.FinalCommit) (*helperv1.HelperResponse, error) {
+		taskID := commit.GetTaskId()
+		if taskID == "" {
+			// A panel from before the proof existed. The helper decides what to
+			// make of a wipe without one.
+			taskID = "final-wipe"
+		}
 		return client.Call(ctx, &helperv1.HelperRequest{
-			TaskId:         "final-wipe",
-			TimeoutSeconds: uint32(finalWipeTimeout.Seconds()),
+			TaskId:              taskID,
+			TimeoutSeconds:      uint32(finalWipeTimeout.Seconds()),
+			CanonicalPayload:    commit.GetCanonicalPayload(),
+			Capability:          commit.GetCapability(),
+			CapabilitySignature: commit.GetCapabilitySignature(),
 			Action: &helperv1.HelperRequest_FinalWipe{
-				FinalWipe: &helperv1.FinalWipeRequest{Reason: reason},
+				FinalWipe: &helperv1.FinalWipeRequest{Reason: commit.GetReason()},
 			},
 		}, finalWipeTimeout)
 	}
@@ -200,7 +211,7 @@ func applyFinalCommit(ctx context.Context, commit *agentv1.FinalCommit, handshak
 	}
 	wipeCtx, cancel := context.WithTimeout(ctx, finalWipeTimeout)
 	defer cancel()
-	response, err := wipe(wipeCtx, commit.GetReason())
+	response, err := wipe(wipeCtx, commit)
 	if err != nil {
 		log.Error("the helper did not answer the final wipe; the agent keeps running", "err", err)
 		return nil

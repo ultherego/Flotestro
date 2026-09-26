@@ -86,9 +86,11 @@ func Expect(request *helperv1.HelperRequest) Expectation {
 	case *helperv1.HelperRequest_Hostname:
 		return mutating("system.hostname", opspec.ActionSystemHostnameSet)
 	case *helperv1.HelperRequest_FinalWipe:
-		// The final wipe is the end of the decommission handshake, a typed message
-		// rather than a task, so no capability exists for it.
-		return read("final_wipe")
+		// The end of the decommission handshake, and the most destructive thing
+		// the product does. It used to be read-only here, on the grounds that it
+		// is a typed message rather than a task - which left a relay able to
+		// fabricate the message and take a host's identity with it.
+		return mutating("final_wipe", opspec.ActionHostFinalWipe)
 
 	case *helperv1.HelperRequest_IdentityProbe:
 		return read("identity.probe")
@@ -467,6 +469,13 @@ func CheckBinding(request *helperv1.HelperRequest, bound *BoundPayload) error {
 				payload.ProcessSignal.PID, payload.ProcessSignal.Signal))
 		}
 		return nil
+
+	case *helperv1.HelperRequest_FinalWipe:
+		if payload.FinalWipe == nil {
+			return binding("the bound payload describes no decommission")
+		}
+		// The reason is the operator's and it is all the order carries.
+		return same("decommission reason", action.FinalWipe.GetReason(), payload.FinalWipe.Reason)
 
 	case *helperv1.HelperRequest_Hostname:
 		if payload.Hostname == nil {
