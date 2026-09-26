@@ -64,8 +64,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4.2.2
-      - uses: docker/setup-buildx-action@v3.7.1
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3.7.1
 
       - name: What reaches the builder
         run: |
@@ -159,7 +159,7 @@ jobs:
       run:
         working-directory: docker
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: The settings and the secret files that a parse needs
         # Compose refuses a file whose required variables are unset, and the
@@ -292,20 +292,20 @@ jobs:
       matrix:
         target: [control-plane, relay, admin-tools]
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           # Nothing here pushes anything, so the token does not belong in the
           # checkout's git configuration either.
           persist-credentials: false
 
-      - uses: docker/setup-qemu-action@v3.2.0
+      - uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf # v3.2.0
         # Only the tools image needs it: it installs two packages of the
         # distribution, which has to run on the architecture it installs for.
         if: matrix.target == 'admin-tools'
 
-      - uses: docker/setup-buildx-action@v3.7.1
+      - uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3.7.1
 
-      - uses: docker/build-push-action@v6.9.0
+      - uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6.9.0
         with:
           context: .
           file: docker/Containerfile
@@ -354,7 +354,7 @@ jobs:
             image: flotestro-admin-tools
             binaries: flotestro-auditverify
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: What is being built
         id: facts
@@ -403,7 +403,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "$repository $version ($commit, $created), push=$push"
 
-      - uses: docker/setup-qemu-action@v3.2.0
+      - uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf # v3.2.0
         # Only the tools image needs it, and only for one step: it installs
         # two packages of the distribution, which is a program that has to
         # run on the architecture it installs for. Everything else is
@@ -411,9 +411,9 @@ jobs:
         # distroless stages only copy files, so nothing there is emulated.
         if: matrix.target == 'admin-tools'
 
-      - uses: docker/setup-buildx-action@v3.7.1
+      - uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3.7.1
 
-      - uses: docker/login-action@v3.3.0
+      - uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
         if: steps.facts.outputs.push == 'true'
         with:
           registry: ghcr.io
@@ -435,7 +435,7 @@ jobs:
           fi
           echo "$reference is free"
 
-      - uses: docker/build-push-action@v6.9.0
+      - uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6.9.0
         id: build
         env:
           SOURCE_DATE_EPOCH: ${{ steps.facts.outputs.epoch }}
@@ -466,7 +466,7 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.target }}
           cache-to: type=gha,mode=max,scope=${{ matrix.target }}
 
-      - uses: actions/setup-go@v5.2.0
+      - uses: actions/setup-go@3041bf56c941b39c61721a86cd11f3bb1338122a # v5.2.0
         with:
           go-version-file: go.mod
           cache: true
@@ -502,7 +502,7 @@ jobs:
               -out-dir "$RUNNER_TEMP/bills/$architecture"
           done
 
-      - uses: actions/setup-node@v4.1.0
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
         if: matrix.target == 'control-plane'
         with:
           node-version-file: web/.nvmrc
@@ -533,7 +533,7 @@ jobs:
             cp "$RUNNER_TEMP/flotestro-web.cdx.json" "$directory/"
           done
 
-      - uses: sigstore/cosign-installer@v3.7.0
+      - uses: sigstore/cosign-installer@dc72c7d5c4d10cd6bcb8cf6e3fd625a9e5e537da # v3.7.0
         if: steps.facts.outputs.push == 'true'
 
       - name: Sign the manifest
@@ -596,14 +596,14 @@ jobs:
             "${{ steps.build.outputs.digest }}" \
             > "$RUNNER_TEMP/digests/${{ matrix.target }}.txt"
 
-      - uses: actions/upload-artifact@v4.4.3
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         if: steps.facts.outputs.push == 'true'
         with:
           name: digest-${{ matrix.target }}
           path: ${{ runner.temp }}/digests
           if-no-files-found: error
 
-      - uses: actions/upload-artifact@v4.4.3
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
           name: bills-${{ matrix.target }}
           path: ${{ runner.temp }}/bills
@@ -619,7 +619,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/download-artifact@v4.1.8
+      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
           pattern: digest-*
           merge-multiple: true
@@ -697,7 +697,7 @@ jobs:
 
           cat compose.pins.yaml
 
-      - uses: actions/upload-artifact@v4.4.3
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
           name: compose.pins.yaml
           path: compose.pins.yaml

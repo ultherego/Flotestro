@@ -47,17 +47,17 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           # The provenance carries "git describe": it needs the tags, not
           # only the commit.
           fetch-depth: 0
-      - uses: actions/setup-go@v5.2.0
+      - uses: actions/setup-go@3041bf56c941b39c61721a86cd11f3bb1338122a # v5.2.0
         with:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
-      - uses: actions/setup-node@v4.1.0
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
         with:
           # The version the laboratory installs on the panel machine
           # (Vagrant/provision/control-plane.sh).
@@ -99,7 +99,7 @@ jobs:
           npm ci
           npm run build
 
-      - uses: actions/upload-artifact@v4.4.3
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
           name: panel
           path: web/dist
@@ -121,17 +121,17 @@ jobs:
           - arch: arm64
             runner: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           # The provenance carries "git describe": it needs the tags, not
           # only the commit.
           fetch-depth: 0
-      - uses: actions/setup-go@v5.2.0
+      - uses: actions/setup-go@3041bf56c941b39c61721a86cd11f3bb1338122a # v5.2.0
         with:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
-      - uses: actions/setup-node@v4.1.0
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
         with:
           # The version the laboratory installs on the panel machine
           # (Vagrant/provision/control-plane.sh).
@@ -158,7 +158,7 @@ jobs:
             dpkg-dev rpm makepkg pacman-package-manager fakeroot \
             libarchive-tools zstd binutils file
 
-      - uses: actions/download-artifact@v4.1.8
+      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
           name: panel
           path: web/dist
@@ -170,7 +170,7 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           packaging/build-release.sh all "$version" dist "${{ matrix.arch }}"
 
-      - uses: actions/upload-artifact@v4.4.3
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
           name: dist-${{ matrix.arch }}
           path: |
@@ -194,13 +194,13 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           # The provenance carries "git describe": it needs the tags, not
           # only the commit.
           fetch-depth: 0
 
-      - uses: actions/download-artifact@v4.1.8
+      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
           # Both architectures land in one directory; the completeness check
           # below is what says whether both really arrived.
@@ -326,7 +326,7 @@ jobs:
         # GPG signature over SHA256SUMS stays beside it - one says who signed,
         # the other says what built.
         if: steps.oidc.outputs.available == 'true'
-        uses: actions/attest-build-provenance@v4.2.2
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
             dist/*.deb
@@ -334,7 +334,7 @@ jobs:
             dist/*.pkg.tar.*
             dist/SHA256SUMS
 
-      - uses: actions/upload-artifact@v4.4.3
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
           # Exactly what is published, nothing else: the staged binaries
           # and the build notes of the machine are not part of a release.
@@ -371,7 +371,7 @@ jobs:
       # not to the checkout, the download or the apt-get install.
       RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
     steps:
-      - uses: actions/download-artifact@v4.1.8
+      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
           name: dist
           path: dist
@@ -470,7 +470,7 @@ jobs:
         # One file of the product, taken from the tag being released rather
         # than from the job that built it: a script handed over by the build
         # job would be a way to reach the key this job holds.
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.ref }}
           path: source
@@ -667,7 +667,7 @@ jobs:
     # The image --profile airgap pulls. Its own job because it needs a
     # registry token and the signing job holds the release key.
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           path: source
 
@@ -686,9 +686,9 @@ jobs:
           fi
           echo "the tree carries $(find pages/packages -name '*.deb' -o -name '*.rpm' -o -name '*.pkg.tar.*' | wc -l) packages"
 
-      - uses: docker/setup-buildx-action@v3.7.1
+      - uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3.7.1
 
-      - uses: docker/login-action@v3.3.0
+      - uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
