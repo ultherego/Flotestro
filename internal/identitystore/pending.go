@@ -1,6 +1,8 @@
 package identitystore
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -104,6 +106,10 @@ func (m *Store) PreparePending(random io.Reader, now time.Time, name string,
 
 // SavePending writes the record so that it is either whole or absent.
 func (m *Store) SavePending(p Pending) error {
+	return m.withLock(func() error { return m.savePendingLocked(p) })
+}
+
+func (m *Store) savePendingLocked(p Pending) error {
 	if err := p.check(); err != nil {
 		return err
 	}
@@ -115,7 +121,14 @@ func (m *Store) SavePending(p Pending) error {
 		return err
 	}
 	path := m.PendingPath()
-	temporary := path + ".tmp"
+	// The temporary name is this call's own: the record carries a private key,
+	// and two attempts sharing one name means one of them writes over the key
+	// the other is about to rename into place.
+	suffix := make([]byte, 8)
+	if _, err := rand.Read(suffix); err != nil {
+		return err
+	}
+	temporary := path + ".tmp-" + hex.EncodeToString(suffix)
 	// The record carries the private key, so the file is readable by its
 	// owner alone - from the first byte, not after a chmod.
 	if err := writeWithSync(temporary, append(content, '\n'), 0o600); err != nil {

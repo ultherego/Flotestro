@@ -11,11 +11,14 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/ultherego/flotestro/internal/pki"
 )
@@ -38,6 +41,34 @@ const (
 
 // GenerationsKept says how many generations stay on disk.
 const GenerationsKept = 2
+
+// lockName is the file every change of the store is serialised on. The agent
+// daemon, the relay daemon and the operator running agentctl or relayctl all
+// write into one directory, and two of them at once were enough to lose a
+// host's identity: the staging directory of one was removed by the Clean of the
+// other, and the shared name of the symlink temp let one publish the other's
+// generation while reporting its own.
+const lockName = "identity.lock"
+
+// withLock runs a change of the store under an exclusive lock. Every path that
+// writes takes it; the reads do not, because a read follows one symlink and a
+// symlink is replaced in one move.
+func (m *Store) withLock(run func() error) error {
+	if err := os.MkdirAll(m.root, 0o700); err != nil {
+		return err
+	}
+	fd, err := unix.Open(filepath.Join(m.root, lockName),
+		unix.O_RDWR|unix.O_CREAT|unix.O_CLOEXEC, 0o600)
+	if err != nil {
+		return fmt.Errorf("the lock of the identity store: %w", err)
+	}
+	defer unix.Close(fd)
+	if err := unix.Flock(fd, unix.LOCK_EX); err != nil {
+		return fmt.Errorf("locking the identity store: %w", err)
+	}
+	defer func() { _ = unix.Flock(fd, unix.LOCK_UN) }()
+	return run()
+}
 
 // The store's errors. The codes are part of the contract with the operator -
 // they are what shows up on a host that has no connection with the panel.
@@ -151,6 +182,16 @@ func Check(g Generation) error {
 
 // Commit records a new generation and switches "current" to it.
 func (m *Store) Commit(g Generation) (*Identity, error) {
+	var identity *Identity
+	err := m.withLock(func() error {
+		var err error
+		identity, err = m.commitLocked(g)
+		return err
+	})
+	return identity, err
+}
+
+func (m *Store) commitLocked(g Generation) (*Identity, error) {
 	if err := Check(g); err != nil {
 		return nil, err
 	}
@@ -224,7 +265,7 @@ func (m *Store) Commit(g Generation) (*Identity, error) {
 	if err := m.switchTo(serial); err != nil {
 		return nil, err
 	}
-	if err := m.Clean(); err != nil {
+	if err := m.cleanLocked(); err != nil {
 		return nil, err
 	}
 	return m.Current()
@@ -261,10 +302,16 @@ func renameNoReplaceFallback(oldPath, newPath string) error {
 	return os.Rename(oldPath, newPath)
 }
 
-// switchTo replaces the "current" symlink in one atomic move.
+// switchTo replaces the "current" symlink in one atomic move. The temporary
+// name is this call's own: a shared one let a second writer remove the symlink
+// this one had just made, and then publish its own target under this one's
+// rename.
 func (m *Store) switchTo(serial string) error {
-	next := filepath.Join(m.root, nextName)
-	_ = os.Remove(next)
+	name := make([]byte, 8)
+	if _, err := rand.Read(name); err != nil {
+		return err
+	}
+	next := filepath.Join(m.root, nextName+hex.EncodeToString(name))
 	if err := os.Symlink(filepath.Join(GenerationsDir, serial), next); err != nil {
 		return err
 	}
@@ -306,9 +353,20 @@ func (m *Store) Previous() (*Identity, error) {
 
 // Clean removes the traces of interrupted writes and the surplus generations.
 func (m *Store) Clean() error {
+	return m.withLock(m.cleanLocked)
+}
+
+func (m *Store) cleanLocked() error {
 	// A temporary symlink is never the host's identity: either it was renamed
-	// to "current" or it does not exist.
-	_ = os.Remove(filepath.Join(m.root, nextName))
+	// to "current" or it does not exist. The names carry a random tail now, so
+	// the leftovers of an interrupted move are swept by prefix.
+	if entries, err := os.ReadDir(m.root); err == nil {
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.Name(), nextName) {
+				_ = os.Remove(filepath.Join(m.root, entry.Name()))
+			}
+		}
+	}
 
 	generations := filepath.Join(m.root, GenerationsDir)
 	entries, err := os.ReadDir(generations)
@@ -475,17 +533,21 @@ func (m *Store) Migrate(keyPath, certPath, trustPath string) (bool, error) {
 	if _, err := os.Lstat(filepath.Join(m.root, CurrentName)); err == nil {
 		return false, nil
 	}
-	keyPEM, err := os.ReadFile(keyPath)
-	if err != nil {
-		return false, nil
+	// A file that is not there means there is nothing to move. A file that is
+	// there and cannot be read means something else entirely - the wrong owner,
+	// the wrong mode, a broken disk - and answering "no identity here" to that
+	// sent the operator to enroll a host that already had one.
+	keyPEM, err := readLegacy(keyPath)
+	if err != nil || keyPEM == nil {
+		return false, err
 	}
-	certPEM, err := os.ReadFile(certPath)
-	if err != nil {
-		return false, nil
+	certPEM, err := readLegacy(certPath)
+	if err != nil || certPEM == nil {
+		return false, err
 	}
-	trustPEM, err := os.ReadFile(trustPath)
-	if err != nil {
-		return false, nil
+	trustPEM, err := readLegacy(trustPath)
+	if err != nil || trustPEM == nil {
+		return false, err
 	}
 	if err := os.MkdirAll(m.root, 0o700); err != nil {
 		return false, err
@@ -498,6 +560,19 @@ func (m *Store) Migrate(keyPath, certPath, trustPath string) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// readLegacy reads one file of the old layout. A missing file is no identity
+// and no error; anything else is an error, because it is not the same thing.
+func readLegacy(path string) ([]byte, error) {
+	content, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("the identity of the previous layout at %s: %w", path, err)
+	}
+	return content, nil
 }
 
 // keysMatch says whether the certificate describes this key.

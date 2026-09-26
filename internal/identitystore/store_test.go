@@ -30,7 +30,7 @@ func generation(t *testing.T, ca *pki.CA, hostID string) Generation {
 		t.Fatal(err)
 	}
 	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})
-	wydany, err := ca.SignAgentCSR(csrPEM, hostID)
+	issued, err := ca.SignAgentCSR(csrPEM, hostID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func generation(t *testing.T, ca *pki.CA, hostID string) Generation {
 	}
 	return Generation{
 		KeyPEM:         pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}),
-		CertificatePEM: wydany.PEM,
+		CertificatePEM: issued.PEM,
 		TrustPEM:       ca.PEM,
 	}
 }
