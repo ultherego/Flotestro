@@ -402,6 +402,9 @@ FLOTESTRO_VERSION=0.60.0
 FLOTESTRO_GATEWAY_ID=cp-prod-01
 FLOTESTRO_ADVERTISE=panel.example.org
 FLOTESTRO_PUBLIC_URL=https://panel.example.org
+# The serving process does not change the schema on a database somebody else
+# runs: the migration is a run of its own, below. Leave this on only for a trial.
+FLOTESTRO_AUTO_MIGRATE=false
 SETTINGS
 
 # 2. The database DSN, as a file and with no trailing surprises. Nothing else
@@ -411,15 +414,25 @@ mkdir -p secrets && chmod 700 secrets
 printf '%s' 'postgresql://flotestro:PASSWORD@db.example.org:5432/flotestro?sslmode=verify-full&application_name=flotestro-control-plane' > secrets/database-url
 chmod 600 secrets/database-url
 
-# 3. Start. The panel migrates the schema itself before it listens.
+# 3. The roles, once, as a superuser. The login the panel serves as does not
+#    get the right to change the schema; a separate one migrates and works as
+#    the owner. Skip this and both DSNs are the same login, which still keeps
+#    the migration out of the serving process but gives up the separation.
+psql "$SUPERUSER_DSN" -v ON_ERROR_STOP=1 \
+     -v migrator_password=... -v runtime_password=... -v backup_password=... \
+     -f db/roles.sql
+
+# 4. Migrate, then start. In this order and never the other way: the panel
+#    refuses to serve a schema it does not match rather than reshape it.
+docker compose --profile migrate run --rm migrate
 docker compose up -d
 docker compose logs -f control-plane        # wait for "the database schema is current"
 
-# 4. The first administrator. The control plane writes a bootstrap token into
+# 5. The first administrator. The control plane writes a bootstrap token into
 #    its state when the installation has no identities yet.
 docker compose cp control-plane:/var/lib/flotestro/bootstrap-token ./bootstrap-token
 
-# 5. Back up the database and the state volume together, now - the CA was
+# 6. Back up the database and the state volume together, now - the CA was
 #    just created. ./backups is ready: init made it. See "Taking the pair".
 docker compose --profile tools run --rm admin-tools backup
 ```

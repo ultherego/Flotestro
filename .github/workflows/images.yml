@@ -209,7 +209,7 @@ jobs:
         run: |
           set -euo pipefail
           started() { docker compose -f compose.yaml "$@" config --services; }
-          for service in postgres package-repository admin-tools admin-restore; do
+          for service in postgres package-repository admin-tools admin-restore migrate; do
             if started | grep -qx "$service"; then
               echo "compose.yaml starts $service with no profile named" >&2
               exit 1
@@ -236,7 +236,7 @@ jobs:
           # Depending on a profiled one would stop the deployment dead when
           # that profile is not named.
           docker compose -f compose.yaml --profile quickstart --profile tools \
-            --profile restore --profile airgap config --format json > /tmp/profiles.json
+            --profile restore --profile airgap --profile migrate config --format json > /tmp/profiles.json
           python3 - <<'CHECK'
           import json, sys
           services = json.load(open("/tmp/profiles.json"))["services"]

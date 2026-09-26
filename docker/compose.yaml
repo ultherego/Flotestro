@@ -81,6 +81,39 @@ services:
         max-size: "1m"
         max-file: "2"
 
+  # The migration as a run of its own:
+  #
+  #   docker compose --profile migrate run --rm migrate
+  #
+  # Behind a profile and depended on by nothing, so "up" never starts it: an
+  # upgrade is migrate once, then roll the replicas, and the order matters.
+  # An installation that separates the database roles adds
+  # FLOTESTRO_MIGRATION_DATABASE_URL_FILE here and mounts the migrator's own
+  # DSN beside the serving one; without it this run uses the serving login,
+  # which still takes the migration out of the serving process.
+  migrate:
+    image: ghcr.io/ultherego/flotestro-control-plane:${FLOTESTRO_VERSION:-latest}
+    profiles: ["migrate"]
+    user: "65532:65532"
+    command: ["migrate"]
+    environment:
+      FLOTESTRO_DATABASE_URL_FILE: /run/flotestro/database-url
+      FLOTESTRO_STATE_DIR: /var/lib/flotestro
+    volumes:
+      - shared_secrets:/run/flotestro:ro
+      - control_plane_state:/var/lib/flotestro
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    logging:
+      driver: json-file
+      options:
+        max-size: "1m"
+        max-file: "2"
+
   control-plane:
     # A tag is readable and is what an example shows. Production pins the
     # digest as well - image:tag@sha256:... - because a tag can be moved.
@@ -92,6 +125,15 @@ services:
       # The DSN is a secret and travels as a file, never as a value: an
       # environment variable is visible in "docker inspect" and in a crash dump.
       FLOTESTRO_DATABASE_URL_FILE: /run/flotestro/database-url
+      # Whether this process brings the schema up to date at its own start.
+      # A trial keeps it on: an installation somebody has just downloaded is to
+      # come up on the first "up" with nothing else asked of them. An
+      # installation on a database somebody else runs turns it off in ./.env and
+      # migrates with the run below, so that the login the panel serves as never
+      # needs the right to change the schema - see db/roles.sql. With it off the
+      # panel refuses to start on a schema it does not match rather than
+      # quietly reshaping the database.
+      FLOTESTRO_AUTO_MIGRATE: ${FLOTESTRO_AUTO_MIGRATE:-true}
       # The state directory and the panel are set in the image already; they
       # stand here too so that the deployment can be read in one place.
       FLOTESTRO_STATE_DIR: /var/lib/flotestro
