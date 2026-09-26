@@ -93,6 +93,13 @@ jobs:
           cache: true
           cache-dependency-path: go.sum
 
+      - name: The boundaries of the tree
+        # One repository and one deployable is the right shape for this product,
+        # but "one repository" turns into "any package may reach into any other"
+        # the moment nothing checks. It did: the root helper owned plumbing that
+        # two packages which are not the helper imported from it.
+        run: go run ./tools/archcheck
+
       - name: govulncheck
         # Known vulnerabilities in the modules the binaries actually call
         # into; the release carries a CycloneDX bill for the rest. The tool

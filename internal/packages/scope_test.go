@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ultherego/flotestro/internal/helper/runscope"
+	"github.com/ultherego/flotestro/internal/platform/process"
 )
 
 // The scope of a package transaction is a prefix in front of the tool - the
@@ -36,8 +36,8 @@ func scopeShim(t *testing.T) (shim, tool, record string) {
 // for a request with limits.
 func scopedContext(shim string) context.Context {
 	prefix := []string{shim, "--scope", "--quiet", "--unit=flotestro-op-test", "--"}
-	return runscope.With(context.Background(), func(argv []string) []string {
-		return runscope.Prefixed(prefix, argv)
+	return process.With(context.Background(), func(argv []string) []string {
+		return process.Prefixed(prefix, argv)
 	})
 }
 
@@ -80,7 +80,7 @@ func TestAPackageCommandRunsBareWithoutAScope(t *testing.T) {
 // for a request without limits, so that nothing recorded higher up leaks in.
 func TestAClearedScopeIsABareRun(t *testing.T) {
 	shim, tool, record := scopeShim(t)
-	ctx := runscope.With(scopedContext(shim), nil)
+	ctx := process.With(scopedContext(shim), nil)
 	result := runCommand(ctx, time.Minute, "", tool, "-Qu")
 	if !result.Ran || result.ExitCode != 0 {
 		t.Fatalf("the bare command did not run: %+v", result)

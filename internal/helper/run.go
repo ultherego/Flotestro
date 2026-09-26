@@ -8,8 +8,8 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/ultherego/flotestro/internal/helper/runscope"
 	"github.com/ultherego/flotestro/internal/opspec"
+	"github.com/ultherego/flotestro/internal/platform/process"
 )
 
 // A heavy operation - a package transaction, a backup, a filesystem check, a
@@ -57,7 +57,7 @@ func (r scopeRunner) wrap(taskID string, family opspec.ResourceFamily,
 	if !ok {
 		return argv, false
 	}
-	return runscope.Prefixed(prefix, argv), true
+	return process.Prefixed(prefix, argv), true
 }
 
 // prefix returns the systemd-run invocation that puts a tool under a scope
@@ -137,17 +137,17 @@ func (s *Server) scopeContext(ctx context.Context, taskID string,
 		runner = newScopeRunner(s.log)
 	}
 	if _, ok := runner.prefix(taskID, family, opspec.FamilyLimits(family)); !ok {
-		return runscope.With(ctx, nil)
+		return process.With(ctx, nil)
 	}
 	if s.log != nil {
 		s.log.Info("the operation runs in a resource scope",
 			"task_id", taskID, "family", string(family), "unit", scopeUnitPrefix+"*")
 	}
-	return runscope.With(ctx, func(argv []string) []string {
+	return process.With(ctx, func(argv []string) []string {
 		// The prefix is computed anew for every tool, so each gets its own
 		// unit number; only the presence of a scope was decided above.
 		prefix, _ := runner.prefix(taskID, family, opspec.FamilyLimits(family))
-		return runscope.Prefixed(prefix, argv)
+		return process.Prefixed(prefix, argv)
 	})
 }
 

@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ultherego/flotestro/internal/helper/runscope"
+	"github.com/ultherego/flotestro/internal/platform/process"
 )
 
 // Progress describes the progress of a package transaction.
@@ -75,7 +75,7 @@ func runWithProgress(ctx context.Context, timeout time.Duration, progress Progre
 
 	// The tool was checked above; what runs is the tool behind the resource
 	// scope the context asks for, when the helper put one there.
-	argv := runscope.Apply(ctx, append([]string{path}, args...))
+	argv := process.Apply(ctx, append([]string{path}, args...))
 
 	cmd := exec.CommandContext(cmdCtx, argv[0], argv[1:]...)
 	cmd.Env = environment()

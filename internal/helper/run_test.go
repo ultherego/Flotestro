@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/ultherego/flotestro/internal/helper/runscope"
 	"github.com/ultherego/flotestro/internal/opspec"
+	"github.com/ultherego/flotestro/internal/platform/process"
 )
 
 // TestScopeWrapsTheSameArgvUnderSystemdRun: the tool and its arguments reach
@@ -142,12 +142,12 @@ func TestScopeContextCarriesThePrefixOfTheRequest(t *testing.T) {
 		"--",
 		"/usr/bin/restic", "backup", "/srv",
 	}
-	if got := runscope.Apply(ctx, argv); !reflect.DeepEqual(got, want) {
+	if got := process.Apply(ctx, argv); !reflect.DeepEqual(got, want) {
 		t.Fatalf("argv = %q\nexpected %q", got, want)
 	}
 	// Two tools of the same operation do not share a backing array.
-	first := runscope.Apply(ctx, []string{"/usr/bin/restic", "check"})
-	second := runscope.Apply(ctx, []string{"/usr/bin/restic", "forget"})
+	first := process.Apply(ctx, []string{"/usr/bin/restic", "check"})
+	second := process.Apply(ctx, []string{"/usr/bin/restic", "forget"})
 	if first[len(first)-1] != "check" || second[len(second)-1] != "forget" {
 		t.Fatalf("the tools were mixed up: %q and %q", first, second)
 	}
@@ -159,7 +159,7 @@ func TestScopeContextCarriesThePrefixOfTheRequest(t *testing.T) {
 
 	// A family without limits clears the scope, even one recorded higher up.
 	bare := server.scopeContext(ctx, "task-1", opspec.FamilyStorage)
-	if got := runscope.Apply(bare, argv); !reflect.DeepEqual(got, argv) {
+	if got := process.Apply(bare, argv); !reflect.DeepEqual(got, argv) {
 		t.Fatalf("argv = %q, expected the plain %q", got, argv)
 	}
 }

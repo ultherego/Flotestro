@@ -1,6 +1,12 @@
-// Package runscope carries the resource scope of an operation down to the
-// modules that start their own tools.
-package runscope
+// Package process carries the resource scope of an operation down to whatever
+// starts a tool of the host.
+//
+// It used to live under internal/helper, and internal/packages and
+// internal/modules/backup imported it from there - so the root helper owned a
+// piece of plumbing that packages which are not the helper depend on, and the
+// dependency ran the wrong way round. Nothing here knows about the helper: it
+// is a context value and two functions over an argument array.
+package process
 
 import "context"
 
