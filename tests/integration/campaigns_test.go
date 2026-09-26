@@ -117,19 +117,70 @@ func (h *harness) campaignTargets(id string) []campaignTargetView {
 	return result.Items
 }
 
-// awaitCampaign waits for one of the expected campaign states.
+// offlineHoldGrace is how much longer a campaign may wait once the panel says it
+// is holding a target for a host that is not connected. An agent restarted by
+// another test is back within a sampling interval or two, and the campaign waiting
+// for it is the offline policy doing its job.
+const offlineHoldGrace = 2 * time.Minute
+
+// heldForAnOfflineHost names a target the campaign is holding because its host is
+// away, or the empty string when none is.
+func heldForAnOfflineHost(targets []campaignTargetView) string {
+	for _, target := range targets {
+		if target.State == "queued_offline" {
+			return target.Hostname + " (" + target.Message + ")"
+		}
+	}
+	return ""
+}
+
+// describeTargets is what the panel knows about a campaign that did not move: the
+// state of every target and the reason it carries.
+func describeTargets(targets []campaignTargetView) string {
+	if len(targets) == 0 {
+		return "; the campaign has no targets"
+	}
+	lines := make([]string, 0, len(targets))
+	for _, target := range targets {
+		line := "\n    " + target.Hostname + ": " + target.State
+		if target.ErrorCode != "" {
+			line += " (" + target.ErrorCode + ")"
+		}
+		if target.Message != "" {
+			line += " - " + target.Message
+		}
+		lines = append(lines, line)
+	}
+	return ";" + strings.Join(lines, "")
+}
+
+// awaitCampaign waits for one of the expected campaign states. A campaign that
+// does not get there is not a fact on its own: its targets say what it is waiting
+// for, so the wait is extended once for a host the panel is holding, and the
+// failure names every target and its reason instead of the campaign's state alone.
 func (h *harness) awaitCampaign(id string, wanted map[string]bool, timeout time.Duration) campaignView {
 	h.t.Helper()
 	deadline := time.Now().Add(timeout)
+	extended := false
 	var last campaignView
-	for time.Now().Before(deadline) {
+	for {
 		last = h.campaign(id)
 		if wanted[last.State] {
 			return last
 		}
+		if !time.Now().Before(deadline) {
+			if held := heldForAnOfflineHost(h.campaignTargets(id)); held != "" && !extended {
+				h.t.Logf("the campaign is holding %s; waiting %s more", held, offlineHoldGrace)
+				extended = true
+				deadline = time.Now().Add(offlineHoldGrace)
+				continue
+			}
+			break
+		}
 		time.Sleep(2 * time.Second)
 	}
-	h.t.Fatalf("campaign %s did not reach the expected state (it is %s)", id, last.State)
+	h.t.Fatalf("campaign %s did not reach the expected state (it is %s)%s",
+		id, last.State, describeTargets(h.campaignTargets(id)))
 	return last
 }
 
