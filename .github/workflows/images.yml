@@ -275,9 +275,61 @@ jobs:
   # The images themselves. One leg of the matrix per target: they are
   # independent, and a relay that fails to build must not hide a control
   # plane that builds.
+  # A pull request proves the Containerfile builds, and holds nothing it could
+  # publish with. The job below carries the registry and signing grants; a
+  # permission set cannot be made conditional, so the only way for code from a
+  # pull request not to run inside those grants is for it to run in another job.
+  image-check:
+    name: ${{ matrix.target }} (check)
+    needs: [context, compose]
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [control-plane, relay, admin-tools]
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          # Nothing here pushes anything, so the token does not belong in the
+          # checkout's git configuration either.
+          persist-credentials: false
+
+      - uses: docker/setup-qemu-action@v3.2.0
+        # Only the tools image needs it: it installs two packages of the
+        # distribution, which has to run on the architecture it installs for.
+        if: matrix.target == 'admin-tools'
+
+      - uses: docker/setup-buildx-action@v3.7.1
+
+      - uses: docker/build-push-action@v6.9.0
+        with:
+          context: .
+          file: docker/Containerfile
+          target: ${{ matrix.target }}
+          platforms: linux/amd64,linux/arm64
+          # Nothing is loaded and nothing is kept: a multi-platform build
+          # cannot go into the local daemon, and what is being proved is that
+          # the Containerfile builds at all. The bill of materials and the
+          # provenance are attestations on a pushed manifest, so they belong to
+          # the publishing job and not here.
+          push: false
+          provenance: false
+          build-args: |
+            VERSION=0.0.0-check
+            COMMIT=${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.target }}
+
   images:
     name: ${{ matrix.target }}
     needs: [context, compose]
+    # Never on a pull request: this job holds the grants to publish, and code
+    # that has not been merged yet does not run inside them. The pull-request
+    # build is image-check above.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
