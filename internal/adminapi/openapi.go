@@ -15,6 +15,7 @@ import (
 	"github.com/ultherego/flotestro/internal/campaigns"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/jobs"
+	"github.com/ultherego/flotestro/internal/monitoring"
 	"github.com/ultherego/flotestro/internal/notify"
 	"github.com/ultherego/flotestro/internal/opspec"
 	"github.com/ultherego/flotestro/internal/policy"
@@ -755,7 +756,170 @@ func alertNoteBodySchema(what string) map[string]any {
 	}
 }
 
+// lifecycleBodySchema is the body of a change of a host's lifecycle state. The
+// reason is required everywhere: a host cut off without one is a host nobody
+// will know in a week why it is not working.
+func lifecycleBodySchema(reason string) map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"reason":              map[string]any{"type": "string", "description": reason},
+			"revoke_certificates": map[string]any{"type": "boolean", "description": "Revoke the host's certificates as well; for a suspected key leak."},
+		},
+		"required": []string{"reason"},
+	}
+}
+
+// hostSelectorSchema is the scope of a rule: the flat fields, or an expression
+// for a scope they cannot say.
+func hostSelectorSchema() map[string]any {
+	return map[string]any{
+		"type":        "object",
+		"description": "Which hosts the rule watches. Left empty it watches every host the reader may see.",
+		"properties": map[string]any{
+			"site":        map[string]any{"type": "string"},
+			"environment": map[string]any{"type": "string"},
+			"os_family":   map[string]any{"type": "string"},
+			"tags": map[string]any{"type": "array", "items": map[string]any{"type": "string"},
+				"description": "Keeps the hosts carrying every one of the tags, 'key' or 'key=value' as recorded on the host."},
+			"groups": map[string]any{"type": "array", "items": map[string]any{"type": "string"},
+				"description": "Keeps the hosts of any of the saved groups, named by identifier or by name."},
+			"owner":      map[string]any{"type": "string"},
+			"expression": map[string]any{"type": "string", "description": "The text form of a campaign selector, for a scope the flat fields cannot say."},
+		},
+	}
+}
+
+// alertRuleBodySchema is the rule an operator writes down. The vocabularies come
+// from the monitoring package: a contract that restated them would be free to
+// disagree with the evaluator.
+var alertRuleBodySchema = map[string]any{
+	"type": "object",
+	"properties": map[string]any{
+		"name":      map[string]any{"type": "string"},
+		"metric":    map[string]any{"type": "string", "enum": monitoring.Metrics},
+		"operator":  map[string]any{"type": "string", "enum": monitoring.Operators},
+		"threshold": map[string]any{"type": "number", "description": "Compared with the reading of the metric; a number, never NaN or an infinity."},
+		"for_minutes": map[string]any{"type": "integer", "minimum": 0, "maximum": 24 * 60,
+			"description": "How long the comparison has to hold before the alert fires; zero fires on the first reading."},
+		"severity": map[string]any{"type": "string", "enum": monitoring.Severities},
+		"selector": hostSelectorSchema(),
+		"enabled":  map[string]any{"type": []string{"boolean", "null"}, "description": "Left out, a rule written down is a rule meant to run."},
+		"expected_cadence_seconds": map[string]any{"type": "integer",
+			"minimum":     int(monitoring.SamplingInterval / time.Second),
+			"maximum":     int(monitoring.MaxCadence / time.Second),
+			"description": "How often a reading is expected. It cannot be faster than the agents sample."},
+		"max_gap_seconds": map[string]any{"type": "integer", "maximum": int(monitoring.MaxCadence / time.Second),
+			"description": "The widest gap between readings that is not a gap. It cannot be narrower than the expected cadence, or a reading that arrives on time opens one."},
+		"no_data_policy": map[string]any{"type": "string", "enum": monitoring.NoDataPolicies,
+			"description": "What the evaluator does when the readings stop. A rule that does not say ignores gaps."},
+	},
+	"required": []string{"name", "metric", "operator", "severity"},
+}
+
 var requestSchemas = map[string]map[string]any{
+	"POST /api/v1/monitoring/rules":     alertRuleBodySchema,
+	"PUT /api/v1/monitoring/rules/{id}": alertRuleBodySchema,
+	"POST /api/v1/secrets": {
+		"type": "object",
+		"properties": map[string]any{
+			"name": map[string]any{"type": "string", "pattern": `^[a-z0-9][a-z0-9._-]{1,62}$`,
+				"description": "Lower-case letters, digits, a dot, a dash and an underscore, 2 to 63 characters."},
+			"description": map[string]any{"type": "string"},
+			"value": map[string]any{"type": "string",
+				"description": "The only place the value appears in the API, and only in this direction: no route ever gives it back."},
+			"reason": map[string]any{"type": "string", "description": "What the secret is for; kept in the audit trail."},
+		},
+		"required": []string{"name", "value"},
+	},
+	"POST /api/v1/principals": {
+		"type": "object",
+		"properties": map[string]any{
+			"subject":      map[string]any{"type": "string", "description": "The identity as the directory or the token issuer names it."},
+			"display_name": map[string]any{"type": "string"},
+			"kind":         map[string]any{"type": "string", "enum": []string{"user", "service"}, "description": "Left out, the store's own default decides."},
+			"roles": map[string]any{"type": "array", "description": "The bindings to grant at once.",
+				"items": map[string]any{"type": "object", "properties": mergedProperties(bindingScope(), map[string]any{
+					"role":        map[string]any{"type": "string", "enum": roleNames()},
+					"valid_until": map[string]any{"type": "string", "format": "date-time", "description": "An RFC 3339 moment the binding ends at; empty means until revoked."},
+				}), "required": []string{"role"}},
+			},
+			"issue_token": map[string]any{"type": "boolean",
+				"description": "Issue an API token together with the identity. Its value is in that one answer and nowhere else."},
+			"token_ttl_hours": map[string]any{"type": "integer", "minimum": 1, "maximum": int(maxTokenTTL / time.Hour),
+				"description": "How long that token lives; left out it takes the panel's default."},
+			"reason": map[string]any{"type": "string", "description": "What the access is granted for; the order moves the access rules of the whole fleet."},
+		},
+		"required": []string{"subject"},
+	},
+	// The key is the registered pattern, wildcard and all: the table is looked up
+	// by it, and the document normalises it to {key} only for the reader.
+	"PUT /api/v1/budgets/{key...}": {
+		"type": "object",
+		"properties": map[string]any{
+			"capacity": map[string]any{"type": "integer", "minimum": 1,
+				"description": "How many changes of this kind may run at once under this key."},
+			"note": map[string]any{"type": "string", "description": "Why the budget is what it is."},
+		},
+		"required": []string{"capacity"},
+	},
+	"PUT /api/v1/me/preferences": {
+		"type": "object",
+		"properties": map[string]any{
+			"time_zone": map[string]any{"type": "string", "maxLength": maxTimeZoneLength,
+				"description": "An IANA zone name the panel reads times in; empty for the browser's own zone."},
+			"page_size": map[string]any{"type": "integer", "minimum": 0, "maximum": maxPreferredPageSize,
+				"description": "Rows per page in the lists; zero for the default."},
+			"landing_page": map[string]any{"type": "string", "maxLength": maxLandingPageLength,
+				"description": "A path of this panel, such as /hosts; empty for the dashboard."},
+			"language": map[string]any{"type": "string", "enum": []string{"", "en", "pl"}, "description": "Empty leaves the choice to the browser."},
+			"theme":    map[string]any{"type": "string", "enum": []string{"", "mocha-peach", "mocha-green", "latte"}},
+		},
+	},
+	"POST /api/v1/hosts/{id}/quarantine": lifecycleBodySchema(
+		"Why the host is cut off from the fleet; required."),
+	"POST /api/v1/hosts/{id}/quarantine/release": lifecycleBodySchema(
+		"Why the host is taken back into the fleet; required."),
+	"POST /api/v1/hosts/{id}/decommission": {
+		"type": "object",
+		"properties": map[string]any{
+			"reason": map[string]any{"type": "string", "description": "Why the panel stops trusting the host; required."},
+			"typed_confirmation": map[string]any{"type": "string",
+				"description": "The host's own hostname, retyped. It has to match exactly: this is the one place where the operator is made to look at which machine is being ended."},
+			"revoke_certificates": map[string]any{"type": "boolean", "description": "Revoke the host's certificates as well."},
+			"local_identity_wipe": map[string]any{"type": []string{"boolean", "null"},
+				"description": "Ask the agent to remove its identity and journal and to disable its service, once the panel has revoked the certificates. Left out, the panel's own default decides."},
+			"revoke_immediately_if_offline": map[string]any{"type": []string{"boolean", "null"},
+				"description": "Revoke the certificates of a host that has no session instead of waiting for it to come back. Left out, the panel's own default decides."},
+		},
+		"required": []string{"reason", "typed_confirmation"},
+	},
+	"POST /api/v1/hosts/{id}/maintenance": {
+		"type": "object",
+		"properties": map[string]any{
+			"until":            map[string]any{"type": "string", "format": "date-time", "description": "When the window closes, as an RFC 3339 moment. Send this or duration_minutes, not both."},
+			"duration_minutes": map[string]any{"type": "integer", "minimum": 1, "description": "How long the window lasts from now. Send this or until."},
+			"reason":           map[string]any{"type": "string", "description": "Kept with the window and shown wherever the host is silenced."},
+			"clear":            map[string]any{"type": "boolean", "description": "Close the window early; the other fields are then ignored."},
+		},
+	},
+	"PUT /api/v1/hosts/{id}/tags": {
+		"type": "object",
+		"properties": map[string]any{
+			"tags": map[string]any{"type": "array", "items": map[string]any{"type": "string"},
+				"description": "The whole list, not a change to it: a tag left out is a tag removed."},
+		},
+		"required": []string{"tags"},
+	},
+	"POST /api/v1/tags/rename": {
+		"type": "object",
+		"properties": map[string]any{
+			"from":   map[string]any{"type": "string", "description": "The tag as it is now."},
+			"to":     map[string]any{"type": "string", "description": "The tag it becomes, on every host the caller can see."},
+			"reason": map[string]any{"type": "string", "description": "Required: a rename touches every host carrying the tag."},
+		},
+		"required": []string{"from", "to", "reason"},
+	},
 	// A transition of one job or one campaign: why, and what the approver saw.
 	"POST /api/v1/jobs/{id}/approve": transitionBodySchema,
 	"POST /api/v1/jobs/{id}/cancel":  transitionBodySchema,
