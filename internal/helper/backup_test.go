@@ -56,12 +56,12 @@ func TestABackupIsBoundToThePlanItWasApprovedWith(t *testing.T) {
 	}
 
 	held := &helperv1.BackupRequest{PlanHash: current.PlanHash}
-	if refusal := checkBackupPlanDigest(ctx, adapter, order, held, false); refusal != nil {
+	if refusal := checkBackupPlanDigest(ctx, adapter, order, held, false, false); refusal != nil {
 		t.Fatalf("the plan that still holds was refused: %s %s", refusal.GetErrorCode(), refusal.GetMessage())
 	}
 
 	foreign := &helperv1.BackupRequest{PlanHash: "0000000000000000000000000000000000000000000000000000000000000000"}
-	refusal := checkBackupPlanDigest(ctx, adapter, order, foreign, false)
+	refusal := checkBackupPlanDigest(ctx, adapter, order, foreign, false, false)
 	if refusal == nil {
 		t.Fatal("a digest from another plan was accepted")
 	}
@@ -71,13 +71,13 @@ func TestABackupIsBoundToThePlanItWasApprovedWith(t *testing.T) {
 
 	// A check hashes another plan than a copy - it describes another
 	// change - so the digest of a copy does not let a check through.
-	if refusal := checkBackupPlanDigest(ctx, adapter, order, held, true); refusal == nil {
+	if refusal := checkBackupPlanDigest(ctx, adapter, order, held, true, false); refusal == nil {
 		t.Error("the digest of a copy let a check through")
 	}
 
 	// The single-host convenience that is left: an order without a digest is the
 	// operator ordering a copy from the host's own screen, and it is not refused.
-	if refusal := checkBackupPlanDigest(ctx, adapter, order, &helperv1.BackupRequest{}, false); refusal != nil {
+	if refusal := checkBackupPlanDigest(ctx, adapter, order, &helperv1.BackupRequest{}, false, false); refusal != nil {
 		t.Errorf("an order without a plan was refused: %s", refusal.GetErrorCode())
 	}
 }
@@ -96,7 +96,7 @@ func TestARepositoryThatMovedRefusesTheApprovedPlan(t *testing.T) {
 	adapter := &planningAdapter{state: moved}
 
 	refusal := checkBackupPlanDigest(ctx, adapter, order,
-		&helperv1.BackupRequest{PlanHash: approved.PlanHash}, false)
+		&helperv1.BackupRequest{PlanHash: approved.PlanHash}, false, false)
 	if refusal == nil || refusal.GetErrorCode() != errorStalePlan {
 		t.Fatalf("refusal = %+v, expected %s", refusal, errorStalePlan)
 	}

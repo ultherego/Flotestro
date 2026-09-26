@@ -121,7 +121,10 @@ func (s *Server) applyBackup(ctx context.Context, request *helperv1.HelperReques
 		}
 
 	case helperv1.BackupRequest_OPERATION_RUN:
-		if refusal := checkBackupPlanDigest(actionCtx, adapter, order, action, false); refusal != nil {
+		// A copy binds to the plan when the order carries one. It is not required:
+		// the first copy of a repository creates it, and a repository that is not
+		// there yet cannot be planned against.
+		if refusal := checkBackupPlanDigest(actionCtx, adapter, order, action, false, false); refusal != nil {
 			return refusal
 		}
 		result, err := adapter.Run(actionCtx, order, receiver)
@@ -144,7 +147,9 @@ func (s *Server) applyBackup(ctx context.Context, request *helperv1.HelperReques
 		return response
 
 	case helperv1.BackupRequest_OPERATION_VERIFY:
-		if refusal := checkBackupPlanDigest(actionCtx, adapter, order, action, true); refusal != nil {
+		// A check is not a change and is not held to a plan: it reads what is
+		// there, which is the whole of what it is for.
+		if refusal := checkBackupPlanDigest(actionCtx, adapter, order, action, true, false); refusal != nil {
 			return refusal
 		}
 		result, err := adapter.Verify(actionCtx, order)
@@ -161,7 +166,7 @@ func (s *Server) applyBackup(ctx context.Context, request *helperv1.HelperReques
 		// A restore is bound to its plan like a copy and a check: the operator
 		// approved unpacking out of the repository as the plan described it, and a
 		// repository that has taken another copy or lost one since is not that.
-		if refusal := checkBackupPlanDigest(actionCtx, adapter, order, action, false); refusal != nil {
+		if refusal := checkBackupPlanDigest(actionCtx, adapter, order, action, false, true); refusal != nil {
 			return refusal
 		}
 		// The target is checked right before unpacking: only the host knows what
@@ -254,9 +259,16 @@ func backupPlanResponse(state backup.State, definition backup.Definition,
 // checkBackupPlanDigest compares the plan computed now with the one the
 // operator consented to.
 func checkBackupPlanDigest(ctx context.Context, adapter backup.Adapter,
-	order backup.Order, action *helperv1.BackupRequest, verification bool) *helperv1.HelperResponse {
+	order backup.Order, action *helperv1.BackupRequest, verification, required bool) *helperv1.HelperResponse {
 	expected := action.GetPlanHash()
 	if expected == "" {
+		if required {
+			// The panel sent no plan for an operation that is bound to one. The
+			// check used to pass on an empty hash, which made the binding a thing
+			// that happened when somebody remembered it.
+			return reject(errorStalePlan,
+				"this operation is bound to a plan of the repository and the order carries none; read the repository and order again")
+		}
 		return nil
 	}
 	state, err := adapter.Plan(ctx, order)

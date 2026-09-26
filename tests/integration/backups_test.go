@@ -52,6 +52,9 @@ type backupDetailView struct {
 		TotalSizeBytes    *uint64 `json:"total_size_bytes"`
 		UnavailableReason string  `json:"unavailable_reason"`
 	} `json:"state"`
+	Plan struct {
+		PlanHash string `json:"plan_hash"`
+	} `json:"plan"`
 	Outcome struct {
 		SnapshotID string  `json:"snapshot_id"`
 		BytesAdded *uint64 `json:"bytes_added"`
@@ -184,6 +187,24 @@ func TestBackupFullCycle(t *testing.T) {
 	restore["snapshot_id"] = snapshot.ID
 	restore["target"] = target
 	restore["overwrite"] = "empty-target"
+
+	// A restore is bound to the set of copies the operator chose from. Without
+	// the plan the order is refused before it reaches the host: the binding used
+	// to happen only when somebody remembered to send the hash.
+	unbound := map[string]any{}
+	for key, value := range restore {
+		unbound[key] = value
+	}
+	delete(unbound, "plan_hash")
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations", map[string]any{
+		"action": "backup.restore", "reason": backupReason,
+		"payload": map[string]any{"backup": unbound},
+	}, nil, http.StatusBadRequest)
+
+	if detail.Plan.PlanHash == "" {
+		t.Fatal("the repository plan carries no fingerprint to bind the restore to")
+	}
+	restore["plan_hash"] = detail.Plan.PlanHash
 	restoration, attempts := h.runOperation(host.ID, map[string]any{
 		"action": "backup.restore", "reason": backupReason,
 		"payload": map[string]any{"backup": restore},

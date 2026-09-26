@@ -1004,7 +1004,7 @@ var actionSpecs = map[ActionType]actionSpec{
 	ActionBackupVerify: {mutating: true, capability: "backup", permission: "backup.verify",
 		timeoutSeconds: 3600, risk: RiskMedium, lockClass: LockBackup, maxOutputBytes: 512 << 10, verifier: VerifierNone},
 	// A restore unpacks old state onto a running system.
-	ActionBackupRestore: {mutating: true, capability: "backup", permission: "backup.restore",
+	ActionBackupRestore: {mutating: true, capability: "backup", permission: "backup.restore", requiresPlan: true,
 		timeoutSeconds: 7200, risk: RiskCritical, lockClass: LockBackup, maxOutputBytes: 512 << 10, verifier: VerifierRestoreTarget},
 
 	// A package source is a decision about trust, not about a version: from that
@@ -1746,6 +1746,18 @@ func CheckPlanBinding(action ActionType, payload Payload) error {
 		if payload.Certificate == nil || payload.Certificate.PlanHash == "" {
 			return &RefusalError{Code: RefusalPlanBindingMissing,
 				Err: fmt.Errorf("%s needs the hash of a certificate plan computed on the host", action)}
+		}
+	case ActionBackupRestore:
+		// A restore is bound to the set of copies the operator chose from. The
+		// helper already checked a plan when one was given and nothing required
+		// one, so the binding happened when somebody remembered it.
+		//
+		// A copy is deliberately not held to the same rule: the first copy of a
+		// repository creates it, and there is nothing to plan against yet. It
+		// still binds whenever the panel carries a plan, which it now does.
+		if payload.Backup == nil || payload.Backup.PlanHash == "" {
+			return &RefusalError{Code: RefusalPlanBindingMissing,
+				Err: fmt.Errorf("%s needs the hash of a repository plan computed on the host", action)}
 		}
 	}
 	return nil

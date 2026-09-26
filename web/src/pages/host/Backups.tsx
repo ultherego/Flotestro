@@ -68,6 +68,7 @@ type AttemptDetail = {
   kind?: string;
   message?: string;
   state?: RepositoryState;
+  plan?: { plan_hash?: string };
   outcome?: { snapshot_id?: string; bytes_added?: number; message?: string };
 };
 
@@ -137,6 +138,9 @@ export function Backups() {
   const [editing, setEditing] = useState<Definition | null>(null);
   const [selected, setSelected] = useState("");
   const [planJob, setPlanJob] = useState("");
+  // Which definition the repository was read for. A plan belongs to one
+  // definition, and a copy or a restore is bound to the plan of its own.
+  const [planFor, setPlanFor] = useState("");
   const confirm = useConfirm();
   const toast = useToast();
 
@@ -159,6 +163,11 @@ export function Backups() {
   const planAttempts = plan.data?.items ?? [];
   const lastPlan = planAttempts[planAttempts.length - 1];
   const repositoryState = lastPlan?.detail?.state;
+  // The fingerprint of what the operator is looking at. A copy and a restore
+  // carry it, so a repository that has taken or lost a copy since refuses the
+  // order instead of quietly working on something else.
+  const planHash = lastPlan?.detail?.plan?.plan_hash ?? "";
+  const planHashFor = (name: string) => (planFor === name ? planHash : "");
 
   const history = useQuery({
     queryKey: ["backup-runs", host.id, selected],
@@ -180,7 +189,11 @@ export function Backups() {
       // The message strip is at the top of the module and the copy list
       // may be far below it; the toast names the job wherever the page is.
       toast.success(text, { link: { to: `/hosts/${host.id}/jobs`, label: t("Jobs") } });
-      if ((variables as { action?: string }).action === "backup.plan") setPlanJob(job.id);
+      if ((variables as { action?: string }).action === "backup.plan") {
+        setPlanJob(job.id);
+        const ordered = (variables as { payload?: { backup?: { id?: string } } }).payload?.backup?.id;
+        setPlanFor(ordered ?? "");
+      }
       setIntent(null);
       queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
       queryClient.invalidateQueries({ queryKey: ["backups", host.id] });
@@ -222,6 +235,7 @@ export function Backups() {
 
   const definitionRequest = (item: Definition, extra: Record<string, unknown> = {}) => ({
     id: item.name,
+    plan_hash: planHashFor(item.name),
     tool: item.tool,
     repository: item.repository ?? "",
     paths: item.paths ?? [],
