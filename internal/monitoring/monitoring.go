@@ -416,10 +416,18 @@ func (s *Store) RefreshSettings(ctx context.Context) error {
 	return nil
 }
 
-// SaveSettings validates and stores the settings of the installation, and
-// puts them in force on this replica at once. A zero field is cleared in the
-// row, which hands that field back to the environment.
-func (s *Store) SaveSettings(ctx context.Context, next Options, actor string) (Options, Stored, error) {
+// settingsWriter is the pool or the transaction of the caller.
+type settingsWriter interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// SaveSettingsTx validates and stores the settings inside the transaction of
+// the caller and does NOT put them in force: that is a change in this process
+// which no rollback can undo, so it waits for the commit and PutInForce.
+// A zero field is cleared in the row, which hands that field back to the
+// environment.
+func (s *Store) SaveSettingsTx(ctx context.Context, q settingsWriter,
+	next Options, actor string) (Options, Stored, error) {
 	effective := s.options.Overlay(next).withDefaults()
 	// The validation of the start-up, on the write: a pair that deletes a
 	// reading still on its way is refused before it is stored, never after.
@@ -428,7 +436,7 @@ func (s *Store) SaveSettings(ctx context.Context, next Options, actor string) (O
 	}
 	stored := Stored{Present: true, UpdatedBy: actor, Options: next}
 	var updatedAt time.Time
-	if err := s.pool.QueryRow(ctx, storedSettingsWrite,
+	if err := q.QueryRow(ctx, storedSettingsWrite,
 		nullSeconds(next.RawRetention), nullSeconds(next.RollupRetention),
 		nullSeconds(next.MaxLateness), nullSeconds(next.RawQueryWindow),
 		nullSeconds(next.ClockSkewLimit), nullCount(next.PartitionsAhead),
@@ -436,7 +444,31 @@ func (s *Store) SaveSettings(ctx context.Context, next Options, actor string) (O
 		return Options{}, Stored{}, err
 	}
 	stored.UpdatedAt = &updatedAt
-	s.live.Store(&effective)
+	return effective, stored, nil
+}
+
+// PutInForce makes the settings the ones the workers of this replica read. It
+// follows the commit, never precedes it: a replica running on settings the
+// database does not hold would apply a retention nobody stored, and its sweep
+// deletes.
+func (s *Store) PutInForce(effective Options) { s.live.Store(&effective) }
+
+// SaveSettings validates and stores the settings of the installation, and
+// puts them in force on this replica at once.
+func (s *Store) SaveSettings(ctx context.Context, next Options, actor string) (Options, Stored, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Options{}, Stored{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	effective, stored, err := s.SaveSettingsTx(ctx, tx, next, actor)
+	if err != nil {
+		return Options{}, Stored{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Options{}, Stored{}, err
+	}
+	s.PutInForce(effective)
 	return effective, stored, nil
 }
 

@@ -223,6 +223,17 @@ func ChannelSecretName(channelID string) string {
 // computed with an empty key is a signature only in shape.
 const CodeWebhookSecretRequired = "webhook_secret_required"
 
+// CodeChannelLeftBehind: the credential of a new channel could not be sealed
+// and the row created for it could not be removed either, so a channel nobody
+// asked for is on record. It sends nothing - it was committed switched off -
+// but it is there and somebody has to take it away.
+const CodeChannelLeftBehind = "channel_left_behind"
+
+// CodeChannelLeftDisabled: the change to the channel is stored, its credential
+// is not, so the channel was switched off rather than left sending under a
+// credential that no longer matches its configuration.
+const CodeChannelLeftDisabled = "channel_left_disabled"
+
 // WebhookConfig is the address of a webhook of the installation's own.
 type WebhookConfig struct {
 	URL string `json:"url"`

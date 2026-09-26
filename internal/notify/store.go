@@ -267,9 +267,15 @@ func (s *Store) Create(ctx context.Context, channel Channel) (*Channel, error) {
 		// The row was committed disabled: the secret store joins no transaction,
 		// so a crash leaves a channel that sends nothing rather than unsigned.
 		if err := s.putCredential(ctx, id, credential, channel.CreatedBy); err != nil {
-			// A channel whose credential could not be sealed is not a
-			// channel: the row goes, and the refusal names the store.
-			_, _ = s.pool.Exec(ctx, `delete from notification_channels where id = $1`, id)
+			// A channel whose credential could not be sealed is not a channel:
+			// the row goes, and the refusal names the store. If the row cannot
+			// go either, the refusal says so instead of hiding it - somebody
+			// has to know there is a channel to remove.
+			if _, undo := s.pool.Exec(ctx, `delete from notification_channels where id = $1`, id); undo != nil {
+				return nil, Error{Code: CodeChannelLeftBehind, Message: fmt.Sprintf(
+					"the credential was not sealed (%v) and the channel %s created for it was not removed either (%v); it is switched off and has to be removed by hand",
+					err, id, undo)}
+			}
 			return nil, err
 		}
 		if channel.Enabled {
@@ -277,7 +283,9 @@ func (s *Store) Create(ctx context.Context, channel Channel) (*Channel, error) {
 				update notification_channels
 				   set enabled = true, revision = revision + 1, updated_at = now()
 				 where id = $1`, id); err != nil {
-				return nil, err
+				return nil, Error{Code: CodeChannelLeftDisabled, Message: fmt.Sprintf(
+					"the channel %s was created with its credential but could not be switched on (%v); switch it on when the database answers again",
+					id, err)}
 			}
 		}
 	}
@@ -423,10 +431,31 @@ func (s *Store) Update(ctx context.Context, id string, channel Channel) (*Channe
 	}
 	if credential != "" {
 		if err := s.putCredential(ctx, id, credential, channel.CreatedBy); err != nil {
-			return nil, err
+			// The configuration is stored and the credential is not, so the
+			// channel would sign with one that no longer belongs to it. It is
+			// switched off instead - the same choice a new channel makes - and
+			// the refusal says which state it was left in.
+			return nil, s.leaveDisabled(ctx, id, err)
 		}
 	}
 	return s.Get(ctx, id)
+}
+
+// leaveDisabled switches a channel off after a change whose credential did not
+// follow, and names what was left behind. A channel that sends under a
+// credential its configuration no longer matches is worse than one that sends
+// nothing.
+func (s *Store) leaveDisabled(ctx context.Context, id string, cause error) error {
+	if _, off := s.pool.Exec(ctx, `
+		update notification_channels set enabled = false, revision = revision + 1, updated_at = now()
+		 where id = $1`, id); off != nil {
+		return Error{Code: CodeChannelLeftBehind, Message: fmt.Sprintf(
+			"the credential of the channel %s was not stored (%v) and the channel could not be switched off either (%v); it may be sending under the credential it had",
+			id, cause, off)}
+	}
+	return Error{Code: CodeChannelLeftDisabled, Message: fmt.Sprintf(
+		"the change to the channel %s is stored, its credential is not (%v), so the channel was switched off",
+		id, cause)}
 }
 
 // DeleteTx removes the channel row inside the transaction of the caller and

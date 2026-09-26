@@ -488,12 +488,18 @@ func (s *Server) handleSetMonitoringSettings(w http.ResponseWriter, r *http.Requ
 	}
 
 	before := settingsOf(s.monitoring.Settings())
-	effective, stored, err := s.monitoring.SaveSettings(r.Context(), proposed, principal.Subject)
+	tx, err := s.pool.Begin(r.Context())
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	s.audit.Record(r.Context(), audit.Event{
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	effective, stored, err := s.monitoring.SaveSettingsTx(r.Context(), tx, proposed, principal.Subject)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := s.audit.RecordTx(r.Context(), tx, audit.Event{
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
 		Action: "settings.monitoring.write", TargetType: "monitoring_settings", TargetID: "",
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
@@ -507,7 +513,17 @@ func (s *Server) handleSetMonitoringSettings(w http.ResponseWriter, r *http.Requ
 		},
 		Before: map[string]any{"settings": before},
 		After:  map[string]any{"settings": settingsOf(effective)},
-	})
+	}); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		s.fail(w, err)
+		return
+	}
+	// Only now: a retention that is not stored must not be the one this replica
+	// sweeps by.
+	s.monitoring.PutInForce(effective)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"effective": settingsOf(effective),
 		"stored": map[string]any{
