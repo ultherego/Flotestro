@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 import { FleetVulnerabilities, fleetListAddress, generationState, packagesPreview, severityTone } from "./Vulnerabilities";
-import { patchAddress } from "./Vulnerability";
+import { patchGroups } from "./Vulnerability";
 import { findingMatches, patchAddress as hostPatchAddress, severityRung } from "./host/Vulnerabilities";
 
 /* The fleet screen reads the same findings two ways. The host table is
@@ -134,28 +134,47 @@ describe("findingMatches", () => {
    identifier, the packages in the payload. A finding without a vendor fix
    yields no order - it is a risk to weigh, not something to install. */
 
-describe("patchAddress on the CVE page", () => {
+describe("the patch orders of a CVE", () => {
   const rows = [
     { host_id: "h1", package: "libssl3", state: "affected", vendor_fix: "known" },
     { host_id: "h1", package: "openssl", state: "affected", vendor_fix: "known" },
     { host_id: "h2", package: "libssl3", state: "affected", vendor_fix: "unavailable" },
     { host_id: "h3", package: "libssl3", state: "unknown", vendor_fix: "unknown" },
     { host_id: "h4", package: "libssl3", state: "affected", vendor_fix: "known" },
+    { host_id: "h5", package: "libssl3", state: "affected", vendor_fix: "known" },
   ];
 
-  it("names the hosts with a vendor fix once each and the packages in the payload", () => {
-    const address = patchAddress("CVE-2024-1111", rows);
-    expect(address).not.toBeNull();
-    const query = params(address ?? "");
+  /* The page used to build one order out of the union of every host's packages.
+     h4 and h5 are affected in libssl3 alone; the union handed them openssl as
+     well, which they may not even have installed - and apt refuses an upgrade of
+     a package that is not there, so the order failed on the hosts that needed
+     the least. */
+  it("sends a host the packages it is affected in and no others", () => {
+    const groups = patchGroups("CVE-2024-1111", rows);
+    expect(groups).toHaveLength(2);
+
+    // The largest group first: what most of the fleet needs.
+    const [common, alone] = groups;
+    expect(common.packages).toEqual(["libssl3"]);
+    expect(common.hosts).toEqual(["h4", "h5"]);
+    expect(alone.packages).toEqual(["libssl3", "openssl"]);
+    expect(alone.hosts).toEqual(["h1"]);
+
+    const query = params(common.address);
     expect(query.get("action")).toBe("packages.upgrade");
     expect(query.get("name")).toBe("Patch CVE-2024-1111");
-    expect(query.getAll("host_id")).toEqual(["h1", "h4"]);
-    expect(JSON.parse(query.get("payload") ?? "")).toEqual({ package_upgrade: { packages: ["libssl3", "openssl"] } });
+    expect(query.getAll("host_id")).toEqual(["h4", "h5"]);
+    expect(JSON.parse(query.get("payload") ?? "")).toEqual({ package_upgrade: { packages: ["libssl3"] } });
+
+    // A host without a vendor fix, and one nobody has decided about, are in no
+    // order at all.
+    expect(groups.flatMap((group) => group.hosts)).not.toContain("h2");
+    expect(groups.flatMap((group) => group.hosts)).not.toContain("h3");
   });
 
   it("offers no order when no host has a vendor fix", () => {
-    expect(patchAddress("CVE-2024-1111", rows.slice(2, 4))).toBeNull();
-    expect(patchAddress("CVE-2024-1111", [])).toBeNull();
+    expect(patchGroups("CVE-2024-1111", rows.slice(2, 4))).toEqual([]);
+    expect(patchGroups("CVE-2024-1111", [])).toEqual([]);
   });
 });
 
