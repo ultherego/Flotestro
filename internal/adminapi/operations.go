@@ -313,12 +313,12 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 		ActorType: audit.ActorUser, ActorID: actor,
 		Action: "job.create", TargetType: "job", TargetID: job.ID,
 		RequestID: job.RequestID, Outcome: audit.OutcomeSuccess,
-		Detail: map[string]any{
+		Detail: withPackageSet(map[string]any{
 			"host_id": hostID, "action_type": job.ActionType,
 			"payload_hash": job.PayloadHash, "requires_approval": job.RequiresApproval,
 			"step_up": stepUpProof,
 			"state":   string(job.State),
-		},
+		}, payload),
 	}); err != nil {
 		s.fail(w, err)
 		return
@@ -354,6 +354,16 @@ type transitionRequest struct {
 	// PayloadHash lets the approver confirm that they approve exactly the
 	// plan they saw. A mismatch means a swap between viewing and approving.
 	PayloadHash string `json:"payload_hash,omitempty"`
+}
+
+// withPackageSet adds the digest of the packages an order names, when it names
+// any. One patch becomes an order per package set, so the digest is what tells
+// afterwards which set a host was actually given.
+func withPackageSet(detail map[string]any, payload opspec.Payload) map[string]any {
+	if digest := opspec.PackageSetDigest(payload); digest != "" {
+		detail["package_set_digest"] = digest
+	}
+	return detail
 }
 
 func (s *Server) transitionJob(w http.ResponseWriter, r *http.Request, operation string) {
