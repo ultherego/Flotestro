@@ -26,6 +26,12 @@ const (
 	// footprintFreshness is how old the newest sample may be for the host to
 	// count: three sampling intervals, as the panel counts a host as reporting.
 	footprintFreshness = 3 * time.Minute
+	// firstSampleWait is how long a session may be open before its agent owes a
+	// footprint: one sampling interval for the sample, one for the start, and the
+	// delivery. firstSampleLimit caps the whole wait, so an agent reconnecting in
+	// a loop - whose session is always new - does not hold the test for ever.
+	firstSampleWait  = 150 * time.Second
+	firstSampleLimit = 5 * time.Minute
 )
 
 // footprintPoint is the part of a chart point the gate reads.
@@ -75,6 +81,17 @@ func (h *harness) latestFootprint(hostID string) footprintMetricsView {
 	return view
 }
 
+// sessionOpenedAt is when the panel claimed the session it serves the host on,
+// or nil for a host with no session or one the panel does not date.
+func (h *harness) sessionOpenedAt(hostID string) *time.Time {
+	h.t.Helper()
+	var view struct {
+		SessionOpenedAt *time.Time `json:"session_opened_at"`
+	}
+	h.get("/api/v1/hosts/"+hostID, &view)
+	return view.SessionOpenedAt
+}
+
 // TestAgentFootprintIsWithinBudget is the release gate on the agent's cost: on
 // every online host of the lab the agent's newest sample says it uses less
 // than 128 MiB of resident memory and less than ten per cent of one core.
@@ -92,15 +109,28 @@ func TestAgentFootprintIsWithinBudget(t *testing.T) {
 
 	for _, host := range online {
 		view := h.latestFootprint(host.ID)
-		// An agent samples once a minute and the first sample follows the start; a
-		// host that joined the fleet a moment ago has none yet, which is not a
-		// missing footprint - it is waited for, once.
-		for waited := time.Duration(0); (view.Latest == nil || view.LastSampleAt == nil) && waited < 150*time.Second; waited += 10 * time.Second {
+		// An agent samples once a minute and the first sample follows its start, so
+		// a host that joined a moment ago has none yet - that is waited for. The
+		// clock that counts is the session's and not this test's: an agent that
+		// restarted while the test was already waiting begins the interval again,
+		// and the panel says when it claimed the session.
+		for start := time.Now(); view.Latest == nil || view.LastSampleAt == nil; {
+			deadline := start.Add(firstSampleWait)
+			if opened := h.sessionOpenedAt(host.ID); opened != nil {
+				deadline = opened.Add(firstSampleWait)
+			}
+			if time.Now().After(deadline) || time.Since(start) > firstSampleLimit {
+				break
+			}
 			time.Sleep(10 * time.Second)
 			view = h.latestFootprint(host.ID)
 		}
 		if view.Latest == nil || view.LastSampleAt == nil {
-			t.Errorf("%s: the agent has not sent a sample; the footprint was not measured", host.Hostname)
+			open := "a session the panel does not date"
+			if opened := h.sessionOpenedAt(host.ID); opened != nil {
+				open = "a session open for " + time.Since(*opened).Round(time.Second).String()
+			}
+			t.Errorf("%s: no footprint from %s; the gate was not measured", host.Hostname, open)
 			continue
 		}
 		if age := time.Since(*view.LastSampleAt); age > footprintFreshness {

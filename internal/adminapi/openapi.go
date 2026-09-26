@@ -58,6 +58,7 @@ func (s *Server) openAPI() map[string]any {
 		schemas[name] = schemaOf(reflect.TypeOf(value), schemas)
 	}
 	register("Host", hosts.Host{})
+	register("HostDetail", hostDetail{})
 	register("Job", jobs.Job{})
 	register("Attempt", jobs.Attempt{})
 	register("Campaign", campaigns.Campaign{})
@@ -599,7 +600,7 @@ func collection(name string) map[string]any {
 // module-specific views described by their handlers.
 var responseSchemas = map[string]map[string]any{
 	"GET /api/v1/hosts":                                pagedCollection("Host"),
-	"GET /api/v1/hosts/{id}":                           ref("Host"),
+	"GET /api/v1/hosts/{id}":                           ref("HostDetail"),
 	"PUT /api/v1/hosts/{id}/tags":                      ref("Host"),
 	"PUT /api/v1/hosts/{id}/channel":                   ref("Host"),
 	"PUT /api/v1/hosts/{id}/owner":                     ref("Host"),

@@ -1160,6 +1160,16 @@ const (
 	maxListPage     = 500
 )
 
+// hostDetail is the host as the store keeps it, with the one fact about its
+// connection that lives elsewhere: when the session now serving it was claimed.
+type hostDetail struct {
+	hosts.Host
+	// SessionOpenedAt is when the panel claimed the session it is serving the
+	// host on. Absent for a host with no session, and it moves on every
+	// reconnection - an agent restarted a minute ago has a new one.
+	SessionOpenedAt *time.Time `json:"session_opened_at,omitempty"`
+}
+
 func (s *Server) handleGetHost(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
 	host, scope, ok := s.hostScope(w, r, hostID)
@@ -1169,10 +1179,20 @@ func (s *Server) handleGetHost(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorize(w, r, authz.PermHostRead, scope, "host", hostID); !ok {
 		return
 	}
+	detail := hostDetail{Host: *host}
+	// A host that is not connected has no session to date, and a failure to read
+	// the ownership row leaves the field absent rather than the answer refused:
+	// the rest of the host is what the caller asked for.
+	if host.ConnectionState == "online" && s.jobs != nil {
+		if owner, err := s.jobs.OwnerOf(r.Context(), hostID); err == nil && !owner.ConnectedAt.IsZero() {
+			connected := owner.ConnectedAt
+			detail.SessionOpenedAt = &connected
+		}
+	}
 	// The tag names the version of the hand-recorded facts, so an editor
 	// of the owner or the address writes back on what they read.
 	setETag(w, hostFactsTag(host))
-	writeJSON(w, http.StatusOK, host)
+	writeJSON(w, http.StatusOK, detail)
 }
 
 func (s *Server) handleHostInventory(w http.ResponseWriter, r *http.Request) {
