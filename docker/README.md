@@ -455,6 +455,22 @@ docker compose --profile quickstart up -d
 That DSN carries `sslmode=disable`, which is acceptable only there, on one
 host and an internal network; an external database requires `verify-full`.
 
+### A second control plane
+
+One control plane is active at a time. A second one is a warm standby: the same
+image, the same `./secrets`, the same state directory restored from the pair the
+backup takes, its own `FLOTESTRO_GATEWAY_ID`, and stopped. It is not a second
+active instance and must not be started as one: two state directories against one
+database mean two fleet certificate authorities and two secret-store keys for one
+installation, and the panel refuses to start rather than let that happen
+(`installation_state_mismatch`).
+
+Bringing it up is: stop the active one, restore the state pair if the standby's
+copy is older than the database, start the standby. Readiness is what the load
+balancer follows - an instance whose database has become a standby, or whose key
+material is behind the installation record, answers `/readyz` with a refusal and
+takes no traffic.
+
 The DSN has to reach the writer directly, or a pooler in session mode. The
 control plane holds two connections for the life of the process - the event bus
 and the epoch watcher, each `LISTEN`ing - and takes session-level advisory

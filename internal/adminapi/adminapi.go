@@ -624,6 +624,21 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusServiceUnavailable, "database_unavailable", "the database is not responding")
 		return
 	}
+	// A standby answers a ping and every read, and refuses every write. An
+	// instance on one is alive and cannot do the work, which is exactly what
+	// readiness is for: a load balancer sending it a change gets a failure per
+	// request instead of no traffic. The start refuses a standby outright; this
+	// is for a database that became one afterwards, which is what a failover is.
+	var standby bool
+	if err := s.pool.QueryRow(r.Context(), `select pg_is_in_recovery()`).Scan(&standby); err != nil {
+		problem(w, http.StatusServiceUnavailable, "database_unavailable", "the database did not answer")
+		return
+	}
+	if standby {
+		problem(w, http.StatusServiceUnavailable, "database_read_only",
+			"the database this instance holds is a standby: it takes no change")
+		return
+	}
 	// An instance whose key material is behind the installation record answers
 	// every query and signs with an authority the installation may have retired.
 	// It is alive; it is not fit to be sent work.
