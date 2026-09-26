@@ -5,12 +5,20 @@ package monitoring
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
+
+// errPartitionCovered means the day already lies inside a partition that exists.
+// The first partition of the table has no lower bound - it is the one the
+// partitioning migration left holding everything that came before it - so a day
+// behind today can be served by a partition named after a later one.
+var errPartitionCovered = errors.New("the day is already inside a partition")
 
 const (
 	// rawPartitionParent is the partitioned table, and rawPartitionPrefix with
@@ -51,7 +59,13 @@ func (s *Store) EnsurePartitions(ctx context.Context, now time.Time) error {
 		if have[at] {
 			continue
 		}
-		if err := s.createPartition(ctx, at); err != nil {
+		// A day the names do not account for may still be covered, and that is
+		// not a reason to abandon the pass: the days ahead are the ones the
+		// readings arriving now will need.
+		switch err := s.createPartition(ctx, at); {
+		case errors.Is(err, errPartitionCovered):
+			continue
+		case err != nil:
 			return err
 		}
 	}
@@ -66,6 +80,12 @@ func (s *Store) createPartition(ctx context.Context, at time.Time) error {
 		pgx.Identifier{name}.Sanitize(), pgx.Identifier{rawPartitionParent}.Sanitize(),
 		at.UTC().Format(time.RFC3339), at.Add(partitionWidth).UTC().Format(time.RFC3339))
 	if _, err := s.pool.Exec(ctx, statement); err != nil {
+		// 42P17 is the overlap: the range asked for lies inside one that exists.
+		// "if not exists" guards the name and says nothing about the range.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "42P17" {
+			return fmt.Errorf("%w: %s", errPartitionCovered, name)
+		}
 		return fmt.Errorf("creating the partition %s of the raw samples: %w", name, err)
 	}
 	return nil
