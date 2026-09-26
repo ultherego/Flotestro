@@ -987,7 +987,7 @@ export type BudgetLimit = {
 };
 
 export type InstallationCommand = {
-  key: "repository" | "package" | "config" | "ca" | "enroll" | "start";
+  key: "repository" | "package" | "image" | "config" | "ca" | "enroll" | "start";
   command: string;
 };
 
@@ -1016,6 +1016,9 @@ export type InstallationProfile = {
   config: { path: string; content: string };
   ca: { path: string; pem: string; fingerprint_sha256: string; subject: string; not_after: string };
   repository: { configured: boolean; url: string; key_url: string; package: string };
+  /** The image a relay is deployed from, pinned by digest. Known is false for an
+   *  installation that was given no release manifest. */
+  image: { known: boolean; reference: string };
   architectures: string[];
   families: InstallationFamily[];
   warnings?: string[];

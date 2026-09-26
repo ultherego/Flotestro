@@ -1,12 +1,15 @@
 # The relay of one site, on the site's own host.
 #
 #   docker compose -f compose.relay.yaml --profile enroll run --rm relay-enroll
+#
+# The image comes from the release manifest, pinned by digest; unset is an error
+# rather than a floating tag nobody chose.
 #   docker compose -f compose.relay.yaml up -d
 name: flotestro-relay
 
 services:
   relay:
-    image: ghcr.io/ultherego/flotestro-relay:${FLOTESTRO_VERSION:-latest}
+    image: ${FLOTESTRO_RELAY_IMAGE:?set it to the image the release manifest names, pinned by digest}
     # A tag for readability; production pins the digest as well, and the
     # relay is upgraded from the same release as the panel it talks to.
     restart: unless-stopped
@@ -63,7 +66,7 @@ services:
   # The registration runs once, with a one-time token, and ends. The token
   # never enters the service above, which restarts and would keep it.
   relay-enroll:
-    image: ghcr.io/ultherego/flotestro-relay:${FLOTESTRO_VERSION:-latest}
+    image: ${FLOTESTRO_RELAY_IMAGE:?set it to the image the release manifest names, pinned by digest}
     profiles: ["enroll"]
     user: "65532:65532"
     command: ["enroll", "-config", "/etc/flotestro/relay.yaml", "-token-file", "/run/secrets/relay_enrollment_token"]

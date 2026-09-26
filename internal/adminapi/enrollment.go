@@ -835,9 +835,16 @@ const (
 	agentConfigPath = "/etc/flotestro/agent.yaml"
 	agentCAPath     = "/var/lib/flotestro-agent/ca.pem"
 	agentAccount    = "flotestro-agent"
-	relayConfigPath = "/etc/flotestro/relay.yaml"
-	relayCAPath     = "/var/lib/flotestro-relay/ca.pem"
-	relayAccount    = "flotestro-relay"
+	// A relay is deployed from an image, so its files are the ones
+	// docker/compose.relay.yaml mounts, in the directory that holds it.
+	relayComposeFile     = "compose.relay.yaml"
+	relayHostConfigPath  = "./relay.yaml"
+	relayHostCAPath      = "./relay-ca.pem"
+	relaySecretsDir      = "./secrets"
+	relayHostTokenPath   = relaySecretsDir + "/relay-enrollment-token"
+	relayBootstrapCAPath = "/etc/flotestro/ca.pem"
+	// relayImageVariable carries the pinned reference into the compose files.
+	relayImageVariable = "FLOTESTRO_RELAY_IMAGE"
 	// relayPort is the port a relay listens on for the agents of its site.
 	relayPort = "8453"
 	// repositoryPlaceholder stands in the commands of an installation
@@ -864,6 +871,7 @@ type installationProfile struct {
 	Config         installationFile       `json:"config"`
 	CA             installationCA         `json:"ca"`
 	Repository     installationRepository `json:"repository"`
+	Image          installationImage      `json:"image"`
 	Architectures  []string               `json:"architectures"`
 	Families       []installationFamily   `json:"families"`
 	// Warnings name what the profile could compose only in part.
@@ -909,6 +917,14 @@ type installationRepository struct {
 	Package    string `json:"package"`
 }
 
+// installationImage is the image a component is deployed from, pinned by digest.
+// Known is false for an installation that was given no release manifest: the
+// image cannot be named, and saying so is better than naming a guess.
+type installationImage struct {
+	Known     bool   `json:"known"`
+	Reference string `json:"reference"`
+}
+
 // installationFamily is the set of commands for one family of
 // distributions. The keys of the steps are stable: the screen names them.
 type installationFamily struct {
@@ -927,6 +943,7 @@ type installationCommand struct {
 const (
 	CommandRepository = "repository"
 	CommandPackage    = "package"
+	CommandImage      = "image"
 	CommandConfig     = "config"
 	CommandCA         = "ca"
 	CommandEnroll     = "enroll"
@@ -1017,9 +1034,10 @@ func (s *Server) handleInstallationProfile(w http.ResponseWriter, r *http.Reques
 		Content: agentConfigText(kind, site, environment, connection),
 	}
 	if kind == enrollment.KindRelay {
-		config.Path = relayConfigPath
+		config.Path = relayHostConfigPath
 	}
 	repository := s.installationRepository(kind)
+	image := installationRelayImage(kind, s.installation.Images)
 
 	profile := installationProfile{
 		Kind:           kind,
@@ -1032,13 +1050,21 @@ func (s *Server) handleInstallationProfile(w http.ResponseWriter, r *http.Reques
 		Config:         config,
 		CA:             ca,
 		Repository:     repository,
+		Image:          image,
 		Architectures:  installationArchitectures,
-		Families:       installationFamilies(kind, repository, channel, config, ca),
+		Families:       installationFamilies(kind, repository, channel, config, ca, image),
 	}
-	if !repository.Configured {
+	// A relay takes no package, so a missing repository says nothing about it.
+	if !repository.Configured && kind == enrollment.KindAgent {
 		profile.Warnings = append(profile.Warnings,
 			"no package repository is configured (FLOTESTRO_PACKAGE_REPOSITORY_URL); "+
 				"the commands name a placeholder to replace")
+	}
+	if kind == enrollment.KindRelay && !image.Known {
+		profile.Warnings = append(profile.Warnings,
+			"this installation was given no release manifest "+
+				"(FLOTESTRO_RELEASE_MANIFEST_FILE); the commands cannot name the image "+
+				"the relay is deployed from")
 	}
 	if onlyLoopback(s.installation.AdvertisedAddresses) && connection.Relay == nil {
 		profile.Warnings = append(profile.Warnings,
@@ -1191,7 +1217,7 @@ func (s *Server) installationCA(kind string) (installationCA, error) {
 	active := authorities[0]
 	path := agentCAPath
 	if kind == enrollment.KindRelay {
-		path = relayCAPath
+		path = relayHostCAPath
 	}
 	return installationCA{
 		Path: path, PEM: string(s.trust.Bundle()),
@@ -1201,9 +1227,10 @@ func (s *Server) installationCA(kind string) (installationCA, error) {
 
 // installationRepository names the package source of the installation.
 func (s *Server) installationRepository(kind string) installationRepository {
+	// A relay is deployed from an image, so it names no package.
 	pkg := "flotestro-agent"
 	if kind == enrollment.KindRelay {
-		pkg = "flotestro-relay"
+		pkg = ""
 	}
 	base := strings.TrimRight(strings.TrimSpace(s.installation.PackageRepositoryURL), "/")
 	repository := installationRepository{Configured: base != "", URL: base, Package: pkg}
@@ -1226,7 +1253,7 @@ func agentConfigText(kind, site, environment string, connection installationConn
 	if kind == enrollment.KindRelay {
 		fmt.Fprintf(&b, "# The Flotestro relay of site %s.\n", yamlString(site))
 		b.WriteString("# Composed by the panel. The enrollment token is not here and must not be:\n")
-		b.WriteString("# it is a one-time secret, and this file survives package updates.\n")
+		b.WriteString("# it is a one-time secret, and this file outlives the container.\n")
 		b.WriteString("schema_version: 1\n\nrelay:\n")
 		b.WriteString("  # The name is the key in the panel's registry: fill in a name unique in\n")
 		b.WriteString("  # the fleet. Reinstalling the same name refreshes the entry.\n")
@@ -1241,7 +1268,9 @@ func agentConfigText(kind, site, environment string, connection installationConn
 		fmt.Fprintf(&b, "  enrollment_url: %s\n", yamlString(connection.EnrollmentURL))
 		b.WriteString("  gateway_urls:\n")
 		gateways("    ")
-		fmt.Fprintf(&b, "  bootstrap_ca_file: %s\n", yamlString(relayCAPath))
+		b.WriteString("  # The path inside the container: the compose file of the release mounts\n")
+		b.WriteString("  # the file saved beside it here.\n")
+		fmt.Fprintf(&b, "  bootstrap_ca_file: %s\n", yamlString(relayBootstrapCAPath))
 		return b.String()
 	}
 
@@ -1275,18 +1304,74 @@ func yamlString(value string) string {
 	return strconv.Quote(value)
 }
 
-// installationFamilies composes the commands per distribution family.
-func installationFamilies(kind string, repository installationRepository, channel string,
-	config installationFile, ca installationCA) []installationFamily {
-	account, service, enroll := agentAccount, "flotestro-agent.service",
-		"sudo -u flotestro-agent flotestro-agentctl enroll"
-	if kind == enrollment.KindRelay {
-		account, service = relayAccount, "flotestro-relay.service"
-		// The relay takes the token from a pipe; the shell reads it without an echo,
-		// so that it lands neither in the history nor in the process list.
-		enroll = "read -rs -p 'Enrollment token: ' TOKEN; echo; printf '%s' \"$TOKEN\" | " +
-			"sudo -u flotestro-relay flotestro-relay enroll; unset TOKEN"
+// installationRelayImage names the image a relay is deployed from. An agent is
+// a native package and has none; an installation without a manifest names
+// nothing rather than a reference that would not pull.
+func installationRelayImage(kind string, images release.Manifest) installationImage {
+	if kind != enrollment.KindRelay {
+		return installationImage{}
 	}
+	reference, named := images.Image(release.ComponentRelay)
+	if !named {
+		return installationImage{}
+	}
+	return installationImage{Known: true, Reference: reference}
+}
+
+// relayImageStep writes the pinned reference into the deployment, as an
+// environment line the compose file reads.
+func relayImageStep(image installationImage, compose string) string {
+	if !image.Known {
+		return "# This installation was given no release manifest, so the image of the\n" +
+			"# relay cannot be named here. Point FLOTESTRO_RELEASE_MANIFEST_FILE on the\n" +
+			"# control plane at the manifest published with the release, then open this\n" +
+			"# page again."
+	}
+	// The pull comes first, so a digest that resolves to nothing is found here
+	// and not halfway through a registration.
+	return "# In the directory that holds " + relayComposeFile + ":\n" +
+		"printf '%s\\n' '" + relayImageVariable + "=" + image.Reference + "' > .env\n" +
+		compose + " pull"
+}
+
+// relayFamily is the one installation of a relay: the image of the release,
+// pinned by digest, under the compose file the release ships.
+func relayFamily(image installationImage, config installationFile, ca installationCA) installationFamily {
+	compose := "docker compose -f " + relayComposeFile
+	// The container reads the two files it mounts as an unprivileged account of
+	// its own, which is why the mode is 0644 and not the owner's alone.
+	file := func(path, content, tail string) string {
+		return fmt.Sprintf("tee %[1]s >/dev/null <<'EOF'\n%[2]sEOF\nchmod 0644 %[1]s%[3]s", path, content, tail)
+	}
+	return installationFamily{
+		Key: "container", Label: "Container (Docker or Podman)", PackageManager: "compose",
+		Steps: []installationCommand{
+			{Key: CommandImage, Command: relayImageStep(image, compose)},
+			{Key: CommandConfig, Command: file(config.Path, config.Content, "")},
+			{Key: CommandCA, Command: file(ca.Path, ca.PEM,
+				"\nopenssl x509 -in "+ca.Path+" -noout -fingerprint -sha256")},
+			// The shell reads the token without an echo and it reaches the container as
+			// the file the compose file declares; the 0700 directory is what guards it.
+			{Key: CommandEnroll, Command: "install -d -m 0700 " + relaySecretsDir + "\n" +
+				"read -rs -p 'Enrollment token: ' TOKEN; echo\n" +
+				"printf '%s' \"$TOKEN\" > " + relayHostTokenPath + "; unset TOKEN\n" +
+				"chmod 0644 " + relayHostTokenPath + "\n" +
+				compose + " --profile enroll run --rm relay-enroll\n" +
+				"shred -u " + relayHostTokenPath},
+			{Key: CommandStart, Command: compose + " up -d"},
+		},
+	}
+}
+
+// installationFamilies composes the commands per distribution family. A relay
+// is one image and therefore one family; an agent is a package per family.
+func installationFamilies(kind string, repository installationRepository, channel string,
+	config installationFile, ca installationCA, image installationImage) []installationFamily {
+	if kind == enrollment.KindRelay {
+		return []installationFamily{relayFamily(image, config, ca)}
+	}
+	account, service := agentAccount, "flotestro-agent.service"
+	enroll := "sudo -u flotestro-agent flotestro-agentctl enroll"
 	common := []installationCommand{
 		{Key: CommandConfig, Command: fmt.Sprintf(
 			"sudo tee %[1]s >/dev/null <<'EOF'\n%[2]sEOF\nsudo chown root:%[3]s %[1]s && sudo chmod 0640 %[1]s",

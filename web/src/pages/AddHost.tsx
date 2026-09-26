@@ -39,6 +39,7 @@ const stepDescriptions: Record<EnrollmentStep["key"], string> = {
 const commandTitles: Record<InstallationCommand["key"], string> = {
   repository: "Add the signed repository",
   package: "Install the agent package",
+  image: "Pull the relay image, pinned by digest",
   config: "Save the configuration",
   ca: "Save the fleet CA and compare the fingerprint",
   enroll: "Register the host and paste the token when asked",
@@ -301,6 +302,14 @@ export function AddHost() {
   // production environment, a batch token or a relay.
   const reasonRequired = !!profile.data?.reason_required || maxUses > 1 || kind === "relay";
   const reasonGiven = reason.trim().length >= 8;
+  // A relay comes back with one family - a container one - so there is nothing
+  // to pick and the package manager chosen for an agent does not apply.
+  const offered = profile.data?.families ?? [];
+  const singleFamily = offered.length === 1;
+  const currentFamily = singleFamily ? offered[0] : offered.find((entry) => entry.key === family);
+  // Without a release manifest the control plane cannot name the image, and a
+  // step with no reference is not offered as a command.
+  const imageUnknown = !!profile.data && !profile.data.image.known;
   const gates: { open: boolean; reason: string }[] = [
     { open: true, reason: "" },
     {
@@ -310,13 +319,12 @@ export function AddHost() {
         : t("a reason first"),
     },
     { open: kind === "relay" || route === "direct" || relayId !== "", reason: t("choose the route") },
-    { open: FAMILIES.some((entry) => entry.key === family), reason: t("choose the system") },
+    { open: singleFamily || FAMILIES.some((entry) => entry.key === family), reason: t("choose the system") },
     { open: !!created, reason: t("place the order first") },
   ];
   const open = (index: number) => gates.slice(0, index).every((gate) => gate.open);
   const blocker = (index: number) => gates.slice(0, index).find((gate) => !gate.open)?.reason;
 
-  const currentFamily = profile.data?.families.find((entry) => entry.key === family);
   const orders = list.data?.items ?? [];
   const expired = created ? new Date(created.expires_at).getTime() <= now : false;
   const currentStatus = state?.status ?? "pending";
@@ -530,7 +538,9 @@ export function AddHost() {
       {step === 3 && (
         <Card
           title={t("4. Which system")}
-          description={t("The family picks the repository and the package manager; the architecture picks the artefact. The channel is stable.")}
+          description={singleFamily
+            ? t("This installation comes as a container image; only the architecture and the channel are left to pick. The channel is stable.")
+            : t("The family picks the repository and the package manager; the architecture picks the artefact. The channel is stable.")}
           footer={
             <Actions>
               <button onClick={() => setStep(4)} disabled={!gates[3].open}>{t("Continue")}</button>
@@ -539,18 +549,24 @@ export function AddHost() {
           }
         >
           {/* The commands differ by package manager; the choice changes
-              nothing on the server. */}
-          <div className="segmented" role="group">
-            {FAMILIES.map((entry) => (
-              <button
-                key={entry.key}
-                className={family === entry.key ? "active" : ""}
-                onClick={() => setFamily(entry.key)}
-              >
-                {entry.label}
-              </button>
-            ))}
-          </div>
+              nothing on the server. One family is not a choice, so it is named. */}
+          {singleFamily ? (
+            <p className="source">
+              {t("Installed from an image, not from a package repository: {family}.", { family: offered[0].label })}
+            </p>
+          ) : (
+            <div className="segmented" role="group">
+              {FAMILIES.map((entry) => (
+                <button
+                  key={entry.key}
+                  className={family === entry.key ? "active" : ""}
+                  onClick={() => setFamily(entry.key)}
+                >
+                  {entry.label}
+                </button>
+              ))}
+            </div>
+          )}
           <FieldGrid>
             <Field label={t("Architecture")}>
               <select value={architecture} onChange={(e) => setArchitecture(e.target.value)}>
@@ -641,11 +657,17 @@ export function AddHost() {
             <Card
               title={t("Installation on {family}", { family: currentFamily?.label ?? FAMILIES.find((entry) => entry.key === family)?.label ?? family })}
               description={profile.data && !profile.data.repository.configured
+                && currentFamily?.steps.some((command) => command.key === "repository")
                 ? t("No package repository is configured on the panel; replace {url} in the commands with the address of yours.", { url: profile.data.repository.url })
                 : undefined}
             >
               {profile.error && <ErrorBox error={profile.error} />}
               {!currentFamily && !profile.error && <Empty>{t("waiting for the installation profile…")}</Empty>}
+              {imageUnknown && currentFamily?.steps.some((command) => command.key === "image") && (
+                <p className="warning">
+                  <span>{t("This installation was given no release manifest, so the relay's image cannot be named here. The control plane supplies it from the file in FLOTESTRO_RELEASE_MANIFEST_FILE; until it has one, there is no digest to pull.")}</span>
+                </p>
+              )}
               {currentFamily && (
                 <ol className="steps">
                   {currentFamily.steps.map((command) => (
@@ -653,10 +675,18 @@ export function AddHost() {
                       {t(commandTitles[command.key])}
                       {command.key === "config" && <> <code>{profile.data?.config.path}</code></>}
                       {command.key === "ca" && <> <code>{profile.data?.ca.path}</code></>}
-                      <pre>{command.command}</pre>
-                      <button className="secondary" onClick={() => copy(command.key, command.command)}>
-                        {copied === command.key ? t("Copied") : t("Copy command")}
-                      </button>
+                      {command.key === "image" && imageUnknown ? (
+                        <p className="source">
+                          {t("No image reference to copy: set FLOTESTRO_RELEASE_MANIFEST_FILE on the control plane and open this page again.")}
+                        </p>
+                      ) : (
+                        <>
+                          <pre>{command.command}</pre>
+                          <button className="secondary" onClick={() => copy(command.key, command.command)}>
+                            {copied === command.key ? t("Copied") : t("Copy command")}
+                          </button>
+                        </>
+                      )}
                     </li>
                   ))}
                 </ol>
