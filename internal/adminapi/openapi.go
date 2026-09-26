@@ -11,8 +11,12 @@ import (
 
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
+	"github.com/ultherego/flotestro/internal/backup"
 	"github.com/ultherego/flotestro/internal/budgets"
 	"github.com/ultherego/flotestro/internal/campaigns"
+	"github.com/ultherego/flotestro/internal/certificates"
+	"github.com/ultherego/flotestro/internal/compliance"
+	"github.com/ultherego/flotestro/internal/files"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/jobs"
 	backupmodule "github.com/ultherego/flotestro/internal/modules/backup"
@@ -114,6 +118,27 @@ func (s *Server) openAPI() map[string]any {
 	register("Team", hosts.Team{})
 	register("Relay", relayView{})
 	register("Secret", secrets.Secret{})
+	register("BackupReport", backupReport{})
+	register("CertificateReport", certificateReport{})
+	register("VulnerabilityReport", vulnerabilityReport{})
+	register("ComplianceReport", compliance.Report{})
+	register("FleetActivity", FleetActivity{})
+	register("ServerCapabilities", serverCapabilities{})
+	register("FleetBackups", fleetBackupsView{})
+	register("FleetCertificates", fleetCertificatesView{})
+	register("FleetTrust", fleetTrustView{})
+	register("EnrollmentRequest", orderView{})
+	register("HostMetrics", hostMetricsView{})
+	register("HostMonitoring", hostMonitoringView{})
+	register("HostGroup", groupView{})
+	register("GroupMapping", authz.GroupMapping{})
+	register("BackupRun", backup.Run{})
+	register("CampaignApproval", campaigns.Approval{})
+	register("CertificateDeployment", certificates.Deployment{})
+	register("ManagedFile", fileView{})
+	register("ManagedFileVersion", files.Version{})
+	register("ComposeProjectVersion", projectVersion{})
+	register("ErrorGuide", opspec.ErrorGuide{})
 	describe(schemas, "AuditEvent", "actor",
 		"The actor as it was when the event was written: principal_id, subject, display_name, kind, resource_type, resource_id, resource_name, credential_id.")
 	describe(schemas, "Attempt", "verification",
@@ -620,71 +645,93 @@ func collection(name string) map[string]any {
 // The endpoints whose answers are known resources. The rest answer with
 // module-specific views described by their handlers.
 var responseSchemas = map[string]map[string]any{
-	"GET /api/v1/notifications/channels":               collection("NotificationChannel"),
-	"POST /api/v1/notifications/channels":              ref("NotificationChannel"),
-	"GET /api/v1/notifications/channels/{id}":          ref("NotificationChannel"),
-	"PUT /api/v1/notifications/channels/{id}":          ref("NotificationChannel"),
-	"POST /api/v1/notifications/channels/{id}/test":    ref("NotificationDelivery"),
-	"GET /api/v1/notifications/deliveries":             collection("NotificationDelivery"),
-	"GET /api/v1/teams":                                collection("Team"),
-	"POST /api/v1/teams":                               ref("Team"),
-	"GET /api/v1/teams/{id}":                           ref("Team"),
-	"PUT /api/v1/teams/{id}":                           ref("Team"),
-	"GET /api/v1/relays":                               collection("Relay"),
-	"GET /api/v1/relays/{id}":                          ref("Relay"),
-	"GET /api/v1/secrets":                              collection("Secret"),
-	"GET /api/v1/secrets/{name}":                       ref("Secret"),
-	"GET /api/v1/budgets/{key...}":                     ref("Budget"),
-	"PUT /api/v1/budgets/{key...}":                     ref("Budget"),
-	"GET /api/v1/hosts":                                pagedCollection("Host"),
-	"GET /api/v1/hosts/{id}":                           ref("HostDetail"),
-	"PUT /api/v1/hosts/{id}/tags":                      ref("Host"),
-	"PUT /api/v1/hosts/{id}/channel":                   ref("Host"),
-	"PUT /api/v1/hosts/{id}/owner":                     ref("Host"),
-	"PUT /api/v1/hosts/{id}/management-address":        ref("Host"),
-	"PUT /api/v1/hosts/{id}/failure-domain":            ref("Host"),
-	"PUT /api/v1/hosts/{id}/placement":                 ref("Host"),
-	"GET /api/v1/jobs":                                 cursorCollection("Job"),
-	"GET /api/v1/jobs/{id}":                            ref("Job"),
-	"POST /api/v1/jobs/{id}/approve":                   ref("Job"),
-	"POST /api/v1/jobs/{id}/cancel":                    ref("Job"),
-	"GET /api/v1/jobs/{id}/attempts":                   collection("Attempt"),
-	"POST /api/v1/hosts/{id}/operations":               ref("Job"),
-	"GET /api/v1/campaigns":                            collection("Campaign"),
-	"POST /api/v1/campaigns":                           ref("Campaign"),
-	"GET /api/v1/campaigns/{id}":                       ref("Campaign"),
-	"POST /api/v1/campaigns/{id}/approve":              ref("Campaign"),
-	"POST /api/v1/campaigns/{id}/pause":                ref("Campaign"),
-	"POST /api/v1/campaigns/{id}/resume":               ref("Campaign"),
-	"POST /api/v1/campaigns/{id}/cancel":               ref("Campaign"),
-	"POST /api/v1/campaigns/{id}/retry":                ref("Campaign"),
-	"POST /api/v1/campaigns/{id}/targets/{host}/skip":  ref("CampaignTarget"),
-	"POST /api/v1/notifications/deliveries/{id}/retry": ref("NotificationDelivery"),
-	"GET /api/v1/campaign-schedules":                   collection("CampaignSchedule"),
-	"POST /api/v1/campaign-schedules":                  ref("CampaignSchedule"),
-	"GET /api/v1/campaign-schedules/{id}":              ref("CampaignSchedule"),
-	"PUT /api/v1/campaign-schedules/{id}":              ref("CampaignSchedule"),
-	"POST /api/v1/campaign-schedules/{id}/run-now":     ref("Campaign"),
-	"GET /api/v1/campaigns/{id}/targets":               pagedCollection("CampaignTarget"),
-	"GET /api/v1/campaigns/{id}/timeline":              collection("TimelineEntry"),
-	"GET /api/v1/campaigns/{id}/steps":                 cursorCollection("CampaignStep"),
-	"GET /api/v1/audit":                                cursorCollection("AuditEvent"),
-	"GET /api/v1/budgets":                              items("Budget"),
-	"GET /api/v1/fleet/summary":                        ref("FleetSummary"),
-	"GET /api/v1/hosts/{id}/audit":                     cursorCollection("AuditEvent"),
-	"GET /api/v1/hosts/{id}/packages":                  ref("HostPackageList"),
-	"GET /api/v1/hosts/{id}/actions":                   collection("HostAction"),
-	"GET /api/v1/hosts/{id}/system/history":            collection("SystemHistoryEntry"),
-	"GET /api/v1/hosts/{id}/access":                    ref("HostAccess"),
-	"GET /api/v1/policies":                             collection("Policy"),
-	"POST /api/v1/policies":                            ref("Policy"),
-	"GET /api/v1/policies/{id}":                        ref("Policy"),
-	"PUT /api/v1/policies/{id}":                        ref("Policy"),
-	"POST /api/v1/policies/{id}/publish":               ref("Policy"),
-	"POST /api/v1/policies/{id}/evaluate":              ref("PolicyOutcome"),
-	"GET /api/v1/policies/{id}/results":                pagedCollection("PolicyResult"),
-	"GET /api/v1/policies/{id}/versions":               collection("PolicyVersion"),
-	"GET /api/v1/hosts/{id}/policies":                  collection("PolicyResult"),
+	"GET /api/v1/host-groups":                           collection("HostGroup"),
+	"GET /api/v1/group-mappings":                        collection("GroupMapping"),
+	"GET /api/v1/hosts/{id}/backups/runs":               collection("BackupRun"),
+	"GET /api/v1/campaigns/{id}/approvals":              collection("CampaignApproval"),
+	"GET /api/v1/hosts/{id}/certificates/deployments":   collection("CertificateDeployment"),
+	"GET /api/v1/hosts/{id}/files":                      collection("ManagedFile"),
+	"GET /api/v1/hosts/{id}/files/history":              collection("ManagedFileVersion"),
+	"GET /api/v1/hosts/{id}/compose/{project}/versions": collection("ComposeProjectVersion"),
+	"GET /api/v1/errors":                                collection("ErrorGuide"),
+	"GET /api/v1/hosts/{id}/backups":                    ref("BackupReport"),
+	"GET /api/v1/hosts/{id}/certificates":               ref("CertificateReport"),
+	"GET /api/v1/hosts/{id}/vulnerabilities":            ref("VulnerabilityReport"),
+	"GET /api/v1/hosts/{id}/security":                   ref("ComplianceReport"),
+	"GET /api/v1/hosts/{id}/metrics":                    ref("HostMetrics"),
+	"GET /api/v1/hosts/{id}/monitoring":                 ref("HostMonitoring"),
+	"GET /api/v1/fleet/activity":                        ref("FleetActivity"),
+	"GET /api/v1/capabilities":                          ref("ServerCapabilities"),
+	"GET /api/v1/backups":                               ref("FleetBackups"),
+	"GET /api/v1/certificates":                          ref("FleetCertificates"),
+	"GET /api/v1/certificates/trust":                    ref("FleetTrust"),
+	"GET /api/v1/enrollment-requests/{id}":              ref("EnrollmentRequest"),
+	"GET /api/v1/host-groups/{id}":                      ref("HostGroup"),
+	"GET /api/v1/notifications/channels":                collection("NotificationChannel"),
+	"POST /api/v1/notifications/channels":               ref("NotificationChannel"),
+	"GET /api/v1/notifications/channels/{id}":           ref("NotificationChannel"),
+	"PUT /api/v1/notifications/channels/{id}":           ref("NotificationChannel"),
+	"POST /api/v1/notifications/channels/{id}/test":     ref("NotificationDelivery"),
+	"GET /api/v1/notifications/deliveries":              collection("NotificationDelivery"),
+	"GET /api/v1/teams":                                 collection("Team"),
+	"POST /api/v1/teams":                                ref("Team"),
+	"GET /api/v1/teams/{id}":                            ref("Team"),
+	"PUT /api/v1/teams/{id}":                            ref("Team"),
+	"GET /api/v1/relays":                                collection("Relay"),
+	"GET /api/v1/relays/{id}":                           ref("Relay"),
+	"GET /api/v1/secrets":                               collection("Secret"),
+	"GET /api/v1/secrets/{name}":                        ref("Secret"),
+	"GET /api/v1/budgets/{key...}":                      ref("Budget"),
+	"PUT /api/v1/budgets/{key...}":                      ref("Budget"),
+	"GET /api/v1/hosts":                                 pagedCollection("Host"),
+	"GET /api/v1/hosts/{id}":                            ref("HostDetail"),
+	"PUT /api/v1/hosts/{id}/tags":                       ref("Host"),
+	"PUT /api/v1/hosts/{id}/channel":                    ref("Host"),
+	"PUT /api/v1/hosts/{id}/owner":                      ref("Host"),
+	"PUT /api/v1/hosts/{id}/management-address":         ref("Host"),
+	"PUT /api/v1/hosts/{id}/failure-domain":             ref("Host"),
+	"PUT /api/v1/hosts/{id}/placement":                  ref("Host"),
+	"GET /api/v1/jobs":                                  cursorCollection("Job"),
+	"GET /api/v1/jobs/{id}":                             ref("Job"),
+	"POST /api/v1/jobs/{id}/approve":                    ref("Job"),
+	"POST /api/v1/jobs/{id}/cancel":                     ref("Job"),
+	"GET /api/v1/jobs/{id}/attempts":                    collection("Attempt"),
+	"POST /api/v1/hosts/{id}/operations":                ref("Job"),
+	"GET /api/v1/campaigns":                             collection("Campaign"),
+	"POST /api/v1/campaigns":                            ref("Campaign"),
+	"GET /api/v1/campaigns/{id}":                        ref("Campaign"),
+	"POST /api/v1/campaigns/{id}/approve":               ref("Campaign"),
+	"POST /api/v1/campaigns/{id}/pause":                 ref("Campaign"),
+	"POST /api/v1/campaigns/{id}/resume":                ref("Campaign"),
+	"POST /api/v1/campaigns/{id}/cancel":                ref("Campaign"),
+	"POST /api/v1/campaigns/{id}/retry":                 ref("Campaign"),
+	"POST /api/v1/campaigns/{id}/targets/{host}/skip":   ref("CampaignTarget"),
+	"POST /api/v1/notifications/deliveries/{id}/retry":  ref("NotificationDelivery"),
+	"GET /api/v1/campaign-schedules":                    collection("CampaignSchedule"),
+	"POST /api/v1/campaign-schedules":                   ref("CampaignSchedule"),
+	"GET /api/v1/campaign-schedules/{id}":               ref("CampaignSchedule"),
+	"PUT /api/v1/campaign-schedules/{id}":               ref("CampaignSchedule"),
+	"POST /api/v1/campaign-schedules/{id}/run-now":      ref("Campaign"),
+	"GET /api/v1/campaigns/{id}/targets":                pagedCollection("CampaignTarget"),
+	"GET /api/v1/campaigns/{id}/timeline":               collection("TimelineEntry"),
+	"GET /api/v1/campaigns/{id}/steps":                  cursorCollection("CampaignStep"),
+	"GET /api/v1/audit":                                 cursorCollection("AuditEvent"),
+	"GET /api/v1/budgets":                               items("Budget"),
+	"GET /api/v1/fleet/summary":                         ref("FleetSummary"),
+	"GET /api/v1/hosts/{id}/audit":                      cursorCollection("AuditEvent"),
+	"GET /api/v1/hosts/{id}/packages":                   ref("HostPackageList"),
+	"GET /api/v1/hosts/{id}/actions":                    collection("HostAction"),
+	"GET /api/v1/hosts/{id}/system/history":             collection("SystemHistoryEntry"),
+	"GET /api/v1/hosts/{id}/access":                     ref("HostAccess"),
+	"GET /api/v1/policies":                              collection("Policy"),
+	"POST /api/v1/policies":                             ref("Policy"),
+	"GET /api/v1/policies/{id}":                         ref("Policy"),
+	"PUT /api/v1/policies/{id}":                         ref("Policy"),
+	"POST /api/v1/policies/{id}/publish":                ref("Policy"),
+	"POST /api/v1/policies/{id}/evaluate":               ref("PolicyOutcome"),
+	"GET /api/v1/policies/{id}/results":                 pagedCollection("PolicyResult"),
+	"GET /api/v1/policies/{id}/versions":                collection("PolicyVersion"),
+	"GET /api/v1/hosts/{id}/policies":                   collection("PolicyResult"),
 }
 
 // items is a whole list answered at once, without a count: the budgets
@@ -1604,9 +1651,28 @@ func openAPIPath(path string) string {
 	return strings.ReplaceAll(path, "...}", "}")
 }
 
-// schemaOf describes a Go type as a JSON schema, following the json tags
-// the way the encoder does.
+// goTypeName is the component name a recursive type is published under: the name
+// it has in the source, which is what a reader of the document recognises.
+func goTypeName(t reflect.Type) string {
+	if name := t.Name(); name != "" {
+		return name
+	}
+	return "Nested"
+}
+
+// schemaOf describes a Go type as a JSON schema, following the json tags the way
+// the encoder does.
 func schemaOf(t reflect.Type, schemas map[string]any) map[string]any {
+	return describeType(t, schemas, map[reflect.Type]bool{}, map[reflect.Type]bool{})
+}
+
+// describeType is schemaOf with the two things a recursive type needs: which
+// types are being expanded right now, and which of them turned out to contain
+// themselves. A selector expression is a tree of selector expressions, so
+// expanding it in place never ends; it becomes a component that refers to itself,
+// which is what a recursive shape looks like in a contract.
+func describeType(t reflect.Type, schemas map[string]any,
+	expanding, recursive map[reflect.Type]bool) map[string]any {
 	switch {
 	case t == reflect.TypeOf(time.Time{}):
 		return map[string]any{"type": "string", "format": "date-time"}
@@ -1615,7 +1681,7 @@ func schemaOf(t reflect.Type, schemas map[string]any) map[string]any {
 	}
 	switch t.Kind() {
 	case reflect.Pointer:
-		return schemaOf(t.Elem(), schemas)
+		return describeType(t.Elem(), schemas, expanding, recursive)
 	case reflect.String:
 		return map[string]any{"type": "string"}
 	case reflect.Bool:
@@ -1629,10 +1695,18 @@ func schemaOf(t reflect.Type, schemas map[string]any) map[string]any {
 		if t.Elem().Kind() == reflect.Uint8 {
 			return map[string]any{"type": "string", "description": "Base64."}
 		}
-		return map[string]any{"type": "array", "items": schemaOf(t.Elem(), schemas)}
+		return map[string]any{"type": "array", "items": describeType(t.Elem(), schemas, expanding, recursive)}
 	case reflect.Map:
-		return map[string]any{"type": "object", "additionalProperties": schemaOf(t.Elem(), schemas)}
+		return map[string]any{"type": "object", "additionalProperties": describeType(t.Elem(), schemas, expanding, recursive)}
 	case reflect.Struct:
+		// A type already being expanded is a type that contains itself. It is
+		// published under its own name and referred to, and the expansion that
+		// started it stores that name.
+		if expanding[t] {
+			recursive[t] = true
+			return ref(goTypeName(t))
+		}
+		expanding[t] = true
 		properties := map[string]any{}
 		var required []string
 		for i := 0; i < t.NumField(); i++ {
@@ -1647,14 +1721,14 @@ func schemaOf(t reflect.Type, schemas map[string]any) map[string]any {
 			name, options, _ := strings.Cut(tag, ",")
 			if name == "" {
 				if field.Anonymous {
-					for k, v := range schemaOf(field.Type, schemas)["properties"].(map[string]any) {
+					for k, v := range describeType(field.Type, schemas, expanding, recursive)["properties"].(map[string]any) {
 						properties[k] = v
 					}
 					continue
 				}
 				name = field.Name
 			}
-			properties[name] = schemaOf(field.Type, schemas)
+			properties[name] = describeType(field.Type, schemas, expanding, recursive)
 			if !strings.Contains(options, "omitempty") && field.Type.Kind() != reflect.Pointer {
 				required = append(required, name)
 			}
@@ -1663,6 +1737,14 @@ func schemaOf(t reflect.Type, schemas map[string]any) map[string]any {
 		if len(required) > 0 {
 			sort.Strings(required)
 			schema["required"] = required
+		}
+		delete(expanding, t)
+		if recursive[t] {
+			name := goTypeName(t)
+			if _, published := schemas[name]; !published {
+				schemas[name] = schema
+			}
+			return ref(name)
 		}
 		return schema
 	case reflect.Interface:
