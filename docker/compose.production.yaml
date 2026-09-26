@@ -1,0 +1,28 @@
+# The production overlay. Used beside the base file, never on its own:
+#
+#   docker compose -f compose.yaml -f compose.production.yaml --profile migrate run --rm migrate
+#   docker compose -f compose.yaml -f compose.production.yaml up -d
+#
+# What it changes, and why the base file cannot:
+#
+#   * The serving replicas do not migrate. A quick start has to come up from one
+#     `up`, so the base file lets the panel bring the schema forward itself; with
+#     more than one replica that means several serving logins reshaping the
+#     schema at once, and each of them holds the rights to do it. Here they do
+#     not, and the migrate run above does it once with the migrator's own login.
+#
+#   * The database is somebody else's. `external` holds the DSN to
+#     sslmode=verify-full and target_session_attrs=read-write and refuses it
+#     otherwise, and the quickstart postgres service is not started.
+#
+# Every other setting stays in the environment file, where an installation's own
+# values belong.
+services:
+  control-plane:
+    environment:
+      FLOTESTRO_AUTO_MIGRATE: "false"
+      FLOTESTRO_DATABASE_MODE: ${FLOTESTRO_DATABASE_MODE:-external}
+
+  migrate:
+    environment:
+      FLOTESTRO_DATABASE_MODE: ${FLOTESTRO_DATABASE_MODE:-external}
