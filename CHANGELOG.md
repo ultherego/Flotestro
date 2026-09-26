@@ -6,48 +6,35 @@ day the tag was published.
 
 ## [Unreleased]
 
-### Fixed
-
-- A reading that landed while its quarter-hour was being recomputed had its
-  mark swallowed by the pass that had already claimed the bucket, so the
-  reading never reached the fifteen-minute series — a relay draining its spool
-  lost the readings it was carrying.
-- A second cancel of the same job was recorded and never delivered, and the
-  panel then failed the job on its own timeout without ever asking the host.
-  The cancel acknowledgement is also fenced now, like every other settlement.
-- `schema_migrations` records the digest of what was applied, so a migration
-  edited after it ran somewhere cannot describe two schemas under one label.
-- A restore target was checked by name and then resolved again by the tool
-  that unpacks as root, so anybody who could write a directory on the path
-  could point it elsewhere in between.
-- A firewalld zone change had none of the rollback and connectivity proof a
-  rule change has, although firewalld keeps an established connection alive
-  across a reload — so a change that locked the host out reported success. And
-  the management-channel guard compared one port with one port, so removing a
-  service took every port it stands for, including 443.
-- A compose plan stood still for the whole operation's timeout when the
-  registry would not answer, instead of falling back to the digest the host
-  already held.
-- The start checked only the active secrets key, so a key that live secret
-  versions were sealed with and the provider no longer held surfaced at the
-  first read of that secret rather than at the start.
-- The host page could order an agent upgrade by version alone, and the whole
-  digest-and-signer verification on the host sits behind "if a digest was
-  given". The form now carries the checksum and the fall-back version.
-- A webhook consumer that an installation stopped running kept its cursor and
-  pinned the retention of the durable trail for ever.
-- Every replica downloaded every vulnerability feed and rewrote every host's
-  findings; the pass now runs under a lease, like the alert evaluator.
-- The container guide names the two database facts an external installation
-  needs: a pooler in transaction mode breaks the panel silently, and the
-  migration switches existed in no document.
-- A fleet authority activated on one replica left every other replica signing
-  with the retired one and rejecting the agents that had renewed against the
-  new one. Each instance now follows the record, and one that cannot catch up
-  reports itself unready instead of handing out certificates nobody trusts.
-
 ### Changed
 
+- The root helper refuses a request it holds no rule for comparing with the
+  order the capability binds. Every kind of request that changes a host now has
+  such a rule - the network, resolver and firewall changes, the sshd, kernel,
+  time and protection changes, the container, Compose, domain, keytab, repair,
+  restart and shutdown orders - and a kind added later without one is refused
+  rather than carried out on the strength of a signature. Three of the rules
+  bind less than they could, deliberately: the rollback of an unverified sysctl
+  change sends the host's previous readings under the capability of the order
+  that made it, so the keys are bound and the values are not; the management
+  address and port are what the agent knows about the channel it answers on;
+  and the one-time password of a domain enrollment is minted after the
+  capability is signed.
+- A host can be told beforehand which panel may enroll it. Until now the helper
+  verified its very first trust bundle with a key carried inside that bundle, so
+  whoever reached its socket first owned the host from then on. The pin names the
+  whole SHA-256 of the panel's signing key - the short identifier is eight bytes,
+  which is not enough to settle who owns a machine - and the panel prints its
+  fingerprints when it starts, two while a key rotation is in the air. Written
+  with `flotestro-agentctl helper-trust pin` or by the Ansible role;
+  `capabilities.bootstrap` stays `tofu` so an installation made before this keeps
+  working.
+- The agent's resident-memory budget is 36 MiB rather than 30. The two numbers
+  behind it never agreed: the runtime is capped at 20 MiB and the resident pages
+  of the binary add about 11 MiB, so an agent using its whole allowance sat over
+  the old budget and passed only by not using it. The agent has grown -
+  containers, Compose, network layers, vulnerability assessment, built-in
+  monitoring - and the budget follows what it costs.
 - A first installation of the agent package now writes
   `/etc/flotestro/helper.yaml` with `capabilities.mode: enforce`, so the root
   helper carries out a change only against the panel's signed capability for
@@ -85,6 +72,85 @@ day the tag was published.
 
 ### Fixed
 
+- `ignore_inhibitors` on a restart never reached the host: the task envelope had
+  no such field, so the panel dropped what the operator had asked for and the
+  host respected the inhibitors anyway.
+- A message of a durable class that the relay's spool would not take was
+  forwarded as though it had been kept, with no copy behind it, and the relay
+  went on reporting itself healthy. The session now ends with
+  `resource_exhausted`, so the agent keeps the message instead of being told it
+  was delivered.
+- The webhook consumer held a transaction open across its delivery, so a
+  receiver taking its whole fifteen seconds held the oldest transaction in the
+  database for as long. And because the cursor moved only on success, one event
+  the receiver will never accept stopped the whole trail at its own identifier
+  for ever; after a bounded number of attempts on that event alone it is set
+  aside whole and the trail goes on.
+- The maintenance pass of the monitoring store and the retention sweep of the
+  panel ran on every replica at once, so two replicas computed the same
+  quarter-hours from the same readings and the retention of one deleted beneath
+  the rollup of the other.
+- Audit events that could not be written were logged and otherwise invisible;
+  they are counted now, so a trail with holes in it can be alerted on.
+- Retiring a secret ran its two statements outside any transaction, so a failure
+  between them left a retired secret whose leases were still live - one nobody
+  may be issued that hosts could still redeem. Two rotations at once computed
+  the same next version and one was refused by the key.
+- A change to a secret, a backup definition or a notification channel and the
+  audit entry recording it now commit together.
+- The monitoring settings write put the new settings in force in the process
+  before the transaction committed, so a failed commit left that replica
+  sweeping by a retention nobody had stored.
+- Saving a backup definition from the panel wrote the whole definition back
+  while the form showed nine of its seventeen fields, so changing one path
+  cleared the retention, the pruning, the tags, the note and the tool's
+  environment. The form has an edit mode that opens filled, and an empty
+  password field now means "unchanged".
+- A notification channel whose credential could not be sealed was removed
+  best-effort with the error discarded, so a channel nothing backed could be
+  left on record silently; and a change whose credential did not follow left the
+  channel enabled, signing under one that no longer matched its configuration.
+  Both now name what was left behind, and such a channel is switched off.
+- The tests of the root helper wrote the registry of managed paths to
+  `/var/lib/flotestro-helper`, which exists on a host that has the package and
+  not on a build runner.
+- A reading that landed while its quarter-hour was being recomputed had its
+  mark swallowed by the pass that had already claimed the bucket, so the
+  reading never reached the fifteen-minute series — a relay draining its spool
+  lost the readings it was carrying.
+- A second cancel of the same job was recorded and never delivered, and the
+  panel then failed the job on its own timeout without ever asking the host.
+  The cancel acknowledgement is also fenced now, like every other settlement.
+- `schema_migrations` records the digest of what was applied, so a migration
+  edited after it ran somewhere cannot describe two schemas under one label.
+- A restore target was checked by name and then resolved again by the tool
+  that unpacks as root, so anybody who could write a directory on the path
+  could point it elsewhere in between.
+- A firewalld zone change had none of the rollback and connectivity proof a
+  rule change has, although firewalld keeps an established connection alive
+  across a reload — so a change that locked the host out reported success. And
+  the management-channel guard compared one port with one port, so removing a
+  service took every port it stands for, including 443.
+- A compose plan stood still for the whole operation's timeout when the
+  registry would not answer, instead of falling back to the digest the host
+  already held.
+- The start checked only the active secrets key, so a key that live secret
+  versions were sealed with and the provider no longer held surfaced at the
+  first read of that secret rather than at the start.
+- The host page could order an agent upgrade by version alone, and the whole
+  digest-and-signer verification on the host sits behind "if a digest was
+  given". The form now carries the checksum and the fall-back version.
+- A webhook consumer that an installation stopped running kept its cursor and
+  pinned the retention of the durable trail for ever.
+- Every replica downloaded every vulnerability feed and rewrote every host's
+  findings; the pass now runs under a lease, like the alert evaluator.
+- The container guide names the two database facts an external installation
+  needs: a pooler in transaction mode breaks the panel silently, and the
+  migration switches existed in no document.
+- A fleet authority activated on one replica left every other replica signing
+  with the retired one and rejecting the agents that had renewed against the
+  new one. Each instance now follows the record, and one that cannot catch up
+  reports itself unready instead of handing out certificates nobody trusts.
 - A compliance check rested on a read stamped in the panel's future: a host
   whose clock runs ahead was assessed against a month-old picture and reported
   compliant, because the age test can never fire on a negative age.

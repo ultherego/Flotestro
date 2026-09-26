@@ -24,12 +24,11 @@ import (
 // the whole footprint: the resident pages of the binary itself come on top, and
 // on the test fleet they measure about 11 MiB of a 13 MiB executable
 // (RssFile 11468 kB against RssAnon 12480 kB at rest). So an agent that uses
-// its whole allowance sits near 31 MiB, which is over the 30 MiB the footprint
-// gate holds it to - the two numbers do not agree and the agent passes only by
-// not reaching its own limit. Lowering this is not free either: at rest the
-// runtime already holds 12 MiB, so a limit near that would buy the budget with
-// collector time on the busiest host. The measurement is here so the next
-// change to either number is made with both in view.
+// its whole allowance sits near 31 MiB, and the footprint budget - 36 MiB in
+// tests/integration/agent_footprint_test.go - is set with that sum and a margin
+// in view. Lowering this limit instead would buy the budget with collector
+// time: at rest the runtime already holds 12 MiB, so a limit near that would
+// make the collector run constantly on the busiest host.
 const heapSoftLimit = 20 << 20
 
 func main() {
