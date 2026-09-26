@@ -586,10 +586,51 @@ func (s *AgentService) learnPublicKey(ctx context.Context, hostID string, verifi
 func (s *AgentService) handle(ctx context.Context, hostID string, session *Session,
 	msg *agentv1.AgentMessage) error {
 	if err := s.consume(ctx, hostID, session, msg); err != nil {
+		// The sequence is spent whatever happens next, so what became of the
+		// message is recorded: a redelivery of work never done is done, and one
+		// the panel will never take is set aside instead of being carried for ever.
+		if dead := s.noteRelayFailure(ctx, hostID, msg.GetEnvelope(), err); dead {
+			s.log.Error("a relayed message was refused too many times and was set aside; the relay is told to stop carrying it",
+				"host_id", hostID, "sequence", msg.GetEnvelope().GetSequence(), "err", err)
+			s.acknowledge(hostID, session, msg.GetEnvelope(), msg.GetRelayMessageId())
+			return errMessageDropped
+		}
 		return err
 	}
+	s.noteRelayApplied(ctx, hostID, msg.GetEnvelope())
 	s.acknowledge(hostID, session, msg.GetEnvelope(), msg.GetRelayMessageId())
 	return nil
+}
+
+// noteRelayApplied records that a relayed message reached its place.
+func (s *AgentService) noteRelayApplied(ctx context.Context, hostID string, envelope *agentv1.RelayedEnvelope) {
+	if envelope == nil || envelope.GetSessionId() == "" {
+		return
+	}
+	if err := (relaySequences{pool: s.pool}).NoteApplied(context.WithoutCancel(ctx),
+		hostID, envelope.GetSessionId(), envelope.GetSequence()); err != nil {
+		// The work is done and the record of it is not, so a redelivery would do
+		// the work twice. Said out loud rather than swallowed.
+		s.log.Error("a relayed message was applied and the record of it was not written",
+			"host_id", hostID, "sequence", envelope.GetSequence(), "err", err)
+	}
+}
+
+// noteRelayFailure counts a failed apply and says whether the message was set
+// aside for good.
+func (s *AgentService) noteRelayFailure(ctx context.Context, hostID string,
+	envelope *agentv1.RelayedEnvelope, cause error) bool {
+	if envelope == nil || envelope.GetSessionId() == "" {
+		return false
+	}
+	dead, err := (relaySequences{pool: s.pool}).NoteFailure(context.WithoutCancel(ctx),
+		hostID, envelope.GetSessionId(), envelope.GetSequence(), cause)
+	if err != nil {
+		s.log.Error("the failed delivery of a relayed message was not counted",
+			"host_id", hostID, "sequence", envelope.GetSequence(), "err", err)
+		return false
+	}
+	return dead
 }
 
 // acknowledge tells the relay the message is the panel's now: by the sequence

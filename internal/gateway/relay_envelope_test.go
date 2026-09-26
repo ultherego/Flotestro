@@ -53,14 +53,17 @@ func (f *fakeRecords) Get(_ context.Context, hostID string) (*hosts.Host, error)
 	return f.host, nil
 }
 
-func (f *fakeRecords) Accept(_ context.Context, hostID, sessionID string, sequence uint64) (bool, uint64, error) {
+func (f *fakeRecords) Claim(_ context.Context, hostID, sessionID string, sequence uint64) (Claim, error) {
 	key := hostID + "/" + sessionID
 	last, known := f.sequences[key]
 	if known && last >= sequence {
-		return false, last, nil
+		// The fake keeps no per-message state, so a number already spent is a
+		// message the panel took: the case the real store distinguishes from work
+		// that was never done has its own test.
+		return Claim{Applied: true, Last: last}, nil
 	}
 	f.sequences[key] = sequence
-	return true, last, nil
+	return Claim{Fresh: true, Last: last}, nil
 }
 
 // fixedSequences answers the same way every time: what the record of a session
@@ -71,8 +74,11 @@ type fixedSequences struct {
 	last     uint64
 }
 
-func (f fixedSequences) Accept(context.Context, string, string, uint64) (bool, uint64, error) {
-	return f.accepted, f.last, nil
+func (f fixedSequences) Claim(context.Context, string, string, uint64) (Claim, error) {
+	if f.accepted {
+		return Claim{Fresh: true, Last: f.last}, nil
+	}
+	return Claim{Applied: true, Last: f.last}, nil
 }
 
 // testHost is a host with a live certificate on record, its key, and the
@@ -378,17 +384,21 @@ func TestARedeliveredSequenceIsToldFromAReplay(t *testing.T) {
 		t.Fatal("a message the session had consumed was not read as a redelivery")
 	}
 
-	// The same store refusing a number the session never spent - it stands below
-	// the first message of a session nobody has spoken in, which is what another
-	// gateway's write or another session's number looks like from here.
+	// A number the store will not take is a number the panel has spent. There
+	// used to be a second answer here - "accepted before", not a redelivery -
+	// for a sequence above the watermark that the watermark refused to move for.
+	// That was a race between two gateways with no honest reading, and the panel
+	// answered it by holding the message against the host. What decides now is
+	// the record of the message itself, so this case is a repeat like any other:
+	// acknowledged, and dropped rather than applied twice.
 	verifier := NewRelayVerifier(host.records, host.records, fixedSequences{accepted: false, last: 0})
 	_, err = verifier.VerifyMessage(ctx, host.peer, signedHello(t, host.signer(uuid.NewString())))
 	refusal = RelayRefusalOf(err)
 	if refusal == nil || refusal.Code != hosts.RefusalRelaySequenceReplayed {
-		t.Fatalf("a sequence the session never took answered %q", refusalCode(err))
+		t.Fatalf("a sequence the panel had spent answered %q", refusalCode(err))
 	}
-	if refusal.Redelivery {
-		t.Fatal("a sequence above the last one of the session was read as a redelivery")
+	if !refusal.Redelivery {
+		t.Fatal("a sequence the panel had spent was held against the host instead of being acknowledged")
 	}
 }
 

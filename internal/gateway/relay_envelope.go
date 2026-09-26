@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/protobuf/proto"
 
@@ -68,7 +69,7 @@ type hostRecords interface {
 // sequenceRecords accepts a sequence of a session once and refuses it the
 // second time.
 type sequenceRecords interface {
-	Accept(ctx context.Context, hostID, sessionID string, sequence uint64) (accepted bool, last uint64, err error)
+	Claim(ctx context.Context, hostID, sessionID string, sequence uint64) (Claim, error)
 }
 
 // RelayVerifier checks the inner identity envelope of a relayed message the
@@ -95,6 +96,10 @@ type Verified struct {
 	// presented rather than from the record; the caller writes it on the record
 	// so the next session needs no relay to supply it.
 	LearnedKeyDER []byte
+	// Redelivered says the sequence had been spent before and the message was
+	// never applied: the relay is carrying it again and this delivery is the one
+	// that does the work.
+	Redelivered bool
 }
 
 // VerifyMessage checks the envelope of a message of the stream.
@@ -202,22 +207,28 @@ func (v *RelayVerifier) verify(ctx context.Context, peer RelayPeer, envelope *ag
 		if _, err := uuid.Parse(envelope.GetSessionId()); err != nil {
 			return nil, invalid("the session identifier is not a UUID")
 		}
-		accepted, last, err := v.sequences.Accept(ctx, peer.HostID, envelope.GetSessionId(), envelope.GetSequence())
+		claim, err := v.sequences.Claim(ctx, peer.HostID, envelope.GetSessionId(), envelope.GetSequence())
 		if err != nil {
 			return nil, err
 		}
-		if !accepted {
-			// A number at or below the one the same session last spent is a message this
-			// panel consumed already and the relay sent again unacknowledged.
-			if envelope.GetSequence() <= last {
-				return nil, &RelayRefusal{Code: hosts.RefusalRelaySequenceReplayed, Redelivery: true,
-					Detail: "sequence " + strconv.FormatUint(envelope.GetSequence(), 10) +
-						" of session " + envelope.GetSessionId() + " was consumed before (the session is at " +
-						strconv.FormatUint(last, 10) + ")"}
-			}
-			return nil, &RelayRefusal{Code: hosts.RefusalRelaySequenceReplayed,
+		switch {
+		case claim.Applied:
+			// The panel has this message. The relay carried it again because the
+			// acknowledgement never reached it.
+			return nil, &RelayRefusal{Code: hosts.RefusalRelaySequenceReplayed, Redelivery: true,
 				Detail: "sequence " + strconv.FormatUint(envelope.GetSequence(), 10) +
-					" of session " + envelope.GetSessionId() + " was accepted before"}
+					" of session " + envelope.GetSessionId() + " was applied before (the session is at " +
+					strconv.FormatUint(claim.Last, 10) + ")"}
+		case claim.Dead:
+			return nil, &RelayRefusal{Code: hosts.RefusalRelaySequenceReplayed, Redelivery: true,
+				Detail: "sequence " + strconv.FormatUint(envelope.GetSequence(), 10) +
+					" of session " + envelope.GetSessionId() + " was set aside after " +
+					strconv.Itoa(claim.Attempts) + " failed attempts"}
+		case claim.Retry:
+			// The number was spent and the work was not done: this delivery does it.
+			// This is the case that used to be indistinguishable from a duplicate,
+			// and the message was dropped with an acknowledgement.
+			verified.Redelivered = true
 		}
 	}
 	return verified, nil
@@ -250,13 +261,35 @@ type relaySequences struct {
 	pool *pgxpool.Pool
 }
 
-// Accept records the sequence when it is greater than the last one of the
-// session, in one statement: two gateways serving a host's buffered messages
-// at once cannot both accept the same number.
-func (r relaySequences) Accept(ctx context.Context, hostID, sessionID string,
-	sequence uint64) (bool, uint64, error) {
-	var accepted bool
+// Claim is what the panel knows about one relayed message.
+type Claim struct {
+	// Fresh says this sequence had not been seen before.
+	Fresh bool
+	// Retry says it had been seen and its message was never applied, so this
+	// delivery is the one that applies it. The number is spent either way; what
+	// the number does not say is whether the work was done.
+	Retry bool
+	// Applied says the panel has the message already: a repeat, to be
+	// acknowledged and dropped.
+	Applied bool
+	// Dead says the message was refused often enough to be set aside. The relay
+	// is told to stop carrying it.
+	Dead bool
+	// Last is the watermark of the session, and Attempts how many times this
+	// message has been tried.
+	Last     uint64
+	Attempts int
+}
+
+// Claim records the sequence and says what became of the message it names. The
+// watermark moves in the same statement, so two gateways serving one host's
+// spool cannot both take the same number.
+func (r relaySequences) Claim(ctx context.Context, hostID, sessionID string,
+	sequence uint64) (Claim, error) {
+	var moved, noted bool
 	var last int64
+	var state string
+	var attempts int
 	err := r.pool.QueryRow(ctx, `
 		with taken as (
 			insert into relay_host_sequences (host_id, session_id, last_sequence, updated_at)
@@ -265,18 +298,95 @@ func (r relaySequences) Accept(ctx context.Context, hostID, sessionID string,
 			   set last_sequence = excluded.last_sequence, updated_at = now()
 			 where relay_host_sequences.last_sequence < excluded.last_sequence
 			returning last_sequence
+		),
+		noted as (
+			insert into relay_inbox (host_id, session_id, sequence) values ($1, $2, $3)
+			on conflict (host_id, session_id, sequence) do nothing
+			returning 1
 		)
-		select exists (select 1 from taken),
+		select exists (select 1 from taken), exists (select 1 from noted),
 		       coalesce((select last_sequence from relay_host_sequences
-		                  where host_id = $1 and session_id = $2), 0)`,
-		hostID, sessionID, int64(sequence)).Scan(&accepted, &last)
+		                  where host_id = $1 and session_id = $2), 0),
+		       coalesce((select state from relay_inbox
+		                  where host_id = $1 and session_id = $2 and sequence = $3), ''),
+		       coalesce((select attempts from relay_inbox
+		                  where host_id = $1 and session_id = $2 and sequence = $3), 0)`,
+		hostID, sessionID, int64(sequence)).Scan(&moved, &noted, &last, &state, &attempts)
 	if err != nil {
-		return false, 0, fmt.Errorf("recording the sequence: %w", err)
+		return Claim{}, fmt.Errorf("recording the sequence: %w", err)
 	}
 	if last < 0 {
 		last = 0
 	}
-	return accepted, uint64(last), nil
+	claim := Claim{Last: uint64(last), Attempts: attempts}
+	switch {
+	case noted && moved:
+		// The row was created by this statement, so the two selects above - which
+		// read the snapshot the statement began with - saw nothing. The watermark
+		// moved with it, so this number is new work.
+		claim.Fresh = true
+	case noted:
+		// The inbox has no memory of this number and the watermark says it is
+		// spent: the record was swept after its retention, or somebody is
+		// presenting the numbers of a session that is over. Either way the panel
+		// does not do the work again, and the row it just made says so.
+		claim.Applied = true
+		if _, err := r.pool.Exec(ctx, `
+			update relay_inbox set state = 'applied', applied_at = now()
+			 where host_id = $1 and session_id = $2 and sequence = $3`,
+			hostID, sessionID, int64(sequence)); err != nil {
+			return Claim{}, fmt.Errorf("recording a spent sequence: %w", err)
+		}
+	case state == "applied":
+		claim.Applied = true
+	case state == "dead":
+		claim.Dead = true
+	default:
+		// The number was spent and the work was not finished. Whichever gateway
+		// spent it, this delivery is the one that does the work.
+		claim.Retry = true
+	}
+	return claim, nil
+}
+
+// NoteApplied records that the panel has the message. A redelivery of it is a
+// repeat from here on.
+func (r relaySequences) NoteApplied(ctx context.Context, hostID, sessionID string, sequence uint64) error {
+	_, err := r.pool.Exec(ctx, `
+		update relay_inbox set state = 'applied', applied_at = now(), last_error = ''
+		 where host_id = $1 and session_id = $2 and sequence = $3 and state <> 'applied'`,
+		hostID, sessionID, int64(sequence))
+	return err
+}
+
+// inboxAttempts is how many times a message is applied before the panel sets it
+// aside. A message the panel will never take would otherwise be carried by the
+// relay for as long as the relay lives.
+const inboxAttempts = 8
+
+// NoteFailure counts a failed apply and says whether the message was set aside.
+func (r relaySequences) NoteFailure(ctx context.Context, hostID, sessionID string,
+	sequence uint64, cause error) (bool, error) {
+	reason := ""
+	if cause != nil {
+		reason = cause.Error()
+	}
+	var state string
+	err := r.pool.QueryRow(ctx, `
+		update relay_inbox
+		   set attempts = attempts + 1, last_error = $4,
+		       state = case when attempts + 1 >= $5 then 'dead' else state end
+		 where host_id = $1 and session_id = $2 and sequence = $3
+		returning state`,
+		hostID, sessionID, int64(sequence), reason, inboxAttempts).Scan(&state)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// A session from before the inbox existed: nothing to count.
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return state == "dead", nil
 }
 
 // sequenceRetention is how long a session's last sequence is kept after its
@@ -284,8 +394,15 @@ func (r relaySequences) Accept(ctx context.Context, hostID, sessionID string,
 const sequenceRetention = 30 * 24 * time.Hour
 
 // Sweep removes the sequences of sessions nobody has spoken in for longer
-// than the retention.
+// than the retention, and with them what was recorded about their messages.
+// A message still owed is kept: it is work the panel has not done.
 func (r relaySequences) Sweep(ctx context.Context) (int64, error) {
+	if _, err := r.pool.Exec(ctx, `
+		delete from relay_inbox
+		 where state <> 'received' and coalesce(applied_at, received_at) < now() - $1::interval`,
+		fmt.Sprintf("%d seconds", int(sequenceRetention.Seconds()))); err != nil {
+		return 0, fmt.Errorf("sweeping the relay inbox: %w", err)
+	}
 	tag, err := r.pool.Exec(ctx, `
 		delete from relay_host_sequences where updated_at < now() - $1::interval`,
 		fmt.Sprintf("%d seconds", int(sequenceRetention.Seconds())))
