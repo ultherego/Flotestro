@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ultherego/flotestro/internal/audit"
+	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/budgets"
 	"github.com/ultherego/flotestro/internal/campaigns"
 	"github.com/ultherego/flotestro/internal/hosts"
@@ -675,7 +676,106 @@ func pagedCollection(name string) map[string]any {
 	return schema
 }
 
+// reasonOnlyBody describes an order whose whole body is why it was placed. The
+// body may be left out; the reason then comes from the query if it is there.
+func reasonOnlyBody(what string) map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"reason": map[string]any{"type": "string", "description": what},
+		},
+	}
+}
+
+// roleNames lists the roles a binding may name, so a caller reads the
+// vocabulary from the contract instead of guessing at the strings.
+func roleNames() []string {
+	names := make([]string, 0, len(authz.AllRoles()))
+	for _, role := range authz.AllRoles() {
+		names = append(names, string(role))
+	}
+	return names
+}
+
+// bindingScope is the scope half of a role binding: a site and an environment,
+// each of which may be the wildcard.
+func bindingScope() map[string]any {
+	return map[string]any{
+		"site":        map[string]any{"type": "string", "maxLength": hosts.MaxPlacementLength, "description": "The site the role is held over; '*' means every site."},
+		"environment": map[string]any{"type": "string", "maxLength": hosts.MaxPlacementLength, "description": "The environment the role is held over; '*' means every environment."},
+	}
+}
+
+// teamBodySchema is the register entry of a team: the two routes that write one
+// take the same fields.
+var teamBodySchema = map[string]any{
+	"type": "object",
+	"properties": map[string]any{
+		"name":        map[string]any{"type": "string", "maxLength": hosts.MaxTeamNameLength, "description": "What people call the team; unique, and not the identifier, so a rename keeps every host and every binding."},
+		"description": map[string]any{"type": "string", "maxLength": hosts.MaxTeamDescriptionLength},
+		"reason":      map[string]any{"type": "string", "description": "Kept in the audit trail; a team decides who may act on its hosts, so the trail asks for one."},
+	},
+	"required": []string{"name"},
+}
+
+// mergedProperties joins property sets into one map, so a body that shares a
+// half with another body does not repeat it.
+func mergedProperties(sets ...map[string]any) map[string]any {
+	merged := map[string]any{}
+	for _, set := range sets {
+		for name, schema := range set {
+			merged[name] = schema
+		}
+	}
+	return merged
+}
+
 var requestSchemas = map[string]map[string]any{
+	// The orders whose whole body is the reason they were placed.
+	"POST /api/v1/secrets/{name}/retire":           reasonOnlyBody("Why issuing this secret ends; kept in the audit trail."),
+	"POST /api/v1/campaign-schedules/{id}/run-now": reasonOnlyBody("Why the schedule is run off its calendar; kept in the audit trail."),
+	"POST /api/v1/support/bundles":                 reasonOnlyBody("Why the bundle is being taken; kept in the audit trail."),
+	"POST /api/v1/support/bundles/{id}/download":   reasonOnlyBody("Why the bundle is being fetched; kept in the audit trail."),
+	"POST /api/v1/principals/{id}/enable":          reasonOnlyBody("Why the identity gets its access back; kept in the audit trail."),
+
+	"POST /api/v1/teams":     teamBodySchema,
+	"PUT /api/v1/teams/{id}": teamBodySchema,
+	"PUT /api/v1/hosts/{id}/team": {
+		"type": "object",
+		"properties": map[string]any{
+			"team":   map[string]any{"type": "string", "description": "The identifier of the team the host joins; empty takes it out of the one it is in."},
+			"reason": map[string]any{"type": "string", "description": "Kept in the audit trail; the move changes who may act on the machine, so the trail asks for one."},
+		},
+	},
+	"POST /api/v1/principals/{id}/tokens": {
+		"type": "object",
+		"properties": map[string]any{
+			"description":     map[string]any{"type": "string", "description": "What the token is for; it is the only thing that tells two tokens apart afterwards."},
+			"token_ttl_hours": map[string]any{"type": "integer", "minimum": 1, "maximum": int(maxTokenTTL / time.Hour), "description": "How long the token lives; left out it takes the panel's default."},
+			"reason":          map[string]any{"type": "string", "description": "Kept in the audit trail."},
+		},
+	},
+	"POST /api/v1/principals/{id}/roles": {
+		"type": "object",
+		"properties": mergedProperties(bindingScope(), map[string]any{
+			"role":        map[string]any{"type": "string", "enum": roleNames()},
+			"valid_until": map[string]any{"type": "string", "format": "date-time", "description": "An RFC 3339 moment the binding ends at; empty means it holds until revoked."},
+			"reason":      map[string]any{"type": "string", "description": "Kept in the audit trail."},
+		}),
+		"required": []string{"role"},
+	},
+	"POST /api/v1/principals/{id}/team-roles": {
+		"type": "object",
+		"properties": map[string]any{
+			"role":        map[string]any{"type": "string", "enum": roleNames()},
+			"team":        map[string]any{"type": "string", "description": "The identifier of the team the role is held over."},
+			"valid_until": map[string]any{"type": "string", "format": "date-time", "description": "An RFC 3339 moment the binding ends at; empty means it holds until revoked."},
+			"reason":      map[string]any{"type": "string", "description": "Kept in the audit trail."},
+		},
+		// A binding names a team or a site and an environment, never both, so
+		// the site and the environment are not fields of this order at all.
+		"required": []string{"role", "team"},
+	},
 	// The hand-recorded facts of a host.
 	"PUT /api/v1/hosts/{id}/owner": {
 		"type": "object",

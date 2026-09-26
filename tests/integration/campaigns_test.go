@@ -4338,6 +4338,116 @@ func TestOpenAPIDescribesTheLiveAPI(t *testing.T) {
 	}
 }
 
+// bareRequestBodies names the orders the contract still describes as an
+// unconstrained object. It is a ratchet, not an aspiration: a route that
+// appears here and is not listed fails the test, so the count only falls.
+var bareRequestBodies = map[string]struct{}{
+	"POST /api/v1/campaigns/{id}/advance":                      {},
+	"POST /api/v1/campaigns/{id}/approve":                      {},
+	"POST /api/v1/campaigns/{id}/cancel":                       {},
+	"POST /api/v1/campaigns/{id}/pause":                        {},
+	"POST /api/v1/campaigns/{id}/resume":                       {},
+	"POST /api/v1/campaigns/{id}/retry":                        {},
+	"POST /api/v1/campaigns/{id}/targets/{host}/skip":          {},
+	"POST /api/v1/enrollment-requests/{id}/revoke":             {},
+	"POST /api/v1/group-mappings":                              {},
+	"POST /api/v1/host-groups":                                 {},
+	"POST /api/v1/hosts/{id}/backups":                          {},
+	"POST /api/v1/hosts/{id}/certificates/targets":             {},
+	"POST /api/v1/hosts/{id}/decommission":                     {},
+	"POST /api/v1/hosts/{id}/identity-recovery":                {},
+	"POST /api/v1/hosts/{id}/maintenance":                      {},
+	"POST /api/v1/hosts/{id}/monitoring/silences":              {},
+	"POST /api/v1/hosts/{id}/quarantine":                       {},
+	"POST /api/v1/hosts/{id}/quarantine/release":               {},
+	"POST /api/v1/hosts/{id}/security/remediation":             {},
+	"POST /api/v1/hosts/{id}/security/remediation/{plan}/stop": {},
+	"POST /api/v1/identity/access/simulate":                    {},
+	"POST /api/v1/identity/changes/{id}/approve":               {},
+	"POST /api/v1/identity/changes/{id}/cancel":                {},
+	"POST /api/v1/identity/directory/provision-preserve":       {},
+	"POST /api/v1/jobs/{id}/approve":                           {},
+	"POST /api/v1/jobs/{id}/cancel":                            {},
+	"POST /api/v1/monitoring/alerts/{id}/acknowledge":          {},
+	"POST /api/v1/monitoring/alerts/{id}/annotate":             {},
+	"POST /api/v1/monitoring/rules":                            {},
+	"POST /api/v1/monitoring/silences":                         {},
+	"POST /api/v1/notifications/channels":                      {},
+	"POST /api/v1/notifications/channels/{id}/test":            {},
+	"POST /api/v1/notifications/deliveries/{id}/retry":         {},
+	"POST /api/v1/pki/activate":                                {},
+	"POST /api/v1/pki/prepare":                                 {},
+	"POST /api/v1/policies/{id}/evaluate":                      {},
+	"POST /api/v1/principals":                                  {},
+	"POST /api/v1/reads":                                       {},
+	"POST /api/v1/relays/{id}/revoke":                          {},
+	"POST /api/v1/secrets":                                     {},
+	"POST /api/v1/secrets/{name}/rotate":                       {},
+	"POST /api/v1/security/remediation":                        {},
+	"POST /api/v1/security/remediation/preview":                {},
+	"POST /api/v1/setup/test-directory":                        {},
+	"POST /api/v1/setup/test-oidc":                             {},
+	"POST /api/v1/tags/rename":                                 {},
+	"POST /api/v1/vulnerabilities/snapshots/{id}/accept":       {},
+	"PUT /api/v1/budgets/{key}":                                {},
+	"PUT /api/v1/host-groups/{id}":                             {},
+	"PUT /api/v1/host-groups/{id}/members":                     {},
+	"PUT /api/v1/hosts/{id}/channel":                           {},
+	"PUT /api/v1/hosts/{id}/tags":                              {},
+	"PUT /api/v1/me/preferences":                               {},
+	"PUT /api/v1/monitoring/rules/{id}":                        {},
+	"PUT /api/v1/notifications/channels/{id}":                  {},
+	"PUT /api/v1/settings/monitoring":                          {},
+}
+
+// TestTheContractDescribesOrderBodies holds the line on the request half of the
+// contract. A generated client can call every route in the document, but it can
+// only build a body for a route whose schema names the fields, so each entry
+// below is an order a caller has to learn from the source.
+func TestTheContractDescribesOrderBodies(t *testing.T) {
+	h := newHarness(t)
+	var document struct {
+		Paths map[string]map[string]struct {
+			RequestBody struct {
+				Content map[string]struct {
+					Schema map[string]any `json:"schema"`
+				} `json:"content"`
+			} `json:"requestBody"`
+		} `json:"paths"`
+	}
+	h.get("/api/v1/openapi.json", &document)
+
+	bare := map[string]struct{}{}
+	for path, operations := range document.Paths {
+		for method, operation := range operations {
+			if method != "post" && method != "put" {
+				continue
+			}
+			schema := operation.RequestBody.Content["application/json"].Schema
+			if schema == nil {
+				continue
+			}
+			// An order whose schema says no more than "an object" describes
+			// nothing: every field a caller has to send is still a guess.
+			if len(schema) == 1 && schema["type"] == "object" {
+				bare[strings.ToUpper(method)+" "+path] = struct{}{}
+			}
+		}
+	}
+
+	for route := range bare {
+		if _, known := bareRequestBodies[route]; !known {
+			t.Errorf("%s takes a body the contract does not describe; give it a schema in requestSchemas", route)
+		}
+	}
+	for route := range bareRequestBodies {
+		if _, still := bare[route]; !still {
+			t.Errorf("%s is described now: take it out of bareRequestBodies so the count stays honest", route)
+		}
+	}
+	t.Logf("%d of the contract's orders still take an unconstrained body", len(bare))
+}
+
 // TestRepeatedOrdersAreIdempotent guards the contract a pipeline relies on: an
 // order repeated with the same Idempotency-Key gives the campaign or the job
 // that already exists, not a second one.
