@@ -4,9 +4,70 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [semantic versioning](https://semver.org/). Dates are the
 day the tag was published.
 
-## [Unreleased]
+## [0.62.0] - 2026-09-26
+
+### Added
+
+- A `migrate` service in the container deployment, behind a profile and depended
+  on by nothing, so the schema is not reshaped by the login that serves the
+  fleet. The machinery was already there - its own DSN, `SET ROLE` with a
+  refusal when the migrator turns out to be a superuser, an advisory lock, a
+  digest per applied migration - and no deployment used any of it, while the
+  guide said the panel migrates itself before it listens.
+- `FLOTESTRO_DATABASE_MODE` says whether the database is the one the deployment
+  starts or one somebody else runs, instead of the deployment inferring it from
+  whether a secrets file happened to exist yet. On `external` the panel holds
+  the DSN to `sslmode=verify-full` and `target_session_attrs=read-write` and
+  refuses it otherwise; a laboratory can set one variable to get past both,
+  which is one visible way round rather than several invisible ones. No refusal
+  carries the DSN, because it holds the password. A preflight asks the database
+  what it is - a standby, the extensions, the rights - before the panel settles
+  on it.
+- A second control plane is written down: a warm standby on the same image and
+  the same secrets, its state directory restored from the pair the backup takes,
+  its own gateway identifier, and stopped. Not a second active instance - two
+  state directories against one database mean two fleet authorities and two
+  secret-store keys for one installation, which the panel already refuses to
+  start into. The refusal existed and the topology it implies did not.
+- The pipeline checks that the protocol and the schema keep the promise of
+  working one release apart: `buf breaking` compares the protocol with the
+  newest release tag rather than with the branch it is pushing to, a release
+  records the migrations it contains, and the upgrade job writes rows under the
+  old version and reads them back under the new one.
+- The OpenAPI document describes the body of eleven more orders - the five whose
+  whole body is the reason they were placed, the team register, a host's move
+  between teams, an issued token and the two role bindings - with the role
+  vocabulary taken from the code rather than restated. The 56 orders still
+  described as an unconstrained object are listed in a test that fails when a
+  route is added to them, so the count can only fall.
 
 ### Changed
+
+- A signed request is carried out once. The helper's replay store held one bit
+  per nonce, and a repeat of a nonce by the same task in the same life of the
+  process was answered "carry on" - so the same signed order could be carried
+  out as often as it was asked for, and the only thing between an order and a
+  second execution was the agent's own journal, on the unprivileged side of the
+  boundary the helper exists to defend. The store now keeps the answer of the
+  first attempt against the request it answered, and a repeat receives that
+  answer instead of being performed again.
+- The commit of a decommission is proven. Messages from a host to the panel are
+  signed so a relay can carry the host's word without speaking for it; messages
+  from the panel carried no sequence, no epoch and no signature, and the worst
+  of what a relay could write was the order that makes the agent ask the helper
+  to remove the host's identity, its journal and its service. The helper had
+  classified that request as a read, so no capability bound it either.
+- A restore is bound to the copies the operator chose. The helper answers a plan
+  request with a fingerprint only when the order names the kind of plan it
+  wants - a plan of a copy, against the repository and the definition - and the
+  panel's button asked for a bare read of the repository, which is why the
+  binding had been unreachable rather than wrong.
+- Patching a vulnerability sends each host the packages it is affected in and no
+  others. The page built one order out of the union of every affected host's
+  packages, and a package manager refuses an upgrade of something that is not
+  installed, so the order failed on the hosts that needed the least. There is
+  one order per set of packages now, largest group first, and the page says how
+  many orders a patch takes and why more than one.
 
 - The root helper refuses a request it holds no rule for comparing with the
   order the capability binds. Every kind of request that changes a host now has
@@ -46,32 +107,26 @@ day the tag was published.
   declared container, network or volume, a repository, a backup definition and
   a certificate deployment.
 
-- A relay renewal whose answer was lost left the relay holding a certificate
-  the panel no longer knew, and the renewal that could have fixed it refuses an
-  unknown certificate — so a whole site stayed down until somebody enrolled the
-  relay by hand. The replaced certificate is kept and still recognised until
-  the relay arrives with the new one.
-- Retiring a certificate authority counted the hosts resting on it and never
-  the relays, which are signed by the same authority.
-- The agent's journal wrote without flushing, and pruned the markers of tasks
-  nobody had resolved, so an agent down for longer than a day came back having
-  forgotten that an outcome was unknown — and carried the change out twice.
-- The audit retention sweep is now the privileged path rather than the polite
-  one, and refuses a retention that is not positive.
-- `certificate.deploy` now requires the plan the helper already computes; the
-  panel plans on the host and shows what would be replaced.
-- An idempotency key already used on a host for a different order returned the
-  first task with 200 OK, telling the caller an order had gone through that
-  never existed.
-- A restart never asked logind what it would interrupt, although a shutdown
-  did, and the panel's override checkbox governed only the shutdown.
-- A stable container tag could be published unsigned, with a warning, when a
-  run received no OIDC identity.
-- The release signing job carried its key and passphrase in the environment of
-  every step, and the passphrase travelled on gpg's command line.
-
 ### Fixed
 
+- An instance whose database has become a standby leaves the rotation. The start
+  refused a standby outright, but a failover under a running panel left the
+  instance alive and ready while every change it was handed failed on its own,
+  and a load balancer went on sending it work. Readiness asks the question now,
+  and the instance comes back by itself when the database is a writer again.
+- A relayed message's sequence is claimed together with the work it carries.
+  The number was spent in a transaction of its own before the message was
+  applied, so anything in between - a database hiccup, the gateway going down, a
+  failure in the work - left the number spent and the work undone; the relay
+  then carried the message again, as it is meant to, and the panel read the
+  number as one it had consumed and dropped it. A job result, an inventory or a
+  task acknowledgement disappeared with no word anywhere.
+- The changes to a host's identity are serialised. The agent daemon, the relay
+  daemon and an operator running `agentctl` or `relayctl` all write into one
+  directory, with no lock anywhere but the package manager's, and two at once
+  were enough to lose the identity: the symlink naming the generation in force
+  moved through one shared temporary name, and the clean every commit ends with
+  removed every directory under the staging prefix, including another writer's.
 - `ignore_inhibitors` on a restart never reached the host: the task envelope had
   no such field, so the panel dropped what the operator had asked for and the
   host respected the inhibitors anyway.
@@ -176,6 +231,29 @@ day the tag was published.
   digest of secret-derived content.
 - A failed time change deleted the drop-in it could not read instead of
   restoring it.
+- A relay renewal whose answer was lost left the relay holding a certificate
+  the panel no longer knew, and the renewal that could have fixed it refuses an
+  unknown certificate — so a whole site stayed down until somebody enrolled the
+  relay by hand. The replaced certificate is kept and still recognised until
+  the relay arrives with the new one.
+- Retiring a certificate authority counted the hosts resting on it and never
+  the relays, which are signed by the same authority.
+- The agent's journal wrote without flushing, and pruned the markers of tasks
+  nobody had resolved, so an agent down for longer than a day came back having
+  forgotten that an outcome was unknown — and carried the change out twice.
+- The audit retention sweep is now the privileged path rather than the polite
+  one, and refuses a retention that is not positive.
+- `certificate.deploy` now requires the plan the helper already computes; the
+  panel plans on the host and shows what would be replaced.
+- An idempotency key already used on a host for a different order returned the
+  first task with 200 OK, telling the caller an order had gone through that
+  never existed.
+- A restart never asked logind what it would interrupt, although a shutdown
+  did, and the panel's override checkbox governed only the shutdown.
+- A stable container tag could be published unsigned, with a warning, when a
+  run received no OIDC identity.
+- The release signing job carried its key and passphrase in the environment of
+  every step, and the passphrase travelled on gpg's command line.
 
 ## [0.61.0] - 2026-09-23
 
