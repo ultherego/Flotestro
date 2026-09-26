@@ -57,15 +57,23 @@ rpmName() {
 # than it should: the first question is then "which commit is this from" and
 # it has to be answerable on the host, without access to the release
 # machine.
+# It is computed once, because a stamp per component would date the binaries
+# of one release differently and none of the dates would mean anything.
+STAMP=""
 stamp() {
+    if [ -n "$STAMP" ]; then
+        printf -- "%s" "$STAMP"
+        return
+    fi
     local pkg=github.com/ultherego/flotestro/internal/buildinfo
     local commit date
     # safe.directory: the source directory often belongs to a different user
     # than the building process, and git then refuses to read it.
     commit="$(git -C "$repo" -c "safe.directory=$repo" rev-parse HEAD 2>/dev/null || true)"
     date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    printf -- "-X %s.Version=%s -X %s.Commit=%s -X %s.Date=%s" \
-        "$pkg" "$VERSION" "$pkg" "$commit" "$pkg" "$date"
+    STAMP="$(printf -- "-X %s.Version=%s -X %s.Commit=%s -X %s.Date=%s" \
+        "$pkg" "$VERSION" "$pkg" "$commit" "$pkg" "$date")"
+    printf -- "%s" "$STAMP"
 }
 
 buildBinaries() {
@@ -223,7 +231,7 @@ provenance() {
   "commit": "$commit",
   "description": "$description",
   "toolchain": "$("$GO" version 2>/dev/null || echo unknown)",
-  "flags": "-trimpath -ldflags '-s -w' CGO_ENABLED=0",
+  "flags": "-trimpath -ldflags '-s -w $(stamp)' CGO_ENABLED=0",
   "architectures": "${ARCHITECTURES[*]}",
   "sbom_format": "CycloneDX 1.5",
   "sbom": [$bills],
