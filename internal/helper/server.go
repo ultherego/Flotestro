@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+	"google.golang.org/protobuf/proto"
 
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 	"github.com/ultherego/flotestro/internal/helpercap"
@@ -248,22 +249,54 @@ func (s *Server) handle(ctx context.Context, request *helperv1.HelperRequest,
 	}
 	// The capability: the panel's proof that this operation was approved
 	// for this host. A refusal here runs nothing.
-	refused, capabilityID := s.authorize(request)
+	refused, decision := s.authorize(request)
 	if refused != nil {
 		return refused
+	}
+	// This very request already ran under this capability: the answer it gave
+	// is repeated and the effect is not. A capability covers a whole task and
+	// the agent may ask twice - after a lost answer, or because somebody made
+	// it ask - and a schedule, a signal or a restore must not happen twice for
+	// one order.
+	if len(decision.Kept) > 0 {
+		kept := &helperv1.HelperResponse{}
+		if err := proto.Unmarshal(decision.Kept, kept); err != nil {
+			s.log.Error("the kept answer of a repeated request does not read; the request is refused rather than carried out again",
+				"task_id", request.GetTaskId(), "err", err)
+			return reject(helpercap.ErrorCapabilityPerformed,
+				"this request already ran under this capability and the answer kept for it does not read")
+		}
+		s.log.Info("a repeated request was answered from what it answered before",
+			"task_id", request.GetTaskId(), "kind", helpercap.Expect(request).Kind)
+		kept.CapabilityId = decision.CapabilityID
+		return kept
 	}
 
 	response := s.perform(ctx, request, progress)
 	// The verified capability travels back with the answer, so the agent
 	// can put it next to the task on its own side of the audit trail.
-	response.CapabilityId = capabilityID
+	response.CapabilityId = decision.CapabilityID
+	if decision.Complete != nil {
+		encoded, err := proto.Marshal(response)
+		if err == nil {
+			err = decision.Complete(encoded)
+		}
+		if err != nil {
+			// The effect happened. What is lost is the ability to answer a
+			// repeat without doing it again, so it is said out loud.
+			s.log.Error("the answer of this request was not recorded; asked again it would be carried out a second time",
+				"task_id", request.GetTaskId(), "err", err)
+		}
+	}
 	return response
 }
 
-// authorize applies the capability policy to a request.
-func (s *Server) authorize(request *helperv1.HelperRequest) (*helperv1.HelperResponse, string) {
+// authorize applies the capability policy to a request and hands the decision
+// back: what the capability was, and what the store already knows about this
+// very request under it.
+func (s *Server) authorize(request *helperv1.HelperRequest) (*helperv1.HelperResponse, helpercap.Decision) {
 	if s.policy == nil {
-		return nil, ""
+		return nil, helpercap.Decision{}
 	}
 	decision := s.policy.Decide(request)
 	switch decision.Outcome {
@@ -282,13 +315,13 @@ func (s *Server) authorize(request *helperv1.HelperRequest) (*helperv1.HelperRes
 			"task_id", request.GetTaskId(), "capability_id", decision.CapabilityID,
 			"kind", helpercap.Expect(request).Kind, "mode", string(s.policy.Mode),
 			"code", decision.Code, "reason", decision.Message)
-		return reject(decision.Code, decision.Message), ""
+		return reject(decision.Code, decision.Message), helpercap.Decision{}
 	case helpercap.OutcomeVerified:
 		s.log.Info("the capability of the panel was verified",
 			"task_id", request.GetTaskId(), "capability_id", decision.CapabilityID,
 			"action", request.GetCapability().GetActionType(), "key_id", request.GetCapability().GetKeyId())
 	}
-	return nil, decision.CapabilityID
+	return nil, decision
 }
 
 // applyTrustUpdate writes the panel's keyring and the host identity.

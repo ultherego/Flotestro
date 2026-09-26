@@ -89,6 +89,13 @@ const (
 	// ErrorCapabilityReplay: the nonce was consumed before, by an earlier
 	// task or by an earlier life of the helper.
 	ErrorCapabilityReplay = "capability_replay"
+	// ErrorCapabilityInFlight: this very request is being carried out under
+	// this nonce right now. Asking again does not start it a second time.
+	ErrorCapabilityInFlight = "capability_in_flight"
+	// ErrorCapabilityPerformed: this very request already ran under this nonce
+	// and its answer was too large to keep, so the helper can neither repeat
+	// the answer nor repeat the effect.
+	ErrorCapabilityPerformed = "capability_already_performed"
 )
 
 // Error is a refusal with its stable code.

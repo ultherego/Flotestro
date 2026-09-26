@@ -169,6 +169,8 @@
 <tr><td><a href="#err-canceled-before-start"><code class="refusal">canceled_before_start</code></a></td><td>cancel</td><td><span class="badge retry-never">never</span></td><td>no</td></tr>
 <tr><td><a href="#err-capability-bad-signature"><code class="refusal">capability_bad_signature</code></a></td><td>helper</td><td><span class="badge retry-never">never</span></td><td>yes</td></tr>
 <tr><td><a href="#err-capability-expired"><code class="refusal">capability_expired</code></a></td><td>helper</td><td><span class="badge retry-after-change">after_change</span></td><td>yes</td></tr>
+<tr><td><a href="#err-capability-already-performed"><code class="refusal">capability_already_performed</code></a></td><td>helper</td><td><span class="badge retry-never">never</span></td><td>yes</td></tr>
+<tr><td><a href="#err-capability-in-flight"><code class="refusal">capability_in_flight</code></a></td><td>helper</td><td><span class="badge retry-automatic">automatic</span></td><td>no</td></tr>
 <tr><td><a href="#err-capability-invalid-nonce"><code class="refusal">capability_invalid_nonce</code></a></td><td>helper</td><td><span class="badge retry-never">never</span></td><td>yes</td></tr>
 <tr><td><a href="#err-cancel-ack-stale"><code class="refusal">cancel_ack_stale</code></a></td><td>dispatch</td><td><span class="badge retry-automatic">automatic</span></td><td>no</td></tr>
 <tr><td><a href="#err-crypto-state-stale"><code class="refusal">crypto_state_stale</code></a></td><td>startup</td><td><span class="badge retry-automatic">automatic</span></td><td>no</td></tr>
@@ -717,6 +719,10 @@
 <dd><p>The signature of the capability does not verify under the named key.</p><p><span class="label">What to do</span> The capability was altered on the way or minted with another key; inspect the host and the panel.</p><p><span class="badge retry-never">retry: never</span> <span class="badge counts-failure">counts as a failure</span></p></dd>
 <dt id="err-capability-expired"><code class="refusal">capability_expired</code></dt>
 <dd><p>The capability's window closed before the helper started the operation - the task waited for a resource of the host longer than the window - or the host's clock is far from the panel's.</p><p><span class="label">What to do</span> Order again when the host is free; if it repeats on an idle host, fix the clock of the host.</p><p><span class="badge retry-after-change">retry: after_change</span> <span class="badge counts-failure">counts as a failure</span></p></dd>
+<dt id="err-capability-already-performed"><code class="refusal">capability_already_performed</code></dt>
+<dd><p>The very same request already ran under this capability and its answer was too large for the host to keep, so the helper can neither repeat the answer nor repeat the effect.</p><p><span class="label">What to do</span> Read the state of the host to see what the operation left behind; it happened once and only once.</p><p><span class="badge retry-never">retry: never</span> <span class="badge counts-failure">counts as a failure</span></p></dd>
+<dt id="err-capability-in-flight"><code class="refusal">capability_in_flight</code></dt>
+<dd><p>The very same request is already being carried out under this capability; asking again does not start it a second time.</p><p><span class="label">What to do</span> Wait for the answer of the request that is running; it is the answer to this one.</p><p><span class="badge retry-automatic">retry: automatic</span></p></dd>
 <dt id="err-capability-invalid-nonce"><code class="refusal">capability_invalid_nonce</code></dt>
 <dd><p>The capability's nonce is not of the required length.</p><p><span class="label">What to do</span> The capability was not minted by this panel's code; inspect the panel and the host.</p><p><span class="badge retry-never">retry: never</span> <span class="badge counts-failure">counts as a failure</span></p></dd>
 <dt id="err-capability-replay"><code class="refusal">capability_replay</code></dt>

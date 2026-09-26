@@ -238,17 +238,19 @@ func TestReplayStoreSweepsExpiredRecords(t *testing.T) {
 	store.now = func() time.Time { return now }
 	nonce := make([]byte, NonceSize)
 	nonce[0] = 7
-	if err := store.Consume(nonce, now.Add(time.Minute).Unix(), "task-1"); err != nil {
+	if _, err := store.Reserve(nonce, now.Add(time.Minute).Unix(), "task-1", "digest-1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Consume(nonce, now.Add(time.Minute).Unix(), "task-2"); CodeOf(err) != ErrorCapabilityReplay {
+	if _, err := store.Reserve(nonce, now.Add(time.Minute).Unix(), "task-2", "digest-1"); CodeOf(err) != ErrorCapabilityReplay {
 		t.Fatalf("a second task consumed the nonce: %v", err)
 	}
-	if err := store.Consume(nonce[:16], now.Unix(), "task-1"); CodeOf(err) != ErrorInvalidNonce {
+	if _, err := store.Reserve(nonce[:16], now.Unix(), "task-1", "digest-1"); CodeOf(err) != ErrorInvalidNonce {
 		t.Fatalf("a short nonce: %v", err)
 	}
+	// Two records for one reservation: the nonce belongs to a task and a life
+	// of the helper, and the request under it has a state of its own.
 	entries, _ := os.ReadDir(dir)
-	if len(entries) != 1 {
+	if len(entries) != 2 {
 		t.Fatalf("records = %d", len(entries))
 	}
 	now = now.Add(2 * time.Minute)

@@ -3,10 +3,14 @@ package helpercap
 import (
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync/atomic"
 	"time"
+
+	"google.golang.org/protobuf/proto"
 
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 )
@@ -53,38 +57,38 @@ func NewVerifierWith(hostID string, keyring *Keyring, replay *ReplayStore, now f
 }
 
 // Verify checks the capability the request carries against the request.
-func (v *Verifier) Verify(request *helperv1.HelperRequest, expectation Expectation) error {
+func (v *Verifier) Verify(request *helperv1.HelperRequest, expectation Expectation) (Reservation, error) {
 	capability := request.GetCapability()
 	if capability == nil {
-		return refusal(ErrorCapabilityRequired, "the request carries no capability")
+		return Reservation{}, refusal(ErrorCapabilityRequired, "the request carries no capability")
 	}
 	if capability.GetSchemaVersion() != SchemaVersion {
-		return refusal(ErrorCapabilityVersion,
+		return Reservation{}, refusal(ErrorCapabilityVersion,
 			fmt.Sprintf("the capability has layout %d, this helper reads %d", capability.GetSchemaVersion(), SchemaVersion))
 	}
 	localHost, err := v.hostID()
 	if err != nil {
-		return fmt.Errorf("reading the host identity: %w", err)
+		return Reservation{}, fmt.Errorf("reading the host identity: %w", err)
 	}
 	if localHost == "" {
-		return refusal(ErrorWrongHost, "the helper has no host identity yet; the trust bundle of the panel has not reached it")
+		return Reservation{}, refusal(ErrorWrongHost, "the helper has no host identity yet; the trust bundle of the panel has not reached it")
 	}
 	if capability.GetHostId() != localHost {
-		return refusal(ErrorWrongHost, "the capability names another host")
+		return Reservation{}, refusal(ErrorWrongHost, "the capability names another host")
 	}
 	if !expectation.Allows(capability.GetActionType()) {
-		return refusal(ErrorWrongAction,
+		return Reservation{}, refusal(ErrorWrongAction,
 			fmt.Sprintf("the capability authorizes %s, the request asks for %s", capability.GetActionType(), expectation.Kind))
 	}
 	if request.GetTaskId() != capability.GetTaskId() {
-		return refusal(ErrorWrongAction, "the capability is for another task than the request names")
+		return Reservation{}, refusal(ErrorWrongAction, "the capability is for another task than the request names")
 	}
 	now := v.now().Unix()
 	skew := int64(ClockSkew.Seconds())
 	// The start of the window forgives a clock behind the panel's; the end
 	// forgives nothing, so a stale capability is stale on the second.
 	if now < capability.GetNotBeforeUnix()-skew || now > capability.GetExpiresUnix() {
-		return refusal(ErrorCapabilityExpired,
+		return Reservation{}, refusal(ErrorCapabilityExpired,
 			fmt.Sprintf("the capability is valid from %s to %s",
 				time.Unix(capability.GetNotBeforeUnix(), 0).UTC().Format(time.RFC3339),
 				time.Unix(capability.GetExpiresUnix(), 0).UTC().Format(time.RFC3339)))
@@ -93,41 +97,75 @@ func (v *Verifier) Verify(request *helperv1.HelperRequest, expectation Expectati
 	// issue, so the longest honest window is the class window plus that.
 	longest := int64(MaxTTL[ClassOf(capability.GetActionType())].Seconds()) + skew
 	if capability.GetExpiresUnix()-capability.GetNotBeforeUnix() > longest {
-		return refusal(ErrorTTLTooLong,
+		return Reservation{}, refusal(ErrorTTLTooLong,
 			fmt.Sprintf("the window of the capability is longer than %s", MaxTTL[ClassOf(capability.GetActionType())]))
 	}
 	digest := sha256.Sum256(request.GetCanonicalPayload())
 	if len(capability.GetPayloadSha256()) != len(digest) ||
 		subtle.ConstantTimeCompare(digest[:], capability.GetPayloadSha256()) != 1 {
-		return refusal(ErrorPayloadMismatch, "the payload handed over is not the one the capability binds")
+		return Reservation{}, refusal(ErrorPayloadMismatch, "the payload handed over is not the one the capability binds")
 	}
 	bound, err := DecodeCanonicalPayload(request.GetCanonicalPayload())
 	if err != nil {
-		return refusal(ErrorPayloadMismatch, err.Error())
+		return Reservation{}, refusal(ErrorPayloadMismatch, err.Error())
 	}
 	if string(bound.Action) != capability.GetActionType() {
-		return refusal(ErrorPayloadBinding,
+		return Reservation{}, refusal(ErrorPayloadBinding,
 			fmt.Sprintf("the bound payload is of %s, the capability of %s", bound.Action, capability.GetActionType()))
 	}
 	if err := CheckBinding(request, bound); err != nil {
-		return err
+		return Reservation{}, err
 	}
 	ring, err := v.keyring()
 	if err != nil {
-		return fmt.Errorf("reading the keyring: %w", err)
+		return Reservation{}, fmt.Errorf("reading the keyring: %w", err)
 	}
 	public, ok := ring.Lookup(capability.GetKeyId())
 	if !ok {
-		return refusal(ErrorUnknownKey,
+		return Reservation{}, refusal(ErrorUnknownKey,
 			fmt.Sprintf("the keyring holds no key %s", capability.GetKeyId()))
 	}
 	if !VerifySignature(public, capability, request.GetCapabilitySignature()) {
-		return refusal(ErrorBadSignature, "the signature of the capability does not verify")
+		return Reservation{}, refusal(ErrorBadSignature, "the signature of the capability does not verify")
 	}
 	if v.replay == nil {
-		return fmt.Errorf("the helper has no replay store")
+		return Reservation{}, fmt.Errorf("the helper has no replay store")
 	}
-	return v.replay.Consume(capability.GetNonce(), capability.GetExpiresUnix(), capability.GetTaskId())
+	// The nonce covers the whole task and a task calls the helper more than
+	// once, so what is reserved is this request under that nonce.
+	requestDigest, err := RequestDigest(request)
+	if err != nil {
+		return Reservation{}, err
+	}
+	reservation, err := v.replay.Reserve(capability.GetNonce(), capability.GetExpiresUnix(),
+		capability.GetTaskId(), requestDigest)
+	if err != nil {
+		return Reservation{}, err
+	}
+	reservation.complete = func(result []byte) error {
+		return v.replay.Complete(capability.GetNonce(), capability.GetExpiresUnix(),
+			capability.GetTaskId(), requestDigest, result)
+	}
+	return reservation, nil
+}
+
+// RequestDigest names a helper request without its capability: the same order
+// asked twice has one digest, and two different orders of one task have two.
+// The marshalling is deterministic, so a map field - the sysctl settings, the
+// image digests of a project - does not give the same request two names.
+func RequestDigest(request *helperv1.HelperRequest) (string, error) {
+	bare, ok := proto.Clone(request).(*helperv1.HelperRequest)
+	if !ok {
+		return "", errors.New("the request did not clone")
+	}
+	bare.Capability = nil
+	bare.CapabilitySignature = nil
+	encoded, err := proto.MarshalOptions{Deterministic: true}.Marshal(bare)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 // Decision is what the policy says about one request.
@@ -145,6 +183,13 @@ type Decision struct {
 	Legacy bool
 	// CapabilityID names the verified capability, for the audit line.
 	CapabilityID string
+	// Kept is the answer of an effect that already ran under this nonce for
+	// this very request. The caller answers with it and performs nothing.
+	Kept []byte
+	// Complete records the answer of the effect the caller is about to carry
+	// out, so that the same request asked again is answered and not performed.
+	// Nil when there is nothing to record.
+	Complete func(result []byte) error
 }
 
 // The outcomes of a decision.
@@ -198,11 +243,12 @@ func (p *Policy) Decide(request *helperv1.HelperRequest) Decision {
 		return Decision{Outcome: OutcomeRefused, Code: ErrorUnknownKey,
 			Message: "the helper has no keyring to verify the capability against"}
 	}
-	err := p.Verifier.Verify(request, expectation)
+	reservation, err := p.Verifier.Verify(request, expectation)
 	if err == nil {
 		p.verified.Add(1)
 		return Decision{Allowed: true, Outcome: OutcomeVerified,
-			CapabilityID: request.GetCapability().GetCapabilityId()}
+			CapabilityID: request.GetCapability().GetCapabilityId(),
+			Kept:         reservation.Kept, Complete: reservation.complete}
 	}
 	code := CodeOf(err)
 	if code == "" {
