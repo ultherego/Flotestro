@@ -23,6 +23,8 @@ type fakePlanner struct {
 	// planErr makes the plan fail, as it does when the metadata cache is
 	// gone.
 	planErr error
+	// upgraded records the plan-free upgrade path, which nothing may reach.
+	upgraded bool
 }
 
 func (f *fakePlanner) Name() string             { return "apt" }
@@ -33,6 +35,7 @@ func (f *fakePlanner) Refresh(context.Context) error {
 }
 func (f *fakePlanner) DatabaseBroken(context.Context) bool { return false }
 func (f *fakePlanner) Upgrade(context.Context, packages.Options) (packages.Apply, error) {
+	f.upgraded = true
 	return packages.Apply{}, errors.New("the fake planner does not upgrade by name")
 }
 
@@ -243,19 +246,24 @@ func TestTheHelperRefusesATamperedDigest(t *testing.T) {
 	}
 }
 
-// The order without a digest is a legacy one and takes the old path: the
-// fake planner has no upgrade by name, and that is the failure reported.
-func TestAnOrderWithoutADigestIsNotBoundToAPlan(t *testing.T) {
+// An upgrade without a digest is refused by the helper itself. The panel will
+// not create such an order, and this is the same rule on the side that would do
+// the work: what runs for the unprivileged agent account is a change somebody
+// reviewed, never "upgrade everything".
+func TestAnUpgradeWithoutADigestIsRefusedByTheHelper(t *testing.T) {
 	request := approvedRequest(t, approvedContent(), testHeader())
 	request.GetPackageAction().PlanHash = nil
 	planner := &fakePlanner{content: approvedContent()}
 	server := testServer()
 	server.packageManager = func() (packages.Manager, error) { return planner, nil }
 	response := server.handle(context.Background(), request, nil)
-	if response.GetAccepted() || response.GetErrorCode() != packages.ErrorTransaction {
+	if response.GetAccepted() || response.GetErrorCode() != plan.ErrorStalePlan {
 		t.Fatalf("code = %q, accepted = %v", response.GetErrorCode(), response.GetAccepted())
 	}
 	if planner.applied != nil {
 		t.Error("an order without a digest ran the exact path")
+	}
+	if planner.upgraded {
+		t.Error("an order without a digest upgraded the host with no plan at all")
 	}
 }

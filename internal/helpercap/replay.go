@@ -32,8 +32,12 @@ type ReplayStore struct {
 }
 
 // OpenReplayStore opens the directory, creating it with mode 0700 when it is
-// missing.
-func OpenReplayStore(dir string) (*ReplayStore, error) {
+// missing. With requireRoot the directory has to be root's and writable by
+// nobody else, and the helper refuses to start otherwise: whoever can empty this
+// directory can present a still-valid capability a second time and have the
+// helper carry out the same root change again. The check is made on the open
+// descriptor, so what was checked is what is written to.
+func OpenReplayStore(dir string, requireRoot bool) (*ReplayStore, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
@@ -44,6 +48,12 @@ func OpenReplayStore(dir string) (*ReplayStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("the replay directory %s: %w", dir, err)
 	}
+	if requireRoot {
+		if err := replayDirIsRoots(dirfd, dir); err != nil {
+			unix.Close(dirfd)
+			return nil, err
+		}
+	}
 	life := make([]byte, 8)
 	if _, err := rand.Read(life); err != nil {
 		unix.Close(dirfd)
@@ -52,6 +62,28 @@ func OpenReplayStore(dir string) (*ReplayStore, error) {
 	store := &ReplayStore{dir: dir, dirfd: dirfd, life: hex.EncodeToString(life), now: time.Now}
 	store.Sweep()
 	return store, nil
+}
+
+// replayDirIsRoots refuses a directory somebody other than root could empty or
+// fill. The symbolic link is refused by the open itself, with O_NOFOLLOW.
+func replayDirIsRoots(dirfd int, dir string) error {
+	var stat unix.Stat_t
+	if err := unix.Fstat(dirfd, &stat); err != nil {
+		return fmt.Errorf("the replay directory %s: %w", dir, err)
+	}
+	if stat.Mode&unix.S_IFMT != unix.S_IFDIR {
+		return fmt.Errorf("the replay directory %s is not a directory", dir)
+	}
+	if stat.Uid != 0 {
+		return fmt.Errorf("the replay directory %s is owned by uid %d, not by root: "+
+			"whoever owns it can erase a consumed capability and present it again", dir, stat.Uid)
+	}
+	if stat.Mode&0o022 != 0 {
+		return fmt.Errorf("the replay directory %s is writable by others (mode %04o): "+
+			"whoever can write here can erase a consumed capability and present it again",
+			dir, stat.Mode&0o7777)
+	}
+	return nil
 }
 
 // Close releases the directory.

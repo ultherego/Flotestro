@@ -41,7 +41,7 @@ func newCapabilityLab(t *testing.T, mode helpercap.Mode) *capabilityLab {
 	// unset policy enrols with nobody.
 	trust := helpercap.TrustStore{Dir: filepath.Join(dir, "trust.d"), HostIDPath: filepath.Join(dir, "host-id"),
 		Bootstrap: helpercap.BootstrapTOFU}
-	replay, err := helpercap.OpenReplayStore(filepath.Join(dir, "replay"))
+	replay, err := helpercap.OpenReplayStore(filepath.Join(dir, "replay"), false)
 	if err != nil {
 		t.Fatal(err)
 	}

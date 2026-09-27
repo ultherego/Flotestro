@@ -27,7 +27,18 @@ type Outcome struct {
 // Settle reads every expected effect off the installed state - package name to
 // installed version, a package not in the map is absent - and returns the
 // outcomes achieved and the outcomes missed, each sorted by subject.
+//
+// A nil map is not an empty one: it means the state could not be read, and the
+// caller is to say so rather than settle anything against it. Settle keeps that
+// distinction by treating every expected effect as missed.
 func (e Effects) Settle(installed map[string]string) (achieved, missed []Outcome) {
+	if installed == nil {
+		for _, effect := range e.Expected {
+			missed = append(missed, Outcome{Effect: effect, Observed: "unknown"})
+		}
+		sort.Slice(missed, func(i, j int) bool { return lessEffect(missed[i].Effect, missed[j].Effect) })
+		return nil, missed
+	}
 	for _, effect := range e.Expected {
 		version, present := installed[effect.Subject]
 		observed := version

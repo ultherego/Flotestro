@@ -20,10 +20,16 @@ type Exact interface {
 }
 
 // settleEffects reads the expected effects of the plan off the state after the
-// transaction.
+// transaction. A state that could not be read settles nothing: the answer then
+// says the outcome is unknown, because an unreadable package database would
+// otherwise report every package a removal names as gone.
 func settleEffects(apply *Apply, approved Plan, after map[string]string) error {
 	achieved, missed := approved.Envelope().Effects.Settle(after)
 	apply.EffectsAchieved, apply.EffectsMissed = achieved, missed
+	if after == nil {
+		return fmt.Errorf("%w: the package database of the host could not be listed after the transaction",
+			plan.ErrStateUnreadable)
+	}
 	return plan.Partial(missed)
 }
 

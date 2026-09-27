@@ -19,6 +19,7 @@ import (
 	"github.com/ultherego/flotestro/internal/helpercap"
 	"github.com/ultherego/flotestro/internal/opspec"
 	"github.com/ultherego/flotestro/internal/packages"
+	"github.com/ultherego/flotestro/internal/plan"
 	"github.com/ultherego/flotestro/internal/systemd"
 )
 
@@ -487,6 +488,17 @@ func (s *Server) applyPackageAction(ctx context.Context, request *helperv1.Helpe
 				Step: p.Step, Total: p.Total, Percent: p.Percent, Message: p.Message,
 			})
 		}
+	}
+
+	// An upgrade without an approved plan is refused here, not only at the panel:
+	// what the helper carries out for the unprivileged agent account must be a
+	// change somebody reviewed, and "upgrade everything" is not one. The panel
+	// refuses to create such an order (opspec.CheckPlanBinding); this is the same
+	// rule on the side that would do the work.
+	if _, _, bound := approvedPlan(action); !bound &&
+		action.GetOperation() == helperv1.PackageActionRequest_OPERATION_UPGRADE {
+		return packageFailure(manager.Name(), fmt.Errorf("%w: an upgrade runs the plan it was "+
+			"approved with; this request carries no plan digest", plan.ErrStalePlan))
 	}
 
 	// An order bound to an approved plan runs that plan and nothing else: the

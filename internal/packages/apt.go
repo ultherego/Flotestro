@@ -578,6 +578,12 @@ func (a *APT) servicesNeedingRestart(ctx context.Context) []string {
 
 // diffVersions compares the state before and after the transaction.
 func diffVersions(before, after map[string]string) []Change {
+	// Either reading may have failed, and a nil map is not an empty host: with no
+	// "before" every package would read as newly installed, and with no "after"
+	// the transaction would read as having changed nothing.
+	if before == nil || after == nil {
+		return nil
+	}
 	var changes []Change
 	for name, newVersion := range after {
 		oldVersion := before[name]

@@ -32,6 +32,11 @@ const (
 	// ErrorEffectsPartial: the transaction ran, and the state read afterwards
 	// does not show every effect the plan promised.
 	ErrorEffectsPartial = "effects_partial"
+	// ErrorStateUnreadable: the transaction ran and the state afterwards could
+	// not be read, so nothing is known about what it achieved. An unreadable
+	// state is not an achieved one: a removal whose package database cannot be
+	// listed would otherwise report every package as gone.
+	ErrorStateUnreadable = "state_unreadable"
 )
 
 // ErrStalePlan means the plan computed now does not hash to the approved
@@ -49,6 +54,10 @@ var ErrPlanExpired = errors.New("the plan expired")
 // effect.
 var ErrEffectsPartial = errors.New("the transaction did not reach every expected effect")
 
+// ErrStateUnreadable means the state after the transaction could not be read,
+// so no effect can be called achieved.
+var ErrStateUnreadable = errors.New("the state after the transaction could not be read")
+
 // CodeOf maps the errors of this package to their stable codes.
 func CodeOf(err error) (string, bool) {
 	switch {
@@ -60,6 +69,8 @@ func CodeOf(err error) (string, bool) {
 		return ErrorPlanExpired, true
 	case errors.Is(err, ErrEffectsPartial):
 		return ErrorEffectsPartial, true
+	case errors.Is(err, ErrStateUnreadable):
+		return ErrorStateUnreadable, true
 	}
 	return "", false
 }

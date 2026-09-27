@@ -233,7 +233,7 @@ func TestSignerKeyFileRoundTrip(t *testing.T) {
 // The replay store forgets a nonce only once its capability is long past.
 func TestReplayStoreSweepsExpiredRecords(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "replay")
-	store, err := OpenReplayStore(dir)
+	store, err := OpenReplayStore(dir, false)
 	if err != nil {
 		t.Fatal(err)
 	}

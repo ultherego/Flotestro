@@ -1,6 +1,8 @@
 package helpercap
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
@@ -163,5 +165,36 @@ func TestTheCapabilityForAnAuditReloadIsNotOneForTheProtectionMode(t *testing.T)
 	mode := &BoundPayload{Payload: opspec.Payload{Security: &opspec.SecurityPayload{Mode: "permissive"}}}
 	if err := CheckBinding(reload, mode); err == nil {
 		t.Error("a capability signed for the protection mode reloaded the audit rules")
+	}
+}
+
+// The replay store is what keeps a consumed capability from being presented a
+// second time, so it is root's. A directory the agent's account could empty
+// would make every unexpired capability replayable, and nothing would say so.
+func TestTheReplayStoreRefusesADirectoryAnybodyElseCouldEmpty(t *testing.T) {
+	dir := t.TempDir()
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: the ownership of a temporary directory proves nothing here")
+	}
+	// The directory belongs to the test's own account, which is exactly the case
+	// the check refuses when the helper asks for root's.
+	if _, err := OpenReplayStore(dir, true); err == nil {
+		t.Error("a replay directory owned by somebody other than root was accepted")
+	}
+	// Without the requirement the same directory serves, which is how the tests
+	// of this package drive the store at all.
+	store, err := OpenReplayStore(dir, false)
+	if err != nil {
+		t.Fatalf("the same directory without the requirement: %v", err)
+	}
+	_ = store.Close()
+
+	// A link in place of the directory is refused by the open itself.
+	linked := filepath.Join(t.TempDir(), "replay")
+	if err := os.Symlink(dir, linked); err != nil {
+		t.Skipf("this filesystem takes no symbolic links: %v", err)
+	}
+	if _, err := OpenReplayStore(linked, false); err == nil {
+		t.Error("a replay directory behind a symbolic link was opened")
 	}
 }

@@ -164,7 +164,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	replay, err := helpercap.OpenReplayStore(settings.ReplayDir)
+	replay, err := helpercap.OpenReplayStore(settings.ReplayDir, true)
 	if err != nil {
 		return fmt.Errorf("the replay store of the helper: %w", err)
 	}

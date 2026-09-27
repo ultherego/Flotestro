@@ -47,7 +47,7 @@ func newFixture(t *testing.T) *fixture {
 // directory: a new store, a new life.
 func (f *fixture) openVerifier() *Verifier {
 	f.t.Helper()
-	replay, err := OpenReplayStore(f.replayDir)
+	replay, err := OpenReplayStore(f.replayDir, false)
 	if err != nil {
 		f.t.Fatal(err)
 	}
