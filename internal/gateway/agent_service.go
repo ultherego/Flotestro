@@ -1152,7 +1152,21 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 		// came: without it the operator sees applied_unverified with no way to learn
 		// which verifier looked, what it expected and what it found.
 		Verification: verificationJSON(result.GetVerification()),
-	}, state, session.Fence())
+	}, state, session.Fence(), func(tx pgx.Tx) error {
+		// The trail of a change carried out as root commits with the settlement:
+		// a mutation nothing recorded cannot be accounted for afterwards, and the
+		// host still holds the result, so a failure here is a redelivery.
+		return s.audit.RecordTx(ctx, tx, audit.Event{
+			ActorType: audit.ActorAgent, ActorID: hostID,
+			Action: "job.result", TargetType: "job", TargetID: jobID, Outcome: resultOutcome(state),
+			Detail: map[string]any{
+				"attempt_id": attemptID, "status": statusName,
+				"exit_code": result.GetExitCode(), "error_code": result.GetErrorCode(),
+				"replayed": result.GetReplayed(), "applied": true,
+				"after_lease_expiry": attemptStatus == jobs.AttemptStatusLeaseExpired,
+			},
+		})
+	})
 	if errors.Is(err, jobs.ErrStaleFence) {
 		// The database refused the settlement: the host was claimed by a newer
 		// session and this one no longer owns it.
@@ -1453,29 +1467,23 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 		}
 	}
 
-	outcome := audit.OutcomeSuccess
-	if state != jobs.StateSucceeded {
-		outcome = audit.OutcomeFailure
-	}
 	// A result on an attempt the scheduler had given up on is the host finishing
 	// what it was carrying all along; the trail says so, because the attempt rows
 	// alone read as a lease that ran out.
 	afterLeaseExpiry := attemptStatus == jobs.AttemptStatusLeaseExpired
-	s.audit.Record(ctx, audit.Event{
-		ActorType: audit.ActorAgent, ActorID: hostID,
-		Action: "job.result", TargetType: "job", TargetID: jobID, Outcome: outcome,
-		Detail: map[string]any{
-			"attempt_id": attemptID, "status": statusName,
-			"exit_code": result.GetExitCode(), "error_code": result.GetErrorCode(),
-			"replayed": result.GetReplayed(), "applied": true,
-			"after_lease_expiry": afterLeaseExpiry,
-		},
-	})
 	s.log.Info("the result of the job was written",
 		"job_id", jobID, "host_id", hostID, "status", statusName,
 		"exit_code", result.GetExitCode(), "replayed", result.GetReplayed(),
 		"after_lease_expiry", afterLeaseExpiry)
 	return nil
+}
+
+// resultOutcome reads a settled state as the trail's word for it.
+func resultOutcome(state jobs.State) audit.Outcome {
+	if state == jobs.StateSucceeded {
+		return audit.OutcomeSuccess
+	}
+	return audit.OutcomeFailure
 }
 
 // recordUnappliedResult puts a result the store did not accept on the trail.

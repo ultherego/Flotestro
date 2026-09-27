@@ -86,6 +86,25 @@ func (r *Recorder) Record(ctx context.Context, event Event) {
 	}
 }
 
+// RecordNow writes an event and says whether it was written. It is for the
+// operations whose trail is part of the operation: releasing a credential,
+// changing what a host trusts, changing who may do what, enrolling a host or
+// retiring one. The caller stops rather than going on with no record - a change
+// of that kind with nothing to read afterwards cannot be undone or accounted
+// for, so not making it is the lesser harm.
+//
+// Everything else uses Record, which cannot fail an operation and counts what it
+// could not write.
+func (r *Recorder) RecordNow(ctx context.Context, event Event) error {
+	if err := r.record(ctx, r.pool, event); err != nil {
+		metrics.AuditWriteFailed.Inc(event.Action)
+		r.log.Error("the audit event was not written and the operation was stopped",
+			"action", event.Action, "target", event.TargetID, "err", err)
+		return fmt.Errorf("the audit trail of %s could not be written: %w", event.Action, err)
+	}
+	return nil
+}
+
 // RecordTx writes an event inside the transaction of the caller, so that the
 // change of state and its audit trail are committed together.
 func (r *Recorder) RecordTx(ctx context.Context, tx pgx.Tx, event Event) error {

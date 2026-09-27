@@ -106,3 +106,20 @@ func (s *Server) jobScope(r *http.Request, hostID string) authz.Scope {
 	}
 	return hosts.ScopeOf(host)
 }
+
+// recordedChange writes the trail of a change that has already been made and
+// says whether it was written. The changes it guards - what the fleet trusts,
+// who may do what, a credential that went out - are the ones nobody can account
+// for afterwards without an entry, so the answer names the situation rather than
+// reporting a plain success: the operator is to know that the change happened
+// and that nothing recorded it.
+func (s *Server) recordedChange(w http.ResponseWriter, r *http.Request,
+	event audit.Event, made string) bool {
+	if err := s.audit.RecordNow(r.Context(), event); err != nil {
+		problem(w, http.StatusInternalServerError, "audit_unavailable",
+			made+", and the audit trail of it could not be written: "+err.Error()+
+				". Read the state of the installation before ordering anything further.")
+		return false
+	}
+	return true
+}

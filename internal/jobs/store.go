@@ -915,8 +915,12 @@ type Result struct {
 
 // RecordResult records the result of an attempt and moves the task to a final
 // state.
+// trail writes the audit entry of a settlement inside the transaction that
+// settles it. A root change on a host that nothing recorded cannot be accounted
+// for afterwards, so the settlement is rolled back and the host - which keeps the
+// result in its own journal - delivers it again.
 func (s *Store) RecordResult(ctx context.Context, jobID, attemptID string,
-	result Result, jobState State, fence Fence) (accepted bool, err error) {
+	result Result, jobState State, fence Fence, trail func(pgx.Tx) error) (accepted bool, err error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return false, err
@@ -1030,6 +1034,11 @@ func (s *Store) RecordResult(ctx context.Context, jobID, attemptID string,
 	// is free the moment the settlement is.
 	if jobState.Terminal() {
 		if err := releaseBudgets(ctx, tx, jobID); err != nil {
+			return false, err
+		}
+	}
+	if trail != nil {
+		if err := trail(tx); err != nil {
 			return false, err
 		}
 	}

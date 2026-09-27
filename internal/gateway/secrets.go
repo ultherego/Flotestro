@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"connectrpc.com/connect"
+	"github.com/jackc/pgx/v5"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/ultherego/flotestro/internal/audit"
@@ -18,7 +19,11 @@ import (
 // SecretIssuing describes what the gateway has to be able to do with the
 // secret store.
 type SecretIssuing interface {
-	Redeem(ctx context.Context, jobID, hostID, name string, version int) ([]byte, int, error)
+	// Redeem spends the lease and returns the value. The record hook runs in the
+	// same transaction, so the trail of the release commits with the lease or the
+	// secret does not go out.
+	Redeem(ctx context.Context, jobID, hostID, name string, version int,
+		record func(tx pgx.Tx, released int) error) ([]byte, int, error)
 }
 
 // SecretLeases describes the leases issued for a job.
@@ -84,7 +89,21 @@ func (s *AgentService) FetchSecret(ctx context.Context,
 			errors.New("an unknown job"))
 	}
 
-	value, version, err := s.secrets.Redeem(ctx, jobID, hostID, name, int(req.Msg.GetSecretVersion()))
+	// The trail of the release commits with the lease: no entry, no secret. The
+	// version comes from the lease that was spent, so the entry is written from
+	// inside the redemption.
+	value, version, err := s.secrets.Redeem(ctx, jobID, hostID, name, int(req.Msg.GetSecretVersion()),
+		func(tx pgx.Tx, released int) error {
+			return s.audit.RecordTx(ctx, tx, audit.Event{
+				ActorType: audit.ActorAgent, ActorID: hostID,
+				Action: "secret.fetch", TargetType: "secret", TargetID: name,
+				Outcome: audit.OutcomeSuccess,
+				Detail: map[string]any{
+					"job_id": jobID, "host_id": hostID, "version": released,
+					"relay_id": nullableRelay(who.RelayID), "sealed": sealTo != nil,
+				},
+			})
+		})
 	switch {
 	case errors.Is(err, secrets.ErrNoLease):
 		s.refuseSecret(ctx, hostID, name, "no_lease")
@@ -97,18 +116,6 @@ func (s *AgentService) FetchSecret(ctx context.Context,
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	// The audit notes the fact of the release: who, what, which version and
-	// within which operation, and whether it went out sealed.
-	s.audit.Record(ctx, audit.Event{
-		ActorType: audit.ActorAgent, ActorID: hostID,
-		Action: "secret.fetch", TargetType: "secret", TargetID: name,
-		Outcome: audit.OutcomeSuccess,
-		Detail: map[string]any{
-			"job_id": jobID, "host_id": hostID, "version": version,
-			"size_bytes": len(value), "relay_id": nullableRelay(who.RelayID),
-			"sealed": sealTo != nil,
-		},
-	})
 	if sealTo == nil {
 		return connect.NewResponse(&agentv1.FetchSecretResponse{
 			Value: value, Version: uint32(version), Sha256: secrets.Fingerprint(value),

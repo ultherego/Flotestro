@@ -87,7 +87,7 @@ func (s *AgentService) closeReboot(ctx context.Context, hostID string,
 			Verifier: string(opspec.VerifierReboot), Verified: true,
 			Expected: verdict.Expected, Observed: verdict.Observed,
 		}),
-	}, jobs.StateSucceeded, fence)
+	}, jobs.StateSucceeded, fence, nil)
 	if err != nil {
 		s.log.Error("the result of the restart was not written",
 			"host_id", hostID, "job_id", job.JobID, "err", err)

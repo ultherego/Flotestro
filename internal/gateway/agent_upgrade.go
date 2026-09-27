@@ -84,7 +84,7 @@ func (s *AgentService) closeUpgrade(ctx context.Context, hostID string,
 	}
 	if _, err := s.jobs.RecordResult(ctx, job.JobID, job.AttemptID, jobs.Result{
 		Status: status, ErrorCode: code, Message: message,
-	}, state, fence); err != nil {
+	}, state, fence, nil); err != nil {
 		s.log.Error("the result of the agent replacement was not written",
 			"host_id", hostID, "job_id", job.JobID, "err", err)
 		return

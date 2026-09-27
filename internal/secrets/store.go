@@ -300,7 +300,15 @@ func (s *Store) Issue(ctx context.Context, name string, version int,
 
 // Redeem returns the value of the secret and uses up the lease. A lease is
 // single-use: the same task may fetch the secret once.
-func (s *Store) Redeem(ctx context.Context, jobID, hostID, name string, version int) ([]byte, int, error) {
+//
+// record runs inside the same transaction, after the lease is spent and before
+// it is committed, and is where the caller writes the trail of the release. Its
+// failure rolls the whole redemption back: a secret that went out with no record
+// of who received it is a secret nobody can account for afterwards, so it does
+// not go out at all. A nil record is no entry, for the callers that have their
+// own.
+func (s *Store) Redeem(ctx context.Context, jobID, hostID, name string, version int,
+	record func(tx pgx.Tx, released int) error) ([]byte, int, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, 0, err
@@ -339,6 +347,11 @@ func (s *Store) Redeem(ctx context.Context, jobID, hostID, name string, version 
 	if _, err := tx.Exec(ctx, `
 		update secret_leases set redeemed_at = now() where id = $1`, leaseID); err != nil {
 		return nil, 0, err
+	}
+	if record != nil {
+		if err := record(tx, issuedVersion); err != nil {
+			return nil, 0, fmt.Errorf("the trail of the release: %w", err)
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, 0, err

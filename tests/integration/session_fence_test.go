@@ -52,7 +52,7 @@ func TestOnlyNewestSessionMayCommit(t *testing.T) {
 
 	result := jobs.Result{Status: "succeeded", Message: "settled by the session fence test"}
 	accepted, err := store.RecordResult(ctx, jobID, attemptID, result, jobs.StateSucceeded,
-		jobs.Fence{SessionID: sessionA, Token: tokenA})
+		jobs.Fence{SessionID: sessionA, Token: tokenA}, nil)
 	if !errors.Is(err, jobs.ErrStaleFence) {
 		t.Fatalf("the result under the superseded token was not refused: accepted=%v err=%v", accepted, err)
 	}
@@ -61,7 +61,7 @@ func TestOnlyNewestSessionMayCommit(t *testing.T) {
 	}
 
 	accepted, err = store.RecordResult(ctx, jobID, attemptID, result, jobs.StateSucceeded,
-		jobs.Fence{SessionID: sessionB, Token: tokenB})
+		jobs.Fence{SessionID: sessionB, Token: tokenB}, nil)
 	if err != nil || !accepted {
 		t.Fatalf("the owner's result was not applied: accepted=%v err=%v", accepted, err)
 	}
@@ -73,12 +73,12 @@ func TestOnlyNewestSessionMayCommit(t *testing.T) {
 	// by the state of the job, not by the fence, and changes nothing; the
 	// superseded session gets the same refusal as before.
 	accepted, err = store.RecordResult(ctx, jobID, attemptID, jobs.Result{Status: "failed"},
-		jobs.StateFailed, jobs.Fence{SessionID: sessionB, Token: tokenB})
+		jobs.StateFailed, jobs.Fence{SessionID: sessionB, Token: tokenB}, nil)
 	if err != nil || accepted {
 		t.Fatalf("a second result settled the job again: accepted=%v err=%v", accepted, err)
 	}
 	if _, err := store.RecordResult(ctx, jobID, attemptID, jobs.Result{Status: "failed"},
-		jobs.StateFailed, jobs.Fence{SessionID: sessionA, Token: tokenA}); err != nil {
+		jobs.StateFailed, jobs.Fence{SessionID: sessionA, Token: tokenA}, nil); err != nil {
 		// A settled job answers by its state before the fence is asked: the trail
 		// keeps a late result as not applied rather than as a refused write.
 		t.Fatalf("a late result on a settled job was answered by the fence, not by the state: %v", err)

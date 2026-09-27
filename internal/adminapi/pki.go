@@ -77,14 +77,16 @@ func (s *Server) handlePrepareCA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.audit.Record(r.Context(), audit.Event{
+	if !s.recordedChange(w, r, audit.Event{
 		ActorType: audit.ActorUser, ActorID: actor.Subject,
 		Action: "pki.ca.prepare", TargetType: "pki", TargetID: prepared.Fingerprint,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		Detail: withStepUp(map[string]any{
 			"serial": prepared.Serial, "not_after": prepared.NotAfter,
 		}, evidence),
-	})
+	}, "a new fleet CA was prepared") {
+		return
+	}
 	s.log.Warn("a new fleet CA was prepared; it takes over signing only after approval",
 		"serial", prepared.Serial)
 
@@ -137,14 +139,16 @@ func (s *Server) handleActivateCA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.audit.Record(r.Context(), audit.Event{
+	if !s.recordedChange(w, r, audit.Event{
 		ActorType: audit.ActorUser, ActorID: actor.Subject,
 		Action: "pki.ca.activate", TargetType: "pki", TargetID: active.Fingerprint,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		Detail: withStepUp(map[string]any{
 			"serial": active.Serial, "not_after": active.NotAfter,
 		}, evidence),
-	})
+	}, "the new fleet CA took over signing") {
+		return
+	}
 	// The server certificate still comes from the previous CA; a new one is
 	// made at the next panel start and is accepted by the whole fleet.
 	s.log.Warn("the new fleet CA took over signing", "serial", active.Serial)
@@ -218,11 +222,13 @@ func (s *Server) handleRetireCA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.audit.Record(r.Context(), audit.Event{
+	if !s.recordedChange(w, r, audit.Event{
 		ActorType: audit.ActorUser, ActorID: actor.Subject,
 		Action: "pki.ca.retire", TargetType: "pki", TargetID: fingerprint,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		Detail: withStepUp(map[string]any{}, evidence),
-	})
+	}, "the fleet CA was retired") {
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
