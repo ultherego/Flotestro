@@ -77,3 +77,60 @@ func TestEverySchemaNamesARoute(t *testing.T) {
 		}
 	}
 }
+
+// TestEveryRouteSaysWhatItAnswers is the rule that replaced a list. The list
+// named 134 routes whose answer the document described as an unconstrained
+// object, and it shrank until it was empty; from here a route decides, and a new
+// one that decides nothing fails rather than going out promising nothing.
+func TestEveryRouteSaysWhatItAnswers(t *testing.T) {
+	server := &Server{}
+	server.Routes()
+	for _, route := range server.contract {
+		if !inTheDocument(route.Path) {
+			continue
+		}
+		key := route.Method + " " + route.Path
+		decided := 0
+		if _, ok := responseSchemas[key]; ok {
+			decided++
+		}
+		if _, ok := emptyAnswers[key]; ok {
+			decided++
+		}
+		if _, ok := otherContentTypes[key]; ok {
+			decided++
+		}
+		switch decided {
+		case 0:
+			t.Errorf("%s says nothing about its answer; name its schema, its empty answer or its content type", key)
+		case 1:
+		default:
+			t.Errorf("%s says two different things about its answer", key)
+		}
+	}
+	// And nothing in these tables names a route that is not there: a key spelled
+	// any other way applies nothing and says nothing.
+	registered := map[string]bool{}
+	for _, route := range server.contract {
+		registered[route.Method+" "+route.Path] = true
+	}
+	for name, table := range map[string]map[string]string{
+		"emptyAnswers":            emptyAnswers,
+		"otherContentTypes":       otherContentTypes,
+		"otherAnswerDescriptions": otherAnswerDescriptions,
+	} {
+		for key, value := range table {
+			if !registered[key] {
+				t.Errorf("%s names %q, which no route answers", name, key)
+			}
+			if value == "" {
+				t.Errorf("%s gives nothing for %q; the value is what the document tells a caller", name, key)
+			}
+		}
+	}
+	for key := range otherContentTypes {
+		if otherAnswerDescriptions[key] == "" {
+			t.Errorf("%s has a content type and no sentence saying what it carries", key)
+		}
+	}
+}

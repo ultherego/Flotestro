@@ -21,6 +21,7 @@ import (
 	"github.com/ultherego/flotestro/internal/freeipa"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/identity"
+	"github.com/ultherego/flotestro/internal/inventory"
 	"github.com/ultherego/flotestro/internal/jobs"
 	backupmodule "github.com/ultherego/flotestro/internal/modules/backup"
 	"github.com/ultherego/flotestro/internal/monitoring"
@@ -29,6 +30,7 @@ import (
 	"github.com/ultherego/flotestro/internal/pki"
 	"github.com/ultherego/flotestro/internal/policy"
 	"github.com/ultherego/flotestro/internal/remediation"
+	"github.com/ultherego/flotestro/internal/reports"
 	"github.com/ultherego/flotestro/internal/secrets"
 	"github.com/ultherego/flotestro/internal/selector"
 	"github.com/ultherego/flotestro/internal/vuln"
@@ -91,6 +93,39 @@ func (s *Server) openAPI() map[string]any {
 	register("HBACTestResult", freeipa.HBACTestResult{})
 	register("ProvisioningReport", freeipa.ProvisioningReport{})
 	register("DirectoryChange", identity.Change{})
+	register("HostInventory", inventory.Revision{})
+	register("HostInventoryModule", inventory.Fragment{})
+	register("HostLocalAccount", inventory.LocalAccount{})
+	register("HostTimelineEntry", TimelineItem{})
+	register("CalendarEntry", calendarEntry{})
+	register("SearchResult", searchItem{})
+	register("SettingsArea", settingsArea{})
+	register("MonitoringSettings", monitoringSettingsBody{})
+	register("Setup", setupChecklist{})
+	register("StatusBlock", statusBlock{})
+	register("Principal", principalView{})
+	register("ReadSummary", readFanOut{})
+	register("InstallationProfile", installationProfile{})
+	register("Tag", hosts.TagCount{})
+	register("PolicyCampaignLink", policy.CampaignLink{})
+	register("DirectoryUser", freeipa.User{})
+	register("DirectoryGroup", freeipa.Group{})
+	register("DirectoryHost", freeipa.Host{})
+	register("DirectoryHostGroup", freeipa.HostGroup{})
+	register("DirectoryService", freeipa.Service{})
+	register("DirectoryHBACRule", freeipa.HBACRule{})
+	register("DirectorySudoRule", freeipa.SudoRule{})
+	register("DirectoryZone", freeipa.Zone{})
+	register("DirectoryRecord", freeipa.Record{})
+	register("FleetVulnerabilities", fleetVulnerabilitiesView{})
+	register("ReportEnvelope", reportEnvelope{})
+	register("PatchStatus", reports.PatchStatus{})
+	register("PatchHost", reports.PatchHost{})
+	register("CampaignsReport", reports.CampaignsReport{})
+	register("PolicyCompliance", reports.PolicyCompliance{})
+	register("SecuritySummary", securitySummary{})
+	register("FleetIdentityStatus", fleetIdentityStatus{})
+	register("DirectoryConnectorHealth", freeipa.Health{})
 	register("HostDetail", hostDetail{})
 	register("Job", jobs.Job{})
 	register("Attempt", jobs.Attempt{})
@@ -299,8 +334,7 @@ func (s *Server) openAPI() map[string]any {
 
 	paths := map[string]map[string]any{}
 	for _, route := range s.contract {
-		if !strings.HasPrefix(route.Path, "/api/") && !isProbePath(route.Path) && route.Path != "/metrics" {
-			// The browser login flow is not a programmable interface.
+		if !inTheDocument(route.Path) {
 			continue
 		}
 		path := openAPIPath(route.Path)
@@ -384,27 +418,26 @@ func (s *Server) operation(route apiRoute) map[string]any {
 	if route.Method == http.MethodPost && strings.HasSuffix(route.Path, "s") {
 		status = "201"
 	}
-	if why, empty := emptyAnswers[route.Method+" "+route.Path]; empty {
+	key := route.Method + " " + route.Path
+	switch {
+	case emptyAnswers[key] != "":
 		// 204 and no content, rather than a 200 carrying an object with nothing
 		// in it: a caller that waits for a body would wait for one that never
 		// comes, and a generated client would parse an empty stream.
-		responses["204"] = map[string]any{"description": "No content: " + why + "."}
-	} else if schema, ok := responseSchemas[route.Method+" "+route.Path]; ok {
+		responses["204"] = map[string]any{"description": "No content: " + emptyAnswers[key] + "."}
+	case otherContentTypes[key] != "":
+		responses[status] = map[string]any{
+			"description": otherAnswerDescriptions[key],
+			"content": map[string]any{otherContentTypes[key]: map[string]any{
+				"schema": map[string]any{"type": "string"},
+			}},
+		}
+	case responseSchemas[key] != nil:
 		responses[status] = map[string]any{"description": "The resource.",
-			"content": map[string]any{"application/json": map[string]any{"schema": schema}}}
-	} else if strings.HasSuffix(route.Path, "/config") {
-		responses[status] = map[string]any{"description": "The ready configuration file of the order, without the token.",
-			"content": map[string]any{"application/yaml": map[string]any{"schema": map[string]any{"type": "string"}}}}
-	} else if strings.HasSuffix(route.Path, "/events") {
-		responses[status] = map[string]any{"description": "A stream of server-sent events; trail events carry an id for Last-Event-ID resumption.",
-			"content": map[string]any{"text/event-stream": map[string]any{"schema": map[string]any{"type": "string"}}}}
-	} else if route.Path == "/api/v1/audit/export" {
-		responses[status] = map[string]any{"description": "The trail as hash-chained JSON lines, one event per line, closed by a summary line.",
-			"content": map[string]any{"application/x-ndjson": map[string]any{"schema": map[string]any{"type": "string"}}}}
-	} else if route.Path == "/metrics" {
-		responses[status] = map[string]any{"description": "The Prometheus exposition.",
-			"content": map[string]any{"text/plain": map[string]any{"schema": map[string]any{"type": "string"}}}}
-	} else {
+			"content": map[string]any{"application/json": map[string]any{"schema": responseSchemas[key]}}}
+	default:
+		// A test refuses a route that says nothing about its answer; this is what
+		// the document would say if one slipped through.
 		responses[status] = map[string]any{"description": "The answer.",
 			"content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"type": "object"}}}}
 	}
@@ -707,6 +740,258 @@ func collection(name string) map[string]any {
 // The endpoints whose answers are known resources. The rest answer with
 // module-specific views described by their handlers.
 var responseSchemas = map[string]map[string]any{
+	// One answer that grows: without an action it is the count and the sample,
+	// with one it also carries the qualification and the token the order is held
+	// to. The keys that are absent are absent, not empty.
+	"GET /api/v1/campaigns/preview": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"limit":    count(),
+			"selector": str(),
+			"count":    count(),
+			"sample":   map[string]any{"type": "array", "items": str()},
+			"compensates": map[string]any{"type": "object", "properties": map[string]any{
+				"id": str(), "name": str(), "state": str(), "changed": count(),
+			}},
+			"eligible":      count(),
+			"excluded":      map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
+			"notes":         map[string]any{"type": "array", "items": str()},
+			"campaign_mode": str(),
+			"requires_plan": flag(),
+			"distribution":  map[string]any{"type": "object"},
+			"hosts": map[string]any{"type": "array", "items": map[string]any{"type": "object"},
+				"description": "Every ready host, for an order the panel splits host by host."},
+			"preview_id":           str(),
+			"preview_digest":       str(),
+			"principal_id":         str(),
+			"permission":           str(),
+			"selector_hash":        str(),
+			"scope_hash":           str(),
+			"target_snapshot_hash": str(),
+			"targets":              count(),
+			"expires_at":           timestamp(),
+			"mode":                 str(),
+		},
+	},
+	// One shape with the parts that apply: no connector, one that does not
+	// answer, one that does.
+	"GET /api/v1/identity/status": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"configured": flag(),
+			"reachable":  flag(),
+			"principal":  str(),
+			"detail":     map[string]any{"type": "string", "description": "Why there is no connector."},
+			"error":      map[string]any{"type": "string", "description": "Why the connector did not answer."},
+			"summary":    map[string]any{"type": "string", "description": "What the directory said to the ping."},
+			"hosts":      ref("FleetIdentityStatus"),
+			"connector":  ref("DirectoryConnectorHealth"),
+		},
+	},
+	"GET /api/v1/files/versions/{sha256}": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"sha256": str(), "content": str(), "size_bytes": count(),
+		},
+	},
+	"GET /api/v1/openapi.json": map[string]any{
+		"type": "object", "description": "This document.",
+	},
+	// Three documents behind one route, chosen by the name in the path. Each is
+	// the envelope and its own body, which is how the handler writes it.
+	"GET /api/v1/reports/{name}": map[string]any{
+		"description": "patch-status, campaigns or compliance.",
+		"anyOf": []map[string]any{
+			{"allOf": []map[string]any{ref("ReportEnvelope"), ref("PatchStatus"), {
+				"type": "object",
+				"properties": map[string]any{
+					"hosts":           map[string]any{"type": "array", "items": ref("PatchHost")},
+					"hosts_listed":    count(),
+					"hosts_truncated": flag(),
+					"next_cursor":     str(),
+					"campaigns_read":  flag(),
+				},
+			}}},
+			{"allOf": []map[string]any{ref("ReportEnvelope"), ref("CampaignsReport")}},
+			{"allOf": []map[string]any{ref("ReportEnvelope"), {
+				"type": "object",
+				"properties": map[string]any{
+					"policies": ref("PolicyCompliance"),
+					"security": ref("SecuritySummary"),
+				},
+			}}},
+		},
+	},
+	"GET /api/v1/actions": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"version": count(),
+			"items": map[string]any{"type": "array", "items": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"action": str(), "mutating": flag(), "required_capability": str(),
+					"permission": str(), "default_timeout_seconds": count(), "risk": str(),
+					"lock_class": str(), "campaign_mode": str(), "campaign_ready": flag(),
+					"offline_policy": str(), "fanout_limit": count(),
+					"fanout_refusal": str(), "campaign_refusal": str(),
+					"payload_template": ref("Payload"), "needs_material": flag(),
+					"cancel_mode": str(), "retry_class": str(), "rollback": str(),
+					"verification": str(),
+					"resource_claims": map[string]any{"type": "array", "items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"class": str(), "mode": str(), "weight": count(),
+						},
+					}},
+				},
+			}},
+		},
+	},
+	"GET /api/v1/campaigns/{id}/plans": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"count": count(), "hosts": count(), "plan_set_hash": str(),
+			"plan_ttl_seconds": count(),
+			"items": map[string]any{"type": "array", "items": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"plan_hash": str(), "count": count(),
+					"hosts":           map[string]any{"type": "array", "items": str()},
+					"plan":            map[string]any{"description": "The plan as the host reported it."},
+					"expires_at":      timestamp(),
+					"planner_version": str(), "schema_version": count(), "envelope": flag(),
+				},
+			}},
+		},
+	},
+	"GET /api/v1/hosts/{id}/inventory":            ref("HostInventory"),
+	"GET /api/v1/hosts/{id}/inventory/{module}":   ref("HostInventoryModule"),
+	"GET /api/v1/hosts/{id}/security/remediation": collection("RemediationPlan"),
+	"GET /api/v1/identity/changes":                collection("DirectoryChange"),
+	"GET /api/v1/identity/changes/{id}":           ref("DirectoryChange"),
+	"GET /api/v1/identity/dns/records":            collection("DirectoryRecord"),
+	"GET /api/v1/identity/dns/zones":              collection("DirectoryZone"),
+	"GET /api/v1/identity/groups":                 collection("DirectoryGroup"),
+	"GET /api/v1/identity/hbac-rules":             collection("DirectoryHBACRule"),
+	"GET /api/v1/identity/host-groups":            collection("DirectoryHostGroup"),
+	"GET /api/v1/identity/hosts":                  collection("DirectoryHost"),
+	"GET /api/v1/identity/services":               collection("DirectoryService"),
+	"GET /api/v1/identity/sudo-rules":             collection("DirectorySudoRule"),
+	"GET /api/v1/identity/users":                  collection("DirectoryUser"),
+	"GET /api/v1/installation-profiles":           ref("InstallationProfile"),
+	"GET /api/v1/monitoring/alerts":               pagedCollection("Alert"),
+	"GET /api/v1/policies/{id}/campaigns":         collection("PolicyCampaignLink"),
+	"GET /api/v1/principals":                      collection("Principal"),
+	"GET /api/v1/reads/{id}":                      ref("Read"),
+	"GET /api/v1/setup":                           ref("Setup"),
+	"GET /api/v1/support/bundles/{id}":            ref("SupportBundle"),
+	"GET /api/v1/tags":                            collection("Tag"),
+	"GET /api/v1/vulnerabilities":                 ref("FleetVulnerabilities"),
+	"GET /api/v1/hosts/{id}/local-accounts": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"accounts": map[string]any{"type": "array", "items": ref("HostLocalAccount")},
+		},
+	},
+	"GET /api/v1/hosts/{id}/timeline": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"items":       map[string]any{"type": "array", "items": ref("HostTimelineEntry")},
+			"count":       count(),
+			"next_cursor": str(),
+			"sources":     map[string]any{"type": "array", "items": str()},
+		},
+	},
+	"GET /api/v1/maintenance/calendar": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"items": map[string]any{"type": "array", "items": ref("CalendarEntry")},
+			"count": count(), "from": timestamp(), "to": timestamp(),
+		},
+	},
+	"GET /api/v1/pki": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"authorities": map[string]any{"type": "array", "items": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"subject": str(), "serial": str(), "fingerprint": str(),
+					"not_before": timestamp(), "not_after": timestamp(), "state": str(),
+					"hosts_using": count(), "prepared_at": timestamp(),
+					"hosts_missing": count(), "ready_to_activate": flag(),
+				},
+			}},
+		},
+	},
+	"GET /api/v1/reads": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"items":       map[string]any{"type": "array", "items": ref("ReadSummary")},
+			"count":       count(),
+			"next_cursor": str(),
+			"limit":       count(),
+		},
+	},
+	"GET /api/v1/roles": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"items": map[string]any{"type": "array", "items": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"role":        map[string]any{"type": "string", "enum": roleNames()},
+					"permissions": map[string]any{"type": "array", "items": str()},
+				},
+			}},
+			"count": count(),
+		},
+	},
+	"GET /api/v1/search": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"items":     map[string]any{"type": "array", "items": ref("SearchResult")},
+			"truncated": map[string]any{"type": "array", "items": str()},
+		},
+	},
+	"GET /api/v1/settings": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"source": str(), "note": str(),
+			"areas": map[string]any{"type": "array", "items": ref("SettingsArea")},
+		},
+	},
+	"GET /api/v1/settings/monitoring": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"effective":   ref("MonitoringSettings"),
+			"environment": ref("MonitoringSettings"),
+			"stored": map[string]any{"type": "object", "properties": map[string]any{
+				"present": flag(), "updated_at": nullableTime(), "updated_by": str(),
+				"revision": count(),
+				"values": map[string]any{"type": "object",
+					"description": "Only the fields the installation stored; a field the environment still decides is absent."},
+			}},
+			"note": str(),
+		},
+	},
+	"GET /api/v1/status": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"generated_at": timestamp(), "ok": flag(), "unknown": count(),
+			"blocks": map[string]any{"type": "object",
+				"description":          "Keyed by block name: database, replicas, migrations, outbox, scheduler, sessions, relays, directory, vulnerability_feeds, certificates, crypto, housekeeping, monitoring, build.",
+				"additionalProperties": ref("StatusBlock")},
+			"links": map[string]any{"type": "object", "additionalProperties": str()},
+		},
+	},
+	"GET /api/v1/support/bundles": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"items":     map[string]any{"type": "array", "items": ref("SupportBundle")},
+			"count":     count(),
+			"retention": map[string]any{"type": "object", "additionalProperties": str()},
+			"token_ttl": str(),
+		},
+	},
 	"POST /api/v1/monitoring/alerts/{id}/acknowledge":          ref("Alert"),
 	"POST /api/v1/monitoring/alerts/{id}/annotate":             ref("Alert"),
 	"POST /api/v1/monitoring/rules":                            ref("AlertRule"),
@@ -2102,4 +2387,33 @@ func describeType(t reflect.Type, schemas map[string]any,
 // part of the API document.
 func isProbePath(path string) bool {
 	return path == "/healthz" || path == "/livez" || path == "/readyz"
+}
+
+// inTheDocument says whether a route is a programmable interface at all. The
+// browser login flow is not, so it carries no contract.
+func inTheDocument(path string) bool {
+	return strings.HasPrefix(path, "/api/") || isProbePath(path) || path == "/metrics"
+}
+
+// The answers that are not one JSON object, each with the type it writes. They
+// are named here rather than guessed from the path, so a new route that happens
+// to end in /events does not quietly inherit somebody else's content type.
+var otherAnswerDescriptions = map[string]string{
+	"GET /api/v1/audit/export":                    "The trail as hash-chained JSON lines, one event per line, closed by a summary line.",
+	"GET /api/v1/support/bundles/{id}/archive":    "The bundle itself, as an attachment.",
+	"GET /api/v1/enrollment-requests/{id}/config": "The ready configuration file of the order, without the token.",
+	"GET /api/v1/events":                          "A stream of server-sent events; trail events carry an id for Last-Event-ID resumption.",
+	"GET /api/v1/campaigns/{id}/events":           "A stream of server-sent events for one campaign.",
+	"GET /api/v1/jobs/{id}/events":                "A stream of server-sent events for one job.",
+	"GET /metrics":                                "The Prometheus exposition.",
+}
+
+var otherContentTypes = map[string]string{
+	"GET /api/v1/audit/export":                    "application/x-ndjson",
+	"GET /api/v1/support/bundles/{id}/archive":    "application/gzip",
+	"GET /api/v1/enrollment-requests/{id}/config": "application/yaml",
+	"GET /api/v1/events":                          "text/event-stream",
+	"GET /api/v1/campaigns/{id}/events":           "text/event-stream",
+	"GET /api/v1/jobs/{id}/events":                "text/event-stream",
+	"GET /metrics":                                "text/plain",
 }
