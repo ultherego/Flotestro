@@ -14,24 +14,89 @@ const checkupdatesFixture = `linux 6.16.5.arch1-1 -> 6.16.6.arch1-1
 glibc 2.42+r25+g4eec3d0d3d0c-1 -> 2.42+r30+g6ae1c8c4a1a0-1
 which 2.23-1 -> 2.23-2
 flotestro-agent 0.9.0-1 -> 0.9.1-1
+linux-lts 6.12.48-1 -> 6.12.49-1 [ignored]
 `
 
-func TestCheckupdatesLinesBecomeChanges(t *testing.T) {
-	changes := ParseCheckupdates(checkupdatesFixture + "\nnot a change\n")
-	if len(changes) != 4 {
-		t.Fatalf("read %d changes, expected 4: %+v", len(changes), changes)
+func TestPacmanPendingLinesBecomeChanges(t *testing.T) {
+	pending, err := ParsePacmanPending(checkupdatesFixture)
+	if err != nil {
+		t.Fatalf("the pending list was refused: %v", err)
 	}
-	if changes[0].Name != "linux" || changes[0].CurrentVersion != "6.16.5.arch1-1" ||
-		changes[0].CandidateVersion != "6.16.6.arch1-1" {
-		t.Errorf("the first change was read as %+v", changes[0])
+	if len(pending.Updates) != 4 {
+		t.Fatalf("read %d updates, expected 4: %+v", len(pending.Updates), pending.Updates)
+	}
+	if pending.Updates[0].Name != "linux" || pending.Updates[0].CurrentVersion != "6.16.5.arch1-1" ||
+		pending.Updates[0].CandidateVersion != "6.16.6.arch1-1" {
+		t.Errorf("the first update was read as %+v", pending.Updates[0])
 	}
 	// Arch has no security metadata: nothing may be marked as a security update,
 	// and nothing as harmless either - the adapter says "unknown" through its own
 	// error rather than through this flag.
-	for _, change := range changes {
+	for _, change := range pending.Updates {
 		if change.Security {
 			t.Errorf("%s was marked as a security update without metadata", change.Name)
 		}
+	}
+}
+
+// A held package is what the host decided about its own upgrades: the update
+// stays in the plan as held instead of disappearing behind a parser that reads
+// four fields and drops the fifth.
+func TestPacmanHeldUpdatesStayInThePlan(t *testing.T) {
+	pending, err := ParsePacmanPending(checkupdatesFixture)
+	if err != nil {
+		t.Fatalf("the pending list was refused: %v", err)
+	}
+	if len(pending.Held) != 1 || pending.Held[0].Name != "linux-lts" ||
+		pending.Held[0].CurrentVersion != "6.12.48-1" ||
+		pending.Held[0].CandidateVersion != "6.12.49-1" {
+		t.Fatalf("the held update was read as %+v", pending.Held)
+	}
+	for _, change := range pending.Updates {
+		if change.Name == "linux-lts" {
+			t.Error("a held package was planned as an upgrade")
+		}
+	}
+	blocked := pacmanHeldBlocks(pending.Held)
+	if len(blocked) != 1 || blocked[0].Name != "linux-lts" || blocked[0].Kind != BlockedHeld {
+		t.Fatalf("the plan carries the hold as %+v", blocked)
+	}
+	for _, part := range []string{PacmanConfPath, "6.12.48-1", "6.12.49-1"} {
+		if !strings.Contains(blocked[0].Status, part) {
+			t.Errorf("the hold does not say %q: %s", part, blocked[0].Status)
+		}
+	}
+}
+
+// An answer in another shape than the one asked for is a refusal with a code:
+// a plan read short would be approved for a smaller transaction than the host
+// would carry out.
+func TestPacmanRefusesAPendingListItCannotRead(t *testing.T) {
+	for _, output := range []string{
+		"linux 6.16.5.arch1-1 -> 6.16.6.arch1-1\nnot a change\n",
+		"linux 6.16.5.arch1-1 => 6.16.6.arch1-1\n",
+		"linux 6.16.5.arch1-1 -> 6.16.6.arch1-1 pinned\n",
+	} {
+		pending, err := ParsePacmanPending(output)
+		if err == nil {
+			t.Fatalf("%q was read as %+v", output, pending)
+		}
+		if !errors.Is(err, ErrPlanMetadataMissing) {
+			t.Errorf("%q ended with %v", output, err)
+		}
+		if code, _ := ErrorCodeOf(err); code != ErrorPlanMetadataMissing {
+			t.Errorf("%q: the code is %q", output, code)
+		}
+		if len(pending.Updates) != 0 || len(pending.Held) != 0 {
+			t.Errorf("%q: a refusal carried a partial plan: %+v", output, pending)
+		}
+	}
+	// The warnings pacman writes around its answer are not updates and not a
+	// reason to refuse one.
+	pending, err := ParsePacmanPending(
+		"warning: database file for 'extra' does not exist\nwhich 2.23-1 -> 2.23-2\n")
+	if err != nil || len(pending.Updates) != 1 {
+		t.Errorf("the warning was read as %+v, %v", pending, err)
 	}
 }
 
@@ -613,5 +678,258 @@ func TestPlanMetadataMissingIsARefusal(t *testing.T) {
 	}
 	if !strings.Contains(ErrPlanMetadataMissing.Error(), SyncCopyDir) {
 		t.Errorf("the refusal does not name the copy: %v", ErrPlanMetadataMissing)
+	}
+}
+
+// The targets of "pacman -Sup --print-format": the pending update of which,
+// the dependency the upgrade pulls in with it, and the package of the sync
+// database that takes the place of an installed one.
+const pacmanUpgradeTargetsFixture = "which\t2.23-2\tcore\t17000\t" +
+	"https://mirror.example.invalid/core/os/x86_64/which-2.23-2-x86_64.pkg.tar.zst\n" +
+	"flotest-dep\t1.0-1\textra\t245\t" +
+	"https://mirror.example.invalid/extra/os/x86_64/flotest-dep-1.0-1-x86_64.pkg.tar.zst\n" +
+	"python-gtk\t3.0-1\textra\t111006\t" +
+	"https://mirror.example.invalid/extra/os/any/python-gtk-3.0-1-any.pkg.tar.zst\n"
+
+// The records of the same targets in the sync database: where the checksum of
+// the archive stands, and what a package replaces or conflicts with.
+const pacmanSyncInfoFixture = `Repository      : core
+Name            : which
+Version         : 2.23-2
+Architecture    : x86_64
+Conflicts With  : None
+Replaces        : None
+Download Size   : 17.00 KiB
+Installed Size  : 42.00 KiB
+MD5 Sum         : None
+SHA-256 Sum     : 8A6230468CC31A2C984A41C092035DD16BF97E737EC3241490724A5419903739
+Signatures      : C06086337C50773E
+
+Repository      : extra
+Name            : flotest-dep
+Version         : 1.0-1
+Architecture    : x86_64
+Conflicts With  : None
+Replaces        : None
+Download Size   : 245.00 B
+Installed Size  : 1.00 KiB
+MD5 Sum         : None
+SHA-256 Sum     : None
+Signatures      : None
+
+Repository      : extra
+Name            : python-gtk
+Version         : 3.0-1
+Architecture    : any
+Conflicts With  : pygtk  ttf-font
+Replaces        : pygtk
+Download Size   : 108.40 KiB
+Installed Size  : 512.00 KiB
+MD5 Sum         : None
+SHA-256 Sum     : 1f2e3d4c5b6a798877665544332211009988776655443322110099887766554433
+Signatures      : C06086337C50773E
+`
+
+// What the operator approves is the whole transaction: the direct update, the
+// dependency it pulls in, the package a replacement takes away, and the
+// identity and repository of each.
+func TestPacmanUpgradePlanCarriesTheWholeTransaction(t *testing.T) {
+	targets, err := pacmanTargetsOf("pacman -Sup", pacmanUpgradeTargetsFixture)
+	if err != nil {
+		t.Fatalf("the targets were refused: %v", err)
+	}
+	transaction := pacmanTransaction{Targets: targets, Info: ParsePacmanInfo(pacmanSyncInfoFixture)}
+	candidates := pacmanRemovalCandidates(transaction)
+	// pygtk is installed under its own name; ttf-font is satisfied by a provision
+	// of another package, so nobody can name what would go.
+	satisfied := map[string]bool{"pygtk": true, "ttf-font": true}
+	installed := map[string]string{"which": "2.23-1", "pygtk": "2.24.0-9", "ttf-dejavu": "2.37-8"}
+	removals, unknown := pacmanRemovals(candidates, satisfied, installed)
+	transaction.Removals, transaction.Unknown = removals, unknown
+	if len(removals) != 1 || removals[0] != "pygtk" {
+		t.Fatalf("the transaction takes away %v", removals)
+	}
+
+	pending := PacmanPending{Updates: []Change{{Name: "which",
+		CurrentVersion: "2.23-1", CandidateVersion: "2.23-2"}}}
+	if err := pacmanTransactionCovers(transaction, pending); err != nil {
+		t.Fatalf("the resolution does not cover the pending list: %v", err)
+	}
+	changes := pacmanUpgradeChanges(transaction, pending, installed)
+	byName := map[string]Change{}
+	for _, change := range changes {
+		byName[change.Name] = change
+	}
+	if len(changes) != 4 {
+		t.Fatalf("the plan carries %d changes: %+v", len(changes), changes)
+	}
+
+	update := byName["which"]
+	if update.Action != ActionUpgrade || update.Reason != ReasonRequested ||
+		update.CurrentVersion != "2.23-1" || update.CandidateVersion != "2.23-2" ||
+		update.Origin != "core" || update.Architecture != "x86_64" ||
+		update.Digest != "sha256:8a6230468cc31a2c984a41c092035dd16bf97e737ec3241490724a5419903739" {
+		t.Errorf("the direct update reads as %+v", update)
+	}
+	dependency := byName["flotest-dep"]
+	if dependency.Action != ActionInstall || dependency.Reason != ReasonDependency ||
+		dependency.CandidateVersion != "1.0-1" || dependency.Origin != "extra" ||
+		dependency.Architecture != "x86_64" {
+		t.Errorf("the new dependency reads as %+v", dependency)
+	}
+	// A record without a checksum says so: an empty field would read as an
+	// archive that needs no proof.
+	if dependency.Digest != PacmanDigestUnknown {
+		t.Errorf("the checksum of the dependency reads as %q", dependency.Digest)
+	}
+	replacement := byName["python-gtk"]
+	if replacement.Action != ActionInstall || replacement.Reason != ReasonDependency ||
+		replacement.Origin != "extra" || replacement.Architecture != "any" {
+		t.Errorf("the replacing package reads as %+v", replacement)
+	}
+	removal := byName["pygtk"]
+	if removal.Action != ActionRemove || removal.Reason != ReasonOrphan ||
+		removal.CurrentVersion != "2.24.0-9" {
+		t.Errorf("the replaced package reads as %+v", removal)
+	}
+
+	// The removal nobody can name does not leave the plan as a zero.
+	if len(unknown) != 1 || unknown[0].Name != "ttf-font" || unknown[0].Kind != BlockedUnknown {
+		t.Fatalf("the plan says of the unnamed removal: %+v", unknown)
+	}
+	if !strings.Contains(unknown[0].Status, "python-gtk") {
+		t.Errorf("the gap does not name what takes its place: %s", unknown[0].Status)
+	}
+}
+
+// A record of the sync database carries what the printed target does not: the
+// checksum of the archive and what the package takes the place of.
+func TestPacmanSyncRecordsCarryTheChecksumAndTheReplacements(t *testing.T) {
+	info := ParsePacmanInfo(pacmanSyncInfoFixture)
+	if len(info) != 3 {
+		t.Fatalf("read %d records: %+v", len(info), info)
+	}
+	gtk := info["python-gtk"]
+	if len(gtk.Replaces) != 1 || gtk.Replaces[0] != "pygtk" {
+		t.Errorf("python-gtk replaces %v", gtk.Replaces)
+	}
+	if len(gtk.Conflicts) != 2 || gtk.Conflicts[0] != "pygtk" || gtk.Conflicts[1] != "ttf-font" {
+		t.Errorf("python-gtk conflicts with %v", gtk.Conflicts)
+	}
+	if gtk.Architecture != "any" || gtk.InstalledSize != 512*1024 {
+		t.Errorf("the record of python-gtk reads as %+v", gtk)
+	}
+	// "None" is no entry at all, not a package of that name.
+	if len(info["which"].Replaces) != 0 || len(info["which"].Conflicts) != 0 ||
+		info["flotest-dep"].SHA256 != "" {
+		t.Errorf("an empty field was read as a value: %+v, %+v", info["which"], info["flotest-dep"])
+	}
+}
+
+// An entry with a version constraint names the package it constrains, and a
+// package the transaction installs anyway is not one it takes away.
+func TestPacmanRemovalCandidatesReadTheEntriesOfARecord(t *testing.T) {
+	transaction := pacmanTransaction{
+		Targets: map[string]PacmanTarget{
+			"python-gtk": {Name: "python-gtk", Version: "3.0-1", Origin: "extra"},
+			"pygobject":  {Name: "pygobject", Version: "3.50-1", Origin: "extra"},
+		},
+		Info: map[string]PacmanInfo{
+			"python-gtk": {Replaces: []string{"pygtk<2.25"}, Conflicts: []string{"pygobject", "python-gtk"}},
+		},
+	}
+	candidates := pacmanRemovalCandidates(transaction)
+	if len(candidates) != 1 || candidates["pygtk<2.25"] == nil {
+		t.Fatalf("the candidates read as %+v", candidates)
+	}
+	if name := pacmanEntryName("pygtk<2.25"); name != "pygtk" {
+		t.Errorf("the entry names %q", name)
+	}
+	installed := map[string]string{"pygtk": "2.24.0-9"}
+	removals, unknown := pacmanRemovals(candidates,
+		map[string]bool{"pygtk<2.25": true}, installed)
+	if len(removals) != 1 || removals[0] != "pygtk" || len(unknown) != 0 {
+		t.Errorf("the removals read as %v, %+v", removals, unknown)
+	}
+	// An entry nothing installed satisfies takes nothing away.
+	removals, unknown = pacmanRemovals(candidates, map[string]bool{}, installed)
+	if len(removals) != 0 || len(unknown) != 0 {
+		t.Errorf("an unsatisfied entry read as %v, %+v", removals, unknown)
+	}
+}
+
+// Output in another format than the one asked for is a refusal: a target read
+// short would leave the plan without the identity of something the transaction
+// installs.
+func TestPacmanTargetsRefuseOutputTheyCannotRead(t *testing.T) {
+	for _, output := range []string{
+		"which\t2.23-2\tcore\n",
+		"which\t2.23-2\tcore\tnot-a-number\thttps://mirror.example.invalid/w.pkg.tar.zst\n",
+		"which\t\tcore\t17000\thttps://mirror.example.invalid/w.pkg.tar.zst\n",
+		"which\t2.23-2\tcore\t17000\t\n",
+	} {
+		targets, err := pacmanTargetsOf("pacman -Sup", output)
+		if err == nil {
+			t.Fatalf("%q was read as %+v", output, targets)
+		}
+		if code, _ := ErrorCodeOf(err); code != ErrorPlanMetadataMissing || !Refused(err) {
+			t.Errorf("%q ended with the code %q (%v)", output, code, err)
+		}
+		if targets != nil {
+			t.Errorf("%q: a refusal carried targets: %+v", output, targets)
+		}
+	}
+	// pacman writes its own notices on the same stream; they are not targets.
+	targets, err := pacmanTargetsOf("pacman -Sup", ":: Starting full system upgrade...\n"+
+		"resolving dependencies...\n"+pacmanUpgradeTargetsFixture)
+	if err != nil || len(targets) != 3 {
+		t.Fatalf("the notices were read as %+v, %v", targets, err)
+	}
+	if targets["python-gtk"].Architecture() != "any" || targets["which"].Size != 17000 {
+		t.Errorf("the targets read as %+v", targets)
+	}
+}
+
+// A pending update the resolution does not account for means the answer was
+// read short, and the plan would cover less than the transaction.
+func TestPacmanTransactionCoversEveryPendingUpdate(t *testing.T) {
+	transaction := pacmanTransaction{
+		Targets:  map[string]PacmanTarget{"which": {Name: "which", Version: "2.23-2", Origin: "core"}},
+		Removals: []string{"pygtk"},
+	}
+	pending := PacmanPending{Updates: []Change{
+		{Name: "which"}, {Name: "pygtk"}, {Name: AgentPackage},
+	}}
+	// A package a replacement takes away and the agent the upgrade leaves alone
+	// are accounted for without a target of their own.
+	if err := pacmanTransactionCovers(transaction, pending); err != nil {
+		t.Fatalf("the resolution was refused: %v", err)
+	}
+	pending.Updates = append(pending.Updates, Change{Name: "glibc"})
+	err := pacmanTransactionCovers(transaction, pending)
+	if err == nil || !strings.Contains(err.Error(), "glibc") {
+		t.Fatalf("the missing update ended with %v", err)
+	}
+	if code, _ := ErrorCodeOf(err); code != ErrorPlanMetadataMissing || !Refused(err) {
+		t.Errorf("the code of the refusal is %q", code)
+	}
+}
+
+// The records are asked for by repository, so a package two repositories
+// publish is read from the one the transaction takes it from.
+func TestPacmanSyncInfoIsAskedForByRepository(t *testing.T) {
+	targets := map[string]PacmanTarget{
+		"bash": {Name: "bash", Version: "5.3-2", Origin: "core"},
+		"acl":  {Name: "acl", Version: "2.3.2-1", Origin: ""},
+	}
+	args := pacmanSyncInfoArgs(pacmanDatabaseArgs(SyncCopyDir), pacmanTargetSpecs(targets))
+	want := []string{"-Sii", "--dbpath", SyncCopyDir, "acl", "core/bash"}
+	if len(args) != len(want) {
+		t.Fatalf("args = %v", args)
+	}
+	for i := range want {
+		if args[i] != want[i] {
+			t.Fatalf("args = %v, expected %v", args, want)
+		}
 	}
 }

@@ -15,6 +15,13 @@ const (
 	// BlockedAdvisory: the update is left out of a security plan because no
 	// advisory of the host says whether it closes a vulnerability.
 	BlockedAdvisory = "advisory"
+	// BlockedHeld: the host holds the package back itself - IgnorePkg, apt-mark
+	// hold, versionlock - so the transaction leaves it where it is. A plan with
+	// the update left out would read as a host that has none.
+	BlockedHeld = "held"
+	// BlockedUnknown: what the resolution could not name. Unknown is not zero
+	// here either: a change set that looks complete is worse than a named gap.
+	BlockedUnknown = "unknown"
 )
 
 // Blocked describes a package that blocks package operations.

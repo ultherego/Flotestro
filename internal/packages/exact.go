@@ -79,10 +79,14 @@ func (a *APT) ApplyExact(ctx context.Context, approved Plan, options Options) (A
 	}
 	args = append(args, specs...)
 	// The agent is not raised in a transaction it carries out itself; the plan
-	// does not name it, and the hold keeps a dependency from pulling it in.
-	if release, err := a.holdAgent(ctx); err == nil {
-		defer release()
+	// does not name it, and the hold keeps a dependency from pulling it in. A hold
+	// that cannot be taken stops the transaction: running it anyway is how the
+	// agent gets replaced halfway through the work it is doing.
+	release, err := a.holdAgent(ctx)
+	if err != nil {
+		return apply, fmt.Errorf("%w: %s", ErrAgentHoldFailed, err)
 	}
+	defer release()
 	if options.Progress != nil {
 		args = append([]string{"-o", "APT::Status-Fd=3"}, args...)
 	}
@@ -255,16 +259,23 @@ func (p *Pacman) ApplyExact(ctx context.Context, approved Plan, options Options)
 		}
 	}
 
+	// The removals go first. An upgrade plan carries a removal when a target
+	// replaces an installed package or conflicts with one, and installing the
+	// archive while that package is still there is the conflict itself: with
+	// --noconfirm pacman declines to remove it and the transaction fails before
+	// anything is done. A removal that would break a dependency is refused by
+	// pacman in turn, and then nothing has been installed either - which is the
+	// safe way round for a step that cannot be undone.
 	result := commandResult{Ran: true}
-	command := "pacman -U"
-	if len(files) > 0 {
-		args := append([]string{"-U", "--noconfirm", "--noprogressbar"}, files...)
-		result = runWithProgress(ctx, 45*time.Minute, options.Progress, false, pacmanPath, args...)
-	}
-	if removals := removalSpecs(approved); len(removals) > 0 && result.Ran && result.ExitCode == 0 {
-		command = "pacman -Rs"
+	command := "pacman -Rs"
+	if removals := removalSpecs(approved); len(removals) > 0 {
 		removing := append([]string{"-Rs", "--noconfirm", "--noprogressbar"}, removals...)
 		result = runWithProgress(ctx, 45*time.Minute, options.Progress, false, pacmanPath, removing...)
+	}
+	if len(files) > 0 && result.Ran && result.ExitCode == 0 {
+		command = "pacman -U"
+		args := append([]string{"-U", "--noconfirm", "--noprogressbar"}, files...)
+		result = runWithProgress(ctx, 45*time.Minute, options.Progress, false, pacmanPath, args...)
 	}
 
 	after := p.installedVersions(ctx)

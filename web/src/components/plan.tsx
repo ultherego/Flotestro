@@ -382,13 +382,34 @@ export function PlanBlocked({ plan }: { plan: PackagePlanFacts }) {
   const blocked = plan.blocked ?? [];
   if (blocked.length === 0) return null;
   const database = blocked.filter((entry) => (entry.kind ?? "database") === "database");
+  const held = blocked.filter((entry) => entry.kind === "held");
+  const unknown = blocked.filter((entry) => entry.kind === "unknown");
+  const advisory = blocked.length - database.length - held.length - unknown.length;
   return (
     <div className="plan-blocked">
-      <p className={database.length > 0 ? "warning" : "source"}>
-        {database.length > 0
-          ? t("{n} packages block the package operations of this host; a repair has to run before the plan is applied.", { n: database.length })
-          : t("{n} packages stay out of this plan: no advisory of this host says whether their update closes a vulnerability.", { n: blocked.length })}
-      </p>
+      {/* Each kind is said in its own words: a broken database is a fault of the
+          host, a hold is a decision on it, and a gap the resolution could not
+          name is neither. */}
+      {database.length > 0 && (
+        <p className="warning">
+          {t("{n} packages block the package operations of this host; a repair has to run before the plan is applied.", { n: database.length })}
+        </p>
+      )}
+      {held.length > 0 && (
+        <p className="source">
+          {t("{n} updates are held back on the host itself and stay out of this plan.", { n: held.length })}
+        </p>
+      )}
+      {unknown.length > 0 && (
+        <p className="warning">
+          {t("{n} entries of this transaction could not be named; what they stand for is not in the plan.", { n: unknown.length })}
+        </p>
+      )}
+      {advisory > 0 && (
+        <p className="source">
+          {t("{n} packages stay out of this plan: no advisory of this host says whether their update closes a vulnerability.", { n: advisory })}
+        </p>
+      )}
       <ul className="plan-changes-list">
         {blocked.map((entry) => (
           <li key={`${entry.kind ?? "database"}:${entry.name}`}>

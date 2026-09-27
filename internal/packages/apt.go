@@ -128,9 +128,20 @@ func (a *APT) securityUpgradeNames(ctx context.Context) ([]string, error) {
 	}
 	var names []string
 	for _, line := range strings.Split(result.Stdout, "\n") {
+		change, ok := parseAptInstLine(line)
+		if !ok {
+			continue
+		}
+		// A candidate whose archive apt did not name cannot be placed on either
+		// side of the question. Raising it would put ordinary updates into a
+		// security-only transaction, and leaving it out would hide a security
+		// update; the plan is refused instead and says which package it is about.
+		if !securityClassifiable(change.Origin) {
+			return nil, fmt.Errorf("%w: %s", ErrSecurityOriginUnknown, change.Name)
+		}
 		// The agent package has an operation of its own: raised in this
 		// transaction it would stop the helper that runs it.
-		if change, ok := parseAptInstLine(line); ok && change.Security && change.Name != AgentPackage {
+		if change.Security && change.Name != AgentPackage {
 			names = append(names, change.Name)
 		}
 	}
@@ -279,13 +290,74 @@ func parseAptInstLine(line string) (Change, bool) {
 			}
 		}
 	}
-	// The security repositories of Debian and Ubuntu have a recognisable
-	// origin.
-	origin := change.Origin
-	change.Security = strings.Contains(origin, "-security") ||
-		strings.Contains(origin, "Debian-Security") ||
-		strings.Contains(origin, "Ubuntu:") && strings.Contains(origin, "security")
+	change.Security = securityOrigin(change.Origin)
 	return change, true
+}
+
+// The stable codes of the apt adapter's refusals.
+const (
+	// ErrorSecurityOriginUnknown: apt named no archive for an upgradable package,
+	// so a security-only upgrade cannot be told from an ordinary one.
+	ErrorSecurityOriginUnknown = "security_origin_unknown"
+	// ErrorAgentHoldFailed: the agent could not be held out of the transaction.
+	ErrorAgentHoldFailed = "agent_hold_failed"
+)
+
+// The refusals of the apt adapter that the caller can act on.
+var (
+	// ErrSecurityOriginUnknown means apt named no repository for a candidate, so
+	// a security-only upgrade cannot be told from an ordinary one. apt has no
+	// security mode of its own: the origin is the only thing that says which
+	// archive a version comes from, and guessing here would raise the whole
+	// upgrade under the name of a security one.
+	ErrSecurityOriginUnknown = errors.New("apt named no repository for an upgradable package")
+	// ErrAgentHoldFailed means the agent could not be held out of a transaction
+	// it carries out itself. Without the hold a dependency may replace the agent
+	// halfway through, which ends with a host cut off from the work it is doing.
+	ErrAgentHoldFailed = errors.New("the agent could not be held out of the transaction")
+)
+
+// securityOrigin says whether a candidate comes from a security archive. The
+// origin apt prints is "<label>:<version>/<archive>", possibly several separated
+// by commas, and it is the archive that names the security suite -
+// "bookworm-security", "jammy-security". A substring of the whole string is not
+// enough: a repository somebody called "our-security-tools" is not one.
+func securityOrigin(origin string) bool {
+	for _, entry := range strings.Split(origin, ",") {
+		entry = strings.TrimSpace(entry)
+		label, suite, hasSuite := strings.Cut(entry, "/")
+		if !hasSuite {
+			// No archive: the label is all there is, and Debian's security
+			// archive names itself in it.
+			if _, after, ok := strings.Cut(entry, ":"); ok && after == "" {
+				continue
+			}
+			if strings.HasPrefix(entry, "Debian-Security:") {
+				return true
+			}
+			continue
+		}
+		suite = strings.TrimSpace(suite)
+		if suite == "security" || strings.HasSuffix(suite, "-security") ||
+			strings.HasPrefix(label, "Debian-Security:") {
+			return true
+		}
+	}
+	return false
+}
+
+// securityClassifiable says whether apt gave enough about a candidate to tell a
+// security upgrade from an ordinary one: the archive it comes from.
+func securityClassifiable(origin string) bool {
+	for _, entry := range strings.Split(origin, ",") {
+		if _, _, hasSuite := strings.Cut(strings.TrimSpace(entry), "/"); hasSuite {
+			return true
+		}
+		if strings.HasPrefix(strings.TrimSpace(entry), "Debian-Security:") {
+			return true
+		}
+	}
+	return false
 }
 
 // downloadManifest reads what the operation fetches: the sum of the sizes of
@@ -395,10 +467,13 @@ func (a *APT) Upgrade(ctx context.Context, options Options) (Apply, error) {
 	}
 	// An ordinary upgrade does not touch the agent: replacing it in the middle of
 	// a transaction it carries out itself ends with a host cut off halfway
-	// through the work and a result nobody collects.
-	if release, err := a.holdAgent(ctx); err == nil {
-		defer release()
+	// through the work and a result nobody collects. A hold that cannot be taken
+	// is a refusal, not a warning: the transaction would run without it.
+	release, err := a.holdAgent(ctx)
+	if err != nil {
+		return Apply{Manager: a.Name()}, fmt.Errorf("%w: %s", ErrAgentHoldFailed, err)
 	}
+	defer release()
 	if len(options.Packages) > 0 {
 		args = append([]string{"--yes", "--quiet",
 			"-o", "Dpkg::Options::=--force-confold",

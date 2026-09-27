@@ -66,6 +66,21 @@ var ErrSecurityUnknown = errors.New("the Arch repositories carry no security met
 // transaction can go through.
 var ErrDatabaseBroken = errors.New("the package database needs repairing")
 
+// pacmanPlanUnreadable is the refusal of an answer of pacman this adapter does
+// not recognise. It answers ErrPlanMetadataMissing: nothing was planned, and a
+// plan shorter than the transaction would be approved for another change than
+// the one the host would make.
+type pacmanPlanUnreadable struct{ reason string }
+
+func (e pacmanPlanUnreadable) Error() string { return e.reason }
+
+func (e pacmanPlanUnreadable) Is(target error) bool { return target == ErrPlanMetadataMissing }
+
+// PacmanDigestUnknown stands where the checksum of an archive would: a sync
+// record that publishes none leaves the field named rather than empty, which
+// would read as an archive that needs no proof.
+const PacmanDigestUnknown = "pacman-sync-unknown:no_checksum_published"
+
 // Pacman is the adapter of Arch Linux and its derivatives.
 type Pacman struct{}
 
@@ -154,42 +169,60 @@ func (p *Pacman) plan(ctx context.Context, options Options) (Plan, error) {
 	if len(options.Packages) > 0 {
 		return plan, fmt.Errorf("%w; plan the upgrade without naming packages", ErrPartialUpgrade)
 	}
-	var pending []Change
+	var pending PacmanPending
+	var err error
 	database := pacmanPlanDatabase()
 	if fileExists(checkupdatesPath) {
 		result := run(ctx, 10*time.Minute, checkupdatesPath, "--nocolor")
 		switch {
 		case !result.Ran:
 			return plan, fmt.Errorf("checkupdates: %s", result.Reason())
-		case result.ExitCode == checkupdatesNoUpdates:
-			return plan, nil
-		case result.ExitCode != 0:
+		case result.ExitCode != 0 && result.ExitCode != checkupdatesNoUpdates:
 			return plan, fmt.Errorf("checkupdates: %s", result.Reason())
 		}
-		pending = ParseCheckupdates(result.Stdout)
+		// checkupdates is here for the database it syncs for itself; its own output
+		// drops the held packages with a grep, so the pending list is read from
+		// that database rather than from its answer.
+		if pending, err = p.pendingAgainst(ctx, database); err != nil {
+			return plan, err
+		}
 	} else {
 		// Without pacman-contrib the plan reads the copy the helper synced (see
 		// Refresh): the pending updates against a fresh copy of the repositories,
 		// with the system database untouched, which is what checkupdates does.
-		var err error
 		if pending, err = p.pendingWithoutCheckupdates(ctx, database); err != nil {
 			return plan, err
 		}
 	}
+	// A hold is a decision of this host: the update stays out of the transaction
+	// and is named in the plan, never dropped from it.
+	plan.Blocked = append(plan.Blocked, pacmanHeldBlocks(pending.Held)...)
 
-	for _, change := range pending {
-		// An ordinary upgrade skips the agent package, so the plan does not
-		// promise a change the transaction will not make.
-		if change.Name == AgentPackage {
-			continue
-		}
-		plan.Changes = append(plan.Changes, change)
+	// The pending list names the direct updates and nothing else. What the
+	// operator approves is the transaction the host would carry out, so it is
+	// resolved against the same database with the flags the apply path uses -
+	// also when nothing is pending, because a package of the repositories that
+	// takes the place of an installed one is an upgrade of its own.
+	transaction, err := p.resolveUpgrade(ctx, database, pending)
+	if err != nil {
+		return plan, err
 	}
-	p.enrichFromSyncCopy(ctx, &plan, database)
+	if len(transaction.Targets) == 0 && len(transaction.Removals) == 0 {
+		plan.Blocked = append(plan.Blocked, transaction.Unknown...)
+		plan.Space = p.planSpace(ctx, plan, nil, pacmanDatabaseArgs(database)...)
+		return plan, nil
+	}
+	installed := p.installedVersions(ctx)
+	plan.Changes = pacmanUpgradeChanges(transaction, pending, installed)
+	plan.Blocked = append(plan.Blocked, transaction.Unknown...)
+	// An upgrade takes packages away too, and one of them may be a package the
+	// policy does not let go away.
+	plan.Protected = ProtectedInSet(transaction.Removals)
+	plan.DownloadBytes = transaction.DownloadBytes()
 	plan.RebootPredicted = p.rebootPredicted(plan.Changes)
-	// The sizes of the candidates come from the same database the plan came
-	// from, so the plan and its sizes agree.
-	plan.Space = p.planSpace(ctx, plan, pacmanDatabaseArgs(database)...)
+	// The sizes and the checksums come from the records the transaction was
+	// resolved against, so the plan and its bytes describe one transaction.
+	plan.Space = p.planSpace(ctx, plan, transaction.Info, pacmanDatabaseArgs(database)...)
 	return plan, nil
 }
 
@@ -217,16 +250,16 @@ func pacmanDatabaseArgs(database string) []string {
 
 // pendingWithoutCheckupdates lists the updates pending on a host that has no
 // pacman-contrib, against the database the plan reads.
-func (p *Pacman) pendingWithoutCheckupdates(ctx context.Context, database string) ([]Change, error) {
+func (p *Pacman) pendingWithoutCheckupdates(ctx context.Context, database string) (PacmanPending, error) {
 	if database == "" && !pacmanSystemDatabaseSynced() {
-		return nil, ErrPlanMetadataMissing
+		return PacmanPending{}, ErrPlanMetadataMissing
 	}
 	return p.pendingAgainst(ctx, database)
 }
 
 // pendingAgainst asks pacman what is pending against the given database
 // directory; an empty directory is the host's own.
-func (p *Pacman) pendingAgainst(ctx context.Context, database string) ([]Change, error) {
+func (p *Pacman) pendingAgainst(ctx context.Context, database string) (PacmanPending, error) {
 	// Exit 1 without output is pacman's way of saying nothing is pending.
 	pending := run(ctx, 2*time.Minute, pacmanPath, append([]string{"-Qu"},
 		pacmanDatabaseArgs(database)...)...)
@@ -236,13 +269,13 @@ func (p *Pacman) pendingAgainst(ctx context.Context, database string) ([]Change,
 	}
 	switch {
 	case !pending.Ran:
-		return nil, fmt.Errorf("pacman -Qu against %s: %s", source, pending.Reason())
+		return PacmanPending{}, fmt.Errorf("pacman -Qu against %s: %s", source, pending.Reason())
 	case pending.ExitCode != 0 && strings.TrimSpace(pending.Stdout) == "":
-		return nil, nil
+		return PacmanPending{}, nil
 	case pending.ExitCode != 0:
-		return nil, fmt.Errorf("pacman -Qu against %s: %s", source, pending.Reason())
+		return PacmanPending{}, fmt.Errorf("pacman -Qu against %s: %s", source, pending.Reason())
 	}
-	return ParseCheckupdates(pending.Stdout), nil
+	return ParsePacmanPending(pending.Stdout)
 }
 
 // pacmanSystemDatabaseSynced says whether the host's own sync database holds
@@ -305,16 +338,37 @@ func (p *Pacman) SyncCopy(ctx context.Context) error {
 	return nil
 }
 
-// planSpace measures where the bytes of the plan go.
-func (p *Pacman) planSpace(ctx context.Context, plan Plan, database ...string) []SpaceFact {
+// planSpace measures where the bytes of the plan go. The records of the sync
+// database are read once for the whole plan, so its sizes and its checksums
+// come from the answer the transaction was resolved against.
+func (p *Pacman) planSpace(ctx context.Context, plan Plan, info map[string]PacmanInfo,
+	database ...string) []SpaceFact {
 	needs := spaceNeeds{downloadKnown: true, installBasis: BasisInstalledSize}
 	if len(plan.Changes) == 0 {
 		return spaceFacts(pacmanCacheDir, pacmanDatabaseDir, needs)
 	}
 	needs.download = plan.DownloadBytes
 	needs.kernel = anyKernel(p.Name(), plan.Changes)
-	names := changeNames(plan.Changes)
-	info := p.packageInfo(ctx, append(append([]string{"-Si"}, database...), names...)...)
+	// A package that goes away has no sync record and no size to grow by; asking
+	// for one would leave the growth of the whole plan unknown.
+	var names, specs []string
+	for _, change := range plan.Changes {
+		if change.Action == ActionRemove {
+			continue
+		}
+		names = append(names, change.Name)
+		if change.Origin != "" {
+			specs = append(specs, change.Origin+"/"+change.Name)
+			continue
+		}
+		specs = append(specs, change.Name)
+	}
+	if len(names) == 0 {
+		return spaceFacts(pacmanCacheDir, pacmanDatabaseDir, needs)
+	}
+	if info == nil {
+		info = p.packageInfo(ctx, pacmanSyncInfoArgs(database, specs)...)
+	}
 	candidate := map[string]uint64{}
 	for name, entry := range info {
 		candidate[name] = entry.InstalledSize
@@ -327,15 +381,27 @@ func (p *Pacman) planSpace(ctx context.Context, plan Plan, database ...string) [
 	// the growth of the installed files where measured.
 	for i := range plan.Changes {
 		change := &plan.Changes[i]
+		if change.Action == ActionRemove {
+			continue
+		}
 		entry, ok := info[change.Name]
 		if !ok {
+			// The record of the candidate went unread: the checksum is named as
+			// unknown rather than left empty, which would read as an archive that
+			// needs no proof.
+			if change.Digest == "" {
+				change.Digest = PacmanDigestUnknown
+			}
 			continue
 		}
 		if change.Architecture == "" {
 			change.Architecture = entry.Architecture
 		}
-		if change.Digest == "" && entry.SHA256 != "" {
-			change.Digest = "sha256:" + entry.SHA256
+		if change.Digest == "" {
+			change.Digest = PacmanDigestUnknown
+			if entry.SHA256 != "" {
+				change.Digest = "sha256:" + entry.SHA256
+			}
 		}
 		change.InstalledDeltaBytes = int64(entry.InstalledSize) - int64(current[change.Name])
 		change.InstalledDeltaKnown = true
@@ -361,13 +427,18 @@ func (p *Pacman) packageInfo(ctx context.Context, args ...string) map[string]Pac
 	return ParsePacmanInfo(result.Stdout)
 }
 
-// PacmanInfo is what one record of "pacman -Si" or "pacman -Qi" says that the
+// PacmanInfo is what one record of "pacman -Sii" or "pacman -Qi" says that the
 // plan needs: the size of the installed files, the architecture and, for a
-// sync record, the checksum of the archive.
+// sync record, the checksum of the archive and what the package takes the place
+// of.
 type PacmanInfo struct {
 	InstalledSize uint64
 	Architecture  string
 	SHA256        string
+	// Replaces and Conflicts are the entries of the record as the database
+	// writes them: a name, sometimes with a version constraint.
+	Replaces  []string
+	Conflicts []string
 }
 
 // ParsePacmanInfoSizes reads the "Name" and "Installed Size" lines of "pacman
@@ -380,7 +451,7 @@ func ParsePacmanInfoSizes(output string) map[string]uint64 {
 	return sizes
 }
 
-// ParsePacmanInfo reads the records of "pacman -Si" and "pacman -Qi".
+// ParsePacmanInfo reads the records of "pacman -Sii" and "pacman -Qi".
 func ParsePacmanInfo(output string) map[string]PacmanInfo {
 	info := map[string]PacmanInfo{}
 	name := ""
@@ -405,6 +476,16 @@ func ParsePacmanInfo(output string) map[string]PacmanInfo {
 				entry.SHA256 = strings.ToLower(value)
 				pending[name] = entry
 			}
+		case "Replaces":
+			if entry, ok := pending[name]; ok {
+				entry.Replaces = pacmanInfoList(value)
+				pending[name] = entry
+			}
+		case "Conflicts With":
+			if entry, ok := pending[name]; ok {
+				entry.Conflicts = pacmanInfoList(value)
+				pending[name] = entry
+			}
 		case "Installed Size":
 			if size, ok := ParseHumanSize(value); ok && name != "" {
 				entry := pending[name]
@@ -414,58 +495,415 @@ func ParsePacmanInfo(output string) map[string]PacmanInfo {
 			}
 		}
 	}
-	// The architecture and the checksum are printed after the size in the
+	// The architecture and the checksum stand on either side of the size in the
 	// record, so the entries are completed once the whole record is read.
 	for pkg, entry := range pending {
 		if complete, ok := info[pkg]; ok {
 			complete.Architecture, complete.SHA256 = entry.Architecture, entry.SHA256
+			complete.Replaces, complete.Conflicts = entry.Replaces, entry.Conflicts
 			info[pkg] = complete
 		}
 	}
 	return info
 }
 
+// pacmanInfoList reads a list field of a record. "None" is no entry at all,
+// not a package of that name.
+func pacmanInfoList(value string) []string {
+	if value == "" || value == "None" {
+		return nil
+	}
+	return strings.Fields(value)
+}
+
 // checkupdatesNoUpdates is the exit code checkupdates ends with when there is
 // nothing to upgrade.
 const checkupdatesNoUpdates = 2
 
-// ParseCheckupdates reads lines of the form: linux 6. 16. 5. arch1-1 -> 6. 16.
-// 6.
-func ParseCheckupdates(output string) []Change {
-	var changes []Change
-	for _, line := range strings.Split(output, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) != 4 || fields[2] != "->" {
-			continue
-		}
-		changes = append(changes, Change{
-			Name: fields[0], CurrentVersion: fields[1], CandidateVersion: fields[3],
-		})
-	}
-	return changes
+// PacmanPending is what "pacman -Qu" says about this host: the updates an
+// upgrade would carry out, and the ones IgnorePkg holds back.
+type PacmanPending struct {
+	Updates []Change
+	Held    []Change
 }
 
-// enrichFromSyncCopy fills the origin and the download size in from the
-// database the plan was read against - the copy on a host without
-// pacman-contrib, the host's own where there is no copy.
-func (p *Pacman) enrichFromSyncCopy(ctx context.Context, plan *Plan, copyDir string) {
-	if len(plan.Changes) == 0 {
-		return
+// ParsePacmanPending reads lines of the form "linux 6.16.5.arch1-1 ->
+// 6.16.6.arch1-1", with "[ignored]" behind the versions of a held package. A
+// line in another shape is refused rather than skipped: a held package a parser
+// drops is a hold respected by accident.
+func ParsePacmanPending(output string) (PacmanPending, error) {
+	var pending PacmanPending
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || pacmanNotice(trimmed) {
+			continue
+		}
+		fields := strings.Fields(trimmed)
+		if len(fields) < 4 || len(fields) > 5 || fields[2] != "->" {
+			return PacmanPending{}, pacmanPlanUnreadable{"pacman answered with a pending update " +
+				"this adapter cannot read (" + printedLine(trimmed) + "), so the plan cannot say " +
+				"what this host has waiting"}
+		}
+		change := Change{Name: fields[0], CurrentVersion: fields[1], CandidateVersion: fields[3]}
+		if len(fields) == 4 {
+			pending.Updates = append(pending.Updates, change)
+			continue
+		}
+		// pacman marks an update it leaves alone with a word in brackets behind the
+		// versions; under LC_ALL=C that word is "ignored".
+		if !strings.HasPrefix(fields[4], "[") || !strings.HasSuffix(fields[4], "]") {
+			return PacmanPending{}, pacmanPlanUnreadable{"pacman marked the update of " + fields[0] +
+				" with " + printedLine(fields[4]) + ", which this adapter does not know, so the plan " +
+				"cannot say whether the update is held"}
+		}
+		pending.Held = append(pending.Held, change)
 	}
-	args := append([]string{"-Sup", "--noconfirm"}, pacmanDatabaseArgs(copyDir)...)
-	args = append(args, "--ignore", AgentPackage, "--print-format", pacmanPrintFormat)
-	result := run(ctx, 2*time.Minute, pacmanPath, args...)
-	if !result.Ran || result.ExitCode != 0 {
-		return
-	}
-	targets := ParsePacmanTargets(result.Stdout)
-	for i := range plan.Changes {
-		if target, ok := targets[plan.Changes[i].Name]; ok {
-			plan.Changes[i].Origin = target.Origin
-			plan.Changes[i].Architecture = target.Architecture()
-			plan.DownloadBytes += target.Size
+	return pending, nil
+}
+
+// pacmanNotice recognises the lines pacman writes around an answer: its
+// progress, its warnings and the questions --noconfirm answers itself.
+func pacmanNotice(trimmed string) bool {
+	for _, prefix := range []string{"::", "warning:", "error:"} {
+		if strings.HasPrefix(trimmed, prefix) {
+			return true
 		}
 	}
+	return false
+}
+
+// printedLine makes a line of a tool readable inside a refusal: the tabs of a
+// print format are spaces there, and a long line is cut.
+func printedLine(line string) string {
+	text := strings.Join(strings.Fields(line), " ")
+	if len(text) > 120 {
+		return text[:120] + "…"
+	}
+	return text
+}
+
+// pacmanHeldBlocks names the held updates in the plan, with the versions the
+// hold stands between.
+func pacmanHeldBlocks(held []Change) []Blocked {
+	var blocked []Blocked
+	for _, change := range held {
+		blocked = append(blocked, Blocked{Name: change.Name, Kind: BlockedHeld,
+			Status: "IgnorePkg of " + PacmanConfPath + " holds this package at " +
+				change.CurrentVersion + ", so the upgrade to " + change.CandidateVersion +
+				" stays out of this transaction"})
+	}
+	return blocked
+}
+
+// pacmanTransaction is the upgrade pacman resolves against the database the
+// plan reads: the targets it would install, the records they come from, the
+// installed packages they take away, and what the resolution could not name.
+type pacmanTransaction struct {
+	Targets  map[string]PacmanTarget
+	Info     map[string]PacmanInfo
+	Removals []string
+	Unknown  []Blocked
+}
+
+// DownloadBytes is what the archives of the transaction weigh.
+func (t pacmanTransaction) DownloadBytes() uint64 {
+	var total uint64
+	for _, target := range t.Targets {
+		total += target.Size
+	}
+	return total
+}
+
+// resolveUpgrade asks pacman for the whole transaction of a full upgrade - the
+// dependencies it pulls in besides the pending updates - with the flags the
+// apply path prints its targets with, so plan and execution answer the same
+// question.
+func (p *Pacman) resolveUpgrade(ctx context.Context, database string,
+	pending PacmanPending) (pacmanTransaction, error) {
+	var transaction pacmanTransaction
+	args := append([]string{"-Sup", "--noconfirm"}, pacmanDatabaseArgs(database)...)
+	args = append(args, "--ignore", AgentPackage, "--print-format", pacmanPrintFormat)
+	result := run(ctx, 5*time.Minute, pacmanPath, args...)
+	if !result.Ran {
+		return transaction, fmt.Errorf("pacman -Sup: %s", result.Reason())
+	}
+	output := result.Stdout + "\n" + result.Stderr
+	if result.ExitCode != 0 {
+		if missing := PacmanTargetsNotFound(output); len(missing) > 0 {
+			return transaction, fmt.Errorf("pacman does not know a package of this upgrade: %s",
+				strings.Join(missing, ", "))
+		}
+		// A transaction pacman cannot resolve is a refusal, not an empty plan.
+		if reason := PacmanUnresolvable(output); reason != "" {
+			return transaction, fmt.Errorf("pacman cannot resolve this upgrade: %s", reason)
+		}
+		return transaction, fmt.Errorf("pacman -Sup: %s", result.Reason())
+	}
+	targets, err := pacmanTargetsOf("pacman -Sup", result.Stdout)
+	if err != nil {
+		return transaction, err
+	}
+	transaction.Targets = targets
+	if len(targets) == 0 {
+		// A query without a package name would answer with every record of every
+		// repository, so an upgrade with no target asks for none.
+		return transaction, pacmanTransactionCovers(transaction, pending)
+	}
+	// The records of the same database carry what the printed line does not: the
+	// checksum of the archive and what the package replaces or conflicts with.
+	transaction.Info = p.packageInfo(ctx,
+		pacmanSyncInfoArgs(pacmanDatabaseArgs(database), pacmanTargetSpecs(targets))...)
+	transaction.Removals, transaction.Unknown = p.transactionRemovals(ctx, transaction)
+	if err := pacmanTransactionCovers(transaction, pending); err != nil {
+		return pacmanTransaction{}, err
+	}
+	return transaction, nil
+}
+
+// pacmanTransactionCovers refuses a resolution that leaves a pending update
+// out: consent to four changes is not consent to the fourteen a transaction
+// would make, and a target that went unread would be one of them.
+func pacmanTransactionCovers(transaction pacmanTransaction, pending PacmanPending) error {
+	removed := map[string]bool{}
+	for _, name := range transaction.Removals {
+		removed[name] = true
+	}
+	for _, update := range pending.Updates {
+		// The agent is not raised in a transaction it carries out itself, so the
+		// resolution leaves it out on purpose.
+		if update.Name == AgentPackage || removed[update.Name] {
+			continue
+		}
+		if _, ok := transaction.Targets[update.Name]; !ok {
+			return pacmanPlanUnreadable{"pacman has an update of " + update.Name +
+				" and printed no target for it, so the plan would name fewer changes " +
+				"than the upgrade makes"}
+		}
+	}
+	return nil
+}
+
+// pacmanTargetsOf reads the targets of a printed transaction. A line in the
+// format that was asked for and does not parse whole is a refusal: the plan
+// would carry no identity for something the transaction installs.
+func pacmanTargetsOf(command, output string) (map[string]PacmanTarget, error) {
+	targets := map[string]PacmanTarget{}
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimRight(line, "\r")
+		// pacman writes its progress and its warnings on the same stream; a target
+		// is a line of the tab format.
+		if !strings.Contains(line, "\t") {
+			continue
+		}
+		fields := strings.Split(line, "\t")
+		if len(fields) != 5 || fields[0] == "" || fields[1] == "" || fields[2] == "" ||
+			strings.TrimSpace(fields[4]) == "" {
+			return nil, pacmanPlanUnreadable{command + " printed a target this adapter cannot read (" +
+				printedLine(line) + "), so the plan cannot carry its identity"}
+		}
+		size, err := strconv.ParseUint(strings.TrimSpace(fields[3]), 10, 64)
+		if err != nil {
+			return nil, pacmanPlanUnreadable{command + " printed the size of " + fields[0] + " as " +
+				printedLine(fields[3]) + ", so the plan cannot say what this upgrade downloads"}
+		}
+		targets[fields[0]] = PacmanTarget{
+			Name: fields[0], Version: fields[1], Origin: fields[2], Size: size,
+			Location: strings.TrimSpace(fields[4]),
+		}
+	}
+	return targets, nil
+}
+
+// pacmanSyncInfoArgs asks the sync database for the full records of the named
+// packages. "-Sii" carries the checksum of the archive, which "-Si" leaves out.
+func pacmanSyncInfoArgs(database, specs []string) []string {
+	return append(append([]string{"-Sii"}, database...), specs...)
+}
+
+// pacmanTargetSpecs names every target by its repository, so a package two
+// repositories publish is read from the one the transaction takes it from.
+func pacmanTargetSpecs(targets map[string]PacmanTarget) []string {
+	specs := make([]string, 0, len(targets))
+	for _, name := range sortedNames(targets) {
+		target := targets[name]
+		if target.Origin == "" {
+			specs = append(specs, name)
+			continue
+		}
+		specs = append(specs, target.Origin+"/"+name)
+	}
+	return specs
+}
+
+// sortedNames lists the names of the targets in one order, so a plan of the
+// same transaction reads the same twice.
+func sortedNames(targets map[string]PacmanTarget) []string {
+	names := make([]string, 0, len(targets))
+	for name := range targets {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// transactionRemovals names the installed packages the upgrade takes away.
+// pacman prints what it installs and never what a replacement or a conflict
+// removes, so the removals are read off the records of the targets - what they
+// replace and what they conflict with - and settled against the local database
+// with pacman's own dependency test.
+func (p *Pacman) transactionRemovals(ctx context.Context,
+	transaction pacmanTransaction) ([]string, []Blocked) {
+	candidates := pacmanRemovalCandidates(transaction)
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+	entries := make([]string, 0, len(candidates))
+	for entry := range candidates {
+		entries = append(entries, entry)
+	}
+	sort.Strings(entries)
+	satisfied, err := p.installedSatisfy(ctx, entries)
+	if err != nil {
+		// Unknown is not "nothing goes away": the plan says the removals could not
+		// be settled rather than showing a change set that looks complete. The name
+		// is no package, so no element of the plan is marked by this gap.
+		return nil, []Blocked{{Name: "removals", Kind: BlockedUnknown,
+			Status: "this host could not be asked which of " + strings.Join(entries, ", ") +
+				" it has (" + err.Error() + "), so what the upgrade would replace or remove " +
+				"is unknown"}}
+	}
+	return pacmanRemovals(candidates, satisfied, p.installedVersions(ctx))
+}
+
+// pacmanRemovalCandidates lists what the targets replace and conflict with, as
+// the sync records write it, keyed by the entry and naming the targets it comes
+// from. A package the transaction installs anyway is not taken away by it.
+func pacmanRemovalCandidates(transaction pacmanTransaction) map[string][]string {
+	candidates := map[string][]string{}
+	for _, name := range sortedNames(transaction.Targets) {
+		info, ok := transaction.Info[name]
+		if !ok {
+			continue
+		}
+		for _, entry := range append(append([]string{}, info.Replaces...), info.Conflicts...) {
+			subject := pacmanEntryName(entry)
+			if subject == "" || subject == name {
+				continue
+			}
+			if _, upgraded := transaction.Targets[subject]; upgraded {
+				continue
+			}
+			candidates[entry] = append(candidates[entry], name)
+		}
+	}
+	return candidates
+}
+
+// pacmanRemovals turns the candidates into the packages the plan says go away
+// and into the gaps it names: an entry an installed package satisfies under a
+// provision rather than under its own name names no package to remove, and a
+// removal nobody can name does not leave the plan as a zero.
+func pacmanRemovals(candidates map[string][]string, satisfied map[string]bool,
+	installed map[string]string) ([]string, []Blocked) {
+	var removals []string
+	var unknown []Blocked
+	entries := make([]string, 0, len(candidates))
+	for entry := range candidates {
+		entries = append(entries, entry)
+	}
+	sort.Strings(entries)
+	for _, entry := range entries {
+		if !satisfied[entry] {
+			continue
+		}
+		name := pacmanEntryName(entry)
+		if _, present := installed[name]; present {
+			removals = append(removals, name)
+			continue
+		}
+		takers := unique(candidates[entry])
+		sort.Strings(takers)
+		unknown = append(unknown, Blocked{Name: entry, Kind: BlockedUnknown,
+			Status: "this host satisfies " + entry + ", which " + strings.Join(takers, ", ") +
+				" takes the place of, under a provision rather than under that name; " +
+				"pacman does not print which package the upgrade would remove"})
+	}
+	return unique(removals), unknown
+}
+
+// pacmanEntryName is the package name of an entry of a record: "tree<2.0"
+// names tree.
+func pacmanEntryName(entry string) string {
+	if index := strings.IndexAny(entry, "<>="); index >= 0 {
+		return strings.TrimSpace(entry[:index])
+	}
+	return strings.TrimSpace(entry)
+}
+
+// pacmanUnsatisfied is the code "pacman -T" ends with when the local database
+// does not satisfy every entry it was given.
+const pacmanUnsatisfied = 127
+
+// installedSatisfy asks which of the entries the local database satisfies.
+// "pacman -T" prints the ones it does not, so what it leaves out this host has
+// - under that name or under a provision of another package.
+func (p *Pacman) installedSatisfy(ctx context.Context, entries []string) (map[string]bool, error) {
+	result := run(ctx, 2*time.Minute, pacmanPath, append([]string{"-T"}, entries...)...)
+	if !result.Ran || (result.ExitCode != 0 && result.ExitCode != pacmanUnsatisfied) {
+		return nil, fmt.Errorf("pacman -T: %s", result.Reason())
+	}
+	unsatisfied := map[string]bool{}
+	for _, line := range strings.Split(result.Stdout, "\n") {
+		if entry := strings.TrimSpace(line); entry != "" {
+			unsatisfied[entry] = true
+		}
+	}
+	satisfied := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		satisfied[entry] = !unsatisfied[entry]
+	}
+	return satisfied, nil
+}
+
+// pacmanUpgradeChanges turns the resolved transaction into the elements of the
+// plan: every target with its identity, its repository and the checksum of its
+// archive, apart by whether the pending list named it or the upgrade pulled it
+// in, and every package the transaction takes away.
+func pacmanUpgradeChanges(transaction pacmanTransaction, pending PacmanPending,
+	installed map[string]string) []Change {
+	direct := map[string]bool{}
+	for _, update := range pending.Updates {
+		direct[update.Name] = true
+	}
+	var changes []Change
+	for _, name := range sortedNames(transaction.Targets) {
+		target := transaction.Targets[name]
+		current := installed[name]
+		change := Change{
+			Name: name, CurrentVersion: current, CandidateVersion: target.Version,
+			Origin: target.Origin, Architecture: target.Architecture(),
+			Action: changeAction(PacmanName, current, target.Version), Reason: ReasonDependency,
+		}
+		if direct[name] {
+			change.Reason = ReasonRequested
+		}
+		info, known := transaction.Info[name]
+		change.Digest = PacmanDigestUnknown
+		if known && info.SHA256 != "" {
+			change.Digest = "sha256:" + info.SHA256
+		}
+		if change.Architecture == "" && known {
+			change.Architecture = info.Architecture
+		}
+		changes = append(changes, change)
+	}
+	for _, name := range transaction.Removals {
+		// pacman drops no orphan of its own accord: a package that goes away in an
+		// upgrade is one a target replaces or conflicts with.
+		changes = append(changes, Change{Name: name, CurrentVersion: installed[name],
+			Action: ActionRemove, Reason: ReasonOrphan})
+	}
+	return changes
 }
 
 // pacmanPrintFormat asks --print for the name, the version, the repository,
@@ -708,14 +1146,12 @@ func (p *Pacman) planInstall(ctx context.Context, plan Plan, options Options) (P
 	if result.ExitCode != 0 {
 		return plan, fmt.Errorf("pacman -Sp: %s", result.Reason())
 	}
-	targets := ParsePacmanTargets(result.Stdout)
-	names := make([]string, 0, len(targets))
-	for name := range targets {
-		names = append(names, name)
+	targets, err := pacmanTargetsOf("pacman -Sp", result.Stdout)
+	if err != nil {
+		return plan, err
 	}
-	sort.Strings(names)
 	installed := p.installedVersions(ctx)
-	for _, name := range names {
+	for _, name := range sortedNames(targets) {
 		target := targets[name]
 		plan.Changes = append(plan.Changes, Change{
 			Name: name, CurrentVersion: installed[name],
@@ -725,7 +1161,7 @@ func (p *Pacman) planInstall(ctx context.Context, plan Plan, options Options) (P
 		plan.DownloadBytes += target.Size
 	}
 	plan.RebootPredicted = p.rebootPredicted(plan.Changes)
-	plan.Space = p.planSpace(ctx, plan)
+	plan.Space = p.planSpace(ctx, plan, nil)
 	return plan, nil
 }
 
@@ -989,7 +1425,7 @@ func (p *Pacman) PendingUpdates(ctx context.Context) (int, string) {
 		if err != nil {
 			return 0, err.Error()
 		}
-		return len(pending), ""
+		return len(pending.Updates), ""
 	}
 	result := run(ctx, 10*time.Minute, checkupdatesPath, "--nocolor")
 	switch {
@@ -1000,7 +1436,13 @@ func (p *Pacman) PendingUpdates(ctx context.Context) (int, string) {
 	case result.ExitCode != 0:
 		return 0, "checkupdates: " + result.Reason()
 	}
-	return len(ParseCheckupdates(result.Stdout)), ""
+	pending, err := ParsePacmanPending(result.Stdout)
+	if err != nil {
+		return 0, err.Error()
+	}
+	// A held update is pending on the host and is not one the count of the
+	// inventory promises: the transaction leaves it where it is.
+	return len(pending.Updates), ""
 }
 
 // The hold of packages. pacman keeps it in IgnorePkg of /etc/pacman. conf

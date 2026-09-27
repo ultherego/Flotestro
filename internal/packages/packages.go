@@ -69,6 +69,10 @@ func ErrorCodeOf(err error) (string, bool) {
 		return ErrorPartialUpgrade, true
 	case errors.Is(err, ErrSecurityUnknown):
 		return ErrorSecurityUnknown, true
+	case errors.Is(err, ErrSecurityOriginUnknown):
+		return ErrorSecurityOriginUnknown, true
+	case errors.Is(err, ErrAgentHoldFailed):
+		return ErrorAgentHoldFailed, true
 	case errors.Is(err, ErrNoSpace):
 		return ErrorNoSpace, true
 	}
@@ -87,6 +91,7 @@ func Refused(err error) bool {
 	return errors.Is(err, ErrLocked) || errors.Is(err, ErrPlanMetadataMissing) ||
 		errors.Is(err, ErrVersionlockMissing) ||
 		errors.Is(err, ErrPartialUpgrade) || errors.Is(err, ErrSecurityUnknown) ||
+		errors.Is(err, ErrSecurityOriginUnknown) || errors.Is(err, ErrAgentHoldFailed) ||
 		errors.Is(err, ErrNoSpace) || errors.Is(err, plan.ErrStalePlan) ||
 		errors.Is(err, plan.ErrReplanRequired) || errors.Is(err, plan.ErrPlanExpired)
 }

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -91,13 +92,6 @@ func (d *DNF) plan(ctx context.Context, options Options) (Plan, error) {
 	if err != nil {
 		return plan, err
 	}
-	installed := d.installedVersions(ctx)
-	for i := range pending {
-		// check-update names the candidate and nothing about what is there now; the
-		// rpm database does, and the direction of the change follows from the two.
-		pending[i].CurrentVersion = installed[pending[i].Name]
-		pending[i].Action = ActionUpgrade
-	}
 	// The advisories decide what a security-only plan may carry; what they do
 	// not cover stays in the plan as blocked instead of disappearing from it.
 	if options.SecurityOnly && len(pending) > 0 {
@@ -105,21 +99,91 @@ func (d *DNF) plan(ctx context.Context, options Options) (Plan, error) {
 			return plan, err
 		}
 	}
-	plan.Changes = pending
+	// A host with nothing pending is not asked for a transaction it would not
+	// make; what the file systems hold is worth saying all the same.
+	if len(pending) == 0 {
+		plan.DownloadBytes, plan.Space = d.planSpace(ctx, nil, nil)
+		return plan, nil
+	}
+	// check-update names the direct updates and nothing else. What the operator
+	// approves is the transaction dnf would carry out, so the plan is read from
+	// its table: the dependencies it adds, what it replaces and what it drops.
+	output, err := d.upgradePreview(ctx, options)
+	if err != nil {
+		return plan, err
+	}
+	changes, err := ParseDNFUpgradePlan(output)
+	if err != nil {
+		return plan, err
+	}
+	completeDNFChanges(changes, d.installedVersions(ctx), pending)
+	// The protected removals are marked on the elements, not on the plan's list
+	// that refuses the transaction whole: dropping the old kernel as the new one
+	// arrives is the ordinary shape of an upgrade here.
+	plan.Changes = changes
 	plan.RebootPredicted = d.rebootPredicted(plan.Changes)
-	// check-update lists the versions and nothing about their size.
-	plan.DownloadBytes, plan.Space = d.planSpace(ctx, plan.Changes, func() string {
-		args := append([]string{"--assumeno"}, append(dnfReadArgs(), "upgrade")...)
-		if options.SecurityOnly {
-			args = append(args, "--security")
-		}
-		if len(options.Packages) == 0 {
-			args = append(args, "--exclude="+AgentPackage)
-		}
-		result := run(ctx, 10*time.Minute, dnfPath, append(args, options.Packages...)...)
-		return result.Stdout + "\n" + result.Stderr
-	})
+	// The sizes come from the summary of the same preview the table was read
+	// from, so the plan and its bytes describe one transaction.
+	plan.DownloadBytes, plan.Space = d.planSpace(ctx, plan.Changes, func() string { return output })
 	return plan, nil
+}
+
+// upgradePreview asks dnf for the transaction it would carry out without
+// carrying it out: --assumeno stops before execution and prints the whole
+// table, which is the only place the dependencies and the removals stand.
+func (d *DNF) upgradePreview(ctx context.Context, options Options) (string, error) {
+	args := append([]string{"--assumeno"}, append(dnfReadArgs(), "upgrade")...)
+	if options.SecurityOnly {
+		args = append(args, "--security")
+	}
+	// An ordinary upgrade does not touch the agent, so the preview does not
+	// promise a change the transaction will not make.
+	if len(options.Packages) == 0 {
+		args = append(args, "--exclude="+AgentPackage)
+	}
+	result := run(ctx, 10*time.Minute, dnfPath, append(args, options.Packages...)...)
+	if !result.Ran {
+		return "", fmt.Errorf("dnf upgrade: %s", result.Reason())
+	}
+	if result.Truncated {
+		// A table read out of a cut output would name fewer packages than the
+		// transaction touches.
+		return "", dnfPlanUnreadable{"dnf wrote more about this transaction than the agent reads, " +
+			"so the plan cannot describe what it would do"}
+	}
+	output := result.Stdout + "\n" + result.Stderr
+	// A transaction dnf cannot resolve is not an empty plan.
+	if reason := DNFUnresolvable(output); reason != "" {
+		return "", fmt.Errorf("dnf cannot resolve this transaction: %s", reason)
+	}
+	return output, nil
+}
+
+// completeDNFChanges finishes the elements of an upgrade plan with what the
+// transaction table does not say: the version installed now, and the security
+// flag of the updates the advisories of the host classified.
+func completeDNFChanges(changes []Change, installed map[string]string, classified []Change) {
+	security := map[string]bool{}
+	for _, change := range classified {
+		if change.Security {
+			security[change.Name] = true
+			security[change.Name+"."+change.Architecture] = true
+		}
+	}
+	for i := range changes {
+		change := &changes[i]
+		if change.Action == ActionRemove {
+			continue
+		}
+		// The architecture first: a host carries two builds of one name, and the
+		// change is about one of them.
+		if version, ok := installed[change.Name+"."+change.Architecture]; ok {
+			change.CurrentVersion = version
+		} else {
+			change.CurrentVersion = installed[change.Name]
+		}
+		change.Security = security[change.Name] || security[change.Name+"."+change.Architecture]
+	}
 }
 
 // planSpace measures where the bytes of the plan go: the archives and the
@@ -217,6 +281,15 @@ func (e dnfSecurityUnknown) Error() string { return e.reason }
 // Is answers the shared sentinel, so the refusal carries ErrorSecurityUnknown
 // and counts as a refusal of the host rather than a failed transaction.
 func (e dnfSecurityUnknown) Is(target error) bool { return target == ErrSecurityUnknown }
+
+// dnfPlanUnreadable is the refusal of a transaction whose table the agent does
+// not recognise. It answers ErrPlanMetadataMissing: nothing was planned, and a
+// plan shorter than the transaction would be approved for something else.
+type dnfPlanUnreadable struct{ reason string }
+
+func (e dnfPlanUnreadable) Error() string { return e.reason }
+
+func (e dnfPlanUnreadable) Is(target error) bool { return target == ErrPlanMetadataMissing }
 
 // DNFAdvisoryTypes says, per package, whether an advisory of this host marks
 // its pending update as a security fix. A package that is not in it is unknown.
@@ -660,6 +733,33 @@ var installHeadings = []string{
 	"reinstalling:",
 }
 
+// obsoleteHeadings head the sections about a package that takes the place of
+// another: dnf4 puts the arriving package under "Obsoleting:", dnf5 puts the
+// package that goes under "Replacing:".
+var obsoleteHeadings = []string{
+	"obsoleting:",
+	"replacing:",
+}
+
+// upgradeHeadings are every section an upgrade touches. A plan read from the
+// direct updates alone would name neither the dependencies the transaction
+// pulls in nor what it replaces or drops.
+var upgradeHeadings = slices.Concat(installHeadings, removalHeadings, obsoleteHeadings)
+
+// upgradeSummaries are the counts of an upgrade summary, in both spellings of
+// dnf. The trailing space matters: "Installed size" is not a count of
+// packages. A section this does not read - the packages dnf says it skips - is
+// not counted either, so its absence from the table is not read as a short.
+var upgradeSummaries = []string{
+	"installing:", "install ",
+	"upgrading:", "upgrade ",
+	"downgrading:", "downgrade ",
+	"removing:", "remove ",
+	"reinstalling:", "reinstall ",
+	"replacing:", "replacing ",
+	"obsoleting:", "obsoleting ",
+}
+
 // dnfSectionAction says which direction a section of the transaction
 // table means, and dnfSectionReason why its packages are in the plan.
 func dnfSectionAction(heading string) string {
@@ -668,7 +768,9 @@ func dnfSectionAction(heading string) string {
 		return ActionUpgrade
 	case strings.HasPrefix(heading, "downgrading"):
 		return ActionDowngrade
-	case strings.HasPrefix(heading, "removing"):
+	// A package under "Replacing:" is the one that goes away; the one that
+	// arrives in its place stands under "Obsoleting:".
+	case strings.HasPrefix(heading, "removing"), strings.HasPrefix(heading, "replacing"):
 		return ActionRemove
 	}
 	return ActionInstall
@@ -676,9 +778,12 @@ func dnfSectionAction(heading string) string {
 
 func dnfSectionReason(heading string) string {
 	switch {
-	case strings.Contains(heading, "unused"):
+	// An obsoleting package is not named by the order: a repository says it takes
+	// the place of something installed, and the package it replaces is dropped
+	// along the way.
+	case strings.Contains(heading, "unused"), strings.HasPrefix(heading, "replacing"):
 		return ReasonOrphan
-	case strings.Contains(heading, "dependen"):
+	case strings.Contains(heading, "dependen"), strings.HasPrefix(heading, "obsoleting"):
 		return ReasonDependency
 	}
 	return ReasonRequested
@@ -702,13 +807,75 @@ func ParseDNFInstallPlan(output string) []Change {
 	entries, _ := dnfTransactionSections(output, installHeadings, installSummaries)
 	changes := make([]Change, 0, len(entries))
 	for _, entry := range entries {
-		changes = append(changes, Change{
-			Name: entry.Name, Architecture: entry.Architecture, CandidateVersion: entry.Version,
-			Origin: entry.Repository, Action: dnfSectionAction(entry.Section),
-			Reason: dnfSectionReason(entry.Section),
-		})
+		changes = append(changes, dnfChangeOf(entry))
 	}
 	return changes
+}
+
+// ParseDNFUpgradePlan reads the whole table of an upgrade: what arrives on its
+// own account and what arrives as a dependency, what is raised and what is
+// lowered, what takes the place of something else and what goes away. A table
+// this does not recognise is a refusal rather than a shorter plan: consent to
+// four changes is not consent to the fourteen the transaction would make.
+func ParseDNFUpgradePlan(output string) ([]Change, error) {
+	entries, announced := dnfTransactionSections(output, upgradeHeadings, upgradeSummaries)
+	if len(entries) == 0 {
+		// Every pending update is held or left out of this transaction: an empty
+		// plan is the truth here, not a table that went unread.
+		if WholeTransactionReady(output) {
+			return nil, nil
+		}
+		return nil, dnfPlanUnreadable{"the transaction table was not recognised in the answer of dnf, " +
+			"so the plan cannot say what this upgrade would install, replace or remove"}
+	}
+	if announced > len(entries) {
+		return nil, dnfPlanUnreadable{fmt.Sprintf("dnf announces %d packages in this transaction and %d "+
+			"were read from its table, so the plan would name fewer changes than it makes",
+			announced, len(entries))}
+	}
+	changes := make([]Change, 0, len(entries))
+	for _, entry := range entries {
+		change := dnfChangeOf(entry)
+		// A package that arrives without a version or without a repository comes
+		// from a table in another format than this reads: the plan would say
+		// neither what it installs nor where it comes from.
+		if change.Action != ActionRemove && (change.CandidateVersion == "" ||
+			change.Origin == "" || change.Origin == dnfRepositoryUnknown) {
+			return nil, dnfPlanUnreadable{"the transaction table of dnf names no version or no " +
+				"repository for " + entry.Name + ", so the plan cannot carry its identity"}
+		}
+		changes = append(changes, change)
+	}
+	return changes, nil
+}
+
+// dnfRepositoryUnknown is how dnf prints a package it cannot name a repository
+// for. A plan cannot be carried out from a repository nobody can name, so a
+// row with it is refused rather than guessed at.
+const dnfRepositoryUnknown = "<unknown>"
+
+// DNFDigestUnknown stands in the plan where the checksum of an archive would:
+// the transaction table of dnf publishes none, and an empty field would read as
+// a package whose artefact needs no proof.
+const DNFDigestUnknown = "dnf-table-unknown:no_checksum_published"
+
+// dnfChangeOf turns one row of the transaction table into an element of a plan:
+// the full identity of the package - name, epoch, version, release and
+// architecture - the repository it comes from, and what its section means.
+func dnfChangeOf(entry dnfEntry) Change {
+	change := Change{
+		Name: entry.Name, Architecture: entry.Architecture, Origin: entry.Repository,
+		Action: dnfSectionAction(entry.Section), Reason: dnfSectionReason(entry.Section),
+	}
+	if change.Action == ActionRemove {
+		// A package that goes away has a version on the host and no candidate; its
+		// repository column names where it came from.
+		change.CurrentVersion = entry.Version
+		return change
+	}
+	change.CandidateVersion = entry.Version
+	change.Digest = DNFDigestUnknown
+	return change
 }
 
 // dnfEntry is one row of the transaction table with the section it was
@@ -726,6 +893,17 @@ func dnfTransactionSections(output string, headings, summaries []string) ([]dnfE
 	announced := 0
 	section := ""
 
+	// One name can stand twice in one transaction - an old kernel removed while a
+	// new one arrives - so what tells the rows apart is the whole identity.
+	add := func(entry dnfEntry) {
+		key := entry.Name + "." + entry.Architecture + "-" + entry.Version
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		entries = append(entries, entry)
+	}
+
 	for _, line := range strings.Split(output, "\n") {
 		trimmed := strings.TrimSpace(line)
 		lower := strings.ToLower(trimmed)
@@ -739,10 +917,12 @@ func dnfTransactionSections(output string, headings, summaries []string) ([]dnfE
 		if inSummary {
 			// Dnf5 writes "Removing: 3 packages", dnf4 - "Remove 3 Packages". We read
 			// both, because it is that number that guards whether the read is complete.
+			// An upgrade announces every direction on a line of its own, so the counts
+			// are added up rather than overwritten.
 			if matchesSummary(lower, summaries) {
 				for _, field := range strings.Fields(lower) {
 					if number, err := strconv.Atoi(field); err == nil {
-						announced = number
+						announced += number
 						break
 					}
 				}
@@ -762,23 +942,43 @@ func dnfTransactionSections(output string, headings, summaries []string) ([]dnfE
 		if !inSection || !strings.HasPrefix(line, " ") {
 			continue
 		}
+		// Dnf4 gives the replaced package no section of its own: it writes
+		// "replacing <nevra>" under the package that takes its place.
+		if replaced, ok := dnfReplacedEntry(trimmed); ok {
+			add(replaced)
+			continue
+		}
 		fields := strings.Fields(trimmed)
 		if len(fields) < 2 {
 			continue
 		}
-		name := fields[0]
-		if seen[name] {
-			continue
-		}
-		seen[name] = true
-		entry := dnfEntry{Name: name, Section: section}
+		entry := dnfEntry{Name: fields[0], Section: section}
 		// The columns after the name: architecture, version, repository, size.
 		if len(fields) > 3 {
 			entry.Architecture, entry.Version, entry.Repository = fields[1], fields[2], fields[3]
 		}
-		entries = append(entries, entry)
+		add(entry)
 	}
 	return entries, announced
+}
+
+// dnfReplacedEntry reads the line dnf4 writes under an obsoleting package:
+// "replacing python3-setuptools-wheel.noarch 53.0.0-13.el9". Read as a row of
+// the table it would enter the plan as a package named "replacing".
+func dnfReplacedEntry(line string) (dnfEntry, bool) {
+	fields := strings.Fields(line)
+	if len(fields) < 2 || !strings.EqualFold(fields[0], "replacing") {
+		return dnfEntry{}, false
+	}
+	name, architecture := fields[1], ""
+	if index := strings.LastIndex(name, "."); index > 0 {
+		name, architecture = name[:index], name[index+1:]
+	}
+	entry := dnfEntry{Name: name, Architecture: architecture, Section: "replacing:"}
+	if len(fields) > 2 {
+		entry.Version = fields[2]
+	}
+	return entry, true
 }
 
 // matchesSummary recognises a summary line in both generations of dnf.

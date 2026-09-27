@@ -310,3 +310,35 @@ func withAPTTools(t *testing.T, origin func(context.Context, string) (string, st
 func printURIs(uri, digest string) func(context.Context, string) (string, string, error) {
 	return func(context.Context, string) (string, string, error) { return uri, digest, nil }
 }
+
+// The origin apt prints is "<label>:<version>/<archive>", and it is the archive
+// that names a security suite. Reading the whole string for the word instead
+// would count a repository somebody called "our-security-tools", and a
+// security-only upgrade would then raise ordinary updates under that name.
+func TestASecurityOriginIsTheArchiveAndNotTheWord(t *testing.T) {
+	for _, test := range []struct {
+		origin       string
+		security     bool
+		classifiable bool
+	}{
+		{"Debian:12.5/stable", false, true},
+		{"Debian-Security:12/stable-security", true, true},
+		{"Ubuntu:24.04/noble-security", true, true},
+		{"Ubuntu:24.04/noble-updates", false, true},
+		{"our-security-tools:1/stable", false, true},
+		{"Debian:12.5/stable, Debian-Security:12/stable-security", true, true},
+		// No archive at all: apt said where the version comes from in a form that
+		// does not answer the question, so the plan must not answer it either.
+		{"", false, false},
+		{"local", false, false},
+	} {
+		t.Run(test.origin, func(t *testing.T) {
+			if got := securityOrigin(test.origin); got != test.security {
+				t.Errorf("securityOrigin(%q) = %v, expected %v", test.origin, got, test.security)
+			}
+			if got := securityClassifiable(test.origin); got != test.classifiable {
+				t.Errorf("securityClassifiable(%q) = %v, expected %v", test.origin, got, test.classifiable)
+			}
+		})
+	}
+}
