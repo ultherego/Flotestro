@@ -214,7 +214,7 @@ func New(cfg Config) (*Client, error) {
 
 	krbConfig, err := config.Load(cfg.KRB5ConfPath)
 	if err != nil {
-		return nil, fmt.Errorf("Kerberos configuration: %w", err)
+		return nil, fmt.Errorf("Kerberos configuration %s: %w", cfg.KRB5ConfPath, err)
 	}
 	krbKeytab, err := keytab.Load(cfg.KeytabPath)
 	if err != nil {

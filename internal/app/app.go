@@ -197,6 +197,11 @@ func Run() error {
 		config.Env("FLOTESTRO_IPA_CA_CERT", "/etc/flotestro/ipa-ca.crt"), "the CA certificate of the directory")
 	ipaRealm := flag.String("ipa-realm",
 		config.Env("FLOTESTRO_IPA_REALM", ""), "the Kerberos realm of the directory")
+	// Named like every other file of the connector, because the default path
+	// belongs to a host enrolled in the realm and an image has no such file.
+	ipaKRB5Conf := flag.String("ipa-krb5-conf",
+		config.Env("FLOTESTRO_IPA_KRB5_CONF", "/etc/krb5.conf"),
+		"the Kerberos configuration the connector reads")
 	// The built-in monitoring keeps the raw samples for a week and the
 	// quarter-hour rollups for a quarter of a year. These are the initial
 	// values of an installation: once it stores its own from the panel, the
@@ -757,12 +762,13 @@ func Run() error {
 			return fmt.Errorf("the directory connector: %w", err)
 		}
 		directory, err = freeipa.New(freeipa.Config{
-			ServerURL:  *ipaServer,
-			Realm:      *ipaRealm,
-			Principal:  *ipaPrincipal,
-			KeytabPath: *ipaKeytab,
-			CACertPath: *ipaCACert,
-			CacheTTL:   30 * time.Second,
+			ServerURL:    *ipaServer,
+			Realm:        *ipaRealm,
+			Principal:    *ipaPrincipal,
+			KeytabPath:   *ipaKeytab,
+			CACertPath:   *ipaCACert,
+			KRB5ConfPath: *ipaKRB5Conf,
+			CacheTTL:     30 * time.Second,
 		})
 		if err != nil {
 			return fmt.Errorf("the directory connector: %w", err)

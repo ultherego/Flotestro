@@ -206,8 +206,10 @@ services:
       # The state: the fleet CA, the secret store keys, the helper signing key,
       # the bootstrap token and the feed cache. Losing it loses the fleet.
       - control_plane_state:/var/lib/flotestro
-      # The keytab of the directory connector, when FreeIPA is configured:
+      # The keytab and the Kerberos configuration of the directory connector,
+      # when FreeIPA is configured; the image carries neither:
       # - ./secrets/ipa.keytab:/run/secrets/ipa.keytab:ro
+      # - ./secrets/krb5.conf:/etc/flotestro/krb5.conf:ro
       # Vulnerability feeds copied onto an isolated site, read-only and outside
       # the state, which is one half of the backup pair - see README.md:
       # - ./feeds:/var/lib/flotestro-feeds:ro
