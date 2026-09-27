@@ -162,7 +162,7 @@ test.describe("host selector", () => {
     await expect(list).toBeVisible();
     // The list fills once the hosts arrive, every row a host; a fleet
     // with no host would say so instead of staying blank.
-    await expect(list.getByRole("option").first().or(page.getByText("No host is enrolled yet"))).toBeVisible();
+    await expect(list.getByRole("option").first().or(page.getByText("No host is enrolled yet")).first()).toBeVisible();
     for (const row of await list.getByRole("option").all()) {
       await expect(row).toHaveAttribute("data-kind", "hosts");
     }

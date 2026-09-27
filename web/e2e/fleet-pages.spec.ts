@@ -455,7 +455,10 @@ test.describe("audit", () => {
     const denied = page.waitForResponse((response) => response.url().includes("/api/v1/audit?") && response.url().includes("outcome=denied"));
     await page.locator(".toolbar select").selectOption("denied");
     expect((await denied).ok()).toBeTruthy();
-    await expect(rows.first().or(page.getByText("No events."))).toBeVisible();
+    // Scoped to the table: the charts above say "No events." too, and on a trail
+    // with no denial at all the unscoped text matched three elements at once.
+    const emptyTable = page.locator("div.empty").filter({ hasText: "No events." });
+    await expect(rows.first().or(emptyTable)).toBeVisible();
     for (const row of await rows.all()) {
       await expect(row.locator("td").nth(5).locator(".badge")).toHaveText("denied");
     }
