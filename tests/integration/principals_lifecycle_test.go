@@ -27,7 +27,7 @@ func TestAnIdentityIsDisabledAndEnabledAgain(t *testing.T) {
 	}
 	h.do(http.MethodPost, "/api/v1/principals", map[string]any{
 		"subject": subject, "kind": "user", "display_name": "Lifecycle probe",
-		"roles":  []map[string]string{{"role": "viewer"}},
+		"roles":  anyTeam([]map[string]string{{"role": "viewer"}}),
 		"reason": identityLifecycleReason,
 	}, &created, http.StatusCreated)
 	if created.ID == "" {
@@ -227,7 +227,7 @@ func TestAnIdentityIsCreatedWithinTheBoundsOfTheStore(t *testing.T) {
 		TokenExpiresAt time.Time `json:"token_expires_at"`
 	}
 	h.do(http.MethodPost, "/api/v1/principals", map[string]any{
-		"subject": subject, "kind": "service", "roles": []map[string]string{{"role": "viewer"}},
+		"subject": subject, "kind": "service", "roles": anyTeam([]map[string]string{{"role": "viewer"}}),
 		"issue_token": true, "token_ttl_hours": 2, "reason": identityLifecycleReason,
 	}, &created, http.StatusCreated)
 	if created.Token == "" {

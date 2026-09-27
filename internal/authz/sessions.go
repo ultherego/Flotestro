@@ -374,9 +374,15 @@ func (s *Store) MappedBindings(ctx context.Context, issuer string, groups []stri
 	var bindings []Binding
 	for rows.Next() {
 		var binding Binding
-		if err := rows.Scan(&binding.Role, &binding.Scope.Site, &binding.Scope.Environment); err != nil {
+		var site, environment string
+		if err := rows.Scan(&binding.Role, &site, &environment); err != nil {
 			return nil, err
 		}
+		// A mapping narrows by site and environment and by nothing else, and
+		// Placement says so in every category. Filling two fields of a scope and
+		// leaving three empty would grant nothing at all: an empty category
+		// reaches no host, which is the safe way round and the wrong answer here.
+		binding.Scope = Placement(site, environment)
 		bindings = append(bindings, binding)
 	}
 	return bindings, rows.Err()

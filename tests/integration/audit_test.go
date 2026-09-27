@@ -124,7 +124,7 @@ func TestAnExpiredBindingGrantsNothingAtTheDoor(t *testing.T) {
 	}
 	h.do(http.MethodPost, "/api/v1/principals", map[string]any{
 		"subject": uniqueSubject("bad-date"),
-		"roles":   []map[string]string{{"role": "viewer", "valid_until": "next tuesday"}},
+		"roles":   anyTeam([]map[string]string{{"role": "viewer", "valid_until": "next tuesday"}}),
 		"reason":  "identity prepared for an integration test",
 	}, &problem, http.StatusBadRequest)
 	if problem.Code != "invalid_binding" {

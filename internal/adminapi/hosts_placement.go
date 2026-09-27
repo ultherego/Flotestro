@@ -27,6 +27,11 @@ type hostPlacementRequest struct {
 
 // handleSetHostPlacement moves a host to a site and an environment. The
 // placement is not a label.
+// placementDescription is where a host stands, for the trail to read.
+func placementDescription(site, environment string) string {
+	return "site=" + site + " env=" + environment
+}
+
 func (s *Server) handleSetHostPlacement(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
 	host, scope, ok := s.hostScope(w, r, hostID)
@@ -69,9 +74,11 @@ func (s *Server) handleSetHostPlacement(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
-	// The trail describes the move in the vocabulary the move is in.
-	placedBefore := authz.Scope{Site: host.Site, Environment: host.Environment}
-	placedAfter := authz.Scope{Site: site, Environment: environment}
+	// The trail describes the move in the vocabulary the move is in: a placement
+	// is a site and an environment. Naming the categories a scope also has would
+	// suggest the move touched them.
+	placedBefore := placementDescription(host.Site, host.Environment)
+	placedAfter := placementDescription(site, environment)
 
 	updated, err := s.hosts.SetPlacement(r.Context(), hostID, site, environment)
 	if errors.Is(err, hosts.ErrNotFound) {
@@ -88,7 +95,7 @@ func (s *Server) handleSetHostPlacement(w http.ResponseWriter, r *http.Request) 
 		Action: "host.placement", TargetType: "host", TargetID: host.ID,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		Detail: map[string]any{
-			"before": placedBefore.String(), "after": placedAfter.String(), "reason": request.Reason,
+			"before": placedBefore, "after": placedAfter, "reason": request.Reason,
 		},
 		Before: map[string]any{"site": host.Site, "environment": host.Environment},
 		After:  map[string]any{"site": updated.Site, "environment": updated.Environment},

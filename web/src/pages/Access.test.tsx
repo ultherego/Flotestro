@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { expiresSoon, grantRequest, matchesIdentity, permissionMatrix, scopeKind, scopeTeam, tabFromParam } from "./Access";
+import { expiresSoon, grantRequest, matchesIdentity, permissionMatrix, previewScope, scopeKind, scopeTeam, tabFromParam } from "./Access";
 import { exportFileName, targetLink, toLocalInput } from "./Audit";
 
 /* The access screen decides a few things without the server: which tab
@@ -141,6 +141,28 @@ describe("grantRequest", () => {
       const namesSite = "site" in body || "environment" in body;
       expect(namesTeam && namesSite).toBe(false);
     }
+  });
+});
+
+describe("previewScope", () => {
+  it("shows the asterisks the server would fill in, so an empty field is not read as nothing", () => {
+    expect(previewScope("site", { site: "", environment: "", team: "" })).toEqual({
+      site: "*", environment: "*", team_scope: { mode: "any" }, owners: ["*"], tags: ["*"],
+    });
+  });
+
+  it("shows what a narrowed grant reaches, category by category", () => {
+    expect(previewScope("site", { site: " production ", environment: "prod", team: "", owners: "payments", tags: "pci, critical" })).toEqual({
+      site: "production", environment: "prod", team_scope: { mode: "any" },
+      owners: ["payments"], tags: ["pci", "critical"],
+    });
+  });
+
+  it("shows a team grant as bound to that team and to nothing else within it", () => {
+    expect(previewScope("team", { site: "lab", environment: "test", team, owners: "alice", tags: "db" })).toEqual({
+      site: "*", environment: "*", team_scope: { mode: "exact", team_id: team },
+      owners: ["*"], tags: ["*"],
+    });
   });
 });
 

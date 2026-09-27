@@ -122,6 +122,33 @@ export function grantRequest(principalID: string, scope: GrantScope, fields: {
   };
 }
 
+/**
+ * The scope a grant is about to write, read the way the server will read it:
+ * an empty field is the asterisk the server would fill in, and the team is a
+ * word either way. The form shows this before sending, so an operator sees what
+ * the binding reaches rather than what they typed into four boxes.
+ */
+export function previewScope(kind: GrantScope, fields: {
+  site: string; environment: string; team: string; owners?: string; tags?: string;
+}): BindingScope {
+  if (kind === "team") {
+    return {
+      site: "*", environment: "*",
+      team_scope: { mode: "exact", team_id: fields.team.trim() },
+      owners: ["*"], tags: ["*"],
+    };
+  }
+  const owners = valueList(fields.owners);
+  const tags = valueList(fields.tags);
+  return {
+    site: fields.site.trim() || "*",
+    environment: fields.environment.trim() || "*",
+    team_scope: { mode: "any" },
+    owners: owners.length === 0 ? ["*"] : owners,
+    tags: tags.length === 0 ? ["*"] : tags,
+  };
+}
+
 /** A comma-separated field as the list the server reads. */
 export function valueList(value: string | undefined): string[] {
   return (value ?? "").split(",").map((part) => part.trim()).filter((part) => part !== "");
@@ -849,6 +876,21 @@ function Identities({ initialSearch }: { initialSearch: string }) {
                   </select>
                 </Field>
               )}
+              <Field
+                label={t("This grant will reach")}
+                hint={t("The scope as the server will read it. Every category has to be satisfied at once, and a category is widened only by an asterisk.")}
+                wide
+              >
+                <div className="source" data-testid="grant-preview">
+                  <ScopeText
+                    scope={previewScope(grantScopeKind, {
+                      site: grantSite, environment: grantEnvironment, team: grantTeam,
+                      owners: grantOwners, tags: grantTags,
+                    })}
+                    teamName={grantTeam ? teamName(grantTeam) : undefined}
+                  />
+                </div>
+              </Field>
               <Field label={t("Valid until (empty = until revoked)")}>
                 <input type="datetime-local" value={grantUntil} onChange={(e) => setGrantUntil(e.target.value)} />
               </Field>

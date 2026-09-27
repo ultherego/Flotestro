@@ -42,7 +42,7 @@ func TestAuditKeepsTheActorsNameAsItWas(t *testing.T) {
 	}
 	h.do(http.MethodPost, "/api/v1/principals", map[string]any{
 		"subject": subject, "display_name": "Name As Ordered", "kind": "user",
-		"roles":       []map[string]string{{"role": "auditor"}},
+		"roles":       anyTeam([]map[string]string{{"role": "auditor"}}),
 		"issue_token": true,
 		"reason":      "identity prepared for an integration test",
 	}, &created, http.StatusCreated)

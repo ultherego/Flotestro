@@ -21,7 +21,12 @@ async function createViewer(request: APIRequestContext, host: Host): Promise<str
   const response = await request.post("/api/v1/principals", {
     data: {
       subject: `viewer-e2e-${Date.now()}`,
-      roles: [{ role: "viewer", site: host.site, environment: host.environment }],
+      // The team is said in words: the panel refuses a grant that leaves it out,
+      // because a team omitted by accident would widen the binding in silence.
+      roles: [{
+        role: "viewer", site: host.site, environment: host.environment,
+        team_scope: { mode: "any" },
+      }],
       issue_token: true,
       reason: "viewer prepared for a browser test of the action guard",
     },

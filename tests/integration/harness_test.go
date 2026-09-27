@@ -102,7 +102,7 @@ func (h *harness) createPrincipal(subject string, bindings []map[string]string) 
 	}
 	h.do(http.MethodPost, "/api/v1/principals", map[string]any{
 		"subject":     subject,
-		"roles":       bindings,
+		"roles":       anyTeam(bindings),
 		"issue_token": true,
 		// Granting access requires a reason; in a test the reason is the test
 		// itself.
@@ -112,6 +112,20 @@ func (h *harness) createPrincipal(subject string, bindings []map[string]string) 
 		h.t.Fatalf("no token was issued for %s", subject)
 	}
 	return response.Token
+}
+
+// anyTeam says of every binding what the panel refuses to guess: that it is not
+// narrowed by team. A test that means one team passes team_scope itself.
+func anyTeam(bindings []map[string]string) []map[string]any {
+	out := make([]map[string]any, 0, len(bindings))
+	for _, binding := range bindings {
+		role := map[string]any{"team_scope": map[string]string{"mode": "any"}}
+		for key, value := range binding {
+			role[key] = value
+		}
+		out = append(out, role)
+	}
+	return out
 }
 
 func (h *harness) get(path string, out any) {
