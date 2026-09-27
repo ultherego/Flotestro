@@ -12,7 +12,11 @@ import (
 func newStore(t *testing.T) TrustStore {
 	t.Helper()
 	dir := t.TempDir()
-	return TrustStore{Dir: filepath.Join(dir, "trust.d"), HostIDPath: filepath.Join(dir, "host-id")}
+	// These tests are about the keyring, not about which panel may enrol the
+	// host, so they say what they want of the first bundle rather than leaning
+	// on a default: an unset policy now enrols with nobody.
+	return TrustStore{Dir: filepath.Join(dir, "trust.d"), HostIDPath: filepath.Join(dir, "host-id"),
+		Bootstrap: BootstrapTOFU}
 }
 
 func newSigner(t *testing.T) *Signer {

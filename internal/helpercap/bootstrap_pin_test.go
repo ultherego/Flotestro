@@ -42,19 +42,24 @@ func TestTheFirstBundleIsHeldToThePinnedPanel(t *testing.T) {
 		t.Fatalf("a bundle of another panel got %v, expected %s", err, ErrorTrustPin)
 	}
 
-	// A host that names nobody still enrolls with the first panel it hears
-	// from, because that is how every host enrolled before the pin existed.
+	// A host that names nobody enrolls with nobody, and a field nobody filled
+	// in counts as that: the safe answer is the one no operator has to choose.
 	store = pinned(t)
-	if _, err := store.Apply(stranger.TrustBundle("host-1", now)); err != nil {
-		t.Fatalf("a host with no pin refused the first bundle: %v", err)
+	if _, err := store.Apply(stranger.TrustBundle("host-1", now)); CodeOf(err) != ErrorTrustPin {
+		t.Fatalf("a host with no pin and nothing said got %v, expected %s", err, ErrorTrustPin)
 	}
-
-	// Unless it was told not to. Then it enrolls with nobody, which is the
-	// point: an installation that will not take a panel on trust says so.
 	store = pinned(t)
 	store.Bootstrap = BootstrapPinned
 	if _, err := store.Apply(panel.TrustBundle("host-1", now)); CodeOf(err) != ErrorTrustPin {
 		t.Fatalf("a host on pinned with no pin got %v, expected %s", err, ErrorTrustPin)
+	}
+
+	// Taking the first panel that asks is still possible, and it is now a thing
+	// somebody wrote down rather than the way a host behaves by default.
+	store = pinned(t)
+	store.Bootstrap = BootstrapTOFU
+	if _, err := store.Apply(stranger.TrustBundle("host-1", now)); err != nil {
+		t.Fatalf("a host told to take the first bundle refused it: %v", err)
 	}
 }
 

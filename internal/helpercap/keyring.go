@@ -85,10 +85,28 @@ func (t TrustStore) Pins() ([]string, error) {
 	if t.PinPath == "" {
 		return nil, nil
 	}
-	raw, err := os.ReadFile(t.PinPath)
+	// The pin is a trust anchor: a file somebody else may write is a file that
+	// chooses the panel for this host, and a symlink moves the decision
+	// somewhere nobody looked.
+	info, err := os.Lstat(t.PinPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("%s is a symbolic link; the pin is read from a file", t.PinPath)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", t.PinPath)
+	}
+	if t.RequireRoot {
+		if err := pinFileIsSafe(t.PinPath, info); err != nil {
+			return nil, err
+		}
+	}
+	raw, err := os.ReadFile(t.PinPath)
 	if err != nil {
 		return nil, err
 	}
@@ -105,6 +123,24 @@ func (t TrustStore) Pins() ([]string, error) {
 		pins = append(pins, line)
 	}
 	return pins, nil
+}
+
+// pinFileIsSafe refuses a pin anybody but root can rewrite. Both modes the
+// packaging uses are allowed: 0644 so an operator can read what a host is held
+// to, and 0600 where that is nobody's business either.
+func pinFileIsSafe(path string, info os.FileInfo) error {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return nil
+	}
+	if stat.Uid != 0 {
+		return fmt.Errorf("%s is owned by uid %d; the pin is root's", path, stat.Uid)
+	}
+	if info.Mode().Perm()&0o022 != 0 {
+		return fmt.Errorf("%s is writable by the group or by others (mode %04o); chmod 644 it",
+			path, info.Mode().Perm())
+	}
+	return nil
 }
 
 // sha256HexLength is a SHA-256 written in hex.
@@ -147,9 +183,15 @@ func (t TrustStore) checkPin(signer ed25519.PublicKey) error {
 		return err
 	}
 	if len(pins) == 0 {
-		if t.Bootstrap == BootstrapPinned {
+		// Anything but an explicit tofu is pinned, the zero value included: a
+		// field nobody filled in must not quietly mean "take whoever asks".
+		if t.Bootstrap != BootstrapTOFU {
 			return refusal(ErrorTrustPin, fmt.Sprintf(
-				"this host enrolls only with a panel named in %s, and the file names none", t.PinPath))
+				"this host enrolls only with a panel named in %s, and the file names none: "+
+					"write the panel's fingerprint with "+
+					"\"flotestro-agentctl helper-trust pin <sha256>\", or set "+
+					"capabilities.bootstrap to tofu in the helper's configuration to take "+
+					"the first panel that asks", t.PinPath))
 		}
 		return nil
 	}
@@ -421,7 +463,20 @@ func writeRootFile(path string, content []byte, mode os.FileMode) error {
 		return err
 	}
 	temporary := path + ".new"
-	if err := os.WriteFile(temporary, content, mode); err != nil {
+	// O_EXCL, so a symbolic link left where the temporary goes is not followed
+	// into a file somebody else chose; the rename that follows is atomic.
+	_ = os.Remove(temporary)
+	handle, err := os.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := handle.Write(content); err != nil {
+		handle.Close()
+		_ = os.Remove(temporary)
+		return err
+	}
+	if err := handle.Close(); err != nil {
+		_ = os.Remove(temporary)
 		return err
 	}
 	if err := os.Chmod(temporary, mode); err != nil {

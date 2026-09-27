@@ -42,6 +42,7 @@ const commandTitles: Record<InstallationCommand["key"], string> = {
   image: "Pull the relay image, pinned by digest",
   config: "Save the configuration",
   ca: "Save the fleet CA and compare the fingerprint",
+  pin: "Name this panel, before the host trusts any",
   enroll: "Register the host and paste the token when asked",
   start: "Start the agent",
 };

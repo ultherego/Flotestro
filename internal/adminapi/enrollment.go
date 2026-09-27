@@ -946,8 +946,12 @@ const (
 	CommandImage      = "image"
 	CommandConfig     = "config"
 	CommandCA         = "ca"
-	CommandEnroll     = "enroll"
-	CommandStart      = "start"
+	// CommandPin names the panel this host may be enrolled by. It comes before
+	// the enrollment because that is when the helper is handed its first trust
+	// bundle, and a helper on the default policy takes none that is not pinned.
+	CommandPin    = "pin"
+	CommandEnroll = "enroll"
+	CommandStart  = "start"
 )
 
 // The reasons an installation profile cannot be composed.
@@ -1052,7 +1056,7 @@ func (s *Server) handleInstallationProfile(w http.ResponseWriter, r *http.Reques
 		Repository:     repository,
 		Image:          image,
 		Architectures:  installationArchitectures,
-		Families:       installationFamilies(kind, repository, channel, config, ca, image),
+		Families:       installationFamilies(kind, repository, channel, config, ca, image, s.helperFingerprints),
 	}
 	// A relay takes no package, so a missing repository says nothing about it.
 	if !repository.Configured && kind == enrollment.KindAgent {
@@ -1363,10 +1367,23 @@ func relayFamily(image installationImage, config installationFile, ca installati
 	}
 }
 
+// pinStep names this panel to the host before the host is ever handed a trust
+// bundle. Without it a helper on the default policy enrolls with nobody, and
+// with it the host enrolls with this panel and with no other.
+func pinStep(fingerprints []string) string {
+	if len(fingerprints) == 0 {
+		return "# This panel does not know its own signing fingerprint, so the pin\n" +
+			"# cannot be written here. A host whose helper is on the default policy\n" +
+			"# enrols with nobody until one is named."
+	}
+	return "sudo flotestro-agentctl helper-trust pin " + strings.Join(fingerprints, " ")
+}
+
 // installationFamilies composes the commands per distribution family. A relay
 // is one image and therefore one family; an agent is a package per family.
 func installationFamilies(kind string, repository installationRepository, channel string,
-	config installationFile, ca installationCA, image installationImage) []installationFamily {
+	config installationFile, ca installationCA, image installationImage,
+	fingerprints []string) []installationFamily {
 	if kind == enrollment.KindRelay {
 		return []installationFamily{relayFamily(image, config, ca)}
 	}
@@ -1381,6 +1398,7 @@ func installationFamilies(kind string, repository installationRepository, channe
 				"sudo chown %[3]s:%[3]s %[1]s && sudo chmod 0644 %[1]s\n"+
 				"openssl x509 -in %[1]s -noout -fingerprint -sha256",
 			ca.Path, ca.PEM, account)},
+		{Key: CommandPin, Command: pinStep(fingerprints)},
 		{Key: CommandEnroll, Command: enroll},
 		{Key: CommandStart, Command: "sudo systemctl enable --now " + service},
 	}

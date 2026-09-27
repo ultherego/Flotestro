@@ -173,23 +173,25 @@ func KeyFingerprint(public ed25519.PublicKey) string {
 type Bootstrap string
 
 const (
-	// BootstrapTOFU takes that first bundle on trust. It is how an installation
-	// made before the pin existed enrolls, and it means whoever reaches the
-	// helper's socket first decides which panel owns the host.
+	// BootstrapTOFU takes that first bundle on trust, which means whoever
+	// reaches the helper's socket first decides which panel owns the host. It
+	// is a laboratory's answer and a deliberate one; nothing defaults to it.
 	BootstrapTOFU Bootstrap = "tofu"
 	// BootstrapPinned takes it only when its signing key is one the operator
 	// wrote down on the host beforehand. A host with no pin enrolls with
-	// nobody.
+	// nobody, and this is what an unset policy means.
 	BootstrapPinned Bootstrap = "pinned"
 )
 
-// ParseBootstrap reads the bootstrap policy from configuration.
+// ParseBootstrap reads the bootstrap policy from configuration. An empty value
+// is pinned: the safe answer is the one nobody has to choose, and a host that
+// enrolls with whoever asks first is a decision somebody writes down.
 func ParseBootstrap(value string) (Bootstrap, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "tofu", "":
-		return BootstrapTOFU, nil
-	case "pinned":
+	case "pinned", "":
 		return BootstrapPinned, nil
+	case "tofu":
+		return BootstrapTOFU, nil
 	}
 	return "", errors.New("the bootstrap policy has to be tofu or pinned")
 }

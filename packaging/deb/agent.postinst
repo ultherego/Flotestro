@@ -42,7 +42,7 @@ configure)
        [ -f /usr/share/flotestro/helper.yaml ]; then
         install -m 0644 -o root -g root /usr/share/flotestro/helper.yaml \
             /etc/flotestro/helper.yaml
-        echo "flotestro-agent: /etc/flotestro/helper.yaml was written with capabilities.mode: enforce" >&2
+        echo "flotestro-agent: /etc/flotestro/helper.yaml was written with capabilities.mode: enforce and capabilities.bootstrap: pinned - this host enrols with no panel until one is named with \"flotestro-agentctl helper-trust pin <fingerprint>\"" >&2
     fi
     # The configuration is read by the agent itself, so it must be able to
     # open it - but nobody besides it and root may replace it: the right to

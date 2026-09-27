@@ -987,7 +987,7 @@ export type BudgetLimit = {
 };
 
 export type InstallationCommand = {
-  key: "repository" | "package" | "image" | "config" | "ca" | "enroll" | "start";
+  key: "repository" | "package" | "image" | "config" | "ca" | "pin" | "enroll" | "start";
   command: string;
 };
 

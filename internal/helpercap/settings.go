@@ -53,7 +53,7 @@ type Settings struct {
 func LoadSettings(path string) (Settings, error) {
 	settings := Settings{
 		Mode:       ModePrefer,
-		Bootstrap:  BootstrapTOFU,
+		Bootstrap:  BootstrapPinned,
 		PinPath:    DefaultPinPath,
 		TrustDir:   DefaultTrustDir,
 		ReplayDir:  DefaultReplayDir,

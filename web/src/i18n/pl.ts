@@ -1801,6 +1801,7 @@ export const pl: Record<string, string> = {
   "Refresh the whole inventory": "Odśwież cały inwentarz",
   "Refreshing every few seconds.": "Odświeżanie co kilka sekund.",
   "Regenerate": "Wygeneruj ponownie",
+  "Name this panel, before the host trusts any": "Wskaż ten panel, zanim host zaufa jakiemukolwiek",
   "Register the host and paste the token when asked": "Zarejestruj host i wklej token, gdy narzędzie o niego zapyta",
   "Registering a relay requires the relay.enroll.create permission.": "Rejestracja relaya wymaga uprawnienia relay.enroll.create.",
   "Relay": "Relay",

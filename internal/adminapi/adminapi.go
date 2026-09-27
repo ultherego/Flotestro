@@ -58,6 +58,9 @@ type Server struct {
 	authz    *authz.Store
 	audit    *audit.Recorder
 	registry *gateway.Registry
+	// helperFingerprints are the signing key's fingerprints, as a host's pin
+	// file names them.
+	helperFingerprints []string
 	// decommissioner drives the handshake that ends a host's membership:
 	// it needs the session, so it lives with the gateway rather than here.
 	decommissioner *gateway.Decommissioner
@@ -613,6 +616,11 @@ type cryptoState interface{ Stale() string }
 func (s *Server) SetHelperSigner(signer *helpercap.Signer) {
 	if s.decommissioner != nil {
 		s.decommissioner.SetHelperSigner(signer)
+	}
+	// The same key's fingerprints are what an installation writes into a host's
+	// pin file, so the enrollment instructions can name this panel and no other.
+	if signer != nil {
+		s.helperFingerprints = signer.Fingerprints()
 	}
 }
 

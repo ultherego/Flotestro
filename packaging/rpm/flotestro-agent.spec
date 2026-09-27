@@ -126,7 +126,7 @@ if [ "$1" = 1 ] && [ ! -f %{_sysconfdir}/flotestro/helper.yaml ] &&
    [ -f %{_datadir}/flotestro/helper.yaml ]; then
     install -m 0644 -o root -g root %{_datadir}/flotestro/helper.yaml \
         %{_sysconfdir}/flotestro/helper.yaml
-    echo "flotestro-agent: %{_sysconfdir}/flotestro/helper.yaml was written with capabilities.mode: enforce" >&2
+    echo "flotestro-agent: %{_sysconfdir}/flotestro/helper.yaml was written with capabilities.mode: enforce and capabilities.bootstrap: pinned - this host enrols with no panel until one is named with \"flotestro-agentctl helper-trust pin <fingerprint>\"" >&2
 fi
 # Reading the journal without root requires membership in the systemd-journal
 # group. A missing group is not an installation error - the journal read is

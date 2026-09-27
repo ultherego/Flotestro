@@ -36,7 +36,11 @@ func newCapabilityLab(t *testing.T, mode helpercap.Mode) *capabilityLab {
 		t.Fatal(err)
 	}
 	signer := helpercap.NewSignerFromKey(private)
-	trust := helpercap.TrustStore{Dir: filepath.Join(dir, "trust.d"), HostIDPath: filepath.Join(dir, "host-id")}
+	// These tests are about what a capability lets through, not about which
+	// panel may enrol the host, so they take the first bundle deliberately: an
+	// unset policy enrols with nobody.
+	trust := helpercap.TrustStore{Dir: filepath.Join(dir, "trust.d"), HostIDPath: filepath.Join(dir, "host-id"),
+		Bootstrap: helpercap.BootstrapTOFU}
 	replay, err := helpercap.OpenReplayStore(filepath.Join(dir, "replay"))
 	if err != nil {
 		t.Fatal(err)
