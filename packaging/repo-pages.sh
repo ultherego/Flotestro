@@ -81,6 +81,19 @@ historyNote() {
 HTML
 }
 
+# fileLink names a file of the tree: a link when it is there, the name alone
+# when it is not. The pages point at the stable channel because that is what the
+# commands on them use, and a repository that carries only a pre-release has no
+# such file to link to.
+fileLink() {
+    local relative="$1" label="$2" from="$3"
+    if [ -e "$REPO/$from/$relative" ]; then
+        printf '<a href="%s"><code>%s</code></a>' "$relative" "$label"
+    else
+        printf '<code>%s</code>' "$label"
+    fi
+}
+
 # carries is the same two paragraphs on every page: what is here and what is
 # deliberately not.
 carries() {
@@ -286,7 +299,7 @@ HTML
     exist, no distribution enables them and <code>apt</code> never consults them -
     so a signature on the <code>.deb</code> would prove nothing to the host that
     installs it. What binds the bytes here is a chain:
-    <a href="dists/stable/InRelease"><code>InRelease</code></a> is signed and
+    $(fileLink dists/stable/InRelease InRelease deb) is signed and
     carries the checksum of <code>Packages</code>, and <code>Packages</code>
     carries the checksum of every <code>.deb</code>.</p>
 
@@ -353,7 +366,7 @@ HTML
     <p>One <code>createrepo_c</code> tree per channel,
     <code>rpm/&lt;channel&gt;</code>, with the metadata under
     <code>repodata/</code> and
-    <a href="stable/repodata/repomd.xml"><code>repomd.xml</code></a> signed beside
+    $(fileLink stable/repodata/repomd.xml repomd.xml rpm) signed beside
     itself as <code>repomd.xml.asc</code>. The metadata is composed over the whole
     directory, so the index offers every version the channel has carried and dnf
     takes the highest.</p>
@@ -429,7 +442,7 @@ HTML
     <h2>What proves where a package came from</h2>
 
     <p>The package file itself, with a detached <code>.sig</code> beside it, and
-    the <a href="stable/flotestro.db">database</a> with one of its own.
+    the $(fileLink stable/flotestro.db flotestro.db arch) with one of its own.
     <code>gpg</code> against pacman's keyring names the key that made the
     signature, so an agent upgrade on a host of this family may demand a
     particular one.</p>

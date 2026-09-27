@@ -1,7 +1,8 @@
 /* The one stylesheet of the Flotestro site: tokens, page shell and the
    elements a documentation page needs, so no page adds CSS of its own. */
 
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;600&display=swap");
+/* The fonts are requested by every page with a <link>, in parallel with this
+   file; an @import here would fetch the same sheet again and only after it. */
 
 :root {
   /* Catppuccin Mocha, the official values. No hex literal below this block. */
