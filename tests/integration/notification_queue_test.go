@@ -5,8 +5,10 @@ package integration
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -40,6 +42,7 @@ type queueListView struct {
 // recipient is a receiver the panel really talks to.
 type recipient struct {
 	server   *httptest.Server
+	url      string
 	status   atomic.Int64
 	received atomic.Int64
 	body     atomic.Value
@@ -49,13 +52,34 @@ func newRecipient(t *testing.T, status int) *recipient {
 	t.Helper()
 	r := &recipient{}
 	r.status.Store(int64(status))
-	r.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+	r.server = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		var payload map[string]any
 		_ = json.NewDecoder(request.Body).Decode(&payload)
 		r.body.Store(payload)
 		r.received.Add(1)
 		w.WriteHeader(int(r.status.Load()))
 	}))
+	// A panel in a container does not share this machine's loopback: 127.0.0.1
+	// there is the container. Where the panel is elsewhere the receiver listens
+	// on every address and tells the panel the one it can be reached at.
+	host := os.Getenv("FLOTESTRO_TEST_RECEIVER_HOST")
+	if host != "" {
+		listener, err := net.Listen("tcp", "0.0.0.0:0")
+		if err != nil {
+			t.Fatalf("listening for the panel to reach: %v", err)
+		}
+		_ = r.server.Listener.Close()
+		r.server.Listener = listener
+	}
+	r.server.Start()
+	r.url = r.server.URL
+	if host != "" {
+		_, port, err := net.SplitHostPort(strings.TrimPrefix(r.server.URL, "http://"))
+		if err != nil {
+			t.Fatalf("reading the port the receiver took: %v", err)
+		}
+		r.url = "http://" + net.JoinHostPort(host, port)
+	}
 	t.Cleanup(r.server.Close)
 	return r
 }
@@ -108,12 +132,12 @@ func TestTheQueueHoldsAMessageUntilTheReceiverTakesIt(t *testing.T) {
 	subject := "enrollment.completed"
 	down := createChannel(h, map[string]any{
 		"name": name + "-down", "kind": "webhook",
-		"config": map[string]any{"url": flaky.server.URL, "secret": "integration-signing-secret"},
+		"config": map[string]any{"url": flaky.url, "secret": "integration-signing-secret"},
 		"events": []string{subject}, "reason": notificationReason,
 	})
 	refusing := createChannel(h, map[string]any{
 		"name": name + "-refusing", "kind": "webhook",
-		"config": map[string]any{"url": rejecting.server.URL, "secret": "integration-signing-secret"},
+		"config": map[string]any{"url": rejecting.url, "secret": "integration-signing-secret"},
 		"events": []string{subject}, "reason": notificationReason,
 	})
 
@@ -226,7 +250,7 @@ func TestAnIncomingWebhookKeepsItsAddress(t *testing.T) {
 	// carried the events of the other tests would only add noise.
 	channel := createChannel(h, map[string]any{
 		"name": name, "kind": "slack_webhook",
-		"config":  map[string]any{"url": room.server.URL + "/services/T0/B0/token"},
+		"config":  map[string]any{"url": room.url + "/services/T0/B0/token"},
 		"events":  []string{"host.offline"},
 		"enabled": false, "reason": notificationReason,
 	})

@@ -377,7 +377,18 @@ func (c *Client) invoke(ctx context.Context, method string, args []string, optio
 		c.noteFailure(err)
 		return nil, err
 	}
-	return c.post(ctx, payload)
+	result, err = c.post(ctx, payload)
+	if errors.Is(err, errSessionExpired) {
+		// Refused twice, the second time on a session made a moment ago: the
+		// login held a ticket the directory accepted and then refused the
+		// session it gave for it. Said outright, because "the session expired"
+		// sends an operator to look at a timeout that is not the problem.
+		refused := fmt.Errorf("the directory accepted the Kerberos login as %s and refused the session it gave: 401",
+			c.config.Principal)
+		c.noteFailure(refused)
+		return nil, refused
+	}
+	return result, err
 }
 
 func (c *Client) post(ctx context.Context, payload []byte) (json.RawMessage, error) {

@@ -8,7 +8,8 @@ the signed repository.
 | File | Role |
 |---|---|
 | `Containerfile` | All four images: the control plane (target `control-plane`), the relay (target `relay`), the administration tools (target `admin-tools`) and the package repository of an isolated site (target `package-repository`). |
-| `compose.yaml` | The whole deployment, in profiles: the control plane on its own, `quickstart` for a PostgreSQL of its own, `airgap` for the signed package repository of the release, `tools` and `restore` for the backup pair. |
+| `compose.yaml` | The default start: the one-time `init`, a PostgreSQL of its own, the migration as a run of its own and the control plane. Three profiles add to it: `airgap` for the signed package repository of the release, `tools` and `restore` for the backup pair. |
+| `compose.external-db.yaml` | The same deployment against a database somebody else runs: the PostgreSQL service is taken out and the DSN arrives as a Compose secret. Loaded after `compose.yaml`, and chosen before the installation is initialised. |
 | `compose.relay.yaml` | The relay of one site, run on the site host as its own project. It is not a profile of the file above: that file requires settings a relay host has none of, and Compose interpolates a whole document whatever profile is active. |
 | `../.dockerignore` | The allowlist of the build context; it lies at the repository root because that is the context the build runs with. |
 | `../.github/workflows/images.yml` | What builds, publishes, describes and signs the three service images, and what a pull request runs to prove the files above still work. |
@@ -24,10 +25,12 @@ docker compose up -d
 
 **Production basic** - one control plane against an external, backed-up
 PostgreSQL. This is the default for a company; the database keeps its own
-lifecycle, its own tuning and its own high availability.
+lifecycle, its own tuning and its own high availability. The overlay is what
+takes the deployment's own database out and holds the DSN to a verified server:
 
 ```
-docker compose up -d
+docker compose -f compose.yaml -f compose.external-db.yaml run --rm migrate
+docker compose -f compose.yaml -f compose.external-db.yaml up -d
 ```
 
 **Production relay** - the same, plus one relay per site, each on its own
@@ -52,9 +55,9 @@ The backup and the restore are not a deployment of their own: they are two
 one-shot services behind the profiles `tools` and `restore`, which add nothing
 to `up`. See "Taking the pair".
 
-The control plane is the only service with no profile; nothing else starts
-unless its profile is named, and `.github/workflows/images.yml` checks that
-in both directions. An installation
+The default start needs no profile at all - init, the database, the migration and
+the control plane; nothing else starts unless its profile is named, and
+`.github/workflows/images.yml` checks that in both directions. An installation
 that points at an external database therefore cannot start a second, empty one
 beside it and write half of its truth there, and a connected site does not
 quietly publish a package repository on port 8090.
@@ -377,15 +380,18 @@ anyone else is refused.
 
 | Secret | Variable | Mount | Put there by |
 |---|---|---|---|
-| Database DSN | `FLOTESTRO_DATABASE_URL_FILE` | `/run/flotestro/database-url` | `init` |
+| Database DSN, the deployment's own database | `FLOTESTRO_DATABASE_URL_FILE` | `/run/flotestro/database-url` | `init` |
+| Database DSN, an external database | `FLOTESTRO_DATABASE_URL_FILE` | `/run/secrets/database-url` | you, as `./secrets/database-url` |
+| The authority that issued the database's certificate, when it is not a public one | named in the DSN with `sslrootcert=` | `/run/secrets/database-ca.crt` | a bind mount you add |
 | PostgreSQL password (quickstart) | `POSTGRES_PASSWORD_FILE` | `/run/flotestro/postgres-password` | `init` |
 | OIDC client secret | `FLOTESTRO_OIDC_CLIENT_SECRET_FILE` | `/run/secrets/oidc_client_secret` | a bind mount you add |
 | Webhook HMAC key | `FLOTESTRO_WEBHOOK_SECRET_FILE` | `/run/secrets/webhook_secret` | a bind mount you add |
 | NVD API key | `FLOTESTRO_VULN_NVD_KEY_FILE` | `/run/secrets/nvd_key` | a bind mount you add |
 | FreeIPA keytab | `FLOTESTRO_IPA_KEYTAB` (already a path) | `/run/secrets/ipa.keytab` | a bind mount you add |
+| Kerberos configuration for that keytab | `FLOTESTRO_IPA_KRB5_CONF` (already a path) | `/etc/flotestro/krb5.conf` | a bind mount you add |
 
-The first two are made inside the runtime, so no account on the host has to
-own them. The rest are added as they are needed, a line each under the
+The two that `init` makes are made inside the runtime, so no account on the host
+has to own them. The rest are added as they are needed, a line each under the
 control plane's `volumes:` and a `_FILE` variable beside it:
 
     volumes:
@@ -742,12 +748,10 @@ is the image that does the work - so that the host which runs the panel never
 needs a PostgreSQL client, a `pg_dump` of the wrong major version or a cron
 job written by hand.
 
-Once, before the first backup:
+The directory the pair lands in is made by `init` at the first start, 0700 and
+owned by the account the tools run as, so there is nothing to prepare.
 
-```
-```
-
-Then, with the control plane stopped - or at the very least with the rotation
+With the control plane stopped - or at the very least with the rotation
 of the CA and of the key encryption keys held for the duration:
 
 ```
@@ -1208,6 +1212,25 @@ prints the same fill of the buffer.
    The registration goes into an empty state volume and writes a new
    certificate; the centre keeps the one it replaces recognised until the relay
    arrives with the new one, so the site is not cut off in between.
+
+   Under Docker the restart policy in the file is what brings the relay back
+   after a reboot. Under rootless Podman it is not: the containers belong to a
+   user session that ends with the last login. Give the deployment a unit of its
+   own there, `/etc/systemd/system/flotestro-relay.service`, which starts and
+   stops it in the deployment's directory:
+
+   ```
+   [Service]
+   Type=simple
+   WorkingDirectory=/opt/flotestro-relay
+   ExecStart=/usr/bin/podman-compose -f compose.relay.yaml up
+   ExecStop=/usr/bin/podman-compose -f compose.relay.yaml down
+   Restart=on-failure
+   ```
+
+   The unit is also what an operator restarts from the panel: the panel orders
+   systemd units on a host, not containers, so a relay nobody gave a unit is a
+   relay that can only be restarted by someone logged into the site host.
 
 4. **Check the site.** The agents of the site reconnect to the same name and
    port with the certificates they hold, and the new relay certificate is signed
