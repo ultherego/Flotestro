@@ -19,7 +19,11 @@ import (
 
 // settingsSource is where the values are set. The screen names it, so
 // whoever wants a change knows where to make it.
-const settingsSource = "/etc/flotestro/control-plane.env"
+// Where the values come from. It used to name /etc/flotestro/control-plane.env,
+// which was true of a packaged panel and of nothing else: an installation from an
+// image has no such file, and the screen was telling the operator to edit one
+// that does not exist.
+const settingsSource = "the environment of the control plane process"
 
 // maskedSecret stands in for every secret. The screen never shows one,
 // whoever asks; it shows whether one is set.
@@ -255,9 +259,10 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	note := "The values are set in " + settingsSource +
-		" and read when the control plane starts. The monitoring retentions and windows are the" +
-		" exception: the installation stores them and this screen changes them without a restart."
+	note := "The values come from " + settingsSource +
+		" and are read when it starts; the deployment sets them - see env.example beside the" +
+		" Compose file. The monitoring retentions and windows are the exception: the installation" +
+		" stores them and this screen changes them without a restart."
 	writeJSON(w, http.StatusOK, map[string]any{
 		"source": settingsSource,
 		"note":   note,

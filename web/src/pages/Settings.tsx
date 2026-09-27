@@ -25,7 +25,7 @@ export function Settings() {
       <PageHeader
         icon="settings"
         title={t("Settings")}
-        description={t("What this panel was started with. The values are set in {source} and read when the control plane starts; the monitoring retentions below are the exception - they belong to the installation and change without a restart.", { source: data?.source ?? "/etc/flotestro/control-plane.env" })}
+        description={t("What this panel was started with. The values come from {source} and are read when it starts; the monitoring retentions below are the exception - they belong to the installation and change without a restart.", { source: t(data?.source ?? "the environment of the control plane process") })}
       />
       {error && <ErrorBox error={error} />}
       {!error && !data && <Card><Empty>{t("Loading…")}</Empty></Card>}
