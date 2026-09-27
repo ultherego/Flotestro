@@ -12,6 +12,18 @@ import { useT } from "../i18n";
 /**
  * The fleet CA.
  */
+/**
+ * A key for one change of the trust set. The panel writes the beginning of such
+ * a change to the trail before making it, and the key is what tells a repeated
+ * request from a second change: the server refuses a key that already began one.
+ */
+function changeKey(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 export function CertificateAuthority({ reportError }: { reportError: (error: ApiError | null) => void }) {
   const t = useT();
   const queryClient = useQueryClient();
@@ -30,18 +42,21 @@ export function CertificateAuthority({ reportError }: { reportError: (error: Api
   const onError = (error: unknown) => reportError(error instanceof ApiError ? error : null);
 
   const prepare = useMutation({
-    mutationFn: () => api.post("/api/v1/pki/prepare", { reason: reason.trim() }),
+    mutationFn: () => api.post("/api/v1/pki/prepare",
+      { reason: reason.trim(), idempotency_key: changeKey() }),
     onSuccess: () => { setReason(""); refresh(); },
     onError,
   });
   const activate = useMutation({
-    mutationFn: () => api.post("/api/v1/pki/activate", { reason: reason.trim() }),
+    mutationFn: () => api.post("/api/v1/pki/activate",
+      { reason: reason.trim(), idempotency_key: changeKey() }),
     onSuccess: () => { setReason(""); refresh(); },
     onError,
   });
   const remove = useMutation({
     mutationFn: ({ fingerprint, reason }: { fingerprint: string; reason: string; serial: string }) =>
-      api.del(`/api/v1/pki/${fingerprint}?reason=${encodeURIComponent(reason)}`),
+      api.del(`/api/v1/pki/${fingerprint}?reason=${encodeURIComponent(reason)}`
+        + `&idempotency_key=${encodeURIComponent(changeKey())}`),
     onSuccess: (_, { serial }) => {
       // The row is gone with the refresh, so the outcome is told elsewhere.
       toast.success(t("Authority {serial} is removed from the trust set.", { serial }));

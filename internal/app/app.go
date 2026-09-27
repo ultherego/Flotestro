@@ -1095,6 +1095,11 @@ func Run() error {
 	// retired, and answers every query while it does.
 	panelServer.SetCryptoState(cryptoRuntime)
 	panelServer.SetHelperSigner(helperSigner)
+	// A change to what the fleet trusts writes its beginning before it happens, so
+	// a panel that stopped between the change and its outcome leaves a beginning
+	// with nothing after it. This reads the trust store and closes those entries
+	// with what is actually there.
+	panelServer.ReconcileTrustIntents(ctx, log)
 	go cryptoRuntime.Maintain(ctx)
 	panelServer.SetSecrets(secretStore)
 	agentService.SetSecrets(secretStore)

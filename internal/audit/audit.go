@@ -36,6 +36,10 @@ const (
 	OutcomeSuccess Outcome = "success"
 	OutcomeFailure Outcome = "failure"
 	OutcomeDenied  Outcome = "denied"
+	// OutcomeStarted is a change that has begun. It is written and committed
+	// before the change is made, so that something says who began what even when
+	// the entry carrying the outcome is never written.
+	OutcomeStarted Outcome = "started"
 )
 
 // Event describes a single audit event.
@@ -84,6 +88,81 @@ func (r *Recorder) Record(ctx context.Context, event Event) {
 		r.log.Error("the audit event was not written",
 			"action", event.Action, "target", event.TargetID, "err", err)
 	}
+}
+
+// IntentKey is where the key of a beginning lives in the detail of the entry.
+const IntentKey = "intent_key"
+
+// ErrIntentExists means a change has already begun under this key. The row that
+// says so is never removed, so a key is spent for good: a retry is refused
+// rather than carried out a second time.
+var ErrIntentExists = errors.New("a change has already begun under this key")
+
+// RecordIntent writes the entry that says a change is about to be made, and
+// commits it. The caller makes the change only when this returns nil: an entry
+// that cannot be written is a change nobody could account for afterwards.
+//
+// The event carries the key of the beginning in Detail under IntentKey; a second
+// beginning under the same key and action answers ErrIntentExists.
+func (r *Recorder) RecordIntent(ctx context.Context, event Event) error {
+	event.Outcome = OutcomeStarted
+	if err := r.record(ctx, r.pool, event); err != nil {
+		var unique *pgconn.PgError
+		if errors.As(err, &unique) && unique.Code == "23505" {
+			return ErrIntentExists
+		}
+		metrics.AuditWriteFailed.Inc(event.Action)
+		r.log.Error("the beginning of a change was not written, so the change was not made",
+			"action", event.Action, "target", event.TargetID, "err", err)
+		return fmt.Errorf("the beginning of %s could not be written: %w", event.Action, err)
+	}
+	return nil
+}
+
+// Intent is a change that began and whose outcome nothing recorded.
+type Intent struct {
+	Action     string
+	TargetID   string
+	ActorID    string
+	Key        string
+	OccurredAt time.Time
+	Detail     map[string]any
+}
+
+// UnfinishedIntents lists the beginnings of the given family of actions that no
+// later entry answers. They are what the reconciler reads the real state for.
+func (r *Recorder) UnfinishedIntents(ctx context.Context, family string) ([]Intent, error) {
+	const query = `
+		select s.action, coalesce(s.target_id, ''), s.actor_id,
+		       s.detail->>'intent_key', s.occurred_at, s.detail
+		  from audit_events s
+		 where s.outcome = 'started' and s.action like $1
+		   and s.detail ? 'intent_key'
+		   and not exists (
+		       select 1 from audit_events f
+		        where f.action = s.action
+		          and f.detail->>'intent_key' = s.detail->>'intent_key'
+		          and f.outcome <> 'started')
+		 order by s.occurred_at`
+	rows, err := r.pool.Query(ctx, query, family)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var intents []Intent
+	for rows.Next() {
+		var intent Intent
+		var detail []byte
+		if err := rows.Scan(&intent.Action, &intent.TargetID, &intent.ActorID,
+			&intent.Key, &intent.OccurredAt, &detail); err != nil {
+			return nil, err
+		}
+		if len(detail) > 0 {
+			_ = json.Unmarshal(detail, &intent.Detail)
+		}
+		intents = append(intents, intent)
+	}
+	return intents, rows.Err()
 }
 
 // RecordNow writes an event and says whether it was written. It is for the

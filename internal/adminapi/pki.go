@@ -52,6 +52,10 @@ func (s *Server) handlePKIStatus(w http.ResponseWriter, r *http.Request) {
 
 type pkiRequest struct {
 	Reason string `json:"reason"`
+	// IdempotencyKey is what tells a repeated request from a second change. The
+	// header of the same name serves too; one of them is required, because a
+	// change to what the fleet trusts must not happen twice on a lost answer.
+	IdempotencyKey string `json:"idempotency_key"`
 }
 
 // handlePrepareCA creates a new fleet CA and adds it to the trust set, without
@@ -70,21 +74,40 @@ func (s *Server) handlePrepareCA(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// The trail first, and committed: a CA on disk that nobody began is a CA
+	// nobody can account for.
+	key, ok := s.beganChange(w, r, audit.Event{
+		ActorType: audit.ActorUser, ActorID: actor.Subject,
+		Action: "pki.ca.prepare", TargetType: "pki", TargetID: "",
+		RequestID: requestIDOf(r),
+		Detail:    withStepUp(map[string]any{"reason": request.Reason}, evidence),
+	}, request.IdempotencyKey)
+	if !ok {
+		return
+	}
 
 	prepared, err := s.trust.Prepare()
 	if err != nil {
+		if !s.finishedChange(w, r, audit.Event{
+			ActorType: audit.ActorUser, ActorID: actor.Subject,
+			Action: "pki.ca.prepare", TargetType: "pki", TargetID: "",
+			RequestID: requestIDOf(r), Outcome: audit.OutcomeFailure,
+			Detail: map[string]any{"error": err.Error()},
+		}, key, "no CA was prepared") {
+			return
+		}
 		problem(w, http.StatusConflict, "prepare_failed", err.Error())
 		return
 	}
 
-	if !s.recordedChange(w, r, audit.Event{
+	if !s.finishedChange(w, r, audit.Event{
 		ActorType: audit.ActorUser, ActorID: actor.Subject,
 		Action: "pki.ca.prepare", TargetType: "pki", TargetID: prepared.Fingerprint,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		Detail: withStepUp(map[string]any{
 			"serial": prepared.Serial, "not_after": prepared.NotAfter,
 		}, evidence),
-	}, "a new fleet CA was prepared") {
+	}, key, "a new fleet CA was prepared") {
 		return
 	}
 	s.log.Warn("a new fleet CA was prepared; it takes over signing only after approval",
@@ -133,20 +156,42 @@ func (s *Server) handleActivateCA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Everything that could refuse has refused by now, so the next step changes
+	// the fleet's trust: the beginning is written and committed first.
+	key, ok := s.beganChange(w, r, audit.Event{
+		ActorType: audit.ActorUser, ActorID: actor.Subject,
+		Action: "pki.ca.activate", TargetType: "pki", TargetID: pending.FingerprintHex(),
+		RequestID: requestIDOf(r),
+		Detail: withStepUp(map[string]any{
+			"reason": request.Reason, "serial": pending.Certificate.SerialNumber.String(),
+		}, evidence),
+	}, request.IdempotencyKey)
+	if !ok {
+		return
+	}
+
 	active, err := s.trust.Activate()
 	if err != nil {
+		if !s.finishedChange(w, r, audit.Event{
+			ActorType: audit.ActorUser, ActorID: actor.Subject,
+			Action: "pki.ca.activate", TargetType: "pki", TargetID: pending.FingerprintHex(),
+			RequestID: requestIDOf(r), Outcome: audit.OutcomeFailure,
+			Detail: map[string]any{"error": err.Error()},
+		}, key, "signing was not handed over") {
+			return
+		}
 		problem(w, http.StatusConflict, "activate_failed", err.Error())
 		return
 	}
 
-	if !s.recordedChange(w, r, audit.Event{
+	if !s.finishedChange(w, r, audit.Event{
 		ActorType: audit.ActorUser, ActorID: actor.Subject,
 		Action: "pki.ca.activate", TargetType: "pki", TargetID: active.Fingerprint,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		Detail: withStepUp(map[string]any{
 			"serial": active.Serial, "not_after": active.NotAfter,
 		}, evidence),
-	}, "the new fleet CA took over signing") {
+	}, key, "the new fleet CA took over signing") {
 		return
 	}
 	// The server certificate still comes from the previous CA; a new one is
@@ -211,23 +256,39 @@ func (s *Server) handleRetireCA(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Taking an authority out of the trust set is the same kind of change as
+	// putting one in, and it is written down before it happens.
+	key, ok := s.beganChange(w, r, audit.Event{
+		ActorType: audit.ActorUser, ActorID: actor.Subject,
+		Action: "pki.ca.retire", TargetType: "pki", TargetID: fingerprint,
+		RequestID: requestIDOf(r),
+		Detail: withStepUp(map[string]any{
+			"reason": r.URL.Query().Get("reason"), "hosts_using": hostCount,
+		}, evidence),
+	}, r.URL.Query().Get("idempotency_key"))
+	if !ok {
+		return
+	}
+
 	if err := s.trust.Retire(fingerprint, hostCount); err != nil {
-		s.audit.Record(r.Context(), audit.Event{
+		if !s.finishedChange(w, r, audit.Event{
 			ActorType: audit.ActorUser, ActorID: actor.Subject,
 			Action: "pki.ca.retire", TargetType: "pki", TargetID: fingerprint,
 			RequestID: requestIDOf(r), Outcome: audit.OutcomeDenied,
 			Detail: map[string]any{"reason": err.Error(), "hosts_using": hostCount},
-		})
+		}, key, "the CA was not retired") {
+			return
+		}
 		problem(w, http.StatusConflict, "ca_in_use", err.Error())
 		return
 	}
 
-	if !s.recordedChange(w, r, audit.Event{
+	if !s.finishedChange(w, r, audit.Event{
 		ActorType: audit.ActorUser, ActorID: actor.Subject,
 		Action: "pki.ca.retire", TargetType: "pki", TargetID: fingerprint,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		Detail: withStepUp(map[string]any{}, evidence),
-	}, "the fleet CA was retired") {
+	}, key, "the fleet CA was retired") {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

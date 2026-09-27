@@ -677,10 +677,16 @@ var queryParameters = map[string][]queryParameter{
 		{"actor_resource_id", "string", "The host, relay or campaign that acted."},
 		{"action", "string", ""},
 		{"action_prefix", "string", "The beginning of an action; job. keeps every event about a job."},
-		{"outcome", "string", "success, failure or denied."},
+		{"outcome", "string", "success, failure, denied, or started for a change written down before it was made."},
 		{"since", "string", "RFC 3339; events at or after this moment."},
 		{"until", "string", "RFC 3339; events before this moment."},
 	}, pagingParameters...),
+	"DELETE /api/v1/pki/{fingerprint}": {
+		{"reason", "string", "Why the authority is taken out of the trust set; kept in the audit trail."},
+		{"idempotency_key", "string", "What tells a repeat of this request from a second change. " +
+			"Required: the panel writes the beginning of the change under this key before making it, " +
+			"and refuses a key that already began one."},
+	},
 	"GET /api/v1/audit": append([]queryParameter{
 		{"target_id", "string", ""},
 		{"target_type", "string", ""},
@@ -690,7 +696,7 @@ var queryParameters = map[string][]queryParameter{
 		{"actor_resource_id", "string", "The host, relay or campaign that acted."},
 		{"action", "string", ""},
 		{"action_prefix", "string", "The beginning of an action; job. keeps every event about a job."},
-		{"outcome", "string", "success, failure or denied."},
+		{"outcome", "string", "success, failure, denied, or started for a change written down before it was made."},
 		{"since", "string", "RFC 3339; events at or after this moment."},
 		{"until", "string", "RFC 3339; events before this moment."},
 	}, pagingParameters...),
@@ -1375,6 +1381,24 @@ func pagedCollection(name string) map[string]any {
 
 // reasonOnlyBody describes an order whose whole body is why it was placed. The
 // body may be left out; the reason then comes from the query if it is there.
+// trustChangeBody is the body of a change to what the fleet trusts. Such a
+// change is written to the trail before it is made and cannot be undone, so the
+// caller names the change: a repeated request under the same key is refused
+// rather than performed again.
+func trustChangeBody(what string) map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"reason": map[string]any{"type": "string", "description": what},
+			"idempotency_key": map[string]any{"type": "string", "description": "What tells a repeat " +
+				"of this request from a second change; the Idempotency-Key header serves too. " +
+				"Required: the panel writes the beginning of the change under this key before " +
+				"making it, and refuses a key that already began one."},
+		},
+		"required": []string{"idempotency_key"},
+	}
+}
+
 func reasonOnlyBody(what string) map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -1814,9 +1838,9 @@ var requestSchemas = map[string]map[string]any{
 		},
 		"required": []string{"action", "selector"},
 	},
-	"POST /api/v1/pki/prepare": reasonOnlyBody(
+	"POST /api/v1/pki/prepare": trustChangeBody(
 		"Why a new fleet authority is being made. It joins the trust set without the right to sign, so the fleet learns it before anything is signed by it."),
-	"POST /api/v1/pki/activate": reasonOnlyBody(
+	"POST /api/v1/pki/activate": trustChangeBody(
 		"Why the prepared authority takes over the signing. Hosts that have not yet learned it will refuse what it signs, so the order follows the preparation rather than replacing it."),
 	"POST /api/v1/relays/{id}/revoke": reasonOnlyBody(
 		"Why the relay loses the right to mediate; kept in the audit trail."),

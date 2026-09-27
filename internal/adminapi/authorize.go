@@ -107,18 +107,56 @@ func (s *Server) jobScope(r *http.Request, hostID string) authz.Scope {
 	return hosts.ScopeOf(host)
 }
 
-// recordedChange writes the trail of a change that has already been made and
-// says whether it was written. The changes it guards - what the fleet trusts,
-// who may do what, a credential that went out - are the ones nobody can account
-// for afterwards without an entry, so the answer names the situation rather than
-// reporting a plain success: the operator is to know that the change happened
-// and that nothing recorded it.
-func (s *Server) recordedChange(w http.ResponseWriter, r *http.Request,
-	event audit.Event, made string) bool {
+// beganChange writes the beginning of a change and commits it, before anything
+// happens. It answers false when the change must not be made: with no entry
+// nobody could say afterwards who began what, and a change to what the fleet
+// trusts cannot be undone.
+//
+// The key is the caller's, so that a retry of a request whose answer was lost
+// does not make the change a second time. It is required for exactly that
+// reason: a beginning nobody can recognise again is not idempotent.
+func (s *Server) beganChange(w http.ResponseWriter, r *http.Request, event audit.Event,
+	body string) (string, bool) {
+	key := idempotencyKeyOf(r, body)
+	if key == "" {
+		problem(w, http.StatusBadRequest, "idempotency_key_required",
+			"this change needs an Idempotency-Key header (or an idempotency_key field): "+
+				"it is what tells a repeated request from a second change")
+		return "", false
+	}
+	if event.Detail == nil {
+		event.Detail = map[string]any{}
+	}
+	event.Detail[audit.IntentKey] = key
+	err := s.audit.RecordIntent(r.Context(), event)
+	switch {
+	case errors.Is(err, audit.ErrIntentExists):
+		problem(w, http.StatusConflict, "change_already_started",
+			"a change has already begun under this key; read the state of the installation "+
+				"rather than repeating the request")
+		return "", false
+	case err != nil:
+		problem(w, http.StatusInternalServerError, "audit_unavailable",
+			"the beginning of this change could not be written, so nothing was changed: "+err.Error())
+		return "", false
+	}
+	return key, true
+}
+
+// finishedChange writes the outcome of a change that has been made, under the
+// key of its beginning. The beginning is durable, so a failure here leaves a
+// trail that names who began what; the answer says so, and the reconciler
+// closes the entry at the next start by reading the real state.
+func (s *Server) finishedChange(w http.ResponseWriter, r *http.Request,
+	event audit.Event, key, made string) bool {
+	if event.Detail == nil {
+		event.Detail = map[string]any{}
+	}
+	event.Detail[audit.IntentKey] = key
 	if err := s.audit.RecordNow(r.Context(), event); err != nil {
 		problem(w, http.StatusInternalServerError, "audit_unavailable",
-			made+", and the audit trail of it could not be written: "+err.Error()+
-				". Read the state of the installation before ordering anything further.")
+			made+", and the outcome could not be written to the trail: "+err.Error()+
+				". The beginning of the change is on the trail; read the state of the installation.")
 		return false
 	}
 	return true
