@@ -613,20 +613,16 @@ jobs:
         # is a re-run of the same tag and there is nothing to say.
         run: |
           set -euo pipefail
+          # The repository describes itself under packages/, one page per tree:
+          # Pages serves no directory index, so deb/, rpm/ and arch/ answered
+          # 404 to a browser while the package managers read them happily. The
+          # root of the site belongs to the project and this release leaves it
+          # alone. The pages are read out of the tree that has just been signed,
+          # so what they list is what is there.
+          bash source/packaging/repo-pages.sh pages/packages \
+            "https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/packages"
           cd pages
           : > .nojekyll
-          # The repository describes itself under packages/; the root of the
-          # site belongs to the project and this release does not touch it.
-          cat > packages/index.html <<'PAGE'
-          <!doctype html>
-          <meta charset="utf-8">
-          <title>Flotestro packages</title>
-          <h1>Flotestro packages</h1>
-          <p>The signed apt, dnf and pacman repository the Flotestro fleet installs from.
-          The panel writes the commands for a host under <em>Add host</em>; the key that
-          signs every index is <a href="flotestro-repo.asc">flotestro-repo.asc</a>.</p>
-          <p><a href="https://github.com/ultherego/Flotestro">github.com/ultherego/Flotestro</a></p>
-          PAGE
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A

@@ -163,6 +163,7 @@ anything.
 ```
 packaging/build-release.sh all 0.60.0 /srv/release
 packaging/sign-repo.sh /srv/release <gpg-key-id> /srv/repo 0.60.0
+packaging/repo-pages.sh /srv/repo http://repo.site.example:8090
 
 docker build -f docker/Containerfile --target package-repository \
   --build-context repository=/srv/repo \
@@ -175,6 +176,13 @@ docker build -f docker/Containerfile --target package-repository \
 The build refuses a context without `flotestro-repo.asc`: a tree that carries
 no public key is not one a host could verify, and an image that served it
 would fail on every managed host instead of on the machine that built it.
+
+`repo-pages.sh` is what makes the tree readable to a person rather than only to
+a package manager: one page per family, carrying the lines that add it and the
+packages it holds. It takes the address the tree will be served at, because the
+commands on the pages contain it. Leave it out and the repository still works;
+what an operator who opens it in a browser gets is a 404, because neither Pages
+nor the repository server lists a directory.
 
 These are the commands by hand, for a laboratory. A release runs the three
 service images from `.github/workflows/images.yml`, which also attaches the
