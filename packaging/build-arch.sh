@@ -14,9 +14,9 @@
 set -euo pipefail
 
 case "${1:-}" in
-agent|relay) COMPONENT="$1"; shift ;;
-*)           COMPONENT=agent ;;
+agent) shift ;;
 esac
+COMPONENT=agent
 STAGE="${1:?give the directory with the binaries}"
 VERSION="${2:-0.1.0}"
 ARCH="${3:-x86_64}"
@@ -34,32 +34,21 @@ PKGVER="$(printf '%s' "$VERSION" | tr -d '-')"
 
 # makepkg refuses to work as root; the sources go into a directory owned by
 # the building user.
-if [ "$COMPONENT" = relay ]; then
-    cp "$STAGE/flotestro-relay" "$STAGE/flotestro-relayctl" "$build/"
-    cp "$here/systemd/flotestro-relay.service" "$build/"
-    cp "$here/arch/flotestro-relay.sysusers" "$here/arch/flotestro-relay.tmpfiles" \
-       "$here/arch/flotestro-relay.install" "$build/"
-    cp "$here/relay.yaml" "$build/relay.yaml"
-    FILES="flotestro-relay flotestro-relayctl flotestro-relay.service flotestro-relay.sysusers"
-    FILES="$FILES flotestro-relay.tmpfiles relay.yaml"
-    TEMPLATE="$here/arch/relay-PKGBUILD"
-else
-    cp "$STAGE/flotestro-agent" "$STAGE/flotestro-agentctl" \
-       "$STAGE/flotestro-agent-helper" "$build/"
-    cp "$here/systemd/flotestro-agent.service" "$here/systemd/flotestro-enroll.service" \
-       "$here/systemd/flotestro-helper.service" "$here/systemd/flotestro-helper.socket" \
-       "$here/systemd/flotestro-firewall-restore.service" "$build/"
-    cp "$here/arch/flotestro-agent.sysusers" "$here/arch/flotestro-agent.tmpfiles" \
-       "$here/arch/flotestro-agent.install" "$build/"
-    cp "$here/agent.yaml" "$build/agent.yaml"
-    cp "$here/helper.yaml" "$build/helper.yaml"
-    FILES="flotestro-agent flotestro-agentctl flotestro-agent-helper"
-    FILES="$FILES flotestro-agent.service flotestro-enroll.service"
-    FILES="$FILES flotestro-helper.service flotestro-helper.socket"
-    FILES="$FILES flotestro-firewall-restore.service"
-    FILES="$FILES flotestro-agent.sysusers flotestro-agent.tmpfiles agent.yaml helper.yaml"
-    TEMPLATE="$here/arch/PKGBUILD"
-fi
+cp "$STAGE/flotestro-agent" "$STAGE/flotestro-agentctl" \
+   "$STAGE/flotestro-agent-helper" "$build/"
+cp "$here/systemd/flotestro-agent.service" "$here/systemd/flotestro-enroll.service" \
+   "$here/systemd/flotestro-helper.service" "$here/systemd/flotestro-helper.socket" \
+   "$here/systemd/flotestro-firewall-restore.service" "$build/"
+cp "$here/arch/flotestro-agent.sysusers" "$here/arch/flotestro-agent.tmpfiles" \
+   "$here/arch/flotestro-agent.install" "$build/"
+cp "$here/agent.yaml" "$build/agent.yaml"
+cp "$here/helper.yaml" "$build/helper.yaml"
+FILES="flotestro-agent flotestro-agentctl flotestro-agent-helper"
+FILES="$FILES flotestro-agent.service flotestro-enroll.service"
+FILES="$FILES flotestro-helper.service flotestro-helper.socket"
+FILES="$FILES flotestro-firewall-restore.service"
+FILES="$FILES flotestro-agent.sysusers flotestro-agent.tmpfiles agent.yaml helper.yaml"
+TEMPLATE="$here/arch/PKGBUILD"
 
 # The bills of materials of the package's binaries travel as sources like
 # everything else, with their checksums. They were written when the

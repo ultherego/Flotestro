@@ -1,3 +1,0 @@
-# The state directory belongs to the relay and is closed to the rest of the
-# system: the private key and the relay identity lie in it.
-d /var/lib/flotestro-relay 0700 flotestro-relay flotestro-relay -

@@ -81,7 +81,7 @@ buildBinaries() {
     echo "==> binaries $arch"
     rm -rf "$stage"
     mkdir -p "$stage"
-    for component in agent agent-helper agentctl relay relayctl control-plane auditverify; do
+    for component in agent agent-helper agentctl; do
         # CGO disabled: the package is to work on every machine of the given
         # architecture, not only on one with the same libraries.
         # -trimpath removes the build machine paths, so that the same binary
@@ -94,12 +94,6 @@ buildBinaries() {
             -ldflags "-s -w $(stamp)" \
             -o "$stage/flotestro-$component" "./cmd/$component"
     done
-    # The web panel is architecture-independent; it enters the control plane
-    # package when it was built earlier.
-    if [ -d "${FLOTESTRO_WEB:-/usr/share/flotestro/web}" ]; then
-        mkdir -p "$stage/web"
-        cp -r "${FLOTESTRO_WEB:-/usr/share/flotestro/web}/." "$stage/web/"
-    fi
     # The list of modules that enter the binaries, as the toolchain prints
     # it: exactly the information the binaries themselves carry.
     "$GO" version -m "$stage"/flotestro-* > "$OUT/modules-$arch.txt"
@@ -162,19 +156,15 @@ buildPackages() {
     [ -d "$stage" ] || { echo "no binaries in $stage" >&2; exit 1; }
     if command -v dpkg-deb >/dev/null; then
         echo "==> .deb packages $arch"
-        for component in agent relay control-plane; do
-            "$here/build-deb.sh" "$component" "$stage" "$VERSION" "$arch" "$OUT" >/dev/null
-        done
+        "$here/build-deb.sh" agent "$stage" "$VERSION" "$arch" "$OUT" >/dev/null
         built=true
     fi
     if command -v makepkg >/dev/null; then
         # makepkg packs ready files, so the architecture is a matter of the
         # package name, not of the build machine.
         echo "==> pacman packages $(archName "$arch")"
-        for component in agent relay; do
-            "$here/build-arch.sh" "$component" "$stage" "$VERSION" \
-                "$(archName "$arch")" "$OUT" >/dev/null
-        done
+        "$here/build-arch.sh" agent "$stage" "$VERSION" \
+            "$(archName "$arch")" "$OUT" >/dev/null
         built=true
     fi
     if command -v rpmbuild >/dev/null; then
@@ -185,9 +175,7 @@ buildPackages() {
         # incomplete release.
         if [ "$(rpmName "$arch")" = "$(uname -m)" ]; then
             echo "==> .rpm packages $(rpmName "$arch")"
-            for component in agent relay control-plane; do
-                "$here/build-rpm.sh" "$component" "$stage" "$VERSION" "$(rpmName "$arch")" "$OUT" >/dev/null
-            done
+            "$here/build-rpm.sh" agent "$stage" "$VERSION" "$(rpmName "$arch")" "$OUT" >/dev/null
             built=true
         else
             echo "!!! .rpm $(rpmName "$arch") requires a $(rpmName "$arch") machine; this one is $(uname -m)" >&2

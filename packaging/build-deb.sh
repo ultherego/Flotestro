@@ -82,36 +82,6 @@ agent)
     name="flotestro-agent"
     installSBOM flotestro-agent flotestro-agent flotestro-agent-helper flotestro-agentctl
     ;;
-relay)
-    install -m 0755 "$STAGE/flotestro-relay"    "$root/usr/bin/flotestro-relay"
-    install -m 0755 "$STAGE/flotestro-relayctl" "$root/usr/bin/flotestro-relayctl"
-    install -m 0644 "$here/systemd/flotestro-relay.service" \
-        "$root/lib/systemd/system/flotestro-relay.service"
-    install -m 0640 "$here/relay.yaml" "$root/etc/flotestro/relay.yaml"
-    install -d -m 0700 "$root/var/lib/flotestro-relay"
-    name="flotestro-relay"
-    installSBOM flotestro-relay flotestro-relay flotestro-relayctl
-    ;;
-control-plane)
-    install -m 0755 "$STAGE/flotestro-control-plane" "$root/usr/bin/flotestro-control-plane"
-    # The audit verifier stands next to the panel: an export of the audit
-    # trail is checked where the trail was written, or on any machine with
-    # this package.
-    install -m 0755 "$STAGE/flotestro-auditverify" "$root/usr/bin/flotestro-auditverify"
-    install -m 0644 "$here/systemd/flotestro-control-plane.service" \
-        "$root/lib/systemd/system/flotestro-control-plane.service"
-    install -m 0640 "$here/control-plane.env" "$root/etc/flotestro/control-plane.env"
-    install -d -m 0700 "$root/var/lib/flotestro"
-    # The web panel is built separately; the package carries the ready files.
-    if [ -d "$STAGE/web" ]; then
-        install -d -m 0755 "$root/usr/share/flotestro/web"
-        cp -r "$STAGE/web/." "$root/usr/share/flotestro/web/"
-        find "$root/usr/share/flotestro/web" -type d -exec chmod 0755 {} +
-        find "$root/usr/share/flotestro/web" -type f -exec chmod 0644 {} +
-    fi
-    name="flotestro-control-plane"
-    installSBOM flotestro-control-plane flotestro-control-plane flotestro-auditverify
-    ;;
 *)
     echo "unknown component: $COMPONENT" >&2
     exit 1
