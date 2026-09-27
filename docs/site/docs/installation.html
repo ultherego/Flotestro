@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Installation &middot; Flotestro documentation</title>
-<meta name="description" content="Installing Flotestro from nothing: the control plane from its image or from packages, the first administrator, the backup pair, the hosts, a relay and the air-gapped profile.">
+<meta name="description" content="Installing Flotestro from nothing: the control plane from its image, the first administrator, the backup pair, the hosts, a relay and the air-gapped profile.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;600&display=swap">
@@ -67,7 +67,6 @@
     <ul class="linkrow">
       <li><a href="#before">Before you start</a></li>
       <li><a href="#image">The control plane from its image</a></li>
-      <li><a href="#packages">&hellip; or from packages</a></li>
       <li><a href="#admin">The first administrator</a></li>
       <li><a href="#backup">The backup pair</a></li>
       <li><a href="#hosts">The hosts</a></li>
@@ -84,8 +83,8 @@
       reachable from the panel's host - or the quick-start profile, which brings
       one up beside it.</li>
       <li><strong>A container runtime</strong>: Docker Engine with the Compose
-      plugin, or Podman. There is also a package path for the control plane, and
-      no container at all on the managed hosts.</li>
+      plugin, or Podman. The panel and the relay are images and are deployed no
+      other way; there is no container at all on the managed hosts.</li>
       <li><strong>DNS</strong> that resolves the names the panel will advertise,
       from the hosts and from the operator's browser. Those names enter the
       agent gateway's certificate, so they are the names the fleet really
@@ -105,24 +104,28 @@
 
     <h2 id="image">The control plane from its image</h2>
 
-    <p>There are four deployments, and they are profiles of one
-    <code>compose.yaml</code>. The control plane is the only service without a
-    profile, so nothing else ever starts unless it is named: an installation
-    pointed at an external database cannot quietly start a second, empty one
-    beside it, and a connected site does not quietly publish a package
-    repository.</p>
+    <p>There are four deployments and they are one <code>compose.yaml</code>,
+    varied by a profile or by an overlay file. Nothing beyond the panel, its
+    database and the one-shot services that prepare it starts unless it is
+    named: a connected site does not quietly publish a package repository, and
+    an installation that points at a database of its own takes the local one out
+    with an overlay rather than leaving it running empty beside the real one.</p>
 
     <div class="table-scroll">
     <table>
       <thead><tr><th>Deployment</th><th>Command</th><th>For</th></tr></thead>
       <tbody>
-        <tr><td>Quick start</td><td><code>docker compose --profile quickstart up -d</code></td><td>The panel and a PostgreSQL of its own on one host. A laboratory, a demonstration, a small installation.</td></tr>
-        <tr><td>Production basic</td><td><code>docker compose up -d</code></td><td>One control plane against an external, backed-up PostgreSQL. The default for a company.</td></tr>
+        <tr><td>Quick start</td><td><code>docker compose up -d</code></td><td>The panel and a PostgreSQL of its own on one host, with nothing prepared. A laboratory, a demonstration, a small installation.</td></tr>
+        <tr><td>Production basic</td><td><code>docker compose -f compose.yaml -f compose.external-db.yaml up -d</code></td><td>One control plane against an external, backed-up PostgreSQL. The default for a company. The overlay takes the local database out and holds the DSN to a verified server.</td></tr>
         <tr><td>Production relay</td><td><code>docker compose -f compose.relay.yaml up -d</code> on each site host</td><td>The same, plus one relay per site next to the agents it serves.</td></tr>
-        <tr><td>Air-gapped</td><td><code>docker compose --profile airgap up -d</code></td><td>Any of the three, plus the package repository of the release on the network the managed hosts reach.</td></tr>
+        <tr><td>Air-gapped</td><td><code>--profile airgap</code> added to either of the first two</td><td>Any of the above, plus the package repository of the release on the network the managed hosts reach.</td></tr>
       </tbody>
     </table>
     </div>
+
+    <p>Which database an installation uses is chosen before it is initialised.
+    Moving a live one to another database is a data migration, not a change of a
+    variable.</p>
 
     <h3>The first start</h3>
 
@@ -131,7 +134,7 @@
 
     <p class="filename">On the panel host</p>
 <pre><code>curl -fsSLO https://raw.githubusercontent.com/ultherego/Flotestro/main/docker/compose.yaml
-docker compose --profile quickstart up -d
+docker compose up -d
 docker compose cp control-plane:/var/lib/flotestro/bootstrap-token .</code></pre>
 
     <p>Every setting has a working default, so the panel answers on
@@ -140,32 +143,51 @@ docker compose cp control-plane:/var/lib/flotestro/bootstrap-token .</code></pre
     file &mdash; <code>env.example</code> lists every setting and names the
     three that matter.</p>
 
-    <p>Production basic, against a database somebody else runs. Leave the
-    profile out and write the DSN before the first start; the
-    <code>init</code> service reads it and hands the copy to the account the
-    panel runs as, so no ownership is yours to get right:</p>
+    <p>Production basic, against a database somebody else runs. The overlay
+    <code>compose.external-db.yaml</code> is what makes it that installation:
+    it takes the local database out, sets
+    <code>FLOTESTRO_DATABASE_MODE=external</code> and passes the DSN as a
+    Compose secret. Write the DSN before the first start:</p>
 
 <pre><code>cat &gt; .env &lt;&lt;'SETTINGS'
-FLOTESTRO_VERSION=0.60.1
+FLOTESTRO_VERSION=0.62.0
 FLOTESTRO_GATEWAY_ID=cp-prod-01
 FLOTESTRO_ADVERTISE=panel.example.org
 FLOTESTRO_PUBLIC_URL=https://panel.example.org
 SETTINGS
 
 mkdir -p secrets &amp;&amp; chmod 700 secrets
-printf '%s' 'postgresql://flotestro:PASSWORD@db.example.org:5432/flotestro?sslmode=verify-full&amp;application_name=flotestro-control-plane' &gt; secrets/database-url
+printf '%s' 'postgresql://flotestro:PASSWORD@db.example.org:5432/flotestro?sslmode=verify-full&amp;target_session_attrs=read-write&amp;application_name=flotestro-control-plane' &gt; secrets/database-url
 chmod 600 secrets/database-url
 
-docker compose up -d
+docker compose -f compose.yaml -f compose.external-db.yaml run --rm migrate
+docker compose -f compose.yaml -f compose.external-db.yaml up -d
 docker compose logs -f control-plane        # wait for "the database schema is current"
 curl -fsS http://127.0.0.1:8080/healthz</code></pre>
 
-    <p>A DSN found in <code>secrets/database-url</code> always wins over
-    anything generated earlier, so that is also how an installation moves off
-    the quick-start database and how its password is changed.
-    <code>sslmode=disable</code> is acceptable only for the quick start, on one
-    host with an internal network. An external database requires
-    <code>verify-full</code>.</p>
+    <p>In that order and not the other way. The schema is brought forward by a
+    run of its own, and a panel that serves refuses a schema it does not match
+    rather than reshape one somebody else owns. That is also what makes a second
+    replica possible: an upgrade is one migration and then the replicas rolled,
+    which cannot be true if every instance migrates at its own start.</p>
+
+    <p><code>external</code> mode holds the DSN to
+    <code>sslmode=verify-full</code> and
+    <code>target_session_attrs=read-write</code> and refuses it otherwise, and a
+    preflight asks the database what it is - a standby, its extensions, the
+    rights of the login - before the panel settles on it. No refusal carries the
+    DSN, because it holds the password. <code>verify-full</code> needs the
+    issuing authority, and the image carries the public bundle alone: a database
+    with an authority of its own is named with <code>sslrootcert=</code> and the
+    file mounted, as the header of the overlay shows.</p>
+
+    <p>Separating the database roles is a further step and worth taking: the
+    login the panel serves on then has no right to change the schema, and a
+    second one migrates as the owner. <code>db/roles.sql</code> creates them, and
+    the migration is pointed at its own DSN with
+    <code>FLOTESTRO_MIGRATION_DATABASE_URL_FILE</code>. Without it the migration
+    uses the serving login, which still keeps the migration out of the serving
+    process but gives up the separation.</p>
 
     <div class="note">
       <p class="note__title">Nothing to prepare</p>
@@ -196,17 +218,25 @@ curl -fsS http://127.0.0.1:8080/healthz</code></pre>
 
     <div class="table-scroll">
     <table>
-      <thead><tr><th>Secret</th><th>Variable</th><th>Mount</th></tr></thead>
+      <thead><tr><th>Secret</th><th>Variable</th><th>Mount</th><th>Put there by</th></tr></thead>
       <tbody>
-        <tr><td>Database DSN</td><td><code>FLOTESTRO_DATABASE_URL_FILE</code></td><td><code>/run/secrets/database_url</code></td></tr>
-        <tr><td>OIDC client secret</td><td><code>FLOTESTRO_OIDC_CLIENT_SECRET_FILE</code></td><td><code>/run/secrets/oidc_client_secret</code></td></tr>
-        <tr><td>Webhook HMAC key</td><td><code>FLOTESTRO_WEBHOOK_SECRET_FILE</code></td><td><code>/run/secrets/webhook_secret</code></td></tr>
-        <tr><td>NVD API key</td><td><code>FLOTESTRO_VULN_NVD_KEY_FILE</code></td><td><code>/run/secrets/nvd_key</code></td></tr>
-        <tr><td>FreeIPA keytab</td><td><code>FLOTESTRO_IPA_KEYTAB</code> (already a path)</td><td><code>/run/secrets/ipa.keytab</code></td></tr>
-        <tr><td>PostgreSQL password (quick start)</td><td><code>POSTGRES_PASSWORD_FILE</code></td><td><code>/run/secrets/postgres_password</code></td></tr>
+        <tr><td>Database DSN, quick start</td><td><code>FLOTESTRO_DATABASE_URL_FILE</code></td><td><code>/run/flotestro/database-url</code></td><td><code>init</code></td></tr>
+        <tr><td>Database DSN, external</td><td><code>FLOTESTRO_DATABASE_URL_FILE</code></td><td><code>/run/secrets/database-url</code></td><td>the Compose secret <code>./secrets/database-url</code></td></tr>
+        <tr><td>PostgreSQL password, quick start</td><td><code>POSTGRES_PASSWORD_FILE</code></td><td><code>/run/flotestro/postgres-password</code></td><td><code>init</code></td></tr>
+        <tr><td>OIDC client secret</td><td><code>FLOTESTRO_OIDC_CLIENT_SECRET_FILE</code></td><td><code>/run/secrets/oidc_client_secret</code></td><td>a bind mount you add</td></tr>
+        <tr><td>Webhook HMAC key</td><td><code>FLOTESTRO_WEBHOOK_SECRET_FILE</code></td><td><code>/run/secrets/webhook_secret</code></td><td>a bind mount you add</td></tr>
+        <tr><td>NVD API key</td><td><code>FLOTESTRO_VULN_NVD_KEY_FILE</code></td><td><code>/run/secrets/nvd_key</code></td><td>a bind mount you add</td></tr>
+        <tr><td>FreeIPA keytab</td><td><code>FLOTESTRO_IPA_KEYTAB</code> (already a path)</td><td><code>/run/secrets/ipa.keytab</code></td><td>a bind mount you add</td></tr>
       </tbody>
     </table>
     </div>
+
+    <p>The first three are made inside the runtime or handed in as a file, so no
+    account on the host has to own them at the right uid. The rest are added as
+    they are needed: a line under the control plane's <code>volumes:</code> and
+    the matching <code>_FILE</code> variable beside it.
+    <code>./secrets/</code> is not tracked by Git and is readable only by the
+    account that runs the deployment.</p>
 
     <h3>Pin a digest, and check what you are about to run</h3>
 
@@ -225,7 +255,7 @@ curl -fsS http://127.0.0.1:8080/healthz</code></pre>
 <pre><code>cosign verify \
   --certificate-identity-regexp '^https://github\.com/ultherego/Flotestro/\.github/workflows/images\.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/ultherego/flotestro-control-plane:0.60.0@sha256:...</code></pre>
+  ghcr.io/ultherego/flotestro-control-plane:0.62.0@sha256:...</code></pre>
 
     <p>The bill of materials and the provenance are read the same way with
     <code>cosign verify-attestation --type cyclonedx</code> and
@@ -233,55 +263,6 @@ curl -fsS http://127.0.0.1:8080/healthz</code></pre>
     no OIDC identity publishes the image unsigned and says so in its log; a
     <code>cosign verify</code> against such an image fails, which is the correct
     answer and not a malfunction.</p>
-
-    <h2 id="packages">&hellip; or the control plane from packages</h2>
-
-    <p>The release also builds <code>flotestro-control-plane</code> as a
-    <code>.deb</code> and an <code>.rpm</code> (pacman gets the agent and the
-    relay only). The package brings the panel, the systemd unit, the
-    configuration file and <code>flotestro-auditverify</code>, which stands next
-    to the panel so that an export of the audit trail can be checked where the
-    trail was written.</p>
-
-    <div class="table-scroll">
-    <table>
-      <thead><tr><th>Path</th><th>What it is</th></tr></thead>
-      <tbody>
-        <tr><td><code>/usr/bin/flotestro-control-plane</code></td><td>The binary.</td></tr>
-        <tr><td><code>/usr/bin/flotestro-auditverify</code></td><td>The offline verifier of an audit export.</td></tr>
-        <tr><td><code>/lib/systemd/system/flotestro-control-plane.service</code></td><td>The unit.</td></tr>
-        <tr><td><code>/etc/flotestro/control-plane.env</code></td><td>Every setting, commented. A configuration file: a package update does not overwrite it. Owned <code>root:flotestro</code>, mode 0640, because it holds the database credentials.</td></tr>
-        <tr><td><code>/var/lib/flotestro</code></td><td>The state directory, mode 0700, owned by the service account.</td></tr>
-        <tr><td><code>/usr/share/flotestro/web</code></td><td>The built panel; the unit points <code>FLOTESTRO_WEB_ROOT</code> at it.</td></tr>
-      </tbody>
-    </table>
-    </div>
-
-    <p>The package makes a system account <code>flotestro</code> and enables the
-    unit. It does <em>not</em> start it while the shipped DSN still says
-    <code>change-me</code>: a panel without a database has nowhere to keep the
-    fleet state, and a restart loop would only litter the journal. The
-    installation ends with the two lines that finish it - set
-    <code>FLOTESTRO_DATABASE_URL</code>, then
-    <code>systemctl start flotestro-control-plane.service</code>.</p>
-
-    <p>Three settings in that file have to be changed before the panel is of any
-    use: <code>FLOTESTRO_DATABASE_URL</code>,
-    <code>FLOTESTRO_ADVERTISE</code> (empty by default, and the certificate
-    issued without it covers <code>127.0.0.1</code> alone - an agent elsewhere
-    rejects the connection) and <code>FLOTESTRO_PUBLIC_URL</code>.</p>
-
-    <div class="note">
-      <p class="note__title">The package's defaults are not all the binary's</p>
-      <p>The shipped <code>control-plane.env</code> sets
-      <code>FLOTESTRO_METRICS_RETENTION_RAW=48h</code> and
-      <code>FLOTESTRO_METRICS_RETENTION_ROLLUP=720h</code>, which are shorter
-      than the binary's own defaults of <code>168h</code> and
-      <code>2160h</code>. What the file sets is what the installation runs on.
-      From the moment an operator stores a monitoring retention in the panel, the
-      stored value decides and the file is only what a cleared field falls back
-      to.</p>
-    </div>
 
     <h2 id="admin">The first administrator, and the mappings without which nobody can sign in</h2>
 
@@ -530,8 +511,11 @@ upstream:
     - "https://gateway-b.flotestro.example.com:8443"
   bootstrap_ca_file: "/etc/flotestro/bootstrap-ca.pem"</code></pre>
 
-    <p>The relay is configured by that file and by nothing else;
-    <code>flotestro-relay config show</code> prints what it resolves to. Its site
+    <p>The relay is configured by that file and by nothing else. It lives beside
+    <code>compose.relay.yaml</code> on the site host and is bind-mounted
+    read-only at <code>/etc/flotestro/relay.yaml</code>;
+    <code>docker compose -f compose.relay.yaml run --rm relay config show</code>
+    prints what it resolves to. Its site
     is an expectation - the scope a relay really has is the one its enrollment
     token granted. No relay may advertise a name that is in
     <code>FLOTESTRO_ADVERTISE</code>. Its spool is on disk and survives a
