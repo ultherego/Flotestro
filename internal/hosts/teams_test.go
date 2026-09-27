@@ -24,30 +24,32 @@ func TestScopeSQLReadsATeamOnTheTeamColumn(t *testing.T) {
 		},
 		{
 			name:   "a global scope lifts the condition",
-			scopes: []authz.Scope{{Site: authz.Wildcard, Environment: authz.Wildcard}},
+			scopes: []authz.Scope{authz.Placement(authz.Wildcard, authz.Wildcard)},
 			want:   "",
 		},
 		{
 			// The case the site columns alone would read as the whole fleet. The
 			// wildcards are what the binding carries; the team is what it means.
 			name:   "a team scope compares the team column alone",
-			scopes: []authz.Scope{{Site: authz.Wildcard, Environment: authz.Wildcard, Team: team}},
+			scopes: []authz.Scope{authz.OfTeam(team)},
 			want:   "(h.team_id = $1::uuid)",
 			args:   []any{team},
 		},
 		{
 			name: "a team and a site scope are two ways in",
 			scopes: []authz.Scope{
-				{Site: authz.Wildcard, Environment: authz.Wildcard, Team: team},
-				{Site: "lab", Environment: "test"},
+				authz.OfTeam(team),
+				authz.Placement("lab", "test"),
 			},
 			want: "(h.team_id = $1::uuid or (h.site = $2 and h.environment = $3))",
 			args: []any{team, "lab", "test"},
 		},
 		{
-			name:   "an unknown site narrows to nothing",
+			// A binding whose categories were never filled in is a binding that
+			// reaches nothing: every unset one refuses on its own.
+			name:   "a binding that says nothing reaches nothing",
 			scopes: []authz.Scope{{Site: "", Environment: "test"}},
-			want:   "((false and h.environment = $1))",
+			want:   "((false and h.environment = $1 and false and false and false))",
 			args:   []any{"test"},
 		},
 	} {
@@ -73,7 +75,7 @@ func TestScopeSQLReadsATeamOnTheTeamColumn(t *testing.T) {
 func TestScopeSQLNumbersAfterTheOffset(t *testing.T) {
 	team := "1e83b0e4-0000-4000-8000-000000000002"
 	condition, args := ScopeSQL([]authz.Scope{
-		{Site: authz.Wildcard, Environment: authz.Wildcard, Team: team},
+		authz.OfTeam(team),
 	}, "h.site", "h.environment", "h.team_id", 4)
 	if condition != "(h.team_id = $5::uuid)" {
 		t.Errorf("condition = %q", condition)
@@ -89,9 +91,9 @@ func TestScopeSQLAgreesWithMatches(t *testing.T) {
 	mine := "1e83b0e4-0000-4000-8000-00000000000a"
 	theirs := "1e83b0e4-0000-4000-8000-00000000000b"
 	bindings := []authz.Scope{
-		{Site: authz.Wildcard, Environment: authz.Wildcard},
-		{Site: "lab", Environment: authz.Wildcard},
-		{Site: authz.Wildcard, Environment: authz.Wildcard, Team: mine},
+		authz.Placement(authz.Wildcard, authz.Wildcard),
+		authz.Placement("lab", authz.Wildcard),
+		authz.OfTeam(mine),
 	}
 	targets := []struct {
 		name string

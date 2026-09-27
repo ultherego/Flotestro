@@ -58,12 +58,12 @@ func TestScopeConditionNarrowsOrRefuses(t *testing.T) {
 		},
 		{
 			name:   "a global scope lifts the condition",
-			scopes: []authz.Scope{{Site: authz.Wildcard, Environment: authz.Wildcard}},
+			scopes: []authz.Scope{authz.Placement(authz.Wildcard, authz.Wildcard)},
 			want:   "true",
 		},
 		{
 			name:   "a site scope compares the columns it was given",
-			scopes: []authz.Scope{{Site: "lab", Environment: "test"}},
+			scopes: []authz.Scope{authz.Placement("lab", "test")},
 			want:   "((h.site = $1 and h.environment = $2))",
 			args:   2,
 		},
@@ -72,7 +72,7 @@ func TestScopeConditionNarrowsOrRefuses(t *testing.T) {
 			// carries the wildcard site and environment, so only the team column may
 			// answer for it.
 			name:   "a team scope compares the team column alone",
-			scopes: []authz.Scope{{Site: authz.Wildcard, Environment: authz.Wildcard, Team: "1e83"}},
+			scopes: []authz.Scope{authz.OfTeam("1e83")},
 			want:   "(h.team_id = $1::uuid)",
 			args:   1,
 		},
@@ -92,9 +92,9 @@ func TestScopeConditionNarrowsOrRefuses(t *testing.T) {
 // The offset is where the caller's own parameters end, so a condition
 // concatenated after them numbers its placeholders from there.
 func TestScopeConditionNumbersAfterTheOffset(t *testing.T) {
-	condition, args := ScopeCondition([]authz.Scope{{Site: "lab", Environment: authz.Wildcard}},
+	condition, args := ScopeCondition([]authz.Scope{authz.Placement("lab", authz.Wildcard)},
 		"h.site", "h.environment", "h.team_id", 4)
-	if condition != "((h.site = $5))" {
+	if condition != "(h.site = $5)" {
 		t.Errorf("condition = %q", condition)
 	}
 	if len(args) != 1 || args[0] != "lab" {

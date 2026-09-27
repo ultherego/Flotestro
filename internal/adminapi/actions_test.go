@@ -12,7 +12,7 @@ import (
 // same permission in the same scope, the same registry, the same lifecycle
 // states.
 
-var labScope = authz.Scope{Site: "lab", Environment: "test"}
+var labScope = authz.Placement("lab", "test")
 
 func principalWith(role authz.Role, scope authz.Scope) authz.Principal {
 	return authz.Principal{
@@ -79,7 +79,7 @@ func TestAViewerMayOrderNoChangeAndTheReasonNamesTheActionsPermission(t *testing
 }
 
 func TestAnAdministratorMayRestartAUnitOnAHostWithSystemd(t *testing.T) {
-	admin := principalWith(authz.RolePlatformAdmin, authz.Scope{Site: authz.Wildcard, Environment: authz.Wildcard})
+	admin := principalWith(authz.RolePlatformAdmin, authz.Placement(authz.Wildcard, authz.Wildcard))
 	items := hostActions(admin, onlineHost(systemdRegistry), labScope)
 
 	restart := verdictOf(t, items, string(opspec.ActionUnitRestart))
@@ -136,7 +136,7 @@ func TestLifecycleOrdersFollowThePermissionAndTheState(t *testing.T) {
 }
 
 func TestTheScopeOfTheBindingIsTheScopeOfTheHost(t *testing.T) {
-	elsewhere := principalWith(authz.RolePlatformAdmin, authz.Scope{Site: "other", Environment: "prod"})
+	elsewhere := principalWith(authz.RolePlatformAdmin, authz.Placement("other", "prod"))
 	items := hostActions(elsewhere, onlineHost(systemdRegistry), labScope)
 	restart := verdictOf(t, items, string(opspec.ActionUnitRestart))
 	if restart.Allowed || restart.ReasonCode != ReasonPermissionDenied {

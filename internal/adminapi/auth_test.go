@@ -66,7 +66,7 @@ func TestCollectionsDoNotRequireGlobalScope(t *testing.T) {
 		Subject: "jsmith", Kind: "user",
 		Bindings: []authz.Binding{{
 			Role:  authz.RoleOperator,
-			Scope: authz.Scope{Site: "lab", Environment: "test"},
+			Scope: authz.Placement("lab", "test"),
 		}},
 	}
 
@@ -96,7 +96,7 @@ func TestCollectionsDoNotRequireGlobalScope(t *testing.T) {
 func TestPrincipalPermissionsAreComplete(t *testing.T) {
 	principal := authz.Principal{
 		Bindings: []authz.Binding{
-			{Role: authz.RoleViewer, Scope: authz.Scope{Site: "lab"}},
+			{Role: authz.RoleViewer, Scope: authz.Placement("lab", authz.Wildcard)},
 			{Role: authz.RoleApprover, Scope: authz.GlobalScope},
 		},
 	}
@@ -122,7 +122,7 @@ func TestBudgetScopeFollowsTheKey(t *testing.T) {
 	siteOperator := authz.Principal{
 		Subject: "waw-admin", Kind: "user",
 		Bindings: []authz.Binding{{
-			Role: authz.RolePlatformAdmin, Scope: authz.Scope{Site: "warsaw", Environment: "*"},
+			Role: authz.RolePlatformAdmin, Scope: authz.Placement("warsaw", "*"),
 		}},
 	}
 	for key, allowed := range map[string]bool{

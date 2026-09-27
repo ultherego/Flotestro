@@ -10,7 +10,7 @@ func TestAScopeLimitsAPermission(t *testing.T) {
 	// The operator has rights only on staging in Warsaw.
 	operator := principalWith(Binding{
 		Role:  RoleOperator,
-		Scope: Scope{Site: "warsaw", Environment: "staging"},
+		Scope: Placement("warsaw", "staging"),
 	})
 
 	if !operator.Can(PermUnitRestart, Scope{Site: "warsaw", Environment: "staging"}) {
@@ -29,7 +29,7 @@ func TestAnAsteriskInTheTargetDoesNotWidenPermissions(t *testing.T) {
 	// A global operation has a target with an asterisk.
 	operator := principalWith(Binding{
 		Role:  RolePlatformAdmin,
-		Scope: Scope{Site: "warsaw", Environment: "staging"},
+		Scope: Placement("warsaw", "staging"),
 	})
 	if operator.Can(PermHostEnrollCreate, GlobalScope) {
 		t.Fatal("a narrow assignment covered a global operation")

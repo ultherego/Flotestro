@@ -93,23 +93,36 @@ func (s *Store) GrantRole(ctx context.Context, tx pgx.Tx,
 	// A binding names a team or a site, never both: the two are different
 	// vocabularies, and the insert follows the constraint rather than letting the
 	// database explain it afterwards.
-	if scope.Team != "" {
+	// Passed through as given. Substituting a wildcard for a list nobody filled
+	// in is the silent widening this design exists to prevent; the decision
+	// belongs to whoever builds the scope, and an empty list reaches nothing.
+	owners, tags := scope.Owners, scope.Tags
+	if !scope.TeamAny {
+		if scope.Team == "" {
+			// Neither word: the caller said nothing about the team, and saying
+			// nothing is not a grant. The database would refuse this too.
+			return errors.New("the binding says neither a team nor that it covers any")
+		}
 		const teamQuery = `
-			insert into role_bindings (id, principal_id, role, site, environment, team_id, valid_until, created_by)
-			values ($1, $2, $3, '*', '*', $4::uuid, $5, $6)
+			insert into role_bindings (id, principal_id, role, site, environment, team_id, team_any,
+			                           owners, tags, valid_until, created_by)
+			values ($1, $2, $3, '*', '*', $4::uuid, false, $5, $6, $7, $8)
 			on conflict (principal_id, role, team_id) where team_id is not null do update
-				set valid_until = excluded.valid_until, expiry_noted = false`
+				set valid_until = excluded.valid_until, expiry_noted = false,
+				    owners = excluded.owners, tags = excluded.tags`
 		_, err := tx.Exec(ctx, teamQuery, uuid.NewString(), principalID, string(role),
-			scope.Team, validUntil, createdBy)
+			scope.Team, owners, tags, validUntil, createdBy)
 		return err
 	}
 	const query = `
-		insert into role_bindings (id, principal_id, role, site, environment, valid_until, created_by)
-		values ($1, $2, $3, $4, $5, $6, $7)
+		insert into role_bindings (id, principal_id, role, site, environment, team_any,
+		                           owners, tags, valid_until, created_by)
+		values ($1, $2, $3, $4, $5, true, $6, $7, $8, $9)
 		on conflict (principal_id, role, site, environment) do update
-			set valid_until = excluded.valid_until, expiry_noted = false`
+			set valid_until = excluded.valid_until, expiry_noted = false,
+			    owners = excluded.owners, tags = excluded.tags`
 	_, err := tx.Exec(ctx, query, uuid.NewString(), principalID, string(role),
-		orWildcard(scope.Site), orWildcard(scope.Environment), validUntil, createdBy)
+		orWildcard(scope.Site), orWildcard(scope.Environment), owners, tags, validUntil, createdBy)
 	return err
 }
 
@@ -381,7 +394,7 @@ func (s *Store) allBindingsOf(ctx context.Context, principalID string) ([]Bindin
 }
 
 func (s *Store) readBindings(ctx context.Context, principalID string, liveOnly bool) ([]Binding, error) {
-	query := `select role, site, environment, coalesce(team_id::text, ''), valid_until
+	query := `select role, site, environment, coalesce(team_id::text, ''), team_any, owners, tags, valid_until
 		from role_bindings where principal_id = $1`
 	if liveOnly {
 		query += ` and (valid_until is null or valid_until > now())`
@@ -396,7 +409,8 @@ func (s *Store) readBindings(ctx context.Context, principalID string, liveOnly b
 	for rows.Next() {
 		var binding Binding
 		if err := rows.Scan(&binding.Role, &binding.Scope.Site, &binding.Scope.Environment,
-			&binding.Scope.Team, &binding.ValidUntil); err != nil {
+			&binding.Scope.Team, &binding.Scope.TeamAny,
+			&binding.Scope.Owners, &binding.Scope.Tags, &binding.ValidUntil); err != nil {
 			return nil, err
 		}
 		bindings = append(bindings, binding)
@@ -611,7 +625,8 @@ func (s *Store) ReviewAccess(ctx context.Context, now time.Time) ([]ReviewedPrin
 	}
 
 	bindings, err := s.pool.Query(ctx, `
-		select principal_id, role, site, environment, valid_until, created_by, created_at
+		select principal_id, role, site, environment, coalesce(team_id::text, ''), team_any,
+		       owners, tags, valid_until, created_by, created_at
 		from role_bindings order by principal_id, role, site, environment`)
 	if err != nil {
 		return nil, err
@@ -620,6 +635,7 @@ func (s *Store) ReviewAccess(ctx context.Context, now time.Time) ([]ReviewedPrin
 		var principalID string
 		var binding ReviewedBinding
 		if err := bindings.Scan(&principalID, &binding.Role, &binding.Scope.Site, &binding.Scope.Environment,
+			&binding.Scope.Team, &binding.Scope.TeamAny, &binding.Scope.Owners, &binding.Scope.Tags,
 			&binding.ValidUntil, &binding.CreatedBy, &binding.CreatedAt); err != nil {
 			bindings.Close()
 			return nil, err

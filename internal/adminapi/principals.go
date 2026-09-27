@@ -567,9 +567,9 @@ func bindingRecord(role authz.Role, scope authz.Scope, validUntil *time.Time) ma
 // findBinding returns the binding of the role in the scope as the trail
 // describes it, or nil when the identity has none.
 func findBinding(bindings []authz.Binding, role authz.Role, scope authz.Scope) map[string]any {
-	wanted := authz.Scope{Site: orWildcard(scope.Site), Environment: orWildcard(scope.Environment)}
+	wanted := authz.Placement(orWildcard(scope.Site), orWildcard(scope.Environment)).String()
 	for _, binding := range bindings {
-		if binding.Role == role && binding.Scope == wanted {
+		if binding.Role == role && binding.Scope.String() == wanted {
 			return bindingRecord(binding.Role, binding.Scope, binding.ValidUntil)
 		}
 	}

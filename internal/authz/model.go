@@ -594,21 +594,110 @@ func AllRoles() []Role {
 type Scope struct {
 	Site        string `json:"site"`
 	Environment string `json:"environment"`
-	// Team is the group of hosts a target belongs to, where somebody has said
-	// which one.
-	Team string `json:"team,omitempty"`
+	// Team is the group of hosts a target belongs to. TeamAny says the binding
+	// is not narrowed by team at all; the two are exclusive, which the database
+	// holds to with a check constraint. A binding never leaves both unset: an
+	// omitted field must fail rather than widen what somebody may reach.
+	Team    string `json:"team,omitempty"`
+	TeamAny bool   `json:"team_any,omitempty"`
+	// Owners and Tags narrow the binding further. Within a list the values are
+	// alternatives; across the categories every one has to be satisfied.
+	Owners []string `json:"owners,omitempty"`
+	Tags   []string `json:"tags,omitempty"`
 }
 
 // Wildcard is the value meaning any scope.
 const Wildcard = "*"
 
-// Matches checks whether the permission's scope covers the target's scope. An
-// asterisk on the permission's side matches everything.
-func (s Scope) Matches(target Scope) bool {
-	if s.Team != "" {
-		return s.Team == target.Team
+// Placement is the scope of a binding that narrows by site and environment and
+// by nothing else. It says so in every category rather than leaving three of
+// them empty: an empty category matches nothing, so a binding built field by
+// field and missing one grants nothing at all - which is the safe way round,
+// and this is how a caller says it meant "any".
+func Placement(site, environment string) Scope {
+	return Scope{
+		Site: site, Environment: environment, TeamAny: true,
+		Owners: []string{Wildcard}, Tags: []string{Wildcard},
 	}
-	return matchesValue(s.Site, target.Site) && matchesValue(s.Environment, target.Environment)
+}
+
+// OfTeam is the scope of a binding that narrows to one team, and to nothing
+// else within it.
+func OfTeam(team string) Scope {
+	return Scope{
+		Site: Wildcard, Environment: Wildcard, Team: team,
+		Owners: []string{Wildcard}, Tags: []string{Wildcard},
+	}
+}
+
+// TargetOf is the other side: what a thing is, for a binding to be held
+// against. The facts, not a permission.
+func TargetOf(site, environment, team, owner string, tags []string) Scope {
+	target := Scope{Site: site, Environment: environment, Team: team, Tags: tags}
+	if owner != "" {
+		target.Owners = []string{owner}
+	}
+	return target
+}
+
+// Matches checks whether the permission's scope covers the target's scope.
+//
+// Every category has to be satisfied - site and environment and team and owner
+// and tag - and within a category the values are alternatives. An asterisk is
+// how a binding says it does not care about a category; an empty value is not,
+// because a field nobody filled in must not widen what a role reaches.
+func (s Scope) Matches(target Scope) bool {
+	return matchesValue(s.Site, target.Site) &&
+		matchesValue(s.Environment, target.Environment) &&
+		s.matchesTeam(target.Team) &&
+		matchesAny(s.Owners, target.Owners) &&
+		matchesAny(s.Tags, target.Tags)
+}
+
+// Covers says the binding narrows by nothing at all: every category is an
+// asterisk and the team is any. Such a binding needs no condition in SQL.
+func (s Scope) Covers() bool {
+	return s.Site == Wildcard && s.Environment == Wildcard && s.TeamAny &&
+		hasWildcard(s.Owners) && hasWildcard(s.Tags)
+}
+
+func hasWildcard(values []string) bool {
+	for _, value := range values {
+		if value == Wildcard {
+			return true
+		}
+	}
+	return false
+}
+
+// matchesTeam holds a binding to one team unless it says it covers any. The
+// team is a foreign key and has no value that means "all", which is why the
+// binding carries a separate word for it rather than an empty column.
+func (s Scope) matchesTeam(team string) bool {
+	if s.TeamAny {
+		return true
+	}
+	return s.Team != "" && s.Team == team
+}
+
+// matchesAny is one category of alternatives: the binding lists what it allows,
+// the target carries what it is. An asterisk in the list covers every value,
+// including a target that carries none - an unowned host is still a host.
+func matchesAny(granted, target []string) bool {
+	if len(granted) == 0 {
+		return false
+	}
+	for _, allowed := range granted {
+		if allowed == Wildcard {
+			return true
+		}
+		for _, value := range target {
+			if allowed == value {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func matchesValue(granted, target string) bool {
@@ -618,12 +707,23 @@ func matchesValue(granted, target string) bool {
 	return granted != "" && granted == target
 }
 
-// String returns a readable description of the scope.
+// String returns a readable description of the scope, and names every category:
+// what is not written down is what somebody later mistakes for "all".
 func (s Scope) String() string {
-	if s.Team != "" {
-		return "team=" + s.Team
+	team := Wildcard
+	if !s.TeamAny {
+		team = s.Team
 	}
-	return fmt.Sprintf("site=%s env=%s", orWildcard(s.Site), orWildcard(s.Environment))
+	return fmt.Sprintf("site=%s env=%s team=%s owner=%s tag=%s",
+		orWildcard(s.Site), orWildcard(s.Environment), orWildcard(team),
+		listOrWildcard(s.Owners), listOrWildcard(s.Tags))
+}
+
+func listOrWildcard(values []string) string {
+	if len(values) == 0 {
+		return "(none)"
+	}
+	return strings.Join(values, "|")
 }
 
 func orWildcard(value string) string {

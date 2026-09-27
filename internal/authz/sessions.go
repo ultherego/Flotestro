@@ -443,18 +443,31 @@ func issuerHost(issuer string) string {
 	return trimmed
 }
 
-// mergeBindings joins manual assignments with those following from groups, without duplicates.
+// mergeBindings joins manual assignments with those following from groups,
+// without duplicates. A scope carries lists now, so the key is written out
+// rather than the value itself being compared.
 func mergeBindings(manual, mapped []Binding) []Binding {
-	seen := map[Binding]bool{}
+	seen := map[string]bool{}
 	result := make([]Binding, 0, len(manual)+len(mapped))
 	for _, binding := range append(append([]Binding{}, manual...), mapped...) {
-		if seen[binding] {
+		key := bindingKey(binding)
+		if seen[key] {
 			continue
 		}
-		seen[binding] = true
+		seen[key] = true
 		result = append(result, binding)
 	}
 	return result
+}
+
+// bindingKey is what makes two bindings the same one: the role, the whole
+// scope, and the moment the grant stops.
+func bindingKey(binding Binding) string {
+	until := ""
+	if binding.ValidUntil != nil {
+		until = binding.ValidUntil.UTC().Format(time.RFC3339Nano)
+	}
+	return string(binding.Role) + "\x00" + binding.Scope.String() + "\x00" + until
 }
 
 func nullableTime(value time.Time) any {

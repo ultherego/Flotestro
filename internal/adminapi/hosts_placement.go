@@ -63,8 +63,8 @@ func (s *Server) handleSetHostPlacement(w http.ResponseWriter, r *http.Request) 
 	}
 	// The destination is authorised like the origin: the same permission, in the
 	// scope the host is about to enter.
-	target := authz.Scope{Site: site, Environment: environment, Team: host.TeamID}
-	if target != scope {
+	target := authz.TargetOf(site, environment, host.TeamID, host.Owner, host.Tags)
+	if target.String() != scope.String() {
 		if _, ok := s.authorize(w, r, authz.PermHostTagWrite, target, "host", hostID); !ok {
 			return
 		}

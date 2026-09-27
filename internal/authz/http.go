@@ -10,7 +10,12 @@ const principalKey contextKey = "flotestro.principal"
 
 // GlobalScope is the target of operations not assigned to any particular part
 // of the fleet.
-var GlobalScope = Scope{Site: Wildcard, Environment: Wildcard}
+// It is both a target - an operation belonging to no site - and the scope of a
+// binding that narrows by nothing, so it names every category.
+var GlobalScope = Scope{
+	Site: Wildcard, Environment: Wildcard, TeamAny: true,
+	Owners: []string{Wildcard}, Tags: []string{Wildcard},
+}
 
 // Anonymous is an identity without any permissions.
 var Anonymous = Principal{Subject: "anonymous", Kind: "user"}

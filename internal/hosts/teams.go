@@ -269,6 +269,30 @@ func isForeignKeyViolation(err error) bool {
 
 // ScopeSQL narrows host rows to the given scopes, teams included. It is authz.
 func ScopeSQL(scopes []authz.Scope, siteColumn, envColumn, teamColumn string, offset int) (string, []any) {
+	return scopeSQL(scopes, siteColumn, envColumn, teamColumn,
+		strings.Replace(teamColumn, "team_id", "owner", 1),
+		strings.Replace(teamColumn, "team_id", "tags", 1), offset)
+}
+
+// listSQL is one category of alternatives. An asterisk anywhere in the list
+// covers every value, so the category adds no condition at all.
+func listSQL(column string, values []string, array bool, offset int) (string, []any) {
+	if len(values) == 0 {
+		return "false", nil
+	}
+	for _, value := range values {
+		if value == authz.Wildcard {
+			return "", nil
+		}
+	}
+	if array {
+		return fmt.Sprintf("coalesce(%s, '{}') && $%d::text[]", column, offset+1), []any{values}
+	}
+	return fmt.Sprintf("coalesce(%s, '') = any($%d::text[])", column, offset+1), []any{values}
+}
+
+func scopeSQL(scopes []authz.Scope, siteColumn, envColumn, teamColumn,
+	ownerColumn, tagColumn string, offset int) (string, []any) {
 	if len(scopes) == 0 {
 		return "false", nil
 	}
@@ -277,18 +301,12 @@ func ScopeSQL(scopes []authz.Scope, siteColumn, envColumn, teamColumn string, of
 		args       []any
 	)
 	for _, scope := range scopes {
-		if scope.Team != "" {
-			args = append(args, scope.Team)
-			conditions = append(conditions,
-				fmt.Sprintf("%s = $%d::uuid", teamColumn, offset+len(args)))
-			continue
-		}
-		if scope.Site == authz.Wildcard && scope.Environment == authz.Wildcard {
-			// A global scope covers everything, so no further condition
-			// can narrow the answer.
+		if scope.Covers() {
+			// A scope that narrows by nothing covers everything, so no further
+			// condition can narrow the answer.
 			return "", nil
 		}
-		parts := make([]string, 0, 2)
+		parts := make([]string, 0, 5)
 		for _, dimension := range []struct {
 			column string
 			value  string
@@ -304,10 +322,39 @@ func ScopeSQL(scopes []authz.Scope, siteColumn, envColumn, teamColumn string, of
 				parts = append(parts, fmt.Sprintf("%s = $%d", dimension.column, offset+len(args)))
 			}
 		}
+		// Then the categories that were added later, in the order the rule is
+		// written: site and environment and team and owner and tag. The team is
+		// a foreign key with no value meaning "all", so the binding carries a
+		// separate word for that.
+		if !scope.TeamAny {
+			if scope.Team == "" {
+				parts = append(parts, "false")
+			} else {
+				args = append(args, scope.Team)
+				parts = append(parts, fmt.Sprintf("%s = $%d::uuid", teamColumn, offset+len(args)))
+			}
+		}
+		for _, list := range []struct {
+			column string
+			values []string
+			array  bool
+		}{{ownerColumn, scope.Owners, false}, {tagColumn, scope.Tags, true}} {
+			condition, used := listSQL(list.column, list.values, list.array, offset+len(args))
+			if condition == "" {
+				continue
+			}
+			args = append(args, used...)
+			parts = append(parts, condition)
+		}
 		if len(parts) == 0 {
 			return "", nil
 		}
-		conditions = append(conditions, "("+strings.Join(parts, " and ")+")")
+		// One part needs no brackets: this SQL is read in a slow query log.
+		if len(parts) == 1 {
+			conditions = append(conditions, parts[0])
+		} else {
+			conditions = append(conditions, "("+strings.Join(parts, " and ")+")")
+		}
 	}
 	return "(" + strings.Join(conditions, " or ") + ")", args
 }
@@ -320,5 +367,5 @@ func ScopeOf(host *Host) authz.Scope {
 		// empty scope is matched by none.
 		return authz.Scope{}
 	}
-	return authz.Scope{Site: host.Site, Environment: host.Environment, Team: host.TeamID}
+	return authz.TargetOf(host.Site, host.Environment, host.TeamID, host.Owner, host.Tags)
 }
