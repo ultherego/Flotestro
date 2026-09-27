@@ -1223,7 +1223,7 @@ prints the same fill of the buffer.
    [Service]
    Type=simple
    WorkingDirectory=/opt/flotestro-relay
-   ExecStart=/usr/bin/podman-compose -f compose.relay.yaml up
+   ExecStart=/usr/bin/podman-compose -f compose.relay.yaml up relay
    ExecStop=/usr/bin/podman-compose -f compose.relay.yaml down
    Restart=on-failure
    ```
