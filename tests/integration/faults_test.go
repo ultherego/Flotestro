@@ -31,22 +31,24 @@ const linkCutDuration = 60 * time.Second
 // can be deleted whole, whatever the state of the test.
 const nftTable = "flotestro_test"
 
-// controlPlaneUnit returns the systemd unit of the control plane or skips:
-// restarting the panel and filtering its traffic need root on the panel, and
-// only the lab script knows whether that is where the tests run.
-func controlPlaneUnit(t *testing.T) string {
+// restartPanel returns the command line that restarts the control plane, or
+// skips: restarting the panel and filtering its traffic need root on the panel,
+// and only the lab script knows whether that is where the tests run - and what
+// runs the panel there, a service or a container.
+func restartPanel(t *testing.T) []string {
 	t.Helper()
-	unit := os.Getenv("FLOTESTRO_TEST_CONTROL_PLANE_UNIT")
-	if unit == "" {
-		t.Skip("FLOTESTRO_TEST_CONTROL_PLANE_UNIT is not set; the fault tests run only as root on the panel")
+	command := os.Getenv("FLOTESTRO_TEST_CONTROL_PLANE_RESTART")
+	if command == "" {
+		t.Skip("FLOTESTRO_TEST_CONTROL_PLANE_RESTART is not set; the fault tests run only as root on the panel")
+	}
+	words := strings.Fields(command)
+	if len(words) == 0 {
+		t.Skipf("FLOTESTRO_TEST_CONTROL_PLANE_RESTART is blank")
 	}
 	if os.Geteuid() != 0 {
-		t.Skipf("not running as root (uid %d); the unit %s cannot be restarted", os.Geteuid(), unit)
+		t.Skipf("not running as root (uid %d); %q cannot be run", os.Geteuid(), command)
 	}
-	if output, err := exec.Command("systemctl", "is-active", unit).CombinedOutput(); err != nil {
-		t.Skipf("the unit %s is not active here: %s", unit, strings.TrimSpace(string(output)))
-	}
-	return unit
+	return words
 }
 
 // journalFollow orders a live preview that keeps the agent busy for the given
@@ -120,7 +122,7 @@ func assertReplayedFromTheJournal(t *testing.T, attempts []attemptView) {
 // TestThePanelRestartsWhileAJobRuns restarts the control plane with a preview
 // in flight on one host.
 func TestThePanelRestartsWhileAJobRuns(t *testing.T) {
-	unit := controlPlaneUnit(t)
+	restart := restartPanel(t)
 	h := newHarness(t)
 	ctx := context.Background()
 	pool := h.database(ctx)
@@ -148,8 +150,9 @@ func TestThePanelRestartsWhileAJobRuns(t *testing.T) {
 	}
 	h.awaitJobState(job.ID, 60*time.Second, "dispatched", "running")
 
-	if output, err := exec.Command("systemctl", "restart", unit).CombinedOutput(); err != nil {
-		t.Fatalf("restarting %s: %v: %s", unit, err, strings.TrimSpace(string(output)))
+	if output, err := exec.Command(restart[0], restart[1:]...).CombinedOutput(); err != nil {
+		t.Fatalf("restarting the panel with %q: %v: %s",
+			strings.Join(restart, " "), err, strings.TrimSpace(string(output)))
 	}
 	h.awaitHealthy(90 * time.Second)
 
@@ -222,7 +225,7 @@ func (c *linkCut) restore() {
 // TestAResultSurvivesALinkCut cuts the link between agent-debian and the
 // gateway while a preview runs on it, long enough for the agent to notice.
 func TestAResultSurvivesALinkCut(t *testing.T) {
-	controlPlaneUnit(t)
+	restartPanel(t)
 	nft := nftPath()
 	if nft == "" {
 		t.Skip("nft is not available on this machine")
