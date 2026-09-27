@@ -1041,20 +1041,22 @@ var responseSchemas = map[string]map[string]any{
 	},
 	"POST /api/v1/principals/{id}/roles": map[string]any{
 		"type": "object",
-		"properties": mergedProperties(bindingScope(), map[string]any{
+		"properties": map[string]any{
 			"principal_id": str(), "subject": str(),
 			"role":        map[string]any{"type": "string", "enum": roleNames()},
+			"scope":       scopeSchema(),
 			"valid_until": nullableTime(),
-		}),
+		},
 	},
 	"POST /api/v1/principals/{id}/team-roles": map[string]any{
 		"type": "object",
-		"properties": mergedProperties(bindingScope(), map[string]any{
+		"properties": map[string]any{
 			"principal_id": str(), "subject": str(),
 			"role":        map[string]any{"type": "string", "enum": roleNames()},
+			"scope":       scopeSchema(),
 			"team":        ref("Team"),
 			"valid_until": nullableTime(),
-		}),
+		},
 	},
 	"POST /api/v1/principals/{id}/tokens": map[string]any{
 		"type": "object",
@@ -1395,6 +1397,40 @@ func bindingScope() map[string]any {
 	return map[string]any{
 		"site":        map[string]any{"type": "string", "maxLength": hosts.MaxPlacementLength, "description": "The site the role is held over; '*' means every site."},
 		"environment": map[string]any{"type": "string", "maxLength": hosts.MaxPlacementLength, "description": "The environment the role is held over; '*' means every environment."},
+		"team_scope":  teamScopeSchema(),
+		"owners": map[string]any{"type": "array", "items": str(),
+			"description": "The owners the role is held over; a single '*' is every owner. Left out it is every owner; a list narrows to what it names."},
+		"tags": map[string]any{"type": "array", "items": str(),
+			"description": "The tags the role is held over; a host carrying any one of them is in scope. A single '*' is every tag; left out it is every tag."},
+	}
+}
+
+// teamScopeSchema is how a binding says what it does about teams. The team is a
+// foreign key and has no value meaning "all", so the mode is a word: a missing
+// field would be read as "any team" by whoever writes the next client.
+func teamScopeSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"mode": map[string]any{"type": "string", "enum": []string{"any", "exact"},
+				"description": "any: the role is not narrowed by team. exact: it is held over the one team named."},
+			"team_id": map[string]any{"type": "string",
+				"description": "The team, with mode exact and only then."},
+		},
+		"required": []string{"mode"},
+	}
+}
+
+// scopeSchema is a scope as it goes out on the wire, which is what its own
+// MarshalJSON writes rather than what its fields are called: every category is
+// there, and the team is a word.
+func scopeSchema() map[string]any {
+	return map[string]any{
+		"type":       "object",
+		"properties": bindingScope(),
+		"required":   []string{"site", "environment", "team_scope", "owners", "tags"},
+		"description": "What a role reaches: site and environment and team and owner and tag, " +
+			"all of which have to be satisfied. A category is widened only by an explicit '*'.",
 	}
 }
 
@@ -2008,7 +2044,9 @@ var requestSchemas = map[string]map[string]any{
 			"valid_until": map[string]any{"type": "string", "format": "date-time", "description": "An RFC 3339 moment the binding ends at; empty means it holds until revoked."},
 			"reason":      map[string]any{"type": "string", "description": "Kept in the audit trail."},
 		}),
-		"required": []string{"role"},
+		// The team is required because there is no shape of silence that could
+		// mean it safely: a grant that leaves it out is refused.
+		"required": []string{"role", "team_scope"},
 	},
 	"POST /api/v1/principals/{id}/team-roles": {
 		"type": "object",
@@ -2308,6 +2346,9 @@ func describeType(t reflect.Type, schemas map[string]any,
 		return map[string]any{"type": "string", "format": "date-time"}
 	case t == reflect.TypeOf(json.RawMessage{}):
 		return map[string]any{"description": "Free-form JSON."}
+	case t == reflect.TypeOf(authz.Scope{}):
+		// A scope writes itself, so its fields are not what a reader receives.
+		return scopeSchema()
 	}
 	switch t.Kind() {
 	case reflect.Pointer:

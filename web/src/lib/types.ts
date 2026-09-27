@@ -463,7 +463,7 @@ export type Whoami = {
   display_name?: string;
   kind: string;
   roles: string[];
-  bindings: { role: string; scope: { site: string; environment: string } }[];
+  bindings: { role: string; scope: Scope }[];
   /** The permissions in any scope; the interface hides unbacked sections with them. */
   permissions: string[];
 };
@@ -780,10 +780,23 @@ export type Principal = {
   tokens?: ApiToken[];
 };
 
+/**
+ * The scope of a binding as the server writes it: every category named, the team
+ * in words. A reader that had to infer "any team" from a missing field is a
+ * reader that would one day infer it wrongly, so the server never leaves it out.
+ */
+export type Scope = {
+  site: string;
+  environment: string;
+  team_scope: { mode: "any" | "exact"; team_id?: string };
+  owners: string[];
+  tags: string[];
+};
+
 /** A role in a scope; a binding with a validity ends by itself. */
 export type RoleBinding = {
   role: string;
-  scope: { site: string; environment: string };
+  scope: Scope;
   /** Absent means until revoked. */
   valid_until?: string;
 };

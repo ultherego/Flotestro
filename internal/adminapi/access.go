@@ -396,10 +396,9 @@ func (request teamBindingRequest) parse() (authz.Role, authz.Scope, *time.Time, 
 		return "", authz.Scope{}, nil, "invalid_binding",
 			errors.New("valid_until must be an RFC 3339 timestamp")
 	}
-	// The site and the environment stay at the wildcard the constraint gives a
-	// team binding: they say nothing there, and Scope.
-	return role, authz.Scope{Site: authz.Wildcard, Environment: authz.Wildcard, Team: team},
-		validUntil, "", nil
+	// A team binding narrows by the team and by nothing else, which OfTeam says
+	// in every category: the wildcards are not an absence, they are the answer.
+	return role, authz.OfTeam(team), validUntil, "", nil
 }
 
 // findTeamBinding returns the binding of the role over the team as the trail
@@ -457,6 +456,10 @@ func (s *Server) handleGrantTeamRole(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		s.fail(w, err)
+		return
+	}
+	if err := mayGrant(actor, role, scope); err != nil {
+		s.refuseEscalation(w, r, actor, "principal.role.grant", target.ID, err)
 		return
 	}
 	evidence, ok := s.requireStepUp(w, r, actor, reason, "principal.role.grant", "principal", target.ID)
@@ -526,7 +529,7 @@ func (s *Server) handleRevokeTeamRole(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, "invalid_team", "team must be a team identifier")
 		return
 	}
-	scope := authz.Scope{Site: authz.Wildcard, Environment: authz.Wildcard, Team: team}
+	scope := authz.OfTeam(team)
 	evidence, ok := s.requireStepUp(w, r, actor, reason, "principal.role.revoke", "principal", target.ID)
 	if !ok {
 		return

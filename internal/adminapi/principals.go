@@ -473,7 +473,7 @@ func (s *Server) handleRevokeRole(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	scope := authz.Scope{Site: strings.TrimSpace(request.Site), Environment: strings.TrimSpace(request.Environment)}
+	scope := authz.Placement(strings.TrimSpace(request.Site), strings.TrimSpace(request.Environment))
 	evidence, ok := s.requireStepUp(w, r, actor, reason, "principal.role.revoke", "principal", target.ID)
 	if !ok {
 		return
@@ -537,8 +537,109 @@ type roleRequest struct {
 	Role        string `json:"role"`
 	Site        string `json:"site"`
 	Environment string `json:"environment"`
+	// TeamScope says whether the binding is narrowed by team, in words rather
+	// than by the presence of a field: a request that leaves it out is refused,
+	// because a team omitted by accident would widen the grant in silence.
+	TeamScope *teamScopeRequest `json:"team_scope"`
+	// Owners and Tags narrow it further. A single "*" is every value; an empty
+	// list reaches none, which is what a caller gets for saying nothing.
+	Owners []string `json:"owners"`
+	Tags   []string `json:"tags"`
 	// ValidUntil is an RFC 3339 moment; empty means until revoked.
 	ValidUntil string `json:"valid_until"`
+}
+
+// teamScopeRequest is the one field that cannot say "any" by being empty: the
+// team is a foreign key, so the mode is spelled out.
+type teamScopeRequest struct {
+	// Mode is "any" or "exact".
+	Mode   string `json:"mode"`
+	TeamID string `json:"team_id"`
+}
+
+// scope reads the team, the owners and the tags, refusing every shape that
+// would leave the binding wider than the caller wrote down.
+func (request roleRequest) scope() (authz.Scope, error) {
+	scope := authz.Scope{
+		Site:        strings.TrimSpace(request.Site),
+		Environment: strings.TrimSpace(request.Environment),
+		Owners:      trimmedList(request.Owners),
+		Tags:        trimmedList(request.Tags),
+	}
+	if request.TeamScope == nil {
+		return scope, errors.New("team_scope is required: say {\"mode\":\"any\"} or " +
+			"{\"mode\":\"exact\",\"team_id\":\"...\"}")
+	}
+	team := strings.TrimSpace(request.TeamScope.TeamID)
+	switch strings.ToLower(strings.TrimSpace(request.TeamScope.Mode)) {
+	case "any":
+		if team != "" {
+			return scope, errors.New("team_scope mode any takes no team_id")
+		}
+		scope.TeamAny = true
+	case "exact":
+		if team == "" {
+			return scope, errors.New("team_scope mode exact needs a team_id")
+		}
+		scope.Team = team
+	default:
+		return scope, errors.New("team_scope mode has to be any or exact")
+	}
+	if len(scope.Owners) == 0 {
+		scope.Owners = []string{authz.Wildcard}
+	}
+	if len(scope.Tags) == 0 {
+		scope.Tags = []string{authz.Wildcard}
+	}
+	return scope, nil
+}
+
+// trimmedList drops the blanks a hand-written list collects.
+func trimmedList(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+// mayGrant refuses a binding wider than the one the acting identity holds
+// itself. It reads every permission the role carries and asks whether the actor
+// has that permission in a scope containing the one being granted: the
+// comparison is on what a binding reaches, not on columns that happen to match,
+// so "any team" cannot be handed out by somebody bound to one team.
+func mayGrant(actor authz.Principal, role authz.Role, scope authz.Scope) error {
+	for _, permission := range role.Permissions() {
+		if !holdsInScope(actor, permission, scope) {
+			return errors.New("the role " + string(role) + " carries " + string(permission) +
+				", which you do not hold in " + scope.String())
+		}
+	}
+	return nil
+}
+
+func holdsInScope(actor authz.Principal, permission authz.Permission, scope authz.Scope) bool {
+	for _, own := range actor.ScopesFor(permission) {
+		if own.Contains(scope) {
+			return true
+		}
+	}
+	return false
+}
+
+// refuseEscalation answers the attempt and records it: somebody trying to widen
+// access beyond their own is worth reading in the trail afterwards.
+func (s *Server) refuseEscalation(w http.ResponseWriter, r *http.Request,
+	actor authz.Principal, action, target string, err error) {
+	s.audit.Record(r.Context(), audit.Event{
+		ActorType: audit.ActorUser, ActorID: actor.Subject,
+		Action: action, TargetType: "principal", TargetID: target,
+		RequestID: requestIDOf(r), Outcome: audit.OutcomeDenied,
+		Detail: map[string]any{"reason": "scope_escalation", "message": err.Error()},
+	})
+	problem(w, http.StatusForbidden, "scope_escalation", err.Error())
 }
 
 // parse checks the role and reads the validity.
@@ -547,7 +648,10 @@ func (request roleRequest) parse() (authz.Role, authz.Scope, *time.Time, error) 
 	if !authz.KnownRole(role) {
 		return "", authz.Scope{}, nil, errors.New("unknown role " + request.Role)
 	}
-	scope := authz.Scope{Site: strings.TrimSpace(request.Site), Environment: strings.TrimSpace(request.Environment)}
+	scope, err := request.scope()
+	if err != nil {
+		return "", authz.Scope{}, nil, err
+	}
 	validUntil, err := parseTimeParam(strings.TrimSpace(request.ValidUntil))
 	if err != nil {
 		return "", authz.Scope{}, nil, errors.New("valid_until must be an RFC 3339 timestamp")
@@ -567,20 +671,28 @@ func bindingRecord(role authz.Role, scope authz.Scope, validUntil *time.Time) ma
 // findBinding returns the binding of the role in the scope as the trail
 // describes it, or nil when the identity has none.
 func findBinding(bindings []authz.Binding, role authz.Role, scope authz.Scope) map[string]any {
-	wanted := authz.Placement(orWildcard(scope.Site), orWildcard(scope.Environment)).String()
+	// A binding is one row per role, site and environment; the owners and the tags
+	// live on that row. So the row is found by its placement and reported with the
+	// scope it actually carries, which is what a grant narrowed by owner replaced.
 	for _, binding := range bindings {
-		if binding.Role == role && binding.Scope.String() == wanted {
+		if binding.Role != role || !binding.Scope.TeamAny {
+			continue
+		}
+		if samePlacement(binding.Scope.Site, scope.Site) &&
+			samePlacement(binding.Scope.Environment, scope.Environment) {
 			return bindingRecord(binding.Role, binding.Scope, binding.ValidUntil)
 		}
 	}
 	return nil
 }
 
-func orWildcard(value string) string {
-	if value == "" {
-		return authz.Wildcard
+// samePlacement compares one part of a placement, where an empty request and a
+// stored asterisk mean the same thing.
+func samePlacement(stored, requested string) bool {
+	if requested == "" {
+		return stored == authz.Wildcard || stored == ""
 	}
-	return value
+	return stored == requested
 }
 
 type grantRoleRequest struct {
@@ -607,6 +719,10 @@ func (s *Server) handleGrantRole(w http.ResponseWriter, r *http.Request) {
 	role, scope, validUntil, err := request.parse()
 	if err != nil {
 		problem(w, http.StatusBadRequest, "invalid_binding", err.Error())
+		return
+	}
+	if err := mayGrant(actor, role, scope); err != nil {
+		s.refuseEscalation(w, r, actor, "principal.role.grant", target.ID, err)
 		return
 	}
 	evidence, ok := s.requireStepUp(w, r, actor, reason, "principal.role.grant", "principal", target.ID)
@@ -691,6 +807,10 @@ func (s *Server) handleCreatePrincipal(w http.ResponseWriter, r *http.Request) {
 		role, scope, validUntil, err := binding.parse()
 		if err != nil {
 			problem(w, http.StatusBadRequest, "invalid_binding", err.Error())
+			return
+		}
+		if err := mayGrant(actor, role, scope); err != nil {
+			s.refuseEscalation(w, r, actor, "principal.create", request.Subject, err)
 			return
 		}
 		bindings = append(bindings, parsedBinding{role: role, scope: scope, validUntil: validUntil})

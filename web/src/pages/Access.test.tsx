@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { expiresSoon, grantRequest, matchesIdentity, permissionMatrix, scopeKind, tabFromParam } from "./Access";
+import { expiresSoon, grantRequest, matchesIdentity, permissionMatrix, scopeKind, scopeTeam, tabFromParam } from "./Access";
 import { exportFileName, targetLink, toLocalInput } from "./Audit";
 
 /* The access screen decides a few things without the server: which tab
@@ -102,14 +102,22 @@ describe("grantRequest", () => {
     validUntil: "", reason: "  on-call rotation for the quarter  ",
   };
 
-  it("sends a site binding to the role route, with no team in the body", () => {
+  it("sends a site binding to the role route, saying in words that it covers any team", () => {
     const request = grantRequest(principal, "site", filled);
     expect(request.path).toBe(`/api/v1/principals/${principal}/roles`);
     expect(request.body).toEqual({
       role: "operator", site: "lab", environment: "test",
+      team_scope: { mode: "any" }, owners: [], tags: [],
       valid_until: "", reason: "on-call rotation for the quarter",
     });
     expect(request.body).not.toHaveProperty("team");
+  });
+
+  it("narrows by owner and by tag, and drops what a hand-written list collects", () => {
+    const request = grantRequest(principal, "site",
+      { ...filled, owners: " alice , bob ,", tags: "db" });
+    expect(request.body.owners).toEqual(["alice", "bob"]);
+    expect(request.body.tags).toEqual(["db"]);
   });
 
   it("sends a team binding to the team-roles route, with no site or environment in the body", () => {
@@ -137,13 +145,15 @@ describe("grantRequest", () => {
 });
 
 describe("scopeKind", () => {
-  it("reads a binding with a team as a team binding", () => {
-    expect(scopeKind({ site: "*", environment: "*", team })).toBe("team");
+  it("reads a binding bound to one team as a team binding", () => {
+    expect(scopeKind({ site: "*", environment: "*", team_scope: { mode: "exact", team_id: team } })).toBe("team");
+    expect(scopeTeam({ site: "*", environment: "*", team_scope: { mode: "exact", team_id: team } })).toBe(team);
   });
 
-  it("reads a binding without one as a site binding, so a team is never shown as the whole fleet", () => {
-    expect(scopeKind({ site: "*", environment: "*" })).toBe("site");
-    expect(scopeKind({ site: "lab", environment: "prod" })).toBe("site");
+  it("reads one covering any team as a site binding, so a team is never shown as the whole fleet", () => {
+    expect(scopeKind({ site: "*", environment: "*", team_scope: { mode: "any" } })).toBe("site");
+    expect(scopeKind({ site: "lab", environment: "prod", team_scope: { mode: "any" } })).toBe("site");
     expect(scopeKind(undefined)).toBe("site");
+    expect(scopeTeam({ site: "*", environment: "*", team_scope: { mode: "any" } })).toBe("");
   });
 });

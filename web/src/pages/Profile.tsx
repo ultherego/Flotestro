@@ -34,6 +34,18 @@ type Identity = Whoami & { id?: string };
 
 const WHOAMI_STALE = 5 * 60 * 1000;
 
+/**
+ * One category of alternatives as the profile shows it. An asterisk is every
+ * value; a list is what the binding reaches; no value at all reaches nothing,
+ * and that is said rather than left as an empty cell.
+ */
+function ScopeList({ values, every }: { values: string[] | undefined; every: string }) {
+  const t = useT();
+  if (!values || values.includes("*")) return <span className="source">{every}</span>;
+  if (values.length === 0) return <span className="badge warn">{t("nothing")}</span>;
+  return <span className="mono">{values.join(", ")}</span>;
+}
+
 /** A scope part that names no site or environment: an asterisk, as the server keeps it, or nothing. */
 function anyScope(value: string | undefined): boolean {
   return !value || value === "*";
@@ -158,7 +170,7 @@ export function Profile({ theme, setTheme }: {
         <Card
           className="span-6"
           title={t("Bindings")}
-          description={t("Each role with the site and the environment it holds in.")}
+          description={t("Each role with everything it is narrowed by. A category shown as any is one the binding does not narrow; a category naming values is one it does, and the role reaches nothing outside them.")}
           flush
         >
           {!me ? (
@@ -168,7 +180,11 @@ export function Profile({ theme, setTheme }: {
           ) : (
             <table>
               <thead>
-                <tr><th>{t("Role")}</th><th>{t("Site")}</th><th>{t("Environment")}</th><th>{t("Valid until")}</th></tr>
+                <tr>
+                  <th>{t("Role")}</th><th>{t("Site")}</th><th>{t("Environment")}</th>
+                  <th>{t("Team")}</th><th>{t("Owners")}</th><th>{t("Tags")}</th>
+                  <th>{t("Valid until")}</th>
+                </tr>
               </thead>
               <tbody>
                 {me.bindings.map((binding, index) => {
@@ -178,6 +194,11 @@ export function Profile({ theme, setTheme }: {
                       <td>{binding.role}</td>
                       <td>{anyScope(binding.scope.site) ? <span className="source">{t("any site")}</span> : <span className="mono">{binding.scope.site}</span>}</td>
                       <td>{anyScope(binding.scope.environment) ? <span className="source">{t("any environment")}</span> : <span className="mono">{binding.scope.environment}</span>}</td>
+                      <td>{binding.scope.team_scope?.mode === "exact"
+                        ? <span className="mono">{binding.scope.team_scope.team_id}</span>
+                        : <span className="source">{t("any team")}</span>}</td>
+                      <td><ScopeList values={binding.scope.owners} every={t("any owner")} /></td>
+                      <td><ScopeList values={binding.scope.tags} every={t("any tag")} /></td>
                       <td>{until ? <Time value={until} /> : <span className="source">{t("until revoked")}</span>}</td>
                     </tr>
                   );

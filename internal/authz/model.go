@@ -2,6 +2,7 @@
 package authz
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -670,6 +671,58 @@ func hasWildcard(values []string) bool {
 	return false
 }
 
+// Contains says whether the scope is at least as wide as another one, category
+// by category. It is the question a grant asks - nobody hands out access they do
+// not hold - and it compares the effective scope rather than equal columns: a
+// binding that says "any team" must not pass for one that names a team.
+func (s Scope) Contains(other Scope) bool {
+	return containsValue(s.Site, other.Site) &&
+		containsValue(s.Environment, other.Environment) &&
+		s.containsTeam(other) &&
+		containsAll(s.Owners, other.Owners) &&
+		containsAll(s.Tags, other.Tags)
+}
+
+// containsTeam: only a binding that covers any team can hand out any team.
+func (s Scope) containsTeam(other Scope) bool {
+	if s.TeamAny {
+		return true
+	}
+	return !other.TeamAny && s.Team != "" && s.Team == other.Team
+}
+
+// containsValue is one single-valued category. An empty value on the narrow side
+// reaches nothing, so anything contains it.
+func containsValue(granted, other string) bool {
+	if granted == Wildcard || other == "" {
+		return true
+	}
+	return granted == other
+}
+
+// containsAll is one category of alternatives: every value the narrow side lists
+// has to be one the wide side lists, and only a wildcard contains a wildcard.
+func containsAll(granted, other []string) bool {
+	if hasWildcard(granted) {
+		return true
+	}
+	for _, value := range other {
+		if value == Wildcard || !contains(granted, value) {
+			return false
+		}
+	}
+	return true
+}
+
+func contains(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
+}
+
 // matchesTeam holds a binding to one team unless it says it covers any. The
 // team is a foreign key and has no value that means "all", which is why the
 // binding carries a separate word for it rather than an empty column.
@@ -731,6 +784,39 @@ func orWildcard(value string) string {
 		return Wildcard
 	}
 	return value
+}
+
+// MarshalJSON writes every category, always. A scope that answered with three
+// fields and left two out would be read as "the rest is any", which is the one
+// reading this design refuses; the team comes out as a word for the same reason.
+func (s Scope) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Site        string         `json:"site"`
+		Environment string         `json:"environment"`
+		TeamScope   map[string]any `json:"team_scope"`
+		Owners      []string       `json:"owners"`
+		Tags        []string       `json:"tags"`
+	}{
+		Site: s.Site, Environment: s.Environment, TeamScope: s.TeamScope(),
+		Owners: orEmpty(s.Owners), Tags: orEmpty(s.Tags),
+	})
+}
+
+func orEmpty(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return values
+}
+
+// TeamScope is how a scope answers about its team: a word, never the presence
+// or absence of a field. A reader that has to infer "any" from a missing value
+// is a reader that will one day infer it wrongly.
+func (s Scope) TeamScope() map[string]any {
+	if s.TeamAny {
+		return map[string]any{"mode": "any"}
+	}
+	return map[string]any{"mode": "exact", "team_id": s.Team}
 }
 
 // Binding is a role assigned within a scope.

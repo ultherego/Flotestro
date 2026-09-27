@@ -17,33 +17,71 @@ function anyScope(value: string | undefined): boolean {
 }
 
 /**
- * The scope of a binding as the server sends it.
+ * The scope of a binding as the server sends it. Every category is there,
+ * including the team, which is a word and not a field that may be missing.
  */
-export type BindingScope = { site?: string; environment?: string; team?: string };
+export type BindingScope = {
+  site?: string;
+  environment?: string;
+  team_scope?: { mode?: string; team_id?: string };
+  owners?: string[];
+  tags?: string[];
+};
+
+/** The team a binding is bound to, or nothing when it covers any team. */
+export function scopeTeam(scope: BindingScope | undefined): string {
+  return scope?.team_scope?.mode === "exact" ? scope.team_scope.team_id ?? "" : "";
+}
 
 /** Which vocabulary a binding is written in. The two never mix. */
 export function scopeKind(scope: BindingScope | undefined): GrantScope {
-  return scope?.team ? "team" : "site";
+  return scopeTeam(scope) ? "team" : "site";
+}
+
+/** A list category that names every value: a lone asterisk. */
+function anyList(values: string[] | undefined): boolean {
+  return !values || values.length === 0 || values.includes("*");
 }
 
 /**
- * A scope in words.
+ * A scope in words: the effective one, with every category the binding narrows
+ * spelled out. A category left out of the sentence is a category somebody later
+ * reads as "all", so the ones that narrow are always named.
  */
-function ScopeText({ site, environment, team, teamName }: { site?: string; environment?: string; team?: string; teamName?: string }) {
+export function ScopeText({ scope, teamName }: { scope: BindingScope | undefined; teamName?: string }) {
   const t = useT();
+  const team = scopeTeam(scope);
+  const owners = anyList(scope?.owners) ? null : (scope?.owners ?? []).join(", ");
+  const tags = anyList(scope?.tags) ? null : (scope?.tags ?? []).join(", ");
+  // A binding that reaches nothing is not the same as one that reaches the
+  // fleet, and the difference has to be visible at a glance.
+  const empty = (scope?.owners?.length === 0) || (scope?.tags?.length === 0);
+  const narrowing = (
+    <>
+      {owners && <> · {t("owner")} <span className="mono">{owners}</span></>}
+      {tags && <> · {t("tag")} <span className="mono">{tags}</span></>}
+      {empty && <> · <span className="badge warn">{t("reaches nothing")}</span></>}
+    </>
+  );
   if (team) {
     return (
-      <span className="badge" title={t("The role reaches the hosts of this team wherever they stand, and nothing else. It follows the team as hosts are placed in it and taken out.")}>
-        {t("team")} {teamName || team}
+      <span>
+        <span className="badge" title={t("The role reaches the hosts of this team wherever they stand, and nothing else. It follows the team as hosts are placed in it and taken out.")}>
+          {t("team")} {teamName || team}
+        </span>
+        {narrowing}
       </span>
     );
   }
-  if (anyScope(site) && anyScope(environment)) return <span className="badge warn">{t("whole fleet")}</span>;
+  if (anyScope(scope?.site) && anyScope(scope?.environment) && !owners && !tags && !empty) {
+    return <span className="badge warn">{t("whole fleet")}</span>;
+  }
   return (
     <span>
-      {anyScope(site) ? t("any site") : <>{t("site")} <span className="mono">{site}</span></>}
+      {anyScope(scope?.site) ? t("any site") : <>{t("site")} <span className="mono">{scope?.site}</span></>}
       {" · "}
-      {anyScope(environment) ? t("any environment") : <>{t("environment")} <span className="mono">{environment}</span></>}
+      {anyScope(scope?.environment) ? t("any environment") : <>{t("environment")} <span className="mono">{scope?.environment}</span></>}
+      {narrowing}
     </span>
   );
 }
@@ -57,7 +95,8 @@ export type GrantScope = "site" | "team";
  * The request one grant makes: the route and the whole body.
  */
 export function grantRequest(principalID: string, scope: GrantScope, fields: {
-  role: string; site: string; environment: string; team: string; validUntil: string; reason: string;
+  role: string; site: string; environment: string; team: string;
+  owners?: string; tags?: string; validUntil: string; reason: string;
 }): { path: string; body: Record<string, unknown> } {
   const common = {
     role: fields.role,
@@ -70,10 +109,22 @@ export function grantRequest(principalID: string, scope: GrantScope, fields: {
       body: { ...common, team: fields.team.trim() },
     };
   }
+  // The team is said in words even when the binding does not narrow by team: the
+  // server refuses a grant that leaves it out, because a team omitted by accident
+  // would widen the grant in silence.
   return {
     path: `/api/v1/principals/${principalID}/roles`,
-    body: { ...common, site: fields.site.trim(), environment: fields.environment.trim() },
+    body: {
+      ...common, site: fields.site.trim(), environment: fields.environment.trim(),
+      team_scope: { mode: "any" },
+      owners: valueList(fields.owners), tags: valueList(fields.tags),
+    },
   };
+}
+
+/** A comma-separated field as the list the server reads. */
+export function valueList(value: string | undefined): string[] {
+  return (value ?? "").split(",").map((part) => part.trim()).filter((part) => part !== "");
 }
 
 const ROLES = [
@@ -264,7 +315,7 @@ function Mappings() {
                   <tr key={mapping.id}>
                     <td className="mono">{mapping.group_name}</td>
                     <td>{mapping.role}</td>
-                    <td className="source"><ScopeText site={mapping.site} environment={mapping.environment} /></td>
+                    <td className="source"><ScopeText scope={{ site: mapping.site, environment: mapping.environment }} /></td>
                     <td className="source">{mapping.created_by}</td>
                     <td><Time value={mapping.created_at} /></td>
                     <td className="actions-cell">
@@ -483,13 +534,19 @@ function Identities({ initialSearch }: { initialSearch: string }) {
   // Which vocabulary the binding is written in.
   const [grantScopeKind, setGrantScopeKind] = useState<GrantScope>("site");
   const [grantTeam, setGrantTeam] = useState("");
+  // The two categories a binding narrows by beyond its placement. Empty means
+  // every value, which is the one place the panel writes the asterisk for the
+  // operator; a list narrows to what it names.
+  const [grantOwners, setGrantOwners] = useState("");
+  const [grantTags, setGrantTags] = useState("");
   const [grantUntil, setGrantUntil] = useState("");
   const [grantReason, setGrantReason] = useState("");
   const grantMutation = useMutation({
     mutationFn: () => {
       const request = grantRequest(grant?.id ?? "", grantScopeKind, {
         role: grantRole, site: grantSite, environment: grantEnvironment,
-        team: grantTeam, validUntil: grantUntil, reason: grantReason,
+        team: grantTeam, owners: grantOwners, tags: grantTags,
+        validUntil: grantUntil, reason: grantReason,
       });
       return api.post(request.path, request.body);
     },
@@ -507,6 +564,7 @@ function Identities({ initialSearch }: { initialSearch: string }) {
     // The form opens on the vocabulary most bindings are written in; the
     // team of a previous grant must not ride along into the next one.
     setGrantScopeKind("site"); setGrantTeam("");
+    setGrantOwners(""); setGrantTags("");
     setGrant({ id: principal.id, subject: principal.subject });
   };
   const openPending = (next: Pending) => { setGrant(null); setCreating(false); setPending(next); };
@@ -600,12 +658,13 @@ function Identities({ initialSearch }: { initialSearch: string }) {
                           // the site and the environment at the asterisk,
                           // and as a site scope it would read as the whole.
                           const scope = binding.scope as BindingScope;
+                          const team = scopeTeam(scope);
                           return (
                           <div key={index} className="row-actions" style={{ justifyContent: "flex-start" }} data-testid="binding">
                             <span>
                               {binding.role}
                               <span className="source">
-                                {" "}<ScopeText site={scope.site} environment={scope.environment} team={scope.team} teamName={scope.team ? teamName(scope.team) : undefined} />
+                                {" "}<ScopeText scope={scope} teamName={team ? teamName(team) : undefined} />
                               </span>
                               {/* A binding with a date ends by itself; one past its date
                                   stays on the record and grants nothing. */}
@@ -619,10 +678,10 @@ function Identities({ initialSearch }: { initialSearch: string }) {
                               <button
                                 className="secondary"
                                 disabled={revokeRole.isPending || revokeTeamRole.isPending}
-                                onClick={() => openPending(scope.team
+                                onClick={() => openPending(team
                                   ? {
                                       kind: "revoke-team-role", principal, role: binding.role,
-                                      team: scope.team, teamName: teamName(scope.team),
+                                      team, teamName: teamName(team),
                                     }
                                   : {
                                       kind: "revoke-role", principal, role: binding.role,
@@ -758,6 +817,20 @@ function Identities({ initialSearch }: { initialSearch: string }) {
                   </Field>
                   <Field label={t("Environment (empty = all)")}>
                     <input value={grantEnvironment} onChange={(e) => setGrantEnvironment(e.target.value)} placeholder="test" />
+                  </Field>
+                  <Field
+                    label={t("Owners (empty = all)")}
+                    hint={t("A comma-separated list. The role then reaches only the hosts one of these people owns.")}
+                  >
+                    <input value={grantOwners} onChange={(e) => setGrantOwners(e.target.value)}
+                           placeholder={t("e.g. alice, bob")} data-testid="grant-owners" />
+                  </Field>
+                  <Field
+                    label={t("Tags (empty = all)")}
+                    hint={t("A comma-separated list. The role reaches a host carrying any one of these tags; a host carrying none of them is out of the scope.")}
+                  >
+                    <input value={grantTags} onChange={(e) => setGrantTags(e.target.value)}
+                           placeholder={t("e.g. db, web")} data-testid="grant-tags" />
                   </Field>
                 </>
               ) : (
@@ -1222,10 +1295,11 @@ function ReviewRow({ principal }: { principal: ReviewedPrincipal }) {
           ? <span className="source">{t("no direct assignments; roles may come from group mappings")}</span>
           : principal.bindings.map((binding, index) => {
             const scope = binding.scope as BindingScope;
+            const team = scopeTeam(scope);
             return (
               <div key={index}>
                 {binding.role}
-                <span className="source"> <ScopeText site={scope.site} environment={scope.environment} team={scope.team} teamName={scope.team ? teamName(scope.team) : undefined} /></span>
+                <span className="source"> <ScopeText scope={scope} teamName={team ? teamName(team) : undefined} /></span>
                 {binding.expired
                   ? <> <span className="badge unknown">{t("expired")}</span></>
                   : binding.valid_until && <span className="source"> · {t("until")} <Time value={binding.valid_until} /></span>}
