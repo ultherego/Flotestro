@@ -19,12 +19,15 @@ Not in the database, and therefore part of every backup set:
   that the background rewrap has not reached), `bootstrap-token` (first start only).
   A key kept as a systemd credential (`FLOTESTRO_SECRETS_KEY_CREDENTIAL`) lives wherever the
   unit's `LoadCredential=` points, and that place is part of the backup set instead.
-- `/etc/flotestro/control-plane.env`.
+- The settings and the secrets of the deployment: `./.env` beside `docker/compose.yaml`, the
+  files under `./secrets/`, and any secret mounted into the container from elsewhere. They are
+  not in either half of the pair and an installation cannot be started without them.
 - The package repositories: the panel only knows `FLOTESTRO_PACKAGE_REPOSITORY_URL`; the
   signed apt, dnf and pacman repositories from `packaging/sign-repo.sh` live wherever you serve them.
 
-There is no built-in dump or restore: `flotestro-control-plane` has flags only, and no API
-route exports the database. Backups are taken with the PostgreSQL tools.
+No API route exports the database and there is no backup button in the panel. The pair is taken
+and put back by the `admin-tools` image, behind the profiles `tools` and `restore`, which is why
+the host that runs the panel needs no PostgreSQL client of its own.
 
 ## Signals
 
@@ -147,25 +150,31 @@ scales a second control plane with a state volume of its own against one databas
 
 ### Backup (routine)
 
-1. `pg_dump --format=custom --no-owner --no-privileges --file=flotestro-$(date -u +%Y%m%dT%H%MZ).dump "$FLOTESTRO_DATABASE_URL"`
-   from a host that can reach the database; the custom format allows a selective restore.
-2. `tar -C / -czf flotestro-state-$(date -u +%Y%m%dT%H%MZ).tgz var/lib/flotestro etc/flotestro/control-plane.env`
-   (adjust for a non-default `FLOTESTRO_STATE_DIR`), stored with the same care as the CA key.
+1. `docker compose --profile tools run --rm admin-tools backup`, with the control plane stopped
+   or at least with the rotation of the CA and of the key encryption keys held for the duration.
+   It writes `./backups/<backup-id>/`: `database.dump`, `state.tar.zst`, a `manifest.json` that
+   ties the two halves to one installation and one image, and `SHA256SUMS`. Both archives belong
+   on encrypted storage, away from the host they were taken from. "Taking the pair" in
+   `docker/README.md` is the reference.
+2. Keep `./.env` and `./secrets/` with them, off the host. They are not in the pair, and the CA
+   key is no use without the DSN that reaches the database it belongs to.
 3. Export the audit trail alongside: `GET /api/v1/audit/export` (filters `since`, `until`,
    `actor`, `action`, `outcome`, `target_type`, `target_id`) returns NDJSON with a `prev_sha256`
    per line and a trailer `{"count": N, "sha256_chain": "<hex>"}`. The export itself is audited as `audit.export`.
 
 ### Restore (drill or incident)
 
-1. `systemctl stop flotestro-control-plane`. Agents keep their sessions closed and retry the
-   gateway with backoff; a relay buffers its site's messages in memory up to `buffer_max_bytes`.
+1. `docker compose stop control-plane`, on every instance the installation runs. Agents keep
+   their sessions closed and retry the gateway with backoff; a relay buffers its site's messages
+   in memory up to `buffer_max_bytes`.
 2. Restore the state directory first, permissions intact (`ca.key`, `keys/*.key` and
    `secrets.key` are 0600, owned by the service user): `tar -C / -xzf flotestro-state-<stamp>.tgz`.
 3. Create an empty database and restore into it:
    `createdb flotestro && pg_restore --no-owner --no-privileges --dbname=flotestro flotestro-<stamp>.dump`.
    A restore over a live schema is not needed; the service applies any migration newer than the
    dump at start, under the advisory lock `0x464c4f54`, one file per transaction.
-4. Point `FLOTESTRO_DATABASE_URL` at the restored database and `systemctl start flotestro-control-plane`.
+4. Point the DSN in `./secrets/database-url` at the restored database, bring the schema forward
+   with `docker compose run --rm migrate`, then `docker compose up -d control-plane`.
    Watch for "the database schema is current" and, if the dump predates a release, one line per
    migration, then "the cryptographic state of the installation was verified" with the
    `installation_id` of the dump. A dump from before the upgrade restored next to its own state
