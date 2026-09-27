@@ -10,11 +10,15 @@ are involved:
   the site's agents send while the link to the centre is down, and it survives a restart of
   `flotestro-relay` - the index is rebuilt from the segments and a record damaged at the end of
   the last one is cut off without touching the records before it.
-- The **state directory** (`state_dir`, default `/var/lib/flotestro-relay`, the only writable
-  path of the unit) holds that spool, the identity (`identity/current -> generations/<serial>/`
+- The **state directory** (`state_dir`, default `/var/lib/flotestro-relay`, the volume
+  `flotestro-relay-state` and the only writable path of the container) holds that spool, the identity (`identity/current -> generations/<serial>/`
   with `agent.key`, `agent.pem`, `trust-bundle.pem`), `status.json` and the renewal throttle
   file. A full filesystem there stops certificate renewal and the spool alike: nothing is
   appended below `min_free_bytes` (256 MiB by default), whatever the class.
+
+The relay runs as a container from `docker/compose.relay.yaml`, so its own tool is reached
+through it: `docker compose -f compose.relay.yaml exec relay flotestro-relayctl <command>`. It is
+written out where the whole command matters and shortened to `flotestro-relayctl <command>` below.
 
 ## Signals
 
@@ -125,7 +129,7 @@ code `lease_expired`.
 
 ### Buffer full (link to the centre down)
 
-1. Confirm: `sudo -u flotestro-relay flotestro-relayctl status` (`Centre:`, `Buffer:`), then
+1. Confirm: `flotestro-relayctl status` (`Centre:`, `Buffer:`), then
    `flotestro-relayctl diagnose` for the `dns.*`, `tls.*` and `upstream` checks of `upstream.gateway_urls`.
 2. Restore the link. Restarting the relay frees nothing - the spool is on disk and comes back
    with the process - and it costs the site every open session, so restart only for a reason of
@@ -138,18 +142,22 @@ code `lease_expired`.
    targets in `unknown` with `error_code` `lease_expired` (`GET /api/v1/campaigns/{id}/targets`);
    follow the guide before repeating a destructive step.
 5. If drops occurred, raise `buffer_max_bytes` (bytes, at most `4294967296`; `0` buffers nothing)
-   in `/etc/flotestro/relay.yaml`, check with `flotestro-relay config validate` and
-   `flotestro-relay config show`, then `systemctl restart flotestro-relay` while the buffer is
-   empty. The unit runs under `MemoryHigh=512M` and `MemoryMax=768M`; a larger buffer needs the
-   unit changed too.
+   in `relay.yaml` beside `compose.relay.yaml`, check it with
+   `docker compose -f compose.relay.yaml run --rm relay config validate` and `... config show`,
+   then `docker compose -f compose.relay.yaml restart relay` while the buffer is empty. The
+   shipped file sets no memory limit on the container; a deployment that adds one has to raise it
+   too, because the buffer is held in the relay's own address space.
 
 ### State directory full
 
-1. `df /var/lib/flotestro-relay`; `flotestro-relayctl diagnose` reports `state_dir_low_space` or
+1. `df` on the filesystem that holds the `flotestro-relay-state` volume;
+   `docker compose -f compose.relay.yaml exec relay flotestro-relayctl diagnose` reports
+   `state_dir_low_space` or
    `state_dir_unwritable`. The relay writes nothing large there; something else took the space.
 2. Free the filesystem without touching `identity/` (`generations/` keeps two entries by itself).
-3. `flotestro-relayctl renew` if the certificate has under a day left (`identity_expiring`); once
-   per 10 minutes, and the running relay switches only at `systemctl restart flotestro-relay`.
+3. `docker compose -f compose.relay.yaml exec relay flotestro-relayctl renew` if the certificate
+   has under a day left (`identity_expiring`); once per 10 minutes, and the running relay switches
+   only at `docker compose -f compose.relay.yaml restart relay`.
 
 ### Re-enrollment (identity lost or compromised)
 
@@ -158,9 +166,10 @@ code `lease_expired`.
    next address in their `gateway_urls`.
 2. Order a token: `POST /api/v1/enrollment-requests` with `"kind": "relay"` and the site; the
    token appears once in the response.
-3. On the relay host, with the token in a file readable by the service user:
-   `sudo -u flotestro-relay flotestro-relayctl enroll --token-file /run/relay-token`, then
-   `systemctl start flotestro-relay`. `enroll` refuses while a valid identity exists
+3. On the relay host, with the token in `./secrets/relay-enrollment-token`:
+   `docker compose -f compose.relay.yaml --profile enroll run --rm relay-enroll`, then delete the
+   token file and `docker compose -f compose.relay.yaml up -d`. `enroll` refuses while a valid
+   identity exists
    (`machine_already_enrolled`); the revocation in step 1 is what makes the old one invalid on the
    panel side, and a lost state directory passes the local check by itself. The relay `name`
    in `relay.yaml` is the natural key: the same name refreshes the existing record and clears

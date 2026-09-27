@@ -43,7 +43,8 @@ database.
 
 ## Install
 
-**The panel**, with a database of its own:
+**The panel** is a container image and is deployed no other way. With a database
+of its own:
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/ultherego/Flotestro/main/docker/compose.yaml
@@ -64,7 +65,9 @@ echo 'deb [signed-by=/etc/apt/keyrings/flotestro.asc] https://ultherego.github.i
 sudo apt update && sudo apt install flotestro-agent
 ```
 
-`dnf` and `pacman` are in the [documentation](https://ultherego.github.io/Flotestro/docs/installation.html).
+`dnf` and `pacman` are on the [repository's own pages](https://ultherego.github.io/Flotestro/packages/),
+which also list what it carries, and in the
+[documentation](https://ultherego.github.io/Flotestro/docs/installation.html).
 The panel writes the enrollment command for each host under **Add host**, and
 [`ansible`](ansible) does the same for a hundred hosts at once.
 
@@ -97,14 +100,20 @@ air-gapped installation, backups, upgrades — is in the
 
 ## Built from
 
-Go for the control plane, the agent, the root helper and the relay; React and
-TypeScript for the panel; PostgreSQL for everything it remembers. The agent and
-its helper are native packages, not containers, because a host agent has to see
-the real `/proc`, the real disks and the real systemd.
+Go for the control plane, the agent, the root helper, `agentctl` and the relay;
+React and TypeScript for the panel; PostgreSQL for everything it remembers.
+
+The split is deliberate and each half has one form. The panel, the relay, the
+administration tools and the migrator are OCI images, deployed with the Compose
+files in [`docker/`](docker); there is no package of any of them. The agent, its
+root helper and `flotestro-agentctl` are one native package per family, because
+they manage the host itself — its PID 1, its devices, its package database — and
+a container that could do that would be a `--privileged` container with nothing
+isolated about it.
 
 Images are published to
 [GHCR](https://github.com/ultherego/Flotestro/pkgs/container/flotestro-control-plane)
-and packages to the signed
+and the package to the signed
 [apt, dnf and pacman repository](https://ultherego.github.io/Flotestro/packages/),
 each with a build attestation that says which run produced it.
 

@@ -53,7 +53,7 @@ operation under `pki.rotate`, held by `platform_admin` only.
    refused with `409 hosts_missing_ca` and audited as denied. On success the new CA signs, the
    old one is `retired` (still trusted for verification), and the log says
    "the new fleet CA took over signing".
-6. Restart the control plane: `systemctl restart flotestro-control-plane`. The gateway server
+6. Restart the control plane: `docker compose restart control-plane`. The gateway server
    certificate is issued at start from the active CA; until then it still comes from the old one.
    Both are in every agent's bundle, so either order works.
 7. Wait for `hosts_using` of the retired CA to reach 0. Certificates are reissued only by

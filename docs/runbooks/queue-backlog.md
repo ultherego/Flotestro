@@ -74,7 +74,7 @@ In the API and the panel:
 3. Dispatch rate (`flotestro_dispatch_throttled_total` climbing, tasks `queued` with an empty
    `wait_reason`, hosts connected): each scheduler pass admits at most the tokens in a bucket
    of `FLOTESTRO_DISPATCH_RATE` per second (burst one second's worth), oldest first. Raise the
-   value in `/etc/flotestro/control-plane.env` and `systemctl restart flotestro-control-plane`;
+   value of `FLOTESTRO_DISPATCH_RATE` in `./.env` and `docker compose up -d control-plane`;
    there is no runtime setting.
 4. Lock wait (`awaiting_lock:<blocker>`, target `awaiting_lock`): the agent waits on its host
    for the resource another task holds (one lock class per operation). There is no lock-wait
