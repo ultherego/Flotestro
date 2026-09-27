@@ -303,11 +303,15 @@
       it is written: a bundle containing a private key or a bearer token is
       refused outright.</dd>
 
-      <dt>Publish a moving version</dt>
-      <dd>No <code>latest</code>, no <code>stable</code> alias, no truncated
-      <code>0.60</code> tag for the images: only the full version, which is never
-      rewritten, and a commit tag for diagnostics. A pre-release goes to a
-      <code>testing</code> channel that a host asking for <code>stable</code>
+      <dt>Rewrite a version that is already published</dt>
+      <dd>A package file is never replaced, and a release refuses outright to
+      build a version tag the registry already has. Of an image's tags, the full
+      version and the commit tag are the ones that never move, and those are
+      what an installation pins - beside the digest, which cannot be moved at
+      all. A finished release also moves <code>latest</code> and the minor
+      alias, for somebody who has just found the project and does not yet know
+      which version is current; a pre-release moves neither, and it goes to a
+      package channel of its own that a host asking for <code>stable</code>
       never reads.</dd>
 
       <dt>Decide for the operator</dt>
@@ -356,7 +360,7 @@
 
 <footer class="site-footer">
   <div class="site-footer__inner">
-    <p>Flotestro documentation, release 0.60.0.</p>
+    <p>Flotestro documentation, release 0.62.0.</p>
     <p><a href="https://github.com/ultherego/Flotestro">github.com/ultherego/Flotestro</a></p>
   </div>
 </footer>

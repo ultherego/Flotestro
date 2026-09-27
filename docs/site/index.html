@@ -15,7 +15,7 @@
 
 <header class="site-header">
   <div class="site-header__inner">
-    <a class="brand" href="/Flotestro/">
+    <a class="brand" href="./">
       <img class="brand__mark" src="img/logo.webp" alt="" width="459" height="160">
       Flotestro
     </a>
@@ -267,9 +267,9 @@
         <tbody>
           <tr>
             <td><code>flotestro-control-plane</code></td>
-            <td>service on the panel server</td>
-            <td>API, web panel, agent gateway, enrollment, scheduler, campaign engine, PKI,
-              PostgreSQL</td>
+            <td>a container, uid 65532, read-only</td>
+            <td>API, web panel, agent gateway, enrollment, scheduler, campaign engine, PKI; keeps
+              everything it remembers in PostgreSQL</td>
           </tr>
           <tr>
             <td><code>flotestro-agent</code></td>
@@ -285,7 +285,7 @@
           </tr>
           <tr>
             <td><code>flotestro-relay</code></td>
-            <td>unprivileged, one per isolated site</td>
+            <td>a container of its own, one per isolated site</td>
             <td>terminates the agent sessions of a site and forwards them; buffers results during
               an outage</td>
           </tr>
@@ -321,7 +321,7 @@
     <h3>The panel, with a database of its own</h3>
 
     <pre><code>curl -fsSLO https://raw.githubusercontent.com/ultherego/Flotestro/main/docker/compose.yaml
-docker compose --profile quickstart up -d
+docker compose up -d
 docker compose cp control-plane:/var/lib/flotestro/bootstrap-token .</code></pre>
 
     <p class="prose">Every setting has a working default, so that is a panel on
@@ -334,22 +334,25 @@ docker compose cp control-plane:/var/lib/flotestro/bootstrap-token .</code></pre
       rather than issuing a certificate that host would reject.
       <code>env.example</code> carries the whole list.</p>
 
-    <p class="prose">Against a database you already run, leave the profile out and write its
-      DSN into <code>secrets/database-url</code> before the first start; the same file works
-      under Docker and rootless Podman, on a host with SELinux and without. The backup pair,
-      an isolated site, pinning a digest and upgrading are in
+    <p class="prose">Against a database you already run, add
+      <code>compose.external-db.yaml</code>: it takes the local database out, holds the DSN to a
+      verified server and a writer, and brings the schema forward as a run of its own before
+      anything serves. The DSN goes into <code>secrets/database-url</code> before the first start,
+      and the same file works under Docker and rootless Podman, on a host with SELinux and
+      without. The backup pair, an isolated site, pinning a digest and upgrading are in
       <a href="https://github.com/ultherego/Flotestro/blob/main/docker/README.md">docker/README.md</a>.</p>
 
     <div class="note">
       <p class="note__title">Which image</p>
-      <p>The control plane is <code>ghcr.io/ultherego/flotestro-control-plane</code>. A release
-        publishes the full version, <code>0.60.0</code>, and
-        <code>sha-&lt;twelve characters of the commit&gt;</code>; a stable release also moves
-        <code>latest</code> and the minor alias <code>0.60</code>, a pre-release moves neither.
-        The tag is what a human reads — production pins the digest the release run printed.</p>
+      <p>The control plane is <code>ghcr.io/ultherego/flotestro-control-plane</code>, and the
+        relay <code>ghcr.io/ultherego/flotestro-relay</code>. A release publishes the full
+        version and <code>sha-&lt;twelve characters of the commit&gt;</code>, and neither is ever
+        rewritten; a finished release also moves <code>latest</code> and the minor alias, a
+        pre-release moves neither. The tag is what a human reads — production pins the digest the
+        release run printed.</p>
     </div>
 
-    <h3>A host, from the package repository</h3>
+    <h3>A host, from the <a href="packages/">package repository</a></h3>
 
     <p class="filename">Debian and Ubuntu</p>
     <pre><code>sudo install -d -m 0755 /etc/apt/keyrings
@@ -438,7 +441,7 @@ flotestro-agentctl diagnose                                        # explains a 
 <footer class="site-footer">
   <div class="site-footer__inner">
     <p>Flotestro &middot; <a href="https://github.com/ultherego/Flotestro">github.com/ultherego/Flotestro</a></p>
-    <p>This site describes version 0.60.0.</p>
+    <p>This site describes version 0.62.0.</p>
   </div>
 </footer>
 
