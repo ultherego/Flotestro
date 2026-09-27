@@ -7,6 +7,16 @@
 # Chosen before the installation is initialised: moving a live one to another
 # database is a data migration, not a change of a variable.
 #
+# verify-full verifies the server's certificate, and the image carries the public
+# bundle only: a database with an authority of its own - which is the usual case
+# for a managed one - needs that authority as a file. Add it to both services
+# below and name it in the DSN:
+#
+#   volumes:
+#     - ./secrets/database-ca.crt:/run/secrets/database-ca.crt:ro
+#
+#   ...?sslmode=verify-full&sslrootcert=/run/secrets/database-ca.crt
+#
 services:
   # Not started here: the database is the installation's own.
   postgres:
@@ -28,7 +38,10 @@ services:
       - database-url
 
 # The DSN carries the password, so it arrives as a file and not as a variable.
-# external mode holds it to sslmode=verify-full and target_session_attrs=read-write.
+# external mode holds it to sslmode=verify-full and target_session_attrs=read-write,
+# and verify-full needs the issuing authority: the image carries the public
+# bundle only, so a database with its own CA is named with sslrootcert= and the
+# file mounted above.
 secrets:
   database-url:
     file: ./secrets/database-url

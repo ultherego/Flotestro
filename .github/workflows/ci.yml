@@ -163,27 +163,55 @@ jobs:
           cache: true
           cache-dependency-path: go.sum
 
-      # Go runs one fuzz target per invocation, so each target is a step.
-      # The seed corpus of every target runs with the unit tests of the Go
-      # job; the short budget here is a smoke run, not a campaign. The job
-      # does not wait for the unit tests: the two find different faults and
-      # the pull request waits for the slower of them, not for their sum.
-      - name: CSR decoder (internal/pki)
-        run: go test -run='^$' -fuzz='^FuzzSignAgentCSR$' -fuzztime=20s ./internal/pki
-      - name: Agent configuration (internal/agentconfig)
-        run: go test -run='^$' -fuzz='^FuzzRead$' -fuzztime=20s ./internal/agentconfig
-      - name: JCS canonicaliser (internal/jcs)
-        run: go test -run='^$' -fuzz='^FuzzTransform$' -fuzztime=20s ./internal/jcs
-      - name: Cron expressions (internal/modules/schedules)
-        run: go test -run='^$' -fuzz='^FuzzParseExpression$' -fuzztime=20s ./internal/modules/schedules
-      - name: Systemd calendar preview (internal/modules/schedules)
-        run: go test -run='^$' -fuzz='^FuzzParseCalendarPreview$' -fuzztime=20s ./internal/modules/schedules
-      - name: Sudoers (internal/modules/sudoers)
-        run: go test -run='^$' -fuzz='^FuzzParse$' -fuzztime=20s ./internal/modules/sudoers
-      - name: Human-readable sizes (internal/packages)
-        run: go test -run='^$' -fuzz='^FuzzParseHumanSize$' -fuzztime=20s ./internal/packages
-      - name: DNF transaction summary (internal/packages)
-        run: go test -run='^$' -fuzz='^FuzzParseDNFTransactionSizes$' -fuzztime=20s ./internal/packages
+      # Go runs one fuzz target per invocation, so each target is a step. The
+      # seed corpus of every target runs with the unit tests of the Go job; the
+      # short budget here is a smoke run, not a campaign. The job does not wait
+      # for the unit tests: the two find different faults and the pull request
+      # waits for the slower of them, not for their sum.
+      #
+      # The verdict is read rather than taken from the exit code, because there
+      # are two ways to fail and only one of them is a fault of the code. A
+      # target that finds an input says so and writes it into testdata; a run
+      # that spends its budget on a runner whose throughput collapses ends with
+      # "context deadline exceeded" and has found nothing. Failing on the second
+      # made the gate red at random, and a gate that is red at random is one
+      # nobody reads.
+      - name: Every target
+        run: |
+          set -uo pipefail
+          failed=0
+          # A here-document and not a pipe: a loop behind a pipe runs in a
+          # subshell, and the verdict set inside it would never come back - the
+          # job would pass whatever it found.
+          while read -r target package; do
+            [ -n "$target" ] || continue
+            echo "::group::$target ($package)"
+            out="$(go test -run='^$' -fuzz="^$target\$" -fuzztime=20s "$package" 2>&1)"
+            code=$?
+            printf '%s\n' "$out"
+            echo "::endgroup::"
+            if [ "$code" -eq 0 ]; then
+              echo "$target: nothing found"
+            elif printf '%s' "$out" | grep -q 'Failing input written to'; then
+              echo "::error title=$target::the fuzzer found an input; it is in testdata/fuzz"
+              failed=1
+            elif printf '%s' "$out" | grep -q 'context deadline exceeded'; then
+              echo "::warning title=$target::the run did not finish inside its budget; nothing was found"
+            else
+              echo "::error title=$target::the run failed for a reason that is not a timeout"
+              failed=1
+            fi
+          done <<'TARGETS'
+          FuzzSignAgentCSR ./internal/pki
+          FuzzRead ./internal/agentconfig
+          FuzzTransform ./internal/jcs
+          FuzzParseExpression ./internal/modules/schedules
+          FuzzParseCalendarPreview ./internal/modules/schedules
+          FuzzParse ./internal/modules/sudoers
+          FuzzParseHumanSize ./internal/packages
+          FuzzParseDNFTransactionSizes ./internal/packages
+          TARGETS
+          exit $failed
 
   database:
     name: Database

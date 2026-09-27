@@ -635,8 +635,11 @@ jobs:
           # Asked of the registry rather than taken from the build: what a
           # deployment pulls is what the registry serves under that tag, and the
           # two differing is exactly the case a pinned digest exists to catch.
-          published="$(docker buildx imagetools inspect "$REFERENCE" \
-            --format '{{ .Manifest.Digest }}')"
+          # The digest of a manifest is the sha256 of its own bytes, so it is
+          # computed here rather than read out of a template field whose name
+          # only a real tag would ever exercise.
+          published="sha256:$(docker buildx imagetools inspect --raw "$REFERENCE" \
+            | sha256sum | cut -d' ' -f1)"
           case "$published" in
             sha256:*) ;;
             *) echo "the registry gave no digest for $REFERENCE" >&2; exit 1 ;;
