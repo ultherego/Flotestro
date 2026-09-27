@@ -40,7 +40,7 @@ func (s *Server) handleFleetActivity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	scopes := principal.ScopesFor(authz.PermHostRead)
-	condition, args := authz.ScopeSQL(scopes, "h.site", "h.environment", 0)
+	condition, args := authz.ScopeSQL(scopes, authz.HostColumns("h"), 0)
 	visible := "true"
 	if condition != "" {
 		visible = condition

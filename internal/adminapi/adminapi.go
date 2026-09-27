@@ -677,6 +677,11 @@ type FleetSummary struct {
 	PackageDatabaseBroken int `json:"package_database_broken"`
 	SSSDOffline           int `json:"sssd_offline"`
 	InMaintenance         int `json:"in_maintenance"`
+	// HelperCapabilityLegacy counts the hosts whose root helper does not require
+	// the panel's signed capability: what the helper does with a request that
+	// carries none is a state of that host, and these are the hosts a migration
+	// to enforce still has to reach.
+	HelperCapabilityLegacy int `json:"helper_capability_legacy"`
 	// FailedJobs24h counts the tasks that failed or timed out in the last
 	// day on the visible hosts.
 	FailedJobs24h *int `json:"failed_jobs_24h,omitempty"`
@@ -738,7 +743,7 @@ func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
 	// The summary counts only the hosts the principal may see. Otherwise the
 	// dashboard of a single-environment operator would show the whole fleet.
 	scopes := principal.ScopesFor(authz.PermHostRead)
-	condition, args := authz.ScopeSQL(scopes, "h.site", "h.environment", 0)
+	condition, args := authz.ScopeSQL(scopes, authz.HostColumns("h"), 0)
 	visible := "true"
 	if condition != "" {
 		visible = condition
@@ -758,12 +763,14 @@ func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
 			count(*) filter (where h.package_database_broken and h.lifecycle_state <> 'retired'),
 			count(*) filter (where h.identity_enrolled and h.identity_sssd_online = false
 			                   and h.lifecycle_state <> 'retired'),
-			count(*) filter (where h.maintenance_until > now() and h.lifecycle_state <> 'retired')
+			count(*) filter (where h.maintenance_until > now() and h.lifecycle_state <> 'retired'),
+			count(*) filter (where coalesce(h.helper_capability_mode, '') <> 'enforce'
+			                   and h.lifecycle_state <> 'retired')
 		from hosts h where `+visible, args...).Scan(
 		&summary.Hosts, &summary.Online, &summary.Offline,
 		&summary.RebootRequired, &summary.WithFailedUnits, &summary.PendingSecurity,
 		&summary.QuarantinedHosts, &summary.PackageDatabaseBroken, &summary.SSSDOffline,
-		&summary.InMaintenance)
+		&summary.InMaintenance, &summary.HelperCapabilityLegacy)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -787,7 +794,7 @@ func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
 	// An order past its deadline is not pending, whatever its status column
 	// says: the store reports it as expired for the same reason.
 	var pendingEnrollments int
-	enrollmentCondition, enrollmentArgs := authz.ScopeSQL(scopes, "e.site", "e.environment", 0)
+	enrollmentCondition, enrollmentArgs := authz.ScopeSQL(scopes, authz.Placements("e.site", "e.environment"), 0)
 	if enrollmentCondition == "" {
 		enrollmentCondition = "true"
 	}
@@ -1013,6 +1020,7 @@ func (s *Server) handleListHosts(w http.ResponseWriter, r *http.Request) {
 		Owner:           query.Get("owner"),
 		IdentityDomain:  query.Get("identity_domain"),
 		Capability:      query.Get("capability"),
+		HelperMode:      query.Get("helper_mode"),
 		// The refusal code narrows to the hosts the gateway last turned away for
 		// that reason - the dashboard's expired-certificates tile leads here.
 		ConnectionRefusal: query.Get("connection_refusal"),

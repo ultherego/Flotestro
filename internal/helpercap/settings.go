@@ -52,7 +52,7 @@ type Settings struct {
 // FLOTESTRO_HELPER_REPLAY_DIR and FLOTESTRO_HELPER_HOST_ID_FILE.
 func LoadSettings(path string) (Settings, error) {
 	settings := Settings{
-		Mode:       ModePrefer,
+		Mode:       ModeEnforce,
 		Bootstrap:  BootstrapPinned,
 		PinPath:    DefaultPinPath,
 		TrustDir:   DefaultTrustDir,

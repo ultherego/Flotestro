@@ -460,7 +460,9 @@ func sha256Of(data []byte) []byte {
 }
 
 func TestModeIsParsedStrictly(t *testing.T) {
-	for value, want := range map[string]Mode{"": ModePrefer, "prefer": ModePrefer, "observe": ModeObserve,
+	// An unset value is enforce: the modes that let a mutation through unproved
+	// are only ever the ones somebody wrote down.
+	for value, want := range map[string]Mode{"": ModeEnforce, "prefer": ModePrefer, "observe": ModeObserve,
 		"audit": ModeObserve, "ENFORCE": ModeEnforce} {
 		got, err := ParseMode(value)
 		if err != nil || got != want {

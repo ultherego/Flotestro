@@ -55,6 +55,8 @@ type HostFilters = {
   owner: string;
   maintenance: string;
   capability: string;
+  /** The mode the host's root helper runs in, or `unknown` when it has not said. */
+  helper_mode: string;
   channel: string;
   reboot_required: string;
   security_updates: string;
@@ -77,7 +79,8 @@ type HostFilters = {
 
 const EMPTY_FILTERS: HostFilters = {
   q: "", site: "", environment: "", os_family: "", connection_state: "", lifecycle_state: "",
-  owner: "", maintenance: "", capability: "", channel: "", reboot_required: "", security_updates: "",
+  owner: "", maintenance: "", capability: "", helper_mode: "", channel: "",
+  reboot_required: "", security_updates: "",
   identity_domain: "", connection_refusal: "", tags: "", failed_units: "", package_db_broken: "",
   sssd_offline: "", agent_behind: "", relay: "", failure_domain: "", team: "", sort: "",
 };
@@ -289,7 +292,8 @@ export function Hosts() {
   const chipLabels: Record<Exclude<keyof HostFilters, "sort">, string> = {
     q: t("search"), site: t("site"), environment: t("environment"), os_family: t("OS"),
     connection_state: t("state"), lifecycle_state: t("lifecycle"), owner: t("owner"),
-    maintenance: t("maintenance"), capability: t("capability"), channel: t("channel"),
+    maintenance: t("maintenance"), capability: t("capability"),
+    helper_mode: t("helper mode"), channel: t("channel"),
     reboot_required: t("reboot required"), security_updates: t("security updates"),
     identity_domain: t("domain"), connection_refusal: t("refused for"), tags: t("tags"),
     failed_units: t("failed units"), package_db_broken: t("package database broken"),
@@ -418,6 +422,16 @@ export function Hosts() {
             <select value={filters.capability} onChange={(e) => setFilter("capability", e.target.value)}>
               <option value="">{t("capability: any")}</option>
               {CAPABILITIES.map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
+            {/* What the host's helper does with a request carrying no capability of
+                the panel. Only enforce refuses one, so the other values are the
+                hosts a migration still has to reach. */}
+            <select value={filters.helper_mode} onChange={(e) => setFilter("helper_mode", e.target.value)} data-testid="filter-helper-mode">
+              <option value="">{t("helper mode: any")}</option>
+              <option value="enforce">{t("enforce: an unsigned request is refused")}</option>
+              <option value="prefer">{t("prefer: an unsigned request is carried out")}</option>
+              <option value="observe">{t("observe: nothing is refused")}</option>
+              <option value="unknown">{t("unknown: the host has not said")}</option>
             </select>
             <select value={filters.channel} onChange={(e) => setFilter("channel", e.target.value)}>
               <option value="">{t("channel: any")}</option>

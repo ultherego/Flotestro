@@ -578,7 +578,7 @@ func (s *Store) ListPaged(ctx context.Context, filter ListFilter, cursor string,
 		add("environment = $%d", filter.Environment)
 	}
 	if filter.Scopes != nil {
-		if condition, extra := authz.ScopeSQL(filter.Scopes, "site", "environment", len(args)); condition != "" {
+		if condition, extra := authz.ScopeSQL(filter.Scopes, authz.Placements("site", "environment"), len(args)); condition != "" {
 			conditions = append(conditions, condition)
 			args = append(args, extra...)
 		}

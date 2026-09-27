@@ -952,6 +952,10 @@ type ListFilter struct {
 	// Capability keeps the hosts whose registry has the named adapter
 	// available; 'packages.apt', not 'packages'.
 	Capability string
+	// HelperMode keeps the hosts whose root helper runs in the named mode;
+	// 'unknown' keeps the ones that have not said, and they are not the same as
+	// the ones on enforce.
+	HelperMode string
 	// Tags keeps the hosts carrying every one of the given tags.
 	Tags []string
 	// Channel keeps the hosts on the given release channel.
@@ -1264,6 +1268,14 @@ func (f ListFilter) conditions() ([]string, []any, error) {
 	}
 	if f.TeamUnassigned {
 		conditions = append(conditions, "h.team_id is null")
+	}
+	if f.HelperMode != "" {
+		if f.HelperMode == "unknown" {
+			conditions = append(conditions, "coalesce(h.helper_capability_mode, '') = ''")
+		} else {
+			args = append(args, f.HelperMode)
+			conditions = append(conditions, fmt.Sprintf("h.helper_capability_mode = $%d", len(args)))
+		}
 	}
 	if f.Capability != "" {
 		args = append(args, f.Capability)

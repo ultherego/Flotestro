@@ -49,7 +49,7 @@ func hostClause(filter Filter, offset int) (string, []any) {
 	}
 	add("h.site", filter.Site)
 	add("h.environment", filter.Environment)
-	condition, extra := authz.ScopeSQL(filter.Scopes, "h.site", "h.environment", offset+len(args))
+	condition, extra := authz.ScopeSQL(filter.Scopes, authz.HostColumns("h"), offset+len(args))
 	if condition != "" {
 		conditions = append(conditions, condition)
 		args = append(args, extra...)

@@ -530,6 +530,9 @@ var queryParameters = map[string][]queryParameter{
 		{"failure_domain", "string", "The failure domain an operator placed the host in."},
 		{"team", "string", "The identifier of a team; keeps its hosts. The word none keeps the hosts nobody has placed in a team."},
 		{"capability", "string", "An adapter the host must have available, such as packages.apt."},
+		{"helper_mode", "string", "The mode the host's root helper runs in: enforce, prefer, observe, " +
+			"or unknown for a host that has not said. A host not on enforce carries out a mutating " +
+			"request that arrives without the panel's signed capability."},
 		{"connection_refusal", "string", "The reason the gateway last turned the host away since its last session: certificate_expired, certificate_not_yet_valid, unknown_certificate, revoked_certificate, identity_mismatch or lifecycle_<state>."},
 		{"sort", "string", "The order of the list as column or column:desc; the columns are " + strings.Join(hosts.SortColumns(), ", ") + ". The hostname ascending by default; an unknown column is refused with invalid_sort, and a cursor issued under one order is refused under another. A count the host has not reported sorts below zero, a host never seen before every host seen."},
 	}, pagingParameters...),

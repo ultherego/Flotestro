@@ -642,7 +642,7 @@ func alertConditions(filter AlertFilter, paged bool) (string, []any, bool) {
 		add("a.host_id", filter.HostID)
 	}
 	if filter.Scopes != nil {
-		if condition, extra := authz.ScopeSQL(filter.Scopes, "h.site", "h.environment", len(args)); condition != "" {
+		if condition, extra := authz.ScopeSQL(filter.Scopes, authz.HostColumns("h"), len(args)); condition != "" {
 			conditions = append(conditions, condition)
 			args = append(args, extra...)
 		}
@@ -708,7 +708,7 @@ const FiringBoardLimit = 500
 // no-data episodes, on the hosts the caller's scopes make visible. The most
 // pressing come first, and at most limit of them.
 func (s *Store) Firing(ctx context.Context, scopes []authz.Scope, limit int) ([]Alert, error) {
-	condition, args := authz.ScopeSQL(scopes, "h.site", "h.environment", 0)
+	condition, args := authz.ScopeSQL(scopes, authz.HostColumns("h"), 0)
 	if condition == "" {
 		condition = "true"
 	}
@@ -739,7 +739,7 @@ type FiringGroup struct {
 // FiringCounts groups every firing alert of the visible hosts, board or no
 // board: the board a request carries is bounded, these counts are not.
 func (s *Store) FiringCounts(ctx context.Context, scopes []authz.Scope) ([]FiringGroup, error) {
-	condition, args := authz.ScopeSQL(scopes, "h.site", "h.environment", 0)
+	condition, args := authz.ScopeSQL(scopes, authz.HostColumns("h"), 0)
 	if condition == "" {
 		condition = "true"
 	}
@@ -829,7 +829,7 @@ func (s *Store) Alert(ctx context.Context, id string) (*Alert, error) {
 
 // Pending counts the pending alerts of the visible hosts.
 func (s *Store) Pending(ctx context.Context, scopes []authz.Scope) (int, error) {
-	condition, args := authz.ScopeSQL(scopes, "h.site", "h.environment", 0)
+	condition, args := authz.ScopeSQL(scopes, authz.HostColumns("h"), 0)
 	if condition == "" {
 		condition = "true"
 	}
@@ -1102,7 +1102,7 @@ func (s *Store) ExpireFleetSilence(ctx context.Context, id string) error {
 
 // ActiveSilences lists the silences in force, the soonest to end first.
 func (s *Store) ActiveSilences(ctx context.Context, scopes []authz.Scope) ([]Silence, error) {
-	condition, args := authz.ScopeSQL(scopes, "h.site", "h.environment", 0)
+	condition, args := authz.ScopeSQL(scopes, authz.HostColumns("h"), 0)
 	if condition == "" {
 		condition = "true"
 	}

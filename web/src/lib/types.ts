@@ -207,6 +207,8 @@ export type FleetSummary = {
   quarantined_hosts: number;
   package_database_broken: number;
   sssd_offline: number;
+  /** Hosts whose root helper does not require the panel's signed capability. */
+  helper_capability_legacy: number;
   in_maintenance: number;
   // The attention counters the database computes over the visible fleet.
   failed_jobs_24h?: number;

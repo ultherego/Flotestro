@@ -1338,7 +1338,7 @@ func (f ListFilter) conditions() ([]string, []any) {
 			translated = append(translated,
 				authz.Scope{Site: scope.Site, Environment: scope.Environment, Team: scope.Team})
 		}
-		if condition, extra := authz.ScopeSQL(translated, "h.site", "h.environment", len(args)); condition != "" {
+		if condition, extra := authz.ScopeSQL(translated, authz.HostColumns("h"), len(args)); condition != "" {
 			conditions = append(conditions,
 				"exists (select 1 from hosts h where h.id = jobs.host_id and "+condition+")")
 			args = append(args, extra...)

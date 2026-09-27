@@ -1024,7 +1024,7 @@ func scopeCondition(scopes []Scope, offset int) (string, []any) {
 		przelozone = append(przelozone,
 			authz.Scope{Site: scope.Site, Environment: scope.Environment, Team: scope.Team})
 	}
-	warunek, args := authz.ScopeSQL(przelozone, "h.site", "h.environment", offset)
+	warunek, args := authz.ScopeSQL(przelozone, authz.HostColumns("h"), offset)
 	if warunek == "" {
 		return "", nil
 	}

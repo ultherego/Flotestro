@@ -290,7 +290,7 @@ func (s *Server) handleFleetMonitoring(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	condition, args := authz.ScopeSQL(scopes, "h.site", "h.environment", 0)
+	condition, args := authz.ScopeSQL(scopes, authz.HostColumns("h"), 0)
 	if condition == "" {
 		condition = "true"
 	}

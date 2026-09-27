@@ -130,7 +130,7 @@ func (s *Server) searchHosts(ctx context.Context, principal authz.Principal, que
 	condition := "(" + nameCondition("h.hostname", 0) +
 		fmt.Sprintf(" or lower(h.machine_id) like $1 or h.management_address like $%d)", len(args)+1)
 	args = append(args, escapeLike(query)+"%")
-	scope, scopeArgs := authz.ScopeSQL(principal.ScopesFor(authz.PermHostRead), "h.site", "h.environment", len(args))
+	scope, scopeArgs := authz.ScopeSQL(principal.ScopesFor(authz.PermHostRead), authz.HostColumns("h"), len(args))
 	if scope != "" {
 		condition += " and " + scope
 		args = append(args, scopeArgs...)
@@ -181,7 +181,7 @@ func (s *Server) searchCampaigns(ctx context.Context, principal authz.Principal,
 	prefix, word := namePrefixes(query)
 	args := []any{prefix, word}
 	condition := nameCondition("c.name", 0)
-	scope, scopeArgs := authz.ScopeSQL(principal.ScopesFor(authz.PermCampaignRead), "h.site", "h.environment", len(args))
+	scope, scopeArgs := authz.ScopeSQL(principal.ScopesFor(authz.PermCampaignRead), authz.HostColumns("h"), len(args))
 	if scope != "" {
 		condition += " and exists (select 1 from campaign_targets t join hosts h on h.id = t.host_id" +
 			" where t.campaign_id = c.id and " + scope + ")"
@@ -241,7 +241,7 @@ func (s *Server) searchJobs(ctx context.Context, principal authz.Principal, quer
 	}
 	args := []any{low, high}
 	condition := "j.id >= $1::uuid and j.id <= $2::uuid"
-	scope, scopeArgs := authz.ScopeSQL(principal.ScopesFor(authz.PermJobRead), "h.site", "h.environment", len(args))
+	scope, scopeArgs := authz.ScopeSQL(principal.ScopesFor(authz.PermJobRead), authz.HostColumns("h"), len(args))
 	if scope != "" {
 		condition += " and " + scope
 		args = append(args, scopeArgs...)

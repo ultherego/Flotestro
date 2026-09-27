@@ -123,7 +123,7 @@ type FleetPage struct {
 // scopeCondition renders the visibility of a host row; an empty scope
 // list sees nothing.
 func scopeCondition(scopes []authz.Scope, offset int) (string, []any) {
-	condition, args := authz.ScopeSQL(scopes, "h.site", "h.environment", offset)
+	condition, args := authz.ScopeSQL(scopes, authz.HostColumns("h"), offset)
 	if condition == "" {
 		return "true", nil
 	}

@@ -112,31 +112,30 @@ func TestAnEmptyAssignmentScopeDoesNotMatch(t *testing.T) {
 }
 
 // TestScopeSQLHasTheSameSemanticsAsMatches guards that narrowing lists agrees
-// with authorisation.
+// with authorisation, over all five categories.
 func TestScopeSQLHasTheSameSemanticsAsMatches(t *testing.T) {
-	global := []Scope{{Site: Wildcard, Environment: Wildcard}}
-	if condition, args := ScopeSQL(global, "site", "environment", 0); condition != "" || args != nil {
-		t.Errorf("a global scope must not narrow: %q %v", condition, args)
+	hosts := HostColumns("h")
+
+	if condition, args := ScopeSQL([]Scope{GlobalScope}, hosts, 0); condition != "" || args != nil {
+		t.Errorf("a scope that narrows by nothing must not narrow: %q %v", condition, args)
 	}
 
-	narrow := []Scope{{Site: "lab", Environment: "test"}}
-	condition, args := ScopeSQL(narrow, "site", "environment", 0)
-	if condition != "((site = $1 and environment = $2))" {
-		t.Errorf("the condition of a narrow scope = %q", condition)
+	condition, args := ScopeSQL([]Scope{Placement("lab", "test")}, hosts, 0)
+	if condition != "((h.site = $1 and h.environment = $2))" {
+		t.Errorf("the condition of a placement = %q", condition)
 	}
 	if len(args) != 2 || args[0] != "lab" || args[1] != "test" {
 		t.Errorf("arguments = %v", args)
 	}
 
 	// An asterisk in one dimension lifts the condition only in that one.
-	partial := []Scope{{Site: Wildcard, Environment: "prod"}}
-	condition, args = ScopeSQL(partial, "site", "environment", 0)
-	if condition != "((environment = $1))" || len(args) != 1 || args[0] != "prod" {
-		t.Errorf("partial scope: %q %v", condition, args)
+	condition, args = ScopeSQL([]Scope{Placement(Wildcard, "prod")}, hosts, 0)
+	if condition != "(h.environment = $1)" || len(args) != 1 || args[0] != "prod" {
+		t.Errorf("a placement of one dimension: %q %v", condition, args)
 	}
 
 	// The numbering of parameters accounts for those already used in the query.
-	condition, _ = ScopeSQL(narrow, "h.site", "h.environment", 3)
+	condition, _ = ScopeSQL([]Scope{Placement("lab", "test")}, hosts, 3)
 	if condition != "((h.site = $4 and h.environment = $5))" {
 		t.Errorf("parameter offset: %q", condition)
 	}
@@ -145,13 +144,58 @@ func TestScopeSQLHasTheSameSemanticsAsMatches(t *testing.T) {
 	if (Scope{Site: "", Environment: "test"}).Matches(Scope{Site: "lab", Environment: "test"}) {
 		t.Fatal("an empty dimension must not match")
 	}
-	condition, _ = ScopeSQL([]Scope{{Site: "", Environment: "test"}}, "site", "environment", 0)
-	if condition != "((false and environment = $1))" {
+	condition, _ = ScopeSQL([]Scope{{Site: "", Environment: "test", TeamAny: true,
+		Owners: []string{Wildcard}, Tags: []string{Wildcard}}}, hosts, 0)
+	if condition != "((false and h.environment = $1))" {
 		t.Errorf("an empty dimension in SQL = %q", condition)
 	}
 
 	// No scopes must not mean access to everything.
-	if condition, _ := ScopeSQL(nil, "site", "environment", 0); condition != "false" {
+	if condition, _ := ScopeSQL(nil, hosts, 0); condition != "false" {
 		t.Errorf("no scopes = %q, expected a false condition", condition)
+	}
+}
+
+// A binding narrowed by a category the query cannot express reaches no row. The
+// mistake this guards against is the opposite answer: a listing that cannot
+// compare owners quietly showing every owner's hosts to somebody bound to one.
+func TestScopeSQLRefusesWhatItCannotCompare(t *testing.T) {
+	owned := Scope{Site: Wildcard, Environment: Wildcard, TeamAny: true,
+		Owners: []string{"payments"}, Tags: []string{Wildcard}}
+	tagged := Scope{Site: Wildcard, Environment: Wildcard, TeamAny: true,
+		Owners: []string{Wildcard}, Tags: []string{"pci"}}
+	team := OfTeam("1e83b0e4-0000-4000-8000-00000000000a")
+
+	for _, test := range []struct {
+		name  string
+		scope Scope
+		want  string
+	}{
+		{"an owner is compared where there is a column", owned,
+			"(coalesce(h.owner, '') = any($1::text[]))"},
+		{"a tag is compared where there is a column", tagged,
+			"(coalesce(h.tags, '{}') && $1::text[])"},
+		{"a team is compared where there is a column", team, "(h.team_id = $1::uuid)"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			condition, _ := ScopeSQL([]Scope{test.scope}, HostColumns("h"), 0)
+			if condition != test.want {
+				t.Errorf("condition = %q, expected %q", condition, test.want)
+			}
+		})
+	}
+
+	// The same bindings against a table that knows only a placement: each of them
+	// narrows by something the table cannot answer, so none reaches a row.
+	orders := Placements("e.site", "e.environment")
+	for _, scope := range []Scope{owned, tagged, team} {
+		if condition, _ := ScopeSQL([]Scope{scope}, orders, 0); condition != "(false)" {
+			t.Errorf("%s against a placement table = %q, expected no row", scope.String(), condition)
+		}
+	}
+	// A placement still reaches the rows it names.
+	if condition, _ := ScopeSQL([]Scope{Placement("lab", "test")}, orders, 0); condition !=
+		"((e.site = $1 and e.environment = $2))" {
+		t.Errorf("a placement against a placement table = %q", condition)
 	}
 }

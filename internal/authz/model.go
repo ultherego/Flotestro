@@ -918,46 +918,125 @@ func (p Principal) Roles() []string {
 	return roles
 }
 
+// Columns names the columns a query compares a scope against. An empty name
+// means the query cannot express that category at all, so a binding narrowing by
+// it matches no row: a category nothing can check is not a category that is
+// satisfied, and answering "everything" there is how a narrow binding becomes
+// the whole fleet.
+type Columns struct {
+	Site        string
+	Environment string
+	Team        string
+	Owner       string
+	Tags        string
+}
+
+// HostColumns names the five columns of a hosts row under the given alias, for
+// the many queries that join the fleet to answer about it.
+func HostColumns(alias string) Columns {
+	if alias != "" {
+		alias += "."
+	}
+	return Columns{
+		Site: alias + "site", Environment: alias + "environment", Team: alias + "team_id",
+		Owner: alias + "owner", Tags: alias + "tags",
+	}
+}
+
+// Placements names a table carrying a site and an environment and nothing else,
+// such as the enrollment orders: there is no host yet, so there is no team, no
+// owner and no tags, and a binding narrowed by one of those reaches no order.
+func Placements(siteColumn, envColumn string) Columns {
+	return Columns{Site: siteColumn, Environment: envColumn}
+}
+
 // ScopeSQL builds an SQL condition narrowing the rows to the given scopes.
-func ScopeSQL(scopes []Scope, siteColumn, envColumn string, offset int) (string, []any) {
+// Within one scope every category has to hold; between the scopes any one of
+// them is enough. No scope at all is no row.
+func ScopeSQL(scopes []Scope, columns Columns, offset int) (string, []any) {
 	if len(scopes) == 0 {
 		return "false", nil
 	}
-
-	var conditions []string
-	var args []any
+	var (
+		conditions []string
+		args       []any
+	)
 	for _, scope := range scopes {
-		if scope.Team != "" {
-			// A team scope cannot be written with the site and the environment columns:
-			// the binding carries the wildcards its constraint gives it, and a listing
-			// reading those alone would answer with the whole fleet.
-			conditions = append(conditions, "false")
-			continue
-		}
-		if scope.Site == Wildcard && scope.Environment == Wildcard {
-			// A global scope covers everything, so further conditions no
-			// longer matter.
+		if scope.Covers() {
+			// A scope that narrows by nothing covers everything, so no further
+			// condition can narrow the answer.
 			return "", nil
 		}
-		parts := make([]string, 0, 2)
+		parts := make([]string, 0, 5)
 		for _, dimension := range []struct {
 			column string
 			value  string
-		}{{siteColumn, scope.Site}, {envColumn, scope.Environment}} {
-			switch dimension.value {
-			case Wildcard:
+		}{{columns.Site, scope.Site}, {columns.Environment, scope.Environment}} {
+			switch {
+			case dimension.value == Wildcard:
 				// Any value in this dimension.
-			case "":
+			case dimension.value == "", dimension.column == "":
+				// Not knowing the scope, or having no column to read it from, must
+				// not widen what is shown.
 				parts = append(parts, "false")
 			default:
 				args = append(args, dimension.value)
 				parts = append(parts, fmt.Sprintf("%s = $%d", dimension.column, offset+len(args)))
 			}
 		}
+		// Then the categories added later, in the order the rule is written: site
+		// and environment and team and owner and tag. The team is a foreign key
+		// with no value meaning "all", so the binding carries a separate word.
+		if !scope.TeamAny {
+			switch {
+			case scope.Team == "", columns.Team == "":
+				parts = append(parts, "false")
+			default:
+				args = append(args, scope.Team)
+				parts = append(parts, fmt.Sprintf("%s = $%d::uuid", columns.Team, offset+len(args)))
+			}
+		}
+		for _, list := range []struct {
+			column string
+			values []string
+			array  bool
+		}{{columns.Owner, scope.Owners, false}, {columns.Tags, scope.Tags, true}} {
+			condition, used := listSQL(list.column, list.values, list.array, offset+len(args))
+			if condition == "" {
+				continue
+			}
+			args = append(args, used...)
+			parts = append(parts, condition)
+		}
 		if len(parts) == 0 {
 			return "", nil
 		}
-		conditions = append(conditions, "("+strings.Join(parts, " and ")+")")
+		// One part needs no brackets: this SQL is read in a slow query log.
+		if len(parts) == 1 {
+			conditions = append(conditions, parts[0])
+		} else {
+			conditions = append(conditions, "("+strings.Join(parts, " and ")+")")
+		}
 	}
 	return "(" + strings.Join(conditions, " or ") + ")", args
+}
+
+// listSQL is one category of alternatives. An asterisk anywhere in the list
+// covers every value, so the category adds no condition; an empty list reaches
+// nothing, and so does a list with no column to compare it against.
+func listSQL(column string, values []string, array bool, offset int) (string, []any) {
+	// The wildcard is read first and needs no column: a category that narrows
+	// nothing asks nothing of the query.
+	for _, value := range values {
+		if value == Wildcard {
+			return "", nil
+		}
+	}
+	if len(values) == 0 || column == "" {
+		return "false", nil
+	}
+	if array {
+		return fmt.Sprintf("coalesce(%s, '{}') && $%d::text[]", column, offset+1), []any{values}
+	}
+	return fmt.Sprintf("coalesce(%s, '') = any($%d::text[])", column, offset+1), []any{values}
 }

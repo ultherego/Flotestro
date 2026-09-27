@@ -321,9 +321,12 @@ func Run() error {
 	// The rollout stage of the root helper's signed capability on the panel's
 	// side: observe and prefer dispatch to every host, prefer reports a host
 	// whose agent forwards no capability, enforce holds a mutating task back.
+	// Enforce is the default on both sides. A fleet from before the capability
+	// sets prefer here for as long as its hosts need it, and the panel names
+	// them; the safer behaviour is not the one that waits to be switched on.
 	helperCapabilityModeValue := flag.String("helper-capability-mode",
-		config.Env("FLOTESTRO_HELPER_CAPABILITY_MODE", "prefer"),
-		"the stage of the helper capability rollout: observe, prefer (the default) or enforce")
+		config.Env("FLOTESTRO_HELPER_CAPABILITY_MODE", "enforce"),
+		"the stage of the helper capability rollout: enforce (the default), prefer or observe")
 	helperSigningKey := flag.String("helper-signing-key",
 		config.Env("FLOTESTRO_HELPER_SIGNING_KEY", ""),
 		"the Ed25519 key that signs helper capabilities; the default is helper-signing.key in the state directory")

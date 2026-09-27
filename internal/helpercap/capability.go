@@ -40,9 +40,11 @@ func ParseMode(value string) (Mode, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "observe", "audit":
 		return ModeObserve, nil
-	case "prefer", "":
+	case "prefer":
 		return ModePrefer, nil
-	case "enforce":
+	case "enforce", "":
+		// An unset value is enforce. The mode that lets a mutation through
+		// unproved is only ever the one somebody wrote down.
 		return ModeEnforce, nil
 	}
 	return "", errors.New("the capability mode has to be observe, prefer or enforce")

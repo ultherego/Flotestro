@@ -1,0 +1,25 @@
+# The root helper of Flotestro, as an upgrade writes it for a host that was
+# installed before this file existed.
+#
+# The helper's own default is enforce. A host that has been running without a
+# configuration file was running in the compatibility mode, and an upgrade must
+# not change what a host does behind the operator's back - so the upgrade writes
+# that mode down here, as this host's own state, instead of leaving the product
+# less safe for everybody.
+#
+# Move this host on when its agent forwards the panel's capability: first
+# observe, to see what would be refused, then enforce. The panel lists the hosts
+# that are still on prefer.
+schema_version: 1
+
+capabilities:
+  # prefer: a request that carries no capability of the panel is carried out and
+  # counted. This is the mode this host was already in.
+  mode: prefer
+
+  # pinned: the first trust bundle is taken only when its signing key is one
+  # written into the file below beforehand, with
+  # "flotestro-agentctl helper-trust pin <fingerprint>". A host that has already
+  # enrolled is unaffected: it trusts the keys it was given.
+  bootstrap: pinned
+  pin_file: /etc/flotestro/panel-trust.pin

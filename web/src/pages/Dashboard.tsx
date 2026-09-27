@@ -116,6 +116,7 @@ export function Dashboard() {
 
   const attention = [
     s?.reboot_required, s?.with_failed_units, s?.package_database_broken, s?.sssd_offline,
+    s?.helper_capability_legacy,
     s?.failed_jobs_24h, s?.pending_enrollment_requests, s?.agents_behind_latest,
     s?.agent_certificates_expiring, s?.agent_certificates_expired, s?.degraded_relays,
     s?.relays_buffer_high, s?.duplicate_identities_24h, s?.enrollment_refusals_1h, s?.agents_unsupported,
@@ -204,6 +205,17 @@ export function Dashboard() {
             <Stat label={t("With failed units")} value={s?.with_failed_units} tone={warnAbove(s?.with_failed_units)} to="/hosts?failed_units=true" />
             <Stat label={t("Package database broken")} value={s?.package_database_broken} tone={errorAbove(s?.package_database_broken)} to="/hosts?package_db_broken=true" />
             <Stat label={t("SSSD offline")} value={s?.sssd_offline} tone={warnAbove(s?.sssd_offline)} to="/hosts?sssd_offline=true" />
+            {/* A host not on enforce carries out a mutating request that arrives
+                without the panel's signed capability. The tile leads to those
+                hosts, because the mode is a state of the host and moving it on
+                is done there: prefer, then observe, then enforce. */}
+            <Stat
+              label={t("Helper not on enforce")}
+              value={s?.helper_capability_legacy}
+              tone={warnAbove(s?.helper_capability_legacy)}
+              hint={t("these hosts act on an unsigned request")}
+              to="/hosts?helper_mode=prefer"
+            />
             {s?.pending_enrollment_requests !== undefined && (
               <Stat label={t("Pending enrollments")} value={s.pending_enrollment_requests} tone={warnAbove(s.pending_enrollment_requests)} to="/hosts/new" />
             )}

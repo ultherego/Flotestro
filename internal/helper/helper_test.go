@@ -12,11 +12,18 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
+	"github.com/ultherego/flotestro/internal/helpercap"
 	"github.com/ultherego/flotestro/internal/modules/schedules"
 )
 
 func testServer() *Server {
-	return NewServer(1000, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	server := NewServer(1000, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	// These tests drive the helper without a panel behind it, so they ask for the
+	// mode a fleet installed before the capability runs in. A packaged first
+	// installation and a helper whose policy was never installed are on enforce,
+	// which internal/helpercap tests in its own right.
+	server.SetCapabilityPolicy(helpercap.NewPolicy(helpercap.ModePrefer, nil), helpercap.TrustStore{})
+	return server
 }
 
 func unitRequest(unit string, mutate func(*helperv1.HelperRequest)) *helperv1.HelperRequest {

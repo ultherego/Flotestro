@@ -60,8 +60,20 @@ func TestTheShippedFileIsPinnedAndALaboratoryCanSayOtherwise(t *testing.T) {
 	if err != nil {
 		t.Skipf("the packaged file is not here: %v", err)
 	}
-	if got := read(t, string(shipped)).Bootstrap; got != BootstrapPinned {
-		t.Errorf("the packaged helper.yaml runs on %s, expected %s", got, BootstrapPinned)
+	if got := read(t, string(shipped)); got.Bootstrap != BootstrapPinned || got.Mode != ModeEnforce {
+		t.Errorf("the packaged helper.yaml runs on %s/%s, expected %s/%s",
+			got.Mode, got.Bootstrap, ModeEnforce, BootstrapPinned)
+	}
+	// The other packaged file is what an upgrade writes for a host that ran
+	// before the file existed: the mode that host was already in, recorded as its
+	// own state rather than left to a default that would have to be the unsafe one.
+	legacy, err := os.ReadFile("../../packaging/helper-legacy.yaml")
+	if err != nil {
+		t.Skipf("the packaged legacy file is not here: %v", err)
+	}
+	if got := read(t, string(legacy)); got.Mode != ModePrefer || got.Bootstrap != BootstrapPinned {
+		t.Errorf("the packaged helper-legacy.yaml runs on %s/%s, expected %s/%s",
+			got.Mode, got.Bootstrap, ModePrefer, BootstrapPinned)
 	}
 	lab := "schema_version: 1\ncapabilities:\n  mode: enforce\n  bootstrap: tofu\n"
 	if got := read(t, lab).Bootstrap; got != BootstrapTOFU {
@@ -120,5 +132,41 @@ func TestAnEnrolledHostIsUnaffectedByThePolicy(t *testing.T) {
 	store.Bootstrap = BootstrapPinned
 	if _, err := store.Apply(panel.TrustBundle("host-1", time.Now())); err != nil {
 		t.Fatalf("an enrolled host was cut off by the new default: %v", err)
+	}
+}
+
+// The mode is the other half of the same question as the bootstrap: what a
+// helper does when nobody wrote anything down. Both answers are the safe one,
+// and the compatible answer is a state of one host, written into its file.
+func TestAnInstallationWithNoConfigurationEnforces(t *testing.T) {
+	settings, err := LoadSettings(filepath.Join(t.TempDir(), "helper.yaml"))
+	if err != nil {
+		t.Fatalf("a missing configuration file: %v", err)
+	}
+	if settings.Mode != ModeEnforce {
+		t.Errorf("with no configuration the helper runs in %q", settings.Mode)
+	}
+	if settings.Bootstrap != BootstrapPinned {
+		t.Errorf("with no configuration the bootstrap is %q", settings.Bootstrap)
+	}
+}
+
+// A host kept on the legacy mode says so in its own file, which is what an
+// upgrade of an installation from before the capability writes.
+func TestAHostKeptOnTheLegacyModeSaysSo(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "helper.yaml")
+	if err := os.WriteFile(path, []byte("schema_version: 1\ncapabilities:\n  mode: prefer\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := LoadSettings(path)
+	if err != nil {
+		t.Fatalf("the configuration of a legacy host: %v", err)
+	}
+	if settings.Mode != ModePrefer {
+		t.Errorf("the mode written into the file came back as %q", settings.Mode)
+	}
+	if settings.Source != path {
+		t.Errorf("the source of the mode is %q, so the panel cannot say where it came from", settings.Source)
 	}
 }

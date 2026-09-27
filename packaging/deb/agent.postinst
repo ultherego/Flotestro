@@ -34,15 +34,21 @@ configure)
     install -d -m 0700 -o flotestro-agent -g flotestro-agent /var/lib/flotestro-agent
     install -d -m 0755 /etc/flotestro
 
-    # The helper's settings go in on a first installation only. $2 carries the
-    # version being replaced, so an empty one is a first install: an upgrade
-    # must not switch a running fleet to enforce behind the operator's back,
-    # and a new installation must not start in the compatibility mode.
-    if [ -z "$2" ] && [ ! -f /etc/flotestro/helper.yaml ] &&
-       [ -f /usr/share/flotestro/helper.yaml ]; then
-        install -m 0644 -o root -g root /usr/share/flotestro/helper.yaml \
-            /etc/flotestro/helper.yaml
-        echo "flotestro-agent: /etc/flotestro/helper.yaml was written with capabilities.mode: enforce and capabilities.bootstrap: pinned - this host enrols with no panel until one is named with \"flotestro-agentctl helper-trust pin <fingerprint>\"" >&2
+    # The helper's settings, written once. $2 carries the version being replaced,
+    # so an empty one is a first install: that host gets enforce. A host that ran
+    # before this file existed gets the compatibility mode written down as its own
+    # state, because the helper's own default is enforce now and one fleet's
+    # history must not make the product less safe for everybody.
+    if [ ! -f /etc/flotestro/helper.yaml ]; then
+        if [ -z "$2" ] && [ -f /usr/share/flotestro/helper.yaml ]; then
+            install -m 0644 -o root -g root /usr/share/flotestro/helper.yaml \
+                /etc/flotestro/helper.yaml
+            echo "flotestro-agent: /etc/flotestro/helper.yaml was written with capabilities.mode: enforce and capabilities.bootstrap: pinned - this host enrols with no panel until one is named with \"flotestro-agentctl helper-trust pin <fingerprint>\"" >&2
+        elif [ -f /usr/share/flotestro/helper-legacy.yaml ]; then
+            install -m 0644 -o root -g root /usr/share/flotestro/helper-legacy.yaml \
+                /etc/flotestro/helper.yaml
+            echo "flotestro-agent: this host ran without /etc/flotestro/helper.yaml, so the upgrade wrote capabilities.mode: prefer into it - the mode it was already in. Move it to enforce when its agent forwards the panel's capability; the panel lists the hosts still on prefer" >&2
+        fi
     fi
     # The configuration is read by the agent itself, so it must be able to
     # open it - but nobody besides it and root may replace it: the right to

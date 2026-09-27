@@ -112,7 +112,7 @@ func (s *Store) CVEs(ctx context.Context, filter CVEFilter) (CVEPage, error) {
 	var args []any
 	scope := ""
 	if filter.Scopes != nil {
-		condition, extra := authz.ScopeSQL(filter.Scopes, "h.site", "h.environment", 0)
+		condition, extra := authz.ScopeSQL(filter.Scopes, authz.HostColumns("h"), 0)
 		if condition != "" {
 			scope = " and " + condition
 			args = append(args, extra...)
@@ -218,7 +218,7 @@ func (s *Store) CVEHosts(ctx context.Context, cve string, scopes []authz.Scope) 
 	args := []any{cve, CVEHostsLimit}
 	scope := ""
 	if scopes != nil {
-		condition, extra := authz.ScopeSQL(scopes, "h.site", "h.environment", len(args))
+		condition, extra := authz.ScopeSQL(scopes, authz.HostColumns("h"), len(args))
 		if condition != "" {
 			scope = " and " + condition
 			args = append(args, extra...)
@@ -317,7 +317,7 @@ func (s *Store) CVEReferences(ctx context.Context, cve string, scopes []authz.Sc
 	args := []any{cve, cveReferencesLimit}
 	scope := ""
 	if scopes != nil {
-		condition, extra := authz.ScopeSQL(scopes, "h.site", "h.environment", len(args))
+		condition, extra := authz.ScopeSQL(scopes, authz.HostColumns("h"), len(args))
 		if condition != "" {
 			scope = " and " + condition
 			args = append(args, extra...)

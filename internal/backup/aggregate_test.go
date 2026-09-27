@@ -75,10 +75,10 @@ func TestScopeConditionNarrowsOrRefuses(t *testing.T) {
 	if condition, _ := scopeCondition(nil, 0); condition != "false" {
 		t.Errorf("no scope gives %q, expected false", condition)
 	}
-	if condition, _ := scopeCondition([]authz.Scope{{Site: authz.Wildcard, Environment: authz.Wildcard}}, 0); condition != "true" {
+	if condition, _ := scopeCondition([]authz.Scope{authz.GlobalScope}, 0); condition != "true" {
 		t.Errorf("a global scope gives %q, expected true", condition)
 	}
-	condition, args := scopeCondition([]authz.Scope{{Site: "lab", Environment: "test"}}, 4)
+	condition, args := scopeCondition([]authz.Scope{authz.Placement("lab", "test")}, 4)
 	if !strings.Contains(condition, "$5") || !strings.Contains(condition, "$6") || len(args) != 2 {
 		t.Errorf("a site scope after four parameters gives %q with %v", condition, args)
 	}

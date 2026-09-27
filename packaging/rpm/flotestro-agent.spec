@@ -75,6 +75,8 @@ install -d -m 0755 %{buildroot}%{_sysconfdir}/flotestro
 install -m 0640 %{_flotestro_stage}/agent.yaml %{buildroot}%{_sysconfdir}/flotestro/agent.yaml
 install -d -m 0755 %{buildroot}%{_datadir}/flotestro
 install -m 0644 %{_flotestro_stage}/helper.yaml %{buildroot}%{_datadir}/flotestro/helper.yaml
+%{_datadir}/flotestro/helper-legacy.yaml
+install -m 0644 %{_flotestro_stage}/helper-legacy.yaml %{buildroot}%{_datadir}/flotestro/helper-legacy.yaml
 install -m 0640 %{_flotestro_stage}/agent.env  %{buildroot}%{_sysconfdir}/flotestro/agent.env
 
 install -d -m 0700 %{buildroot}%{_sharedstatedir}/flotestro-agent
@@ -118,15 +120,21 @@ getent passwd flotestro-agent >/dev/null || \
 exit 0
 
 %post
-# The helper's settings go in on a first installation only: $1 is 1 for an
-# install and 2 or more for an upgrade. An upgrade must not switch a running
-# fleet to enforce behind the operator's back, and a new installation must not
-# start in the compatibility mode.
-if [ "$1" = 1 ] && [ ! -f %{_sysconfdir}/flotestro/helper.yaml ] &&
-   [ -f %{_datadir}/flotestro/helper.yaml ]; then
-    install -m 0644 -o root -g root %{_datadir}/flotestro/helper.yaml \
-        %{_sysconfdir}/flotestro/helper.yaml
-    echo "flotestro-agent: %{_sysconfdir}/flotestro/helper.yaml was written with capabilities.mode: enforce and capabilities.bootstrap: pinned - this host enrols with no panel until one is named with \"flotestro-agentctl helper-trust pin <fingerprint>\"" >&2
+# The helper's settings, written once: $1 is 1 for an install and 2 or more for
+# an upgrade. A new installation gets enforce. An upgrade of a host that ran
+# before this file existed gets the compatibility mode written down as that
+# host's own state - the helper's own default is enforce, and a fleet's history
+# must not make the product less safe for everybody.
+if [ ! -f %{_sysconfdir}/flotestro/helper.yaml ]; then
+    if [ "$1" = 1 ] && [ -f %{_datadir}/flotestro/helper.yaml ]; then
+        install -m 0644 -o root -g root %{_datadir}/flotestro/helper.yaml \
+            %{_sysconfdir}/flotestro/helper.yaml
+        echo "flotestro-agent: %{_sysconfdir}/flotestro/helper.yaml was written with capabilities.mode: enforce and capabilities.bootstrap: pinned - this host enrols with no panel until one is named with \"flotestro-agentctl helper-trust pin <fingerprint>\"" >&2
+    elif [ -f %{_datadir}/flotestro/helper-legacy.yaml ]; then
+        install -m 0644 -o root -g root %{_datadir}/flotestro/helper-legacy.yaml \
+            %{_sysconfdir}/flotestro/helper.yaml
+        echo "flotestro-agent: this host ran without %{_sysconfdir}/flotestro/helper.yaml, so the upgrade wrote capabilities.mode: prefer into it - the mode it was already in. Move it to enforce when its agent forwards the panel's capability; the panel lists the hosts still on prefer" >&2
+    fi
 fi
 # Reading the journal without root requires membership in the systemd-journal
 # group. A missing group is not an installation error - the journal read is

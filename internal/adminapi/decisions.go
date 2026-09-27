@@ -35,7 +35,7 @@ func (s *Server) countPendingDecisions(ctx context.Context, principal authz.Prin
 		if len(scopes) == 0 {
 			return "", nil, false
 		}
-		condition, args := authz.ScopeSQL(scopes, "h.site", "h.environment", 0)
+		condition, args := authz.ScopeSQL(scopes, authz.HostColumns("h"), 0)
 		if condition == "" {
 			condition = "true"
 		}

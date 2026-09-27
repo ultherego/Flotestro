@@ -65,8 +65,10 @@ type Server struct {
 }
 
 func NewServer(allowedUID uint32, log *slog.Logger) *Server {
+	// Enforce until told otherwise: a helper whose policy was never installed
+	// must not be the one that carries out an unproved mutation.
 	return &Server{allowedUID: allowedUID, log: log, traffic: make(chan struct{}, 1),
-		scopes: newScopeRunner(log), policy: helpercap.NewPolicy(helpercap.ModePrefer, nil)}
+		scopes: newScopeRunner(log), policy: helpercap.NewPolicy(helpercap.ModeEnforce, nil)}
 }
 
 // SetCapabilityPolicy installs the capability policy and the trust store

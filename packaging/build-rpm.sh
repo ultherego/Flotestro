@@ -32,7 +32,8 @@ esac
 case "$COMPONENT" in
 agent)         cp "$here/agent.env" "$STAGE/agent.env"
                cp "$here/agent.yaml" "$STAGE/agent.yaml"
-               cp "$here/helper.yaml" "$STAGE/helper.yaml" ;;
+               cp "$here/helper.yaml" "$STAGE/helper.yaml"
+               cp "$here/helper-legacy.yaml" "$STAGE/helper-legacy.yaml" ;;
 *) echo "unknown component: $COMPONENT" >&2; exit 1 ;;
 esac
 
