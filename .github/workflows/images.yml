@@ -15,11 +15,10 @@
 name: Images
 
 on:
-  # A tag is the only thing that publishes. The version of the image is the
-  # tag without its "v", so v0.56.0 becomes 0.56.0.
+  # A tag publishes, and a tag reaches this workflow through the release, which
+  # calls it: two runs of the same tag would push the same images twice and the
+  # manifest could then name the digests of the run that lost the race.
   push:
-    tags:
-      - "v*"
     # A push to the default branch builds and checks the files and pushes
     # nothing; without it the compose contract is first proven by the tag.
     branches:
@@ -42,6 +41,26 @@ on:
   # A dry run of the whole thing on a branch, for the day somebody changes
   # the build itself. It pushes nothing either.
   workflow_dispatch:
+  # Called by the release, so that the images and the manifest that names their
+  # digests are made in one run: a manifest assembled in a second run could name
+  # digests from a third.
+  workflow_call:
+    outputs:
+      version:
+        description: The version the images were published under.
+        value: ${{ jobs.pins.outputs.version }}
+      owner:
+        description: The registry owner the images were published to.
+        value: ${{ jobs.pins.outputs.owner }}
+      control_plane:
+        description: The digest of the control plane image, read back from the registry.
+        value: ${{ jobs.pins.outputs.control_plane }}
+      relay:
+        description: The digest of the relay image, read back from the registry.
+        value: ${{ jobs.pins.outputs.relay }}
+      admin_tools:
+        description: The digest of the administration tools image, read back from the registry.
+        value: ${{ jobs.pins.outputs.admin_tools }}
 
 permissions:
   contents: read
@@ -412,6 +431,7 @@ jobs:
           fi
           {
             echo "stable=$stable"
+            echo "owner=$owner"
             echo "repository=$repository"
             echo "version=$version"
             echo "commit=$commit"
@@ -605,14 +625,29 @@ jobs:
             done
           done
 
-      - name: The digest of this image
+      - name: The digest of this image, read back from the registry
         if: steps.facts.outputs.push == 'true'
+        env:
+          BUILT: ${{ steps.build.outputs.digest }}
+          REFERENCE: ${{ env.REGISTRY }}/${{ steps.facts.outputs.owner }}/${{ matrix.image }}:${{ steps.facts.outputs.version }}
         run: |
           set -euo pipefail
+          # Asked of the registry rather than taken from the build: what a
+          # deployment pulls is what the registry serves under that tag, and the
+          # two differing is exactly the case a pinned digest exists to catch.
+          published="$(docker buildx imagetools inspect "$REFERENCE" \
+            --format '{{ .Manifest.Digest }}')"
+          case "$published" in
+            sha256:*) ;;
+            *) echo "the registry gave no digest for $REFERENCE" >&2; exit 1 ;;
+          esac
+          if [ "$published" != "$BUILT" ]; then
+            echo "the registry serves $published under $REFERENCE; the build pushed $BUILT" >&2
+            exit 1
+          fi
           mkdir -p "$RUNNER_TEMP/digests"
           printf '%s %s %s\n' "${{ matrix.image }}" \
-            "${{ steps.facts.outputs.version }}" \
-            "${{ steps.build.outputs.digest }}" \
+            "${{ steps.facts.outputs.version }}" "$published" \
             > "$RUNNER_TEMP/digests/${{ matrix.target }}.txt"
 
       - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
@@ -637,6 +672,12 @@ jobs:
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      version: ${{ steps.pinned.outputs.version }}
+      owner: ${{ steps.pinned.outputs.owner }}
+      control_plane: ${{ steps.pinned.outputs.control_plane }}
+      relay: ${{ steps.pinned.outputs.relay }}
+      admin_tools: ${{ steps.pinned.outputs.admin_tools }}
     steps:
       - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
@@ -645,6 +686,7 @@ jobs:
           path: digests
 
       - name: The block an operator copies
+        id: pinned
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
@@ -658,6 +700,14 @@ jobs:
               *) echo "one of the three images reported no digest; the release is incomplete" >&2; exit 1 ;;
             esac
           done
+
+          {
+            echo "version=$version"
+            echo "owner=$owner"
+            echo "control_plane=$control_plane"
+            echo "relay=$relay"
+            echo "admin_tools=$tools"
+          } >> "$GITHUB_OUTPUT"
 
           # The override file is generated rather than described, because a
           # digest copied by hand is a digest with a character missing.

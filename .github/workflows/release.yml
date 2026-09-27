@@ -40,6 +40,18 @@ env:
   PAGES_BRANCH: gh-pages
 
 jobs:
+  # The images are built and published by the workflow that owns that, called
+  # from here rather than triggered beside this one: a manifest that names their
+  # digests has to be made in the same run, or it could name the digests of
+  # another.
+  images:
+    name: Images
+    uses: ./.github/workflows/images.yml
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
   panel:
     name: Panel
     runs-on: ubuntu-latest
@@ -184,7 +196,7 @@ jobs:
 
   collect:
     name: The release as a whole
-    needs: packages
+    needs: [packages, images]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -223,7 +235,7 @@ jobs:
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
           cd dist
-          rm -f provenance.json SHA256SUMS SHA256SUMS.asc
+          rm -f provenance.json release-manifest.json SHA256SUMS SHA256SUMS.asc
           # A tag with a suffix - v1.2.3-rc1 - is a pre-release and may ship
           # incomplete; a bare version may not.
           prerelease=false
@@ -290,12 +302,45 @@ jobs:
               toolchain: $toolchain, node: $node, flags: $flags,
               sbom_format: "CycloneDX 1.5", sbom: $sbom, built_at: $built_at}' \
             > provenance.json
+          # What the panel is told about itself. It cannot know its own digest -
+          # the digest is of the image the panel is inside - so the release says
+          # it, and the signature over SHA256SUMS is what makes the saying worth
+          # anything. The digests come from the images job, which read each of
+          # them back from the registry after the push.
+          jq -n \
+            --arg version "$version" \
+            --arg commit "$(git rev-parse HEAD)" \
+            --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg owner "${{ needs.images.outputs.owner }}" \
+            --arg control_plane "${{ needs.images.outputs.control_plane }}" \
+            --arg relay "${{ needs.images.outputs.relay }}" \
+            --arg admin_tools "${{ needs.images.outputs.admin_tools }}" \
+            '{schema_version: 1, version: $version, commit: $commit,
+              created_at: $created,
+              images: {
+                control_plane: {reference: ("ghcr.io/" + $owner + "/flotestro-control-plane"),
+                                digest: $control_plane},
+                relay: {reference: ("ghcr.io/" + $owner + "/flotestro-relay"),
+                        digest: $relay},
+                admin_tools: {reference: ("ghcr.io/" + $owner + "/flotestro-admin-tools"),
+                              digest: $admin_tools}}}' \
+            > release-manifest.json
+          # A manifest missing a digest is a manifest the panel refuses, and it
+          # is better refused here than at somebody's start.
+          for image in control_plane relay admin_tools; do
+            digest="$(jq -r ".images.$image.digest" release-manifest.json)"
+            case "$digest" in
+              sha256:*) ;;
+              *) echo "the manifest has no digest for $image" >&2; exit 1 ;;
+            esac
+          done
+
           # The checksums cover everything that will be published, the
-          # provenance included: a file nobody can check is a file nobody
-          # knows the origin of. SHA256SUMS itself is the one exception,
-          # and its signature, when there is one.
+          # provenance and the manifest included: a file nobody can check is a
+          # file nobody knows the origin of. SHA256SUMS itself is the one
+          # exception, and its signature, when there is one.
           published=()
-          for file in *.deb *.rpm *.pkg.tar.* *.cdx.json modules-*.txt provenance.json; do
+          for file in *.deb *.rpm *.pkg.tar.* *.cdx.json modules-*.txt provenance.json release-manifest.json; do
             [ -f "$file" ] && published+=("$file")
           done
           if [ ${#published[@]} -eq 0 ]; then
@@ -346,6 +391,7 @@ jobs:
             dist/*.cdx.json
             dist/modules-*.txt
             dist/provenance.json
+            dist/release-manifest.json
             dist/SHA256SUMS
             dist/SHA256SUMS.asc
           if-no-files-found: error
@@ -618,7 +664,7 @@ jobs:
           # The same list the upload publishes; the stage directories of
           # the build script stay out of it, they are not artefacts.
           for file in dist/*.deb dist/*.rpm dist/*.pkg.tar.* dist/*.cdx.json \
-                      dist/modules-*.txt dist/provenance.json \
+                      dist/modules-*.txt dist/provenance.json dist/release-manifest.json \
                       dist/SHA256SUMS dist/SHA256SUMS.asc; do
             [ -f "$file" ] || continue
             name="$(basename "$file")"
@@ -650,7 +696,7 @@ jobs:
           fi
           assets=()
           for file in dist/*.deb dist/*.rpm dist/*.pkg.tar.* dist/*.cdx.json \
-                      dist/modules-*.txt dist/provenance.json \
+                      dist/modules-*.txt dist/provenance.json dist/release-manifest.json \
                       dist/SHA256SUMS dist/SHA256SUMS.asc; do
             [ -f "$file" ] && assets+=("$file")
           done
