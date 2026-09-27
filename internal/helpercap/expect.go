@@ -390,7 +390,14 @@ func CheckBinding(request *helperv1.HelperRequest, bound *BoundPayload) error {
 		case payload.UnitToggle != nil:
 			want = payload.UnitToggle.Unit
 		}
-		return same("unit", action.UnitAction.GetUnit(), want)
+		if err := same("unit", action.UnitAction.GetUnit(), want); err != nil {
+			return err
+		}
+		// Enabling and disabling are one action, and so are masking and
+		// unmasking: the operation carries the direction, and a capability
+		// approved to start a unit at boot must not turn into one that keeps it
+		// from starting. The payload says which way the approval went.
+		return sameUnitDirection(action.UnitAction.GetOperation(), payload)
 
 	case *helperv1.HelperRequest_PackageAction:
 		switch action.PackageAction.GetOperation() {
@@ -518,18 +525,41 @@ func CheckBinding(request *helperv1.HelperRequest, bound *BoundPayload) error {
 		return same("backup definition", action.Backup.GetId(), payload.Backup.ID)
 
 	case *helperv1.HelperRequest_Certificate:
-		if action.Certificate.GetOperation() != helperv1.CertificateRequest_OPERATION_DEPLOY {
-			// A renewal and a trust change name an anchor rather than a path;
-			// they have no rule yet and are listed as such.
+		switch action.Certificate.GetOperation() {
+		case helperv1.CertificateRequest_OPERATION_FACTS, helperv1.CertificateRequest_OPERATION_PLAN,
+			helperv1.CertificateRequest_OPERATION_TRUST_PLAN:
+			// A read and a plan change nothing and take no capability.
 			return nil
 		}
 		if payload.Certificate == nil {
 			return binding("the bound payload describes no certificate")
 		}
-		if err := same("certificate path", action.Certificate.GetPath(), payload.Certificate.Path); err != nil {
-			return err
+		certificate := payload.Certificate
+		// A deployment names the files it writes, a renewal names the request it
+		// renews, and a trust change names the anchor it adds or takes away. Each
+		// is compared: the trust store decides which panel this host believes, so a
+		// capability for one anchor must not remove another.
+		for _, field := range []struct {
+			what string
+			got  string
+			want string
+		}{
+			{"certificate path", action.Certificate.GetPath(), certificate.Path},
+			{"key path", action.Certificate.GetKeyPath(), certificate.KeyPath},
+			{"owner", action.Certificate.GetOwner(), certificate.Owner},
+			{"group", action.Certificate.GetGroup(), certificate.Group},
+			{"mode", action.Certificate.GetMode(), certificate.Mode},
+			{"key mode", action.Certificate.GetKeyMode(), certificate.KeyMode},
+			{"unit to reload", action.Certificate.GetReloadUnit(), certificate.ReloadUnit},
+			{"renewal request", action.Certificate.GetRequest(), certificate.Request},
+			{"trust anchor", action.Certificate.GetAnchorId(), certificate.AnchorID},
+			{"plan digest", action.Certificate.GetPlanHash(), certificate.PlanHash},
+		} {
+			if err := same(field.what, field.got, field.want); err != nil {
+				return err
+			}
 		}
-		return same("plan digest", action.Certificate.GetPlanHash(), payload.Certificate.PlanHash)
+		return nil
 
 	case *helperv1.HelperRequest_DockerAction:
 		container := action.DockerAction
@@ -813,9 +843,20 @@ func CheckBinding(request *helperv1.HelperRequest, bound *BoundPayload) error {
 		return nil
 
 	case *helperv1.HelperRequest_Security:
-		if action.Security.GetOperation() != helperv1.SecurityRequest_OPERATION_SELINUX_MODE {
-			// A rules reload names nothing, and the check that orders it carries
-			// no payload at all.
+		switch action.Security.GetOperation() {
+		case helperv1.SecurityRequest_OPERATION_FACTS:
+			// A read changes nothing and takes no capability.
+			return nil
+		case helperv1.SecurityRequest_OPERATION_AUDIT_RELOAD:
+			// A reload names nothing of its own: the rules are already on the host
+			// and the operation loads them into the kernel. What it must be held to
+			// is that the capability was signed for a reload and not for a change of
+			// the protection mode, which the action name alone already says - so the
+			// payload has only to be the one of an audit reload.
+			if payload.Security != nil && payload.Security.Mode != "" {
+				return binding("the capability was signed for a change of the protection mode, " +
+					"and the request asks for a reload of the audit rules")
+			}
 			return nil
 		}
 		if payload.Security == nil {
@@ -824,22 +865,22 @@ func CheckBinding(request *helperv1.HelperRequest, bound *BoundPayload) error {
 		return same("protection mode", action.Security.GetMode(), payload.Security.Mode)
 
 	case *helperv1.HelperRequest_Storage:
-		// A destructive storage request is bound to the device and to its
-		// stable identity: a capability for one disk must not format another.
-		if payload.Storage == nil {
+		switch action.Storage.GetOperation() {
+		case helperv1.StorageRequest_OPERATION_READ_LVM, helperv1.StorageRequest_OPERATION_READ_RAID,
+			helperv1.StorageRequest_OPERATION_SMART_READ, helperv1.StorageRequest_OPERATION_MOUNT_PLAN,
+			helperv1.StorageRequest_OPERATION_DEVICE_PLAN:
+			// A read changes nothing and takes no capability, so there is nothing
+			// to hold it to.
 			return nil
 		}
-		switch action.Storage.GetOperation() {
-		case helperv1.StorageRequest_OPERATION_FS_CREATE, helperv1.StorageRequest_OPERATION_DISK_WIPE:
-			if err := same("device", action.Storage.GetDevice(), payload.Storage.Device); err != nil {
-				return err
-			}
-			if err := same("device by-id link", action.Storage.GetExpectedById(), payload.Storage.ExpectedByID); err != nil {
-				return err
-			}
-			return same("device WWN", action.Storage.GetExpectedWwn(), payload.Storage.ExpectedWWN)
+		// Every other storage request changes a disk, and the agent builds it out
+		// of the payload field for field - so every field is compared. A capability
+		// for one mount must not move another filesystem, and one for extending a
+		// volume must not extend a different one.
+		if payload.Storage == nil {
+			return binding("the bound payload describes no storage operation")
 		}
-		return nil
+		return sameStorage(action.Storage, payload.Storage)
 	}
 	// The default is a refusal. A request nothing compares with the payload is a
 	// capability for one change authorising every other change of its kind, which
@@ -1170,6 +1211,108 @@ func approvedAnswers(answers []opspec.DebconfAnswer) []string {
 			answer.Type, answer.Value}, "\x00"))
 	}
 	return out
+}
+
+// sameStorage compares a storage request with the payload the capability was
+// signed over, field for field. The device path is not an identity of its own -
+// /dev/sdb is a different disk after a reboot - which is why the by-id link, the
+// WWN, the serial and the UUIDs of the array, the group and the volume are
+// compared beside it.
+func sameStorage(request *helperv1.StorageRequest, payload *opspec.StoragePayload) error {
+	for _, field := range []struct {
+		what string
+		got  string
+		want string
+	}{
+		{"source", request.GetSource(), payload.Source},
+		{"target", request.GetTarget(), payload.Target},
+		{"filesystem type", request.GetFsType(), payload.FSType},
+		{"mount options", request.GetOptions(), payload.Options},
+		{"device", request.GetDevice(), payload.Device},
+		{"filesystem UUID", request.GetExpectedUuid(), payload.ExpectedUUID},
+		{"device serial", request.GetExpectedSerial(), payload.ExpectedSerial},
+		{"device by-id link", request.GetExpectedById(), payload.ExpectedByID},
+		{"device WWN", request.GetExpectedWwn(), payload.ExpectedWWN},
+		{"size", request.GetSize(), payload.Size},
+		{"label", request.GetLabel(), payload.Label},
+		{"plan", request.GetPlan(), payload.Plan},
+		{"plan digest", request.GetPlanHash(), payload.PlanHash},
+		{"array", request.GetArray(), payload.Array},
+		{"array UUID", request.GetExpectedArrayUuid(), payload.ExpectedArrayUUID},
+		{"volume group", request.GetGroup(), payload.Group},
+		{"volume group UUID", request.GetExpectedGroupUuid(), payload.ExpectedGroupUUID},
+		{"logical volume", request.GetVolume(), payload.Volume},
+		{"logical volume UUID", request.GetExpectedVolumeUuid(), payload.ExpectedVolumeUUID},
+	} {
+		if err := same(field.what, field.got, field.want); err != nil {
+			return err
+		}
+	}
+	if request.GetPersist() != payload.Persist {
+		return binding(fmt.Sprintf("the request %s the mount in fstab and the capability was signed to %s it",
+			keepWord(request.GetPersist()), keepWord(payload.Persist)))
+	}
+	if request.GetRepair() != payload.Repair {
+		return binding(fmt.Sprintf("the request asks for a %s and the capability was signed for a %s",
+			checkWord(request.GetRepair()), checkWord(payload.Repair)))
+	}
+	if request.GetExpectedSizeBytes() != payload.ExpectedSizeBytes {
+		return binding(fmt.Sprintf("the request expects a device of %d bytes and the capability names %d",
+			request.GetExpectedSizeBytes(), payload.ExpectedSizeBytes))
+	}
+	return nil
+}
+
+func keepWord(persist bool) string {
+	if persist {
+		return "records"
+	}
+	return "leaves out of"
+}
+
+func checkWord(repair bool) string {
+	if repair {
+		return "repair"
+	}
+	return "check"
+}
+
+// sameUnitDirection compares the direction of a toggle with the one the payload
+// carries. An operation that is not a toggle has no direction to compare.
+func sameUnitDirection(operation helperv1.UnitActionRequest_Operation, payload opspec.Payload) error {
+	var asked bool
+	switch operation {
+	case helperv1.UnitActionRequest_OPERATION_ENABLE, helperv1.UnitActionRequest_OPERATION_MASK:
+		asked = true
+	case helperv1.UnitActionRequest_OPERATION_DISABLE, helperv1.UnitActionRequest_OPERATION_UNMASK:
+		asked = false
+	default:
+		return nil
+	}
+	if payload.UnitToggle == nil {
+		return binding("the bound payload describes no toggle of a unit")
+	}
+	if payload.UnitToggle.Enabled != asked {
+		return binding(fmt.Sprintf("the request asks to %s the unit and the capability was signed to %s it",
+			toggleWord(operation, asked), toggleWord(operation, payload.UnitToggle.Enabled)))
+	}
+	return nil
+}
+
+// toggleWord names a direction the way the operator ordered it.
+func toggleWord(operation helperv1.UnitActionRequest_Operation, on bool) string {
+	masking := operation == helperv1.UnitActionRequest_OPERATION_MASK ||
+		operation == helperv1.UnitActionRequest_OPERATION_UNMASK
+	switch {
+	case masking && on:
+		return "mask"
+	case masking:
+		return "unmask"
+	case on:
+		return "enable"
+	default:
+		return "disable"
+	}
 }
 
 func same(what, got, want string) error {
