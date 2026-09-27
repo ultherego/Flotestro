@@ -200,9 +200,19 @@ jobs:
           export FLOTESTRO_PACKAGE_REPOSITORY_URL=http://packages.invalid:8090
           parse -f compose.yaml --profile airgap
           parse -f compose.yaml -f compose.external-db.yaml --profile airgap
-          # The relay: its own project, on the site host.
+          # The relay: its own project, on the site host. Its image comes from the
+          # release manifest, so parsing needs one named.
+          export FLOTESTRO_RELAY_IMAGE="ghcr.io/ultherego/flotestro-relay@sha256:$(printf '0%.0s' $(seq 64))"
           parse -f compose.relay.yaml
           parse -f compose.relay.yaml --profile enroll
+          # And without one it has to refuse: a relay deployed from a floating tag
+          # is the thing the digest exists to prevent.
+          unset FLOTESTRO_RELAY_IMAGE
+          if docker compose -f compose.relay.yaml config --quiet 2>/dev/null; then
+            echo "compose.relay.yaml accepted an unnamed image" >&2
+            exit 1
+          fi
+          echo "the relay file refuses an unnamed image"
 
       - name: The default deployment is whole and nothing else starts unasked
         # One "up" has to give a working installation - the database, the
