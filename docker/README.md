@@ -118,6 +118,21 @@ sound: the same binary run by hand answers. Ask the panel over HTTP instead -
 `/readyz` on the API port, `/healthz` on a relay's health port - which is what
 the deployment scripts here do.
 
+A secret is the other place the two runtimes differ. Docker makes the file
+readable by the account inside the container; `podman-compose` bind-mounts it
+with the ownership it has on the host, so a secret that only the deployment's own
+account may read is one the container cannot read - and the panel refuses a
+secret anybody else may read, so widening the mode is no answer. Rootless Podman
+maps the image's account to a subordinate uid of the host, so chowning the file
+to 65532 on the host does not help either: the mount needs Podman's `U`, which
+remaps it. A secret declared under `secrets:` has nowhere to put that flag, so
+under Podman mount it as a volume instead and name the path in the variable:
+
+    volumes:
+      - ./secrets/database-url:/run/flotestro-db/database-url:ro,U
+    environment:
+      FLOTESTRO_DATABASE_URL_FILE: /run/flotestro-db/database-url
+
 `podman-compose` reads the rest of the files as written:
 `read_only`, `tmpfs`, `cap_drop`, `security_opt`, `pids_limit`, `ulimits` and
 `stop_grace_period`. Two options had to change to be portable at all, and both
