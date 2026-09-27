@@ -16,16 +16,22 @@ import (
 	"github.com/ultherego/flotestro/internal/campaigns"
 	"github.com/ultherego/flotestro/internal/certificates"
 	"github.com/ultherego/flotestro/internal/compliance"
+	"github.com/ultherego/flotestro/internal/enrollment"
 	"github.com/ultherego/flotestro/internal/files"
+	"github.com/ultherego/flotestro/internal/freeipa"
 	"github.com/ultherego/flotestro/internal/hosts"
+	"github.com/ultherego/flotestro/internal/identity"
 	"github.com/ultherego/flotestro/internal/jobs"
 	backupmodule "github.com/ultherego/flotestro/internal/modules/backup"
 	"github.com/ultherego/flotestro/internal/monitoring"
 	"github.com/ultherego/flotestro/internal/notify"
 	"github.com/ultherego/flotestro/internal/opspec"
+	"github.com/ultherego/flotestro/internal/pki"
 	"github.com/ultherego/flotestro/internal/policy"
+	"github.com/ultherego/flotestro/internal/remediation"
 	"github.com/ultherego/flotestro/internal/secrets"
 	"github.com/ultherego/flotestro/internal/selector"
+	"github.com/ultherego/flotestro/internal/vuln"
 )
 
 // The contract of the public API.
@@ -66,6 +72,25 @@ func (s *Server) openAPI() map[string]any {
 		schemas[name] = schemaOf(reflect.TypeOf(value), schemas)
 	}
 	register("Host", hosts.Host{})
+	register("ReviewedPrincipal", authz.ReviewedPrincipal{})
+	register("TeamHost", hosts.TeamHost{})
+	register("EnrollmentOrder", enrollment.Request{})
+	register("Alert", monitoring.Alert{})
+	register("Authority", pki.Authority{})
+	register("Read", fanOutView{})
+	register("ConnectionTest", connectionTest{})
+	register("SupportBundle", supportBundleView{})
+	register("VulnSnapshot", vuln.Snapshot{})
+	register("CVESummary", vuln.CVESummary{})
+	register("CVE", cveReport{})
+	register("Binding", authz.Binding{})
+	register("BulkHostMetadataResult", hostsBulkMetadataResponse{})
+	register("BackupDefinition", backup.Definition{})
+	register("CertificateTarget", certificates.Target{})
+	register("RemediationPlan", remediation.Plan{})
+	register("HBACTestResult", freeipa.HBACTestResult{})
+	register("ProvisioningReport", freeipa.ProvisioningReport{})
+	register("DirectoryChange", identity.Change{})
 	register("HostDetail", hostDetail{})
 	register("Job", jobs.Job{})
 	register("Attempt", jobs.Attempt{})
@@ -359,7 +384,12 @@ func (s *Server) operation(route apiRoute) map[string]any {
 	if route.Method == http.MethodPost && strings.HasSuffix(route.Path, "s") {
 		status = "201"
 	}
-	if schema, ok := responseSchemas[route.Method+" "+route.Path]; ok {
+	if why, empty := emptyAnswers[route.Method+" "+route.Path]; empty {
+		// 204 and no content, rather than a 200 carrying an object with nothing
+		// in it: a caller that waits for a body would wait for one that never
+		// comes, and a generated client would parse an empty stream.
+		responses["204"] = map[string]any{"description": "No content: " + why + "."}
+	} else if schema, ok := responseSchemas[route.Method+" "+route.Path]; ok {
 		responses[status] = map[string]any{"description": "The resource.",
 			"content": map[string]any{"application/json": map[string]any{"schema": schema}}}
 	} else if strings.HasSuffix(route.Path, "/config") {
@@ -368,6 +398,9 @@ func (s *Server) operation(route apiRoute) map[string]any {
 	} else if strings.HasSuffix(route.Path, "/events") {
 		responses[status] = map[string]any{"description": "A stream of server-sent events; trail events carry an id for Last-Event-ID resumption.",
 			"content": map[string]any{"text/event-stream": map[string]any{"schema": map[string]any{"type": "string"}}}}
+	} else if route.Path == "/api/v1/audit/export" {
+		responses[status] = map[string]any{"description": "The trail as hash-chained JSON lines, one event per line, closed by a summary line.",
+			"content": map[string]any{"application/x-ndjson": map[string]any{"schema": map[string]any{"type": "string"}}}}
 	} else if route.Path == "/metrics" {
 		responses[status] = map[string]any{"description": "The Prometheus exposition.",
 			"content": map[string]any{"text/plain": map[string]any{"schema": map[string]any{"type": "string"}}}}
@@ -641,6 +674,26 @@ func ref(name string) map[string]any {
 	return map[string]any{"$ref": "#/components/schemas/" + name}
 }
 
+func str() map[string]any   { return map[string]any{"type": "string"} }
+func count() map[string]any { return map[string]any{"type": "integer"} }
+func flag() map[string]any  { return map[string]any{"type": "boolean"} }
+
+func timestamp() map[string]any {
+	return map[string]any{"type": "string", "format": "date-time"}
+}
+
+func nullableTime() map[string]any {
+	return map[string]any{"type": []string{"string", "null"}, "format": "date-time"}
+}
+
+// The answer of the three probes, which is one handler's shape.
+func liveness() map[string]any {
+	return map[string]any{
+		"type":       "object",
+		"properties": map[string]any{"status": str(), "active_sessions": count()},
+	}
+}
+
 func collection(name string) map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -654,6 +707,255 @@ func collection(name string) map[string]any {
 // The endpoints whose answers are known resources. The rest answer with
 // module-specific views described by their handlers.
 var responseSchemas = map[string]map[string]any{
+	"POST /api/v1/monitoring/alerts/{id}/acknowledge":          ref("Alert"),
+	"POST /api/v1/monitoring/alerts/{id}/annotate":             ref("Alert"),
+	"POST /api/v1/monitoring/rules":                            ref("AlertRule"),
+	"PUT /api/v1/monitoring/rules/{id}":                        ref("AlertRule"),
+	"POST /api/v1/monitoring/silences":                         ref("Silence"),
+	"POST /api/v1/pki/prepare":                                 ref("Authority"),
+	"POST /api/v1/pki/activate":                                ref("Authority"),
+	"POST /api/v1/reads":                                       ref("Read"),
+	"POST /api/v1/secrets":                                     ref("Secret"),
+	"POST /api/v1/secrets/{name}/rotate":                       ref("Secret"),
+	"POST /api/v1/secrets/{name}/retire":                       ref("Secret"),
+	"POST /api/v1/setup/test-oidc":                             ref("ConnectionTest"),
+	"POST /api/v1/setup/test-directory":                        ref("ConnectionTest"),
+	"POST /api/v1/support/bundles":                             ref("SupportBundle"),
+	"PUT /api/v1/host-groups/{id}":                             ref("HostGroup"),
+	"PUT /api/v1/host-groups/{id}/members":                     ref("HostGroup"),
+	"PUT /api/v1/hosts/{id}/notes":                             ref("Host"),
+	"PUT /api/v1/hosts/{id}/team":                              ref("Host"),
+	"PUT /api/v1/me/preferences":                               ref("Preferences"),
+	"GET /api/v1/vulnerabilities/cves/{cve}":                   ref("CVE"),
+	"POST /api/v1/campaigns/{id}/advance":                      ref("Campaign"),
+	"POST /api/v1/enrollment-requests":                         ref("EnrollmentRequest"),
+	"POST /api/v1/enrollment-requests/{id}/replace":            ref("EnrollmentRequest"),
+	"POST /api/v1/group-mappings":                              ref("GroupMapping"),
+	"POST /api/v1/host-groups":                                 ref("HostGroup"),
+	"POST /api/v1/hosts/bulk-metadata":                         ref("BulkHostMetadataResult"),
+	"POST /api/v1/hosts/{id}/backups":                          ref("BackupDefinition"),
+	"POST /api/v1/hosts/{id}/certificates/targets":             ref("CertificateTarget"),
+	"POST /api/v1/hosts/{id}/identity-recovery":                ref("EnrollmentRequest"),
+	"POST /api/v1/hosts/{id}/maintenance":                      ref("Host"),
+	"POST /api/v1/hosts/{id}/monitoring/silences":              ref("Silence"),
+	"POST /api/v1/hosts/{id}/security/remediation/{plan}/stop": ref("RemediationPlan"),
+	"POST /api/v1/identity/access/simulate":                    ref("HBACTestResult"),
+	"POST /api/v1/identity/changes":                            ref("DirectoryChange"),
+	"POST /api/v1/identity/changes/{id}/approve":               ref("DirectoryChange"),
+	"POST /api/v1/identity/changes/{id}/cancel":                ref("DirectoryChange"),
+	"POST /api/v1/vulnerabilities/snapshots/{id}/accept": map[string]any{
+		"type":       "object",
+		"properties": map[string]any{"snapshot": ref("VulnSnapshot")},
+	},
+	"POST /api/v1/principals/{id}/enable": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"id": str(), "subject": str(), "kind": str(),
+			"bindings": map[string]any{"type": "array", "items": ref("Binding")},
+		},
+	},
+	"POST /api/v1/principals/{id}/roles": map[string]any{
+		"type": "object",
+		"properties": mergedProperties(bindingScope(), map[string]any{
+			"principal_id": str(), "subject": str(),
+			"role":        map[string]any{"type": "string", "enum": roleNames()},
+			"valid_until": nullableTime(),
+		}),
+	},
+	"POST /api/v1/principals/{id}/team-roles": map[string]any{
+		"type": "object",
+		"properties": mergedProperties(bindingScope(), map[string]any{
+			"principal_id": str(), "subject": str(),
+			"role":        map[string]any{"type": "string", "enum": roleNames()},
+			"team":        ref("Team"),
+			"valid_until": nullableTime(),
+		}),
+	},
+	"POST /api/v1/principals/{id}/tokens": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"id": str(), "principal_id": str(), "subject": str(), "description": str(),
+			"token":            map[string]any{"type": "string", "description": "The bearer value; given here and nowhere else."},
+			"token_expires_at": timestamp(),
+		},
+	},
+	"POST /api/v1/principals": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"id": str(), "subject": str(),
+			"roles": map[string]any{"type": "array", "items": map[string]any{
+				"type": "object", "properties": mergedProperties(bindingScope(), map[string]any{
+					"role":        map[string]any{"type": "string", "enum": roleNames()},
+					"valid_until": nullableTime(),
+				}),
+			}},
+			"token":            map[string]any{"type": "string", "description": "Only when the order asked for one."},
+			"token_expires_at": timestamp(),
+		},
+	},
+	"POST /api/v1/relays/{id}/revoke": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"relay":           ref("Relay"),
+			"hosts_attested":  count(),
+			"sessions_closed": count(),
+		},
+	},
+	"POST /api/v1/security/remediation": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"campaign": ref("Campaign"),
+			"groups":   map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
+			"excluded": map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
+		},
+	},
+	"POST /api/v1/security/remediation/preview": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"check_ids":    map[string]any{"type": "array", "items": str()},
+			"hosts":        count(),
+			"eligible":     count(),
+			"groups":       map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
+			"excluded":     map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
+			"notes":        map[string]any{"type": "array", "items": str()},
+			"generated_at": timestamp(),
+		},
+	},
+	"POST /api/v1/support/bundles/{id}/download": map[string]any{
+		"type":       "object",
+		"properties": map[string]any{"url": str(), "expires_at": timestamp()},
+	},
+	"POST /api/v1/tags/rename": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"from": str(), "to": str(), "hosts": count(),
+			"host_ids": map[string]any{"type": "array", "items": str()},
+		},
+	},
+	"GET /api/v1/vulnerabilities/cves": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"items": map[string]any{"type": "array", "items": ref("CVESummary")},
+			"count": count(), "total": count(), "limit": count(), "offset": count(),
+		},
+	},
+	"GET /api/v1/whoami": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"id": str(), "subject": str(), "display_name": str(), "kind": str(),
+			"roles":       map[string]any{"type": "array", "items": str()},
+			"bindings":    map[string]any{"type": "array", "items": ref("Binding")},
+			"permissions": map[string]any{"type": "array", "items": str()},
+		},
+	},
+	// Three shapes behind one route: the save, and the two a dry run gives.
+	"PUT /api/v1/settings/monitoring": map[string]any{
+		"type":        "object",
+		"description": "A save answers effective and stored. A dry run answers valid and impact instead, with code and detail when the values are refused.",
+		"properties": map[string]any{
+			"effective": map[string]any{"type": "object"},
+			"stored": map[string]any{"type": "object", "properties": map[string]any{
+				"present": flag(), "updated_at": timestamp(), "updated_by": str(),
+				"revision": count(), "values": map[string]any{"type": "object"},
+			}},
+			"valid":  flag(),
+			"impact": map[string]any{"type": "object"},
+			"code":   str(),
+			"detail": str(),
+		},
+	},
+	"GET /healthz": liveness(),
+	"GET /livez":   liveness(),
+	"GET /readyz":  liveness(),
+	"POST /api/v1/hosts/{id}/decommission": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"host_id": str(), "lifecycle_state": str(), "reason": str(), "phase": str(),
+			"remote_cleanup_unconfirmed": flag(),
+			"running_tasks":              map[string]any{"type": "array", "items": str()},
+			"leases_dropped":             flag(),
+			"jobs_canceled":              count(),
+			"certificates_revoked":       count(),
+			"session_closed":             flag(),
+			"handed_over":                flag(),
+			"command_id":                 str(),
+			"owner_instance_id":          str(),
+			"handover_error":             str(),
+		},
+	},
+	"POST /api/v1/hosts/{id}/quarantine": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"host_id": str(), "lifecycle_state": str(), "reason": str(),
+			"jobs_canceled": count(), "certificates_revoked": count(),
+			"session_closed": flag(), "session_close": str(),
+			"command_id": str(), "owner_instance_id": str(),
+		},
+	},
+	"POST /api/v1/hosts/{id}/quarantine/release": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"host_id": str(), "lifecycle_state": str(), "reason": str(),
+			"jobs_canceled": count(), "certificates_revoked": count(),
+			"session_closed": flag(),
+		},
+	},
+	"POST /api/v1/hosts/{id}/security/remediation": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"plan":    ref("RemediationPlan"),
+			"skipped": map[string]any{"type": "object", "additionalProperties": str()},
+		},
+	},
+	"POST /api/v1/identity/changes/{id}/reveal": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"uid": str(), "one_time_password": str(),
+			"expires_on_first_login": flag(),
+		},
+	},
+	// Two answers: the report when a directory is configured, and the statement
+	// that none is when it is not.
+	"POST /api/v1/identity/directory/provision-preserve": map[string]any{
+		"anyOf": []map[string]any{
+			ref("ProvisioningReport"),
+			{"type": "object", "properties": map[string]any{"configured": flag(), "detail": str()}},
+		},
+	},
+	// EnrollmentRequest is the order with its config_url and its steps; the list
+	// answers the rows themselves, which carry neither.
+	"GET /api/v1/enrollment-requests":                  cursorCollection("EnrollmentOrder"),
+	"GET /api/v1/host-groups/{id}/hosts":               pagedCollection("Host"),
+	"DELETE /api/v1/secrets/{name}/versions/{version}": ref("Secret"),
+	"DELETE /api/v1/teams/{id}": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"deleted":        map[string]any{"type": "string"},
+			"released_hosts": map[string]any{"type": "array", "items": ref("TeamHost")},
+		},
+	},
+	"GET /api/v1/host-groups/preview": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"count":    map[string]any{"type": "integer"},
+			"sample":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"selector": map[string]any{"type": "string"},
+		},
+	},
+	"GET /api/v1/access/review": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"items":       map[string]any{"type": "array", "items": ref("ReviewedPrincipal")},
+			"count":       map[string]any{"type": "integer"},
+			"flagged":     map[string]any{"type": "integer"},
+			"reviewed_at": map[string]any{"type": "string", "format": "date-time"},
+			"thresholds": map[string]any{"type": "object", "properties": map[string]any{
+				"unused_days":       map[string]any{"type": "integer"},
+				"expires_soon_days": map[string]any{"type": "integer"},
+				"token_max_days":    map[string]any{"type": "integer"},
+			}},
+		},
+	},
 	"GET /api/v1/monitoring/rules":                      collection("AlertRule"),
 	"GET /api/v1/monitoring/rules/{id}":                 ref("AlertRule"),
 	"GET /api/v1/monitoring/silences":                   collection("Silence"),
@@ -1036,6 +1338,29 @@ func fleetRemediationBodySchema(order bool) map[string]any {
 // document said "send an object" for every one of them, which is a promise the
 // panel does not keep. A route belongs here or in requestSchemas, never both and
 // never neither.
+// The routes that answer with nothing, and what the caller already knows
+// instead. The document then promises 204 and no body.
+var emptyAnswers = map[string]string{
+	"DELETE /api/v1/budgets/{key...}":                         "the budget is gone and the holders keep their own",
+	"DELETE /api/v1/campaign-schedules/{id}":                  "the schedule is gone; the campaigns it made stay",
+	"DELETE /api/v1/group-mappings/{id}":                      "the mapping is gone; the roles already granted stay",
+	"DELETE /api/v1/host-groups/{id}":                         "the group is gone and its hosts are untouched",
+	"DELETE /api/v1/hosts/{id}/backups":                       "the host keeps no backup definition any more",
+	"DELETE /api/v1/hosts/{id}/certificates/targets":          "the certificate is no longer watched",
+	"DELETE /api/v1/hosts/{id}/monitoring/silences/{silence}": "the silence has expired",
+	"DELETE /api/v1/monitoring/rules/{id}":                    "the rule is gone; the alerts it raised stay",
+	"DELETE /api/v1/monitoring/silences/{silence}":            "the silence has expired",
+	"DELETE /api/v1/notifications/channels/{id}":              "the channel is gone; its deliveries stay",
+	"DELETE /api/v1/pki/{fingerprint}":                        "the authority is retired",
+	"DELETE /api/v1/policies/{id}":                            "the policy is gone; the campaigns it made stay",
+	"DELETE /api/v1/principals/{id}":                          "the principal is disabled, not removed",
+	"DELETE /api/v1/principals/{id}/roles/{role}":             "the role is no longer granted",
+	"DELETE /api/v1/principals/{id}/sessions/{sid}":           "the session is revoked",
+	"DELETE /api/v1/principals/{id}/team-roles/{role}":        "the role in that team is no longer granted",
+	"DELETE /api/v1/principals/{id}/tokens/{token}":           "the token is revoked",
+	"POST /api/v1/enrollment-requests/{id}/revoke":            "the order can no longer be used",
+}
+
 var bodilessRoutes = map[string]string{
 	"POST /auth/logout":                                        "the caller's own session is what ends",
 	"POST /api/v1/enrollment-requests/{id}/revoke":             "the order is named in the path",
