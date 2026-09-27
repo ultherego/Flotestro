@@ -17,11 +17,6 @@ services:
       FLOTESTRO_DATABASE_MODE: external
       FLOTESTRO_DATABASE_URL_FILE: /run/secrets/database-url
       FLOTESTRO_AUTO_MIGRATE: "false"
-    # Only postgres goes: init still writes the file the DSN is read from, and
-    # the backup and restore tools read it there.
-    depends_on: !override
-      init:
-        condition: service_completed_successfully
     secrets:
       - database-url
 
@@ -29,11 +24,6 @@ services:
     environment:
       FLOTESTRO_DATABASE_MODE: external
       FLOTESTRO_DATABASE_URL_FILE: /run/secrets/database-url
-    # Only postgres goes: init still writes the file the DSN is read from, and
-    # the backup and restore tools read it there.
-    depends_on: !override
-      init:
-        condition: service_completed_successfully
     secrets:
       - database-url
 

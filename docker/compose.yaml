@@ -115,11 +115,11 @@ services:
     user: "65532:65532"
     command: ["migrate"]
     restart: "no"
+    # Only init: the connection waits half a minute for a database that answers
+    # and says so, so the graph needs no edge to one.
     depends_on:
       init:
         condition: service_completed_successfully
-      postgres:
-        condition: service_healthy
     environment:
       FLOTESTRO_DATABASE_URL_FILE: /run/flotestro/database-url
       FLOTESTRO_DATABASE_MODE: ${FLOTESTRO_DATABASE_MODE:-quickstart}
