@@ -47,7 +47,7 @@ database.
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/ultherego/Flotestro/main/docker/compose.yaml
-docker compose --profile quickstart up -d
+docker compose up -d
 docker compose cp control-plane:/var/lib/flotestro/bootstrap-token .
 ```
 

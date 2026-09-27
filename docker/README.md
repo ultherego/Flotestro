@@ -104,6 +104,17 @@ fetching the bootstrap token - is `podman cp` against the container instead:
 
     podman cp flotestro_control-plane_1:/var/lib/flotestro/bootstrap-token .
 
+One difference it is worth knowing about before it worries somebody: under
+`podman-compose` the container healthchecks never pass, and `podman ps` shows
+`(starting)` for as long as the container runs. The files declare the check in
+exec form - a list of arguments, no shell - because the images are distroless
+and carry no shell to run a string with; `podman-compose` turns that list into a
+shell string anyway, and the mangled command exits non-zero every time. Nothing
+acts on the verdict, so the containers keep running, and the check itself is
+sound: the same binary run by hand answers. Ask the panel over HTTP instead -
+`/readyz` on the API port, `/healthz` on a relay's health port - which is what
+the deployment scripts here do.
+
 `podman-compose` reads the rest of the files as written:
 `read_only`, `tmpfs`, `cap_drop`, `security_opt`, `pids_limit`, `ulimits` and
 `stop_grace_period`. Two options had to change to be portable at all, and both
