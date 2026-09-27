@@ -183,12 +183,12 @@ services:
       # The name of this gateway, and the name a second replica must not
       # repeat. The container's own hostname is random, so it cannot serve.
       FLOTESTRO_GATEWAY_ID: ${FLOTESTRO_GATEWAY_ID:-cp-01}
-      # A mutating task leaves the panel only with a signed capability for
-      # exactly that change. A fresh installation can hold to it, because the
-      # packaged helper of a first installation runs on enforce too; a fleet
-      # that predates the capability sets prefer in ./.env until every host is
-      # moved, and the panel names the hosts that are still on prefer.
-      FLOTESTRO_HELPER_CAPABILITY_MODE: ${FLOTESTRO_HELPER_CAPABILITY_MODE:-enforce}
+      # A mutating task leaves the panel only with a signed capability for exactly
+      # that change, which is what the panel does with no value here. No default is
+      # written in: podman-compose passes a ${VAR:-default} through as the literal
+      # text and the panel would refuse to start on it. A fleet that predates the
+      # capability sets prefer in ./.env, and the panel names the hosts still on it.
+      FLOTESTRO_HELPER_CAPABILITY_MODE:
       # The addresses the fleet reaches the panel at. They enter the certificate
       # of the agent gateway, so they are public names, not the container's.
       # The default serves a trial on this machine; no remote host can enrol

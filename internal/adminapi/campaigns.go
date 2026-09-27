@@ -1756,14 +1756,8 @@ func orDefault(value, fallback string) string {
 
 // campaignScopes carries the principal scopes to the store layer. The
 // global scope lifts the narrowing, so it is enough to pass it as it is.
-func campaignScopes(principal authz.Principal) []campaigns.Scope {
-	scopes := principal.ScopesFor(authz.PermCampaignRead)
-	result := make([]campaigns.Scope, 0, len(scopes))
-	for _, scope := range scopes {
-		result = append(result,
-			campaigns.Scope{Site: scope.Site, Environment: scope.Environment, Team: scope.Team})
-	}
-	return result
+func campaignScopes(principal authz.Principal) []authz.Scope {
+	return principal.ScopesFor(authz.PermCampaignRead)
 }
 
 // campaignRequiresFreshAuth says whether approving the campaign needs the

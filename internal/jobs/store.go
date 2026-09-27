@@ -1211,8 +1211,9 @@ type ListFilter struct {
 	Until *time.Time
 	Limit int
 	// Scopes narrow the result to the scopes in which the caller has the right to
-	// read.
-	Scopes []Scope
+	// read. They are the bindings as authz holds them: a reduced copy would drop
+	// the categories it has no field for and so grant nothing.
+	Scopes []authz.Scope
 	// Sort is the order of the list; the zero value is the creation time,
 	// newest first, the order the list always had.
 	Sort Sort
@@ -1325,14 +1326,6 @@ func validTimeKey(value string) bool {
 	return err == nil
 }
 
-// Scope is a site-environment pair. An empty field means "any".
-type Scope struct {
-	Site        string
-	Environment string
-	// Team is the group of hosts a binding names instead of a site.
-	Team string
-}
-
 // conditions renders the filter as SQL over the jobs table.
 func (f ListFilter) conditions() ([]string, []any) {
 	var (
@@ -1342,12 +1335,7 @@ func (f ListFilter) conditions() ([]string, []any) {
 	// A task belongs to a host, so it inherits visibility from it: the operator
 	// of one environment must not see the tasks of the whole fleet.
 	if len(f.Scopes) > 0 {
-		translated := make([]authz.Scope, 0, len(f.Scopes))
-		for _, scope := range f.Scopes {
-			translated = append(translated,
-				authz.Scope{Site: scope.Site, Environment: scope.Environment, Team: scope.Team})
-		}
-		if condition, extra := authz.ScopeSQL(translated, authz.HostColumns("h"), len(args)); condition != "" {
+		if condition, extra := authz.ScopeSQL(f.Scopes, authz.HostColumns("h"), len(args)); condition != "" {
 			conditions = append(conditions,
 				"exists (select 1 from hosts h where h.id = jobs.host_id and "+condition+")")
 			args = append(args, extra...)

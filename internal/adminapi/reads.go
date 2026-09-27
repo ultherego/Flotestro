@@ -460,10 +460,7 @@ func (s *Server) handleGetRead(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filter := jobs.ListFilter{FanoutID: stored.ID, Limit: 500}
-	for _, scope := range principal.ScopesFor(authz.PermJobRead) {
-		filter.Scopes = append(filter.Scopes,
-			jobs.Scope{Site: scope.Site, Environment: scope.Environment, Team: scope.Team})
-	}
+	filter.Scopes = principal.ScopesFor(authz.PermJobRead)
 	listed, err := s.jobs.List(r.Context(), filter)
 	if err != nil {
 		s.fail(w, err)

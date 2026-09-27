@@ -613,10 +613,7 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, "invalid_filter", "until must be an RFC 3339 timestamp")
 		return
 	}
-	for _, scope := range scopes {
-		filter.Scopes = append(filter.Scopes,
-			jobs.Scope{Site: scope.Site, Environment: scope.Environment, Team: scope.Team})
-	}
+	filter.Scopes = append(filter.Scopes, scopes...)
 	// The order of the list: one of the columns the store whitelists, newest
 	// first unless the value names another column or direction.
 	order, err := jobs.ParseSort(query.Get("sort"))

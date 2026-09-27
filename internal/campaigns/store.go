@@ -907,16 +907,6 @@ func (s *Store) getTx(ctx context.Context, tx pgx.Tx, campaignID string) (*Campa
 	return &campaigns[0], nil
 }
 
-// Scope is a site-environment pair. An empty field means "any".
-type Scope struct {
-	Site        string
-	Environment string
-	// Team, as in the job listing: a boundary this table cannot express, carried
-	// so that it narrows to nothing instead of being dropped and leaving the
-	// listing wide open.
-	Team string
-}
-
 // ListFilter narrows the campaign list. Every field is optional; the
 // page is bounded by Limit and starts at Offset, newest campaign first.
 type ListFilter struct {
@@ -940,7 +930,7 @@ type ListPage struct {
 
 // List returns the campaigns narrowed to the scopes in which the caller has
 // the right to read, and to the filter.
-func (s *Store) List(ctx context.Context, filter ListFilter, scopes []Scope) (ListPage, error) {
+func (s *Store) List(ctx context.Context, filter ListFilter, scopes []authz.Scope) (ListPage, error) {
 	limit := filter.Limit
 	if limit <= 0 || limit > 200 {
 		limit = 50
@@ -1017,14 +1007,11 @@ func (s *Store) attachProgress(ctx context.Context, items []Campaign) error {
 	return rows.Err()
 }
 
-// scopeCondition builds the visibility condition over a campaign's targets.
-func scopeCondition(scopes []Scope, offset int) (string, []any) {
-	przelozone := make([]authz.Scope, 0, len(scopes))
-	for _, scope := range scopes {
-		przelozone = append(przelozone,
-			authz.Scope{Site: scope.Site, Environment: scope.Environment, Team: scope.Team})
-	}
-	warunek, args := authz.ScopeSQL(przelozone, authz.HostColumns("h"), offset)
+// scopeCondition builds the visibility condition over a campaign's targets. The
+// bindings go to authz untouched: a copy holding fewer fields would leave the
+// rest empty, and an empty category reaches no row.
+func scopeCondition(scopes []authz.Scope, offset int) (string, []any) {
+	warunek, args := authz.ScopeSQL(scopes, authz.HostColumns("h"), offset)
 	if warunek == "" {
 		return "", nil
 	}

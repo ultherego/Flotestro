@@ -12,6 +12,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/ultherego/flotestro/internal/authz"
 )
 
 // A schedule is a campaign order kept for a moment: the same body the door
@@ -544,7 +546,7 @@ type CampaignWindow struct {
 // CampaignWindows lists the campaigns whose maintenance window touches [from,
 // to), narrowed to the scopes the caller may read campaigns in - the same
 // narrowing the campaign list applies.
-func (s *Store) CampaignWindows(ctx context.Context, from, to time.Time, scopes []Scope) ([]CampaignWindow, error) {
+func (s *Store) CampaignWindows(ctx context.Context, from, to time.Time, scopes []authz.Scope) ([]CampaignWindow, error) {
 	clause := `where (maintenance_start is not null or maintenance_end is not null)
 		 and coalesce(maintenance_end, maintenance_start) >= $1
 		 and coalesce(maintenance_start, maintenance_end) < $2`
