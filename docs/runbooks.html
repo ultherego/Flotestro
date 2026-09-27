@@ -116,8 +116,9 @@
     <p>Reach for it to bring the control plane back on a snapshot - in a drill or
     in earnest - and to settle the work that was in flight when the snapshot was
     taken. It is also the reference for what the database holds and what does
-    not: the state directory, the environment file, and the signed package
-    repositories are each outside it and each part of the backup set. It carries
+    not: the state volume, the deployment's own settings and secrets, and the
+    signed package repository are each outside it and each part of the backup
+    set. It carries
     the cryptographic states a start can stop in
     (<code class="refusal">secrets_key_unavailable</code>,
     <code class="refusal">issuer_key_unavailable</code>,
@@ -282,7 +283,7 @@
 
 <footer class="site-footer">
   <div class="site-footer__inner">
-    <p>Flotestro documentation, release 0.60.0.</p>
+    <p>Flotestro documentation, release 0.62.0.</p>
     <p><a href="https://github.com/ultherego/Flotestro">github.com/ultherego/Flotestro</a></p>
   </div>
 </footer>

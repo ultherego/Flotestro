@@ -82,7 +82,7 @@
       <tbody>
         <tr>
           <td><code>flotestro-control-plane</code></td>
-          <td>uid 65532 in a container, or a service account from the package</td>
+          <td>uid 65532 in a container, read-only and without capabilities</td>
           <td>REST API, web panel, agent gateway, enrollment, scheduler, campaign engine, fleet CA, monitoring ingest and alert evaluation, notification outbox</td>
           <td><code>FLOTESTRO_STATE_DIR</code>, default <code>/var/lib/flotestro</code></td>
         </tr>
@@ -100,7 +100,7 @@
         </tr>
         <tr>
           <td><code>flotestro-relay</code></td>
-          <td>unprivileged, one per isolated site</td>
+          <td>uid 65532 in a container of its own, one per isolated site</td>
           <td>Terminates the agent sessions of a site and forwards them to the centre; spools what the centre has not acknowledged</td>
           <td><code>/var/lib/flotestro-relay</code></td>
         </tr>
@@ -114,11 +114,15 @@
     </table>
     </div>
 
-    <p>Two more images exist and run only when they are asked to:
+    <p>The first and the last of those are images and are deployed no other
+    way; the agent and its helper are native packages, because they manage the
+    host itself. Two further images exist and run only when they are asked to:
     <code>flotestro-admin-tools</code>, which takes and restores the backup pair
-    and carries the same <code>auditverify</code> the packages ship, and
+    and carries <code>auditverify</code>, and
     <code>flotestro-package-repository</code>, which serves the signed packages
-    of a release inside an isolated site.</p>
+    of a release inside an isolated site. The panel's own image carries a fifth
+    entry point, <code>migrate</code>, which brings the schema forward as a run
+    of its own.</p>
 
     <h2 id="wires">Who talks to whom, over which port, with which identity</h2>
 
@@ -364,10 +368,13 @@
     <p>A relay serves one site whose hosts cannot reach the panel directly. It
     terminates their sessions on <code>:8453</code>, forwards them upstream to
     one of <code>upstream.gateway_urls</code>, and spools what the centre has not
-    acknowledged. It is configured by <code>/etc/flotestro/relay.yaml</code>
-    alone - one variable, <code>FLOTESTRO_ENROLLMENT_TOKEN</code>, is read by the
-    <code>enroll</code> command and by nothing else. <code>flotestro-relay config
-    show</code> prints what the file resolves to.</p>
+    acknowledged. It is configured by <code>relay.yaml</code> alone, which lies
+    beside <code>compose.relay.yaml</code> on the site host and is bind-mounted
+    read-only at <code>/etc/flotestro/relay.yaml</code>; one variable,
+    <code>FLOTESTRO_ENROLLMENT_TOKEN</code>, is read by the <code>enroll</code>
+    command and by nothing else.
+    <code>docker compose -f compose.relay.yaml run --rm relay config show</code>
+    prints what the file resolves to.</p>
 
     <p>Its site is an expectation, not a grant: the scope of a relay is what its
     enrollment token granted, and the token settles it. No relay may advertise a
@@ -513,7 +520,7 @@
 
 <footer class="site-footer">
   <div class="site-footer__inner">
-    <p>Flotestro documentation, release 0.60.0.</p>
+    <p>Flotestro documentation, release 0.62.0.</p>
     <p><a href="https://github.com/ultherego/Flotestro">github.com/ultherego/Flotestro</a></p>
   </div>
 </footer>

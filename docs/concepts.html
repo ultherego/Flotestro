@@ -675,8 +675,9 @@
     recomputes the chain line by line. Exit status 0 means intact, 1 means broken,
     2 means it was invoked wrongly or could not read the file. Without a file
     name it reads standard input, so an export can be checked as it is
-    downloaded. The tool ships with the control-plane package, so an export can be
-    checked where the trail was written, and it is in the admin-tools image too:</p>
+    downloaded. It is a static binary of its own, so a copy can be kept wherever
+    the exports are; the admin-tools image carries it as well, which is how it is
+    run against a backup the deployment took:</p>
 
 <pre><code>docker compose --profile tools run --rm admin-tools auditverify /backups/audit-20260901.jsonl</code></pre>
 
@@ -709,7 +710,7 @@
 
 <footer class="site-footer">
   <div class="site-footer__inner">
-    <p>Flotestro documentation, release 0.60.0.</p>
+    <p>Flotestro documentation, release 0.62.0.</p>
     <p><a href="https://github.com/ultherego/Flotestro">github.com/ultherego/Flotestro</a></p>
   </div>
 </footer>
