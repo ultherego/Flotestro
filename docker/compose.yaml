@@ -127,6 +127,12 @@ services:
     volumes:
       - shared_secrets:/run/flotestro:ro
       - control_plane_state:/var/lib/flotestro
+
+    # The same two as the control plane, minus the edge: the migration talks to
+    # the database and to nothing else, here or somewhere an operator runs.
+    networks:
+      - database
+      - database_egress
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
