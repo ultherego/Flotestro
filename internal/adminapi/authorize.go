@@ -153,7 +153,13 @@ func (s *Server) finishedChange(w http.ResponseWriter, r *http.Request,
 		event.Detail = map[string]any{}
 	}
 	event.Detail[audit.IntentKey] = key
-	if err := s.audit.RecordNow(r.Context(), event); err != nil {
+	err := s.audit.RecordOutcome(r.Context(), event)
+	if errors.Is(err, audit.ErrOutcomeRecorded) {
+		// Another replica, or the reconciler at a start in between, closed this
+		// change already. The trail has its answer, which is what was wanted.
+		return true
+	}
+	if err != nil {
 		problem(w, http.StatusInternalServerError, "audit_unavailable",
 			made+", and the outcome could not be written to the trail: "+err.Error()+
 				". The beginning of the change is on the trail; read the state of the installation.")

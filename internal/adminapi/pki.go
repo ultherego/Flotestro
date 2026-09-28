@@ -88,12 +88,17 @@ func (s *Server) handlePrepareCA(w http.ResponseWriter, r *http.Request) {
 
 	prepared, err := s.trust.Prepare()
 	if err != nil {
+		// What the trail records is what the trust store shows, not what the call
+		// returned: a preparation that failed halfway may still have left material
+		// behind, and a terminal "failure" over it would be read later as a change
+		// that never happened.
+		outcome, found := s.trustState(audit.Intent{Action: "pki.ca.prepare"})
 		if !s.finishedChange(w, r, audit.Event{
 			ActorType: audit.ActorUser, ActorID: actor.Subject,
 			Action: "pki.ca.prepare", TargetType: "pki", TargetID: "",
-			RequestID: requestIDOf(r), Outcome: audit.OutcomeFailure,
-			Detail: map[string]any{"error": err.Error()},
-		}, key, "no CA was prepared") {
+			RequestID: requestIDOf(r), Outcome: outcome,
+			Detail: map[string]any{"error": err.Error(), "found": found},
+		}, key, "the preparation of a CA failed") {
 			return
 		}
 		problem(w, http.StatusConflict, "prepare_failed", err.Error())
@@ -172,12 +177,17 @@ func (s *Server) handleActivateCA(w http.ResponseWriter, r *http.Request) {
 
 	active, err := s.trust.Activate()
 	if err != nil {
+		// The trail says what signs now, not what the call returned: a handover
+		// that failed after the swap would otherwise be recorded as one that never
+		// happened.
+		outcome, found := s.trustState(audit.Intent{
+			Action: "pki.ca.activate", TargetID: pending.FingerprintHex()})
 		if !s.finishedChange(w, r, audit.Event{
 			ActorType: audit.ActorUser, ActorID: actor.Subject,
 			Action: "pki.ca.activate", TargetType: "pki", TargetID: pending.FingerprintHex(),
-			RequestID: requestIDOf(r), Outcome: audit.OutcomeFailure,
-			Detail: map[string]any{"error": err.Error()},
-		}, key, "signing was not handed over") {
+			RequestID: requestIDOf(r), Outcome: outcome,
+			Detail: map[string]any{"error": err.Error(), "found": found},
+		}, key, "the handover of signing failed") {
 			return
 		}
 		problem(w, http.StatusConflict, "activate_failed", err.Error())
@@ -271,11 +281,18 @@ func (s *Server) handleRetireCA(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.trust.Retire(fingerprint, hostCount); err != nil {
+		// A refusal by the policy leaves the trust set as it was, and a failure
+		// halfway may not have: the trail takes the answer from the set itself.
+		outcome, found := s.trustState(audit.Intent{
+			Action: "pki.ca.retire", TargetID: fingerprint})
+		if outcome == audit.OutcomeFailure {
+			outcome = audit.OutcomeDenied
+		}
 		if !s.finishedChange(w, r, audit.Event{
 			ActorType: audit.ActorUser, ActorID: actor.Subject,
 			Action: "pki.ca.retire", TargetType: "pki", TargetID: fingerprint,
-			RequestID: requestIDOf(r), Outcome: audit.OutcomeDenied,
-			Detail: map[string]any{"reason": err.Error(), "hosts_using": hostCount},
+			RequestID: requestIDOf(r), Outcome: outcome,
+			Detail: map[string]any{"reason": err.Error(), "hosts_using": hostCount, "found": found},
 		}, key, "the CA was not retired") {
 			return
 		}

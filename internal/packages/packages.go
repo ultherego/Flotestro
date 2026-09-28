@@ -35,6 +35,9 @@ const (
 	ErrorDatabaseBroken = "package_database_broken"
 	ErrorModulesHidden  = "kernel_modules_hidden"
 	ErrorNoSpace        = "insufficient_space"
+	// ErrorPlanIncomplete: the plan carries a gap the resolution could not name,
+	// so the change set somebody approved is not the whole change set.
+	ErrorPlanIncomplete = "plan_incomplete"
 )
 
 // ErrLocked means the lock of the package manager is held.
@@ -51,6 +54,10 @@ var ErrProtectedPackage = errors.New("a protected package")
 // ErrPlanChanged means the set of packages to remove has changed since the
 // plan was approved.
 var ErrPlanChanged = errors.New("the removal plan has changed since it was approved")
+
+// ErrPlanIncomplete means the plan names a gap the resolution could not fill.
+// What nobody could name nobody approved, so the transaction does not run.
+var ErrPlanIncomplete = errors.New("the plan does not describe the whole transaction")
 
 // ErrorCodeOf maps the errors of the adapters to their stable codes.
 func ErrorCodeOf(err error) (string, bool) {
@@ -73,6 +80,10 @@ func ErrorCodeOf(err error) (string, bool) {
 		return ErrorSecurityOriginUnknown, true
 	case errors.Is(err, ErrAgentHoldFailed):
 		return ErrorAgentHoldFailed, true
+	case errors.Is(err, ErrNotSecurityUpgrade):
+		return ErrorNotSecurityUpgrade, true
+	case errors.Is(err, ErrPlanIncomplete):
+		return ErrorPlanIncomplete, true
 	case errors.Is(err, ErrNoSpace):
 		return ErrorNoSpace, true
 	}
@@ -92,6 +103,7 @@ func Refused(err error) bool {
 		errors.Is(err, ErrVersionlockMissing) ||
 		errors.Is(err, ErrPartialUpgrade) || errors.Is(err, ErrSecurityUnknown) ||
 		errors.Is(err, ErrSecurityOriginUnknown) || errors.Is(err, ErrAgentHoldFailed) ||
+		errors.Is(err, ErrNotSecurityUpgrade) || errors.Is(err, ErrPlanIncomplete) ||
 		errors.Is(err, ErrNoSpace) || errors.Is(err, plan.ErrStalePlan) ||
 		errors.Is(err, plan.ErrReplanRequired) || errors.Is(err, plan.ErrPlanExpired)
 }

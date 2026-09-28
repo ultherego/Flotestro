@@ -267,9 +267,13 @@ func (p *Pacman) ApplyExact(ctx context.Context, approved Plan, options Options)
 	// pacman in turn, and then nothing has been installed either - which is the
 	// safe way round for a step that cannot be undone.
 	result := commandResult{Ran: true}
-	command := "pacman -Rs"
+	command := "pacman -R"
 	if removals := removalSpecs(approved); len(removals) > 0 {
-		removing := append([]string{"-Rs", "--noconfirm", "--noprogressbar"}, removals...)
+		// -R and not -Rs: the s takes the dependencies that have become unneeded
+		// as well, and those are packages the plan never named and the operator
+		// never saw. An orphan left behind is the honest outcome of an approved
+		// change; a package nobody approved going away is not.
+		removing := append([]string{"-R", "--noconfirm", "--noprogressbar"}, removals...)
 		result = runWithProgress(ctx, 45*time.Minute, options.Progress, false, pacmanPath, removing...)
 	}
 	if len(files) > 0 && result.Ran && result.ExitCode == 0 {

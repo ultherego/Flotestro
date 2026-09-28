@@ -24,6 +24,24 @@ const (
 	BlockedUnknown = "unknown"
 )
 
+// UnknownBlocks names the gaps of a plan: the entries the resolution could not
+// put a package to. A transaction is what somebody approved, and nobody can
+// approve what nobody could name, so the helper refuses a plan carrying one.
+func UnknownBlocks(blocked []Blocked) []string {
+	var gaps []string
+	for _, entry := range blocked {
+		if entry.Kind != BlockedUnknown {
+			continue
+		}
+		gap := entry.Name
+		if entry.Status != "" {
+			gap += " (" + entry.Status + ")"
+		}
+		gaps = append(gaps, gap)
+	}
+	return gaps
+}
+
 // Blocked describes a package that blocks package operations.
 type Blocked struct {
 	Name   string `json:"name"`

@@ -23,6 +23,11 @@ const (
 	preconditionMetadata  = "metadata_revision"
 	preconditionLockFree  = "lock_free"
 	preconditionProtected = "protected_absent"
+	// preconditionBlocked carries what stands in the way of the plan, so that the
+	// digest covers it: a gap the resolution could not name, a package the host
+	// holds back, a database waiting for a repair. A plan whose obstacles moved
+	// between the approval and the transaction is a plan nobody approved.
+	preconditionBlocked = "blocked"
 )
 
 // The rollback mechanisms a package plan can name.
@@ -77,7 +82,25 @@ func (p Plan) Envelope() plan.Envelope {
 		envelope.Preconditions = append(envelope.Preconditions,
 			plan.Precondition{Kind: preconditionProtected, Subject: name, Expected: "not in the plan"})
 	}
+	for _, entry := range p.Blocked {
+		kind := entry.Kind
+		if kind == "" {
+			kind = BlockedDatabase
+		}
+		envelope.Preconditions = append(envelope.Preconditions,
+			plan.Precondition{Kind: preconditionBlocked, Subject: entry.Name, Expected: kind})
+	}
 
+	// A package the plan also installs is not a package the plan makes absent:
+	// dropping the old kernel as the new one arrives leaves the name installed,
+	// and an "absent" effect over it would read every successful kernel upgrade
+	// as a partial one. The version the name ends at is the effect that covers it.
+	arriving := map[string]bool{}
+	for _, change := range p.Changes {
+		if change.Action != ActionRemove {
+			arriving[change.Name] = true
+		}
+	}
 	var installDelta int64
 	installKnown := len(p.Changes) > 0
 	for _, change := range p.Changes {
@@ -89,7 +112,7 @@ func (p Plan) Envelope() plan.Envelope {
 			envelope.Effects.Expected = append(envelope.Effects.Expected, plan.Effect{
 				Kind: plan.EffectPackageVersion, Subject: change.Name, Value: change.CandidateVersion,
 			})
-		} else {
+		} else if !arriving[change.Name] {
 			envelope.Effects.Expected = append(envelope.Effects.Expected, plan.Effect{
 				Kind: plan.EffectPackageAbsent, Subject: change.Name,
 			})
@@ -186,6 +209,17 @@ func (p Plan) RepositoryIDs() []string {
 // names one, so a foreign-architecture package is not resolved to the native.
 func exactSpec(manager string, change Change) string {
 	if change.Action == ActionRemove {
+		// A removal is addressed as exactly as an arrival. dnf keeps several
+		// versions of an installonly package, so a bare name would take the
+		// version this very transaction installed away with the old one; apt and
+		// pacman hold one version at a time, where the name is that version.
+		if manager == "dnf" && change.CurrentVersion != "" {
+			spec := change.Name + "-" + change.CurrentVersion
+			if change.Architecture != "" {
+				spec += "." + change.Architecture
+			}
+			return spec
+		}
 		return change.Name
 	}
 	switch manager {
@@ -308,11 +342,37 @@ func finishPlan(ctx context.Context, manager Manager, p Plan, options Options) P
 			Name: name, Action: ActionRemove, Reason: reason, Protected: Protected(name),
 		})
 	}
+	// The protected packages of the plan are the ones it takes away and does not
+	// put back: the helper refuses a transaction that names any. A version
+	// cleanup - the old kernel going as the new one arrives - is not the removal
+	// of a package, and counting it would refuse every kernel upgrade.
+	arriving := map[string]bool{}
+	for _, change := range p.Changes {
+		if change.Action != ActionRemove {
+			arriving[change.Name] = true
+		}
+	}
+	for _, change := range p.Changes {
+		if change.Action == ActionRemove && change.Protected && !arriving[change.Name] &&
+			!containsName(p.Protected, change.Name) {
+			p.Protected = append(p.Protected, change.Name)
+		}
+	}
+	sort.Strings(p.Protected)
 	sort.SliceStable(p.Changes, func(i, j int) bool { return p.Changes[i].Name < p.Changes[j].Name })
 	if p.Rollback.Mechanism == "" {
 		p.Rollback = rollbackOf(p.Manager)
 	}
 	return p
+}
+
+func containsName(names []string, wanted string) bool {
+	for _, name := range names {
+		if name == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 // rollbackOf is the plan's honest answer about undoing the change.

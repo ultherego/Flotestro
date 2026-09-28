@@ -102,6 +102,13 @@ func (s *Server) executeApproved(ctx context.Context, request *helperv1.HelperRe
 		return packageFailure(manager.Name(), fmt.Errorf("%w: %s",
 			packages.ErrProtectedPackage, strings.Join(current.Protected, ", ")))
 	}
+	// A plan with a gap is not the whole change set: the resolution could not put
+	// a package to something the transaction would do, and what nobody could name
+	// nobody approved.
+	if gaps := packages.UnknownBlocks(current.Blocked); len(gaps) > 0 {
+		return packageFailure(manager.Name(), fmt.Errorf("%w: %s",
+			packages.ErrPlanIncomplete, strings.Join(gaps, ", ")))
+	}
 	exact, ok := manager.(packages.Exact)
 	if !ok {
 		return reject(ErrorUnsupported,

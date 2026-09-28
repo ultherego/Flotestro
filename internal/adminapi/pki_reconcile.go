@@ -2,6 +2,7 @@ package adminapi
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
 	"github.com/ultherego/flotestro/internal/audit"
@@ -35,11 +36,17 @@ func (s *Server) ReconcileTrustIntents(ctx context.Context, log *slog.Logger) {
 			"began_at": intent.OccurredAt, "began_by": intent.ActorID,
 			"found": found,
 		}
-		if err := s.audit.RecordNow(ctx, audit.Event{
+		err := s.audit.RecordOutcome(ctx, audit.Event{
 			ActorType: audit.ActorSystem, ActorID: "reconciler",
 			Action: intent.Action, TargetType: "pki", TargetID: intent.TargetID,
 			Outcome: outcome, Detail: detail,
-		}); err != nil {
+		})
+		if errors.Is(err, audit.ErrOutcomeRecorded) {
+			// Another replica reconciled first. One answer per beginning is the
+			// point, so this one is dropped rather than written beside it.
+			continue
+		}
+		if err != nil {
 			log.Error("a trust change that began could not be closed on the trail",
 				"action", intent.Action, "began_at", intent.OccurredAt, "err", err)
 			continue

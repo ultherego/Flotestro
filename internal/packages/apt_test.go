@@ -342,3 +342,22 @@ func TestASecurityOriginIsTheArchiveAndNotTheWord(t *testing.T) {
 		})
 	}
 }
+
+// A security-only order that names its packages was not classified at all: the
+// classification ran only when the list was empty. An ordinary upgrade would
+// then be carried out and recorded as a security one.
+func TestASecurityOrderRefusesAPackageWithNoSecurityUpdate(t *testing.T) {
+	security := []string{"openssl", "libssl3"}
+	if outside := namesOutside([]string{"openssl", "libssl3:amd64"}, security); len(outside) != 0 {
+		t.Errorf("packages with a security update were read as outside it: %v", outside)
+	}
+	outside := namesOutside([]string{"openssl", "nginx", "curl:amd64"}, security)
+	if len(outside) != 2 || outside[0] != "nginx" || outside[1] != "curl:amd64" {
+		t.Errorf("the packages outside the security set are %v", outside)
+	}
+	// Nothing pending anywhere: every named package is outside, and the plan says
+	// which rather than upgrading them under the name of a security transaction.
+	if outside := namesOutside([]string{"openssl"}, nil); len(outside) != 1 {
+		t.Errorf("with no security updates pending the order reads as %v", outside)
+	}
+}

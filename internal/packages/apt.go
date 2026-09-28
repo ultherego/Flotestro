@@ -88,17 +88,25 @@ func (a *APT) plan(ctx context.Context, options Options) (Plan, error) {
 	// filtered afterwards: install --only-upgrade resolves dependencies and
 	// removals of its own, and a filtered plain upgrade never shows them.
 	names := options.Packages
-	if options.SecurityOnly && len(names) == 0 {
+	if options.SecurityOnly {
 		found, err := a.securityUpgradeNames(ctx)
 		if err != nil {
 			return plan, err
 		}
-		if len(found) == 0 {
-			// Nothing to raise is a plan with no changes, never a full upgrade.
-			plan.DownloadBytes, plan.Space = a.planSpace(ctx, nil, []string{"upgrade"})
-			return plan, nil
+		if len(names) == 0 {
+			if len(found) == 0 {
+				// Nothing to raise is a plan with no changes, never a full upgrade.
+				plan.DownloadBytes, plan.Space = a.planSpace(ctx, nil, []string{"upgrade"})
+				return plan, nil
+			}
+			names = found
+		} else if outside := namesOutside(names, found); len(outside) > 0 {
+			// A named package with no security update would be raised as an
+			// ordinary upgrade under the name of a security one. Dropping it
+			// silently would hide it from the operator, so the plan refuses and
+			// says which packages it is about.
+			return plan, fmt.Errorf("%w: %s", ErrNotSecurityUpgrade, strings.Join(outside, ", "))
 		}
-		names = found
 	}
 	operation, sizing := []string{"upgrade"}, []string{"upgrade"}
 	if len(names) > 0 {
@@ -301,6 +309,9 @@ const (
 	ErrorSecurityOriginUnknown = "security_origin_unknown"
 	// ErrorAgentHoldFailed: the agent could not be held out of the transaction.
 	ErrorAgentHoldFailed = "agent_hold_failed"
+	// ErrorNotSecurityUpgrade: a security-only order named a package whose
+	// pending update is not a security one.
+	ErrorNotSecurityUpgrade = "not_a_security_upgrade"
 )
 
 // The refusals of the apt adapter that the caller can act on.
@@ -315,7 +326,29 @@ var (
 	// it carries out itself. Without the hold a dependency may replace the agent
 	// halfway through, which ends with a host cut off from the work it is doing.
 	ErrAgentHoldFailed = errors.New("the agent could not be held out of the transaction")
+	// ErrNotSecurityUpgrade means a security-only order named a package whose
+	// pending update comes from no security archive. Raising it would be an
+	// ordinary upgrade carried out under the name of a security one.
+	ErrNotSecurityUpgrade = errors.New("the named packages have no security update pending")
 )
+
+// namesOutside lists the names that are not in the allowed set.
+func namesOutside(names, allowed []string) []string {
+	inside := make(map[string]bool, len(allowed))
+	for _, name := range allowed {
+		inside[name] = true
+	}
+	var outside []string
+	for _, name := range names {
+		// apt takes a package with its architecture; the security list names it
+		// without one.
+		bare := strings.SplitN(name, ":", 2)[0]
+		if !inside[name] && !inside[bare] {
+			outside = append(outside, name)
+		}
+	}
+	return outside
+}
 
 // securityOrigin says whether a candidate comes from a security archive. The
 // origin apt prints is "<label>:<version>/<archive>", possibly several separated

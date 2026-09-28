@@ -682,7 +682,10 @@ func (d *DNF) planInstall(ctx context.Context, plan Plan, options Options) (Plan
 	// Dnf ends a transaction interrupted before execution with a non-zero code; a
 	// zero code means here that there was nothing to install or that the tool
 	// answered other than we assume.
-	changes := ParseDNFInstallPlan(output)
+	changes, err := dnfInstallChanges(output)
+	if err != nil {
+		return plan, err
+	}
 	if len(changes) == 0 {
 		if result.ExitCode == 0 && WholeTransactionReady(output) {
 			// Everything is already installed: an empty plan is true here.
@@ -734,11 +737,11 @@ var installHeadings = []string{
 }
 
 // obsoleteHeadings head the sections about a package that takes the place of
-// another: dnf4 puts the arriving package under "Obsoleting:", dnf5 puts the
-// package that goes under "Replacing:".
+// another. Only dnf4 gives it one: dnf5 prints no such section at all, it
+// writes the replaced package indented under the package that takes its place
+// and counts it in the summary alone.
 var obsoleteHeadings = []string{
 	"obsoleting:",
-	"replacing:",
 }
 
 // upgradeHeadings are every section an upgrade touches. A plan read from the
@@ -768,9 +771,9 @@ func dnfSectionAction(heading string) string {
 		return ActionUpgrade
 	case strings.HasPrefix(heading, "downgrading"):
 		return ActionDowngrade
-	// A package under "Replacing:" is the one that goes away; the one that
-	// arrives in its place stands under "Obsoleting:".
-	case strings.HasPrefix(heading, "removing"), strings.HasPrefix(heading, "replacing"):
+	// The section dnfReplacedEntry puts a replaced package in: it is the one
+	// that goes away, the one arriving in its place stands in the table itself.
+	case strings.HasPrefix(heading, "removing"), strings.HasPrefix(heading, dnfReplacingSection):
 		return ActionRemove
 	}
 	return ActionInstall
@@ -781,7 +784,7 @@ func dnfSectionReason(heading string) string {
 	// An obsoleting package is not named by the order: a repository says it takes
 	// the place of something installed, and the package it replaces is dropped
 	// along the way.
-	case strings.Contains(heading, "unused"), strings.HasPrefix(heading, "replacing"):
+	case strings.Contains(heading, "unused"), strings.HasPrefix(heading, dnfReplacingSection):
 		return ReasonOrphan
 	case strings.Contains(heading, "dependen"), strings.HasPrefix(heading, "obsoleting"):
 		return ReasonDependency
@@ -792,7 +795,9 @@ func dnfSectionReason(heading string) string {
 // ParseDNFRemovalPlan reads the table of a transaction interrupted before
 // execution.
 func ParseDNFRemovalPlan(output string) ([]string, int, error) {
-	entries, announced := dnfTransactionSections(output, removalHeadings, removalSummaries)
+	// A removal reads only the sections of what goes away, and no replaced
+	// package stands in them.
+	entries, announced, _ := dnfTransactionSections(output, removalHeadings, removalSummaries)
 	names := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		names = append(names, entry.Name)
@@ -804,12 +809,22 @@ func ParseDNFRemovalPlan(output string) ([]string, int, error) {
 // entry with its architecture, its version and the repository it comes from,
 // and the direction its section means.
 func ParseDNFInstallPlan(output string) []Change {
-	entries, _ := dnfTransactionSections(output, installHeadings, installSummaries)
+	changes, _ := dnfInstallChanges(output)
+	return changes
+}
+
+// dnfInstallChanges is what planInstall reads: the same table, and the refusal
+// of a replaced package it cannot name - an installation drops it too.
+func dnfInstallChanges(output string) ([]Change, error) {
+	entries, _, unreadable := dnfTransactionSections(output, installHeadings, installSummaries)
+	if len(unreadable) > 0 {
+		return nil, dnfReplacedUnreadable(unreadable)
+	}
 	changes := make([]Change, 0, len(entries))
 	for _, entry := range entries {
 		changes = append(changes, dnfChangeOf(entry))
 	}
-	return changes
+	return changes, nil
 }
 
 // ParseDNFUpgradePlan reads the whole table of an upgrade: what arrives on its
@@ -818,7 +833,10 @@ func ParseDNFInstallPlan(output string) []Change {
 // this does not recognise is a refusal rather than a shorter plan: consent to
 // four changes is not consent to the fourteen the transaction would make.
 func ParseDNFUpgradePlan(output string) ([]Change, error) {
-	entries, announced := dnfTransactionSections(output, upgradeHeadings, upgradeSummaries)
+	entries, announced, unreadable := dnfTransactionSections(output, upgradeHeadings, upgradeSummaries)
+	if len(unreadable) > 0 {
+		return nil, dnfReplacedUnreadable(unreadable)
+	}
 	if len(entries) == 0 {
 		// Every pending update is held or left out of this transaction: an empty
 		// plan is the truth here, not a table that went unread.
@@ -884,9 +902,12 @@ type dnfEntry struct {
 	Name, Architecture, Version, Repository, Section string
 }
 
-// dnfTransactionSections reads the packages from the transaction table.
-func dnfTransactionSections(output string, headings, summaries []string) ([]dnfEntry, int) {
+// dnfTransactionSections reads the packages from the transaction table. The
+// third result holds the lines that name a replaced package in neither shape:
+// they are not entries, and they are not nothing either.
+func dnfTransactionSections(output string, headings, summaries []string) ([]dnfEntry, int, []string) {
 	var entries []dnfEntry
+	var unreadable []string
 	seen := map[string]bool{}
 	inSection := false
 	inSummary := false
@@ -942,10 +963,14 @@ func dnfTransactionSections(output string, headings, summaries []string) ([]dnfE
 		if !inSection || !strings.HasPrefix(line, " ") {
 			continue
 		}
-		// Dnf4 gives the replaced package no section of its own: it writes
-		// "replacing <nevra>" under the package that takes its place.
-		if replaced, ok := dnfReplacedEntry(trimmed); ok {
-			add(replaced)
+		// Neither dnf gives the replaced package a section of its own: it stands
+		// indented under the package that takes its place.
+		if entry, replaced, readable := dnfReplacedEntry(trimmed); replaced {
+			if !readable {
+				unreadable = append(unreadable, trimmed)
+				continue
+			}
+			add(entry)
 			continue
 		}
 		fields := strings.Fields(trimmed)
@@ -959,26 +984,57 @@ func dnfTransactionSections(output string, headings, summaries []string) ([]dnfE
 		}
 		add(entry)
 	}
-	return entries, announced
+	return entries, announced, unreadable
 }
 
-// dnfReplacedEntry reads the line dnf4 writes under an obsoleting package:
-// "replacing python3-setuptools-wheel.noarch 53.0.0-13.el9". Read as a row of
-// the table it would enter the plan as a package named "replacing".
-func dnfReplacedEntry(line string) (dnfEntry, bool) {
+// dnfReplacedUnreadable refuses a table whose replaced package cannot be named.
+// Skipping the line would hide a removal the transaction makes.
+func dnfReplacedUnreadable(lines []string) error {
+	return dnfPlanUnreadable{"dnf names a package this transaction replaces in a line the agent " +
+		"does not read (" + strings.Join(lines, "; ") + "), so the plan cannot say which package " +
+		"would be removed"}
+}
+
+// dnfReplacingSection is the section a replaced package is filed under. Neither
+// generation of dnf prints it as a heading; it is what the indented line means.
+const dnfReplacingSection = "replacing:"
+
+// dnfReplacedEntry reads the line dnf writes under the package that takes
+// another's place. The two generations write it differently, measured on
+// Fedora 42:
+//
+//	dnf4: "     replacing  words.noarch 3.0-61.fc42"
+//	dnf5: "   replacing words           noarch 3.0-61.fc42      anaconda   4.7 MiB"
+//
+// Read as an ordinary row the line would enter the plan as a package named
+// "replacing", and since a replaced package becomes a removal, the plan would
+// promise to remove something nobody named. A line in neither shape is refused
+// rather than guessed at, for the same reason.
+func dnfReplacedEntry(line string) (entry dnfEntry, replaced, readable bool) {
 	fields := strings.Fields(line)
-	if len(fields) < 2 || !strings.EqualFold(fields[0], "replacing") {
-		return dnfEntry{}, false
+	if len(fields) == 0 || !strings.EqualFold(fields[0], "replacing") {
+		return dnfEntry{}, false, false
 	}
-	name, architecture := fields[1], ""
-	if index := strings.LastIndex(name, "."); index > 0 {
-		name, architecture = name[:index], name[index+1:]
-	}
-	entry := dnfEntry{Name: name, Architecture: architecture, Section: "replacing:"}
-	if len(fields) > 2 {
+	entry = dnfEntry{Section: dnfReplacingSection}
+	switch {
+	case len(fields) >= 5:
+		// dnf5 puts the replaced package in the columns of the table itself: name,
+		// architecture, version, the repository it came from, then its size.
+		entry.Name, entry.Architecture, entry.Version, entry.Repository =
+			fields[1], fields[2], fields[3], fields[4]
+	case len(fields) == 3:
+		// dnf4 writes the name and the architecture as one token, the version after
+		// it. Without an architecture the token is not that shape either.
+		index := strings.LastIndex(fields[1], ".")
+		if index <= 0 || index == len(fields[1])-1 {
+			return dnfEntry{}, true, false
+		}
+		entry.Name, entry.Architecture = fields[1][:index], fields[1][index+1:]
 		entry.Version = fields[2]
+	default:
+		return dnfEntry{}, true, false
 	}
-	return entry, true
+	return entry, true, entry.Name != "" && entry.Architecture != "" && entry.Version != ""
 }
 
 // matchesSummary recognises a summary line in both generations of dnf.

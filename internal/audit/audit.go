@@ -94,9 +94,15 @@ func (r *Recorder) Record(ctx context.Context, event Event) {
 const IntentKey = "intent_key"
 
 // ErrIntentExists means a change has already begun under this key. The row that
-// says so is never removed, so a key is spent for good: a retry is refused
-// rather than carried out a second time.
+// says so is kept for as long as nothing answers it, so a key is spent for
+// good: a retry is refused rather than carried out a second time.
 var ErrIntentExists = errors.New("a change has already begun under this key")
+
+// ErrOutcomeRecorded means the outcome of this change is already on the trail.
+// The panel writes it when the change finishes and the reconciler writes it at
+// a later start when nothing did; whoever is second is told so rather than
+// answering the same change twice.
+var ErrOutcomeRecorded = errors.New("the outcome of this change is already on the trail")
 
 // RecordIntent writes the entry that says a change is about to be made, and
 // commits it. The caller makes the change only when this returns nil: an entry
@@ -115,6 +121,24 @@ func (r *Recorder) RecordIntent(ctx context.Context, event Event) error {
 		r.log.Error("the beginning of a change was not written, so the change was not made",
 			"action", event.Action, "target", event.TargetID, "err", err)
 		return fmt.Errorf("the beginning of %s could not be written: %w", event.Action, err)
+	}
+	return nil
+}
+
+// RecordOutcome writes the entry that answers a beginning, under the same key.
+// Exactly one such entry exists per key: the panel writes it when the change
+// finishes, the reconciler at a later start when nothing did, and whoever is
+// second is answered with ErrOutcomeRecorded rather than writing a second one.
+func (r *Recorder) RecordOutcome(ctx context.Context, event Event) error {
+	if err := r.record(ctx, r.pool, event); err != nil {
+		var unique *pgconn.PgError
+		if errors.As(err, &unique) && unique.Code == "23505" {
+			return ErrOutcomeRecorded
+		}
+		metrics.AuditWriteFailed.Inc(event.Action)
+		r.log.Error("the outcome of a change was not written",
+			"action", event.Action, "target", event.TargetID, "err", err)
+		return fmt.Errorf("the outcome of %s could not be written: %w", event.Action, err)
 	}
 	return nil
 }

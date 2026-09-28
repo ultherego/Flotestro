@@ -64,3 +64,32 @@ Version: without a status
 		t.Errorf("a missing file gave %v", blocked)
 	}
 }
+
+// A gap in a plan is not a plan with nothing in that place: the resolution
+// could not say what the transaction would do there, and what nobody could name
+// nobody approved. The helper refuses such a plan, so the gaps have to be
+// findable and to read as sentences an operator can act on.
+func TestTheGapsOfAPlanAreNamed(t *testing.T) {
+	blocked := []Blocked{
+		{Name: "grub-pc", Status: "awaiting configuration", Kind: BlockedDatabase},
+		{Name: "linux-firmware", Status: "held by IgnorePkg", Kind: BlockedHeld},
+		{Name: "ttf-font", Status: "a provision only an installed package satisfies", Kind: BlockedUnknown},
+		{Name: "removals", Kind: BlockedUnknown},
+		{Name: "openssl", Status: "no advisory says whether it closes a vulnerability", Kind: BlockedAdvisory},
+	}
+	gaps := UnknownBlocks(blocked)
+	if len(gaps) != 2 {
+		t.Fatalf("the gaps of the plan are %v, expected the two unknown entries", gaps)
+	}
+	if gaps[0] != "ttf-font (a provision only an installed package satisfies)" {
+		t.Errorf("the first gap reads %q", gaps[0])
+	}
+	// An entry with nothing to add says its name alone rather than an empty pair
+	// of brackets.
+	if gaps[1] != "removals" {
+		t.Errorf("the second gap reads %q", gaps[1])
+	}
+	if len(UnknownBlocks(nil)) != 0 {
+		t.Error("a plan with no blocked entries has gaps")
+	}
+}

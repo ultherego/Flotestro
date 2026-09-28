@@ -1,6 +1,7 @@
 package packages
 
 import (
+	"context"
 	"encoding/hex"
 	"testing"
 	"time"
@@ -221,5 +222,49 @@ func TestAnInstalledPackageIsFoundUnderEitherSpelling(t *testing.T) {
 	}
 	if fedora["kernel-core.x86_64"] == "" {
 		t.Error("the architecture-qualified name of an installed package is not recorded")
+	}
+}
+
+// A dnf kernel upgrade installs the new kernel and drops the old one, so the
+// same name stands on both sides of the plan. The name is still installed when
+// the transaction succeeds, so an "absent" effect over it would read every such
+// upgrade as a partial result - and the exact spec of the removal is what makes
+// sure only the old version goes.
+func TestAVersionCleanupIsNotAPackageGoingAway(t *testing.T) {
+	cleanup := finishPlan(context.Background(), nil, Plan{
+		Manager: "dnf", Mode: ModeUpgrade, ResourceRevision: "dnf:0123",
+		Changes: []Change{
+			{Name: "kernel-core", CandidateVersion: "6.17.4-200.fc42",
+				Architecture: "x86_64", Origin: "updates", Action: ActionInstall},
+			{Name: "kernel-core", CurrentVersion: "6.15.2-200.fc42",
+				Architecture: "x86_64", Origin: "@updates", Action: ActionRemove},
+		},
+	}, Options{Mode: ModeUpgrade})
+
+	for _, effect := range cleanup.Envelope().Effects.Expected {
+		if effect.Kind == plan.EffectPackageAbsent && effect.Subject == "kernel-core" {
+			t.Error("the plan expects kernel-core to be absent, and the upgrade leaves it installed")
+		}
+	}
+	// The transaction as it would end: the name at the new version.
+	var apply Apply
+	if err := settleEffects(&apply, cleanup, map[string]string{
+		"kernel-core": "6.17.4-200.fc42"}); err != nil {
+		t.Errorf("a successful kernel upgrade settles as %v", err)
+	}
+	if len(apply.EffectsMissed) != 0 {
+		t.Errorf("a successful kernel upgrade misses %+v", apply.EffectsMissed)
+	}
+	// A package that simply goes away still has to be gone.
+	removal := finishPlan(context.Background(), nil, Plan{
+		Manager: "dnf", Mode: ModeUpgrade, ResourceRevision: "dnf:0123",
+		Changes: []Change{
+			{Name: "obsolete-tool", CurrentVersion: "1.2-3", Architecture: "x86_64",
+				Origin: "@updates", Action: ActionRemove},
+		},
+	}, Options{Mode: ModeUpgrade})
+	apply = Apply{}
+	if err := settleEffects(&apply, removal, map[string]string{"obsolete-tool": "1.2-3"}); err == nil {
+		t.Error("a package the plan removes was accepted as removed while it is still installed")
 	}
 }
