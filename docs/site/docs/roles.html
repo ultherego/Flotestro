@@ -93,7 +93,7 @@
 <table>
 <thead><tr><th>Role</th><th>What it is for</th><th>Permissions</th></tr></thead>
 <tbody>
-<tr><td><code>viewer</code></td><td>Looks at the fleet. Reads the hosts and every module of them, and computes plans; changes nothing.</td><td>31</td></tr>
+<tr><td><code>viewer</code></td><td>Looks at the fleet. Reads the hosts and their modules, and computes plans; changes nothing.</td><td>31</td></tr>
 <tr><td><code>auditor</code></td><td>Reviews the installation. Reads the audit trail, the metrics, the findings, the secret metadata and the state of the CA; fixes nothing.</td><td>23</td></tr>
 <tr><td><code>operator</code></td><td>Is on call. Restarts services, runs containers, plans upgrades, orders campaigns, makes backups, silences alerts; approves nothing and carries out no package transaction.</td><td>63</td></tr>
 <tr><td><code>approver</code></td><td>Is the second person. Reads the change and the trail, approves operations and campaigns, publishes a policy; orders nothing.</td><td>12</td></tr>
@@ -109,7 +109,7 @@
 
     <h2 id="viewer">viewer</h2>
 
-    <p>The role that reads. It has every module of a host open to it and can
+    <p>The role that reads. It sees the hosts and their modules, and it can
     ask the host what a change would come to, because a plan computes a
     difference and writes nothing.</p>
 
@@ -118,7 +118,7 @@
 <thead><tr><th>What it may do</th><th>Permissions</th></tr></thead>
 <tbody>
 <tr><td>See the fleet, its inventory, its operations and its campaigns.</td><td><code>host.read</code>, <code>inventory.read</code>, <code>job.read</code>, <code>campaign.read</code></td></tr>
-<tr><td>Read every module of a host: services, processes, packages, storage, network, firewall, SSH, kernel, time, security, certificates, backups, containers, monitoring, vulnerabilities, accounts and the declared state.</td><td><code>unit.status</code>, <code>process.read</code>, <code>packages.read</code>, <code>storage.read</code>, <code>storage.smart.read</code>, <code>network.read</code>, <code>dns.read</code>, <code>firewall.read</code>, <code>ssh.read</code>, <code>kernel.read</code>, <code>time.read</code>, <code>security.read</code>, <code>certificate.read</code>, <code>backup.read</code>, <code>docker.read</code>, <code>docker.events</code>, <code>monitoring.read</code>, <code>vulnerability.read</code>, <code>identity.read</code>, <code>localuser.read</code>, <code>policy.read</code></td></tr>
+<tr><td>Read the state of a host: services, processes, packages, storage, network, firewall, SSH, kernel, time, security, certificates, backups, containers, monitoring, vulnerabilities, accounts and the declared state.</td><td><code>unit.status</code>, <code>process.read</code>, <code>packages.read</code>, <code>storage.read</code>, <code>storage.smart.read</code>, <code>network.read</code>, <code>dns.read</code>, <code>firewall.read</code>, <code>ssh.read</code>, <code>kernel.read</code>, <code>time.read</code>, <code>security.read</code>, <code>certificate.read</code>, <code>backup.read</code>, <code>docker.read</code>, <code>docker.events</code>, <code>monitoring.read</code>, <code>vulnerability.read</code>, <code>identity.read</code>, <code>localuser.read</code>, <code>policy.read</code></td></tr>
 <tr><td>Compute a plan: what a change would come to on this host, without making it.</td><td><code>dns.plan</code>, <code>time.plan</code>, <code>file.plan</code>, <code>kernel.module.plan</code>, <code>certificate.plan</code>, <code>certificate.trust.plan</code></td></tr>
 </tbody></table></div>
 
