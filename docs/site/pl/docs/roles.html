@@ -59,8 +59,8 @@
   <main class="content">
     <h1>9. Role i uprawnienia</h1>
 
-    <p class="lede">Uprawnienia nikt nie ma samego w sobie. Ma je rola, rola
-    jest powiązana z tożsamością w konkretnym zakresie, a zakres mówi, do
+    <p class="lede">Żadne uprawnienie nie istnieje samo dla siebie. Ma je rola,
+    rola jest powiązana z tożsamością w konkretnym zakresie, a zakres mówi, do
     której części floty ta rola sięga. Ten rozdział to wykaz sześciu ról: co
     każda z nich może i czego nie może, jak zakres zawęża powiązanie i o co
     operacja prosi ponad samą rolę.</p>
@@ -103,8 +103,8 @@
 </tbody></table></div>
 
     <p>Jedna tożsamość może mieć kilka ról naraz, każdą w osobnym zakresie:
-    inżynier na dyżurze jest zwykle <code>operator</code>em w swoim site i
-    <code>viewer</code>em w pozostałej części floty. Uprawnienia się sumują,
+    inżynier na dyżurze ma zwykle rolę <code>operator</code> w swoim site i
+    rolę <code>viewer</code> w pozostałej części floty. Uprawnienia się sumują,
     zakresy się nie zlewają &mdash; uprawnienie obowiązuje tam, dokąd sięga
     powiązanie, które je niesie, i nigdzie indziej.</p>
 
@@ -295,16 +295,16 @@
       alternatywą.</li>
     </ul>
 
-    <p>Gwiazdka jest jedynym, co poszerza kategorię: obejmuje każdą wartość, w
+    <p>Tylko gwiazdka poszerza kategorię: obejmuje każdą wartość, w
     tym cel, który nie niesie żadnej &mdash; host bez właściciela to nadal
     host. Pusta kategoria nie jest kategorią szeroką: nie sięga niczego. Tak
     jest celowo i w tę stronę ma się przewracać pomyłka. Powiązanie budowane
-    pole po polu, w którym jedno pole zostało zapomniane, nie nadaje nic
+    pole po polu, w którym jedno pole zostało zapomniane, nie nadaje niczego,
     zamiast po cichu nadać całą flotę.</p>
 
-    <p>Zespół to jedyna kategoria, która nie może powiedzieć &bdquo;dowolny&rdquo;
-    przez bycie pustą, bo jest kluczem obcym i nie ma wartości znaczącej
-    <em>wszystkie</em>. Dlatego mówi się go słowem, a zakres tak samo słowem o
+    <p>Zespół to jedyna kategoria, która nie powie &bdquo;dowolny&rdquo;,
+    zostając pusta, bo jest kluczem obcym i nie ma wartości znaczącej
+    <em>wszystkie</em>. Dlatego zapisuje się go słowem, a zakres tak samo o
     nim odpowiada: <code>{"mode":"any"}</code> albo
     <code>{"mode":"exact","team_id":"&hellip;"}</code>. Czytelnik, który musi
     wywnioskować <em>dowolny</em> z braku pola, jest czytelnikiem, który
