@@ -75,7 +75,6 @@ install -d -m 0755 %{buildroot}%{_sysconfdir}/flotestro
 install -m 0640 %{_flotestro_stage}/agent.yaml %{buildroot}%{_sysconfdir}/flotestro/agent.yaml
 install -d -m 0755 %{buildroot}%{_datadir}/flotestro
 install -m 0644 %{_flotestro_stage}/helper.yaml %{buildroot}%{_datadir}/flotestro/helper.yaml
-%{_datadir}/flotestro/helper-legacy.yaml
 install -m 0644 %{_flotestro_stage}/helper-legacy.yaml %{buildroot}%{_datadir}/flotestro/helper-legacy.yaml
 install -m 0640 %{_flotestro_stage}/agent.env  %{buildroot}%{_sysconfdir}/flotestro/agent.env
 
@@ -93,6 +92,7 @@ install -d -m 0755 %{buildroot}%{_docdir}/flotestro-agent
 
 %files
 %{_datadir}/flotestro/helper.yaml
+%{_datadir}/flotestro/helper-legacy.yaml
 %{_docdir}/flotestro-agent
 %{_bindir}/flotestro-agent
 %{_bindir}/flotestro-agent-helper
