@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wykaz konfiguracji &middot; Dokumentacja Flotestro</title>
+<meta name="description" content="Każde ustawienie control plane, agenta, helpera i relaya Flotestro, z wartością domyślną, informacją o restarcie i uwagą o bezpieczeństwie.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;600&display=swap">
+<link rel="stylesheet" href="../../style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header__inner">
+    <a class="brand" href="../"><img class="brand__mark" src="../../img/logo.webp" alt="">Flotestro</a>
+    <nav class="site-nav">
+      <a href="../">Przegląd</a>
+      <a href="./" aria-current="page">Dokumentacja</a>
+      <a href="https://ultherego.github.io/Flotestro/packages/">Pakiety</a>
+      <a href="https://github.com/ultherego/Flotestro">Kod</a>
+      <a href="../../docs/configuration.html" hreflang="en" lang="en">English</a>
+    </nav>
+  </div>
+</header>
+
+<div class="layout">
+
+  <aside class="sidebar">
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Podręcznik</h2>
+      <ul class="sidebar__list">
+        <li><a href="./">Spis treści</a></li>
+        <li><a href="introduction.html">1. Wprowadzenie</a></li>
+        <li><a href="architecture.html">2. Architektura</a></li>
+        <li><a href="installation.html">3. Instalacja</a></li>
+        <li><a href="concepts.html">4. Jak przebiega zmiana</a></li>
+      </ul>
+    </nav>
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Wykazy</h2>
+      <ul class="sidebar__list">
+        <li><a href="configuration.html" aria-current="page">5. Konfiguracja</a></li>
+        <li><a href="operations.html">6. Operacje</a></li>
+        <li><a href="errors.html">7. Błędy i odmowy</a></li>
+        <li><a href="api.html">8. API</a></li>
+        <li><a href="roles.html">9. Role i uprawnienia</a></li>
+      </ul>
+    </nav>
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Procedury</h2>
+      <ul class="sidebar__list">
+        <li><a href="runbooks.html">10. Runbooki</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main class="content">
+<h1>5. Wykaz konfiguracji</h1>
+<p class="lede">Każde ustawienie każdego pliku binarnego Flotestro. Control plane, agent, helper agenta i relay konfiguruje się zmiennymi środowiskowymi i dwoma plikami; retencje monitoringu należą do instalacji i zmienia się je w panelu bez restartu. Ta strona jest wykazem; <code>docker/env.example</code> niesie ustawienia wdrożenia jako skomentowany plik, a <code>packaging/agent.yaml</code> ustawienia hosta.</p>
+    <ul class="linkrow">
+      <li><a href="#secrets-are-files">Sekrety są plikami</a></li>
+      <li><a href="#control-plane-flotestro-control-plane">Control plane (flotestro-control-plane)</a></li>
+      <li><a href="#database-and-listeners">Baza danych i nasłuchy</a></li>
+      <li><a href="#agents">Agenci</a></li>
+      <li><a href="#lifecycle-orders-between-instances">Polecenia cyklu życia między instancjami</a></li>
+      <li><a href="#local-accounts-and-their-ssh-keys">Konta lokalne i ich klucze SSH</a></li>
+      <li><a href="#identity-provider-and-browser-sessions">Dostawca tożsamości i sesje przeglądarki</a></li>
+      <li><a href="#directory-connector-freeipa">Konektor katalogu (FreeIPA)</a></li>
+      <li><a href="#notifications-webhook">Powiadomienia (webhook)</a></li>
+      <li><a href="#notification-queue">Kolejka powiadomień</a></li>
+      <li><a href="#notification-channel-credentials">Poświadczenia kanałów powiadomień</a></li>
+      <li><a href="#vulnerability-feeds">Źródła podatności</a></li>
+      <li><a href="#monitoring-and-retention">Monitoring i retencja</a></li>
+      <li><a href="#the-monitoring-retentions-are-stored-not-restarted-into">Retencje monitoringu są przechowywane, a nie wprowadzane restartem</a></li>
+      <li><a href="#stored-fields">Sześć przechowywanych pól i co przy nich znaczy środowisko</a></li>
+      <li><a href="#agent-flotestro-agent">Agent (flotestro-agent)</a></li>
+      <li><a href="#agent-helper-flotestro-agent-helper">Helper agenta (flotestro-agent-helper)</a></li>
+      <li><a href="#relay-flotestro-relay">Relay (flotestro-relay)</a></li>
+      <li><a href="#agent-yaml">Plik agenta: agent.yaml</a></li>
+      <li><a href="#relay-yaml">Plik relaya: relay.yaml</a></li>
+      <li><a href="#relay-spool">Trwały spool</a></li>
+    </ul>
+<p>Każde ustawienie pliku binarnego Flotestro to zmienna środowiskowa czytana przy starcie, z flagą wiersza poleceń o tym samym znaczeniu, która ją nadpisuje. Skąd pochodzą, zależy od komponentu, bo panel się wdraża, a host instaluje:</p>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Komponent</th><th>Skąd biorą się jego ustawienia</th></tr></thead>
+<tbody>
+<tr><td>Control plane</td><td>Środowisko kontenera. <code>./.env</code> obok <code>docker/compose.yaml</code> trzyma wartości niebędące sekretami, a <code>env.example</code> je wylicza; każdy sekret to plik wskazany zmienną <code>_FILE</code>. Na hoście nie ma pliku środowiska: panel jest obrazem i nie wdraża się go inaczej.</td></tr>
+<tr><td>Relay</td><td><code>relay.yaml</code> obok <code>compose.relay.yaml</code>, podmontowany tylko do odczytu jako <code>/etc/flotestro/relay.yaml</code>. Poza nim czytana jest jedna zmienna, wyłącznie przez polecenie <code>enroll</code>.</td></tr>
+<tr><td>Agent</td><td><code>/etc/flotestro/agent.yaml</code> opisuje host; <code>/etc/flotestro/agent.env</code> trzyma zmienne. Oba instaluje pakiet <code>flotestro-agent</code>.</td></tr>
+<tr><td>Helper agenta</td><td><code>/etc/flotestro/helper.yaml</code>, a dla tego, czemu ufa, <code>/etc/flotestro/helper-trust.d</code>. Instalowane przez ten sam pakiet.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Dla agenta i relaya zmienne są nadpisaniem na czas testu, a nie zwykłym sposobem konfiguracji: tym jest plik.</p>
+<h3 id="secrets-are-files">Sekrety są plikami, nigdy wartościami</h3>
+<p>Każde ustawienie control plane będące sekretem ma postać <code>_FILE</code>, która wskazuje ścieżkę, i to tej postaci używa wdrożenie. Postać z wartością i postać <code>_FILE</code> nie mogą być ustawione naraz, a pusty plik, dowiązanie symboliczne, katalog albo plik czytelny dla kogokolwiek innego kończą się odmową. Wartość w środowisku widać w <code>docker inspect</code>, na liście procesów hosta i w zrzucie po awarii, i właśnie po to jest ta druga postać.</p>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Sekret</th><th>Zmienna</th><th>Gdzie umieszcza go wdrożenie</th></tr></thead>
+<tbody>
+<tr><td>DSN bazy danych</td><td><code>FLOTESTRO_DATABASE_URL_FILE</code></td><td><code>/run/flotestro/database-url</code>, zapisywany przez <code>init</code>; <code>/run/secrets/database-url</code> z <code>./secrets/database-url</code> przy <code>compose.external-db.yaml</code></td></tr>
+<tr><td>DSN bazy danych dla migracji</td><td><code>FLOTESTRO_MIGRATION_DATABASE_URL_FILE</code></td><td>Plik podmontowany przez administratora, gdy właściciel schematu ma własny login</td></tr>
+<tr><td>Hasło PostgreSQL, szybki start</td><td><code>POSTGRES_PASSWORD_FILE</code></td><td><code>/run/flotestro/postgres-password</code>, zapisywane przez <code>init</code></td></tr>
+<tr><td>Sekret klienta OIDC</td><td><code>FLOTESTRO_OIDC_CLIENT_SECRET_FILE</code></td><td><code>/run/secrets/oidc_client_secret</code></td></tr>
+<tr><td>Klucz HMAC webhooka</td><td><code>FLOTESTRO_WEBHOOK_SECRET_FILE</code></td><td><code>/run/secrets/webhook_secret</code></td></tr>
+<tr><td>Klucz API NVD</td><td><code>FLOTESTRO_VULN_NVD_KEY_FILE</code></td><td><code>/run/secrets/nvd_key</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Tabele poniżej nazywają samą zmienną. Każdą, która niesie sekret, należy czytać jako jej postać <code>_FILE</code>.</p>
+<p>Zmiana dowolnej zmiennej działa od następnego startu usługi: nic tutaj nie jest odczytywane ponownie w trakcie pracy procesu. Ekran ustawień w panelu pokazuje wartości obowiązujące, z zamaskowanymi sekretami; ekran stanu pokazuje, co robią postawione na nich pętle.</p>
+<p>Czasy trwania zapisuje się tak, jak czyta je Go: <code>30s</code>, <code>5m</code>, <code>8h</code>, <code>720h</code>. Nieczytelny czas trwania zostawia wartość domyślną, zamiast wyłączać zabezpieczenie.</p>
+<h2 id="control-plane-flotestro-control-plane">Control plane (<code>flotestro-control-plane</code>)</h2>
+<h3 id="database-and-listeners">Baza danych i nasłuchy</h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Zmienna</th><th>Domyślnie</th><th>Znaczenie</th><th>Restart</th><th>Bezpieczeństwo</th></tr></thead>
+<tbody>
+<tr><td><code>FLOTESTRO_DATABASE_URL</code></td><td>brak, wymagane</td><td>DSN PostgreSQL. Baza jest jedynym źródłem prawdy. Wdrożenie ustawia zamiast tego <code>FLOTESTRO_DATABASE_URL_FILE</code>.</td><td>tak</td><td>Niesie hasło do bazy, więc jedzie jako plik czytelny tylko dla konta, na którym pracuje panel. Żadna odmowa dotycząca bazy go nie cytuje.</td></tr>
+<tr><td><code>FLOTESTRO_DATABASE_MODE</code></td><td><code>quickstart</code></td><td>Czy baza jest tą, którą uruchamia wdrożenie, czy prowadzi ją ktoś inny. <code>external</code> trzyma DSN przy <code>sslmode=verify-full</code> i <code>target_session_attrs=read-write</code>, a inaczej odmawia, i preflight pyta serwer, czym jest - czy to standby, jakie ma rozszerzenia, jakie prawa ma login - zanim panel na nim osiądzie. Deklaruje się to i nigdy nie zgaduje: instalacja przeznaczona do bazy prowadzonej przez kogoś innego mogłaby inaczej wstać z wskazaniem na lokalny serwer, którego nikt nie uruchomił.</td><td>tak</td><td>Odmowa nazywa, co było nie tak, i nigdy nie cytuje DSN.</td></tr>
+<tr><td><code>FLOTESTRO_LAB_ALLOW_INSECURE_DB</code></td><td><code>false</code></td><td>Pozwala laboratorium sięgnąć do zewnętrznej bazy bez TLS. Istnieje po to, żeby powyższa odmowa miała jedną widoczną drogę obejścia zamiast kilku niewidocznych.</td><td>tak</td><td>Nigdy w instalacji, która trzyma prawdziwą flotę.</td></tr>
+<tr><td><code>FLOTESTRO_AUTO_MIGRATE</code></td><td><code>true</code></td><td>Czy serwująca instancja przenosi schemat do przodu przy własnym starcie. Instalacja z więcej niż jedną repliką ustawia <code>false</code> i migruje osobnym uruchomieniem - usługą <code>migrate</code> wdrożenia - bo dwie instancje przekształcające jeden schemat to nie jest aktualizacja. Wartość, która nie jest ani <code>true</code>, ani <code>false</code>, zatrzymuje start, zamiast rozstrzygać to przypadkiem.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_MIGRATION_DATABASE_URL</code></td><td>DSN serwujący</td><td>DSN, którego używa migracja, gdy właściciel schematu ma własny login. Bez niego migracja idzie na loginie, który serwuje, co nadal trzyma migrację poza procesem serwującym, ale rezygnuje z rozdziału. Role zakłada <code>db/roles.sql</code>.</td><td>tak</td><td>Niesie hasło; ustaw postać <code>_FILE</code>.</td></tr>
+<tr><td><code>FLOTESTRO_MIGRATION_ROLE</code></td><td>brak</td><td>Rola, którą migracja przyjmuje przez <code>SET ROLE</code>, żeby to, co tworzy, należało do właściciela schematu, a nie do tego, kto uruchomił polecenie. Uruchomienie odmawia, jeśli okaże się, że migrujący jest superuserem.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_MIGRATION_LOCK_WAIT</code></td><td><code>15m</code></td><td>Jak długo migracja czeka na advisory lock, który czyni ją jedyną działającą.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_STATE_DIR</code></td><td><code>/var/lib/flotestro</code></td><td>Katalog stanu: fleet CA, klucze magazynu sekretów w <code>keys/</code>, plik tokenu bootstrap. Porównywany z zapisem instalacji przy każdym starcie; brakujący klucz albo brakująca część CA zatrzymują start z nazwanym stanem, zamiast dorobić nowy klucz albo nowe CA (zob. <code>docs/runbooks/db-restore.md</code>).</td><td>tak</td><td>Trzyma klucz CA i klucze magazynu; nic innego nie może go czytać.</td></tr>
+<tr><td><code>FLOTESTRO_ADMIN_ADDR</code></td><td><code>127.0.0.1:8080</code></td><td>REST API i panel webowy.</td><td>tak</td><td>Czysty HTTP; wystaw go przez reverse proxy z TLS.</td></tr>
+<tr><td><code>FLOTESTRO_GATEWAY_ADDR</code></td><td><code>:8443</code></td><td>Agent gateway (mTLS).</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_ENROLLMENT_ADDR</code></td><td><code>:8444</code></td><td>Endpoint enrollmentu (TLS, bez certyfikatu klienta).</td><td>tak</td><td>Odpowiada nieznajomym; żądanie jest ograniczone do 256 KiB.</td></tr>
+<tr><td><code>FLOTESTRO_ADVERTISE</code></td><td><code>127.0.0.1</code></td><td>Adresy i nazwy, pod którymi agenci widzą panel, rozdzielone przecinkami. Trafiają do certyfikatu gatewaya i są zarezerwowane: żaden relay nie może nosić żadnej z nich.</td><td>tak</td><td>Panel zostawiony na pętli zwrotnej nie obsłuży żadnej floty i mówi o tym przy starcie.</td></tr>
+<tr><td><code>FLOTESTRO_PUBLIC_URL</code></td><td>puste</td><td>Adres panelu widziany przez przeglądarkę; wynika z niego przekierowanie OIDC i flaga Secure ciasteczek.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_PACKAGE_REPOSITORY_URL</code></td><td>puste</td><td>Adres bazowy podpisanego repozytorium pakietów, na które wskazuje instrukcja &bdquo;Dodaj host&rdquo;; w odciętym site jest to obraz package-repository z profilu air-gapped. To adres, pod który sięgają hosty, a nie nazwa usługi z Compose.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_WEB_ROOT</code></td><td>puste</td><td>Katalog ze zbudowanym panelem; pusty serwuje samo API.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_GATEWAY_ID</code></td><td>nazwa hosta</td><td>Nazwa tego gatewaya w instalacji z wieloma gatewayami; są nią znaczone sesje i dzierżawy.</td><td>tak</td><td></td></tr>
+</tbody></table></div>
+<h3 id="agents">Agenci</h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Zmienna</th><th>Domyślnie</th><th>Znaczenie</th><th>Restart</th><th>Bezpieczeństwo</th></tr></thead>
+<tbody>
+<tr><td><code>FLOTESTRO_HEARTBEAT_SECONDS</code></td><td><code>60</code></td><td>Bazowy odstęp heartbeatu przekazywany agentom.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_HEARTBEAT_JITTER</code></td><td><code>30</code></td><td>Losowy rozrzut dokładany do heartbeatu. Host jest nieaktualny po trzech pominiętych heartbeatach liczonych od sumy.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_AGENT_CERT_TTL</code></td><td><code>720h</code></td><td>Czas życia certyfikatu agenta; agent odnawia po dwóch trzecich.</td><td>tak</td><td>Krótszy termin zawęża okno, w którym działa skradziony klucz.</td></tr>
+<tr><td><code>FLOTESTRO_DISPATCH_RATE</code></td><td><code>100</code></td><td>Koperty zadań wysyłane na sekundę, z zapasem na jedną sekundę; <code>0</code> wysyła wszystkie wydzierżawione zadania naraz. Wstrzymane zadania liczy <code>flotestro_dispatch_throttled_total</code>.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_CLONE_POLICY</code></td><td><code>quarantine</code></td><td>Co gateway robi z tą samą tożsamością żywą na dwóch uruchomieniach: <code>quarantine</code> kończy obie sesje i wstawia host do kwarantanny, <code>report</code> zapisuje incydent i zostawia nowszą sesję. Każde inne słowo odmawia startu.</td><td>tak</td><td><code>report</code> pozwala sklonowanemu kluczowi działać, dopóki ktoś nie spojrzy.</td></tr>
+<tr><td><code>FLOTESTRO_RELAY_IDENTITY</code></td><td><code>prefer</code></td><td>Co gateway robi z sesją przez relay, w której host nie podpisał własnej koperty tożsamości (<code>relay.identity</code> v2). Podpisana koperta jest weryfikowana w każdym trybie - relay, host, certyfikat po numerze seryjnym, site i środowisko, digest payloadu, podpis, numer w sekwencji - i znaczy host jako <code>relay_identity: end_to_end</code> (<code>flotestro_relay_session_identity_total{strength="end_to_end"}</code>, <code>auth_strength: end_to_end</code> na sesji); błędna koperta jest odrzucana w każdym trybie przez <code>relay_envelope_invalid</code>, <code>relay_body_hash_mismatch</code>, <code>relay_sequence_replayed</code> albo <code>relay_host_signature_invalid</code> na hoście. Bez koperty <code>observe</code> i <code>prefer</code> wpuszczają sesję na atestację relaya (<code>attested</code>) albo na samo jego słowo (<code>weak</code>), licząc ją pod tymi siłami i zapisując jako <code>auth_strength: relay_only</code>. <code>enforce</code> odmawia relayowi, który wskazuje host sam, przez <code>relay_identity_missing</code>, a agentowi, który nie podpisuje, za relayem, który atestuje, przez <code>blocked_upgrade_required</code>. Odnowienie certyfikatu i pobranie sekretu przez relay wymagają koperty w każdym trybie. Każde inne słowo odmawia startu.</td><td>tak</td><td>Najpierw aktualizuje się panel, potem relaye, potem agentów; <code>enforce</code> włącza się wtedy, gdy sesji <code>weak</code> i <code>relay_only</code> jest zero.</td></tr>
+</tbody></table></div>
+<h3 id="lifecycle-orders-between-instances">Polecenia cyklu życia między instancjami</h3>
+<p>Host jest podłączony dokładnie do jednej instancji control plane, a żądanie operatora trafia do tej, która obsłużyła przeglądarkę. Większość decyzji to wiersze i rozchodzą się same; praca, która wymaga otwartego strumienia hosta - ostatnie zadanie wycofania, zakończenie sesji przy kwarantannie albo odzyskanie tożsamości - już nie. Taka praca jest zapisywana jako polecenie w <code>gateway_commands</code>, zaadresowane do sesji, którą w chwili decyzji wskazuje <code>host_session_owners</code>, i do fencing tokenu tego przejęcia, a wykonuje je instancja trzymająca dokładnie tę sesję. Instancja, która w międzyczasie straciła host, nie podejmuje niczego, a polecenie, którego sesji już nie ma, nie zostaje wykonane nigdy: mówi o tym wprost, a panel wraca do tego, co robi z hostem, którego nikt nie trzyma - wycofuje go z <code>remote_cleanup_unconfirmed</code>.</p>
+<p>Pętla działa na każdej instancji i budzi ją ślad, więc polecenie zwykle dociera do właściciela w czasie jednego obiegu; ustawienia poniżej są dolną granicą. Instalacja z jedną instancją nie zapisuje poleceń w ogóle i nic z tego jej nie dotyczy.</p>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Zmienna</th><th>Domyślnie</th><th>Znaczenie</th><th>Restart</th><th>Bezpieczeństwo</th></tr></thead>
+<tbody>
+<tr><td><code>FLOTESTRO_COMMAND_POLL</code></td><td><code>5s</code></td><td>Jak często instancja szuka poleceń zaadresowanych do trzymanych przez siebie sesji, gdy powiadomienie ze śladu do niej nie dotarło. Ten sam takt rozlicza polecenia, które wygasły.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_COMMAND_EXPIRY</code></td><td><code>5m</code></td><td>Jak długo stoi nieodebrane polecenie. Dłużej niż dzierżawa przejęcia, więc instancja, która jest tylko powolna, wciąż je weźmie; po tym czasie polecenie zostaje rozliczone jako <code>expired</code> i z hostem nic się nie stało. Decyzja wykonana długo po jej podjęciu jest gorsza niż powtórzona przez operatora.</td><td>tak</td><td>Skrócenie poniżej dzierżawy przejęcia (45s) wycofywałoby hosty jako nieosiągalne, podczas gdy ich instancja wciąż z nimi rozmawia.</td></tr>
+</tbody></table></div>
+<p>Żądanie, które wydało polecenie, czeka na odpowiedź do 60 sekund. Wycofanie, którego właściciel nie zdążył dokończyć, dostaje odpowiedź z fazą <code>handover_pending</code>: host stoi w <code>retiring</code>, instancja będąca właścicielem kończy handshake, a decyzja nigdy nie zapada dwa razy.</p>
+<h3 id="local-accounts-and-their-ssh-keys">Konta lokalne i ich klucze SSH</h3>
+<p>Jedną listę grup uprzywilejowanych czyta każdy plik binarny, który ocenia konto lokalne - control plane, agent i helper - żeby panel nazywał uprzywilejowanym dokładnie to samo co host. Tak samo jest z zakresem UID, który odróżnia konto człowieka od konta usługi: bierze się z hostowego <code>/etc/login.defs</code> i nie jest ustawieniem panelu.</p>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Zmienna</th><th>Domyślnie</th><th>Znaczenie</th><th>Restart</th><th>Bezpieczeństwo</th></tr></thead>
+<tbody>
+<tr><td><code>FLOTESTRO_ACCOUNTS_PRIVILEGED_GROUPS</code></td><td><code>sudo,wheel,docker,lxd</code></td><td>Grupy, których członkostwo jest rootem pod inną nazwą: sudo i wheel dają roota wprost, docker i lxd przez socket silnika. Polecenie, które zakłada konto w jednej z nich albo przenosi do niej konto istniejące, ma rangę krytyczną: wymaga uprawnienia <code>accounts.privileged_groups</code> w zakresie hosta obok uprawnienia samej operacji, świeżego uwierzytelnienia z powodem i zatwierdzenia. Nazwy rozdziela się przecinkami albo spacjami, sprowadza do małych liter i odsiewa powtórzenia; pusta wartość zostawia domyślną, bo instalacja, która nic nie ustawiła, nie miała na myśli, że żadna grupa nie jest uprzywilejowana.</td><td>tak</td><td>Zdjęcie grupy z listy nie odbiera praw, które ona daje - odbiera bramę stojącą przed ich nadaniem. Dopisz grupy używane w instalacji (<code>admin</code>, <code>adm</code>, <code>systemd-journal</code>), zamiast skracać listę. Samo uprawnienie należy wyłącznie do administratora platformy: administrator tożsamości zakłada konta i klucze, a wstawienie konta do grupy uprzywilejowanej to druga połowa tej decyzji.</td></tr>
+</tbody></table></div>
+<p>Klucze konta edytuje się po jednym - dodanie dopisuje, usunięcie nazywa odciski, podmiana niesie listę, którą operator widział, i zostaje odrzucona jako nieaktualna, gdy konto zmieniło się w międzyczasie - a każde polecenie edytuje jeden plik. Domyślnie jest to własny <code>~/.ssh/authorized_keys</code> użytkownika, gdzie trafia też klucz świeżo założonego konta.</p>
+<p>Polecenie może zamiast tego wskazać plik zarządzany przez panel, <code>/etc/ssh/authorized_keys.d/&lt;account&gt;/60-flotestro.keys</code>: własność roota, czytelny dla wszystkich i poza zasięgiem użytkownika, więc klucze panelu stoją osobno od tych, które dopisał użytkownik, a podmiana nie rusza niczego, co na hoście położył ktoś inny. Plik jest zapisywany tylko wtedy, gdy sshd mówi, że go czyta: konfiguracja obowiązująca (<code>sshd -T</code>) musi nieść <code>/etc/ssh/authorized_keys.d/%u/60-flotestro.keys</code> w <code>AuthorizedKeysFile</code>, inaczej takie polecenie zostaje odrzucone z <code>managed_file_not_read</code>, zamiast zapisać klucze, które niczego nie otwierają. Panel pokazuje przy każdym kluczu, z którego z dwóch plików pochodzi.</p>
+<h3 id="identity-provider-and-browser-sessions">Dostawca tożsamości i sesje przeglądarki</h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Zmienna</th><th>Domyślnie</th><th>Znaczenie</th><th>Restart</th><th>Bezpieczeństwo</th></tr></thead>
+<tbody>
+<tr><td><code>FLOTESTRO_OIDC_ISSUER</code></td><td>puste</td><td>Issuer OIDC, np. <code>https://ipa:8081/realms/flotestro</code>. Puste wyłącza logowanie z przeglądarki; panel pracuje wtedy na tokenach API.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_OIDC_CLIENT_ID</code></td><td><code>flotestro-panel</code></td><td>Identyfikator klienta OIDC.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_OIDC_CLIENT_SECRET</code></td><td>puste</td><td>Sekret klienta OIDC.</td><td>tak</td><td>Sekret; ekran ustawień pokazuje tylko to, czy jest ustawiony.</td></tr>
+<tr><td><code>FLOTESTRO_OIDC_GROUPS_CLAIM</code></td><td><code>groups</code></td><td>Pole tokenu z listą grup, które czytają mapowania ról.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_OIDC_ADMIN_LOGOUT</code></td><td><code>false</code></td><td>Kończy sesje wyłączonego użytkownika także u dostawcy, przez admin API Keycloaka; wymaga konta serwisowego z <code>view-users</code> i <code>manage-users</code>.</td><td>tak</td><td>Lokalna odmowa obowiązuje i bez tego.</td></tr>
+<tr><td><code>FLOTESTRO_SESSION_IDLE</code></td><td><code>8h</code></td><td>Jak długo sesja przeglądarki żyje bez żądania; między <code>1m</code> a bezwzględnym limitem 24 godzin.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_SESSION_GROUP_REFRESH</code></td><td><code>5m</code></td><td>Jak często grupy żywej sesji są potwierdzane u dostawcy; <code>0</code> wyłącza to, poza tym między <code>1m</code> a 24 godzinami.</td><td>tak</td><td>Przy wyłączonym odebrane członkostwo dochodzi do sesji dopiero przy następnym logowaniu.</td></tr>
+<tr><td><code>FLOTESTRO_STEPUP_MAX_AGE</code></td><td><code>5m</code></td><td>Dopuszczalny wiek uwierzytelnienia dla operacji o największym skutku.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_STEPUP_ACR</code></td><td>puste</td><td>Wymagany poziom uwierzytelnienia (acr) dla tych operacji; puste zostawia sam warunek świeżości.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_STEPUP_TOKENS</code></td><td><code>allow</code></td><td>Czy token API może wykonywać te operacje: <code>allow</code> albo <code>refuse</code>.</td><td>tak</td><td><code>refuse</code> stawia przed każdą taką zmianą człowieka ze świeżym uwierzytelnieniem.</td></tr>
+<tr><td><code>FLOTESTRO_PRODUCTION_ENVIRONMENTS</code></td><td><code>prod,production</code></td><td>Środowiska, w których zmiana wymaga zatwierdzenia przez drugą osobę.</td><td>tak</td><td></td></tr>
+</tbody></table></div>
+<h3 id="directory-connector-freeipa">Konektor katalogu (FreeIPA)</h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Zmienna</th><th>Domyślnie</th><th>Znaczenie</th><th>Restart</th><th>Bezpieczeństwo</th></tr></thead>
+<tbody>
+<tr><td><code>FLOTESTRO_IPA_URL</code></td><td>puste</td><td>Serwer FreeIPA, np. <code>https://ipa.example.org</code>. Puste wyłącza moduł katalogu. <code>FLOTESTRO_IPA_SERVER</code> jest czytany zapasowo.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_IPA_PRINCIPAL</code></td><td>puste</td><td>Principal usługowy konektora; konektor startuje dopiero z serwerem i principalem naraz.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_IPA_KEYTAB</code></td><td><code>/etc/flotestro/ipa.keytab</code></td><td>Keytab konektora.</td><td>tak</td><td>Musi mieć prawa 600 i należeć do roota albo do użytkownika usługi, inaczej panel odmawia startu.</td></tr>
+<tr><td><code>FLOTESTRO_IPA_CA_CERT</code></td><td><code>/etc/flotestro/ipa-ca.crt</code></td><td>Certyfikat CA, którym konektor weryfikuje serwer.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_IPA_REALM</code></td><td>puste</td><td>Realm Kerberosa katalogu.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_DIRECTORY_WRITE</code></td><td><code>false</code></td><td>Włącza zmiany w katalogu z panelu; domyślnie panel tylko czyta.</td><td>tak</td><td></td></tr>
+</tbody></table></div>
+<h3 id="notifications-webhook">Powiadomienia (webhook)</h3>
+<p>Webhook z pliku środowiska jest domyślnym kanałem instalacji: jeden adres, każde zdarzenie trwałego śladu, konfigurowany tutaj, a nie w panelu. Kanały, które administrator zakłada w panelu, są drugim odbiorcą tego samego śladu, z własnym kursorem, i nie konfiguruje się ich zmiennymi w ogóle - adres, tematy, które niesie, i część floty, za którą mówi, są zapisami panelu, tworzonymi z powodem i trzymanymi w śladzie audytowym.</p>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Zmienna</th><th>Domyślnie</th><th>Znaczenie</th><th>Restart</th><th>Bezpieczeństwo</th></tr></thead>
+<tbody>
+<tr><td><code>FLOTESTRO_WEBHOOK_URL</code></td><td>puste</td><td>Dokąd partiami wysyłane są zdarzenia trwałego śladu; puste wyłącza webhook.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_WEBHOOK_SECRET</code></td><td>puste</td><td>Sekret HMAC-SHA256, którym podpisywane są dostarczenia.</td><td>tak</td><td>Sekret; bez niego dostarczeń nie da się zweryfikować i panel ostrzega o tym przy starcie.</td></tr>
+<tr><td><code>FLOTESTRO_WEBHOOK_EVENTS</code></td><td>puste</td><td>Prefiksy typów zdarzeń do dostarczenia, rozdzielone przecinkami, np. <code>campaign.</code>; puste dostarcza każde zdarzenie.</td><td>tak</td><td></td></tr>
+</tbody></table></div>
+<h3 id="notification-queue">Kolejka powiadomień</h3>
+<p>Wiadomość do kanału jest trwałym wierszem, a nie wywołaniem. Router zapisuje jeden wiersz na zdarzenie i kanał w transakcji tego zdarzenia; worker każdej instancji panelu przejmuje wiersze, którym nadszedł czas, wysyła je pod dzierżawą i rozlicza. Odbiorca, który leży, opóźnia więc wiadomość, a nie gubi ją: wiersz czeka, próby są na nim liczone, a wiersz, któremu próby się skończyły - albo któremu odbiorca odmówił poświadczeń - staje się dead letterem, którego operator wysyła ponownie z panelu. Dwie instancje nigdy nie wysyłają tego samego wiersza naraz, a wiersz po zmarłym workerze wraca do puli, gdy skończy się jego dzierżawa.</p>
+<p>Ustawienia poniżej stroją tego workera. Na każdej instancji są takie same; podniesienie partii albo skrócenie odpytywania przyspiesza kolejkę i obciąża bazę, a flota z kilkoma kanałami nie ma powodu ich ruszać.</p>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Zmienna</th><th>Domyślnie</th><th>Znaczenie</th><th>Restart</th><th>Bezpieczeństwo</th></tr></thead>
+<tbody>
+<tr><td><code>FLOTESTRO_NOTIFY_POLL</code></td><td><code>2s</code></td><td>Jak często worker szuka wierszy, którym nadszedł czas, gdy nic go nie obudziło. Wiersz zapisany przez router i dead letter wstawiony z powrotem przez operatora budzą workera tej instancji natychmiast, więc jest to dolna granica dla pozostałych instancji, a nie zwykłe opóźnienie.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_NOTIFY_BATCH</code></td><td><code>50</code></td><td>Ile wierszy bierze jedno przejęcie. Po rundzie, która wypełniła partię, od razu idzie następna, więc ogranicza to jedną transakcję, a nie tempo.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_NOTIFY_MAX_ATTEMPTS</code></td><td><code>20</code></td><td>Ile prób dostaje wiersz, zanim stanie się dead letterem. Przy poniższym backoffie to około doby leżącego odbiorcy. 401 albo 403 od odbiorcy i relay pocztowy odrzucający logowanie są dead letterem przy pierwszej próbie niezależnie od tej wartości: kolejna próba z tym samym poświadczeniem nic nie da.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_NOTIFY_BACKOFF_BASE</code></td><td><code>30s</code></td><td>Przerwa przed drugą próbą. Każda kolejna próba podwaja przerwę, losowaną z pełnym rozrzutem - jednostajnie między zerem a podwojoną przerwą - żeby tysiąc wierszy, które padły razem, nie wróciło razem.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_NOTIFY_BACKOFF_MAX</code></td><td><code>1h</code></td><td>Sufit tej przerwy.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_NOTIFY_LEASE</code></td><td><code>30s</code></td><td>Jak długo przejęty wiersz należy do jednego workera. Dzierżawa jest odnawiana w trakcie wysyłki, więc powolny odbiorca nie oddaje wiersza drugiemu workerowi; worker, który zmarł, trzyma swoje wiersze tylko do końca dzierżawy.</td><td>tak</td><td></td></tr>
+</tbody></table></div>
+<p>Rozliczone wiersze - dostarczone i stłumione - znikają po trzydziestu dniach. Wiersz, który wciąż czeka, nie znika nigdy: dead letter należy do operatora, choćby był stary.</p>
+<h3 id="notification-channel-credentials">Poświadczenia kanałów powiadomień</h3>
+<p>Poświadczenie nigdy nie leży w zapisie kanału. Adres webhooka przychodzącego (niesie token, który pozwala każdemu pisać do pokoju), klucz, którym podpisywany jest webhook, i hasło do skrzynki pocztowej są wersjami w magazynie sekretów panelu, nazwanymi <code>panel.notification.&lt;channel id&gt;</code>. Trafiają tam w chwili wpisania, są czytane tylko w chwili wysyłki, a API odpowiada w ich miejsce <code>secret_configured</code> i <code>secret_last_rotated_at</code> - nigdy wartością, nawet administratorowi platformy.</p>
+<p>Co z tego wynika w API i na ekranie:</p>
+<ul><li>Edycja, która zostawia pole sekretu puste, zachowuje zapisane poświadczenie; formularz mówi, które kanały je mają i kiedy było ostatnio podmienione. Klucz podpisujący webhooka czyści się, prosząc o to wprost, a webhook przychodzący nie może zostać bez adresu w ogóle.</li><li><code>GET /api/v1/notifications/channels/{id}</code> nie niesie adresu webhooka przychodzącego. Obok konfiguracji niesie <code>public_config</code>, skrót z hostem adresu i bez części ścieżkowej, żeby odróżnić źle wpisanego odbiorcę od właściwego bez pokazywania tokenu.</li><li>Scheduler odmawia wydania hostowi sekretu spod prefiksu <code>panel.notification.</code>: poświadczenie panelu nie jest czymś, co wozi zadanie.</li><li>Kanały założone przed tym wydaniem trzymały poświadczenia w kolumnie konfiguracji. Przenosi się je do magazynu sekretów raz, przy pierwszym starcie panelu po aktualizacji, a przeniesienie jest zapisywane z liczbą; jest idempotentne, więc drugi start nie przenosi niczego. Panel z poprzedniego wydania uruchomiony na tej samej bazie wciąż czyta kolumnę konfiguracji i dla przeniesionego kanału nie wysyła nic - i o to chodzi: poświadczenie nie zostaje tam, gdzie mogłoby je odczytać starsze wydanie.</li></ul>
+<h3 id="vulnerability-feeds">Źródła podatności</h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Zmienna</th><th>Domyślnie</th><th>Znaczenie</th><th>Restart</th><th>Bezpieczeństwo</th></tr></thead>
+<tbody>
+<tr><td><code>FLOTESTRO_VULN_ENABLED</code></td><td><code>true</code></td><td>Włącza korelator oparty na trackerach dystrybucji.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_VULN_SYNC_INTERVAL</code></td><td><code>30m</code></td><td>Jak często panel pyta trackery o zmiany.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_VULN_MAX_SNAPSHOT_AGE</code></td><td><code>6h</code></td><td>Wiek, powyżej którego źródło jest opisywane jako nieświeże przy każdej ocenie.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_VULN_DEBIAN_URL</code></td><td><code>https://security-tracker.debian.org/tracker/data/json</code></td><td>Zrzut trackera Debiana (<code>https://</code> albo <code>file://</code>); puste wyłącza to źródło.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_VULN_UBUNTU_URL</code></td><td><code>https://security-metadata.canonical.com/oval/</code></td><td>Katalog z danymi OVAL Canonicala (<code>https://</code> albo <code>file://</code>); puste wyłącza to źródło.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_VULN_REDHAT_URL</code></td><td><code>https://security.access.redhat.com/data/csaf/v2/vex/</code></td><td>Katalog z danymi CSAF/VEX Red Hata (<code>https://</code> albo <code>file://</code>); puste wyłącza to źródło.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_VULN_REDHAT_CACHE</code></td><td><code>/var/lib/flotestro/vuln/redhat</code></td><td>Gdzie między cyklami trzymane są przeczytane dotąd ustalenia Red Hata.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_VULN_NVD_URL</code></td><td><code>https://services.nvd.nist.gov/rest/json/cves/2.0</code></td><td>API NVD po opisy i oceny; puste wyłącza wzbogacanie, co ustawia odcięty site - NVD nie ma postaci offline. NVD nie rozstrzyga niczego o hoście.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_VULN_NVD_KEY</code></td><td>puste</td><td>Klucz API NVD; bez niego pierwszy odczyt trwa około dwudziestu minut.</td><td>tak</td><td>Sekret; ekran ustawień pokazuje tylko to, czy jest ustawiony.</td></tr>
+<tr><td><code>FLOTESTRO_VULN_NVD_INTERVAL</code></td><td><code>6h</code></td><td>Jak często odświeżane są opisy.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_VULN_SHRINK_SHARE</code></td><td><code>0.4</code></td><td>Ile z obowiązującej migawki może stracić pobranie i wciąż zostać aktywowane. Pobranie, które traci więcej albo przestaje pokrywać wydanie pokrywane przez migawkę obowiązującą, nie jest aktywowane: zostaje kandydatem z powodem <code>feed_shrank</code> albo <code>feed_release_missing</code>, poprzednia migawka pozostaje w mocy i starzeje się do nieświeżej, a operator przyjmuje kandydata świadomie z ekranu Podatności (<code>POST /api/v1/vulnerabilities/snapshots/{id}/accept</code>, z powodem i na śladzie audytowym). Wartość spoza <code>0 &lt; share &lt; 1</code> wraca do domyślnej, więc źle wpisane ustawienie nie wyłączy bramy; <code>0</code> oznacza wartość domyślną.</td><td>tak</td><td>W stronę <code>0</code> brama odrzuca zwykły ruch u dostawcy i uczy operatora przyjmowania bez czytania; w stronę <code>1</code> odrzucane jest tylko puste źródło.</td></tr>
+</tbody></table></div>
+<h3 id="monitoring-and-retention">Monitoring i retencja</h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Zmienna</th><th>Domyślnie</th><th>Znaczenie</th><th>Restart</th><th>Bezpieczeństwo</th></tr></thead>
+<tbody>
+<tr><td><code>FLOTESTRO_METRICS_RETENTION_RAW</code></td><td><code>168h</code> (7 dni)</td><td>Wartość początkowa tego, jak długo trzymane są surowe próbki zasobów hostów; od chwili, gdy instalacja zapisze własną na ekranie ustawień, rozstrzyga zapisana, a ta jest tym, do czego wraca wyczyszczone pole. Surowe próbki leżą w jednej partycji na dobę, a retencja zrzuca całe partycje, więc dłuższe okno kosztuje miejsce, a nie przebieg czyszczący, który blokuje bazę. Partycja, która wciąż jest winna agregat, zostaje po swoim dniu; blok stanu liczy, ile jest winnych.</td><td>nie (przechowywane)</td><td></td></tr>
+<tr><td><code>FLOTESTRO_METRICS_RETENTION_ROLLUP</code></td><td><code>2160h</code> (90 dni)</td><td>Wartość początkowa tego, jak długo trzymane są kwadransowe agregaty. To okno, z którego czyta się trend pojemności.</td><td>nie (przechowywane)</td><td></td></tr>
+<tr><td><code>FLOTESTRO_RELAY_BUFFER_RETENTION_RAW</code></td><td><code>168h</code> (7 dni)</td><td>Jak długo trzymane są surowe raporty o buforach relayów. Relay raportuje raz na minutę, więc to okno odpowiada minuta po minucie na pytanie, czy ten site był w nocy odcięty. Zwykłe wiersze kasowane przebiegiem, a nie partycje dobowe: flota relayów jest o trzy rzędy wielkości mniejsza niż flota hostów. <code>0</code> oznacza wartość domyślną.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_RELAY_BUFFER_RETENTION_ROLLUP</code></td><td><code>2160h</code> (90 dni)</td><td>Jak długo trzymane są kwadransowe agregaty raportów o buforach relayów. To okno odpowiada na pytanie, czy ten spool zapełnia się od miesiąca, i ogranicza też, jak długo rozwiązany alert o buforze relaya zostaje jako historia. <code>0</code> oznacza wartość domyślną.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_METRICS_MAX_LATENESS</code></td><td><code>24h</code></td><td>Wartość początkowa tego, jak długo po pobraniu próbka może jeszcze dotrzeć i zostać zapisana. Relay, któremu padło łącze do centrali, opróżnia spool i każdy odczyt ląduje na właściwym wykresie; cokolwiek starszego dostaje odpowiedź <code>metric_sample_too_old</code>, nie jest zapisywane i zostawia lukę z powodem zamiast linii przeciągniętej przez nią. Agent porzuca taką próbkę z własnego spoola.</td><td>nie (przechowywane)</td><td></td></tr>
+<tr><td><code>FLOTESTRO_METRICS_QUERY_WINDOW</code></td><td><code>24h</code></td><td>Wartość początkowa tego, jak daleko wstecz panel obiecuje pełną rozdzielczość. To wobec niej sprawdzana jest retencja, a nie limit zakresów wykresu.</td><td>nie (przechowywane)</td><td></td></tr>
+<tr><td><code>FLOTESTRO_METRICS_CLOCK_SKEW</code></td><td><code>5m</code></td><td>Jak bardzo zegar hosta może wyprzedzać panel, zanim próbka dostanie stempel czasu panelu. Poprawiany jest tylko kierunek w przyszłość: próbka z przeszłości mogła po prostu czekać w spoolu, a przestemplowanie zamieniłoby zaległości relaya w ścianę identycznych punktów. Próbkę identyfikuje jej uruchomienie i numer w sekwencji, nigdy zegar, więc poprawka zmienia tylko to, gdzie punkt jest rysowany, a nigdy tego, którą jest próbką.</td><td>nie (przechowywane)</td><td></td></tr>
+<tr><td><code>FLOTESTRO_METRICS_PARTITIONS_AHEAD</code></td><td><code>3</code></td><td>Ile dni surowych partycji istnieje przed dzisiejszym dniem. Wstawienie do dnia, którego nie pokrywa żadna partycja, jest błędem, więc jest to liczba dni, przez które pętla konserwacyjna może nie zadziałać, zanim flota zacznie tracić próbki. Najwyżej 60.</td><td>nie (przechowywane)</td><td></td></tr>
+<tr><td><code>FLOTESTRO_METRICS_EVALUATOR_LEASE</code></td><td><code>45s</code></td><td>Jak długo jedna instancja control plane trzyma prawo do oceny reguł alertów. Instancja, która zastaje zajętą dzierżawę, nie ocenia niczego; ta, która straci ją w trakcie przebiegu, zatrzymuje się tam, gdzie jest (<code>alert_evaluator_lease_lost</code>), a nowy posiadacz podejmuje od otwartych epizodów. W terminie mieszczą się trzy odnowienia.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_AUDIT_RETENTION</code></td><td><code>0</code></td><td>Jak długo trzymany jest ślad audytowy; <code>0</code> trzyma go na zawsze. Ślad jest dowodem: jego kasowanie to decyzja instalacji.</td><td>tak</td><td>Ustawiaj tylko wtedy, gdy ślad jest trzymany gdzie indziej.</td></tr>
+<tr><td><code>FLOTESTRO_JOB_RETENTION</code></td><td><code>2160h</code> (90 dni)</td><td>Jak długo zakończone zadania trzymane są wraz z próbami. Zadanie kampanii zostaje tak długo jak kampania; zadanie w toku nie jest kasowane nigdy. <code>0</code> oznacza wartość domyślną.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_CAMPAIGN_RETENTION</code></td><td><code>8760h</code> (rok)</td><td>Jak długo zakończone kampanie trzymane są wraz z celami, krokami, planami i zatwierdzeniami. Kampania w toku ani taka, którą inna kampania powtarza lub kompensuje, nie jest kasowana nigdy. <code>0</code> oznacza wartość domyślną.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_OUTBOX_RETENTION</code></td><td><code>720h</code> (30 dni)</td><td>Jak długo trzymane są dostarczone zdarzenia trwałego śladu. Zdarzenie, którego odbiorca webhooka jeszcze nie wziął, zostaje bez względu na wiek. <code>0</code> oznacza wartość domyślną.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_SECRETS_KEY_FILE</code></td><td><code>&lt;state dir&gt;/secrets.key</code></td><td>Plik klucza magazynu sekretów sprzed dostawcy kluczy. Przy pierwszym starcie po aktualizacji zostaje przejęty jako <code>keys/legacy.key</code> i staje się aktywnym kluczem <code>legacy</code>; nowa instalacja nie ma go nigdy.</td><td>tak</td><td>Trzymaj go w zestawie kopii, dopóki klucz <code>legacy</code> nie zostanie wycofany. Panel nigdy go nie generuje.</td></tr>
+<tr><td><code>FLOTESTRO_SECRETS_KEY_CREDENTIAL</code></td><td>puste</td><td>Nazwa credentiala systemd (<code>LoadCredential=&lt;name&gt;:&lt;file&gt;</code> w jednostce), który trzyma klucz magazynu sekretów pod tym identyfikatorem; czytany z <code>$CREDENTIALS_DIRECTORY</code>, nigdy zapisywany.</td><td>tak</td><td>Credential jest węższy niż plik w katalogu stanu: nie widzi go żaden inny proces.</td></tr>
+<tr><td><code>FLOTESTRO_SECRETS_KEY_ROTATE_TO</code></td><td>puste</td><td>Identyfikator klucza, na który magazyn sekretów przechodzi przy tym starcie (<code>k-...</code>, małe litery, cyfry, myślniki). Tworzony w <code>keys/</code>, gdy go brak; wersje magazynu są w tle przepakowywane, a stary klucz zostaje, dopóki żadna z nich go nie wskazuje. Gdy ten klucz już jest aktywny, nic się nie dzieje.</td><td>tak</td><td>Stary klucz usuwaj dopiero wtedy, gdy blok stanu pokazuje <code>pending_rewrap: 0</code>.</td></tr>
+</tbody></table></div>
+<p>Przebieg czyszczący idzie raz na godzinę, po pięć tysięcy wierszy jednego rodzaju, a zakończone sesje agentów znikają po trzydziestu dniach niezależnie od ustawień.</p>
+<p><strong>Panel odmawia startu</strong>, gdy <code>FLOTESTRO_METRICS_RETENTION_RAW</code> jest krótsza niż <code>FLOTESTRO_METRICS_QUERY_WINDOW</code> plus <code>FLOTESTRO_METRICS_MAX_LATENESS</code> (<code>metrics_retention_too_short</code>). Taka konfiguracja kasuje odczyt, który relay wciąż wiezie, z definicji i bez niczyjego polecenia; podnieś retencję albo obniż okno lub dopuszczalne opóźnienie. <strong>Ta sama kontrola idzie przy zapisie</strong> z ekranu ustawień i idzie przed zapisaniem czegokolwiek: odrzucona zmiana zostawia obowiązujące wartości nietknięte.</p>
+<h3 id="the-monitoring-retentions-are-stored-not-restarted-into">Retencje monitoringu są przechowywane, a nie wprowadzane restartem</h3>
+<p>Sześć ustawień oznaczonych wyżej jako <code>no (stored)</code> należy do instalacji, a nie do procesu. Środowisko ustala wartość początkową każdego z nich; od chwili, gdy operator zapisze którąś w panelu, rozstrzyga wartość zapisana, a środowisko jest tym, do czego wraca wyczyszczone pole. Wiersz leży w <code>monitoring_settings</code> (jeden wiersz, a pole <code>NULL</code> to takie, którego instalacja nigdy nie ustawiła) i niesie, kto i kiedy je zapisał, obok wpisu <code>settings.monitoring.write</code> w śladzie audytowym.</p>
+<div class="table-scroll">
+<table>
+<tbody>
+<tr><td>Odczyt</td><td><code>GET /api/v1/settings/monitoring</code> - wartości obowiązujące, zapisane i te, z którymi wystartował ten proces, żeby ekran mógł powiedzieć, skąd bierze się każda. Uprawnienie <code>settings.read</code>.</td></tr>
+<tr><td>Podgląd</td><td><code>PUT /api/v1/settings/monitoring?dry_run=true</code> - nie zapisuje niczego i odpowiada tym, co zmiana by usunęła: dobowe partycje surowych próbek, które odejdą, oszacowanie odczytów w nich oraz liczby agregatów, zapisanych luk, poprawek zegara i wygasłych wyciszeń.</td></tr>
+<tr><td>Zapis</td><td><code>PUT /api/v1/settings/monitoring</code>. Uprawnienie <code>monitoring.rules.write</code> w całej flocie. Czas trwania to napis w formacie Go, a pusty czyści pole. Zmiana, która cokolwiek usuwa, zostaje odrzucona z <code>metrics_retention_shrink_unacknowledged</code>, dopóki treść nie niesie <code>acknowledge_data_loss: true</code>: skrócenie retencji jest decyzją operatora, ale zapada raz i nie da się jej cofnąć.</td></tr>
+</tbody></table></div>
+<p>Zapisana zmiana nie wymaga restartu. Replika, która przyjęła zapis, wprowadza go od razu; każda inna replika odczytuje wiersz na własnym takcie i ma go <strong>w ciągu trzydziestu sekund</strong>. Trwający już przebieg konserwacyjny zostaje przy wartościach, z którymi zaczął - przebieg czyszczący i każdy przebieg partycji czytają ustawienia raz, na starcie - więc zmiana nigdy nie obejmuje połowy przebiegu. Ścieżka przyjmowania próbek czyta je przy każdej próbce, więc dopuszczalne opóźnienie i limit rozjazdu zegarów obowiązują dla następnego odczytu, który przyjdzie.</p>
+<p><strong>W trakcie aktualizacji rolling</strong> replika na poprzednim wydaniu nie czyta tej tabeli w ogóle i pracuje dalej na własnym środowisku. Dopóki to trwa, retencją surowych próbek obowiązującą dla floty jest <strong>krótsza</strong> z dwóch, bo partycję może zrzucić przebieg którejkolwiek repliki. Nowe wartości zapisuje się, gdy każda replika jest już na nowym wydaniu, albo ustawia środowisko starej tak, żeby się zgadzało.</p>
+<p>Zapisany wiersz, który nie przechodzi walidacji wobec środowiska tego procesu - bo na przykład środowisko podniosło okno zapytania po zapisaniu retencji - jest logowany przy starcie i pomijany: replika pracuje na własnych wartościach, które walidację przeszły, zamiast odmawiać startu z powodu ustawienia, które może poprawić tylko panel.</p>
+<p>Próbki, których panel nie potwierdził, agent trzyma w <code>&lt;state dir&gt;/metrics-spool</code>: najwyżej 240 sztuk, cztery godziny po jednej na minutę, każda w osobnym małym pliku. Próbka jest tam zapisywana przed wysłaniem i kasowana dopiero wtedy, gdy panel potwierdzi właśnie ją; po ponownym połączeniu agent wysyła to, co nigdy nie doczekało się odpowiedzi, od najstarszych. Po przekroczeniu limitu ginie najstarsza - panel nieobecny przez tydzień kosztuje host cztery godziny odczytów, a nie tydzień. Nie ma na to ustawienia: ten limit jest tym, ile agent może kosztować host.</p>
+<h3 id="stored-fields">Sześć przechowywanych pól i co przy nich znaczy środowisko</h3>
+<p>To są pola, które czyta <code>GET /api/v1/settings/monitoring</code> i zapisuje <code>PUT /api/v1/settings/monitoring</code>. Każde jest napisem czasu trwania w formacie Go poza <code>partitions_ahead</code>, które jest liczbą. O polu, którego instalacja nigdy nie zapisała, albo wyczyszczonym przez wysłanie pustej wartości, rozstrzyga stojąca przy nim zmienna; API odpowiada trzema zestawami naraz - wartościami <code>effective</code> teraz, <code>stored</code> przez instalację wraz z tym, kto i kiedy je zapisał, oraz <code>environment</code>, z którym wystartował ten proces - żeby ekran mógł powiedzieć, skąd bierze się każda wartość.</p>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Pole</th><th>Wraca do</th><th>Wbudowana wartość domyślna</th></tr></thead>
+<tbody>
+<tr><td><code>raw_retention</code></td><td><code>FLOTESTRO_METRICS_RETENTION_RAW</code></td><td><code>168h (7 days)</code></td></tr>
+<tr><td><code>rollup_retention</code></td><td><code>FLOTESTRO_METRICS_RETENTION_ROLLUP</code></td><td><code>2160h (90 days)</code></td></tr>
+<tr><td><code>max_lateness</code></td><td><code>FLOTESTRO_METRICS_MAX_LATENESS</code></td><td><code>24h</code></td></tr>
+<tr><td><code>raw_query_window</code></td><td><code>FLOTESTRO_METRICS_QUERY_WINDOW</code></td><td><code>24h</code></td></tr>
+<tr><td><code>clock_skew_limit</code></td><td><code>FLOTESTRO_METRICS_CLOCK_SKEW</code></td><td><code>5m</code></td></tr>
+<tr><td><code>partitions_ahead</code></td><td><code>FLOTESTRO_METRICS_PARTITIONS_AHEAD</code></td><td><code>3, at most 60</code></td></tr>
+</tbody></table></div>
+<p>Zapisane zero nie jest ustawieniem: to pole, którego instalacja nigdy nie ustawiła, więc wciąż rozstrzyga o nim środowisko. Czas trwania zapisany jako zero albo mniej zostaje odrzucony - <em>a duration must be positive; leave the field empty to let the environment decide it</em> - i tak samo <code>partitions_ahead</code> poniżej zera.</p>
+<p>Jedno ustawienie monitoringu <strong>nie</strong> jest przechowywane i czytane jest wyłącznie z procesu: <code>FLOTESTRO_METRICS_EVALUATOR_LEASE</code>, czyli termin, na jaki jedna instancja control plane bierze prawo do oceny reguł alertów. Termin dzierżawy zmieniony pod jej posiadaczem to inne zagrożenie niż retencja, więc zostaje ustawieniem wymagającym restartu.</p>
+<p>Zapis zostaje odrzucony przed zapisaniem czegokolwiek, gdy retencja surowych próbek jest krótsza niż okno zapytania surowych plus maksymalne opóźnienie (<code>metrics_retention_too_short</code>) oraz gdy zmiana zrzuciłaby odczyty, które panel wciąż trzyma, a treść nie niesie <code>acknowledge_data_loss: true</code> (<code>metrics_retention_shrink_unacknowledged</code>). Podgląd odpowiada tym samym skutkiem, jaki miałby zapis: dobowe partycje surowych próbek, które odejdą, oszacowanie odczytów w nich oraz liczby agregatów, zapisanych luk, poprawek zegara i wygasłych wyciszeń, które pójdą razem z nimi.</p>
+<h2 id="agent-flotestro-agent">Agent (<code>flotestro-agent</code>)</h2>
+<p>Host opisuje <code>/etc/flotestro/agent.yaml</code>. Zmienne poniżej nadpisują plik, gdy są ustawione; zostaw je puste, żeby rozstrzygał plik. Demon nie przechodzi enrollmentu: <code>FLOTESTRO_ENROLLMENT_TOKEN</code> w jego środowisku jest ignorowany i zgłaszany przy każdym starcie, dopóki się go nie usunie.</p>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Zmienna</th><th>Domyślnie</th><th>Znaczenie</th><th>Restart</th><th>Bezpieczeństwo</th></tr></thead>
+<tbody>
+<tr><td><code>FLOTESTRO_AGENT_CONFIG</code></td><td><code>/etc/flotestro/agent.yaml</code></td><td>Plik konfiguracyjny agenta.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_AGENT_STATE_DIR</code></td><td><code>/var/lib/flotestro-agent</code></td><td>Katalog stanu: tożsamość, certyfikat, bufor wyników.</td><td>tak</td><td>Trzyma klucz hosta.</td></tr>
+<tr><td><code>FLOTESTRO_ENROLLMENT_URL</code></td><td>z pliku</td><td>Endpoint enrollmentu panelu albo relaya.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_GATEWAY_URL</code></td><td>z pliku</td><td>Agent gateway; zastępuje całą listę z pliku.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_CA_FILE</code></td><td>z pliku</td><td>Zestaw CA do zbudowania pierwszego zaufania.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_INVENTORY_MINUTES</code></td><td><code>15</code></td><td>Odstęp pełnego inventory.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_MAX_CONCURRENT_TASKS</code></td><td><code>2</code></td><td>Limit równoległych zadań na hoście.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_HELPER_SOCKET</code></td><td><code>/run/flotestro/helper.sock</code></td><td>Socket root helpera.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_AGENT_MODE</code></td><td>z pliku</td><td><code>full</code> albo <code>read_only</code>.</td><td>tak</td><td>Agent tylko do odczytu raportuje i niczego nie zmienia.</td></tr>
+</tbody></table></div>
+<p><code>flotestro-agentctl enroll</code> czyta <code>FLOTESTRO_ENROLLMENT_TOKEN</code>, <code>FLOTESTRO_ENROLLMENT_URL</code>, <code>FLOTESTRO_GATEWAY_URL</code> i <code>FLOTESTRO_CA_FILE</code> z pliku środowiska agenta przy przenoszeniu hosta ustawionego jeszcze przed <code>agent.yaml</code>; token jest sekretem jednorazowym i należy do polecenia operatora albo do pliku o wąskich prawach, a nie do pliku, który przeżywa aktualizacje pakietu.</p>
+<h2 id="agent-helper-flotestro-agent-helper">Helper agenta (<code>flotestro-agent-helper</code>)</h2>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Zmienna</th><th>Domyślnie</th><th>Znaczenie</th><th>Restart</th><th>Bezpieczeństwo</th></tr></thead>
+<tbody>
+<tr><td><code>FLOTESTRO_HELPER_SOCKET</code></td><td><code>/run/flotestro/helper.sock</code></td><td>Ścieżka socketu, gdy nie ma aktywacji przez socket.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_AGENT_USER</code></td><td><code>flotestro-agent</code></td><td>Użytkownik, któremu wolno wydawać polecenia przez socket.</td><td>tak</td><td>Każdy inny na sockecie dostaje odmowę.</td></tr>
+<tr><td><code>FLOTESTRO_HELPER_IDLE_SECONDS</code></td><td><code>300</code></td><td>Czas bezczynności, po którym helper kończy pracę; systemd uruchamia go ponownie przy kolejnym poleceniu.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_HELPER_CONFIG</code></td><td><code>/etc/flotestro/helper.yaml</code></td><td>Własny plik helpera, opcjonalny: <code>capabilities.mode</code>, <code>capabilities.trusted_keys_dir</code>, <code>capabilities.replay_dir</code>, <code>identity.host_id_file</code>. Plik należy do roota, więc przejęty agent nie obniży tego, co w nim stoi.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_HELPER_CAPABILITY_MODE</code></td><td><code>prefer</code></td><td>Co helper robi z żądaniem, które zmienia host. Każde takie żądanie powinno nieść capability podpisane przez panel dokładnie dla tego hosta, zadania, akcji i payloadu. <code>observe</code> wykonuje żądanie bez niego albo z błędnym i zapisuje to w logu; <code>prefer</code> wykonuje żądanie bez niego (agent sprzed capability), ale odmawia przy błędnym; <code>enforce</code> odmawia żądaniu bez niego przez <code>capability_required</code>. Odczyty nigdy nie wymagają capability.</td><td>tak</td><td>Ustaw <code>enforce</code> na każdym hoście, gdy panelowe <code>flotestro_helper_capability_total{outcome="legacy_agent"}</code> stoi na zerze.</td></tr>
+<tr><td><code>FLOTESTRO_HELPER_TRUST_DIR</code></td><td><code>/etc/flotestro/helper-trust.d</code></td><td>Klucze capability panelu, po jednym <code>&lt;key_id&gt;.pub</code> na klucz, własność roota. Napełniane z podpisanego zestawu panelu przy enrollmencie i przy każdej sesji; pierwszy zestaw przyjmowany jest na wiarę tylko dopóty, dopóki helper nie ma ani klucza, ani tożsamości hosta.</td><td>tak</td><td>Plik klucza, który nie należy do roota albo jest zapisywalny dla innych, nie jest kluczem.</td></tr>
+<tr><td><code>FLOTESTRO_HELPER_REPLAY_DIR</code></td><td><code>/var/lib/flotestro-helper/replay</code></td><td>Gdzie helper pamięta nonce każdego capability, które wykonał, żeby to samo capability nie wykonało się dwa razy.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_HELPER_FILE_VERSION_DIR</code></td><td><code>/var/lib/flotestro-helper/files</code></td><td>Gdzie host trzyma zawartość zarządzanego pliku konfiguracyjnego sprzed każdego zapisu, żeby powrót do wersji miał co dokładnie odłożyć z powrotem. Jeden katalog na plik, nazwany digestem jego ścieżki.</td><td>tak</td><td>Katalog roota, 0700, każda kopia 0600: kopia trzyma to, co trzymał plik, łącznie z wartością z magazynu sekretów, więc jest czytelna dokładnie dla tych, dla których czytelny był plik.</td></tr>
+<tr><td><code>FLOTESTRO_HELPER_FILE_VERSIONS</code></td><td><code>10</code></td><td>Ile kopii jednego pliku trzyma host. Najstarsza odchodzi przy tworzeniu następnej.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_HELPER_FILE_VERSION_BYTES</code></td><td><code>33554432</code></td><td>Rozmiar całego magazynu w bajtach. Powyżej odchodzą najstarsze kopie, ze wszystkich plików - jeden plik przepisywany megabajtami mieści się we własnej liczbie kopii i wciąż zapełniłby partycję, na której leży stan helpera.</td><td>tak</td><td></td></tr>
+<tr><td><code>FLOTESTRO_HELPER_HOST_ID_FILE</code></td><td><code>/var/lib/flotestro-helper/host-id</code></td><td>Identyfikator hosta, na który helper odpowiada; capability dla innego hosta dostaje odmowę. <code>flotestro-agentctl helper-trust show</code> wypisuje go razem z kluczami, a <code>helper-trust reset --confirm &lt;hostname&gt;</code> (jako root) zapomina jedno i drugie dla hosta zapisywanego od nowa do panelu, którego helper nie zna.</td><td>tak</td><td></td></tr>
+</tbody></table></div>
+<p>Magazyn wersji plików jest tym, z czego odtwarza <code>file.rollback</code>. Zapis kopiuje do niego zawartość, którą ma zastąpić, jeszcze przed zmianą nazwy, a zapis, który tej kopii zrobić nie może - pełna partycja, plik większy niż megabajtowa granica modułu - odmawia przez <code>file_version_not_kept</code>, zamiast wprowadzać zmianę nie do cofnięcia. Host raportuje, co trzyma, fragmentem plików w inventory, więc panel proponuje zawartość do powrotu, zamiast pytać o sumę kontrolną; kopia, której zawartość pochodzi z magazynu sekretów, raportowana jest bez sumy kontrolnej i dlatego nie da się jej zamówić z panelu, bo nazwanie jej umieściłoby odcisk sekretnej wartości w bazie panelu. Powrót wskazuje jedną wersję jej sumą kontrolną: suma kontrolna, której ten host nigdy nie zachował, dostaje odmowę <code>file_version_unknown</code>, zamiast odpowiedzi w postaci najnowszej kopii, a odtworzona zawartość przechodzi przez to samo miejsce przejściowe i tego samego weryfikatora co każdy inny zapis - wersja, której usługa już nie przyjmuje, dostaje odmowę, a nie zapis z powrotem.</p>
+<h2 id="relay-flotestro-relay">Relay (<code>flotestro-relay</code>)</h2>
+<p>Relay opisuje <code>relay.yaml</code>, podmontowany tylko do odczytu do jego kontenera jako <code>/etc/flotestro/relay.yaml</code>; <code>docker compose -f compose.relay.yaml run --rm relay config show</code> wypisuje to, co z niego wynika. Czytana jest jedna zmienna, wyłącznie przez polecenie <code>enroll</code>:</p>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Zmienna</th><th>Domyślnie</th><th>Znaczenie</th><th>Restart</th><th>Bezpieczeństwo</th></tr></thead>
+<tbody>
+<tr><td><code>FLOTESTRO_ENROLLMENT_TOKEN</code></td><td>puste</td><td>Token enrollmentu, gdy nie niesie go ani <code>--token-file</code>, ani standardowe wejście.</td><td>nie dotyczy</td><td>Sekret jednorazowy: podawaj go plikiem albo przez stdin, zamiast zostawiać w środowisku.</td></tr>
+</tbody></table></div>
+<h2 id="agent-yaml">Plik agenta: <code>/etc/flotestro/agent.yaml</code></h2>
+<p>Plik jest kanonicznym źródłem ustawień hosta i jest oznaczony jako plik konfiguracyjny, więc aktualizacja pakietu go nie nadpisuje. Trzech rzeczy w nim nie ma i być nie może: tokenu enrollmentu, bo jest sekretem jednorazowym, a ten plik przeżywa aktualizacje pakietu i trafia do kopii zapasowych; tożsamości hosta, bo bierze się z certyfikatu, a nie z tekstu, który każdy może przepisać; oraz site, środowiska i właściciela, bo o nich rozstrzyga panel na podstawie profilu enrollmentu, a nie plik na hoście.</p>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Klucz</th><th>Domyślnie</th><th>Znaczenie</th></tr></thead>
+<tbody>
+<tr><td><code>schema_version</code></td><td><code>1</code></td><td>Wersja kształtu samego pliku.</td></tr>
+<tr><td><code>connection.enrollment_url</code></td><td><code>""</code></td><td>Adres usługi enrollmentu. Używany raz, do wystawienia certyfikatu hosta.</td></tr>
+<tr><td><code>connection.gateway_urls</code></td><td><code>[]</code></td><td>Agent gatewaye w kolejności priorytetu. Agent trzyma jedną aktywną sesję i wraca do pierwszego gatewaya, gdy tylko ten znów odpowie.</td></tr>
+<tr><td><code>connection.bootstrap_ca_file</code></td><td><code>/var/lib/flotestro-agent/ca.pem</code></td><td>Zestaw fleet CA na pierwsze połączenie. Po enrollmencie agent używa kopii zapisanej w katalogu stanu.</td></tr>
+<tr><td><code>connection.connect_timeout</code></td><td><code>15s</code></td><td></td></tr>
+<tr><td><code>connection.reconnect_min</code></td><td><code>2s</code></td><td></td></tr>
+<tr><td><code>connection.reconnect_max</code></td><td><code>2m</code></td><td></td></tr>
+<tr><td><code>agent.state_dir</code></td><td><code>/var/lib/flotestro-agent</code></td><td></td></tr>
+<tr><td><code>agent.inventory_interval</code></td><td><code>15m</code></td><td></td></tr>
+<tr><td><code>agent.max_concurrent_tasks</code></td><td><code>2</code></td><td></td></tr>
+<tr><td><code>agent.mode</code></td><td><code>full</code></td><td>full - host zarządzany; read_only - host tylko obserwowany: agent raportuje fakty i nie wykonuje żadnej zmiany.</td></tr>
+<tr><td><code>helper.socket</code></td><td><code>/run/flotestro/helper.sock</code></td><td></td></tr>
+</tbody></table></div>
+<p>Plik w postaci instalowanej przez pakiet:</p>
+<pre><code># The configuration of the Flotestro agent.
+#
+# The file is the canonical source of the host settings and is marked as a
+# configuration file, so a package update does not overwrite it.
+#
+# What is not here and cannot be:
+#   - the enrollment token - it is a one-time secret, and this file survives
+#     package updates and ends up in backups,
+#   - the host identity - it comes from the certificate, not from text
+#     anybody can rewrite,
+#   - the site, the environment and the owner - the panel decides those on
+#     the basis of the enrollment profile, not a file on the host.
+schema_version: 1
+
+connection:
+  # The address of the enrollment service. Used once, to issue the host
+  # certificate.
+  enrollment_url: ""
+
+  # The agent gateways (mTLS) in priority order. The agent keeps one active
+  # session and returns to the first gateway as soon as it answers again.
+  gateway_urls: []
+
+  # The fleet CA bundle for the first connection. After enrollment the agent
+  # uses the copy saved in the state directory.
+  bootstrap_ca_file: "/var/lib/flotestro-agent/ca.pem"
+
+  connect_timeout: "15s"
+  reconnect_min: "2s"
+  reconnect_max: "2m"
+
+agent:
+  state_dir: "/var/lib/flotestro-agent"
+  inventory_interval: "15m"
+  max_concurrent_tasks: 2
+  # full - a managed host; read_only - a host that is only observed: the
+  # agent reports facts and carries out no change.
+  mode: "full"
+
+helper:
+  socket: "/run/flotestro/helper.sock"
+</code></pre>
+<h2 id="relay-yaml">Plik relaya: <code>relay.yaml</code></h2>
+<p>Relay jest opcjonalnym komponentem site i osobną granicą zaufania: terminuje połączenie agenta i sam zaświadcza centrali, czyj to ruch. Dlatego ma własny plik, własny kontener i własny wolumen stanu. Leży obok <code>compose.relay.yaml</code> na hoście site i jest podmontowany tylko do odczytu jako <code>/etc/flotestro/relay.yaml</code>. Tokenu enrollmentu w nim nie ma z tego samego powodu, dla którego nie ma go w pliku agenta, i nie ma też tożsamości relaya: ta bierze się z certyfikatu. <code>docker compose -f compose.relay.yaml run --rm relay config show</code> wypisuje to, co z pliku wynika.</p>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Klucz</th><th>Domyślnie</th><th>Znaczenie</th></tr></thead>
+<tbody>
+<tr><td><code>schema_version</code></td><td><code>1</code></td><td>Wersja kształtu samego pliku.</td></tr>
+<tr><td><code>relay.name</code></td><td><code>""</code></td><td>Nazwa relaya. Jest naturalnym kluczem w rejestrze centrali: ponowna instalacja pod tą samą nazwą odświeża wpis, zamiast tworzyć drugi.</td></tr>
+<tr><td><code>relay.site</code></td><td><code>""</code></td><td>Wartość oczekiwana. Zakres nadaje token enrollmentu i to on rozstrzyga; rozbieżność znaczy, że plik opisuje inny site niż certyfikat.</td></tr>
+<tr><td><code>relay.listen</code></td><td><code>0.0.0.0:8453</code></td><td>Relay pracuje bez uprawnień roota, więc port jest powyżej 1024.</td></tr>
+<tr><td><code>relay.health_listen</code></td><td><code>127.0.0.1:8454</code></td><td>Nasłuch health: czysty HTTP, bez certyfikatu klienta, odpowiadający na /healthz (liveness: proces serwuje, a jego nasłuch przyjmuje połączenia) i /readyz (readiness: sesja w górę, limit spoola, certyfikat). Domyślnie pętla zwrotna, bo odpowiedź jest dla maszyny i jej runtime'u kontenerów, a nie dla sieci site; sonda spoza kontenera - kubelet, load balancer - potrzebuje adresu osiągalnego z zewnątrz, na przykład "0.0.0.0:8454". Pusta wartość wyłącza nasłuch; brak klucza bierze wartość domyślną.</td></tr>
+<tr><td><code>relay.advertised_names</code></td><td><code>[]</code></td><td>Nazwy, pod którymi agenci site widzą relay. Trafiają do certyfikatu serwera; zmiana nazw wymaga decyzji operatora w panelu, bo odnowienie wystawia tylko to, co centrala ma zapisane w rejestrze.</td></tr>
+<tr><td><code>relay.state_dir</code></td><td><code>/var/lib/flotestro-relay</code></td><td></td></tr>
+<tr><td><code>relay.buffer_max_bytes</code></td><td><code>268435456</code></td><td>Limit bufora wyników na czas awarii łącza do centrali. Zero znaczy &bdquo;nie buforuj&rdquo;: wyniki z czasu awarii są wtedy tracone świadomie.</td></tr>
+<tr><td><code>upstream.enrollment_url</code></td><td><code>""</code></td><td></td></tr>
+<tr><td><code>upstream.gateway_urls</code></td><td><code>[]</code></td><td>Gatewaye centrali w kolejności priorytetu.</td></tr>
+<tr><td><code>upstream.bootstrap_ca_file</code></td><td><code>/var/lib/flotestro-relay/ca.pem</code></td><td>Zestaw fleet CA na pierwsze połączenie. Po enrollmencie relay używa kopii zapisanej w katalogu stanu.</td></tr>
+</tbody></table></div>
+<h3 id="relay-spool">Trwały spool</h3>
+<p>Komunikaty agentów, o których centrala jeszcze nie potwierdziła, że je przyjęła. Przeżywają restart relaya i maszyny i opuszczają spool dopiero na potwierdzenie panelu, więc wyniki z czasu awarii docierają do centrali, zamiast ginąć razem z procesem. Wartości poniżej są domyślnymi i w pliku zapisane są jako komentarze, do zmiany, a nie do odkomentowania: brakujący klucz bierze dokładnie tę wartość, która tam stoi. Rozmiary są w bajtach.</p>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Klucz</th><th>Domyślnie</th><th>Znaczenie</th></tr></thead>
+<tbody>
+<tr><td><code>spool.path</code></td><td><code>/var/lib/flotestro-relay/spool</code></td><td>Katalog z plikami segmentów; bez niego spool leży w katalogu &bdquo;spool&rdquo; pod state_dir. Należy wyłącznie do konta relaya (prawa 0700): rekordy trzymają wyniki i inventory całego site.</td></tr>
+<tr><td><code>spool.max_bytes</code></td><td><code>268435456</code></td><td>Miejsce, które czekające rekordy mogą zająć razem. Bez tego klucza spool bierze limit z buffer_max_bytes powyżej, żeby aktualizacja nie zmieniła miejsca, które operator dał site; plik, który nie nazywa żadnego z nich, dostaje gigabajt.</td></tr>
+<tr><td><code>spool.critical_reserve_bytes</code></td><td><code>134217728</code></td><td>Część max_bytes, do której wchodzą tylko komunikaty sterujące i wyniki operacji. Inventory, próbki metryk i linie logu zatrzymują się przed nią: site w długiej awarii zachowuje to, co mówi, co się z nim stało, i porzuca to, co tylko go opisuje.</td></tr>
+<tr><td><code>spool.min_free_bytes</code></td><td><code>268435456</code></td><td>Dolna granica wolnego miejsca na systemie plików spoola. Poniżej niej nic nie jest dopisywane, niezależnie od klasy: system plików zapełniony przez relay odbiera site to, co działa lokalnie.</td></tr>
+<tr><td><code>spool.ack_timeout</code></td><td><code>30s</code></td><td>Jak długo rekord wysłany w górę czeka na potwierdzenie panelu, zanim pójdzie ponownie. Między sekundą a godziną.</td></tr>
+<tr><td><code>spool.max_inflight_per_host</code></td><td><code>64</code></td><td>Rekordy jednego hosta wysłane i jeszcze niepotwierdzone w danej chwili.</td></tr>
+</tbody></table></div>
+<p>Plik, skomentowany:</p>
+<pre><code># The configuration of the Flotestro relay.
+#
+# The relay is an optional site component and a separate trust boundary: it
+# terminates the agent connection and attests to the centre itself whose
+# traffic it is. That is why it has a file of its own, a container of its
+# own and a state volume of its own.
+#
+# What is not here and cannot be:
+#   - the enrollment token - it is a one-time secret, and this file is kept
+#     with the deployment and ends up in backups,
+#   - the relay identity - it comes from the certificate, not from text.
+schema_version: 1
+
+relay:
+  # The relay name. It is the natural key in the centre's registry:
+  # reinstalling the same name refreshes the entry instead of creating a
+  # second one.
+  name: ""
+
+  # The expected value. The scope is granted by the enrollment token and that
+  # is what decides; a mismatch means the file describes a different site
+  # than the certificate.
+  site: ""
+
+  # The relay runs without root privileges, so the port is above 1024.
+  listen: "0.0.0.0:8453"
+  # The health listener: plain HTTP, no client certificate, answering
+  # /healthz (liveness: the process serves and its listener accepts) and
+  # /readyz (readiness: the session upstream, the bound of the spool, the
+  # certificate). The loopback by default, because the answer is for the
+  # machine and its container runtime rather than for the network of the
+  # site; a probe from outside the container - a kubelet, a load balancer -
+  # needs an address that is reachable, for instance "0.0.0.0:8454".
+  # An empty value turns the listener off; the key absent takes the default.
+  health_listen: "127.0.0.1:8454"
+
+  # The names the site agents see the relay under. They enter the server
+  # certificate; changing the names requires an operator decision in the
+  # panel, because a renewal issues only what the centre has recorded in the
+  # registry.
+  advertised_names: []
+
+  state_dir: "/var/lib/flotestro-relay"
+
+  # The limit of the result buffer for the duration of an outage of the link
+  # to the centre. Zero means "do not buffer": the results from the outage
+  # are then lost deliberately.
+  buffer_max_bytes: 268435456
+
+upstream:
+  enrollment_url: ""
+  # The centre gateways in priority order.
+  gateway_urls: []
+  # The fleet CA bundle for the first connection. After enrollment the relay
+  # uses the copy saved in the state directory.
+  bootstrap_ca_file: "/var/lib/flotestro-relay/ca.pem"
+
+# The durable spool: the messages of the agents the centre has not yet
+# confirmed it consumed. They survive a restart of the relay and of the
+# machine and leave the spool only on the panel's acknowledgement, so the
+# results of an outage reach the centre instead of being lost with the
+# process.
+#
+# The values below are the defaults and are shown to be changed, not to be
+# uncommented: a key that is absent takes exactly the value written here.
+# Sizes are in bytes.
+#
+# spool:
+#   # The directory of the segment files; without it the spool lives in
+#   # the "spool" directory under state_dir. It belongs to the relay's
+#   # account alone (mode 0700): the records hold the results and the
+#   # inventories of the whole site.
+#   path: "/var/lib/flotestro-relay/spool"
+#
+#   # The room the waiting records may take together. Without this key
+#   # the spool takes the limit of buffer_max_bytes above, so an upgrade
+#   # does not change the room the operator gave the site; a file that
+#   # names neither gets a gigabyte.
+#   max_bytes: 268435456
+#
+#   # The part of max_bytes only the control messages and the results of
+#   # the operations may enter. Inventories, metric samples and log lines
+#   # stop before it: a site under a long outage keeps what says what
+#   # happened to it and drops what only describes it.
+#   critical_reserve_bytes: 134217728
+#
+#   # The floor of free space on the filesystem of the spool. Nothing is
+#   # appended below it, whatever the class: a filesystem the relay filled
+#   # takes from the site what works locally.
+#   min_free_bytes: 268435456
+#
+#   # How long a record sent up waits for the panel's acknowledgement
+#   # before it is sent again. Between a second and an hour.
+#   ack_timeout: 30s
+#
+#   # The records of one host sent and not yet acknowledged at a time.
+#   max_inflight_per_host: 64
+</code></pre>
+    <ul class="linkrow">
+      <li><a href="installation.html">← 3. Instalacja</a></li>
+      <li><a href="operations.html">6. Operacje</a></li>
+      <li><a href="runbooks.html">10. Runbooki</a></li>
+      <li><a href="./">Spis treści</a></li>
+    </ul>
+  </main>
+
+</div>
+
+<footer class="site-footer">
+  <div class="site-footer__inner">
+    <p>Dokumentacja Flotestro, wydanie 0.62.0.</p>
+    <p><a href="https://github.com/ultherego/Flotestro">github.com/ultherego/Flotestro</a></p>
+  </div>
+</footer>
+
+</body>
+</html>

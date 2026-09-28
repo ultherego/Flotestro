@@ -1,0 +1,779 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API &middot; Dokumentacja Flotestro</title>
+<meta name="description" content="Wszystkie trasy control plane Flotestro, uprawnienia do nich i konwencje interfejsu: stronicowanie, rewizje, idempotency key i odmowy.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;600&display=swap">
+<link rel="stylesheet" href="../../style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header__inner">
+    <a class="brand" href="../"><img class="brand__mark" src="../../img/logo.webp" alt="">Flotestro</a>
+    <nav class="site-nav">
+      <a href="../">Przegląd</a>
+      <a href="./" aria-current="page">Dokumentacja</a>
+      <a href="https://ultherego.github.io/Flotestro/packages/">Pakiety</a>
+      <a href="https://github.com/ultherego/Flotestro">Kod</a>
+      <a href="../../docs/api.html" hreflang="en" lang="en">English</a>
+    </nav>
+  </div>
+</header>
+
+<div class="layout">
+
+  <aside class="sidebar">
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Podręcznik</h2>
+      <ul class="sidebar__list">
+        <li><a href="./">Spis treści</a></li>
+        <li><a href="introduction.html">1. Wprowadzenie</a></li>
+        <li><a href="architecture.html">2. Architektura</a></li>
+        <li><a href="installation.html">3. Instalacja</a></li>
+        <li><a href="concepts.html">4. Jak przebiega zmiana</a></li>
+      </ul>
+    </nav>
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Wykazy</h2>
+      <ul class="sidebar__list">
+        <li><a href="configuration.html">5. Konfiguracja</a></li>
+        <li><a href="operations.html">6. Operacje</a></li>
+        <li><a href="errors.html">7. Błędy i odmowy</a></li>
+        <li><a href="api.html" aria-current="page">8. API</a></li>
+        <li><a href="roles.html">9. Role i uprawnienia</a></li>
+      </ul>
+    </nav>
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Procedury</h2>
+      <ul class="sidebar__list">
+        <li><a href="runbooks.html">10. Runbooki</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main class="content">
+<h1>8. API</h1>
+<p class="lede">Wszystko, co robi panel, może zrobić program. API to ta sama powierzchnia, na której działa panel webowy: 230 tras pod <code>/api/v1</code>, odpowiedzi w JSON, autoryzacja tymi samymi uprawnieniami i zapis do tego samego śladu audytowego. Ta strona to tabela tras w postaci, w jakiej rejestruje je <code>internal/adminapi/adminapi.go</code>, oraz konwencje opisane w <code>internal/adminapi/openapi.go</code>; panel udostępnia własny dokument OpenAPI pod <code>GET /api/v1/openapi.json</code>.</p>
+    <ul class="linkrow">
+      <li><a href="#basics">Kształt interfejsu</a></li>
+      <li><a href="#authentication">Uwierzytelnianie</a></li>
+      <li><a href="#stepup">Step-up: operacje o największych skutkach</a></li>
+      <li><a href="#problem">Kształt odmowy</a></li>
+      <li><a href="#paging">Stronicowanie i kursory</a></li>
+      <li><a href="#sorting">Sortowanie</a></li>
+      <li><a href="#revisions">Rewizje, ETag i If-Match</a></li>
+      <li><a href="#idempotency">Idempotency key</a></li>
+      <li><a href="#exports">Eksporty i strumienie</a></li>
+      <li><a href="#request-id">Identyfikatory żądań</a></li>
+      <li><a href="#routes">Trasy</a></li>
+      <li><a href="#routes-service">Endpointy serwisowe</a></li>
+      <li><a href="#routes-caller">Logowanie i własne rekordy wywołującego</a></li>
+      <li><a href="#routes-fleet">Flota w skrócie</a></li>
+      <li><a href="#routes-hosts">Hosty</a></li>
+      <li><a href="#routes-enrollment">Enrollment, relaye i CA floty</a></li>
+      <li><a href="#routes-work">Operacje, odczyty i kampanie</a></li>
+      <li><a href="#routes-compliance">Polityki, zgodność, podatności, certyfikaty i kopie zapasowe</a></li>
+      <li><a href="#routes-monitoring">Monitoring i powiadomienia</a></li>
+      <li><a href="#routes-directory">Katalog</a></li>
+      <li><a href="#routes-access">Tożsamości, zespoły, role i sekrety</a></li>
+      <li><a href="#routes-audit">Ślad audytowy</a></li>
+      <li><a href="#routes-support">Pakiety diagnostyczne</a></li>
+      <li><a href="#filters">Filtry dużych list</a></li>
+    </ul>
+<h2 id="basics">Kształt interfejsu</h2>
+<ul><li>Odczyty idą przez <code>GET</code>. Plany, operacje i kampanie tworzy się przez <code>POST</code>; mają też własne jawne endpointy <code>approve</code>, <code>cancel</code>, <code>pause</code> i <code>resume</code>.</li><li>Każda lista jest stronicowana po stronie serwera.</li><li>Błędy to obiekty problem ze stabilnym kodem.</li><li>Dokument opisuje sam siebie: <code>GET /api/v1/openapi.json</code> powstaje z zarejestrowanych tras, więc nie może się od nich rozjechać.</li><li>Panel nasłuchuje na <code>FLOTESTRO_ADMIN_ADDR</code>, domyślnie <code>127.0.0.1:8080</code>, po zwykłym HTTP; ma stać za reverse proxy, które terminuje TLS.</li></ul>
+<h2 id="authentication">Uwierzytelnianie</h2>
+<p>Do tych samych uprawnień prowadzą dwa poświadczenia.</p>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Poświadczenie</th><th>Jak podróżuje</th><th>Kto go używa</th></tr></thead>
+<tbody>
+<tr><td>Token API</td><td><code>Authorization: Bearer &lt;token&gt;</code></td><td>Automatyzacja. Token należy do tożsamości i niesie jej uprawnienia.</td></tr>
+<tr><td>Sesja przeglądarki</td><td>ciasteczko <code>flotestro_session</code>, ustawiane po zalogowaniu przez OIDC</td><td>Człowiek pracujący w panelu.</td></tr>
+</tbody></table></div>
+<p>Sesja przeglądarki ma pierwszeństwo: jeśli żądanie niesie oba poświadczenia, decyduje ciasteczko. Ciasteczko sesji jest <code>HttpOnly</code>, więc skrypt w przeglądarce go nie odczyta, a żądanie zmieniające stan uwierzytelnione tą sesją musi potwierdzić intencję wywołującego: wartość czytelnego ciasteczka <code>flotestro_csrf</code> wraca w nagłówku <code>X-Flotestro-CSRF</code>. Samo ciasteczko nie autoryzuje niczego. Żądanie bez poświadczenia jest anonimowe, a endpoint, który poświadczenia wymaga, odpowiada <code>401</code> z <code>WWW-Authenticate: Bearer realm="flotestro"</code> i kodem <code>unauthenticated</code>.</p>
+<p>Logowanie w przeglądarce jest kwestią konfiguracji, nie czymś wbudowanym: bez <code>FLOTESTRO_OIDC_ISSUER</code> panel działa wyłącznie na tokenach API. Sesję ograniczają <code>FLOTESTRO_SESSION_IDLE</code> (domyślnie 8h) oraz sztywny limit 24 godzin, a jej grupy są potwierdzane u dostawcy tożsamości co <code>FLOTESTRO_SESSION_GROUP_REFRESH</code> (domyślnie 5m).</p>
+<h2 id="stepup">Step-up: operacje o największych skutkach</h2>
+<p>Nie każdą trasę niesie samo uprawnienie. Operacja <code>critical</code> lub <code>destructive</code>, zmiana reguł dostępu i zmiana w katalogu wymagają, obok uprawnienia:</p>
+<ul><li><strong>Powodu</strong>, co najmniej 8 znaków, w polu <code>reason</code> ciała żądania. Bez niego odpowiedzią jest <code>400</code> <code>reason_required</code> - odmowa, której ponowne zalogowanie nie naprawi.</li><li><strong>Świeżego uwierzytelnienia.</strong> Uwierzytelnienie sesji nie może być starsze niż <code>FLOTESTRO_STEPUP_MAX_AGE</code> (domyślnie 5m), a tam, gdzie ustawiono <code>FLOTESTRO_STEPUP_ACR</code>, musi być na tym poziomie. W przeciwnym razie odpowiedzią jest <code>401</code> <code>reauthentication_required</code>, a w obiekcie problem znajdą się <code>required_max_age_seconds</code> i <code>authentication_age_seconds</code> albo <code>required_acr</code> i <code>session_acr</code>. Dostawca tożsamości, który nie podaje czasu uwierzytelnienia, dostaje taką samą odmowę: stanu nieustalonego nie wolno czytać jako &bdquo;przed chwilą&rdquo;.</li><li><strong>Zgody na to, by w ogóle zrobił to token API.</strong> <code>FLOTESTRO_STEPUP_TOKENS</code> ma domyślnie wartość <code>allow</code>, a polecenie wydane tokenem zapisuje się jako <code>authentication: api_token, reauthenticated: false</code>. Przy wartości <code>refuse</code> token dostaje <code>401</code> <code>reauthentication_required</code>: automat nie może się uwierzytelnić ponownie, bo nie stoi za nim człowiek.</li></ul>
+<p>To, co panel przyjął, zapisuje się razem ze zmianą, w postaci zgłoszonej przez dostawcę tożsamości: cel wpisany przez operatora, metoda uwierzytelnienia (<code>acr</code>, <code>amr</code>) i moment uwierzytelnienia. Panel nie przekłada tego na własne &bdquo;mfa: yes&rdquo;.</p>
+<p>W środowisku produkcyjnym - czyli takim, które wymienia <code>FLOTESTRO_PRODUCTION_ENVIRONMENTS</code>, domyślnie <code>prod,production</code> - zatwierdzenia nie może wystawić osoba, która zleciła zmianę.</p>
+<h2 id="problem">Kształt odmowy</h2>
+<p>Każda odmowa to ten sam obiekt, podawany jako <code>application/problem+json</code>:</p>
+<pre><code>{
+  "type":   "about:blank",
+  "title":  "Unprocessable Entity",
+  "status": 422,
+  "code":   "metrics_retention_too_short",
+  "detail": "the raw retention 1h is shorter than the raw query window 24h plus the maximum lateness 24h; raise the retention or lower the window or the lateness"
+}</code></pre>
+<p><code>code</code> jest stabilny i przeznaczony dla programów; <code>detail</code> jest dla ludzi. Każdy kod, jaki mechanizm może nałożyć na zadanie albo żądanie, znajduje się w <a href="errors.html">przewodniku po błędach</a>, a panel udostępnia ten sam przewodnik pod <code>GET /api/v1/errors</code>.</p>
+<h2 id="paging">Stronicowanie i kursory</h2>
+<p>Każda lista jest stronicowana po stronie serwera, po kluczu, a nie po offsecie: stronę pobiera się przez <code>limit</code> i <code>cursor</code>, a odpowiedź niesie <code>next_cursor</code>, puste na ostatniej stronie. Domyślna strona to 100 pozycji, sufit to 500; kilka list podaje inne wartości we własnych tabelach poniżej. Kursor jest tokenem nieprzezroczystym - to klucz sortowania ostatniego wiersza, base64url bez dopełnienia - więc wraca dokładnie w takiej postaci, w jakiej przyszedł. Kursor, którego ten panel nie wydał, albo wydany przy innym porządku sortowania, zostanie odrzucony, a nie po cichu potraktowany jako pierwsza strona.</p>
+<p>Lista, którą da się policzyć, odpowiada polami <code>items</code>, <code>count</code>, <code>next_cursor</code> i <code>total</code> (ile pozycji pasuje do filtra na wszystkich stronach razem). Lista zadań i ślad audytowy nie niosą <code>total</code>: te się przegląda, a nie zlicza.</p>
+<h2 id="sorting">Sortowanie</h2>
+<p>Lista, którą da się uporządkować, przyjmuje <code>sort</code> w postaci <code>column</code> albo <code>column:desc</code>. Nieznana kolumna kończy się odmową <code>invalid_sort</code>, a kursor wydany przy jednym porządku zostanie odrzucony przy innym.</p>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Lista</th><th>Kolumny</th><th>Domyślnie</th></tr></thead>
+<tbody>
+<tr><td><code>GET /api/v1/hosts</code></td><td><code>agent_version</code>, <code>connection_state</code>, <code>environment</code>, <code>failed_units</code>, <code>hostname</code>, <code>last_seen_at</code>, <code>lifecycle_state</code>, <code>owner</code>, <code>pending_security_updates</code>, <code>pending_updates</code>, <code>site</code></td><td>hostname rosnąco</td></tr>
+<tr><td><code>GET /api/v1/jobs</code></td><td><code>action_type</code>, <code>created_at</code>, <code>finished_at</code>, <code>hostname</code>, <code>state</code></td><td>najnowsze pierwsze</td></tr>
+</tbody></table></div>
+<p>Wartość, której host nie zgłosił, nie udaje zera: licznik o nieznanej wartości sortuje się poniżej zera, a host, którego nigdy nie widziano, trafia przed każdego hosta, który się kiedyś odezwał.</p>
+<h2 id="revisions">Rewizje, ETag i If-Match</h2>
+<p>Dwóch operatorów edytujących ten sam rekord to zwykła sytuacja, więc współdzielone rekordy noszą wersję. Odczyt takiego rekordu zwraca słaby entity tag w <code>ETag</code>; zapis może go odesłać w <code>If-Match</code>. Bez tego nagłówka zapis po prostu się wykonuje; z nim rekord zmieniony w międzyczasie kończy się odmową <code>412</code> <code>precondition_failed</code> i bieżącym tagiem w odpowiedzi: <em>the record changed since it was read; read it again and repeat the write with its current ETag</em>. <code>If-Match: *</code> pasuje do dowolnej wersji.</p>
+<p>Kampania ma własną rewizję, w samym rekordzie, a nie w nagłówku: rośnie przy każdej zmianie stanu, a klient, który odczytał kampanię w jednej rewizji, a zleca przejście przy innej, dostaje <code>409</code> <code>concurrent_transition</code>.</p>
+<p>Część zapisów wiąże się z tym, co operator zobaczył, jeszcze inaczej: zatwierdzenie może nieść <code>payload_hash</code> i zostaje odrzucone, jeśli plan zmienił się między obejrzeniem a zatwierdzeniem.</p>
+<h2 id="idempotency">Idempotency key</h2>
+<p>Polecenie, które tworzy pracę - kampania albo operacja na hoście - może nieść <code>Idempotency-Key</code>. Powtórzenie z tym samym kluczem zwraca już utworzony zasób zamiast tworzyć drugi. Wywołujący, który woli umieścić klucz w ciele żądania, może to zrobić: nagłówek ma pierwszeństwo, a pole w ciele jest czytane wtedy, gdy nagłówka nie ma.</p>
+<h2 id="exports">Eksporty i strumienie</h2>
+<p>Dwanaście list oprócz JSON-a zwraca też plik: <code>format=csv</code> daje jeden wiersz na pozycję, z tymi samymi filtrami i zakresem wywołującego, bez stronicowania. Plik jest strumieniowany w trakcie zapisu - opróżniany co 500 wierszy - więc eksport wielkości całej floty trafia do przeglądarki, zamiast być najpierw budowany w pamięci, i nosi nazwę utworzoną z listy i daty (<code>flotestro-hosts-2026-09-15.csv</code>). Plik kończy się na 50000 wierszy, a jego ostatni wiersz jest oznaczony jako <code>truncated</code>; plik przerwany z powodu, który podała sama lista, dostaje oznaczenie <code>error</code>, a odpowiedź opisująca tylko część floty mówi o tym w nagłówku <code>X-Flotestro-Partial</code>, jeszcze przed pierwszym wierszem. <code>format</code> inny niż <code>json</code> i <code>csv</code> kończy się odmową <code>invalid_format</code>, a nie odpowiedzią w JSON-ie tak, jakby o nic nie pytano.</p>
+<p>Listy, które zwracają plik: <code>/api/v1/hosts</code>, <code>/api/v1/jobs</code>, <code>/api/v1/security</code>, <code>/api/v1/vulnerabilities</code>, <code>/api/v1/certificates</code>, <code>/api/v1/backups</code>, <code>/api/v1/policies/{id}/results</code>, <code>/api/v1/monitoring/alerts</code>, <code>/api/v1/campaigns/{id}/report</code>, <code>/api/v1/access/review</code>, <code>/api/v1/reports/{name}</code>, <code>/api/v1/notifications/deliveries</code>.</p>
+<p>Ślad audytowy eksportuje się inaczej, bo jest materiałem dowodowym: <code>GET /api/v1/audit/export</code> strumieniuje zdarzenia z przedziału między dwoma momentami jako <code>application/x-ndjson</code>, od najstarszych, powiązane łańcuchem skrótów, z linią zamykającą, która niesie liczbę zdarzeń i digest ostatniego z nich. Awaria w połowie nie zmieni już kodu statusu, więc wywołujący dostaje plik bez linii zamykającej - i dokładnie to weryfikator zgłasza jako urwanie.</p>
+<p>Trasa zakończona na <code>/events</code> odpowiada typem <code>text/event-stream</code>: strumieniem server-sent events, w którym zdarzenie ze śladu niesie <code>id</code>, dzięki czemu czytelnik po zerwaniu połączenia wznawia odczyt przez <code>Last-Event-ID</code>.</p>
+<h2 id="request-id">Identyfikatory żądań</h2>
+<p>Wywołujący może ustawić <code>X-Request-Id</code>. Panel zapisuje go przy każdym wpisie audytowym, który powstaje z tego żądania, więc jeden identyfikator wiąże zmianę w systemie zewnętrznym z wpisem w śladzie.</p>
+<h2 id="routes">Trasy</h2>
+<p>Wszystkie zarejestrowane trasy wraz z uprawnieniem, które sprawdza ich handler. Wiersz z więcej niż jednym uprawnieniem wymienia wszystkie, do których handler się odwołuje: część z nich to alternatywy - drugie prawo kogoś, kto czyta całą flotę - a część jest wymagana dodatkowo, obok pierwszego. Samo polecenie jest autoryzowane ponownie na serwerze, niezależnie od tego, co usłyszał klient.</p>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Sekcja</th><th>Trasy</th></tr></thead>
+<tbody>
+<tr><td><a href="#routes-service">Endpointy serwisowe</a></td><td>13</td></tr>
+<tr><td><a href="#routes-caller">Logowanie i własne rekordy wywołującego</a></td><td>8</td></tr>
+<tr><td><a href="#routes-fleet">Flota w skrócie</a></td><td>7</td></tr>
+<tr><td><a href="#routes-hosts">Hosty</a></td><td>59</td></tr>
+<tr><td><a href="#routes-enrollment">Enrollment, relaye i CA floty</a></td><td>14</td></tr>
+<tr><td><a href="#routes-work">Operacje, odczyty i kampanie</a></td><td>37</td></tr>
+<tr><td><a href="#routes-compliance">Polityki, zgodność, podatności, certyfikaty i kopie zapasowe</a></td><td>20</td></tr>
+<tr><td><a href="#routes-monitoring">Monitoring i powiadomienia</a></td><td>20</td></tr>
+<tr><td><a href="#routes-directory">Katalog</a></td><td>18</td></tr>
+<tr><td><a href="#routes-access">Tożsamości, zespoły, role i sekrety</a></td><td>27</td></tr>
+<tr><td><a href="#routes-audit">Ślad audytowy</a></td><td>2</td></tr>
+<tr><td><a href="#routes-support">Pakiety diagnostyczne</a></td><td>5</td></tr>
+</tbody></table></div>
+<h3 id="routes-service">Endpointy serwisowe</h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Metoda</th><th>Ścieżka</th><th>Uprawnienie</th></tr></thead>
+<tbody>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/actions</code><br><span class="caption">Operacje typowane: plan, zatwierdzenie, wykonanie, wynik.</span></td><td><span class="caption">dowolna uwierzytelniona tożsamość</span></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/capabilities</code></td><td><span class="caption">brak &mdash; endpoint odpowiada bez tożsamości</span></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/errors</code></td><td><span class="caption">dowolna uwierzytelniona tożsamość</span></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/openapi.json</code></td><td><span class="caption">brak &mdash; endpoint odpowiada bez tożsamości</span></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/settings</code><br><span class="caption">Konfiguracja efektywna, z zamaskowanymi sekretami: z czym ten panel został uruchomiony, dla tego, kto nim administruje.</span></td><td><code>settings.read</code>, <code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/settings/monitoring</code><br><span class="caption">Retencje monitoringu są ustawieniem instalacji, a nie procesu: czyta się je tutaj i zapisuje bez restartu.</span></td><td><code>settings.read</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/settings/monitoring</code></td><td><code>monitoring.rules.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/setup</code><br><span class="caption">Pierwsze uruchomienie: czego instalacji jeszcze brakuje oraz dwa testy połączenia, które lista kontrolna udostępnia na miejscu.</span></td><td><span class="caption">dowolna uwierzytelniona tożsamość</span></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/setup/test-directory</code></td><td><code>identity.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/setup/test-oidc</code></td><td><code>settings.read</code>, <code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/status</code></td><td><code>settings.read</code>, <code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/healthz</code></td><td><span class="caption">brak &mdash; endpoint odpowiada bez tożsamości</span></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/metrics</code></td><td><code>metrics.read</code></td></tr>
+</tbody></table></div>
+<h3 id="routes-caller">Logowanie i własne rekordy wywołującego</h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Metoda</th><th>Ścieżka</th><th>Uprawnienie</th></tr></thead>
+<tbody>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/me/preferences</code><br><span class="caption">Co zalogowana tożsamość trzyma dla siebie.</span></td><td><span class="caption">dowolna uwierzytelniona tożsamość</span></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/me/preferences</code></td><td><span class="caption">dowolna uwierzytelniona tożsamość</span></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/me/sessions</code></td><td><span class="caption">dowolna uwierzytelniona tożsamość</span></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/me/tokens</code></td><td><span class="caption">dowolna uwierzytelniona tożsamość</span></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/whoami</code></td><td><span class="caption">dowolna uwierzytelniona tożsamość</span></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/auth/callback</code></td><td><span class="caption">brak &mdash; endpoint odpowiada bez tożsamości</span></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/auth/login</code><br><span class="caption">Logowanie operatora przez dostawcę tożsamości.</span></td><td><span class="caption">brak &mdash; endpoint odpowiada bez tożsamości</span></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/auth/logout</code></td><td><span class="caption">brak &mdash; endpoint odpowiada bez tożsamości</span></td></tr>
+</tbody></table></div>
+<h3 id="routes-fleet">Flota w skrócie</h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Metoda</th><th>Ścieżka</th><th>Uprawnienie</th></tr></thead>
+<tbody>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/access/review</code><br><span class="caption">Przegląd dostępów: każda tożsamość wraz z tym, co może zrobić, kiedy była ostatnio użyta i na co powinien spojrzeć przeglądający.</span></td><td><code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/events</code><br><span class="caption">Strumień zdarzeń całej widocznej floty. Jedno połączenie na kartę wystarcza dla wszystkich trwających operacji.</span></td><td><code>job.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/fleet/activity</code></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/fleet/summary</code></td><td><code>host.read</code>, <code>audit.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/maintenance/calendar</code></td><td><code>campaign.read</code>, <code>host.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/reports/{name}</code></td><td><code>host.read</code>, <code>campaign.read</code>, <code>policy.read</code>, <code>security.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/search</code><br><span class="caption">Jedno zapytanie po wszystkich rodzajach obiektów, które wywołujący może czytać.</span></td><td><span class="caption">dowolna uwierzytelniona tożsamość</span></td></tr>
+</tbody></table></div>
+<h3 id="routes-hosts">Hosty</h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Metoda</th><th>Ścieżka</th><th>Uprawnienie</th></tr></thead>
+<tbody>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/files/versions/{sha256}</code></td><td><code>file.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/host-groups</code><br><span class="caption">Grupy hostów: zapisana odpowiedź na pytanie &bdquo;które hosty&rdquo;, albo stała lista członków, albo selektor rozwiązywany przy odczycie.</span></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/host-groups</code></td><td><code>host.group.write</code>, <code>host.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/host-groups/preview</code><br><span class="caption">Podgląd selektora: do czego rozwiązuje się w tej chwili budowany selektor, na potrzeby formularza grupy; ta sama ewaluacja co na stronie grupy.</span></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/host-groups/{id}</code></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/host-groups/{id}</code></td><td><code>host.group.write</code>, <code>host.read</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/host-groups/{id}</code></td><td><code>host.group.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/host-groups/{id}/hosts</code></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/host-groups/{id}/members</code></td><td><code>host.group.write</code>, <code>host.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts</code></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/hosts/bulk-metadata</code><br><span class="caption">Jedno polecenie dotyczące danych wielu hostów, z odpowiedzią host po hoście.</span></td><td><code>host.tag.write</code>, <code>host.maintenance.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}</code></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/access</code></td><td><code>identity.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/actions</code></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/audit</code></td><td><code>audit.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/backups</code></td><td><code>backup.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/backups</code></td><td><code>backup.run</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/hosts/{id}/backups</code></td><td><code>backup.run</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/backups/runs</code></td><td><code>backup.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/certificates</code></td><td><code>certificate.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/certificates/deployments</code></td><td><code>certificate.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/certificates/targets</code></td><td><code>certificate.watch</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/hosts/{id}/certificates/targets</code></td><td><code>certificate.watch</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/hosts/{id}/channel</code><br><span class="caption">Kanał wydań to polityka podobna do tagu: które wydania agenta host widzi jako pierwszy.</span></td><td><code>host.tag.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/compose/{project}/versions</code><br><span class="caption">Historia manifestów projektu. Cofnięcie zmiany to wdrożenie wcześniejszej wersji, więc nie ma na to osobnej operacji.</span></td><td><code>job.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/decommission</code></td><td><code>host.decommission</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/hosts/{id}/failure-domain</code></td><td><code>host.tag.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/files</code></td><td><code>file.plan</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/files/history</code></td><td><code>file.plan</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/identity-recovery</code></td><td><code>host.identity.replace</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/inventory</code></td><td><code>inventory.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/inventory/{module}</code></td><td><code>inventory.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/local-accounts</code></td><td><code>localuser.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/maintenance</code><br><span class="caption">Okno serwisowe zmienia to, co panel sądzi o hoście, a nie stan samego hosta, więc ma własne wejście zamiast miejsca w kolejce zadań.</span></td><td><code>host.maintenance.write</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/hosts/{id}/management-address</code></td><td><code>host.tag.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/metrics</code><br><span class="caption">Widok hosta: jego wykresy, jego alerty i jego wyciszenia.</span></td><td><code>monitoring.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/monitoring</code></td><td><code>monitoring.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/monitoring/silences</code></td><td><code>monitoring.silence.write</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/hosts/{id}/monitoring/silences/{silence}</code></td><td><code>monitoring.silence.write</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/hosts/{id}/notes</code></td><td><code>host.tag.write</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/operations</code></td><td><code>job.create</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/hosts/{id}/owner</code><br><span class="caption">Właściciel i adres do zarządzania ręcznego to dane, które operator zapisuje o hoście, podobnie jak tag; dzielą z tagiem uprawnienie i niosą entity tag, bo ten sam host poprawiają dwie osoby.</span></td><td><code>host.tag.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/packages</code><br><span class="caption">Zainstalowane pakiety hosta w postaci, w jakiej trzyma je baza, wraz z blokadami.</span></td><td><code>packages.read</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/hosts/{id}/placement</code></td><td><code>host.tag.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/policies</code></td><td><code>policy.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/quarantine</code><br><span class="caption">Cykl życia hosta: odcięcie, zwolnienie i wycofanie z floty.</span></td><td><code>host.quarantine</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/quarantine/release</code></td><td><code>host.quarantine.release</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/security</code><br><span class="caption">Zgodność z profilem hardeningu panel wylicza z danych, które host i tak zgłasza; naprawa to plan i osobne zadania modułów.</span></td><td><code>security.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/security/remediation</code></td><td><code>security.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/security/remediation</code></td><td><code>security.remediate</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/security/remediation/{plan}/stop</code></td><td><code>security.remediate</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/system/history</code><br><span class="caption">Jądra i wydania, na których panel widział tego hosta; bieżącą platformę podaje moduł systemowy inventory.</span></td><td><code>inventory.read</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/hosts/{id}/tags</code><br><span class="caption">Tagi opisują hosta w panelu; samego hosta nikt o nie nie pyta. Lista jest podmieniana w całości, więc ślad pokazuje każdą zmianę jako jeden zapis.</span></td><td><code>host.tag.write</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/hosts/{id}/team</code><br><span class="caption">Przypisanie hosta do zespołu zmienia to, kto może na nim działać, więc jest osobną decyzją, a nie polem metadanych.</span></td><td><code>host.scope.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/timeline</code><br><span class="caption">Historia jednego hosta ze wszystkich rekordów, jakie panel prowadzi: zadania, ślad audytowy, sesje, kampanie i alerty, ułożone w czasie.</span></td><td><code>host.read</code>, <code>audit.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/vulnerabilities</code></td><td><code>vulnerability.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/installation-profiles</code><br><span class="caption">Wszystko, czego host potrzebuje, zanim dostanie token: adresy, zaufanie, repozytorium i polecenia właściwe dla jego rodziny systemów.</span></td><td><code>host.enroll.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/tags</code><br><span class="caption">Katalog tagów widocznej floty i zmiana nazwy tagu w całej flocie.</span></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/tags/rename</code></td><td><code>host.tag.write</code></td></tr>
+</tbody></table></div>
+<h3 id="routes-enrollment">Enrollment, relaye i CA floty</h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Metoda</th><th>Ścieżka</th><th>Uprawnienie</th></tr></thead>
+<tbody>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/enrollment-requests</code><br><span class="caption">Zgłoszenie enrollmentu to trwały rekord oczekującej instalacji; token jest tylko sekretem, który autoryzuje jedną próbę.</span></td><td><code>host.enroll.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/enrollment-requests</code></td><td><code>host.enroll.create</code>, <code>relay.enroll.create</code>, <code>host.enroll.batch</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/enrollment-requests/{id}</code></td><td><code>host.enroll.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/enrollment-requests/{id}/config</code><br><span class="caption">Gotowa konfiguracja zlecenia: ten sam plik, który składa profil instalacyjny, bez tokenu, do pobrania tyle razy, ile trzeba.</span></td><td><code>host.enroll.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/enrollment-requests/{id}/replace</code></td><td><code>host.enroll.revoke</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/enrollment-requests/{id}/revoke</code></td><td><code>host.enroll.revoke</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/pki</code></td><td><code>pki.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/pki/activate</code></td><td><code>pki.rotate</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/pki/prepare</code></td><td><code>pki.rotate</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/pki/{fingerprint}</code></td><td><code>pki.rotate</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/relays</code><br><span class="caption">Relaye lokalizacji: trasa instalacji dla kreatora, stan lokalizacji dla strony relayów.</span></td><td><code>host.enroll.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/relays/{id}</code></td><td><code>host.enroll.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/relays/{id}/buffer-history</code></td><td><code>host.enroll.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/relays/{id}/revoke</code></td><td><code>relay.manage</code></td></tr>
+</tbody></table></div>
+<h3 id="routes-work">Operacje, odczyty i kampanie</h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Metoda</th><th>Ścieżka</th><th>Uprawnienie</th></tr></thead>
+<tbody>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/budgets</code></td><td><code>budget.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/budgets/{key...}</code></td><td><code>budget.read</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/budgets/{key...}</code></td><td><code>budget.write</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/budgets/{key...}</code></td><td><code>budget.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/campaign-schedules</code><br><span class="caption">Kampanie zaplanowane: zlecenie odłożone na konkretny moment albo na regułę momentów, składane tym samym wejściem co wyżej i na prawach swojego autora; każda kampania, którą zlecenie utworzy, czeka na zatwierdzenie.</span></td><td><code>campaign.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/campaign-schedules</code></td><td><code>campaign.create</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/campaign-schedules/{id}</code></td><td><code>campaign.read</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/campaign-schedules/{id}</code></td><td><code>campaign.create</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/campaign-schedules/{id}</code></td><td><code>campaign.create</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/campaign-schedules/{id}/run-now</code></td><td><code>campaign.create</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/campaigns</code><br><span class="caption">Kampanie: plan, zatwierdzenie, przebieg i raport.</span></td><td><code>campaign.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/campaigns</code></td><td><code>campaign.create</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/campaigns/preview</code><br><span class="caption">Podgląd selektora: liczba celów pochodzi z bazy, a nie z długości pierwszej strony listy hostów.</span></td><td><code>campaign.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/campaigns/{id}</code></td><td><code>campaign.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/campaigns/{id}/advance</code></td><td><code>campaign.control</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/campaigns/{id}/approvals</code></td><td><code>campaign.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/campaigns/{id}/approve</code></td><td><code>campaign.approve</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/campaigns/{id}/cancel</code></td><td><code>campaign.control</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/campaigns/{id}/events</code></td><td><code>campaign.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/campaigns/{id}/pause</code></td><td><code>campaign.control</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/campaigns/{id}/plans</code></td><td><code>campaign.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/campaigns/{id}/report</code></td><td><code>campaign.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/campaigns/{id}/resume</code></td><td><code>campaign.control</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/campaigns/{id}/retry</code><br><span class="caption">Ponowienie to nowe zlecenie dla hostów, które kampania straciła, wymagające nowego zatwierdzenia; sama zamknięta kampania nigdy się nie zmienia.</span></td><td><code>campaign.create</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/campaigns/{id}/steps</code><br><span class="caption">Kroki celów: które zadanie wykonało który krok na którym hoście, przy której próbie, i dlaczego dany krok się nie wykonał.</span></td><td><code>campaign.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/campaigns/{id}/targets</code></td><td><code>campaign.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/campaigns/{id}/targets/{host}/skip</code></td><td><code>campaign.approve</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/campaigns/{id}/timeline</code></td><td><code>campaign.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/jobs</code></td><td><code>job.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/jobs/{id}</code></td><td><code>job.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/jobs/{id}/approve</code></td><td><code>job.approve</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/jobs/{id}/attempts</code></td><td><code>job.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/jobs/{id}/cancel</code></td><td><code>job.cancel</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/jobs/{id}/events</code><br><span class="caption">Strumień postępu jednej operacji. Wynik pozostaje trwale w bazie; strumień mówi tylko, kiedy warto odczytać go ponownie.</span></td><td><code>job.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/reads</code><br><span class="caption">Zbiorcze odczyty diagnostyczne: ten sam odczyt na kilku hostach naraz, po jednym zwykłym zadaniu na host, scalone w jedną odpowiedź.</span></td><td><code>job.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/reads</code></td><td><code>job.create</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/reads/{id}</code></td><td><code>job.read</code></td></tr>
+</tbody></table></div>
+<h3 id="routes-compliance">Polityki, zgodność, podatności, certyfikaty i kopie zapasowe</h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Metoda</th><th>Ścieżka</th><th>Uprawnienie</th></tr></thead>
+<tbody>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/backups</code></td><td><code>backup.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/certificates</code></td><td><code>certificate.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/certificates/trust</code></td><td><code>certificate.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/policies</code></td><td><code>policy.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/policies</code></td><td><code>policy.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/policies/{id}</code></td><td><code>policy.read</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/policies/{id}</code></td><td><code>policy.write</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/policies/{id}</code></td><td><code>policy.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/policies/{id}/campaigns</code></td><td><code>policy.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/policies/{id}/evaluate</code></td><td><code>policy.write</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/policies/{id}/publish</code></td><td><code>policy.publish</code>, <code>policy.remediate.auto</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/policies/{id}/results</code></td><td><code>policy.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/policies/{id}/versions</code></td><td><code>policy.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/security</code><br><span class="caption">Widok floty: jedno złe ustawienie na stu hostach to jeden problem, a nie sto - i widać to dopiero wtedy, gdy ustawić znaleziska obok siebie.</span></td><td><code>security.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/security/remediation</code></td><td><code>security.remediate</code>, <code>campaign.create</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/security/remediation/preview</code><br><span class="caption">Naprawa w skali floty: wybrane kontrole na wybranych hostach, każdy host z własnym planem kroków, jedno zatwierdzenie na całość, wykonywane jako kampania.</span></td><td><code>security.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/vulnerabilities</code></td><td><code>vulnerability.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/vulnerabilities/cves</code></td><td><code>vulnerability.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/vulnerabilities/cves/{cve}</code></td><td><code>vulnerability.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/vulnerabilities/snapshots/{id}/accept</code></td><td><code>monitoring.rules.write</code></td></tr>
+</tbody></table></div>
+<h3 id="routes-monitoring">Monitoring i powiadomienia</h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Metoda</th><th>Ścieżka</th><th>Uprawnienie</th></tr></thead>
+<tbody>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/monitoring</code><br><span class="caption">Widok floty: co się w tej chwili zapala, kto raportuje i kto zamilkł.</span></td><td><code>monitoring.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/monitoring/alerts</code></td><td><code>monitoring.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/monitoring/alerts/{id}/acknowledge</code><br><span class="caption">Przejęcie alertu i dopisanie do niego notatki: czujnik dalej działa, ale alert znika z liczników tego, co czeka na człowieka.</span></td><td><code>monitoring.silence.write</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/monitoring/alerts/{id}/annotate</code></td><td><code>monitoring.silence.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/monitoring/rules</code><br><span class="caption">Reguły to polityka obowiązująca w całej flocie: ich odczyt idzie razem z odczytem alertów, a zapis ma własne uprawnienie.</span></td><td><code>monitoring.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/monitoring/rules</code></td><td><code>monitoring.rules.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/monitoring/rules/{id}</code></td><td><code>monitoring.read</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/monitoring/rules/{id}</code></td><td><code>monitoring.rules.write</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/monitoring/rules/{id}</code></td><td><code>monitoring.rules.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/monitoring/silences</code></td><td><code>monitoring.read</code>, <code>monitoring.silence.write</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/monitoring/silences</code><br><span class="caption">Wyciszenie, które nie wskazuje żadnego hosta, obejmuje wszystkie, więc zakłada się je i kończy uprawnieniem nad całą instalacją.</span></td><td><code>monitoring.silence.write</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/monitoring/silences/{silence}</code></td><td><code>monitoring.silence.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/notifications/channels</code></td><td><code>notification.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/notifications/channels</code></td><td><code>notification.manage</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/notifications/channels/{id}</code></td><td><code>notification.read</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/notifications/channels/{id}</code></td><td><code>notification.manage</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/notifications/channels/{id}</code></td><td><code>notification.manage</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/notifications/channels/{id}/test</code></td><td><code>notification.manage</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/notifications/deliveries</code></td><td><code>notification.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/notifications/deliveries/{id}/retry</code></td><td><code>notification.manage</code></td></tr>
+</tbody></table></div>
+<h3 id="routes-directory">Katalog</h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Metoda</th><th>Ścieżka</th><th>Uprawnienie</th></tr></thead>
+<tbody>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/identity/access/simulate</code><br><span class="caption">Dostęp efektywny: symulacja katalogu dla pary użytkownik-host oraz rzut reguł na jednego hosta.</span></td><td><code>identity.policy.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/changes</code><br><span class="caption">Zmiany w katalogu: plan, zatwierdzenie i wykonanie faza po fazie.</span></td><td><code>identity.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/identity/changes</code></td><td>uprawnienie właściwe dla typu zmiany: <code>identity.user.write</code>, <code>identity.group.write</code>, <code>identity.policy.write</code>, <code>dns.directory.write</code>, <code>identity.keytab.rotate</code> albo, dla symulacji, <code>identity.policy.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/changes/{id}</code></td><td><code>identity.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/identity/changes/{id}/approve</code></td><td><code>identity.policy.write</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/identity/changes/{id}/cancel</code></td><td><code>identity.user.write</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/identity/changes/{id}/reveal</code><br><span class="caption">Jednorazowa wartość zmiany - hasło z resetu - odczytywana raz przez zlecającego i przez nikogo innego.</span></td><td><code>identity.user.write</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/identity/directory/provision-preserve</code></td><td><code>identity.policy.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/dns/records</code></td><td><code>identity.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/dns/zones</code><br><span class="caption">DNS katalogu: strefy i rekordy.</span></td><td><code>identity.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/groups</code></td><td><code>identity.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/hbac-rules</code><br><span class="caption">Reguły dostępu i sudo wymagają osobnego uprawnienia: opisują, kto może wejść na hosta i podnieść uprawnienia.</span></td><td><code>identity.policy.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/host-groups</code></td><td><code>identity.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/hosts</code></td><td><code>identity.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/services</code></td><td><code>identity.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/status</code><br><span class="caption">Katalog tożsamości w trybie tylko do odczytu.</span></td><td><code>identity.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/sudo-rules</code></td><td><code>identity.policy.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/users</code></td><td><code>identity.read</code></td></tr>
+</tbody></table></div>
+<h3 id="routes-access">Tożsamości, zespoły, role i sekrety</h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Metoda</th><th>Ścieżka</th><th>Uprawnienie</th></tr></thead>
+<tbody>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/group-mappings</code></td><td><code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/group-mappings</code></td><td><code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/group-mappings/{id}</code></td><td><code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/principals</code><br><span class="caption">Tożsamości i tokeny API.</span></td><td><code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/principals</code></td><td><code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/principals/{id}</code><br><span class="caption">Tożsamość się wyłącza, a nie usuwa: ślad audytowy nadal ją wymienia. Tokenami i powiązaniami ról zarządza się pojedynczo.</span></td><td><code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/principals/{id}/enable</code><br><span class="caption">Włączenie przywraca wyłączonej tożsamości jej role; sesje i tokeny, które zakończyły się przy wyłączeniu, pozostają zakończone.</span></td><td><code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/principals/{id}/roles</code><br><span class="caption">Powiązanie roli nadaje się z terminem ważności albo bez niego; ponowne nadanie zmienia wyłącznie termin.</span></td><td><code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/principals/{id}/roles/{role}</code></td><td><code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/principals/{id}/sessions</code><br><span class="caption">Aktywne sesje przeglądarkowe tożsamości, kończone pojedynczo.</span></td><td><code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/principals/{id}/sessions/{sid}</code></td><td><code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/principals/{id}/team-roles</code><br><span class="caption">Rola nad zespołem, obok powiązań o zakresie site.</span></td><td><code>principal.manage</code>, <code>team.binding.write</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/principals/{id}/team-roles/{role}</code></td><td><code>principal.manage</code>, <code>team.binding.write</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/principals/{id}/tokens</code></td><td><code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/principals/{id}/tokens/{token}</code></td><td><code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/roles</code></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/secrets</code></td><td><code>secret.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/secrets</code></td><td><code>secret.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/secrets/{name}</code></td><td><code>secret.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/secrets/{name}/retire</code></td><td><code>secret.destroy</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/secrets/{name}/rotate</code></td><td><code>secret.write</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/secrets/{name}/versions/{version}</code></td><td><code>secret.destroy</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/teams</code></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/teams</code></td><td><code>team.binding.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/teams/{id}</code></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/teams/{id}</code></td><td><code>team.binding.write</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/teams/{id}</code></td><td><code>team.binding.write</code></td></tr>
+</tbody></table></div>
+<h3 id="routes-audit">Ślad audytowy</h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Metoda</th><th>Ścieżka</th><th>Uprawnienie</th></tr></thead>
+<tbody>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/audit</code></td><td><code>audit.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/audit/export</code><br><span class="caption">Eksport to ślad audytowy w postaci pliku z łańcuchem skrótów, na kopię trzymaną poza panelem; cmd/auditverify sprawdza taki plik offline.</span></td><td><code>audit.read</code></td></tr>
+</tbody></table></div>
+<h3 id="routes-support">Pakiety diagnostyczne</h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Metoda</th><th>Ścieżka</th><th>Uprawnienie</th></tr></thead>
+<tbody>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/support/bundles</code><br><span class="caption">Pakiet diagnostyczny panelu: zamawiany ze step-up, pobierany przez link, który wygasa (naprawa bezpieczeństwa, rozdział 14.6).</span></td><td><code>support.bundle.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/support/bundles</code></td><td><code>support.bundle.create</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/support/bundles/{id}</code></td><td><code>support.bundle.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/support/bundles/{id}/archive</code></td><td><code>support.bundle.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/support/bundles/{id}/download</code></td><td><code>support.bundle.read</code></td></tr>
+</tbody></table></div>
+<h2 id="filters">Filtry dużych list</h2>
+<p>Wszystkie filtry przyjmowane przez listy, w postaci opisanej we własnym kontrakcie panelu. Pominięty filtr niczego nie zawęża.</p>
+<h3 id="filters-get-api-v1-audit"><code>GET /api/v1/audit</code></h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
+<tbody>
+<tr><td><code>target_id</code></td><td><code>string</code></td><td></td></tr>
+<tr><td><code>target_type</code></td><td><code>string</code></td><td></td></tr>
+<tr><td><code>actor</code></td><td><code>string</code></td><td>Tożsamość, która wykonała działanie.</td></tr>
+<tr><td><code>actor_kind</code></td><td><code>string</code></td><td>user, service, anonymous, agent, relay, machine albo system.</td></tr>
+<tr><td><code>actor_principal_id</code></td><td><code>string</code></td><td>Niezmienny identyfikator tożsamości, która wykonała działanie.</td></tr>
+<tr><td><code>actor_resource_id</code></td><td><code>string</code></td><td>Host, relay albo kampania, które wykonały działanie.</td></tr>
+<tr><td><code>action</code></td><td><code>string</code></td><td></td></tr>
+<tr><td><code>action_prefix</code></td><td><code>string</code></td><td>Początek nazwy akcji; job. zostawia wszystkie zdarzenia dotyczące zadania.</td></tr>
+<tr><td><code>outcome</code></td><td><code>string</code></td><td>success, failure albo denied.</td></tr>
+<tr><td><code>since</code></td><td><code>string</code></td><td>RFC 3339; zdarzenia od tego momentu włącznie.</td></tr>
+<tr><td><code>until</code></td><td><code>string</code></td><td>RFC 3339; zdarzenia sprzed tego momentu.</td></tr>
+<tr><td><code>limit</code></td><td><code>integer</code></td><td>Rozmiar strony: domyślnie 100, najwyżej 500.</td></tr>
+<tr><td><code>cursor</code></td><td><code>string</code></td><td>Wartość next_cursor z poprzedniej strony; puste dla pierwszej strony.</td></tr>
+</tbody></table></div>
+<h3 id="filters-get-api-v1-backups"><code>GET /api/v1/backups</code></h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
+<tbody>
+<tr><td><code>limit</code></td><td><code>integer</code></td><td>Rozmiar strony: domyślnie 100, najwyżej 500.</td></tr>
+<tr><td><code>cursor</code></td><td><code>string</code></td><td>Wartość next_cursor z poprzedniej strony; puste dla pierwszej strony. Podróżuje w nim moment, względem którego oceniono wiek, więc wszystkie strony jednego odczytu liczą według tego samego zegara.</td></tr>
+</tbody></table></div>
+<h3 id="filters-get-api-v1-campaigns-preview"><code>GET /api/v1/campaigns/preview</code></h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
+<tbody>
+<tr><td><code>action</code></td><td><code>string</code></td><td>Typ operacji; bez niego podgląd liczy hosty, ale żadnego nie kwalifikuje. Dla operacji, którą panel rozbija host po hoście (system.hostname.set), odpowiedź wymienia też każdego gotowego hosta w polu hosts [{id, hostname}], na potrzeby mapowania nazw.</td></tr>
+<tr><td><code>site</code></td><td><code>string</code></td><td></td></tr>
+<tr><td><code>environment</code></td><td><code>string</code></td><td></td></tr>
+<tr><td><code>os_family</code></td><td><code>string</code></td><td></td></tr>
+<tr><td><code>expression</code></td><td><code>string</code></td><td>Selektor typowany w postaci JSON; jeśli jest obecny, decyduje sam.</td></tr>
+<tr><td><code>exclude</code></td><td><code>string</code></td><td>Identyfikator hosta do pominięcia; może się powtarzać.</td></tr>
+<tr><td><code>exclude_reason</code></td><td><code>string</code></td><td></td></tr>
+<tr><td><code>compensates</code></td><td><code>string</code></td><td>Kampania, którą zlecenie ma cofnąć; pusty selektor wskazuje wtedy hosty zmienione przez tamtą kampanię, a odpowiedź niesie oryginał w polu compensates.</td></tr>
+<tr><td><code>host_id</code></td><td><code>string</code></td><td>Identyfikator hosta do podglądu jako jawna lista; może się powtarzać. Lista jest ścisła: nieznany host, host spoza zakresu wywołującego dla tej operacji albo host jednocześnie wykluczony kończy się odpowiedzią 422 targets_invalid z powodem podanym dla każdego hosta.</td></tr>
+</tbody></table></div>
+<h3 id="filters-get-api-v1-campaigns-id-steps"><code>GET /api/v1/campaigns/{id}/steps</code></h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
+<tbody>
+<tr><td><code>host_id</code></td><td><code>string</code></td><td>Tylko kroki tego hosta.</td></tr>
+<tr><td><code>limit</code></td><td><code>integer</code></td><td>Ile hostów obejmuje jedna strona: domyślnie 200, najwyżej 1000; strona urywa się między hostami, nigdy w środku jednego.</td></tr>
+<tr><td><code>cursor</code></td><td><code>string</code></td><td>Wartość next_cursor z poprzedniej strony; puste dla pierwszej strony.</td></tr>
+</tbody></table></div>
+<h3 id="filters-get-api-v1-certificates"><code>GET /api/v1/certificates</code></h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
+<tbody>
+<tr><td><code>limit</code></td><td><code>integer</code></td><td>Rozmiar strony: domyślnie 100, najwyżej 500.</td></tr>
+<tr><td><code>cursor</code></td><td><code>string</code></td><td>Wartość next_cursor z poprzedniej strony; puste dla pierwszej strony.</td></tr>
+</tbody></table></div>
+<h3 id="filters-get-api-v1-enrollment-requests"><code>GET /api/v1/enrollment-requests</code></h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
+<tbody>
+<tr><td><code>status</code></td><td><code>string</code></td><td>pending, enrolled, expired, revoked albo failed.</td></tr>
+<tr><td><code>kind</code></td><td><code>string</code></td><td>agent albo relay.</td></tr>
+<tr><td><code>site</code></td><td><code>string</code></td><td></td></tr>
+<tr><td><code>environment</code></td><td><code>string</code></td><td></td></tr>
+<tr><td><code>limit</code></td><td><code>integer</code></td><td>Rozmiar strony: domyślnie 200, najwyżej 500.</td></tr>
+<tr><td><code>cursor</code></td><td><code>string</code></td><td>Wartość next_cursor z poprzedniej strony; puste dla pierwszej strony.</td></tr>
+</tbody></table></div>
+<h3 id="filters-get-api-v1-host-groups-preview"><code>GET /api/v1/host-groups/preview</code></h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
+<tbody>
+<tr><td><code>expression</code></td><td><code>string</code></td><td>Selektor typowany w postaci JSON; odpowiedzią jest liczba hostów w zakresie wywołującego, próbka do 20 nazw hostów i selektor zapisany w jednej linii.</td></tr>
+</tbody></table></div>
+<h3 id="filters-get-api-v1-hosts"><code>GET /api/v1/hosts</code></h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
+<tbody>
+<tr><td><code>q</code></td><td><code>string</code></td><td>Fragment nazwy hosta, adresu do zarządzania, identyfikatora maszyny albo właściciela; bez rozróżniania wielkości liter.</td></tr>
+<tr><td><code>site</code></td><td><code>string</code></td><td></td></tr>
+<tr><td><code>environment</code></td><td><code>string</code></td><td></td></tr>
+<tr><td><code>os_family</code></td><td><code>string</code></td><td></td></tr>
+<tr><td><code>connection_state</code></td><td><code>string</code></td><td>online, offline, stale albo unknown.</td></tr>
+<tr><td><code>lifecycle_state</code></td><td><code>string</code></td><td>active, quarantined, recovery, retiring albo retired.</td></tr>
+<tr><td><code>owner</code></td><td><code>string</code></td><td></td></tr>
+<tr><td><code>identity_domain</code></td><td><code>string</code></td><td>Domena katalogu, do której host jest przyłączony, w postaci zgłaszanej przez jego moduł tożsamości.</td></tr>
+<tr><td><code>tag</code></td><td><code>string</code></td><td>Tag, który host musi nosić; może się powtarzać, a host musi mieć wszystkie wymienione tagi.</td></tr>
+<tr><td><code>channel</code></td><td><code>string</code></td><td>Kanał wydań, który śledzi host: stable albo beta.</td></tr>
+<tr><td><code>maintenance</code></td><td><code>boolean</code></td><td>true zostawia hosty będące teraz w oknie serwisowym, false te poza nim.</td></tr>
+<tr><td><code>reboot_required</code></td><td><code>boolean</code></td><td>true zostawia hosty wymagające restartu, false te, które takiej potrzeby nie zgłosiły; host, który nic nie zgłosił, nie trafia do żadnej z grup.</td></tr>
+<tr><td><code>security_updates</code></td><td><code>boolean</code></td><td>true zostawia hosty z czekającą aktualizacją bezpieczeństwa, false te, które żadnej nie zgłosiły; nieznany licznik nie trafia do żadnej z grup.</td></tr>
+<tr><td><code>failed_units</code></td><td><code>boolean</code></td><td>true zostawia hosty z co najmniej jedną nieudaną jednostką, false te, które żadnej nie zgłosiły; host, który nic nie zgłosił, nie trafia do żadnej z grup.</td></tr>
+<tr><td><code>package_db_broken</code></td><td><code>boolean</code></td><td>true zostawia hosty (poza wycofanymi), których bazę pakietów ostatnia operacja uznała za uszkodzoną, false te sprawne.</td></tr>
+<tr><td><code>sssd_offline</code></td><td><code>boolean</code></td><td>true zostawia hosty przyłączone do domeny (poza wycofanymi), których SSSD zgłasza się jako offline, false te online; host spoza domeny nie trafia do żadnej z grup.</td></tr>
+<tr><td><code>agent_behind</code></td><td><code>boolean</code></td><td>true zostawia hosty, których agent jest starszy niż najnowsza wersja zgłoszona w widocznej flocie, false te już na niej; wersja, której nie da się sparsować, nie trafia do żadnej z grup.</td></tr>
+<tr><td><code>relay</code></td><td><code>string</code></td><td>Identyfikator relaya; zostawia hosty, których otwartą sesję poświadczył.</td></tr>
+<tr><td><code>failure_domain</code></td><td><code>string</code></td><td>Domena awarii, do której operator przypisał hosta.</td></tr>
+<tr><td><code>team</code></td><td><code>string</code></td><td>Identyfikator zespołu; zostawia jego hosty. Słowo none zostawia hosty, których nikt nie przypisał do żadnego zespołu.</td></tr>
+<tr><td><code>capability</code></td><td><code>string</code></td><td>Adapter, który host musi mieć dostępny, na przykład packages.apt.</td></tr>
+<tr><td><code>connection_refusal</code></td><td><code>string</code></td><td>Powód, dla którego brama ostatnio odprawiła hosta od czasu jego ostatniej sesji: certificate_expired, certificate_not_yet_valid, unknown_certificate, revoked_certificate, identity_mismatch albo lifecycle_&lt;state&gt;.</td></tr>
+<tr><td><code>sort</code></td><td><code>string</code></td><td>Porządek listy w postaci column albo column:desc; dostępne kolumny to agent_version, connection_state, environment, failed_units, hostname, last_seen_at, lifecycle_state, owner, pending_security_updates, pending_updates, site. Domyślnie hostname rosnąco; nieznana kolumna kończy się odmową invalid_sort, a kursor wydany przy jednym porządku zostanie odrzucony przy innym. Licznik, którego host nie zgłosił, sortuje się poniżej zera, a host nigdy niewidziany przed każdym widzianym.</td></tr>
+<tr><td><code>limit</code></td><td><code>integer</code></td><td>Rozmiar strony: domyślnie 100, najwyżej 500.</td></tr>
+<tr><td><code>cursor</code></td><td><code>string</code></td><td>Wartość next_cursor z poprzedniej strony; puste dla pierwszej strony.</td></tr>
+</tbody></table></div>
+<h3 id="filters-get-api-v1-hosts-id-audit"><code>GET /api/v1/hosts/{id}/audit</code></h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
+<tbody>
+<tr><td><code>actor</code></td><td><code>string</code></td><td>Tożsamość, która wykonała działanie.</td></tr>
+<tr><td><code>actor_kind</code></td><td><code>string</code></td><td>user, service, anonymous, agent, relay, machine albo system.</td></tr>
+<tr><td><code>actor_principal_id</code></td><td><code>string</code></td><td>Niezmienny identyfikator tożsamości, która wykonała działanie.</td></tr>
+<tr><td><code>actor_resource_id</code></td><td><code>string</code></td><td>Host, relay albo kampania, które wykonały działanie.</td></tr>
+<tr><td><code>action</code></td><td><code>string</code></td><td></td></tr>
+<tr><td><code>action_prefix</code></td><td><code>string</code></td><td>Początek nazwy akcji; job. zostawia wszystkie zdarzenia dotyczące zadania.</td></tr>
+<tr><td><code>outcome</code></td><td><code>string</code></td><td>success, failure albo denied.</td></tr>
+<tr><td><code>since</code></td><td><code>string</code></td><td>RFC 3339; zdarzenia od tego momentu włącznie.</td></tr>
+<tr><td><code>until</code></td><td><code>string</code></td><td>RFC 3339; zdarzenia sprzed tego momentu.</td></tr>
+<tr><td><code>limit</code></td><td><code>integer</code></td><td>Rozmiar strony: domyślnie 100, najwyżej 500.</td></tr>
+<tr><td><code>cursor</code></td><td><code>string</code></td><td>Wartość next_cursor z poprzedniej strony; puste dla pierwszej strony.</td></tr>
+</tbody></table></div>
+<h3 id="filters-get-api-v1-hosts-id-metrics"><code>GET /api/v1/hosts/{id}/metrics</code></h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
+<tbody>
+<tr><td><code>range</code></td><td><code>string</code></td><td>Okno wykresu: 3h (domyślnie), 24h, 7d albo 30d; dwa pierwsze zwracają surowe próbki, pozostałe agregaty kwadransowe.</td></tr>
+</tbody></table></div>
+<h3 id="filters-get-api-v1-identity-changes"><code>GET /api/v1/identity/changes</code></h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
+<tbody>
+<tr><td><code>state</code></td><td><code>string</code></td><td>planned, awaiting_approval, running, succeeded, partially_applied, failed albo canceled.</td></tr>
+<tr><td><code>limit</code></td><td><code>integer</code></td><td>Największa liczba zwracanych zmian: domyślnie 50, najwyżej 200.</td></tr>
+</tbody></table></div>
+<h3 id="filters-get-api-v1-identity-users"><code>GET /api/v1/identity/users</code></h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
+<tbody>
+<tr><td><code>preserved</code></td><td><code>string</code></td><td>"true" wypisuje konta usunięte z zachowanym wpisem, osobno od aktywnych; zachowane konto nie trafia na żadnego hosta i nie należy do żadnej grupy.</td></tr>
+</tbody></table></div>
+<h3 id="filters-get-api-v1-installation-profiles"><code>GET /api/v1/installation-profiles</code></h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
+<tbody>
+<tr><td><code>site</code></td><td><code>string</code></td><td>Site, w którym host będzie umieszczony; "default", gdy puste.</td></tr>
+<tr><td><code>environment</code></td><td><code>string</code></td><td>Środowisko hosta; "unassigned", gdy puste.</td></tr>
+<tr><td><code>kind</code></td><td><code>string</code></td><td>agent (domyślnie) albo relay.</td></tr>
+<tr><td><code>relay_id</code></td><td><code>string</code></td><td>Relay lokalizacji, przez który łączy się host; puste oznacza połączenie wprost do panelu.</td></tr>
+<tr><td><code>architecture</code></td><td><code>string</code></td><td>amd64 (domyślnie) albo arm64.</td></tr>
+<tr><td><code>channel</code></td><td><code>string</code></td><td>Kanał repozytorium; domyślnie stable.</td></tr>
+</tbody></table></div>
+<h3 id="filters-get-api-v1-jobs"><code>GET /api/v1/jobs</code></h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
+<tbody>
+<tr><td><code>host_id</code></td><td><code>string</code></td><td>Host, do którego należą zadania.</td></tr>
+<tr><td><code>hostname</code></td><td><code>string</code></td><td>Początek nazwy hosta; pełna nazwa zostawia tylko tego jednego hosta.</td></tr>
+<tr><td><code>state</code></td><td><code>string</code></td><td></td></tr>
+<tr><td><code>action</code></td><td><code>string</code></td><td>Typ operacji.</td></tr>
+<tr><td><code>action_prefix</code></td><td><code>string</code></td><td>Początek typu operacji; packages. zostawia wszystkie operacje pakietowe.</td></tr>
+<tr><td><code>actor</code></td><td><code>string</code></td><td>Tożsamość, która zleciła zadanie.</td></tr>
+<tr><td><code>campaign_id</code></td><td><code>string</code></td><td></td></tr>
+<tr><td><code>fanout_id</code></td><td><code>string</code></td><td>Zbiorczy odczyt, który zlecił te zadania.</td></tr>
+<tr><td><code>error_code</code></td><td><code>string</code></td><td>Kod błędu wyniku, którym zakończyło się zadanie.</td></tr>
+<tr><td><code>since</code></td><td><code>string</code></td><td>RFC 3339; zadania utworzone od tego momentu włącznie.</td></tr>
+<tr><td><code>until</code></td><td><code>string</code></td><td>RFC 3339; zadania utworzone przed tym momentem.</td></tr>
+<tr><td><code>sort</code></td><td><code>string</code></td><td>Porządek listy w postaci column, column:asc albo column:desc; dostępne kolumny to action_type, created_at, finished_at, hostname, state. Domyślnie najnowsze pierwsze; nieznana kolumna kończy się odmową invalid_sort, a kursor wydany przy jednym porządku zostanie odrzucony przy innym. Zadanie jeszcze niezakończone sortuje się według finished_at przed każdym zakończonym.</td></tr>
+<tr><td><code>limit</code></td><td><code>integer</code></td><td>Rozmiar strony: domyślnie 100, najwyżej 500.</td></tr>
+<tr><td><code>cursor</code></td><td><code>string</code></td><td>Wartość next_cursor z poprzedniej strony; puste dla pierwszej strony.</td></tr>
+</tbody></table></div>
+<h3 id="filters-get-api-v1-maintenance-calendar"><code>GET /api/v1/maintenance/calendar</code></h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
+<tbody>
+<tr><td><code>from</code></td><td><code>string</code></td><td>RFC 3339; początek zakresu.</td></tr>
+<tr><td><code>to</code></td><td><code>string</code></td><td>RFC 3339; koniec zakresu, najwyżej rok po from.</td></tr>
+</tbody></table></div>
+<h3 id="filters-get-api-v1-monitoring-alerts"><code>GET /api/v1/monitoring/alerts</code></h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
+<tbody>
+<tr><td><code>state</code></td><td><code>string</code></td><td>pending, firing albo resolved.</td></tr>
+<tr><td><code>acknowledged</code></td><td><code>string</code></td><td>true zostawia alerty, które ktoś przejął, false te wciąż czekające.</td></tr>
+<tr><td><code>severity</code></td><td><code>string</code></td><td>critical, warning albo info.</td></tr>
+<tr><td><code>host_id</code></td><td><code>string</code></td><td></td></tr>
+<tr><td><code>limit</code></td><td><code>integer</code></td><td>Rozmiar strony: domyślnie 100, najwyżej 500.</td></tr>
+<tr><td><code>cursor</code></td><td><code>string</code></td><td>Wartość next_cursor z poprzedniej strony; puste dla pierwszej strony.</td></tr>
+</tbody></table></div>
+<h3 id="filters-get-api-v1-notifications-deliveries"><code>GET /api/v1/notifications/deliveries</code></h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
+<tbody>
+<tr><td><code>channel_id</code></td><td><code>string</code></td><td>Dostarczenia jednego kanału.</td></tr>
+<tr><td><code>status</code></td><td><code>string</code></td><td>sent albo failed, nazewnictwo z poprzedniego wydania.</td></tr>
+<tr><td><code>state</code></td><td><code>string</code></td><td>pending, leased, delivered, retry_wait, dead_letter albo suppressed.</td></tr>
+<tr><td><code>since</code></td><td><code>string</code></td><td>RFC 3339; dostarczenia od tego momentu włącznie.</td></tr>
+<tr><td><code>limit</code></td><td><code>integer</code></td><td>Domyślnie 100, najwyżej 500.</td></tr>
+</tbody></table></div>
+<h3 id="filters-get-api-v1-policies-id-results"><code>GET /api/v1/policies/{id}/results</code></h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
+<tbody>
+<tr><td><code>host_id</code></td><td><code>string</code></td><td>Tylko werdykty tego hosta.</td></tr>
+<tr><td><code>verdict</code></td><td><code>string</code></td><td>compliant, drift, error albo not_applicable.</td></tr>
+<tr><td><code>limit</code></td><td><code>integer</code></td><td>Rozmiar strony: domyślnie 100, najwyżej 500.</td></tr>
+<tr><td><code>cursor</code></td><td><code>string</code></td><td>Wartość next_cursor z poprzedniej strony; puste dla pierwszej strony.</td></tr>
+</tbody></table></div>
+<h3 id="filters-get-api-v1-reads"><code>GET /api/v1/reads</code></h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
+<tbody>
+<tr><td><code>limit</code></td><td><code>integer</code></td><td>Rozmiar strony: domyślnie 100, najwyżej 500.</td></tr>
+<tr><td><code>cursor</code></td><td><code>string</code></td><td>Wartość next_cursor z poprzedniej strony; puste dla pierwszej strony.</td></tr>
+</tbody></table></div>
+<h3 id="filters-get-api-v1-relays"><code>GET /api/v1/relays</code></h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
+<tbody>
+<tr><td><code>site</code></td><td><code>string</code></td><td>Tylko relaye tego site.</td></tr>
+</tbody></table></div>
+<h3 id="filters-get-api-v1-relays-id-buffer-history"><code>GET /api/v1/relays/{id}/buffer-history</code></h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
+<tbody>
+<tr><td><code>range</code></td><td><code>string</code></td><td>Okno wykresu: 3h, 24h (domyślnie), 7d, 30d albo 90d; dwa pierwsze zwracają surowe raporty, pozostałe agregaty kwadransowe.</td></tr>
+</tbody></table></div>
+<h3 id="filters-get-api-v1-reports-name-"><code>GET /api/v1/reports/{name}</code></h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
+<tbody>
+<tr><td><code>from</code></td><td><code>string</code></td><td>RFC 3339; początek okresu. Albo obie granice, albo żadna: bez nich brane jest ostatnie trzydzieści dni.</td></tr>
+<tr><td><code>to</code></td><td><code>string</code></td><td>RFC 3339; koniec okresu, najwyżej rok po from.</td></tr>
+<tr><td><code>site</code></td><td><code>string</code></td><td>Zawęża raport do jednego site.</td></tr>
+<tr><td><code>environment</code></td><td><code>string</code></td><td>Zawęża raport do jednego środowiska.</td></tr>
+<tr><td><code>limit</code></td><td><code>integer</code></td><td>tylko patch-status: największa liczba wierszy hostów w JSON-ie, domyślnie 1000, najwyżej 5000; plik zawiera wszystkie.</td></tr>
+<tr><td><code>section</code></td><td><code>string</code></td><td>compliance z format=csv: policies (domyślnie), hosts albo security.</td></tr>
+</tbody></table></div>
+<h3 id="filters-get-api-v1-search"><code>GET /api/v1/search</code></h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
+<tbody>
+<tr><td><code>q</code></td><td><code>string</code></td><td>Początek nazwy: nazwa hosta, identyfikator maszyny albo adres do zarządzania, nazwa kampanii, polityki, grupy, relaya albo sekretu, subject lub nazwa wyświetlana tożsamości, co najmniej osiem znaków identyfikatora zadania albo pełny identyfikator CVE. Mniej niż dwa znaki nie zwracają nic; rodzaj obiektu, którego wywołujący nie może czytać, jest pomijany.</td></tr>
+<tr><td><code>limit</code></td><td><code>integer</code></td><td>Liczba trafień na rodzaj: domyślnie 8, najwyżej 25.</td></tr>
+</tbody></table></div>
+<h3 id="filters-get-api-v1-security"><code>GET /api/v1/security</code></h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
+<tbody>
+<tr><td><code>check</code></td><td><code>string</code></td><td>Identyfikator jednej kontroli; odpowiedzią jest wtedy jedna strona hostów, które jej nie przechodzą, zamiast całego profilu.</td></tr>
+<tr><td><code>limit</code></td><td><code>integer</code></td><td>Rozmiar strony listy hostów dla pojedynczej kontroli: domyślnie 100, najwyżej 500.</td></tr>
+<tr><td><code>cursor</code></td><td><code>string</code></td><td>Wartość next_cursor z poprzedniej strony; puste dla pierwszej strony.</td></tr>
+</tbody></table></div>
+<h3 id="filters-get-api-v1-vulnerabilities"><code>GET /api/v1/vulnerabilities</code></h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
+<tbody>
+<tr><td><code>q</code></td><td><code>string</code></td><td>Fragment nazwy hosta; liczby w podsumowaniu nadal dotyczą całej floty.</td></tr>
+<tr><td><code>severity</code></td><td><code>string</code></td><td>critical, high, medium, low, negligible albo unrated: hosty ze znaleziskiem tego stopnia.</td></tr>
+<tr><td><code>sort</code></td><td><code>string</code></td><td>affected (domyślnie), fixable albo hostname.</td></tr>
+<tr><td><code>limit</code></td><td><code>integer</code></td><td>Rozmiar strony: domyślnie 100, najwyżej 500.</td></tr>
+<tr><td><code>cursor</code></td><td><code>string</code></td><td>Wartość next_cursor z poprzedniej strony; puste dla pierwszej strony. Kursor wydany przy jednym porządku sortowania zostanie odrzucony przy innym.</td></tr>
+<tr><td><code>offset</code></td><td><code>integer</code></td><td>Ile wierszy pominąć; przy obu podanych wygrywa kursor.</td></tr>
+</tbody></table></div>
+<h3 id="filters-get-api-v1-vulnerabilities-cves"><code>GET /api/v1/vulnerabilities/cves</code></h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
+<tbody>
+<tr><td><code>q</code></td><td><code>string</code></td><td>Prefiks numeru CVE albo nazwy dotkniętego pakietu.</td></tr>
+<tr><td><code>severity</code></td><td><code>string</code></td><td>critical, high, medium, low, negligible albo unrated.</td></tr>
+<tr><td><code>fixable</code></td><td><code>boolean</code></td><td>true zostawia CVE, dla których producent wydał poprawkę na co najmniej jednym hoście.</td></tr>
+<tr><td><code>limit</code></td><td><code>integer</code></td><td>Rozmiar strony: domyślnie 50, najwyżej 500.</td></tr>
+<tr><td><code>offset</code></td><td><code>integer</code></td><td>Ile wierszy pominąć.</td></tr>
+</tbody></table></div>
+    <ul class="linkrow">
+      <li><a href="errors.html">← 7. Błędy i odmowy</a></li>
+      <li><a href="operations.html">6. Operacje</a></li>
+      <li><a href="roles.html">Dalej: 9. Role i uprawnienia &rarr;</a></li>
+      <li><a href="runbooks.html">10. Runbooki</a></li>
+      <li><a href="./">Spis treści</a></li>
+    </ul>
+  </main>
+
+</div>
+
+<footer class="site-footer">
+  <div class="site-footer__inner">
+    <p>Dokumentacja Flotestro, wydanie 0.62.0.</p>
+    <p><a href="https://github.com/ultherego/Flotestro">github.com/ultherego/Flotestro</a></p>
+  </div>
+</footer>
+
+</body>
+</html>

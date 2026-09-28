@@ -1,0 +1,550 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Roles and permissions &middot; Flotestro documentation</title>
+<meta name="description" content="The six roles, the permissions each one holds and does not hold, the five categories of a scope, and what needs more than a role: fresh authentication and a second person.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;600&display=swap">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header__inner">
+    <a class="brand" href="../"><img class="brand__mark" src="../img/logo.webp" alt="">Flotestro</a>
+    <nav class="site-nav">
+      <a href="../">Overview</a>
+      <a href="./" aria-current="page">Documentation</a>
+      <a href="https://ultherego.github.io/Flotestro/packages/">Packages</a>
+      <a href="https://github.com/ultherego/Flotestro">Source</a>
+      <a href="../pl/docs/roles.html" hreflang="pl" lang="pl">Polski</a>
+    </nav>
+  </div>
+</header>
+
+<div class="layout">
+
+  <aside class="sidebar">
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Manual</h2>
+      <ul class="sidebar__list">
+        <li><a href="./">Contents</a></li>
+        <li><a href="introduction.html">1. Introduction</a></li>
+        <li><a href="architecture.html">2. Architecture</a></li>
+        <li><a href="installation.html">3. Installation</a></li>
+        <li><a href="concepts.html">4. How a change happens</a></li>
+      </ul>
+    </nav>
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Reference</h2>
+      <ul class="sidebar__list">
+        <li><a href="configuration.html">5. Configuration</a></li>
+        <li><a href="operations.html">6. Operations</a></li>
+        <li><a href="errors.html">7. Errors and refusals</a></li>
+        <li><a href="api.html">8. API</a></li>
+        <li><a href="roles.html" aria-current="page">9. Roles and permissions</a></li>
+      </ul>
+    </nav>
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Procedures</h2>
+      <ul class="sidebar__list">
+        <li><a href="runbooks.html">10. Runbooks</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <h1>9. Roles and permissions</h1>
+
+    <p class="lede">A permission is never held in the abstract. It is held by a
+    role, the role is bound to an identity within a scope, and the scope says
+    which part of the fleet the role reaches. This chapter is the catalogue of
+    the six roles, what each may and may not do, how a scope narrows a binding,
+    and what an operation asks for beyond a role.</p>
+
+    <ul class="linkrow">
+      <li><a href="#roles">The six roles</a></li>
+      <li><a href="#viewer">viewer</a></li>
+      <li><a href="#auditor">auditor</a></li>
+      <li><a href="#operator">operator</a></li>
+      <li><a href="#approver">approver</a></li>
+      <li><a href="#identity-admin">identity_admin</a></li>
+      <li><a href="#platform-admin">platform_admin</a></li>
+      <li><a href="#scope">The scope of a binding</a></li>
+      <li><a href="#grant">The shape of a grant</a></li>
+      <li><a href="#escalation">Nobody grants what they do not hold</a></li>
+      <li><a href="#groups">A directory group becomes a role</a></li>
+      <li><a href="#beyond">When a role is not enough</a></li>
+    </ul>
+
+    <h2 id="roles">The six roles</h2>
+
+    <p>The catalogue is fixed: the panel knows these six roles and no others,
+    and a request naming another is refused with
+    <code class="refusal">unknown_role</code>. A role is a list of permissions,
+    not a rank &mdash; the lists overlap, but none of them contains another.
+    The whole catalogue is served at <code>GET /api/v1/roles</code>, role by
+    role with the permissions it carries.</p>
+
+<div class="table-scroll">
+<table>
+<thead><tr><th>Role</th><th>What it is for</th><th>Permissions</th></tr></thead>
+<tbody>
+<tr><td><code>viewer</code></td><td>Looks at the fleet. Reads the hosts and their modules, and computes plans; changes nothing.</td><td>31</td></tr>
+<tr><td><code>auditor</code></td><td>Reviews the installation. Reads the audit trail, the metrics, the findings, the secret metadata and the state of the CA; fixes nothing.</td><td>23</td></tr>
+<tr><td><code>operator</code></td><td>Is on call. Restarts services, runs containers, plans upgrades, orders campaigns, makes backups, silences alerts; approves nothing and carries out no package transaction.</td><td>63</td></tr>
+<tr><td><code>approver</code></td><td>Is the second person. Reads the change and the trail, approves operations and campaigns, publishes a policy; orders nothing.</td><td>12</td></tr>
+<tr><td><code>identity_admin</code></td><td>Decides who has access to the hosts. The directory, its policies and the local accounts; runs no operations on hosts.</td><td>24</td></tr>
+<tr><td><code>platform_admin</code></td><td>Administers the installation. Holds every permission there is.</td><td>187</td></tr>
+</tbody></table></div>
+
+    <p>An identity can hold several roles at once, each in a scope of its own:
+    an on-call engineer is usually an <code>operator</code> across their site
+    and a <code>viewer</code> across the rest of the fleet. The permissions add
+    up, the scopes do not merge &mdash; a permission is held where the binding
+    that carries it reaches, and nowhere else.</p>
+
+    <h2 id="viewer">viewer</h2>
+
+    <p>The role that reads. It sees the hosts and their modules, and it can
+    ask the host what a change would come to, because a plan computes a
+    difference and writes nothing.</p>
+
+<div class="table-scroll">
+<table>
+<thead><tr><th>What it may do</th><th>Permissions</th></tr></thead>
+<tbody>
+<tr><td>See the fleet, its inventory, its operations and its campaigns.</td><td><code>host.read</code>, <code>inventory.read</code>, <code>job.read</code>, <code>campaign.read</code></td></tr>
+<tr><td>Read the state of a host: services, processes, packages, storage, network, firewall, SSH, kernel, time, security, certificates, backups, containers, monitoring, vulnerabilities, accounts and the declared state.</td><td><code>unit.status</code>, <code>process.read</code>, <code>packages.read</code>, <code>storage.read</code>, <code>storage.smart.read</code>, <code>network.read</code>, <code>dns.read</code>, <code>firewall.read</code>, <code>ssh.read</code>, <code>kernel.read</code>, <code>time.read</code>, <code>security.read</code>, <code>certificate.read</code>, <code>backup.read</code>, <code>docker.read</code>, <code>docker.events</code>, <code>monitoring.read</code>, <code>vulnerability.read</code>, <code>identity.read</code>, <code>localuser.read</code>, <code>policy.read</code></td></tr>
+<tr><td>Compute a plan: what a change would come to on this host, without making it.</td><td><code>dns.plan</code>, <code>time.plan</code>, <code>file.plan</code>, <code>kernel.module.plan</code>, <code>certificate.plan</code>, <code>certificate.trust.plan</code></td></tr>
+</tbody></table></div>
+
+    <p><strong>What it may not do.</strong> Nothing that writes: no operation
+    can be ordered, because <code>job.create</code> is not in the list. It does
+    not read the audit trail either &mdash; that is the auditor's material,
+    not a viewer's &mdash; nor the metrics, nor the secret metadata, and it
+    cannot run a security scan: a scan collects reconnaissance material about
+    the host and has a permission of its own.</p>
+
+    <h2 id="auditor">auditor</h2>
+
+    <p>The role that reviews. Its work is the trail, the findings and the state
+    of the installation, and it is deliberately not the role that repairs any of
+    them.</p>
+
+<div class="table-scroll">
+<table>
+<thead><tr><th>What it may do</th><th>Permissions</th></tr></thead>
+<tbody>
+<tr><td>See the fleet, its inventory, its operations and its campaigns.</td><td><code>host.read</code>, <code>inventory.read</code>, <code>job.read</code>, <code>campaign.read</code></td></tr>
+<tr><td>Read the evidence: the audit trail, the fleet metrics, the state of the CA and the metadata of the secrets. The value of a secret cannot be read through the API at all, by anybody.</td><td><code>audit.read</code>, <code>metrics.read</code>, <code>pki.read</code>, <code>secret.read</code></td></tr>
+<tr><td>Read the material of a review, and run the scan that produces it: the protective state, the vulnerabilities, the installed packages behind them, the certificate dates, the backups, the alerts and silences, and the verdicts of the declared state.</td><td><code>security.read</code>, <code>security.scan</code>, <code>vulnerability.read</code>, <code>packages.read</code>, <code>certificate.read</code>, <code>certificate.plan</code>, <code>certificate.trust.plan</code>, <code>backup.read</code>, <code>monitoring.read</code>, <code>policy.read</code></td></tr>
+<tr><td>See who has access: the directory, its HBAC and sudo rules, the local accounts and the containers on a host.</td><td><code>identity.read</code>, <code>identity.policy.read</code>, <code>localuser.read</code>, <code>docker.read</code>, <code>docker.events</code></td></tr>
+</tbody></table></div>
+
+    <p><strong>What it may not do.</strong> It replaces nothing it reviews: not
+    the CA (<code>pki.rotate</code> is the administrator's), not a finding
+    (<code>security.remediate</code>), not a policy. It also does not hold the
+    ordinary module reads of a host &mdash; network, storage, firewall, SSH,
+    kernel, time &mdash; which is the one place where a <code>viewer</code>
+    sees more than an <code>auditor</code>: an identity that needs both holds
+    both roles.</p>
+
+    <h2 id="operator">operator</h2>
+
+    <p>The on-call role, and the largest of the five that are not the
+    administrator. Its shape is one decision repeated: everything that gets a
+    service back up, nothing that changes what the host is.</p>
+
+<div class="table-scroll">
+<table>
+<thead><tr><th>What it may do</th><th>Permissions</th></tr></thead>
+<tbody>
+<tr><td>Order work and take it back. Refreshing the inventory is the first move in an outage: before changing a host, one wants to know how things are now.</td><td><code>host.read</code>, <code>inventory.read</code>, <code>inventory.refresh</code>, <code>job.read</code>, <code>job.create</code>, <code>job.cancel</code></td></tr>
+<tr><td>Move services and read the journal.</td><td><code>unit.start</code>, <code>unit.stop</code>, <code>unit.restart</code>, <code>unit.reload</code>, <code>unit.reset_failed</code>, <code>journal.read</code></td></tr>
+<tr><td>Run containers and pull images; plan a declaration or a project deployment without carrying it out.</td><td><code>docker.read</code>, <code>docker.events</code>, <code>docker.container.logs</code>, <code>docker.container.start</code>, <code>docker.container.stop</code>, <code>docker.container.restart</code>, <code>docker.image.pull</code>, <code>docker.plan</code>, <code>docker.compose.plan</code></td></tr>
+<tr><td>Plan a package transaction, without carrying it out.</td><td><code>packages.read</code>, <code>packages.plan</code></td></tr>
+<tr><td>Run and steer a campaign, and write the declared state as a draft. Publishing that draft is the approval, and it stays with the approver.</td><td><code>campaign.read</code>, <code>campaign.create</code>, <code>campaign.control</code>, <code>policy.read</code>, <code>policy.write</code></td></tr>
+<tr><td>Name the targets of a campaign and declare a host under repair.</td><td><code>host.tag.write</code>, <code>host.group.write</code>, <code>host.maintenance.write</code></td></tr>
+<tr><td>Invite a machine into the fleet, one token per host, see the pending installations and close a token that leaked.</td><td><code>host.enroll.create</code>, <code>host.enroll.read</code>, <code>host.enroll.revoke</code></td></tr>
+<tr><td>Read the local accounts, and move the boundary of an existing one: its groups and its expiry.</td><td><code>localuser.read</code>, <code>localuser.groups.write</code>, <code>localuser.expiry.write</code></td></tr>
+<tr><td>Read the configuration of a host and compute what a change would come to, without making it.</td><td><code>network.read</code>, <code>dns.read</code>, <code>dns.plan</code>, <code>firewall.read</code>, <code>storage.read</code>, <code>storage.smart.read</code>, <code>ssh.read</code>, <code>kernel.read</code>, <code>kernel.module.plan</code>, <code>time.read</code>, <code>time.plan</code>, <code>security.read</code>, <code>security.scan</code>, <code>file.plan</code>, <code>vulnerability.read</code></td></tr>
+<tr><td>Watch certificates and tell the panel which files to watch.</td><td><code>certificate.read</code>, <code>certificate.plan</code>, <code>certificate.trust.plan</code>, <code>certificate.watch</code></td></tr>
+<tr><td>Make a backup and verify it. Restoring is a separate decision, because it unpacks old state onto a running system.</td><td><code>backup.read</code>, <code>backup.run</code>, <code>backup.verify</code></td></tr>
+<tr><td>Read alerts, probe a host and silence an alert during a repair.</td><td><code>monitoring.read</code>, <code>monitoring.probe</code>, <code>monitoring.silence.write</code>, <code>notification.read</code></td></tr>
+</tbody></table></div>
+
+    <p><strong>What it may not do.</strong> It approves nothing: neither
+    <code>job.approve</code> nor <code>campaign.approve</code> nor
+    <code>policy.publish</code> is in the list, so an operator who orders a
+    mutation waits for somebody else. It carries out no package transaction
+    (<code>packages.install</code>, <code>packages.remove</code>,
+    <code>packages.upgrade</code>, <code>packages.repair</code>) and does not
+    replace the agent. It writes nothing on the configuration of a host: no
+    network, no firewall, no storage, no SSH, no kernel, no time, no managed
+    file &mdash; a bad change there cuts the host off and cannot be fixed
+    remotely. It does not reboot or shut a host down, does not remove or prune
+    a container, does not deploy a Compose project, does not restore a backup,
+    does not create or delete a local account, and does not read the audit
+    trail.</p>
+
+    <h2 id="approver">approver</h2>
+
+    <p>The smallest role, and the one the second-person rule rests on. It reads
+    the change, the trail and the people, and says yes.</p>
+
+<div class="table-scroll">
+<table>
+<thead><tr><th>What it may do</th><th>Permissions</th></tr></thead>
+<tbody>
+<tr><td>Read what it is being asked to approve, and the trail behind it.</td><td><code>host.read</code>, <code>inventory.read</code>, <code>job.read</code>, <code>campaign.read</code>, <code>audit.read</code></td></tr>
+<tr><td>Approve an operation or a campaign.</td><td><code>job.approve</code>, <code>campaign.approve</code></td></tr>
+<tr><td>Read and publish the declared state. Publishing a policy is the approval of a draft somebody else wrote.</td><td><code>policy.read</code>, <code>policy.publish</code></td></tr>
+<tr><td>See who has access: the directory, its HBAC and sudo rules, and the local accounts.</td><td><code>identity.read</code>, <code>identity.policy.read</code>, <code>localuser.read</code></td></tr>
+</tbody></table></div>
+
+    <p><strong>What it may not do.</strong> It orders nothing: there is no
+    <code>job.create</code>, no <code>campaign.create</code> and no
+    <code>policy.write</code>, so an approver cannot write the change they
+    then approve. It reads no module of a host beyond the inventory, and it
+    cancels nothing.</p>
+
+    <h2 id="identity-admin">identity_admin</h2>
+
+    <p>The role that decides who has access to the hosts &mdash; through the
+    directory, or past it, through a local account. It does not run operations
+    on hosts.</p>
+
+<div class="table-scroll">
+<table>
+<thead><tr><th>What it may do</th><th>Permissions</th></tr></thead>
+<tbody>
+<tr><td>See the fleet it is granting access to.</td><td><code>host.read</code>, <code>inventory.read</code>, <code>job.read</code>, <code>campaign.read</code>, <code>unit.status</code>, <code>notification.read</code></td></tr>
+<tr><td>Manage the directory: its users, its groups, its HBAC and sudo rules, the membership of a host, and the records the whole network reads.</td><td><code>identity.read</code>, <code>identity.policy.read</code>, <code>identity.user.write</code>, <code>identity.group.write</code>, <code>identity.policy.write</code>, <code>identity.host.enroll</code>, <code>identity.host.leave</code>, <code>identity.keytab.rotate</code>, <code>dns.directory.write</code></td></tr>
+<tr><td>Manage local accounts, which are the path to a host that does not go through the directory, and the SSH keys on them.</td><td><code>localuser.read</code>, <code>localuser.create</code>, <code>localuser.lock</code>, <code>localuser.unlock</code>, <code>localuser.sshkeys.add</code>, <code>localuser.sshkeys.remove</code>, <code>localuser.sshkeys.replace</code>, <code>localuser.sshkeys.write</code></td></tr>
+<tr><td>Let a scheduled entry run as root. The permission travels with the order rather than standing on its own.</td><td><code>schedule.root.exec</code></td></tr>
+</tbody></table></div>
+
+    <p><strong>What it may not do.</strong> It does not grant root by another
+    name: <code>accounts.privileged_groups</code> is withheld from it, as from
+    every role but the administrator, so this role opens ordinary accounts and
+    an account that lands in <code>sudo</code>, <code>wheel</code>,
+    <code>docker</code> or <code>lxd</code> is opened by whoever may grant
+    root. It does not change the groups or the expiry of an account, and does
+    not delete one. It holds <code>schedule.root.exec</code> but not
+    <code>schedule.write</code>, so it cannot write a scheduled entry at all
+    &mdash; the permission is one an administrator's order carries. And it does
+    not order operations: <code>job.create</code> is not in the list.</p>
+
+    <h2 id="platform-admin">platform_admin</h2>
+
+    <p>The administrator holds all 187 permissions in the catalogue: every
+    permission the panel defines is in this role, and nothing is outside it.
+    Some of them are in this role alone.</p>
+
+<div class="table-scroll">
+<table>
+<thead><tr><th>Held by nobody else</th><th>What it decides</th></tr></thead>
+<tbody>
+<tr><td><code>principal.manage</code>, <code>host.scope.write</code>, <code>team.binding.write</code></td><td>Who exists in the panel, which team a host belongs to, and which team a binding may name. The last two move the boundary of what anybody may touch.</td></tr>
+<tr><td><code>accounts.privileged_groups</code></td><td>An account created in, or moved into, a group that is root by another name.</td></tr>
+<tr><td><code>pki.rotate</code></td><td>The fleet&rsquo;s CA, which is the root of trust for every host.</td></tr>
+<tr><td><code>relay.enroll.create</code>, <code>relay.manage</code>, <code>host.enroll.batch</code></td><td>A relay carries the traffic of a whole site, and revoking one cuts that site off; a batch token is one token good for many machines.</td></tr>
+<tr><td><code>host.quarantine</code>, <code>host.quarantine.release</code>, <code>host.decommission</code>, <code>host.identity.replace</code></td><td>The life of a host in the fleet, and the restoration of its identity.</td></tr>
+<tr><td><code>packages.install</code>, <code>packages.remove</code>, <code>packages.upgrade</code>, <code>packages.repair</code>, <code>packages.hold.write</code>, <code>packages.repository.write</code>, <code>agent.upgrade</code></td><td>The package transactions the operator may only plan, and the decision about where a host takes software from.</td></tr>
+<tr><td><code>network.write</code>, <code>firewall.write</code>, <code>storage.destructive</code>, <code>storage.wipe</code>, <code>ssh.config.write</code>, <code>kernel.sysctl.write</code>, <code>file.write</code>, <code>system.reboot</code>, <code>system.shutdown</code>, <code>system.hostname.write</code> and the rest of the writes</td><td>Everything that changes what a host is, rather than what it is currently running.</td></tr>
+<tr><td><code>secret.write</code>, <code>secret.destroy</code>, <code>settings.read</code>, <code>support.bundle.create</code>, <code>support.bundle.read</code></td><td>The secret store and the panel&rsquo;s reading of itself. A bundle reads everything the panel knows about itself, so it belongs to whoever administers the panel and to nobody else.</td></tr>
+<tr><td><code>budget.write</code>, <code>policy.remediate.auto</code>, <code>monitoring.rules.write</code>, <code>notification.manage</code></td><td>How much change the fleet carries at once, what it repairs without being asked, and what it alerts on.</td></tr>
+</tbody></table></div>
+
+    <p>Holding every permission is not the same as being unconditional. The
+    administrator meets the second-person rule in a production environment like
+    anybody else, and the operations of the greatest impact ask them for a
+    reason and a fresh authentication &mdash; both are described under
+    <a href="#beyond">When a role is not enough</a>.</p>
+
+    <h2 id="scope">The scope of a binding</h2>
+
+    <p>A binding is a role <em>within a scope</em>. The scope has five
+    categories, and a target &mdash; a host, or an order that names a place in
+    the fleet &mdash; carries the facts the categories are compared against.</p>
+
+<div class="table-scroll">
+<table>
+<thead><tr><th>Category</th><th>What it narrows by</th><th>How it is written</th></tr></thead>
+<tbody>
+<tr><td><code>site</code></td><td>The site the host stands in.</td><td>One value, or <code>*</code>.</td></tr>
+<tr><td><code>environment</code></td><td>The environment the host belongs to.</td><td>One value, or <code>*</code>.</td></tr>
+<tr><td><code>team</code></td><td>The team the host is assigned to.</td><td>In words: <code>{"mode":"any"}</code> or <code>{"mode":"exact","team_id":"&hellip;"}</code>.</td></tr>
+<tr><td><code>owner</code></td><td>The owner recorded on the host.</td><td>A list of values, any of which satisfies it, or a list containing <code>*</code>.</td></tr>
+<tr><td><code>tag</code></td><td>The tags on the host.</td><td>A list of values, any of which satisfies it, or a list containing <code>*</code>.</td></tr>
+</tbody></table></div>
+
+    <p>Two rules decide everything else:</p>
+
+    <ul>
+      <li><strong>Every category has to be satisfied at once.</strong> Site
+      <em>and</em> environment <em>and</em> team <em>and</em> owner
+      <em>and</em> tag. A binding that names a site and a tag reaches the hosts
+      that are in that site and carry that tag, not the union of the two.</li>
+      <li><strong>Within a category the values are alternatives.</strong> Two
+      owners on one binding mean either of them; two tags mean a host carrying
+      either. A single value is the same rule with one alternative.</li>
+    </ul>
+
+    <p>An asterisk is the only thing that widens a category: it covers every
+    value, including a target that carries none &mdash; an unowned host is
+    still a host. An empty category is not a wide one: it reaches nothing. That
+    is deliberate, and it is the direction a mistake falls in. A binding built
+    field by field with one field forgotten grants nothing at all, rather than
+    quietly granting the fleet.</p>
+
+    <p>The team is the one category that cannot say &ldquo;any&rdquo; by being
+    empty, because it is a foreign key and has no value meaning
+    <em>all</em>. So it is said in words, and a scope answers about it in words
+    too: <code>{"mode":"any"}</code> or
+    <code>{"mode":"exact","team_id":"&hellip;"}</code>. A reader that has to
+    infer <em>any</em> from a missing field is a reader that will one day infer
+    it wrongly.</p>
+
+    <p>For the same reason a scope is written out in full wherever it is
+    printed or serialised. In the audit trail it reads
+    <code>site=* env=prod team=* owner=* tag=*</code>, with every category
+    named; over the API every category is a field of the JSON object, never
+    left out. A list with no values at all prints as <code>(none)</code>,
+    which is what reaches nothing.</p>
+
+    <div class="note">
+      <p class="note__title">A category the query cannot check is not satisfied</p>
+      <p>Some lists have no column to compare a category against. An enrollment
+      order carries a site and an environment and nothing else &mdash; there is
+      no host yet, so there is no team, no owner and no tags. A binding narrowed
+      by one of those reaches no such order at all, rather than every one of
+      them: answering &ldquo;everything&rdquo; where nothing can be checked is
+      how a narrow binding becomes the whole fleet.</p>
+    </div>
+
+    <h2 id="grant">The shape of a grant</h2>
+
+    <p>A binding is granted with <code>POST /api/v1/principals/{id}/roles</code>,
+    and the same shape is carried in the <code>roles</code> list when an
+    identity is created. It needs <code>principal.manage</code> across the whole
+    fleet, and it is an operation of the greatest impact: it moves who can do
+    anything at all.</p>
+
+<pre><code>POST /api/v1/principals/{id}/roles
+{
+  "role":        "operator",
+  "site":        "waw",
+  "environment": "prod",
+  "team_scope":  {"mode": "any"},
+  "owners":      ["*"],
+  "tags":        ["*"],
+  "valid_until": "2026-12-31T23:59:59Z",
+  "reason":      "on-call rotation for the Warsaw site"
+}</code></pre>
+
+    <p>What the panel refuses:</p>
+
+<div class="table-scroll">
+<table>
+<thead><tr><th>Refusal</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><code class="refusal">unknown_role</code></td><td>The role is not one of the six.</td></tr>
+<tr><td><code class="refusal">invalid_binding</code></td><td><code>team_scope</code> is missing. It is required, and the refusal says what to write: <code>{"mode":"any"}</code> or <code>{"mode":"exact","team_id":"&hellip;"}</code>. A team omitted by accident would widen the grant in silence.</td></tr>
+<tr><td><code class="refusal">invalid_binding</code></td><td><code>team_scope</code> is malformed: a mode that is neither <code>any</code> nor <code>exact</code>, a <code>team_id</code> given with mode <code>any</code>, or mode <code>exact</code> with no <code>team_id</code>.</td></tr>
+<tr><td><code class="refusal">invalid_binding</code></td><td><code>valid_until</code> is not an RFC 3339 moment. Leaving it out means the binding lasts until somebody revokes it.</td></tr>
+<tr><td><code class="refusal">scope_escalation</code></td><td>The binding would be wider than the one the caller holds. See below.</td></tr>
+<tr><td><code class="refusal">reason_required</code></td><td>The <code>reason</code> is shorter than 8 characters.</td></tr>
+<tr><td><code class="refusal">reauthentication_required</code></td><td>The caller&rsquo;s authentication is not fresh enough for an operation of this impact.</td></tr>
+</tbody></table></div>
+
+    <p>A binding over a team has a route of its own,
+    <code>POST /api/v1/principals/{id}/team-roles</code>, which takes the
+    team and nothing else: the scope it stores is the team with an asterisk in
+    every other category. It takes two permissions rather than one &mdash;
+    <code>principal.manage</code> and <code>team.binding.write</code> &mdash;
+    because binding a role to a team hands over whatever that team holds. A
+    request there naming a site or an environment as well is refused with
+    <code class="refusal">scope_conflict</code>: a binding names one vocabulary
+    or the other, never both. A team that is not a team identifier is
+    <code class="refusal">invalid_team</code>, and a team nobody has created is
+    <code class="refusal">team_not_found</code> &mdash; a binding over an
+    identifier that does not exist yet would start granting the moment somebody
+    created a team with that name.</p>
+
+    <p><code>owners</code> and <code>tags</code> left out of the request are
+    read as <code>["*"]</code>: this is the one place the panel fills a
+    category in, and it does so because a grant request that says nothing about
+    owners means the caller did not narrow by them. The team is not filled in
+    the same way, and a scope stored with an empty category still reaches
+    nothing. A binding is revoked with
+    <code>DELETE /api/v1/principals/{id}/roles/{role}</code>, which names the
+    site and the environment in the body; an identity with no such binding is
+    answered <code class="refusal">binding_not_found</code>.</p>
+
+    <p>A binding may carry <code>valid_until</code>, after which it grants
+    nothing without anybody revoking it. The access review at
+    <code>GET /api/v1/access/review</code> flags an administrator whose binding
+    has no end date at all.</p>
+
+    <h2 id="escalation">Nobody grants what they do not hold</h2>
+
+    <p>Before a grant is written the panel takes every permission the role
+    carries and asks whether the caller holds that permission in a scope that
+    <em>contains</em> the one being granted. One permission missing is enough to
+    refuse the whole grant, and the refusal names it:</p>
+
+<pre><code>403 scope_escalation
+the role operator carries packages.plan, which you do not hold in
+site=waw env=prod team=* owner=* tag=*</code></pre>
+
+    <p>The comparison is on what a binding reaches, not on columns that happen
+    to match. A caller bound to one team cannot hand out &ldquo;any
+    team&rdquo;; a caller whose binding lists two tags cannot hand out
+    <code>*</code>; an asterisk on the caller&rsquo;s side contains anything in
+    that category. The attempt is recorded in the audit trail as a denied
+    <code>principal.role.grant</code> or <code>principal.create</code> with
+    <code>reason: scope_escalation</code> and the message above &mdash;
+    somebody trying to widen their own access is worth reading afterwards.</p>
+
+    <h2 id="groups">A directory group becomes a role</h2>
+
+    <p>Nobody is given a role by hand in the usual case. A group of the identity
+    provider is mapped to a role within a scope, and whoever signs in carrying
+    that group gets that binding. The mapping is written with
+    <code>POST /api/v1/group-mappings</code> &mdash; see
+    <a href="installation.html#admin">the first administrator</a> for the
+    request and the order the steps are taken in.</p>
+
+    <p>Three things about the mapping are worth knowing:</p>
+
+    <ul>
+      <li><strong>The group grants a role; the scope stays the panel&rsquo;s
+      policy.</strong> A mapping narrows by site and environment and by nothing
+      else, and it says so in every category: the team is any, the owners and
+      the tags are <code>*</code>. Filling two fields and leaving three empty
+      would grant nothing at all.</li>
+      <li><strong>The mapping is read on every request,</strong> so removing one
+      takes the role away on the user&rsquo;s next request rather than at their
+      next login.</li>
+      <li><strong>A group with no mapping grants nothing.</strong> With no
+      mapping at all, whoever signs in through the provider has no permission
+      &mdash; which is the single most common reason a fresh installation looks
+      broken.</li>
+    </ul>
+
+    <p>The laboratory maps five groups, one per role that is used there. They
+    are ordinary directory groups; the names carry no meaning to the panel
+    beyond what the mapping gives them:</p>
+
+<div class="table-scroll">
+<table>
+<thead><tr><th>Group</th><th>Role</th></tr></thead>
+<tbody>
+<tr><td><code>flotestro-viewers</code></td><td><code>viewer</code></td></tr>
+<tr><td><code>flotestro-operators</code></td><td><code>operator</code></td></tr>
+<tr><td><code>flotestro-prod-approvers</code></td><td><code>approver</code></td></tr>
+<tr><td><code>flotestro-identity-admins</code></td><td><code>identity_admin</code></td></tr>
+<tr><td><code>flotestro-platform-admins</code></td><td><code>platform_admin</code></td></tr>
+</tbody></table></div>
+
+    <p>Which site and environment each of those mappings narrows by is the
+    installation&rsquo;s decision and not the group&rsquo;s: the panel reads the
+    scope from the mapping, never from the name.</p>
+
+    <p>The group names reach the panel as the provider writes them. A group
+    mapper that emits full paths &mdash; <code>/flotestro-operators</code>
+    &mdash; is read the same as one that emits bare names, and a provider that
+    puts a single group in a string rather than a list is read the same as one
+    that sends a list of one.</p>
+
+    <h2 id="beyond">When a role is not enough</h2>
+
+    <p>Three things are asked for on top of a permission. None of them can be
+    granted by a role, and none of them replaces one.</p>
+
+    <h3>A reason and a fresh authentication</h3>
+
+    <p>The operations of the greatest impact &mdash; every change to the access
+    rules among them &mdash; require a <code>reason</code> of at least 8
+    characters and an authentication no older than the installation allows.
+    Every route in this chapter that writes is one of them: creating an
+    identity, granting or revoking a role, issuing or revoking a token, ending
+    a session, disabling or enabling an identity, and writing or removing a
+    group mapping. A reason that is too short is answered <code>400</code>
+    <code class="refusal">reason_required</code>, which signing in again will
+    not fix; an authentication that is too old is answered <code>401</code>
+    <code class="refusal">reauthentication_required</code>. What the panel
+    accepted is recorded with the change itself: the purpose the operator
+    typed, the method the provider reported and the moment of authentication.
+    The settings behind it are in
+    <a href="api.html#stepup">the API chapter</a>.</p>
+
+    <p>Operations on hosts have their own version of the same rule, decided by
+    the risk level rather than by the route: a <code>critical</code> or
+    <code>destructive</code> operation requires fresh authentication, and a
+    <code>destructive</code> one also requires the operator to type the target
+    name. The risk of one order can be higher than the level of the operation
+    &mdash; an order that creates an account in a privileged group, or moves
+    one into it, is <code>critical</code> whatever the operation says, and so
+    is one that hands over the access of an account the host reported as
+    privileged. The levels and the operations that carry them are in
+    <a href="operations.html#risk">the operations chapter</a>.</p>
+
+    <h3>A second person</h3>
+
+    <p>A mutating operation always waits for an approval: the request may ask
+    for an approval where none is needed, never waive one. In a production
+    environment &mdash; one named by
+    <code>FLOTESTRO_PRODUCTION_ENVIRONMENTS</code>,
+    <code>prod,production</code> by default &mdash; the approval may not come
+    from the person who ordered the change. The attempt is answered
+    <code>403</code> <code class="refusal">self_approval</code> and recorded as
+    a denied <code>job.approve</code>. The same rule holds for a campaign and
+    for a change in the directory.</p>
+
+    <p>This is why <code>operator</code> and <code>approver</code> are separate
+    roles rather than one. An identity holding both in the same production
+    environment can order a change and then be refused its approval, which is
+    the rule working rather than a misconfiguration &mdash; but it leaves the
+    change waiting for somebody who was not meant to be needed.</p>
+
+    <h3>A permission the order carries</h3>
+
+    <p>Three permissions are asked for by the <em>content</em> of an order,
+    on top of the one its operation needs. An order whose payload calls for one
+    of them and whose actor does not hold it is refused, whatever role that
+    actor has.</p>
+
+<div class="table-scroll">
+<table>
+<thead><tr><th>Permission</th><th>When the order needs it</th><th>Who holds it</th></tr></thead>
+<tbody>
+<tr><td><code>schedule.root.exec</code></td><td>A scheduled entry whose user is root.</td><td><code>identity_admin</code>, <code>platform_admin</code></td></tr>
+<tr><td><code>file.write.unvalidated</code></td><td>A file write or rollback that carries <code>allow_missing_validator</code>: the host lacks the validator the order relies on.</td><td><code>platform_admin</code></td></tr>
+<tr><td><code>accounts.privileged_groups</code></td><td>An order that creates an account in, or moves an account into, a group that is root by another name.</td><td><code>platform_admin</code></td></tr>
+</tbody></table></div>
+
+    <ul class="linkrow">
+      <li><a href="api.html">&larr; 8. API</a></li>
+      <li><a href="installation.html#admin">3. The first administrator</a></li>
+      <li><a href="runbooks.html">Next: 10. Runbooks &rarr;</a></li>
+      <li><a href="./">Contents</a></li>
+    </ul>
+  </main>
+
+</div>
+
+<footer class="site-footer">
+  <div class="site-footer__inner">
+    <p>Flotestro documentation, release 0.62.0.</p>
+    <p><a href="https://github.com/ultherego/Flotestro">github.com/ultherego/Flotestro</a></p>
+  </div>
+</footer>
+
+</body>
+</html>
