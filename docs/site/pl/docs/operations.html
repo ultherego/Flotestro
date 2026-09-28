@@ -112,7 +112,7 @@
 <h2 id="risk">Poziomy ryzyka</h2>
 <div class="table-scroll">
 <table>
-<thead><tr><th>Value</th><th>Meaning</th></tr></thead>
+<thead><tr><th>Wartość</th><th>Znaczenie</th></tr></thead>
 <tbody>
 <tr><td><code>low</code></td><td>Odczyt albo plan: nic nie zmienia.</td></tr>
 <tr><td><code>medium</code></td><td>Zmienia stan odwracalnie i lokalnie.</td></tr>
@@ -136,7 +136,7 @@
 <p>Klasa blokady nazywa zasób hosta, z którego operacja korzysta na wyłączność. Operacja bez klasy nie nazywa żadnego.</p>
 <div class="table-scroll">
 <table>
-<thead><tr><th>Value</th><th>Meaning</th></tr></thead>
+<thead><tr><th>Wartość</th><th>Znaczenie</th></tr></thead>
 <tbody>
 <tr><td><code>packages</code></td><td>Menedżer pakietów hosta.</td></tr>
 <tr><td><code>units</code></td><td>Jednostki systemd.</td></tr>
@@ -166,7 +166,7 @@
 <p>Kampania to ta sama operacja na wielu hostach. To, czy jest dozwolona i na jakich warunkach, deklaruje sama operacja; brak deklaracji oznacza odmowę.</p>
 <div class="table-scroll">
 <table>
-<thead><tr><th>Value</th><th>Meaning</th></tr></thead>
+<thead><tr><th>Wartość</th><th>Znaczenie</th></tr></thead>
 <tbody>
 <tr><td><code>none</code></td><td>Niedozwolona masowo.</td></tr>
 <tr><td><code>same_payload</code></td><td>Ten sam payload znaczy to samo na każdym hoście.</td></tr>
@@ -195,7 +195,7 @@
 <p>Co kampania robi z hostem, który nie jest połączony, gdy przychodzi jego kolej. Kampania może politykę zadeklarowaną przez operację tylko zaostrzyć, nigdy poluzować.</p>
 <div class="table-scroll">
 <table>
-<thead><tr><th>Value</th><th>Meaning</th></tr></thead>
+<thead><tr><th>Wartość</th><th>Znaczenie</th></tr></thead>
 <tbody>
 <tr><td><code>require_online</code></td><td>Kończy udział hosta w chwili, gdy okaże się on offline: zlecenie jest reakcją na sytuację, a stanu, dla którego je wydano, nie będzie już, gdy host wróci.</td></tr>
 <tr><td><code>skip_if_offline</code></td><td>Pomija host, nie nazywając tego porażką: odczyt albo odświeżenie, które się nie odbyło, to luka w wiedzy, a nie zepsuta zmiana.</td></tr>
@@ -219,7 +219,7 @@
 <p>Co kampania sprawdza na hoście po zmianie:</p>
 <div class="table-scroll">
 <table>
-<thead><tr><th>Value</th><th>Meaning</th></tr></thead>
+<thead><tr><th>Wartość</th><th>Znaczenie</th></tr></thead>
 <tbody>
 <tr><td><code>none</code></td><td>Nie ma czego sprawdzać albo nie da się tego sprawdzić z panelu.</td></tr>
 <tr><td><code>unit_health</code></td><td>Jednostka, której dotyczy zmiana, jest w oczekiwanym stanie i zdrowa.</td></tr>
@@ -230,7 +230,7 @@
 <p>Jaka droga powrotna istnieje, gdy zmiana już weszła w życie:</p>
 <div class="table-scroll">
 <table>
-<thead><tr><th>Value</th><th>Meaning</th></tr></thead>
+<thead><tr><th>Wartość</th><th>Znaczenie</th></tr></thead>
 <tbody>
 <tr><td><code>automatic_local</code></td><td>Host cofa zmianę sam, bez control plane - watchdog łączności w modułach sieci i firewalla.</td></tr>
 <tr><td><code>exact_restore</code></td><td>Poprzednia wersja jest przechowywana i można ją przywrócić w niezmienionej postaci - zarządzany plik, harmonogram, manifest Compose.</td></tr>
@@ -238,11 +238,11 @@
 <tr><td><code>best_effort</code></td><td>Próba ograniczenia szkód bez gwarancji stanu początkowego.</td></tr>
 <tr><td><code>none</code></td><td>Nieodwracalne - wymazanie, wyłączenie, sygnał.</td></tr>
 </tbody></table></div>
-<p>Pięć zmian ma nazwaną operację, która je cofa: <code>file.ensure</code> &rarr; <code>file.rollback</code>, <code>network.profile.apply</code>, <code>network.link.apply</code> and <code>network.link.remove</code> &rarr; <code>network.rollback</code>, and <code>firewall.rule.ensure</code> &rarr; <code>firewall.ruleset.restore</code>.</p>
+<p>Pięć zmian ma nazwaną operację, która je cofa: <code>file.ensure</code> &rarr; <code>file.rollback</code>, <code>network.profile.apply</code>, <code>network.link.apply</code> i <code>network.link.remove</code> &rarr; <code>network.rollback</code> oraz <code>firewall.rule.ensure</code> &rarr; <code>firewall.ruleset.restore</code>.</p>
 <p>Co anulowanie robi z trwającą operacją. Operację stojącą w kolejce zawsze można anulować: nie dotknęła jeszcze hosta.</p>
 <div class="table-scroll">
 <table>
-<thead><tr><th>Value</th><th>Meaning</th></tr></thead>
+<thead><tr><th>Wartość</th><th>Znaczenie</th></tr></thead>
 <tbody>
 <tr><td><code>safe</code></td><td>Anulowanie kontekstu przerywa operację i zostawia spójny stan - odczyt, sonda, strumień.</td></tr>
 <tr><td><code>checkpoint_only</code></td><td>Anulowanie sprawdzane jest tylko między krokami atomowymi. Trwający krok się kończy; następny już nie startuje.</td></tr>
@@ -252,7 +252,7 @@
 <p>Czy powtórzenie tego samego może się udać:</p>
 <div class="table-scroll">
 <table>
-<thead><tr><th>Value</th><th>Meaning</th></tr></thead>
+<thead><tr><th>Wartość</th><th>Znaczenie</th></tr></thead>
 <tbody>
 <tr><td><code>never</code></td><td>To samo zlecenie zawiedzie tak samo; potrzebna jest decyzja.</td></tr>
 <tr><td><code>automatic</code></td><td>System powtarza sam, np. gdy zwolni się pojemność.</td></tr>
@@ -268,21 +268,21 @@
 <table>
 <thead><tr><th>Grupa</th><th>Operacje</th></tr></thead>
 <tbody>
-<tr><td><a href="#group-services">Services</a></td><td>8</td></tr>
-<tr><td><a href="#group-scheduled-jobs">Scheduled jobs</a></td><td>5</td></tr>
-<tr><td><a href="#group-packages">Packages</a></td><td>8</td></tr>
-<tr><td><a href="#group-files">Files</a></td><td>5</td></tr>
-<tr><td><a href="#group-network">Network</a></td><td>10</td></tr>
-<tr><td><a href="#group-security">Security</a></td><td>13</td></tr>
-<tr><td><a href="#group-storage">Storage</a></td><td>17</td></tr>
-<tr><td><a href="#group-containers">Containers</a></td><td>17</td></tr>
+<tr><td><a href="#group-services">Usługi</a></td><td>8</td></tr>
+<tr><td><a href="#group-scheduled-jobs">Zadania cykliczne</a></td><td>5</td></tr>
+<tr><td><a href="#group-packages">Pakiety</a></td><td>8</td></tr>
+<tr><td><a href="#group-files">Pliki</a></td><td>5</td></tr>
+<tr><td><a href="#group-network">Sieć</a></td><td>10</td></tr>
+<tr><td><a href="#group-security">Bezpieczeństwo</a></td><td>13</td></tr>
+<tr><td><a href="#group-storage">Pamięć masowa</a></td><td>17</td></tr>
+<tr><td><a href="#group-containers">Kontenery</a></td><td>17</td></tr>
 <tr><td><a href="#group-system">System</a></td><td>13</td></tr>
-<tr><td><a href="#group-accounts">Accounts</a></td><td>10</td></tr>
-<tr><td><a href="#group-directory">Directory</a></td><td>4</td></tr>
-<tr><td><a href="#group-certificates">Certificates</a></td><td>7</td></tr>
-<tr><td><a href="#group-backups">Backups</a></td><td>4</td></tr>
-<tr><td><a href="#group-logs-and-processes">Logs and processes</a></td><td>5</td></tr>
-<tr><td><a href="#group-inventory-and-monitoring">Inventory and monitoring</a></td><td>2</td></tr>
+<tr><td><a href="#group-accounts">Konta</a></td><td>10</td></tr>
+<tr><td><a href="#group-directory">Katalog</a></td><td>4</td></tr>
+<tr><td><a href="#group-certificates">Certyfikaty</a></td><td>7</td></tr>
+<tr><td><a href="#group-backups">Kopie zapasowe</a></td><td>4</td></tr>
+<tr><td><a href="#group-logs-and-processes">Logi i procesy</a></td><td>5</td></tr>
+<tr><td><a href="#group-inventory-and-monitoring">Inventory i monitoring</a></td><td>2</td></tr>
 </tbody></table></div>
 <h2 id="group-services">Usługi</h2>
 <div class="table-scroll">
@@ -417,12 +417,12 @@
 <thead><tr><th>Operacja</th><th>Co robi</th><th>Uprawnienie</th><th>Ryzyko</th><th>Świeże uwierzytelnienie</th><th>Blokada</th><th>Kampania</th><th>Payload</th></tr></thead>
 <tbody>
 <tr><td><a href="#op-dns-host-apply"><code>dns.host.apply</code></a></td><td>Ustawia serwery nazw hosta</td><td><code>dns.host.write</code></td><td><span class="badge risk-critical">critical</span></td><td>tak</td><td><code>network</code></td><td><code>per_host_plan</code></td><td><a href="#payload-dns"><code>dns</code></a></td></tr>
-<tr><td><a href="#op-dns-plan"><code>dns.plan</code></a></td><td>Plan resolvera: różnica między znalezionym profilem a żądanym</td><td><code>dns.plan</code></td><td><span class="badge risk-low">low</span></td><td>nie</td><td>brak</td><td><code>none</code></td><td><a href="#payload-dns"><code>dns</code></a> <span class="caption">(optional)</span></td></tr>
+<tr><td><a href="#op-dns-plan"><code>dns.plan</code></a></td><td>Plan resolvera: różnica między znalezionym profilem a żądanym</td><td><code>dns.plan</code></td><td><span class="badge risk-low">low</span></td><td>nie</td><td>brak</td><td><code>none</code></td><td><a href="#payload-dns"><code>dns</code></a> <span class="caption">(opcjonalny)</span></td></tr>
 <tr><td><a href="#op-dns-resolve-test"><code>dns.resolve.test</code></a></td><td>Test rozwiązywania nazw pyta z hosta, bo odpowiedź panelu nic nie mówi o tym, co zobaczy host. Samo zapytanie niczego nie zmienia</td><td><code>dns.read</code></td><td><span class="badge risk-low">low</span></td><td>nie</td><td>brak</td><td><code>none</code></td><td><a href="#payload-dns"><code>dns</code></a></td></tr>
 <tr><td><a href="#op-network-link-apply"><code>network.link.apply</code></a></td><td>Tworzy albo zmienia bond, bridge lub VLAN</td><td><code>network.link.write</code></td><td><span class="badge risk-critical">critical</span></td><td>tak</td><td><code>network</code></td><td><code>per_host_plan</code></td><td><a href="#payload-network"><code>network</code></a></td></tr>
 <tr><td><a href="#op-network-link-remove"><code>network.link.remove</code></a></td><td>Usuwa bond, bridge lub VLAN</td><td><code>network.link.remove</code></td><td><span class="badge risk-critical">critical</span></td><td>tak</td><td><code>network</code></td><td><code>per_host_plan</code></td><td><a href="#payload-network"><code>network</code></a></td></tr>
 <tr><td><a href="#op-network-mtu-set"><code>network.mtu.set</code></a></td><td>Ustawia MTU interfejsu</td><td><code>network.mtu.write</code></td><td><span class="badge risk-high">high</span></td><td>nie</td><td><code>network</code></td><td><code>per_host_plan</code></td><td><a href="#payload-network"><code>network</code></a></td></tr>
-<tr><td><a href="#op-network-plan"><code>network.plan</code></a></td><td>Odczyt profili NetworkManagera przed zmianą. Plan nie dotyka hosta</td><td><code>network.read</code></td><td><span class="badge risk-low">low</span></td><td>nie</td><td>brak</td><td><code>none</code></td><td><a href="#payload-network"><code>network</code></a> <span class="caption">(optional)</span></td></tr>
+<tr><td><a href="#op-network-plan"><code>network.plan</code></a></td><td>Odczyt profili NetworkManagera przed zmianą. Plan nie dotyka hosta</td><td><code>network.read</code></td><td><span class="badge risk-low">low</span></td><td>nie</td><td>brak</td><td><code>none</code></td><td><a href="#payload-network"><code>network</code></a> <span class="caption">(opcjonalny)</span></td></tr>
 <tr><td><a href="#op-network-profile-apply"><code>network.profile.apply</code></a></td><td>Ustawia adresację interfejsu</td><td><code>network.write</code></td><td><span class="badge risk-critical">critical</span></td><td>tak</td><td><code>network</code></td><td><code>per_host_plan</code></td><td><a href="#payload-network"><code>network</code></a></td></tr>
 <tr><td><a href="#op-network-rollback"><code>network.rollback</code></a></td><td>Cofa zmianę sieciową</td><td><code>network.rollback</code></td><td><span class="badge risk-high">high</span></td><td>nie</td><td><code>network</code></td><td><code>specialized</code></td><td><a href="#payload-network"><code>network</code></a></td></tr>
 <tr><td><a href="#op-network-route-ensure"><code>network.route.ensure</code></a></td><td>Ustawia trasy interfejsu</td><td><code>network.route.write</code></td><td><span class="badge risk-critical">critical</span></td><td>tak</td><td><code>network</code></td><td><code>per_host_plan</code></td><td><a href="#payload-network"><code>network</code></a></td></tr>
@@ -534,7 +534,7 @@
 <tr><td><a href="#op-raid-member-add"><code>raid.member.add</code></a></td><td>Dodaje członka do macierzy</td><td><code>storage.raid.add</code></td><td><span class="badge risk-destructive">destructive</span></td><td>tak</td><td><code>storage</code></td><td><code>none</code></td><td><a href="#payload-storage"><code>storage</code></a></td></tr>
 <tr><td><a href="#op-raid-member-fail"><code>raid.member.fail</code></a></td><td>Oznacza członka macierzy jako uszkodzonego</td><td><code>storage.raid.fail</code></td><td><span class="badge risk-destructive">destructive</span></td><td>tak</td><td><code>storage</code></td><td><code>none</code></td><td><a href="#payload-storage"><code>storage</code></a></td></tr>
 <tr><td><a href="#op-raid-member-remove"><code>raid.member.remove</code></a></td><td>Wyjmuje członka z macierzy</td><td><code>storage.raid.remove</code></td><td><span class="badge risk-high">high</span></td><td>nie</td><td><code>storage</code></td><td><code>none</code></td><td><a href="#payload-storage"><code>storage</code></a></td></tr>
-<tr><td><a href="#op-storage-plan"><code>storage.plan</code></a></td><td>Odczyt topologii na żądanie</td><td><code>storage.read</code></td><td><span class="badge risk-low">low</span></td><td>nie</td><td>brak</td><td><code>none</code></td><td><a href="#payload-storage"><code>storage</code></a> <span class="caption">(optional)</span></td></tr>
+<tr><td><a href="#op-storage-plan"><code>storage.plan</code></a></td><td>Odczyt topologii na żądanie</td><td><code>storage.read</code></td><td><span class="badge risk-low">low</span></td><td>nie</td><td>brak</td><td><code>none</code></td><td><a href="#payload-storage"><code>storage</code></a> <span class="caption">(opcjonalny)</span></td></tr>
 <tr><td><a href="#op-storage-smart-read"><code>storage.smart.read</code></a></td><td>Czyta zdrowie i atrybuty SMART jednego urządzenia</td><td><code>storage.smart.read</code></td><td><span class="badge risk-low">low</span></td><td>nie</td><td>brak</td><td><code>none</code></td><td><a href="#payload-storage"><code>storage</code></a></td></tr>
 </tbody></table></div>
 <h3 id="op-disk-wipe"><code>disk.wipe</code></h3>
@@ -669,14 +669,14 @@
 <tr><td><a href="#op-agent-upgrade"><code>agent.upgrade</code></a></td><td>Podmienia agenta na inną wersję</td><td><code>agent.upgrade</code></td><td><span class="badge risk-high">high</span></td><td>nie</td><td><code>packages</code></td><td><code>same_payload</code></td><td><a href="#payload-agent-upgrade"><code>agent_upgrade</code></a></td></tr>
 <tr><td><a href="#op-kernel-module-blacklist"><code>kernel.module.blacklist</code></a></td><td>Blokuje ładowanie modułu jądra</td><td><code>kernel.module.blacklist</code></td><td><span class="badge risk-critical">critical</span></td><td>tak</td><td>brak</td><td><code>per_host_plan</code></td><td><a href="#payload-kernel"><code>kernel</code></a></td></tr>
 <tr><td><a href="#op-kernel-module-load"><code>kernel.module.load</code></a></td><td>Ładuje moduł jądra</td><td><code>kernel.module.write</code></td><td><span class="badge risk-high">high</span></td><td>nie</td><td>brak</td><td><code>same_payload</code></td><td><a href="#payload-kernel"><code>kernel</code></a></td></tr>
-<tr><td><a href="#op-kernel-module-plan"><code>kernel.module.plan</code></a></td><td>Plan blacklisty modułów: różnica między znalezioną blacklistą a żądaną. Nie dotyka hosta</td><td><code>kernel.module.plan</code></td><td><span class="badge risk-low">low</span></td><td>nie</td><td>brak</td><td><code>none</code></td><td><a href="#payload-kernel"><code>kernel</code></a> <span class="caption">(optional)</span></td></tr>
+<tr><td><a href="#op-kernel-module-plan"><code>kernel.module.plan</code></a></td><td>Plan blacklisty modułów: różnica między znalezioną blacklistą a żądaną. Nie dotyka hosta</td><td><code>kernel.module.plan</code></td><td><span class="badge risk-low">low</span></td><td>nie</td><td>brak</td><td><code>none</code></td><td><a href="#payload-kernel"><code>kernel</code></a> <span class="caption">(opcjonalny)</span></td></tr>
 <tr><td><a href="#op-sysctl-ensure"><code>sysctl.ensure</code></a></td><td>Ustawia parametry jądra</td><td><code>kernel.sysctl.write</code></td><td><span class="badge risk-high">high</span></td><td>nie</td><td>brak</td><td><code>same_payload</code></td><td><a href="#payload-kernel"><code>kernel</code></a></td></tr>
-<tr><td><a href="#op-sysctl-plan"><code>sysctl.plan</code></a></td><td>Odczyt ustawień jądra</td><td><code>kernel.read</code></td><td><span class="badge risk-low">low</span></td><td>nie</td><td>brak</td><td><code>none</code></td><td><a href="#payload-kernel"><code>kernel</code></a> <span class="caption">(optional)</span></td></tr>
+<tr><td><a href="#op-sysctl-plan"><code>sysctl.plan</code></a></td><td>Odczyt ustawień jądra</td><td><code>kernel.read</code></td><td><span class="badge risk-low">low</span></td><td>nie</td><td>brak</td><td><code>none</code></td><td><a href="#payload-kernel"><code>kernel</code></a> <span class="caption">(opcjonalny)</span></td></tr>
 <tr><td><a href="#op-system-hostname-set"><code>system.hostname.set</code></a></td><td>Zmienia nazwę hosta</td><td><code>system.hostname.write</code></td><td><span class="badge risk-critical">critical</span></td><td>tak</td><td><code>host</code></td><td><code>per_host_plan</code></td><td><a href="#payload-hostname"><code>hostname</code></a></td></tr>
 <tr><td><a href="#op-system-reboot"><code>system.reboot</code></a></td><td>Restartuje host</td><td><code>system.reboot</code></td><td><span class="badge risk-critical">critical</span></td><td>tak</td><td>brak</td><td><code>specialized</code></td><td><a href="#payload-reboot"><code>reboot</code></a></td></tr>
 <tr><td><a href="#op-system-shutdown"><code>system.shutdown</code></a></td><td>Wyłączenie hosta to operacja, z której panel nie umie go przywrócić: włączenie wymaga dostępu poza pasmem</td><td><code>system.shutdown</code></td><td><span class="badge risk-critical">critical</span></td><td>tak</td><td><code>units</code></td><td><code>none</code></td><td><a href="#payload-power"><code>power</code></a></td></tr>
 <tr><td><a href="#op-time-config-apply"><code>time.config.apply</code></a></td><td>Ustawia, skąd host bierze czas</td><td><code>time.write</code></td><td><span class="badge risk-high">high</span></td><td>nie</td><td><code>units</code></td><td><code>per_host_plan</code></td><td><a href="#payload-time"><code>time</code></a></td></tr>
-<tr><td><a href="#op-time-plan"><code>time.plan</code></a></td><td>Plan źródła czasu: różnica między plikiem panelu a zleceniem, wraz z tym, czy demon zostanie zrestartowany</td><td><code>time.plan</code></td><td><span class="badge risk-low">low</span></td><td>nie</td><td>brak</td><td><code>none</code></td><td><a href="#payload-time"><code>time</code></a> <span class="caption">(optional)</span></td></tr>
+<tr><td><a href="#op-time-plan"><code>time.plan</code></a></td><td>Plan źródła czasu: różnica między plikiem panelu a zleceniem, wraz z tym, czy demon zostanie zrestartowany</td><td><code>time.plan</code></td><td><span class="badge risk-low">low</span></td><td>nie</td><td>brak</td><td><code>none</code></td><td><a href="#payload-time"><code>time</code></a> <span class="caption">(opcjonalny)</span></td></tr>
 <tr><td><a href="#op-time-sync-test"><code>time.sync.test</code></a></td><td>&mdash;</td><td><code>time.read</code></td><td><span class="badge risk-low">low</span></td><td>nie</td><td>brak</td><td><code>none</code></td><td><a href="#payload-time"><code>time</code></a></td></tr>
 <tr><td><a href="#op-time-timezone-set"><code>time.timezone.set</code></a></td><td>Ustawia strefę czasową hosta</td><td><code>time.timezone.write</code></td><td><span class="badge risk-medium">medium</span></td><td>nie</td><td>brak</td><td><code>same_payload</code></td><td><a href="#payload-time"><code>time</code></a></td></tr>
 </tbody></table></div>
@@ -796,11 +796,11 @@
 <thead><tr><th>Operacja</th><th>Co robi</th><th>Uprawnienie</th><th>Ryzyko</th><th>Świeże uwierzytelnienie</th><th>Blokada</th><th>Kampania</th><th>Payload</th></tr></thead>
 <tbody>
 <tr><td><a href="#op-certificate-deploy"><code>certificate.deploy</code></a></td><td>Umieszcza certyfikat na hoście</td><td><code>certificate.deploy</code></td><td><span class="badge risk-critical">critical</span></td><td>tak</td><td><code>units</code></td><td><code>per_host_plan</code></td><td><a href="#payload-certificate"><code>certificate</code></a></td></tr>
-<tr><td><a href="#op-certificate-plan"><code>certificate.plan</code></a></td><td>Wylicza plan dla certificate.deploy, certificate.renew</td><td><code>certificate.plan</code></td><td><span class="badge risk-low">low</span></td><td>nie</td><td>brak</td><td><code>none</code></td><td><a href="#payload-certificate"><code>certificate</code></a> <span class="caption">(optional)</span></td></tr>
+<tr><td><a href="#op-certificate-plan"><code>certificate.plan</code></a></td><td>Wylicza plan dla certificate.deploy, certificate.renew</td><td><code>certificate.plan</code></td><td><span class="badge risk-low">low</span></td><td>nie</td><td>brak</td><td><code>none</code></td><td><a href="#payload-certificate"><code>certificate</code></a> <span class="caption">(opcjonalny)</span></td></tr>
 <tr><td><a href="#op-certificate-renew"><code>certificate.renew</code></a></td><td>Każe hostowi odnowić certyfikat</td><td><code>certificate.renew</code></td><td><span class="badge risk-critical">critical</span></td><td>tak</td><td><code>units</code></td><td><code>per_host_plan</code></td><td><a href="#payload-certificate"><code>certificate</code></a></td></tr>
 <tr><td><a href="#op-certificate-scan"><code>certificate.scan</code></a></td><td>Skan ogląda pliki, które mu wskazano, i nie zmienia hosta</td><td><code>certificate.read</code></td><td><span class="badge risk-low">low</span></td><td>nie</td><td>brak</td><td><code>none</code></td><td><a href="#payload-certificate"><code>certificate</code></a></td></tr>
 <tr><td><a href="#op-certificate-trust-ensure"><code>certificate.trust.ensure</code></a></td><td>Każe hostowi zaufać urzędowi</td><td><code>certificate.trust.write</code></td><td><span class="badge risk-critical">critical</span></td><td>tak</td><td><code>certificates</code></td><td><code>per_host_plan</code></td><td><a href="#payload-certificate"><code>certificate</code></a></td></tr>
-<tr><td><a href="#op-certificate-trust-plan"><code>certificate.trust.plan</code></a></td><td>Wylicza plan dla certificate.trust.ensure, certificate.trust.remove</td><td><code>certificate.trust.plan</code></td><td><span class="badge risk-low">low</span></td><td>nie</td><td>brak</td><td><code>none</code></td><td><a href="#payload-certificate"><code>certificate</code></a> <span class="caption">(optional)</span></td></tr>
+<tr><td><a href="#op-certificate-trust-plan"><code>certificate.trust.plan</code></a></td><td>Wylicza plan dla certificate.trust.ensure, certificate.trust.remove</td><td><code>certificate.trust.plan</code></td><td><span class="badge risk-low">low</span></td><td>nie</td><td>brak</td><td><code>none</code></td><td><a href="#payload-certificate"><code>certificate</code></a> <span class="caption">(opcjonalny)</span></td></tr>
 <tr><td><a href="#op-certificate-trust-remove"><code>certificate.trust.remove</code></a></td><td>Każe hostowi przestać ufać urzędowi</td><td><code>certificate.trust.remove</code></td><td><span class="badge risk-critical">critical</span></td><td>tak</td><td><code>certificates</code></td><td><code>per_host_plan</code></td><td><a href="#payload-certificate"><code>certificate</code></a></td></tr>
 </tbody></table></div>
 <h3 id="op-certificate-deploy"><code>certificate.deploy</code></h3>

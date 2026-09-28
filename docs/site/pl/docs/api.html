@@ -127,7 +127,7 @@
 </tbody></table></div>
 <p>Wartość, której host nie zgłosił, nie udaje zera: licznik o nieznanej wartości sortuje się poniżej zera, a host, którego nigdy nie widziano, trafia przed każdego hosta, który się kiedyś odezwał.</p>
 <h2 id="revisions">Rewizje, ETag i If-Match</h2>
-<p>Dwóch operatorów edytujących ten sam rekord to zwykła sytuacja, więc współdzielone rekordy noszą wersję. Odczyt takiego rekordu zwraca słaby entity tag w <code>ETag</code>; zapis może go odesłać w <code>If-Match</code>. Bez tego nagłówka zapis po prostu się wykonuje; z nim rekord zmieniony w międzyczasie kończy się odmową <code>412</code> <code>precondition_failed</code> i bieżącym tagiem w odpowiedzi: <em>rekord zmienił się od czasu odczytu; odczytaj go ponownie i powtórz zapis z jego bieżącym ETagiem</em>. <code>If-Match: *</code> pasuje do dowolnej wersji.</p>
+<p>Dwóch operatorów edytujących ten sam rekord to zwykła sytuacja, więc współdzielone rekordy noszą wersję. Odczyt takiego rekordu zwraca słaby entity tag w <code>ETag</code>; zapis może go odesłać w <code>If-Match</code>. Bez tego nagłówka zapis po prostu się wykonuje; z nim rekord zmieniony w międzyczasie kończy się odmową <code>412</code> <code>precondition_failed</code> i bieżącym tagiem w odpowiedzi: <em>the record changed since it was read; read it again and repeat the write with its current ETag</em>. <code>If-Match: *</code> pasuje do dowolnej wersji.</p>
 <p>Kampania ma własną rewizję, w samym rekordzie, a nie w nagłówku: rośnie przy każdej zmianie stanu, a klient, który odczytał kampanię w jednej rewizji, a zleca przejście przy innej, dostaje <code>409</code> <code>concurrent_transition</code>.</p>
 <p>Część zapisów wiąże się z tym, co operator zobaczył, jeszcze inaczej: zatwierdzenie może nieść <code>payload_hash</code> i zostaje odrzucone, jeśli plan zmienił się między obejrzeniem a zatwierdzeniem.</p>
 <h2 id="idempotency">Idempotency key</h2>
@@ -391,7 +391,7 @@
 <tbody>
 <tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/identity/access/simulate</code><br><span class="caption">Dostęp efektywny: symulacja katalogu dla pary użytkownik-host oraz rzut reguł na jednego hosta.</span></td><td><code>identity.policy.read</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/changes</code><br><span class="caption">Zmiany w katalogu: plan, zatwierdzenie i wykonanie faza po fazie.</span></td><td><code>identity.read</code></td></tr>
-<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/identity/changes</code></td><td>the permission of the change type: <code>identity.user.write</code>, <code>identity.group.write</code>, <code>identity.policy.write</code>, <code>dns.directory.write</code>, <code>identity.keytab.rotate</code> or, for a simulation, <code>identity.policy.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/identity/changes</code></td><td>uprawnienie właściwe dla typu zmiany: <code>identity.user.write</code>, <code>identity.group.write</code>, <code>identity.policy.write</code>, <code>dns.directory.write</code>, <code>identity.keytab.rotate</code> albo, dla symulacji, <code>identity.policy.read</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/changes/{id}</code></td><td><code>identity.read</code></td></tr>
 <tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/identity/changes/{id}/approve</code></td><td><code>identity.policy.write</code></td></tr>
 <tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/identity/changes/{id}/cancel</code></td><td><code>identity.user.write</code></td></tr>
@@ -469,10 +469,10 @@
 <tbody>
 <tr><td><code>target_id</code></td><td><code>string</code></td><td></td></tr>
 <tr><td><code>target_type</code></td><td><code>string</code></td><td></td></tr>
-<tr><td><code>actor</code></td><td><code>string</code></td><td>The identity that acted.</td></tr>
+<tr><td><code>actor</code></td><td><code>string</code></td><td>Tożsamość, która wykonała działanie.</td></tr>
 <tr><td><code>actor_kind</code></td><td><code>string</code></td><td>user, service, anonymous, agent, relay, machine albo system.</td></tr>
-<tr><td><code>actor_principal_id</code></td><td><code>string</code></td><td>The immutable identifier of the identity that acted.</td></tr>
-<tr><td><code>actor_resource_id</code></td><td><code>string</code></td><td>The host, relay or campaign that acted.</td></tr>
+<tr><td><code>actor_principal_id</code></td><td><code>string</code></td><td>Niezmienny identyfikator tożsamości, która wykonała działanie.</td></tr>
+<tr><td><code>actor_resource_id</code></td><td><code>string</code></td><td>Host, relay albo kampania, które wykonały działanie.</td></tr>
 <tr><td><code>action</code></td><td><code>string</code></td><td></td></tr>
 <tr><td><code>action_prefix</code></td><td><code>string</code></td><td>Początek nazwy akcji; job. zostawia wszystkie zdarzenia dotyczące zadania.</td></tr>
 <tr><td><code>outcome</code></td><td><code>string</code></td><td>success, failure albo denied.</td></tr>
@@ -487,18 +487,18 @@
 <thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
 <tbody>
 <tr><td><code>limit</code></td><td><code>integer</code></td><td>Rozmiar strony: domyślnie 100, najwyżej 500.</td></tr>
-<tr><td><code>cursor</code></td><td><code>string</code></td><td>The next_cursor of the previous page; empty for the first page. The moment the ages were judged at travels in it, so every page of one reading judges by the same clock.</td></tr>
+<tr><td><code>cursor</code></td><td><code>string</code></td><td>Wartość next_cursor z poprzedniej strony; puste dla pierwszej strony. Podróżuje w nim moment, względem którego oceniono wiek, więc wszystkie strony jednego odczytu liczą według tego samego zegara.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-campaigns-preview"><code>GET /api/v1/campaigns/preview</code></h3>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
 <tbody>
-<tr><td><code>action</code></td><td><code>string</code></td><td>The operation type; without it the preview counts hosts and qualifies none. For an operation the panel splits host by host (system.hostname.set) the answer also lists every ready host under hosts [{id, hostname}], for the mapping to name.</td></tr>
+<tr><td><code>action</code></td><td><code>string</code></td><td>Typ operacji; bez niego podgląd liczy hosty, ale żadnego nie kwalifikuje. Dla operacji, którą panel rozbija host po hoście (system.hostname.set), odpowiedź wymienia też każdego gotowego hosta w polu hosts [{id, hostname}], na potrzeby mapowania nazw.</td></tr>
 <tr><td><code>site</code></td><td><code>string</code></td><td></td></tr>
 <tr><td><code>environment</code></td><td><code>string</code></td><td></td></tr>
 <tr><td><code>os_family</code></td><td><code>string</code></td><td></td></tr>
-<tr><td><code>expression</code></td><td><code>string</code></td><td>The typed selector as JSON; when present it decides alone.</td></tr>
+<tr><td><code>expression</code></td><td><code>string</code></td><td>Selektor typowany w postaci JSON; jeśli jest obecny, decyduje sam.</td></tr>
 <tr><td><code>exclude</code></td><td><code>string</code></td><td>Identyfikator hosta do pominięcia; może się powtarzać.</td></tr>
 <tr><td><code>exclude_reason</code></td><td><code>string</code></td><td></td></tr>
 <tr><td><code>compensates</code></td><td><code>string</code></td><td>Kampania, którą zlecenie ma cofnąć; pusty selektor wskazuje wtedy hosty zmienione przez tamtą kampanię, a odpowiedź niesie oryginał w polu compensates.</td></tr>
@@ -530,7 +530,7 @@
 <tr><td><code>kind</code></td><td><code>string</code></td><td>agent albo relay.</td></tr>
 <tr><td><code>site</code></td><td><code>string</code></td><td></td></tr>
 <tr><td><code>environment</code></td><td><code>string</code></td><td></td></tr>
-<tr><td><code>limit</code></td><td><code>integer</code></td><td>The page size: 200 by default, 500 at most.</td></tr>
+<tr><td><code>limit</code></td><td><code>integer</code></td><td>Rozmiar strony: domyślnie 200, najwyżej 500.</td></tr>
 <tr><td><code>cursor</code></td><td><code>string</code></td><td>Wartość next_cursor z poprzedniej strony; puste dla pierwszej strony.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-host-groups-preview"><code>GET /api/v1/host-groups/preview</code></h3>
@@ -538,7 +538,7 @@
 <table>
 <thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
 <tbody>
-<tr><td><code>expression</code></td><td><code>string</code></td><td>The typed selector as JSON; the answer is the count within the caller's scope, a sample of up to 20 hostnames and the selector in one line.</td></tr>
+<tr><td><code>expression</code></td><td><code>string</code></td><td>Selektor typowany w postaci JSON; odpowiedzią jest liczba hostów w zakresie wywołującego, próbka do 20 nazw hostów i selektor zapisany w jednej linii.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-hosts"><code>GET /api/v1/hosts</code></h3>
 <div class="table-scroll">
@@ -554,20 +554,20 @@
 <tr><td><code>owner</code></td><td><code>string</code></td><td></td></tr>
 <tr><td><code>identity_domain</code></td><td><code>string</code></td><td>Domena katalogu, do której host jest przyłączony, w postaci zgłaszanej przez jego moduł tożsamości.</td></tr>
 <tr><td><code>tag</code></td><td><code>string</code></td><td>Tag, który host musi nosić; może się powtarzać, a host musi mieć wszystkie wymienione tagi.</td></tr>
-<tr><td><code>channel</code></td><td><code>string</code></td><td>The release channel the host follows: stable or beta.</td></tr>
-<tr><td><code>maintenance</code></td><td><code>boolean</code></td><td>true keeps the hosts inside a maintenance window now, false those outside one.</td></tr>
-<tr><td><code>reboot_required</code></td><td><code>boolean</code></td><td>true keeps the hosts that need a reboot, false the ones that reported none; a host that has not reported is in neither.</td></tr>
-<tr><td><code>security_updates</code></td><td><code>boolean</code></td><td>true keeps the hosts with a security update waiting, false the ones that reported none; an unknown count is in neither.</td></tr>
-<tr><td><code>failed_units</code></td><td><code>boolean</code></td><td>true keeps the hosts with at least one failed unit, false the ones that reported none; a host that has not reported is in neither.</td></tr>
-<tr><td><code>package_db_broken</code></td><td><code>boolean</code></td><td>true keeps the hosts (not retired) whose package database the last operation found broken, false the sound ones.</td></tr>
-<tr><td><code>sssd_offline</code></td><td><code>boolean</code></td><td>true keeps the domain-joined hosts (not retired) whose SSSD reports itself offline, false those online; a host outside a domain is in neither.</td></tr>
-<tr><td><code>agent_behind</code></td><td><code>boolean</code></td><td>true keeps the hosts whose agent is older than the newest version reported in the visible fleet, false those on it; a version that does not parse is in neither.</td></tr>
-<tr><td><code>relay</code></td><td><code>string</code></td><td>The identifier of a relay; keeps the hosts whose open session it attested.</td></tr>
-<tr><td><code>failure_domain</code></td><td><code>string</code></td><td>The failure domain an operator placed the host in.</td></tr>
-<tr><td><code>team</code></td><td><code>string</code></td><td>The identifier of a team; keeps its hosts. The word none keeps the hosts nobody has placed in a team.</td></tr>
+<tr><td><code>channel</code></td><td><code>string</code></td><td>Kanał wydań, który śledzi host: stable albo beta.</td></tr>
+<tr><td><code>maintenance</code></td><td><code>boolean</code></td><td>true zostawia hosty będące teraz w oknie serwisowym, false te poza nim.</td></tr>
+<tr><td><code>reboot_required</code></td><td><code>boolean</code></td><td>true zostawia hosty wymagające restartu, false te, które takiej potrzeby nie zgłosiły; host, który nic nie zgłosił, nie trafia do żadnej z grup.</td></tr>
+<tr><td><code>security_updates</code></td><td><code>boolean</code></td><td>true zostawia hosty z czekającą aktualizacją bezpieczeństwa, false te, które żadnej nie zgłosiły; nieznany licznik nie trafia do żadnej z grup.</td></tr>
+<tr><td><code>failed_units</code></td><td><code>boolean</code></td><td>true zostawia hosty z co najmniej jedną nieudaną jednostką, false te, które żadnej nie zgłosiły; host, który nic nie zgłosił, nie trafia do żadnej z grup.</td></tr>
+<tr><td><code>package_db_broken</code></td><td><code>boolean</code></td><td>true zostawia hosty (poza wycofanymi), których bazę pakietów ostatnia operacja uznała za uszkodzoną, false te sprawne.</td></tr>
+<tr><td><code>sssd_offline</code></td><td><code>boolean</code></td><td>true zostawia hosty przyłączone do domeny (poza wycofanymi), których SSSD zgłasza się jako offline, false te online; host spoza domeny nie trafia do żadnej z grup.</td></tr>
+<tr><td><code>agent_behind</code></td><td><code>boolean</code></td><td>true zostawia hosty, których agent jest starszy niż najnowsza wersja zgłoszona w widocznej flocie, false te już na niej; wersja, której nie da się sparsować, nie trafia do żadnej z grup.</td></tr>
+<tr><td><code>relay</code></td><td><code>string</code></td><td>Identyfikator relaya; zostawia hosty, których otwartą sesję poświadczył.</td></tr>
+<tr><td><code>failure_domain</code></td><td><code>string</code></td><td>Domena awarii, do której operator przypisał hosta.</td></tr>
+<tr><td><code>team</code></td><td><code>string</code></td><td>Identyfikator zespołu; zostawia jego hosty. Słowo none zostawia hosty, których nikt nie przypisał do żadnego zespołu.</td></tr>
 <tr><td><code>capability</code></td><td><code>string</code></td><td>Adapter, który host musi mieć dostępny, na przykład packages.apt.</td></tr>
-<tr><td><code>connection_refusal</code></td><td><code>string</code></td><td>The reason the gateway last turned the host away since its last session: certificate_expired, certificate_not_yet_valid, unknown_certificate, revoked_certificate, identity_mismatch or lifecycle_&lt;state&gt;.</td></tr>
-<tr><td><code>sort</code></td><td><code>string</code></td><td>The order of the list as column or column:desc; the columns are agent_version, connection_state, environment, failed_units, hostname, last_seen_at, lifecycle_state, owner, pending_security_updates, pending_updates, site. The hostname ascending by default; an unknown column is refused with invalid_sort, and a cursor issued under one order is refused under another. A count the host has not reported sorts below zero, a host never seen before every host seen.</td></tr>
+<tr><td><code>connection_refusal</code></td><td><code>string</code></td><td>Powód, dla którego brama ostatnio odprawiła hosta od czasu jego ostatniej sesji: certificate_expired, certificate_not_yet_valid, unknown_certificate, revoked_certificate, identity_mismatch albo lifecycle_&lt;state&gt;.</td></tr>
+<tr><td><code>sort</code></td><td><code>string</code></td><td>Porządek listy w postaci column albo column:desc; dostępne kolumny to agent_version, connection_state, environment, failed_units, hostname, last_seen_at, lifecycle_state, owner, pending_security_updates, pending_updates, site. Domyślnie hostname rosnąco; nieznana kolumna kończy się odmową invalid_sort, a kursor wydany przy jednym porządku zostanie odrzucony przy innym. Licznik, którego host nie zgłosił, sortuje się poniżej zera, a host nigdy niewidziany przed każdym widzianym.</td></tr>
 <tr><td><code>limit</code></td><td><code>integer</code></td><td>Rozmiar strony: domyślnie 100, najwyżej 500.</td></tr>
 <tr><td><code>cursor</code></td><td><code>string</code></td><td>Wartość next_cursor z poprzedniej strony; puste dla pierwszej strony.</td></tr>
 </tbody></table></div>
@@ -576,10 +576,10 @@
 <table>
 <thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
 <tbody>
-<tr><td><code>actor</code></td><td><code>string</code></td><td>The identity that acted.</td></tr>
+<tr><td><code>actor</code></td><td><code>string</code></td><td>Tożsamość, która wykonała działanie.</td></tr>
 <tr><td><code>actor_kind</code></td><td><code>string</code></td><td>user, service, anonymous, agent, relay, machine albo system.</td></tr>
-<tr><td><code>actor_principal_id</code></td><td><code>string</code></td><td>The immutable identifier of the identity that acted.</td></tr>
-<tr><td><code>actor_resource_id</code></td><td><code>string</code></td><td>The host, relay or campaign that acted.</td></tr>
+<tr><td><code>actor_principal_id</code></td><td><code>string</code></td><td>Niezmienny identyfikator tożsamości, która wykonała działanie.</td></tr>
+<tr><td><code>actor_resource_id</code></td><td><code>string</code></td><td>Host, relay albo kampania, które wykonały działanie.</td></tr>
 <tr><td><code>action</code></td><td><code>string</code></td><td></td></tr>
 <tr><td><code>action_prefix</code></td><td><code>string</code></td><td>Początek nazwy akcji; job. zostawia wszystkie zdarzenia dotyczące zadania.</td></tr>
 <tr><td><code>outcome</code></td><td><code>string</code></td><td>success, failure albo denied.</td></tr>
@@ -601,44 +601,44 @@
 <thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
 <tbody>
 <tr><td><code>state</code></td><td><code>string</code></td><td>planned, awaiting_approval, running, succeeded, partially_applied, failed albo canceled.</td></tr>
-<tr><td><code>limit</code></td><td><code>integer</code></td><td>The most changes to return: 50 by default, 200 at most.</td></tr>
+<tr><td><code>limit</code></td><td><code>integer</code></td><td>Największa liczba zwracanych zmian: domyślnie 50, najwyżej 200.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-identity-users"><code>GET /api/v1/identity/users</code></h3>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
 <tbody>
-<tr><td><code>preserved</code></td><td><code>string</code></td><td>"true" lists the accounts removed with their entry kept, apart from the live ones; a preserved account reaches no host and belongs to no group.</td></tr>
+<tr><td><code>preserved</code></td><td><code>string</code></td><td>"true" wypisuje konta usunięte z zachowanym wpisem, osobno od aktywnych; zachowane konto nie trafia na żadnego hosta i nie należy do żadnej grupy.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-installation-profiles"><code>GET /api/v1/installation-profiles</code></h3>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
 <tbody>
-<tr><td><code>site</code></td><td><code>string</code></td><td>The site the host will live in; "default" when empty.</td></tr>
+<tr><td><code>site</code></td><td><code>string</code></td><td>Site, w którym host będzie umieszczony; "default", gdy puste.</td></tr>
 <tr><td><code>environment</code></td><td><code>string</code></td><td>Środowisko hosta; "unassigned", gdy puste.</td></tr>
 <tr><td><code>kind</code></td><td><code>string</code></td><td>agent (domyślnie) albo relay.</td></tr>
-<tr><td><code>relay_id</code></td><td><code>string</code></td><td>The relay of the site the host connects through; empty means directly to the panel.</td></tr>
+<tr><td><code>relay_id</code></td><td><code>string</code></td><td>Relay lokalizacji, przez który łączy się host; puste oznacza połączenie wprost do panelu.</td></tr>
 <tr><td><code>architecture</code></td><td><code>string</code></td><td>amd64 (domyślnie) albo arm64.</td></tr>
-<tr><td><code>channel</code></td><td><code>string</code></td><td>The repository channel; stable by default.</td></tr>
+<tr><td><code>channel</code></td><td><code>string</code></td><td>Kanał repozytorium; domyślnie stable.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-jobs"><code>GET /api/v1/jobs</code></h3>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
 <tbody>
-<tr><td><code>host_id</code></td><td><code>string</code></td><td>The host the tasks belong to.</td></tr>
+<tr><td><code>host_id</code></td><td><code>string</code></td><td>Host, do którego należą zadania.</td></tr>
 <tr><td><code>hostname</code></td><td><code>string</code></td><td>Początek nazwy hosta; pełna nazwa zostawia tylko tego jednego hosta.</td></tr>
 <tr><td><code>state</code></td><td><code>string</code></td><td></td></tr>
-<tr><td><code>action</code></td><td><code>string</code></td><td>The operation type.</td></tr>
+<tr><td><code>action</code></td><td><code>string</code></td><td>Typ operacji.</td></tr>
 <tr><td><code>action_prefix</code></td><td><code>string</code></td><td>Początek typu operacji; packages. zostawia wszystkie operacje pakietowe.</td></tr>
-<tr><td><code>actor</code></td><td><code>string</code></td><td>The identity that ordered the task.</td></tr>
+<tr><td><code>actor</code></td><td><code>string</code></td><td>Tożsamość, która zleciła zadanie.</td></tr>
 <tr><td><code>campaign_id</code></td><td><code>string</code></td><td></td></tr>
-<tr><td><code>fanout_id</code></td><td><code>string</code></td><td>The read fan-out that ordered the tasks.</td></tr>
-<tr><td><code>error_code</code></td><td><code>string</code></td><td>The result error code the task ended with.</td></tr>
+<tr><td><code>fanout_id</code></td><td><code>string</code></td><td>Zbiorczy odczyt, który zlecił te zadania.</td></tr>
+<tr><td><code>error_code</code></td><td><code>string</code></td><td>Kod błędu wyniku, którym zakończyło się zadanie.</td></tr>
 <tr><td><code>since</code></td><td><code>string</code></td><td>RFC 3339; zadania utworzone od tego momentu włącznie.</td></tr>
 <tr><td><code>until</code></td><td><code>string</code></td><td>RFC 3339; zadania utworzone przed tym momentem.</td></tr>
-<tr><td><code>sort</code></td><td><code>string</code></td><td>The order of the list as column, column:asc or column:desc; the columns are action_type, created_at, finished_at, hostname, state. Newest first by default; an unknown column is refused with invalid_sort, and a cursor issued under one order is refused under another. A task not finished yet sorts before every finished one under finished_at.</td></tr>
+<tr><td><code>sort</code></td><td><code>string</code></td><td>Porządek listy w postaci column, column:asc albo column:desc; dostępne kolumny to action_type, created_at, finished_at, hostname, state. Domyślnie najnowsze pierwsze; nieznana kolumna kończy się odmową invalid_sort, a kursor wydany przy jednym porządku zostanie odrzucony przy innym. Zadanie jeszcze niezakończone sortuje się według finished_at przed każdym zakończonym.</td></tr>
 <tr><td><code>limit</code></td><td><code>integer</code></td><td>Rozmiar strony: domyślnie 100, najwyżej 500.</td></tr>
 <tr><td><code>cursor</code></td><td><code>string</code></td><td>Wartość next_cursor z poprzedniej strony; puste dla pierwszej strony.</td></tr>
 </tbody></table></div>
@@ -656,7 +656,7 @@
 <thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
 <tbody>
 <tr><td><code>state</code></td><td><code>string</code></td><td>pending, firing albo resolved.</td></tr>
-<tr><td><code>acknowledged</code></td><td><code>string</code></td><td>true keeps the alerts somebody took, false the ones still waiting.</td></tr>
+<tr><td><code>acknowledged</code></td><td><code>string</code></td><td>true zostawia alerty, które ktoś przejął, false te wciąż czekające.</td></tr>
 <tr><td><code>severity</code></td><td><code>string</code></td><td>critical, warning albo info.</td></tr>
 <tr><td><code>host_id</code></td><td><code>string</code></td><td></td></tr>
 <tr><td><code>limit</code></td><td><code>integer</code></td><td>Rozmiar strony: domyślnie 100, najwyżej 500.</td></tr>
@@ -723,15 +723,15 @@
 <thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
 <tbody>
 <tr><td><code>q</code></td><td><code>string</code></td><td>Początek nazwy: nazwa hosta, identyfikator maszyny albo adres do zarządzania, nazwa kampanii, polityki, grupy, relaya albo sekretu, subject lub nazwa wyświetlana tożsamości, co najmniej osiem znaków identyfikatora zadania albo pełny identyfikator CVE. Mniej niż dwa znaki nie zwracają nic; rodzaj obiektu, którego wywołujący nie może czytać, jest pomijany.</td></tr>
-<tr><td><code>limit</code></td><td><code>integer</code></td><td>The hits per kind: 8 by default, 25 at most.</td></tr>
+<tr><td><code>limit</code></td><td><code>integer</code></td><td>Liczba trafień na rodzaj: domyślnie 8, najwyżej 25.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-security"><code>GET /api/v1/security</code></h3>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Parametr</th><th>Typ</th><th>Znaczenie</th></tr></thead>
 <tbody>
-<tr><td><code>check</code></td><td><code>string</code></td><td>The identifier of one check; the answer is then one page of the hosts failing it rather than the whole profile.</td></tr>
-<tr><td><code>limit</code></td><td><code>integer</code></td><td>The page size of the host list of a check: 100 by default, 500 at most.</td></tr>
+<tr><td><code>check</code></td><td><code>string</code></td><td>Identyfikator jednej kontroli; odpowiedzią jest wtedy jedna strona hostów, które jej nie przechodzą, zamiast całego profilu.</td></tr>
+<tr><td><code>limit</code></td><td><code>integer</code></td><td>Rozmiar strony listy hostów dla pojedynczej kontroli: domyślnie 100, najwyżej 500.</td></tr>
 <tr><td><code>cursor</code></td><td><code>string</code></td><td>Wartość next_cursor z poprzedniej strony; puste dla pierwszej strony.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-vulnerabilities"><code>GET /api/v1/vulnerabilities</code></h3>
@@ -743,7 +743,7 @@
 <tr><td><code>severity</code></td><td><code>string</code></td><td>critical, high, medium, low, negligible albo unrated: hosty ze znaleziskiem tego stopnia.</td></tr>
 <tr><td><code>sort</code></td><td><code>string</code></td><td>affected (domyślnie), fixable albo hostname.</td></tr>
 <tr><td><code>limit</code></td><td><code>integer</code></td><td>Rozmiar strony: domyślnie 100, najwyżej 500.</td></tr>
-<tr><td><code>cursor</code></td><td><code>string</code></td><td>The next_cursor of the previous page; empty for the first page. A cursor issued under one order is refused under another.</td></tr>
+<tr><td><code>cursor</code></td><td><code>string</code></td><td>Wartość next_cursor z poprzedniej strony; puste dla pierwszej strony. Kursor wydany przy jednym porządku sortowania zostanie odrzucony przy innym.</td></tr>
 <tr><td><code>offset</code></td><td><code>integer</code></td><td>Ile wierszy pominąć; przy obu podanych wygrywa kursor.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-vulnerabilities-cves"><code>GET /api/v1/vulnerabilities/cves</code></h3>
@@ -753,14 +753,14 @@
 <tbody>
 <tr><td><code>q</code></td><td><code>string</code></td><td>Prefiks numeru CVE albo nazwy dotkniętego pakietu.</td></tr>
 <tr><td><code>severity</code></td><td><code>string</code></td><td>critical, high, medium, low, negligible albo unrated.</td></tr>
-<tr><td><code>fixable</code></td><td><code>boolean</code></td><td>true keeps the CVEs with a vendor fix on at least one host.</td></tr>
-<tr><td><code>limit</code></td><td><code>integer</code></td><td>The page size: 50 by default, 500 at most.</td></tr>
+<tr><td><code>fixable</code></td><td><code>boolean</code></td><td>true zostawia CVE, dla których producent wydał poprawkę na co najmniej jednym hoście.</td></tr>
+<tr><td><code>limit</code></td><td><code>integer</code></td><td>Rozmiar strony: domyślnie 50, najwyżej 500.</td></tr>
 <tr><td><code>offset</code></td><td><code>integer</code></td><td>Ile wierszy pominąć.</td></tr>
 </tbody></table></div>
     <ul class="linkrow">
-      <li><a href="errors.html">← 7. Errors and refusals</a></li>
+      <li><a href="errors.html">← 7. Błędy i odmowy</a></li>
       <li><a href="operations.html">6. Operacje</a></li>
-      <li><a href="roles.html">Next: 9. Roles and permissions &rarr;</a></li>
+      <li><a href="roles.html">Dalej: 9. Role i uprawnienia &rarr;</a></li>
       <li><a href="runbooks.html">10. Runbooki</a></li>
       <li><a href="./">Spis treści</a></li>
     </ul>
