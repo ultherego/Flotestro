@@ -20,7 +20,40 @@
       <a href="./" aria-current="page">Dokumentacja</a>
       <a href="https://ultherego.github.io/Flotestro/packages/">Pakiety</a>
       <a href="https://github.com/ultherego/Flotestro">Kod</a>
-      <a href="../../docs/runbooks.html" hreflang="en" lang="en">English</a>
+      <details class="lang-menu">
+        <summary class="lang-menu__toggle" aria-label="Język: polski (PL)">
+          <svg class="lang-menu__flag" viewBox="0 0 60 40" width="18" height="12" aria-hidden="true">
+            <path fill="#ffffff" d="M0 0h60v20H0z"/>
+            <path fill="#dc143c" d="M0 20h60v20H0z"/>
+          </svg>
+          <span class="lang-menu__code">PL</span>
+        </summary>
+        <ul class="lang-menu__list">
+          <li>
+            <a class="lang-menu__item" href="../../docs/runbooks.html" hreflang="en" lang="en">
+              <svg class="lang-menu__flag" viewBox="0 0 60 40" width="18" height="12" aria-hidden="true">
+                <path fill="#012169" d="M0 0h60v40H0z"/>
+                <g fill="none">
+                  <path stroke="#ffffff" stroke-width="8" d="M0 0L60 40M60 0L0 40"/>
+                  <path stroke="#c8102e" stroke-width="4" d="M0 0L60 40M60 0L0 40"/>
+                  <path stroke="#ffffff" stroke-width="13" d="M30 0V40M0 20H60"/>
+                  <path stroke="#c8102e" stroke-width="8" d="M30 0V40M0 20H60"/>
+                </g>
+              </svg>
+              English
+            </a>
+          </li>
+          <li>
+            <span class="lang-menu__item" lang="pl" aria-current="true">
+              <svg class="lang-menu__flag" viewBox="0 0 60 40" width="18" height="12" aria-hidden="true">
+                <path fill="#ffffff" d="M0 0h60v20H0z"/>
+                <path fill="#dc143c" d="M0 20h60v20H0z"/>
+              </svg>
+              Polski
+            </span>
+          </li>
+        </ul>
+      </details>
     </nav>
   </div>
 </header>
@@ -59,27 +92,27 @@
   <main class="content">
     <h1>10. Runbooki</h1>
 
-    <p class="lede">Procedury do działań, których panel nie wykonuje sam. Każda
-    nazywa sygnały, które każą po nią sięgnąć, warunki wstępne, dokładne
+    <p class="lede">Procedury do działań, których panel nie wykonuje sam.
+    Każda nazywa sygnały, które każą po nią sięgnąć, warunki wstępne, dokładne
     żądania i polecenia, sposób weryfikacji wyniku i drogę powrotną - a kończy
-    się kodami, które produkuje albo czyta. Tam, gdzie produkt nie ma dla danego
-    kroku żadnego endpointu ani polecenia, runbook mówi to wprost, zamiast
-    opisywać cokolwiek.</p>
+    się kodami, które produkuje albo czyta. Tam, gdzie produkt nie ma dla
+    danego kroku żadnego endpointu ani polecenia, runbook mówi to wprost i nie
+    opisuje niczego w ich miejsce.</p>
 
-    <p>Leżą w
-    <a href="https://github.com/ultherego/Flotestro/tree/main/docs/runbooks"><code>docs/runbooks/</code></a>
-    repozytorium i są napisane tak, żeby o trzeciej nad ranem wykonał je ktoś,
-    kto ich nie pisał.</p>
+    <p>Leżą w repozytorium, w
+    <a href="https://github.com/ultherego/Flotestro/tree/main/docs/runbooks"><code>docs/runbooks/</code></a>,
+    i są napisane tak, żeby o trzeciej nad ranem wykonał je ktoś, kto ich nie
+    pisał.</p>
 
     <h2><a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/install.md">Instalacja od zera</a></h2>
 
-    <p>Sięga się po niego, gdy nie ma jeszcze żadnej instalacji: control plane z
-    obrazu, pierwszy administrator, para kopii zapasowych, zanim powstanie flota,
-    i pierwsze hosty z podpisanych pakietów. To skrócona forma
-    <a href="installation.html">rozdziału 3</a> i rzecz do podania komuś, kto
-    robi to pierwszy raz - wymienia trzy rzeczy, które łatwo zrobić źle i każda
-    kosztuje godzinę (własność plików sekretów, ich etykieta SELinux i przypięcie
-    digestu na produkcji).</p>
+    <p>Gdy nie ma jeszcze żadnej instalacji: control plane z obrazu, pierwszy
+    administrator, para kopii zapasowych jeszcze przed flotą i pierwsze hosty
+    z podpisanych pakietów. To skrócona wersja
+    <a href="installation.html">rozdziału 3</a> i to ją podaje się komuś, kto
+    robi to po raz pierwszy - wymienia trzy rzeczy, które łatwo zrobić źle, a
+    każda kosztuje godzinę (własność plików sekretów, ich etykieta SELinux i
+    przypięcie digestu na produkcji).</p>
 
     <p>Kody: <code class="refusal">installation_state_mismatch</code>,
     <code class="refusal">gateway_id_in_use</code>,
@@ -87,19 +120,19 @@
 
     <h2><a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/ca-rotation.md">Rotacja CA</a></h2>
 
-    <p>Sięga się po niego, gdy
-    <code>flotestro_ca_certificate_expires_in_seconds</code> robi się krótki, gdy
-    lista kontrolna instalacji zaczyna ostrzegać trzydzieści dni przed końcem CA
-    floty albo gdy klucz CA trzeba uznać za skompromitowany. Rotacja jest
-    etapowa, tak żeby nie było momentu, w którym host nie ufa panelowi albo panel
-    nie ufa hostowi: nowe CA jest <em>przygotowane</em> (zaufane, rozprowadzone,
-    jeszcze nie podpisuje), potem <em>aktywowane</em> (podpisuje, stare przechodzi
-    w stan wycofany), a stare opuszcza zbiór zaufania dopiero wtedy, gdy żaden
-    host już go nie używa. Nie ma pushu - bundle jedzie w odpowiedziach
-    enrollmentu i odnowienia, więc flota poznaje nowe CA we własnym tempie
-    odnawiania, a <code>GET /api/v1/pki</code> zgłasza <code>hosts_missing</code>
-    i <code>ready_to_activate</code>, dopóki tak się nie stanie. Każdy etap to
-    operacja step-up pod uprawnieniem <code>pki.rotate</code>, które trzyma
+    <p>Potrzebny, gdy <code>flotestro_ca_certificate_expires_in_seconds</code>
+    robi się krótki, gdy lista kontrolna instalacji zaczyna ostrzegać
+    trzydzieści dni przed końcem CA floty albo gdy klucz CA trzeba uznać za
+    skompromitowany. Rotacja jest etapowa, tak żeby nie było momentu, w którym
+    host nie ufa panelowi albo panel nie ufa hostowi: nowe CA jest
+    <em>przygotowane</em> (zaufane, rozprowadzone, jeszcze nie podpisuje),
+    potem <em>aktywowane</em> (podpisuje, stare przechodzi w stan wycofany), a
+    stare opuszcza zbiór zaufania dopiero wtedy, gdy żaden host już go nie
+    używa. Nie ma pushu - bundle jedzie w odpowiedziach enrollmentu i
+    odnowienia, więc flota poznaje nowe CA we własnym tempie odnawiania, a
+    <code>GET /api/v1/pki</code> zgłasza <code>hosts_missing</code> i
+    <code>ready_to_activate</code>, dopóki tak się nie stanie. Każdy etap to
+    operacja step-up pod uprawnieniem <code>pki.rotate</code>, które ma
     wyłącznie <code>platform_admin</code>.</p>
 
     <p>Kody: <code class="refusal">incomplete_coverage</code> z wykazu błędów;
@@ -115,20 +148,19 @@
 
     <h2><a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/db-restore.md">Odtworzenie bazy danych</a></h2>
 
-    <p>Sięga się po niego, żeby przywrócić control plane z migawki - w ćwiczeniu
-    albo naprawdę - i rozliczyć pracę, która była w locie w chwili robienia
-    migawki. Jest też źródłem informacji o tym, co baza trzyma, a czego nie:
-    wolumen stanu, własne ustawienia i sekrety wdrożenia oraz podpisane
-    repozytorium pakietów leżą poza nią i każde z nich należy do zestawu kopii
-    zapasowych. Niesie
-    stany kryptograficzne, na których start może się zatrzymać
+    <p>Do przywrócenia control plane z migawki - w ćwiczeniu albo naprawdę - i
+    do rozliczenia pracy, która była w locie w chwili robienia migawki. Mówi
+    też, co jest w bazie, a czego w niej nie ma: wolumen stanu, własne
+    ustawienia i sekrety wdrożenia oraz podpisane repozytorium pakietów leżą
+    poza nią i każde z nich należy do zestawu kopii zapasowych. Opisuje stany
+    kryptograficzne, na których może stanąć start
     (<code class="refusal">secrets_key_unavailable</code>,
     <code class="refusal">issuer_key_unavailable</code>,
     <code class="refusal">pki_state_mismatch</code>,
-    <code class="refusal">crypto_state_ambiguous</code>), przyjęcie istniejącego
-    wcześniej klucza sekretów przy pierwszym starcie po aktualizacji, rotację
-    klucza magazynu, to, co da się i czego nie da się odzyskać po utracie klucza,
-    oraz sprawdzenie łańcucha audytowego przez
+    <code class="refusal">crypto_state_ambiguous</code>), przyjęcie
+    istniejącego wcześniej klucza sekretów przy pierwszym starcie po
+    aktualizacji, rotację klucza magazynu, to, co da się i czego nie da się
+    odzyskać po utracie klucza, oraz sprawdzenie łańcucha audytowego przez
     <code>flotestro-auditverify</code> po odtworzeniu.</p>
 
     <p>Rozdział o zadaniach w locie warto przeczytać przed pierwszym ćwiczeniem:
@@ -140,7 +172,7 @@
 
     <h2><a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/queue-backlog.md">Zaległości w kolejce</a></h2>
 
-    <p>Sięga się po niego, gdy praca stoi w kolejce i nie rusza. Istnieje po to,
+    <p>Gdy praca stoi w kolejce i nie rusza. Istnieje po to,
     żeby rozróżnić cztery powody, bo środki zaradcze są inne, a trzy z nich w
     ogóle nie są usterką: wysycony budżet, tempo wysyłki, blokada zasobu na
     hoście albo host, który jest po prostu offline. Wymienia metrykę dla każdego
@@ -167,7 +199,7 @@
 
     <h2><a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/relay-disk-full.md">Pełny bufor relaya, pełny dysk relaya</a></h2>
 
-    <p>Sięga się po niego, gdy relay site'u zgłasza bufor powyżej 70&nbsp;%, gdy
+    <p>Gdy relay site'u zgłasza bufor powyżej 70&nbsp;%, gdy
     <code>/readyz</code> odpowiada <code class="refusal">relay_spool_critical</code>
     albo <code class="refusal">relay_spool_unwritable</code>, albo gdy site jest
     odcięty na tyle długo, że to, co trzyma, zaczyna mieć znaczenie. Rozdziela
@@ -178,19 +210,20 @@
     Obejmuje też ponowny enrollment relaya, którego tożsamość została utracona
     albo skompromitowana.</p>
 
-    <p>Notkę o <code>/healthz</code> trzeba przeczytać przed dotknięciem relaya w
-    czasie awarii: liveness celowo zostaje <code>200</code> przez całą awarię
-    centrali, bo relay z zerwanym łączem to ten jeden proces, którego nie wolno
-    restartować. <code>/readyz</code> niesie <code>safe_to_restart</code>, a
-    wartość ta jest prawdziwa tylko wtedy, gdy nic nie czeka w spoolu.</p>
+    <p>Notkę o <code>/healthz</code> trzeba przeczytać przed dotknięciem
+    relaya w czasie awarii: liveness celowo pozostaje <code>200</code> przez
+    całą awarię centrali, bo relay z zerwanym łączem to ten jeden proces,
+    którego nie wolno restartować. <code>/readyz</code> niesie
+    <code>safe_to_restart</code>, a wartość ta jest prawdziwa tylko wtedy, gdy
+    nic nie czeka w spoolu.</p>
 
     <h2><a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/metrics-gap.md">Próbki przestają przychodzić albo wykres ma dziurę</a></h2>
 
-    <p>Sięga się po niego zawsze, gdy wykres hosta się urywa albo ma lukę - i
-    trzeba to brać na poważnie, bo panel jest w tym produkcie jedynym kanałem
+    <p>Zawsze wtedy, gdy wykres hosta się urywa albo ma lukę - i trzeba to
+    traktować poważnie, bo panel jest w tym produkcie jedynym kanałem
     alertowania: host, którego próbki się kończą, to host, którego reguły alertów
     nie mają jak zadziałać. Runbook rozróżnia pięć przyczyn i leczy każdą z nich:
-    host jest nieobecny, agent nie może spoolować, panel odrzuca próbki jako za
+    hosta nie ma, agent nie może spoolować, panel odrzuca próbki jako za
     późne, rollup stanął albo ewaluator alertów nie działa nigdzie. Sygnały są w
     jednym miejscu - blok <code>monitoring</code> w
     <code>GET /api/v1/status</code>, z <code>raw_partitions</code>,
@@ -204,17 +237,17 @@
 
     <h2><a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/quarantine.md">Kwarantanna, odzyskanie tożsamości i wycofanie</a></h2>
 
-    <p>Sięga się po niego, żeby odciąć host od floty, przywrócić go, wymienić
-    jego tożsamość albo wycofać go z użycia. Stany cyklu życia to
-    <code>active</code>, <code>quarantined</code>, <code>recovery</code>,
-    <code>retiring</code> i <code>retired</code>, a przejście, na które automat
-    stanów nie pozwala, kończy się odmową <code>409</code>
-    <code class="refusal">lifecycle_conflict</code>. Wszystkie cztery endpointy to
-    operacje step-up z powodem o długości co najmniej ośmiu znaków i wpisaną
-    nazwą hosta. Runbook wyjaśnia też, co robi polityka klonów, gdy jeden
-    certyfikat żyje naraz na dwóch bootach, oraz jak przekazuje się wycofanie,
-    kiedy instancja będąca właścicielem sesji hosta nie jest tą, która podjęła
-    decyzję.</p>
+    <p>Do odcięcia hosta od floty, przywrócenia go, wymiany tożsamości albo
+    wycofania z użycia. Stany cyklu życia to <code>active</code>,
+    <code>quarantined</code>, <code>recovery</code>, <code>retiring</code> i
+    <code>retired</code>, a przejście, na które automat stanów nie pozwala,
+    kończy się odmową <code>409</code>
+    <code class="refusal">lifecycle_conflict</code>. Wszystkie cztery
+    endpointy to operacje step-up z powodem o długości co najmniej ośmiu
+    znaków i wpisaną nazwą hosta. Runbook wyjaśnia też, co robi polityka
+    klonów, gdy jeden certyfikat żyje naraz na dwóch bootach, oraz jak
+    przekazuje się wycofanie, kiedy sesja hosta należy do innej instancji niż
+    ta, która podjęła decyzję.</p>
 
     <p>Kody: <code class="refusal">host_quarantined</code>,
     <code class="refusal">lifecycle_conflict</code>,
@@ -226,16 +259,16 @@
 
     <h2><a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/support-bundle.md">Pakiet diagnostyczny</a></h2>
 
-    <p>Sięga się po niego, gdy samo <code>flotestro-agentctl diagnose</code> nie
-    rozstrzyga sprawy - host, który nie chce się połączyć, helper, który nie
-    odpowiada, odnowienie, które ciągle się nie udaje - albo gdy ktoś prosi o
+    <p>Gdy samo <code>flotestro-agentctl diagnose</code> nie rozstrzyga sprawy
+    - host, który nie chce się połączyć, helper, który nie odpowiada,
+    odnowienie, które ciągle się nie udaje - albo gdy ktoś prosi o
     &bdquo;logi&rdquo;. Zamiast luźnych plików wysyła się pakiet, bo to pakiet
-    jest formą, która przeszła skanowanie. Powstaje na hoście, jawnym poleceniem,
-    w pliku wskazanym przez operatora, który może go przeczytać, zanim wyśle go
+    przeszedł skanowanie. Powstaje na hoście, jawnym poleceniem, w pliku
+    wskazanym przez operatora, który może go przeczytać, zanim wyśle go
     gdziekolwiek; endpointu, który ściąga pakiet z hosta, nie ma i to celowo.
-    Każdy kolektor deklaruje każde pole jako publiczne, wrażliwe albo sekretne:
-    publiczne i wrażliwe jadą dalej, sekretne nie są w ogóle zbierane, a
-    manifest mówi, co zostało pominięte i dlaczego.</p>
+    Każdy kolektor deklaruje każde pole jako publiczne, wrażliwe albo
+    sekretne: publiczne i wrażliwe jadą dalej, sekretne nie są w ogóle
+    zbierane, a manifest mówi, co zostało pominięte i dlaczego.</p>
 
     <p>Kody: <code class="refusal">bundle_private_key_found</code>,
     <code class="refusal">bundle_bearer_token_found</code>,
@@ -249,18 +282,19 @@
 
     <h2><a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/golden-image.md">Golden image i cloud-init</a></h2>
 
-    <p>Sięga się po niego przed zbudowaniem obrazu maszyny, który niesie agenta,
-    i przed zamienieniem migawki działającego hosta w szablon. Zasada, dla której
-    istnieje, mówi, że obraz nie może nieść żadnej tożsamości: wiersz hosta jest
-    kluczowany przez <code>/etc/machine-id</code>, tożsamość leży pod
-    <code>identity/current</code>, a sesję rozpoznaje się po odcisku certyfikatu -
-    więc obraz, który niesie którąkolwiek z tych trzech rzeczy, daje flotę, w
-    której wiele maszyn jest jednym hostem. Wymienia, co może znaleźć się w
-    obrazie, a co nie, sanityzację przed zapieczętowaniem (łącznie z rejestrem firewalla, który
-    inaczej rozniósłby reguły jednego klona na każdą zrobioną z niego maszynę),
-    oraz enrollment przy pierwszym starcie przez
-    <code>flotestro-enroll.service</code>, który uruchamia się tylko dopóki
-    <code>identity/current/agent.pem</code> nie istnieje.</p>
+    <p>Przed zbudowaniem obrazu maszyny, który niesie agenta, i przed
+    zamienieniem migawki działającego hosta w szablon. Istnieje po to, żeby
+    pilnować jednej zasady - obraz nie może nieść żadnej tożsamości: wiersz
+    hosta jest kluczowany przez <code>/etc/machine-id</code>, tożsamość leży
+    pod <code>identity/current</code>, a sesję rozpoznaje się po odcisku
+    certyfikatu - więc obraz, który niesie którąkolwiek z tych trzech rzeczy,
+    daje flotę, w której wiele maszyn jest jednym hostem. Wymienia, co może
+    znaleźć się w obrazie, a co nie, opisuje sanityzację przed
+    zapieczętowaniem (łącznie z rejestrem firewalla, który inaczej rozniósłby
+    reguły jednego klona na każdą zrobioną z niego maszynę) oraz enrollment
+    przy pierwszym starcie przez <code>flotestro-enroll.service</code>, który
+    uruchamia się tylko dopóki <code>identity/current/agent.pem</code> nie
+    istnieje.</p>
 
     <p>Kody: <code class="refusal">duplicate_machine_id</code>,
     <code class="refusal">machine_id_mismatch</code>,

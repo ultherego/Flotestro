@@ -20,7 +20,40 @@
       <a href="./" aria-current="page">Dokumentacja</a>
       <a href="https://ultherego.github.io/Flotestro/packages/">Pakiety</a>
       <a href="https://github.com/ultherego/Flotestro">Kod</a>
-      <a href="../../docs/configuration.html" hreflang="en" lang="en">English</a>
+      <details class="lang-menu">
+        <summary class="lang-menu__toggle" aria-label="Język: polski (PL)">
+          <svg class="lang-menu__flag" viewBox="0 0 60 40" width="18" height="12" aria-hidden="true">
+            <path fill="#ffffff" d="M0 0h60v20H0z"/>
+            <path fill="#dc143c" d="M0 20h60v20H0z"/>
+          </svg>
+          <span class="lang-menu__code">PL</span>
+        </summary>
+        <ul class="lang-menu__list">
+          <li>
+            <a class="lang-menu__item" href="../../docs/configuration.html" hreflang="en" lang="en">
+              <svg class="lang-menu__flag" viewBox="0 0 60 40" width="18" height="12" aria-hidden="true">
+                <path fill="#012169" d="M0 0h60v40H0z"/>
+                <g fill="none">
+                  <path stroke="#ffffff" stroke-width="8" d="M0 0L60 40M60 0L0 40"/>
+                  <path stroke="#c8102e" stroke-width="4" d="M0 0L60 40M60 0L0 40"/>
+                  <path stroke="#ffffff" stroke-width="13" d="M30 0V40M0 20H60"/>
+                  <path stroke="#c8102e" stroke-width="8" d="M30 0V40M0 20H60"/>
+                </g>
+              </svg>
+              English
+            </a>
+          </li>
+          <li>
+            <span class="lang-menu__item" lang="pl" aria-current="true">
+              <svg class="lang-menu__flag" viewBox="0 0 60 40" width="18" height="12" aria-hidden="true">
+                <path fill="#ffffff" d="M0 0h60v20H0z"/>
+                <path fill="#dc143c" d="M0 20h60v20H0z"/>
+              </svg>
+              Polski
+            </span>
+          </li>
+        </ul>
+      </details>
     </nav>
   </div>
 </header>
@@ -58,7 +91,7 @@
 
   <main class="content">
 <h1>5. Wykaz konfiguracji</h1>
-<p class="lede">Każde ustawienie każdego pliku binarnego Flotestro. Control plane, agent, helper agenta i relay konfiguruje się zmiennymi środowiskowymi i dwoma plikami; retencje monitoringu należą do instalacji i zmienia się je w panelu bez restartu. Ta strona jest wykazem; <code>docker/env.example</code> niesie ustawienia wdrożenia jako skomentowany plik, a <code>packaging/agent.yaml</code> ustawienia hosta.</p>
+<p class="lede">Każde ustawienie każdej binarki Flotestro. Control plane, agent, helper agenta i relay konfiguruje się zmiennymi środowiskowymi i dwoma plikami; retencje monitoringu należą do instalacji i zmienia się je w panelu bez restartu. Ta strona jest wykazem; <code>docker/env.example</code> niesie ustawienia wdrożenia jako skomentowany plik, a <code>packaging/agent.yaml</code> ustawienia hosta.</p>
     <ul class="linkrow">
       <li><a href="#secrets-are-files">Sekrety są plikami</a></li>
       <li><a href="#control-plane-flotestro-control-plane">Control plane (flotestro-control-plane)</a></li>
@@ -82,7 +115,7 @@
       <li><a href="#relay-yaml">Plik relaya: relay.yaml</a></li>
       <li><a href="#relay-spool">Trwały spool</a></li>
     </ul>
-<p>Każde ustawienie pliku binarnego Flotestro to zmienna środowiskowa czytana przy starcie, z flagą wiersza poleceń o tym samym znaczeniu, która ją nadpisuje. Skąd pochodzą, zależy od komponentu, bo panel się wdraża, a host instaluje:</p>
+<p>Każde ustawienie binarki Flotestro to zmienna środowiskowa czytana przy starcie, z flagą wiersza poleceń o tym samym znaczeniu, która ją nadpisuje. Skąd pochodzą, zależy od komponentu, bo panel się wdraża, a host instaluje:</p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Komponent</th><th>Skąd biorą się jego ustawienia</th></tr></thead>
@@ -94,7 +127,7 @@
 </tbody>
 </table>
 </div>
-<p>Dla agenta i relaya zmienne są nadpisaniem na czas testu, a nie zwykłym sposobem konfiguracji: tym jest plik.</p>
+<p>Dla agenta i relaya zmienne służą do nadpisania czegoś na czas testu, a nie do zwykłej konfiguracji: od tego jest plik.</p>
 <h3 id="secrets-are-files">Sekrety są plikami, nigdy wartościami</h3>
 <p>Każde ustawienie control plane będące sekretem ma postać <code>_FILE</code>, która wskazuje ścieżkę, i to tej postaci używa wdrożenie. Postać z wartością i postać <code>_FILE</code> nie mogą być ustawione naraz, a pusty plik, dowiązanie symboliczne, katalog albo plik czytelny dla kogokolwiek innego kończą się odmową. Wartość w środowisku widać w <code>docker inspect</code>, na liście procesów hosta i w zrzucie po awarii, i właśnie po to jest ta druga postać.</p>
 <div class="table-scroll">
@@ -110,7 +143,7 @@
 </tbody>
 </table>
 </div>
-<p>Tabele poniżej nazywają samą zmienną. Każdą, która niesie sekret, należy czytać jako jej postać <code>_FILE</code>.</p>
+<p>Tabele poniżej nazywają samą zmienną. Każdą, która niesie sekret, należy czytać jako postać <code>_FILE</code>.</p>
 <p>Zmiana dowolnej zmiennej działa od następnego startu usługi: nic tutaj nie jest odczytywane ponownie w trakcie pracy procesu. Ekran ustawień w panelu pokazuje wartości obowiązujące, z zamaskowanymi sekretami; ekran stanu pokazuje, co robią postawione na nich pętle.</p>
 <p>Czasy trwania zapisuje się tak, jak czyta je Go: <code>30s</code>, <code>5m</code>, <code>8h</code>, <code>720h</code>. Nieczytelny czas trwania zostawia wartość domyślną, zamiast wyłączać zabezpieczenie.</p>
 <h2 id="control-plane-flotestro-control-plane">Control plane (<code>flotestro-control-plane</code>)</h2>
@@ -150,7 +183,7 @@
 </tbody></table></div>
 <h3 id="lifecycle-orders-between-instances">Polecenia cyklu życia między instancjami</h3>
 <p>Host jest podłączony dokładnie do jednej instancji control plane, a żądanie operatora trafia do tej, która obsłużyła przeglądarkę. Większość decyzji to wiersze i rozchodzą się same; praca, która wymaga otwartego strumienia hosta - ostatnie zadanie wycofania, zakończenie sesji przy kwarantannie albo odzyskanie tożsamości - już nie. Taka praca jest zapisywana jako polecenie w <code>gateway_commands</code>, zaadresowane do sesji, którą w chwili decyzji wskazuje <code>host_session_owners</code>, i do fencing tokenu tego przejęcia, a wykonuje je instancja trzymająca dokładnie tę sesję. Instancja, która w międzyczasie straciła host, nie podejmuje niczego, a polecenie, którego sesji już nie ma, nie zostaje wykonane nigdy: mówi o tym wprost, a panel wraca do tego, co robi z hostem, którego nikt nie trzyma - wycofuje go z <code>remote_cleanup_unconfirmed</code>.</p>
-<p>Pętla działa na każdej instancji i budzi ją ślad, więc polecenie zwykle dociera do właściciela w czasie jednego obiegu; ustawienia poniżej są dolną granicą. Instalacja z jedną instancją nie zapisuje poleceń w ogóle i nic z tego jej nie dotyczy.</p>
+<p>Pętla działa na każdej instancji, a budzi ją ślad, więc polecenie zwykle dociera do właściciela w czasie jednego obiegu; ustawienia poniżej są dolną granicą. Instalacja z jedną instancją nie zapisuje poleceń w ogóle i nic z tego jej nie dotyczy.</p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Zmienna</th><th>Domyślnie</th><th>Znaczenie</th><th>Restart</th><th>Bezpieczeństwo</th></tr></thead>
@@ -160,7 +193,7 @@
 </tbody></table></div>
 <p>Żądanie, które wydało polecenie, czeka na odpowiedź do 60 sekund. Wycofanie, którego właściciel nie zdążył dokończyć, dostaje odpowiedź z fazą <code>handover_pending</code>: host stoi w <code>retiring</code>, instancja będąca właścicielem kończy handshake, a decyzja nigdy nie zapada dwa razy.</p>
 <h3 id="local-accounts-and-their-ssh-keys">Konta lokalne i ich klucze SSH</h3>
-<p>Jedną listę grup uprzywilejowanych czyta każdy plik binarny, który ocenia konto lokalne - control plane, agent i helper - żeby panel nazywał uprzywilejowanym dokładnie to samo co host. Tak samo jest z zakresem UID, który odróżnia konto człowieka od konta usługi: bierze się z hostowego <code>/etc/login.defs</code> i nie jest ustawieniem panelu.</p>
+<p>Jedną listę grup uprzywilejowanych czyta każda binarka, która ocenia konto lokalne - control plane, agent i helper - żeby panel nazywał uprzywilejowanym dokładnie to samo co host. Tak samo jest z zakresem UID, który odróżnia konto człowieka od konta usługi: bierze się z hostowego <code>/etc/login.defs</code> i nie jest ustawieniem panelu.</p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Zmienna</th><th>Domyślnie</th><th>Znaczenie</th><th>Restart</th><th>Bezpieczeństwo</th></tr></thead>
@@ -209,8 +242,8 @@
 <tr><td><code>FLOTESTRO_WEBHOOK_EVENTS</code></td><td>puste</td><td>Prefiksy typów zdarzeń do dostarczenia, rozdzielone przecinkami, np. <code>campaign.</code>; puste dostarcza każde zdarzenie.</td><td>tak</td><td></td></tr>
 </tbody></table></div>
 <h3 id="notification-queue">Kolejka powiadomień</h3>
-<p>Wiadomość do kanału jest trwałym wierszem, a nie wywołaniem. Router zapisuje jeden wiersz na zdarzenie i kanał w transakcji tego zdarzenia; worker każdej instancji panelu przejmuje wiersze, którym nadszedł czas, wysyła je pod dzierżawą i rozlicza. Odbiorca, który leży, opóźnia więc wiadomość, a nie gubi ją: wiersz czeka, próby są na nim liczone, a wiersz, któremu próby się skończyły - albo któremu odbiorca odmówił poświadczeń - staje się dead letterem, którego operator wysyła ponownie z panelu. Dwie instancje nigdy nie wysyłają tego samego wiersza naraz, a wiersz po zmarłym workerze wraca do puli, gdy skończy się jego dzierżawa.</p>
-<p>Ustawienia poniżej stroją tego workera. Na każdej instancji są takie same; podniesienie partii albo skrócenie odpytywania przyspiesza kolejkę i obciąża bazę, a flota z kilkoma kanałami nie ma powodu ich ruszać.</p>
+<p>Wiadomość do kanału to trwały wiersz, a nie wywołanie. Router zapisuje jeden wiersz na zdarzenie i kanał w transakcji tego zdarzenia; worker każdej instancji panelu przejmuje wiersze, którym nadszedł czas, wysyła je pod dzierżawą i rozlicza. Odbiorca, który leży, opóźnia więc wiadomość, a nie gubi jej: wiersz czeka, próby są na nim liczone, a wiersz, któremu próby się skończyły - albo któremu odbiorca odmówił poświadczeń - staje się dead letterem, którego operator wysyła ponownie z panelu. Dwie instancje nigdy nie wysyłają tego samego wiersza naraz, a wiersz po zmarłym workerze wraca do puli, gdy skończy się jego dzierżawa.</p>
+<p>Poniższe ustawienia dostrajają tego workera. Na każdej instancji są takie same; podniesienie partii albo skrócenie odpytywania przyspiesza kolejkę i obciąża bazę, a flota z kilkoma kanałami nie ma powodu ich ruszać.</p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Zmienna</th><th>Domyślnie</th><th>Znaczenie</th><th>Restart</th><th>Bezpieczeństwo</th></tr></thead>
@@ -242,7 +275,7 @@
 <tr><td><code>FLOTESTRO_VULN_NVD_URL</code></td><td><code>https://services.nvd.nist.gov/rest/json/cves/2.0</code></td><td>API NVD po opisy i oceny; puste wyłącza wzbogacanie, co ustawia odcięty site - NVD nie ma postaci offline. NVD nie rozstrzyga niczego o hoście.</td><td>tak</td><td></td></tr>
 <tr><td><code>FLOTESTRO_VULN_NVD_KEY</code></td><td>puste</td><td>Klucz API NVD; bez niego pierwszy odczyt trwa około dwudziestu minut.</td><td>tak</td><td>Sekret; ekran ustawień pokazuje tylko to, czy jest ustawiony.</td></tr>
 <tr><td><code>FLOTESTRO_VULN_NVD_INTERVAL</code></td><td><code>6h</code></td><td>Jak często odświeżane są opisy.</td><td>tak</td><td></td></tr>
-<tr><td><code>FLOTESTRO_VULN_SHRINK_SHARE</code></td><td><code>0.4</code></td><td>Ile z obowiązującej migawki może stracić pobranie i wciąż zostać aktywowane. Pobranie, które traci więcej albo przestaje pokrywać wydanie pokrywane przez migawkę obowiązującą, nie jest aktywowane: zostaje kandydatem z powodem <code>feed_shrank</code> albo <code>feed_release_missing</code>, poprzednia migawka pozostaje w mocy i starzeje się do nieświeżej, a operator przyjmuje kandydata świadomie z ekranu Podatności (<code>POST /api/v1/vulnerabilities/snapshots/{id}/accept</code>, z powodem i na śladzie audytowym). Wartość spoza <code>0 &lt; share &lt; 1</code> wraca do domyślnej, więc źle wpisane ustawienie nie wyłączy bramy; <code>0</code> oznacza wartość domyślną.</td><td>tak</td><td>W stronę <code>0</code> brama odrzuca zwykły ruch u dostawcy i uczy operatora przyjmowania bez czytania; w stronę <code>1</code> odrzucane jest tylko puste źródło.</td></tr>
+<tr><td><code>FLOTESTRO_VULN_SHRINK_SHARE</code></td><td><code>0.4</code></td><td>Ile z obowiązującej migawki może stracić pobranie i wciąż zostać aktywowane. Pobranie, które traci więcej albo przestaje pokrywać wydanie pokrywane przez migawkę obowiązującą, nie jest aktywowane: zostaje kandydatem z powodem <code>feed_shrank</code> albo <code>feed_release_missing</code>, poprzednia migawka pozostaje w mocy i starzeje się do nieświeżej, a operator przyjmuje kandydata świadomie z ekranu Podatności (<code>POST /api/v1/vulnerabilities/snapshots/{id}/accept</code>, z powodem i z wpisem w śladzie audytowym). Wartość spoza <code>0 &lt; share &lt; 1</code> wraca do domyślnej, więc źle wpisane ustawienie nie wyłączy bramy; <code>0</code> oznacza wartość domyślną.</td><td>tak</td><td>W stronę <code>0</code> brama odrzuca zwykły ruch u dostawcy i uczy operatora przyjmowania bez czytania; w stronę <code>1</code> odrzucane jest tylko puste źródło.</td></tr>
 </tbody></table></div>
 <h3 id="monitoring-and-retention">Monitoring i retencja</h3>
 <div class="table-scroll">
@@ -269,7 +302,7 @@
 <p>Przebieg czyszczący idzie raz na godzinę, po pięć tysięcy wierszy jednego rodzaju, a zakończone sesje agentów znikają po trzydziestu dniach niezależnie od ustawień.</p>
 <p><strong>Panel odmawia startu</strong>, gdy <code>FLOTESTRO_METRICS_RETENTION_RAW</code> jest krótsza niż <code>FLOTESTRO_METRICS_QUERY_WINDOW</code> plus <code>FLOTESTRO_METRICS_MAX_LATENESS</code> (<code>metrics_retention_too_short</code>). Taka konfiguracja kasuje odczyt, który relay wciąż wiezie, z definicji i bez niczyjego polecenia; podnieś retencję albo obniż okno lub dopuszczalne opóźnienie. <strong>Ta sama kontrola idzie przy zapisie</strong> z ekranu ustawień i idzie przed zapisaniem czegokolwiek: odrzucona zmiana zostawia obowiązujące wartości nietknięte.</p>
 <h3 id="the-monitoring-retentions-are-stored-not-restarted-into">Retencje monitoringu są przechowywane, a nie wprowadzane restartem</h3>
-<p>Sześć ustawień oznaczonych wyżej jako <code>no (stored)</code> należy do instalacji, a nie do procesu. Środowisko ustala wartość początkową każdego z nich; od chwili, gdy operator zapisze którąś w panelu, rozstrzyga wartość zapisana, a środowisko jest tym, do czego wraca wyczyszczone pole. Wiersz leży w <code>monitoring_settings</code> (jeden wiersz, a pole <code>NULL</code> to takie, którego instalacja nigdy nie ustawiła) i niesie, kto i kiedy je zapisał, obok wpisu <code>settings.monitoring.write</code> w śladzie audytowym.</p>
+<p>Sześć ustawień oznaczonych wyżej jako <code>no (stored)</code> należy do instalacji, a nie do procesu. Środowisko ustala wartość początkową każdego z nich; od chwili, gdy operator zapisze którąś w panelu, rozstrzyga wartość zapisana, a do środowiska wraca wyczyszczone pole. Wiersz leży w <code>monitoring_settings</code> (jeden wiersz, a pole <code>NULL</code> to takie, którego instalacja nigdy nie ustawiła) i niesie, kto i kiedy je zapisał, obok wpisu <code>settings.monitoring.write</code> w śladzie audytowym.</p>
 <div class="table-scroll">
 <table>
 <tbody>
@@ -279,10 +312,10 @@
 </tbody></table></div>
 <p>Zapisana zmiana nie wymaga restartu. Replika, która przyjęła zapis, wprowadza go od razu; każda inna replika odczytuje wiersz na własnym takcie i ma go <strong>w ciągu trzydziestu sekund</strong>. Trwający już przebieg konserwacyjny zostaje przy wartościach, z którymi zaczął - przebieg czyszczący i każdy przebieg partycji czytają ustawienia raz, na starcie - więc zmiana nigdy nie obejmuje połowy przebiegu. Ścieżka przyjmowania próbek czyta je przy każdej próbce, więc dopuszczalne opóźnienie i limit rozjazdu zegarów obowiązują dla następnego odczytu, który przyjdzie.</p>
 <p><strong>W trakcie aktualizacji rolling</strong> replika na poprzednim wydaniu nie czyta tej tabeli w ogóle i pracuje dalej na własnym środowisku. Dopóki to trwa, retencją surowych próbek obowiązującą dla floty jest <strong>krótsza</strong> z dwóch, bo partycję może zrzucić przebieg którejkolwiek repliki. Nowe wartości zapisuje się, gdy każda replika jest już na nowym wydaniu, albo ustawia środowisko starej tak, żeby się zgadzało.</p>
-<p>Zapisany wiersz, który nie przechodzi walidacji wobec środowiska tego procesu - bo na przykład środowisko podniosło okno zapytania po zapisaniu retencji - jest logowany przy starcie i pomijany: replika pracuje na własnych wartościach, które walidację przeszły, zamiast odmawiać startu z powodu ustawienia, które może poprawić tylko panel.</p>
+<p>Zapisany wiersz, który nie przechodzi walidacji w środowisku tego procesu - bo na przykład środowisko podniosło okno zapytania po zapisaniu retencji - jest logowany przy starcie i pomijany: replika pracuje na własnych wartościach, które walidację przeszły, zamiast odmawiać startu z powodu ustawienia, które może poprawić tylko panel.</p>
 <p>Próbki, których panel nie potwierdził, agent trzyma w <code>&lt;state dir&gt;/metrics-spool</code>: najwyżej 240 sztuk, cztery godziny po jednej na minutę, każda w osobnym małym pliku. Próbka jest tam zapisywana przed wysłaniem i kasowana dopiero wtedy, gdy panel potwierdzi właśnie ją; po ponownym połączeniu agent wysyła to, co nigdy nie doczekało się odpowiedzi, od najstarszych. Po przekroczeniu limitu ginie najstarsza - panel nieobecny przez tydzień kosztuje host cztery godziny odczytów, a nie tydzień. Nie ma na to ustawienia: ten limit jest tym, ile agent może kosztować host.</p>
 <h3 id="stored-fields">Sześć przechowywanych pól i co przy nich znaczy środowisko</h3>
-<p>To są pola, które czyta <code>GET /api/v1/settings/monitoring</code> i zapisuje <code>PUT /api/v1/settings/monitoring</code>. Każde jest napisem czasu trwania w formacie Go poza <code>partitions_ahead</code>, które jest liczbą. O polu, którego instalacja nigdy nie zapisała, albo wyczyszczonym przez wysłanie pustej wartości, rozstrzyga stojąca przy nim zmienna; API odpowiada trzema zestawami naraz - wartościami <code>effective</code> teraz, <code>stored</code> przez instalację wraz z tym, kto i kiedy je zapisał, oraz <code>environment</code>, z którym wystartował ten proces - żeby ekran mógł powiedzieć, skąd bierze się każda wartość.</p>
+<p>To są pola, które czyta <code>GET /api/v1/settings/monitoring</code> i zapisuje <code>PUT /api/v1/settings/monitoring</code>. Każde jest napisem z czasem trwania w formacie Go, poza <code>partitions_ahead</code>, które jest liczbą. O polu, którego instalacja nigdy nie zapisała, albo wyczyszczonym przez wysłanie pustej wartości, rozstrzyga stojąca przy nim zmienna; API odpowiada trzema zestawami naraz - wartościami <code>effective</code> teraz, <code>stored</code> przez instalację wraz z tym, kto i kiedy je zapisał, oraz <code>environment</code>, z którym wystartował ten proces - żeby ekran mógł powiedzieć, skąd bierze się każda wartość.</p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Wraca do</th><th>Wbudowana wartość domyślna</th></tr></thead>
@@ -331,7 +364,7 @@
 <tr><td><code>FLOTESTRO_HELPER_FILE_VERSION_BYTES</code></td><td><code>33554432</code></td><td>Rozmiar całego magazynu w bajtach. Powyżej odchodzą najstarsze kopie, ze wszystkich plików - jeden plik przepisywany megabajtami mieści się we własnej liczbie kopii i wciąż zapełniłby partycję, na której leży stan helpera.</td><td>tak</td><td></td></tr>
 <tr><td><code>FLOTESTRO_HELPER_HOST_ID_FILE</code></td><td><code>/var/lib/flotestro-helper/host-id</code></td><td>Identyfikator hosta, na który helper odpowiada; capability dla innego hosta dostaje odmowę. <code>flotestro-agentctl helper-trust show</code> wypisuje go razem z kluczami, a <code>helper-trust reset --confirm &lt;hostname&gt;</code> (jako root) zapomina jedno i drugie dla hosta zapisywanego od nowa do panelu, którego helper nie zna.</td><td>tak</td><td></td></tr>
 </tbody></table></div>
-<p>Magazyn wersji plików jest tym, z czego odtwarza <code>file.rollback</code>. Zapis kopiuje do niego zawartość, którą ma zastąpić, jeszcze przed zmianą nazwy, a zapis, który tej kopii zrobić nie może - pełna partycja, plik większy niż megabajtowa granica modułu - odmawia przez <code>file_version_not_kept</code>, zamiast wprowadzać zmianę nie do cofnięcia. Host raportuje, co trzyma, fragmentem plików w inventory, więc panel proponuje zawartość do powrotu, zamiast pytać o sumę kontrolną; kopia, której zawartość pochodzi z magazynu sekretów, raportowana jest bez sumy kontrolnej i dlatego nie da się jej zamówić z panelu, bo nazwanie jej umieściłoby odcisk sekretnej wartości w bazie panelu. Powrót wskazuje jedną wersję jej sumą kontrolną: suma kontrolna, której ten host nigdy nie zachował, dostaje odmowę <code>file_version_unknown</code>, zamiast odpowiedzi w postaci najnowszej kopii, a odtworzona zawartość przechodzi przez to samo miejsce przejściowe i tego samego weryfikatora co każdy inny zapis - wersja, której usługa już nie przyjmuje, dostaje odmowę, a nie zapis z powrotem.</p>
+<p><code>file.rollback</code> odtwarza z magazynu wersji plików. Zapis kopiuje do niego zawartość, którą ma zastąpić, jeszcze przed zmianą nazwy, a zapis, który tej kopii zrobić nie może - pełna partycja, plik większy niż megabajtowa granica modułu - odmawia przez <code>file_version_not_kept</code>, zamiast wprowadzać zmianę nie do cofnięcia. Host raportuje, co trzyma, fragmentem plików w inventory, więc panel proponuje zawartość, do której można wrócić, zamiast pytać o sumę kontrolną; kopia, której zawartość pochodzi z magazynu sekretów, raportowana jest bez sumy kontrolnej i dlatego nie da się jej zamówić z panelu, bo nazwanie jej umieściłoby odcisk sekretnej wartości w bazie panelu. Powrót wskazuje jedną wersję jej sumą kontrolną: suma kontrolna, której ten host nigdy nie zachował, dostaje odmowę <code>file_version_unknown</code>, zamiast odpowiedzi w postaci najnowszej kopii, a odtworzona zawartość przechodzi przez to samo miejsce przejściowe i tego samego weryfikatora co każdy inny zapis - wersja, której usługa już nie przyjmuje, dostaje odmowę, a nie zapis z powrotem.</p>
 <h2 id="relay-flotestro-relay">Relay (<code>flotestro-relay</code>)</h2>
 <p>Relay opisuje <code>relay.yaml</code>, podmontowany tylko do odczytu do jego kontenera jako <code>/etc/flotestro/relay.yaml</code>; <code>docker compose -f compose.relay.yaml run --rm relay config show</code> wypisuje to, co z niego wynika. Czytana jest jedna zmienna, wyłącznie przez polecenie <code>enroll</code>:</p>
 <div class="table-scroll">
@@ -341,7 +374,7 @@
 <tr><td><code>FLOTESTRO_ENROLLMENT_TOKEN</code></td><td>puste</td><td>Token enrollmentu, gdy nie niesie go ani <code>--token-file</code>, ani standardowe wejście.</td><td>nie dotyczy</td><td>Sekret jednorazowy: podawaj go plikiem albo przez stdin, zamiast zostawiać w środowisku.</td></tr>
 </tbody></table></div>
 <h2 id="agent-yaml">Plik agenta: <code>/etc/flotestro/agent.yaml</code></h2>
-<p>Plik jest kanonicznym źródłem ustawień hosta i jest oznaczony jako plik konfiguracyjny, więc aktualizacja pakietu go nie nadpisuje. Trzech rzeczy w nim nie ma i być nie może: tokenu enrollmentu, bo jest sekretem jednorazowym, a ten plik przeżywa aktualizacje pakietu i trafia do kopii zapasowych; tożsamości hosta, bo bierze się z certyfikatu, a nie z tekstu, który każdy może przepisać; oraz site, środowiska i właściciela, bo o nich rozstrzyga panel na podstawie profilu enrollmentu, a nie plik na hoście.</p>
+<p>Plik jest kanonicznym źródłem ustawień hosta i ma znacznik pliku konfiguracyjnego, więc aktualizacja pakietu go nie nadpisuje. Trzech rzeczy w nim nie ma i być nie może: tokenu enrollmentu, bo jest sekretem jednorazowym, a ten plik przeżywa aktualizacje pakietu i trafia do kopii zapasowych; tożsamości hosta, bo bierze się z certyfikatu, a nie z tekstu, który każdy może przepisać; oraz site, środowiska i właściciela, bo o nich rozstrzyga panel na podstawie profilu enrollmentu, a nie plik na hoście.</p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Klucz</th><th>Domyślnie</th><th>Znaczenie</th></tr></thead>
@@ -421,7 +454,7 @@ helper:
 <tr><td><code>upstream.bootstrap_ca_file</code></td><td><code>/var/lib/flotestro-relay/ca.pem</code></td><td>Zestaw fleet CA na pierwsze połączenie. Po enrollmencie relay używa kopii zapisanej w katalogu stanu.</td></tr>
 </tbody></table></div>
 <h3 id="relay-spool">Trwały spool</h3>
-<p>Komunikaty agentów, o których centrala jeszcze nie potwierdziła, że je przyjęła. Przeżywają restart relaya i maszyny i opuszczają spool dopiero na potwierdzenie panelu, więc wyniki z czasu awarii docierają do centrali, zamiast ginąć razem z procesem. Wartości poniżej są domyślnymi i w pliku zapisane są jako komentarze, do zmiany, a nie do odkomentowania: brakujący klucz bierze dokładnie tę wartość, która tam stoi. Rozmiary są w bajtach.</p>
+<p>Komunikaty agentów, o których centrala jeszcze nie potwierdziła, że je przyjęła. Przeżywają restart relaya i maszyny i opuszczają spool dopiero na potwierdzenie panelu, więc wyniki z czasu awarii docierają do centrali, zamiast ginąć razem z procesem. Wartości poniżej są domyślne i stoją w pliku jako komentarze, do zmiany, a nie do odkomentowania: brakujący klucz bierze dokładnie tę wartość, która tam stoi. Rozmiary są w bajtach.</p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Klucz</th><th>Domyślnie</th><th>Znaczenie</th></tr></thead>

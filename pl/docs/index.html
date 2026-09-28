@@ -20,7 +20,40 @@
       <a href="./" aria-current="page">Dokumentacja</a>
       <a href="https://ultherego.github.io/Flotestro/packages/">Pakiety</a>
       <a href="https://github.com/ultherego/Flotestro">Kod</a>
-      <a href="../../docs/" hreflang="en" lang="en">English</a>
+      <details class="lang-menu">
+        <summary class="lang-menu__toggle" aria-label="Język: polski (PL)">
+          <svg class="lang-menu__flag" viewBox="0 0 60 40" width="18" height="12" aria-hidden="true">
+            <path fill="#ffffff" d="M0 0h60v20H0z"/>
+            <path fill="#dc143c" d="M0 20h60v20H0z"/>
+          </svg>
+          <span class="lang-menu__code">PL</span>
+        </summary>
+        <ul class="lang-menu__list">
+          <li>
+            <a class="lang-menu__item" href="../../docs/" hreflang="en" lang="en">
+              <svg class="lang-menu__flag" viewBox="0 0 60 40" width="18" height="12" aria-hidden="true">
+                <path fill="#012169" d="M0 0h60v40H0z"/>
+                <g fill="none">
+                  <path stroke="#ffffff" stroke-width="8" d="M0 0L60 40M60 0L0 40"/>
+                  <path stroke="#c8102e" stroke-width="4" d="M0 0L60 40M60 0L0 40"/>
+                  <path stroke="#ffffff" stroke-width="13" d="M30 0V40M0 20H60"/>
+                  <path stroke="#c8102e" stroke-width="8" d="M30 0V40M0 20H60"/>
+                </g>
+              </svg>
+              English
+            </a>
+          </li>
+          <li>
+            <span class="lang-menu__item" lang="pl" aria-current="true">
+              <svg class="lang-menu__flag" viewBox="0 0 60 40" width="18" height="12" aria-hidden="true">
+                <path fill="#ffffff" d="M0 0h60v20H0z"/>
+                <path fill="#dc143c" d="M0 20h60v20H0z"/>
+              </svg>
+              Polski
+            </span>
+          </li>
+        </ul>
+      </details>
     </nav>
   </div>
 </header>
@@ -60,10 +93,10 @@
     <h1>Dokumentacja Flotestro</h1>
 
     <p class="lede">Flotestro zarządza flotą serwerów Linux z jednego panelu:
-    planuje zmianę, doprowadza do jej zatwierdzenia, przeprowadza ją na hostach
-    i zapisuje, co się stało. Ten podręcznik jest wykazem dla tych, którzy to
-    prowadzą - czym są poszczególne części, jak się je instaluje, co panel
-    obiecuje i co znaczy każda odmowa.</p>
+    planuje zmianę, doprowadza do jej zatwierdzenia, przeprowadza ją na
+    hostach i zapisuje, co się stało. Ten podręcznik jest materiałem dla tych,
+    którzy to prowadzą - czym są poszczególne części, jak się je instaluje, co
+    panel obiecuje i co znaczy każda odmowa.</p>
 
     <p>Za pierwszym razem warto czytać po kolei. <a href="introduction.html">Wprowadzenie</a>
     i <a href="concepts.html">Jak przebiega zmiana</a> to dwa rozdziały, na
@@ -75,36 +108,36 @@
     <h2>Rozdziały</h2>
 
     <h3><a href="introduction.html">1. Wprowadzenie</a></h3>
-    <p>Czym produkt jest, czym zarządza i czego celowo nie robi - żadnej powłoki
-    na hoście, żadnego zewnętrznego stosu monitoringu, żadnego zgadywania faktu,
-    którego host nie umiał zgłosić. Tutaj leży doktryna: nieznane nigdy nie jest
-    zerem, każda operacja to typowany kontrakt, host zgłasza fakty, a panel
-    ocenia, plan zatwierdza się po digeście, każda odmowa ma stabilny kod,
-    fail-closed.</p>
+    <p>Czym produkt jest, czym zarządza i czego celowo nie robi - żadnej
+    powłoki na hoście, żadnego zewnętrznego stosu monitoringu, żadnego
+    zgadywania faktu, którego host nie umiał zgłosić. Tu jest opisana
+    doktryna: nieznane nigdy nie jest zerem, każda operacja to typowany
+    kontrakt, host zgłasza fakty, a panel ocenia, plan zatwierdza się po
+    digeście, każda odmowa ma stabilny kod, fail-closed.</p>
 
     <h3><a href="architecture.html">2. Architektura</a></h3>
-    <p>Pięć części - control plane, nieuprzywilejowany agent, root helper, relay
-    site i PostgreSQL - z portami między nimi, tożsamością, którą każda z nich
-    udowadnia, i katalogiem stanu, którego w bazie nie ma. Odpowiada też, czemu
-    agent jest natywnym pakietem, a control plane obrazem.</p>
+    <p>Pięć części - control plane, nieuprzywilejowany agent, root helper,
+    relay site i PostgreSQL - z portami między nimi, tożsamością, którą każda
+    z nich udowadnia, i katalogiem stanu, którego w bazie nie ma. Odpowiada
+    też, dlaczego agent jest natywnym pakietem, a control plane obrazem.</p>
 
     <h3><a href="installation.html">3. Instalacja</a></h3>
     <p>Długa wersja instalacji od zera: control plane z obrazu, pierwszy
     administrator i mapowania grup, bez których nikt się nie zaloguje, para do
-    kopii zapasowych zrobiona, zanim powstanie flota, hosty z podpisanego
+    kopii zapasowych zrobiona jeszcze przed flotą, hosty z podpisanego
     repozytorium, site za relayem i profil odcięty od sieci.</p>
 
     <h3><a href="concepts.html">4. Jak przebiega zmiana</a></h3>
     <p>Jedna zmiana od początku do końca: operacja, jej plan, zatwierdzenie
     związane z digestem, wysłanie, dzierżawa, wynik i weryfikator - oraz to, co
     dokłada do tego kampania: migawka, canary, fale, okna serwisowe i budżety.
-    Inventory ze swoimi rewizjami i częstotliwościami oraz łańcuch audytowy,
+    Inventory z rewizjami i częstotliwościami oraz łańcuch audytowy,
     który <code>flotestro-auditverify</code> sprawdza bez bazy
     danych.</p>
 
     <h3><a href="configuration.html">5. Wykaz konfiguracji</a></h3>
-    <p>Każda zmienna środowiskowa każdego z binariów, jej wartość domyślna, to,
-    czy zmiana wymaga restartu, i ile ta zmiana kosztuje w bezpieczeństwie.</p>
+    <p>Każda zmienna środowiskowa każdej binarki, jej wartość domyślna, to, czy
+    zmiana wymaga restartu, i jaki jest jej koszt dla bezpieczeństwa.</p>
 
     <h3><a href="operations.html">6. Wykaz operacji</a></h3>
     <p>Operacje typowane: co robi każda z nich, jakiego uprawnienia wymaga, jej
@@ -131,7 +164,7 @@
     <p>Procedury, których panel nie przeprowadza sam - rotacja CA, odtworzenie
     bazy danych, kolejka, która stoi, relay bez miejsca, dziura na wykresach,
     kwarantanna i wycofanie hosta, pakiet diagnostyczny, golden image. Każda
-    podaje swoje sygnały, warunki wstępne, dokładne żądania, weryfikację i drogę
+    podaje sygnały, warunki wstępne, dokładne żądania, weryfikację i drogę
     powrotną.</p>
 
     <h2>Jak to czytać</h2>
@@ -143,16 +176,16 @@
       może się zmienić, kod nie.</dd>
 
       <dt>Wartość domyślna</dt>
-      <dd>Podana wszędzie tam, gdzie jakaś jest, w postaci, z jaką produkt jest
-      wydawany. Ustawienie bez wartości domyślnej jest oznaczone jako wymagane,
-      a binarium bez niego odmawia startu.</dd>
+      <dd>Podana wszędzie tam, gdzie jakaś jest, w takiej postaci, w jakiej
+      produkt jest wydawany. Ustawienie bez wartości domyślnej jest oznaczone
+      jako wymagane, a binarka bez niego odmawia startu.</dd>
 
       <dt>Polecenie</dt>
-      <dd>Wykonuje się tam, gdzie mówi tekst: na hoście panelu, w kontenerze
-      albo na zarządzanym hoście jako <code>root</code>. Polecenia dla hostów
-      panel wypisuje dla swoich własnych adresów pod <strong>Dodaj host</strong>;
-      kształty w tym podręczniku są po to, żeby operator wiedział, co się
-      uruchamia.</dd>
+      <dd>Uruchamia się je tam, gdzie wskazuje tekst: na hoście panelu, w
+      kontenerze albo na zarządzanym hoście jako <code>root</code>.
+      Polecenia dla hostów panel wypisuje z własnymi adresami pod
+      <strong>Dodaj host</strong>; postacie poleceń w tym podręczniku są po
+      to, żeby operator wiedział, co się uruchamia.</dd>
 
       <dt>Uprawnienie</dt>
       <dd>Zapisane jako <code>pki.rotate</code>. Uprawnienia nadaje się rolom,
@@ -172,7 +205,7 @@
 
     <ul>
       <li><a href="https://github.com/ultherego/Flotestro/blob/main/README.md"><code>README.md</code></a> - czym produkt jest i szybki start.</li>
-      <li><a href="configuration.html">Konfiguracja</a> - każde ustawienie każdego z binariów.</li>
+      <li><a href="configuration.html">Konfiguracja</a> - każde ustawienie każdej binarki.</li>
       <li><a href="https://github.com/ultherego/Flotestro/blob/main/docker/README.md"><code>docker/README.md</code></a> - obrazy, pliki Compose, łańcuch dostaw, para do kopii zapasowych.</li>
       <li><a href="https://github.com/ultherego/Flotestro/tree/main/docs/runbooks"><code>docs/runbooks/</code></a> - procedury.</li>
       <li><a href="https://github.com/ultherego/Flotestro/blob/main/CONTRIBUTING.md"><code>CONTRIBUTING.md</code></a> - jak to zbudować i jakie kontrole przechodzi zmiana, zanim trafi do <code>main</code>.</li>

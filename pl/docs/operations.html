@@ -20,7 +20,40 @@
       <a href="./" aria-current="page">Dokumentacja</a>
       <a href="https://ultherego.github.io/Flotestro/packages/">Pakiety</a>
       <a href="https://github.com/ultherego/Flotestro">Kod</a>
-      <a href="../../docs/operations.html" hreflang="en" lang="en">English</a>
+      <details class="lang-menu">
+        <summary class="lang-menu__toggle" aria-label="Język: polski (PL)">
+          <svg class="lang-menu__flag" viewBox="0 0 60 40" width="18" height="12" aria-hidden="true">
+            <path fill="#ffffff" d="M0 0h60v20H0z"/>
+            <path fill="#dc143c" d="M0 20h60v20H0z"/>
+          </svg>
+          <span class="lang-menu__code">PL</span>
+        </summary>
+        <ul class="lang-menu__list">
+          <li>
+            <a class="lang-menu__item" href="../../docs/operations.html" hreflang="en" lang="en">
+              <svg class="lang-menu__flag" viewBox="0 0 60 40" width="18" height="12" aria-hidden="true">
+                <path fill="#012169" d="M0 0h60v40H0z"/>
+                <g fill="none">
+                  <path stroke="#ffffff" stroke-width="8" d="M0 0L60 40M60 0L0 40"/>
+                  <path stroke="#c8102e" stroke-width="4" d="M0 0L60 40M60 0L0 40"/>
+                  <path stroke="#ffffff" stroke-width="13" d="M30 0V40M0 20H60"/>
+                  <path stroke="#c8102e" stroke-width="8" d="M30 0V40M0 20H60"/>
+                </g>
+              </svg>
+              English
+            </a>
+          </li>
+          <li>
+            <span class="lang-menu__item" lang="pl" aria-current="true">
+              <svg class="lang-menu__flag" viewBox="0 0 60 40" width="18" height="12" aria-hidden="true">
+                <path fill="#ffffff" d="M0 0h60v20H0z"/>
+                <path fill="#dc143c" d="M0 20h60v20H0z"/>
+              </svg>
+              Polski
+            </span>
+          </li>
+        </ul>
+      </details>
     </nav>
   </div>
 </header>
@@ -96,7 +129,7 @@
 <thead><tr><th>Fakt</th><th>O czym rozstrzyga</th></tr></thead>
 <tbody>
 <tr><td>Uprawnienie</td><td>Uprawnienie, którego operator potrzebuje w zakresie danego hosta. Bez niego zlecenie kończy się odmową, zanim cokolwiek zostanie wysłane.</td></tr>
-<tr><td>Adapter</td><td>Zdolność, którą host musi zgłosić, żeby operacja była na nim możliwa. Host, który jej nie ma, zostaje pominięty, a nie zaliczony jako błąd.</td></tr>
+<tr><td>Adapter</td><td>Capability, którą host musi zgłosić, żeby operacja była na nim możliwa. Host, który jej nie ma, zostaje pominięty, a nie policzony jako błąd.</td></tr>
 <tr><td>Ryzyko</td><td>Czym grozi operacja. Operacje critical i destructive wymagają świeżego uwierzytelnienia; destructive wymaga dodatkowo wpisania nazwy celu.</td></tr>
 <tr><td>Klasa blokady</td><td>Zasób hosta, który operacja trzyma na wyłączność przez czas działania. Dwie operacje tej samej klasy nigdy nie działają na jednym hoście równocześnie.</td></tr>
 <tr><td>Tryb kampanii</td><td>Czy operacja może działać na wielu hostach naraz i na jakich warunkach.</td></tr>
@@ -197,9 +230,9 @@
 <table>
 <thead><tr><th>Wartość</th><th>Znaczenie</th></tr></thead>
 <tbody>
-<tr><td><code>require_online</code></td><td>Kończy udział hosta w chwili, gdy okaże się on offline: zlecenie jest reakcją na sytuację, a stanu, dla którego je wydano, nie będzie już, gdy host wróci.</td></tr>
+<tr><td><code>require_online</code></td><td>Kończy udział hosta w chwili, gdy okaże się offline: zlecenie jest reakcją na sytuację, a stanu, dla którego je wydano, nie będzie już, gdy host wróci.</td></tr>
 <tr><td><code>skip_if_offline</code></td><td>Pomija host, nie nazywając tego porażką: odczyt albo odświeżenie, które się nie odbyło, to luka w wiedzy, a nie zepsuta zmiana.</td></tr>
-<tr><td><code>wait_until_deadline</code></td><td>Trzyma host w kolejce bez przydzielonego slotu i uruchamia go, gdy wróci, aż do terminu kampanii.</td></tr>
+<tr><td><code>wait_until_deadline</code></td><td>Trzyma host w kolejce bez przydzielonego slotu i obsługuje go, gdy wróci, aż do terminu kampanii.</td></tr>
 <tr><td><code>replan_on_reconnect</code></td><td>Czeka tak samo, ale po powrocie liczy plan hosta jeszcze raz i wykonuje zmianę tylko wtedy, gdy plan jest tym, który został zatwierdzony.</td></tr>
 </tbody></table></div>
 <h2 id="fanout">Odczyty fan-out</h2>
@@ -213,9 +246,9 @@
 <tr><td>20 hostów</td><td><a href="#op-docker-container-logs"><code>docker.container.logs</code></a>, <a href="#op-docker-events"><code>docker.events</code></a>, <a href="#op-file-read"><code>file.read</code></a>, <a href="#op-journal-read"><code>journal.read</code></a>, <a href="#op-logfile-read"><code>logfile.read</code></a></td></tr>
 <tr><td>10 hostów</td><td><a href="#op-process-list"><code>process.list</code></a></td></tr>
 </tbody></table></div>
-<p>Odczyt spoza tabeli nie idzie w fan-out i jest wykonywany host po hoście. Podgląd journala na żywo (<code>journal.follow</code>) spotyka się z odmową jako fan-out z własnego powodu: przez cały czas trwania trzyma na hoście proces.</p>
+<p>Odczyt spoza tabeli nie idzie w fan-out i jest wykonywany host po hoście. Podgląd journala na żywo (<code>journal.follow</code>) jest odmawiany jako fan-out z własnego powodu: przez cały czas trwania trzyma na hoście proces.</p>
 <h2 id="verification">Weryfikacja i droga powrotna</h2>
-<p>Zmiana nie jest sukcesem dlatego, że polecenie zwróciło zero. Host czyta się potem sam weryfikatorem, który deklaruje operacja, i dopiero to zamienia zmianę w sukces. Zmiana, której weryfikator nie potwierdził, jest raportowana jako <code>applied_unverified</code>; trzy operacje idą dalej i same przywracają poprzedni stan, zamiast zostawiać niepotwierdzoną zmianę: <code>sysctl.ensure</code>, <code>file.ensure</code> i <code>file.rollback</code>.</p>
+<p>Zmiana nie jest sukcesem dlatego, że polecenie zwróciło zero. Potem host sam czyta swój stan weryfikatorem, który deklaruje operacja, i dopiero to zamienia zmianę w sukces. Zmiana, której weryfikator nie potwierdził, jest raportowana jako <code>applied_unverified</code>; trzy operacje idą dalej i same przywracają poprzedni stan, zamiast zostawiać niepotwierdzoną zmianę: <code>sysctl.ensure</code>, <code>file.ensure</code> i <code>file.rollback</code>.</p>
 <p>Co kampania sprawdza na hoście po zmianie:</p>
 <div class="table-scroll">
 <table>
@@ -434,7 +467,7 @@
 <p>Plan resolvera: różnica między znalezionym profilem a żądanym.</p>
 <dl class="kv"><dt>Uprawnienie</dt><dd><code>dns.plan</code></dd><dt>Adapter</dt><dd><code>dns</code></dd><dt>Zmienia host</dt><dd>nie, to odczyt</dd><dt>Ryzyko</dt><dd><span class="badge risk-low">low</span></dd><dt>Świeże uwierzytelnienie</dt><dd>niewymagane</dd><dt>Klasa blokady</dt><dd>brak</dd><dt>Rezerwacje zasobów</dt><dd>brak</dd><dt>Domyślny limit czasu</dt><dd>60 s</dd><dt>Limit wyniku</dt><dd>64 KiB</dd><dt>Zatwierdzony plan</dt><dd>niewymagany</dd><dt>Tryb kampanii</dt><dd><code>none</code></dd><dt>Polityka offline</dt><dd><code>skip_if_offline</code></dd><dt>Fan-out</dt><dd>niedostępne jako fan-out; wykonywane host po hoście</dd><dt>Anulowanie</dt><dd><code>safe</code></dd><dt>Ponowienie</dt><dd><code>automatic</code></dd><dt>Rollback</dt><dd><code>none</code></dd><dt>Weryfikacja w kampanii</dt><dd><code>none</code></dd><dt>Payload</dt><dd><a href="#payload-dns"><code>dns</code></a> <span class="caption">(opcjonalny)</span></dd></dl>
 <h3 id="op-dns-resolve-test"><code>dns.resolve.test</code></h3>
-<p>Test rozwiązywania nazw pyta z hosta, bo odpowiedź panelu nic nie mówi o tym, co zobaczy host. Samo zapytanie niczego nie zmienia.</p>
+<p>Test rozwiązywania nazw pyta z poziomu hosta, bo odpowiedź panelu nic nie mówi o tym, co zobaczy host. Samo zapytanie niczego nie zmienia.</p>
 <dl class="kv"><dt>Uprawnienie</dt><dd><code>dns.read</code></dd><dt>Adapter</dt><dd><code>dns</code></dd><dt>Zmienia host</dt><dd>nie, to odczyt</dd><dt>Ryzyko</dt><dd><span class="badge risk-low">low</span></dd><dt>Świeże uwierzytelnienie</dt><dd>niewymagane</dd><dt>Klasa blokady</dt><dd>brak</dd><dt>Rezerwacje zasobów</dt><dd>brak</dd><dt>Domyślny limit czasu</dt><dd>60 s</dd><dt>Limit wyniku</dt><dd>64 KiB</dd><dt>Zatwierdzony plan</dt><dd>niewymagany</dd><dt>Tryb kampanii</dt><dd><code>none</code></dd><dt>Polityka offline</dt><dd><code>skip_if_offline</code></dd><dt>Fan-out</dt><dd>do 50 hostów naraz</dd><dt>Anulowanie</dt><dd><code>safe</code></dd><dt>Ponowienie</dt><dd><code>automatic</code></dd><dt>Rollback</dt><dd><code>none</code></dd><dt>Weryfikacja w kampanii</dt><dd><code>none</code></dd><dt>Payload</dt><dd><a href="#payload-dns"><code>dns</code></a></dd></dl>
 <h3 id="op-network-link-apply"><code>network.link.apply</code></h3>
 <p>Tworzy albo zmienia bond, bridge lub VLAN.</p>
@@ -779,7 +812,7 @@
 <p>Przyłącza host do domeny.</p>
 <dl class="kv"><dt>Uprawnienie</dt><dd><code>identity.host.enroll</code></dd><dt>Adapter</dt><dd><code>systemd</code></dd><dt>Zmienia host</dt><dd>tak</dd><dt>Ryzyko</dt><dd><span class="badge risk-critical">critical</span></dd><dt>Świeże uwierzytelnienie</dt><dd>wymagane</dd><dt>Klasa blokady</dt><dd><code>identity</code>, wyłączna</dd><dt>Rezerwacje zasobów</dt><dd><code>identity</code> (wyłączna, waga 2)</dd><dt>Domyślny limit czasu</dt><dd>900 s (15 min)</dd><dt>Limit wyniku</dt><dd>64 KiB (domyślnie)</dd><dt>Weryfikator</dt><dd><code>domain_membership</code></dd><dt>Gdy weryfikator nie potwierdzi</dt><dd>zmiana jest raportowana jako <code>applied_unverified</code></dd><dt>Zatwierdzony plan</dt><dd>niewymagany</dd><dt>Tryb kampanii</dt><dd><code>specialized</code></dd><dt>Polityka offline</dt><dd><code>wait_until_deadline</code></dd><dt>Anulowanie</dt><dd><code>checkpoint_only</code></dd><dt>Ponowienie</dt><dd><code>after_change</code></dd><dt>Rollback</dt><dd><code>compensating</code></dd><dt>Weryfikacja w kampanii</dt><dd><code>custom</code></dd><dt>Payload</dt><dd><a href="#payload-domain-enroll"><code>domain_enroll</code></a></dd></dl>
 <h3 id="op-host-final-wipe"><code>host.final_wipe</code></h3>
-<p>Ostatni krok wycofania hosta. Nie zleca się go z endpointu operacji: handler wycofania wysyła go jako commit handshake&rsquo;u, po tym jak host zgłosił, że przestał działać, a jego certyfikaty zostały unieważnione. Niesie capability panelu jak każda inna zmiana, bo wiadomość idzie przez relay, a relay nie może mieć możliwości przejęcia tożsamości hosta przez napisanie takiej wiadomości.</p>
+<p>Ostatni krok wycofania hosta. Nie zleca się go z endpointu operacji: handler wycofania wysyła go jako commit handshake&rsquo;u, po tym jak host zgłosił, że przestał działać, a jego certyfikaty zostały unieważnione. Niesie capability panelu jak każda inna zmiana, bo wiadomość idzie przez relay, a relay nie może być w stanie przejąć tożsamości hosta, pisząc taką wiadomość.</p>
 <dl class="kv"><dt>Uprawnienie</dt><dd><code>host.decommission</code></dd><dt>Adapter</dt><dd><code>systemd</code></dd><dt>Zmienia host</dt><dd>tak</dd><dt>Ryzyko</dt><dd><span class="badge risk-destructive">destructive</span></dd><dt>Świeże uwierzytelnienie</dt><dd>wymagane</dd><dt>Potwierdzenie celu</dt><dd>operator wpisuje nazwę hosta</dd><dt>Klasa blokady</dt><dd><code>identity</code>, wyłączna</dd><dt>Rezerwacje zasobów</dt><dd><code>host</code> (wyłączna, waga 1)</dd><dt>Domyślny limit czasu</dt><dd>300 s (5 min)</dd><dt>Limit wyniku</dt><dd>64 KiB (domyślnie)</dd><dt>Weryfikator</dt><dd><code>none</code></dd><dt>Zatwierdzony plan</dt><dd>niewymagany</dd><dt>Tryb kampanii</dt><dd><code>none</code></dd><dt>Anulowanie</dt><dd><code>impossible_after_start</code></dd><dt>Ponowienie</dt><dd><code>never</code></dd><dt>Rollback</dt><dd><code>none</code></dd><dt>Weryfikacja w kampanii</dt><dd><code>none</code></dd><dt>Payload</dt><dd><a href="#payload-final-wipe"><code>final_wipe</code></a></dd></dl>
 <h3 id="op-identity-host-leave"><code>identity.host.leave</code></h3>
 <p>Opuszczenie domeny jest osobną decyzją, a nie cofnięciem przyłączenia: odcina od hosta wszystkich użytkowników z katalogu naraz.</p>
@@ -1072,7 +1105,7 @@
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
 <tbody>
-<tr><td><code>reason</code></td><td>string</td><td>tak</td><td>Powód odejścia hosta z floty, w brzmieniu podanym przez operatora. Jest związany przez capability, więc powód w śladzie audytowym to ten sam, który dostał host.</td></tr>
+<tr><td><code>reason</code></td><td>string</td><td>tak</td><td>Powód odejścia hosta z floty, w brzmieniu podanym przez operatora. Wiąże go capability, więc powód w śladzie audytowym to ten sam, który dostał host.</td></tr>
 </tbody>
 </table>
 </div>
@@ -1475,7 +1508,7 @@
 <tbody>
 <tr><td><code>units</code></td><td><code>[]string</code></td><td>tak</td><td></td></tr>
 <tr><td><code>all</code></td><td><code>bool</code></td><td>nie</td><td><code>all</code> zamawia pełną listę. Bez niego pusta lista jednostek jest błędem.</td></tr>
-<tr><td><code>detail</code></td><td><code>bool</code></td><td>nie</td><td><code>detail</code> prosi o pełny obraz wskazanych jednostek: zależności, drop-iny wraz z treścią, ostatnie linie journala.</td></tr>
+<tr><td><code>detail</code></td><td><code>bool</code></td><td>nie</td><td><code>detail</code> włącza pełny obraz wskazanych jednostek: zależności, drop-iny wraz z treścią, ostatnie linie journala.</td></tr>
 </tbody></table></div>
 <h3 id="payload-unit-toggle"><code>unit_toggle</code></h3>
 <p>Włącza albo wyłącza właściwość jednostki.</p>

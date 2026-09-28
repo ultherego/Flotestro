@@ -20,7 +20,40 @@
       <a href="./" aria-current="page">Dokumentacja</a>
       <a href="https://ultherego.github.io/Flotestro/packages/">Pakiety</a>
       <a href="https://github.com/ultherego/Flotestro">Kod</a>
-      <a href="../../docs/api.html" hreflang="en" lang="en">English</a>
+      <details class="lang-menu">
+        <summary class="lang-menu__toggle" aria-label="Język: polski (PL)">
+          <svg class="lang-menu__flag" viewBox="0 0 60 40" width="18" height="12" aria-hidden="true">
+            <path fill="#ffffff" d="M0 0h60v20H0z"/>
+            <path fill="#dc143c" d="M0 20h60v20H0z"/>
+          </svg>
+          <span class="lang-menu__code">PL</span>
+        </summary>
+        <ul class="lang-menu__list">
+          <li>
+            <a class="lang-menu__item" href="../../docs/api.html" hreflang="en" lang="en">
+              <svg class="lang-menu__flag" viewBox="0 0 60 40" width="18" height="12" aria-hidden="true">
+                <path fill="#012169" d="M0 0h60v40H0z"/>
+                <g fill="none">
+                  <path stroke="#ffffff" stroke-width="8" d="M0 0L60 40M60 0L0 40"/>
+                  <path stroke="#c8102e" stroke-width="4" d="M0 0L60 40M60 0L0 40"/>
+                  <path stroke="#ffffff" stroke-width="13" d="M30 0V40M0 20H60"/>
+                  <path stroke="#c8102e" stroke-width="8" d="M30 0V40M0 20H60"/>
+                </g>
+              </svg>
+              English
+            </a>
+          </li>
+          <li>
+            <span class="lang-menu__item" lang="pl" aria-current="true">
+              <svg class="lang-menu__flag" viewBox="0 0 60 40" width="18" height="12" aria-hidden="true">
+                <path fill="#ffffff" d="M0 0h60v20H0z"/>
+                <path fill="#dc143c" d="M0 20h60v20H0z"/>
+              </svg>
+              Polski
+            </span>
+          </li>
+        </ul>
+      </details>
     </nav>
   </div>
 </header>
@@ -91,7 +124,7 @@
 <p>Do tych samych uprawnień prowadzą dwa poświadczenia.</p>
 <div class="table-scroll">
 <table>
-<thead><tr><th>Poświadczenie</th><th>Jak podróżuje</th><th>Kto go używa</th></tr></thead>
+<thead><tr><th>Poświadczenie</th><th>Jak jedzie</th><th>Kto go używa</th></tr></thead>
 <tbody>
 <tr><td>Token API</td><td><code>Authorization: Bearer &lt;token&gt;</code></td><td>Automatyzacja. Token należy do tożsamości i niesie jej uprawnienia.</td></tr>
 <tr><td>Sesja przeglądarki</td><td>ciasteczko <code>flotestro_session</code>, ustawiane po zalogowaniu przez OIDC</td><td>Człowiek pracujący w panelu.</td></tr>
@@ -100,7 +133,7 @@
 <p>Logowanie w przeglądarce jest kwestią konfiguracji, nie czymś wbudowanym: bez <code>FLOTESTRO_OIDC_ISSUER</code> panel działa wyłącznie na tokenach API. Sesję ograniczają <code>FLOTESTRO_SESSION_IDLE</code> (domyślnie 8h) oraz sztywny limit 24 godzin, a jej grupy są potwierdzane u dostawcy tożsamości co <code>FLOTESTRO_SESSION_GROUP_REFRESH</code> (domyślnie 5m).</p>
 <h2 id="stepup">Step-up: operacje o największych skutkach</h2>
 <p>Nie każdą trasę niesie samo uprawnienie. Operacja <code>critical</code> lub <code>destructive</code>, zmiana reguł dostępu i zmiana w katalogu wymagają, obok uprawnienia:</p>
-<ul><li><strong>Powodu</strong>, co najmniej 8 znaków, w polu <code>reason</code> ciała żądania. Bez niego odpowiedzią jest <code>400</code> <code>reason_required</code> - odmowa, której ponowne zalogowanie nie naprawi.</li><li><strong>Świeżego uwierzytelnienia.</strong> Uwierzytelnienie sesji nie może być starsze niż <code>FLOTESTRO_STEPUP_MAX_AGE</code> (domyślnie 5m), a tam, gdzie ustawiono <code>FLOTESTRO_STEPUP_ACR</code>, musi być na tym poziomie. W przeciwnym razie odpowiedzią jest <code>401</code> <code>reauthentication_required</code>, a w obiekcie problem znajdą się <code>required_max_age_seconds</code> i <code>authentication_age_seconds</code> albo <code>required_acr</code> i <code>session_acr</code>. Dostawca tożsamości, który nie podaje czasu uwierzytelnienia, dostaje taką samą odmowę: stanu nieustalonego nie wolno czytać jako &bdquo;przed chwilą&rdquo;.</li><li><strong>Zgody na to, by w ogóle zrobił to token API.</strong> <code>FLOTESTRO_STEPUP_TOKENS</code> ma domyślnie wartość <code>allow</code>, a polecenie wydane tokenem zapisuje się jako <code>authentication: api_token, reauthenticated: false</code>. Przy wartości <code>refuse</code> token dostaje <code>401</code> <code>reauthentication_required</code>: automat nie może się uwierzytelnić ponownie, bo nie stoi za nim człowiek.</li></ul>
+<ul><li><strong>Powodu</strong>, co najmniej 8 znaków, w polu <code>reason</code> ciała żądania. Bez niego panel odpowiada <code>400</code> <code>reason_required</code> - odmową, której ponowne zalogowanie nie naprawi.</li><li><strong>Świeżego uwierzytelnienia.</strong> Uwierzytelnienie sesji nie może być starsze niż <code>FLOTESTRO_STEPUP_MAX_AGE</code> (domyślnie 5m), a tam, gdzie ustawiono <code>FLOTESTRO_STEPUP_ACR</code>, musi być na tym poziomie. W przeciwnym razie panel odpowiada <code>401</code> <code>reauthentication_required</code>, a w obiekcie problem znajdą się <code>required_max_age_seconds</code> i <code>authentication_age_seconds</code> albo <code>required_acr</code> i <code>session_acr</code>. Dostawca tożsamości, który nie podaje czasu uwierzytelnienia, dostaje taką samą odmowę: stanu nieustalonego nie wolno czytać jako &bdquo;przed chwilą&rdquo;.</li><li><strong>Zgody na wykonanie tego tokenem API.</strong> <code>FLOTESTRO_STEPUP_TOKENS</code> ma domyślnie wartość <code>allow</code>, a polecenie wydane tokenem zapisuje się jako <code>authentication: api_token, reauthenticated: false</code>. Przy wartości <code>refuse</code> token dostaje <code>401</code> <code>reauthentication_required</code>: automat nie może się uwierzytelnić ponownie, bo nie stoi za nim człowiek.</li></ul>
 <p>To, co panel przyjął, zapisuje się razem ze zmianą, w postaci zgłoszonej przez dostawcę tożsamości: cel wpisany przez operatora, metoda uwierzytelnienia (<code>acr</code>, <code>amr</code>) i moment uwierzytelnienia. Panel nie przekłada tego na własne &bdquo;mfa: yes&rdquo;.</p>
 <p>W środowisku produkcyjnym - czyli takim, które wymienia <code>FLOTESTRO_PRODUCTION_ENVIRONMENTS</code>, domyślnie <code>prod,production</code> - zatwierdzenia nie może wystawić osoba, która zleciła zmianę.</p>
 <h2 id="problem">Kształt odmowy</h2>
@@ -461,7 +494,7 @@
 <tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/support/bundles/{id}/download</code></td><td><code>support.bundle.read</code></td></tr>
 </tbody></table></div>
 <h2 id="filters">Filtry dużych list</h2>
-<p>Wszystkie filtry przyjmowane przez listy, w postaci opisanej we własnym kontrakcie panelu. Pominięty filtr niczego nie zawęża.</p>
+<p>Wszystkie filtry przyjmowane przez listy, tak jak opisuje je własny kontrakt panelu. Pominięty filtr niczego nie zawęża.</p>
 <h3 id="filters-get-api-v1-audit"><code>GET /api/v1/audit</code></h3>
 <div class="table-scroll">
 <table>
