@@ -92,11 +92,11 @@
   <main class="content">
     <h1>9. Role i uprawnienia</h1>
 
-    <p class="lede">Żadne uprawnienie nie istnieje samo dla siebie. Ma je rola,
-    rola jest powiązana z tożsamością w konkretnym zakresie, a zakres mówi, do
-    której części floty ta rola sięga. Ten rozdział to wykaz sześciu ról: co
-    każda z nich może i czego nie może, jak zakres zawęża powiązanie i o co
-    operacja prosi ponad samą rolę.</p>
+    <p class="lede">Żadne uprawnienie nie istnieje samo z siebie. Należy do roli, rola jest
+    powiązana z tożsamością w konkretnym zakresie, a zakres mówi, do której
+    części floty ta rola sięga. Ten rozdział to wykaz sześciu ról: co każda
+    z nich może i czego nie może, jak zakres zawęża powiązanie i czego
+    operacja wymaga ponad samą rolę.</p>
 
     <ul class="linkrow">
       <li><a href="#roles">Sześć ról</a></li>
@@ -127,12 +127,12 @@
 <table>
 <thead><tr><th>Rola</th><th>Do czego służy</th><th>Uprawnień</th></tr></thead>
 <tbody>
-<tr><td><code>viewer</code></td><td>Patrzy na flotę. Czyta hosty i ich moduły, wylicza plany; niczego nie zmienia.</td><td>31</td></tr>
-<tr><td><code>auditor</code></td><td>Przegląda instalację. Czyta ślad audytowy, metryki, ustalenia, metadane sekretów i stan CA; niczego nie naprawia.</td><td>23</td></tr>
-<tr><td><code>operator</code></td><td>Pełni dyżur. Restartuje usługi, uruchamia kontenery, planuje aktualizacje, zleca kampanie, robi kopie zapasowe, wycisza alerty; niczego nie zatwierdza i nie przeprowadza żadnej transakcji pakietowej.</td><td>63</td></tr>
-<tr><td><code>approver</code></td><td>Jest drugą osobą. Czyta zmianę i ślad audytowy, zatwierdza operacje i kampanie, publikuje politykę; niczego nie zleca.</td><td>12</td></tr>
-<tr><td><code>identity_admin</code></td><td>Decyduje, kto ma dostęp do hostów. Katalog, jego polityki i konta lokalne; nie prowadzi operacji na hostach.</td><td>24</td></tr>
-<tr><td><code>platform_admin</code></td><td>Administruje instalacją. Ma każde uprawnienie, jakie istnieje.</td><td>187</td></tr>
+<tr><td><code>viewer</code></td><td>Tylko do odczytu. Podgląd hostów i ich modułów, wyliczanie planów; żadnych zmian.</td><td>31</td></tr>
+<tr><td><code>auditor</code></td><td>Rola przeglądowa. Odczyt śladu audytowego, metryk, ustaleń, metadanych sekretów i stanu CA; niczego nie naprawia.</td><td>23</td></tr>
+<tr><td><code>operator</code></td><td>Rola dyżurna. Restart usług, uruchamianie kontenerów, planowanie aktualizacji, zlecanie kampanii, kopie zapasowe, wyciszanie alertów; niczego nie zatwierdza i nie przeprowadza żadnej transakcji pakietowej.</td><td>63</td></tr>
+<tr><td><code>approver</code></td><td>Druga para oczu. Odczyt zmiany i śladu audytowego, zatwierdzanie operacji i kampanii, publikacja polityki; niczego nie zleca.</td><td>12</td></tr>
+<tr><td><code>identity_admin</code></td><td>Dostęp do hostów: katalog, polityki katalogu i konta lokalne. Nie prowadzi operacji na hostach.</td><td>24</td></tr>
+<tr><td><code>platform_admin</code></td><td>Administrator instalacji. Ma wszystkie uprawnienia, jakie istnieją.</td><td>187</td></tr>
 </tbody></table></div>
 
     <p>Jedna tożsamość może mieć kilka ról naraz, każdą w osobnym zakresie:
@@ -143,8 +143,8 @@
 
     <h2 id="viewer">viewer</h2>
 
-    <p>Rola, która czyta. Widzi hosty i ich moduły i może zapytać
-    host, do czego doprowadziłaby zmiana, bo plan wylicza różnicę i niczego nie
+    <p>Rola czysto odczytowa. Widzi hosty i ich moduły, a planem sprawdza, do
+    czego doprowadziłaby zmiana &mdash; plan wylicza różnicę i niczego nie
     zapisuje.</p>
 
 <div class="table-scroll">
@@ -157,16 +157,16 @@
 </tbody></table></div>
 
     <p><strong>Czego nie może.</strong> Niczego, co zapisuje: nie zleci żadnej
-    operacji, bo na liście nie ma <code>job.create</code>. Nie czyta też śladu
-    audytowego &mdash; to materiał audytora, nie widza &mdash; ani metryk, ani
-    metadanych sekretów, i nie uruchomi skanu bezpieczeństwa: skan zbiera o
-    hoście materiał rozpoznawczy i ma własne uprawnienie.</p>
+    operacji, bo na liście nie ma <code>job.create</code>. Nie czyta też
+    śladu audytowego &mdash; to materiał dla audytora, nie dla tej roli
+    &mdash; ani metryk, ani metadanych sekretów, i nie uruchomi skanu
+    bezpieczeństwa: skan zbiera informacje rozpoznawcze o hoście i ma własne
+    uprawnienie.</p>
 
     <h2 id="auditor">auditor</h2>
 
-    <p>Rola, która przegląda. Jej materiałem jest ślad audytowy, ustalenia i
-    stan instalacji, i celowo nie jest to rola, która cokolwiek z tego
-    naprawia.</p>
+    <p>Rola przeglądowa. Pracuje na śladzie audytowym, ustaleniach i stanie
+    instalacji i celowo niczego z tego nie naprawia.</p>
 
 <div class="table-scroll">
 <table>
@@ -183,27 +183,26 @@
     (<code>security.remediate</code>), ani polityki. Nie ma też zwykłych
     odczytów modułów hosta &mdash; sieci, dysków, firewalla, SSH, jądra, czasu
     &mdash; i to jedyne miejsce, w którym <code>viewer</code> widzi więcej niż
-    <code>auditor</code>: kto potrzebuje jednego i drugiego, dostaje obie
-    role.</p>
+    <code>auditor</code>: komu potrzebne są oba, dostaje obie role.</p>
 
     <h2 id="operator">operator</h2>
 
-    <p>Rola dyżurna i największa z pięciu, które nie są administratorem. Cała
-    jest jedną decyzją powtórzoną wielokrotnie: wszystko, co stawia usługę z
-    powrotem na nogi, nic, co zmienia to, czym host jest.</p>
+    <p>Rola dyżurna i największa z pięciu, które nie są administratorem.
+    Zbudowana wokół jednej zasady: wszystko, co stawia usługę z powrotem na
+    nogi, nic, co zmienia to, czym host jest.</p>
 
 <div class="table-scroll">
 <table>
 <thead><tr><th>Co może</th><th>Uprawnienia</th></tr></thead>
 <tbody>
 <tr><td>Zlecić pracę i ją wycofać. Odświeżenie inventory to pierwszy ruch przy każdej awarii: zanim ktoś zacznie zmieniać host, chce wiedzieć, jak jest teraz.</td><td><code>host.read</code>, <code>inventory.read</code>, <code>inventory.refresh</code>, <code>job.read</code>, <code>job.create</code>, <code>job.cancel</code></td></tr>
-<tr><td>Ruszać usługami i czytać journal.</td><td><code>unit.start</code>, <code>unit.stop</code>, <code>unit.restart</code>, <code>unit.reload</code>, <code>unit.reset_failed</code>, <code>journal.read</code></td></tr>
+<tr><td>Sterować usługami i czytać journal.</td><td><code>unit.start</code>, <code>unit.stop</code>, <code>unit.restart</code>, <code>unit.reload</code>, <code>unit.reset_failed</code>, <code>journal.read</code></td></tr>
 <tr><td>Uruchamiać kontenery i pobierać obrazy; zaplanować deklarację albo wdrożenie projektu, ale go nie przeprowadzić.</td><td><code>docker.read</code>, <code>docker.events</code>, <code>docker.container.logs</code>, <code>docker.container.start</code>, <code>docker.container.stop</code>, <code>docker.container.restart</code>, <code>docker.image.pull</code>, <code>docker.plan</code>, <code>docker.compose.plan</code></td></tr>
 <tr><td>Zaplanować transakcję pakietową, ale jej nie przeprowadzić.</td><td><code>packages.read</code>, <code>packages.plan</code></td></tr>
 <tr><td>Prowadzić i sterować kampanią oraz pisać stan deklarowany jako szkic. Opublikowanie tego szkicu jest zatwierdzeniem i zostaje po stronie zatwierdzającego.</td><td><code>campaign.read</code>, <code>campaign.create</code>, <code>campaign.control</code>, <code>policy.read</code>, <code>policy.write</code></td></tr>
-<tr><td>Nazwać cele kampanii i zgłosić host jako będący w naprawie.</td><td><code>host.tag.write</code>, <code>host.group.write</code>, <code>host.maintenance.write</code></td></tr>
-<tr><td>Zaprosić maszynę do floty, po jednym tokenie na host, zobaczyć instalacje w toku i zamknąć token, który wyciekł.</td><td><code>host.enroll.create</code>, <code>host.enroll.read</code>, <code>host.enroll.revoke</code></td></tr>
-<tr><td>Czytać konta lokalne i przesuwać granicę istniejącego konta: jego grupy i datę wygaśnięcia.</td><td><code>localuser.read</code>, <code>localuser.groups.write</code>, <code>localuser.expiry.write</code></td></tr>
+<tr><td>Nazwać cele kampanii i oznaczyć host jako będący w naprawie.</td><td><code>host.tag.write</code>, <code>host.group.write</code>, <code>host.maintenance.write</code></td></tr>
+<tr><td>Przyjąć maszynę do floty, po jednym tokenie na host, zobaczyć instalacje w toku i zamknąć token, który wyciekł.</td><td><code>host.enroll.create</code>, <code>host.enroll.read</code>, <code>host.enroll.revoke</code></td></tr>
+<tr><td>Czytać konta lokalne i przesuwać granicę istniejącego konta: grupy i datę wygaśnięcia.</td><td><code>localuser.read</code>, <code>localuser.groups.write</code>, <code>localuser.expiry.write</code></td></tr>
 <tr><td>Czytać konfigurację hosta i wyliczyć, do czego doprowadziłaby zmiana, bez jej wykonania.</td><td><code>network.read</code>, <code>dns.read</code>, <code>dns.plan</code>, <code>firewall.read</code>, <code>storage.read</code>, <code>storage.smart.read</code>, <code>ssh.read</code>, <code>kernel.read</code>, <code>kernel.module.plan</code>, <code>time.read</code>, <code>time.plan</code>, <code>security.read</code>, <code>security.scan</code>, <code>file.plan</code>, <code>vulnerability.read</code></td></tr>
 <tr><td>Pilnować certyfikatów i wskazać panelowi pliki, które ma obserwować.</td><td><code>certificate.read</code>, <code>certificate.plan</code>, <code>certificate.trust.plan</code>, <code>certificate.watch</code></td></tr>
 <tr><td>Zrobić kopię zapasową i ją zweryfikować. Odtworzenie jest osobną decyzją, bo rozpakowuje stary stan na działającym systemie.</td><td><code>backup.read</code>, <code>backup.run</code>, <code>backup.verify</code></td></tr>
@@ -226,7 +225,7 @@
     <h2 id="approver">approver</h2>
 
     <p>Najmniejsza rola i ta, na której opiera się zasada drugiej pary oczu.
-    Czyta zmianę, ślad audytowy i ludzi, po czym mówi: tak.</p>
+    Czyta zmianę, ślad audytowy i to, kto ma dostęp, po czym mówi: tak.</p>
 
 <div class="table-scroll">
 <table>
@@ -274,14 +273,14 @@
     <h2 id="platform-admin">platform_admin</h2>
 
     <p>Administrator ma wszystkie 187 uprawnień z wykazu: każde uprawnienie,
-    jakie panel definiuje, jest w tej roli, i nic poza nią nie zostaje.
-    Niektórych z nich nie ma żadna inna rola.</p>
+    jakie panel definiuje, jest w tej roli i nic nie zostaje poza nią.
+    Części z nich nie ma żadna inna rola.</p>
 
 <div class="table-scroll">
 <table>
 <thead><tr><th>Ma tylko ta rola</th><th>O czym decyduje</th></tr></thead>
 <tbody>
-<tr><td><code>principal.manage</code>, <code>host.scope.write</code>, <code>team.binding.write</code></td><td>Kto istnieje w panelu, do którego zespołu należy host i który zespół może nazwać powiązanie. Dwa ostatnie przesuwają granicę tego, czego ktokolwiek może dotknąć.</td></tr>
+<tr><td><code>principal.manage</code>, <code>host.scope.write</code>, <code>team.binding.write</code></td><td>Kto istnieje w panelu, do którego zespołu należy host i jaki zespół może zostać wskazany w powiązaniu. Dwa ostatnie przesuwają granicę tego, czego ktokolwiek może dotknąć.</td></tr>
 <tr><td><code>accounts.privileged_groups</code></td><td>Konto zakładane w grupie, która jest rootem pod inną nazwą, albo do niej przenoszone.</td></tr>
 <tr><td><code>pki.rotate</code></td><td>CA floty, czyli korzeń zaufania dla każdego hosta.</td></tr>
 <tr><td><code>relay.enroll.create</code>, <code>relay.manage</code>, <code>host.enroll.batch</code></td><td>Relay niesie ruch całego site, a jego odwołanie odcina ten site; token zbiorczy to jeden token ważny dla wielu maszyn.</td></tr>
@@ -294,8 +293,8 @@
 
     <p>Mieć każde uprawnienie to nie to samo, co działać bez warunków.
     Administrator podlega zasadzie drugiej pary oczu w środowisku produkcyjnym
-    tak samo jak każdy, a operacje o największym wpływie proszą i jego o powód
-    i świeże uwierzytelnienie &mdash; jedno i drugie opisuje
+    tak samo jak każdy, a operacje o największych skutkach i od niego wymagają powodu oraz
+    świeżego uwierzytelnienia &mdash; jedno i drugie opisuje
     <a href="#beyond">Kiedy sama rola nie wystarczy</a>.</p>
 
     <h2 id="scope">Zakres powiązania</h2>
@@ -310,7 +309,7 @@
 <tbody>
 <tr><td><code>site</code></td><td>Site, w którym stoi host.</td><td>Jedna wartość albo <code>*</code>.</td></tr>
 <tr><td><code>environment</code></td><td>Środowisko, do którego należy host.</td><td>Jedna wartość albo <code>*</code>.</td></tr>
-<tr><td><code>team</code></td><td>Zespół, do którego host jest przypisany.</td><td>Słowem: <code>{"mode":"any"}</code> albo <code>{"mode":"exact","team_id":"&hellip;"}</code>.</td></tr>
+<tr><td><code>team</code></td><td>Zespół, do którego host jest przypisany.</td><td>Wprost: <code>{"mode":"any"}</code> albo <code>{"mode":"exact","team_id":"&hellip;"}</code>.</td></tr>
 <tr><td><code>owner</code></td><td>Właściciel zapisany przy hoście.</td><td>Lista wartości, z których wystarczy dowolna, albo lista zawierająca <code>*</code>.</td></tr>
 <tr><td><code>tag</code></td><td>Tagi na hoście.</td><td>Lista wartości, z których wystarczy dowolna, albo lista zawierająca <code>*</code>.</td></tr>
 </tbody></table></div>
@@ -337,8 +336,7 @@
 
     <p>Zespół to jedyna kategoria, która nie powie &bdquo;dowolny&rdquo;,
     zostając pusta, bo jest kluczem obcym i nie ma wartości znaczącej
-    <em>wszystkie</em>. Dlatego zapisuje się go słowem, a zakres tak samo o
-    nim odpowiada: <code>{"mode":"any"}</code> albo
+    <em>wszystkie</em>. Dlatego zapisuje się go wprost i tak samo wprost zakres o nim odpowiada: <code>{"mode":"any"}</code> albo
     <code>{"mode":"exact","team_id":"&hellip;"}</code>. Czytelnik, który musi
     wywnioskować <em>dowolny</em> z braku pola, jest czytelnikiem, który
     kiedyś wywnioskuje to źle.</p>
@@ -366,8 +364,8 @@
     <p>Powiązanie nadaje się przez
     <code>POST /api/v1/principals/{id}/roles</code>, a ten sam kształt jedzie w
     liście <code>roles</code> przy zakładaniu tożsamości. Wymaga
-    <code>principal.manage</code> w całej flocie i jest operacją o największym
-    wpływie: przesuwa to, kto może zrobić cokolwiek.</p>
+    <code>principal.manage</code> w całej flocie i jest operacją o największym skutku: przesuwa to, kto może zrobić
+    cokolwiek.</p>
 
 <pre><code>POST /api/v1/principals/{id}/roles
 {
@@ -437,13 +435,12 @@ the role operator carries packages.plan, which you do not hold in
 site=waw env=prod team=* owner=* tag=*</code></pre>
 
     <p>Porównanie idzie po tym, dokąd powiązanie sięga, a nie po kolumnach,
-    które akurat się zgadzają. Wołający powiązany z jednym zespołem nie nada
-    &bdquo;dowolnego zespołu&rdquo;; wywołujący, którego powiązanie wymienia dwa
+    które akurat się zgadzają. Wywołujący powiązany z jednym zespołem nie nada &bdquo;dowolnego
+    zespołu&rdquo;; wywołujący, którego powiązanie wymienia dwa
     tagi, nie nada <code>*</code>; gwiazdka po stronie wywołującego zawiera w tej
     kategorii wszystko. Próba trafia do śladu audytowego jako odrzucone
     <code>principal.role.grant</code> albo <code>principal.create</code> z
-    <code>reason: scope_escalation</code> i powyższym komunikatem &mdash; kto
-    próbuje poszerzyć własny dostęp, jest wart przeczytania później.</p>
+    <code>reason: scope_escalation</code> i powyższym komunikatem &mdash; do kogoś, kto próbuje poszerzyć własny dostęp, warto potem wrócić.</p>
 
     <h2 id="groups">Grupa z katalogu staje się rolą</h2>
 
@@ -502,8 +499,8 @@ site=waw env=prod team=* owner=* tag=*</code></pre>
 
     <h3>Powód i świeże uwierzytelnienie</h3>
 
-    <p>Operacje o największym wpływie &mdash; a wśród nich każda zmiana reguł
-    dostępu &mdash; wymagają pola <code>reason</code> o długości co najmniej 8
+    <p>Operacje o największych skutkach &mdash; a wśród nich każda zmiana
+    reguł dostępu &mdash; wymagają pola <code>reason</code> o długości co najmniej 8
     znaków oraz uwierzytelnienia nie starszego, niż pozwala instalacja. Każda
     zapisująca ścieżka z tego rozdziału jest taką operacją: założenie
     tożsamości, nadanie i odebranie roli, wystawienie i unieważnienie tokenu,
@@ -511,8 +508,7 @@ site=waw env=prod team=* owner=* tag=*</code></pre>
     usunięcie mapowania grup. Zbyt krótki powód dostaje <code>400</code>
     <code class="refusal">reason_required</code>, czego ponowne logowanie nie
     naprawi; zbyt stare uwierzytelnienie dostaje <code>401</code>
-    <code class="refusal">reauthentication_required</code>. To, co panel
-    przyjął, jest zapisywane razem ze samą zmianą: cel wpisany przez operatora,
+    <code class="refusal">reauthentication_required</code>. To, co panel przyjął, zapisuje się razem z samą zmianą: cel wpisany przez operatora,
     metoda zgłoszona przez dostawcę i moment uwierzytelnienia. Ustawienia,
     które za tym stoją, są w <a href="api.html#stepup">rozdziale o API</a>.</p>
 

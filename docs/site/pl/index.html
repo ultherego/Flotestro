@@ -86,7 +86,7 @@
       <li><a href="../packages/">Repozytorium pakietów</a></li>
     </ul>
 
-    <h2 id="principles">Czego się trzyma</h2>
+    <h2 id="principles">Zasady</h2>
 
     <dl class="kv">
       <dt>Tylko operacje typowane</dt>
@@ -97,7 +97,7 @@
       <dd>Host wylicza plan, zatwierdzający go czyta, a host wykonuje go tylko wtedy, gdy treść
         nadal zgadza się z zatwierdzonym digestem.</dd>
 
-      <dt>Nieznane pokazujemy jako nieznane</dt>
+      <dt>Nieznane pozostaje nieznane</dt>
       <dd>Fakt, którego agent nie ustalił, jest pusty, a nie zerowy; brak deklaracji to odmowa, a
         nie zgoda.</dd>
 
@@ -106,8 +106,8 @@
         skrótów, który <code>auditverify</code> sprawdza offline, bez bazy danych.</dd>
 
       <dt>Bez zewnętrznego stosu monitoringu</dt>
-      <dd>Agenci próbkują swoje hosty; panel trzyma próbki i agregaty, ocenia reguły oraz prowadzi
-        alerty i wyciszenia.</dd>
+      <dd>Każdy agent próbkuje swój host; panel trzyma próbki i agregaty,
+        ocenia reguły oraz prowadzi alerty i wyciszenia.</dd>
     </dl>
 
     <h2 id="panel">Panel</h2>
@@ -124,9 +124,9 @@
         cztery online, zero nieaktualnych, offline, nieznanych, w kwarantannie i w trybie
         serwisowym &mdash; po prawej problemy według rodzaju: 13 znalezisk bezpieczeństwa, 8
         nieudanych zadań w ciągu 24 godzin, 6 kontroli z wynikiem nieznanym. Niżej zakończone
-        operacje na godzinę według wyniku; blok <i>wymaga uwagi</i> liczony w bazie danych, z
-        dwoma hostami z nieudanymi jednostkami, jednym enrollmentem w toku i czterema
-        certyfikatami agentów wygasającymi w ciągu 30 dni; oraz skład floty według systemu,
+        operacje na godzinę według wyniku; blok <i>wymaga uwagi</i> liczony w bazie danych: dwa hosty z
+        nieudanymi jednostkami, jeden enrollment w toku i cztery certyfikaty
+        agentów wygasające w ciągu 30 dni; oraz skład floty według systemu,
         wersji agenta, site i środowiska.</figcaption>
     </figure>
 
@@ -136,8 +136,8 @@
         środowisko, właściciel, tagi, dalej system operacyjny, stan, cykl życia, tryb serwisowy,
         możliwości i kanał wydań. Wiersz niesie stan, system tak, jak zgłosił go host &mdash;
         <code>arch</code>, <code>debian 13</code>, <code>fedora 42</code>,
-        <code>ubuntu 24.04</code> &mdash; jego site i środowisko, to, czy jest w domenie, ile
-        aktualizacji na niego czeka, ile jednostek się wywróciło, czy chce restartu i kiedy był
+        <code>ubuntu 24.04</code> &mdash; site i środowisko, to, czy jest w domenie, ile aktualizacji
+        na niego czeka, ile jednostek padło, czy chce restartu i kiedy był
         widziany ostatni raz.</figcaption>
     </figure>
 
@@ -148,7 +148,7 @@
       <figcaption><b>Przegląd hosta.</b> Menu po lewej to moduły tego hosta: pakiety, usługi,
         procesy, harmonogramy, jądro, czas, zasilanie, sieć, DNS, firewall, SSH, pamięć masowa,
         pliki, kopie zapasowe, kontenery, Compose, bezpieczeństwo, podatności, certyfikaty.
-        Każda strona mówi, skąd wzięły się jej fakty i kiedy, tutaj
+        Każda strona mówi, skąd wzięły się fakty i kiedy, tutaj
         <code>agent/os-release+procfs, revision 1dc313f1f045, observed 8m ago</code>. Spośród
         adapterów na tym hoście 16 potrafi czytać i zmieniać, 2 są tylko do odczytu, a 5 jest
         niedostępnych, co jest inną odpowiedzią niż zero. Obok tożsamości i sprzętu stoi to, co
@@ -158,8 +158,8 @@
 
     <figure class="figure">
       <img src="../img/host-packages.png" alt="Strona pakietów jednego hosta: aktualizacje według stanu, źródła pakietów, operacje, o które może poprosić operator, oraz wersja samego agenta." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Pakiety hosta.</b> 351 pakietów aktualnych, 36 do aktualizacji, żaden z nich
-        bezpieczeństwa. Po prawej źródła tak, jak zgłasza je host: 387 zainstalowanych przez
+      <figcaption><b>Pakiety hosta.</b> 351 pakietów aktualnych, 36 do aktualizacji, w tym żadnej
+        aktualizacji bezpieczeństwa. Po prawej źródła tak, jak zgłasza je host: 387 zainstalowanych przez
         <code>apt</code>, zdrowa baza pakietów, siedem repozytoriów, z czego jedno ma sprawdzane
         podpisy i żadne nie jest zarządzane przez panel. Operator może zaplanować aktualizacje
         &mdash; samo ich policzenie niczego na hoście nie zmienia &mdash; albo zainstalować,
@@ -180,8 +180,8 @@
         odtworzenie, weryfikacja przez ponowne sprawdzenie planu. Zapis zatwierdzenia mówi, kto
         zatwierdził, na jakim uwierzytelnieniu (token API, bez ponownego uwierzytelnienia) i
         dlaczego: <i>zmiana CHG-1042 zatwierdzona na cotygodniowym przeglądzie</i>. Powstaje raz
-        i nigdy się nie zmienia. Pod falami jeden wiersz na każdy kształt zmiany, z odciskiem
-        planu i czasem jego ważności &mdash; host, którego plan zdążył się zmienić, odmawia
+        i nigdy się nie zmienia. Pod falami jeden wiersz na każdy kształt zmiany, z odciskiem planu i
+        czasem ważności &mdash; host, którego plan zdążył się zmienić, odmawia
         wykonania.</figcaption>
     </figure>
 
@@ -216,7 +216,7 @@
         policzone według aktora &mdash; nazwany operator, sam panel oraz kampanie pod własnymi
         identyfikatorami. Wiersz niesie czas, aktora, rodzaj, operację, cel i wynik, a pod nazwą
         użytkownika uwierzytelnienie, na którym oparło się żądanie: sesję i kontekst
-        uwierzytelnienia, z jakim ją nadano.</figcaption>
+        uwierzytelnienia, w jakim ją nadano.</figcaption>
     </figure>
 
     <h2 id="change">Jak przebiega zmiana</h2>
@@ -422,9 +422,10 @@ sudo pacman -Sy &amp;&amp; sudo pacman -S --noconfirm flotestro-agent</code></pr
 
     <h3>Potem enrollment hosta</h3>
 
-    <p class="prose">Panel wypisuje dokładne polecenia dla swoich własnych adresów pod
-      <b>Dodaj host</b> &mdash; repozytorium, pakiet, CA floty z odciskiem do porównania, jednorazowy
-      token i start. Kształt dwóch ostatnich kroków:</p>
+    <p class="prose">Panel wypisuje dokładne polecenia dla własnych adresów pod <b>Dodaj
+      host</b> &mdash; repozytorium, pakiet, CA floty z odciskiem do
+      porównania, jednorazowy token i start. Tak wyglądają dwa ostatnie
+      kroki:</p>
 
     <pre><code>sudo tee /var/lib/flotestro-agent/ca.pem &gt;/dev/null   # the fleet CA, fingerprint shown in the panel
 sudo sed -i -e 's|^  enrollment_url: .*|  enrollment_url: "https://panel.example.org:8444"|' \
@@ -453,8 +454,8 @@ flotestro-agentctl diagnose                                        # explains a 
     <ul class="cards">
       <li class="card">
         <p class="card__title"><a href="docs/">Dokumentacja</a></p>
-        <p>Instalacja, konfiguracja i prowadzenie instalacji oraz runbooki na to, co idzie nie
-          tak.</p>
+        <p>Jak się to instaluje, konfiguruje i prowadzi, oraz runbooki na
+          to, co idzie nie tak.</p>
       </li>
       <li class="card">
         <p class="card__title"><a href="../packages/">Repozytorium pakietów</a></p>
@@ -462,8 +463,8 @@ flotestro-agentctl diagnose                                        # explains a 
       </li>
       <li class="card">
         <p class="card__title"><a href="https://github.com/ultherego/Flotestro">Kod</a></p>
-        <p>Usługi w Go, panel, migracje i pakietowanie, razem z kontrolami, które idą przy każdym
-          pushu.</p>
+        <p>Usługi w Go, panel, migracje i pakietowanie, razem z kontrolami
+          uruchamianymi przy każdym pushu.</p>
       </li>
       <li class="card">
         <p class="card__title"><a href="https://github.com/ultherego/Flotestro/releases">Wydania</a></p>

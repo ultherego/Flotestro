@@ -138,9 +138,9 @@
     </table>
     </div>
 
-    <p>Operacja, której rejestr nie zna, traktowana jest jak
-    <code>critical</code>, a budżety liczą ją jako zmieniającą: nieznane nie
-    znaczy nieszkodliwe, więc sięga po rzadszą pojemność.</p>
+    <p>Operacja, której rejestr nie zna, dostaje ryzyko <code>critical</code>,
+    a budżety liczą ją jako zmieniającą: nieznane nie znaczy nieszkodliwe, więc
+    sięga po rzadszą pojemność.</p>
 
     <h2 id="plan">Plan i jego digest</h2>
 
@@ -157,8 +157,8 @@
     <code>backup.run</code> przez <code>backup.plan</code>.</p>
 
     <p>Plan liczony jest <em>na hoście</em>, bo tylko host wie, co naprawdę
-    zrobi jego menedżer pakietów, jego pliki unitów i jego systemy plików. Jest
-    to koperta z wersją schematu, wersją plannera, akcją, hostem, rewizją
+    zrobi jego menedżer pakietów, pliki unitów i systemy plików. Jest to
+    koperta z wersją schematu, wersją plannera, akcją, hostem, rewizją
     inventory, na której go odczytano, rewizją zasobu, warunkami wstępnymi,
     krokami, obiecanymi efektami, artefaktami (dla pakietów: dokładne wersje,
     dla Compose: rozwiązane digesty obrazów), rollbackiem i terminem
@@ -178,8 +178,8 @@
     każda lista <code>null</code> zamieniona na pustą, każdy znacznik czasu
     obcięty do sekundy w UTC. Wynik jest kodowany jako kanoniczny JSON według
     RFC 8785 (pola posortowane po jednostkach kodowych UTF-16, bez białych
-    znaków, minimalne escapowanie) i skracany przez SHA-256. Szesnastkowy zapis
-    tego skrótu to digest, który zatwierdza zatwierdzający.</p>
+    znaków, minimalne escapowanie) i haszowany SHA-256. Szesnastkowy zapis tego
+    skrótu to digest, który zatwierdza zatwierdzający.</p>
 
     <p>Konsekwencja jest sednem całego rozwiązania: ta sama zmiana na tym samym
     stanie zawsze daje ten sam skrót, na dowolnej maszynie i przy dowolnej
@@ -209,7 +209,7 @@
       <p><strong>Digest planu</strong> wiąże policzoną zmianę - kroki, efekty,
       artefakty - z jej zatwierdzeniem. <strong>Payload hash</strong> wiąże
       <em>zlecenie</em> z wierszem zadania w chwili jego utworzenia: SHA-256 z
-      prefiksu rozdzielającego domenę, akcji, wersji kontraktu i kanonicznego
+      prefiksu separującego domenę, akcji, wersji kontraktu i kanonicznego
       JSON-a payloadu. Zadanie, którego payload nie zgadza się z tym, z którym
       je utworzono, kończy się odmową
       <code class="refusal">payload_hash_mismatch</code>, a helper sprawdza to
@@ -220,49 +220,49 @@
     <h2 id="approval">Zatwierdzenie</h2>
 
     <p>Zadanie wymagające zatwierdzenia powstaje w stanie
-    <code>awaiting_approval</code> i nie rusza z miejsca, dopóki nie zbierze ich
-    dość. Domyślnie wystarczy jedno; operacja <code>destructive</code> wymaga
-    dwóch i muszą to być dwie różne osoby - tabela zatwierdzeń ma klucz po
-    zatwierdzającym. W środowisku wskazanym przez
-    <code>FLOTESTRO_PRODUCTION_ENVIRONMENTS</code>
-    (domyślnie <code>prod,production</code>) zmiana również wymaga
-    zatwierdzenia przez drugą osobę.</p>
+    <code>awaiting_approval</code> i nie rusza z miejsca, dopóki nie zbierze
+    dość zatwierdzeń. Domyślnie wystarczy jedno; operacja
+    <code>destructive</code> wymaga dwóch i muszą to być dwie różne osoby -
+    kluczem tabeli zatwierdzeń jest zatwierdzający. W środowisku wskazanym
+    przez <code>FLOTESTRO_PRODUCTION_ENVIRONMENTS</code> (domyślnie
+    <code>prod,production</code>) zmiana również wymaga zatwierdzenia przez
+    drugą osobę.</p>
 
     <p>Zatwierdzenie wiąże się z planem, nie z intencją. Żądanie zatwierdzenia
     może nieść <code>payload_hash</code>, który zatwierdzający miał przed
     oczami, a panel porównuje go z hashem zadania: rozbieżność to
     <code>409</code> <code class="refusal">payload_hash_mismatch</code> -
-    &bdquo;plan zmienił się od chwili przeglądu&rdquo; - a odmowa trafia na ślad
-    audytowy razem z tym, czego oczekiwano. W środowisku produkcyjnym osoba,
-    która zleciła zmianę, nie może jej zatwierdzić: to <code>403</code>
-    <code class="refusal">self_approval</code>, zapisywane razem ze środowiskiem
-    i nazwą tego, kto utworzył zadanie.</p>
+    &bdquo;plan zmienił się od chwili przeglądu&rdquo; - a odmowa trafia do
+    śladu audytowego razem z tym, czego oczekiwano. W środowisku produkcyjnym
+    osoba, która zleciła zmianę, nie może jej zatwierdzić: to <code>403</code>
+    <code class="refusal">self_approval</code>, zapisywane razem ze
+    środowiskiem i nazwą tego, kto utworzył zadanie.</p>
 
     <p>Przy zatwierdzeniu panel zapisuje też, kto je wydał i na jakim
     uwierzytelnieniu oparła się decyzja - sesję, jej <code>acr</code> i
     <code>amr</code>, moment uwierzytelnienia - oraz powód podany przez
-    zatwierdzającego. Świeże uwierzytelnienie jest wymagane przy każdej operacji
-    <code>critical</code> i <code>destructive</code>: sesja musi być młodsza niż
-    <code>FLOTESTRO_STEPUP_MAX_AGE</code> (5m) i, jeśli instalacja to ustawiła,
-    na poziomie <code>FLOTESTRO_STEPUP_ACR</code>. Przy
+    zatwierdzającego. Świeże uwierzytelnienie jest wymagane przy każdej
+    operacji <code>critical</code> i <code>destructive</code>: sesja musi być
+    młodsza niż <code>FLOTESTRO_STEPUP_MAX_AGE</code> (5m) i, jeśli instalacja
+    to ustawiła, na poziomie <code>FLOTESTRO_STEPUP_ACR</code>. Przy
     <code>FLOTESTRO_STEPUP_TOKENS=refuse</code> token API w ogóle nie
     przeprowadzi takiej operacji i dostaje
-    <code class="refusal">reauthentication_required</code>. Na trasach step-up
-    - rotacja CA, cykl życia hosta, ustawienia monitoringu, kanały powiadomień -
-    powód nie jest opcjonalny: mniej niż osiem znaków kończy się odmową
-    <code class="refusal">reason_required</code>.</p>
+    <code class="refusal">reauthentication_required</code>. Na ścieżkach
+    step-up - rotacja CA, cykl życia hosta, ustawienia monitoringu, kanały
+    powiadomień - powód nie jest opcjonalny: mniej niż osiem znaków kończy się
+    odmową <code class="refusal">reason_required</code>.</p>
 
     <p>Zatwierdzenie, które nie opisuje już tego, co ma się wykonać, kończy się
-    odmową, zamiast być naciąganym: <code class="refusal">approval_stale</code>,
-    gdy kampania zmieniła się od udzielenia zgody, i
+    odmową, a nie naciąganiem: <code class="refusal">approval_stale</code>, gdy
+    kampania zmieniła się od udzielenia zgody, i
     <code class="refusal">fingerprint_mismatch</code>, gdy zatwierdzenie niosło
     fingerprint czegoś innego.</p>
 
-    <h3>Podgląd, z którego składa się zlecenie masowe</h3>
+    <h3>Podgląd, z którego zleca się zmianę masową</h3>
 
     <p>Kampanię zleca się z podglądu: panel rozwiązuje selektor, pokazuje, kogo
-    zmiana obejmie, i oddaje identyfikator podglądu wraz z digestem po
-    zakwalifikowanych hostach. Zlecenie niesie jedno i drugie, a panel odrzuca
+    zmiana obejmie, i oddaje identyfikator podglądu wraz z digestem z
+    zakwalifikowanych hostów. Zlecenie niesie jedno i drugie, a panel odrzuca
     je, jeśli cokolwiek się w międzyczasie ruszyło -
     <code class="refusal">preview_unknown</code>,
     <code class="refusal">preview_expired</code> (podgląd żyje 15 minut),
@@ -288,7 +288,7 @@
         <tr><td><code>planned</code></td><td>Utworzone, z payload hashem i odwołaniem do planu.</td></tr>
         <tr><td><code>awaiting_approval</code></td><td>Czeka na zatwierdzenia wymagane przez swoją operację.</td></tr>
         <tr><td><code>queued</code></td><td>Gotowe do startu. <code>wait_reason</code> mówi, na co czeka: <code>awaiting_budget:&lt;key&gt;</code> albo <code>awaiting_lock:&lt;blocker&gt;</code>.</td></tr>
-        <tr><td><code>leased</code></td><td>Instancja gateway wzięła je do dostarczenia.</td></tr>
+        <tr><td><code>leased</code></td><td>Instancja gatewaya wzięła je do dostarczenia.</td></tr>
         <tr><td><code>dispatched</code></td><td>Koperta poszła strumieniem hosta.</td></tr>
         <tr><td><code>running</code></td><td>Host je przyjął i zaczął.</td></tr>
         <tr><td><code>cancel_requested</code></td><td>Anulowanie jest w drodze do hosta.</td></tr>
@@ -301,7 +301,7 @@
     minut, o ile zlecenie nie ustawiło własnego, a zadania w stanach
     <code>planned</code>, <code>awaiting_approval</code> i <code>queued</code>
     po tym czasie dostają <code>expired</code>. Każde zadanie niesie też
-    idempotency key - własny zlecenia albo wygenerowany - więc to samo zlecenie
+    idempotency key - ten ze zlecenia albo wygenerowany - więc to samo zlecenie
     powtórzone na tym samym hoście zwraca istniejące zadanie, zamiast tworzyć
     drugie.</p>
 
@@ -324,14 +324,14 @@
       sesje, które już do niej nie należą.</dd>
 
       <dt>Lease próby</dt>
-      <dd>Brany wtedy, gdy zadanie zostaje wzięte do dostarczenia. Do
-      potwierdzenia przez agenta jest ograniczony do 60 sekund; kiedy agent
-      przyjmie zadanie, rośnie do lease wykonania tej operacji i jest odnawiany
-      przy każdym znaku życia od hosta. Próba, której lease wygasł bez wyniku,
-      wraca do <code>queued</code>, a sama próba zamyka się jako
+      <dd>Brany wtedy, gdy zadanie zostaje pobrane do dostarczenia. Dopóki
+      agent nie potwierdzi, jest ograniczony do 60 sekund; kiedy agent przyjmie
+      zadanie, rośnie do lease wykonania tej operacji i jest odnawiany przy
+      każdym znaku życia od hosta. Próba, której lease wygasł bez wyniku, wraca
+      do <code>queued</code>, a sama próba zamyka się jako
       <code class="refusal">lease_expired</code>. Jeśli prawdziwy wynik dotrze
-      później, zamyka się jako <code>superseded_by_result</code>, zamiast zostać
-      wyrzuconym.</dd>
+      później, zamyka się jako <code>superseded_by_result</code>, zamiast
+      zostać wyrzuconym.</dd>
     </dl>
 
     <p>Tempo samego dostarczania ustala <code>FLOTESTRO_DISPATCH_RATE</code> -
@@ -363,11 +363,11 @@
     </table>
     </div>
 
-    <p>Brak odpowiedzi w granicach własnego timeoutu operacji kończy zadanie
+    <p>Brak odpowiedzi w czasie własnego timeoutu operacji kończy zadanie
     błędem <code class="refusal">cancel_ack_timeout</code> i statusem wyniku
-    <code>unknown_needs_reconciliation</code> - panel nie twierdzi, że zmiana
-    się nie wydarzyła. Operacja, której kontrakt to
-    <code>impossible_after_start</code>, odpowiada na anulowanie kodem
+    <code>unknown_needs_reconciliation</code> - panel nie twierdzi, że zmiany
+    nie było. Operacja, której kontrakt to <code>impossible_after_start</code>,
+    odpowiada na anulowanie kodem
     <code class="refusal">operation_non_cancelable</code>.</p>
 
     <h2 id="result">Wynik i weryfikator</h2>
@@ -448,20 +448,20 @@
     <p>Czegoś takiego jak &bdquo;brama automatyczna&rdquo; nie ma: automatyczne
     przechodzenie dalej to po prostu brak bramy ręcznej. Z ustawionym
     <code>manual_gate</code> kampania zatrzymuje się po canary w stanie
-    <code>manual_gate</code> i czeka, aż ktoś popchnie ją dalej; panel zapisuje,
-    kto i kiedy to zrobił, a na ślad audytowy trafia
+    <code>manual_gate</code> i czeka, aż ktoś popchnie ją dalej; panel
+    zapisuje, kto i kiedy to zrobił, a do śladu audytowego trafia
     <code>campaign.manual_gate</code>. Ta sama rodzina endpointów obsługuje
     <code>pause</code>, <code>resume</code>, <code>advance</code> i
     <code>cancel</code>.</p>
 
     <h3>Progi</h3>
 
-    <p>Po każdym zamkniętym hoście kampania pyta, czy niepowodzeń jest już dość,
-    by się zatrzymać. Próg bezwzględny zadziała, gdy liczba niepowodzeń go
-    osiągnie; próg procentowy - gdy osiągnie go udział niepowodzeń wśród hostów
-    <em>zakończonych</em>. Każdy z nich wstrzymuje kampanię, a nigdy jej nie
-    anuluje, zapisując na ślad audytowy powód, liczniki i progi, tak by to
-    operator zdecydował, czy pozostałe fale nadal mają sens.</p>
+    <p>Po każdym zamkniętym hoście kampania pyta, czy niepowodzeń jest już
+    dość, by się zatrzymać. Próg bezwzględny zadziała, gdy liczba niepowodzeń
+    go osiągnie; próg procentowy - gdy osiągnie go udział niepowodzeń wśród
+    hostów <em>zakończonych</em>. Każdy z nich wstrzymuje kampanię, a nigdy jej
+    nie anuluje, zapisując w śladzie audytowym powód, liczniki i progi, tak by
+    to operator zdecydował, czy pozostałe fale nadal mają sens.</p>
 
     <p>Host, który skończył jako <code>unknown</code>, liczy się w tym rachunku
     jako niepowodzenie. Próg ogranicza liczbę hostów, które nie osiągnęły
@@ -494,10 +494,10 @@
 
     <p>Budżet odpowiada na jedno pytanie: czy system ma pojemność, żeby zacząć
     jeszcze jedną operację. Każda operacja zmieniająca zajmuje globalny budżet
-    zmian oraz budżety swojego site, swojej domeny awarii i swojego gateway dla
-    rodziny odpowiadającej jej klasie blokady; kopia zapasowa zajmuje dodatkowo
-    budżet swojego repository, bo dwie kopie robione do jednego repository
-    rywalizują ze sobą niezależnie od tego, z jakich hostów są uruchomione.</p>
+    zmian oraz budżety swojego site, domeny awarii i gatewaya dla rodziny
+    odpowiadającej jej klasie blokady; kopia zapasowa zajmuje dodatkowo budżet
+    swojego repository, bo dwie kopie robione do jednego repository rywalizują
+    ze sobą niezależnie od tego, z jakich hostów są uruchomione.</p>
 
     <div class="table-scroll">
     <table>
@@ -527,13 +527,13 @@
     dociera do operatora jako <code class="refusal">budget_capacity</code> lub
     <code class="refusal">budget_fair_share</code> na celu kampanii, a jako
     <code>wait_reason: awaiting_budget:&lt;key&gt;</code> na zadaniu dla
-    pojedynczego hosta. Lease na budżecie trwa dwie minuty i jest odnawiany na
-    czas trwania pracy; niesie fencing token, więc runner, który stracił swój
-    cel na rzecz innego, nie zwalnia niczego.</p>
+    pojedynczego hosta. Lease na budżecie trwa dwie minuty i jest odnawiany
+    przez cały czas pracy; niesie fencing token, więc runner, który stracił
+    swój cel na rzecz innego, nie zwalnia niczego.</p>
 
     <p>Podniesienie pojemności budżetu to zapis objęty optymistyczną
     współbieżnością: najpierw odczyt, potem zapis z odczytanym ETagiem.
-    Nieaktualny kończy się odmową <code>412</code>
+    Nieaktualny ETag kończy się odmową <code>412</code>
     <code class="refusal">precondition_failed</code>. Budżetu, który wciąż
     trzyma trwającą pracę, nie da się usunąć
     (<code class="refusal">budget_in_use</code>), a pojemność poniżej 1 jest
@@ -652,11 +652,11 @@
     mnożnik dla klasy normal i godzinę pełnego raportu osobno dla każdej sesji,
     a <code>inventory.refresh</code> prosi o moduł natychmiast.</p>
 
-    <p>Werdykt jest wart tyle, co odczyt, na którym stoi. Moduł odczytany
-    dawniej niż dwie swoje częstotliwości temu jest nieaktualny, a polityka albo
+    <p>Werdykt jest wart tyle, co odczyt, na którym stoi. Moduł, od którego
+    odczytu minęły ponad dwa jego cykle, jest nieaktualny, a polityka albo
     kampania, która miałaby na jego podstawie ocenić hosta, odpowiada zamiast
-    tego <code class="refusal">inventory_stale</code> - werdykt jest nieznany, a
-    to nie jest niepowodzenie.</p>
+    tego <code class="refusal">inventory_stale</code> - werdykt jest nieznany,
+    a to nie jest niepowodzenie.</p>
 
     <h3>Próbki to nie inventory</h3>
 
@@ -721,18 +721,20 @@
     przelicza łańcuch linia po linii. Kod wyjścia 0 oznacza plik nienaruszony, 1
     zerwany łańcuch, 2 złe wywołanie albo brak możliwości odczytania pliku. Bez
     nazwy pliku czyta standardowe wejście, więc eksport da się sprawdzać w
-    trakcie pobierania. Jest osobnym statycznym binarium, więc kopię można
-    trzymać tam, gdzie leżą eksporty; niesie go także obraz admin-tools i tak
+    trakcie pobierania. Jest osobną statyczną binarką, więc kopię można trzymać tam, gdzie leżą
+    eksporty; niesie go także obraz admin-tools i tak
     właśnie uruchamia się go na kopii zapasowej zrobionej przez wdrożenie:</p>
 
 <pre><code>docker compose --profile tools run --rm admin-tools auditverify /backups/audit-20260901.jsonl</code></pre>
 
     <p>Zepsuty plik zgłaszany jest razem z linią, która nie następuje po
-    poprzedniej, i z informacją, dokąd plik się zweryfikował: <code>the first 9120 events verified,
-    up to event 9120</code>. Nazywane przez niego błędy to te, które mogą
-    wystąpić - linia po linii zamykającej, linia, która nie jest ani zdarzeniem,
-    ani stopką, licznik niezgodny z liczbą obecnych linii, zamykający digest
-    niepasujący do ostatniego zdarzenia i plik ucięty w połowie.</p>
+    poprzedniej, i z informacją, dokąd plik się zweryfikował:
+    <code>the first 9120 events verified,
+    up to event 9120</code>. Błędy,
+    które nazywa, to te, które mogą wystąpić - linia po linii zamykającej,
+    linia, która nie jest ani zdarzeniem, ani stopką, licznik niezgodny z
+    liczbą obecnych linii, zamykający digest niepasujący do ostatniego
+    zdarzenia i plik ucięty w połowie.</p>
 
     <div class="note">
       <p class="note__title">Czego dowodzi, a czego nie</p>
