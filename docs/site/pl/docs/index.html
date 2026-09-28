@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dokumentacja Flotestro</title>
+<meta name="description" content="Podręcznik Flotestro: wprowadzenie, architektura, instalacja, pojęcia, konfiguracja, operacje, błędy, API i runbooki.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;600&display=swap">
+<link rel="stylesheet" href="../../style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header__inner">
+    <a class="brand" href="../"><img class="brand__mark" src="../../img/logo.webp" alt="">Flotestro</a>
+    <nav class="site-nav">
+      <a href="../">Przegląd</a>
+      <a href="./" aria-current="page">Dokumentacja</a>
+      <a href="https://ultherego.github.io/Flotestro/packages/">Pakiety</a>
+      <a href="https://github.com/ultherego/Flotestro">Kod</a>
+      <a href="../../docs/" hreflang="en" lang="en">English</a>
+    </nav>
+  </div>
+</header>
+
+<div class="layout">
+
+  <aside class="sidebar">
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Podręcznik</h2>
+      <ul class="sidebar__list">
+        <li><a href="./" aria-current="page">Spis treści</a></li>
+        <li><a href="introduction.html">1. Wprowadzenie</a></li>
+        <li><a href="architecture.html">2. Architektura</a></li>
+        <li><a href="installation.html">3. Instalacja</a></li>
+        <li><a href="concepts.html">4. Jak przebiega zmiana</a></li>
+      </ul>
+    </nav>
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Wykazy</h2>
+      <ul class="sidebar__list">
+        <li><a href="configuration.html">5. Konfiguracja</a></li>
+        <li><a href="operations.html">6. Operacje</a></li>
+        <li><a href="errors.html">7. Błędy i odmowy</a></li>
+        <li><a href="api.html">8. API</a></li>
+        <li><a href="roles.html">9. Role i uprawnienia</a></li>
+      </ul>
+    </nav>
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Procedury</h2>
+      <ul class="sidebar__list">
+        <li><a href="runbooks.html">10. Runbooki</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <h1>Dokumentacja Flotestro</h1>
+
+    <p class="lede">Flotestro zarządza flotą serwerów Linux z jednego panelu:
+    planuje zmianę, doprowadza do jej zatwierdzenia, przeprowadza ją na hostach
+    i zapisuje, co się stało. Ten podręcznik jest wykazem dla tych, którzy to
+    prowadzą - czym są poszczególne części, jak się je instaluje, co panel
+    obiecuje i co znaczy każda odmowa.</p>
+
+    <p>Za pierwszym razem warto czytać po kolei. <a href="introduction.html">Wprowadzenie</a>
+    i <a href="concepts.html">Jak przebiega zmiana</a> to dwa rozdziały, na
+    których opiera się reszta: wszystko, co panel robi, to typowana operacja,
+    plan, zatwierdzenie związane z digestem, wysłanie i wynik. Dalej rozdziały
+    z wykazami odpowiadają na pojedyncze pytania - co robi ta zmienna, czego
+    potrzebuje ta operacja, co znaczy ten kod.</p>
+
+    <h2>Rozdziały</h2>
+
+    <h3><a href="introduction.html">1. Wprowadzenie</a></h3>
+    <p>Czym produkt jest, czym zarządza i czego celowo nie robi - żadnej powłoki
+    na hoście, żadnego zewnętrznego stosu monitoringu, żadnego zgadywania faktu,
+    którego host nie umiał zgłosić. Tutaj leży doktryna: nieznane nigdy nie jest
+    zerem, każda operacja to typowany kontrakt, host zgłasza fakty, a panel
+    ocenia, plan zatwierdza się po digeście, każda odmowa ma stabilny kod,
+    fail-closed.</p>
+
+    <h3><a href="architecture.html">2. Architektura</a></h3>
+    <p>Pięć części - control plane, nieuprzywilejowany agent, root helper, relay
+    site i PostgreSQL - z portami między nimi, tożsamością, którą każda z nich
+    udowadnia, i katalogiem stanu, którego w bazie nie ma. Odpowiada też, czemu
+    agent jest natywnym pakietem, a control plane obrazem.</p>
+
+    <h3><a href="installation.html">3. Instalacja</a></h3>
+    <p>Długa wersja instalacji od zera: control plane z obrazu, pierwszy
+    administrator i mapowania grup, bez których nikt się nie zaloguje, para do
+    kopii zapasowych zrobiona, zanim powstanie flota, hosty z podpisanego
+    repozytorium, site za relayem i profil odcięty od sieci.</p>
+
+    <h3><a href="concepts.html">4. Jak przebiega zmiana</a></h3>
+    <p>Jedna zmiana od początku do końca: operacja, jej plan, zatwierdzenie
+    związane z digestem, wysłanie, dzierżawa, wynik i weryfikator - oraz to, co
+    dokłada do tego kampania: migawka, canary, fale, okna serwisowe i budżety.
+    Inventory ze swoimi rewizjami i częstotliwościami oraz łańcuch audytowy,
+    który <code>flotestro-auditverify</code> sprawdza bez bazy
+    danych.</p>
+
+    <h3><a href="configuration.html">5. Wykaz konfiguracji</a></h3>
+    <p>Każda zmienna środowiskowa każdego z binariów, jej wartość domyślna, to,
+    czy zmiana wymaga restartu, i ile ta zmiana kosztuje w bezpieczeństwie.</p>
+
+    <h3><a href="operations.html">6. Wykaz operacji</a></h3>
+    <p>Operacje typowane: co robi każda z nich, jakiego uprawnienia wymaga, jej
+    poziom ryzyka i klasa blokady, czy bierze udział w kampanii i jakimi
+    odmowami może odpowiedzieć.</p>
+
+    <h3><a href="errors.html">7. Błędy i odmowy</a></h3>
+    <p>Stabilne kody. Odmowa jest częścią kontraktu: ta sama sytuacja zawsze
+    odpowiada tym samym kodem - w API, w panelu i w śladzie audytowym.
+    Działający panel podaje tę samą listę pod
+    <code>GET /api/v1/errors</code>.</p>
+
+    <h3><a href="api.html">8. API</a></h3>
+    <p>REST API pod <code>/api/v1</code>: uwierzytelnianie, uprawnienia,
+    współbieżność z <code>If-Match</code> oraz same trasy.</p>
+
+    <h3><a href="roles.html">9. Role i uprawnienia</a></h3>
+    <p>Sześć ról oraz uprawnienia, które każda z nich ma i których nie ma, pięć
+    kategorii, po których zawęża się zakres, to, jak grupa z katalogu staje się
+    rolą, i czego wymaga się ponad rolę: powodu, świeżego uwierzytelnienia i
+    drugiej osoby.</p>
+
+    <h3><a href="runbooks.html">10. Runbooki</a></h3>
+    <p>Procedury, których panel nie przeprowadza sam - rotacja CA, odtworzenie
+    bazy danych, kolejka, która stoi, relay bez miejsca, dziura na wykresach,
+    kwarantanna i wycofanie hosta, pakiet diagnostyczny, golden image. Każda
+    podaje swoje sygnały, warunki wstępne, dokładne żądania, weryfikację i drogę
+    powrotną.</p>
+
+    <h2>Jak to czytać</h2>
+
+    <dl class="kv">
+      <dt>Kod odmowy</dt>
+      <dd>Zapisany jako <code class="refusal">machine_already_enrolled</code>. To
+      stabilny identyfikator jednego powodu, a nie komunikat; treść komunikatu
+      może się zmienić, kod nie.</dd>
+
+      <dt>Wartość domyślna</dt>
+      <dd>Podana wszędzie tam, gdzie jakaś jest, w postaci, z jaką produkt jest
+      wydawany. Ustawienie bez wartości domyślnej jest oznaczone jako wymagane,
+      a binarium bez niego odmawia startu.</dd>
+
+      <dt>Polecenie</dt>
+      <dd>Wykonuje się tam, gdzie mówi tekst: na hoście panelu, w kontenerze
+      albo na zarządzanym hoście jako <code>root</code>. Polecenia dla hostów
+      panel wypisuje dla swoich własnych adresów pod <strong>Add host</strong>;
+      kształty w tym podręczniku są po to, żeby operator wiedział, co się
+      uruchamia.</dd>
+
+      <dt>Uprawnienie</dt>
+      <dd>Zapisane jako <code>pki.rotate</code>. Uprawnienia nadaje się rolom,
+      role grupom dostawcy tożsamości, a każde nadanie ma swój zakres. Katalog
+      jest w <a href="roles.html">Rolach i uprawnieniach</a>.</dd>
+    </dl>
+
+    <div class="note">
+      <p class="note__title">Gdzie ten podręcznik się kończy</p>
+      <p>Wszystko, co tu jest, da się wskazać w repozytorium. Tam, gdzie
+      procedura nie ma trasy ani polecenia, podręcznik mówi to wprost, zamiast
+      je wymyślać: nie ma API, które eksportuje bazę danych, ani trasy, która
+      ściąga pakiet diagnostyczny z hosta.</p>
+    </div>
+
+    <h2>Źródła, z których powstał ten podręcznik</h2>
+
+    <ul>
+      <li><a href="https://github.com/ultherego/Flotestro/blob/main/README.md"><code>README.md</code></a> - czym produkt jest i szybki start.</li>
+      <li><a href="configuration.html">Konfiguracja</a> - każde ustawienie każdego z binariów.</li>
+      <li><a href="https://github.com/ultherego/Flotestro/blob/main/docker/README.md"><code>docker/README.md</code></a> - obrazy, pliki Compose, łańcuch dostaw, para do kopii zapasowych.</li>
+      <li><a href="https://github.com/ultherego/Flotestro/tree/main/docs/runbooks"><code>docs/runbooks/</code></a> - procedury.</li>
+      <li><a href="https://github.com/ultherego/Flotestro/blob/main/CONTRIBUTING.md"><code>CONTRIBUTING.md</code></a> - jak to zbudować i jakie kontrole przechodzi zmiana, zanim trafi do <code>main</code>.</li>
+    </ul>
+  </main>
+
+</div>
+
+<footer class="site-footer">
+  <div class="site-footer__inner">
+    <p>Dokumentacja Flotestro, wydanie 0.62.0.</p>
+    <p><a href="https://github.com/ultherego/Flotestro">github.com/ultherego/Flotestro</a></p>
+  </div>
+</footer>
+
+</body>
+</html>

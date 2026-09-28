@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flotestro</title>
+<meta name="description" content="Zarządzanie flotą serwerów Linux: jeden panel, który planuje, zatwierdza, przeprowadza i zapisuje zmiany na hostach Debian, Ubuntu, Fedora, RHEL i Arch.">
+<link rel="icon" href="../img/logo.webp" type="image/webp">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;600&display=swap">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header__inner">
+    <a class="brand" href="./">
+      <img class="brand__mark" src="../img/logo.webp" alt="" width="459" height="160">
+      Flotestro
+    </a>
+    <nav class="site-nav" aria-label="Sekcje">
+      <a href="#panel">The panel</a>
+      <a href="#change">A change</a>
+      <a href="#operations">Operations</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#install">Install</a>
+      <a href="docs/">Dokumentacja</a>
+      <a href="https://github.com/ultherego/Flotestro">Kod</a>
+      <a href="../" hreflang="en" lang="en">English</a>
+    </nav>
+  </div>
+</header>
+
+<div class="layout layout--plain">
+  <main class="content">
+
+    <h1>Zarządzanie flotą serwerów Linux</h1>
+    <p class="lede prose">Jeden panel, który planuje, zatwierdza, przeprowadza i zapisuje zmiany
+      na hostach Debian, Ubuntu, Fedora, RHEL i Arch.</p>
+
+    <p class="prose">Flotestro to control plane i agent. Agent zgłasza, czym host naprawdę jest;
+      panel rozstrzyga, co to znaczy, i zleca zmianę. Nie ma operacji
+      &bdquo;uruchom polecenie&rdquo;, a panel nigdy nie otwiera powłoki na hoście: każde działanie to
+      wersjonowany kontrakt z własnym uprawnieniem, poziomem ryzyka, klasą blokady i trybem
+      kampanii. W skali floty ta sama zmiana idzie jako kampania, z canary, falami, bramami i
+      progiem niepowodzeń.</p>
+
+    <ul class="linkrow">
+      <li><a href="#install">Instalacja</a></li>
+      <li><a href="docs/">Dokumentacja</a></li>
+      <li><a href="https://github.com/ultherego/Flotestro">Kod na GitHubie</a></li>
+      <li><a href="../packages/">Repozytorium pakietów</a></li>
+    </ul>
+
+    <h2 id="principles">Czego się trzyma</h2>
+
+    <dl class="kv">
+      <dt>Tylko operacje typowane</dt>
+      <dd>Każde działanie to wersjonowany kontrakt z własnym uprawnieniem, poziomem ryzyka, klasą
+        blokady i trybem kampanii. Nie ma typu, który uruchamia dowolne polecenie.</dd>
+
+      <dt>Plany zatwierdzane po digeście</dt>
+      <dd>Host wylicza plan, zatwierdzający go czyta, a host wykonuje go tylko wtedy, gdy treść
+        nadal zgadza się z zatwierdzonym digestem.</dd>
+
+      <dt>Nieznane pokazujemy jako nieznane</dt>
+      <dd>Fakt, którego agent nie ustalił, jest pusty, a nie zerowy; brak deklaracji to odmowa, a
+        nie zgoda.</dd>
+
+      <dt>Dowody, nie logi</dt>
+      <dd>Każde zlecenie, zatwierdzenie i wynik to zdarzenie w śladzie audytowym spiętym łańcuchem
+        skrótów, który <code>auditverify</code> sprawdza offline, bez bazy danych.</dd>
+
+      <dt>Bez zewnętrznego stosu monitoringu</dt>
+      <dd>Agenci próbkują swoje hosty; panel trzyma próbki i agregaty, ocenia reguły oraz prowadzi
+        alerty i wyciszenia.</dd>
+    </dl>
+
+    <h2 id="panel">Panel</h2>
+
+    <p class="prose">Każdy obrazek poniżej pochodzi z działającej instalacji: czterohostowego
+      laboratorium z jedną maszyną Debian, jedną Ubuntu, jedną Fedora i jedną Arch, stąd małe
+      liczby. Chodzi o to, co robią te strony, a nie o rozmiar floty.</p>
+
+    <h3>Flota</h3>
+
+    <figure class="figure">
+      <img src="../img/dashboard.png" alt="Dashboard floty: dostępność hostów, problemy według rodzaju, operacje z ostatnich 24 godzin, to, co wymaga uwagi, oraz skład floty." width="1600" height="1000" loading="lazy">
+      <figcaption><b>Dashboard.</b> Tylko to, co wymaga decyzji. Po lewej dostępność hostów &mdash;
+        cztery online, zero nieaktualnych, offline, nieznanych, w kwarantannie i w trybie
+        serwisowym &mdash; po prawej problemy według rodzaju: 13 znalezisk bezpieczeństwa, 8
+        nieudanych zadań w ciągu 24 godzin, 6 kontroli z wynikiem nieznanym. Niżej zakończone
+        operacje na godzinę według wyniku; blok <i>wymaga uwagi</i> liczony w bazie danych, z
+        dwoma hostami z nieudanymi jednostkami, jednym enrollmentem w toku i czterema
+        certyfikatami agentów wygasającymi w ciągu 30 dni; oraz skład floty według systemu,
+        wersji agenta, site i środowiska.</figcaption>
+    </figure>
+
+    <figure class="figure">
+      <img src="../img/hosts.png" alt="Lista hostów z filtrami po stronie serwera i wierszem na host: stan, system, site, środowisko, domena, aktualizacje, nieudane jednostki, restart i ostatni kontakt." width="1600" height="1000" loading="lazy">
+      <figcaption><b>Hosty.</b> Filtry działają po stronie serwera: nazwa hosta lub adres, site,
+        środowisko, właściciel, tagi, dalej system operacyjny, stan, cykl życia, tryb serwisowy,
+        możliwości i kanał wydań. Wiersz niesie stan, system tak, jak zgłosił go host &mdash;
+        <code>arch</code>, <code>debian 13</code>, <code>fedora 42</code>,
+        <code>ubuntu 24.04</code> &mdash; jego site i środowisko, to, czy jest w domenie, ile
+        aktualizacji na niego czeka, ile jednostek się wywróciło, czy chce restartu i kiedy był
+        widziany ostatni raz.</figcaption>
+    </figure>
+
+    <h3>Pojedynczy host</h3>
+
+    <figure class="figure">
+      <img src="../img/host-overview.png" alt="Strona hosta: menu modułów, adaptery dostępne na tym hoście, fakty systemowe i sprzęt zgłoszony przez agenta." width="1600" height="1000" loading="lazy">
+      <figcaption><b>Przegląd hosta.</b> Menu po lewej to moduły tego hosta: pakiety, usługi,
+        procesy, harmonogramy, jądro, czas, zasilanie, sieć, DNS, firewall, SSH, pamięć masowa,
+        pliki, kopie zapasowe, kontenery, Compose, bezpieczeństwo, podatności, certyfikaty.
+        Każda strona mówi, skąd wzięły się jej fakty i kiedy, tutaj
+        <code>agent/os-release+procfs, revision 1dc313f1f045, observed 8m ago</code>. Spośród
+        adapterów na tym hoście 16 potrafi czytać i zmieniać, 2 są tylko do odczytu, a 5 jest
+        niedostępnych, co jest inną odpowiedzią niż zero. Obok tożsamości i sprzętu stoi to, co
+        wymaga uwagi na samym tym hoście: żadnych nieudanych jednostek, 36 czekających
+        aktualizacji, brak aktualizacji bezpieczeństwa.</figcaption>
+    </figure>
+
+    <figure class="figure">
+      <img src="../img/host-packages.png" alt="Strona pakietów jednego hosta: aktualizacje według stanu, źródła pakietów, operacje, o które może poprosić operator, oraz wersja samego agenta." width="1600" height="1000" loading="lazy">
+      <figcaption><b>Pakiety hosta.</b> 351 pakietów aktualnych, 36 do aktualizacji, żaden z nich
+        bezpieczeństwa. Po prawej źródła tak, jak zgłasza je host: 387 zainstalowanych przez
+        <code>apt</code>, zdrowa baza pakietów, siedem repozytoriów, z czego jedno ma sprawdzane
+        podpisy i żadne nie jest zarządzane przez panel. Operator może zaplanować aktualizacje
+        &mdash; samo ich policzenie niczego na hoście nie zmienia &mdash; albo zainstalować,
+        wstrzymać, zdjąć wstrzymanie i zaplanować usunięcie. Zwykłe aktualizacje nie ruszają
+        agenta: jego wymiana to osobna operacja, a za wykonaną uznaje się ją dopiero wtedy, gdy
+        host wraca, zgłaszając wersję, o którą poproszono.</figcaption>
+    </figure>
+
+    <h3>Zmiana w całej flocie</h3>
+
+    <figure class="figure">
+      <img src="../img/campaign.png" alt="Zakończona kampania: liczby celów, ustawienia canary i fal, zapis zatwierdzenia, fale oraz plany z ich odciskami." width="1600" height="1000" loading="lazy">
+      <figcaption><b>Kampania.</b> Zakończona kampania <code>file.ensure</code> na czterech
+        hostach: jeden canary i dwie fale, najwyżej dwa hosty naraz, próg niepowodzeń 25% albo
+        jeden host, polityka restartu <code>never</code>, polityka dla hostów offline
+        <code>replan_on_reconnect</code> i kontrakt operacji wypisany na stronie &mdash;
+        anulowanie między krokami, ponowienie po nowym planie, rollback przez dokładne
+        odtworzenie, weryfikacja przez ponowne sprawdzenie planu. Zapis zatwierdzenia mówi, kto
+        zatwierdził, na jakim uwierzytelnieniu (token API, bez ponownego uwierzytelnienia) i
+        dlaczego: <i>zmiana CHG-1042 zatwierdzona na cotygodniowym przeglądzie</i>. Powstaje raz
+        i nigdy się nie zmienia. Pod falami jeden wiersz na każdy kształt zmiany, z odciskiem
+        planu i czasem jego ważności &mdash; host, którego plan zdążył się zmienić, odmawia
+        wykonania.</figcaption>
+    </figure>
+
+    <h3>Co panel obserwuje</h3>
+
+    <figure class="figure">
+      <img src="../img/security.png" alt="Strona bezpieczeństwa: znaleziska według stanu, tabela kontroli z wartością oczekiwaną oraz znaleziska według wagi i hosta." width="1600" height="1000" loading="lazy">
+      <figcaption><b>Bezpieczeństwo.</b> Wersjonowane kontrole oceniane w panelu na faktach, które
+        hosty i tak zgłaszają: 13 kontroli na czterech hostach, 13 znalezisk wymagających
+        działania, 23 zaliczone, 6 nieznanych, 10 takich, które nie dotyczą hosta, 6 takich, które
+        panel potrafi naprawić. Każdy wiersz podaje nazwę kontroli i jej identyfikator &mdash;
+        <code>ssh.password-auth</code>, <code>exposure.listening</code>,
+        <code>kernel.rp-filter</code> &mdash; oraz wartość, względem której była oceniana. Jedno
+        złe ustawienie na stu hostach to jeden problem, a naprawa to jedna kampania z jednym
+        zatwierdzeniem.</figcaption>
+    </figure>
+
+    <figure class="figure">
+      <img src="../img/monitoring.png" alt="Strona monitoringu: alerty według wagi, pokrycie hostów oraz reguły alertów wraz z ich warunkami." width="1600" height="1000" loading="lazy">
+      <figcaption><b>Monitoring.</b> Każdy agent próbkuje swój host; reguły z tej strony zamieniają
+        próbki w alerty i nic nie odpali bez reguły, którą operator może tu przeczytać. Najpierw
+        pokrycie &mdash; cztery hosty zgłaszają dane, żaden nie milczy, pięć reguł włączonych
+        &mdash; a potem same reguły: <code>filesystem_used_percent &gt; 90%</code> utrzymane przez
+        dziesięć minut to ostrzeżenie dla całej floty, ta sama metryka powyżej 97% jest krytyczna
+        i nie czeka wcale.</figcaption>
+    </figure>
+
+    <figure class="figure">
+      <img src="../img/audit.png" alt="Strona audytu: zdarzenia na godzinę według wyniku, podsumowanie wyników i aktorów, filtry oraz tabela zdarzeń." width="1600" height="1000" loading="lazy">
+      <figcaption><b>Audyt.</b> Każde powodzenie i niepowodzenie tworzy zdarzenie; każda odmowa
+        również. Wśród stu wypisanych tutaj: 89 się powiodło, 9 zawiodło, 2 zostały odrzucone,
+        policzone według aktora &mdash; nazwany operator, sam panel oraz kampanie pod własnymi
+        identyfikatorami. Wiersz niesie czas, aktora, rodzaj, operację, cel i wynik, a pod nazwą
+        użytkownika uwierzytelnienie, na którym oparło się żądanie: sesję i kontekst
+        uwierzytelnienia, z jakim ją nadano.</figcaption>
+    </figure>
+
+    <h2 id="change">Jak przebiega zmiana</h2>
+
+    <ol class="steps">
+      <li>Host wylicza plan zmiany i zgłasza jego digest.</li>
+      <li>Zatwierdzający czyta plan; na produkcji zatwierdza druga osoba.</li>
+      <li>Host wprowadza zmianę tylko wtedy, gdy jej treść nadal zgadza się z zatwierdzonym digestem.</li>
+      <li>Wynik, weryfikacja i każdy krok trafiają do śladu audytowego spiętego łańcuchem skrótów.</li>
+    </ol>
+
+    <figure class="figure figure--bare">
+      <img src="../img/flow.svg" alt="Jedna kontrolowana ścieżka zmiany: operator, control plane, agent na hoście, flota Linuksa i ślad audytowy, który zapisuje każdy krok." width="1200" height="700" loading="lazy">
+      <figcaption>Plan, zatwierdzenie, wykonanie tylko przy zgodnym digeście, weryfikacja, audyt.</figcaption>
+    </figure>
+
+    <p class="prose">W skali floty ta sama zmiana idzie jako kampania: canary, fale, bramy ręczne
+      lub automatyczne, progi niepowodzeń, okna serwisowe, budżety na site i polityka dla hostów
+      offline.</p>
+
+    <h2 id="operations">Na czym potrafi działać</h2>
+
+    <dl class="kv">
+      <dt>Pakiety</dt>
+      <dd>Plan, aktualizacja, instalacja, usunięcie, wstrzymanie, naprawa; plany dla każdego hosta
+        zatwierdzane po digeście; aktualizacja agenta.</dd>
+
+      <dt>Usługi i procesy</dt>
+      <dd>Start, stop, restart, przeładowanie, włączenie, maskowanie, reset-failed; szczegóły
+        jednostki; drzewo procesów; sygnały.</dd>
+
+      <dt>Pliki i harmonogramy</dt>
+      <dd>Zarządzane pliki z wersjami i rollbackiem; wpisy cron i timery systemd.</dd>
+
+      <dt>Sieć i firewall</dt>
+      <dd>NetworkManager, nmstate i netplan z watchdogiem łączności; firewalld, nftables i UFW;
+        resolver.</dd>
+
+      <dt>Pamięć masowa</dt>
+      <dd>Montowania, sprawdzenie i zmiana rozmiaru systemu plików, LVM, SMART, czyszczenie urządzenia.</dd>
+
+      <dt>Kontenery</dt>
+      <dd>Kontenery, obrazy, prune, zdarzenia i logi Dockera; projekty Compose wdrażane według
+        planu.</dd>
+
+      <dt>Jądro i bezpieczeństwo</dt>
+      <dd>sysctl, moduły, tryb SELinux, reguły audytu; kontrole bezpieczeństwa z naprawą w całej
+        flocie.</dd>
+
+      <dt>Czas</dt>
+      <dd>chrony i timesyncd, strefa czasowa oraz test źródła przed jego wymianą.</dd>
+
+      <dt>Tożsamość</dt>
+      <dd>Użytkownicy, grupy, reguły HBAC i sudo we FreeIPA, symulacja dostępu, przyłączanie do
+        domeny; konta lokalne i klucze.</dd>
+
+      <dt>Certyfikaty i kopie zapasowe</dt>
+      <dd>Skanowanie, rotacja kotwic zaufania, odnawianie przez certmonger; przebiegi restic i borg,
+        weryfikacja i odtworzenie.</dd>
+
+      <dt>Monitoring</dt>
+      <dd>CPU, pamięć, swap, systemy plików, i-węzły i uptime próbkowane przez agenta; reguły
+        alertów i wyciszenia w panelu.</dd>
+
+      <dt>Podatności</dt>
+      <dd>Listy pakietów korelowane ze źródłami Debiana, Ubuntu, Red Hata i NVD; źródła czyta
+        panel, nigdy hosty.</dd>
+
+      <dt>Kampanie</dt>
+      <dd>Canary, fale, bramy ręczne lub automatyczne, progi niepowodzeń, okna serwisowe, budżety
+        na site, polityka offline dla każdego hosta.</dd>
+
+      <dt>Powiadomienia</dt>
+      <dd>Trwały zapis wysyłany partiami na webhooka, podpisany HMAC-SHA256, dostarczany co
+        najmniej raz i w kolejności.</dd>
+    </dl>
+
+    <h2 id="architecture">Architektura</h2>
+
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th scope="col">Komponent</th><th scope="col">Działa jako</th><th scope="col">Rola</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>flotestro-control-plane</code></td>
+            <td>kontener, uid 65532, tylko do odczytu</td>
+            <td>API, panel webowy, brama agentów, enrollment, scheduler, silnik kampanii, PKI;
+              wszystko, co pamięta, trzyma w PostgreSQL</td>
+          </tr>
+          <tr>
+            <td><code>flotestro-agent</code></td>
+            <td>nieuprzywilejowany użytkownik na każdym hoście</td>
+            <td>jedna sesja mTLS do bramy; inventory, metryki, plany; kroki wymagające uprawnień
+              oddaje helperowi</td>
+          </tr>
+          <tr>
+            <td><code>flotestro-agent-helper</code></td>
+            <td>root, aktywowany przez gniazdo</td>
+            <td>wykonuje ustalony zbiór operacji uprzywilejowanych przez lokalne gniazdo; bez
+              sieci</td>
+          </tr>
+          <tr>
+            <td><code>flotestro-relay</code></td>
+            <td>osobny kontener, jeden na odizolowany site</td>
+            <td>kończy sesje agentów z danego site i przekazuje je dalej; buforuje wyniki na czas
+              awarii</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="prose">Hosty trzymają certyfikat z CA floty, wystawiony przy enrollmencie na
+      podstawie klucza, który nigdy nie opuszcza hosta, odnawiany przez samego agenta i
+      unieważniany, gdy zostaje zastąpiony. Tokeny enrollmentu są jednorazowe i przechowywane jako
+      digesty. Użytkownicy logują się przez OpenID Connect; role biorą się z mapowania grup
+      zawężonego do site i środowiska, a wrażliwe działanie wymaga uwierzytelnienia step-up.
+      Sekrety pobiera host na krótką dzierżawę i nigdy nie jadą one w zadaniu. PostgreSQL jest
+      jedynym źródłem prawdy: panel nie trzyma stanu floty nigdzie indziej.</p>
+
+    <table>
+      <thead>
+        <tr><th scope="col">Port</th><th scope="col">Usługa</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>8080</td><td>panel i API; domyślnie na loopbacku, do wystawienia za proxy TLS</td></tr>
+        <tr><td>8443</td><td>brama agentów (mTLS)</td></tr>
+        <tr><td>8444</td><td>enrollment (TLS)</td></tr>
+        <tr><td>8453</td><td>relay</td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="install">Instalacja</h2>
+
+    <p class="prose">Nie ma czego budować ani klonować. Panel działa z opublikowanego obrazu, a
+      hosty biorą pakiet z podpisanego repozytorium projektu.</p>
+
+    <h3>Panel z własną bazą danych</h3>
+
+    <pre><code>curl -fsSLO https://raw.githubusercontent.com/ultherego/Flotestro/main/docker/compose.yaml
+docker compose up -d
+docker compose cp control-plane:/var/lib/flotestro/bootstrap-token .</code></pre>
+
+    <p class="prose">Każde ustawienie ma działającą wartość domyślną, więc to już jest panel pod
+      adresem <code>http://localhost:8080</code>. Token bootstrap służy do pierwszego logowania; po
+      zmapowaniu grup dostawcy tożsamości na role należy go usunąć.</p>
+
+    <p class="prose">Do obsługi hostów na innych maszynach <code>FLOTESTRO_ADVERTISE</code> w
+      <code>.env</code> musi wskazywać nazwę, pod którą flota naprawdę dociera do tego panelu:
+      trafia ona do certyfikatu bramy agentów, a panel zostawiony na loopbacku odmawia zdalnego
+      enrollmentu, zamiast wystawić certyfikat, który host i tak by odrzucił.
+      <code>env.example</code> niesie całą listę.</p>
+
+    <p class="prose">Przy bazie danych, która już działa, dochodzi
+      <code>compose.external-db.yaml</code>: wyjmuje lokalną bazę, trzyma DSN do zweryfikowanego
+      serwera i konta zapisującego oraz podnosi schemat osobnym przebiegiem, zanim cokolwiek
+      zacznie obsługiwać ruch. DSN trafia do <code>secrets/database-url</code> przed pierwszym
+      startem, a ten sam plik działa pod Dockerem i pod rootless Podmanem, na hoście z SELinuksem
+      i bez niego. Para do kopii zapasowych, odizolowany site, przypięcie digestu i aktualizacja są
+      w <a href="https://github.com/ultherego/Flotestro/blob/main/docker/README.md">docker/README.md</a>.</p>
+
+    <div class="note">
+      <p class="note__title">Który obraz</p>
+      <p>Control plane to <code>ghcr.io/ultherego/flotestro-control-plane</code>, a relay
+        <code>ghcr.io/ultherego/flotestro-relay</code>. Wydanie publikuje pełną wersję i
+        <code>sha-&lt;twelve characters of the commit&gt;</code>, i żadne z nich nigdy nie jest
+        nadpisywane; gotowe wydanie przesuwa dodatkowo <code>latest</code> oraz alias wersji
+        minor, wydanie przedpremierowe nie przesuwa żadnego. Tag jest tym, co czyta człowiek
+        &mdash; produkcja przypina digest, który wypisał przebieg wydania.</p>
+    </div>
+
+    <h3>Host, z <a href="../packages/">repozytorium pakietów</a></h3>
+
+    <p class="filename">Debian i Ubuntu</p>
+    <pre><code>sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsS https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc | sudo tee /etc/apt/keyrings/flotestro.asc &gt;/dev/null
+echo 'deb [signed-by=/etc/apt/keyrings/flotestro.asc] https://ultherego.github.io/Flotestro/packages/deb stable main' | sudo tee /etc/apt/sources.list.d/flotestro.list &gt;/dev/null
+sudo apt update &amp;&amp; sudo apt install flotestro-agent</code></pre>
+
+    <p class="filename">RHEL i Fedora</p>
+    <pre><code>sudo rpm --import https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc
+printf '%s\n' '[flotestro]' 'name=Flotestro' 'baseurl=https://ultherego.github.io/Flotestro/packages/rpm/stable' \
+  'enabled=1' 'gpgcheck=1' 'repo_gpgcheck=1' 'gpgkey=https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc' \
+  | sudo tee /etc/yum.repos.d/flotestro.repo &gt;/dev/null
+sudo dnf install -y flotestro-agent</code></pre>
+
+    <p class="filename">Arch Linux</p>
+    <pre><code>curl -fsS https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc | sudo pacman-key --add -
+sudo pacman-key --lsign-key "$(curl -fsS https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc \
+  | gpg --show-keys --with-colons | awk -F: '/^fpr:/ {print $10; exit}')"
+printf '%s\n' '[flotestro]' 'SigLevel = Required DatabaseRequired' \
+  'Server = https://ultherego.github.io/Flotestro/packages/arch/stable' | sudo tee -a /etc/pacman.conf &gt;/dev/null
+sudo pacman -Sy &amp;&amp; sudo pacman -S --noconfirm flotestro-agent</code></pre>
+
+    <p class="prose">Każdy indeks w repozytorium jest podpisany kluczem wydania i w żadnej z tych
+      linii nie ma wersji: <code>apt update</code> jest tym, czym host dowiaduje się o nowszej
+      wersji, a <code>apt upgrade</code> tym, co go na nią przenosi. Wydanie przedpremierowe idzie
+      do kanału <code>testing</code>, którego host pytający o <code>stable</code> nigdy nie czyta.
+      Bez drogi na zewnątrz pakiet pobiera się na maszynie z siecią, sprawdza względem
+      <code>SHA256SUMS</code> i przenosi ręcznie; każdy plik niesie też atestację buildu, którą
+      sprawdza <code>gh attestation verify</code>.</p>
+
+    <h3>Potem enrollment hosta</h3>
+
+    <p class="prose">Panel wypisuje dokładne polecenia dla swoich własnych adresów pod
+      <b>Add host</b> &mdash; repozytorium, pakiet, CA floty z odciskiem do porównania, jednorazowy
+      token i start. Kształt dwóch ostatnich kroków:</p>
+
+    <pre><code>sudo tee /var/lib/flotestro-agent/ca.pem &gt;/dev/null   # the fleet CA, fingerprint shown in the panel
+sudo sed -i -e 's|^  enrollment_url: .*|  enrollment_url: "https://panel.example.org:8444"|' \
+            -e 's|^  gateway_urls: .*|  gateway_urls: ["https://panel.example.org:8443"]|' /etc/flotestro/agent.yaml
+echo "$TOKEN" | sudo -u flotestro-agent flotestro-agentctl enroll   # one-time, from the panel
+sudo systemctl enable --now flotestro-agent
+flotestro-agentctl diagnose                                        # explains a host that does not show up</code></pre>
+
+    <div class="note note--warning">
+      <p class="note__title">Token jest jednorazowy i krótko żyje</p>
+      <p>Podaje się go plikiem albo na standardowym wejściu, nigdy w środowisku:
+        <code>sudo -u flotestro-agent flotestro-agentctl enroll --token-file /run/token</code>, a
+        plik potem kasuje. Host, który wciąż trzyma tożsamość z poprzedniej instalacji, dostaje
+        odmowę <code class="refusal">machine_already_enrolled</code>: nowa CA floty nie uznaje
+        certyfikatów wystawionych przez poprzednią.</p>
+    </div>
+
+    <p class="prose">Dla całego inventory naraz jest rola Ansible w
+      <a href="https://github.com/ultherego/Flotestro/tree/main/ansible">ansible</a>;
+      dla site za relayem &mdash; <code>docker/compose.relay.yaml</code>. Instalacja od zera, od
+      początku do końca, to
+      <a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/install.md">runbook instalacyjny</a>.</p>
+
+    <h2 id="documentation">Dokumentacja</h2>
+
+    <ul class="cards">
+      <li class="card">
+        <p class="card__title"><a href="docs/">Dokumentacja</a></p>
+        <p>Instalacja, konfiguracja i prowadzenie instalacji oraz runbooki na to, co idzie nie
+          tak.</p>
+      </li>
+      <li class="card">
+        <p class="card__title"><a href="../packages/">Repozytorium pakietów</a></p>
+        <p>Podpisane repozytoria apt, dnf i pacman, z których hosty instalują agenta.</p>
+      </li>
+      <li class="card">
+        <p class="card__title"><a href="https://github.com/ultherego/Flotestro">Kod</a></p>
+        <p>Usługi w Go, panel, migracje i pakietowanie, razem z kontrolami, które idą przy każdym
+          pushu.</p>
+      </li>
+      <li class="card">
+        <p class="card__title"><a href="https://github.com/ultherego/Flotestro/releases">Wydania</a></p>
+        <p>Pakiety dla amd64 i arm64 z sumami kontrolnymi, podpisami i zestawieniami
+          komponentów.</p>
+      </li>
+    </ul>
+
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="site-footer__inner">
+    <p>Flotestro &middot; <a href="https://github.com/ultherego/Flotestro">github.com/ultherego/Flotestro</a></p>
+    <p>This site describes version 0.62.0.</p>
+  </div>
+</footer>
+
+</body>
+</html>
