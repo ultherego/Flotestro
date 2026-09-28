@@ -358,9 +358,9 @@
 <tr><td><code class="refusal">invalid_binding</code></td><td>Brakuje <code>team_scope</code>. Jest wymagane, a odmowa mówi, co wpisać: <code>{"mode":"any"}</code> albo <code>{"mode":"exact","team_id":"&hellip;"}</code>. Zespół pominięty przez przypadek poszerzyłby nadanie po cichu.</td></tr>
 <tr><td><code class="refusal">invalid_binding</code></td><td><code>team_scope</code> jest źle zbudowane: tryb inny niż <code>any</code> i <code>exact</code>, <code>team_id</code> podane przy trybie <code>any</code> albo tryb <code>exact</code> bez <code>team_id</code>.</td></tr>
 <tr><td><code class="refusal">invalid_binding</code></td><td><code>valid_until</code> nie jest momentem w formacie RFC 3339. Pominięcie go znaczy, że powiązanie trwa, dopóki ktoś go nie odbierze.</td></tr>
-<tr><td><code class="refusal">scope_escalation</code></td><td>Powiązanie byłoby szersze niż to, które ma wołający. Opis niżej.</td></tr>
+<tr><td><code class="refusal">scope_escalation</code></td><td>Powiązanie byłoby szersze niż to, które ma wywołujący. Opis niżej.</td></tr>
 <tr><td><code class="refusal">reason_required</code></td><td>Pole <code>reason</code> jest krótsze niż 8 znaków.</td></tr>
-<tr><td><code class="refusal">reauthentication_required</code></td><td>Uwierzytelnienie wołającego nie jest dość świeże jak na operację o takim wpływie.</td></tr>
+<tr><td><code class="refusal">reauthentication_required</code></td><td>Uwierzytelnienie wywołującego nie jest dość świeże jak na operację o takim wpływie.</td></tr>
 </tbody></table></div>
 
     <p>Powiązanie z zespołem ma własną ścieżkę,
@@ -379,8 +379,8 @@
 
     <p><code>owners</code> i <code>tags</code> pominięte w żądaniu są czytane
     jako <code>["*"]</code>: to jedyne miejsce, w którym panel wypełnia
-    kategorię za wołającego, i robi to dlatego, że żądanie nadania milczące o
-    właścicielach znaczy, że wołający nie zawężał po nich. Zespołu nie
+    kategorię za wywołującego, i robi to dlatego, że żądanie, które nic nie
+    mówi o właścicielach, znaczy, że nikt po nich nie zawężał. Zespołu nie
     wypełnia się w ten sposób, a zakres zapisany z pustą kategorią nadal nie
     sięga niczego. Powiązanie odbiera się przez
     <code>DELETE /api/v1/principals/{id}/roles/{role}</code>, wskazując site i
@@ -395,7 +395,7 @@
     <h2 id="escalation">Nikt nie nada tego, czego sam nie ma</h2>
 
     <p>Zanim nadanie zostanie zapisane, panel bierze każde uprawnienie niesione
-    przez rolę i pyta, czy wołający ma je w zakresie, który <em>zawiera</em>
+    przez rolę i pyta, czy wywołujący ma je w zakresie, który <em>zawiera</em>
     zakres nadawany. Brak jednego uprawnienia wystarczy, żeby odmówić całego
     nadania, a odmowa je nazywa:</p>
 
@@ -405,8 +405,8 @@ site=waw env=prod team=* owner=* tag=*</code></pre>
 
     <p>Porównanie idzie po tym, dokąd powiązanie sięga, a nie po kolumnach,
     które akurat się zgadzają. Wołający powiązany z jednym zespołem nie nada
-    &bdquo;dowolnego zespołu&rdquo;; wołający, którego powiązanie wymienia dwa
-    tagi, nie nada <code>*</code>; gwiazdka po stronie wołającego zawiera w tej
+    &bdquo;dowolnego zespołu&rdquo;; wywołujący, którego powiązanie wymienia dwa
+    tagi, nie nada <code>*</code>; gwiazdka po stronie wywołującego zawiera w tej
     kategorii wszystko. Próba trafia do śladu audytowego jako odrzucone
     <code>principal.role.grant</code> albo <code>principal.create</code> z
     <code>reason: scope_escalation</code> i powyższym komunikatem &mdash; kto
