@@ -109,6 +109,70 @@ hr { border: 0; border-top: 1px solid var(--surface1); margin: 3rem 0; }
 .site-nav a:hover { color: var(--peach); }
 .site-nav a[aria-current="page"] { color: var(--peach); }
 
+/* Language switcher -------------------------------------------------- */
+
+/* <details> opens and closes on its own, so the site stays free of script.
+   The menu is the same in both languages, hence one set of rules. */
+.lang-menu {
+  position: relative;
+  align-self: center;
+}
+
+.lang-menu__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+  color: var(--subtext0);
+  list-style: none;          /* Firefox draws the triangle from the marker */
+}
+
+.lang-menu__toggle::-webkit-details-marker { display: none; }
+
+.lang-menu__toggle:hover,
+.lang-menu[open] .lang-menu__toggle { color: var(--peach); }
+
+/* The panel floats, so opening it never moves the header or the page. */
+.lang-menu__list {
+  position: absolute;
+  top: calc(100% + 0.55rem);
+  right: 0;
+  z-index: 20;
+  min-width: 9.5rem;
+  margin: 0;
+  padding: 0.25rem;
+  list-style: none;
+  background: var(--mantle);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius);
+}
+
+.lang-menu__list li { margin: 0; }
+
+.lang-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 4px;
+  border-bottom: 0;
+  white-space: nowrap;
+}
+
+.site-nav .lang-menu__item { color: var(--subtext0); }
+.site-nav .lang-menu__item:hover { background: var(--surface0); color: var(--text); }
+.lang-menu__item[aria-current] { color: var(--peach); }
+
+/* The hairline keeps the white half of a flag off the background it sits on;
+   the border is outside the 18x12 drawing, so the proportions stay right. */
+.lang-menu__flag {
+  flex: none;
+  width: 1.25rem;
+  height: 0.875rem;
+  border: 1px solid var(--surface2);
+  border-radius: 1px;
+}
+
 /* Shell -------------------------------------------------------------- */
 
 .layout {
@@ -492,6 +556,10 @@ td { color: var(--subtext1); }
 
   .site-header__inner { padding: 0.6rem var(--gutter); }
   .site-nav { width: 100%; margin-left: 0; }
+
+  /* The nav fills the width here and wraps, so the switcher is held at the
+     right edge of its row and its panel still opens inside the viewport. */
+  .lang-menu { margin-left: auto; }
 }
 
 /* ---------------------------------------------------------------------- */
