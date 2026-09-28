@@ -20,6 +20,7 @@
       <a href="./" aria-current="page">Documentation</a>
       <a href="https://ultherego.github.io/Flotestro/packages/">Packages</a>
       <a href="https://github.com/ultherego/Flotestro">Source</a>
+      <a href="../pl/docs/" hreflang="pl" lang="pl">Polski</a>
     </nav>
   </div>
 </header>
@@ -44,12 +45,13 @@
         <li><a href="operations.html">6. Operations</a></li>
         <li><a href="errors.html">7. Errors and refusals</a></li>
         <li><a href="api.html">8. API</a></li>
+        <li><a href="roles.html">9. Roles and permissions</a></li>
       </ul>
     </nav>
     <nav class="sidebar__group">
       <h2 class="sidebar__title">Procedures</h2>
       <ul class="sidebar__list">
-        <li><a href="runbooks.html">9. Runbooks</a></li>
+        <li><a href="runbooks.html">10. Runbooks</a></li>
       </ul>
     </nav>
   </aside>
@@ -120,7 +122,13 @@
     <p>The REST API under <code>/api/v1</code>: authentication, permissions,
     concurrency with <code>If-Match</code>, and the routes themselves.</p>
 
-    <h3><a href="runbooks.html">9. Runbooks</a></h3>
+    <h3><a href="roles.html">9. Roles and permissions</a></h3>
+    <p>The six roles and the permissions each one holds and does not hold, the
+    five categories a scope narrows by, how a directory group becomes a role,
+    and what is asked for beyond a role: a reason, a fresh authentication and a
+    second person.</p>
+
+    <h3><a href="runbooks.html">10. Runbooks</a></h3>
     <p>The procedures the panel does not carry out by itself - CA rotation, a
     database restore, a queue that is not moving, a relay out of room, a gap in
     the charts, quarantine and decommission, a support bundle, a golden image.
@@ -149,8 +157,8 @@
 
       <dt>A permission</dt>
       <dd>Written as <code>pki.rotate</code>. Permissions are granted to roles,
-      roles to groups of the identity provider, and each grant is scoped by site
-      and environment.</dd>
+      roles to groups of the identity provider, and each grant is scoped. The
+      catalogue is in <a href="roles.html">Roles and permissions</a>.</dd>
     </dl>
 
     <div class="note">

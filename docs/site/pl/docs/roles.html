@@ -1,0 +1,549 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Role i uprawnienia &middot; Dokumentacja Flotestro</title>
+<meta name="description" content="Sześć ról, uprawnienia, które każda z nich ma i których nie ma, pięć kategorii zakresu oraz to, co wymaga czegoś więcej niż roli: świeżego uwierzytelnienia i drugiej osoby.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;600&display=swap">
+<link rel="stylesheet" href="../../style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header__inner">
+    <a class="brand" href="../"><img class="brand__mark" src="../../img/logo.webp" alt="">Flotestro</a>
+    <nav class="site-nav">
+      <a href="../">Przegląd</a>
+      <a href="./" aria-current="page">Dokumentacja</a>
+      <a href="https://ultherego.github.io/Flotestro/packages/">Pakiety</a>
+      <a href="https://github.com/ultherego/Flotestro">Kod</a>
+      <a href="../../docs/roles.html" hreflang="en" lang="en">English</a>
+    </nav>
+  </div>
+</header>
+
+<div class="layout">
+
+  <aside class="sidebar">
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Podręcznik</h2>
+      <ul class="sidebar__list">
+        <li><a href="./">Spis treści</a></li>
+        <li><a href="introduction.html">1. Wprowadzenie</a></li>
+        <li><a href="architecture.html">2. Architektura</a></li>
+        <li><a href="installation.html">3. Instalacja</a></li>
+        <li><a href="concepts.html">4. Jak przebiega zmiana</a></li>
+      </ul>
+    </nav>
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Wykazy</h2>
+      <ul class="sidebar__list">
+        <li><a href="configuration.html">5. Konfiguracja</a></li>
+        <li><a href="operations.html">6. Operacje</a></li>
+        <li><a href="errors.html">7. Błędy i odmowy</a></li>
+        <li><a href="api.html">8. API</a></li>
+        <li><a href="roles.html" aria-current="page">9. Role i uprawnienia</a></li>
+      </ul>
+    </nav>
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Procedury</h2>
+      <ul class="sidebar__list">
+        <li><a href="runbooks.html">10. Runbooki</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <h1>9. Role i uprawnienia</h1>
+
+    <p class="lede">Żadne uprawnienie nie istnieje samo dla siebie. Ma je rola,
+    rola jest powiązana z tożsamością w konkretnym zakresie, a zakres mówi, do
+    której części floty ta rola sięga. Ten rozdział to wykaz sześciu ról: co
+    każda z nich może i czego nie może, jak zakres zawęża powiązanie i o co
+    operacja prosi ponad samą rolę.</p>
+
+    <ul class="linkrow">
+      <li><a href="#roles">Sześć ról</a></li>
+      <li><a href="#viewer">viewer</a></li>
+      <li><a href="#auditor">auditor</a></li>
+      <li><a href="#operator">operator</a></li>
+      <li><a href="#approver">approver</a></li>
+      <li><a href="#identity-admin">identity_admin</a></li>
+      <li><a href="#platform-admin">platform_admin</a></li>
+      <li><a href="#scope">Zakres powiązania</a></li>
+      <li><a href="#grant">Jak wygląda nadanie</a></li>
+      <li><a href="#escalation">Nikt nie nada tego, czego sam nie ma</a></li>
+      <li><a href="#groups">Grupa z katalogu staje się rolą</a></li>
+      <li><a href="#beyond">Kiedy sama rola nie wystarczy</a></li>
+    </ul>
+
+    <h2 id="roles">Sześć ról</h2>
+
+    <p>Wykaz jest zamknięty: panel zna te sześć ról i żadnej innej, a żądanie
+    z inną nazwą kończy się odmową
+    <code class="refusal">unknown_role</code>. Rola to lista uprawnień, a nie
+    stopień w hierarchii &mdash; listy zachodzą na siebie, ale żadna nie
+    zawiera się w drugiej. Cały wykaz zwraca
+    <code>GET /api/v1/roles</code>, rola po roli, razem z uprawnieniami każdej
+    z nich.</p>
+
+<div class="table-scroll">
+<table>
+<thead><tr><th>Rola</th><th>Do czego służy</th><th>Uprawnień</th></tr></thead>
+<tbody>
+<tr><td><code>viewer</code></td><td>Patrzy na flotę. Czyta hosty i ich moduły, wylicza plany; niczego nie zmienia.</td><td>31</td></tr>
+<tr><td><code>auditor</code></td><td>Przegląda instalację. Czyta ślad audytowy, metryki, ustalenia, metadane sekretów i stan CA; niczego nie naprawia.</td><td>23</td></tr>
+<tr><td><code>operator</code></td><td>Pełni dyżur. Restartuje usługi, uruchamia kontenery, planuje aktualizacje, zleca kampanie, robi kopie zapasowe, wycisza alerty; niczego nie zatwierdza i nie przeprowadza żadnej transakcji pakietowej.</td><td>63</td></tr>
+<tr><td><code>approver</code></td><td>Jest drugą osobą. Czyta zmianę i ślad audytowy, zatwierdza operacje i kampanie, publikuje politykę; niczego nie zleca.</td><td>12</td></tr>
+<tr><td><code>identity_admin</code></td><td>Decyduje, kto ma dostęp do hostów. Katalog, jego polityki i konta lokalne; nie prowadzi operacji na hostach.</td><td>24</td></tr>
+<tr><td><code>platform_admin</code></td><td>Administruje instalacją. Ma każde uprawnienie, jakie istnieje.</td><td>187</td></tr>
+</tbody></table></div>
+
+    <p>Jedna tożsamość może mieć kilka ról naraz, każdą w osobnym zakresie:
+    inżynier na dyżurze ma zwykle rolę <code>operator</code> w swoim site i
+    rolę <code>viewer</code> w pozostałej części floty. Uprawnienia się sumują,
+    zakresy się nie zlewają &mdash; uprawnienie obowiązuje tam, dokąd sięga
+    powiązanie, które je niesie, i nigdzie indziej.</p>
+
+    <h2 id="viewer">viewer</h2>
+
+    <p>Rola, która czyta. Widzi hosty i ich moduły i może zapytać
+    host, do czego doprowadziłaby zmiana, bo plan wylicza różnicę i niczego nie
+    zapisuje.</p>
+
+<div class="table-scroll">
+<table>
+<thead><tr><th>Co może</th><th>Uprawnienia</th></tr></thead>
+<tbody>
+<tr><td>Widzieć flotę, jej inventory, jej operacje i jej kampanie.</td><td><code>host.read</code>, <code>inventory.read</code>, <code>job.read</code>, <code>campaign.read</code></td></tr>
+<tr><td>Czytać stan hosta: usługi, procesy, pakiety, dyski, sieć, firewall, SSH, jądro, czas, bezpieczeństwo, certyfikaty, kopie zapasowe, kontenery, monitoring, podatności, konta i stan deklarowany.</td><td><code>unit.status</code>, <code>process.read</code>, <code>packages.read</code>, <code>storage.read</code>, <code>storage.smart.read</code>, <code>network.read</code>, <code>dns.read</code>, <code>firewall.read</code>, <code>ssh.read</code>, <code>kernel.read</code>, <code>time.read</code>, <code>security.read</code>, <code>certificate.read</code>, <code>backup.read</code>, <code>docker.read</code>, <code>docker.events</code>, <code>monitoring.read</code>, <code>vulnerability.read</code>, <code>identity.read</code>, <code>localuser.read</code>, <code>policy.read</code></td></tr>
+<tr><td>Wyliczyć plan: do czego doprowadziłaby zmiana na tym hoście, bez jej wykonania.</td><td><code>dns.plan</code>, <code>time.plan</code>, <code>file.plan</code>, <code>kernel.module.plan</code>, <code>certificate.plan</code>, <code>certificate.trust.plan</code></td></tr>
+</tbody></table></div>
+
+    <p><strong>Czego nie może.</strong> Niczego, co zapisuje: nie zleci żadnej
+    operacji, bo na liście nie ma <code>job.create</code>. Nie czyta też śladu
+    audytowego &mdash; to materiał audytora, nie widza &mdash; ani metryk, ani
+    metadanych sekretów, i nie uruchomi skanu bezpieczeństwa: skan zbiera o
+    hoście materiał rozpoznawczy i ma własne uprawnienie.</p>
+
+    <h2 id="auditor">auditor</h2>
+
+    <p>Rola, która przegląda. Jej materiałem jest ślad audytowy, ustalenia i
+    stan instalacji, i celowo nie jest to rola, która cokolwiek z tego
+    naprawia.</p>
+
+<div class="table-scroll">
+<table>
+<thead><tr><th>Co może</th><th>Uprawnienia</th></tr></thead>
+<tbody>
+<tr><td>Widzieć flotę, jej inventory, jej operacje i jej kampanie.</td><td><code>host.read</code>, <code>inventory.read</code>, <code>job.read</code>, <code>campaign.read</code></td></tr>
+<tr><td>Czytać materiał dowodowy: ślad audytowy, metryki floty, stan CA i metadane sekretów. Wartości sekretu nie da się odczytać przez API w ogóle, nikomu.</td><td><code>audit.read</code>, <code>metrics.read</code>, <code>pki.read</code>, <code>secret.read</code></td></tr>
+<tr><td>Czytać materiał przeglądu i uruchomić skan, który go wytwarza: stan zabezpieczeń, podatności, listę zainstalowanych pakietów, daty ważności certyfikatów, kopie zapasowe, alerty i wyciszenia oraz werdykty o stanie deklarowanym.</td><td><code>security.read</code>, <code>security.scan</code>, <code>vulnerability.read</code>, <code>packages.read</code>, <code>certificate.read</code>, <code>certificate.plan</code>, <code>certificate.trust.plan</code>, <code>backup.read</code>, <code>monitoring.read</code>, <code>policy.read</code></td></tr>
+<tr><td>Widzieć, kto ma dostęp: katalog, jego reguły HBAC i sudo, konta lokalne i kontenery na hoście.</td><td><code>identity.read</code>, <code>identity.policy.read</code>, <code>localuser.read</code>, <code>docker.read</code>, <code>docker.events</code></td></tr>
+</tbody></table></div>
+
+    <p><strong>Czego nie może.</strong> Nie wymienia niczego, co przegląda: ani
+    CA (<code>pki.rotate</code> należy do administratora), ani ustalenia
+    (<code>security.remediate</code>), ani polityki. Nie ma też zwykłych
+    odczytów modułów hosta &mdash; sieci, dysków, firewalla, SSH, jądra, czasu
+    &mdash; i to jedyne miejsce, w którym <code>viewer</code> widzi więcej niż
+    <code>auditor</code>: kto potrzebuje jednego i drugiego, dostaje obie
+    role.</p>
+
+    <h2 id="operator">operator</h2>
+
+    <p>Rola dyżurna i największa z pięciu, które nie są administratorem. Cała
+    jest jedną decyzją powtórzoną wielokrotnie: wszystko, co stawia usługę z
+    powrotem na nogi, nic, co zmienia to, czym host jest.</p>
+
+<div class="table-scroll">
+<table>
+<thead><tr><th>Co może</th><th>Uprawnienia</th></tr></thead>
+<tbody>
+<tr><td>Zlecić pracę i ją wycofać. Odświeżenie inventory to pierwszy ruch przy każdej awarii: zanim ktoś zacznie zmieniać host, chce wiedzieć, jak jest teraz.</td><td><code>host.read</code>, <code>inventory.read</code>, <code>inventory.refresh</code>, <code>job.read</code>, <code>job.create</code>, <code>job.cancel</code></td></tr>
+<tr><td>Ruszać usługami i czytać journal.</td><td><code>unit.start</code>, <code>unit.stop</code>, <code>unit.restart</code>, <code>unit.reload</code>, <code>unit.reset_failed</code>, <code>journal.read</code></td></tr>
+<tr><td>Uruchamiać kontenery i pobierać obrazy; zaplanować deklarację albo wdrożenie projektu, ale go nie przeprowadzić.</td><td><code>docker.read</code>, <code>docker.events</code>, <code>docker.container.logs</code>, <code>docker.container.start</code>, <code>docker.container.stop</code>, <code>docker.container.restart</code>, <code>docker.image.pull</code>, <code>docker.plan</code>, <code>docker.compose.plan</code></td></tr>
+<tr><td>Zaplanować transakcję pakietową, ale jej nie przeprowadzić.</td><td><code>packages.read</code>, <code>packages.plan</code></td></tr>
+<tr><td>Prowadzić i sterować kampanią oraz pisać stan deklarowany jako szkic. Opublikowanie tego szkicu jest zatwierdzeniem i zostaje po stronie zatwierdzającego.</td><td><code>campaign.read</code>, <code>campaign.create</code>, <code>campaign.control</code>, <code>policy.read</code>, <code>policy.write</code></td></tr>
+<tr><td>Nazwać cele kampanii i zgłosić host jako będący w naprawie.</td><td><code>host.tag.write</code>, <code>host.group.write</code>, <code>host.maintenance.write</code></td></tr>
+<tr><td>Zaprosić maszynę do floty, po jednym tokenie na host, zobaczyć instalacje w toku i zamknąć token, który wyciekł.</td><td><code>host.enroll.create</code>, <code>host.enroll.read</code>, <code>host.enroll.revoke</code></td></tr>
+<tr><td>Czytać konta lokalne i przesuwać granicę istniejącego konta: jego grupy i datę wygaśnięcia.</td><td><code>localuser.read</code>, <code>localuser.groups.write</code>, <code>localuser.expiry.write</code></td></tr>
+<tr><td>Czytać konfigurację hosta i wyliczyć, do czego doprowadziłaby zmiana, bez jej wykonania.</td><td><code>network.read</code>, <code>dns.read</code>, <code>dns.plan</code>, <code>firewall.read</code>, <code>storage.read</code>, <code>storage.smart.read</code>, <code>ssh.read</code>, <code>kernel.read</code>, <code>kernel.module.plan</code>, <code>time.read</code>, <code>time.plan</code>, <code>security.read</code>, <code>security.scan</code>, <code>file.plan</code>, <code>vulnerability.read</code></td></tr>
+<tr><td>Pilnować certyfikatów i wskazać panelowi pliki, które ma obserwować.</td><td><code>certificate.read</code>, <code>certificate.plan</code>, <code>certificate.trust.plan</code>, <code>certificate.watch</code></td></tr>
+<tr><td>Zrobić kopię zapasową i ją zweryfikować. Odtworzenie jest osobną decyzją, bo rozpakowuje stary stan na działającym systemie.</td><td><code>backup.read</code>, <code>backup.run</code>, <code>backup.verify</code></td></tr>
+<tr><td>Czytać alerty, odpytać host sondą i wyciszyć alert na czas naprawy.</td><td><code>monitoring.read</code>, <code>monitoring.probe</code>, <code>monitoring.silence.write</code>, <code>notification.read</code></td></tr>
+</tbody></table></div>
+
+    <p><strong>Czego nie może.</strong> Niczego nie zatwierdza: nie ma ani
+    <code>job.approve</code>, ani <code>campaign.approve</code>, ani
+    <code>policy.publish</code>, więc operator, który zlecił zmianę, czeka na
+    kogoś innego. Nie przeprowadza żadnej transakcji pakietowej
+    (<code>packages.install</code>, <code>packages.remove</code>,
+    <code>packages.upgrade</code>, <code>packages.repair</code>) i nie wymienia
+    agenta. Nie zapisuje niczego w konfiguracji hosta: ani sieci, ani
+    firewalla, ani dysków, ani SSH, ani jądra, ani czasu, ani zarządzanego
+    pliku &mdash; zła zmiana odcina host i nie da się jej naprawić zdalnie. Nie
+    restartuje hosta ani go nie wyłącza, nie usuwa kontenera ani nie robi
+    prune, nie wdraża projektu Compose, nie odtwarza kopii zapasowej, nie
+    zakłada ani nie kasuje konta lokalnego i nie czyta śladu audytowego.</p>
+
+    <h2 id="approver">approver</h2>
+
+    <p>Najmniejsza rola i ta, na której opiera się zasada drugiej pary oczu.
+    Czyta zmianę, ślad audytowy i ludzi, po czym mówi: tak.</p>
+
+<div class="table-scroll">
+<table>
+<thead><tr><th>Co może</th><th>Uprawnienia</th></tr></thead>
+<tbody>
+<tr><td>Przeczytać to, co ma zatwierdzić, i ślad audytowy za tym stojący.</td><td><code>host.read</code>, <code>inventory.read</code>, <code>job.read</code>, <code>campaign.read</code>, <code>audit.read</code></td></tr>
+<tr><td>Zatwierdzić operację albo kampanię.</td><td><code>job.approve</code>, <code>campaign.approve</code></td></tr>
+<tr><td>Czytać i publikować stan deklarowany. Opublikowanie polityki jest zatwierdzeniem szkicu, który napisał ktoś inny.</td><td><code>policy.read</code>, <code>policy.publish</code></td></tr>
+<tr><td>Widzieć, kto ma dostęp: katalog, jego reguły HBAC i sudo oraz konta lokalne.</td><td><code>identity.read</code>, <code>identity.policy.read</code>, <code>localuser.read</code></td></tr>
+</tbody></table></div>
+
+    <p><strong>Czego nie może.</strong> Niczego nie zleca: nie ma
+    <code>job.create</code>, nie ma <code>campaign.create</code> i nie ma
+    <code>policy.write</code>, więc zatwierdzający nie napisze zmiany, którą
+    potem zatwierdzi. Nie czyta żadnego modułu hosta poza inventory i niczego
+    nie anuluje.</p>
+
+    <h2 id="identity-admin">identity_admin</h2>
+
+    <p>Rola, która decyduje, kto ma dostęp do hostów &mdash; przez katalog albo
+    z jego pominięciem, przez konto lokalne. Nie prowadzi operacji na
+    hostach.</p>
+
+<div class="table-scroll">
+<table>
+<thead><tr><th>Co może</th><th>Uprawnienia</th></tr></thead>
+<tbody>
+<tr><td>Widzieć flotę, do której nadaje dostęp.</td><td><code>host.read</code>, <code>inventory.read</code>, <code>job.read</code>, <code>campaign.read</code>, <code>unit.status</code>, <code>notification.read</code></td></tr>
+<tr><td>Zarządzać katalogiem: jego użytkownikami, grupami, regułami HBAC i sudo, przynależnością hosta do domeny oraz rekordami, które czyta cała sieć.</td><td><code>identity.read</code>, <code>identity.policy.read</code>, <code>identity.user.write</code>, <code>identity.group.write</code>, <code>identity.policy.write</code>, <code>identity.host.enroll</code>, <code>identity.host.leave</code>, <code>identity.keytab.rotate</code>, <code>dns.directory.write</code></td></tr>
+<tr><td>Zarządzać kontami lokalnymi, czyli drogą do hosta, która nie prowadzi przez katalog, i kluczami SSH na nich.</td><td><code>localuser.read</code>, <code>localuser.create</code>, <code>localuser.lock</code>, <code>localuser.unlock</code>, <code>localuser.sshkeys.add</code>, <code>localuser.sshkeys.remove</code>, <code>localuser.sshkeys.replace</code>, <code>localuser.sshkeys.write</code></td></tr>
+<tr><td>Pozwolić, by wpis harmonogramu działał jako root. To uprawnienie jedzie razem ze zleceniem, samo z siebie nic nie znaczy.</td><td><code>schedule.root.exec</code></td></tr>
+</tbody></table></div>
+
+    <p><strong>Czego nie może.</strong> Nie nadaje roota pod inną nazwą:
+    <code>accounts.privileged_groups</code> jest tej roli odebrane, tak jak
+    każdej poza administratorem, więc ta rola zakłada zwykłe konta, a konto,
+    które trafia do <code>sudo</code>, <code>wheel</code>, <code>docker</code>
+    albo <code>lxd</code>, zakłada ten, kto może nadawać roota. Nie zmienia
+    grup ani daty wygaśnięcia konta i nie kasuje konta. Ma
+    <code>schedule.root.exec</code>, ale nie ma <code>schedule.write</code>,
+    więc w ogóle nie napisze wpisu harmonogramu &mdash; to uprawnienie niesie
+    zlecenie administratora. I nie zleca operacji: na liście nie ma
+    <code>job.create</code>.</p>
+
+    <h2 id="platform-admin">platform_admin</h2>
+
+    <p>Administrator ma wszystkie 187 uprawnień z wykazu: każde uprawnienie,
+    jakie panel definiuje, jest w tej roli, i nic poza nią nie zostaje.
+    Niektórych z nich nie ma żadna inna rola.</p>
+
+<div class="table-scroll">
+<table>
+<thead><tr><th>Ma tylko ta rola</th><th>O czym decyduje</th></tr></thead>
+<tbody>
+<tr><td><code>principal.manage</code>, <code>host.scope.write</code>, <code>team.binding.write</code></td><td>Kto istnieje w panelu, do którego zespołu należy host i który zespół może nazwać powiązanie. Dwa ostatnie przesuwają granicę tego, czego ktokolwiek może dotknąć.</td></tr>
+<tr><td><code>accounts.privileged_groups</code></td><td>Konto zakładane w grupie, która jest rootem pod inną nazwą, albo do niej przenoszone.</td></tr>
+<tr><td><code>pki.rotate</code></td><td>CA floty, czyli korzeń zaufania dla każdego hosta.</td></tr>
+<tr><td><code>relay.enroll.create</code>, <code>relay.manage</code>, <code>host.enroll.batch</code></td><td>Relay niesie ruch całego site, a jego odwołanie odcina ten site; token zbiorczy to jeden token ważny dla wielu maszyn.</td></tr>
+<tr><td><code>host.quarantine</code>, <code>host.quarantine.release</code>, <code>host.decommission</code>, <code>host.identity.replace</code></td><td>Życie hosta we flocie i odtworzenie jego tożsamości.</td></tr>
+<tr><td><code>packages.install</code>, <code>packages.remove</code>, <code>packages.upgrade</code>, <code>packages.repair</code>, <code>packages.hold.write</code>, <code>packages.repository.write</code>, <code>agent.upgrade</code></td><td>Transakcje pakietowe, które operator może tylko zaplanować, oraz decyzja o tym, skąd host bierze oprogramowanie.</td></tr>
+<tr><td><code>network.write</code>, <code>firewall.write</code>, <code>storage.destructive</code>, <code>storage.wipe</code>, <code>ssh.config.write</code>, <code>kernel.sysctl.write</code>, <code>file.write</code>, <code>system.reboot</code>, <code>system.shutdown</code>, <code>system.hostname.write</code> i pozostałe zapisy</td><td>Wszystko, co zmienia to, czym host jest, a nie to, co akurat na nim chodzi.</td></tr>
+<tr><td><code>secret.write</code>, <code>secret.destroy</code>, <code>settings.read</code>, <code>support.bundle.create</code>, <code>support.bundle.read</code></td><td>Magazyn sekretów i to, jak panel czyta sam siebie. Bundle czyta wszystko, co panel o sobie wie, więc należy do tego, kto panelem administruje, i do nikogo więcej.</td></tr>
+<tr><td><code>budget.write</code>, <code>policy.remediate.auto</code>, <code>monitoring.rules.write</code>, <code>notification.manage</code></td><td>Ile zmian flota unosi naraz, co naprawia bez pytania i na co alarmuje.</td></tr>
+</tbody></table></div>
+
+    <p>Mieć każde uprawnienie to nie to samo, co działać bez warunków.
+    Administrator podlega zasadzie drugiej pary oczu w środowisku produkcyjnym
+    tak samo jak każdy, a operacje o największym wpływie proszą i jego o powód
+    i świeże uwierzytelnienie &mdash; jedno i drugie opisuje
+    <a href="#beyond">Kiedy sama rola nie wystarczy</a>.</p>
+
+    <h2 id="scope">Zakres powiązania</h2>
+
+    <p>Powiązanie to rola <em>w zakresie</em>. Zakres ma pięć kategorii, a cel
+    &mdash; host albo zlecenie wskazujące miejsce we flocie &mdash; niesie
+    fakty, z którymi te kategorie są porównywane.</p>
+
+<div class="table-scroll">
+<table>
+<thead><tr><th>Kategoria</th><th>Czym zawęża</th><th>Jak się ją zapisuje</th></tr></thead>
+<tbody>
+<tr><td><code>site</code></td><td>Site, w którym stoi host.</td><td>Jedna wartość albo <code>*</code>.</td></tr>
+<tr><td><code>environment</code></td><td>Środowisko, do którego należy host.</td><td>Jedna wartość albo <code>*</code>.</td></tr>
+<tr><td><code>team</code></td><td>Zespół, do którego host jest przypisany.</td><td>Słowem: <code>{"mode":"any"}</code> albo <code>{"mode":"exact","team_id":"&hellip;"}</code>.</td></tr>
+<tr><td><code>owner</code></td><td>Właściciel zapisany przy hoście.</td><td>Lista wartości, z których wystarczy dowolna, albo lista zawierająca <code>*</code>.</td></tr>
+<tr><td><code>tag</code></td><td>Tagi na hoście.</td><td>Lista wartości, z których wystarczy dowolna, albo lista zawierająca <code>*</code>.</td></tr>
+</tbody></table></div>
+
+    <p>Całą resztę rozstrzygają dwie zasady:</p>
+
+    <ul>
+      <li><strong>Każda kategoria musi być spełniona naraz.</strong> Site
+      <em>i</em> środowisko <em>i</em> zespół <em>i</em> właściciel <em>i</em>
+      tag. Powiązanie, które wskazuje site i tag, sięga hostów, które są w tym
+      site i noszą ten tag, a nie sumy jednych i drugich.</li>
+      <li><strong>Wewnątrz kategorii wartości są alternatywą.</strong> Dwóch
+      właścicieli w jednym powiązaniu znaczy: dowolny z nich; dwa tagi znaczą
+      host noszący którykolwiek. Pojedyncza wartość to ta sama zasada z jedną
+      alternatywą.</li>
+    </ul>
+
+    <p>Tylko gwiazdka poszerza kategorię: obejmuje każdą wartość, w
+    tym cel, który nie niesie żadnej &mdash; host bez właściciela to nadal
+    host. Pusta kategoria nie jest kategorią szeroką: nie sięga niczego. Tak
+    jest celowo i w tę stronę ma się przewracać pomyłka. Powiązanie budowane
+    pole po polu, w którym jedno pole zostało zapomniane, nie nadaje niczego,
+    zamiast po cichu nadać całą flotę.</p>
+
+    <p>Zespół to jedyna kategoria, która nie powie &bdquo;dowolny&rdquo;,
+    zostając pusta, bo jest kluczem obcym i nie ma wartości znaczącej
+    <em>wszystkie</em>. Dlatego zapisuje się go słowem, a zakres tak samo o
+    nim odpowiada: <code>{"mode":"any"}</code> albo
+    <code>{"mode":"exact","team_id":"&hellip;"}</code>. Czytelnik, który musi
+    wywnioskować <em>dowolny</em> z braku pola, jest czytelnikiem, który
+    kiedyś wywnioskuje to źle.</p>
+
+    <p>Z tego samego powodu zakres jest wypisywany w całości wszędzie tam,
+    gdzie jest drukowany albo serializowany. W śladzie audytowym czyta się to
+    jako <code>site=* env=prod team=* owner=* tag=*</code>, z każdą kategorią
+    nazwaną; w API każda kategoria jest polem obiektu JSON i nigdy nie jest
+    pomijana. Lista bez żadnej wartości drukuje się jako <code>(none)</code>,
+    czyli jako to, co nie sięga niczego.</p>
+
+    <div class="note">
+      <p class="note__title">Kategoria, której zapytanie nie umie sprawdzić, nie jest spełniona</p>
+      <p>Niektóre listy nie mają kolumny, z którą można porównać kategorię.
+      Zlecenie enrollmentu niesie site i środowisko, i nic poza tym &mdash;
+      hosta jeszcze nie ma, więc nie ma zespołu, właściciela ani tagów.
+      Powiązanie zawężone którąkolwiek z tych kategorii nie sięga takiego
+      zlecenia w ogóle, zamiast sięgać ich wszystkich: odpowiedź
+      &bdquo;wszystko&rdquo; tam, gdzie niczego nie da się sprawdzić, jest
+      sposobem, w jaki wąskie powiązanie staje się całą flotą.</p>
+    </div>
+
+    <h2 id="grant">Jak wygląda nadanie</h2>
+
+    <p>Powiązanie nadaje się przez
+    <code>POST /api/v1/principals/{id}/roles</code>, a ten sam kształt jedzie w
+    liście <code>roles</code> przy zakładaniu tożsamości. Wymaga
+    <code>principal.manage</code> w całej flocie i jest operacją o największym
+    wpływie: przesuwa to, kto może zrobić cokolwiek.</p>
+
+<pre><code>POST /api/v1/principals/{id}/roles
+{
+  "role":        "operator",
+  "site":        "waw",
+  "environment": "prod",
+  "team_scope":  {"mode": "any"},
+  "owners":      ["*"],
+  "tags":        ["*"],
+  "valid_until": "2026-12-31T23:59:59Z",
+  "reason":      "on-call rotation for the Warsaw site"
+}</code></pre>
+
+    <p>Czego panel odmawia:</p>
+
+<div class="table-scroll">
+<table>
+<thead><tr><th>Odmowa</th><th>Kiedy</th></tr></thead>
+<tbody>
+<tr><td><code class="refusal">unknown_role</code></td><td>Rola nie jest jedną z sześciu.</td></tr>
+<tr><td><code class="refusal">invalid_binding</code></td><td>Brakuje <code>team_scope</code>. Jest wymagane, a odmowa mówi, co wpisać: <code>{"mode":"any"}</code> albo <code>{"mode":"exact","team_id":"&hellip;"}</code>. Zespół pominięty przez przypadek poszerzyłby nadanie po cichu.</td></tr>
+<tr><td><code class="refusal">invalid_binding</code></td><td><code>team_scope</code> jest źle zbudowane: tryb inny niż <code>any</code> i <code>exact</code>, <code>team_id</code> podane przy trybie <code>any</code> albo tryb <code>exact</code> bez <code>team_id</code>.</td></tr>
+<tr><td><code class="refusal">invalid_binding</code></td><td><code>valid_until</code> nie jest momentem w formacie RFC 3339. Pominięcie go znaczy, że powiązanie trwa, dopóki ktoś go nie odbierze.</td></tr>
+<tr><td><code class="refusal">scope_escalation</code></td><td>Powiązanie byłoby szersze niż to, które ma wywołujący. Opis niżej.</td></tr>
+<tr><td><code class="refusal">reason_required</code></td><td>Pole <code>reason</code> jest krótsze niż 8 znaków.</td></tr>
+<tr><td><code class="refusal">reauthentication_required</code></td><td>Uwierzytelnienie wywołującego nie jest dość świeże jak na operację o takim wpływie.</td></tr>
+</tbody></table></div>
+
+    <p>Powiązanie z zespołem ma własną ścieżkę,
+    <code>POST /api/v1/principals/{id}/team-roles</code>, która bierze zespół i
+    nic więcej: zakres, jaki zapisuje, to ten zespół i gwiazdka w każdej
+    pozostałej kategorii. Bierze dwa uprawnienia, nie jedno &mdash;
+    <code>principal.manage</code> i <code>team.binding.write</code> &mdash;
+    bo powiązanie roli z zespołem oddaje to, co ten zespół obejmuje. Żądanie
+    wskazujące tam dodatkowo site albo środowisko kończy się odmową
+    <code class="refusal">scope_conflict</code>: powiązanie nazywa jeden
+    słownik albo drugi, nigdy oba. Zespół, który nie jest identyfikatorem
+    zespołu, to <code class="refusal">invalid_team</code>, a zespół, którego
+    nikt nie założył, to <code class="refusal">team_not_found</code> &mdash;
+    powiązanie z nieistniejącym identyfikatorem zaczęłoby nadawać w chwili, w
+    której ktoś założyłby zespół o tej nazwie.</p>
+
+    <p><code>owners</code> i <code>tags</code> pominięte w żądaniu są czytane
+    jako <code>["*"]</code>: to jedyne miejsce, w którym panel wypełnia
+    kategorię za wywołującego, i robi to dlatego, że żądanie, które nic nie
+    mówi o właścicielach, znaczy, że nikt po nich nie zawężał. Zespołu nie
+    wypełnia się w ten sposób, a zakres zapisany z pustą kategorią nadal nie
+    sięga niczego. Powiązanie odbiera się przez
+    <code>DELETE /api/v1/principals/{id}/roles/{role}</code>, wskazując site i
+    środowisko w ciele żądania; tożsamość bez takiego powiązania dostaje
+    <code class="refusal">binding_not_found</code>.</p>
+
+    <p>Powiązanie może nieść <code>valid_until</code>, po którym nie nadaje już
+    niczego, bez odbierania go przez kogokolwiek. Przegląd dostępów pod
+    <code>GET /api/v1/access/review</code> oznacza administratora, którego
+    powiązanie nie ma żadnej daty końca.</p>
+
+    <h2 id="escalation">Nikt nie nada tego, czego sam nie ma</h2>
+
+    <p>Zanim nadanie zostanie zapisane, panel bierze każde uprawnienie niesione
+    przez rolę i pyta, czy wywołujący ma je w zakresie, który <em>zawiera</em>
+    zakres nadawany. Brak jednego uprawnienia wystarczy, żeby odmówić całego
+    nadania, a odmowa je nazywa:</p>
+
+<pre><code>403 scope_escalation
+the role operator carries packages.plan, which you do not hold in
+site=waw env=prod team=* owner=* tag=*</code></pre>
+
+    <p>Porównanie idzie po tym, dokąd powiązanie sięga, a nie po kolumnach,
+    które akurat się zgadzają. Wołający powiązany z jednym zespołem nie nada
+    &bdquo;dowolnego zespołu&rdquo;; wywołujący, którego powiązanie wymienia dwa
+    tagi, nie nada <code>*</code>; gwiazdka po stronie wywołującego zawiera w tej
+    kategorii wszystko. Próba trafia do śladu audytowego jako odrzucone
+    <code>principal.role.grant</code> albo <code>principal.create</code> z
+    <code>reason: scope_escalation</code> i powyższym komunikatem &mdash; kto
+    próbuje poszerzyć własny dostęp, jest wart przeczytania później.</p>
+
+    <h2 id="groups">Grupa z katalogu staje się rolą</h2>
+
+    <p>W zwykłym przypadku nikt nie dostaje roli ręcznie. Grupa dostawcy
+    tożsamości jest mapowana na rolę w zakresie, a kto zaloguje się z tą grupą,
+    dostaje to powiązanie. Mapowanie zapisuje się przez
+    <code>POST /api/v1/group-mappings</code> &mdash; żądanie i kolejność kroków
+    opisuje <a href="installation.html#admin">pierwszy administrator</a>.</p>
+
+    <p>Trzy rzeczy o tym mapowaniu warto wiedzieć:</p>
+
+    <ul>
+      <li><strong>Grupa nadaje rolę; zakres pozostaje polityką panelu.</strong>
+      Mapowanie zawęża po site i środowisku, i po niczym więcej, i mówi to w
+      każdej kategorii: zespół dowolny, właściciele i tagi jako <code>*</code>.
+      Wypełnienie dwóch pól i zostawienie trzech pustych nie nadałoby
+      niczego.</li>
+      <li><strong>Mapowanie jest czytane przy każdym żądaniu,</strong> więc
+      usunięcie go zabiera rolę przy następnym żądaniu użytkownika, a nie przy
+      jego następnym logowaniu.</li>
+      <li><strong>Grupa bez mapowania nie nadaje niczego.</strong> Gdy nie ma
+      żadnego mapowania, kto zaloguje się przez dostawcę, nie ma żadnego
+      uprawnienia &mdash; i to jest najczęstszy powód, dla którego świeża
+      instalacja wygląda na zepsutą.</li>
+    </ul>
+
+    <p>Laboratorium mapuje pięć grup, po jednej na rolę, której tam się używa.
+    To zwykłe grupy w katalogu; same nazwy nie znaczą dla panelu nic ponad to,
+    co daje im mapowanie:</p>
+
+<div class="table-scroll">
+<table>
+<thead><tr><th>Grupa</th><th>Rola</th></tr></thead>
+<tbody>
+<tr><td><code>flotestro-viewers</code></td><td><code>viewer</code></td></tr>
+<tr><td><code>flotestro-operators</code></td><td><code>operator</code></td></tr>
+<tr><td><code>flotestro-prod-approvers</code></td><td><code>approver</code></td></tr>
+<tr><td><code>flotestro-identity-admins</code></td><td><code>identity_admin</code></td></tr>
+<tr><td><code>flotestro-platform-admins</code></td><td><code>platform_admin</code></td></tr>
+</tbody></table></div>
+
+    <p>To, po jakim site i środowisku zawęża każde z tych mapowań, jest decyzją
+    instalacji, a nie grupy: panel czyta zakres z mapowania, nigdy z nazwy.</p>
+
+    <p>Nazwy grup docierają do panelu w takiej postaci, w jakiej zapisuje je
+    dostawca. Mapper grup, który wystawia pełne ścieżki &mdash;
+    <code>/flotestro-operators</code> &mdash; jest czytany tak samo jak ten,
+    który wystawia same nazwy, a dostawca, który wkłada pojedynczą grupę w
+    ciąg znaków zamiast w listę, jest czytany tak samo jak ten, który wysyła
+    listę jednoelementową.</p>
+
+    <h2 id="beyond">Kiedy sama rola nie wystarczy</h2>
+
+    <p>Trzy rzeczy są wymagane ponad uprawnienie. Żadnej z nich nie nadaje
+    rola i żadna nie zastępuje uprawnienia.</p>
+
+    <h3>Powód i świeże uwierzytelnienie</h3>
+
+    <p>Operacje o największym wpływie &mdash; a wśród nich każda zmiana reguł
+    dostępu &mdash; wymagają pola <code>reason</code> o długości co najmniej 8
+    znaków oraz uwierzytelnienia nie starszego, niż pozwala instalacja. Każda
+    zapisująca ścieżka z tego rozdziału jest taką operacją: założenie
+    tożsamości, nadanie i odebranie roli, wystawienie i unieważnienie tokenu,
+    zakończenie sesji, wyłączenie i włączenie tożsamości oraz zapisanie i
+    usunięcie mapowania grup. Zbyt krótki powód dostaje <code>400</code>
+    <code class="refusal">reason_required</code>, czego ponowne logowanie nie
+    naprawi; zbyt stare uwierzytelnienie dostaje <code>401</code>
+    <code class="refusal">reauthentication_required</code>. To, co panel
+    przyjął, jest zapisywane razem ze samą zmianą: cel wpisany przez operatora,
+    metoda zgłoszona przez dostawcę i moment uwierzytelnienia. Ustawienia,
+    które za tym stoją, są w <a href="api.html#stepup">rozdziale o API</a>.</p>
+
+    <p>Operacje na hostach mają własną wersję tej samej zasady, rozstrzyganą
+    przez poziom ryzyka, a nie przez ścieżkę: operacja <code>critical</code>
+    albo <code>destructive</code> wymaga świeżego uwierzytelnienia, a
+    <code>destructive</code> wymaga dodatkowo wpisania nazwy celu. Ryzyko
+    jednego zlecenia bywa wyższe niż poziom samej operacji &mdash; zlecenie
+    zakładające konto w grupie uprzywilejowanej albo przenoszące do niej konto
+    jest <code>critical</code> niezależnie od tego, co mówi operacja, i tak
+    samo takie, które oddaje dostęp do konta zgłoszonego przez host jako
+    uprzywilejowane. Poziomy i operacje, które je niosą, opisuje
+    <a href="operations.html#risk">rozdział o operacjach</a>.</p>
+
+    <h3>Druga osoba</h3>
+
+    <p>Operacja zmieniająca stan zawsze czeka na zatwierdzenie: żądanie może
+    poprosić o zatwierdzenie tam, gdzie nie jest wymagane, ale nigdy nie
+    zwolni z niego. W środowisku produkcyjnym &mdash; czyli w tym, które
+    wymienia <code>FLOTESTRO_PRODUCTION_ENVIRONMENTS</code>, domyślnie
+    <code>prod,production</code> &mdash; zatwierdzenie nie może pochodzić od
+    osoby, która zleciła zmianę. Próba dostaje <code>403</code>
+    <code class="refusal">self_approval</code> i trafia do śladu jako odrzucone
+    <code>job.approve</code>. Ta sama zasada obowiązuje przy kampanii i przy
+    zmianie w katalogu.</p>
+
+    <p>Właśnie dlatego <code>operator</code> i <code>approver</code> są
+    osobnymi rolami, a nie jedną. Tożsamość mająca obie w tym samym środowisku
+    produkcyjnym może zlecić zmianę i dostać odmowę jej zatwierdzenia &mdash;
+    to zasada, która działa, a nie błąd konfiguracji &mdash; ale zostawia
+    zmianę czekającą na kogoś, kto nie miał być do tego potrzebny.</p>
+
+    <h3>Uprawnienie, które niesie zlecenie</h3>
+
+    <p>O trzy uprawnienia prosi <em>treść</em> zlecenia, ponad to, którego
+    wymaga sama operacja. Zlecenie, którego payload woła o jedno z nich, a
+    którego autor go nie ma, kończy się odmową &mdash; niezależnie od tego,
+    jaką rolę ten autor ma.</p>
+
+<div class="table-scroll">
+<table>
+<thead><tr><th>Uprawnienie</th><th>Kiedy zlecenie go potrzebuje</th><th>Kto je ma</th></tr></thead>
+<tbody>
+<tr><td><code>schedule.root.exec</code></td><td>Wpis harmonogramu, którego użytkownikiem jest root.</td><td><code>identity_admin</code>, <code>platform_admin</code></td></tr>
+<tr><td><code>file.write.unvalidated</code></td><td>Zapis pliku albo rollback niosący <code>allow_missing_validator</code>: host nie ma walidatora, na którym opiera się zlecenie.</td><td><code>platform_admin</code></td></tr>
+<tr><td><code>accounts.privileged_groups</code></td><td>Zlecenie zakładające konto w grupie, która jest rootem pod inną nazwą, albo przenoszące konto do niej.</td><td><code>platform_admin</code></td></tr>
+</tbody></table></div>
+
+    <ul class="linkrow">
+      <li><a href="api.html">&larr; 8. API</a></li>
+      <li><a href="installation.html#admin">3. Pierwszy administrator</a></li>
+      <li><a href="runbooks.html">Dalej: 10. Runbooki &rarr;</a></li>
+      <li><a href="./">Spis treści</a></li>
+    </ul>
+  </main>
+
+</div>
+
+<footer class="site-footer">
+  <div class="site-footer__inner">
+    <p>Dokumentacja Flotestro, wydanie 0.62.0.</p>
+    <p><a href="https://github.com/ultherego/Flotestro">github.com/ultherego/Flotestro</a></p>
+  </div>
+</footer>
+
+</body>
+</html>
