@@ -59,11 +59,11 @@
   <main class="content">
     <h1>2. Architektura</h1>
 
-    <p class="lede">Instalacja ma pięć części: control plane, nieuprzywilejowany
-    agent na każdym hoście, root helper obok niego, relay dla site, który nie
-    sięga panelu bezpośrednio, oraz PostgreSQL. Każda dowodzi swojej tożsamości
-    następnej i każda ma własny stan, który nie jest kopią zapasową
-    pozostałych.</p>
+    <p class="lede">Instalacja ma pięć części: control plane,
+    nieuprzywilejowany agent na każdym hoście, root helper obok niego, relay
+    dla site, który nie sięga panelu bezpośrednio, oraz PostgreSQL. Każda
+    dowodzi swojej tożsamości przed następną i każda ma własny stan, który nie
+    jest kopią zapasową pozostałych.</p>
 
     <ul class="linkrow">
       <li><a href="#parts">Części</a></li>
@@ -123,7 +123,7 @@
     zapasowych i niesie <code>auditverify</code>, oraz
     <code>flotestro-package-repository</code>, który udostępnia podpisane
     pakiety wydania wewnątrz odciętego site. Obraz samego panelu ma piąty punkt
-    wejścia, <code>migrate</code>, który przenosi schemat do przodu jako osobne
+    wejścia, <code>migrate</code>, który migruje schemat jako osobne
     uruchomienie.</p>
 
     <h2 id="wires">Kto z kim rozmawia, na którym porcie i jaką tożsamość udowadnia</h2>
@@ -132,13 +132,13 @@
     <table>
       <thead><tr><th>Skąd</th><th>Dokąd</th><th>Port</th><th>Udowodniona tożsamość</th></tr></thead>
       <tbody>
-        <tr><td>Przeglądarka, klient API</td><td>control plane</td><td><code>127.0.0.1:8080</code> (<code>FLOTESTRO_ADMIN_ADDR</code>)</td><td>Sesja przeglądarkowa OIDC albo token API. Czysty HTTP: ten port należy za proxy TLS.</td></tr>
+        <tr><td>Przeglądarka, klient API</td><td>control plane</td><td><code>127.0.0.1:8080</code> (<code>FLOTESTRO_ADMIN_ADDR</code>)</td><td>Sesja przeglądarkowa OIDC albo token API. Czysty HTTP: miejsce tego portu jest za proxy TLS.</td></tr>
         <tr><td>Agent</td><td>agent gateway</td><td><code>:8443</code> (<code>FLOTESTRO_GATEWAY_ADDR</code>)</td><td>mTLS z własnym certyfikatem hosta z fleet CA. gRPC, jeden długo żyjący dwukierunkowy strumień na host.</td></tr>
         <tr><td>Agent, tylko za pierwszym razem</td><td>enrollment</td><td><code>:8444</code> (<code>FLOTESTRO_ENROLLMENT_ADDR</code>)</td><td>TLS bez certyfikatu klienta plus jednorazowy token enrollmentu. Odpowiada nieznajomym, więc żądanie jest ograniczone do 256 KiB.</td></tr>
         <tr><td>Agent z site za relayem</td><td>relay</td><td><code>:8453</code> (<code>relay.listen</code>)</td><td>Ten sam mTLS, terminowany przez relay; host dodatkowo podpisuje własną kopertę tożsamości, którą centrala weryfikuje end to end.</td></tr>
-        <tr><td>Relay</td><td>agent gateway</td><td><code>:8443</code></td><td>Własny certyfikat relaya z tego samego fleet CA, z site nadanym przez jego token enrollmentu.</td></tr>
+        <tr><td>Relay</td><td>agent gateway</td><td><code>:8443</code></td><td>Własny certyfikat relaya z tego samego fleet CA, z site nadanym przez token enrollmentu.</td></tr>
         <tr><td>Runtime kontenerów</td><td>health relaya</td><td><code>127.0.0.1:8454</code> (<code>relay.health_listen</code>)</td><td>Żadna. Czysty HTTP, wyłącznie <code>/healthz</code> i <code>/readyz</code>, żeby runtime mógł zapytać bez powłoki w obrazie.</td></tr>
-        <tr><td>Agent</td><td>root helper</td><td><code>/run/flotestro/helper.sock</code></td><td>Jądrowe <code>SO_PEERCRED</code>: wyłącznie uid użytkownika <code>FLOTESTRO_AGENT_USER</code>. Do tego, przy każdym żądaniu, capability podpisane przez panel.</td></tr>
+        <tr><td>Agent</td><td>root helper</td><td><code>/run/flotestro/helper.sock</code></td><td>Jądro przez <code>SO_PEERCRED</code>: wyłącznie uid użytkownika <code>FLOTESTRO_AGENT_USER</code>. Do tego, przy każdym żądaniu, capability podpisane przez panel.</td></tr>
         <tr><td>Control plane</td><td>PostgreSQL</td><td>5432</td><td>DSN z <code>FLOTESTRO_DATABASE_URL_FILE</code>; <code>sslmode=verify-full</code> dla bazy na innej maszynie.</td></tr>
         <tr><td>Control plane</td><td>dostawca tożsamości, FreeIPA, źródła podatności, webhook</td><td>wychodzące</td><td>Poświadczenia klienta OIDC; keytab do FreeIPA; podpis HMAC-SHA256 na każdej partii webhooka.</td></tr>
         <tr><td>Zarządzany host</td><td>repozytorium pakietów</td><td>własny adres repozytorium, <code>:8090</code> dla obrazu odciętego od sieci</td><td>Żadna na poziomie transportu. Zaufanie niesie podpis GPG indeksu i klucz, który host raz zaimportował.</td></tr>
@@ -151,22 +151,21 @@
       <p>Do 8443 i 8444 flota sięga bezpośrednio i ich TLS nie może być
       terminowany przez proxy HTTP: gateway uwierzytelnia host jego
       certyfikatem klienta, a proxy terminujące sesję to odbiera. Za reverse
-      proxy idzie wyłącznie 8080. Nazwy z
-      <code>FLOTESTRO_ADVERTISE</code> trafiają do certyfikatu gatewaya, więc
-      muszą być nazwami, pod którymi flota naprawdę go osiąga - nigdy nazwą
-      usługi z Compose.</p>
+      proxy idzie wyłącznie 8080. Nazwy z <code>FLOTESTRO_ADVERTISE</code>
+      trafiają do certyfikatu gatewaya, więc muszą być nazwami, pod którymi
+      flota naprawdę do niego dociera - nigdy nazwą usługi z Compose.</p>
     </div>
 
     <h2 id="cp">Control plane</h2>
 
-    <p>Jeden plik binarny. Wewnątrz niego części, które mają znaczenie dla operatora, to:</p>
+    <p>Jedna binarka. Części, które mają znaczenie dla operatora, to:</p>
 
     <dl class="kv">
       <dt>API i panel</dt>
       <dd>REST API pod <code>/api/v1</code> i zbudowany panel serwowany z
-      <code>FLOTESTRO_WEB_ROOT</code>; pusty web root serwuje samo API.
-      Każda odpowiedź niesie restrykcyjną politykę content security policy, a
-      panel nigdy nie trafia do ramki.</dd>
+      <code>FLOTESTRO_WEB_ROOT</code>; pusty web root serwuje samo API. Każda
+      odpowiedź niesie restrykcyjną politykę content security policy, a panel
+      nigdy nie daje się osadzić w ramce.</dd>
 
       <dt>Agent gateway</dt>
       <dd>Trzyma jeden strumień na podłączony host, dostarcza koperty zadań,
@@ -239,9 +238,10 @@
     rozkłada oceny alertów: ta działa pod jedną dzierżawą, więc jedna instancja
     ocenia każdą regułę, a pozostałe stoją w gotowości do przejęcia. To sufit,
     o którym warto wiedzieć, a nie usterka do obchodzenia &mdash; flota
-    10&nbsp;000 symulowanych hostów robi migawkę w około cztery sekundy, dobrze
-    wewnątrz interwału oceny. Instalacja dość duża, by ten sufit odczuć,
-    wymagałaby podziału reguł między dzierżawy, czego to wydanie nie robi.</p>
+    10&nbsp;000 symulowanych hostów robi migawkę w około cztery sekundy, z
+    dużym zapasem mieszcząc się w interwale oceny. Instalacja dość duża, by ten
+    sufit odczuć, wymagałaby podziału reguł między dzierżawy, czego to wydanie
+    nie robi.</p>
 
     <h2 id="agent">Agent</h2>
 
@@ -280,7 +280,7 @@
     <code>full</code> a <code>read_only</code> - agent tylko do odczytu
     raportuje i niczego nie zmienia.</p>
 
-    <p>Inventory zbiera się rytmem, a nie wszystko naraz: cykl bazowy
+    <p>Inventory zbiera się cyklicznie, a nie wszystko naraz: cykl bazowy
     <code>FLOTESTRO_INVENTORY_MINUTES</code>, domyślnie 15 minut, z rozrzutem
     &plusmn;10&nbsp;%, żeby flota wystartowana jednym restartem nie raportowała
     równym krokiem do końca życia. To, który moduł czytany jest jak często,
@@ -293,32 +293,33 @@
 
     <h2 id="helper">Root helper</h2>
 
-    <p>Helper jest jedyną częścią działającą jako root i jest celowo mały:
+    <p>Helper jest jedyną częścią działającą jako root i celowo jest mały:
     socket, ustalony repertuar akcji i zero sieci. Aktywuje go socket, a po
-    <code>FLOTESTRO_HELPER_IDLE_SECONDS</code> (300) ciszy kończy pracę; systemd
-    uruchamia go ponownie przy kolejnym poleceniu. Jego protokół to protobuf z
-    prefiksem długości, wersja 1, z limitem ramki 4 MiB - helper działa jako
-    root i nie może pozwolić drugiej stronie alokować pamięci do woli. Akcja,
-    której nie zna, to <code class="refusal">unknown_action</code>; chroniona
-    przez niego jednostka to <code class="refusal">protected_unit</code>;
-    zajęta już klasa zasobu to <code class="refusal">locked</code>.</p>
+    <code>FLOTESTRO_HELPER_IDLE_SECONDS</code> (300) ciszy kończy pracę;
+    systemd uruchamia go ponownie przy kolejnym poleceniu. Jego protokół to
+    protobuf z prefiksem długości, wersja 1, z limitem ramki 4 MiB - helper
+    działa jako root i nie może pozwolić drugiej stronie alokować pamięci do
+    woli. Akcja, której nie zna, to
+    <code class="refusal">unknown_action</code>; chroniona przez niego
+    jednostka to <code class="refusal">protected_unit</code>; zajęta już klasa
+    zasobu to <code class="refusal">locked</code>.</p>
 
-    <p>Przed każdym żądaniem stoją dwie kontrole. Pierwsza należy do jądra:
+    <p>Przed każdym żądaniem stoją dwie kontrole. Pierwszą robi jądro:
     <code>SO_PEERCRED</code> musi wskazać uid użytkownika
-    <code>FLOTESTRO_AGENT_USER</code>, a sprawdzenie idzie na gniazdo,
-    a nie na cokolwiek z treści komunikatu. Druga to capability od panelu.</p>
+    <code>FLOTESTRO_AGENT_USER</code>, a sprawdzenie dotyczy gniazda, a nie
+    czegokolwiek z treści komunikatu. Druga to capability od panelu.</p>
 
     <h3>Capability</h3>
 
     <p>Każde żądanie zmieniające stan powinno nieść capability, które control
     plane podpisał kluczem Ed25519 dokładnie dla tego hosta, zadania, akcji i
-    payloadu. Helper sprawdza je względem należącego do roota zbioru kluczy w
+    payloadu. Helper sprawdza je względem zbioru kluczy należącego do roota w
     <code>FLOTESTRO_HELPER_TRUST_DIR</code>
     (<code>/etc/flotestro/helper-trust.d</code>, po jednym
     <code>&lt;key_id&gt;.pub</code> na klucz), względem identyfikatora hosta w
     <code>FLOTESTRO_HELPER_HOST_ID_FILE</code> i względem nonce'ów już zużytych
     w <code>FLOTESTRO_HELPER_REPLAY_DIR</code>. Ponieważ zbiór kluczy i
-    tożsamość należą do roota, przejęty agent nie obniży tego, co z nich
+    tożsamość należą do roota, przejęty agent nie osłabi tego, co z nich
     wynika.</p>
 
     <div class="table-scroll">
@@ -380,10 +381,10 @@
     <code>docker compose -f compose.relay.yaml run --rm relay config show</code>
     wypisuje to, do czego plik się rozwija.</p>
 
-    <p>Jego site jest oczekiwaniem, a nie nadaniem: zakres relaya to to, co
-    nadał jego token enrollmentu, i token rozstrzyga sprawę. Żaden relay nie
-    może rozgłaszać nazwy obecnej w <code>FLOTESTRO_ADVERTISE</code> - te nazwy
-    są zarezerwowane.</p>
+    <p>Jego site jest oczekiwaniem, a nie nadaniem: zakres relaya to tyle, ile
+    nadał token enrollmentu, i to token rozstrzyga sprawę. Żaden relay nie może
+    rozgłaszać nazwy obecnej w <code>FLOTESTRO_ADVERTISE</code> - te nazwy są
+    zarezerwowane.</p>
 
     <h3>Bufor i spool to dwie różne rzeczy</h3>
 
@@ -413,11 +414,11 @@
     <code class="refusal">relay_certificate_unknown</code>. Jego treść niesie
     też <code>safe_to_restart</code>, prawdziwe tylko wtedy, gdy nic nie czeka w spoolu.</p>
 
-    <h3>Czyje słowo centrala przyjmuje za host</h3>
+    <h3>Czyje słowo o tożsamości hosta centrala przyjmuje</h3>
 
     <p>Sesja przychodząca przez relay rodzi pytanie, którego bezpośrednia nie
     rodzi: czy host naprawdę jest tym hostem, czy tylko relay tak twierdzi?
-    Odpowiedzią jest podpisana przez sam host koperta tożsamości
+    Odpowiedzią jest koperta tożsamości podpisana przez sam host
     (<code>relay.identity</code> v2), weryfikowana w centrali w każdym trybie -
     relay, host, certyfikat po numerze seryjnym, site i środowisko, digest
     payloadu, podpis i numer w sekwencji - a sesja, która ją niesie, dostaje
@@ -449,8 +450,8 @@
     wskazanej przez <code>FLOTESTRO_DATABASE_URL</code>. Panel nie trzyma stanu
     floty nigdzie indziej.</p>
 
-    <p>Tym, czego w bazie <em>nie ma</em>, jest katalog stanu, i właśnie dlatego
-    oba tworzą jedną parę kopii zapasowej:</p>
+    <p>W bazie <em>nie ma</em> katalogu stanu i właśnie dlatego oba tworzą
+    jedną parę kopii zapasowej:</p>
 
     <ul>
       <li><code>ca.pem</code>, <code>ca.key</code>, a podczas rotacji także
@@ -458,10 +459,10 @@
       <code>ca-pending.at</code> i <code>ca-retired/&lt;serial&gt;.pem</code> -
       bez <code>ca.key</code> żaden host nie odnowi certyfikatu ani nie przejdzie enrollmentu.</li>
       <li><code>keys/&lt;key-id&gt;.key</code>, klucze szyfrujące klucze
-      magazynu sekretów - bez aktywnego żadnego wiersza magazynu nie da się
-      odczytać. Klucz trzymany jako credential systemd
+      magazynu sekretów - bez aktywnego klucza nie da się odczytać żadnego
+      wiersza magazynu. Klucz trzymany jako credential systemd
       (<code>FLOTESTRO_SECRETS_KEY_CREDENTIAL</code>) leży tam, gdzie wskazuje
-      <code>LoadCredential=</code> jednostki, i to tamto miejsce wchodzi do
+      <code>LoadCredential=</code> jednostki, i to właśnie ono wchodzi do
       zestawu kopii.</li>
       <li>Klucz podpisujący helpera, którego publiczną połowę hosty trzymają
       jako zbiór kluczy dla capability.</li>
@@ -484,22 +485,23 @@
 
     <h2 id="why-native">Dlaczego agent jest pakietem, a control plane obrazem</h2>
 
-    <p>Agent zarządza samym hostem: jego PID 1, jego urządzeniami, jego bazą
-    pakietów, jego prawdziwym <code>/proc</code>. Kontener, który mógłby to
-    wszystko, byłby kontenerem <code>--privileged</code> dzielącym wszystkie
-    namespace'y - czymś, co ma w nazwie kontener i nie ma w sobie nic
-    odizolowanego. Dlatego agent i jego helper są natywnymi pakietami,
-    instalowanymi z podpisanego repozytorium projektu, aktualizowanymi przez
-    własny menedżer pakietów hosta albo przez panelową operację
-    <code>agent.upgrade</code> na pakiecie, który panel zweryfikował.</p>
+    <p>Agent zarządza samym hostem: jego PID 1, urządzeniami, bazą pakietów i
+    prawdziwym <code>/proc</code>. Kontener, który mógłby to wszystko, byłby
+    kontenerem <code>--privileged</code> dzielącym wszystkie namespace'y -
+    czymś, co ma w nazwie kontener i nie ma w sobie nic odizolowanego. Dlatego
+    agent i jego helper są natywnymi pakietami, instalowanymi z podpisanego
+    repozytorium projektu, aktualizowanymi przez własny menedżer pakietów hosta
+    albo przez panelową operację <code>agent.upgrade</code> na pakiecie, który
+    panel zweryfikował.</p>
 
-    <p>Control plane ma kształt odwrotny. Rozmawia z bazą i z siecią, nie ma na
-    własność żadnego hosta i korzysta na runtime, który daje mu główny system
-    plików tylko do odczytu, zero capabilities i jeden zapisywalny wolumen. Jego
-    obraz jest distroless: pliki binarne, systemowy magazyn certyfikatów i
-    zbudowany panel, bez powłoki, bez menedżera pakietów, bez <code>curl</code>,
-    bez PostgreSQL i bez socketu kontenerów. Health check jest własnym
-    statycznym klientem właśnie dlatego, że w obrazie nie ma czym odpytać
+    <p>Z control plane jest odwrotnie. Rozmawia z bazą i z siecią, nie ma na
+    własność żadnego hosta i dużo zyskuje na tym, że runtime daje mu główny
+    system plików tylko do odczytu, zero capabilities i jeden zapisywalny
+    wolumen.
+    Jego obraz jest distroless: binarki, systemowy magazyn certyfikatów i
+    zbudowany panel, bez powłoki, bez menedżera pakietów, bez
+    <code>curl</code>, bez PostgreSQL i bez socketu kontenerów. Health check to
+    osobny statyczny klient właśnie dlatego, że w obrazie nie ma czym odpytać
     endpointu, a diagnostykę prowadzi się przez support bundle albo obraz z
     narzędziami, a nie przez doinstalowywanie czegoś do działającego
     kontenera.</p>
@@ -507,14 +509,14 @@
     <h3>Wersje między częściami</h3>
 
     <p>Protokół agenta jest wersjonowany niezależnie od wydania, a ten plik
-    binarny mówi w wersji 1 przy minimum 1. Agent z poprzedniego wydania nadal
+    binarny mówi wersją 1 przy minimum 1. Agent z poprzedniego wydania nadal
     działa z nowszym panelem: każda zmiana protokołu niesie albo zgodność z
     wydaniem poprzednim, albo odmowę, która nazywa, co zaktualizować
     (<code class="refusal">blocked_upgrade_required</code>,
     <code class="refusal">protocol_incompatible</code>). Kolejność aktualizacji
     jest zatem taka: panel, potem relaye, potem agenci - a agentów aktualizuje
-    sam panel, osobno, na końcu. Flota z poprzednim agentem przy nowym panelu to
-    stan zwyczajny, a nie zepsuty.</p>
+    sam panel, osobno, na końcu. Flota z poprzednim agentem przy nowym panelu
+    to stan zwyczajny, a nie zepsuty.</p>
 
     <ul class="linkrow">
       <li><a href="introduction.html">&larr; 1. Wprowadzenie</a></li>

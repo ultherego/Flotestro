@@ -59,10 +59,9 @@
   <main class="content">
     <h1>3. Instalacja</h1>
 
-    <p class="lede">Instalacja, której jeszcze nie ma, stawiana w kolejności, w
-    jakiej jej części zależą od siebie: control plane, pierwszy administrator i
+    <p class="lede">Instalacja, której jeszcze nie ma, stawiana w kolejności, jaką narzucają zależności między częściami: control plane, pierwszy administrator i
     mapowania grup, para kopii zapasowej, zanim jest jeszcze flota do stracenia,
-    i dopiero potem hosty. Skrótem tego rozdziału jest runbook
+    i dopiero potem hosty. Krótsza wersja tego rozdziału to runbook
     <a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/install.md"><code>docs/runbooks/install.md</code></a>;
     to jest wersja długa.</p>
 
@@ -81,9 +80,9 @@
     <h2 id="before">Zanim zaczniesz</h2>
 
     <ul>
-      <li><strong>PostgreSQL 16 lub nowszy</strong>, który będzie należał do tej
-      instalacji i będzie osiągalny z hosta panelu - albo profil szybkiego
-      startu, który stawia go obok.</li>
+      <li><strong>PostgreSQL 16 lub nowszy</strong>, należący do tej instalacji
+      i osiągalny z hosta panelu - albo profil szybkiego startu, który
+      stawia go obok.</li>
       <li><strong>Środowisko uruchomieniowe kontenerów</strong>: Docker Engine z
       wtyczką Compose albo Podman. Panel i relay są obrazami i nie wdraża się ich
       inaczej; na zarządzanych hostach nie ma w ogóle kontenerów.</li>
@@ -95,7 +94,7 @@
       osiągane przez flotę bezpośrednio. TLS tych dwóch ostatnich jest end to end
       i nie wolno go terminować na proxy HTTP.</li>
       <li><strong>Podpisane repozytorium pakietów</strong> osiągalne z hostów.
-      Wydanie takie repozytorium publikuje; odizolowany site uruchamia obraz
+      Wydanie publikuje takie repozytorium; odizolowany site uruchamia obraz
       pakietów z profilu odciętego od sieci.</li>
     </ul>
 
@@ -110,15 +109,14 @@
     różnicowany profilem albo plikiem nakładki. Poza panelem, jego bazą i
     jednorazowymi usługami, które ją przygotowują, nie startuje nic, czego się
     nie wskaże: podłączony site nie publikuje po cichu repozytorium pakietów, a
-    instalacja wskazująca własną bazę wyłącza lokalną nakładką, zamiast zostawiać
-    ją uruchomioną pustą obok właściwej.</p>
+    instalacja wskazująca własną bazę wyłącza lokalną nakładką, zamiast zostawiać ją pustą i uruchomioną obok właściwej.</p>
 
     <div class="table-scroll">
     <table>
       <thead><tr><th>Wdrożenie</th><th>Polecenie</th><th>Do czego</th></tr></thead>
       <tbody>
         <tr><td>Szybki start</td><td><code>docker compose up -d</code></td><td>Panel i własny PostgreSQL na jednym hoście, bez niczego przygotowanego. Laboratorium, pokaz, mała instalacja.</td></tr>
-        <tr><td>Produkcyjne podstawowe</td><td><code>docker compose -f compose.yaml -f compose.external-db.yaml up -d</code></td><td>Jeden control plane przeciwko zewnętrznemu PostgreSQL objętemu kopiami zapasowymi. Domyślny wariant dla firmy. Nakładka wyłącza lokalną bazę i trzyma DSN do zweryfikowanego serwera.</td></tr>
+        <tr><td>Produkcyjne podstawowe</td><td><code>docker compose -f compose.yaml -f compose.external-db.yaml up -d</code></td><td>Jeden control plane na zewnętrznym PostgreSQL objętym kopiami zapasowymi. Domyślny wariant dla firmy. Nakładka wyłącza lokalną bazę i trzyma DSN do zweryfikowanego serwera.</td></tr>
         <tr><td>Produkcyjne z relayem</td><td><code>docker compose -f compose.relay.yaml up -d</code> na hoście każdego site'u</td><td>To samo, plus jeden relay na site, obok agentów, które obsługuje.</td></tr>
         <tr><td>Odcięte od sieci</td><td><code>--profile airgap</code> dodany do jednego z dwóch pierwszych</td><td>Dowolne z powyższych, plus repozytorium pakietów z wydania w sieci, do której docierają zarządzane hosty.</td></tr>
       </tbody>
@@ -145,9 +143,9 @@ docker compose cp control-plane:/var/lib/flotestro/bootstrap-token .</code></pre
     obok tego pliku &mdash; <code>env.example</code> wymienia każde ustawienie i
     wskazuje te trzy, które mają znaczenie.</p>
 
-    <p>Wdrożenie produkcyjne podstawowe, przeciwko bazie prowadzonej przez kogoś
-    innego. To nakładka <code>compose.external-db.yaml</code> czyni z niego tę
-    instalację: wyłącza lokalną bazę, ustawia
+    <p>Wdrożenie produkcyjne podstawowe, na bazie prowadzonej przez kogoś
+    innego. Dopiero nakładka <code>compose.external-db.yaml</code> robi z
+    niego tę instalację: wyłącza lokalną bazę, ustawia
     <code>FLOTESTRO_DATABASE_MODE=external</code> i podaje DSN jako sekret
     Compose. DSN zapisz przed pierwszym startem:</p>
 
@@ -167,17 +165,16 @@ docker compose -f compose.yaml -f compose.external-db.yaml up -d
 docker compose logs -f control-plane        # wait for "the database schema is current"
 curl -fsS http://127.0.0.1:8080/healthz</code></pre>
 
-    <p>W tej kolejności i nie odwrotnie. Schemat podnosi osobne uruchomienie, a
-    panel, który obsługuje ruch, odmawia pracy na schemacie, do którego nie
-    pasuje, zamiast przebudowywać ten, który należy do kogoś innego. To samo
-    umożliwia drugą replikę: aktualizacja to jedna migracja, a potem przetoczenie
-    replik, co nie mogłoby być prawdą, gdyby każda instancja migrowała przy
-    własnym starcie.</p>
+    <p>W tej kolejności i nie odwrotnie. Schemat podnosi się osobnym
+    uruchomieniem, a panel obsługujący ruch odmawia pracy na schemacie, do
+    którego nie pasuje, zamiast przebudowywać ten, który należy do kogoś
+    innego. To samo umożliwia drugą replikę: aktualizacja to jedna migracja,
+    a potem przetoczenie replik, czego nie dałoby się zrobić, gdyby każda
+    instancja migrowała przy własnym starcie.</p>
 
     <p>Tryb <code>external</code> wymusza w DSN
     <code>sslmode=verify-full</code> i
-    <code>target_session_attrs=read-write</code>, a inaczej go odrzuca; zanim
-    panel na niej osiądzie, preflight pyta bazę, czym jest - czy to standby,
+    <code>target_session_attrs=read-write</code>, a inaczej go odrzuca; zanim panel zacznie z niej korzystać, preflight pyta bazę, czym jest - czy to standby,
     jakie ma rozszerzenia, jakie prawa ma login. Żadna odmowa nie niesie DSN,
     bo jest w nim hasło. <code>verify-full</code> potrzebuje urzędu
     wystawiającego, a obraz niesie wyłącznie publiczny zestaw: bazę z własnym
@@ -197,16 +194,14 @@ curl -fsS http://127.0.0.1:8080/healthz</code></pre>
       <ul>
         <li>Usługa <code>init</code> zapisuje DSN i hasło do bazy w wolumenie i
         daje każdy plik temu kontu, które go czyta, wewnątrz środowiska
-        uruchomieniowego. Żadnego <code>chown</code> i żadnego uid do
-        trafienia.</li>
+        uruchomieniowego. Żadnego <code>chown</code> ani uid, w który trzeba trafić.</li>
         <li>Docker i rootless Podman zachowują się tak samo, bo żadne konto na
         hoście nie jest już właścicielem tych plików.</li>
         <li><code>./secrets</code> montuje się z <code>:ro,z</code>, więc host
         z SELinuksem sam je przeetykietuje, zamiast kończyć zwykłym
         &bdquo;permission denied&rdquo;.</li>
         <li>Jedna różnica zostaje: <code>podman-compose</code> nie ma
-        <code>cp</code>, więc token bootstrap pobiera się tam zamiast tego
-        poleceniem
+        <code>cp</code>, więc token bootstrap pobiera się tam poleceniem
         <code>podman cp flotestro_control-plane_1:/var/lib/flotestro/bootstrap-token .</code></li>
       </ul>
     </div>
@@ -217,8 +212,7 @@ curl -fsS http://127.0.0.1:8080/healthz</code></pre>
     ścieżkę; postać z wartością i postać <code>_FILE</code> nie mogą być ustawione
     obie naraz, a pusty plik, dowiązanie symboliczne, katalog albo plik czytelny
     dla kogokolwiek innego są odrzucane. Zmienną środowiskową widać w
-    <code>docker inspect</code> i na liście procesów hosta - dlatego DSN
-    podróżuje jako ścieżka.</p>
+    <code>docker inspect</code> i na liście procesów hosta - dlatego DSN jedzie jako ścieżka.</p>
 
     <div class="table-scroll">
     <table>
@@ -245,14 +239,13 @@ curl -fsS http://127.0.0.1:8080/healthz</code></pre>
 
     <h3>Przypnij digest i sprawdź, co zaraz uruchomisz</h3>
 
-    <p>Wydanie wypisuje digest każdego obrazu i dołącza do swojego przebiegu
-    gotowy <code>compose.pins.yaml</code>. Tag jest tym, co czyta człowiek;
-    digest jest tym, co zostaje wdrożone, a tag może nadpisać ten, kto go
-    publikuje.</p>
+    <p>Wydanie wypisuje digest każdego obrazu i dołącza do przebiegu gotowy
+    <code>compose.pins.yaml</code>. Tag czyta człowiek; wdrażany jest
+    digest, a tag może nadpisać ten, kto go publikuje.</p>
 
 <pre><code>docker compose -f compose.yaml -f compose.pins.yaml up -d</code></pre>
 
-    <p>Podpis jest bezkluczowy: powstał wobec tożsamości workflow i został
+    <p>Podpis jest bezkluczowy: powstał na podstawie tożsamości workflow i został
     zapisany w publicznym logu przejrzystości, więc nie ma klucza do wykradzenia
     ani do rozprowadzania. Sprawdzaj tożsamość, a nie samo to, że podpis
     istnieje:</p>
@@ -267,13 +260,13 @@ curl -fsS http://127.0.0.1:8080/healthz</code></pre>
     <code>docker buildx imagetools inspect</code>. Przebieg workflow, który nie
     dostał tożsamości OIDC, publikuje obraz niepodpisany i mówi o tym w swoim
     logu; <code>cosign verify</code> na takim obrazie kończy się niepowodzeniem,
-    co jest odpowiedzią poprawną, a nie awarią.</p>
+    co jest poprawną odpowiedzią, a nie awarią.</p>
 
     <h2 id="admin">Pierwszy administrator i mapowania, bez których nikt się nie zaloguje</h2>
 
     <p>Instalacja bez żadnych tożsamości zapisuje token bootstrap w swoim
-    katalogu stanu. To jedyne wejście, zanim podłączony zostanie dostawca
-    tożsamości, i jest pomyślany tak, by go zużyć i skasować.</p>
+    katalogu stanu. To jedyne wejście, zanim podłączy się dostawcę tożsamości, i token jest
+    pomyślany tak, żeby go zużyć i skasować.</p>
 
 <pre><code>docker compose cp control-plane:/var/lib/flotestro/bootstrap-token ./bootstrap-token</code></pre>
 
@@ -314,8 +307,7 @@ curl -fsS http://127.0.0.1:8080/healthz</code></pre>
 
     <p>Do zapisania mapowania potrzebne jest uprawnienie
     <code>principal.manage</code> w całej flocie; nieznana rola jest odrzucana
-    kodem <code class="refusal">unknown_role</code>. Pominięty issuer zostaje
-    uzupełniony tym skonfigurowanym. Role to <code>viewer</code>,
+    kodem <code class="refusal">unknown_role</code>. Pominięty issuer panel uzupełnia tym skonfigurowanym. Role to <code>viewer</code>,
     <code>auditor</code>, <code>operator</code>, <code>approver</code>,
     <code>identity_admin</code> i <code>platform_admin</code>; <code>site</code>
     i <code>environment</code> przyjmują <code>*</code> dla całej floty albo
@@ -323,19 +315,19 @@ curl -fsS http://127.0.0.1:8080/healthz</code></pre>
 
     <h3>Lista kontrolna, którą prowadzi panel</h3>
 
-    <p><code>GET /api/v1/setup</code> jest tym, co czytają ekran konfiguracji i
-    kafelek na dashboardzie. Odpowiada krokami w kolejności, w jakiej się je wykonuje, iloma
-    są zrobione, który jest następny i czy token bootstrap wciąż otwiera
-    panel:</p>
+    <p>Ekran konfiguracji i kafelek na dashboardzie czytają
+    <code>GET /api/v1/setup</code>. Odpowiada krokami w kolejności, w jakiej
+    się je wykonuje: ile jest zrobionych, który jest następny i czy token bootstrap
+    wciąż otwiera panel:</p>
 
     <div class="table-scroll">
     <table>
       <thead><tr><th>Krok</th><th>Zrobiony, gdy</th></tr></thead>
       <tbody>
-        <tr><td><code>identity_provider</code></td><td>Issuer odpowiada i podaje swoje klucze podpisujące.</td></tr>
+        <tr><td><code>identity_provider</code></td><td>Issuer odpowiada i podaje klucze podpisujące.</td></tr>
         <tr><td><code>group_mapping</code></td><td>Co najmniej jedna grupa rozstrzyga o roli przy logowaniu.</td></tr>
         <tr><td><code>bootstrap_token</code></td><td>Token jest unieważniony albo wygasł - czyli już nie działa.</td></tr>
-        <tr><td><code>directory</code></td><td>Opcjonalnie: skonfigurowany jest konektor FreeIPA.</td></tr>
+        <tr><td><code>directory</code></td><td>Opcjonalnie: konektor FreeIPA jest skonfigurowany.</td></tr>
         <tr><td><code>hosts</code></td><td>Co najmniej jeden host przeszedł enrollment i nie został wycofany.</td></tr>
         <tr><td><code>relay</code></td><td>Opcjonalnie: potrzebny tylko dla site'u, którego hosty nie docierają do panelu bezpośrednio.</td></tr>
         <tr><td><code>policy</code></td><td>Co najmniej jedna polityka deklaruje, co ma być prawdą na hostach; bez niej panel raportuje hosty takimi, jakie są, i niczego nie ocenia.</td></tr>
@@ -350,8 +342,8 @@ curl -fsS http://127.0.0.1:8080/healthz</code></pre>
     <p>Baza i katalog stanu to jedna para. Baza trzyma hosty, zadania, kampanie,
     ślad audytowy, monitoring i zaszyfrowane sekrety; katalog stanu trzyma
     klucze, którymi te szyfrogramy się otwiera, oraz CA, które wystawiło
-    certyfikaty floty. Weź parę teraz, kiedy CA ma kilka minut, i udowodnij
-    odtworzenie, zanim flota zacznie od niego zależeć.</p>
+    certyfikaty floty. Weź parę teraz, kiedy CA ma kilka minut, i przećwicz odtworzenie, zanim
+    flota zacznie od niego zależeć.</p>
 
     <p class="filename">Raz, przed pierwszą kopią</p>
 <pre><code># ./backups is made and given to the right account by the init service.
@@ -399,9 +391,8 @@ docker compose --profile restore run --rm admin-restore restore 20260919T101500Z
 
     <p>Panel generuje dokładne polecenia dla każdego hosta i każdej rodziny
     systemów pod <strong>Dodaj host</strong>: repozytorium, pakiet, CA floty z
-    odciskiem do porównania, enrollment i start. Używaj właśnie ich - niosą
-    własne adresy tej instalacji, jej jednorazowy token i CA, którego flota
-    naprawdę używa. Kształty poniżej są tu po to, żeby operator wiedział, co się
+    odciskiem do porównania, enrollment i start. Używaj właśnie ich - niosą adresy tej instalacji, jej jednorazowy token
+    i CA, którego flota naprawdę używa. Kształty poniżej są tu po to, żeby operator wiedział, co się
     uruchamia.</p>
 
     <div class="table-scroll">
@@ -425,8 +416,8 @@ echo 'deb [signed-by=/etc/apt/keyrings/flotestro.asc] https://ultherego.github.i
 sudo apt update &amp;&amp; sudo apt install flotestro-agent</code></pre>
 
     <p>Każdy indeks jest podpisany kluczem wydania i w żadnej z tych linii nie ma
-    wersji: <code>apt update</code> jest tym, dzięki czemu host dowiaduje się o
-    nowszej wersji, a <code>apt upgrade</code> tym, co go na nią przenosi. Wersja
+    wersji: o nowszej wersji host dowiaduje się z <code>apt update</code>, a
+    przenosi go na nią <code>apt upgrade</code>. Wersja
     przedwydaniowa trafia na kanał <code>testing</code>, którego host pytający o
     <code>stable</code> nigdy nie czyta. <code>dnf</code> i <code>pacman</code>
     czytają to samo drzewo pod <code>rpm/stable</code> i
@@ -476,8 +467,7 @@ flotestro-agentctl diagnose                            # explains a host that do
       <a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/golden-image.md">runbook golden image</a>.</p>
       <p>Maszyna, która jest kopią innej, odpowiada
       <code class="refusal">duplicate_machine_id</code> na kroku certyfikatu albo
-      <code class="refusal">machine_id_mismatch</code> na kroku tokenu: wiersz
-      hosta jest kluczowany przez <code>/etc/machine-id</code>, a dwie maszyny,
+      <code class="refusal">machine_id_mismatch</code> na kroku tokenu: kluczem wiersza hosta jest <code>/etc/machine-id</code>, a dwie maszyny,
       które dzielą jeden, są dla panelu jednym hostem.</p>
     </div>
 
@@ -516,15 +506,14 @@ upstream:
     - "https://gateway-b.flotestro.example.com:8443"
   bootstrap_ca_file: "/etc/flotestro/bootstrap-ca.pem"</code></pre>
 
-    <p>Relay jest konfigurowany tym plikiem i niczym innym. Leży obok
+    <p>Relay konfiguruje się tym plikiem i niczym innym. Leży obok
     <code>compose.relay.yaml</code> na hoście site'u i jest podmontowany tylko do
     odczytu pod <code>/etc/flotestro/relay.yaml</code>;
     <code>docker compose -f compose.relay.yaml run --rm relay config show</code>
-    wypisuje, do czego się rozwija. Jego site
-    jest oczekiwaniem - zakres, który relay naprawdę ma, to ten nadany przez jego
-    token enrollmentu. Żaden relay nie może ogłaszać nazwy, która jest w
-    <code>FLOTESTRO_ADVERTISE</code>. Jego spool leży na dysku i przeżywa
-    restart, więc zostaw systemowi plików miejsce:
+    wypisuje, do czego się rozwija. Site w tym pliku jest tylko deklaracją - zakres, który relay naprawdę
+    ma, nadaje jego token enrollmentu. Żaden relay nie może ogłaszać nazwy, która jest w
+    <code>FLOTESTRO_ADVERTISE</code>. Spool leży na dysku i przeżywa restart, więc zostaw systemowi plików
+    miejsce:
     <code>spool.max_bytes</code> to domyślnie 1 GiB, a poniżej
     <code>spool.min_free_bytes</code>, czyli 256 MiB, nic nie jest
     dopisywane.</p>
@@ -535,13 +524,13 @@ upstream:
     przechodzą cztery obrazy: control plane, repozytorium pakietów (flota
     instaluje swoje agenty z niego i znikąd indziej), narzędzia administracyjne
     (site, który nie umie pobrać obrazu, nie zaimprowizuje go w dniu, w którym
-    musi odtwarzać) oraz, jeśli site go ma, relay. PostgreSQL site zapewnia
-    sobie sam, z kanału, któremu i tak ufa w sprawach baz.</p>
+    musi odtwarzać) oraz, jeśli site go ma, relay. O PostgreSQL site dba sam, biorąc go z kanału, któremu i tak ufa w
+    sprawach baz.</p>
 
     <h3>Po stronie podłączonej</h3>
 
     <p>Tożsamość każdego obrazu sprawdź <em>najpierw</em>, a dopiero potem go
-    zabierz: podpis sprawdzony po przejściu byłby podpisem sprawdzonym wobec logu
+    zabierz: podpis sprawdzony po przejściu byłby podpisem sprawdzonym w logu
     przejrzystości, do którego site nie dociera.</p>
 
 <pre><code>for name in control-plane package-repository admin-tools relay; do
@@ -590,14 +579,13 @@ docker compose --profile airgap up -d</code></pre>
     <p>Panel nie serwuje repozytorium i nie pośredniczy w dostępie do niego:
     składa polecenia &bdquo;Dodaj host&rdquo; z jednego adresu, a hosty
     pobierają z tego adresu same, więc jest to adres, pod który docierają
-    <em>hosty</em> - nigdy nazwa usługi Compose. Pozostawiony pusty, wstawia w
-    tych poleceniach miejsce do wypełnienia, a ekran dodawania hosta mówi o tym w
-    ostrzeżeniu; tego ustawienia panel nie zgaduje. NVD czyta się z żywego API i
+    <em>hosty</em> - nigdy nazwa usługi Compose. Puste ustawienie zostawia w tych poleceniach miejsce do wypełnienia, a
+    ekran dodawania hosta mówi o tym w ostrzeżeniu; tego panel nie zgaduje. NVD czyta się z żywego API i
     nie ma ono postaci offline, więc odizolowany site raczej je czyści, niż
     pozwala, żeby timer kończył się błędem co sześć godzin.</p>
 
-    <p>Zwykły HTTP nie jest tam słabością. Menedżer pakietów ufa podpisowi nad
-    indeksem i kluczowi, który raz zaimportował, a pakiet na odizolowanym site
+    <p>Zwykły HTTP nie jest tam słabością. Menedżer pakietów ufa podpisowi indeksu i kluczowi, który raz
+    zaimportował, a pakiet na odizolowanym site
     weryfikuje się dokładnie tak samo jak wszędzie indziej. Site, który chce TLS,
     stawia przed portem 8090 ten sam edge co przed panelem.</p>
 
@@ -621,10 +609,9 @@ docker compose --profile airgap up -d</code></pre>
 
     <ul>
       <li><code>GET /api/v1/status</code>: schemat jest aktualny, baza odpowiada,
-      a instancja zgłasza swoją tożsamość gatewaya.</li>
+      a instancja zgłasza tożsamość gatewaya.</li>
       <li><code>GET /api/v1/hosts</code>: każdy host po enrollmencie jest
-      <code>online</code> i raportuje swoją dystrybucję oraz wersję
-      agenta.</li>
+      <code>online</code> i raportuje dystrybucję oraz wersję agenta.</li>
       <li>Jedna operacja od początku do końca na jednym hoście - wystarczy odczyt
       - dochodzi do stanu końcowego z wynikiem, a nie z odmową.</li>
       <li>Panel nie pokazuje ostrzeżenia o tokenie bootstrap, a
@@ -670,9 +657,9 @@ docker compose --profile airgap up -d</code></pre>
     oznacza wtedy odtworzenie pary z kroku 1 i utratę wszystkiego, co od tamtej
     pory zostało zapisane. Nigdy nie kasuj wierszy z
     <code>schema_migrations</code>, żeby pogodzić jedno z drugim; tabele nadal są
-    te nowe, a panel pisałby w kształt, który odczytuje błędnie.</p>
+    te nowe, a panel pisałby w strukturę, którą odczytuje błędnie.</p>
 
-    <p>Trwałe usunięcie instalacji jest świadome i idzie w tej kolejności:
+    <p>Trwałe usunięcie instalacji to świadoma decyzja i idzie w tej kolejności:
     wycofaj hosty, póki panel jeszcze działa, żeby każdy z nich przestał ufać
     centrum i unieważnił własny certyfikat; zdejmij ostatnią parę kopii, jeśli
     ślad audytowy ma przeżyć panel;
@@ -695,7 +682,7 @@ docker compose --profile airgap up -d</code></pre>
     <table>
       <thead><tr><th>Kod</th><th>Kiedy</th></tr></thead>
       <tbody>
-        <tr><td><code class="refusal">installation_state_mismatch</code></td><td>Control plane wskazany na bazę, która należy do innej instalacji.</td></tr>
+        <tr><td><code class="refusal">installation_state_mismatch</code></td><td>Control plane skierowany na bazę, która należy do innej instalacji.</td></tr>
         <tr><td><code class="refusal">gateway_id_in_use</code></td><td>Druga instancja zgłaszająca tożsamość gatewaya, która jest już zajęta.</td></tr>
         <tr><td><code class="refusal">machine_already_enrolled</code></td><td>Enrollment na hoście, który wciąż trzyma tożsamość.</td></tr>
         <tr><td><code class="refusal">duplicate_machine_id</code>, <code class="refusal">machine_id_mismatch</code></td><td>Maszyna jest już we flocie pod innym hostem albo token nie pasuje do tej maszyny.</td></tr>
