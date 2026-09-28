@@ -410,6 +410,9 @@ func openSyntheticSession(ctx context.Context, gateway string,
 			Capabilities: &agentv1.Capabilities{Registry: []*agentv1.Capability{
 				{Name: "systemd", Version: 1, Available: true},
 			}},
+			// What a real agent says about the panel's capability; a session
+			// that stays silent has every mutating task held back under enforce.
+			HelperCapabilitySupported: true,
 		}},
 	}); err != nil {
 		cancel()

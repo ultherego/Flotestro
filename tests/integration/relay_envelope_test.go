@@ -163,6 +163,9 @@ func signedHello(t *testing.T, signer *relayproof.Signer, capabilities *agentv1.
 	t.Helper()
 	message := &agentv1.AgentMessage{Payload: &agentv1.AgentMessage_Hello{Hello: &agentv1.Hello{
 		AgentVersion: "test", BootId: uuid.NewString(), Capabilities: capabilities,
+		// What a real agent says about the panel's capability; a session that
+		// stays silent has every mutating task held back under enforce.
+		HelperCapabilitySupported: true,
 	}}}
 	if err := signer.SignMessage(message); err != nil {
 		t.Fatal(err)

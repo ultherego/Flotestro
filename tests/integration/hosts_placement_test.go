@@ -109,14 +109,19 @@ func TestHostPlacementRoundTrip(t *testing.T) {
 	var trail auditPage
 	h.get("/api/v1/audit?target_id="+host.ID+"&action=host.placement&limit=10", &trail)
 	found := false
+	// The newest matching event and no other: the trail keeps every move this
+	// host ever made, and a laboratory that has run this test before holds the
+	// entries of those runs as well. The list arrives newest first.
 	for _, event := range trail.Items {
-		if event.Detail["reason"] == "carried to the new rack" {
-			found = true
-			if event.Detail["before"] != "site="+before.Site+" env="+before.Environment ||
-				event.Detail["after"] != "site=moved-site env="+before.Environment {
-				t.Errorf("the placement event has detail %v", event.Detail)
-			}
+		if event.Detail["reason"] != "carried to the new rack" {
+			continue
 		}
+		found = true
+		if event.Detail["before"] != "site="+before.Site+" env="+before.Environment ||
+			event.Detail["after"] != "site=moved-site env="+before.Environment {
+			t.Errorf("the placement event has detail %v", event.Detail)
+		}
+		break
 	}
 	if !found {
 		t.Error("the move is not on the trail")

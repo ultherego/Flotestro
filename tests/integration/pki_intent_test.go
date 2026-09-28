@@ -15,6 +15,25 @@ import (
 func TestATrustChangeIsWrittenDownBeforeItIsMade(t *testing.T) {
 	h := newHarness(t)
 
+	// A laboratory that ran this test before may still hold the authority it
+	// prepared: the panel allows one prepared CA at a time, and a run that broke
+	// off before its cleanup leaves it behind. It signs nothing, so taking it out
+	// is what the previous run would have done.
+	var authorities struct {
+		Authorities []struct {
+			Fingerprint string `json:"fingerprint"`
+			State       string `json:"state"`
+		} `json:"authorities"`
+	}
+	h.get("/api/v1/pki", &authorities)
+	for _, authority := range authorities.Authorities {
+		if authority.State == "pending" {
+			h.do("DELETE", "/api/v1/pki/"+authority.Fingerprint+
+				"?reason=the+laboratory+is+put+back+as+it+was&idempotency_key="+uuid.NewString(),
+				nil, nil, 0)
+		}
+	}
+
 	// No key, no change: a beginning nobody can recognise again would let a lost
 	// answer be retried into a second authority.
 	h.do("POST", "/api/v1/pki/prepare", map[string]any{
