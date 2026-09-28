@@ -1054,7 +1054,7 @@
 <dd><p>A webhook channel has no signing secret. An empty key is still a legal HMAC key, so a delivery signed with it carries a header anybody can compute, and a receiver that verifies the header when it is present would take a forged body.</p><p><span class="label">What to do</span> Set a signing secret on the channel, give the same secret to the receiver, and retry the dead letters. A receiver that cannot verify a signature belongs behind a channel of another kind.</p><p><span class="badge retry-after-change">retry: after_change</span> <span class="badge not-failure">not a failure</span></p></dd>
 </dl>
     <ul class="linkrow">
-      <li><a href="concepts.html">â 4. How a change happens</a></li>
+      <li><a href="concepts.html">← 4. How a change happens</a></li>
       <li><a href="operations.html">6. Operacje</a></li>
       <li><a href="api.html">8. API</a></li>
       <li><a href="./">Spis treści</a></li>

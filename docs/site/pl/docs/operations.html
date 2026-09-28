@@ -885,30 +885,30 @@
 <h3 id="op-monitoring-probe-run"><code>monitoring.probe.run</code></h3>
 <dl class="kv"><dt>Uprawnienie</dt><dd><code>monitoring.probe</code></dd><dt>Adapter</dt><dd><code>monitoring</code></dd><dt>Zmienia host</dt><dd>nie, to odczyt</dd><dt>Ryzyko</dt><dd><span class="badge risk-medium">medium</span></dd><dt>Świeże uwierzytelnienie</dt><dd>niewymagane</dd><dt>Klasa blokady</dt><dd>brak</dd><dt>Rezerwacje zasobów</dt><dd>brak</dd><dt>Domyślny limit czasu</dt><dd>120 s (2 min)</dd><dt>Limit wyniku</dt><dd>64 KiB</dd><dt>Zatwierdzony plan</dt><dd>niewymagany</dd><dt>Tryb kampanii</dt><dd><code>none</code></dd><dt>Polityka offline</dt><dd><code>skip_if_offline</code></dd><dt>Fan-out</dt><dd>niedostępne jako fan-out; wykonywane host po hoście</dd><dt>Anulowanie</dt><dd><code>safe</code></dd><dt>Ponowienie</dt><dd><code>automatic</code></dd><dt>Rollback</dt><dd><code>none</code></dd><dt>Weryfikacja w kampanii</dt><dd><code>none</code></dd><dt>Payload</dt><dd><a href="#payload-monitoring"><code>monitoring</code></a></dd></dl>
 <h2 id="payloads">Kształty payloadów</h2>
-<p>An order carries one payload. It is the sum of the shapes below, with exactly one field filled in; the field&rsquo;s name is the one each operation names above. A payload describes the state wanted, not the commands that would reach it.</p>
+<p>Zlecenie niesie jeden payload. Jest on sumą kształtów opisanych niżej, z dokładnie jednym wypełnionym polem; nazwę tego pola podaje wykaz powyżej przy każdej operacji. Payload opisuje stan, do jakiego ma dojść, a nie polecenia, które by do niego doprowadziły.</p>
 <h3 id="payload-agent-upgrade"><code>agent_upgrade</code></h3>
-<p>Describes replacing the agent with a named version.</p>
-<p>Ordered by: <a href="#op-agent-upgrade"><code>agent.upgrade</code></a></p>
+<p>Opisuje podmianę agenta na wskazaną wersję.</p>
+<p>Używany przez: <a href="#op-agent-upgrade"><code>agent.upgrade</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
 <tbody>
-<tr><td><code>target_version</code></td><td><code>string</code></td><td>tak</td><td><code>target_version</code> is the version that has to report in after the restart.</td></tr>
-<tr><td><code>package_sha256</code></td><td><code>string</code></td><td>nie</td><td><code>package_sha256</code> is the checksum of the package from the release.</td></tr>
-<tr><td><code>package_signer</code></td><td><code>string</code></td><td>nie</td><td><code>package_signer</code> is the key the artefact must carry the signature of, as a fingerprint or a long key ID. The checksum says the bytes are the ones the release published; the key says who built them. A plan for a host of the apt family leaves it empty on purpose - see ArtefactCarriesSignature.</td></tr>
-<tr><td><code>rollback_version</code></td><td><code>string</code></td><td>nie</td><td><code>rollback_version</code> says what to return to when the host does not come back with the new version. Empty means no prepared return.</td></tr>
-<tr><td><code>release_rollback</code></td><td><code>bool</code></td><td>nie</td><td><code>release_rollback</code> orders the host to drop the artefact it kept for a return.</td></tr>
+<tr><td><code>target_version</code></td><td><code>string</code></td><td>tak</td><td><code>target_version</code> to wersja, która ma się zgłosić po restarcie.</td></tr>
+<tr><td><code>package_sha256</code></td><td><code>string</code></td><td>nie</td><td><code>package_sha256</code> to suma kontrolna pakietu z wydania.</td></tr>
+<tr><td><code>package_signer</code></td><td><code>string</code></td><td>nie</td><td><code>package_signer</code> to klucz, którego podpis musi nieść artefakt, podany jako odcisk albo długi identyfikator klucza. Suma kontrolna mówi, że bajty są tymi, które opublikowało wydanie; klucz mówi, kto je zbudował. Plan dla hosta z rodziny apt zostawia to pole puste celowo - patrz ArtefactCarriesSignature.</td></tr>
+<tr><td><code>rollback_version</code></td><td><code>string</code></td><td>nie</td><td><code>rollback_version</code> mówi, do czego wrócić, gdy host nie wróci z nową wersją. Puste oznacza brak przygotowanej drogi powrotnej.</td></tr>
+<tr><td><code>release_rollback</code></td><td><code>bool</code></td><td>nie</td><td><code>release_rollback</code> każe hostowi porzucić artefakt, który trzymał na powrót.</td></tr>
 </tbody></table></div>
 <h3 id="payload-backup"><code>backup</code></h3>
-<p>Describes a backup operation. The credentials are references to the store: the repository password and the tool's environment variables.</p>
-<p>Ordered by: <a href="#op-backup-plan"><code>backup.plan</code></a>, <a href="#op-backup-restore"><code>backup.restore</code></a>, <a href="#op-backup-run"><code>backup.run</code></a>, <a href="#op-backup-verify"><code>backup.verify</code></a></p>
+<p>Opisuje operację kopii zapasowej. Poświadczenia są odwołaniami do magazynu: hasło repozytorium i zmienne środowiskowe narzędzia.</p>
+<p>Używany przez: <a href="#op-backup-plan"><code>backup.plan</code></a>, <a href="#op-backup-restore"><code>backup.restore</code></a>, <a href="#op-backup-run"><code>backup.run</code></a>, <a href="#op-backup-verify"><code>backup.verify</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
 <tbody>
 <tr><td><code>id</code></td><td><code>string</code></td><td>tak</td><td></td></tr>
 <tr><td><code>tool</code></td><td><code>string</code></td><td>tak</td><td></td></tr>
-<tr><td><code>repository</code></td><td><code>string</code></td><td>nie</td><td><code>repository</code> is a reference to the backup target; the data flows there straight from the host and never through the panel.</td></tr>
+<tr><td><code>repository</code></td><td><code>string</code></td><td>nie</td><td><code>repository</code> to odwołanie do celu kopii zapasowej; dane płyną tam prosto z hosta i nigdy przez panel.</td></tr>
 <tr><td><code>paths</code></td><td><code>[]string</code></td><td>nie</td><td></td></tr>
 <tr><td><code>excludes</code></td><td><code>[]string</code></td><td>nie</td><td></td></tr>
 <tr><td><code>tags</code></td><td><code>[]string</code></td><td>nie</td><td></td></tr>
@@ -917,82 +917,82 @@
 <tr><td><code>keep_weekly</code></td><td><code>int</code></td><td>nie</td><td></td></tr>
 <tr><td><code>keep_monthly</code></td><td><code>int</code></td><td>nie</td><td></td></tr>
 <tr><td><code>prune</code></td><td><code>bool</code></td><td>nie</td><td></td></tr>
-<tr><td><code>runbook</code></td><td><code>string</code></td><td>nie</td><td><code>runbook</code> points at a script the host administrator put there earlier. The panel does not send its content and cannot create it.</td></tr>
-<tr><td><code>initialize</code></td><td><code>bool</code></td><td>nie</td><td><code>initialize</code> is the consent to create the repository on the first copy.</td></tr>
+<tr><td><code>runbook</code></td><td><code>string</code></td><td>nie</td><td><code>runbook</code> wskazuje skrypt, który administrator hosta umieścił tam wcześniej. Panel nie wysyła jego treści i nie potrafi go utworzyć.</td></tr>
+<tr><td><code>initialize</code></td><td><code>bool</code></td><td>nie</td><td><code>initialize</code> to zgoda na utworzenie repozytorium przy pierwszej kopii.</td></tr>
 <tr><td><code>password_secret</code></td><td><code>*SecretRef</code></td><td>nie</td><td></td></tr>
-<tr><td><code>env_secrets</code></td><td><code>map[string]SecretRef</code></td><td>nie</td><td><code>env_secrets</code> assigns secrets from the store to environment variables: that is how credentials reach a cloud backup backend.</td></tr>
-<tr><td><code>read_data</code></td><td><code>bool</code></td><td>nie</td><td><code>read_data</code> turns on verification that reads the data rather than the structure alone.</td></tr>
-<tr><td><code>plan</code></td><td><code>string</code></td><td>nie</td><td><code>plan</code> names the kind of planned operation: run or verify.</td></tr>
-<tr><td><code>plan_hash</code></td><td><code>string</code></td><td>nie</td><td><code>plan_hash</code> binds the copy to the plan computed on this host: a scope or a repository changed since planning stops the operation.</td></tr>
-<tr><td><code>snapshot_id</code></td><td><code>string</code></td><td>nie</td><td>A restore. The target and the overwrite plan are mandatory: an operation without them has an effect nobody knows.</td></tr>
+<tr><td><code>env_secrets</code></td><td><code>map[string]SecretRef</code></td><td>nie</td><td><code>env_secrets</code> przypisuje sekrety z magazynu do zmiennych środowiskowych: tak poświadczenia docierają do chmurowego backendu kopii zapasowych.</td></tr>
+<tr><td><code>read_data</code></td><td><code>bool</code></td><td>nie</td><td><code>read_data</code> włącza weryfikację, która czyta dane, a nie samą strukturę.</td></tr>
+<tr><td><code>plan</code></td><td><code>string</code></td><td>nie</td><td><code>plan</code> nazywa rodzaj planowanej operacji: run albo verify.</td></tr>
+<tr><td><code>plan_hash</code></td><td><code>string</code></td><td>nie</td><td><code>plan_hash</code> wiąże kopię z planem policzonym na tym hoście: zakres albo repozytorium zmienione od czasu planowania zatrzymują operację.</td></tr>
+<tr><td><code>snapshot_id</code></td><td><code>string</code></td><td>nie</td><td>Odtworzenie. Cel i plan nadpisania są obowiązkowe: operacja bez nich daje skutek, którego nikt nie zna.</td></tr>
 <tr><td><code>target</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
 <tr><td><code>include</code></td><td><code>[]string</code></td><td>nie</td><td></td></tr>
 <tr><td><code>overwrite</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
 </tbody></table></div>
 <h3 id="payload-certificate"><code>certificate</code></h3>
-<p>Describes an operation of the certificates module.</p>
-<p>Ordered by: <a href="#op-certificate-deploy"><code>certificate.deploy</code></a>, <a href="#op-certificate-plan"><code>certificate.plan</code></a>, <a href="#op-certificate-renew"><code>certificate.renew</code></a>, <a href="#op-certificate-scan"><code>certificate.scan</code></a>, <a href="#op-certificate-trust-ensure"><code>certificate.trust.ensure</code></a>, <a href="#op-certificate-trust-plan"><code>certificate.trust.plan</code></a>, <a href="#op-certificate-trust-remove"><code>certificate.trust.remove</code></a></p>
+<p>Opisuje operację modułu certyfikatów.</p>
+<p>Używany przez: <a href="#op-certificate-deploy"><code>certificate.deploy</code></a>, <a href="#op-certificate-plan"><code>certificate.plan</code></a>, <a href="#op-certificate-renew"><code>certificate.renew</code></a>, <a href="#op-certificate-scan"><code>certificate.scan</code></a>, <a href="#op-certificate-trust-ensure"><code>certificate.trust.ensure</code></a>, <a href="#op-certificate-trust-plan"><code>certificate.trust.plan</code></a>, <a href="#op-certificate-trust-remove"><code>certificate.trust.remove</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
 <tbody>
-<tr><td><code>targets</code></td><td><code>[]CertificateTarget</code></td><td>nie</td><td><code>targets</code> sets the scope of the scan.</td></tr>
-<tr><td><code>path</code></td><td><code>string</code></td><td>nie</td><td><code>path</code> and KeyPath are the target of a deployment.</td></tr>
+<tr><td><code>targets</code></td><td><code>[]CertificateTarget</code></td><td>nie</td><td><code>targets</code> wyznacza zakres skanu.</td></tr>
+<tr><td><code>path</code></td><td><code>string</code></td><td>nie</td><td><code>path</code> i KeyPath to cel wdrożenia.</td></tr>
 <tr><td><code>key_path</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
-<tr><td><code>certificate</code></td><td><code>string</code></td><td>nie</td><td><code>certificate</code> is content in the clear: the certificate together with its chain.</td></tr>
-<tr><td><code>key_secret</code></td><td><code>*SecretRef</code></td><td>nie</td><td><code>key_secret</code> points at the private key in the store.</td></tr>
+<tr><td><code>certificate</code></td><td><code>string</code></td><td>nie</td><td><code>certificate</code> to treść jawna: certyfikat razem z łańcuchem.</td></tr>
+<tr><td><code>key_secret</code></td><td><code>*SecretRef</code></td><td>nie</td><td><code>key_secret</code> wskazuje klucz prywatny w magazynie.</td></tr>
 <tr><td><code>owner</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
 <tr><td><code>group</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
 <tr><td><code>mode</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
 <tr><td><code>key_mode</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
-<tr><td><code>reload_unit</code></td><td><code>string</code></td><td>nie</td><td><code>reload_unit</code> is the service that has to read the new file.</td></tr>
-<tr><td><code>probe_target</code></td><td><code>string</code></td><td>nie</td><td><code>probe_target</code> is the address at which the host will check the result of the deployment.</td></tr>
-<tr><td><code>request</code></td><td><code>string</code></td><td>nie</td><td><code>request</code> points at the certmonger request during a renewal.</td></tr>
-<tr><td><code>anchor_id</code></td><td><code>string</code></td><td>nie</td><td><code>anchor_id</code> names the panel's anchor in the host's trust store.</td></tr>
-<tr><td><code>plan_hash</code></td><td><code>string</code></td><td>nie</td><td><code>plan_hash</code> binds the deployment to the plan computed on this host; the host computes the plan once more before swapping the files.</td></tr>
+<tr><td><code>reload_unit</code></td><td><code>string</code></td><td>nie</td><td><code>reload_unit</code> to usługa, która ma wczytać nowy plik.</td></tr>
+<tr><td><code>probe_target</code></td><td><code>string</code></td><td>nie</td><td><code>probe_target</code> to adres, pod którym host sprawdzi wynik wdrożenia.</td></tr>
+<tr><td><code>request</code></td><td><code>string</code></td><td>nie</td><td><code>request</code> wskazuje zgłoszenie certmongera przy odnowieniu.</td></tr>
+<tr><td><code>anchor_id</code></td><td><code>string</code></td><td>nie</td><td><code>anchor_id</code> nazywa kotwicę panelu w magazynie zaufania hosta.</td></tr>
+<tr><td><code>plan_hash</code></td><td><code>string</code></td><td>nie</td><td><code>plan_hash</code> wiąże wdrożenie z planem policzonym na tym hoście; host liczy plan jeszcze raz przed podmianą plików.</td></tr>
 </tbody></table></div>
 <h3 id="payload-compose"><code>compose</code></h3>
-<p>Carries the manifest of a Compose project.</p>
-<p>Ordered by: <a href="#op-docker-compose-deploy"><code>docker.compose.deploy</code></a>, <a href="#op-docker-compose-plan"><code>docker.compose.plan</code></a></p>
+<p>Niesie manifest projektu Compose.</p>
+<p>Używany przez: <a href="#op-docker-compose-deploy"><code>docker.compose.deploy</code></a>, <a href="#op-docker-compose-plan"><code>docker.compose.plan</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
 <tbody>
 <tr><td><code>project</code></td><td><code>string</code></td><td>tak</td><td></td></tr>
 <tr><td><code>manifest</code></td><td><code>string</code></td><td>tak</td><td></td></tr>
-<tr><td><code>plan_digest</code></td><td><code>string</code></td><td>nie</td><td><code>plan_digest</code> binds the deployment to a plan. An empty one is allowed only while planning; a deployment without it has no basis.</td></tr>
-<tr><td><code>image_digests</code></td><td><code>map[string]string</code></td><td>nie</td><td><code>image_digests</code> are the digests the plan bound, by service; the host refuses the deployment when a tag has moved since.</td></tr>
+<tr><td><code>plan_digest</code></td><td><code>string</code></td><td>nie</td><td><code>plan_digest</code> wiąże wdrożenie z planem. Pusty jest dopuszczalny tylko przy planowaniu; wdrożenie bez niego nie ma podstawy.</td></tr>
+<tr><td><code>image_digests</code></td><td><code>map[string]string</code></td><td>nie</td><td><code>image_digests</code> to digesty związane przez plan, w rozbiciu na usługi; host odmawia wdrożenia, gdy tag przesunął się od tego czasu.</td></tr>
 </tbody></table></div>
 <h3 id="payload-dns"><code>dns</code></h3>
-<p>Describes an operation on the host's resolver.</p>
-<p>Ordered by: <a href="#op-dns-host-apply"><code>dns.host.apply</code></a>, <a href="#op-dns-plan"><code>dns.plan</code></a>, <a href="#op-dns-resolve-test"><code>dns.resolve.test</code></a></p>
+<p>Opisuje operację na resolverze hosta.</p>
+<p>Używany przez: <a href="#op-dns-host-apply"><code>dns.host.apply</code></a>, <a href="#op-dns-plan"><code>dns.plan</code></a>, <a href="#op-dns-resolve-test"><code>dns.resolve.test</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
 <tbody>
-<tr><td><code>interface</code></td><td><code>string</code></td><td>nie</td><td><code>interface</code> names the connection profile the change goes through.</td></tr>
+<tr><td><code>interface</code></td><td><code>string</code></td><td>nie</td><td><code>interface</code> nazywa profil połączenia, przez który idzie zmiana.</td></tr>
 <tr><td><code>servers</code></td><td><code>[]string</code></td><td>nie</td><td></td></tr>
 <tr><td><code>search_domains</code></td><td><code>[]string</code></td><td>nie</td><td></td></tr>
-<tr><td><code>ignore_auto_dns</code></td><td><code>bool</code></td><td>nie</td><td><code>ignore_auto_dns</code> rejects the servers from DHCP.</td></tr>
+<tr><td><code>ignore_auto_dns</code></td><td><code>bool</code></td><td>nie</td><td><code>ignore_auto_dns</code> odrzuca serwery z DHCP.</td></tr>
 <tr><td><code>rollback_seconds</code></td><td><code>uint32</code></td><td>nie</td><td></td></tr>
 <tr><td><code>names</code></td><td><code>[]string</code></td><td>nie</td><td></td></tr>
-<tr><td><code>plan_hash</code></td><td><code>string</code></td><td>nie</td><td><code>plan_hash</code> binds the change to the plan computed on this host; the host computes the plan once more before the change.</td></tr>
+<tr><td><code>plan_hash</code></td><td><code>string</code></td><td>nie</td><td><code>plan_hash</code> wiąże zmianę z planem policzonym na tym hoście; host liczy plan jeszcze raz przed zmianą.</td></tr>
 </tbody></table></div>
 <h3 id="payload-docker-container"><code>docker_container</code></h3>
-<p>Names the container of an operation. The target is an identifier, not a name.</p>
-<p>Ordered by: <a href="#op-docker-container-remove"><code>docker.container.remove</code></a>, <a href="#op-docker-container-restart"><code>docker.container.restart</code></a>, <a href="#op-docker-container-start"><code>docker.container.start</code></a>, <a href="#op-docker-container-stop"><code>docker.container.stop</code></a></p>
+<p>Wskazuje kontener, którego dotyczy operacja. Celem jest identyfikator, a nie nazwa.</p>
+<p>Używany przez: <a href="#op-docker-container-remove"><code>docker.container.remove</code></a>, <a href="#op-docker-container-restart"><code>docker.container.restart</code></a>, <a href="#op-docker-container-start"><code>docker.container.start</code></a>, <a href="#op-docker-container-stop"><code>docker.container.stop</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
 <tbody>
 <tr><td><code>container_id</code></td><td><code>string</code></td><td>tak</td><td></td></tr>
-<tr><td><code>name</code></td><td><code>string</code></td><td>nie</td><td><code>name</code> serves confirmation and the audit trail only: the operator has the name in the dialog, and what they saw stays in the trail.</td></tr>
-<tr><td><code>timeout_seconds</code></td><td><code>uint32</code></td><td>nie</td><td><code>timeout_seconds</code> gives the container time to shut down before being killed.</td></tr>
-<tr><td><code>remove_volumes</code></td><td><code>bool</code></td><td>nie</td><td><code>remove_volumes</code> concerns removal only and is off by default: a volume outlives its container precisely so that the data outlives it.</td></tr>
+<tr><td><code>name</code></td><td><code>string</code></td><td>nie</td><td><code>name</code> służy tylko potwierdzeniu i śladowi audytowemu: operator ma nazwę w oknie dialogowym, a to, co zobaczył, zostaje w śladzie.</td></tr>
+<tr><td><code>timeout_seconds</code></td><td><code>uint32</code></td><td>nie</td><td><code>timeout_seconds</code> daje kontenerowi czas na zamknięcie, zanim zostanie ubity.</td></tr>
+<tr><td><code>remove_volumes</code></td><td><code>bool</code></td><td>nie</td><td><code>remove_volumes</code> dotyczy wyłącznie usuwania i domyślnie jest wyłączone: wolumen przeżywa swój kontener właśnie po to, żeby przeżyły go dane.</td></tr>
 </tbody></table></div>
 <h3 id="payload-docker-ensure"><code>docker_ensure</code></h3>
-<p>Carries the description of one declared object.</p>
-<p>Ordered by: <a href="#op-docker-container-ensure"><code>docker.container.ensure</code></a>, <a href="#op-docker-network-ensure"><code>docker.network.ensure</code></a>, <a href="#op-docker-network-remove"><code>docker.network.remove</code></a>, <a href="#op-docker-plan"><code>docker.plan</code></a>, <a href="#op-docker-volume-ensure"><code>docker.volume.ensure</code></a>, <a href="#op-docker-volume-remove"><code>docker.volume.remove</code></a></p>
+<p>Niesie opis jednego zadeklarowanego obiektu.</p>
+<p>Używany przez: <a href="#op-docker-container-ensure"><code>docker.container.ensure</code></a>, <a href="#op-docker-network-ensure"><code>docker.network.ensure</code></a>, <a href="#op-docker-network-remove"><code>docker.network.remove</code></a>, <a href="#op-docker-plan"><code>docker.plan</code></a>, <a href="#op-docker-volume-ensure"><code>docker.volume.ensure</code></a>, <a href="#op-docker-volume-remove"><code>docker.volume.remove</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
@@ -1000,48 +1000,48 @@
 <tr><td><code>container</code></td><td><code>*docker.ContainerRequest</code></td><td>nie</td><td></td></tr>
 <tr><td><code>network</code></td><td><code>*docker.NetworkSpec</code></td><td>nie</td><td></td></tr>
 <tr><td><code>volume</code></td><td><code>*docker.VolumeSpec</code></td><td>nie</td><td></td></tr>
-<tr><td><code>kind</code></td><td><code>string</code></td><td>nie</td><td><code>kind</code> and Name describe a removal, which names an object rather than describing one. A plan of a removal carries them too.</td></tr>
+<tr><td><code>kind</code></td><td><code>string</code></td><td>nie</td><td><code>kind</code> i Name opisują usunięcie, które obiekt wskazuje, zamiast go opisywać. Plan usunięcia też je niesie.</td></tr>
 <tr><td><code>name</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
-<tr><td><code>env_secrets</code></td><td><code>map[string]SecretRef</code></td><td>nie</td><td><code>env_secrets</code> maps a container environment variable to the secret whose value it takes. The reference travels; the value never does.</td></tr>
-<tr><td><code>plan_digest</code></td><td><code>string</code></td><td>nie</td><td><code>plan_digest</code> binds the change to a plan. A change without it has no basis, and the registry says which operations may go without one.</td></tr>
-<tr><td><code>force</code></td><td><code>bool</code></td><td>nie</td><td><code>force</code> says the order accepts what the host would otherwise refuse:</td></tr>
+<tr><td><code>env_secrets</code></td><td><code>map[string]SecretRef</code></td><td>nie</td><td><code>env_secrets</code> mapuje zmienną środowiskową kontenera na sekret, z którego bierze wartość. Jedzie odwołanie; wartość nigdy.</td></tr>
+<tr><td><code>plan_digest</code></td><td><code>string</code></td><td>nie</td><td><code>plan_digest</code> wiąże zmianę z planem. Zmiana bez niego nie ma podstawy, a rejestr mówi, które operacje mogą się obejść bez planu.</td></tr>
+<tr><td><code>force</code></td><td><code>bool</code></td><td>nie</td><td><code>force</code> mówi, że zlecenie przyjmuje to, czego host w innym wypadku by odmówił:</td></tr>
 </tbody></table></div>
 <h3 id="payload-docker-events"><code>docker_events</code></h3>
-<p>Describes a closed window of an event journal read.</p>
-<p>Ordered by: <a href="#op-docker-events"><code>docker.events</code></a></p>
+<p>Opisuje zamknięte okno odczytu dziennika zdarzeń.</p>
+<p>Używany przez: <a href="#op-docker-events"><code>docker.events</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
 <tbody>
-<tr><td><code>since_seconds</code></td><td><code>int</code></td><td>nie</td><td><code>since_seconds</code> says how far back to reach.</td></tr>
-<tr><td><code>follow_seconds</code></td><td><code>int</code></td><td>nie</td><td><code>follow_seconds</code> extends the read past the present moment. Zero means the past journal alone - the task ends right away.</td></tr>
-<tr><td><code>types</code></td><td><code>[]string</code></td><td>nie</td><td><code>types</code> narrows the kinds of events. An empty list means all known ones.</td></tr>
-<tr><td><code>max_events</code></td><td><code>int</code></td><td>nie</td><td><code>max_events</code> bounds the number of events in the result.</td></tr>
+<tr><td><code>since_seconds</code></td><td><code>int</code></td><td>nie</td><td><code>since_seconds</code> mówi, jak daleko wstecz sięgnąć.</td></tr>
+<tr><td><code>follow_seconds</code></td><td><code>int</code></td><td>nie</td><td><code>follow_seconds</code> przedłuża odczyt poza bieżącą chwilę. Zero oznacza sam dziennik przeszły - zadanie kończy się od razu.</td></tr>
+<tr><td><code>types</code></td><td><code>[]string</code></td><td>nie</td><td><code>types</code> zawęża rodzaje zdarzeń. Pusta lista oznacza wszystkie znane.</td></tr>
+<tr><td><code>max_events</code></td><td><code>int</code></td><td>nie</td><td><code>max_events</code> ogranicza liczbę zdarzeń w wyniku.</td></tr>
 </tbody></table></div>
 <h3 id="payload-docker-image"><code>docker_image</code></h3>
-<p>Describes the image to pull.</p>
-<p>Ordered by: <a href="#op-docker-image-pull"><code>docker.image.pull</code></a></p>
+<p>Opisuje obraz do pobrania.</p>
+<p>Używany przez: <a href="#op-docker-image-pull"><code>docker.image.pull</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
 <tbody>
-<tr><td><code>reference</code></td><td><code>string</code></td><td>tak</td><td><code>reference</code> is the full image reference, e.g. "nginx:1.27".</td></tr>
+<tr><td><code>reference</code></td><td><code>string</code></td><td>tak</td><td><code>reference</code> to pełne odwołanie do obrazu, np. "nginx:1.27".</td></tr>
 </tbody></table></div>
 <h3 id="payload-docker-logs"><code>docker_logs</code></h3>
-<p>Describes a bounded read of one container's log. The target may be an identifier or a name.</p>
-<p>Ordered by: <a href="#op-docker-container-logs"><code>docker.container.logs</code></a></p>
+<p>Opisuje ograniczony odczyt logu jednego kontenera. Celem może być identyfikator albo nazwa.</p>
+<p>Używany przez: <a href="#op-docker-container-logs"><code>docker.container.logs</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
 <tbody>
 <tr><td><code>container_id</code></td><td><code>string</code></td><td>tak</td><td></td></tr>
-<tr><td><code>lines</code></td><td><code>uint32</code></td><td>nie</td><td><code>lines</code> is the tail to read; zero means the module default of 200.</td></tr>
-<tr><td><code>since</code></td><td><code>string</code></td><td>nie</td><td><code>since</code> narrows the read: an RFC 3339 timestamp or a duration such as 15m. Empty means the whole tail.</td></tr>
-<tr><td><code>timestamps</code></td><td><code>bool</code></td><td>nie</td><td><code>timestamps</code> prefixes every line with the engine's timestamp.</td></tr>
+<tr><td><code>lines</code></td><td><code>uint32</code></td><td>nie</td><td><code>lines</code> to długość końcówki do odczytania; zero oznacza domyślne 200 z modułu.</td></tr>
+<tr><td><code>since</code></td><td><code>string</code></td><td>nie</td><td><code>since</code> zawęża odczyt: znacznik czasu RFC 3339 albo czas trwania w rodzaju 15m. Puste oznacza całą końcówkę.</td></tr>
+<tr><td><code>timestamps</code></td><td><code>bool</code></td><td>nie</td><td><code>timestamps</code> poprzedza każdą linię znacznikiem czasu silnika.</td></tr>
 </tbody></table></div>
 <h3 id="payload-docker-prune"><code>docker_prune</code></h3>
-<p>Lists the objects to remove.</p>
-<p>Ordered by: <a href="#op-docker-prune"><code>docker.prune</code></a></p>
+<p>Wylicza obiekty do usunięcia.</p>
+<p>Używany przez: <a href="#op-docker-prune"><code>docker.prune</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
@@ -1051,11 +1051,11 @@
 <tr><td><code>network_ids</code></td><td><code>[]string</code></td><td>nie</td><td></td></tr>
 </tbody></table></div>
 <h3 id="payload-docker-read"><code>docker_read</code></h3>
-<p>Ordered by: <a href="#op-docker-read"><code>docker.read</code></a></p>
-<p>The shape carries no fields: the operation is fully described by its type.</p>
+<p>Używany przez: <a href="#op-docker-read"><code>docker.read</code></a></p>
+<p>Ten kształt nie ma pól: operację opisuje w całości jej typ.</p>
 <h3 id="payload-domain-enroll"><code>domain_enroll</code></h3>
-<p>Describes joining the host to a domain.</p>
-<p>Ordered by: <a href="#op-identity-host-enroll"><code>identity.host.enroll</code></a>, <a href="#op-identity-host-preflight"><code>identity.host.preflight</code></a></p>
+<p>Opisuje przyłączenie hosta do domeny.</p>
+<p>Używany przez: <a href="#op-identity-host-enroll"><code>identity.host.enroll</code></a>, <a href="#op-identity-host-preflight"><code>identity.host.preflight</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
@@ -1066,19 +1066,19 @@
 <tr><td><code>hostname</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
 </tbody></table></div>
 <h3 id="payload-final-wipe"><code>final_wipe</code></h3>
-<p>The end of a host's membership. It carries the operator's reason and nothing else: there is no target to name, because the target is the host the capability is issued for.</p>
-<p>Ordered by: <a href="#op-host-final-wipe"><code>host.final_wipe</code></a></p>
+<p>Koniec przynależności hosta do floty. Niesie powód podany przez operatora i nic poza tym: nie ma czego wskazywać jako cel, bo celem jest host, dla którego wystawiono capability.</p>
+<p>Używany przez: <a href="#op-host-final-wipe"><code>host.final_wipe</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
 <tbody>
-<tr><td><code>reason</code></td><td>string</td><td>tak</td><td>Why the host is leaving the fleet, as the operator gave it. It is bound by the capability, so the reason on the trail is the reason the host was handed.</td></tr>
+<tr><td><code>reason</code></td><td>string</td><td>tak</td><td>Powód odejścia hosta z floty, w brzmieniu podanym przez operatora. Jest związany przez capability, więc powód w śladzie audytowym to ten sam, który dostał host.</td></tr>
 </tbody>
 </table>
 </div>
 <h3 id="payload-domain-leave"><code>domain_leave</code></h3>
-<p>Describes taking the host out of a domain.</p>
-<p>Ordered by: <a href="#op-identity-host-leave"><code>identity.host.leave</code></a></p>
+<p>Opisuje wyprowadzenie hosta z domeny.</p>
+<p>Używany przez: <a href="#op-identity-host-leave"><code>identity.host.leave</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
@@ -1087,26 +1087,26 @@
 <tr><td><code>realm</code></td><td><code>string</code></td><td>tak</td><td></td></tr>
 </tbody></table></div>
 <h3 id="payload-file"><code>file</code></h3>
-<p>Describes an operation on a configuration file.</p>
-<p>Ordered by: <a href="#op-file-ensure"><code>file.ensure</code></a>, <a href="#op-file-read"><code>file.read</code></a>, <a href="#op-file-remove"><code>file.remove</code></a>, <a href="#op-file-rollback"><code>file.rollback</code></a></p>
+<p>Opisuje operację na pliku konfiguracyjnym.</p>
+<p>Używany przez: <a href="#op-file-ensure"><code>file.ensure</code></a>, <a href="#op-file-read"><code>file.read</code></a>, <a href="#op-file-remove"><code>file.remove</code></a>, <a href="#op-file-rollback"><code>file.rollback</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
 <tbody>
 <tr><td><code>path</code></td><td><code>string</code></td><td>tak</td><td></td></tr>
-<tr><td><code>content</code></td><td><code>string</code></td><td>nie</td><td><code>content</code> is the target content. The panel sends it in the order, so the plan and what reaches the host are the same thing.</td></tr>
+<tr><td><code>content</code></td><td><code>string</code></td><td>nie</td><td><code>content</code> to treść docelowa. Panel wysyła ją w zleceniu, więc plan i to, co dociera do hosta, są tym samym.</td></tr>
 <tr><td><code>mode</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
 <tr><td><code>owner</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
 <tr><td><code>group</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
-<tr><td><code>expected_sha256</code></td><td><code>string</code></td><td>nie</td><td><code>expected_sha256</code> binds the write to the content the operator reviewed.</td></tr>
+<tr><td><code>expected_sha256</code></td><td><code>string</code></td><td>nie</td><td><code>expected_sha256</code> wiąże zapis z treścią, którą obejrzał operator.</td></tr>
 <tr><td><code>validator</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
-<tr><td><code>version_sha256</code></td><td><code>string</code></td><td>nie</td><td><code>version_sha256</code> points at the version from the history when going back to it.</td></tr>
-<tr><td><code>content_secret</code></td><td><code>*SecretRef</code></td><td>nie</td><td><code>content_secret</code> points at the secret whose value is to land in the file.</td></tr>
-<tr><td><code>allow_missing_validator</code></td><td><code>bool</code></td><td>nie</td><td><code>allow_missing_validator</code> lets the write go on when the host lacks the validator; without it a missing validator refuses the write.</td></tr>
+<tr><td><code>version_sha256</code></td><td><code>string</code></td><td>nie</td><td><code>version_sha256</code> wskazuje wersję z historii, gdy wracamy do niej.</td></tr>
+<tr><td><code>content_secret</code></td><td><code>*SecretRef</code></td><td>nie</td><td><code>content_secret</code> wskazuje sekret, którego wartość ma trafić do pliku.</td></tr>
+<tr><td><code>allow_missing_validator</code></td><td><code>bool</code></td><td>nie</td><td><code>allow_missing_validator</code> pozwala przeprowadzić zapis, gdy hostowi brakuje walidatora; bez niego brak walidatora kończy się odmową zapisu.</td></tr>
 </tbody></table></div>
 <h3 id="payload-firewall"><code>firewall</code></h3>
-<p>Describes an operation on the host's firewall.</p>
-<p>Ordered by: <a href="#op-firewall-rule-ensure"><code>firewall.rule.ensure</code></a>, <a href="#op-firewall-rule-remove"><code>firewall.rule.remove</code></a>, <a href="#op-firewall-ruleset-restore"><code>firewall.ruleset.restore</code></a>, <a href="#op-firewall-zone-port"><code>firewall.zone.port</code></a>, <a href="#op-firewall-zone-service"><code>firewall.zone.service</code></a></p>
+<p>Opisuje operację na firewallu hosta.</p>
+<p>Używany przez: <a href="#op-firewall-rule-ensure"><code>firewall.rule.ensure</code></a>, <a href="#op-firewall-rule-remove"><code>firewall.rule.remove</code></a>, <a href="#op-firewall-ruleset-restore"><code>firewall.ruleset.restore</code></a>, <a href="#op-firewall-zone-port"><code>firewall.zone.port</code></a>, <a href="#op-firewall-zone-service"><code>firewall.zone.service</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
@@ -1119,65 +1119,65 @@
 <tr><td><code>sources</code></td><td><code>[]string</code></td><td>nie</td><td></td></tr>
 <tr><td><code>interface</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
 <tr><td><code>comment</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
-<tr><td><code>zone</code></td><td><code>string</code></td><td>nie</td><td><code>zone</code> and Service concern hosts with firewalld.</td></tr>
+<tr><td><code>zone</code></td><td><code>string</code></td><td>nie</td><td><code>zone</code> i Service dotyczą hostów z firewalld.</td></tr>
 <tr><td><code>service</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
 <tr><td><code>enable</code></td><td><code>bool</code></td><td>nie</td><td></td></tr>
-<tr><td><code>break_glass</code></td><td><code>bool</code></td><td>nie</td><td><code>break_glass</code> overrides the protection of the management channel.</td></tr>
+<tr><td><code>break_glass</code></td><td><code>bool</code></td><td>nie</td><td><code>break_glass</code> obchodzi ochronę kanału zarządzania.</td></tr>
 <tr><td><code>rollback_seconds</code></td><td><code>uint32</code></td><td>nie</td><td></td></tr>
 <tr><td><code>rollback_id</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
-<tr><td><code>expected_hash</code></td><td><code>string</code></td><td>nie</td><td><code>expected_hash</code> binds the change to the ruleset the operator reviewed.</td></tr>
+<tr><td><code>expected_hash</code></td><td><code>string</code></td><td>nie</td><td><code>expected_hash</code> wiąże zmianę z zestawem reguł, który obejrzał operator.</td></tr>
 </tbody></table></div>
 <h3 id="payload-hostname"><code>hostname</code></h3>
-<p>Describes a rename of the host.</p>
-<p>Ordered by: <a href="#op-system-hostname-set"><code>system.hostname.set</code></a></p>
+<p>Opisuje zmianę nazwy hosta.</p>
+<p>Używany przez: <a href="#op-system-hostname-set"><code>system.hostname.set</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
 <tbody>
-<tr><td><code>hostname</code></td><td><code>string</code></td><td>tak</td><td><code>hostname</code> is the static name: an RFC 1123 label or a fully qualified name.</td></tr>
-<tr><td><code>pretty</code></td><td><code>string</code></td><td>nie</td><td><code>pretty</code> is the human-readable name hostnamectl shows. Optional.</td></tr>
+<tr><td><code>hostname</code></td><td><code>string</code></td><td>tak</td><td><code>hostname</code> to nazwa statyczna: etykieta zgodna z RFC 1123 albo nazwa w pełni kwalifikowana.</td></tr>
+<tr><td><code>pretty</code></td><td><code>string</code></td><td>nie</td><td><code>pretty</code> to czytelna dla człowieka nazwa, którą pokazuje hostnamectl. Opcjonalna.</td></tr>
 </tbody></table></div>
 <h3 id="payload-inventory"><code>inventory</code></h3>
-<p>Describes the scope of an inventory refresh.</p>
-<p>Ordered by: <a href="#op-inventory-refresh"><code>inventory.refresh</code></a></p>
+<p>Opisuje zakres odświeżenia inventory.</p>
+<p>Używany przez: <a href="#op-inventory-refresh"><code>inventory.refresh</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
 <tbody>
-<tr><td><code>modules</code></td><td><code>[]string</code></td><td>nie</td><td><code>modules</code> narrows the read.</td></tr>
+<tr><td><code>modules</code></td><td><code>[]string</code></td><td>nie</td><td><code>modules</code> zawęża odczyt.</td></tr>
 </tbody></table></div>
 <h3 id="payload-journal"><code>journal</code></h3>
-<p>Describes a journal read.</p>
-<p>Ordered by: <a href="#op-journal-follow"><code>journal.follow</code></a>, <a href="#op-journal-read"><code>journal.read</code></a></p>
+<p>Opisuje odczyt journala.</p>
+<p>Używany przez: <a href="#op-journal-follow"><code>journal.follow</code></a>, <a href="#op-journal-read"><code>journal.read</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
 <tbody>
 <tr><td><code>unit</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
-<tr><td><code>lines</code></td><td><code>uint32</code></td><td>tak</td><td><code>lines</code> bounds the size of the result; a read without a limit is not allowed.</td></tr>
-<tr><td><code>max_priority</code></td><td><code>*uint32</code></td><td>nie</td><td><code>max_priority</code> follows syslog: 0 emerg ... 7 debug. Empty means no filter.</td></tr>
+<tr><td><code>lines</code></td><td><code>uint32</code></td><td>tak</td><td><code>lines</code> ogranicza rozmiar wyniku; odczyt bez limitu jest niedozwolony.</td></tr>
+<tr><td><code>max_priority</code></td><td><code>*uint32</code></td><td>nie</td><td><code>max_priority</code> idzie za syslogiem: 0 emerg ... 7 debug. Puste oznacza brak filtra.</td></tr>
 <tr><td><code>since</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
-<tr><td><code>until</code></td><td><code>string</code></td><td>nie</td><td><code>until</code> ends the read, in the same forms as Since.</td></tr>
-<tr><td><code>boot_id</code></td><td><code>string</code></td><td>nie</td><td><code>boot_id</code> narrows the view to one boot of the host, in either spelling the kernel and the journal use; normalised before it travels.</td></tr>
-<tr><td><code>follow_seconds</code></td><td><code>uint32</code></td><td>nie</td><td><code>follow_seconds</code> bounds the live view.</td></tr>
-<tr><td><code>after_cursor</code></td><td><code>string</code></td><td>nie</td><td><code>after_cursor</code> starts the read right after a journal position.</td></tr>
+<tr><td><code>until</code></td><td><code>string</code></td><td>nie</td><td><code>until</code> kończy odczyt, w tych samych postaciach co Since.</td></tr>
+<tr><td><code>boot_id</code></td><td><code>string</code></td><td>nie</td><td><code>boot_id</code> zawęża widok do jednego rozruchu hosta, w obu zapisach używanych przez jądro i journal; normalizowany, zanim pojedzie.</td></tr>
+<tr><td><code>follow_seconds</code></td><td><code>uint32</code></td><td>nie</td><td><code>follow_seconds</code> ogranicza podgląd na żywo.</td></tr>
+<tr><td><code>after_cursor</code></td><td><code>string</code></td><td>nie</td><td><code>after_cursor</code> zaczyna odczyt zaraz za wskazaną pozycją w journalu.</td></tr>
 </tbody></table></div>
 <h3 id="payload-kernel"><code>kernel</code></h3>
-<p>Describes an operation on kernel settings.</p>
-<p>Ordered by: <a href="#op-kernel-module-blacklist"><code>kernel.module.blacklist</code></a>, <a href="#op-kernel-module-load"><code>kernel.module.load</code></a>, <a href="#op-kernel-module-plan"><code>kernel.module.plan</code></a>, <a href="#op-sysctl-ensure"><code>sysctl.ensure</code></a>, <a href="#op-sysctl-plan"><code>sysctl.plan</code></a></p>
+<p>Opisuje operację na ustawieniach jądra.</p>
+<p>Używany przez: <a href="#op-kernel-module-blacklist"><code>kernel.module.blacklist</code></a>, <a href="#op-kernel-module-load"><code>kernel.module.load</code></a>, <a href="#op-kernel-module-plan"><code>kernel.module.plan</code></a>, <a href="#op-sysctl-ensure"><code>sysctl.ensure</code></a>, <a href="#op-sysctl-plan"><code>sysctl.plan</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
 <tbody>
-<tr><td><code>settings</code></td><td><code>map[string]string</code></td><td>nie</td><td><code>settings</code> are sysctl keys together with their target values.</td></tr>
-<tr><td><code>keys</code></td><td><code>[]string</code></td><td>nie</td><td><code>keys</code> names additional keys to read beyond the profile.</td></tr>
+<tr><td><code>settings</code></td><td><code>map[string]string</code></td><td>nie</td><td><code>settings</code> to klucze sysctl razem z ich wartościami docelowymi.</td></tr>
+<tr><td><code>keys</code></td><td><code>[]string</code></td><td>nie</td><td><code>keys</code> wskazuje dodatkowe klucze do odczytania poza profilem.</td></tr>
 <tr><td><code>module</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
-<tr><td><code>blacklist</code></td><td><code>bool</code></td><td>nie</td><td><code>blacklist</code> says whether the module is to be blocked or unblocked.</td></tr>
-<tr><td><code>plan_hash</code></td><td><code>string</code></td><td>nie</td><td><code>plan_hash</code> binds the blacklist entry to the plan computed on this host; the host computes the plan once more before writing.</td></tr>
+<tr><td><code>blacklist</code></td><td><code>bool</code></td><td>nie</td><td><code>blacklist</code> mówi, czy moduł ma zostać zablokowany, czy odblokowany.</td></tr>
+<tr><td><code>plan_hash</code></td><td><code>string</code></td><td>nie</td><td><code>plan_hash</code> wiąże wpis blacklisty z planem policzonym na tym hoście; host liczy plan jeszcze raz przed zapisem.</td></tr>
 </tbody></table></div>
 <h3 id="payload-keytab"><code>keytab</code></h3>
-<p>Names the service principal whose keytab the host renews, as service/host.</p>
-<p>Ordered by: <a href="#op-identity-keytab-renew"><code>identity.keytab.renew</code></a></p>
+<p>Wskazuje principal usługi, której keytab host odnawia, w postaci service/host.</p>
+<p>Używany przez: <a href="#op-identity-keytab-renew"><code>identity.keytab.renew</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
@@ -1185,8 +1185,8 @@
 <tr><td><code>principal</code></td><td><code>string</code></td><td>tak</td><td></td></tr>
 </tbody></table></div>
 <h3 id="payload-local-user"><code>local_user</code></h3>
-<p>Describes a change to a local account. The payload contains neither a password nor a hash.</p>
-<p>Ordered by: <a href="#op-localuser-create"><code>localuser.create</code></a>, <a href="#op-localuser-delete"><code>localuser.delete</code></a>, <a href="#op-localuser-expiry-set"><code>localuser.expiry.set</code></a>, <a href="#op-localuser-groups-set"><code>localuser.groups.set</code></a>, <a href="#op-localuser-lock"><code>localuser.lock</code></a>, <a href="#op-localuser-sshkeys-add"><code>localuser.sshkeys.add</code></a>, <a href="#op-localuser-sshkeys-remove"><code>localuser.sshkeys.remove</code></a>, <a href="#op-localuser-sshkeys-replace-all"><code>localuser.sshkeys.replace_all</code></a>, <a href="#op-localuser-sshkeys-set"><code>localuser.sshkeys.set</code></a>, <a href="#op-localuser-unlock"><code>localuser.unlock</code></a></p>
+<p>Opisuje zmianę konta lokalnego. Payload nie zawiera ani hasła, ani jego skrótu.</p>
+<p>Używany przez: <a href="#op-localuser-create"><code>localuser.create</code></a>, <a href="#op-localuser-delete"><code>localuser.delete</code></a>, <a href="#op-localuser-expiry-set"><code>localuser.expiry.set</code></a>, <a href="#op-localuser-groups-set"><code>localuser.groups.set</code></a>, <a href="#op-localuser-lock"><code>localuser.lock</code></a>, <a href="#op-localuser-sshkeys-add"><code>localuser.sshkeys.add</code></a>, <a href="#op-localuser-sshkeys-remove"><code>localuser.sshkeys.remove</code></a>, <a href="#op-localuser-sshkeys-replace-all"><code>localuser.sshkeys.replace_all</code></a>, <a href="#op-localuser-sshkeys-set"><code>localuser.sshkeys.set</code></a>, <a href="#op-localuser-unlock"><code>localuser.unlock</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
@@ -1195,95 +1195,95 @@
 <tr><td><code>gecos</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
 <tr><td><code>shell</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
 <tr><td><code>groups</code></td><td><code>[]string</code></td><td>nie</td><td></td></tr>
-<tr><td><code>ssh_keys</code></td><td><code>[]string</code></td><td>nie</td><td><code>ssh_keys</code> is the complete, intended list of keys of a create or a replace.</td></tr>
+<tr><td><code>ssh_keys</code></td><td><code>[]string</code></td><td>nie</td><td><code>ssh_keys</code> to pełna, zamierzona lista kluczy przy zakładaniu konta albo przy wymianie.</td></tr>
 <tr><td><code>create_home</code></td><td><code>bool</code></td><td>nie</td><td></td></tr>
-<tr><td><code>expires_at</code></td><td><code>string</code></td><td>nie</td><td><code>expires_at</code> is the expiry date as YYYY-MM-DD. Empty in an expiry operation clears the expiry - a deliberate change, not missing data.</td></tr>
-<tr><td><code>remove_home</code></td><td><code>bool</code></td><td>nie</td><td><code>remove_home</code> concerns deletion only: the home directory goes with the account only when the operator says so.</td></tr>
-<tr><td><code>keys</code></td><td><code>[]SSHKeyInput</code></td><td>nie</td><td>The key operations of chapter 14. 1 of the security remediation.</td></tr>
-<tr><td><code>fingerprints</code></td><td><code>[]string</code></td><td>nie</td><td><code>fingerprints</code> names the keys a remove takes away and nothing else.</td></tr>
+<tr><td><code>expires_at</code></td><td><code>string</code></td><td>nie</td><td><code>expires_at</code> to data wygaśnięcia w postaci YYYY-MM-DD. Puste w operacji wygaśnięcia czyści datę - to zamierzona zmiana, a nie brakujące dane.</td></tr>
+<tr><td><code>remove_home</code></td><td><code>bool</code></td><td>nie</td><td><code>remove_home</code> dotyczy wyłącznie usuwania: katalog domowy znika razem z kontem tylko wtedy, gdy operator tak powie.</td></tr>
+<tr><td><code>keys</code></td><td><code>[]SSHKeyInput</code></td><td>nie</td><td>Operacje na kluczach z rozdziału 14. 1 naprawy bezpieczeństwa.</td></tr>
+<tr><td><code>fingerprints</code></td><td><code>[]string</code></td><td>nie</td><td><code>fingerprints</code> wskazuje klucze, które odbiera operacja usunięcia, i nic poza tym.</td></tr>
 <tr><td><code>ignore_missing</code></td><td><code>bool</code></td><td>nie</td><td></td></tr>
-<tr><td><code>expected_fingerprints</code></td><td><code>[]string</code></td><td>nie</td><td><code>expected_fingerprints</code> is what the operator saw when they ordered a replace: the list of keys the account has now.</td></tr>
-<tr><td><code>allow_lockout</code></td><td><code>bool</code></td><td>nie</td><td><code>allow_lockout</code> permits taking the last key of an account that has no password login: after it nobody enters as that account.</td></tr>
-<tr><td><code>managed_file</code></td><td><code>bool</code></td><td>nie</td><td><code>managed_file</code> edits the panel's own key file under /etc/ssh/authorized_keys.</td></tr>
-<tr><td><code>system</code></td><td><code>bool</code></td><td>nie</td><td><code>system</code> says the order means a system account - one outside the UID range of people in the host's login.</td></tr>
-<tr><td><code>inactive</code></td><td><code>bool</code></td><td>nie</td><td><code>inactive</code> acknowledges that a created account has no way in: no key and, since the panel sets no passwords, no password.</td></tr>
+<tr><td><code>expected_fingerprints</code></td><td><code>[]string</code></td><td>nie</td><td><code>expected_fingerprints</code> to, co operator widział, zlecając wymianę: lista kluczy, które konto ma teraz.</td></tr>
+<tr><td><code>allow_lockout</code></td><td><code>bool</code></td><td>nie</td><td><code>allow_lockout</code> pozwala odebrać ostatni klucz konta, które nie ma logowania hasłem: po tym nikt już nie wejdzie jako to konto.</td></tr>
+<tr><td><code>managed_file</code></td><td><code>bool</code></td><td>nie</td><td><code>managed_file</code> edytuje własny plik kluczy panelu w /etc/ssh/authorized_keys.</td></tr>
+<tr><td><code>system</code></td><td><code>bool</code></td><td>nie</td><td><code>system</code> mówi, że zlecenie dotyczy konta systemowego - spoza zakresu UID przeznaczonego dla ludzi logujących się na host.</td></tr>
+<tr><td><code>inactive</code></td><td><code>bool</code></td><td>nie</td><td><code>inactive</code> potwierdza, że zakładane konto nie ma jak wejść: nie ma klucza, a skoro panel nie ustawia haseł, nie ma też hasła.</td></tr>
 </tbody></table></div>
 <h3 id="payload-logfile"><code>logfile</code></h3>
-<p>Describes reading a log file.</p>
-<p>Ordered by: <a href="#op-logfile-read"><code>logfile.read</code></a></p>
+<p>Opisuje odczyt pliku logu.</p>
+<p>Używany przez: <a href="#op-logfile-read"><code>logfile.read</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
 <tbody>
 <tr><td><code>path</code></td><td><code>string</code></td><td>tak</td><td></td></tr>
-<tr><td><code>lines</code></td><td><code>uint32</code></td><td>tak</td><td><code>lines</code> bounds the size of the result; a read without a limit is not allowed.</td></tr>
+<tr><td><code>lines</code></td><td><code>uint32</code></td><td>tak</td><td><code>lines</code> ogranicza rozmiar wyniku; odczyt bez limitu jest niedozwolony.</td></tr>
 </tbody></table></div>
 <h3 id="payload-monitoring"><code>monitoring</code></h3>
-<p>Describes a probe carried out from the host.</p>
-<p>Ordered by: <a href="#op-monitoring-probe-run"><code>monitoring.probe.run</code></a></p>
+<p>Opisuje sondę wykonywaną z hosta.</p>
+<p>Używany przez: <a href="#op-monitoring-probe-run"><code>monitoring.probe.run</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
 <tbody>
 <tr><td><code>kind</code></td><td><code>string</code></td><td>tak</td><td></td></tr>
-<tr><td><code>target</code></td><td><code>string</code></td><td>tak</td><td><code>target</code> is the address: a URL for an HTTP probe, host:port for TCP.</td></tr>
-<tr><td><code>expect_status</code></td><td><code>int</code></td><td>nie</td><td><code>expect_status</code> and ExpectBody describe what we treat as a good answer. Empty means "anything in the 2xx and 3xx range".</td></tr>
+<tr><td><code>target</code></td><td><code>string</code></td><td>tak</td><td><code>target</code> to adres: URL dla sondy HTTP, host:port dla TCP.</td></tr>
+<tr><td><code>expect_status</code></td><td><code>int</code></td><td>nie</td><td><code>expect_status</code> i ExpectBody opisują, co uznajemy za dobrą odpowiedź. Puste oznacza "cokolwiek z zakresu 2xx i 3xx".</td></tr>
 <tr><td><code>expect_body</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
 <tr><td><code>timeout_seconds</code></td><td><code>int</code></td><td>nie</td><td></td></tr>
 </tbody></table></div>
 <h3 id="payload-network"><code>network</code></h3>
-<p>Describes a change to the network configuration. The payload describes the target state of the interface, not commands to run.</p>
-<p>Ordered by: <a href="#op-network-link-apply"><code>network.link.apply</code></a>, <a href="#op-network-link-remove"><code>network.link.remove</code></a>, <a href="#op-network-mtu-set"><code>network.mtu.set</code></a>, <a href="#op-network-plan"><code>network.plan</code></a>, <a href="#op-network-profile-apply"><code>network.profile.apply</code></a>, <a href="#op-network-rollback"><code>network.rollback</code></a>, <a href="#op-network-route-ensure"><code>network.route.ensure</code></a></p>
+<p>Opisuje zmianę konfiguracji sieci. Payload opisuje docelowy stan interfejsu, a nie polecenia do wykonania.</p>
+<p>Używany przez: <a href="#op-network-link-apply"><code>network.link.apply</code></a>, <a href="#op-network-link-remove"><code>network.link.remove</code></a>, <a href="#op-network-mtu-set"><code>network.mtu.set</code></a>, <a href="#op-network-plan"><code>network.plan</code></a>, <a href="#op-network-profile-apply"><code>network.profile.apply</code></a>, <a href="#op-network-rollback"><code>network.rollback</code></a>, <a href="#op-network-route-ensure"><code>network.route.ensure</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
 <tbody>
 <tr><td><code>interface</code></td><td><code>string</code></td><td>tak</td><td></td></tr>
-<tr><td><code>mtu</code></td><td><code>string</code></td><td>nie</td><td><code>mtu</code> is text, because "auto" is an equally valid value here: zero would mean a link with an MTU of zero.</td></tr>
-<tr><td><code>routes</code></td><td><code>[]string</code></td><td>nie</td><td><code>routes</code> is the profile's complete list of routes, not an addition:</td></tr>
+<tr><td><code>mtu</code></td><td><code>string</code></td><td>nie</td><td><code>mtu</code> jest tekstem, bo "auto" jest tu równie poprawną wartością: zero oznaczałoby łącze o MTU równym zeru.</td></tr>
+<tr><td><code>routes</code></td><td><code>[]string</code></td><td>nie</td><td><code>routes</code> to pełna lista tras profilu, a nie uzupełnienie:</td></tr>
 <tr><td><code>method</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
 <tr><td><code>addresses</code></td><td><code>[]string</code></td><td>nie</td><td></td></tr>
 <tr><td><code>gateway</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
 <tr><td><code>dns</code></td><td><code>[]string</code></td><td>nie</td><td></td></tr>
-<tr><td><code>rollback_seconds</code></td><td><code>uint32</code></td><td>nie</td><td><code>rollback_seconds</code> is the window in which the agent has to confirm connectivity.</td></tr>
-<tr><td><code>rollback_id</code></td><td><code>string</code></td><td>nie</td><td><code>rollback_id</code> points at the rollback plan in a network.rollback operation.</td></tr>
-<tr><td><code>plan_hash</code></td><td><code>string</code></td><td>nie</td><td><code>plan_hash</code> binds the change to the plan computed on this host.</td></tr>
-<tr><td><code>method6</code></td><td><code>string</code></td><td>nie</td><td>The second family, ordered to the same standard as the first.</td></tr>
+<tr><td><code>rollback_seconds</code></td><td><code>uint32</code></td><td>nie</td><td><code>rollback_seconds</code> to okno, w którym agent musi potwierdzić łączność.</td></tr>
+<tr><td><code>rollback_id</code></td><td><code>string</code></td><td>nie</td><td><code>rollback_id</code> wskazuje plan rollbacku w operacji network.rollback.</td></tr>
+<tr><td><code>plan_hash</code></td><td><code>string</code></td><td>nie</td><td><code>plan_hash</code> wiąże zmianę z planem policzonym na tym hoście.</td></tr>
+<tr><td><code>method6</code></td><td><code>string</code></td><td>nie</td><td>Druga rodzina, zlecana na tych samych zasadach co pierwsza.</td></tr>
 <tr><td><code>addresses6</code></td><td><code>[]string</code></td><td>nie</td><td></td></tr>
-<tr><td><code>gateway6</code></td><td><code>string</code></td><td>nie</td><td><code>gateway6</code> may be a link-local address:</td></tr>
-<tr><td><code>accept_ra</code></td><td><code>string</code></td><td>nie</td><td><code>accept_ra</code> is off, on or on-forwarding; Privacy is off, prefer-public or prefer-temporary.</td></tr>
+<tr><td><code>gateway6</code></td><td><code>string</code></td><td>nie</td><td><code>gateway6</code> może być adresem link-local:</td></tr>
+<tr><td><code>accept_ra</code></td><td><code>string</code></td><td>nie</td><td><code>accept_ra</code> przyjmuje off, on albo on-forwarding; Privacy przyjmuje off, prefer-public albo prefer-temporary.</td></tr>
 <tr><td><code>privacy</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
-<tr><td><code>link</code></td><td><code>*network.LinkSpec</code></td><td>nie</td><td><code>link</code> is the layered interface ordered: a bond, a bridge or a VLAN with what it is made of.</td></tr>
-<tr><td><code>link_remove</code></td><td><code>bool</code></td><td>nie</td><td><code>link_remove</code> marks a plan that is about a removal.</td></tr>
+<tr><td><code>link</code></td><td><code>*network.LinkSpec</code></td><td>nie</td><td><code>link</code> to zlecany interfejs warstwowy: bond, bridge albo VLAN wraz z tym, z czego się składa.</td></tr>
+<tr><td><code>link_remove</code></td><td><code>bool</code></td><td>nie</td><td><code>link_remove</code> oznacza plan, który dotyczy usunięcia.</td></tr>
 </tbody></table></div>
 <h3 id="payload-package-change"><code>package_change</code></h3>
-<p>Describes an install, a removal or a hold.</p>
-<p>Ordered by: <a href="#op-packages-hold-set"><code>packages.hold.set</code></a>, <a href="#op-packages-install"><code>packages.install</code></a>, <a href="#op-packages-remove"><code>packages.remove</code></a></p>
+<p>Opisuje instalację, usunięcie albo zamrożenie wersji.</p>
+<p>Używany przez: <a href="#op-packages-hold-set"><code>packages.hold.set</code></a>, <a href="#op-packages-install"><code>packages.install</code></a>, <a href="#op-packages-remove"><code>packages.remove</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
 <tbody>
 <tr><td><code>packages</code></td><td><code>[]string</code></td><td>tak</td><td></td></tr>
-<tr><td><code>expected_removals</code></td><td><code>[]string</code></td><td>nie</td><td><code>expected_removals</code> is the set the operator approved for a removal.</td></tr>
-<tr><td><code>hold</code></td><td><code>bool</code></td><td>nie</td><td><code>hold</code> concerns holds only: true freezes, false releases.</td></tr>
-<tr><td><code>plan_hash</code></td><td><code>string</code></td><td>nie</td><td><code>plan_hash</code> binds the install to the plan computed on this host:</td></tr>
-<tr><td><code>plan</code></td><td><code>*PlanReference</code></td><td>nie</td><td><code>plan</code> is the approved plan envelope the change is bound to: the header the host rebuilds the envelope with and the elements the operator approved.</td></tr>
+<tr><td><code>expected_removals</code></td><td><code>[]string</code></td><td>nie</td><td><code>expected_removals</code> to zbiór, który operator zatwierdził do usunięcia.</td></tr>
+<tr><td><code>hold</code></td><td><code>bool</code></td><td>nie</td><td><code>hold</code> dotyczy wyłącznie zamrożeń: true zamraża, false zwalnia.</td></tr>
+<tr><td><code>plan_hash</code></td><td><code>string</code></td><td>nie</td><td><code>plan_hash</code> wiąże instalację z planem policzonym na tym hoście:</td></tr>
+<tr><td><code>plan</code></td><td><code>*PlanReference</code></td><td>nie</td><td><code>plan</code> to zatwierdzona koperta planu, z którą związana jest zmiana: nagłówek, z którego host odtwarza kopertę, i elementy zatwierdzone przez operatora.</td></tr>
 </tbody></table></div>
 <h3 id="payload-package-plan"><code>package_plan</code></h3>
-<p>Describes planning an upgrade.</p>
-<p>Ordered by: <a href="#op-packages-plan"><code>packages.plan</code></a></p>
+<p>Opisuje planowanie aktualizacji.</p>
+<p>Używany przez: <a href="#op-packages-plan"><code>packages.plan</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
 <tbody>
-<tr><td><code>mode</code></td><td><code>string</code></td><td>nie</td><td><code>mode</code> picks the kind of plan: upgrade (the default), install or remove.</td></tr>
-<tr><td><code>refresh_metadata</code></td><td><code>bool</code></td><td>tak</td><td><code>refresh_metadata</code> requires root and the repository lock, so it is an explicit choice rather than a side effect of every plan.</td></tr>
+<tr><td><code>mode</code></td><td><code>string</code></td><td>nie</td><td><code>mode</code> wybiera rodzaj planu: upgrade (domyślnie), install albo remove.</td></tr>
+<tr><td><code>refresh_metadata</code></td><td><code>bool</code></td><td>tak</td><td><code>refresh_metadata</code> wymaga roota i blokady repozytorium, więc jest świadomym wyborem, a nie efektem ubocznym każdego planu.</td></tr>
 <tr><td><code>only_packages</code></td><td><code>[]string</code></td><td>nie</td><td></td></tr>
 <tr><td><code>security_only</code></td><td><code>bool</code></td><td>nie</td><td></td></tr>
 </tbody></table></div>
 <h3 id="payload-package-repair"><code>package_repair</code></h3>
-<p>Carries the operator's answers to package configuration questions that block package operations.</p>
-<p>Ordered by: <a href="#op-packages-repair"><code>packages.repair</code></a></p>
+<p>Niesie odpowiedzi operatora na pytania konfiguracyjne pakietów, które blokują operacje na pakietach.</p>
+<p>Używany przez: <a href="#op-packages-repair"><code>packages.repair</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
@@ -1291,42 +1291,42 @@
 <tr><td><code>answers</code></td><td><code>[]DebconfAnswer</code></td><td>nie</td><td></td></tr>
 </tbody></table></div>
 <h3 id="payload-package-upgrade"><code>package_upgrade</code></h3>
-<p>Describes carrying out an upgrade transaction.</p>
-<p>Ordered by: <a href="#op-packages-upgrade"><code>packages.upgrade</code></a></p>
+<p>Opisuje przeprowadzenie transakcji aktualizacji.</p>
+<p>Używany przez: <a href="#op-packages-upgrade"><code>packages.upgrade</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
 <tbody>
-<tr><td><code>plan_hash</code></td><td><code>string</code></td><td>nie</td><td><code>plan_hash</code> binds the execution to one specific plan. Empty means no verification and is allowed outside a campaign only.</td></tr>
+<tr><td><code>plan_hash</code></td><td><code>string</code></td><td>nie</td><td><code>plan_hash</code> wiąże wykonanie z jednym konkretnym planem. Puste oznacza brak weryfikacji i jest dopuszczalne tylko poza kampanią.</td></tr>
 <tr><td><code>packages</code></td><td><code>[]string</code></td><td>nie</td><td></td></tr>
 <tr><td><code>security_only</code></td><td><code>bool</code></td><td>nie</td><td></td></tr>
-<tr><td><code>plan</code></td><td><code>*PlanReference</code></td><td>nie</td><td><code>plan</code> is the approved plan envelope the execution is bound to, see PlanReference.</td></tr>
+<tr><td><code>plan</code></td><td><code>*PlanReference</code></td><td>nie</td><td><code>plan</code> to zatwierdzona koperta planu, z którą związane jest wykonanie, patrz PlanReference.</td></tr>
 </tbody></table></div>
 <h3 id="payload-power"><code>power</code></h3>
-<p>Describes shutting a host down.</p>
-<p>Ordered by: <a href="#op-system-shutdown"><code>system.shutdown</code></a></p>
+<p>Opisuje wyłączenie hosta.</p>
+<p>Używany przez: <a href="#op-system-shutdown"><code>system.shutdown</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
 <tbody>
-<tr><td><code>mode</code></td><td><code>string</code></td><td>nie</td><td><code>mode</code> distinguishes cutting the power from halting the system.</td></tr>
-<tr><td><code>delay_seconds</code></td><td><code>uint32</code></td><td>nie</td><td><code>delay_seconds</code> gives time to send the result back before the host disappears.</td></tr>
-<tr><td><code>reason</code></td><td><code>string</code></td><td>tak</td><td><code>reason</code> is required: nobody will power this host on remotely, so the audit trail is the only thing left after the operation.</td></tr>
-<tr><td><code>ignore_inhibitors</code></td><td><code>bool</code></td><td>nie</td><td><code>ignore_inhibitors</code> overrides logind's inhibitors. By default a host with an inhibitor sends it back as the reason for a refusal.</td></tr>
+<tr><td><code>mode</code></td><td><code>string</code></td><td>nie</td><td><code>mode</code> odróżnia odcięcie zasilania od zatrzymania systemu.</td></tr>
+<tr><td><code>delay_seconds</code></td><td><code>uint32</code></td><td>nie</td><td><code>delay_seconds</code> daje czas na odesłanie wyniku, zanim host zniknie.</td></tr>
+<tr><td><code>reason</code></td><td><code>string</code></td><td>tak</td><td><code>reason</code> jest wymagany: nikt nie włączy tego hosta zdalnie, więc ślad audytowy to jedyne, co po operacji zostaje.</td></tr>
+<tr><td><code>ignore_inhibitors</code></td><td><code>bool</code></td><td>nie</td><td><code>ignore_inhibitors</code> obchodzi inhibitory logind. Domyślnie host z inhibitorem odsyła go jako powód odmowy.</td></tr>
 </tbody></table></div>
 <h3 id="payload-process-list"><code>process_list</code></h3>
-<p>Describes a snapshot of processes.</p>
-<p>Ordered by: <a href="#op-process-list"><code>process.list</code></a></p>
+<p>Opisuje migawkę procesów.</p>
+<p>Używany przez: <a href="#op-process-list"><code>process.list</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
 <tbody>
-<tr><td><code>sort_by</code></td><td><code>string</code></td><td>nie</td><td><code>sort_by</code> decides which processes land in the result when there are more of them than the limit: rss, cpu, pid or started.</td></tr>
+<tr><td><code>sort_by</code></td><td><code>string</code></td><td>nie</td><td><code>sort_by</code> decyduje, które procesy trafią do wyniku, gdy jest ich więcej niż limit: rss, cpu, pid albo started.</td></tr>
 <tr><td><code>limit</code></td><td><code>uint32</code></td><td>nie</td><td></td></tr>
 </tbody></table></div>
 <h3 id="payload-process-signal"><code>process_signal</code></h3>
-<p>Describes a signal to a process.</p>
-<p>Ordered by: <a href="#op-process-signal"><code>process.signal</code></a></p>
+<p>Opisuje sygnał wysyłany do procesu.</p>
+<p>Używany przez: <a href="#op-process-signal"><code>process.signal</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
@@ -1334,21 +1334,21 @@
 <tr><td><code>pid</code></td><td><code>int32</code></td><td>tak</td><td></td></tr>
 <tr><td><code>expected_start_ticks</code></td><td><code>uint64</code></td><td>tak</td><td></td></tr>
 <tr><td><code>signal</code></td><td><code>string</code></td><td>tak</td><td></td></tr>
-<tr><td><code>command</code></td><td><code>string</code></td><td>nie</td><td><code>command</code> serves confirmation and the audit trail: the operator has the command in the dialog, and what they saw stays in the trail.</td></tr>
+<tr><td><code>command</code></td><td><code>string</code></td><td>nie</td><td><code>command</code> służy potwierdzeniu i śladowi audytowemu: operator ma polecenie w oknie dialogowym, a to, co zobaczył, zostaje w śladzie.</td></tr>
 </tbody></table></div>
 <h3 id="payload-reboot"><code>reboot</code></h3>
-<p>Describes a controlled reboot of the host.</p>
-<p>Ordered by: <a href="#op-system-reboot"><code>system.reboot</code></a></p>
+<p>Opisuje kontrolowany restart hosta.</p>
+<p>Używany przez: <a href="#op-system-reboot"><code>system.reboot</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
 <tbody>
-<tr><td><code>delay_seconds</code></td><td><code>uint32</code></td><td>nie</td><td><code>delay_seconds</code> gives time to close the session and send the result back before the host disappears from the network.</td></tr>
+<tr><td><code>delay_seconds</code></td><td><code>uint32</code></td><td>nie</td><td><code>delay_seconds</code> daje czas na zamknięcie sesji i odesłanie wyniku, zanim host zniknie z sieci.</td></tr>
 <tr><td><code>reason</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
 </tbody></table></div>
 <h3 id="payload-repository"><code>repository</code></h3>
-<p>Describes a package source.</p>
-<p>Ordered by: <a href="#op-packages-repository-set"><code>packages.repository.set</code></a></p>
+<p>Opisuje źródło pakietów.</p>
+<p>Używany przez: <a href="#op-packages-repository-set"><code>packages.repository.set</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
@@ -1361,41 +1361,41 @@
 <tr><td><code>architectures</code></td><td><code>[]string</code></td><td>nie</td><td></td></tr>
 <tr><td><code>enabled</code></td><td><code>bool</code></td><td>nie</td><td></td></tr>
 <tr><td><code>priority</code></td><td><code>int</code></td><td>nie</td><td></td></tr>
-<tr><td><code>gpg_key</code></td><td><code>string</code></td><td>nie</td><td><code>gpg_key</code> is the public key of the source in an ASCII frame.</td></tr>
-<tr><td><code>allow_unsigned</code></td><td><code>bool</code></td><td>nie</td><td><code>allow_unsigned</code> is the consent to a source whose signatures the host does not check.</td></tr>
+<tr><td><code>gpg_key</code></td><td><code>string</code></td><td>nie</td><td><code>gpg_key</code> to klucz publiczny źródła w ramce ASCII.</td></tr>
+<tr><td><code>allow_unsigned</code></td><td><code>bool</code></td><td>nie</td><td><code>allow_unsigned</code> to zgoda na źródło, którego podpisów host nie sprawdza.</td></tr>
 <tr><td><code>username</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
-<tr><td><code>password_secret</code></td><td><code>*SecretRef</code></td><td>nie</td><td><code>password_secret</code> points at the password in the store. The value is in neither the order, nor the audit trail, nor the inventory.</td></tr>
-<tr><td><code>remove</code></td><td><code>bool</code></td><td>nie</td><td><code>remove</code> deletes the source together with its key and its password.</td></tr>
+<tr><td><code>password_secret</code></td><td><code>*SecretRef</code></td><td>nie</td><td><code>password_secret</code> wskazuje hasło w magazynie. Wartości nie ma ani w zleceniu, ani w śladzie audytowym, ani w inventory.</td></tr>
+<tr><td><code>remove</code></td><td><code>bool</code></td><td>nie</td><td><code>remove</code> kasuje źródło razem z jego kluczem i hasłem.</td></tr>
 </tbody></table></div>
 <h3 id="payload-schedule"><code>schedule</code></h3>
-<p>Describes a scheduled job.</p>
-<p>Ordered by: <a href="#op-schedule-disable"><code>schedule.disable</code></a>, <a href="#op-schedule-ensure"><code>schedule.ensure</code></a>, <a href="#op-schedule-preview"><code>schedule.preview</code></a>, <a href="#op-schedule-remove"><code>schedule.remove</code></a>, <a href="#op-schedule-run-now"><code>schedule.run_now</code></a></p>
+<p>Opisuje zadanie cykliczne.</p>
+<p>Używany przez: <a href="#op-schedule-disable"><code>schedule.disable</code></a>, <a href="#op-schedule-ensure"><code>schedule.ensure</code></a>, <a href="#op-schedule-preview"><code>schedule.preview</code></a>, <a href="#op-schedule-remove"><code>schedule.remove</code></a>, <a href="#op-schedule-run-now"><code>schedule.run_now</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
 <tbody>
-<tr><td><code>id</code></td><td><code>string</code></td><td>tak</td><td><code>id</code> is the stable identifier of a managed entry. An entry found on the host has no such identifier and cannot be named here.</td></tr>
-<tr><td><code>expression</code></td><td><code>string</code></td><td>nie</td><td><code>expression</code> is the cron expression. Checked on both sides: an entry the host will not understand would never run.</td></tr>
-<tr><td><code>command</code></td><td><code>[]string</code></td><td>nie</td><td><code>command</code> is an array of arguments, never a shell line.</td></tr>
-<tr><td><code>user</code></td><td><code>string</code></td><td>nie</td><td><code>user</code> is the account the entry runs as. It is required for schedule. ensure and root is not a default: an entry for root needs the permission schedule.</td></tr>
+<tr><td><code>id</code></td><td><code>string</code></td><td>tak</td><td><code>id</code> to trwały identyfikator zarządzanego wpisu. Wpis zastany na hoście takiego identyfikatora nie ma i nie da się go tu wskazać.</td></tr>
+<tr><td><code>expression</code></td><td><code>string</code></td><td>nie</td><td><code>expression</code> to wyrażenie cron. Sprawdzane po obu stronach: wpis, którego host nie zrozumie, nigdy by nie zadziałał.</td></tr>
+<tr><td><code>command</code></td><td><code>[]string</code></td><td>nie</td><td><code>command</code> to tablica argumentów, nigdy linia powłoki.</td></tr>
+<tr><td><code>user</code></td><td><code>string</code></td><td>nie</td><td><code>user</code> to konto, na którym wpis działa. Jest wymagane dla schedule. ensure, a root nie jest wartością domyślną: wpis dla roota wymaga uprawnienia schedule.</td></tr>
 <tr><td><code>comment</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
-<tr><td><code>enabled</code></td><td><code>bool</code></td><td>nie</td><td><code>enabled</code> concerns schedule.disable only: true enables, false disables. Disabling does not delete the content of the entry.</td></tr>
-<tr><td><code>adopt</code></td><td><code>bool</code></td><td>nie</td><td><code>adopt</code> allows taking over an entry found on the host. Without it the panel does not overwrite work nobody entered into the panel.</td></tr>
-<tr><td><code>kind</code></td><td><code>string</code></td><td>nie</td><td><code>kind</code> names the mechanism a managed entry is written with: "cron" for a file in /etc/cron.</td></tr>
+<tr><td><code>enabled</code></td><td><code>bool</code></td><td>nie</td><td><code>enabled</code> dotyczy wyłącznie schedule.disable: true włącza, false wyłącza. Wyłączenie nie kasuje treści wpisu.</td></tr>
+<tr><td><code>adopt</code></td><td><code>bool</code></td><td>nie</td><td><code>adopt</code> pozwala przejąć wpis zastany na hoście. Bez niego panel nie nadpisuje pracy, której nikt do panelu nie wprowadził.</td></tr>
+<tr><td><code>kind</code></td><td><code>string</code></td><td>nie</td><td><code>kind</code> nazywa mechanizm, którym zapisywany jest zarządzany wpis: "cron" dla pliku w /etc/cron.</td></tr>
 </tbody></table></div>
 <h3 id="payload-security"><code>security</code></h3>
-<p>Describes an operation of the security module.</p>
-<p>Ordered by: <a href="#op-security-remediate"><code>security.remediate</code></a>, <a href="#op-selinux-mode-set"><code>selinux.mode.set</code></a></p>
+<p>Opisuje operację modułu bezpieczeństwa.</p>
+<p>Używany przez: <a href="#op-security-remediate"><code>security.remediate</code></a>, <a href="#op-selinux-mode-set"><code>selinux.mode.set</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
 <tbody>
-<tr><td><code>mode</code></td><td><code>string</code></td><td>nie</td><td><code>mode</code> is the mode of mandatory access control.</td></tr>
-<tr><td><code>check_ids</code></td><td><code>[]string</code></td><td>nie</td><td><code>check_ids</code> names the compliance checks a fleet remediation removes the findings of.</td></tr>
+<tr><td><code>mode</code></td><td><code>string</code></td><td>nie</td><td><code>mode</code> to tryb obowiązkowej kontroli dostępu.</td></tr>
+<tr><td><code>check_ids</code></td><td><code>[]string</code></td><td>nie</td><td><code>check_ids</code> wskazuje testy zgodności, których znaleziska usuwa naprawa w skali floty.</td></tr>
 </tbody></table></div>
 <h3 id="payload-ssh"><code>ssh</code></h3>
-<p>Describes a change to the sshd server configuration.</p>
-<p>Ordered by: <a href="#op-ssh-config-apply"><code>ssh.config.apply</code></a>, <a href="#op-ssh-hostkey-rotate"><code>ssh.hostkey.rotate</code></a></p>
+<p>Opisuje zmianę konfiguracji serwera sshd.</p>
+<p>Używany przez: <a href="#op-ssh-config-apply"><code>ssh.config.apply</code></a>, <a href="#op-ssh-hostkey-rotate"><code>ssh.hostkey.rotate</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
@@ -1409,13 +1409,13 @@
 <tr><td><code>allow_users</code></td><td><code>[]string</code></td><td>nie</td><td></td></tr>
 <tr><td><code>allow_groups</code></td><td><code>[]string</code></td><td>nie</td><td></td></tr>
 <tr><td><code>deny_users</code></td><td><code>[]string</code></td><td>nie</td><td></td></tr>
-<tr><td><code>allow_lockout</code></td><td><code>bool</code></td><td>nie</td><td><code>allow_lockout</code> permits writing a configuration after which no working authentication method is left.</td></tr>
+<tr><td><code>allow_lockout</code></td><td><code>bool</code></td><td>nie</td><td><code>allow_lockout</code> pozwala zapisać konfigurację, po której nie zostaje żadna działająca metoda uwierzytelniania.</td></tr>
 <tr><td><code>key_type</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
-<tr><td><code>plan_hash</code></td><td><code>string</code></td><td>nie</td><td><code>plan_hash</code> binds the change to the plan computed on this host; the host computes the plan once more before writing.</td></tr>
+<tr><td><code>plan_hash</code></td><td><code>string</code></td><td>nie</td><td><code>plan_hash</code> wiąże zmianę z planem policzonym na tym hoście; host liczy plan jeszcze raz przed zapisem.</td></tr>
 </tbody></table></div>
 <h3 id="payload-storage"><code>storage</code></h3>
-<p>Describes an operation on storage.</p>
-<p>Ordered by: <a href="#op-disk-wipe"><code>disk.wipe</code></a>, <a href="#op-filesystem-check"><code>filesystem.check</code></a>, <a href="#op-filesystem-create"><code>filesystem.create</code></a>, <a href="#op-filesystem-resize"><code>filesystem.resize</code></a>, <a href="#op-lvm-extend"><code>lvm.extend</code></a>, <a href="#op-lvm-group-extend"><code>lvm.group.extend</code></a>, <a href="#op-lvm-snapshot-create"><code>lvm.snapshot.create</code></a>, <a href="#op-lvm-snapshot-remove"><code>lvm.snapshot.remove</code></a>, <a href="#op-lvm-volume-create"><code>lvm.volume.create</code></a>, <a href="#op-lvm-volume-remove"><code>lvm.volume.remove</code></a>, <a href="#op-mount-ensure"><code>mount.ensure</code></a>, <a href="#op-mount-remove"><code>mount.remove</code></a>, <a href="#op-raid-member-add"><code>raid.member.add</code></a>, <a href="#op-raid-member-fail"><code>raid.member.fail</code></a>, <a href="#op-raid-member-remove"><code>raid.member.remove</code></a>, <a href="#op-storage-plan"><code>storage.plan</code></a>, <a href="#op-storage-smart-read"><code>storage.smart.read</code></a></p>
+<p>Opisuje operację na pamięci masowej.</p>
+<p>Używany przez: <a href="#op-disk-wipe"><code>disk.wipe</code></a>, <a href="#op-filesystem-check"><code>filesystem.check</code></a>, <a href="#op-filesystem-create"><code>filesystem.create</code></a>, <a href="#op-filesystem-resize"><code>filesystem.resize</code></a>, <a href="#op-lvm-extend"><code>lvm.extend</code></a>, <a href="#op-lvm-group-extend"><code>lvm.group.extend</code></a>, <a href="#op-lvm-snapshot-create"><code>lvm.snapshot.create</code></a>, <a href="#op-lvm-snapshot-remove"><code>lvm.snapshot.remove</code></a>, <a href="#op-lvm-volume-create"><code>lvm.volume.create</code></a>, <a href="#op-lvm-volume-remove"><code>lvm.volume.remove</code></a>, <a href="#op-mount-ensure"><code>mount.ensure</code></a>, <a href="#op-mount-remove"><code>mount.remove</code></a>, <a href="#op-raid-member-add"><code>raid.member.add</code></a>, <a href="#op-raid-member-fail"><code>raid.member.fail</code></a>, <a href="#op-raid-member-remove"><code>raid.member.remove</code></a>, <a href="#op-storage-plan"><code>storage.plan</code></a>, <a href="#op-storage-smart-read"><code>storage.smart.read</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
@@ -1424,42 +1424,42 @@
 <tr><td><code>target</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
 <tr><td><code>fs_type</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
 <tr><td><code>options</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
-<tr><td><code>persist</code></td><td><code>bool</code></td><td>nie</td><td><code>persist</code> writes an entry in fstab. Without it the mount disappears after a reboot - and the operator is to know that before the outage, not after.</td></tr>
+<tr><td><code>persist</code></td><td><code>bool</code></td><td>nie</td><td><code>persist</code> zapisuje wpis w fstab. Bez niego montowanie znika po restarcie - a operator ma o tym wiedzieć przed przerwą, nie po niej.</td></tr>
 <tr><td><code>device</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
-<tr><td><code>expected_serial</code></td><td><code>string</code></td><td>nie</td><td><code>expected_serial</code> and ExpectedSizeBytes bind the operation to the device the operator reviewed.</td></tr>
+<tr><td><code>expected_serial</code></td><td><code>string</code></td><td>nie</td><td><code>expected_serial</code> i ExpectedSizeBytes wiążą operację z urządzeniem, które obejrzał operator.</td></tr>
 <tr><td><code>expected_size_bytes</code></td><td><code>uint64</code></td><td>nie</td><td></td></tr>
-<tr><td><code>expected_by_id</code></td><td><code>string</code></td><td>nie</td><td><code>expected_by_id</code> and ExpectedWWN are the stable identity of the device a destructive operation binds to; the host refuses without them.</td></tr>
+<tr><td><code>expected_by_id</code></td><td><code>string</code></td><td>nie</td><td><code>expected_by_id</code> i ExpectedWWN to trwała tożsamość urządzenia, z którym wiąże się operacja niszcząca; bez nich host odmawia.</td></tr>
 <tr><td><code>expected_wwn</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
-<tr><td><code>size</code></td><td><code>string</code></td><td>nie</td><td><code>size</code> is the increment of the volume, e.g. "+10G".</td></tr>
+<tr><td><code>size</code></td><td><code>string</code></td><td>nie</td><td><code>size</code> to przyrost wolumenu, np. "+10G".</td></tr>
 <tr><td><code>label</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
-<tr><td><code>expected_uuid</code></td><td><code>string</code></td><td>nie</td><td><code>expected_uuid</code> binds the operation to one specific filesystem.</td></tr>
+<tr><td><code>expected_uuid</code></td><td><code>string</code></td><td>nie</td><td><code>expected_uuid</code> wiąże operację z jednym konkretnym systemem plików.</td></tr>
 <tr><td><code>repair</code></td><td><code>bool</code></td><td>nie</td><td></td></tr>
-<tr><td><code>plan</code></td><td><code>string</code></td><td>nie</td><td><code>plan</code> names the kind of operation storage. plan is planning on the device: check, resize or lvm_extend.</td></tr>
-<tr><td><code>plan_hash</code></td><td><code>string</code></td><td>nie</td><td><code>plan_hash</code> binds the change to the plan computed on this host; the host computes the plan once more before the operation.</td></tr>
-<tr><td><code>array</code></td><td><code>string</code></td><td>nie</td><td><code>array</code> is the software array a member operation acts on, and ExpectedArrayUUID the identity out of its superblock.</td></tr>
+<tr><td><code>plan</code></td><td><code>string</code></td><td>nie</td><td><code>plan</code> nazywa rodzaj operacji, którą storage. plan planuje na urządzeniu: check, resize albo lvm_extend.</td></tr>
+<tr><td><code>plan_hash</code></td><td><code>string</code></td><td>nie</td><td><code>plan_hash</code> wiąże zmianę z planem policzonym na tym hoście; host liczy plan jeszcze raz przed operacją.</td></tr>
+<tr><td><code>array</code></td><td><code>string</code></td><td>nie</td><td><code>array</code> to macierz programowa, na której działa operacja na członku, a ExpectedArrayUUID to jej tożsamość z superbloku.</td></tr>
 <tr><td><code>expected_array_uuid</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
-<tr><td><code>group</code></td><td><code>string</code></td><td>nie</td><td><code>group</code> is the LVM volume group an operation acts in, and ExpectedGroupUUID its identity:</td></tr>
+<tr><td><code>group</code></td><td><code>string</code></td><td>nie</td><td><code>group</code> to grupa wolumenów LVM, w której działa operacja, a ExpectedGroupUUID to jej tożsamość:</td></tr>
 <tr><td><code>expected_group_uuid</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
 <tr><td><code>volume</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
 <tr><td><code>expected_volume_uuid</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
 </tbody></table></div>
 <h3 id="payload-time"><code>time</code></h3>
-<p>Describes an operation on the host's time.</p>
-<p>Ordered by: <a href="#op-time-config-apply"><code>time.config.apply</code></a>, <a href="#op-time-plan"><code>time.plan</code></a>, <a href="#op-time-sync-test"><code>time.sync.test</code></a>, <a href="#op-time-timezone-set"><code>time.timezone.set</code></a></p>
+<p>Opisuje operację na czasie hosta.</p>
+<p>Używany przez: <a href="#op-time-config-apply"><code>time.config.apply</code></a>, <a href="#op-time-plan"><code>time.plan</code></a>, <a href="#op-time-sync-test"><code>time.sync.test</code></a>, <a href="#op-time-timezone-set"><code>time.timezone.set</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
 <tbody>
-<tr><td><code>servers</code></td><td><code>[]string</code></td><td>nie</td><td><code>servers</code> are the target time servers.</td></tr>
-<tr><td><code>probe</code></td><td><code>[]string</code></td><td>nie</td><td><code>probe</code> names the servers to check without changing the configuration.</td></tr>
+<tr><td><code>servers</code></td><td><code>[]string</code></td><td>nie</td><td><code>servers</code> to docelowe serwery czasu.</td></tr>
+<tr><td><code>probe</code></td><td><code>[]string</code></td><td>nie</td><td><code>probe</code> wskazuje serwery do sprawdzenia bez zmiany konfiguracji.</td></tr>
 <tr><td><code>timezone</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
-<tr><td><code>allow_step</code></td><td><code>bool</code></td><td>nie</td><td><code>allow_step</code> is the consent to step the clock. Without it the host rejects a change that would move time by more than the threshold.</td></tr>
-<tr><td><code>enable_dropin</code></td><td><code>bool</code></td><td>nie</td><td><code>enable_dropin</code> is the consent to add the panel's source directory to the daemon's main file.</td></tr>
-<tr><td><code>plan_hash</code></td><td><code>string</code></td><td>nie</td><td><code>plan_hash</code> binds the change to the plan computed on this host; the host computes the plan once more before writing.</td></tr>
+<tr><td><code>allow_step</code></td><td><code>bool</code></td><td>nie</td><td><code>allow_step</code> to zgoda na skokową zmianę zegara. Bez niej host odrzuca zmianę, która przesunęłaby czas bardziej niż o próg.</td></tr>
+<tr><td><code>enable_dropin</code></td><td><code>bool</code></td><td>nie</td><td><code>enable_dropin</code> to zgoda na dopisanie katalogu źródeł panelu do głównego pliku demona.</td></tr>
+<tr><td><code>plan_hash</code></td><td><code>string</code></td><td>nie</td><td><code>plan_hash</code> wiąże zmianę z planem policzonym na tym hoście; host liczy plan jeszcze raz przed zapisem.</td></tr>
 </tbody></table></div>
 <h3 id="payload-unit"><code>unit</code></h3>
-<p>Describes an operation on a systemd unit.</p>
-<p>Ordered by: <a href="#op-unit-reload"><code>unit.reload</code></a>, <a href="#op-unit-reset-failed"><code>unit.reset_failed</code></a>, <a href="#op-unit-restart"><code>unit.restart</code></a>, <a href="#op-unit-start"><code>unit.start</code></a>, <a href="#op-unit-stop"><code>unit.stop</code></a></p>
+<p>Opisuje operację na jednostce systemd.</p>
+<p>Używany przez: <a href="#op-unit-reload"><code>unit.reload</code></a>, <a href="#op-unit-reset-failed"><code>unit.reset_failed</code></a>, <a href="#op-unit-restart"><code>unit.restart</code></a>, <a href="#op-unit-start"><code>unit.start</code></a>, <a href="#op-unit-stop"><code>unit.stop</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
@@ -1467,38 +1467,38 @@
 <tr><td><code>unit</code></td><td><code>string</code></td><td>tak</td><td></td></tr>
 </tbody></table></div>
 <h3 id="payload-unit-status"><code>unit_status</code></h3>
-<p>Describes a read of unit state. An empty list means the full list of the host's units.</p>
-<p>Ordered by: <a href="#op-unit-status"><code>unit.status</code></a></p>
+<p>Opisuje odczyt stanu jednostek. Pusta lista oznacza pełną listę jednostek hosta.</p>
+<p>Używany przez: <a href="#op-unit-status"><code>unit.status</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
 <tbody>
 <tr><td><code>units</code></td><td><code>[]string</code></td><td>tak</td><td></td></tr>
-<tr><td><code>all</code></td><td><code>bool</code></td><td>nie</td><td><code>all</code> orders the full list. Without it an empty list of units is an error.</td></tr>
-<tr><td><code>detail</code></td><td><code>bool</code></td><td>nie</td><td><code>detail</code> asks for the full picture of the named units: dependencies, drop-ins with their content, the last journal lines.</td></tr>
+<tr><td><code>all</code></td><td><code>bool</code></td><td>nie</td><td><code>all</code> zamawia pełną listę. Bez niego pusta lista jednostek jest błędem.</td></tr>
+<tr><td><code>detail</code></td><td><code>bool</code></td><td>nie</td><td><code>detail</code> prosi o pełny obraz wskazanych jednostek: zależności, drop-iny wraz z treścią, ostatnie linie journala.</td></tr>
 </tbody></table></div>
 <h3 id="payload-unit-toggle"><code>unit_toggle</code></h3>
-<p>Turns a property of a unit on or off.</p>
-<p>Ordered by: <a href="#op-unit-enable-set"><code>unit.enable.set</code></a>, <a href="#op-unit-mask-set"><code>unit.mask.set</code></a></p>
+<p>Włącza albo wyłącza właściwość jednostki.</p>
+<p>Używany przez: <a href="#op-unit-enable-set"><code>unit.enable.set</code></a>, <a href="#op-unit-mask-set"><code>unit.mask.set</code></a></p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
 <tbody>
 <tr><td><code>unit</code></td><td><code>string</code></td><td>tak</td><td></td></tr>
-<tr><td><code>enabled</code></td><td><code>bool</code></td><td>tak</td><td><code>enabled</code> for unit. enable. set, Masked for unit. mask. set.</td></tr>
+<tr><td><code>enabled</code></td><td><code>bool</code></td><td>tak</td><td><code>enabled</code> dla unit. enable. set, Masked dla unit. mask. set.</td></tr>
 </tbody></table></div>
-<h3 id="payload-shared">Shapes the payloads share</h3>
+<h3 id="payload-shared">Kształty wspólne dla payloadów</h3>
 <h4 id="aux-secretref"><code>SecretRef</code></h4>
-<p>Points at a secret in the panel's store. The task payload carries only the reference.</p>
+<p>Wskazuje sekret w magazynie panelu. Payload zadania niesie wyłącznie odwołanie.</p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
 <tbody>
 <tr><td><code>name</code></td><td><code>string</code></td><td>tak</td><td></td></tr>
-<tr><td><code>version</code></td><td><code>int</code></td><td>nie</td><td><code>version</code> equal to zero means the version current at the moment the task is delivered.</td></tr>
+<tr><td><code>version</code></td><td><code>int</code></td><td>nie</td><td><code>version</code> równe zeru oznacza wersję aktualną w chwili dostarczenia zadania.</td></tr>
 </tbody></table></div>
 <h4 id="aux-planreference"><code>PlanReference</code></h4>
-<p>Is what an execution carries of the approved plan envelope (chapter 7 of the security remediation plan).</p>
+<p>To ta część zatwierdzonej koperty planu, którą niesie wykonanie (rozdział 7 planu naprawy bezpieczeństwa).</p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
@@ -1507,11 +1507,11 @@
 <tr><td><code>planner_version</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
 <tr><td><code>inventory_revision</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
 <tr><td><code>resource_revision</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
-<tr><td><code>expires_at</code></td><td><code>string</code></td><td>nie</td><td><code>expires_at</code> is the expiry of the plan in RFC 3339; it is part of the digest, so the host needs the same moment to compute the same one.</td></tr>
+<tr><td><code>expires_at</code></td><td><code>string</code></td><td>nie</td><td><code>expires_at</code> to wygaśnięcie planu w RFC 3339; wchodzi do digestu, więc host potrzebuje tej samej chwili, żeby policzyć ten sam digest.</td></tr>
 <tr><td><code>changes</code></td><td><code>[]PlanChangeEntry</code></td><td>nie</td><td></td></tr>
 </tbody></table></div>
 <h4 id="aux-planchangeentry"><code>PlanChangeEntry</code></h4>
-<p>Is one approved element of a package plan: the exact version, architecture and origin of a package and the direction of its</p>
+<p>To jeden zatwierdzony element planu pakietów: dokładna wersja, architektura i pochodzenie pakietu oraz kierunek jego</p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
@@ -1524,7 +1524,7 @@
 <tr><td><code>action</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
 </tbody></table></div>
 <h4 id="aux-certificatetarget"><code>CertificateTarget</code></h4>
-<p>Points at a certificate file together with what the panel knows about it.</p>
+<p>Wskazuje plik certyfikatu wraz z tym, co panel o nim wie.</p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
@@ -1534,7 +1534,7 @@
 <tr><td><code>service</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
 </tbody></table></div>
 <h4 id="aux-debconfanswer"><code>DebconfAnswer</code></h4>
-<p>Is one answer to a package configuration question.</p>
+<p>To jedna odpowiedź na pytanie konfiguracyjne pakietu.</p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
@@ -1545,7 +1545,7 @@
 <tr><td><code>value</code></td><td><code>string</code></td><td>tak</td><td></td></tr>
 </tbody></table></div>
 <h4 id="aux-sshkeyinput"><code>SSHKeyInput</code></h4>
-<p>Is a key an add appends: the public key as the file takes it, options included, and an optional comment appended when the key carries</p>
+<p>To klucz dopisywany przez operację dodania: klucz publiczny w postaci, jakiej oczekuje plik, razem z opcjami, oraz opcjonalny komentarz dopisywany, gdy klucz niesie</p>
 <div class="table-scroll">
 <table>
 <thead><tr><th>Pole</th><th>Typ</th><th>Wymagane</th><th>Znaczenie</th></tr></thead>
@@ -1553,9 +1553,9 @@
 <tr><td><code>public_key</code></td><td><code>string</code></td><td>tak</td><td></td></tr>
 <tr><td><code>comment</code></td><td><code>string</code></td><td>nie</td><td></td></tr>
 </tbody></table></div>
-<p>A secret never travels in an order. Where a payload takes a credential it takes a <code>SecretRef</code>: the name of a version in the panel&rsquo;s store, which the host redeems against the panel at the moment it needs the value.</p>
+<p>Sekret nigdy nie jedzie w zleceniu. Tam, gdzie payload przyjmuje poświadczenie, przyjmuje <code>SecretRef</code>: nazwę wersji w magazynie panelu, którą host realizuje u panelu dokładnie wtedy, gdy potrzebuje wartości.</p>
     <ul class="linkrow">
-      <li><a href="concepts.html">â 4. Jak przebiega zmiana</a></li>
+      <li><a href="concepts.html">← 4. Jak przebiega zmiana</a></li>
       <li><a href="errors.html">7. Błędy i odmowy</a></li>
       <li><a href="api.html">8. API</a></li>
       <li><a href="./">Spis treści</a></li>
