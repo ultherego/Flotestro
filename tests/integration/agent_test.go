@@ -94,6 +94,7 @@ func TestHostReleaseChannelIsSetAndFilteredOn(t *testing.T) {
 // the same payload everywhere, verified by the host coming back, and the
 // catalogue carries a template for it.
 func TestAgentUpgradeIsCampaignReady(t *testing.T) {
+	defer replacingAgent()()
 	h := newHarness(t)
 	var catalogue struct {
 		Items []struct {

@@ -15,6 +15,7 @@ const keptArtefactDir = "/var/lib/flotestro-helper/agent-upgrade/rollback"
 // TestGoingBackReadsTheKeptArtefactAndNotTheRepository is the negative side of
 // chapter 14.5: the refusal names the artefact the host kept, not a download.
 func TestGoingBackReadsTheKeptArtefactAndNotTheRepository(t *testing.T) {
+	defer replacingAgent()()
 	h := newHarness(t)
 	// A Debian-family host: its manager can fetch the file of a version it
 	// already holds, which is what makes both steps reachable here.

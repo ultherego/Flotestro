@@ -23,6 +23,7 @@ var artefactRefusals = []string{"agent_package_digest_mismatch", "agent_package_
 // TestAnAgentUpgradeWithAWrongPackageDigestIsRefusedAndTheAgentKeepsRunning is
 // the negative side of chapter 14.
 func TestAnAgentUpgradeWithAWrongPackageDigestIsRefusedAndTheAgentKeepsRunning(t *testing.T) {
+	defer replacingAgent()()
 	h := newHarness(t)
 	// A Debian-family host: its package manager fetches a file of a version
 	// it already has, which is what makes the digest check reachable here.

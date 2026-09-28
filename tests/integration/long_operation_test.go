@@ -96,6 +96,7 @@ func assertStillOpen(t *testing.T, job jobView) {
 // the lease.
 func TestAnOperationOutlastingItsLeaseIsNotFailed(t *testing.T) {
 	t.Parallel()
+	defer keepAgentUp()()
 	h := newHarness(t)
 	ctx := context.Background()
 	pool := h.database(ctx)
@@ -204,6 +205,7 @@ func TestAnOperationOutlastingItsLeaseIsNotFailed(t *testing.T) {
 // half minute - sends lines the whole time, and every line is a sign of life.
 func TestAReportingAttemptKeepsItsLease(t *testing.T) {
 	t.Parallel()
+	defer keepAgentUp()()
 	h := newHarness(t)
 	ctx := context.Background()
 	pool := h.database(ctx)
