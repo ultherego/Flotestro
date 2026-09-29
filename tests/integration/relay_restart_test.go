@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 )
@@ -37,6 +38,12 @@ func TestARelayRestartLosesNoResult(t *testing.T) {
 	relayHost := h.hostByName(relayHostName(t, h))
 	host, identity := h.enrollSyntheticHostWithIdentity(t)
 	pool := h.database(ctx)
+	// Restarting the relay cuts the path of every fleet host that comes through
+	// it, and the rest of the suite reads that path. Whoever takes it down puts
+	// it back, and says so when it does not come back.
+	relayID, _ := h.labRelay(t)
+	carried := relayedFleetHosts(ctx, t, pool, relayID)
+	t.Cleanup(func() { awaitRelayedFleetHosts(ctx, t, pool, relayID, carried) })
 	if _, err := pool.Exec(ctx, `
 		insert into host_capability_registry (host_id, name, version, available, features)
 		values ($1::uuid, 'systemd', 1, true, '{}'::jsonb)
@@ -123,6 +130,66 @@ func TestARelayRestartLosesNoResult(t *testing.T) {
 	}
 	if view := h.hostRefusal(host.ID); view != nil {
 		t.Errorf("the host carries a refusal after the restart: %+v", view)
+	}
+}
+
+// relayRecoveryBound is how long a host may take to find the relay again. The
+// agent retries with full jitter over a window that doubles from 2 s up to
+// endpoints.MaxBackoff, which is five minutes.
+const relayRecoveryBound = 6 * time.Minute
+
+// relayedFleetHosts returns the hosts whose open session comes through the
+// relay: the ones whose only path to the panel a restart of it cuts.
+func relayedFleetHosts(ctx context.Context, t *testing.T, pool *pgxpool.Pool, relayID string) []string {
+	t.Helper()
+	rows, err := pool.Query(ctx, `
+		select host_id::text from agent_sessions
+		where relay_id = $1::uuid and ended_at is null`, relayID)
+	if err != nil {
+		t.Fatalf("reading the hosts behind the relay %s: %v", relayID, err)
+	}
+	defer rows.Close()
+	var hosts []string
+	for rows.Next() {
+		var hostID string
+		if err := rows.Scan(&hostID); err != nil {
+			t.Fatalf("scanning a host behind the relay %s: %v", relayID, err)
+		}
+		hosts = append(hosts, hostID)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("reading the hosts behind the relay %s: %v", relayID, err)
+	}
+	return hosts
+}
+
+// awaitRelayedFleetHosts waits until each host is back on the relay. A host
+// whose row has gone meanwhile was a test's own machine and is not waited for.
+func awaitRelayedFleetHosts(ctx context.Context, t *testing.T, pool *pgxpool.Pool,
+	relayID string, hosts []string) {
+	t.Helper()
+	deadline := time.Now().Add(relayRecoveryBound)
+	for _, hostID := range hosts {
+		for {
+			var back bool
+			if err := pool.QueryRow(ctx, `
+				select exists (select 1 from agent_sessions
+				               where relay_id = $1::uuid and host_id = $2::uuid and ended_at is null)
+				    or not exists (select 1 from hosts where id = $2::uuid)`,
+				relayID, hostID).Scan(&back); err != nil {
+				t.Errorf("asking whether %s is back on the relay: %v", hostID, err)
+				break
+			}
+			if back {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Errorf("the host %s came through the relay %s before this test and does not any more; "+
+					"the rest of the suite reads that path", hostID, relayID)
+				break
+			}
+			time.Sleep(4 * time.Second)
+		}
 	}
 }
 

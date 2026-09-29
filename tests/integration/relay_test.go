@@ -17,6 +17,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -438,24 +439,58 @@ func TestRelayListCarriesTheStateAndTheAttestedHosts(t *testing.T) {
 	}
 }
 
-// TestRelayPageListsTheAttestedHosts guards that the relay page names the
-// hosts behind the relay: the ubuntu host of the lab connects through it, and
-// the page is where an operator sees that.
-func TestRelayPageListsTheAttestedHosts(t *testing.T) {
+// TestTheFleetComesThroughTheRelay is about the laboratory rather than the
+// product: a relay nothing real connects through proves nothing, and the relay
+// tests that open a session of their own would pass over an empty path.
+func TestTheFleetComesThroughTheRelay(t *testing.T) {
 	h := newHarness(t)
 	relayID, _ := h.labRelay(t)
-	ubuntu := h.hostByName("agent-ubuntu")
+	ctx := context.Background()
+	if hosts := relayedFleetHosts(ctx, t, h.database(ctx), relayID); len(hosts) == 0 {
+		absent(t, "no host of the fleet connects through the relay %s, so the path it exists for is untested",
+			relayID)
+	}
+}
+
+// TestRelayPageListsTheAttestedHosts guards that the relay page names the
+// hosts behind the relay, which is where an operator sees them. The host on the
+// relay is this test's own: one that only passes when another test left a
+// session behind is not a test of the page.
+func TestRelayPageListsTheAttestedHosts(t *testing.T) {
+	h := newHarness(t)
+	relayID, address := h.labRelay(t)
+	if conn, err := net.DialTimeout("tcp", strings.TrimPrefix(address, "https://"), 3*time.Second); err != nil {
+		absent(t, "the relay %s does not answer at %s: %v", relayID, address, err)
+	} else {
+		_ = conn.Close()
+	}
 
 	ctx := context.Background()
-	var attested bool
-	if err := h.database(ctx).QueryRow(ctx, `
-		select exists (select 1 from agent_sessions
-		               where relay_id = $1::uuid and host_id = $2::uuid and ended_at is null)`,
-		relayID, ubuntu.ID).Scan(&attested); err != nil {
-		t.Fatal(err)
+	behind, identity := h.enrollSyntheticHostWithIdentity(t)
+	session, err := openRelayedAgent(ctx, address, identity)
+	if err != nil {
+		t.Fatalf("the host %s did not open a session through the relay: %v", behind.Hostname, err)
 	}
-	if !attested {
-		absent(t, "no host of the fleet connects through the relay %s, so the path it exists for is untested", relayID)
+	defer session.close()
+	// The relay attests the session to the panel, and the row it writes is what
+	// the page is made of.
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		var attested bool
+		if err := h.database(ctx).QueryRow(ctx, `
+			select exists (select 1 from agent_sessions
+			               where relay_id = $1::uuid and host_id = $2::uuid and ended_at is null)`,
+			relayID, behind.ID).Scan(&attested); err != nil {
+			t.Fatal(err)
+		}
+		if attested {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the session of %s through the relay is not attested to the relay %s",
+				behind.Hostname, relayID)
+		}
+		time.Sleep(time.Second)
 	}
 
 	var page struct {
@@ -472,15 +507,15 @@ func TestRelayPageListsTheAttestedHosts(t *testing.T) {
 	}
 	found := false
 	for _, host := range page.Hosts {
-		if host.HostID == ubuntu.ID {
+		if host.HostID == behind.ID {
 			found = true
-			if host.Hostname != ubuntu.Hostname || host.ConnectedAt == "" {
-				t.Fatalf("the ubuntu host is listed without its name or session: %+v", host)
+			if host.Hostname != behind.Hostname || host.ConnectedAt == "" {
+				t.Fatalf("the host behind the relay is listed without its name or session: %+v", host)
 			}
 		}
 	}
 	if !found {
-		t.Fatalf("the ubuntu host %s is not on the relay page: %+v", ubuntu.Hostname, page.Hosts)
+		t.Fatalf("the host %s is not on the relay page: %+v", behind.Hostname, page.Hosts)
 	}
 	if page.Relay.HostsAttested != len(page.Hosts) {
 		t.Fatalf("hosts_attested = %d, the page lists %d hosts", page.Relay.HostsAttested, len(page.Hosts))
