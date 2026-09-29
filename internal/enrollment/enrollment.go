@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -65,6 +66,10 @@ const (
 // ErrRepeated means the creator already placed an order under this
 // idempotency key; the order returned with it is the existing one.
 var ErrRepeated = errors.New("the enrollment order was already placed under this key")
+
+// ErrKeyReused means the key was already used by the same creator for a
+// different order. The earlier order is not the answer to this one.
+var ErrKeyReused = errors.New("the idempotency key was used for a different enrollment order")
 
 // The kinds of identity that can be registered.
 const (
@@ -271,23 +276,31 @@ func (s *Store) Create(ctx context.Context, input CreateInput) (*Request, error)
 		insert into enrollment_requests
 			(id, token_hash, description, site, environment, kind, purpose,
 			 expected_machine_id, expected_host_id, relay_id, max_uses, expires_at, created_by,
-			 idempotency_key, owner, tags)
+			 idempotency_key, owner, tags, ttl_seconds)
 		values ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid, nullif($10, '')::uuid, $11, $12, $13,
-			nullif($14, ''), nullif($15, ''), $16::text[])
+			nullif($14, ''), nullif($15, ''), $16::text[], $17)
 		on conflict (created_by, idempotency_key) where idempotency_key is not null do nothing
 		returning created_at, updated_at`
 	err := s.pool.QueryRow(ctx, query, request.ID, hash[:], nullable(input.Description),
 		input.Site, input.Environment, kind, purpose,
 		nullable(input.ExpectedMachineID), nullable(input.ExpectedHostID),
 		input.RelayID, maxUses, request.ExpiresAt, input.CreatedBy, input.IdempotencyKey,
-		input.Owner, tags).
+		input.Owner, tags, int(ttl/time.Second)).
 		Scan(&request.CreatedAt, &request.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) && input.IdempotencyKey != "" {
-		// The key was used before: the earlier order is the answer. Its token is not
-		// - it was shown once, and the store keeps only the hash.
-		existing, err := s.byIdempotencyKey(ctx, input.CreatedBy, input.IdempotencyKey)
+		// The key was used before, and the earlier order is the answer - but
+		// only to the same order. The key is the caller's word that two requests
+		// are one; a different order answered with the earlier token's request
+		// would tell them their installation was ordered as they asked. The
+		// token is not part of the answer: it was shown once, and the store
+		// keeps only the hash.
+		existing, ttlSeconds, err := s.byIdempotencyKey(ctx, input.CreatedBy, input.IdempotencyKey)
 		if err != nil {
 			return nil, err
+		}
+		if differs := orderDiffers(existing, ttlSeconds, request, int(ttl/time.Second)); differs != "" {
+			return nil, fmt.Errorf("%w: the key names the enrollment order %s, whose %s is another one",
+				ErrKeyReused, existing.ID, differs)
 		}
 		return existing, ErrRepeated
 	}
@@ -297,15 +310,60 @@ func (s *Store) Create(ctx context.Context, input CreateInput) (*Request, error)
 	return request, nil
 }
 
-func (s *Store) byIdempotencyKey(ctx context.Context, createdBy, key string) (*Request, error) {
-	var id string
-	err := s.pool.QueryRow(ctx, `
-		select id from enrollment_requests where created_by = $1 and idempotency_key = $2`,
-		createdBy, key).Scan(&id)
-	if err != nil {
-		return nil, fmt.Errorf("looking up the repeated order: %w", err)
+// orderDiffers names the part of a repeated order that is not the part the
+// existing one was placed with, and is empty when the two are one order.
+//
+// What is compared is what the caller asked for: where the host lands, what
+// identity the token may register, who owns it, how many uses and how long
+// the token lives. The description is a label and is left out, and so is
+// everything the panel decided afterwards (status, uses, the enrolled host).
+// A lifetime the old row never recorded is not held against the repeat.
+func orderDiffers(existing *Request, existingTTL *int, want *Request, ttlSeconds int) string {
+	switch {
+	case existing.Kind != want.Kind:
+		return "kind"
+	case existing.Purpose != want.Purpose:
+		return "purpose"
+	case existing.Site != want.Site || existing.Environment != want.Environment:
+		return "scope"
+	case existing.ExpectedMachineID != want.ExpectedMachineID ||
+		existing.ExpectedHostID != want.ExpectedHostID:
+		return "expected machine"
+	case existing.RelayID != want.RelayID:
+		return "relay"
+	case existing.Owner != want.Owner || !sameTags(existing.Tags, want.Tags):
+		return "owner or tags"
+	case existing.MaxUses != want.MaxUses:
+		return "number of uses"
+	case existingTTL != nil && *existingTTL != ttlSeconds:
+		return "lifetime"
 	}
-	return s.Request(ctx, id)
+	return ""
+}
+
+// sameTags compares two tag lists as sets: the order they were typed in says
+// nothing about what they tag.
+func sameTags(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	left, right := slices.Clone(a), slices.Clone(b)
+	slices.Sort(left)
+	slices.Sort(right)
+	return slices.Equal(left, right)
+}
+
+func (s *Store) byIdempotencyKey(ctx context.Context, createdBy, key string) (*Request, *int, error) {
+	var id string
+	var ttlSeconds *int
+	err := s.pool.QueryRow(ctx, `
+		select id, ttl_seconds from enrollment_requests where created_by = $1 and idempotency_key = $2`,
+		createdBy, key).Scan(&id, &ttlSeconds)
+	if err != nil {
+		return nil, nil, fmt.Errorf("looking up the repeated order: %w", err)
+	}
+	request, err := s.Request(ctx, id)
+	return request, ttlSeconds, err
 }
 
 // checkPurpose guards that the purpose, the kind and the named host hold

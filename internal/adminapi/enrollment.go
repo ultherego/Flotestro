@@ -63,6 +63,12 @@ func (s *Server) handleCreateEnrollmentRequest(w http.ResponseWriter, r *http.Re
 	}
 
 	order, err := s.createOrder(r, req, principal.Subject, "")
+	if errors.Is(err, enrollment.ErrKeyReused) {
+		// The key is the caller's own word: answering with somebody else's
+		// order would tell them their installation was ordered as they asked.
+		problem(w, http.StatusConflict, "idempotency_key_reused", err.Error())
+		return
+	}
 	if errors.Is(err, enrollment.ErrRepeated) {
 		// The same order again, from a caller that lost the first answer. The token
 		// is not repeated: it was shown once.
@@ -260,6 +266,12 @@ func (s *Server) handleReplaceEnrollmentRequest(w http.ResponseWriter, r *http.R
 		})
 		if revoked {
 			s.lapseRecoveries(r.Context(), principal.Subject)
+		}
+		if errors.Is(err, enrollment.ErrKeyReused) {
+			problem(w, http.StatusConflict, "idempotency_key_reused", err.Error())
+			return
+		}
+		if revoked {
 			problem(w, http.StatusBadRequest, "invalid_request",
 				"the order was revoked, but no order was placed in its place: "+err.Error())
 			return
@@ -709,6 +721,12 @@ func (s *Server) handleIdentityRecovery(w http.ResponseWriter, r *http.Request) 
 	}
 
 	order, err := s.createOrder(r, req.enrollmentRequestBody, principal.Subject, hostID)
+	if errors.Is(err, enrollment.ErrKeyReused) {
+		// The key is the caller's own word: answering with somebody else's
+		// order would tell them their installation was ordered as they asked.
+		problem(w, http.StatusConflict, "idempotency_key_reused", err.Error())
+		return
+	}
 	if errors.Is(err, enrollment.ErrRepeated) {
 		writeJSON(w, http.StatusOK, orderView{Request: order, ConfigURL: configURL(order.ID)})
 		return

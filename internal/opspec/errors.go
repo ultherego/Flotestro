@@ -723,7 +723,7 @@ var reportedGuides = []ErrorGuide{
 		Meaning: "The order asked for the panel's own key file under /etc/ssh/authorized_keys.d and sshd on this host does not list it in AuthorizedKeysFile: keys written there would grant nothing.",
 		Action:  "Add /etc/ssh/authorized_keys.d/%u/60-flotestro.keys to AuthorizedKeysFile through the sshd module, or order the change without managed_file and edit the user's authorized_keys."},
 	{Code: "idempotency_key_reused", Stage: "admission", Retry: RetryAfterChange,
-		Meaning: "The idempotency key of this order was already used for a different operation - on this host, or in a campaign of the same creator.",
+		Meaning: "The idempotency key of this order was already used for a different operation - on this host, in a campaign or in an enrollment order of the same creator.",
 		Action:  "The first order stands and is named in the answer; order again with a key of this order's own."},
 	{Code: "invalid_ssh_key", Stage: "helper", Retry: RetryNever,
 		Meaning: "The material given as a public key is not one sshd would read: the host parsed it before writing and could not.",
