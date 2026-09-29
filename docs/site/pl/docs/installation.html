@@ -558,7 +558,7 @@ podman start flotestro_control-plane_1</code></pre>
         <tr><td><code class="refusal">kek_file_missing</code></td><td>Pod ścieżką, którą wskazuje wdrożenie, nie ma pliku.</td></tr>
         <tr><td><code class="refusal">kek_file_unsafe</code></td><td>Plik jest linkiem, nie jest zwykłym plikiem, należy do kogoś innego albo jest czytelny lub zapisywalny dla grupy albo kogokolwiek innego.</td></tr>
         <tr><td><code class="refusal">kek_file_malformed</code></td><td>Zawartość to nie 64 znaki szesnastkowe z co najwyżej jednym końcowym znakiem nowej linii.</td></tr>
-        <tr><td><code class="refusal">kek_mismatch</code></td><td>Klucz w pliku nie jest tym, którym opakowano klucze instalacji, np. replika, która nigdy nie widziała nowego klucza po zakończonej rotacji.</td></tr>
+        <tr><td><code class="refusal">kek_mismatch</code></td><td>Żaden z zamontowanych kluczy nie jest tym, który zapisuje instalacja: to klucz innej instalacji albo klucz sprzed rotacji, której nowy klucz nie jest już zamontowany. Trwająca rotacja tu nie trafia.</td></tr>
         <tr><td><code class="refusal">wrapped_key_unreadable</code></td><td>Wiersz nie otwiera się kluczem, który trzyma wdrożenie, choć twierdzi, że został nim opakowany: został zmieniony albo ma postać, której ten panel nie czyta.</td></tr>
       </tbody>
     </table>
