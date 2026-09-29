@@ -9,11 +9,22 @@ import (
 	"time"
 )
 
+// hostBinary names a program of the host or skips: the cases below are about
+// what runCommand makes of a process, not about which binaries this machine
+// keeps, and a missing one must not read as a failed assertion.
+func hostBinary(t *testing.T, path string) string {
+	t.Helper()
+	if !isExecutable(path) {
+		t.Skipf("%s is missing on this host", path)
+	}
+	return path
+}
+
 func TestRunCommandTellsAResultFromAnExecutionError(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("a process that finished successfully", func(t *testing.T) {
-		result := runCommand(ctx, 5*time.Second, "/bin/true")
+		result := runCommand(ctx, 5*time.Second, hostBinary(t, "/bin/true"))
 		if !result.Ran || result.ExitCode != 0 {
 			t.Fatalf("Ran=%v ExitCode=%d, expected true/0", result.Ran, result.ExitCode)
 		}
@@ -21,7 +32,7 @@ func TestRunCommandTellsAResultFromAnExecutionError(t *testing.T) {
 
 	t.Run("a process that returned an error code", func(t *testing.T) {
 		// A non-zero code from a process that ran is a result, not a failure.
-		result := runCommand(ctx, 5*time.Second, "/bin/false")
+		result := runCommand(ctx, 5*time.Second, hostBinary(t, "/bin/false"))
 		if !result.Ran {
 			t.Fatal("the process ran and Ran=false")
 		}
@@ -43,7 +54,7 @@ func TestRunCommandTellsAResultFromAnExecutionError(t *testing.T) {
 	t.Run("an exceeded timeout", func(t *testing.T) {
 		// A timeout is not a substantive result, even though the process returns
 		// a code.
-		result := runCommand(ctx, 100*time.Millisecond, "/bin/sleep", "5")
+		result := runCommand(ctx, 100*time.Millisecond, hostBinary(t, "/bin/sleep"), "5")
 		if result.Ran {
 			t.Fatal("a process interrupted by the timeout was taken for one that ran")
 		}
@@ -58,9 +69,9 @@ func TestRunCommandSetsAWritableHome(t *testing.T) {
 	t.Cleanup(func() { runtimeDir = os.TempDir() })
 
 	// Tools such as dnf create files in HOME and XDG.
-	result := runCommand(context.Background(), 5*time.Second, "/usr/bin/env")
+	result := runCommand(context.Background(), 5*time.Second, hostBinary(t, "/usr/bin/env"))
 	if !result.Ran {
-		t.Skip("/usr/bin/env is missing")
+		t.Fatalf("/usr/bin/env did not run: %v", result.Err)
 	}
 	for _, want := range []string{
 		"HOME=" + dir,

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"os"
 	"testing"
 	"time"
 )
@@ -97,6 +98,11 @@ func TestReadHealthUsesTheCache(t *testing.T) {
 	}
 	if health.PendingSecurityUpdates == nil || *health.PendingSecurityUpdates != 4 {
 		t.Fatalf("security updates = %v, expected 4", health.PendingSecurityUpdates)
+	}
+	// The uptime is the one value ReadHealth takes from the host itself, so the
+	// assertion holds only where there is a host to take it from.
+	if _, err := os.ReadFile("/proc/uptime"); err != nil {
+		t.Skipf("this host has no /proc/uptime: %v", err)
 	}
 	if health.UptimeSeconds == 0 {
 		t.Fatal("the uptime was not read from /proc")

@@ -18,6 +18,7 @@ import (
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 	"github.com/ultherego/flotestro/internal/helper"
 	"github.com/ultherego/flotestro/internal/opspec"
+	"github.com/ultherego/flotestro/internal/systemd"
 )
 
 // fakeHelper answers requests over a unix socket the way the real helper does,
@@ -70,14 +71,42 @@ func accepted(*helperv1.HelperRequest) *helperv1.HelperResponse {
 	return &helperv1.HelperResponse{Accepted: true, ExitCode: 0}
 }
 
+// restartedUnit is the unit the tasks of this file order around. Whether the
+// machine running the tests has it is nobody's business here: the host these
+// tasks are verified against is a stub.
+const restartedUnit = "cron.service"
+
 func systemdFacts() Facts {
 	return Facts{Capabilities: Capabilities{{Name: CapSystemd, Available: true}}}
 }
 
 func restartEnvelope(taskID, key string) *agentv1.TaskEnvelope {
-	task := unitEnvelope(taskID, "cron.service")
+	task := unitEnvelope(taskID, restartedUnit)
 	task.IdempotencyKey = key
 	return task
+}
+
+// hostShowingUnit is the host the verifier reads after the change: every unit
+// it is asked about answers with the state the test gave it.
+func hostShowingUnit(state systemd.UnitState) *hostReaders {
+	return &hostReaders{unit: func(context.Context, string) (systemd.UnitState, error) {
+		return state, nil
+	}}
+}
+
+// unitTookTheRestart is the state of a unit that came back up after the order.
+func unitTookTheRestart() systemd.UnitState {
+	return systemd.UnitState{Name: restartedUnit, LoadState: "loaded",
+		ActiveState: "active", SubState: "running"}
+}
+
+// newExecutor builds the executor these tests drive: the real one, reading a
+// host the test owns rather than the systemd of the machine it runs on.
+func newExecutor(client *HelperClient, journal *IdempotencyJournal,
+	facts func() Facts, log *slog.Logger) *TaskExecutor {
+	executor := NewTaskExecutor(client, journal, facts, log)
+	executor.verifyReaders = hostShowingUnit(unitTookTheRestart())
+	return executor
 }
 
 // progressLog records the reports an executor sends, from whichever goroutine
@@ -144,7 +173,7 @@ func TestTheMarkerIsDownBeforeTheHelperActsAndGoneWithTheResult(t *testing.T) {
 		seen, found = journal.InFlight("key-1")
 		return accepted(request)
 	})
-	executor := NewTaskExecutor(client, journal, systemdFacts, quietLogger())
+	executor := newExecutor(client, journal, systemdFacts, quietLogger())
 
 	result := executor.Execute(context.Background(), restartEnvelope("task-1", "key-1"))
 	if result.GetStatus() != agentv1.TaskResult_STATUS_SUCCEEDED {
@@ -194,7 +223,7 @@ func TestARestartInFlightAnswersWithAnUnknownOutcome(t *testing.T) {
 	})
 	var startupLog bytes.Buffer
 	log := slog.New(slog.NewTextHandler(&startupLog, nil))
-	executor := NewTaskExecutor(client, journal, systemdFacts, log)
+	executor := newExecutor(client, journal, systemdFacts, log)
 
 	for _, want := range []string{"task_id=task-1", "action=unit.restart", "age="} {
 		if !strings.Contains(startupLog.String(), want) {
@@ -278,7 +307,7 @@ func TestAnUnknownPackageOutcomeCarriesWhatTheAdapterCanSay(t *testing.T) {
 				t.Errorf("the helper was asked again for %s", request.GetTaskId())
 				return accepted(request)
 			})
-			executor := NewTaskExecutor(client, journal, systemdFacts, quietLogger())
+			executor := newExecutor(client, journal, systemdFacts, quietLogger())
 			executor.packageState = tc.probe
 
 			result := executor.Execute(context.Background(), restartEnvelope("task-2", "key-1"))
@@ -316,7 +345,7 @@ func TestAReadLeavesNoMarker(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake, client := startFakeHelper(t, accepted)
-	executor := NewTaskExecutor(client, journal, systemdFacts, quietLogger())
+	executor := newExecutor(client, journal, systemdFacts, quietLogger())
 
 	read := &agentv1.TaskEnvelope{
 		TaskId: "read-1", IdempotencyKey: "key-read",
@@ -353,7 +382,7 @@ func TestARedeliveryDuringTheOperationIsAcknowledgedNotRefused(t *testing.T) {
 		<-release
 		return accepted(request)
 	})
-	executor := NewTaskExecutor(client, journal, systemdFacts, quietLogger())
+	executor := newExecutor(client, journal, systemdFacts, quietLogger())
 	var reports progressLog
 	executor.progress = reports.record
 
@@ -453,7 +482,7 @@ func TestTheNewestRedeliveredAttemptGetsTheResult(t *testing.T) {
 		<-release
 		return accepted(request)
 	})
-	executor := NewTaskExecutor(client, journal, systemdFacts, quietLogger())
+	executor := newExecutor(client, journal, systemdFacts, quietLogger())
 	var reports progressLog
 	executor.progress = reports.record
 
@@ -567,7 +596,7 @@ func TestATaskIsAcceptedThenStartedAroundTheModuleCall(t *testing.T) {
 		atTheHelper = reports.stagesOf("task-1")
 		return accepted(request)
 	})
-	executor := NewTaskExecutor(client, journal, systemdFacts, quietLogger())
+	executor := newExecutor(client, journal, systemdFacts, quietLogger())
 	executor.progress = reports.record
 
 	var admitted []string
@@ -608,7 +637,7 @@ func TestAReadIsAcceptedAndStartedWithoutClaims(t *testing.T) {
 	}
 	var reports progressLog
 	_, client := startFakeHelper(t, accepted)
-	executor := NewTaskExecutor(client, journal, systemdFacts, quietLogger())
+	executor := newExecutor(client, journal, systemdFacts, quietLogger())
 	executor.progress = reports.record
 
 	task := &agentv1.TaskEnvelope{
@@ -635,7 +664,7 @@ func TestAWaitForABusyLockIsReportedBetweenAcceptedAndStarted(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, client := startFakeHelper(t, accepted)
-	executor := NewTaskExecutor(client, journal, systemdFacts, quietLogger())
+	executor := newExecutor(client, journal, systemdFacts, quietLogger())
 	var reports progressLog
 	executor.progress = reports.record
 
@@ -690,7 +719,7 @@ func TestARefusalByTheLockIsNotRemembered(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake, client := startFakeHelper(t, accepted)
-	executor := NewTaskExecutor(client, journal, systemdFacts, quietLogger())
+	executor := newExecutor(client, journal, systemdFacts, quietLogger())
 	busy := true
 	executor.admit = func(ctx context.Context, task *agentv1.TaskEnvelope, claims []opspec.ResourceClaim,
 		waiting func(string)) (func(), string) {
@@ -746,7 +775,7 @@ func TestAChangedPreconditionAfterTheWaitIsRefusedWithoutTouchingTheHost(t *test
 		f.BootID = bootID
 		return f
 	}
-	executor := NewTaskExecutor(client, journal, facts, quietLogger())
+	executor := newExecutor(client, journal, facts, quietLogger())
 	var reports progressLog
 	executor.progress = reports.record
 
@@ -838,7 +867,7 @@ func TestAJournalThatCannotTakeTheMarkerStartsNothing(t *testing.T) {
 		asked = true
 		return accepted(request)
 	})
-	executor := NewTaskExecutor(client, journal, systemdFacts, quietLogger())
+	executor := newExecutor(client, journal, systemdFacts, quietLogger())
 
 	result := executor.Execute(context.Background(), restartEnvelope("task-1", "key-1"))
 	if result.GetStatus() != agentv1.TaskResult_STATUS_FAILED || result.GetErrorCode() != RejectJournalUnavailable {
@@ -859,5 +888,46 @@ func TestAJournalThatCannotTakeTheMarkerStartsNothing(t *testing.T) {
 	}
 	if !asked {
 		t.Fatal("the helper was not asked once the journal could write")
+	}
+}
+
+// TestAChangeTheHostDoesNotShowIsReportedAsUnverified keeps the other half of
+// the verification covered on purpose: the helper accepted the order, and the
+// host the verifier reads does not know the unit at all.
+func TestAChangeTheHostDoesNotShowIsReportedAsUnverified(t *testing.T) {
+	dir := t.TempDir()
+	journal, err := NewIdempotencyJournal(dir, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake, client := startFakeHelper(t, accepted)
+	executor := newExecutor(client, journal, systemdFacts, quietLogger())
+	executor.verifyReaders = hostShowingUnit(systemd.UnitState{
+		Name: restartedUnit, LoadState: "not-found",
+	})
+
+	result := executor.Execute(context.Background(), restartEnvelope("task-1", "key-1"))
+	if result.GetStatus() != agentv1.TaskResult_STATUS_FAILED ||
+		result.GetErrorCode() != opspec.ErrorAppliedUnverified {
+		t.Fatalf("status = %s, code = %q (%s)", result.GetStatus(), result.GetErrorCode(), result.GetMessage())
+	}
+	if fake.calls.Load() != 1 {
+		t.Errorf("the helper was called %d times; the change was made before the verification", fake.calls.Load())
+	}
+	verification := result.GetVerification()
+	if verification.GetVerified() || verification.GetObserved() != "not found" {
+		t.Errorf("verification = %+v", verification)
+	}
+	if !strings.Contains(verification.GetReason(), restartedUnit) {
+		t.Errorf("the reason does not name the unit: %q", verification.GetReason())
+	}
+	// The verdict is the result of the key: a redelivery must not repeat a
+	// change the host already took.
+	if stored := journal.Lookup("key-1"); stored == nil ||
+		stored.GetErrorCode() != opspec.ErrorAppliedUnverified {
+		t.Errorf("the unverified result was not stored: %+v", stored)
+	}
+	if files := inFlightFiles(t, dir); len(files) != 0 {
+		t.Errorf("marker files left behind: %v", files)
 	}
 }
