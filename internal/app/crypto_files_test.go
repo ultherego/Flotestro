@@ -42,6 +42,20 @@ func installation(t *testing.T) (installationFiles, *cryptostate.Record) {
 	if _, _, err := helpercap.LoadOrGenerateSigner(files.HelperKeyPath); err != nil {
 		t.Fatal(err)
 	}
+	// An authority withdrawn from signing: no key left, and the fleet still has
+	// to recognise the hosts it issued for.
+	withdrawn, err := pki.Init(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	retiredPath := filepath.Join(dir, pki.RetiredCertDir,
+		withdrawn.Certificate.SerialNumber.String()+".pem")
+	if err := os.MkdirAll(filepath.Dir(retiredPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(retiredPath, withdrawn.PEM, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	ca, err := pki.Open(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -203,5 +217,51 @@ func TestFilesAreNotForgottenWhileTheDatabaseDisagreesWithThem(t *testing.T) {
 	changed[0].Bytes = append([]byte("x"), changed[0].Bytes...)
 	if err := sameKeys(materials, changed); err == nil {
 		t.Error("a key that holds one thing on disk and another in the database was called safe to remove")
+	}
+}
+
+// The certificates of the withdrawn authorities are public and carry no key,
+// which is exactly why they are easy to forget. An installation that moves
+// into the database without them stops recognising every host that has not
+// renewed since the rotation.
+func TestTheWithdrawnAuthoritiesAreFoundAndPutBack(t *testing.T) {
+	files, _ := installation(t)
+	retired, err := files.collectRetired()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(retired) != 1 {
+		t.Fatalf("the installation has %d withdrawn authorities, want one", len(retired))
+	}
+	// The serial names the certificate, not the file: a file somebody renamed
+	// still describes the authority it holds.
+	serial, err := cryptostate.RetiredSerial(retired[0].Certificate)
+	if err != nil || serial != retired[0].Serial {
+		t.Errorf("the withdrawn authority is named %q and holds %q (%v)", retired[0].Serial, serial, err)
+	}
+
+	restored := t.TempDir()
+	into := installationFiles{StateDir: restored, HelperKeyPath: filepath.Join(restored, "helper-signing.key")}
+	for _, step := range into.retiredPlan(retired) {
+		if err := step.write(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	again, err := into.collectRetired()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(again) != 1 || again[0].Serial != retired[0].Serial ||
+		string(again[0].Certificate) != string(retired[0].Certificate) {
+		t.Error("the withdrawn authority did not come back as it went in")
+	}
+
+	// And a certificate the database never received is not one this command
+	// may throw away.
+	if err := sameAuthorities(retired, retired); err != nil {
+		t.Fatalf("an installation disagreed with itself: %v", err)
+	}
+	if err := sameAuthorities(retired, nil); err == nil {
+		t.Error("a withdrawn authority only on disk was called safe to remove")
 	}
 }

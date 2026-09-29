@@ -78,6 +78,11 @@ installation identifier; any two of the three are not a backup.
    key left behind is an installation that will start, serve, and then fail to renew a
    certificate weeks later.
 
+   The certificates of the authorities withdrawn from signing (`ca-retired/<serial>.pem`) are
+   in the list too, under `retired-authority`. They carry no key, but the fleet recognises the
+   hosts they issued for until the last of those has renewed, so they travel with everything
+   else.
+
 2. Move them:
 
    ```fish

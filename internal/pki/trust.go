@@ -37,7 +37,7 @@ type Trust struct {
 }
 
 // retiredDir holds the CAs withdrawn from signing.
-const retiredDir = "ca-retired"
+const retiredDir = RetiredCertDir
 
 // pendingCertFile and pendingKeyFile hold the CA prepared to take over.
 const (

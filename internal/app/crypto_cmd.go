@@ -207,7 +207,11 @@ func cryptoImportState(args []string) error {
 	if err != nil {
 		return err
 	}
-	preview, err := cryptostate.Preview(ctx, store, kek, materials)
+	retired, err := options.files.collectRetired()
+	if err != nil {
+		return err
+	}
+	preview, err := cryptostate.Preview(ctx, store, kek, materials, retired)
 	if err != nil {
 		return err
 	}
@@ -228,7 +232,7 @@ func cryptoImportState(args []string) error {
 	if err != nil {
 		return err
 	}
-	report, err := cryptostate.Import(ctx, store, kek, materials)
+	report, err := cryptostate.Import(ctx, store, kek, materials, retired)
 	if err != nil {
 		return err
 	}
@@ -266,10 +270,15 @@ func cryptoRevertState(args []string) error {
 	if err != nil {
 		return err
 	}
+	retired, err := cryptostate.ExportRetired(ctx, store)
+	if err != nil {
+		return err
+	}
 	plan, err := options.files.restorePlan(materials, record)
 	if err != nil {
 		return err
 	}
+	plan = append(plan, options.files.retiredPlan(retired)...)
 	if options.dryRun {
 		fmt.Printf("would write %d files back into %s\n", len(plan), options.files.StateDir)
 		for _, step := range plan {
@@ -549,6 +558,17 @@ func cryptoForgetFiles(args []string) error {
 	if err := sameKeys(fromFiles, fromDatabase); err != nil {
 		return err
 	}
+	retiredOnDisk, err := options.files.collectRetired()
+	if err != nil {
+		return err
+	}
+	retiredInDatabase, err := cryptostate.ExportRetired(ctx, store)
+	if err != nil {
+		return err
+	}
+	if err := sameAuthorities(retiredOnDisk, retiredInDatabase); err != nil {
+		return err
+	}
 	// Three: the files belong to this installation and not to another one that
 	// happens to sit in the same directory.
 	marker, err := cryptostate.ReadMarker(options.files.StateDir)
@@ -576,7 +596,7 @@ func cryptoForgetFiles(args []string) error {
 			record.InstallationID)
 	}
 
-	paths := materialPaths(fromFiles)
+	paths := append(materialPaths(fromFiles), retiredPaths(retiredOnDisk)...)
 	// Six: what stops working is said before it stops working, not after.
 	fmt.Println("after this, an installation that is rolled back to a panel from before the keys moved")
 	fmt.Println("into the database will not start without a backup of these files.")
@@ -679,4 +699,26 @@ func syncDir(path string) error {
 	}
 	defer dir.Close()
 	return dir.Sync()
+}
+
+// sameAuthorities checks that the database holds the withdrawn certificates
+// the files hold. A certificate only on disk is one the fleet would stop
+// recognising the moment the file went.
+func sameAuthorities(files, database []cryptostate.RetiredAuthority) error {
+	inDatabase := map[string]string{}
+	for _, authority := range database {
+		inDatabase[authority.Serial] = string(authority.Certificate)
+	}
+	for _, authority := range files {
+		certificate, ok := inDatabase[authority.Serial]
+		if !ok {
+			return fmt.Errorf("the withdrawn authority %s is in %s and not in the database",
+				authority.Serial, authority.Source)
+		}
+		if certificate != string(authority.Certificate) {
+			return fmt.Errorf("the withdrawn authority %s is one certificate in %s and another in the database",
+				authority.Serial, authority.Source)
+		}
+	}
+	return nil
 }

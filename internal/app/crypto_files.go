@@ -238,3 +238,67 @@ func materialPaths(materials []cryptostate.Material) []string {
 	}
 	return paths
 }
+
+// collectRetired reads the certificates of the authorities withdrawn from
+// signing. They carry no key, so nothing wraps them, but an installation that
+// leaves them behind stops recognising every host that has not renewed since
+// the rotation - which is the fleet, the day after a rotation.
+func (f installationFiles) collectRetired() ([]cryptostate.RetiredAuthority, error) {
+	dir := filepath.Join(f.StateDir, pki.RetiredCertDir)
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("the withdrawn authorities: %w", err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".pem") {
+			names = append(names, entry.Name())
+		}
+	}
+	sort.Strings(names)
+	var retired []cryptostate.RetiredAuthority
+	for _, name := range names {
+		path := filepath.Join(dir, name)
+		certPEM, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		// The serial comes from the certificate rather than from the file name:
+		// the name is what somebody called the file, the serial is what the
+		// authority is.
+		serial, err := cryptostate.RetiredSerial(certPEM)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		retired = append(retired, cryptostate.RetiredAuthority{
+			Serial: serial, Certificate: certPEM, Source: path,
+		})
+	}
+	return retired, nil
+}
+
+// retiredPlan puts the withdrawn certificates back where the directory store
+// reads them from.
+func (f installationFiles) retiredPlan(retired []cryptostate.RetiredAuthority) []restoreStep {
+	plan := make([]restoreStep, 0, len(retired))
+	for _, authority := range retired {
+		plan = append(plan, restoreStep{
+			path:    filepath.Join(f.StateDir, pki.RetiredCertDir, authority.Serial+".pem"),
+			mode:    0o644,
+			content: authority.Certificate,
+		})
+	}
+	return plan
+}
+
+// retiredPaths names the files the withdrawn certificates came from.
+func retiredPaths(retired []cryptostate.RetiredAuthority) []string {
+	paths := make([]string, 0, len(retired))
+	for _, authority := range retired {
+		paths = append(paths, authority.Source)
+	}
+	return paths
+}

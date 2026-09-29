@@ -351,7 +351,7 @@ func (p *Postgres) SetKEKID(ctx context.Context, id string) error {
 // installation whose secret store reads from the database while its authority
 // still reads from one replica's disk is shared in a way that hides what it
 // still depends on.
-func (p *Postgres) ImportKeys(ctx context.Context, kekID string, keys []WrappedKey) error {
+func (p *Postgres) ImportKeys(ctx context.Context, kekID string, keys []WrappedKey, retired []RetiredAuthority) error {
 	return p.inTransaction(ctx, func(tx pgx.Tx) error {
 		var recorded *string
 		// The row is taken for update first, so that a second panel doing the same
@@ -375,6 +375,16 @@ func (p *Postgres) ImportKeys(ctx context.Context, kekID string, keys []WrappedK
 		}
 		if err := insertKeys(ctx, tx, keys); err != nil {
 			return err
+		}
+		// The withdrawn certificates travel in the same transaction. They carry no
+		// key, but an installation that loses them stops recognising every host
+		// that has not renewed since the rotation.
+		for _, authority := range retired {
+			if _, err := tx.Exec(ctx, `
+				insert into crypto_retired_authorities (serial, certificate) values ($1, $2)
+				on conflict (serial) do nothing`, authority.Serial, string(authority.Certificate)); err != nil {
+				return fmt.Errorf("the withdrawn authority %s: %w", authority.Serial, err)
+			}
 		}
 		// Moving the keys is switching the provider: the record has to say so in
 		// the same transaction, or the next start would find an installation
@@ -430,7 +440,12 @@ func (p *Postgres) ForgetKeys(ctx context.Context, kekID string) error {
 		if tag.RowsAffected() == 0 {
 			return fmt.Errorf("the installation is not wrapped with %s", kekID)
 		}
-		_, err = tx.Exec(ctx, `delete from crypto_wrapped_keys where kek_id = $1`, kekID)
+		if _, err := tx.Exec(ctx, `delete from crypto_wrapped_keys where kek_id = $1`, kekID); err != nil {
+			return err
+		}
+		// The withdrawn certificates go with them: the files are back by now, and
+		// leaving the rows would make a later import refuse a set it already has.
+		_, err = tx.Exec(ctx, `delete from crypto_retired_authorities`)
 		return err
 	})
 }

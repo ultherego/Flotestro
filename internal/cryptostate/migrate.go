@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"sort"
 	"time"
+
+	"github.com/ultherego/flotestro/internal/pki"
 )
 
 // Moving the keys of an installation into the database, and back.
@@ -47,6 +49,17 @@ func (m Material) Digest() string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
+// RetiredAuthority is the certificate of an authority withdrawn from signing.
+// It carries no key - the key is destroyed at the handover - but the fleet
+// still has to recognise the hosts it issued for until the last of them has
+// renewed, so it travels with the installation like everything else.
+type RetiredAuthority struct {
+	Serial      string
+	Certificate []byte
+	// Source is the file it was read from, for the report and the backup.
+	Source string
+}
+
 // Entry is one line of what a migration did or would do.
 type Entry struct {
 	KeyID   string
@@ -72,17 +85,19 @@ type MigrationReport struct {
 // way to write all of them and the record together or not at all.
 type ImportStore interface {
 	KeyStore
-	// ImportKeys writes every key and the key encryption key's name in one
-	// transaction. It refuses an installation whose keys are already in the
-	// database: a second import would be a second opinion about what the
-	// installation is.
-	ImportKeys(ctx context.Context, kekID string, keys []WrappedKey) error
+	// ImportKeys writes every key, every withdrawn certificate and the key
+	// encryption key's name in one transaction. It refuses an installation
+	// whose keys are already in the database: a second import would be a
+	// second opinion about what the installation is.
+	ImportKeys(ctx context.Context, kekID string, keys []WrappedKey, retired []RetiredAuthority) error
 	// ReplaceKeys rewraps: every row and the record move from one key
 	// encryption key to another together.
 	ReplaceKeys(ctx context.Context, fromKEKID, toKEKID string, keys []WrappedKey) error
 	// ForgetKeys takes the keys out of the database and clears the record,
 	// which is the last step of a revert - after the files are back.
 	ForgetKeys(ctx context.Context, kekID string) error
+	// RetiredAuthorities returns the certificates withdrawn from signing.
+	RetiredAuthorities(ctx context.Context) ([][]byte, error)
 	KEKID(ctx context.Context) (string, error)
 	Load(ctx context.Context) (*Record, error)
 }
@@ -93,7 +108,7 @@ type ImportStore interface {
 // round trip costs nothing and answers the only question that matters at this
 // moment: will this installation still be able to read its own keys once the
 // files are gone.
-func Import(ctx context.Context, store ImportStore, kek *KEK, materials []Material) (MigrationReport, error) {
+func Import(ctx context.Context, store ImportStore, kek *KEK, materials []Material, retired []RetiredAuthority) (MigrationReport, error) {
 	report := MigrationReport{KEKID: kek.ID(), At: time.Now().UTC()}
 	if len(materials) == 0 {
 		return report, fmt.Errorf("there is nothing to move: no key was found outside the database")
@@ -110,10 +125,10 @@ func Import(ctx context.Context, store ImportStore, kek *KEK, materials []Materi
 	if err != nil {
 		return report, err
 	}
-	if err := store.ImportKeys(ctx, kek.ID(), rows); err != nil {
+	if err := store.ImportKeys(ctx, kek.ID(), rows, retired); err != nil {
 		return report, err
 	}
-	report.Entries = entries(materials, "import")
+	report.Entries = append(entries(materials, "import"), retiredEntries(retired)...)
 	return report, nil
 }
 
@@ -172,6 +187,27 @@ func Export(ctx context.Context, store ImportStore, kek *KEK) ([]Material, error
 			"the installation is wrapped with %s; this deployment holds %s", recorded, kek.ID()), nil)
 	}
 	return open(ctx, store, kek)
+}
+
+// ExportRetired hands back the withdrawn certificates, so that a revert can
+// put them next to the keys. An installation that has ever rotated its CA and
+// loses them cuts off every host that has not yet renewed.
+func ExportRetired(ctx context.Context, store ImportStore) ([]RetiredAuthority, error) {
+	certificates, err := store.RetiredAuthorities(ctx)
+	if err != nil {
+		return nil, err
+	}
+	retired := make([]RetiredAuthority, 0, len(certificates))
+	for _, certPEM := range certificates {
+		serial, err := RetiredSerial(certPEM)
+		if err != nil {
+			return nil, err
+		}
+		retired = append(retired, RetiredAuthority{
+			Serial: serial, Certificate: certPEM, Source: "the database",
+		})
+	}
+	return retired, nil
 }
 
 // seal wraps every material and reads each one back. A key that seals but does
@@ -236,6 +272,23 @@ func open(ctx context.Context, store ImportStore, kek *KEK) ([]Material, error) 
 	return materials, nil
 }
 
+// retiredEntries reports the withdrawn certificates beside the keys. They are
+// public, so the digest is there to compare copies, not to hide anything.
+func retiredEntries(retired []RetiredAuthority) []Entry {
+	lines := make([]Entry, 0, len(retired))
+	for _, authority := range retired {
+		sum := sha256.Sum256(authority.Certificate)
+		lines = append(lines, Entry{
+			KeyID:   authority.Serial,
+			Purpose: "retired-authority",
+			Source:  authority.Source,
+			Digest:  "sha256:" + hex.EncodeToString(sum[:]),
+			Action:  "import",
+		})
+	}
+	return lines
+}
+
 func entries(materials []Material, action string) []Entry {
 	lines := make([]Entry, 0, len(materials))
 	for _, material := range materials {
@@ -252,7 +305,7 @@ func entries(materials []Material, action string) []Entry {
 
 // Preview is what a dry run reports: exactly what the run would do, without
 // touching the database.
-func Preview(ctx context.Context, store ImportStore, kek *KEK, materials []Material) (MigrationReport, error) {
+func Preview(ctx context.Context, store ImportStore, kek *KEK, materials []Material, retired []RetiredAuthority) (MigrationReport, error) {
 	report := MigrationReport{KEKID: kek.ID(), At: time.Now().UTC()}
 	recorded, err := store.KEKID(ctx)
 	if err != nil {
@@ -265,6 +318,17 @@ func Preview(ctx context.Context, store ImportStore, kek *KEK, materials []Mater
 	if _, err := seal(kek, materials); err != nil {
 		return report, err
 	}
-	report.Entries = entries(materials, "import")
+	report.Entries = append(entries(materials, "import"), retiredEntries(retired)...)
 	return report, nil
+}
+
+// RetiredSerial names a withdrawn certificate the way the state directory
+// named its file: by the serial of the certificate itself, so that the same
+// authority keeps the same name whichever side it is read from.
+func RetiredSerial(certPEM []byte) (string, error) {
+	cert, err := pki.ParseCertificatePEM(certPEM)
+	if err != nil {
+		return "", fmt.Errorf("a withdrawn authority: %w", err)
+	}
+	return cert.SerialNumber.String(), nil
 }

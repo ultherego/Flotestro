@@ -270,7 +270,10 @@ func (ca *CA) IssuerID() string {
 // wherever they are needed, because moving the keys of an installation into the
 // database has to speak about exactly these files and no others.
 const (
-	CACertFile      = "ca.pem"
+	CACertFile = "ca.pem"
+	// RetiredCertDir holds the certificates of the authorities withdrawn from
+	// signing, one file per serial.
+	RetiredCertDir  = "ca-retired"
 	CAKeyFile       = "ca.key"
 	PendingCertFile = "ca-pending.pem"
 	PendingKeyFile  = "ca-pending.key"

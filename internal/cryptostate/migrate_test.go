@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"sort"
 	"testing"
 	"time"
 
@@ -14,13 +15,15 @@ import (
 // the one column of the record the migration touches.
 type memoryStore struct {
 	*memoryKeys
-	kekID  string
-	record *Record
+	kekID   string
+	record  *Record
+	retired map[string][]byte
 }
 
 func newMemoryStore() *memoryStore {
 	return &memoryStore{
 		memoryKeys: newMemoryKeys(),
+		retired:    map[string][]byte{},
 		record: &Record{
 			InstallationID: "6283c373-ab8a-4527-ad96-9a59b46a9234",
 			Provider:       LocalProviderName, Revision: 4,
@@ -37,7 +40,7 @@ func (m *memoryStore) Load(context.Context) (*Record, error) {
 	return m.record, nil
 }
 
-func (m *memoryStore) ImportKeys(ctx context.Context, kekID string, keys []WrappedKey) error {
+func (m *memoryStore) ImportKeys(ctx context.Context, kekID string, keys []WrappedKey, retired []RetiredAuthority) error {
 	if m.kekID != "" {
 		return errors.New("already wrapped")
 	}
@@ -45,6 +48,9 @@ func (m *memoryStore) ImportKeys(ctx context.Context, kekID string, keys []Wrapp
 		if err := m.PutWrappedKey(ctx, key); err != nil {
 			return err
 		}
+	}
+	for _, authority := range retired {
+		m.retired[authority.Serial] = authority.Certificate
 	}
 	m.kekID = kekID
 	// The database says the same thing the record does: moving the keys is
@@ -78,9 +84,25 @@ func (m *memoryStore) ForgetKeys(_ context.Context, kekID string) error {
 	m.rows = map[string]WrappedKey{}
 	m.mu.Unlock()
 	m.kekID = ""
+	m.retired = map[string][]byte{}
 	m.record.Provider = LocalProviderName
 	m.record.Revision++
 	return nil
+}
+
+func (m *memoryStore) RetiredAuthorities(context.Context) ([][]byte, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	serials := make([]string, 0, len(m.retired))
+	for serial := range m.retired {
+		serials = append(serials, serial)
+	}
+	sort.Strings(serials)
+	certificates := make([][]byte, 0, len(serials))
+	for _, serial := range serials {
+		certificates = append(certificates, m.retired[serial])
+	}
+	return certificates, nil
 }
 
 func (m *memoryStore) count() int {
@@ -113,7 +135,7 @@ func TestTheKeysOfAnInstallationMoveTogetherOrNotAtAll(t *testing.T) {
 	materials := installationMaterial()
 
 	// A dry run says exactly what the run will say, and writes nothing.
-	preview, err := Preview(ctx, store, kek, materials)
+	preview, err := Preview(ctx, store, kek, materials, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +146,7 @@ func TestTheKeysOfAnInstallationMoveTogetherOrNotAtAll(t *testing.T) {
 		t.Fatal("the preview wrote to the database")
 	}
 
-	report, err := Import(ctx, store, kek, materials)
+	report, err := Import(ctx, store, kek, materials, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,10 +187,10 @@ func TestTheKeysOfAnInstallationMoveTogetherOrNotAtAll(t *testing.T) {
 	}
 
 	// A second import would be a second opinion about what the installation is.
-	if _, err := Import(ctx, store, kek, materials); err == nil {
+	if _, err := Import(ctx, store, kek, materials, nil); err == nil {
 		t.Error("the keys were imported twice")
 	}
-	if _, err := Preview(ctx, store, kek, materials); err == nil {
+	if _, err := Preview(ctx, store, kek, materials, nil); err == nil {
 		t.Error("a dry run of a migration that already happened said it would work")
 	}
 }
@@ -200,7 +222,7 @@ func TestAMigrationThatCannotBeCompletedWritesNothing(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			store := newMemoryStore()
-			if _, err := Import(ctx, store, kek, test.materials); err == nil {
+			if _, err := Import(ctx, store, kek, test.materials, nil); err == nil {
 				t.Fatal("the migration went through")
 			}
 			if store.count() != 0 || store.kekID != "" {
@@ -220,7 +242,7 @@ func TestARewrapMovesTheWrappingAndNothingElse(t *testing.T) {
 	second := testKEK(t, otherKEKHex)
 	store := newMemoryStore()
 	materials := installationMaterial()
-	if _, err := Import(ctx, store, first, materials); err != nil {
+	if _, err := Import(ctx, store, first, materials, nil); err != nil {
 		t.Fatal(err)
 	}
 	// One key is out of use but still opens what it sealed.
@@ -288,7 +310,7 @@ func TestARevertHandsBackTheMaterialBeforeTheRowsGo(t *testing.T) {
 	stranger := testKEK(t, otherKEKHex)
 	store := newMemoryStore()
 	materials := installationMaterial()
-	if _, err := Import(ctx, store, kek, materials); err != nil {
+	if _, err := Import(ctx, store, kek, materials, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -326,7 +348,52 @@ func TestARevertHandsBackTheMaterialBeforeTheRowsGo(t *testing.T) {
 	// a rollback rather than a one-way door.
 	now := time.Now()
 	materials[0].RetiredAt = &now
-	if _, err := Import(ctx, store, kek, materials); err != nil {
+	if _, err := Import(ctx, store, kek, materials, nil); err != nil {
 		t.Fatalf("the installation could not move back into the database: %v", err)
+	}
+}
+
+// A withdrawn authority has no key left - it is destroyed at the handover -
+// but the fleet still recognises the hosts it issued for until the last of
+// them has renewed. An installation that moves into the database and leaves
+// those certificates on one machine's disk cuts off exactly those hosts.
+func TestTheWithdrawnAuthoritiesTravelWithTheKeys(t *testing.T) {
+	ctx := context.Background()
+	kek := testKEK(t, testKEKHex)
+	store := newMemoryStore()
+	retired := []RetiredAuthority{
+		{Serial: "162611856396057320278394875948272009921",
+			Certificate: []byte("-----BEGIN CERTIFICATE-----\nfirst\n-----END CERTIFICATE-----\n"),
+			Source:      "ca-retired/162611856396057320278394875948272009921.pem"},
+		{Serial: "42", Certificate: []byte("-----BEGIN CERTIFICATE-----\nsecond\n-----END CERTIFICATE-----\n"),
+			Source: "ca-retired/42.pem"},
+	}
+	report, err := Import(ctx, store, kek, installationMaterial(), retired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(store.retired) != len(retired) {
+		t.Fatalf("the database holds %d withdrawn authorities of %d", len(store.retired), len(retired))
+	}
+	named := 0
+	for _, entry := range report.Entries {
+		if entry.Purpose == "retired-authority" {
+			named++
+		}
+	}
+	if named != len(retired) {
+		t.Errorf("the report names %d withdrawn authorities of %d", named, len(retired))
+	}
+	certificates, err := store.RetiredAuthorities(ctx)
+	if err != nil || len(certificates) != len(retired) {
+		t.Fatalf("the withdrawn authorities came back as %d: %v", len(certificates), err)
+	}
+
+	// They go with the keys on the way back, not before them and not after.
+	if err := store.ForgetKeys(ctx, kek.ID()); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.retired) != 0 {
+		t.Error("the revert left the withdrawn authorities in the database")
 	}
 }
