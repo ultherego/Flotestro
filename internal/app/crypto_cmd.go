@@ -450,7 +450,7 @@ func (f installationFiles) restorePlan(materials []cryptostate.Material, record 
 				content: material.Bytes,
 			})
 		case cryptostate.PurposeAgentCA:
-			keyPEM, certPEM, preparedAt, err := authorityParts(material.Bytes)
+			keyPEM, certPEM, preparedAt, err := cryptostate.AuthorityParts(material.Bytes)
 			if err != nil {
 				return nil, fmt.Errorf("the authority %s: %w", material.KeyID, err)
 			}
@@ -473,7 +473,7 @@ func (f installationFiles) restorePlan(materials []cryptostate.Material, record 
 			}
 		case cryptostate.PurposeHelperSigning:
 			path := f.HelperKeyPath
-			if strings.HasPrefix(material.KeyID, helperPreviousPrefix) {
+			if strings.HasPrefix(material.KeyID, cryptostate.HelperPreviousPrefix) {
 				path = helpercap.PreviousKeyPath(f.HelperKeyPath)
 			}
 			plan = append(plan, restoreStep{path: path, mode: 0o600, content: material.Bytes})

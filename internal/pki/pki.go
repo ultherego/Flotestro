@@ -172,15 +172,20 @@ func EnsureCA(dir string) (*CA, error) {
 	return Init(dir)
 }
 
-// Open reads the signing CA and refuses anything but a complete, matching
-// pair.
+// Open reads the signing CA of a state directory and refuses anything but a
+// complete, matching pair.
 func Open(dir string) (*CA, error) {
-	certPath := filepath.Join(dir, caCertFile)
-	keyPath := filepath.Join(dir, caKeyFile)
-	certPEM, certErr := os.ReadFile(certPath)
-	keyPEM, keyErr := os.ReadFile(keyPath)
+	return OpenFrom(NewDirectoryAuthorities(dir))
+}
+
+// OpenFrom reads the signing CA wherever the installation keeps it.
+func OpenFrom(store AuthorityStore) (*CA, error) {
+	keyPEM, certPEM, err := store.ReadActive()
+	if err != nil {
+		return nil, err
+	}
 	switch {
-	case certErr == nil && keyErr == nil:
+	case certPEM != nil && keyPEM != nil:
 		ca, err := parseCA(certPEM, keyPEM)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrStateMismatch, err)
@@ -189,20 +194,22 @@ func Open(dir string) (*CA, error) {
 			return nil, err
 		}
 		return ca, nil
-	case os.IsNotExist(certErr) && os.IsNotExist(keyErr):
-		if HasAnyMaterial(dir) {
-			return nil, fmt.Errorf("%w: the directory holds CA material but no signing pair (%s, %s)",
-				ErrStateMismatch, caCertFile, caKeyFile)
+	case certPEM == nil && keyPEM == nil:
+		held, err := store.HasMaterial()
+		if err != nil {
+			return nil, err
+		}
+		if held {
+			return nil, fmt.Errorf("%w: %s holds CA material but no signing pair",
+				ErrStateMismatch, store.Describe())
 		}
 		return nil, ErrNoMaterial
-	case certErr == nil && os.IsNotExist(keyErr):
-		return nil, fmt.Errorf("%w: %s is there and %s is not", ErrIssuerKeyUnavailable, caCertFile, caKeyFile)
-	case os.IsNotExist(certErr) && keyErr == nil:
-		return nil, fmt.Errorf("%w: %s is there and %s is not", ErrStateMismatch, caKeyFile, caCertFile)
-	case certErr != nil:
-		return nil, certErr
+	case certPEM != nil:
+		return nil, fmt.Errorf("%w: the certificate of the CA is in %s and its private key is not",
+			ErrIssuerKeyUnavailable, store.Describe())
 	default:
-		return nil, keyErr
+		return nil, fmt.Errorf("%w: the private key of the CA is in %s and its certificate is not",
+			ErrStateMismatch, store.Describe())
 	}
 }
 
@@ -212,21 +219,27 @@ func Init(dir string) (*CA, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("state directory: %w", err)
 	}
-	if HasAnyMaterial(dir) {
-		return nil, fmt.Errorf("%w: %s already holds CA material", ErrMaterialExists, dir)
+	return InitFrom(NewDirectoryAuthorities(dir))
+}
+
+// InitFrom creates the first CA of an installation in a store that holds no
+// material.
+func InitFrom(store AuthorityStore) (*CA, error) {
+	held, err := store.HasMaterial()
+	if err != nil {
+		return nil, err
+	}
+	if held {
+		return nil, fmt.Errorf("%w: %s already holds CA material", ErrMaterialExists, store.Describe())
 	}
 	_, certPEM, keyPEM, err := newCA()
 	if err != nil {
 		return nil, err
 	}
-	// The CA key is the most sensitive material in the system.
-	if err := writeFileAtomic(filepath.Join(dir, caKeyFile), keyPEM, 0o600); err != nil {
+	if err := store.WriteActive(keyPEM, certPEM); err != nil {
 		return nil, err
 	}
-	if err := writeFileAtomic(filepath.Join(dir, caCertFile), certPEM, 0o644); err != nil {
-		return nil, err
-	}
-	return Open(dir)
+	return OpenFrom(store)
 }
 
 // VerifyPair checks that the private key is the one the certificate describes.

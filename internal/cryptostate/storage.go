@@ -462,3 +462,83 @@ func (p *Postgres) inTransaction(ctx context.Context, do func(pgx.Tx) error) err
 	}
 	return tx.Commit(ctx)
 }
+
+// The authorities of the installation as rows: the wrapped ones the fleet
+// signs with, and the certificates of those it has withdrawn from signing.
+
+// ReplaceAuthority implements AuthorityKeyStore. The removal and the insert
+// share a transaction, so that no replica ever reads a moment in which the
+// installation has two authorities that sign, or none.
+func (p *Postgres) ReplaceAuthority(ctx context.Context, row WrappedKey, remove []string) error {
+	return p.inTransaction(ctx, func(tx pgx.Tx) error {
+		if err := deleteAuthorities(ctx, tx, remove); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `
+			insert into crypto_wrapped_keys
+				(key_id, purpose, kek_id, envelope_version, nonce, ciphertext, retired_at)
+			values ($1, $2, $3, $4, $5, $6, $7)`,
+			row.KeyID, row.Purpose, row.KEKID, row.EnvelopeVersion,
+			row.Nonce, row.Ciphertext, row.RetiredAt)
+		if err != nil {
+			return fmt.Errorf("the authority %s: %w", row.KeyID, err)
+		}
+		return nil
+	})
+}
+
+// DeleteAuthorities implements AuthorityKeyStore.
+func (p *Postgres) DeleteAuthorities(ctx context.Context, keyIDs []string) error {
+	return p.inTransaction(ctx, func(tx pgx.Tx) error {
+		return deleteAuthorities(ctx, tx, keyIDs)
+	})
+}
+
+// deleteAuthorities removes rows by name, and only rows that are authorities:
+// a name that turned out to belong to a key of the secret store would take the
+// secrets of the installation with it.
+func deleteAuthorities(ctx context.Context, tx pgx.Tx, keyIDs []string) error {
+	if len(keyIDs) == 0 {
+		return nil
+	}
+	_, err := tx.Exec(ctx,
+		`delete from crypto_wrapped_keys where key_id = any($1) and purpose = $2`,
+		keyIDs, PurposeAgentCA)
+	return err
+}
+
+// RetiredAuthorities implements AuthorityKeyStore.
+func (p *Postgres) RetiredAuthorities(ctx context.Context) ([][]byte, error) {
+	rows, err := p.pool.Query(ctx,
+		`select certificate from crypto_retired_authorities order by serial`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var certificates [][]byte
+	for rows.Next() {
+		var certPEM string
+		if err := rows.Scan(&certPEM); err != nil {
+			return nil, err
+		}
+		certificates = append(certificates, []byte(certPEM))
+	}
+	return certificates, rows.Err()
+}
+
+// PutRetiredAuthority implements AuthorityKeyStore. A serial already there
+// keeps the moment it was withdrawn at: writing the same certificate twice is
+// the same statement of fact.
+func (p *Postgres) PutRetiredAuthority(ctx context.Context, serial string, certPEM []byte) error {
+	_, err := p.pool.Exec(ctx, `
+		insert into crypto_retired_authorities (serial, certificate) values ($1, $2)
+		on conflict (serial) do update set certificate = excluded.certificate`,
+		serial, string(certPEM))
+	return err
+}
+
+// DeleteRetiredAuthority implements AuthorityKeyStore.
+func (p *Postgres) DeleteRetiredAuthority(ctx context.Context, serial string) error {
+	_, err := p.pool.Exec(ctx, `delete from crypto_retired_authorities where serial = $1`, serial)
+	return err
+}

@@ -87,7 +87,7 @@ func TestEveryPrivateKeyOfAnInstallationIsFound(t *testing.T) {
 	// one prepared to take over, and it carries the moment it was prepared.
 	active, prepared := 0, 0
 	for _, material := range byPurpose[cryptostate.PurposeAgentCA] {
-		keyPEM, certPEM, preparedAt, err := authorityParts(material.Bytes)
+		keyPEM, certPEM, preparedAt, err := cryptostate.AuthorityParts(material.Bytes)
 		if err != nil {
 			t.Fatal(err)
 		}

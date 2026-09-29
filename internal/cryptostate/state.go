@@ -74,8 +74,13 @@ func fatalStranger(code string, stranger Stranger, reason string) error {
 type Options struct {
 	Storage  Storage
 	Provider Provider
-	// CADir is the state directory the fleet CA lives in.
+	// CADir is the state directory the fleet CA lives in, and the directory
+	// that carries the marker of the installation it belongs to.
 	CADir string
+	// Authorities is where the fleet's CAs are read from when they are not
+	// files of CADir: the rows of an installation that has moved its keys
+	// into the database, which every replica reads the same way.
+	Authorities pki.AuthorityStore
 	// LegacyKeyPath is where an installation from before the provider
 	// kept its one key. Empty means nowhere to look.
 	LegacyKeyPath string
@@ -92,9 +97,11 @@ type Runtime struct {
 	provider Provider
 	trust    *pki.Trust
 	log      *slog.Logger
-	// caDir is where the fleet CA lives, so a reload reads what another
-	// instance wrote there.
+	// caDir is the state directory, for the marker of the installation.
 	caDir string
+	// authorities is where the CAs are read from, so a reload reads what
+	// another instance wrote.
+	authorities pki.AuthorityStore
 
 	mu     sync.RWMutex
 	record Record
@@ -120,7 +127,8 @@ func Open(ctx context.Context, o Options) (*Runtime, error) {
 	}
 	defer unlock()
 
-	r := &Runtime{storage: o.Storage, provider: o.Provider, log: o.Log, caDir: o.CADir}
+	r := &Runtime{storage: o.Storage, provider: o.Provider, log: o.Log,
+		caDir: o.CADir, authorities: o.authorityStore()}
 	record, err := o.Storage.Load(ctx)
 	switch {
 	case errors.Is(err, ErrNoRecord):
@@ -218,7 +226,7 @@ func (r *Runtime) verify(ctx context.Context, o Options, record Record) error {
 	}
 	o.Provider.SetActive(record.ActiveKeyID)
 
-	trust, err := openTrust(o.CADir)
+	trust, err := openTrust(o.authorityStore())
 	if err != nil {
 		return err
 	}
@@ -268,6 +276,16 @@ func (r *Runtime) verify(ctx context.Context, o Options, record Record) error {
 // initialised, an installation from before the record has its material
 // adopted, and anything in between stops.
 func (r *Runtime) establish(ctx context.Context, o Options) error {
+	if o.Authorities != nil {
+		// The keys of this installation are rows, which means a record named the
+		// key encryption key they are wrapped with - and here there is no record
+		// at all. Creating one now would mint a fleet CA over the authorities the
+		// rows already hold.
+		return fatalStranger(CodeInstallationMismatch, StrangerDatabase,
+			"the keys of this installation are read from the database and the database describes "+
+				"no installation: the control plane was pointed at another database, or at one "+
+				"restored from before this installation existed")
+	}
 	facts, err := o.Storage.Facts(ctx)
 	if err != nil {
 		return fmt.Errorf("reading what the database holds: %w", err)
@@ -301,7 +319,7 @@ func (r *Runtime) establish(ctx context.Context, o Options) error {
 	var createdCA bool
 	switch {
 	case pki.HasAnyMaterial(o.CADir):
-		trust, err = openTrust(o.CADir)
+		trust, err = openTrust(pki.NewDirectoryAuthorities(o.CADir))
 		if err != nil {
 			return err
 		}
@@ -422,21 +440,32 @@ func legacyPathOrNone(path string) string {
 	return path
 }
 
+// authorityStore says where the CAs of this installation are read from. An
+// installation that has not moved its keys reads them from the state
+// directory, exactly as it always did.
+func (o Options) authorityStore() pki.AuthorityStore {
+	if o.Authorities != nil {
+		return o.Authorities
+	}
+	return pki.NewDirectoryAuthorities(o.CADir)
+}
+
 // openTrust reads the CA and translates its states into the fatal ones.
-func openTrust(dir string) (*pki.Trust, error) {
-	trust, err := pki.OpenTrust(dir)
+func openTrust(store pki.AuthorityStore) (*pki.Trust, error) {
+	trust, err := pki.OpenTrustFrom(store)
+	where := store.Describe()
 	switch {
 	case err == nil:
 		return trust, nil
 	case errors.Is(err, pki.ErrIssuerKeyUnavailable):
 		return nil, fatal(CodeIssuerKeyUnavailable,
-			fmt.Sprintf("the fleet CA certificate is in %s and its private key is not; the hosts trust that certificate, so a new CA would cut them off", dir), err)
+			fmt.Sprintf("the fleet CA certificate is in %s and its private key is not; the hosts trust that certificate, so a new CA would cut them off", where), err)
 	case errors.Is(err, pki.ErrStateMismatch):
 		return nil, fatal(CodePKIStateMismatch,
-			fmt.Sprintf("the CA material in %s does not fit together", dir), err)
+			fmt.Sprintf("the CA material in %s does not fit together", where), err)
 	case errors.Is(err, pki.ErrNoMaterial):
 		return nil, fatal(CodeIssuerKeyUnavailable,
-			fmt.Sprintf("%s holds no fleet CA while the installation has one recorded", dir), err)
+			fmt.Sprintf("%s holds no fleet CA while the installation has one recorded", where), err)
 	default:
 		return nil, fmt.Errorf("reading the fleet CA: %w", err)
 	}
@@ -652,9 +681,9 @@ func (r *Runtime) Reload(ctx context.Context) {
 		r.markStale("the record names the key " + loaded.ActiveKeyID + " and this instance does not hold it")
 		return
 	}
-	trust, err := openTrust(r.caDir)
+	trust, err := openTrust(r.authorities)
 	if err != nil {
-		r.markStale("the fleet authority on disk could not be read: " + err.Error())
+		r.markStale("the fleet authority could not be read: " + err.Error())
 		return
 	}
 	if active := trust.Active(); active.IssuerID() != loaded.IssuerID {

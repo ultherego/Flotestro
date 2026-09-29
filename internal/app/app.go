@@ -647,17 +647,27 @@ func Run() error {
 	if err != nil {
 		return refuseCryptoStart(log, err)
 	}
-	if sealed, ok := keyProvider.(*cryptostate.DBSealedProvider); ok {
-		log.Info("the keys of the installation come from the database",
-			"provider", sealed.Name(), "kek_id", sealed.KEKID())
+	// The authorities follow the keys. An installation that moved its keys into
+	// the database and still read its CA from one replica's disk would not be
+	// shared at all: it would depend on that machine and say nothing about it.
+	var authorities pki.AuthorityStore
+	sealedProvider, _ := keyProvider.(*cryptostate.DBSealedProvider)
+	if sealedProvider != nil {
+		authorities, err = sealedProvider.Authorities(ctx)
+		if err != nil {
+			return refuseCryptoStart(log, err)
+		}
+		log.Info("the keys and the fleet authorities of the installation come from the database",
+			"provider", sealedProvider.Name(), "kek_id", sealedProvider.KEKID())
 	} else {
-		log.Info("the keys of the installation come from the state directory",
+		log.Info("the keys and the fleet authorities of the installation come from the state directory",
 			"provider", keyProvider.Name(), "dir", filepath.Join(cfg.StateDir, cryptostate.KeysDir))
 	}
 	cryptoRuntime, err := cryptostate.Open(ctx, cryptostate.Options{
 		Storage:       cryptoStorage,
 		Provider:      keyProvider,
 		CADir:         cfg.StateDir,
+		Authorities:   authorities,
 		LegacyKeyPath: legacyKeyPath,
 		RotateTo:      *secretsKeyRotateTo,
 		Log:           log,
@@ -854,13 +864,9 @@ func Run() error {
 	if signingKeyPath == "" {
 		signingKeyPath = filepath.Join(cfg.StateDir, "helper-signing.key")
 	}
-	helperSigner, created, err := helpercap.LoadOrGenerateSigner(signingKeyPath)
+	helperSigner, err := openHelperSigner(ctx, sealedProvider, signingKeyPath, log)
 	if err != nil {
-		return fmt.Errorf("the helper signing key: %w", err)
-	}
-	if created {
-		log.Warn("the helper signing key was generated; the hosts learn it at their next session",
-			"path", signingKeyPath, "key_id", helperSigner.KeyID())
+		return err
 	}
 	// The fingerprints are what an operator writes into a host's pin file, so
 	// that the host enrolls with this panel and with no other.
@@ -1515,6 +1521,45 @@ func refuseCryptoStart(log *slog.Logger, err error) error {
 		return fmt.Errorf("%s: %s", fatal.Code, fatal.Reason)
 	}
 	return err
+}
+
+// openHelperSigner reads the key that signs the root helper's capabilities
+// from wherever this installation keeps it.
+//
+// For an installation whose keys are rows, nothing is generated. A key that is
+// not there is a fleet whose hosts trust a signature this panel cannot make,
+// and a fresh one would leave every host refusing every capability until
+// somebody noticed; a refused start says so at once.
+func openHelperSigner(ctx context.Context, sealed *cryptostate.DBSealedProvider,
+	path string, log *slog.Logger) (*helpercap.Signer, error) {
+	if sealed == nil {
+		signer, created, err := helpercap.LoadOrGenerateSigner(path)
+		if err != nil {
+			return nil, fmt.Errorf("the helper signing key: %w", err)
+		}
+		if created {
+			log.Warn("the helper signing key was generated; the hosts learn it at their next session",
+				"path", path, "key_id", signer.KeyID())
+		}
+		return signer, nil
+	}
+	active, previous, err := sealed.HelperSigningKeys(ctx)
+	if err != nil {
+		return nil, refuseCryptoStart(log, err)
+	}
+	signer, err := helpercap.ParseSigner(active)
+	if err != nil {
+		return nil, fmt.Errorf("the helper signing key of the installation: %w", err)
+	}
+	if previous != nil {
+		retired, err := helpercap.ParseSigner(previous)
+		if err != nil {
+			return nil, fmt.Errorf("the helper signing key this installation was rotated from: %w", err)
+		}
+		signer = signer.WithPrevious(retired)
+	}
+	log.Info("the helper signing key comes from the database", "key_id", signer.KeyID())
+	return signer, nil
 }
 
 // errorText renders an optional error for a log line.

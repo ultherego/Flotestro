@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/ultherego/flotestro/internal/secrets"
@@ -367,4 +368,50 @@ func (p *DBSealedProvider) Remove(ctx context.Context, id string) error {
 		p.active = ""
 	}
 	return nil
+}
+
+// Authorities serves the fleet's certificate authorities out of the same rows
+// and under the same key encryption key as the keys of the secret store. An
+// installation that moved one moved both, and a replica that read only the
+// secrets would still be signing with whatever lay on its own disk.
+func (p *DBSealedProvider) Authorities(ctx context.Context) (*DBAuthorities, error) {
+	store, ok := p.store.(AuthorityKeyStore)
+	if !ok {
+		return nil, fmt.Errorf("the key store of this installation does not keep authorities")
+	}
+	return NewDBAuthorities(ctx, store, p.kek), nil
+}
+
+// HelperSigningKeys returns the key that signs the root helper's capabilities
+// and, when a rotation left one, the key it was rotated from.
+//
+// Nothing is created here. A missing key is a fleet whose hosts trust a
+// signature this panel cannot make, and minting a fresh one would leave them
+// refusing every capability until somebody noticed - so it is a refusal
+// instead.
+func (p *DBSealedProvider) HelperSigningKeys(ctx context.Context) (active, previous []byte, err error) {
+	rows, err := p.store.WrappedKeys(ctx, PurposeHelperSigning)
+	if err != nil {
+		return nil, nil, fmt.Errorf("the helper signing keys of the installation: %w", err)
+	}
+	for _, row := range rows {
+		material, err := p.kek.Open(row)
+		if err != nil {
+			return nil, nil, err
+		}
+		// The name says which of the two roles the key is in; the keys
+		// themselves are the same kind of thing.
+		switch {
+		case strings.HasPrefix(row.KeyID, HelperPreviousPrefix):
+			previous = material
+		case strings.HasPrefix(row.KeyID, HelperKeyPrefix):
+			active = material
+		}
+	}
+	if active == nil {
+		return nil, nil, fatal(CodeWrappedKeyUnreadable,
+			"the installation keeps its keys in the database and holds no helper signing key; "+
+				"the hosts of this fleet trust a key this panel does not have", nil)
+	}
+	return active, previous, nil
 }

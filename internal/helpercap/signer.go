@@ -75,20 +75,30 @@ func loadSigner(path string) (*Signer, error) {
 	if err != nil {
 		return nil, err
 	}
-	block, _ := pem.Decode(raw)
-	if block == nil || block.Type != "PRIVATE KEY" {
-		return nil, fmt.Errorf("%s: not a PEM private key", path)
-	}
-	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	signer, err := ParseSigner(raw)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	return signer, nil
+}
+
+// ParseSigner reads a signing key that is not a file. An installation that has
+// moved its keys into the database holds this one as a row, and it is the same
+// bytes the file held.
+func ParseSigner(raw []byte) (*Signer, error) {
+	block, _ := pem.Decode(raw)
+	if block == nil || block.Type != "PRIVATE KEY" {
+		return nil, errors.New("not a PEM private key")
+	}
+	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, err
+	}
 	private, ok := parsed.(ed25519.PrivateKey)
 	if !ok {
-		return nil, fmt.Errorf("%s: not an Ed25519 key", path)
+		return nil, errors.New("not an Ed25519 key")
 	}
-	public := private.Public().(ed25519.PublicKey)
-	return &Signer{key: private, public: public, keyID: KeyID(public)}, nil
+	return NewSignerFromKey(private), nil
 }
 
 func writeKey(path string, private ed25519.PrivateKey) error {
@@ -115,6 +125,16 @@ func writeKey(path string, private ed25519.PrivateKey) error {
 func NewSignerFromKey(private ed25519.PrivateKey) *Signer {
 	public := private.Public().(ed25519.PublicKey)
 	return &Signer{key: private, public: public, keyID: KeyID(public)}
+}
+
+// WithPrevious keeps beside the active key the one a rotation retired. The
+// hosts trust both during the overlap, so a panel that reads its keys from the
+// database has to carry the previous one just as one reading files does.
+func (s *Signer) WithPrevious(previous *Signer) *Signer {
+	if previous != nil && previous.keyID != s.keyID {
+		s.previous = previous
+	}
+	return s
 }
 
 // KeyID names the active key.

@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 )
@@ -29,7 +28,10 @@ type Trust struct {
 	pendingAt time.Time
 	// retired ones are still recognised but sign nothing any more.
 	retired []*CA
-	dir     string
+	// store is where this set lives: the state directory, or the database
+	// of an installation that has moved its keys there.
+	store AuthorityStore
+	dir   string
 	// onActivate runs after a handover of signing; see SetActivationHook.
 	onActivate func(active *CA)
 }
@@ -48,10 +50,20 @@ const (
 // EnsureTrust reads the set of CAs from the state directory when it
 // holds material and creates the first CA only when it holds nothing.
 func EnsureTrust(dir string) (*Trust, error) {
-	if HasAnyMaterial(dir) {
-		return OpenTrust(dir)
+	return EnsureTrustFrom(NewDirectoryAuthorities(dir))
+}
+
+// EnsureTrustFrom does the same wherever the installation keeps its
+// authorities.
+func EnsureTrustFrom(store AuthorityStore) (*Trust, error) {
+	held, err := store.HasMaterial()
+	if err != nil {
+		return nil, err
 	}
-	return InitTrust(dir)
+	if held {
+		return OpenTrustFrom(store)
+	}
+	return InitTrustFrom(store)
 }
 
 // InitTrust creates the first CA of an installation. It refuses a
@@ -63,13 +75,28 @@ func InitTrust(dir string) (*Trust, error) {
 	return OpenTrust(dir)
 }
 
-// OpenTrust reads the set of CAs and creates nothing.
+// InitTrustFrom creates the first CA of an installation in a store that holds
+// no material.
+func InitTrustFrom(store AuthorityStore) (*Trust, error) {
+	if _, err := InitFrom(store); err != nil {
+		return nil, err
+	}
+	return OpenTrustFrom(store)
+}
+
+// OpenTrust reads the set of CAs of a state directory and creates nothing.
 func OpenTrust(dir string) (*Trust, error) {
-	active, err := Open(dir)
+	return OpenTrustFrom(NewDirectoryAuthorities(dir))
+}
+
+// OpenTrustFrom reads the set of CAs wherever the installation keeps it and
+// creates nothing.
+func OpenTrustFrom(store AuthorityStore) (*Trust, error) {
+	active, err := OpenFrom(store)
 	if errors.Is(err, ErrStateMismatch) {
-		recovered, finished, finishErr := finishInterruptedActivation(dir)
-		if finishErr != nil {
-			return nil, finishErr
+		recovered, finished, repairErr := repairActivation(store)
+		if repairErr != nil {
+			return nil, repairErr
 		}
 		if !finished {
 			return nil, err
@@ -78,105 +105,76 @@ func OpenTrust(dir string) (*Trust, error) {
 	} else if err != nil {
 		return nil, err
 	}
-	trust := &Trust{active: active, dir: dir}
+	trust := &Trust{active: active, store: store}
+	if directory, ok := store.(*DirectoryAuthorities); ok {
+		trust.dir = directory.Dir()
+	}
 
-	certPEM, certErr := os.ReadFile(filepath.Join(dir, pendingCertFile))
-	keyPEM, keyErr := os.ReadFile(filepath.Join(dir, pendingKeyFile))
+	keyPEM, certPEM, preparedAt, err := store.ReadPrepared()
+	if err != nil {
+		return nil, err
+	}
 	switch {
-	case certErr == nil && keyErr == nil:
+	case certPEM != nil && keyPEM != nil:
 		pending, err := parseCA(certPEM, keyPEM)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %s: %v", ErrStateMismatch, pendingCertFile, err)
+			return nil, fmt.Errorf("%w: the CA prepared to take over: %v", ErrStateMismatch, err)
 		}
 		if err := pending.VerifyPair(); err != nil {
-			return nil, fmt.Errorf("%s: %w", pendingCertFile, err)
+			return nil, fmt.Errorf("the CA prepared to take over: %w", err)
 		}
 		if pending.Certificate.Equal(active.Certificate) {
-			// The activation wrote both files and was interrupted before
-			// it removed the pending ones: nothing is pending any more.
-			removePending(dir)
+			// The activation wrote the new pair and was interrupted before it
+			// dropped the prepared one: nothing is pending any more.
+			if err := store.DropPrepared(); err != nil {
+				return nil, err
+			}
 			break
 		}
 		trust.pending = pending
-		// A missing or damaged marker must not stop the panel.
-		trust.pendingAt = time.Now().UTC()
-		if stamp, err := os.ReadFile(filepath.Join(dir, pendingAtFile)); err == nil {
-			if parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(string(stamp))); err == nil {
-				trust.pendingAt = parsed
+		trust.pendingAt = preparedAt
+		if trust.pendingAt.IsZero() {
+			// A moment of preparation that was lost must not stop the panel. It
+			// is taken as now and written back, so that the next start does not
+			// move it again.
+			trust.pendingAt = time.Now().UTC()
+			if err := store.WritePrepared(keyPEM, certPEM, trust.pendingAt); err != nil {
+				return nil, err
 			}
 		}
-		if err := writeFileAtomic(filepath.Join(dir, pendingAtFile),
-			[]byte(trust.pendingAt.Format(time.RFC3339)), 0o644); err != nil {
-			return nil, err
-		}
-	case os.IsNotExist(certErr) && os.IsNotExist(keyErr):
-	case certErr != nil && !os.IsNotExist(certErr):
-		return nil, certErr
-	case keyErr != nil && !os.IsNotExist(keyErr):
-		return nil, keyErr
+	case certPEM == nil && keyPEM == nil:
 	default:
-		// One pending file without the other is a preparation that was interrupted
-		// or a key removed by hand; either way the pair is not one the panel may
-		// ever sign with.
-		return nil, fmt.Errorf("%w: %s and %s do not come as a pair",
-			ErrStateMismatch, pendingCertFile, pendingKeyFile)
+		// One half of a prepared CA without the other is a preparation that was
+		// interrupted or a key removed by hand; either way the pair is not one
+		// the panel may ever sign with.
+		return nil, fmt.Errorf("%w: the CA prepared to take over is missing its key or its certificate",
+			ErrStateMismatch)
 	}
 
-	entries, err := os.ReadDir(filepath.Join(dir, retiredDir))
-	if err != nil && !os.IsNotExist(err) {
-		return nil, fmt.Errorf("directory of withdrawn CAs: %w", err)
+	retired, err := store.ReadRetired()
+	if err != nil {
+		return nil, err
 	}
-	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".pem" {
-			continue
-		}
-		path := filepath.Join(dir, retiredDir, entry.Name())
-		certPEM, err := os.ReadFile(path)
-		if err != nil {
-			return nil, err
-		}
+	for _, certPEM := range retired {
 		// A withdrawn CA keeps no key with it: it has nothing left to sign,
 		// and keeping a key without need only increases the risk.
 		cert, err := parseCertificateOnly(certPEM)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %s: %v", ErrStateMismatch, entry.Name(), err)
+			return nil, fmt.Errorf("%w: a withdrawn CA of %s: %v", ErrStateMismatch, store.Describe(), err)
 		}
 		trust.retired = append(trust.retired, &CA{Certificate: cert, PEM: certPEM})
 	}
 	return trust, nil
 }
 
-// finishInterruptedActivation completes an activation that wrote the new key
-// and not yet the new certificate.
-func finishInterruptedActivation(dir string) (*CA, bool, error) {
-	keyPEM, err := os.ReadFile(filepath.Join(dir, caKeyFile))
-	if err != nil {
+// repairActivation lets a store that can be interrupted between two writes
+// finish a handover it was caught in the middle of.
+func repairActivation(store AuthorityStore) (*CA, bool, error) {
+	half, ok := store.(repairer)
+	if !ok {
 		return nil, false, nil
 	}
-	pendingPEM, err := os.ReadFile(filepath.Join(dir, pendingCertFile))
-	if err != nil {
-		return nil, false, nil
-	}
-	candidate, err := parseCA(pendingPEM, keyPEM)
-	if err != nil || candidate.VerifyPair() != nil {
-		return nil, false, nil
-	}
-	if err := writeFileAtomic(filepath.Join(dir, caCertFile), pendingPEM, 0o644); err != nil {
-		return nil, false, err
-	}
-	removePending(dir)
-	active, err := Open(dir)
-	if err != nil {
-		return nil, false, err
-	}
-	return active, true, nil
-}
-
-// removePending deletes the files of the CA prepared to take over.
-func removePending(dir string) {
-	_ = os.Remove(filepath.Join(dir, pendingCertFile))
-	_ = os.Remove(filepath.Join(dir, pendingKeyFile))
-	_ = os.Remove(filepath.Join(dir, pendingAtFile))
+	return half.repairActivation()
 }
 
 // SetActivationHook registers what runs once a prepared CA has taken over
@@ -194,7 +192,8 @@ func (t *Trust) Retired() []*CA {
 	return append([]*CA(nil), t.retired...)
 }
 
-// Dir returns the state directory the set is read from.
+// Dir returns the state directory the set is read from. It is empty for an
+// installation whose authorities are rows of the database.
 func (t *Trust) Dir() string { return t.dir }
 
 // Active returns the CA signing new certificates.
@@ -297,16 +296,8 @@ func (t *Trust) Prepare() (Authority, error) {
 	created.AgentTTL = t.active.AgentTTL
 	created.ReservedNames = t.active.ReservedNames
 
-	// The CA key is the most sensitive material in the system.
-	if err := writeFileAtomic(filepath.Join(t.dir, pendingKeyFile), keyPEM, 0o600); err != nil {
-		return Authority{}, err
-	}
-	if err := writeFileAtomic(filepath.Join(t.dir, pendingCertFile), certPEM, 0o644); err != nil {
-		return Authority{}, err
-	}
 	now := time.Now().UTC()
-	if err := writeFileAtomic(filepath.Join(t.dir, pendingAtFile),
-		[]byte(now.Format(time.RFC3339)), 0o644); err != nil {
+	if err := t.store.WritePrepared(keyPEM, certPEM, now); err != nil {
 		return Authority{}, err
 	}
 	t.pending = created
@@ -344,20 +335,19 @@ func (t *Trust) activate() (Authority, func(*CA), *CA, error) {
 	// We record the previous CA as withdrawn before the new one becomes the
 	// signing one: an interruption at this point leaves the fleet with a CA the
 	// panel still recognises.
-	if err := os.MkdirAll(filepath.Join(t.dir, retiredDir), 0o700); err != nil {
-		return Authority{}, nil, nil, err
-	}
-	previous := filepath.Join(t.dir, retiredDir,
-		t.active.Certificate.SerialNumber.String()+".pem")
-	if err := os.WriteFile(previous, t.active.PEM, 0o644); err != nil {
+	if err := t.store.WriteRetired(t.active.Certificate.SerialNumber.String(), t.active.PEM); err != nil {
 		return Authority{}, nil, nil, err
 	}
 
-	pendingKey, err := os.ReadFile(filepath.Join(t.dir, pendingKeyFile))
+	pendingKey, _, _, err := t.store.ReadPrepared()
 	if err != nil {
 		return Authority{}, nil, nil, err
 	}
-	// The pair on disk is checked before anything is replaced: a pending key that
+	if pendingKey == nil {
+		return Authority{}, nil, nil, fmt.Errorf("%w: the CA prepared to take over has no private key left",
+			ErrStateMismatch)
+	}
+	// The stored pair is checked before anything is replaced: a pending key that
 	// does not match the pending certificate would become the signing pair of the
 	// fleet and nothing would say so until the first renewal failed.
 	incoming, err := parseCA(t.pending.PEM, pendingKey)
@@ -367,16 +357,12 @@ func (t *Trust) activate() (Authority, func(*CA), *CA, error) {
 	if err := incoming.VerifyPair(); err != nil {
 		return Authority{}, nil, nil, err
 	}
-	// The key goes first and the certificate second.
-	if err := writeFileAtomic(filepath.Join(t.dir, caKeyFile), pendingKey, 0o600); err != nil {
+	if err := t.store.WriteActive(pendingKey, t.pending.PEM); err != nil {
 		return Authority{}, nil, nil, err
 	}
-	if err := writeFileAtomic(filepath.Join(t.dir, caCertFile), t.pending.PEM, 0o644); err != nil {
-		return Authority{}, nil, nil, err
-	}
-	// Read back what landed: the pair on disk is what the next start will
+	// Read back what landed: what the store holds is what the next start will
 	// sign with, and it has to be the one that was just checked.
-	landed, err := Open(t.dir)
+	landed, err := OpenFrom(t.store)
 	if err != nil {
 		return Authority{}, nil, nil, err
 	}
@@ -384,7 +370,9 @@ func (t *Trust) activate() (Authority, func(*CA), *CA, error) {
 		return Authority{}, nil, nil, fmt.Errorf("%w: the CA read back after the handover is not the prepared one",
 			ErrStateMismatch)
 	}
-	removePending(t.dir)
+	if err := t.store.DropPrepared(); err != nil {
+		return Authority{}, nil, nil, err
+	}
 
 	t.retired = append(t.retired, &CA{Certificate: t.active.Certificate, PEM: t.active.PEM})
 	// The policy of the authority - the lifetime it issues and the names it keeps
@@ -423,7 +411,9 @@ func (t *Trust) Retire(fingerprint string, hostsUsing int) error {
 		// Abandoning a prepared CA is allowed: nothing has been signed with it yet,
 		// and the agents that got it will simply stop knowing it at their next
 		// renewal.
-		removePending(t.dir)
+		if err := t.store.DropPrepared(); err != nil {
+			return err
+		}
 		t.pending = nil
 		t.pendingAt = time.Time{}
 		return nil
@@ -433,8 +423,7 @@ func (t *Trust) Retire(fingerprint string, hostsUsing int) error {
 		if fingerprintHex(ca.Certificate.Raw) != fingerprint {
 			continue
 		}
-		path := filepath.Join(t.dir, retiredDir, ca.Certificate.SerialNumber.String()+".pem")
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		if err := t.store.DropRetired(ca.Certificate.SerialNumber.String()); err != nil {
 			return err
 		}
 		t.retired = append(t.retired[:index], t.retired[index+1:]...)

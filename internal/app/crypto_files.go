@@ -1,7 +1,6 @@
 package app
 
 import (
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"os"
@@ -22,20 +21,6 @@ import (
 // idea of what a key looks like. Gathering them is therefore done here, in one
 // place, so that "everything the replicas need equally" is a list somebody can
 // read rather than something spread over the code.
-
-// preparedAtBlock carries the moment an authority was prepared, which is a
-// file beside the key and not part of any of the PEM the subsystem writes.
-// Keeping it in the bundle is what lets a prepared authority survive the move
-// as the thing it is: prepared, and since when.
-const preparedAtBlock = "FLOTESTRO PREPARED AT"
-
-// helperKeyPrefix and helperPreviousPrefix name the rows of the helper's
-// signer. The two keys are the same kind of thing in two roles, and nothing
-// else records which is which, so the name says it.
-const (
-	helperKeyPrefix      = "helper-"
-	helperPreviousPrefix = "helper-previous-"
-)
 
 // installationFiles is where the keys of this installation are read from.
 type installationFiles struct {
@@ -199,7 +184,7 @@ func (f installationFiles) authority(keyFile, certFile, atFile string) (*cryptos
 		KeyID:   pki.IssuerIDOf(cert),
 		Purpose: cryptostate.PurposeAgentCA,
 		Source:  keyPath,
-		Bytes:   authorityBundle(keyPEM, certPEM, preparedAt),
+		Bytes:   cryptostate.AuthorityBundle(keyPEM, certPEM, preparedAt),
 	}, nil
 }
 
@@ -215,12 +200,12 @@ func (f installationFiles) collectHelperSigning() ([]cryptostate.Material, error
 		path   string
 		prefix string
 	}{
-		{f.HelperKeyPath, helperKeyPrefix},
-		{helpercap.PreviousKeyPath(f.HelperKeyPath), helperPreviousPrefix},
+		{f.HelperKeyPath, cryptostate.HelperKeyPrefix},
+		{helpercap.PreviousKeyPath(f.HelperKeyPath), cryptostate.HelperPreviousPrefix},
 	} {
 		content, err := os.ReadFile(role.path)
 		if errors.Is(err, os.ErrNotExist) {
-			if role.prefix == helperKeyPrefix {
+			if role.prefix == cryptostate.HelperKeyPrefix {
 				return nil, fmt.Errorf(
 					"%s holds no helper signing key; the hosts of this fleet trust a key that would be left behind",
 					role.path)
@@ -252,44 +237,4 @@ func materialPaths(materials []cryptostate.Material) []string {
 		paths = append(paths, material.Source)
 	}
 	return paths
-}
-
-// authorityBundle puts a CA into one value: its key, its certificate and, for
-// a prepared one, the moment it was prepared.
-func authorityBundle(keyPEM, certPEM, preparedAt []byte) []byte {
-	bundle := append([]byte(nil), keyPEM...)
-	bundle = append(bundle, certPEM...)
-	if len(preparedAt) > 0 {
-		bundle = append(bundle, pem.EncodeToMemory(&pem.Block{
-			Type: preparedAtBlock, Bytes: preparedAt,
-		})...)
-	}
-	return bundle
-}
-
-// authorityParts takes a bundle apart again.
-func authorityParts(bundle []byte) (keyPEM, certPEM, preparedAt []byte, err error) {
-	rest := bundle
-	for {
-		var block *pem.Block
-		block, rest = pem.Decode(rest)
-		if block == nil {
-			break
-		}
-		encoded := pem.EncodeToMemory(block)
-		switch {
-		case strings.Contains(block.Type, "PRIVATE KEY"):
-			keyPEM = append(keyPEM, encoded...)
-		case block.Type == "CERTIFICATE":
-			certPEM = append(certPEM, encoded...)
-		case block.Type == preparedAtBlock:
-			preparedAt = block.Bytes
-		default:
-			return nil, nil, nil, fmt.Errorf("the authority carries a %q, which is not part of one", block.Type)
-		}
-	}
-	if len(keyPEM) == 0 || len(certPEM) == 0 {
-		return nil, nil, nil, errors.New("the authority is missing its key or its certificate")
-	}
-	return keyPEM, certPEM, preparedAt, nil
 }
