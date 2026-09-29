@@ -235,7 +235,9 @@ func (s *Server) openAPI() map[string]any {
 		map[string]any{"type": "array", "items": ref("BudgetHolder")}
 	// The reflection reads the shape, not the meaning.
 	describe(schemas, "Campaign", "revision",
-		"Grows with every state change; a client that read the campaign at one revision and orders a transition at another is answered with 409 concurrent_transition.")
+		"Grows with every state change. No endpoint takes it back from a client: it is the panel's own "+
+			"compare-and-set, so a transition ordered against a campaign that moved in between is not "+
+			"applied and the order is answered with 409 invalid_state.")
 	describe(schemas, "CampaignTarget", "wave",
 		"The wave of the rollout: 0 is the canary, then the waves in order. -1 is a host that takes no part - "+
 			"it was already settled when the campaign was created (ineligible, excluded) and never runs, "+
