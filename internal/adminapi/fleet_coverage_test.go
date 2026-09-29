@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/ultherego/flotestro/internal/hosts"
+	"github.com/ultherego/flotestro/internal/jobs"
+	"github.com/ultherego/flotestro/internal/vuln"
 )
 
 // The head of a fleet view is the part an operator reads before anything else,
@@ -200,5 +202,138 @@ func TestWriteCSVFlagsAFileThatStopsEarly(t *testing.T) {
 	}
 	if !strings.Contains(rows[2], "time budget") {
 		t.Errorf("the last row does not say why the file stops: %q", rows[2])
+	}
+}
+
+// A read fan-out is a fleet view like the others: what the panel shows about
+// it is a page of hosts, and the head above them has to describe the whole
+// read, not the page.
+
+func TestAFanOutFoldsEveryStateTheDatabaseCounted(t *testing.T) {
+	tally := tallyStates(map[jobs.State]int{
+		jobs.StateSucceeded: 300, jobs.StateFailed: 40, jobs.StateTimedOut: 10,
+		jobs.StateRunning: 51, jobs.StateQueued: 600, jobs.StatePlanned: 0,
+	})
+	if tally.Hosts != 1001 {
+		t.Errorf("hosts = %d, expected 1001", tally.Hosts)
+	}
+	if tally.Answered != 300 || tally.Failed != 50 || tally.Pending != 651 {
+		t.Errorf("tally = %+v", tally)
+	}
+	if tally.Counts.Succeeded != 300 || tally.Counts.Failed != 50 ||
+		tally.Counts.Running != 51 || tally.Counts.Queued != 600 {
+		t.Errorf("counts = %+v", tally.Counts)
+	}
+}
+
+// A read ordered across a fleet larger than one page must not pass the page
+// off as the answer: the counts cover the fan-out, and the answer says that
+// the hosts under them stop at the page.
+func TestAReadOfTheWholeFleetSaysWhenItCouldNotCoverIt(t *testing.T) {
+	tally := tallyStates(map[jobs.State]int{
+		jobs.StateSucceeded: 300, jobs.StateFailed: 50, jobs.StateQueued: 651,
+	})
+	head := fanOutCoverage(1001, tally, 100)
+	if head.TotalHosts != 1001 || head.EvaluatedHosts != 300 || head.UnknownHosts != 701 {
+		t.Fatalf("head = %+v", head)
+	}
+	if head.EvaluatedHosts+head.UnknownHosts != head.TotalHosts {
+		t.Error("the hosts that answered and the unknown ones do not add up to the read")
+	}
+	if !head.Partial || head.PartialReason != partialCapReached {
+		t.Errorf("partial = %v (%q), expected the page cap", head.Partial, head.PartialReason)
+	}
+	// A host still on its way is not a host with nothing to say, and one
+	// that could not answer is not one that answered nothing.
+	if head.UnknownReasons[unknownNotFinished] != 651 {
+		t.Errorf("still running = %d, expected 651", head.UnknownReasons[unknownNotFinished])
+	}
+	if head.UnknownReasons[unknownUnavailable] != 50 {
+		t.Errorf("could not answer = %d, expected 50", head.UnknownReasons[unknownUnavailable])
+	}
+	// The last page of the walk is as much a part of the read as the first:
+	// the hosts it carries are the last handful, not the fan-out.
+	if last := fanOutCoverage(1001, tally, 1); !last.Partial || last.PartialReason != partialCapReached {
+		t.Errorf("the last page reads as whole: %+v", last)
+	}
+}
+
+// A fan-out whose hosts all fit on the page and all answered is a whole
+// answer, and says nothing about why it would not be.
+func TestAFanOutThatFitsOnItsPageIsAWholeAnswer(t *testing.T) {
+	head := fanOutCoverage(20, tallyStates(map[jobs.State]int{jobs.StateSucceeded: 20}), 20)
+	if head.Partial || head.PartialReason != "" {
+		t.Errorf("head = %+v, expected a whole answer", head)
+	}
+	if head.EvaluatedHosts != 20 || head.UnknownHosts != 0 || len(head.UnknownReasons) != 0 {
+		t.Errorf("head = %+v", head)
+	}
+}
+
+// A reader who may see a part of the fleet the read covered sees a part of
+// the read: the hosts outside their scope are unknown to them, and the answer
+// admits it rather than shrinking the read to what they may read.
+func TestAFanOutWiderThanTheReaderSaysTheReaderSeesAPart(t *testing.T) {
+	head := fanOutCoverage(200, tallyStates(map[jobs.State]int{jobs.StateSucceeded: 120}), 120)
+	if head.TotalHosts != 200 || head.EvaluatedHosts != 120 || head.UnknownHosts != 80 {
+		t.Fatalf("head = %+v", head)
+	}
+	if !head.Partial || head.PartialReason != partialOutOfScope {
+		t.Errorf("partial = %v (%q), expected the scope", head.Partial, head.PartialReason)
+	}
+	if head.UnknownReasons[unknownNotReached] != 80 {
+		t.Errorf("unreachable = %d, expected 80", head.UnknownReasons[unknownNotReached])
+	}
+}
+
+// The fan-out page is read by the panel, so the names of the head and of the
+// page keys are part of the contract of the read.
+func TestAFanOutAnswersTheNamesTheScreenReads(t *testing.T) {
+	view := fanOutView{
+		readFanOut:    readFanOut{ID: "a-fan-out", HostCount: 1001},
+		fleetCoverage: fanOutCoverage(1001, tallyStates(map[jobs.State]int{jobs.StateSucceeded: 1001}), 100),
+		Count:         100, Limit: 100, NextCursor: "the-next-page",
+	}
+	encoded, err := json.Marshal(view)
+	if err != nil {
+		t.Fatalf("encoding the fan-out: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("decoding the fan-out: %v", err)
+	}
+	for _, name := range []string{
+		"total_hosts", "evaluated_hosts", "unknown_hosts", "partial", "partial_reason",
+		"count", "limit", "next_cursor", "host_count", "counts",
+	} {
+		if _, present := decoded[name]; !present {
+			t.Errorf("the fan-out lacks %s: %s", name, encoded)
+		}
+	}
+}
+
+// The CVE list is read off the findings of the hosts an assessment judged, so
+// it speaks for those hosts alone; a fleet nothing was evaluated for must not
+// read as a fleet without vulnerabilities.
+func TestTheCVEListCarriesTheCoverageOfTheFleetItCounted(t *testing.T) {
+	head := assessmentCoverage(vuln.FleetSummary{Hosts: 1001, Evaluated: 300, Unassessed: 701})
+	if head.TotalHosts != 1001 || head.EvaluatedHosts != 300 || head.UnknownHosts != 701 {
+		t.Fatalf("head = %+v", head)
+	}
+	if head.UnknownReasons[unknownNoAssessment] != 701 {
+		t.Errorf("never assessed = %d, expected 701", head.UnknownReasons[unknownNoAssessment])
+	}
+	encoded, err := json.Marshal(fleetCVEsView{fleetCoverage: head, Count: 50, Total: 900, Limit: 50})
+	if err != nil {
+		t.Fatalf("encoding the list: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("decoding the list: %v", err)
+	}
+	for _, name := range []string{"total_hosts", "evaluated_hosts", "unknown_hosts", "partial", "count", "total", "limit"} {
+		if _, present := decoded[name]; !present {
+			t.Errorf("the CVE list lacks %s: %s", name, encoded)
+		}
 	}
 }

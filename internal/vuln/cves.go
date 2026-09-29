@@ -3,10 +3,12 @@ package vuln
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/ultherego/flotestro/internal/authz"
+	"github.com/ultherego/flotestro/internal/paging"
 )
 
 // The CVE-centric reading of the findings.
@@ -70,6 +72,49 @@ type CVEFilter struct {
 	Fixable bool
 	Limit   int
 	Offset  int
+	// Cursor is the key of the last row of the previous page; when it is
+	// set, Offset is ignored, because the two are two ways of asking for
+	// the same next page and only one of them survives a changing list.
+	Cursor CVECursor
+}
+
+// CVECursor is the key of the last row of a page under the order of the CVE
+// list: the rung of the severity, the number of affected hosts and the CVE
+// itself, which the three together make unique.
+type CVECursor struct {
+	Rank  int
+	Hosts int
+	CVE   string
+	Set   bool
+}
+
+// ParseCVECursor reads a cursor issued by CVEs; an empty value is the first
+// page.
+func ParseCVECursor(value string) (CVECursor, error) {
+	parts, err := paging.Decode(value, 3)
+	if err != nil {
+		return CVECursor{}, err
+	}
+	if parts == nil {
+		return CVECursor{}, nil
+	}
+	rank, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return CVECursor{}, fmt.Errorf("%w: %v", paging.ErrInvalidCursor, err)
+	}
+	hosts, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return CVECursor{}, fmt.Errorf("%w: %v", paging.ErrInvalidCursor, err)
+	}
+	if parts[2] == "" {
+		return CVECursor{}, fmt.Errorf("%w: the key names no CVE", paging.ErrInvalidCursor)
+	}
+	return CVECursor{Rank: rank, Hosts: hosts, CVE: parts[2], Set: true}, nil
+}
+
+// String renders the cursor for the next request.
+func (c CVECursor) String() string {
+	return paging.Encode(strconv.Itoa(c.Rank), strconv.Itoa(c.Hosts), c.CVE)
 }
 
 // CVESummary is one row of the CVE list.
@@ -97,6 +142,8 @@ type CVESummary struct {
 type CVEPage struct {
 	Items []CVESummary
 	Total int
+	// NextCursor is empty on the last page.
+	NextCursor string
 }
 
 // escapePattern neutralises the pattern characters of a search. An
@@ -109,6 +156,11 @@ func escapePattern(value string) string {
 // scope, the gravest and the most widespread first.
 func (s *Store) CVEs(ctx context.Context, filter CVEFilter) (CVEPage, error) {
 	page := CVEPage{Items: []CVESummary{}}
+	// A page of no rows is a question nobody asks: a caller that names no
+	// size is given one rather than an empty answer.
+	if filter.Limit <= 0 {
+		filter.Limit = DefaultPage
+	}
 	var args []any
 	scope := ""
 	if filter.Scopes != nil {
@@ -126,8 +178,26 @@ func (s *Store) CVEs(ctx context.Context, filter CVEFilter) (CVEPage, error) {
 	if filter.Severity != "" {
 		rank = SeverityRank(filter.Severity)
 	}
-	args = append(args, pattern, rank, filter.Fixable, filter.Limit, filter.Offset)
-	base := len(args) - 5
+	args = append(args, pattern, rank, filter.Fixable)
+	base := len(args) - 3
+	// The key of the page walks the order itself - the rung, the number of
+	// hosts descending, the CVE - so a row that appears or goes away between
+	// two pages cannot make the list skip another.
+	keyset := ""
+	if filter.Cursor.Set {
+		args = append(args, filter.Cursor.Rank, -filter.Cursor.Hosts, filter.Cursor.CVE)
+		keyset = fmt.Sprintf(" where (r.rank, -r.hosts, r.cve) > ($%d::int, $%d::int, $%d::text)",
+			len(args)-2, len(args)-1, len(args))
+	}
+	// One row more than the page says whether there is a next one.
+	args = append(args, filter.Limit+1)
+	tail := fmt.Sprintf(" limit $%d", len(args))
+	// The offset is the older way of asking for the next page; a cursor
+	// says the same thing better, so it wins where both are given.
+	if filter.Offset > 0 && !filter.Cursor.Set {
+		args = append(args, filter.Offset)
+		tail += fmt.Sprintf(" offset $%d", len(args))
+	}
 	query := fmt.Sprintf(`
 		with affected as (
 		    select f.host_id, cve.id as cve, f.vendor_severity, f.vendor_fix, f.evaluated_at,
@@ -136,7 +206,7 @@ func (s *Store) CVEs(ctx context.Context, filter CVEFilter) (CVEPage, error) {
 		    from vuln_findings f
 		    join hosts h on h.id = f.host_id
 		    cross join lateral unnest(f.cve_ids) as cve(id)
-		    where f.state = 'affected' and cve.id <> ''%s
+		    where f.state = 'affected' and cve.id <> ''%[1]s
 		),
 		grouped as (
 		    select cve, min(rank) as rank,
@@ -148,22 +218,27 @@ func (s *Store) CVEs(ctx context.Context, filter CVEFilter) (CVEPage, error) {
 		           bool_or(package ilike $%[2]d::text or source_package ilike $%[2]d::text) as package_match
 		    from affected
 		    group by cve
+		),
+		matching as (
+		    select g.cve, g.rank, g.vendor_severity, d.cvss_score, coalesce(d.cvss_severity, '') as cvss_severity,
+		           g.hosts, g.hosts_with_fix, g.packages, g.first_seen, count(*) over () as total
+		    from grouped g
+		    left join vuln_cve_details d on d.cve = g.cve
+		    where ($%[2]d::text = '' or g.cve ilike $%[2]d::text or g.package_match)
+		      and ($%[3]d::int < 0 or g.rank = $%[3]d::int)
+		      and (not $%[4]d::boolean or g.hosts_with_fix > 0)
 		)
-		select g.cve, g.rank, g.vendor_severity, d.cvss_score, coalesce(d.cvss_severity, ''),
-		       g.hosts, g.hosts_with_fix, g.packages, g.first_seen, count(*) over ()
-		from grouped g
-		left join vuln_cve_details d on d.cve = g.cve
-		where ($%[2]d::text = '' or g.cve ilike $%[2]d::text or g.package_match)
-		  and ($%[3]d::int < 0 or g.rank = $%[3]d::int)
-		  and (not $%[4]d::boolean or g.hosts_with_fix > 0)
-		order by g.rank, g.hosts desc, g.cve
-		limit $%[5]d offset $%[6]d`,
-		scope, base+1, base+2, base+3, base+4, base+5)
+		select r.cve, r.rank, r.vendor_severity, r.cvss_score, r.cvss_severity,
+		       r.hosts, r.hosts_with_fix, r.packages, r.first_seen, r.total
+		from matching r%[5]s
+		order by r.rank, r.hosts desc, r.cve%[6]s`,
+		scope, base+1, base+2, base+3, keyset, tail)
 	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
 		return page, err
 	}
 	defer rows.Close()
+	var ranks []int
 	for rows.Next() {
 		var item CVESummary
 		var rank int
@@ -179,8 +254,19 @@ func (s *Store) CVEs(ctx context.Context, filter CVEFilter) (CVEPage, error) {
 			item.Packages = []string{}
 		}
 		page.Items = append(page.Items, item)
+		ranks = append(ranks, rank)
 	}
-	return page, rows.Err()
+	if err := rows.Err(); err != nil {
+		return page, err
+	}
+	if len(page.Items) > filter.Limit {
+		page.Items = page.Items[:filter.Limit]
+		last := page.Items[filter.Limit-1]
+		page.NextCursor = CVECursor{
+			Rank: ranks[filter.Limit-1], Hosts: last.Hosts, CVE: last.CVE, Set: true,
+		}.String()
+	}
+	return page, nil
 }
 
 // CVEHost is one finding of one CVE on one host, as the CVE page lists it.

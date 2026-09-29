@@ -6,9 +6,12 @@ import (
 	"context"
 	"encoding/csv"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // The fleet screens used to read the first five hundred hosts and add them up
@@ -25,6 +28,9 @@ const (
 	scaleHosts = 1001
 	// scaleFacts is how many of them report the fact each screen judges by.
 	scaleFacts = 300
+	// scaleCVEs is how many distinct CVEs the assessed hosts carry between
+	// them: more than one page of the CVE list asks for below.
+	scaleCVEs = 60
 )
 
 // fleetCoverageView is the head every fleet view answers with: the fleet in
@@ -125,11 +131,70 @@ func insertScaleFleet(t *testing.T, ctx context.Context, h *harness) {
 			        select id, 'debian', '12', 'debian-security-tracker', 120, 120, 2, 1, 1, 0, '', now()
 			          from ` + firstByName,
 		},
+		{
+			// One affected finding per assessed host, its CVE drawn from a
+			// small pool, so the CVE list is longer than one page of it
+			// while the fleet behind it stays the same.
+			what: "vulnerability findings",
+			query: `insert into vuln_findings (host_id, provider, advisory_id, cve_ids, distribution,
+			                                  release, source_package, binary_package, architecture,
+			                                  installed_version, fixed_version, state, vendor_severity,
+			                                  vendor_fix, evaluated_at)
+			        select ranked.id, 'debian-security-tracker', 'DSA-' || ranked.n,
+			               array['CVE-2026-' || lpad((((ranked.n - 1) % ` + strconv.Itoa(scaleCVEs) + `) + 1)::text, 4, '0')],
+			               'debian', '12', 'openssl', 'openssl', 'amd64', '1.0', '1.1',
+			               'affected', 'high', 'known', now()
+			          from (select id, row_number() over (order by hostname) as n
+			                  from hosts where site = $1 order by hostname limit $2) ranked`,
+		},
 	} {
 		if _, err := pool.Exec(ctx, statement.query, scaleSite, scaleFacts); err != nil {
 			t.Fatalf("inserting the %s: %v", statement.what, err)
 		}
 	}
+}
+
+// insertScaleFanOut orders a read across the whole synthetic fleet by hand:
+// the ceiling on a fan-out ordered through the API is far below this fleet,
+// and what is under test is the page the panel reads it back through.
+func insertScaleFanOut(t *testing.T, ctx context.Context, h *harness) string {
+	t.Helper()
+	pool := h.database(ctx)
+	fanOutID := uuid.NewString()
+	t.Cleanup(func() {
+		// The jobs go with the hosts; the fan-out row is its own.
+		cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if _, err := pool.Exec(cleanup, "delete from jobs where fanout_id = $1", fanOutID); err != nil {
+			t.Errorf("removing the jobs of the synthetic fan-out: %v", err)
+		}
+		if _, err := pool.Exec(cleanup, "delete from read_fanouts where id = $1", fanOutID); err != nil {
+			t.Errorf("removing the synthetic fan-out: %v", err)
+		}
+	})
+	if _, err := pool.Exec(ctx, `
+		insert into read_fanouts (id, action, payload, created_by, reason, host_count)
+		values ($1, 'dns.resolve.test', '{}'::jsonb, 'fleet scale test', 'the scale guard', $2)`,
+		fanOutID, scaleHosts); err != nil {
+		t.Fatalf("ordering the synthetic fan-out: %v", err)
+	}
+	// One job per host, and only the hosts that carry the facts have
+	// answered: the rest are still on their way.
+	if _, err := pool.Exec(ctx, `
+		insert into jobs (id, host_id, action_type, payload, payload_hash, idempotency_key, state,
+		                  expires_at, created_by, fanout_id, result_status, finished_at)
+		select gen_random_uuid(), ranked.id, 'dns.resolve.test', '{}'::jsonb, decode('00', 'hex'),
+		       'scale-fanout-' || ranked.n,
+		       case when ranked.n <= $3 then 'succeeded' else 'queued' end,
+		       now() + interval '1 hour', 'fleet scale test', $1,
+		       case when ranked.n <= $3 then 'ok' end,
+		       case when ranked.n <= $3 then now() end
+		  from (select id, row_number() over (order by hostname) as n
+		          from hosts where site = $2) ranked`,
+		fanOutID, scaleSite, scaleFacts); err != nil {
+		t.Fatalf("ordering the jobs of the synthetic fan-out: %v", err)
+	}
+	return fanOutID
 }
 
 // TestFleetViewsCountTheWholeFleet is the guard of chapter 5: a fleet past the
@@ -215,6 +280,14 @@ func TestFleetViewsCountTheWholeFleet(t *testing.T) {
 		fleetListJoinsUpAcrossPages(t, scoped)
 	})
 
+	t.Run("a read of the whole fleet says how much of it answered", func(t *testing.T) {
+		fanOutReadsTheWholeFanOut(t, ctx, h, scoped)
+	})
+
+	t.Run("the CVE list says how much of the fleet it speaks for", func(t *testing.T) {
+		cveListCarriesTheCoverageOfTheFleet(t, scoped)
+	})
+
 	t.Run("the export carries every row the screen counted", func(t *testing.T) {
 		var head fleetCoverageView
 		scoped.get("/api/v1/backups", &head)
@@ -289,4 +362,168 @@ func readExportRows(t *testing.T, h *harness, path string) [][]string {
 		}
 	}
 	return rows
+}
+
+// fanOutPage is the fan-out page as the panel reads it: the coverage head,
+// the four counts of the status bar and one page of hosts.
+type fanOutPage struct {
+	fleetCoverageView
+	HostCount int `json:"host_count"`
+	Counts    struct {
+		Queued    int `json:"queued"`
+		Running   int `json:"running"`
+		Succeeded int `json:"succeeded"`
+		Failed    int `json:"failed"`
+	} `json:"counts"`
+	Hosts []struct {
+		JobID    string `json:"job_id"`
+		HostID   string `json:"host_id"`
+		Hostname string `json:"hostname"`
+		State    string `json:"state"`
+	} `json:"hosts"`
+}
+
+// fanOutReadsTheWholeFanOut checks that a read ordered across a fleet larger
+// than one page counts every host of it, says that the page carries a part,
+// and that the cursor walks the rest.
+func fanOutReadsTheWholeFanOut(t *testing.T, ctx context.Context, h, scoped *harness) {
+	fanOutID := insertScaleFanOut(t, ctx, h)
+
+	var first fanOutPage
+	scoped.get("/api/v1/reads/"+fanOutID, &first)
+	if first.HostCount != scaleHosts || first.TotalHosts != scaleHosts {
+		t.Errorf("the read covers %d hosts and the head counts %d, expected %d",
+			first.HostCount, first.TotalHosts, scaleHosts)
+	}
+	// The status bar is the database's count over the fan-out, not the
+	// page's: a read of a thousand hosts is not finished after a hundred.
+	if first.Counts.Succeeded != scaleFacts || first.Counts.Queued != scaleHosts-scaleFacts {
+		t.Errorf("counts = %+v, expected %d succeeded and %d queued",
+			first.Counts, scaleFacts, scaleHosts-scaleFacts)
+	}
+	if first.EvaluatedHosts != scaleFacts {
+		t.Errorf("evaluated_hosts = %d, expected %d", first.EvaluatedHosts, scaleFacts)
+	}
+	// A host still on its way has not answered; it is unknown, not a host
+	// with nothing to say.
+	if want := scaleHosts - scaleFacts; first.UnknownHosts != want {
+		t.Errorf("unknown_hosts = %d, expected %d", first.UnknownHosts, want)
+	}
+	if first.EvaluatedHosts+first.UnknownHosts != first.TotalHosts {
+		t.Errorf("%d answered and %d unknown do not add up to %d hosts",
+			first.EvaluatedHosts, first.UnknownHosts, first.TotalHosts)
+	}
+	if first.UnknownReasons["not_finished"] != scaleHosts-scaleFacts {
+		t.Errorf("unknown_reasons = %v, expected %d under not_finished",
+			first.UnknownReasons, scaleHosts-scaleFacts)
+	}
+	// The page carries a part of the read and has to say so, or the panel
+	// would show a hundred hosts as the whole answer.
+	if !first.Partial || first.PartialReason == "" {
+		t.Errorf("a page of %d hosts out of %d does not say it is a part: %+v",
+			len(first.Hosts), scaleHosts, first.fleetCoverageView)
+	}
+	if first.Count > 500 || first.Count != len(first.Hosts) {
+		t.Errorf("the page carries %d hosts and counts %d", len(first.Hosts), first.Count)
+	}
+	if first.NextCursor == "" {
+		t.Fatal("the read of a thousand hosts has no next page")
+	}
+
+	// The cursor walks the whole fan-out: every host once, and as many as
+	// the head counted.
+	seen := map[string]bool{}
+	address := "/api/v1/reads/" + fanOutID + "?limit=250"
+	for requests := 0; ; requests++ {
+		if requests > 20 {
+			t.Fatal("the fan-out never reached its last page")
+		}
+		var page fanOutPage
+		scoped.get(address, &page)
+		for _, host := range page.Hosts {
+			if seen[host.HostID] {
+				t.Fatalf("%s came twice", host.Hostname)
+			}
+			seen[host.HostID] = true
+		}
+		if page.NextCursor == "" {
+			break
+		}
+		address = "/api/v1/reads/" + fanOutID + "?limit=250&cursor=" + page.NextCursor
+	}
+	if len(seen) != scaleHosts {
+		t.Errorf("the cursor walked %d hosts, the read covers %d", len(seen), scaleHosts)
+	}
+
+	// A cursor this page did not issue is refused rather than read as the
+	// key of nothing.
+	scoped.do(http.MethodGet, "/api/v1/reads/"+fanOutID+"?cursor=not-a-cursor", nil, nil, http.StatusBadRequest)
+}
+
+// cveListCarriesTheCoverageOfTheFleet checks that the CVE list says over how
+// much of the fleet it was counted, and that its pages join up.
+func cveListCarriesTheCoverageOfTheFleet(t *testing.T, scoped *harness) {
+	type cvePage struct {
+		fleetCoverageView
+		Items []struct {
+			CVE   string `json:"cve"`
+			Hosts int    `json:"hosts"`
+		} `json:"items"`
+	}
+	var head cvePage
+	scoped.get("/api/v1/vulnerabilities/cves", &head)
+	if head.TotalHosts != scaleHosts {
+		t.Errorf("total_hosts = %d, expected %d", head.TotalHosts, scaleHosts)
+	}
+	// A CVE list counted over three hundred assessed hosts says nothing
+	// about the seven hundred nobody has assessed.
+	if head.EvaluatedHosts != scaleFacts {
+		t.Errorf("evaluated_hosts = %d, expected %d", head.EvaluatedHosts, scaleFacts)
+	}
+	if want := scaleHosts - scaleFacts; head.UnknownHosts != want {
+		t.Errorf("unknown_hosts = %d, expected %d", head.UnknownHosts, want)
+	}
+	if head.EvaluatedHosts+head.UnknownHosts != head.TotalHosts {
+		t.Errorf("%d assessed and %d unknown do not add up to %d hosts",
+			head.EvaluatedHosts, head.UnknownHosts, head.TotalHosts)
+	}
+	if head.UnknownReasons["no_assessment"] != scaleHosts-scaleFacts {
+		t.Errorf("unknown_reasons = %v, expected %d under no_assessment",
+			head.UnknownReasons, scaleHosts-scaleFacts)
+	}
+	if head.Total != scaleCVEs {
+		t.Errorf("the list counts %d CVEs, expected %d", head.Total, scaleCVEs)
+	}
+
+	seen := map[string]bool{}
+	hosts := 0
+	address := "/api/v1/vulnerabilities/cves?limit=25"
+	for requests := 0; ; requests++ {
+		if requests > 10 {
+			t.Fatal("the CVE list never reached its last page")
+		}
+		var page cvePage
+		scoped.get(address, &page)
+		for _, item := range page.Items {
+			if seen[item.CVE] {
+				t.Fatalf("%s came twice", item.CVE)
+			}
+			seen[item.CVE] = true
+			hosts += item.Hosts
+		}
+		if page.NextCursor == "" {
+			break
+		}
+		address = "/api/v1/vulnerabilities/cves?limit=25&cursor=" + page.NextCursor
+	}
+	if len(seen) != scaleCVEs {
+		t.Errorf("the cursor walked %d CVEs, the list counted %d", len(seen), scaleCVEs)
+	}
+	// Every assessed host carries one finding, so the CVEs between them
+	// account for every one of those hosts.
+	if hosts != scaleFacts {
+		t.Errorf("the CVEs name %d affected hosts, expected %d", hosts, scaleFacts)
+	}
+
+	scoped.do(http.MethodGet, "/api/v1/vulnerabilities/cves?cursor=not-a-cursor", nil, nil, http.StatusBadRequest)
 }

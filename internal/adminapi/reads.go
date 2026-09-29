@@ -70,17 +70,87 @@ type fanOutCounts struct {
 }
 
 // add counts one job under the fold its state belongs to.
-func (c *fanOutCounts) add(state jobs.State) {
+func (c *fanOutCounts) add(state jobs.State) { c.addN(state, 1) }
+
+// addN counts many jobs of one state at once, the way the database counts
+// them for a fan-out too wide to list in one page.
+func (c *fanOutCounts) addN(state jobs.State, n int) {
 	switch state {
 	case jobs.StateSucceeded:
-		c.Succeeded++
+		c.Succeeded += n
 	case jobs.StateFailed, jobs.StateTimedOut, jobs.StateCanceled, jobs.StateExpired:
-		c.Failed++
+		c.Failed += n
 	case jobs.StateLeased, jobs.StateDispatched, jobs.StateRunning:
-		c.Running++
+		c.Running += n
 	default:
-		c.Queued++
+		c.Queued += n
 	}
+}
+
+// fanOutTally is the fan-out as the database counts it: every job of it,
+// folded into the four states of the status bar and into the three answers a
+// host can give the read - it answered, it could not, it has not yet.
+type fanOutTally struct {
+	Counts fanOutCounts
+	// Hosts is the number of jobs the caller may see, which is fewer than
+	// the fan-out ordered when part of it lies outside their scope.
+	Hosts    int
+	Answered int
+	Failed   int
+	Pending  int
+}
+
+// tallyStates folds the states the database counted into the tally.
+func tallyStates(states map[jobs.State]int) fanOutTally {
+	var tally fanOutTally
+	for state, count := range states {
+		if count <= 0 {
+			continue
+		}
+		tally.Hosts += count
+		tally.Counts.addN(state, count)
+		switch {
+		case state == jobs.StateSucceeded:
+			tally.Answered += count
+		case state.Terminal():
+			tally.Failed += count
+		default:
+			tally.Pending += count
+		}
+	}
+	return tally
+}
+
+// fanOutCoverage is the head of a fan-out page, in the terms every fleet view
+// uses: the hosts the read was ordered across, the ones that answered it, and
+// the ones nothing is known about, each under its reason.
+func fanOutCoverage(ordered int, tally fanOutTally, listed int) fleetCoverage {
+	total := max(ordered, tally.Hosts)
+	coverage := fleetCoverage{
+		TotalHosts: total, EvaluatedHosts: tally.Answered,
+		UnknownHosts: max(total-tally.Answered, 0), UnknownReasons: map[string]int{},
+	}
+	if tally.Pending > 0 {
+		coverage.UnknownReasons[unknownNotFinished] = tally.Pending
+	}
+	if tally.Failed > 0 {
+		coverage.UnknownReasons[unknownUnavailable] = tally.Failed
+	}
+	// The counts above are the database's and cover the fan-out; the hosts
+	// listed below them, and the timeline merged from those hosts, cover one
+	// page of it. A page that is not the whole fan-out says so, on every page,
+	// because each of them describes a part of the read.
+	if listed < tally.Hosts {
+		coverage.Partial, coverage.PartialReason = true, partialCapReached
+	}
+	// A host of the fan-out whose job the caller may not see, or whose host has
+	// since left the fleet, is a host this answer knows nothing about - and no
+	// amount of paging brings it back, so it is the reason that stands.
+	if hidden := max(total-tally.Hosts, 0); hidden > 0 {
+		coverage.UnknownReasons[unknownNotReached] = hidden
+		coverage.Partial, coverage.PartialReason = true, partialOutOfScope
+	}
+	return coverage
 }
 
 // fanOutHost is one host of the fan-out: its job, and what the job brought
@@ -126,6 +196,9 @@ type untimedLines struct {
 // fanOutView is the fan-out with its hosts and the merged result.
 type fanOutView struct {
 	readFanOut
+	// The coverage of the read: how many hosts it was ordered across, how
+	// many of them answered, and how many this page says nothing about.
+	fleetCoverage
 	// Kind says how the result merges: "timeline" for line reads, whose lines are
 	// sorted into one sequence by their timestamps, and "structured" for reads
 	// that answer with a typed result per host.
@@ -138,6 +211,12 @@ type fanOutView struct {
 	// Skipped names the matched hosts that got no job, with the reason: a
 	// quarantined host, a host without the adapter.
 	Skipped []skippedHost `json:"skipped,omitempty"`
+	// Count is the number of hosts on this page, Limit the page asked for
+	// and NextCursor empty on the last page. The counts above cover the
+	// whole fan-out however few hosts the page carries.
+	Count      int    `json:"count"`
+	Limit      int    `json:"limit,omitempty"`
+	NextCursor string `json:"next_cursor,omitempty"`
 }
 
 // skippedHost is a matched host the fan-out did not reach.
@@ -362,7 +441,13 @@ func (s *Server) handleCreateRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	view := s.projectFanOut(r.Context(), stored, created)
+	// Every host just ordered is in the answer: the ceiling on a fan-out is
+	// below the page, so the order says what it covers without paging.
+	states := map[jobs.State]int{}
+	for _, job := range created {
+		states[job.State]++
+	}
+	view := s.projectFanOut(r.Context(), stored, created, tallyStates(states), "")
 	view.Skipped = skipped
 	writeJSON(w, http.StatusCreated, view)
 }
@@ -459,21 +544,59 @@ func (s *Server) handleGetRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filter := jobs.ListFilter{FanoutID: stored.ID, Limit: 500}
+	// The page holds as many hosts as this read may fan out to, so an
+	// ordinary fan-out comes back whole; one ordered while the ceiling was
+	// wider is paged like any other fleet list.
+	byDefault := fleetPageDefault
+	if ceiling := opspec.ActionType(stored.Action).FanOutLimit(); ceiling > byDefault {
+		byDefault = min(ceiling, fleetPageMax)
+	}
+	limit, cursor, ok := parseFleetPageOf(w, r, byDefault)
+	if !ok {
+		return
+	}
+	from, err := jobs.ParseCursor(cursor)
+	if err != nil {
+		invalidCursor(w, err)
+		return
+	}
+	// The hosts stand in name order, because a page of a fan-out has to
+	// be the same page every time it is asked for.
+	filter := jobs.ListFilter{FanoutID: stored.ID, Sort: jobs.Sort{Column: "hostname"}}
 	filter.Scopes = principal.ScopesFor(authz.PermJobRead)
-	listed, err := s.jobs.List(r.Context(), filter)
+	// The states are counted in the database over the whole fan-out: a status
+	// bar built from the page would call a read of a thousand hosts finished
+	// as soon as the first hundred were.
+	states, err := s.jobs.CountStates(r.Context(), filter)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.projectFanOut(r.Context(), stored, listed))
+	page, err := s.jobs.ListPaged(r.Context(), filter, from, limit)
+	if err != nil {
+		if errors.Is(err, paging.ErrInvalidCursor) {
+			invalidCursor(w, err)
+			return
+		}
+		s.fail(w, err)
+		return
+	}
+	view := s.projectFanOut(r.Context(), stored, page.Items, tallyStates(states), page.NextCursor)
+	view.Limit = limit
+	writeJSON(w, http.StatusOK, view)
 }
 
 // projectFanOut projects the fan-out from its jobs: the state of every host,
 // what each brought back, and the merge.
-func (s *Server) projectFanOut(ctx context.Context, stored readFanOut, listed []jobs.Job) fanOutView {
+func (s *Server) projectFanOut(ctx context.Context, stored readFanOut, listed []jobs.Job,
+	tally fanOutTally, nextCursor string) fanOutView {
 	action := opspec.ActionType(stored.Action)
-	view := fanOutView{readFanOut: stored, Kind: fanOutKind(action), Hosts: make([]fanOutHost, 0, len(listed))}
+	stored.Counts = tally.Counts
+	view := fanOutView{
+		readFanOut: stored, fleetCoverage: fanOutCoverage(stored.HostCount, tally, len(listed)),
+		Kind: fanOutKind(action), Hosts: make([]fanOutHost, 0, len(listed)),
+		Count: len(listed), NextCursor: nextCursor,
+	}
 	// The hosts stand in name order: the list comes newest first, which
 	// for jobs created in one transaction is no order at all.
 	sort.SliceStable(listed, func(i, j int) bool {
@@ -497,15 +620,10 @@ func (s *Server) projectFanOut(ctx context.Context, stored readFanOut, listed []
 		fragments = s.packageStates(ctx, listed)
 	}
 
-	finished := true
 	for _, job := range listed {
 		host := fanOutHost{
 			JobID: job.ID, HostID: job.HostID, Hostname: job.Hostname, State: string(job.State),
 			ErrorCode: job.ResultErrorCode, Message: job.ResultMessage, FinishedAt: job.FinishedAt,
-		}
-		view.Counts.add(job.State)
-		if !job.State.Terminal() {
-			finished = false
 		}
 		if job.State == jobs.StateSucceeded {
 			if attempt := s.lastAttempt(ctx, job.ID); attempt != nil {
@@ -528,8 +646,10 @@ func (s *Server) projectFanOut(ctx context.Context, stored readFanOut, listed []
 	if view.Kind == "timeline" {
 		view.Timeline, view.Untimed = mergeTimeline(view.Hosts, stored.CreatedAt)
 	}
-	// A finished fan-out gives its read tokens back.
-	if finished && len(listed) > 0 {
+	// A finished fan-out gives its read tokens back. The tally decides it,
+	// not the page; and a caller who sees only a part of the fan-out never
+	// releases it, because the rest of it may still be running.
+	if tally.Pending == 0 && tally.Hosts > 0 && tally.Hosts >= stored.HostCount {
 		s.releaseFanOut(ctx, fanOutOwner(stored.ID))
 	}
 	return view

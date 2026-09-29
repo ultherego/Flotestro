@@ -161,3 +161,34 @@ func TestTheFamilyExpressionFallsBackToWhatTheHostReported(t *testing.T) {
 		t.Errorf("the family expression is %q", hostFamilySQL)
 	}
 }
+
+// The CVE list is cut under one order too, and its key is the order itself:
+// the rung, the number of affected hosts and the CVE.
+func TestCVECursorSurvivesTheRoundTrip(t *testing.T) {
+	out := CVECursor{Rank: 1, Hosts: 412, CVE: "CVE-2026-1234", Set: true}
+	back, err := ParseCVECursor(out.String())
+	if err != nil {
+		t.Fatalf("parsing the cursor: %v", err)
+	}
+	if back != out {
+		t.Fatalf("cursor came back as %+v, expected %+v", back, out)
+	}
+}
+
+func TestParseCVECursorRefusesWhatThisListDidNotIssue(t *testing.T) {
+	empty, err := ParseCVECursor("")
+	if err != nil || empty.Set {
+		t.Fatalf("the first page is an empty cursor: %+v, %v", empty, err)
+	}
+	for _, token := range []string{
+		"..",
+		paging.Encode("1", "412"),
+		paging.Encode("worst", "412", "CVE-2026-1234"),
+		paging.Encode("1", "many", "CVE-2026-1234"),
+		paging.Encode("1", "412", ""),
+	} {
+		if _, err := ParseCVECursor(token); !errors.Is(err, paging.ErrInvalidCursor) {
+			t.Errorf("cursor %q was accepted: %v", token, err)
+		}
+	}
+}

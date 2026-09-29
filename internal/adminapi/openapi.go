@@ -118,6 +118,7 @@ func (s *Server) openAPI() map[string]any {
 	register("DirectoryZone", freeipa.Zone{})
 	register("DirectoryRecord", freeipa.Record{})
 	register("FleetVulnerabilities", fleetVulnerabilitiesView{})
+	register("FleetCVEs", fleetCVEsView{})
 	register("ReportEnvelope", reportEnvelope{})
 	register("PatchStatus", reports.PatchStatus{})
 	register("PatchHost", reports.PatchHost{})
@@ -235,6 +236,10 @@ func (s *Server) openAPI() map[string]any {
 	// The reflection reads the shape, not the meaning.
 	describe(schemas, "Campaign", "revision",
 		"Grows with every state change; a client that read the campaign at one revision and orders a transition at another is answered with 409 concurrent_transition.")
+	describe(schemas, "CampaignTarget", "wave",
+		"The wave of the rollout: 0 is the canary, then the waves in order. -1 is a host that takes no part - "+
+			"it was already settled when the campaign was created (ineligible, excluded) and never runs, "+
+			"so counting wave 0 counts the canary and nothing else.")
 	describe(schemas, "CampaignTarget", "cancel_outcome",
 		"The host's answer to the cancel of its task: not_started, interrupted, not_interruptible or already_done; empty until the host answers.")
 	describe(schemas, "CampaignTarget", "cancel_phase",
@@ -561,6 +566,13 @@ var queryParameters = map[string][]queryParameter{
 	"GET /api/v1/relays": {
 		{"site", "string", "Only the relays of this site."},
 	},
+	"GET /api/v1/campaigns/{id}/targets": {
+		{"state", "string", "Only the hosts in this target state."},
+		{"q", "string", "A fragment of the hostname."},
+		{"wave", "integer", "Only the hosts of this wave; 0 is the canary and total then says how many hosts the canary really has. -1 keeps the hosts that take no part."},
+		{"limit", "integer", "The page size: 200 by default, 1000 at most."},
+		{"cursor", "string", "The next_cursor of the previous page; empty for the first page."},
+	},
 	"GET /api/v1/hosts/{id}/metrics": {
 		{"range", "string", "The chart window: 3h (default), 24h, 7d or 30d; the first two answer with raw samples, the others with quarter-hour rollups."},
 	},
@@ -593,7 +605,12 @@ var queryParameters = map[string][]queryParameter{
 		{"severity", "string", "critical, high, medium, low, negligible or unrated."},
 		{"fixable", "boolean", "true keeps the CVEs with a vendor fix on at least one host."},
 		{"limit", "integer", "The page size: 50 by default, 500 at most."},
-		{"offset", "integer", "Rows to skip."},
+		{"cursor", "string", "The next_cursor of the previous page; empty for the first page. It wins over offset."},
+		{"offset", "integer", "Rows to skip; the older way of asking for the next page."},
+	},
+	"GET /api/v1/reads/{id}": {
+		{"limit", "integer", "The page of hosts: by default as many as this read may fan out to, 500 at most. The counts and the coverage head cover the whole fan-out whatever the page holds."},
+		{"cursor", "string", "The next_cursor of the previous page; empty for the first page. The hosts are ordered by name."},
 	},
 	"GET /api/v1/maintenance/calendar": {
 		{"from", "string", "RFC 3339; the start of the range."},
@@ -896,6 +913,7 @@ var responseSchemas = map[string]map[string]any{
 	"GET /api/v1/support/bundles/{id}":            ref("SupportBundle"),
 	"GET /api/v1/tags":                            collection("Tag"),
 	"GET /api/v1/vulnerabilities":                 ref("FleetVulnerabilities"),
+	"GET /api/v1/vulnerabilities/cves":            ref("FleetCVEs"),
 	"GET /api/v1/hosts/{id}/local-accounts": map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -1126,13 +1144,6 @@ var responseSchemas = map[string]map[string]any{
 		"properties": map[string]any{
 			"from": str(), "to": str(), "hosts": count(),
 			"host_ids": map[string]any{"type": "array", "items": str()},
-		},
-	},
-	"GET /api/v1/vulnerabilities/cves": map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"items": map[string]any{"type": "array", "items": ref("CVESummary")},
-			"count": count(), "total": count(), "limit": count(), "offset": count(),
 		},
 	},
 	"GET /api/v1/whoami": map[string]any{

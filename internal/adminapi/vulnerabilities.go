@@ -232,6 +232,20 @@ func (f fleetHostFilter) store(scopes []authz.Scope) vuln.FleetFilter {
 	return vuln.FleetFilter{Scopes: scopes, Query: f.Query, Severity: f.Severity, Sort: f.Sort}
 }
 
+// assessmentCoverage is the head every vulnerability view answers with: the
+// hosts in scope, those an assessment has judged, and those it has not - a
+// host nothing was ever evaluated for is unknown, never a clean one.
+func assessmentCoverage(summary vuln.FleetSummary) fleetCoverage {
+	coverage := fleetCoverage{
+		TotalHosts: summary.Hosts, EvaluatedHosts: summary.Evaluated, UnknownHosts: summary.Unassessed,
+		UnknownReasons: map[string]int{},
+	}
+	if summary.Unassessed > 0 {
+		coverage.UnknownReasons[unknownNoAssessment] = summary.Unassessed
+	}
+	return coverage
+}
+
 // fleetVulnerabilitiesView is the answer of the fleet screen: the coverage of
 // the fleet, the sums over every assessed host in scope, the sources and one
 // page of the host table.
@@ -464,15 +478,8 @@ func (s *Server) handleFleetVulnerabilities(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	coverage := fleetCoverage{
-		TotalHosts: summary.Hosts, EvaluatedHosts: summary.Evaluated, UnknownHosts: summary.Unassessed,
-		UnknownReasons: map[string]int{},
-	}
-	if summary.Unassessed > 0 {
-		coverage.UnknownReasons[unknownNoAssessment] = summary.Unassessed
-	}
 	writeJSON(w, http.StatusOK, fleetVulnerabilitiesView{
-		fleetCoverage: coverage,
+		fleetCoverage: assessmentCoverage(summary),
 		Items:         rows, Count: len(rows), Total: page.Total, NextCursor: page.NextCursor,
 		Limit: filter.Limit, Offset: filter.Offset,
 		Affected: summary.Affected, AffectedWithVendorFix: summary.AffectedWithVendorFix,

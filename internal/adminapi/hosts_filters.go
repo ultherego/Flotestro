@@ -98,6 +98,9 @@ const (
 	// partialCapReached means a cap on rows ended the answer before its
 	// last row.
 	partialCapReached = "cap_reached"
+	// partialOutOfScope means the view covers something wider than the
+	// caller may read, and answers about the part they may.
+	partialOutOfScope = "out_of_scope"
 )
 
 // The reasons a host is unknown to a fleet view.
@@ -108,6 +111,9 @@ const (
 	unknownNotReached       = "not_reached"
 	unknownNoDefinition     = "no_definition"
 	unknownNoAssessment     = "no_assessment"
+	// unknownNotFinished is a host whose work is still under way: it has
+	// not answered yet, which is not the same as having nothing to say.
+	unknownNotFinished = "not_finished"
 )
 
 // The page of a fleet view's rows: what a screen gets without asking and
@@ -120,12 +126,19 @@ const (
 // parseFleetPage reads the page size and the cursor of a fleet view. The
 // answer has been written when the result is false.
 func parseFleetPage(w http.ResponseWriter, r *http.Request) (limit int, cursor string, ok bool) {
+	return parseFleetPageOf(w, r, fleetPageDefault)
+}
+
+// parseFleetPageOf is parseFleetPage for a view whose natural page is not the
+// fleet's: a fan-out is as wide as the read it carries, and the fleet's page
+// would cut an ordinary one in half.
+func parseFleetPageOf(w http.ResponseWriter, r *http.Request, byDefault int) (limit int, cursor string, ok bool) {
 	requested, err := strconv.Atoi(r.URL.Query().Get("limit"))
 	if r.URL.Query().Get("limit") != "" && (err != nil || requested < 0) {
 		problem(w, http.StatusBadRequest, "invalid_limit", "limit must be a positive whole number")
 		return 0, "", false
 	}
-	return paging.Limit(requested, fleetPageDefault, fleetPageMax), r.URL.Query().Get("cursor"), true
+	return paging.Limit(requested, byDefault, fleetPageMax), r.URL.Query().Get("cursor"), true
 }
 
 // invalidCursor refuses a cursor that did not come from this list.

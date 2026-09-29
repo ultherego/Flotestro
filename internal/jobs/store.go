@@ -1391,6 +1391,33 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]Job, error) {
 	return page.Items, nil
 }
 
+// CountStates counts the tasks matching the filter by state. A view that
+// lists one page of them reads it so its picture covers every task, not the
+// page: a fan-out of a thousand hosts must not look finished because the
+// first hundred are.
+func (s *Store) CountStates(ctx context.Context, filter ListFilter) (map[State]int, error) {
+	conditions, args := filter.conditions()
+	clause := ""
+	if len(conditions) > 0 {
+		clause = " where " + strings.Join(conditions, " and ")
+	}
+	rows, err := s.pool.Query(ctx, "select state, count(*) from jobs"+clause+" group by state", args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	states := map[State]int{}
+	for rows.Next() {
+		var state string
+		var count int
+		if err := rows.Scan(&state, &count); err != nil {
+			return nil, err
+		}
+		states[State(state)] = count
+	}
+	return states, rows.Err()
+}
+
 // Cursor is the key of the last task of the previous page: the order the page
 // was read in, the value of the sorted column on that task and its identifier.
 type Cursor struct {

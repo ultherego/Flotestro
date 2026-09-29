@@ -58,16 +58,46 @@ func (s *Server) handleFleetCVEs(w http.ResponseWriter, r *http.Request) {
 	if offset, err := strconv.Atoi(query.Get("offset")); err == nil && offset > 0 {
 		filter.Offset = offset
 	}
+	cursor, err := vuln.ParseCVECursor(query.Get("cursor"))
+	if err != nil {
+		invalidCursor(w, err)
+		return
+	}
+	filter.Cursor = cursor
 
+	// The list is drawn from the findings of the hosts an assessment has
+	// judged, so it speaks for those hosts alone: the head says how much of
+	// the fleet that is, or a fleet nothing was evaluated for would read as a
+	// fleet without vulnerabilities.
+	summary, err := s.vulnerabilities.FleetSummary(r.Context(), filter.Scopes)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	page, err := s.vulnerabilities.CVEs(r.Context(), filter)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"items": page.Items, "count": len(page.Items),
-		"total": page.Total, "limit": filter.Limit, "offset": filter.Offset,
+	writeJSON(w, http.StatusOK, fleetCVEsView{
+		fleetCoverage: assessmentCoverage(summary),
+		Items:         page.Items, Count: len(page.Items), Total: page.Total,
+		NextCursor: page.NextCursor, Limit: filter.Limit, Offset: filter.Offset,
 	})
+}
+
+// fleetCVEsView is the answer of the CVE list: the coverage of the fleet the
+// rows were counted over, and one page of them.
+type fleetCVEsView struct {
+	fleetCoverage
+	Items []vuln.CVESummary `json:"items"`
+	// Count is the rows on this page and Total the rows the filter matches
+	// across every page.
+	Count      int    `json:"count"`
+	Total      int    `json:"total"`
+	NextCursor string `json:"next_cursor,omitempty"`
+	Limit      int    `json:"limit"`
+	Offset     int    `json:"offset"`
 }
 
 // cveReport is the answer of the CVE page: what the upstream database says
