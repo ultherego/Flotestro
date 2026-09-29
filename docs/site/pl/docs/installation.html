@@ -206,7 +206,11 @@ chmod 600 secrets/database-url
 docker compose -f compose.yaml -f compose.external-db.yaml run --rm migrate
 docker compose -f compose.yaml -f compose.external-db.yaml up -d
 docker compose logs -f control-plane        # wait for "the database schema is current"
-curl -fsS http://127.0.0.1:8080/healthz</code></pre>
+curl -fsS http://127.0.0.1:8080/readyz</code></pre>
+
+    <p><code>/readyz</code>, a nie <code>/healthz</code>: to drugie odpowiada,
+    dopóki proces żyje, a żyje też wtedy, gdy baza jest nieosiągalna i gdy stała
+    się standby tylko do odczytu.</p>
 
     <p>W tej kolejności i nie odwrotnie. Schemat podnosi się osobnym
     uruchomieniem, a panel obsługujący ruch odmawia pracy na schemacie, do

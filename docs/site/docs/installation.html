@@ -213,7 +213,11 @@ chmod 600 secrets/database-url
 docker compose -f compose.yaml -f compose.external-db.yaml run --rm migrate
 docker compose -f compose.yaml -f compose.external-db.yaml up -d
 docker compose logs -f control-plane        # wait for "the database schema is current"
-curl -fsS http://127.0.0.1:8080/healthz</code></pre>
+curl -fsS http://127.0.0.1:8080/readyz</code></pre>
+
+    <p><code>/readyz</code> and not <code>/healthz</code>: the latter answers
+    while the process is alive, which it is when the database is unreachable and
+    when the database has become a read-only standby.</p>
 
     <p>In that order and not the other way. The schema is brought forward by a
     run of its own, and a panel that serves refuses a schema it does not match

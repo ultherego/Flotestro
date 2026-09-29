@@ -41,8 +41,10 @@ the host that runs the panel needs no PostgreSQL client of its own.
 
 ## Signals
 
-- `GET /healthz` answers `503 database_unavailable` while the pool cannot ping the database,
-  `{"status":"ok","active_sessions":N}` otherwise.
+- `GET /readyz` answers `503 database_unavailable` while the pool cannot ping the database,
+  `503 database_read_only` on a standby, `503 crypto_state_stale` behind the installation's key
+  record, and `{"status":"ok","active_sessions":N}` otherwise. `GET /healthz` answers `200` while
+  the process is alive and never touches the database.
 - `GET /api/v1/status`, block `crypto`: `ok` with `installation_id`, `active_key_id`, `issuer_id`,
   `keys` and `pending_rewrap`; the block repeats the self-test of the start on every read.
 - A start that stops with `the control plane refuses to start: the cryptographic state of the
@@ -210,7 +212,8 @@ scales a second control plane with a state volume of its own against one databas
 
 ## Verification
 
-1. `GET /healthz` is `200`; `GET /api/v1/settings` shows the expected schema version.
+1. `GET /readyz` is `200` - `/healthz` answers while the process is alive and says nothing
+   about the database this restored; `GET /api/v1/settings` shows the expected schema version.
 2. `GET /api/v1/fleet/summary` and the dashboard: hosts come back online as their agents
    reconnect (`flotestro_hosts_lifecycle{lifecycle_state}` on `GET /metrics`).
 3. Certificates and secrets: `GET /api/v1/pki` lists the same active CA as before;
@@ -242,5 +245,6 @@ From the error guide: `lease_expired` (reconcile, read state), `superseded_by_re
 (reconcile, never retry), `outcome_unknown` (agent, read state), `expired` (dispatch),
 `secret_unavailable` (dispatch, automatic retry); `secrets_key_unavailable`,
 `issuer_key_unavailable`, `pki_state_mismatch`, `crypto_state_ambiguous` (startup, after a
-change). Outside the guide: `database_unavailable` (`/healthz`, 503); `unknown_certificate`,
+change). Outside the guide: `database_unavailable`, `database_read_only` and
+`crypto_state_stale` (`/readyz`, 503); `unknown_certificate`,
 `revoked_certificate`, `identity_mismatch` in the gateway's connection refusals.
