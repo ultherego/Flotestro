@@ -453,10 +453,12 @@ jobs:
     permissions:
       contents: write
     env:
-      # Only the presence of the key is a job-wide fact: the steps below switch
-      # on it. The key and its passphrase go to the two steps that sign, and
-      # not to the checkout, the download or the apt-get install.
-      RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+      # Only the presence of the key is a job-wide fact, and it is a boolean:
+      # the steps below switch on it. The key itself was declared here, which
+      # put it in the environment of the download, the checkout, the apt-get
+      # install and both gh release calls - the comment said otherwise and was
+      # wrong. It now goes to the two steps that import it and nowhere else.
+      RELEASE_SIGNING_KEY_PRESENT: ${{ secrets.RELEASE_SIGNING_KEY != '' }}
     steps:
       - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
@@ -474,6 +476,31 @@ jobs:
           sha256sum --check --strict SHA256SUMS
           echo "every file matches the manifest"
 
+      - name: A stable release is signed or it is not a release
+        # The step below runs only when the repository holds the signing key,
+        # which is right for a pre-release somebody is trying out. For a stable
+        # tag it is not: the packages would go up with no SHA256SUMS.asc beside
+        # them and a fleet installing from this repository would have nothing to
+        # check them against. The same shape of refusal already guards a stable
+        # tag missing an architecture, a few hundred lines above; it was simply
+        # never applied to the signature.
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          prerelease=false
+          case "${VERSION#v}" in *-*) prerelease=true ;; esac
+          if [ "$prerelease" = true ]; then
+            echo "$VERSION is a pre-release; an unsigned one is allowed"
+            exit 0
+          fi
+          if [ "${RELEASE_SIGNING_KEY_PRESENT:-false}" != true ]; then
+            echo "::error::the stable release $VERSION has no signing key, so its packages would be published unsigned." >&2
+            echo "Put the armoured private key of the release identity in the RELEASE_SIGNING_KEY secret, or tag a pre-release." >&2
+            exit 1
+          fi
+          echo "$VERSION is stable and the signing key is here"
+
       - name: Sign the checksums
         # One signature over SHA256SUMS covers every file of the release,
         # because every file's digest stands in it. The step runs only when
@@ -482,8 +509,9 @@ jobs:
         # signature is published unsigned rather than silently "signed" by
         # a key made up on the runner. The secret, when it exists, is the
         # armoured private key of the release identity.
-        if: env.RELEASE_SIGNING_KEY != ''
+        if: env.RELEASE_SIGNING_KEY_PRESENT == 'true'
         env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
           RELEASE_SIGNING_KEY_PASSPHRASE: ${{ secrets.RELEASE_SIGNING_KEY_PASSPHRASE }}
         run: |
           set -euo pipefail
@@ -536,7 +564,7 @@ jobs:
           echo "::warning title=No repository publication::the signing key is missing, so the repository keeps the previous release"
 
       - name: The tools the repositories are composed with
-        if: env.RELEASE_SIGNING_KEY != ''
+        if: env.RELEASE_SIGNING_KEY_PRESENT == 'true'
         # dpkg-dev writes the apt index, createrepo-c the dnf metadata, rpm
         # signs the .rpm files themselves, and repo-add - pacman's own tool,
         # packaged for Debian and Ubuntu as pacman-package-manager - writes
@@ -553,7 +581,7 @@ jobs:
             dpkg-dev rpm createrepo-c pacman-package-manager makepkg libarchive-tools
 
       - name: The script that composes them
-        if: env.RELEASE_SIGNING_KEY != ''
+        if: env.RELEASE_SIGNING_KEY_PRESENT == 'true'
         # One file of the product, taken from the tag being released rather
         # than from the job that built it: a script handed over by the build
         # job would be a way to reach the key this job holds.
@@ -566,7 +594,7 @@ jobs:
           persist-credentials: false
 
       - name: The repository as it stands today
-        if: env.RELEASE_SIGNING_KEY != ''
+        if: env.RELEASE_SIGNING_KEY_PRESENT == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         # The published tree is fetched before anything is added to it. A
@@ -587,9 +615,10 @@ jobs:
           fi
 
       - name: Compose and sign the repositories
-        if: env.RELEASE_SIGNING_KEY != ''
+        if: env.RELEASE_SIGNING_KEY_PRESENT == 'true'
         env:
           FLOTESTRO_CHANNEL: ${{ steps.channel.outputs.name }}
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
           RELEASE_SIGNING_KEY_PASSPHRASE: ${{ secrets.RELEASE_SIGNING_KEY_PASSPHRASE }}
         run: |
           set -euo pipefail
@@ -615,7 +644,7 @@ jobs:
           rm -rf "$GNUPGHOME"
 
       - name: Every index carries a signature
-        if: env.RELEASE_SIGNING_KEY != ''
+        if: env.RELEASE_SIGNING_KEY_PRESENT == 'true'
         # What is about to be pushed is verified with nothing but the public
         # key that lies beside it - exactly what a host has. An index whose
         # signature does not check out stops the publication here, where it
@@ -648,7 +677,7 @@ jobs:
           rm -rf "$GNUPGHOME"
 
       - name: Publish the repository
-        if: env.RELEASE_SIGNING_KEY != ''
+        if: env.RELEASE_SIGNING_KEY_PRESENT == 'true'
         # Jekyll would try to build the tree it is given; .nojekyll says to
         # serve it as it is. The commit is the publication: an unchanged tree
         # is a re-run of the same tag and there is nothing to say.
