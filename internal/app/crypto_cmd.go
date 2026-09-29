@@ -149,10 +149,15 @@ func (o *cryptoOptions) open(ctx context.Context) (*cryptostate.Postgres, *crypt
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	// The floor is the serving panel's - the event bus and the epoch watcher each
-	// hold a connection for the life of the process - and database.Open enforces
-	// it for everybody. A command that needs one connection asks for the floor.
-	pool, err := database.Open(ctx, o.databaseURL, config.DatabasePool{MaxConns: 4, MinConns: 1})
+	// The pool the deployment configured, not one of this command's own: the
+	// floors database.Open enforces are the serving panel's, and a command that
+	// invented its own numbers would be refused by them before it reached the
+	// database.
+	settings, err := config.DatabasePoolFromEnv()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	pool, err := database.Open(ctx, o.databaseURL, settings)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -636,6 +641,10 @@ func cryptoForgetFiles(args []string) error {
 	}
 
 	paths := append(materialPaths(fromFiles), retiredPaths(retiredOnDisk)...)
+	// The certificates go with the keys they belong to. They are public, so
+	// nothing is protected by removing them; what is avoided is a directory
+	// that holds half an authority.
+	paths = append(paths, options.files.companionPaths()...)
 	// Six: what stops working is said before it stops working, not after.
 	fmt.Println("after this, an installation that is rolled back to a panel from before the keys moved")
 	fmt.Println("into the database will not start without a backup of these files.")

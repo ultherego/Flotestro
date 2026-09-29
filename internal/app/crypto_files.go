@@ -302,3 +302,22 @@ func retiredPaths(retired []cryptostate.RetiredAuthority) []string {
 	}
 	return paths
 }
+
+// companionPaths names the public files that belong to the keys but are not
+// keys themselves: the certificate of each authority and the moment a prepared
+// one was prepared.
+//
+// They matter to the removal rather than to the migration. A state directory
+// left holding a certificate whose key is gone is worse than an empty one: a
+// panel started against it refuses with issuer_key_unavailable and an operator
+// goes looking for a key that was removed on purpose.
+func (f installationFiles) companionPaths() []string {
+	var paths []string
+	for _, name := range []string{pki.CACertFile, pki.PendingCertFile, pki.PreparedAtFile} {
+		path := filepath.Join(f.StateDir, name)
+		if _, err := os.Stat(path); err == nil {
+			paths = append(paths, path)
+		}
+	}
+	return paths
+}

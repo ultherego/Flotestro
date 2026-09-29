@@ -256,6 +256,19 @@ func TestTheWithdrawnAuthoritiesAreFoundAndPutBack(t *testing.T) {
 		t.Error("the withdrawn authority did not come back as it went in")
 	}
 
+	// The removal takes the certificate of every authority with its key. A
+	// directory left holding half an authority sends the next operator looking
+	// for a key that was removed on purpose.
+	companions := files.companionPaths()
+	if len(companions) != 3 {
+		t.Errorf("the removal would leave %v behind", companions)
+	}
+	for _, path := range companions {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("%s is named for removal and is not there: %v", path, err)
+		}
+	}
+
 	// And a certificate the database never received is not one this command
 	// may throw away.
 	if err := sameAuthorities(retired, retired); err != nil {
