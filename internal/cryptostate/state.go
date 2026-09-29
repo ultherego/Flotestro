@@ -725,8 +725,11 @@ func (r *Runtime) Rewrap(ctx context.Context) {
 
 // Report is the installation's cryptographic state for the status screen.
 type Report struct {
-	InstallationID    string
-	Provider          string
+	InstallationID string
+	Provider       string
+	// KEKID names the key encryption key the rows are wrapped with; it is
+	// empty for an installation whose keys are still files.
+	KEKID             string
 	ActiveKeyID       string
 	IssuerID          string
 	IssuerFingerprint string
@@ -758,6 +761,9 @@ func (r *Runtime) Report(ctx context.Context) Report {
 		Revision: record.Revision, InitializedAt: record.InitializedAt,
 		Keys: r.provider.KeyIDs(), Initialised: r.initialised, Adopted: r.adopted,
 		VersionsByKey: map[string]int{},
+	}
+	if db, sealed := r.provider.(*DBSealedProvider); sealed {
+		report.KEKID = db.KEKID()
 	}
 	r.mu.RUnlock()
 

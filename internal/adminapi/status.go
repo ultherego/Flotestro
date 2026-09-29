@@ -756,6 +756,11 @@ func (s *Server) cryptoStatus(ctx context.Context) statusBlock {
 		"initialised":        report.Initialised,
 		"adopted":            report.Adopted,
 	}
+	if report.KEKID != "" {
+		// Which key encryption key the rows were sealed with, so an operator can
+		// tell the mounted secret from the one the installation expects.
+		facts["kek_id"] = report.KEKID
+	}
 	if report.Err != nil {
 		return statusFailed("the cryptographic state of the installation is not usable: "+report.Err.Error(), facts)
 	}

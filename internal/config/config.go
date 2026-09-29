@@ -11,8 +11,12 @@ import (
 
 // ControlPlane describes the configuration of the server.
 type ControlPlane struct {
-	DatabaseURL      string
-	StateDir         string
+	DatabaseURL string
+	StateDir    string
+	// KEKFile is where the deployment mounts the key encryption key of the
+	// installation. Only the path is configured; the key itself never travels
+	// in the environment.
+	KEKFile          string
 	GatewayAddr      string
 	EnrollmentAddr   string
 	AdminAddr        string

@@ -166,6 +166,11 @@ func Run() error {
 	secretsKeyRotateTo := flag.String("secrets-key-rotate-to",
 		config.Env("FLOTESTRO_SECRETS_KEY_ROTATE_TO", ""),
 		"the id of the key the secret store switches to at this start; created when missing, a no-op once active")
+	// The path only: a key encryption key given in the environment would stand in
+	// every process listing, every dump of the unit and every crash report.
+	flag.StringVar(&cfg.KEKFile, "kek-file",
+		config.Env("FLOTESTRO_KEK_FILE", cryptostate.DefaultKEKFile),
+		"the file the deployment mounts the key encryption key in; read once the keys of the installation are in the database")
 	webRoot := flag.String("web-root",
 		config.Env("FLOTESTRO_WEB_ROOT", ""), "the directory with the built panel")
 	publicURL := flag.String("public-url",
@@ -627,13 +632,25 @@ func Run() error {
 	if legacyKeyPath == "" {
 		legacyKeyPath = filepath.Join(cfg.StateDir, "secrets.key")
 	}
-	keyProvider, err := cryptostate.NewLocalProvider(filepath.Join(cfg.StateDir, cryptostate.KeysDir),
+	localProvider, err := cryptostate.NewLocalProvider(filepath.Join(cfg.StateDir, cryptostate.KeysDir),
 		*secretsKeyCredential)
 	if err != nil {
 		return fmt.Errorf("the key provider: %w", err)
 	}
+	cryptoStorage := cryptostate.NewPostgres(pool)
+	keyProvider, err := cryptostate.SelectProvider(ctx, cryptoStorage, cfg.KEKFile, localProvider)
+	if err != nil {
+		return refuseCryptoStart(log, err)
+	}
+	if sealed, ok := keyProvider.(*cryptostate.DBSealedProvider); ok {
+		log.Info("the keys of the installation come from the database",
+			"provider", sealed.Name(), "kek_id", sealed.KEKID())
+	} else {
+		log.Info("the keys of the installation come from the state directory",
+			"provider", keyProvider.Name(), "dir", filepath.Join(cfg.StateDir, cryptostate.KeysDir))
+	}
 	cryptoRuntime, err := cryptostate.Open(ctx, cryptostate.Options{
-		Storage:       cryptostate.NewPostgres(pool),
+		Storage:       cryptoStorage,
 		Provider:      keyProvider,
 		CADir:         cfg.StateDir,
 		LegacyKeyPath: legacyKeyPath,
@@ -641,17 +658,7 @@ func Run() error {
 		Log:           log,
 	})
 	if err != nil {
-		var fatal *cryptostate.FatalError
-		if errors.As(err, &fatal) {
-			// The code is what the runbook indexes; the reason names the file or row;
-			// the hint is the one line that stops somebody from "fixing" it by
-			// generating material.
-			log.Error("the control plane refuses to start: the cryptographic state of the installation is not usable",
-				"code", fatal.Code, "reason", fatal.Reason, "detail", errorText(fatal.Err),
-				"hint", cryptostate.RunbookHint)
-			return fmt.Errorf("%s: %s", fatal.Code, fatal.Reason)
-		}
-		return err
+		return refuseCryptoStart(log, err)
 	}
 	trust := cryptoRuntime.Trust()
 	ca := trust.Active()
@@ -1188,7 +1195,7 @@ func Run() error {
 		MetricsRawRetention:    metricsRetention.RawRetention,
 		MetricsRollupRetention: metricsRetention.RollupRetention,
 		AuditRetention:         *auditRetention,
-		SecretsKeyFile:         keyProvider.Dir(),
+		SecretsKeyFile:         localProvider.Dir(),
 		DatabasePool:           dbPool,
 		Migration:              migration,
 	})
@@ -1488,6 +1495,21 @@ func warnAboutBootstrapToken(ctx context.Context, store *authz.Store, log *slog.
 		log.Warn("the bootstrap token is still valid although other administrators exist; " +
 			"revoke it in the access screen or with DELETE /api/v1/principals/{id}/tokens/{token}")
 	}
+}
+
+// refuseCryptoStart turns a refusal of the cryptographic state into the exit
+// of the process. The code is what the runbook indexes; the reason names the
+// file or row; the hint is the one line that stops somebody from "fixing" it
+// by generating material.
+func refuseCryptoStart(log *slog.Logger, err error) error {
+	var fatal *cryptostate.FatalError
+	if errors.As(err, &fatal) {
+		log.Error("the control plane refuses to start: the cryptographic state of the installation is not usable",
+			"code", fatal.Code, "reason", fatal.Reason, "detail", errorText(fatal.Err),
+			"hint", cryptostate.RunbookHint)
+		return fmt.Errorf("%s: %s", fatal.Code, fatal.Reason)
+	}
+	return err
 }
 
 // errorText renders an optional error for a log line.
