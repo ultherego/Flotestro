@@ -413,6 +413,9 @@ func (s *AgentService) Connect(ctx context.Context,
 				// session refreshes them, so a rotated key reaches the host at its next
 				// connection at the latest.
 				HelperTrust: s.helperTrustFor(hostID),
+				// This panel answers every task result, so a host may hold an
+				// undelivered answer until it is told what became of it.
+				TaskResultsAcknowledged: true,
 			},
 		},
 	}); err != nil {
@@ -740,6 +743,38 @@ func (s *AgentService) ackSample(hostID string, session *Session, sample *agentv
 			"sequence", sample.GetSequence(), "err", err)
 	}
 }
+
+// ackResult tells the agent what became of one answer. Only this frees the
+// host's spooled copy of it, so every disposition of a result that is final -
+// taken, held already, or refused for good - sends one.
+func (s *AgentService) ackResult(hostID string, session *Session, result *agentv1.TaskResult,
+	status agentv1.TaskResultAck_Status, reason string) {
+	if session == nil || result.GetTaskId() == "" {
+		return
+	}
+	err := session.Send(&agentv1.ServerMessage{
+		Payload: &agentv1.ServerMessage_TaskResultAck{TaskResultAck: &agentv1.TaskResultAck{
+			TaskId:         result.GetTaskId(),
+			IdempotencyKey: result.GetIdempotencyKey(),
+			Status:         status,
+			ReasonCode:     reason,
+		}},
+	}, ackSendTimeout)
+	if err != nil {
+		s.log.Warn("the acknowledgement of a task result was not sent; the host will offer it again",
+			"host_id", hostID, "attempt_id", result.GetTaskId(), "err", err)
+	}
+}
+
+// The entries of the error guide a refused result carries back to the host.
+const (
+	// errorAttemptUnknown: this panel has no such attempt for this host, so
+	// there is nothing the answer could settle.
+	errorAttemptUnknown = "job_attempt_unknown"
+	// errorJobSettled: the job reached a final state without this answer - a
+	// cancellation, a TTL, another attempt - and a final state is final.
+	errorJobSettled = "job_already_settled"
+)
 
 // consume applies a message of the agent to the records of the panel.
 func (s *AgentService) consume(ctx context.Context, hostID string, session *Session,
@@ -1091,7 +1126,13 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 				Outcome: audit.OutcomeDenied,
 				Detail:  map[string]any{"attempt_id": attemptID, "status": result.GetStatus().String()},
 			})
+			// A host offering this answer again at every session would knock for
+			// ever on a door this panel does not have; it is told to stop.
+			s.ackResult(hostID, session, result,
+				agentv1.TaskResultAck_STATUS_REJECTED_STALE, errorAttemptUnknown)
 		}
+		// Anything else is this panel's own trouble - the database, a timeout -
+		// and the answer stays with the host, which offers it again.
 		return fmt.Errorf("a result for the unknown attempt %s: %w", attemptID, err)
 	}
 
@@ -1104,6 +1145,7 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 	if attemptStatus == jobs.AttemptStatusSuperseded {
 		s.log.Info("the copy of the result for the superseded attempt changes nothing",
 			"job_id", jobID, "attempt_id", attemptID, "status", result.GetStatus().String())
+		s.ackResult(hostID, session, result, agentv1.TaskResultAck_STATUS_DUPLICATE, "")
 		return nil
 	}
 
@@ -1182,6 +1224,9 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 		})
 		s.log.Warn("the result was refused: the session no longer owns the host",
 			"job_id", jobID, "attempt_id", attemptID, "host_id", hostID, "session_id", session.ID)
+		// No acknowledgement: this session is over and the answer is still owed.
+		// The host keeps it and offers it on the session that took the host over,
+		// which is the one entitled to settle the job.
 		session.End("superseded")
 		return nil
 	}
@@ -1193,6 +1238,11 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 	// fragments the agent sent back with it - follows the settlement rather than.
 	if !accepted {
 		s.recordUnappliedResult(ctx, hostID, jobID, attemptID, statusName, result, attemptStatus)
+		// The store looked and would not take it: the job is in a final state
+		// already, or the transition this answer asks for is not one it may make.
+		// Neither changes with time, so the host stops offering it.
+		s.ackResult(hostID, session, result,
+			agentv1.TaskResultAck_STATUS_REJECTED_STALE, errorJobSettled)
 		return nil
 	}
 
@@ -1475,6 +1525,10 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 		"job_id", jobID, "host_id", hostID, "status", statusName,
 		"exit_code", result.GetExitCode(), "replayed", result.GetReplayed(),
 		"after_lease_expiry", afterLeaseExpiry)
+	// The settlement committed, so the host may let its copy go. It comes last:
+	// everything above is what the answer changes, and an acknowledgement sent
+	// before it would free a copy this panel might still have needed.
+	s.ackResult(hostID, session, result, agentv1.TaskResultAck_STATUS_SETTLED, "")
 	return nil
 }
 

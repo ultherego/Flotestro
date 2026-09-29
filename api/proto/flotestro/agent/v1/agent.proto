@@ -325,7 +325,55 @@ message ServerMessage {
     // forwards it like a task - because it is the agent's own spool it
     // frees.
     MetricsAck metrics_ack = 9;
+    // The application acknowledgement of one task result, addressed to the
+    // agent that performed the task. It travels the whole way down, like a
+    // task, because it is the agent's own spool of results it frees.
+    TaskResultAck task_result_ack = 10;
   }
+}
+
+// TaskResultAck answers one TaskResult, named by the attempt the agent
+// computed it for.
+//
+// A host that finished a task and could not send the answer keeps the
+// answer in a small spool on disk and offers it again on the next session
+// that works - otherwise the change is made on the host and the job stays
+// running for ever, because the panel does not redeliver a task it
+// believes is leased. The send is not the confirmation, so only this
+// message frees the spooled copy.
+//
+// The gateway sends it after the transaction that recorded the result
+// committed, and also for a result it will never take - a job cancelled
+// meanwhile, an attempt superseded by another replica, an attempt this
+// panel does not know. A result the panel refuses is refused for good, and
+// the agent stops offering it rather than knocking for ever.
+//
+// A result whose settlement was refused because the session no longer owns
+// the host is NOT acknowledged: that session is ended, and the answer is
+// owed to the one that took the host over.
+message TaskResultAck {
+  // The attempt the result named.
+  string task_id = 1;
+  // The key the host performed the operation under, echoed back so that a
+  // spool keyed by the operation can be freed as well.
+  string idempotency_key = 2;
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    // The result settled the job in this delivery.
+    STATUS_SETTLED = 1;
+    // The panel holds this answer already: the job was settled by this
+    // attempt or by another attempt of the same operation.
+    STATUS_DUPLICATE = 2;
+    // The panel will never take this result - the job was cancelled,
+    // expired or settled otherwise, or the attempt is not one this panel
+    // knows. The change on the host stands; the agent says so in its
+    // journal and gives the answer up.
+    STATUS_REJECTED_STALE = 3;
+  }
+  Status status = 3;
+  // The entry of the error guide behind a refusal; empty on a result the
+  // panel took.
+  string reason_code = 4;
 }
 
 // MetricsAck answers one resource sample, named by the identity the agent
@@ -441,6 +489,11 @@ message SessionConfig {
   // hands the bundle to the helper before any task; an older agent
   // ignores it.
   flotestro.helper.v1.HelperTrustBundle helper_trust = 7;
+  // Whether this panel answers every task result with a TaskResultAck. An
+  // older panel leaves it false, and against one the agent releases a
+  // spooled result on a successful send, which is the contract that panel
+  // was written to.
+  bool task_results_acknowledged = 8;
 }
 
 // InventoryCadence sets the periodic inventory cycle of the agent. Every

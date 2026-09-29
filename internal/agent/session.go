@@ -495,6 +495,30 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 		sampler = NewSpooledSampler(opts.StateDir, facts.BootID, opts.Log)
 	}
 
+	// The answers of the tasks go the same way: written down first, offered
+	// again at the next session until the panel says it holds them. The panel
+	// will not redeliver a task it believes is leased, so an answer dropped at a
+	// broken session would leave the job running for ever with the change made.
+	results := &resultDelivery{
+		send: send, log: opts.Log,
+		acknowledged: sessionConfig.GetTaskResultsAcknowledged(),
+	}
+	if opts.StateDir != "" {
+		spool, err := OpenResultSpool(opts.StateDir, ResultSpoolSize, ResultSpoolBytes,
+			ResultSpoolTTL, opts.Log)
+		if err != nil {
+			opts.Log.Error("the results are not kept for a resend; a broken session loses them",
+				"err", err)
+		} else {
+			results.spool = spool
+		}
+	}
+	if !results.acknowledged && results.spool != nil {
+		// An older panel takes a result and says nothing, so the send is all the
+		// confirmation this session can get.
+		opts.Log.Info("this panel does not acknowledge task results; a sent result is released on the send")
+	}
+
 	go func() {
 		for {
 			msg, err := stream.Receive()
@@ -513,6 +537,11 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 					sampler.Acknowledge(payload.MetricsAck)
 				}
 
+			case *agentv1.ServerMessage_TaskResultAck:
+				// The panel says what became of one answer, after the transaction
+				// that recorded it committed. Only this frees the copy on disk.
+				results.acknowledge(payload.TaskResultAck)
+
 			case *agentv1.ServerMessage_MessageAck:
 				// The acknowledgement of a consumed message is between the panel and the
 				// relay: it says a record may leave the relay's spool.
@@ -526,12 +555,7 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 					if !final.start(task.GetTaskId()) {
 						opts.Log.Info("the task was refused: the host is leaving the fleet",
 							"task_id", task.GetTaskId())
-						if err := send(&agentv1.AgentMessage{
-							Payload: &agentv1.AgentMessage_TaskResult{TaskResult: refuseRetiring(task.GetTaskId())},
-						}); err != nil {
-							opts.Log.Error("the refusal of the task was not sent back",
-								"task_id", task.GetTaskId(), "err", err)
-						}
+						results.deliver(refuseRetiring(task.GetTaskId()))
 						return
 					}
 					defer final.finish(task.GetTaskId())
@@ -576,23 +600,13 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 					opts.Log.Info("the task finished",
 						"task_id", task.GetTaskId(), "status", result.GetStatus(),
 						"error_code", result.GetErrorCode(), "replayed", result.GetReplayed())
-					if err := send(&agentv1.AgentMessage{
-						Payload: &agentv1.AgentMessage_TaskResult{TaskResult: result},
-					}); err != nil {
-						opts.Log.Error("the result of the task was not sent back",
-							"task_id", task.GetTaskId(), "err", err)
-					}
+					results.deliver(result)
 					// The panel may have given up on this attempt and delivered the key
 					// again; that attempt is owed the same result, after the original.
 					if copied := opts.Executor.RedeliveredCopy(result); copied != nil {
 						opts.Log.Info("the result is delivered to the redelivered attempt as well",
 							"task_id", copied.GetTaskId(), "previous_task_id", task.GetTaskId())
-						if err := send(&agentv1.AgentMessage{
-							Payload: &agentv1.AgentMessage_TaskResult{TaskResult: copied},
-						}); err != nil {
-							opts.Log.Error("the result of the task was not sent back",
-								"task_id", copied.GetTaskId(), "err", err)
-						}
+						results.deliver(copied)
 					}
 				}()
 
@@ -644,6 +658,11 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 			}
 		}
 	}()
+
+	// What the panel never confirmed goes first, next to the receive loop so that
+	// the acknowledgements are read as they come and a wedged stream does not
+	// hold up the heartbeat.
+	go results.offer(time.Now())
 
 	// A stable per-host offset spreads the heartbeats of the whole fleet over
 	// time.
