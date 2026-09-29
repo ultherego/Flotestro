@@ -176,6 +176,9 @@ func Run() error {
 	flag.StringVar(&cfg.KEKFile, "kek-file",
 		config.Env("FLOTESTRO_KEK_FILE", cryptostate.DefaultKEKFile),
 		"the file the deployment mounts the key encryption key in; read once the keys of the installation are in the database")
+	flag.StringVar(&cfg.NextKEKFile, "kek-next-file",
+		config.Env("FLOTESTRO_KEK_NEXT_FILE", ""),
+		"the file a rotation mounts the new key encryption key in; the panel uses whichever of the two the installation names")
 	webRoot := flag.String("web-root",
 		config.Env("FLOTESTRO_WEB_ROOT", ""), "the directory with the built panel")
 	publicURL := flag.String("public-url",
@@ -643,7 +646,7 @@ func Run() error {
 		return fmt.Errorf("the key provider: %w", err)
 	}
 	cryptoStorage := cryptostate.NewPostgres(pool)
-	keyProvider, err := cryptostate.SelectProvider(ctx, cryptoStorage, cfg.KEKFile, localProvider)
+	keyProvider, err := cryptostate.SelectProvider(ctx, cryptoStorage, cfg.KEKFile, cfg.NextKEKFile, localProvider)
 	if err != nil {
 		return refuseCryptoStart(log, err)
 	}

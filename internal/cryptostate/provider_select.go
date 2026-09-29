@@ -27,7 +27,7 @@ type ProviderSource interface {
 // is a refusal rather than a quiet fall back to the files: those files may
 // still be lying there and would serve the fleet material the installation has
 // stopped sealing with.
-func SelectProvider(ctx context.Context, source ProviderSource, kekFile string, local Provider) (Provider, error) {
+func SelectProvider(ctx context.Context, source ProviderSource, kekFile, nextKEKFile string, local Provider) (Provider, error) {
 	recorded, err := source.KEKID(ctx)
 	switch {
 	case errors.Is(err, ErrNoRecord):
@@ -42,9 +42,44 @@ func SelectProvider(ctx context.Context, source ProviderSource, kekFile string, 
 		return nil, err
 	}
 	if !kek.Is(recorded) {
-		return nil, fatal(CodeKEKMismatch, fmt.Sprintf(
-			"the keys of this installation are wrapped with %s; %s holds %s",
-			recorded, kekFile, kek.ID()), nil)
+		// A rotation is the one moment an installation has two key encryption
+		// keys: the one the rows were wrapped with and the one they are being
+		// moved to. Which of the two this panel uses is the record's to say, so
+		// there is no order of steps in which a restart brings the panel down.
+		// This is not a fallback to whatever opens - a key that the record does
+		// not name is refused whichever file it came from.
+		next, nextErr := readNextKEK(nextKEKFile, recorded)
+		if nextErr != nil {
+			return nil, nextErr
+		}
+		if next == nil {
+			return nil, fatal(CodeKEKMismatch, fmt.Sprintf(
+				"the keys of this installation are wrapped with %s; %s holds %s",
+				recorded, kekFile, kek.ID()), nil)
+		}
+		kek = next
 	}
 	return NewDBProvider(ctx, source, kek)
+}
+
+// readNextKEK returns the key a rotation is moving to, when there is one and
+// it is the one the record names. Anything else is nothing: a missing file is
+// the ordinary state, and a key that does not match leaves the refusal to the
+// caller, which names the key in use rather than this one.
+func readNextKEK(path, recorded string) (*KEK, error) {
+	if path == "" {
+		return nil, nil
+	}
+	next, err := ReadKEKFile(path)
+	var fatalErr *FatalError
+	if errors.As(err, &fatalErr) && fatalErr.Code == CodeKEKFileMissing {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !next.Is(recorded) {
+		return nil, nil
+	}
+	return next, nil
 }

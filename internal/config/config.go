@@ -16,7 +16,11 @@ type ControlPlane struct {
 	// KEKFile is where the deployment mounts the key encryption key of the
 	// installation. Only the path is configured; the key itself never travels
 	// in the environment.
-	KEKFile          string
+	KEKFile string
+	// NextKEKFile is where a rotation puts the key it is moving to. The
+	// panel uses whichever of the two the installation record names, so no
+	// order of the steps leaves a replica unable to start.
+	NextKEKFile      string
 	GatewayAddr      string
 	EnrollmentAddr   string
 	AdminAddr        string

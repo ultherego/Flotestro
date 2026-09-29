@@ -79,6 +79,10 @@ func (m *memoryKeys) DeleteWrappedKey(_ context.Context, keyID string) error {
 }
 
 const testKEKHex = "3f1a9c0e5b7d2648a0c3e5f7091b2d4e6a8c0e2f4a6b8d0f1234567890abcdef"
+
+// strangerKEKHex belongs to no installation here: it is the third key a test
+// needs to show that two are not simply tried in turn.
+const strangerKEKHex = "5c7e9a1b3d5f70921436587a9cbedf01234567890abcdef0fedcba9876543210"
 const otherKEKHex = "8e2b4d6f0a1c3e5079b1d3f5a7c9e10b2d4f60718293a4b5c6d7e8f901234567"
 
 func testKEK(t *testing.T, hexKey string) *KEK {

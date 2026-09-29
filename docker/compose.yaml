@@ -220,6 +220,10 @@ services:
       # the installation record names a key; the key itself never travels in
       # the environment. See docs/runbooks/key-encryption-key.md.
       FLOTESTRO_KEK_FILE: /run/flotestro/kek
+      # Where a rotation puts the key it is moving to. The panel uses whichever
+      # of the two the installation record names, so neither order of the steps
+      # - rewrap first, move the file first - leaves a replica unable to start.
+      FLOTESTRO_KEK_NEXT_FILE: /run/flotestro/kek-next
       # Optional and non-secret, empty unless ./.env says otherwise: the address
       # the hosts reach the repository at, and the NVD an isolated site clears.
       FLOTESTRO_PACKAGE_REPOSITORY_URL: ${FLOTESTRO_PACKAGE_REPOSITORY_URL-}

@@ -150,6 +150,10 @@ Every row and the record move together, so there is no moment in which the datab
 one key and holds rows wrapped with another. The running panel keeps serving: the keys
 themselves did not change, only their wrapping.
 
+A replica restarted at any point in this - before the rewrap, between it and the move -
+starts on whichever of the two keys the record names. There is no window in which a restart
+takes the panel down.
+
 Then make the new key the deployment's key and restart every replica:
 
 ```fish
@@ -157,8 +161,9 @@ mv ./secrets/kek-next ./secrets/kek
 podman stop flotestro_control-plane_1; podman start flotestro_control-plane_1
 ```
 
-A replica still holding the old key refuses to start with `kek_mismatch`; it does not serve
-half the installation.
+Once `./secrets/kek-next` is gone, a replica that never saw the new key refuses to start
+with `kek_mismatch`; it does not serve half the installation. Keep the file in place until
+every replica has been restarted.
 
 The backup written before the rewrap holds the rows as they were. They open with the old
 key and with no other, so keep that key until every replica is running on the new one.
