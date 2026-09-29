@@ -588,7 +588,7 @@ func (s *Store) SetWaitReason(ctx context.Context, jobID, reason string) error {
 func (s *Store) InFlight(ctx context.Context) ([]string, error) {
 	return collectIDs(s.pool.Query(ctx, `
 		select id from jobs
-		where state in ('leased', 'dispatched', 'running', 'cancel_requested')
+		where state in (`+leaseHoldingStateList()+`)
 		  and campaign_id is null and fanout_id is null`))
 }
 
@@ -804,17 +804,23 @@ func (s *Store) FailUndelivered(ctx context.Context, jobID, attemptID, code, mes
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	settled, err := tx.Exec(ctx, `
+		update jobs set state = 'failed', result_status = 'failed', result_error_code = $2,
+		                result_message = $3, wait_reason = '', finished_at = now(), updated_at = now()
+		where id = $1 and state in ('leased', 'dispatched')`,
+		jobID, code, message)
+	if err != nil {
+		return err
+	}
+	// The host took the task while the panel was giving up on it: the attempt is
+	// still the one carrying the job, and closing it would strand the job.
+	if settled.RowsAffected() == 0 {
+		return tx.Commit(ctx)
+	}
 	if _, err := tx.Exec(ctx, `
 		update job_attempts set finished_at = now(), status = 'failed', error_code = $2,
 		                        message = $3, lease_expires_at = null
 		where id = $1`, attemptID, code, message); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(ctx, `
-		update jobs set state = 'failed', result_status = 'failed', result_error_code = $2,
-		                result_message = $3, wait_reason = '', finished_at = now(), updated_at = now()
-		where id = $1 and state in ('leased', 'dispatched')`,
-		jobID, code, message); err != nil {
 		return err
 	}
 	if err := releaseBudgets(ctx, tx, jobID); err != nil {
@@ -831,11 +837,18 @@ func (s *Store) ReleaseLease(ctx context.Context, jobID, attemptID, reason strin
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if _, err := tx.Exec(ctx, `
+	requeued, err := tx.Exec(ctx, `
 		update jobs set state = $2, updated_at = now()
 		where id = $1 and state in ('leased', 'dispatched')`,
-		jobID, string(StateQueued)); err != nil {
+		jobID, string(StateQueued))
+	if err != nil {
 		return err
+	}
+	// The host acknowledged the task while the panel was taking it back: the
+	// attempt is still the one carrying the job, and closing it would leave the
+	// job running with nothing to carry it and no lease left to expire.
+	if requeued.RowsAffected() == 0 {
+		return tx.Commit(ctx)
 	}
 	if _, err := tx.Exec(ctx, `
 		update job_attempts set finished_at = now(), status = 'released',
@@ -864,7 +877,7 @@ func (s *Store) RenewAttemptLease(ctx context.Context, attemptID, hostID string,
 		   and j.host_id = $2::uuid
 		   and a.finished_at is null
 		   and a.lease_expires_at is not null
-		   and j.state in ('leased', 'dispatched', 'running', 'cancel_requested')`,
+		   and j.state in (`+leaseHoldingStateList()+`)`,
 		attemptID, hostID, extension.Seconds())
 	if err != nil {
 		return false, fmt.Errorf("renewing the lease of the attempt: %w", err)
@@ -952,9 +965,10 @@ func (s *Store) RecordResult(ctx context.Context, jobID, attemptID string,
 
 	// A final state is final: a result that arrived after a cancellation or after
 	// another settlement does not undo the decision - and does not rewrite what
-	// the attempt says either.
-	if currentState.Terminal() || currentState.Validate(jobState) != nil {
-		if previousStatus == "" {
+	// the attempt says either. A move the open job may not make settles nothing
+	// and closes nothing: the attempt is still the only thing carrying the job.
+	if fate := fateOfResult(currentState, jobState); fate != fateSettles {
+		if previousStatus == "" && fate.closesTheAttempt() {
 			if _, err := tx.Exec(ctx, `
 				update job_attempts set
 					status = $2, exit_code = $3, error_code = $4, replayed = $5,
@@ -1075,9 +1089,15 @@ func staleReason(code string) bool {
 // waited for.
 const RebootReturnGrace = 10 * time.Minute
 
-// ReclaimExpiredLeases returns tasks whose lease expired to the queue.
-func (s *Store) ReclaimExpiredLeases(ctx context.Context) (int, error) {
-	const query = `
+// StoppedHostSilentMessage is what a job says when the operator asked the host
+// to stop and the host was never heard from again.
+const StoppedHostSilentMessage = "the host went silent after it was asked to stop; " +
+	"whether the change was made on it is unknown - read the host before ordering again"
+
+// reclaimExpiredLeasesQuery takes back every job nothing is carrying any more:
+// one whose lease ran out, and one left in a lease-holding state with no open
+// attempt, which no lease will ever expire on.
+var reclaimExpiredLeasesQuery = `
 		with expired as (
 			select a.id as attempt_id, a.job_id
 			from job_attempts a
@@ -1087,8 +1107,16 @@ func (s *Store) ReclaimExpiredLeases(ctx context.Context) (int, error) {
 			  and a.lease_expires_at < case when j.action_type = $1
 			                                then now() - make_interval(secs => $2)
 			                                else now() end
-			  and j.state in ('leased', 'dispatched', 'running')
+			  and j.state in (` + leaseHoldingStateList() + `)
 			for update of a skip locked
+		),
+		stranded as (
+			select j.id as job_id
+			from jobs j
+			where j.state in (` + leaseHoldingStateList() + `)
+			  and not exists (select 1 from job_attempts a
+			                   where a.job_id = j.id and a.finished_at is null)
+			for update of j skip locked
 		),
 		closed as (
 			update job_attempts set finished_at = now(), status = 'lease_expired',
@@ -1096,30 +1124,52 @@ func (s *Store) ReclaimExpiredLeases(ctx context.Context) (int, error) {
 			where id in (select attempt_id from expired)
 			returning job_id
 		),
+		reclaimed as (
+			select job_id from closed
+			union
+			select job_id from stranded
+		),
 		settled as (
 			update jobs set state = 'failed', result_status = 'failed',
 			                result_error_code = $3, result_message = $4,
 			                wait_reason = '', finished_at = now(), updated_at = now()
-			where id in (select job_id from closed) and action_type = $1
+			where id in (select job_id from reclaimed) and action_type = $1
+			returning id
+		),
+		stopped as (
+			update jobs set state = 'failed', result_status = $5,
+			                result_error_code = $6, result_message = $7,
+			                wait_reason = '', finished_at = now(), updated_at = now()
+			where id in (select job_id from reclaimed) and action_type <> $1
+			  and state = '` + string(StateCancelRequested) + `'
 			returning id
 		),
 		requeued as (
 			update jobs set state = 'queued', wait_reason = '', updated_at = now()
-			where id in (select job_id from closed) and action_type <> $1
+			where id in (select job_id from reclaimed) and action_type <> $1
+			  and state <> '` + string(StateCancelRequested) + `'
 			returning id
 		)
 		select id from settled
 		union all
+		select id from stopped
+		union all
 		select id from requeued`
+
+// ReclaimExpiredLeases returns tasks whose lease expired to the queue. A task
+// the operator asked to stop is not sent out again: it ends with the outcome
+// on the host recorded as unknown.
+func (s *Store) ReclaimExpiredLeases(ctx context.Context) (int, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return 0, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	reclaimed, err := collectIDs(tx.Query(ctx, query,
+	reclaimed, err := collectIDs(tx.Query(ctx, reclaimExpiredLeasesQuery,
 		string(opspec.ActionSystemReboot), RebootReturnGrace.Seconds(),
 		opspec.ErrorRebootNotObserved,
-		"the host did not come back with a new boot identifier within the wait"))
+		"the host did not come back with a new boot identifier within the wait",
+		ResultStatusUnknown, AttemptStatusLeaseExpired, StoppedHostSilentMessage))
 	if err != nil {
 		return 0, err
 	}

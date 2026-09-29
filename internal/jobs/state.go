@@ -2,7 +2,10 @@
 // queue with leases and the record of attempts.
 package jobs
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // State is the state of a job. Transitions are validated in the domain, not
 // in a handler.
@@ -71,3 +74,59 @@ func (s State) Validate(to State) error {
 	}
 	return nil
 }
+
+// leaseHoldingStates are the states in which a job is carried by an open
+// attempt: it holds a lease, and only that attempt can bring its result.
+var leaseHoldingStates = []State{StateLeased, StateDispatched, StateRunning, StateCancelRequested}
+
+// HoldsLease says whether a job in this state is being carried by an attempt.
+func (s State) HoldsLease() bool {
+	for _, held := range leaseHoldingStates {
+		if held == s {
+			return true
+		}
+	}
+	return false
+}
+
+// leaseHoldingStateList renders the lease-holding states for the in (...) of a
+// query, so that one list answers for every sweep that looks at them.
+func leaseHoldingStateList() string {
+	quoted := make([]string, 0, len(leaseHoldingStates))
+	for _, state := range leaseHoldingStates {
+		quoted = append(quoted, "'"+string(state)+"'")
+	}
+	return strings.Join(quoted, ", ")
+}
+
+// resultFate says what a result may do to its job, by the state the job is in
+// and the state the result asks for.
+type resultFate int
+
+const (
+	// fateSettles: the job is open and may make the move the result asks for.
+	fateSettles resultFate = iota
+	// fateAfterSettlement: the job is already final; the result goes on the
+	// attempt and changes nothing.
+	fateAfterSettlement
+	// fateUnapplicable: the job is open and may not make the move the result
+	// asks for, so nothing about the job is settled by it.
+	fateUnapplicable
+)
+
+// fateOfResult judges a result by the state of its job.
+func fateOfResult(current, asked State) resultFate {
+	switch {
+	case current.Terminal():
+		return fateAfterSettlement
+	case current.Validate(asked) != nil:
+		return fateUnapplicable
+	default:
+		return fateSettles
+	}
+}
+
+// closesTheAttempt says whether the store may close the attempt such a result
+// came on. An attempt closed under a job that still holds it leaves the job
+// carried by nothing and with no lease left to expire.
+func (f resultFate) closesTheAttempt() bool { return f == fateAfterSettlement }
