@@ -653,7 +653,11 @@ func (s *Store) MigrateSecrets(ctx context.Context) (moved int, err error) {
 }
 
 // Enqueue writes the rows of a batch of events in one transaction: every
-// channel's row for every event, pending or suppressed, all or none.
+// channel's row for every event, pending or suppressed, all or none. The
+// transaction is its own - the trail was delivered before it and the cursor
+// moves after it - so the same event can arrive here twice. The unique index on
+// (event_id, channel_id) is what makes the second arrival nothing, and it is
+// the whole of "one event reaches a channel once".
 func (s *Store) Enqueue(ctx context.Context, rows []Delivery) error {
 	if len(rows) == 0 {
 		return nil

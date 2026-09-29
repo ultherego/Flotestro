@@ -475,15 +475,43 @@ func (s *Server) outboxStatus(ctx context.Context) statusBlock {
 		return statusUnknown("the consumers of the durable trail could not be read: "+rows.Err().Error(), facts)
 	}
 
+	// An event a consumer refused often enough is set aside and the trail is let
+	// past it. Nothing else shows that table, and one of those events may be the
+	// alert nobody ever got - so it is counted here, where an operator looks.
+	var setAside int
+	var oldestSetAside *float64
+	if err := s.pool.QueryRow(ctx, `
+		select count(*), extract(epoch from now() - min(set_aside_at))
+		  from outbox_dead_letters`).Scan(&setAside, &oldestSetAside); err != nil {
+		return statusUnknown("the events set aside by the consumers could not be read: "+err.Error(), facts)
+	}
+	facts["set_aside"] = setAside
+	facts["oldest_set_aside_seconds"] = 0.0
+	if oldestSetAside != nil {
+		facts["oldest_set_aside_seconds"] = *oldestSetAside
+	}
+
 	if oldest != nil && *oldest > 120 {
 		return statusFailed("an event has waited for the publisher for more than two minutes", facts)
 	}
 	block := statusOK(facts)
+	attention := []string{}
+	if setAside > 0 {
+		// The trail is past these for good: nothing will try them again unless
+		// somebody does, so the count stands until an operator clears them.
+		note := strconv.Itoa(setAside) + " event(s) were set aside and the trail moved past them"
+		if oldestSetAside != nil {
+			note += ", the oldest " +
+				(time.Duration(*oldestSetAside) * time.Second).Round(time.Minute).String() + " ago"
+		}
+		attention = append(attention, note)
+	}
 	if len(failing) > 0 {
 		// A receiver that is down is the receiver's condition, not the
 		// panel's: the cursor holds and nothing is lost.
-		block.Attention = "a consumer fails its deliveries: " + strings.Join(failing, ", ")
+		attention = append(attention, "a consumer fails its deliveries: "+strings.Join(failing, ", "))
 	}
+	block.Attention = strings.Join(attention, "; ")
 	return block
 }
 

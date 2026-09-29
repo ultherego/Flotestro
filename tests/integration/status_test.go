@@ -66,6 +66,14 @@ func TestStatusJudgesEveryPartOfThePanel(t *testing.T) {
 	if _, ok := outbox.Facts["consumers"].([]any); !ok {
 		t.Error("the outbox block does not list the consumers")
 	}
+	// The events a consumer refused often enough were let past, and one of them
+	// may be the alert nobody ever got: this is the only screen that says so.
+	if _, ok := outbox.Facts["set_aside"].(float64); !ok {
+		t.Error("the outbox block does not count the events set aside by the consumers")
+	}
+	if _, ok := outbox.Facts["oldest_set_aside_seconds"].(float64); !ok {
+		t.Error("the outbox block does not say how old the oldest set-aside event is")
+	}
 
 	// Every block says whether it could be judged; a block without the
 	// field would read as fine to a screen that treats absence as false.

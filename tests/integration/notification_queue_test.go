@@ -3,8 +3,10 @@
 package integration
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +15,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/ultherego/flotestro/internal/notify"
+	"github.com/ultherego/flotestro/internal/outbox"
 )
 
 // The durable notification queue, against receivers that really answer. The
@@ -308,5 +313,89 @@ func TestAnIncomingWebhookKeepsItsAddress(t *testing.T) {
 	h.do(http.MethodPost, "/api/v1/notifications/channels/"+channel.ID+"/test", nil, &outcome, http.StatusOK)
 	if outcome.State != "delivered" || room.received.Load() <= before {
 		t.Errorf("the edit lost the stored address: %+v", outcome)
+	}
+}
+
+// TestOneEventReachesAChannelOnce pins what the queue actually rests on. The
+// consumer hands a round to the router outside every transaction, and the rows
+// are written in a transaction of their own before the cursor moves: a retry, a
+// second instance, or a crash between those two transactions offers the same
+// event again. Nothing but the unique index on (event_id, channel_id) keeps the
+// second offer from becoming a second message.
+func TestOneEventReachesAChannelOnce(t *testing.T) {
+	h := newHarness(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	pool := h.database(ctx)
+
+	receiver := newRecipient(t, http.StatusOK)
+	subject := "policy.drift"
+	channel := createChannel(h, map[string]any{
+		"name": fmt.Sprintf("integration-once-%d", time.Now().UnixNano()), "kind": "webhook",
+		"config": map[string]any{"url": receiver.url, "secret": "integration-signing-secret"},
+		"events": []string{subject}, "reason": notificationReason,
+	})
+
+	// A real event on the trail, so the panel's own consumer walks over it as
+	// well: that is the second instance of the story, and it costs nothing to
+	// have it here.
+	var event outbox.Event
+	if err := pool.QueryRow(ctx, `
+		insert into outbox_events (aggregate_type, aggregate_id, event_type, payload)
+		values ('host', gen_random_uuid(), $1, $2::jsonb)
+		returning id, aggregate_type, aggregate_id, event_type, payload, occurred_at`,
+		subject, `{"policy_name":"exactly once","reason":"the file came back changed"}`).
+		Scan(&event.ID, &event.Aggregate, &event.AggregateID, &event.Type,
+			&event.Payload, &event.OccurredAt); err != nil {
+		t.Fatalf("writing the event on the trail: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `delete from outbox_events where id = $1`, event.ID)
+	})
+
+	// The router with no secrets of its own: the queue is written here, and the
+	// credential is read by the worker of the panel at the moment of sending.
+	router := notify.NewRouter(pool, notify.NewStore(pool, nil), nil, "", slog.Default())
+	for attempt := 1; attempt <= 2; attempt++ {
+		if err := router.Deliver(ctx, []outbox.Event{event}); err != nil {
+			t.Fatalf("handing the round over for the %d. time: %v", attempt, err)
+		}
+	}
+
+	rowsOfEvent := func() int {
+		t.Helper()
+		var count int
+		if err := pool.QueryRow(ctx, `
+			select count(*) from notification_deliveries
+			 where event_id = $1 and channel_id = $2::uuid`, event.ID, channel.ID).Scan(&count); err != nil {
+			t.Fatalf("counting the queue rows of the event: %v", err)
+		}
+		return count
+	}
+	if count := rowsOfEvent(); count != 1 {
+		t.Fatalf("the event handed over twice left %d rows on the channel, expected exactly one", count)
+	}
+
+	// One row, and the worker of the panel sends it once. The row is what the
+	// operator's screen shows, so the delivered state is read the way the screen
+	// reads it.
+	delivered := awaitQueueRow(h, channel.ID, subject, 90*time.Second, "delivered",
+		func(row queueRowView) bool { return row.State == "delivered" })
+	if delivered.EventID != event.ID {
+		t.Errorf("the delivered row carries the event %d rather than %d", delivered.EventID, event.ID)
+	}
+	if receiver.received.Load() != 1 {
+		t.Errorf("the receiver was sent the event %d times, expected once", receiver.received.Load())
+	}
+
+	// The panel's own consumer reaches the event on its own schedule, which may
+	// be after everything above. A round of the trail and a round of the queue
+	// pass here, and neither may add a row or a message.
+	time.Sleep(15 * time.Second)
+	if count := rowsOfEvent(); count != 1 {
+		t.Errorf("the event grew to %d rows on the channel after the trail was walked again", count)
+	}
+	if got := receiver.received.Load(); got != 1 {
+		t.Errorf("the receiver ended up with %d copies of the event, expected one", got)
 	}
 }

@@ -1143,8 +1143,12 @@ func Run() error {
 	notifications := outbox.NewConsumer(pool, "notifications", notifier, log, 2*time.Second)
 	go notifications.Run(ctx)
 	// The queue is what actually sends: the consumer writes a row per channel in
-	// the transaction of the event, and the worker of every instance takes the
-	// rows that are due.
+	// a transaction of its own, after the round was delivered and before the
+	// cursor moves, and the worker of every instance takes the rows that are due.
+	// A round that is handed over twice - a retry, a second instance, a crash
+	// between the two transactions - therefore offers the same rows again, and it
+	// is the unique index on (event_id, channel_id) that makes the second offer
+	// nothing.
 	notificationWorker := notify.NewWorker(notificationStore, notifier, notifyOptions, log)
 	panelServer.SetNotificationQueue(notificationWorker)
 	go notificationWorker.Run(ctx)
