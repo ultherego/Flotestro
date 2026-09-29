@@ -47,7 +47,7 @@ schema it does not expect refuses with `schema_behind` rather than serving half 
 Ask the binary the deployment points at, then the panel itself:
 
 ```
-docker compose run --rm control-plane schema-check   # exit 0 and the level it found
+docker compose --profile check run --rm schema-check   # exit 0 and the level it found
 curl -fsS http://127.0.0.1:8080/readyz
 ```
 

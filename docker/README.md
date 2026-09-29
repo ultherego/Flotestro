@@ -975,12 +975,17 @@ either direction, so the order is not a matter of taste.
    running database:
 
    ```
-   docker compose run --rm control-plane schema-check
+   docker compose --profile check run --rm schema-check
    ```
 
    Exit 0 means the new version needs no migration and the upgrade is a
    restart. Exit 1 with `schema_behind` means it carries migrations; the
    message names how many. Any other answer stops the upgrade.
+
+   The service is `schema-check` and not the control plane with that word
+   after it: `run` starts what the named service depends on, and the control
+   plane depends on `migrate`. Asked that way the question performs the
+   migration it is about and then reports that nothing needs migrating.
 3. **Migrate once, as its own job**, with the credentials of the migrator:
 
    ```
@@ -1220,9 +1225,9 @@ undone by starting the systemd unit again.
    cannot be undone, because a version can be gone back to and a schema cannot.
 
    ```
-   docker compose -f compose.yaml -f compose.external-db.yaml run --rm control-plane schema-check
+   docker compose -f compose.yaml -f compose.external-db.yaml --profile check run --rm schema-check
    docker compose -f compose.yaml -f compose.external-db.yaml run --rm migrate
-   docker compose -f compose.yaml -f compose.external-db.yaml run --rm control-plane schema-check
+   docker compose -f compose.yaml -f compose.external-db.yaml --profile check run --rm schema-check
    ```
 
    The first answer says what the new version would do: exit 0 means it needs no

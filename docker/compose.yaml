@@ -3,6 +3,7 @@
 #   docker compose up -d                                the whole default deployment
 #   docker compose up -d                                with a database somebody else runs
 #   docker compose --profile airgap up -d               plus the package repository of the release
+#   docker compose --profile check run --rm schema-check    what the image would migrate
 #   docker compose --profile tools run --rm admin-tools backup
 #   docker compose --profile restore run --rm admin-restore restore <backup-id>
 #
@@ -146,6 +147,55 @@ services:
 
     # The same two as the control plane, minus the edge: the migration talks to
     # the database and to nothing else, here or somewhere an operator runs.
+    networks:
+      - database
+      - database_egress
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    logging:
+      driver: json-file
+      options:
+        max-size: "1m"
+        max-file: "2"
+
+  # The question an upgrade asks before it decides anything: does the image it
+  # is about to start carry migrations for this database? The answer has to
+  # cost nothing, so this service depends on no other and writes nothing - it
+  # is the control plane's own schema-check and no more.
+  #
+  # It is a service of its own rather than a command of the control plane,
+  # because "run" starts what the named service depends on: asking
+  # control-plane would run the migration the question is about, and answer
+  # that nothing needs migrating. --no-deps does not save it either -
+  # podman-compose puts the dependency on the one-off container itself with
+  # --requires, and podman starts it.
+  #
+  #   docker compose --profile check run --rm schema-check
+  #
+  # Exit 0 is a schema this image matches, exit 1 with schema_behind names how
+  # many migrations it carries, and the profile keeps it out of an ordinary up.
+  schema-check:
+    profiles: ["check"]
+    image: ghcr.io/ultherego/flotestro-control-plane:${FLOTESTRO_VERSION:-latest}
+    user: "65532:65532"
+    command: ["schema-check"]
+    restart: "no"
+
+    environment:
+      FLOTESTRO_DATABASE_URL_FILE: /run/flotestro/database-url
+      FLOTESTRO_DATABASE_MODE: ${FLOTESTRO_DATABASE_MODE:-quickstart}
+      FLOTESTRO_STATE_DIR: /var/lib/flotestro
+
+    volumes:
+      - shared_secrets:/run/flotestro:ro
+      # Read-only, because a question about the schema has no business in the
+      # state the fleet depends on.
+      - control_plane_state:/var/lib/flotestro:ro
+
     networks:
       - database
       - database_egress

@@ -849,10 +849,14 @@ docker compose --profile airgap up -d</code></pre>
       nieuruchomione. Kopia zdjęta po migracji jest kopią wersji, którą właśnie
       się opuszcza.</li>
       <li><strong>Zapytaj, co zrobiłaby nowa wersja</strong>:
-      <code>docker compose run --rm control-plane schema-check</code>. Wyjście 0
+      <code>docker compose --profile check run --rm schema-check</code>. Wyjście 0
       oznacza brak migracji i aktualizację sprowadzoną do restartu; wyjście 1 z
       <code class="refusal">schema_behind</code> oznacza, że niesie migracje, i
-      podaje ile. Każda inna odpowiedź zatrzymuje aktualizację.</li>
+      podaje ile. Każda inna odpowiedź zatrzymuje aktualizację. Usługą jest
+      <code>schema-check</code>, a nie control plane z takim argumentem:
+      <code>run</code> podnosi zależności wskazanej usługi, a control plane
+      zależy od <code>migrate</code> - zapytany tak, preflight wykonałby
+      migrację, o którą pyta.</li>
       <li><strong>Migruj raz, osobnym zadaniem</strong>, poświadczeniami
       migratora:
       <code>docker compose run --rm control-plane migrate</code>. Dwa migratory

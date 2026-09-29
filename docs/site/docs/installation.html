@@ -867,10 +867,14 @@ docker compose --profile airgap up -d</code></pre>
       started from them. A backup taken after the migration is a backup of the
       version you are trying to leave.</li>
       <li><strong>Ask what the new version would do</strong>:
-      <code>docker compose run --rm control-plane schema-check</code>. Exit 0
+      <code>docker compose --profile check run --rm schema-check</code>. Exit 0
       means no migration and the upgrade is a restart; exit 1 with
       <code class="refusal">schema_behind</code> means it carries migrations and
-      names how many. Any other answer stops the upgrade.</li>
+      names how many. Any other answer stops the upgrade. The service is
+      <code>schema-check</code> and not the control plane with that word after
+      it: <code>run</code> starts what the named service depends on, and the
+      control plane depends on <code>migrate</code> - asked that way the
+      question would perform the migration it is about.</li>
       <li><strong>Migrate once, as its own job</strong>, with the migrator's
       credentials:
       <code>docker compose run --rm control-plane migrate</code>. Two migrators

@@ -37,6 +37,15 @@ services:
     secrets:
       - database-url
 
+  # The pre-flight question asks the same database as the two above, so it gets
+  # the same DSN; without this it would ask the quickstart one that is not there.
+  schema-check:
+    environment:
+      FLOTESTRO_DATABASE_MODE: external
+      FLOTESTRO_DATABASE_URL_FILE: /run/secrets/database-url
+    secrets:
+      - database-url
+
 # The DSN carries the password, so it arrives as a file and not as a variable.
 # external mode holds it to sslmode=verify-full and target_session_attrs=read-write,
 # and verify-full needs the issuing authority: the image carries the public

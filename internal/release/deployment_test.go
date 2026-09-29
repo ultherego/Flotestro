@@ -65,3 +65,74 @@ func TestEveryServiceThatMustSurviveARebootSaysAlways(t *testing.T) {
 		}
 	}
 }
+
+// The question an upgrade asks before it decides anything has to cost nothing.
+// "run" starts what the named service depends on, so asking it through the
+// control plane - which depends on migrate - performs the migration it is
+// about and then reports that nothing needs migrating. That was the documented
+// procedure once, and it was measured doing exactly this on both engines: an
+// empty database came back at the head of the schema, exit 0. --no-deps is no
+// answer either, because podman-compose puts the dependency on the one-off
+// container itself with --requires and podman honours it.
+func TestThePreFlightSchemaCheckDependsOnNothing(t *testing.T) {
+	path := filepath.Join("..", "..", "docker", "compose.yaml")
+	content, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		t.Skipf("%s is not in this tree", path)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(content)
+
+	start := regexp.MustCompile(`(?m)^  schema-check:$`).FindStringIndex(text)
+	if start == nil {
+		t.Fatalf("%s declares no schema-check service; the upgrade has nothing to ask "+
+			"that does not first migrate the database it is asking about", path)
+	}
+	block := text[start[1]:]
+	// As far as the next service header or the next top-level key.
+	if next := regexp.MustCompile("(?m)^(?:[a-z]|  [a-z])").FindStringIndex(block[1:]); next != nil {
+		block = block[:next[0]+1]
+	}
+	if regexp.MustCompile(`(?m)^    depends_on:$`).MatchString(block) {
+		t.Errorf("%s: the schema-check service declares depends_on; a pre-flight check that "+
+			"starts anything can start the migration it was asked to look for", path)
+	}
+	if !strings.Contains(block, `command: ["schema-check"]`) {
+		t.Errorf("%s: the schema-check service does not run the schema-check command", path)
+	}
+	if !strings.Contains(block, `profiles: ["check"]`) {
+		t.Errorf("%s: the schema-check service carries no profile, so an ordinary up would "+
+			"run it and leave a refusal behind before the migration has had its turn", path)
+	}
+}
+
+// And nothing may tell an operator to ask it the old way again. The service
+// that answers writes nothing; the one that used to be named drags migrate in
+// behind it.
+func TestNoDocumentAsksTheControlPlaneForASchemaCheck(t *testing.T) {
+	asked := regexp.MustCompile(`run\s+(?:--rm\s+)?control-plane\s+schema-check`)
+	for _, file := range []string{
+		filepath.Join("..", "..", "docker", "README.md"),
+		filepath.Join("..", "..", "docs", "runbooks", "install.md"),
+		filepath.Join("..", "..", "docs", "site", "docs", "installation.html"),
+		filepath.Join("..", "..", "docs", "site", "pl", "docs", "installation.html"),
+	} {
+		content, err := os.ReadFile(file)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range strings.Split(string(content), "\n") {
+			if asked.MatchString(line) {
+				t.Errorf("%s: %q asks the control plane for the schema check, which starts "+
+					"migrate first; the command is "+
+					"\"docker compose --profile check run --rm schema-check\"",
+					file, strings.TrimSpace(line))
+			}
+		}
+	}
+}
