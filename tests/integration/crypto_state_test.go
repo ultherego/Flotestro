@@ -44,8 +44,29 @@ func TestTheInstallationHasARecordedCryptographicState(t *testing.T) {
 	if activeKey == "" {
 		t.Error("the block names no active key")
 	}
-	if provider, _ := block.Facts["provider"].(string); provider != "local-sealed" {
-		t.Errorf("provider = %q, want local-sealed", provider)
+	// Either arrangement is a correct installation, and which one this is is
+	// the deployment's choice; what must hold is that the block describes one
+	// of them and not a mixture. A panel whose keys are rows names the key
+	// encryption key they are wrapped with, and one whose keys are files names
+	// none - that pair is what says the block is talking about the provider
+	// this panel actually runs.
+	provider, _ := block.Facts["provider"].(string)
+	kekID, _ := block.Facts["kek_id"].(string)
+	switch provider {
+	case "local-sealed":
+		if kekID != "" {
+			t.Errorf("the keys are files and the block names the key encryption key %q", kekID)
+		}
+	case "db-sealed":
+		if kekID == "" {
+			t.Error("the keys are rows of the database and the block names no key encryption key")
+		}
+	default:
+		t.Errorf("provider = %q, want local-sealed or db-sealed", provider)
+	}
+	if recorded, _ := block.Facts["recorded_provider"].(string); recorded != "" {
+		t.Errorf("the record names the provider %q and this panel runs %q; it was not restarted after a migration",
+			recorded, provider)
 	}
 	keys, _ := block.Facts["keys"].([]any)
 	if len(keys) == 0 {

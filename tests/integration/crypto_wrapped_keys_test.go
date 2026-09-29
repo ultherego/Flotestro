@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -168,15 +169,27 @@ func TestTheRecordNamesTheKeyEncryptionKeyOrSaysNothingYet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the recorded key encryption key could not be read: %v", err)
 	}
-	t.Cleanup(func() {
-		restore := context.WithoutCancel(ctx)
-		if before == "" {
-			_, _ = pool.Exec(restore, `update crypto_installation_state set kek_id = null where singleton`)
-			return
+	if before != "" {
+		// This installation has moved its keys into the database, and the panel
+		// running against it would refuse to start on a record naming a key
+		// nobody holds. What the column says is then checked and not changed.
+		if !strings.HasPrefix(before, "kek-") || len(before) != 20 {
+			t.Errorf("the record names the key encryption key %q, which is not the shape of one", before)
 		}
-		_ = store.SetKEKID(restore, before)
-	})
+		var rows int
+		if err := pool.QueryRow(ctx, `select count(*) from crypto_wrapped_keys`).Scan(&rows); err != nil {
+			t.Fatal(err)
+		}
+		if rows == 0 {
+			t.Error("the record names a key encryption key and the installation holds no wrapped key")
+		}
+		return
+	}
 
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.WithoutCancel(ctx),
+			`update crypto_installation_state set kek_id = null where singleton`)
+	})
 	if err := store.SetKEKID(ctx, "kek-0123456789abcdef"); err != nil {
 		t.Fatal(err)
 	}
