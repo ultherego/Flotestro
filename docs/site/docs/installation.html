@@ -273,6 +273,8 @@ curl -fsS http://127.0.0.1:8080/healthz</code></pre>
         <tr><td>OIDC client secret</td><td><code>FLOTESTRO_OIDC_CLIENT_SECRET_FILE</code></td><td><code>/run/secrets/oidc_client_secret</code></td><td>a bind mount you add</td></tr>
         <tr><td>Webhook HMAC key</td><td><code>FLOTESTRO_WEBHOOK_SECRET_FILE</code></td><td><code>/run/secrets/webhook_secret</code></td><td>a bind mount you add</td></tr>
         <tr><td>NVD API key</td><td><code>FLOTESTRO_VULN_NVD_KEY_FILE</code></td><td><code>/run/secrets/nvd_key</code></td><td>a bind mount you add</td></tr>
+        <tr><td>Key encryption key</td><td><code>FLOTESTRO_KEK_FILE</code> (already a path)</td><td><code>/run/flotestro/kek</code></td><td><code>init</code>, from <code>./secrets/kek</code></td></tr>
+        <tr><td>Key encryption key a rotation moves to</td><td>named on the command line</td><td><code>/run/flotestro/kek-next</code></td><td><code>init</code>, from <code>./secrets/kek-next</code></td></tr>
         <tr><td>FreeIPA keytab</td><td><code>FLOTESTRO_IPA_KEYTAB</code> (already a path)</td><td><code>/run/secrets/ipa.keytab</code></td><td>a bind mount you add</td></tr>
       </tbody>
     </table>
@@ -418,7 +420,7 @@ docker compose --profile tools run --rm admin-tools backup</code></pre>
       <tbody>
         <tr><td><code>database.dump</code></td><td><code>pg_dump --format=custom</code>, without owners and without privileges: the restore is done by whoever owns the empty database it goes into.</td></tr>
         <tr><td><code>state.tar.zst</code></td><td>The state directory with numeric owners and the original modes - the directory is 0700 and the keys in it 0600.</td></tr>
-        <tr><td><code>manifest.json</code></td><td>What ties the halves together: the backup identifier, the moment, the version and commit of the image, the installation identifier, the active key and issuer identifiers, the digests of both files, and the image digest when the deployment pins one. No DSN, no password, no secret value.</td></tr>
+        <tr><td><code>manifest.json</code></td><td>What ties the halves together: the backup identifier, the moment, the version and commit of the image, the installation identifier, the active key and issuer identifiers, the <code>kek_id</code> of the key encryption key the rows are sealed with (a <code>db-sealed</code> installation only), the digests of both files, and the image digest when the deployment pins one. No DSN, no password, no secret value.</td></tr>
         <tr><td><code>SHA256SUMS</code></td><td>The digests of the two archives, checked before every restore.</td></tr>
       </tbody>
     </table>
@@ -440,7 +442,10 @@ docker compose --profile restore run --rm admin-restore restore 20260919T101500Z
       <p class="note__title">The backup does not take the key encryption key</p>
       <p><code>admin-tools backup</code> takes the database and the state
       directory. It does not take the key encryption key, deliberately: that
-      key is kept apart, by different people.</p>
+      key is kept apart, by different people. The manifest records only its
+      <code>kek_id</code>, so that a restore can tell whether the key in hand is
+      the one that opens the dump; the key itself is not in the backup and must
+      not be.</p>
     </div>
 
     <div class="note note--warning">
@@ -488,6 +493,23 @@ openssl rand -hex 32 &gt; flotestro-kek</code></pre>
     configured: there is no flag and no environment variable that carries the
     key itself.</p>
 
+    <p>In the Compose deployment you put the key in <code>./secrets/kek</code>
+    and <code>init</code> copies it to <code>/run/flotestro/kek</code>, where
+    <code>FLOTESTRO_KEK_FILE</code> points, with the mode and owner the panel
+    insists on. <code>./secrets/</code> is what the deployment holds:
+    <code>init</code> copies it over the volume at every start of the control
+    plane, because starting a container starts what it depends on. A key changed
+    in <code>./secrets/</code> therefore takes effect, and one changed in the
+    volume does not. A key added to a deployment that already runs reaches the
+    panel once <code>init</code> has run again, and under Podman that takes two
+    steps, not <code>podman restart</code>: the control plane depends on
+    <code>init</code> and <code>migrate</code>, which have run and exited, and
+    Podman refuses with &ldquo;some dependencies of container ... are not
+    started&rdquo;.</p>
+
+<pre><code>podman stop flotestro_control-plane_1
+podman start flotestro_control-plane_1</code></pre>
+
     <div class="note note--warning">
       <p class="note__title">A backup is three things, kept apart</p>
       <p>A backup that can be restored is the database dump <strong>and</strong>
@@ -512,9 +534,9 @@ openssl rand -hex 32 &gt; flotestro-kek</code></pre>
     <table>
       <thead><tr><th>Command</th><th>What it does</th></tr></thead>
       <tbody>
-        <tr><td><code>crypto import-state</code></td><td>Moves the keys found in the state directory into the database. Every key is wrapped and read back before anything is written, and all of them are written with the installation record in a single transaction: one key that cannot be read back stops the migration. The files are <strong>not</strong> removed; until you say otherwise they are the way back. Restart the panel afterwards with the key mounted.</td></tr>
+        <tr><td><code>crypto import-state</code></td><td>Moves the keys found in the state directory into the database. Every key is wrapped and read back before anything is written, and all of them are written with the installation record in a single transaction: one key that cannot be read back stops the migration. The files are <strong>not</strong> removed; until you say otherwise they are the way back. Then restart the control plane with the key in place (stop, then start, as above).</td></tr>
         <tr><td><code>crypto revert-state</code></td><td>Moves the keys back into files. The files are written first and the rows dropped only once they are there, so an interrupted revert leaves the keys in the database rather than nowhere.</td></tr>
-        <tr><td><code>crypto rewrap-kek --new-kek-file <var>path</var></code></td><td>Rotates the key encryption key. The keys themselves do not change - only the wrapping - so it can be done with the panel running. Every row and the record move together. Then mount the new key as <code>/run/secrets/flotestro-kek</code> on every replica and restart them; a replica still holding the old key refuses to start with <code>kek_mismatch</code>.</td></tr>
+        <tr><td><code>crypto rewrap-kek --new-kek-file <var>path</var></code></td><td>Rotates the key encryption key. The keys themselves do not change - only the wrapping - so it can be done with the panel running. The new key goes in <code>./secrets/kek-next</code>, <code>init</code> puts it at <code>/run/flotestro/kek-next</code> at the next start of the control plane, and the command is <code>crypto rewrap-kek -new-kek-file /run/flotestro/kek-next</code>. Every row and the record move together. The panel uses whichever of the two keys the installation record names, so a replica restarted at any point in the rotation comes back; there is no window. Then make the new key the deployment's key (<code>./secrets/kek-next</code> becomes <code>./secrets/kek</code>) and restart every replica. Once <code>kek-next</code> is gone, a replica that never saw the new key refuses to start with <code>kek_mismatch</code>, so keep the file until every replica has been restarted.</td></tr>
         <tr><td><code>crypto forget-files -expect-revision <var>revision</var> -confirm-installation <var>installation-id</var></code></td><td>Removes the key files and so closes the way back. It refuses on the first of six checks that fails (the migration is finished and with this key, every key opens from the database and matches its file, the marker in the state directory names this installation, the crypto state still stands at the revision you pass, you said the installation identifier back, and the warning about what stops working is printed first). The revision and the identifier are in the <code>crypto</code> block of <code>GET /api/v1/status</code>.</td></tr>
       </tbody>
     </table>
@@ -552,7 +574,7 @@ openssl rand -hex 32 &gt; flotestro-kek</code></pre>
         <tr><td><code class="refusal">kek_file_missing</code></td><td>There is no file at the path the deployment names.</td></tr>
         <tr><td><code class="refusal">kek_file_unsafe</code></td><td>The file is a link, not a regular file, owned by somebody else, or readable or writable by the group or by anybody else.</td></tr>
         <tr><td><code class="refusal">kek_file_malformed</code></td><td>The content is not 64 hexadecimal characters with at most one trailing newline.</td></tr>
-        <tr><td><code class="refusal">kek_mismatch</code></td><td>The key in the file is not the one the installation's keys were wrapped with, for instance a replica still holding the key from before a rotation.</td></tr>
+        <tr><td><code class="refusal">kek_mismatch</code></td><td>The key in the file is not the one the installation's keys were wrapped with, for instance a replica that never saw the new key once a rotation is finished.</td></tr>
         <tr><td><code class="refusal">wrapped_key_unreadable</code></td><td>A row does not open under the key the deployment holds although it says it was wrapped with it: it was changed, or it is in a form this panel does not read.</td></tr>
       </tbody>
     </table>
