@@ -711,25 +711,22 @@ func Run() error {
 			"on this machine can enrol; set FLOTESTRO_ADVERTISE to an address the fleet reaches")
 	}
 	dnsNames, ips := splitAdvertised(*advertised)
-	serverCertPEM, serverKeyPEM, err := ca.IssueServerCert(dnsNames, ips)
-	if err != nil {
-		return err
-	}
-	serverCert, err := tls.X509KeyPair(serverCertPEM, serverKeyPEM)
+	serverCert, err := newPanelCertificate(trust, dnsNames, ips, log)
 	if err != nil {
 		return err
 	}
 
 	// The trust set changes when the CA is exchanged, so the verification of a
 	// client reads it at every handshake instead of holding a copy from the
-	// moment of the start.
+	// moment of the start. The panel's own certificate is read the same way and
+	// for the same reason.
 	var clientVerifier *gateway.ClientVerifier
 	clientTrust := func(*tls.ClientHelloInfo) (*tls.Config, error) {
 		config := &tls.Config{
-			Certificates: []tls.Certificate{serverCert},
-			ClientAuth:   tls.RequireAndVerifyClientCert,
-			ClientCAs:    trust.Pool(),
-			MinVersion:   tls.VersionTLS13,
+			GetCertificate: serverCert.forClient,
+			ClientAuth:     tls.RequireAndVerifyClientCert,
+			ClientCAs:      trust.Pool(),
+			MinVersion:     tls.VersionTLS13,
 			// The configuration returned here replaces the one of the server as a
 			// whole, so it has to declare HTTP/2 itself.
 			NextProtos: []string{"h2"},
@@ -921,8 +918,8 @@ func Run() error {
 		Addr:    cfg.GatewayAddr,
 		Handler: gateway.WithClientCertificate(gatewayMux),
 		TLSConfig: &tls.Config{
-			Certificates: []tls.Certificate{serverCert},
-			ClientAuth:   tls.RequireAndVerifyClientCert,
+			GetCertificate: serverCert.forClient,
+			ClientAuth:     tls.RequireAndVerifyClientCert,
 			// The trust set is read at every handshake: after an exchange of the CA the
 			// new agent certificates have to be accepted without a restart of the
 			// panel.
@@ -946,9 +943,9 @@ func Run() error {
 		Addr:    cfg.EnrollmentAddr,
 		Handler: enrollmentMux,
 		TLSConfig: &tls.Config{
-			Certificates: []tls.Certificate{serverCert},
-			MinVersion:   tls.VersionTLS12,
-			NextProtos:   []string{"h2", "http/1.1"},
+			GetCertificate: serverCert.forClient,
+			MinVersion:     tls.VersionTLS12,
+			NextProtos:     []string{"h2", "http/1.1"},
 		},
 		ReadHeaderTimeout: 15 * time.Second,
 		ReadTimeout:       30 * time.Second,

@@ -36,7 +36,8 @@ func (s *Server) handlePKIStatus(w http.ResponseWriter, r *http.Request) {
 		if ca.State == "pending" {
 			// For a prepared CA something else counts than the number of hosts
 			// using it: how many hosts do not know it yet.
-			missing, err := s.hosts.HostsWithoutCertificateSince(r.Context(), ca.PreparedAt)
+			missing, err := s.hosts.HostsWithoutCertificateSince(r.Context(), ca.PreparedAt,
+				s.trust.Active().IssuerID())
 			if err != nil {
 				s.fail(w, err)
 				return
@@ -143,7 +144,10 @@ func (s *Server) handleActivateCA(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusConflict, "no_pending_ca", "no CA is prepared for handover")
 		return
 	}
-	missing, err := s.hosts.HostsWithoutCertificateSince(r.Context(), preparedAt)
+	// The authority that signs is read now and not at the start: this instance
+	// may have followed another one into a handover since.
+	missing, err := s.hosts.HostsWithoutCertificateSince(r.Context(), preparedAt,
+		s.trust.Active().IssuerID())
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -204,8 +208,9 @@ func (s *Server) handleActivateCA(w http.ResponseWriter, r *http.Request) {
 	}, key, "the new fleet CA took over signing") {
 		return
 	}
-	// The server certificate still comes from the previous CA; a new one is
-	// made at the next panel start and is accepted by the whole fleet.
+	// Each panel issues its own serving certificate from the CA that signs, and
+	// does so at the handshake after it has seen the handover, so no restart is
+	// needed for the fleet to go on recognising the panel.
 	s.log.Warn("the new fleet CA took over signing", "serial", active.Serial)
 
 	writeJSON(w, http.StatusOK, active)

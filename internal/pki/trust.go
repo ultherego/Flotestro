@@ -34,6 +34,9 @@ type Trust struct {
 	dir   string
 	// onActivate runs after a handover of signing; see SetActivationHook.
 	onActivate func(active *CA)
+	// onPrepare runs after an authority has been admitted to the set; see
+	// SetPreparationHook.
+	onPrepare func(prepared *CA)
 }
 
 // retiredDir holds the CAs withdrawn from signing.
@@ -92,6 +95,34 @@ func OpenTrust(dir string) (*Trust, error) {
 // OpenTrustFrom reads the set of CAs wherever the installation keeps it and
 // creates nothing.
 func OpenTrustFrom(store AuthorityStore) (*Trust, error) {
+	set, err := readTrust(store)
+	if err != nil {
+		return nil, err
+	}
+	trust := &Trust{store: store}
+	if directory, ok := store.(*DirectoryAuthorities); ok {
+		trust.dir = directory.Dir()
+	}
+	trust.active, trust.pending, trust.pendingAt, trust.retired =
+		set.active, set.pending, set.pendingAt, set.retired
+	return trust, nil
+}
+
+// trustSet is the set of CAs as a store holds it. Opening a trust set and
+// refreshing one read it the same way, through readTrust, so the two cannot
+// come to disagree about what the store says.
+type trustSet struct {
+	active    *CA
+	pending   *CA
+	pendingAt time.Time
+	retired   []*CA
+}
+
+// readTrust reads the whole set from the store, finishing an activation the
+// store was caught in the middle of and repairing a moment of preparation that
+// was lost. It returns an error rather than a half-read set: a trust set that
+// is missing a part of itself refuses the hosts that part underwrites.
+func readTrust(store AuthorityStore) (*trustSet, error) {
 	active, err := OpenFrom(store)
 	if errors.Is(err, ErrStateMismatch) {
 		recovered, finished, repairErr := repairActivation(store)
@@ -105,10 +136,7 @@ func OpenTrustFrom(store AuthorityStore) (*Trust, error) {
 	} else if err != nil {
 		return nil, err
 	}
-	trust := &Trust{active: active, store: store}
-	if directory, ok := store.(*DirectoryAuthorities); ok {
-		trust.dir = directory.Dir()
-	}
+	set := &trustSet{active: active}
 
 	keyPEM, certPEM, preparedAt, err := store.ReadPrepared()
 	if err != nil {
@@ -131,14 +159,14 @@ func OpenTrustFrom(store AuthorityStore) (*Trust, error) {
 			}
 			break
 		}
-		trust.pending = pending
-		trust.pendingAt = preparedAt
-		if trust.pendingAt.IsZero() {
+		set.pending = pending
+		set.pendingAt = preparedAt
+		if set.pendingAt.IsZero() {
 			// A moment of preparation that was lost must not stop the panel. It
 			// is taken as now and written back, so that the next start does not
 			// move it again.
-			trust.pendingAt = time.Now().UTC()
-			if err := store.WritePrepared(keyPEM, certPEM, trust.pendingAt); err != nil {
+			set.pendingAt = time.Now().UTC()
+			if err := store.WritePrepared(keyPEM, certPEM, set.pendingAt); err != nil {
 				return nil, err
 			}
 		}
@@ -162,9 +190,40 @@ func OpenTrustFrom(store AuthorityStore) (*Trust, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%w: a withdrawn CA of %s: %v", ErrStateMismatch, store.Describe(), err)
 		}
-		trust.retired = append(trust.retired, &CA{Certificate: cert, PEM: certPEM})
+		set.retired = append(set.retired, &CA{Certificate: cert, PEM: certPEM})
 	}
-	return trust, nil
+	return set, nil
+}
+
+// Refresh re-reads the set from the store into this object, so that everything
+// holding it - the pool of the gateway, the issuer, the metrics - follows an
+// authority another replica activated. Swapping in a freshly opened set
+// instead would leave every one of those holders on the object they were given
+// at the start, signing with and trusting an authority the installation has
+// withdrawn.
+//
+// A store that cannot be read leaves the set exactly as it was and says why: a
+// half-refreshed trust set is worse than a stale one.
+func (t *Trust) Refresh() error {
+	set, err := readTrust(t.store)
+	if err != nil {
+		return err
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	// The policy of the authority - the lifetime it issues and the names it
+	// keeps for the panel - belongs to the installation and not to the key, and
+	// an authority read from a store carries none of it.
+	if set.active.AgentTTL == 0 {
+		set.active.AgentTTL = t.active.AgentTTL
+	}
+	if set.active.ReservedNames == nil {
+		set.active.ReservedNames = t.active.ReservedNames
+	}
+	t.active, t.pending, t.pendingAt, t.retired =
+		set.active, set.pending, set.pendingAt, set.retired
+	return nil
 }
 
 // repairActivation lets a store that can be interrupted between two writes
@@ -183,6 +242,17 @@ func (t *Trust) SetActivationHook(hook func(active *CA)) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.onActivate = hook
+}
+
+// SetPreparationHook registers what runs once a new CA has been admitted to
+// the trust set. It is how the rest of the installation gets told that the set
+// in the store has moved; a replica that is never told goes on handing the
+// hosts a bundle without the new CA, and they would be cut off the moment it
+// took over signing.
+func (t *Trust) SetPreparationHook(hook func(prepared *CA)) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.onPrepare = hook
 }
 
 // Retired returns the withdrawn CAs that are still recognised.
@@ -283,29 +353,43 @@ func describe(ca *CA, state string) Authority {
 // Prepare creates a new CA and admits it into the trust set, but does not let
 // it sign yet.
 func (t *Trust) Prepare() (Authority, error) {
+	authority, hook, prepared, err := t.prepare()
+	if err != nil {
+		return authority, err
+	}
+	// The hook runs outside the lock: it reads the set it is told about.
+	if hook != nil {
+		hook(prepared)
+	}
+	return authority, nil
+}
+
+// prepare is the admission under the lock; it hands back the hook to run once
+// the lock is released.
+func (t *Trust) prepare() (Authority, func(*CA), *CA, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	if t.pending != nil {
-		return Authority{}, fmt.Errorf("a CA prepared to take over already exists")
+		return Authority{}, nil, nil, fmt.Errorf("a CA prepared to take over already exists")
 	}
 	created, certPEM, keyPEM, err := newCA()
 	if err != nil {
-		return Authority{}, err
+		return Authority{}, nil, nil, err
 	}
 	created.AgentTTL = t.active.AgentTTL
 	created.ReservedNames = t.active.ReservedNames
 
 	now := time.Now().UTC()
 	if err := t.store.WritePrepared(keyPEM, certPEM, now); err != nil {
-		return Authority{}, err
+		return Authority{}, nil, nil, err
 	}
 	t.pending = created
 	t.pendingAt = now
 
 	prepared := describe(created, "pending")
 	prepared.PreparedAt = now
-	return prepared, nil
+	return prepared, t.onPrepare, created, nil
 }
 
 // Activate hands signing over to the prepared CA and moves the previous one to

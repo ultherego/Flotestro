@@ -283,3 +283,165 @@ func TestTheActivationHookRunsAfterTheFiles(t *testing.T) {
 		t.Fatalf("hook saw %q, active issuer %q", seen, trust.Active().IssuerID())
 	}
 }
+
+// A replica that did not perform a handover has to end up with the authority
+// that did. Every holder of the set - the pool of the gateway, the issuer, the
+// metrics - is given the object once at the start, so the refresh has to reach
+// into it rather than hand back a second one.
+func TestARefreshedTrustSetFollowsTheAuthorityAnotherReplicaActivated(t *testing.T) {
+	dir := t.TempDir()
+	rotating, err := EnsureTrust(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The other replica over the same store, with the policy the panel gives
+	// its authority at the start.
+	following, err := OpenTrust(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	following.Active().AgentTTL = 3 * time.Hour
+	following.Active().ReservedNames = []string{"panel.example.test"}
+	originalIssuer := following.Active().IssuerID()
+
+	prepared, err := rotating.Prepare()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pending, _ := following.Pending(); pending != nil {
+		t.Fatal("the other replica knew of the prepared CA before it read the store")
+	}
+	if err := following.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	pending, preparedAt := following.Pending()
+	if pending == nil || pending.FingerprintHex() != prepared.Fingerprint {
+		t.Fatal("the prepared CA did not reach the replica that did not prepare it")
+	}
+	if preparedAt.IsZero() {
+		t.Error("the moment of preparation did not travel with it")
+	}
+	if countCertificates(t, following.Bundle()) != 2 {
+		t.Error("the bundle the replica hands out does not carry the prepared CA")
+	}
+
+	activated, err := rotating.Activate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := following.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	if got := following.Active().FingerprintHex(); got != activated.Fingerprint {
+		t.Errorf("the replica signs with %s, the installation with %s", got, activated.Fingerprint)
+	}
+	if following.Active().IssuerID() == originalIssuer {
+		t.Error("the replica still signs with the authority that was withdrawn")
+	}
+	if pending, _ := following.Pending(); pending != nil {
+		t.Error("the authority that took over is still pending on the replica")
+	}
+	if retired := following.Retired(); len(retired) != 1 || retired[0].IssuerID() != originalIssuer {
+		t.Errorf("the withdrawn authority is not the one that stepped down: %d recognised", len(retired))
+	}
+	// The pool is what the gateway verifies agents against, and both the new
+	// authority and the withdrawn one have to be in it.
+	pool := following.Pool()
+	if subjects := len(pool.Subjects()); subjects != 2 { //nolint:staticcheck // the test reads what it built
+		t.Errorf("the pool holds %d authorities, want the new one and the withdrawn one", subjects)
+	}
+	// The lifetime it issues and the names it keeps for the panel belong to the
+	// installation; an authority read from a store carries neither.
+	if following.Active().AgentTTL != 3*time.Hour {
+		t.Errorf("the agent lifetime after the refresh = %s", following.Active().AgentTTL)
+	}
+	if len(following.Active().ReservedNames) != 1 {
+		t.Error("the names reserved for the panel were lost with the handover")
+	}
+}
+
+// halfReadableStore reads its active authority and then refuses, the way a
+// database that goes away between two statements would.
+type halfReadableStore struct {
+	AuthorityStore
+	failing bool
+}
+
+func (h *halfReadableStore) ReadRetired() ([][]byte, error) {
+	if h.failing {
+		return nil, errors.New("the store went away")
+	}
+	return h.AuthorityStore.ReadRetired()
+}
+
+// A set that is half read is worse than one that is old: it would drop the
+// authorities whose part of the read failed, and with them every host they
+// underwrite.
+func TestARefreshThatCannotReadTheStoreLeavesTheSetAsItWas(t *testing.T) {
+	dir := t.TempDir()
+	rotating, err := EnsureTrust(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rotating.Prepare(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rotating.Activate(); err != nil {
+		t.Fatal(err)
+	}
+
+	store := &halfReadableStore{AuthorityStore: NewDirectoryAuthorities(dir)}
+	following, err := OpenTrustFrom(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := following.Authorities()
+
+	store.failing = true
+	if err := following.Refresh(); err == nil {
+		t.Fatal("a store that could not be read was reported as read")
+	}
+	after := following.Authorities()
+	if len(after) != len(before) {
+		t.Fatalf("the set holds %d authorities after the failed refresh, it held %d",
+			len(after), len(before))
+	}
+	for index := range before {
+		if after[index].Fingerprint != before[index].Fingerprint {
+			t.Errorf("the authority %d changed under a refresh that failed", index)
+		}
+	}
+}
+
+// The other replicas have no reason to read the store again unless the
+// preparation says so, and until they do they hand the hosts a bundle without
+// the new authority.
+func TestThePreparationHookRunsOnceTheAuthorityIsInTheStore(t *testing.T) {
+	dir := t.TempDir()
+	trust, err := EnsureTrust(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seen string
+	trust.SetPreparationHook(func(prepared *CA) {
+		beside, err := OpenTrust(dir)
+		if err != nil {
+			t.Errorf("the hook ran before the pair landed: %v", err)
+			return
+		}
+		pending, _ := beside.Pending()
+		if pending == nil || !pending.Certificate.Equal(prepared.Certificate) {
+			t.Error("the hook ran before the store held the prepared CA")
+			return
+		}
+		seen = prepared.IssuerID()
+	})
+	prepared, err := trust.Prepare()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, _ := trust.Pending()
+	if seen == "" || seen != pending.IssuerID() {
+		t.Fatalf("the hook saw %q, the prepared CA is %q", seen, prepared.Fingerprint)
+	}
+}

@@ -1783,8 +1783,18 @@ func (s *Store) CertificateIssuers(ctx context.Context) (map[string]int, error) 
 }
 
 // HostsWithoutCertificateSince counts the hosts that have not received a new
-// certificate since the given moment.
-func (s *Store) HostsWithoutCertificateSince(ctx context.Context, since time.Time) (int, error) {
+// certificate from the given issuer since the given moment. A host gets the
+// trust bundle with the certificate, so a renewal since the preparation is how
+// it comes to know the CA that is waiting to take over.
+//
+// Which CA issued it is half of the question. An instance that has not caught
+// up with a handover still signs with the authority that was withdrawn and
+// hands out the bundle it holds, which is the old one; a certificate it issued
+// proves the host renewed and proves nothing about what the host now trusts.
+// Counting it would let the next activation cut that host off. The issuer of a
+// row that was never recorded is unknown, and unknown is not evidence either.
+func (s *Store) HostsWithoutCertificateSince(ctx context.Context, since time.Time,
+	issuerID string) (int, error) {
 	const query = `
 		select count(*)
 		from hosts h
@@ -1792,9 +1802,10 @@ func (s *Store) HostsWithoutCertificateSince(ctx context.Context, since time.Tim
 		  and not exists (
 		      select 1 from agent_certificates c
 		      where c.host_id = h.id and c.revoked_at is null and c.created_at >= $1
+		        and c.issuer_id = $2::uuid
 		  )`
 	var count int
-	if err := s.pool.QueryRow(ctx, query, since).Scan(&count); err != nil {
+	if err := s.pool.QueryRow(ctx, query, since, issuerID).Scan(&count); err != nil {
 		return 0, err
 	}
 	return count, nil

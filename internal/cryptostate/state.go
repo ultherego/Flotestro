@@ -153,6 +153,7 @@ func Open(ctx context.Context, o Options) (*Runtime, error) {
 		}
 	}
 	r.trust.SetActivationHook(func(active *pki.CA) { r.recordIssuer(context.WithoutCancel(ctx), active) })
+	r.trust.SetPreparationHook(func(*pki.CA) { r.notePreparation(context.WithoutCancel(ctx)) })
 	r.assignIssuers(ctx)
 	return r, nil
 }
@@ -573,6 +574,25 @@ func (r *Runtime) recordIssuer(ctx context.Context, active *pki.CA) {
 	r.assignIssuers(ctx)
 }
 
+// notePreparation is the preparation hook: nothing in the record changes,
+// because what is prepared signs nothing and the record names the authority
+// that signs. What moves is the revision, and that is the point - a reload is
+// the only reason another replica reads the store again, and until it does it
+// hands the hosts a bundle without the new authority.
+func (r *Runtime) notePreparation(ctx context.Context) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.storage.Update(ctx, r.record); err != nil {
+		r.log.Error("a new fleet CA was prepared, but the installation record did not move on; "+
+			"the other instances learn of it only at their next start, and activating before "+
+			"they have would cut off the hosts they serve", "err", err)
+		return
+	}
+	if loaded, err := r.storage.Load(ctx); err == nil {
+		r.record = *loaded
+	}
+}
+
 // assignIssuers fills in the issuer identifier of certificate rows that
 // carry only the subject and serial of their CA.
 func (r *Runtime) assignIssuers(ctx context.Context) {
@@ -697,14 +717,19 @@ func (r *Runtime) Reload(ctx context.Context) {
 		r.markStale("the record names the key " + loaded.ActiveKeyID + " and this instance does not hold it")
 		return
 	}
-	trust, err := openTrust(r.authorities)
-	if err != nil {
+	// The trust set is refreshed in place rather than opened anew: the gateway,
+	// the issuer and the metrics were handed this object at the start and hold
+	// it still, and a set swapped in behind them would reach none of them.
+	if err := r.trust.Refresh(); err != nil {
 		r.markStale("the fleet authority could not be read: " + err.Error())
 		return
 	}
-	if active := trust.Active(); active.IssuerID() != loaded.IssuerID {
-		// The files and the record disagree, which is not this instance's to
-		// resolve: it says so and keeps what it had.
+	if active := r.trust.Active(); active.IssuerID() != loaded.IssuerID {
+		// The store and the record disagree, which is not this instance's to
+		// resolve. What it signs with is what the store holds - that is the
+		// material, and it is what the next start would take - so it says so and
+		// stands down instead of serving a picture of the installation nobody
+		// else has.
 		r.markStale("the authority on disk is " + active.IssuerID() +
 			" and the record names " + loaded.IssuerID)
 		return
@@ -712,7 +737,6 @@ func (r *Runtime) Reload(ctx context.Context) {
 
 	r.mu.Lock()
 	r.record = *loaded
-	r.trust = trust
 	r.stale = ""
 	r.mu.Unlock()
 	r.provider.SetActive(loaded.ActiveKeyID)

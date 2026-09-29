@@ -2,7 +2,12 @@ package cryptostate
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ultherego/flotestro/internal/issuer"
 	"github.com/ultherego/flotestro/internal/pki"
 	"github.com/ultherego/flotestro/internal/secrets"
 )
@@ -602,7 +608,10 @@ func TestARecordBehindAnActivationIsCaughtUp(t *testing.T) {
 	if again.Record().IssuerID != trust.Active().IssuerID() {
 		t.Error("the activation hook did not move the record")
 	}
-	if l.open(t).Record().Revision != 3 {
+	// Two revisions for the two steps: the preparation moves the record so the
+	// other instances have a reason to read the store, and the handover moves
+	// it again with the issuer that now signs.
+	if l.open(t).Record().Revision != 4 {
 		t.Error("the next start did not find the record current")
 	}
 }
@@ -758,5 +767,91 @@ func TestAnInstanceDoesNotClaimAProviderItIsNotRunning(t *testing.T) {
 	}
 	if !strings.Contains(after.Stale, "restarted") {
 		t.Errorf("the reason does not say what to do: %q", after.Stale)
+	}
+}
+
+// hostCSR is a certificate request of the kind an agent sends at a renewal.
+func hostCSR(t *testing.T, hostID string) []byte {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.CreateCertificateRequest(rand.Reader,
+		&x509.CertificateRequest{Subject: pkix.Name{CommonName: hostID}}, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der})
+}
+
+// Two instances over one installation: one hands signing over to a new
+// authority and the other has to follow it.
+//
+// The reload used to open a second trust set and put it in the runtime's
+// field. Nothing outside the runtime was looking there: the pool of the
+// gateway, the issuer and the metrics are handed the object once at the start
+// and hold it for the life of the process. The instance that did not perform
+// the handover went back to ready while it went on signing with, and trusting,
+// the authority the installation had withdrawn.
+func TestTheInstanceThatDidNotRotateSignsWithTheAuthorityTheOtherOneActivated(t *testing.T) {
+	ctx := context.Background()
+	l := newLab(t)
+	rotating := l.open(t)
+	following := l.open(t)
+
+	// What the rest of the panel is given at the start and never asks for again.
+	held := following.Trust()
+	certIssuer := issuer.FromTrust(held)
+	withdrawn := held.Active().IssuerID()
+
+	if _, err := rotating.Trust().Prepare(); err != nil {
+		t.Fatal(err)
+	}
+	following.Reload(ctx)
+	if pending, _ := held.Pending(); pending == nil {
+		t.Fatal("the instance that did not prepare the authority does not know it, " +
+			"so the hosts it serves get a bundle without it and would be cut off by the handover")
+	}
+
+	activated, err := rotating.Trust().Activate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	following.Reload(ctx)
+	if reason := following.Stale(); reason != "" {
+		t.Fatalf("the instance reports itself behind the record: %s", reason)
+	}
+	if following.Trust() != held {
+		t.Fatal("the reload swapped the trust set instead of refreshing the one everything holds")
+	}
+	if got := held.Active().FingerprintHex(); got != activated.Fingerprint {
+		t.Fatalf("the instance signs with %s, the installation with %s", got, activated.Fingerprint)
+	}
+	if following.Record().IssuerID == withdrawn {
+		t.Error("the record of the instance still names the authority that stepped down")
+	}
+
+	// The issuer follows, because it reads the signing authority per signature.
+	issued, err := certIssuer.SignHost(ctx, hostCSR(t, "a-host"), "a-host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issued.IssuerSerial != activated.Serial {
+		t.Errorf("the certificate was issued by %s, the authority that signs is %s",
+			issued.IssuerSerial, activated.Serial)
+	}
+	// And the pool the gateway verifies its clients against accepts it.
+	block, _ := pem.Decode(issued.PEM)
+	if block == nil {
+		t.Fatal("the issued certificate carries no PEM block")
+	}
+	certificate, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := certificate.Verify(x509.VerifyOptions{Roots: held.Pool(),
+		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}); err != nil {
+		t.Errorf("the pool of the instance rejects a certificate it has just issued: %v", err)
 	}
 }
