@@ -369,7 +369,7 @@ func (h *harness) labRelay(t *testing.T) (string, string) {
 		select id::text, advertised_names from relays
 		where revoked_at is null order by enrolled_at desc limit 1`).Scan(&relayID, &names)
 	if err != nil || len(names) == 0 {
-		t.Skipf("the test fleet has no relay: %v", err)
+		absent(t, "the test fleet has no relay: %v", err)
 	}
 	return relayID, "https://" + names[0] + ":8453"
 }
@@ -455,7 +455,7 @@ func TestRelayPageListsTheAttestedHosts(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !attested {
-		t.Skipf("the ubuntu host %s does not connect through the relay %s", ubuntu.Hostname, relayID)
+		absent(t, "no host of the fleet connects through the relay %s, so the path it exists for is untested", relayID)
 	}
 
 	var page struct {

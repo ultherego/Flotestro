@@ -177,7 +177,7 @@ func TestARevokedHostDoesNotConnectThroughTheLabRelay(t *testing.T) {
 	relay := envOr("FLOTESTRO_TEST_RELAY", defaultRelay)
 	address := strings.TrimPrefix(relay, "https://")
 	if conn, err := net.DialTimeout("tcp", address, 3*time.Second); err != nil {
-		t.Skipf("the lab relay at %s does not answer: %v", address, err)
+		absent(t, "the lab relay at %s does not answer: %v", address, err)
 	} else {
 		_ = conn.Close()
 	}
