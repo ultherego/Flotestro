@@ -280,8 +280,14 @@ backup() {
     # state directory holds nothing that cannot be made again, and the other
     # half is the key encryption key - which is not in this backup and must not
     # be, since a dump kept beside the key that opens it is one theft, not two.
+    # The question is answered by the database, so a database that does not
+    # answer is not a "no": swallowing the error here would read an unreachable
+    # server as an installation that keeps its keys in files, and take a backup
+    # of the wrong shape without saying so.
     local kek_id
-    kek_id="$(query "select coalesce(kek_id, '') from crypto_installation_state" 2>/dev/null || true)"
+    if ! kek_id="$(query "select coalesce(kek_id, '') from crypto_installation_state" 2>&1)"; then
+        fail "the installation record could not be read, so it is not known where the keys of this installation are: $kek_id"
+    fi
     if [ -z "$kek_id" ] && [ ! -f "$state_dir/ca.pem" ]; then
         fail "$state_dir carries no ca.pem, so it is not the state of an installation; half a pair is not a backup"
     fi
