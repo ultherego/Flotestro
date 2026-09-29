@@ -402,13 +402,37 @@ func (s restoreStep) write() error {
 		return err
 	}
 	temporary := s.path + ".new"
-	if err := os.WriteFile(temporary, s.content, s.mode); err != nil {
+	if err := writeFileSynced(temporary, s.content, s.mode); err != nil {
 		return err
 	}
+	// The mode is set after the write, because a umask would take the bits off
+	// again and leave a key readable by whoever the account shares a group with.
 	if err := os.Chmod(temporary, s.mode); err != nil {
 		return err
 	}
-	return os.Rename(temporary, s.path)
+	if err := os.Rename(temporary, s.path); err != nil {
+		return err
+	}
+	return syncDir(filepath.Dir(s.path))
+}
+
+// writeFileSynced puts the content on the disk rather than in the page cache.
+// A revert interrupted by a power cut must leave the old file or the new one,
+// never a ca.key of the right length and the wrong content.
+func writeFileSynced(path string, content []byte, mode os.FileMode) error {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write(content); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		file.Close()
+		return err
+	}
+	return file.Close()
 }
 
 // restorePlan works out which file each key goes back to. Which authority is
@@ -618,7 +642,7 @@ func copyFilesTo(dir string, paths []string) (string, error) {
 			return "", err
 		}
 		target := filepath.Join(into, filepath.Base(path))
-		if err := os.WriteFile(target, content, 0o600); err != nil {
+		if err := writeFileSynced(target, content, 0o600); err != nil {
 			return "", err
 		}
 	}
