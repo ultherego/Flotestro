@@ -73,6 +73,18 @@ services:
           echo "password of its own. An installation on a database somebody else runs"
           echo "stops here, puts its DSN in ./secrets/database-url and starts again."
         fi
+        # The key encryption key, when the installation keeps its private keys
+        # in the database rather than in the state volume. It is copied rather
+        # than bound so that it lands beside the other secrets with the same
+        # owner and the same mode; the panel refuses a key file anybody else
+        # could rewrite. Without it nothing changes: an installation whose keys
+        # are still files never reads this path.
+        if [ -f /import/kek ]; then
+          cp /import/kek /run/flotestro/kek
+          chmod 0400 /run/flotestro/kek
+          chown 65532:65532 /run/flotestro/kek
+          echo "the key encryption key was taken from ./secrets/kek"
+        fi
         # The control plane and the tools run as 65532, PostgreSQL as 999, and
         # each reads only the file it needs.
         chmod 0400 /run/flotestro/database-url
@@ -198,6 +210,11 @@ services:
       # The address the operator sees. The OIDC redirect and the Secure flag
       # of the session cookies follow from it.
       FLOTESTRO_PUBLIC_URL: ${FLOTESTRO_PUBLIC_URL:-http://localhost:8080}
+      # Where the key encryption key is mounted, for an installation that has
+      # moved its private keys into the database. The path is read only once
+      # the installation record names a key; the key itself never travels in
+      # the environment. See docs/runbooks/key-encryption-key.md.
+      FLOTESTRO_KEK_FILE: /run/flotestro/kek
       # Optional and non-secret, empty unless ./.env says otherwise: the address
       # the hosts reach the repository at, and the NVD an isolated site clears.
       FLOTESTRO_PACKAGE_REPOSITORY_URL: ${FLOTESTRO_PACKAGE_REPOSITORY_URL-}

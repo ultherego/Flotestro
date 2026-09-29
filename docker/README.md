@@ -423,6 +423,7 @@ anyone else is refused.
 | OIDC client secret | `FLOTESTRO_OIDC_CLIENT_SECRET_FILE` | `/run/secrets/oidc_client_secret` | a bind mount you add |
 | Webhook HMAC key | `FLOTESTRO_WEBHOOK_SECRET_FILE` | `/run/secrets/webhook_secret` | a bind mount you add |
 | NVD API key | `FLOTESTRO_VULN_NVD_KEY_FILE` | `/run/secrets/nvd_key` | a bind mount you add |
+| Key encryption key | `FLOTESTRO_KEK_FILE` (already a path) | `/run/flotestro/kek` | you, as `./secrets/kek`, copied by `init` |
 | FreeIPA keytab | `FLOTESTRO_IPA_KEYTAB` (already a path) | `/run/secrets/ipa.keytab` | a bind mount you add |
 | Kerberos configuration for that keytab | `FLOTESTRO_IPA_KRB5_CONF` (already a path) | `/etc/flotestro/krb5.conf` | a bind mount you add |
 
@@ -441,6 +442,24 @@ the gateway identifier, the advertised addresses and the public URL; see
 Nothing secret goes into a command line, a label, a log line or the settings
 screen: an environment variable is visible in `docker inspect` and in the
 process list of the host, which is why the DSN travels as a path.
+
+The key encryption key is the one secret that is not about reaching something
+else: it is what an installation's own private keys are sealed with once they
+live in the database rather than in the state volume. It is 64 hexadecimal
+characters and nothing else:
+
+    umask 077
+    openssl rand -hex 32 > ./secrets/kek
+
+`init` copies it beside the other secrets and gives it the mode and the owner
+the panel insists on. An installation whose keys are still files never reads
+the path, so the file can be put there before the move and after it. The move
+itself, the rotation of the key and the removal of the old files are
+`flotestro-control-plane crypto import-state`, `crypto rewrap-kek` and
+`crypto forget-files`; the whole procedure is in
+`docs/runbooks/key-encryption-key.md`. The key belongs in a different backup
+from the database: a restorable backup is the dump **and** this key **and**
+the installation identifier.
 
 ## The first start
 
@@ -776,6 +795,14 @@ by. Neither is a backup of the other and neither is usable without the other:
   against one database.
 - Both belong on encrypted storage. File-based secrets are not disk
   encryption.
+
+An installation that has run `crypto import-state` has moved those keys into
+the database, each sealed with the key encryption key. Its pair is then the
+dump and `./secrets/kek`, and the state volume no longer holds anything that
+cannot be made again. The two halves still have to be kept apart: a dump
+whose backup sits beside the key it is sealed with is one theft, not two. The
+`crypto` block of the status screen says which of the two arrangements an
+installation is in - `local-sealed` or `db-sealed`.
 
 ### Taking the pair
 
