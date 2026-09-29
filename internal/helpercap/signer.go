@@ -228,3 +228,12 @@ func TrustBundleSigningBytes(bundle *helperv1.HelperTrustBundle) []byte {
 	}
 	return out
 }
+
+// ReadSigner reads a signing key that must already exist. It is
+// LoadOrGenerateSigner without the generating: a caller that is moving the
+// keys of an installation around wants to know that a key is missing, not to
+// be handed a new one.
+func ReadSigner(path string) (*Signer, error) { return loadSigner(path) }
+
+// PreviousKeyPath names the retired signing key beside the active one.
+func PreviousKeyPath(path string) string { return previousKeyPath(path) }

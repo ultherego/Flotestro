@@ -39,10 +39,10 @@ const retiredDir = "ca-retired"
 
 // pendingCertFile and pendingKeyFile hold the CA prepared to take over.
 const (
-	pendingCertFile = "ca-pending.pem"
-	pendingKeyFile  = "ca-pending.key"
+	pendingCertFile = PendingCertFile
+	pendingKeyFile  = PendingKeyFile
 	// pendingAtFile records the moment the CA was prepared.
-	pendingAtFile = "ca-pending.at"
+	pendingAtFile = PreparedAtFile
 )
 
 // EnsureTrust reads the set of CAs from the state directory when it
@@ -479,4 +479,11 @@ func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 		_ = dir.Close()
 	}
 	return nil
+}
+
+// ParseCertificatePEM reads a certificate that stands on its own, without the
+// key that goes with it: the public half of an authority, as it lies in a file
+// or travels in a bundle.
+func ParseCertificatePEM(certPEM []byte) (*x509.Certificate, error) {
+	return parseCertificateOnly(certPEM)
 }

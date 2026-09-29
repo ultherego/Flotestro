@@ -130,8 +130,8 @@ func (ca *CA) NotAfter() time.Time {
 
 // The names of the files of the signing CA in the state directory.
 const (
-	caCertFile = "ca.pem"
-	caKeyFile  = "ca.key"
+	caCertFile = CACertFile
+	caKeyFile  = CAKeyFile
 )
 
 // The states of the CA material on disk that stop the panel. The codes
@@ -253,6 +253,17 @@ func (ca *CA) IssuerID() string {
 }
 
 // IssuerIDOf derives the issuer identifier of a CA certificate.
+// The files an authority lives in. They are named here rather than spelled out
+// wherever they are needed, because moving the keys of an installation into the
+// database has to speak about exactly these files and no others.
+const (
+	CACertFile      = "ca.pem"
+	CAKeyFile       = "ca.key"
+	PendingCertFile = "ca-pending.pem"
+	PendingKeyFile  = "ca-pending.key"
+	PreparedAtFile  = "ca-pending.at"
+)
+
 func IssuerIDOf(cert *x509.Certificate) string {
 	sum := sha256.Sum256(cert.Raw)
 	var id [16]byte

@@ -91,3 +91,9 @@ func writeMarker(dir, installationID string) error {
 	}
 	return nil
 }
+
+// ReadMarker returns the installation identifier the state directory carries,
+// or an empty string when there is none. The migration of the keys asks for it
+// by name: an operator who is about to drop the files has to be able to say
+// which installation they belong to.
+func ReadMarker(dir string) (string, error) { return readMarker(dir) }

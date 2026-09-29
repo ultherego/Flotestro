@@ -17,10 +17,14 @@ const (
 	// commandSchemaCheck compares the schema with the one this binary
 	// expects and exits; it writes nothing.
 	commandSchemaCheck command = "schema-check"
+	// commandCrypto moves the keys of the installation between the state
+	// directory and the database. It has subcommands of its own, and none of
+	// them runs unless an operator asks for it by name.
+	commandCrypto command = "crypto"
 )
 
 // commandUsage is printed when the command word is not one of the three.
-const commandUsage = "the commands are serve (the default), migrate and schema-check"
+const commandUsage = "the commands are serve (the default), migrate, schema-check and crypto"
 
 // parseCommand takes the command word off the argument list and returns the
 // rest for the flag parser.
@@ -33,7 +37,7 @@ func parseCommand(args []string) (command, []string, error) {
 		return commandServe, args, nil
 	}
 	switch command(first) {
-	case commandServe, commandMigrate, commandSchemaCheck:
+	case commandServe, commandMigrate, commandSchemaCheck, commandCrypto:
 		return command(first), args[1:], nil
 	default:
 		return "", nil, fmt.Errorf("%q is not a command of the control plane; %s", first, commandUsage)

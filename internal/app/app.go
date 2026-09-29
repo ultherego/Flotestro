@@ -89,6 +89,11 @@ func Run() error {
 	if err != nil {
 		return err
 	}
+	// The crypto commands read their own flags and touch nothing the serving
+	// panel sets up, so they are answered here, before any of it is built.
+	if cmd == commandCrypto {
+		return runCrypto(args)
+	}
 	cfg := config.ControlPlane{}
 	// The secrets are read before the flags are defined, so that an installation
 	// can mount each of them as a file instead of putting the value into the

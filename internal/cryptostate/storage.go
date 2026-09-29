@@ -345,3 +345,114 @@ func (p *Postgres) SetKEKID(ctx context.Context, id string) error {
 	}
 	return nil
 }
+
+// ImportKeys implements ImportStore: every key and the name of the key
+// encryption key in one transaction. Half a migration is worse than none - an
+// installation whose secret store reads from the database while its authority
+// still reads from one replica's disk is shared in a way that hides what it
+// still depends on.
+func (p *Postgres) ImportKeys(ctx context.Context, kekID string, keys []WrappedKey) error {
+	return p.inTransaction(ctx, func(tx pgx.Tx) error {
+		var recorded *string
+		// The row is taken for update first, so that a second panel doing the same
+		// thing waits here rather than half way through.
+		if err := tx.QueryRow(ctx,
+			`select kek_id from crypto_installation_state where singleton for update`).Scan(&recorded); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNoRecord
+			}
+			return err
+		}
+		if recorded != nil && *recorded != "" {
+			return fmt.Errorf("the installation is already wrapped with %s", *recorded)
+		}
+		var existing int
+		if err := tx.QueryRow(ctx, `select count(*) from crypto_wrapped_keys`).Scan(&existing); err != nil {
+			return err
+		}
+		if existing > 0 {
+			return fmt.Errorf("the database already holds %d wrapped keys while the record names none", existing)
+		}
+		if err := insertKeys(ctx, tx, keys); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx,
+			`update crypto_installation_state set kek_id = $1, updated_at = now() where singleton`, kekID)
+		return err
+	})
+}
+
+// ReplaceKeys implements ImportStore: the rewrap. Every row and the record
+// move together, so that no moment exists in which the database names one key
+// encryption key and holds rows wrapped with another.
+func (p *Postgres) ReplaceKeys(ctx context.Context, fromKEKID, toKEKID string, keys []WrappedKey) error {
+	return p.inTransaction(ctx, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `
+			update crypto_installation_state set kek_id = $2, updated_at = now()
+			 where singleton and kek_id = $1`, fromKEKID, toKEKID)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return fmt.Errorf("the installation is no longer wrapped with %s", fromKEKID)
+		}
+		if _, err := tx.Exec(ctx, `delete from crypto_wrapped_keys where kek_id = $1`, fromKEKID); err != nil {
+			return err
+		}
+		var left int
+		if err := tx.QueryRow(ctx, `select count(*) from crypto_wrapped_keys`).Scan(&left); err != nil {
+			return err
+		}
+		if left > 0 {
+			return fmt.Errorf("%d keys are wrapped with neither %s nor %s; the rewrap would leave them unreadable",
+				left, fromKEKID, toKEKID)
+		}
+		return insertKeys(ctx, tx, keys)
+	})
+}
+
+// ForgetKeys implements ImportStore: the last step of a revert, once the files
+// are back where the panel reads them from.
+func (p *Postgres) ForgetKeys(ctx context.Context, kekID string) error {
+	return p.inTransaction(ctx, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `
+			update crypto_installation_state set kek_id = null, updated_at = now()
+			 where singleton and kek_id = $1`, kekID)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return fmt.Errorf("the installation is not wrapped with %s", kekID)
+		}
+		_, err = tx.Exec(ctx, `delete from crypto_wrapped_keys where kek_id = $1`, kekID)
+		return err
+	})
+}
+
+// insertKeys writes the rows of a migration. The retirement of a key is kept:
+// a rewrap must not bring a retired key back into use.
+func insertKeys(ctx context.Context, tx pgx.Tx, keys []WrappedKey) error {
+	for _, key := range keys {
+		if _, err := tx.Exec(ctx, `
+			insert into crypto_wrapped_keys
+				(key_id, purpose, kek_id, envelope_version, nonce, ciphertext, retired_at)
+			values ($1, $2, $3, $4, $5, $6, $7)`,
+			key.KeyID, key.Purpose, key.KEKID, key.EnvelopeVersion,
+			key.Nonce, key.Ciphertext, key.RetiredAt); err != nil {
+			return fmt.Errorf("the key %s: %w", key.KeyID, err)
+		}
+	}
+	return nil
+}
+
+func (p *Postgres) inTransaction(ctx context.Context, do func(pgx.Tx) error) error {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	if err := do(tx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
