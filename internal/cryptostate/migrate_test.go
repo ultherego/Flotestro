@@ -26,7 +26,7 @@ func newMemoryStore() *memoryStore {
 		memoryKeys: newMemoryKeys(),
 		retired:    map[string][]byte{},
 		record: &Record{
-			InstallationID: "6283c373-ab8a-4527-ad96-9a59b46a9234",
+			InstallationID: testInstallationID,
 			Provider:       LocalProviderName, Revision: 4,
 		},
 	}

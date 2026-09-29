@@ -11,11 +11,21 @@ import (
 // memoryKeys, plus the key encryption key the installation record names.
 type recordedKeys struct {
 	*memoryKeys
-	id  string
-	err error
+	id string
+	// installation is the one the record names; empty means testInstallationID.
+	installation string
+	err          error
 }
 
 func (r recordedKeys) KEKID(context.Context) (string, error) { return r.id, r.err }
+
+func (r recordedKeys) Load(context.Context) (*Record, error) {
+	installation := r.installation
+	if installation == "" {
+		installation = testInstallationID
+	}
+	return &Record{InstallationID: installation, Provider: DBProviderName}, nil
+}
 
 // writeKEKFile mounts a key the way a deployment does: readable by nobody but
 // its owner.
@@ -173,5 +183,55 @@ func TestDuringARotationTheRecordSaysWhichOfTheTwoKeysIsUsed(t *testing.T) {
 	_, err = SelectProvider(ctx, source, current, filepath.Join(t.TempDir(), "absent"), testLocalProvider(t))
 	if err != nil {
 		t.Errorf("a panel with no rotation under way was refused: %v", err)
+	}
+}
+
+// The graft the binding exists for, at the start rather than at the row: a
+// dump of another installation's keys, restored into a deployment that mounts
+// the same key encryption key. The names of the two keys are the same, so
+// nothing before this noticed; the installation on the row is what does.
+func TestKeysOfAnotherInstallationRefuseTheStartByName(t *testing.T) {
+	ctx := context.Background()
+	elsewhere := unboundKEK(t, testKEKHex).For(otherInstallationID)
+	store := newMemoryKeys()
+	theirs, err := sealSecretsKey(elsewhere, "k-one", make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.rows[theirs.KeyID] = theirs
+
+	source := recordedKeys{memoryKeys: store, id: elsewhere.ID(), installation: testInstallationID}
+	_, err = SelectProvider(ctx, source, writeKEKFile(t, testKEKHex), "", testLocalProvider(t))
+	if !refusedWith(err, CodeWrappedKeyInstallationMismatch) {
+		t.Fatalf("a start over another installation's rows answered %v", err)
+	}
+}
+
+// An installation that has never rewrapped holds nothing but rows of the first
+// form, and one that rewrapped halfway holds both. Either way the start reads
+// them: the form is the row's to say.
+func TestTheStartReadsBothFormsOfWrapping(t *testing.T) {
+	ctx := context.Background()
+	kek := testKEK(t, testKEKHex)
+	store := newMemoryKeys()
+	old := sealFirstForm(t, kek, "k-old", PurposeSecrets, make([]byte, 32))
+	store.rows[old.KeyID] = old
+	fresh, err := sealSecretsKey(kek, "k-new", make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.rows[fresh.KeyID] = fresh
+
+	source := recordedKeys{memoryKeys: store, id: kek.ID()}
+	provider, err := SelectProvider(ctx, source, writeKEKFile(t, testKEKHex), "", testLocalProvider(t))
+	if err != nil {
+		t.Fatalf("the start was refused over a mixed set: %v", err)
+	}
+	sealed, ok := provider.(*DBSealedProvider)
+	if !ok {
+		t.Fatalf("the start chose %s", provider.Name())
+	}
+	if ids := sealed.KeyIDs(); len(ids) != 2 {
+		t.Fatalf("the provider holds %v, expected both forms", ids)
 	}
 }

@@ -116,8 +116,11 @@ type ImportStore interface {
 // round trip costs nothing and answers the only question that matters at this
 // moment: will this installation still be able to read its own keys once the
 // files are gone.
-func Import(ctx context.Context, store ImportStore, kek *KEK, materials []Material, retired []RetiredAuthority) (MigrationReport, error) {
+func Import(ctx context.Context, store ImportStore, kek *InstallationKEK, materials []Material, retired []RetiredAuthority) (MigrationReport, error) {
 	report := MigrationReport{KEKID: kek.ID(), At: time.Now().UTC()}
+	if err := boundToTheInstallation(ctx, store, kek); err != nil {
+		return report, err
+	}
 	if len(materials) == 0 {
 		return report, fmt.Errorf("there is nothing to move: no key was found outside the database")
 	}
@@ -146,8 +149,11 @@ func Import(ctx context.Context, store ImportStore, kek *KEK, materials []Materi
 // pinned and what the certificates were signed with all stay as they are. Only
 // the wrapping moves, which is why this can be done with the panel running and
 // why losing the old key afterwards costs nothing.
-func Rewrap(ctx context.Context, store ImportStore, from, to *KEK) (MigrationReport, error) {
+func Rewrap(ctx context.Context, store ImportStore, from, to *InstallationKEK) (MigrationReport, error) {
 	report := MigrationReport{KEKID: to.ID(), PreviousKEKID: from.ID(), At: time.Now().UTC()}
+	if err := boundToTheInstallation(ctx, store, from, to); err != nil {
+		return report, err
+	}
 	if from.Is(to.ID()) {
 		return report, fmt.Errorf("the installation is already wrapped with %s", to.ID())
 	}
@@ -182,7 +188,10 @@ func Rewrap(ctx context.Context, store ImportStore, from, to *KEK) (MigrationRep
 // files back before the rows are dropped. Nothing is written here: what to do
 // with the material is the caller's, and it is the one thing in this package
 // that leaves the process holding plain key material.
-func Export(ctx context.Context, store ImportStore, kek *KEK) ([]Material, error) {
+func Export(ctx context.Context, store ImportStore, kek *InstallationKEK) ([]Material, error) {
+	if err := boundToTheInstallation(ctx, store, kek); err != nil {
+		return nil, err
+	}
 	recorded, err := store.KEKID(ctx)
 	if err != nil {
 		return nil, err
@@ -218,10 +227,29 @@ func ExportRetired(ctx context.Context, store ImportStore) ([]RetiredAuthority, 
 	return retired, nil
 }
 
+// boundToTheInstallation refuses a key bound to an installation other than the
+// one this database describes. Nothing here can go on to guess which of the two
+// is right: a migration run against the wrong database would seal the keys of
+// one installation into the records of another.
+func boundToTheInstallation(ctx context.Context, store ImportStore, keks ...*InstallationKEK) error {
+	record, err := store.Load(ctx)
+	if err != nil {
+		return fmt.Errorf("the installation record: %w", err)
+	}
+	for _, kek := range keks {
+		if kek.installation != record.InstallationID {
+			return fatal(CodeWrappedKeyInstallationMismatch, fmt.Sprintf(
+				"the key encryption key %s is bound to the installation %s and this database describes %s",
+				kek.ID(), wrappedKeyOwner(kek.installation), record.InstallationID), nil)
+		}
+	}
+	return nil
+}
+
 // seal wraps every material and reads each one back. A key that seals but does
 // not open is the accident this whole stage exists to prevent, and the place to
 // find it is here, before a row is written.
-func seal(kek *KEK, materials []Material) ([]WrappedKey, error) {
+func seal(kek *InstallationKEK, materials []Material) ([]WrappedKey, error) {
 	seen := map[string]bool{}
 	rows := make([]WrappedKey, 0, len(materials))
 	for _, material := range materials {
@@ -247,7 +275,7 @@ func seal(kek *KEK, materials []Material) ([]WrappedKey, error) {
 }
 
 // open reads every key of the installation out of the database.
-func open(ctx context.Context, store ImportStore, kek *KEK) ([]Material, error) {
+func open(ctx context.Context, store ImportStore, kek *InstallationKEK) ([]Material, error) {
 	var materials []Material
 	for _, purpose := range []string{PurposeSecrets, PurposeAgentCA, PurposeHelperSigning} {
 		rows, err := store.WrappedKeys(ctx, purpose)
@@ -313,8 +341,11 @@ func entries(materials []Material, action string) []Entry {
 
 // Preview is what a dry run reports: exactly what the run would do, without
 // touching the database.
-func Preview(ctx context.Context, store ImportStore, kek *KEK, materials []Material, retired []RetiredAuthority) (MigrationReport, error) {
+func Preview(ctx context.Context, store ImportStore, kek *InstallationKEK, materials []Material, retired []RetiredAuthority) (MigrationReport, error) {
 	report := MigrationReport{KEKID: kek.ID(), At: time.Now().UTC()}
+	if err := boundToTheInstallation(ctx, store, kek); err != nil {
+		return report, err
+	}
 	recorded, err := store.KEKID(ctx)
 	if err != nil {
 		return report, err

@@ -14,6 +14,10 @@ type ProviderSource interface {
 	// KEKID names the key encryption key this installation's keys are
 	// wrapped with; empty means they are still files.
 	KEKID(ctx context.Context) (string, error)
+	// Load is the installation record. Which installation this is decides
+	// which rows the key encryption key may open, so the key is not bound
+	// from a flag or a file but from the record itself.
+	Load(ctx context.Context) (*Record, error)
 }
 
 // SelectProvider says where the keys of this installation come from, and is
@@ -59,7 +63,14 @@ func SelectProvider(ctx context.Context, source ProviderSource, kekFile, nextKEK
 		}
 		kek = next
 	}
-	return NewDBProvider(ctx, source, kek)
+	// The key is bound to the installation before it opens anything. A record
+	// naming a key encryption key is a record, so this read finds one; an
+	// installation with no record took the two returns above.
+	record, err := source.Load(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("the installation record: %w", err)
+	}
+	return NewDBProvider(ctx, source, kek.For(record.InstallationID))
 }
 
 // readNextKEK returns the key a rotation is moving to, when there is one and

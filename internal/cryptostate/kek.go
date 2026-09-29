@@ -161,3 +161,24 @@ func allZero(key []byte) bool {
 	}
 	return true
 }
+
+// InstallationKEK is the key encryption key together with the installation
+// whose rows it may seal and open.
+//
+// Sealing lives here and not on KEK so that the binding cannot be forgotten:
+// a key read from a file opens nothing until somebody has said which
+// installation it belongs to, and the compiler asks at every call site.
+type InstallationKEK struct {
+	*KEK
+	installation string
+}
+
+// For binds the key to an installation. It is the only way to a key that
+// seals, and the identifier it is given is meant to come from the
+// installation record, never from a flag or a guess.
+func (k *KEK) For(installationID string) *InstallationKEK {
+	return &InstallationKEK{KEK: k, installation: installationID}
+}
+
+// Installation names the installation this key seals for.
+func (k *InstallationKEK) Installation() string { return k.installation }

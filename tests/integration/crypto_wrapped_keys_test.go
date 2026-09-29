@@ -24,16 +24,10 @@ func TestTheKeysOfTheInstallationLieInTheDatabaseWrappedWithAKeyItDoesNotHold(t 
 	defer cancel()
 	store := cryptostate.NewPostgres(h.database(ctx))
 
-	kek, err := cryptostate.ParseKEK(
-		"3f1a9c0e5b7d2648a0c3e5f7091b2d4e6a8c0e2f4a6b8d0f1234567890abcdef", "test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	stranger, err := cryptostate.ParseKEK(
-		"8e2b4d6f0a1c3e5079b1d3f5a7c9e10b2d4f60718293a4b5c6d7e8f901234567", "test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	kek := installationKEK(ctx, t, store,
+		"3f1a9c0e5b7d2648a0c3e5f7091b2d4e6a8c0e2f4a6b8d0f1234567890abcdef")
+	stranger := installationKEK(ctx, t, store,
+		"8e2b4d6f0a1c3e5079b1d3f5a7c9e10b2d4f60718293a4b5c6d7e8f901234567")
 
 	// Names of this test only, so that a panel running against the same
 	// database is not disturbed by them.
@@ -61,6 +55,14 @@ func TestTheKeysOfTheInstallationLieInTheDatabaseWrappedWithAKeyItDoesNotHold(t 
 	}
 	if stored.KEKID != kek.ID() || stored.Purpose != cryptostate.PurposeSecrets {
 		t.Errorf("the row came back as %s/%s", stored.KEKID, stored.Purpose)
+	}
+	// The installation travels with the row: it is the column an operator reads
+	// to see that a row of another deployment got in here, and the schema has to
+	// carry it for that to be worth anything.
+	if stored.InstallationID != kek.Installation() || stored.EnvelopeVersion != cryptostate.WrappedKeyVersion {
+		t.Errorf("the row came back for the installation %q in form %d, expected %q in form %d",
+			stored.InstallationID, stored.EnvelopeVersion,
+			kek.Installation(), cryptostate.WrappedKeyVersion)
 	}
 	if stored.CreatedAt.IsZero() || stored.RetiredAt != nil {
 		t.Errorf("a key just written is %v and retired at %v", stored.CreatedAt, stored.RetiredAt)
@@ -200,4 +202,25 @@ func TestTheRecordNamesTheKeyEncryptionKeyOrSaysNothingYet(t *testing.T) {
 	if after != "kek-0123456789abcdef" {
 		t.Errorf("the record names %q", after)
 	}
+}
+
+// installationKEK binds a key encryption key the way the panel does: to the
+// installation this database describes. A test that made an installation up
+// would leave rows a panel starting against the same database would refuse.
+func installationKEK(ctx context.Context, t *testing.T, store *cryptostate.Postgres, hexKey string) *cryptostate.InstallationKEK {
+	t.Helper()
+	kek, err := cryptostate.ParseKEK(hexKey, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := store.Load(ctx)
+	switch {
+	case errors.Is(err, cryptostate.ErrNoRecord):
+		// A database no panel has started against yet has no installation to
+		// belong to, so the test names one and every row it writes agrees.
+		return kek.For("00000000-0000-4000-8000-0000000000ff")
+	case err != nil:
+		t.Fatalf("the installation record: %v", err)
+	}
+	return kek.For(record.InstallationID)
 }

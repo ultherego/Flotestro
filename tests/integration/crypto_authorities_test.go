@@ -21,11 +21,8 @@ func TestTheAuthoritiesOfTheFleetLiveInTheDatabaseAndSurviveAHandover(t *testing
 	defer cancel()
 	store := cryptostate.NewPostgres(h.database(ctx))
 
-	kek, err := cryptostate.ParseKEK(
-		"3f1a9c0e5b7d2648a0c3e5f7091b2d4e6a8c0e2f4a6b8d0f1234567890abcdef", "test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	kek := installationKEK(ctx, t, store,
+		"3f1a9c0e5b7d2648a0c3e5f7091b2d4e6a8c0e2f4a6b8d0f1234567890abcdef")
 
 	// The authorities are the installation's own set, not a namespace a test
 	// can borrow a corner of: a second one written here would be a second

@@ -143,8 +143,14 @@ func within(outer, inner string) (bool, error) {
 	return relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)), nil
 }
 
-// open connects to the fleet database and reads the key encryption key.
-func (o *cryptoOptions) open(ctx context.Context) (*cryptostate.Postgres, *cryptostate.KEK, func(), error) {
+// open connects to the fleet database and reads the key encryption key, bound
+// to the installation the database describes.
+//
+// The binding is done here, in the one place every crypto command comes
+// through, and from the record rather than from a flag: a key bound to an
+// installation an operator typed would seal rows into a deployment that is not
+// the one at the other end of this connection string.
+func (o *cryptoOptions) open(ctx context.Context) (*cryptostate.Postgres, *cryptostate.InstallationKEK, func(), error) {
 	kek, err := cryptostate.ReadKEKFile(o.kekFile)
 	if err != nil {
 		return nil, nil, nil, err
@@ -161,7 +167,13 @@ func (o *cryptoOptions) open(ctx context.Context) (*cryptostate.Postgres, *crypt
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	return cryptostate.NewPostgres(pool), kek, pool.Close, nil
+	store := cryptostate.NewPostgres(pool)
+	record, err := store.Load(ctx)
+	if err != nil {
+		pool.Close()
+		return nil, nil, nil, fmt.Errorf("the installation record: %w", err)
+	}
+	return store, kek.For(record.InstallationID), pool.Close, nil
 }
 
 // cryptoBackup is what is written before anything changes: enough to put the
@@ -388,7 +400,7 @@ func cryptoRewrapKEK(args []string) error {
 		return err
 	}
 	defer closePool()
-	next, err := cryptostate.ReadKEKFile(*newKEKFile)
+	unbound, err := cryptostate.ReadKEKFile(*newKEKFile)
 	if err != nil {
 		return err
 	}
@@ -396,6 +408,9 @@ func cryptoRewrapKEK(args []string) error {
 	if err != nil {
 		return fmt.Errorf("the installation record: %w", err)
 	}
+	// The key the rows are moving to answers for the same installation as the
+	// key they are moving from; a rewrap changes the wrapping and nothing else.
+	next := unbound.For(record.InstallationID)
 	rows, err := allRows(ctx, store)
 	if err != nil {
 		return err

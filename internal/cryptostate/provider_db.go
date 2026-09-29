@@ -30,7 +30,7 @@ const DBProviderName = "db-sealed"
 // too - which is the whole point of the move.
 type DBSealedProvider struct {
 	store KeyStore
-	kek   *KEK
+	kek   *InstallationKEK
 
 	mu      sync.RWMutex
 	active  string
@@ -45,9 +45,16 @@ type DBSealedProvider struct {
 // Every row has to open. A provider that quietly served the keys it could read
 // would look healthy until the one secret sealed under the unreadable key was
 // asked for, which is exactly the moment nobody wants to learn it.
-func NewDBProvider(ctx context.Context, store KeyStore, kek *KEK) (*DBSealedProvider, error) {
+func NewDBProvider(ctx context.Context, store KeyStore, kek *InstallationKEK) (*DBSealedProvider, error) {
 	if kek == nil {
 		return nil, fatal(CodeKEKFileMissing, "the panel was given no key encryption key", nil)
+	}
+	// A key that names no installation would seal rows nothing could later tell
+	// apart from another deployment's. It is refused at the start rather than at
+	// the first key the panel writes.
+	if kek.installation == "" {
+		return nil, fatal(CodeWrappedKeyInstallationMismatch,
+			"the key encryption key was not bound to an installation", nil)
 	}
 	p := &DBSealedProvider{store: store, kek: kek}
 	p.keys = map[string]*secrets.Cipher{}

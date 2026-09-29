@@ -24,7 +24,13 @@ schedule and never removes a key file.
 - The panel logs one line at start saying where its keys come from, with the `kek_id` (never
   the key).
 - A start that refuses carries one of `kek_file_missing`, `kek_file_unsafe`,
-  `kek_file_malformed`, `kek_mismatch`, `wrapped_key_unreadable`.
+  `kek_file_malformed`, `kek_mismatch`, `wrapped_key_installation_mismatch`,
+  `wrapped_key_unreadable`.
+- `wrapped_key_installation_mismatch` is a row of another installation, not a damaged one.
+  A key encryption key is named by a keyed digest of the key material, so two deployments
+  that mount the same key name it the same; the installation on the row is what tells them
+  apart. Rows written before this binding existed carry no installation and are not compared
+  — `crypto rewrap-kek` carries every row over to the form that is.
 
 ## Preconditions
 
@@ -231,4 +237,4 @@ installation without a backup of those files.
 ## Codes
 
 `kek_file_missing`, `kek_file_unsafe`, `kek_file_malformed`, `kek_mismatch`,
-`wrapped_key_unreadable`, `secrets_key_unavailable`.
+`wrapped_key_installation_mismatch`, `wrapped_key_unreadable`, `secrets_key_unavailable`.

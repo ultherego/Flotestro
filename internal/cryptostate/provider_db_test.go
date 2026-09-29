@@ -3,7 +3,9 @@ package cryptostate
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"errors"
+	"io"
 	"strings"
 	"sync"
 	"testing"
@@ -85,7 +87,20 @@ const testKEKHex = "3f1a9c0e5b7d2648a0c3e5f7091b2d4e6a8c0e2f4a6b8d0f1234567890ab
 const strangerKEKHex = "5c7e9a1b3d5f70921436587a9cbedf01234567890abcdef0fedcba9876543210"
 const otherKEKHex = "8e2b4d6f0a1c3e5079b1d3f5a7c9e10b2d4f60718293a4b5c6d7e8f901234567"
 
-func testKEK(t *testing.T, hexKey string) *KEK {
+// testInstallationID is the installation every test here belongs to, unless it
+// is a test about two of them.
+const testInstallationID = "6283c373-ab8a-4527-ad96-9a59b46a9234"
+
+// otherInstallationID is a second deployment that mounts the very same key
+// encryption key: the shape of the mistake the binding exists for.
+const otherInstallationID = "b04f1d8c-7a29-4e31-9f60-1c5d2e3a4b57"
+
+func testKEK(t *testing.T, hexKey string) *InstallationKEK {
+	t.Helper()
+	return unboundKEK(t, hexKey).For(testInstallationID)
+}
+
+func unboundKEK(t *testing.T, hexKey string) *KEK {
 	t.Helper()
 	kek, err := ParseKEK(hexKey, "test")
 	if err != nil {
@@ -207,6 +222,14 @@ func TestRowsThatDoNotBelongToThisDeploymentAreRefused(t *testing.T) {
 			row.EnvelopeVersion = WrappedKeyVersion + 1
 			return row
 		}, CodeWrappedKeyUnreadable},
+		{"moved to another installation", func(row WrappedKey) WrappedKey {
+			row.InstallationID = otherInstallationID
+			return row
+		}, CodeWrappedKeyInstallationMismatch},
+		{"the installation taken off the row", func(row WrappedKey) WrappedKey {
+			row.InstallationID = ""
+			return row
+		}, CodeWrappedKeyInstallationMismatch},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			row := test.row(sealed)
@@ -398,5 +421,166 @@ func TestHealthNoticesTheActiveKeyChangingUnderTheRunningPanel(t *testing.T) {
 func TestAProviderWithoutAKeyEncryptionKeyDoesNotStart(t *testing.T) {
 	if _, err := NewDBProvider(context.Background(), newMemoryKeys(), nil); !refusedWith(err, CodeKEKFileMissing) {
 		t.Errorf("a provider without a key encryption key answered %v", err)
+	}
+}
+
+// The whole point of binding the installation: kekID is a keyed digest of the
+// key material, so two deployments that mount the same key encryption key give
+// it the same name. Before the second form that was all a row said about where
+// it came from, and a row lifted out of one database opened verbatim in the
+// other.
+func TestARowSealedForOneInstallationDoesNotOpenForAnotherHoldingTheSameKey(t *testing.T) {
+	material := bytes.Repeat([]byte{7}, secrets.KeyLength)
+	here := unboundKEK(t, testKEKHex).For(testInstallationID)
+	there := unboundKEK(t, testKEKHex).For(otherInstallationID)
+
+	// The fact the refusal rests on: one key, one name, two installations.
+	if here.ID() != there.ID() {
+		t.Fatalf("the same key material is named %s in one installation and %s in the other",
+			here.ID(), there.ID())
+	}
+
+	row, err := sealSecretsKey(here, "k-one", material)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.InstallationID != testInstallationID {
+		t.Fatalf("the row names the installation %q", row.InstallationID)
+	}
+	if row.EnvelopeVersion != WrappedKeyVersion {
+		t.Fatalf("a new row was written in form %d", row.EnvelopeVersion)
+	}
+
+	opened, err := there.Open(row)
+	if err == nil {
+		t.Fatalf("the row of another installation opened, giving back %d bytes", len(opened))
+	}
+	var refusal *FatalError
+	if !errors.As(err, &refusal) || refusal.Code != CodeWrappedKeyInstallationMismatch {
+		t.Fatalf("the refusal is %v, expected %s", err, CodeWrappedKeyInstallationMismatch)
+	}
+	// The operator has to be able to tell this from a damaged row, so the
+	// refusal names both installations rather than saying the row is broken.
+	if !strings.Contains(refusal.Reason, testInstallationID) ||
+		!strings.Contains(refusal.Reason, otherInstallationID) {
+		t.Errorf("the refusal does not name both installations: %s", refusal.Reason)
+	}
+	// And a panel does not start over such a row.
+	store := newMemoryKeys()
+	store.rows[row.KeyID] = row
+	if _, err := NewDBProvider(context.Background(), store, there); err == nil {
+		t.Error("the provider started over a key of another installation")
+	}
+}
+
+// A key encryption key nobody bound to an installation seals nothing. It is a
+// refusal and not a row written with an empty installation, which would be a
+// row two deployments could both claim.
+func TestAKeyEncryptionKeyThatNamesNoInstallationSealsNothing(t *testing.T) {
+	unbound := unboundKEK(t, testKEKHex).For("")
+	if _, err := unbound.Seal("k-one", PurposeSecrets, bytes.Repeat([]byte{1}, secrets.KeyLength)); err == nil {
+		t.Fatal("a key bound to no installation wrapped a row")
+	}
+	if _, err := NewDBProvider(context.Background(), newMemoryKeys(), unbound); err == nil {
+		t.Fatal("a provider started on a key bound to no installation")
+	}
+}
+
+// sealFirstForm writes a row the way the panel wrote them before the
+// installation was bound in: the same wrapping, the same associated data, and
+// no installation on the row at all.
+func sealFirstForm(t *testing.T, kek *InstallationKEK, keyID, purpose string, material []byte) WrappedKey {
+	t.Helper()
+	aead, err := kek.aead()
+	if err != nil {
+		t.Fatal(err)
+	}
+	nonce := make([]byte, aead.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		t.Fatal(err)
+	}
+	associated := wrappedKeyAAD(keyID, purpose, kek.ID(), "", wrappedKeyVersionUnbound)
+	return WrappedKey{
+		KeyID:           keyID,
+		Purpose:         purpose,
+		KEKID:           kek.ID(),
+		EnvelopeVersion: wrappedKeyVersionUnbound,
+		Nonce:           nonce,
+		Ciphertext:      aead.Seal(nil, nonce, material, associated),
+	}
+}
+
+// The bytes of the first form are what every installation that has not
+// rewrapped still has in its database. They are written down here because
+// nothing else can notice them changing: a panel that computes them
+// differently opens none of those rows, and finds out at the start after an
+// upgrade.
+func TestTheAssociatedDataOfTheFirstFormIsWhatItAlwaysWas(t *testing.T) {
+	const expected = "flotestro-wrapped-key|1|kek-abc123|secrets|k-one"
+	// The installation is passed and must make no difference: the first form
+	// never carried one.
+	for _, installation := range []string{"", testInstallationID, otherInstallationID} {
+		got := string(wrappedKeyAAD("k-one", PurposeSecrets, "kek-abc123", installation, wrappedKeyVersionUnbound))
+		if got != expected {
+			t.Errorf("the first form binds %q, it always bound %q", got, expected)
+		}
+	}
+}
+
+// No installation has to re-seal anything to start: a row of the first form
+// opens under the associated data it was sealed with, and the row's own form
+// is what decides.
+func TestARowOfTheFirstFormKeepsOpening(t *testing.T) {
+	material := bytes.Repeat([]byte{9}, secrets.KeyLength)
+	kek := testKEK(t, testKEKHex)
+	row := sealFirstForm(t, kek, "k-old", PurposeSecrets, material)
+
+	opened, err := kek.Open(row)
+	if err != nil {
+		t.Fatalf("a row of the first form was refused: %v", err)
+	}
+	if !bytes.Equal(opened, material) {
+		t.Fatal("the key came back changed")
+	}
+	// It is honest about what it does not do: the first form bound no
+	// installation, so it is the one thing the graft still works on, and a
+	// rewrap is what closes it. A test that asserted otherwise would be
+	// claiming a property the rows do not have.
+	elsewhere := unboundKEK(t, testKEKHex).For(otherInstallationID)
+	if _, err := elsewhere.Open(row); err != nil {
+		t.Fatalf("a row of the first form stopped opening where it always did: %v", err)
+	}
+}
+
+// A mixed set is allowed, and it has to be: a rewrap is what moves rows to the
+// second form, and until one has run an installation holds only rows of the
+// first. Requiring one form or the other would mean every installation had to
+// rewrap before it could start again.
+func TestAnInstallationOpensAMixedSetOfForms(t *testing.T) {
+	ctx := context.Background()
+	kek := testKEK(t, testKEKHex)
+	store := newMemoryKeys()
+
+	old := sealFirstForm(t, kek, "k-old", PurposeSecrets, bytes.Repeat([]byte{4}, secrets.KeyLength))
+	store.rows[old.KeyID] = old
+	fresh, err := sealSecretsKey(kek, "k-new", bytes.Repeat([]byte{5}, secrets.KeyLength))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.rows[fresh.KeyID] = fresh
+
+	provider, err := NewDBProvider(ctx, store, kek)
+	if err != nil {
+		t.Fatalf("a set of both forms was refused: %v", err)
+	}
+	if ids := provider.KeyIDs(); len(ids) != 2 {
+		t.Fatalf("the provider holds %v, expected both forms", ids)
+	}
+	// And the one row of the second form still refuses another installation,
+	// so the mixed set costs nothing beyond what the first form already gave
+	// away.
+	elsewhere := unboundKEK(t, testKEKHex).For(otherInstallationID)
+	if _, err := elsewhere.Open(fresh); err == nil {
+		t.Error("the row of the second form opened for another installation")
 	}
 }

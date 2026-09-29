@@ -19,7 +19,10 @@ import (
 // it is for.
 //
 // A row is worth nothing without the key encryption key, which is why the rows
-// may travel with a dump and the key may not.
+// may travel with a dump and the key may not. The key alone is not enough
+// either: a row also names the installation it belongs to, because the name of
+// a key encryption key is derived from the key material and two deployments
+// holding the same key would otherwise be indistinguishable to their rows.
 
 // What a wrapped key is for. The purpose is part of what the row is sealed
 // against, so a key cannot be moved from one use to another by an update
@@ -34,15 +37,32 @@ const (
 	PurposeHelperSigning = "helper-signing"
 )
 
-// WrappedKeyVersion is the layout of the wrapping. It is counted apart from
-// the envelope version of a secret: these are two floors of the same building,
-// and one may move without the other.
-const WrappedKeyVersion = 1
+// The layout of the wrapping. It is counted apart from the envelope version of
+// a secret: these are two floors of the same building, and one may move
+// without the other.
+const (
+	// WrappedKeyVersion is the form new rows are written in: the installation
+	// is part of what the row is sealed against.
+	WrappedKeyVersion = 2
+	// wrappedKeyVersionUnbound is the first form, which named no installation.
+	// Rows of it keep opening under their own associated data, so no
+	// installation has to re-seal anything to start.
+	wrappedKeyVersionUnbound = 1
+)
 
-// CodeWrappedKeyUnreadable is the stable code of a row that does not open
-// under the key encryption key the deployment holds, although the row says it
-// was wrapped with it. The content was changed, or two keys share a name.
+// CodeWrappedKeyUnreadable is the stable code of a row this panel cannot make
+// sense of: the content or what the row says about itself was changed, or the
+// row is in a form this panel does not read. It is what is left after the row
+// has been cleared of naming another key and another installation.
 const CodeWrappedKeyUnreadable = "wrapped_key_unreadable"
+
+// CodeWrappedKeyInstallationMismatch is the stable code of a row that belongs
+// to another installation. It is kept apart from CodeWrappedKeyUnreadable
+// because the two are fixed differently: a damaged row is restored from a
+// backup, a row of another installation is taken out of this database, and an
+// operator who cannot tell them apart will try the first remedy on the second
+// problem.
+const CodeWrappedKeyInstallationMismatch = "wrapped_key_installation_mismatch"
 
 // WrappedKey is one private key of the installation as the database holds it.
 type WrappedKey struct {
@@ -53,7 +73,12 @@ type WrappedKey struct {
 	Purpose string
 	// KEKID names the key encryption key this row was wrapped with. A row
 	// that names another key is refused rather than half-read.
-	KEKID           string
+	KEKID string
+	// InstallationID names the installation the row belongs to. It is empty
+	// on a row of the first form, which recorded none. From the second form
+	// on it is part of what the row is sealed against, so it cannot be
+	// rewritten to say this installation without the row ceasing to open.
+	InstallationID  string
 	EnvelopeVersion int
 	Nonce           []byte
 	Ciphertext      []byte
@@ -96,12 +121,23 @@ var ErrKeyExists = errors.New("a key of that name is already in the database")
 var ErrWrappedKeyMissing = errors.New("no wrapped key of that name")
 
 // wrappedKeyAAD binds a row to its place. Nothing here is secret; all of it
-// has to be true for the row to open, so a key cannot be moved between names,
-// purposes or installations, and a row from another deployment's database does
-// not open here even if both were wrapped with the same key.
-func wrappedKeyAAD(keyID, purpose, kekID string, version int) []byte {
-	return []byte("flotestro-wrapped-key|" + strconv.Itoa(version) + "|" +
-		kekID + "|" + purpose + "|" + keyID)
+// has to be true for the row to open, so a key cannot be moved between names
+// or purposes by an update statement.
+//
+// The first form stopped at the key encryption key, and a key encryption key
+// is not a place: kekID is a keyed digest of the material, so two
+// installations that hold the same key produce the same name and a row of one
+// opened verbatim in the other. From the second form on the installation is in
+// here as well, which is what makes a row belong somewhere rather than merely
+// to a key. Rows of the first form are not re-read under the new binding -
+// they never had it - so they keep the associated data they were sealed with.
+func wrappedKeyAAD(keyID, purpose, kekID, installationID string, version int) []byte {
+	base := "flotestro-wrapped-key|" + strconv.Itoa(version) + "|" +
+		kekID + "|" + purpose + "|" + keyID
+	if version == wrappedKeyVersionUnbound {
+		return []byte(base)
+	}
+	return []byte(base + "|" + installationID)
 }
 
 // Seal wraps key material for the database.
@@ -110,7 +146,12 @@ func wrappedKeyAAD(keyID, purpose, kekID string, version int) []byte {
 // primitive opens a value with no associated data when the bound form fails, a
 // kindness the first form of the store needed and key material must not have.
 // Here the binding either holds or the row is refused.
-func (k *KEK) Seal(keyID, purpose string, material []byte) (WrappedKey, error) {
+func (k *InstallationKEK) Seal(keyID, purpose string, material []byte) (WrappedKey, error) {
+	if k.installation == "" {
+		return WrappedKey{}, fmt.Errorf(
+			"the key %s cannot be wrapped: the key encryption key %s was not bound to an installation",
+			keyID, k.id)
+	}
 	if err := ValidateKeyID(keyID); err != nil {
 		return WrappedKey{}, err
 	}
@@ -128,11 +169,12 @@ func (k *KEK) Seal(keyID, purpose string, material []byte) (WrappedKey, error) {
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return WrappedKey{}, err
 	}
-	associated := wrappedKeyAAD(keyID, purpose, k.id, WrappedKeyVersion)
+	associated := wrappedKeyAAD(keyID, purpose, k.id, k.installation, WrappedKeyVersion)
 	return WrappedKey{
 		KeyID:           keyID,
 		Purpose:         purpose,
 		KEKID:           k.id,
+		InstallationID:  k.installation,
 		EnvelopeVersion: WrappedKeyVersion,
 		Nonce:           nonce,
 		Ciphertext:      aead.Seal(nil, nonce, material, associated),
@@ -141,17 +183,33 @@ func (k *KEK) Seal(keyID, purpose string, material []byte) (WrappedKey, error) {
 
 // Open returns the material of a wrapped key.
 //
-// A row wrapped with another key encryption key is refused by name before
-// anything is decrypted: "this installation holds a different key" and "the
-// row is damaged" are different situations, and the operator fixes them
-// differently.
-func (k *KEK) Open(row WrappedKey) ([]byte, error) {
+// The three things that can be wrong with a row are told apart before anything
+// is decrypted: this deployment holds a different key encryption key, the row
+// belongs to another installation, or the row is in a form this panel does not
+// read. Each is a different job for the operator, so each says so by name, and
+// only what is left over is reported as damage.
+//
+// Which associated data a row is opened with is the row's own to say: a row of
+// the first form is opened the way it was sealed. That is what lets a mixed
+// set - some rows re-sealed, some not - be read by one panel during a rewrap.
+func (k *InstallationKEK) Open(row WrappedKey) ([]byte, error) {
 	if !k.Is(row.KEKID) {
 		return nil, fatal(CodeKEKMismatch, fmt.Sprintf(
 			"the key %s was wrapped with %s; this deployment holds %s",
 			row.KeyID, row.KEKID, k.id), nil)
 	}
-	if row.EnvelopeVersion != WrappedKeyVersion {
+	switch row.EnvelopeVersion {
+	case wrappedKeyVersionUnbound:
+		// The first form named no installation, so there is nothing to compare
+		// and the row opens under the associated data it was sealed with.
+	case WrappedKeyVersion:
+		if row.InstallationID != k.installation {
+			return nil, fatal(CodeWrappedKeyInstallationMismatch, fmt.Sprintf(
+				"the key %s belongs to the installation %s and this panel is the installation %s: "+
+					"the row was copied from another deployment's database",
+				row.KeyID, wrappedKeyOwner(row.InstallationID), k.installation), nil)
+		}
+	default:
 		return nil, fatal(CodeWrappedKeyUnreadable, fmt.Sprintf(
 			"the key %s is wrapped in form %d, which this panel does not read",
 			row.KeyID, row.EnvelopeVersion), nil)
@@ -165,7 +223,7 @@ func (k *KEK) Open(row WrappedKey) ([]byte, error) {
 			"the key %s carries a nonce of %d bytes instead of %d",
 			row.KeyID, len(row.Nonce), aead.NonceSize()), nil)
 	}
-	associated := wrappedKeyAAD(row.KeyID, row.Purpose, row.KEKID, row.EnvelopeVersion)
+	associated := wrappedKeyAAD(row.KeyID, row.Purpose, row.KEKID, row.InstallationID, row.EnvelopeVersion)
 	material, err := aead.Open(nil, row.Nonce, row.Ciphertext, associated)
 	if err != nil {
 		return nil, fatal(CodeWrappedKeyUnreadable, fmt.Sprintf(
@@ -173,6 +231,16 @@ func (k *KEK) Open(row WrappedKey) ([]byte, error) {
 			row.KeyID, k.id), nil)
 	}
 	return material, nil
+}
+
+// wrappedKeyOwner names the installation of a row that claims the second form
+// and carries none: a row edited by hand, which the refusal still has to be
+// able to speak about.
+func wrappedKeyOwner(installationID string) string {
+	if installationID == "" {
+		return "no installation at all"
+	}
+	return installationID
 }
 
 // aead is the primitive over the key encryption key itself.
@@ -193,7 +261,7 @@ func validatePurpose(purpose string) error {
 }
 
 // sealSecretsKey wraps a key of the secret store, whose length is fixed.
-func sealSecretsKey(kek *KEK, keyID string, material []byte) (WrappedKey, error) {
+func sealSecretsKey(kek *InstallationKEK, keyID string, material []byte) (WrappedKey, error) {
 	if len(material) != secrets.KeyLength {
 		return WrappedKey{}, fmt.Errorf("the key %s has %d bytes instead of %d",
 			keyID, len(material), secrets.KeyLength)

@@ -52,12 +52,12 @@ const authorityTimeout = 15 * time.Second
 type DBAuthorities struct {
 	ctx   context.Context
 	store AuthorityKeyStore
-	kek   *KEK
+	kek   *InstallationKEK
 }
 
 // NewDBAuthorities reads and writes the authorities of an installation whose
 // keys are in the database.
-func NewDBAuthorities(ctx context.Context, store AuthorityKeyStore, kek *KEK) *DBAuthorities {
+func NewDBAuthorities(ctx context.Context, store AuthorityKeyStore, kek *InstallationKEK) *DBAuthorities {
 	return &DBAuthorities{ctx: ctx, store: store, kek: kek}
 }
 

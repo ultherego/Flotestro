@@ -238,7 +238,7 @@ func (p *Postgres) AssignIssuer(ctx context.Context, subject, serial, issuerID s
 // WrappedKeys implements KeyStore.
 func (p *Postgres) WrappedKeys(ctx context.Context, purpose string) ([]WrappedKey, error) {
 	rows, err := p.pool.Query(ctx, `
-		select key_id, purpose, kek_id, envelope_version, nonce, ciphertext, created_at, retired_at
+		select key_id, purpose, kek_id, installation_id, envelope_version, nonce, ciphertext, created_at, retired_at
 		  from crypto_wrapped_keys where purpose = $1 order by key_id`, purpose)
 	if err != nil {
 		return nil, err
@@ -247,10 +247,12 @@ func (p *Postgres) WrappedKeys(ctx context.Context, purpose string) ([]WrappedKe
 	var keys []WrappedKey
 	for rows.Next() {
 		var key WrappedKey
-		if err := rows.Scan(&key.KeyID, &key.Purpose, &key.KEKID, &key.EnvelopeVersion,
+		var installation *string
+		if err := rows.Scan(&key.KeyID, &key.Purpose, &key.KEKID, &installation, &key.EnvelopeVersion,
 			&key.Nonce, &key.Ciphertext, &key.CreatedAt, &key.RetiredAt); err != nil {
 			return nil, err
 		}
+		key.InstallationID = installationOf(installation)
 		keys = append(keys, key)
 	}
 	return keys, rows.Err()
@@ -259,15 +261,36 @@ func (p *Postgres) WrappedKeys(ctx context.Context, purpose string) ([]WrappedKe
 // WrappedKey implements KeyStore.
 func (p *Postgres) WrappedKey(ctx context.Context, keyID string) (WrappedKey, error) {
 	var key WrappedKey
+	var installation *string
 	err := p.pool.QueryRow(ctx, `
-		select key_id, purpose, kek_id, envelope_version, nonce, ciphertext, created_at, retired_at
+		select key_id, purpose, kek_id, installation_id, envelope_version, nonce, ciphertext, created_at, retired_at
 		  from crypto_wrapped_keys where key_id = $1`, keyID).
-		Scan(&key.KeyID, &key.Purpose, &key.KEKID, &key.EnvelopeVersion,
+		Scan(&key.KeyID, &key.Purpose, &key.KEKID, &installation, &key.EnvelopeVersion,
 			&key.Nonce, &key.Ciphertext, &key.CreatedAt, &key.RetiredAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return WrappedKey{}, fmt.Errorf("%w: %s", ErrWrappedKeyMissing, keyID)
 	}
+	key.InstallationID = installationOf(installation)
 	return key, err
+}
+
+// installationOf reads the column of a row that may not have one. A row of the
+// first form names no installation, and that absence is not the empty string
+// somebody wrote into it.
+func installationOf(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+// installationColumn writes the other way: a row that names no installation
+// leaves the column null rather than storing an empty name.
+func installationColumn(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
 }
 
 // PutWrappedKey implements KeyStore. The primary key does the refusing: two
@@ -276,9 +299,10 @@ func (p *Postgres) WrappedKey(ctx context.Context, keyID string) (WrappedKey, er
 func (p *Postgres) PutWrappedKey(ctx context.Context, key WrappedKey) error {
 	_, err := p.pool.Exec(ctx, `
 		insert into crypto_wrapped_keys
-			(key_id, purpose, kek_id, envelope_version, nonce, ciphertext)
-		values ($1, $2, $3, $4, $5, $6)`,
-		key.KeyID, key.Purpose, key.KEKID, key.EnvelopeVersion, key.Nonce, key.Ciphertext)
+			(key_id, purpose, kek_id, installation_id, envelope_version, nonce, ciphertext)
+		values ($1, $2, $3, $4, $5, $6, $7)`,
+		key.KeyID, key.Purpose, key.KEKID, installationColumn(key.InstallationID),
+		key.EnvelopeVersion, key.Nonce, key.Ciphertext)
 	var unique *pgconn.PgError
 	if errors.As(err, &unique) && unique.Code == "23505" {
 		return fmt.Errorf("%w: %s", ErrKeyExists, key.KeyID)
@@ -494,9 +518,9 @@ func insertKeys(ctx context.Context, tx pgx.Tx, keys []WrappedKey) error {
 	for _, key := range keys {
 		if _, err := tx.Exec(ctx, `
 			insert into crypto_wrapped_keys
-				(key_id, purpose, kek_id, envelope_version, nonce, ciphertext, retired_at)
-			values ($1, $2, $3, $4, $5, $6, $7)`,
-			key.KeyID, key.Purpose, key.KEKID, key.EnvelopeVersion,
+				(key_id, purpose, kek_id, installation_id, envelope_version, nonce, ciphertext, retired_at)
+			values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+			key.KeyID, key.Purpose, key.KEKID, installationColumn(key.InstallationID), key.EnvelopeVersion,
 			key.Nonce, key.Ciphertext, key.RetiredAt); err != nil {
 			return fmt.Errorf("the key %s: %w", key.KeyID, err)
 		}
@@ -529,9 +553,9 @@ func (p *Postgres) ReplaceAuthority(ctx context.Context, row WrappedKey, remove 
 		}
 		_, err := tx.Exec(ctx, `
 			insert into crypto_wrapped_keys
-				(key_id, purpose, kek_id, envelope_version, nonce, ciphertext, retired_at)
-			values ($1, $2, $3, $4, $5, $6, $7)`,
-			row.KeyID, row.Purpose, row.KEKID, row.EnvelopeVersion,
+				(key_id, purpose, kek_id, installation_id, envelope_version, nonce, ciphertext, retired_at)
+			values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+			row.KeyID, row.Purpose, row.KEKID, installationColumn(row.InstallationID), row.EnvelopeVersion,
 			row.Nonce, row.Ciphertext, row.RetiredAt)
 		if err != nil {
 			return fmt.Errorf("the authority %s: %w", row.KeyID, err)
