@@ -149,7 +149,10 @@ func (o *cryptoOptions) open(ctx context.Context) (*cryptostate.Postgres, *crypt
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	pool, err := database.Open(ctx, o.databaseURL, config.DatabasePool{MaxConns: 2, MinConns: 1})
+	// The floor is the serving panel's - the event bus and the epoch watcher each
+	// hold a connection for the life of the process - and database.Open enforces
+	// it for everybody. A command that needs one connection asks for the floor.
+	pool, err := database.Open(ctx, o.databaseURL, config.DatabasePool{MaxConns: 4, MinConns: 1})
 	if err != nil {
 		return nil, nil, nil, err
 	}

@@ -61,6 +61,18 @@ Mount it at `/run/secrets/flotestro-kek`, or name another path with `-kek-file` 
 `FLOTESTRO_KEK_FILE`. There is no flag and no environment variable that carries the key
 itself, only the path.
 
+In the Compose deployment the key goes in `./secrets/kek` and `init` copies it beside the
+other secrets. `init` runs when the deployment is created and not again, so a key added to
+an existing deployment needs it brought down and up:
+
+```fish
+podman-compose down
+podman-compose up -d
+```
+
+The volumes survive that. Restarting the control plane alone does not bring the key in, and
+podman will not recreate one container of a pod by itself.
+
 The key belongs in a different backup from the database, kept by different people. A backup
 that can be restored is the database dump **and** the key encryption key **and** the
 installation identifier; any two of the three are not a backup.

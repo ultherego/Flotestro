@@ -452,7 +452,11 @@ characters and nothing else:
     openssl rand -hex 32 > ./secrets/kek
 
 `init` copies it beside the other secrets and gives it the mode and the owner
-the panel insists on. An installation whose keys are still files never reads
+the panel insists on. It does that when the deployment is created and not
+again, so a key put there afterwards needs the deployment brought down and up
+(`podman-compose down` then `podman-compose up -d`, or the Docker equivalent);
+restarting the control plane alone is not enough, and one container of a pod
+cannot be recreated by itself. The volumes survive that, so nothing is lost. An installation whose keys are still files never reads
 the path, so the file can be put there before the move and after it. The move
 itself, the rotation of the key and the removal of the old files are
 `flotestro-control-plane crypto import-state`, `crypto rewrap-kek` and
