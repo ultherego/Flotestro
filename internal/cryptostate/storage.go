@@ -411,16 +411,40 @@ func (p *Postgres) ReplaceKeys(ctx context.Context, fromKEKID, toKEKID string, k
 		if tag.RowsAffected() == 0 {
 			return fmt.Errorf("the installation is no longer wrapped with %s", fromKEKID)
 		}
-		if _, err := tx.Exec(ctx, `delete from crypto_wrapped_keys where kek_id = $1`, fromKEKID); err != nil {
+		// Only the rows this rewrap read, by name. A key made by another replica
+		// between the read and here is wrapped with the old key encryption key
+		// too, and deleting it by that alone would take away a key the record
+		// may already name as the active one - and one this rewrap never
+		// re-wrapped, so it would be in no backup either.
+		names := make([]string, 0, len(keys))
+		for _, key := range keys {
+			names = append(names, key.KeyID)
+		}
+		if _, err := tx.Exec(ctx,
+			`delete from crypto_wrapped_keys where kek_id = $1 and key_id = any($2)`,
+			fromKEKID, names); err != nil {
 			return err
 		}
-		var left int
-		if err := tx.QueryRow(ctx, `select count(*) from crypto_wrapped_keys`).Scan(&left); err != nil {
+		// Whatever is still wrapped with the old key is a key that appeared
+		// while this ran. The rewrap refuses rather than leaving it behind
+		// unreadable: the operator runs it again over the set as it now is.
+		var appeared int
+		if err := tx.QueryRow(ctx,
+			`select count(*) from crypto_wrapped_keys where kek_id = $1`, fromKEKID).Scan(&appeared); err != nil {
 			return err
 		}
-		if left > 0 {
+		if appeared > 0 {
+			return fmt.Errorf("%w: %d keys were wrapped with %s while the rewrap ran",
+				ErrRevisionMoved, appeared, fromKEKID)
+		}
+		var strangers int
+		if err := tx.QueryRow(ctx,
+			`select count(*) from crypto_wrapped_keys where kek_id <> $1`, toKEKID).Scan(&strangers); err != nil {
+			return err
+		}
+		if strangers > 0 {
 			return fmt.Errorf("%d keys are wrapped with neither %s nor %s; the rewrap would leave them unreadable",
-				left, fromKEKID, toKEKID)
+				strangers, fromKEKID, toKEKID)
 		}
 		return insertKeys(ctx, tx, keys)
 	})
@@ -428,7 +452,7 @@ func (p *Postgres) ReplaceKeys(ctx context.Context, fromKEKID, toKEKID string, k
 
 // ForgetKeys implements ImportStore: the last step of a revert, once the files
 // are back where the panel reads them from.
-func (p *Postgres) ForgetKeys(ctx context.Context, kekID string) error {
+func (p *Postgres) ForgetKeys(ctx context.Context, kekID string, keyIDs []string) error {
 	return p.inTransaction(ctx, func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `
 			update crypto_installation_state
@@ -440,8 +464,22 @@ func (p *Postgres) ForgetKeys(ctx context.Context, kekID string) error {
 		if tag.RowsAffected() == 0 {
 			return fmt.Errorf("the installation is not wrapped with %s", kekID)
 		}
-		if _, err := tx.Exec(ctx, `delete from crypto_wrapped_keys where kek_id = $1`, kekID); err != nil {
+		// The keys the revert wrote to the files, by name, and nothing else: a key
+		// made while the revert ran is in no file, so dropping it here would lose
+		// it entirely.
+		if _, err := tx.Exec(ctx,
+			`delete from crypto_wrapped_keys where kek_id = $1 and key_id = any($2)`,
+			kekID, keyIDs); err != nil {
 			return err
+		}
+		var left int
+		if err := tx.QueryRow(ctx,
+			`select count(*) from crypto_wrapped_keys where kek_id = $1`, kekID).Scan(&left); err != nil {
+			return err
+		}
+		if left > 0 {
+			return fmt.Errorf("%w: %d keys appeared while the revert ran and are in no file",
+				ErrRevisionMoved, left)
 		}
 		// The withdrawn certificates go with them: the files are back by now, and
 		// leaving the rows would make a later import refuse a set it already has.

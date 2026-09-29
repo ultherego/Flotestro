@@ -93,9 +93,12 @@ type ImportStore interface {
 	// ReplaceKeys rewraps: every row and the record move from one key
 	// encryption key to another together.
 	ReplaceKeys(ctx context.Context, fromKEKID, toKEKID string, keys []WrappedKey) error
-	// ForgetKeys takes the keys out of the database and clears the record,
-	// which is the last step of a revert - after the files are back.
-	ForgetKeys(ctx context.Context, kekID string) error
+	// ForgetKeys takes the named keys out of the database and clears the
+	// record, which is the last step of a revert - after the files are back.
+	// The names are the keys the revert actually wrote: anything else wrapped
+	// with the same key appeared while it ran, is in no file, and is a refusal
+	// rather than a row to drop.
+	ForgetKeys(ctx context.Context, kekID string, keyIDs []string) error
 	// RetiredAuthorities returns the certificates withdrawn from signing.
 	RetiredAuthorities(ctx context.Context) ([][]byte, error)
 	KEKID(ctx context.Context) (string, error)

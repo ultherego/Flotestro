@@ -353,7 +353,11 @@ func cryptoRevertState(args []string) error {
 		}
 		fmt.Printf("wrote %s\n", step.path)
 	}
-	if err := store.ForgetKeys(ctx, kek.ID()); err != nil {
+	written := make([]string, 0, len(materials))
+	for _, material := range materials {
+		written = append(written, material.KeyID)
+	}
+	if err := store.ForgetKeys(ctx, kek.ID(), written); err != nil {
 		return fmt.Errorf("the files are back, but the rows could not be dropped: %w", err)
 	}
 	fmt.Printf("the installation reads its keys from %s again\n", options.files.StateDir)

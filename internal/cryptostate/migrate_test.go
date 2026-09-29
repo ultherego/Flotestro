@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"testing"
 	"time"
@@ -65,8 +66,15 @@ func (m *memoryStore) ReplaceKeys(ctx context.Context, from, to string, keys []W
 		return errors.New("not wrapped with that key")
 	}
 	m.mu.Lock()
-	m.rows = map[string]WrappedKey{}
+	for _, key := range keys {
+		delete(m.rows, key.KeyID)
+	}
+	appeared := len(m.rows)
 	m.mu.Unlock()
+	if appeared > 0 {
+		return fmt.Errorf("%w: %d keys were wrapped with %s while the rewrap ran",
+			ErrRevisionMoved, appeared, from)
+	}
 	for _, key := range keys {
 		if err := m.PutWrappedKey(ctx, key); err != nil {
 			return err
@@ -76,13 +84,21 @@ func (m *memoryStore) ReplaceKeys(ctx context.Context, from, to string, keys []W
 	return nil
 }
 
-func (m *memoryStore) ForgetKeys(_ context.Context, kekID string) error {
+func (m *memoryStore) ForgetKeys(_ context.Context, kekID string, keyIDs []string) error {
 	if m.kekID != kekID {
 		return errors.New("not wrapped with that key")
 	}
 	m.mu.Lock()
-	m.rows = map[string]WrappedKey{}
+	for _, name := range keyIDs {
+		delete(m.rows, name)
+	}
+	left := len(m.rows)
 	m.mu.Unlock()
+	// A key that appeared while the revert ran is in no file, so dropping it
+	// here would lose it: the store refuses instead, as Postgres does.
+	if left > 0 {
+		return fmt.Errorf("%w: %d keys appeared while the revert ran", ErrRevisionMoved, left)
+	}
 	m.kekID = ""
 	m.retired = map[string][]byte{}
 	m.record.Provider = LocalProviderName
@@ -328,10 +344,10 @@ func TestARevertHandsBackTheMaterialBeforeTheRowsGo(t *testing.T) {
 	if len(back) != len(materials) {
 		t.Fatalf("the revert hands back %d keys of %d", len(back), len(materials))
 	}
-	if err := store.ForgetKeys(ctx, stranger.ID()); err == nil {
+	if err := store.ForgetKeys(ctx, stranger.ID(), nil); err == nil {
 		t.Error("the rows were dropped on the word of a key the installation is not wrapped with")
 	}
-	if err := store.ForgetKeys(ctx, kek.ID()); err != nil {
+	if err := store.ForgetKeys(ctx, kek.ID(), keyNames(back)); err != nil {
 		t.Fatal(err)
 	}
 	if store.count() != 0 || store.kekID != "" {
@@ -390,10 +406,93 @@ func TestTheWithdrawnAuthoritiesTravelWithTheKeys(t *testing.T) {
 	}
 
 	// They go with the keys on the way back, not before them and not after.
-	if err := store.ForgetKeys(ctx, kek.ID()); err != nil {
+	held, err := Export(ctx, store, kek)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ForgetKeys(ctx, kek.ID(), keyNames(held)); err != nil {
 		t.Fatal(err)
 	}
 	if len(store.retired) != 0 {
 		t.Error("the revert left the withdrawn authorities in the database")
 	}
+}
+
+// keyNames is what a revert tells the store it wrote to the files.
+func keyNames(materials []Material) []string {
+	names := make([]string, 0, len(materials))
+	for _, material := range materials {
+		names = append(names, material.KeyID)
+	}
+	return names
+}
+
+// A rewrap and a revert both read the installation, work on what they read and
+// write the answer back. A key made by another replica in between is wrapped
+// with the old key too - and is in no backup and in no file - so taking it away
+// by the key encryption key alone would lose a key the record may already name
+// as the active one. Both refuse instead, and the operator runs them again over
+// the set as it now is.
+func TestAKeyThatAppearedMeanwhileIsNotTakenAway(t *testing.T) {
+	ctx := context.Background()
+	first := testKEK(t, testKEKHex)
+	second := testKEK(t, otherKEKHex)
+
+	t.Run("a rewrap refuses", func(t *testing.T) {
+		store := newMemoryStore()
+		if _, err := Import(ctx, store, first, installationMaterial(), nil); err != nil {
+			t.Fatal(err)
+		}
+		// What the rewrap read, before the other replica wrote.
+		materials, err := Export(ctx, store, first)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows, err := seal(second, materials)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The other replica rotates the secret store key and the record names it.
+		fresh, err := sealSecretsKey(first, "k-made-meanwhile", bytes.Repeat([]byte{8}, secrets.KeyLength))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.PutWrappedKey(ctx, fresh); err != nil {
+			t.Fatal(err)
+		}
+
+		err = store.ReplaceKeys(ctx, first.ID(), second.ID(), rows)
+		if !errors.Is(err, ErrRevisionMoved) {
+			t.Fatalf("the rewrap answered %v", err)
+		}
+		if _, ok := store.rows["k-made-meanwhile"]; !ok {
+			t.Error("the key made meanwhile was taken away")
+		}
+	})
+
+	t.Run("a revert refuses", func(t *testing.T) {
+		store := newMemoryStore()
+		if _, err := Import(ctx, store, first, installationMaterial(), nil); err != nil {
+			t.Fatal(err)
+		}
+		written, err := Export(ctx, store, first)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fresh, err := sealSecretsKey(first, "k-made-meanwhile", bytes.Repeat([]byte{8}, secrets.KeyLength))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.PutWrappedKey(ctx, fresh); err != nil {
+			t.Fatal(err)
+		}
+
+		err = store.ForgetKeys(ctx, first.ID(), keyNames(written))
+		if !errors.Is(err, ErrRevisionMoved) {
+			t.Fatalf("the revert answered %v", err)
+		}
+		if _, ok := store.rows["k-made-meanwhile"]; !ok {
+			t.Error("the key made meanwhile was taken away")
+		}
+	})
 }
