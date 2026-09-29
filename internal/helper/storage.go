@@ -349,11 +349,33 @@ func (s *Server) mount(ctx context.Context, action *helperv1.StorageRequest) *he
 		return reject(ErrorExecFailed, "mounting: "+err.Error()+": "+output)
 	}
 
-	message := action.GetTarget() + " was mounted"
+	// The mount table is read again rather than the exit status believed: what
+	// the operator came for is the filesystem being there now.
+	message := "the mount tool reported no error and " + action.GetTarget() +
+		" is not in the mount table"
+	if found := mountedNow(action.GetTarget()); found != nil {
+		message = action.GetTarget() + " carries " + found.FSType + " from " + found.Source
+	}
 	if !action.GetPersist() {
 		message += "; without an fstab entry it disappears after a restart"
 	}
 	return storageResponse(s.readLVM(ctx), message, "")
+}
+
+// mountedNow reads the mount table of the host and answers with the mount
+// standing at the target, or nothing when there is none.
+func mountedNow(target string) *storage.Mount {
+	content, err := os.ReadFile("/proc/self/mountinfo")
+	if err != nil {
+		return nil
+	}
+	mounts := storage.ParseMountinfo(string(content))
+	for i := range mounts {
+		if mounts[i].Target == target {
+			return &mounts[i]
+		}
+	}
+	return nil
 }
 
 // mountArguments names the source, the type and the options: mount given only
@@ -398,7 +420,14 @@ func (s *Server) unmount(ctx context.Context, action *helperv1.StorageRequest) *
 	if err := storage.RemoveFstabEntry(storage.FstabPath, action.GetTarget()); err != nil {
 		return reject(ErrorExecFailed, "writing fstab: "+err.Error())
 	}
-	return storageResponse(s.readLVM(ctx), action.GetTarget()+" was unmounted", "")
+	// umount exits zero on a mount point it detached and on one that was busy
+	// enough to be only unmounted lazily, so the table decides.
+	message := action.GetTarget() + " is no longer in the mount table"
+	if found := mountedNow(action.GetTarget()); found != nil {
+		message = "the umount tool reported no error and " + action.GetTarget() +
+			" is still mounted from " + found.Source
+	}
+	return storageResponse(s.readLVM(ctx), message, "")
 }
 
 // checkFilesystem runs fsck on an unmounted filesystem.
@@ -509,7 +538,16 @@ func (s *Server) extendVolume(ctx context.Context, action *helperv1.StorageReque
 	if err != nil {
 		return reject(ErrorExecFailed, err.Error()+": "+output)
 	}
-	return storageResponse(s.readLVM(ctx), "the volume was extended", output)
+	// The size is read back out of LVM rather than taken from the order: the
+	// volume grows by whole extents, and a request lvextend rounded is a
+	// different number from the one the operator typed.
+	state := s.readLVM(ctx)
+	message := "the tool reported no error and LVM does not list " + action.GetDevice()
+	if volume := state.VolumeAt(action.GetDevice()); volume != nil {
+		message = "the volume " + volume.Path + " now measures " +
+			strconv.FormatUint(volume.SizeBytes>>20, 10) + " MiB"
+	}
+	return storageResponse(state, message, output)
 }
 
 // extendFilesystem grows the filesystem to the size of the device.
@@ -540,7 +578,37 @@ func (s *Server) extendFilesystem(ctx context.Context, action *helperv1.StorageR
 	if err != nil {
 		return reject(ErrorExecFailed, err.Error()+": "+output)
 	}
-	return storageResponse(s.readLVM(ctx), "the filesystem was extended", output)
+	// The filesystem is measured again: the resize tools exit zero both on one
+	// they grew and on one that was already the size asked for, and the number
+	// is what the operator came for.
+	message := "the tool reported no error and the host reports no size for the filesystem on " +
+		action.GetDevice()
+	if grown := s.deviceWithUsage(ctx, action.GetDevice()); grown != nil && grown.FSSizeBytes != nil {
+		message = "the filesystem on " + action.GetDevice() + " now measures " +
+			strconv.FormatUint(*grown.FSSizeBytes>>20, 10) + " MiB"
+	}
+	return storageResponse(s.readLVM(ctx), message, output)
+}
+
+// deviceWithUsage reads one device back with the filesystem numbers the
+// identity read leaves out on purpose; after a resize that size is the fact,
+// and the status the tool ended with is not.
+func (s *Server) deviceWithUsage(ctx context.Context, path string) *storage.Device {
+	output, err := toolOutput(ctx, storage.LsblkPath, "-J", "-b", "-o",
+		storage.Columns(storage.LsblkColumns))
+	if err != nil {
+		return nil
+	}
+	devices, err := storage.ParseDevices(output)
+	if err != nil {
+		return nil
+	}
+	for i := range devices {
+		if devices[i].Path == path {
+			return &devices[i]
+		}
+	}
+	return nil
 }
 
 // createFilesystem formats a device.
@@ -557,8 +625,20 @@ func (s *Server) createFilesystem(ctx context.Context, action *helperv1.StorageR
 	if err != nil {
 		return reject(ErrorExecFailed, err.Error()+": "+output)
 	}
-	return storageResponse(s.readLVM(ctx),
-		"the filesystem "+action.GetFsType()+" was created on "+action.GetDevice(), output)
+	// The device is read again: mkfs exiting zero is not the same fact as the
+	// host reporting the filesystem, and the UUID is what the fstab entry and
+	// every later plan bind to.
+	message := "the tool reported no error and the host reports no filesystem on " + action.GetDevice()
+	if formatted := s.deviceWithUsage(ctx, action.GetDevice()); formatted != nil && formatted.FSType != "" {
+		message = action.GetDevice() + " now carries " + formatted.FSType
+		if formatted.UUID != "" {
+			message += ", UUID " + formatted.UUID
+		}
+		if formatted.Label != "" {
+			message += ", label " + formatted.Label
+		}
+	}
+	return storageResponse(s.readLVM(ctx), message, output)
 }
 
 // wipeDevice removes the filesystem signatures.
@@ -574,11 +654,16 @@ func (s *Server) wipeDevice(ctx context.Context, action *helperv1.StorageRequest
 	if err != nil {
 		return reject(ErrorExecFailed, err.Error()+": "+output)
 	}
-	// The data is still physically on the platters: the signatures were removed,
-	// not the content.
-	return storageResponse(s.readLVM(ctx),
-		"the filesystem signatures were removed from "+action.GetDevice()+
-			"; the content of the medium was not overwritten", output)
+	// The device is read again: what the host still reports on it is the fact.
+	// The data is in any case still physically on the platters - the signatures
+	// were removed, not the content.
+	message := "the host reports no filesystem on " + action.GetDevice() +
+		"; the content of the medium was not overwritten"
+	if wiped := s.deviceWithUsage(ctx, action.GetDevice()); wiped != nil && wiped.FSType != "" {
+		message = "the tool reported no error and the host still reports " + wiped.FSType +
+			" on " + action.GetDevice()
+	}
+	return storageResponse(s.readLVM(ctx), message, output)
 }
 
 // checkDestructiveTarget makes sure the operation hits the device the operator
