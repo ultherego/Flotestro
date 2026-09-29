@@ -237,12 +237,25 @@ curl -fsS http://127.0.0.1:8080/healthz</code></pre>
         <li>Jedna różnica zostaje: <code>podman-compose</code> nie ma
         <code>cp</code>, więc token bootstrap pobiera się tam poleceniem
         <code>podman cp flotestro_control-plane_1:/var/lib/flotestro/bootstrap-token .</code></li>
-        <li>Drugą jest restart maszyny. Demon Dockera wstaje razem z systemem
-        i podnosi kontenery; rootless Podman nie ma demona, który by to zrobił,
-        więc unit odtwarzający polityki restartu przy starcie włącza się raz, na
-        koncie prowadzącym wdrożenie:
-        <code>systemctl --user enable podman-restart.service</code>. Bez tego
-        panel po każdym reboocie hosta stoi.</li>
+        <li>Drugą jest restart maszyny, a pod Podmanem potrzeba do niego dwóch
+        ustawień i niczego więcej. Demon Dockera wstaje razem z systemem i
+        podnosi kontenery; rootless Podman nie ma demona, który by to zrobił.
+        Linger trzyma kontenery przy życiu po ostatnim wylogowaniu, a unit
+        dostarczany z Podmanem odtwarza polityki restartu przy starcie. Oba
+        ustawia się raz, na koncie prowadzącym wdrożenie:
+        <code>loginctl enable-linger $USER</code> i
+        <code>systemctl --user enable podman-restart.service</code>. To wszystko
+        dlatego, że pliki compose mają <code>restart: always</code>, a nie
+        <code>restart: unless-stopped</code>: unit uruchamia
+        <code>podman start --all --filter restart-policy=always</code>, więc
+        wdrożenie z <code>unless-stopped</code> zostałoby pominięte, a unit
+        zgłosiłby sukces i nic by nie wystartował. Demon Dockera też respektuje
+        <code>always</code> przy własnym starcie, więc oba silniki zachowują się
+        tu tak samo. Host, który ma wstać z celowo wyłączonym panelem, wyłącza
+        się przez <code>podman-compose down</code>, a nie zostawiając zatrzymany
+        kontener: kontener, który jest tylko zatrzymany, wystartuje ponownie przy
+        najbliższym bootowaniu, bo tak mówi polityka i tego potrzebuje flota.
+        Plik compose relaya mówi to samo.</li>
       </ul>
     </div>
 

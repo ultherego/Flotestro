@@ -246,12 +246,25 @@ curl -fsS http://127.0.0.1:8080/healthz</code></pre>
         <code>cp</code>, so the bootstrap token is fetched with
         <code>podman cp flotestro_control-plane_1:/var/lib/flotestro/bootstrap-token .</code>
         instead.</li>
-        <li>A reboot is the other. The Docker daemon starts with the machine and
-        brings the containers back with it; rootless Podman has no daemon that
-        would, so the unit that replays the restart policies at boot is enabled
-        once as the account that runs the deployment:
-        <code>systemctl --user enable podman-restart.service</code>. Without it
-        the panel is down after every reboot of the host.</li>
+        <li>A reboot is the other, and under Podman it needs two settings and
+        no more. The Docker daemon starts with the machine and brings the
+        containers back with it; rootless Podman has no daemon that would.
+        Lingering keeps the containers running after the last logout, and a
+        unit shipped with Podman replays the restart policies at boot. Both are
+        set once, as the account that runs the deployment:
+        <code>loginctl enable-linger $USER</code> and
+        <code>systemctl --user enable podman-restart.service</code>. That is the
+        whole of it because the compose files say <code>restart: always</code>,
+        not <code>restart: unless-stopped</code>: the unit runs
+        <code>podman start --all --filter restart-policy=always</code>, so a
+        deployment that said <code>unless-stopped</code> would be skipped, and
+        the unit would report success and start nothing. The Docker daemon
+        honours <code>always</code> at its own start too, so both engines behave
+        the same way. A host that has to come up with the panel deliberately
+        down is taken down with <code>podman-compose down</code>, not by
+        leaving a stopped container behind: a container that is merely stopped
+        is started again at the next boot, which is what the policy says and
+        what the fleet needs. The relay's compose file says the same.</li>
       </ul>
     </div>
 
