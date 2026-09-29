@@ -579,11 +579,25 @@ host and an internal network; an external database requires `verify-full`.
 
 One control plane is active at a time. A second one is a warm standby: the same
 image, the same `./secrets`, the same state directory restored from the pair the
-backup takes, its own `FLOTESTRO_GATEWAY_ID`, and stopped. It is not a second
-active instance and must not be started as one: two state directories against one
-database mean two fleet certificate authorities and two secret-store keys for one
-installation, and the panel refuses to start rather than let that happen
-(`installation_state_mismatch`).
+backup takes, its own `FLOTESTRO_GATEWAY_ID`, and stopped.
+
+**The reason for that has narrowed, and it is worth knowing which reason still
+stands.** It used to be the keys: two state directories against one database
+meant two fleet certificate authorities and two secret-store keys for one
+installation, and the panel refused to start rather than let that happen
+(`installation_state_mismatch`). An installation that has run `crypto
+import-state` keeps its keys as rows of the database, so two instances holding
+the same key encryption key read the same keys and the same authorities, and a
+second instance with an empty state directory starts and serves. That much is
+measured.
+
+What still holds a deployment to one active instance is this file, not the
+product: the control plane's identifier is one value (`FLOTESTRO_GATEWAY_ID`,
+default `cp-01`) and the published ports are fixed, so a second container of
+this deployment would claim the identifier of the first and fail to bind. Two
+active instances therefore need a compose file of their own, each with its own
+identifier and ports behind a load balancer that follows `/readyz`. That is not
+shipped here, and until it is, the standby is stopped.
 
 Bringing it up is: stop the active one, restore the state pair if the standby's
 copy is older than the database, start the standby. Readiness is what the load
