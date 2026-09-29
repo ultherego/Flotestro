@@ -40,12 +40,52 @@ env:
   PAGES_BRANCH: gh-pages
 
 jobs:
+  # The fleet cannot exist on a runner, so the suite that exercises it runs in
+  # the laboratory and its verdict reaches the commit as the status
+  # "lab-suite". Until now nothing here read that status: a tag shipped whether
+  # the fleet had been tested or not, and the enforcement was somebody
+  # remembering. It is read here, before anything is built, because a release
+  # that was never put through the fleet is the one release nobody should be
+  # able to publish by accident.
+  gate:
+    name: The laboratory verdict
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      statuses: read
+    steps:
+      - name: The lab suite passed on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # The newest status for that context, or the word "missing": a tag
+          # that was never run through the laboratory and one that failed it
+          # are different situations and the message says which.
+          state="$(gh api "repos/$REPOSITORY/commits/$SHA/statuses" \
+              --jq '[.[] | select(.context == "lab-suite")] | first | .state // "missing"')"
+          echo "lab-suite on $SHA: $state"
+          case "$state" in
+            success) ;;
+            missing)
+              echo "::error::this commit carries no lab-suite status: the laboratory gate was never run on it." >&2
+              echo "Run Vagrant/gate.sh on exactly this commit and record the verdict with the lab-gate workflow." >&2
+              exit 1 ;;
+            *)
+              echo "::error::the lab-suite status on this commit is \"$state\", not success." >&2
+              exit 1 ;;
+          esac
+
   # The images are built and published by the workflow that owns that, called
   # from here rather than triggered beside this one: a manifest that names their
   # digests has to be made in the same run, or it could name the digests of
   # another.
   images:
     name: Images
+    needs: gate
     uses: ./.github/workflows/images.yml
     permissions:
       contents: read
@@ -54,6 +94,7 @@ jobs:
 
   panel:
     name: Panel
+    needs: gate
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

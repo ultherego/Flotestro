@@ -16,7 +16,12 @@
 #   gh workflow run lab-gate.yml \
 #       -f sha=$(git rev-parse HEAD) \
 #       -f result=pass \
-#       -f report="$(cat /tmp/flotestro-lab-verdict.txt)"
+#       -f report="$(cat Vagrant/.gate/$(git rev-parse HEAD)/result.json)"
+#
+# A pass has to carry that file: it names the commit the gate ran on, says
+# whether the run was a quick one and holds the verdict the script reached.
+# The two mistakes nobody notices - attesting the wrong commit, attesting a
+# quick run - are refused here rather than found after a release.
 #
 # The commit has to be pushed first: a status belongs to a commit the
 # repository knows. The report is free text - what Vagrant/test.sh and
@@ -80,6 +85,37 @@ jobs:
             fail) state=failure ;;
             *) echo "unknown verdict \"$RESULT\"" >&2; exit 1 ;;
           esac
+
+          # A pass is the machine's own verdict, not a word typed here. The
+          # gate writes .gate/<sha>/result.json and that file names the commit
+          # it ran on, says whether it was a quick run and carries the verdict.
+          # Pasting it turns the two mistakes nobody notices - attesting the
+          # wrong commit, attesting a run that skipped the fleet - into a
+          # refusal. A release reads this status and builds on it, so it is
+          # worth more than a signature under a run nobody can see.
+          if [ "$state" = success ]; then
+            verdict="$(printf '%s' "${REPORT:-}" | jq -r '.verdict // empty' 2>/dev/null || true)"
+            if [ -z "$verdict" ]; then
+              echo "a pass carries the gate's own result.json in the report." >&2
+              echo "Run: gh workflow run lab-gate.yml -f sha=\$(git rev-parse HEAD) -f result=pass \\" >&2
+              echo "         -f report=\"\$(cat Vagrant/.gate/\$(git rev-parse HEAD)/result.json)\"" >&2
+              exit 1
+            fi
+            reported_sha="$(printf '%s' "$REPORT" | jq -r '.sha // empty')"
+            quick="$(printf '%s' "$REPORT" | jq -r '.quick // false')"
+            if [ "$verdict" != pass ]; then
+              echo "the gate's own verdict for that run is \"$verdict\", so this is not a pass." >&2
+              exit 1
+            fi
+            if [ "$reported_sha" != "$SHA" ]; then
+              echo "the gate ran on $reported_sha and this attests $SHA; they have to be the same commit." >&2
+              exit 1
+            fi
+            if [ "$quick" != false ]; then
+              echo "that was a quick run: it skips the fleet and the screenshots, so it cannot be a pass." >&2
+              exit 1
+            fi
+          fi
 
           # The status carries one line, and the API refuses more than 140
           # characters. The whole report stays in the summary of this run,
