@@ -264,6 +264,8 @@ curl -fsS http://127.0.0.1:8080/healthz</code></pre>
         <tr><td>Sekret klienta OIDC</td><td><code>FLOTESTRO_OIDC_CLIENT_SECRET_FILE</code></td><td><code>/run/secrets/oidc_client_secret</code></td><td>dodany ręcznie bind mount</td></tr>
         <tr><td>Klucz HMAC webhooka</td><td><code>FLOTESTRO_WEBHOOK_SECRET_FILE</code></td><td><code>/run/secrets/webhook_secret</code></td><td>dodany ręcznie bind mount</td></tr>
         <tr><td>Klucz API do NVD</td><td><code>FLOTESTRO_VULN_NVD_KEY_FILE</code></td><td><code>/run/secrets/nvd_key</code></td><td>dodany ręcznie bind mount</td></tr>
+        <tr><td>Key encryption key</td><td><code>FLOTESTRO_KEK_FILE</code> (już jest ścieżką)</td><td><code>/run/flotestro/kek</code></td><td><code>init</code>, z <code>./secrets/kek</code></td></tr>
+        <tr><td>Key encryption key, na który przechodzi rotacja</td><td>podawany w wierszu poleceń</td><td><code>/run/flotestro/kek-next</code></td><td><code>init</code>, z <code>./secrets/kek-next</code></td></tr>
         <tr><td>Keytab FreeIPA</td><td><code>FLOTESTRO_IPA_KEYTAB</code> (już jest ścieżką)</td><td><code>/run/secrets/ipa.keytab</code></td><td>dodany ręcznie bind mount</td></tr>
       </tbody>
     </table>
@@ -407,7 +409,7 @@ docker compose --profile tools run --rm admin-tools backup</code></pre>
       <tbody>
         <tr><td><code>database.dump</code></td><td><code>pg_dump --format=custom</code>, bez właścicieli i bez uprawnień: odtworzenie robi ten, kto jest właścicielem pustej bazy, do której trafia.</td></tr>
         <tr><td><code>state.tar.zst</code></td><td>Katalog stanu z numerycznymi właścicielami i oryginalnymi trybami - katalog ma 0700, a klucze w nim 0600.</td></tr>
-        <tr><td><code>manifest.json</code></td><td>To, co wiąże obie połówki: identyfikator kopii, moment, wersja i commit obrazu, identyfikator instalacji, identyfikatory aktywnego klucza i wystawcy, digesty obu plików oraz digest obrazu, jeśli wdrożenie go przypina. Żadnego DSN, żadnego hasła, żadnej wartości sekretu.</td></tr>
+        <tr><td><code>manifest.json</code></td><td>To, co wiąże obie połówki: identyfikator kopii, moment, wersja i commit obrazu, identyfikator instalacji, identyfikatory aktywnego klucza i wystawcy, <code>kek_id</code> key encryption key, którym zapieczętowane są wiersze (tylko instalacja <code>db-sealed</code>), digesty obu plików oraz digest obrazu, jeśli wdrożenie go przypina. Żadnego DSN, żadnego hasła, żadnej wartości sekretu.</td></tr>
         <tr><td><code>SHA256SUMS</code></td><td>Digesty obu archiwów, sprawdzane przed każdym odtworzeniem.</td></tr>
       </tbody>
     </table>
@@ -428,7 +430,9 @@ docker compose --profile restore run --rm admin-restore restore 20260919T101500Z
       <p class="note__title">Backup nie zabiera key encryption key</p>
       <p><code>admin-tools backup</code> zabiera bazę i katalog stanu. Key
       encryption key celowo nie: ten klucz trzyma się osobno, w rękach innych
-      osób.</p>
+      osób. Manifest zapisuje tylko jego <code>kek_id</code>, żeby przy
+      odtwarzaniu dało się sprawdzić, czy klucz, który masz w ręku, otwiera ten
+      dump; samego klucza w backupie nie ma i nie wolno go tam dawać.</p>
     </div>
 
     <div class="note note--warning">
@@ -475,6 +479,23 @@ openssl rand -hex 32 &gt; flotestro-kek</code></pre>
     tylko ścieżkę: nie ma flagi ani zmiennej środowiskowej, która niosłaby sam
     klucz.</p>
 
+    <p>We wdrożeniu Compose klucz kładziesz w <code>./secrets/kek</code>, a
+    <code>init</code> kopiuje go do <code>/run/flotestro/kek</code>, na który
+    wskazuje <code>FLOTESTRO_KEK_FILE</code>, z trybem i właścicielem, jakich
+    wymaga panel. Źródłem jest <code>./secrets/</code>:
+    <code>init</code> kopiuje go na wolumen przy każdym starcie control plane,
+    bo start kontenera startuje to, od czego on zależy. Klucz zmieniony w
+    <code>./secrets/</code> zadziała więc, a zmieniony na wolumenie - nie. Klucz
+    dodany do już działającego wdrożenia trafia do panelu dopiero po ponownym
+    przebiegu <code>init</code>, a pod Podmanem to dwa kroki, nie
+    <code>podman restart</code>: control plane zależy od <code>init</code> i
+    <code>migrate</code>, które przebiegły i zakończyły się, i Podman odmawia z
+    komunikatem &bdquo;some dependencies of container ... are not
+    started&rdquo;.</p>
+
+<pre><code>podman stop flotestro_control-plane_1
+podman start flotestro_control-plane_1</code></pre>
+
     <div class="note note--warning">
       <p class="note__title">Backup to trzy rzeczy, trzymane osobno</p>
       <p>Backup, który da się odtworzyć, to dump bazy <strong>oraz</strong> key
@@ -498,9 +519,9 @@ openssl rand -hex 32 &gt; flotestro-kek</code></pre>
     <table>
       <thead><tr><th>Polecenie</th><th>Co robi</th></tr></thead>
       <tbody>
-        <tr><td><code>crypto import-state</code></td><td>Przenosi klucze znalezione w katalogu stanu do bazy. Każdy klucz jest opakowany i odczytany z powrotem, zanim cokolwiek zostanie zapisane, a wszystkie trafiają do bazy razem z zapisem instalacji w jednej transakcji: jeden klucz, którego nie da się odczytać, zatrzymuje całą migrację. Pliki <strong>nie</strong> są usuwane; dopóki nie zdecydujesz inaczej, to droga powrotu. Potem zrestartuj panel z zamontowanym kluczem.</td></tr>
+        <tr><td><code>crypto import-state</code></td><td>Przenosi klucze znalezione w katalogu stanu do bazy. Każdy klucz jest opakowany i odczytany z powrotem, zanim cokolwiek zostanie zapisane, a wszystkie trafiają do bazy razem z zapisem instalacji w jednej transakcji: jeden klucz, którego nie da się odczytać, zatrzymuje całą migrację. Pliki <strong>nie</strong> są usuwane; dopóki nie zdecydujesz inaczej, to droga powrotu. Potem zrestartuj control plane z kluczem na miejscu (stop, potem start, jak wyżej).</td></tr>
         <tr><td><code>crypto revert-state</code></td><td>Przenosi klucze z powrotem do plików. Pliki powstają najpierw, wiersze znikają dopiero po nich, więc przerwany revert zostawia klucze w bazie, a nie nigdzie.</td></tr>
-        <tr><td><code>crypto rewrap-kek --new-kek-file <var>ścieżka</var></code></td><td>Rotuje KEK. Same klucze się nie zmieniają - zmienia się tylko opakowanie - więc da się to zrobić przy działającym panelu. Wszystkie wiersze i zapis instalacji przechodzą razem. Potem zamontuj nowy klucz jako <code>/run/secrets/flotestro-kek</code> na każdej replice i zrestartuj je; replika, która wciąż ma stary klucz, odmówi startu z <code>kek_mismatch</code>.</td></tr>
+        <tr><td><code>crypto rewrap-kek --new-kek-file <var>ścieżka</var></code></td><td>Rotuje KEK. Same klucze się nie zmieniają - zmienia się tylko opakowanie - więc da się to zrobić przy działającym panelu. Nowy klucz idzie do <code>./secrets/kek-next</code>, <code>init</code> kładzie go w <code>/run/flotestro/kek-next</code> przy najbliższym starcie control plane, a polecenie to <code>crypto rewrap-kek -new-kek-file /run/flotestro/kek-next</code>. Wszystkie wiersze i zapis instalacji przechodzą razem. Panel używa tego z dwóch kluczy, który wskazuje zapis instalacji, więc replika zrestartowana w dowolnym momencie rotacji wraca; nie ma okna, w którym restart kładzie panel. Potem zrób z nowego klucza klucz wdrożenia (<code>./secrets/kek-next</code> staje się <code>./secrets/kek</code>) i zrestartuj każdą replikę. Gdy <code>kek-next</code> zniknie, replika, która nigdy nie widziała nowego klucza, odmówi startu z <code>kek_mismatch</code>, więc trzymaj plik, dopóki każda replika nie zostanie zrestartowana.</td></tr>
         <tr><td><code>crypto forget-files -expect-revision <var>rewizja</var> -confirm-installation <var>id-instalacji</var></code></td><td>Usuwa pliki z kluczami, a tym samym zamyka drogę powrotu. Odmawia przy pierwszej z sześciu kontroli, która się nie powiedzie (migracja jest skończona i tym kluczem; każdy klucz otwiera się z bazy i zgadza z plikiem; znacznik w katalogu stanu wskazuje tę instalację; stan kryptograficzny nadal stoi na rewizji, którą podałeś; powtórzyłeś identyfikator instalacji; a ostrzeżenie o tym, co przestanie działać, jest wypisane przed usunięciem). Rewizję i identyfikator znajdziesz w bloku <code>crypto</code> odpowiedzi <code>GET /api/v1/status</code>.</td></tr>
       </tbody>
     </table>
@@ -537,7 +558,7 @@ openssl rand -hex 32 &gt; flotestro-kek</code></pre>
         <tr><td><code class="refusal">kek_file_missing</code></td><td>Pod ścieżką, którą wskazuje wdrożenie, nie ma pliku.</td></tr>
         <tr><td><code class="refusal">kek_file_unsafe</code></td><td>Plik jest linkiem, nie jest zwykłym plikiem, należy do kogoś innego albo jest czytelny lub zapisywalny dla grupy albo kogokolwiek innego.</td></tr>
         <tr><td><code class="refusal">kek_file_malformed</code></td><td>Zawartość to nie 64 znaki szesnastkowe z co najwyżej jednym końcowym znakiem nowej linii.</td></tr>
-        <tr><td><code class="refusal">kek_mismatch</code></td><td>Klucz w pliku nie jest tym, którym opakowano klucze instalacji, np. replika, która wciąż trzyma klucz sprzed rotacji.</td></tr>
+        <tr><td><code class="refusal">kek_mismatch</code></td><td>Żaden z zamontowanych kluczy nie jest tym, który zapisuje instalacja: to klucz innej instalacji albo klucz sprzed rotacji, której nowy klucz nie jest już zamontowany. Trwająca rotacja tu nie trafia.</td></tr>
         <tr><td><code class="refusal">wrapped_key_unreadable</code></td><td>Wiersz nie otwiera się kluczem, który trzyma wdrożenie, choć twierdzi, że został nim opakowany: został zmieniony albo ma postać, której ten panel nie czyta.</td></tr>
       </tbody>
     </table>

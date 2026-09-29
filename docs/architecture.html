@@ -527,7 +527,10 @@
       <code class="refusal">pki_state_mismatch</code> or
       <code class="refusal">crypto_state_ambiguous</code>. It never creates a
       fresh CA in place of a missing one. Two instances must not run with
-      separate state directories against one database.</p>
+      separate state directories against one database. For a
+      <code>db-sealed</code> installation the two halves are the dump and the
+      key encryption key, and restoring one without the other is the same
+      mistake: the rows open with that key and with no other.</p>
     </div>
 
     <h2 id="why-native">Why the agent is a package and the control plane is an image</h2>

@@ -525,7 +525,10 @@
       <code class="refusal">pki_state_mismatch</code> albo
       <code class="refusal">crypto_state_ambiguous</code>. Nigdy nie zakłada
       nowego CA w miejsce brakującego. Dwie instancje nie mogą pracować z
-      osobnymi katalogami stanu na jednej bazie.</p>
+      osobnymi katalogami stanu na jednej bazie. W instalacji
+      <code>db-sealed</code> obie połówki to dump i key encryption key, a
+      odtworzenie jednej bez drugiej to ten sam błąd: wiersze otwiera ten klucz
+      i żaden inny.</p>
     </div>
 
     <h2 id="why-native">Dlaczego agent jest pakietem, a control plane obrazem</h2>
