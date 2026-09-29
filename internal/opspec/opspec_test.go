@@ -368,3 +368,36 @@ func TestAllowMissingValidatorEntersThePayloadHash(t *testing.T) {
 		t.Error("the payload hash does not see allow_missing_validator")
 	}
 }
+
+// What the panel will not do it refuses by name. Building a volume group and
+// shrinking a group or a volume are the three LVM operations it does not run,
+// and an operator who asks for one gets a code and a reason rather than
+// "no such plan", which reads like a gap somebody forgot to fill.
+func TestTheLVMOperationsOutsideThePanelAreRefusedByName(t *testing.T) {
+	for kind, want := range map[string]string{
+		"vgcreate": "volume_group_lifecycle_out_of_scope",
+		"vgreduce": "volume_shrink_out_of_scope",
+		"lvreduce": "volume_shrink_out_of_scope",
+	} {
+		err := Validate(ActionStoragePlan, Payload{Storage: &StoragePayload{Plan: kind}})
+		if err == nil {
+			t.Errorf("%s was accepted as a plan the panel computes", kind)
+			continue
+		}
+		if code := RefusalCode(err); code != want {
+			t.Errorf("%s: refused with %q, want %q", kind, code, want)
+		}
+		// The refusal is in the catalogue with what to do next, so the operator
+		// reading it is not left guessing whether it is a gap.
+		guide, listed := ErrorGuideFor(want)
+		if !listed || guide.Meaning == "" || guide.Action == "" {
+			t.Errorf("%s says nothing in the error guide", want)
+		}
+	}
+	// The LVM operations the panel does run are untouched by the refusal.
+	for _, kind := range []string{"lvm_vg_extend", "lvm_lv_create", "lvm_extend", "lvm_lv_remove"} {
+		if err := Validate(ActionStoragePlan, Payload{Storage: &StoragePayload{Plan: kind}}); err != nil {
+			t.Errorf("%s was refused: %v", kind, err)
+		}
+	}
+}

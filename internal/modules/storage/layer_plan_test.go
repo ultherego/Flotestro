@@ -371,6 +371,37 @@ func TestBuildingOrTearingDownAnArrayIsRefusedByName(t *testing.T) {
 	}
 }
 
+// Building a volume group and shrinking a group or a volume are outside the
+// panel, each for its own reason, and each says so with its own code rather
+// than looking like an operation somebody forgot to write.
+func TestBuildingOrShrinkingAVolumeIsRefusedByName(t *testing.T) {
+	for _, kind := range []string{"vgcreate", "vg_create", "lvm_vg_create", "VGCREATE"} {
+		refusal := VolumeLifecycleRefusalFor(kind)
+		if refusal == nil {
+			t.Fatalf("%q was not recognised as building a volume group", kind)
+		}
+		if refusal.Code != CodeVolumeGroupLifecycleOutOfScope {
+			t.Errorf("%q: code = %q", kind, refusal.Code)
+		}
+	}
+	for _, kind := range []string{"vgreduce", "lvreduce", "lvm_lv_reduce", " LVReduce "} {
+		refusal := VolumeLifecycleRefusalFor(kind)
+		if refusal == nil {
+			t.Fatalf("%q was not recognised as a shrink", kind)
+		}
+		if refusal.Code != CodeVolumeShrinkOutOfScope {
+			t.Errorf("%q: code = %q", kind, refusal.Code)
+		}
+	}
+	// The operations the panel does run keep running: the refusal is about
+	// the three names it does not answer to.
+	for _, kind := range []string{PlanVGExtend, PlanLVCreate, PlanLVExtend, PlanLVRemove} {
+		if VolumeLifecycleRefusalFor(kind) != nil {
+			t.Errorf("%q was taken for an operation outside the panel", kind)
+		}
+	}
+}
+
 func TestSizeInBytesReadsAnLVMSize(t *testing.T) {
 	for _, tc := range []struct {
 		text     string

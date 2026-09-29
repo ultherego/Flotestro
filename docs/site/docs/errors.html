@@ -96,7 +96,7 @@
 
   <main class="content">
 <h1>7. Errors and refusals</h1>
-<p class="lede">Every refusal, failure and skip the panel, the agent and the helper can put on a task, a campaign target or a request carries a stable code. A code answers two questions: what happened, and what can safely be done next. This page is the whole guide, 260 entries, transcribed from <code>internal/opspec/errors.go</code>; the panel serves the same list at <code>GET /api/v1/errors</code>.</p>
+<p class="lede">Every refusal, failure and skip the panel, the agent and the helper can put on a task, a campaign target or a request carries a stable code. A code answers two questions: what happened, and what can safely be done next. This page is the whole guide, 293 entries, transcribed from <code>internal/opspec/errors.go</code>; the panel serves the same list at <code>GET /api/v1/errors</code>.</p>
     <ul class="linkrow">
       <li><a href="#retry">The retry policy</a></li>
       <li><a href="#failure">Whether a code counts as a failure</a></li>
@@ -452,6 +452,8 @@
 <tr><td><a href="#err-versionlock-missing"><code class="refusal">versionlock_missing</code></a></td><td>helper</td><td><span class="badge retry-after-change">after_change</span></td><td>yes</td></tr>
 <tr><td><a href="#err-vlan-parent-missing"><code class="refusal">vlan_parent_missing</code></a></td><td>helper</td><td><span class="badge retry-after-change">after_change</span></td><td>yes</td></tr>
 <tr><td><a href="#err-volume-group-full"><code class="refusal">volume_group_full</code></a></td><td>helper</td><td><span class="badge retry-after-change">after_change</span></td><td>yes</td></tr>
+<tr><td><a href="#err-volume-group-lifecycle-out-of-scope"><code class="refusal">volume_group_lifecycle_out_of_scope</code></a></td><td>admission</td><td><span class="badge retry-never">never</span></td><td>yes</td></tr>
+<tr><td><a href="#err-volume-shrink-out-of-scope"><code class="refusal">volume_shrink_out_of_scope</code></a></td><td>admission</td><td><span class="badge retry-never">never</span></td><td>yes</td></tr>
 <tr><td><a href="#err-volume-unknown"><code class="refusal">volume_unknown</code></a></td><td>helper</td><td><span class="badge retry-after-change">after_change</span></td><td>yes</td></tr>
 <tr><td><a href="#err-webhook-secret-required"><code class="refusal">webhook_secret_required</code></a></td><td>notification</td><td><span class="badge retry-after-change">after_change</span></td><td>no</td></tr>
 <tr><td><a href="#err-wrapped-key-unreadable"><code class="refusal">wrapped_key_unreadable</code></a></td><td>startup</td><td><span class="badge retry-after-change">after_change</span></td><td>no</td></tr>
@@ -553,7 +555,7 @@
 <dd><p>The host is being decommissioned and takes no operations.</p><p><span class="label">What to do</span> Nothing; the host is leaving the fleet. Not a failure.</p><p><span class="badge retry-never">retry: never</span> <span class="badge not-failure">not a failure</span></p></dd>
 </dl>
 <h2 id="stage-admission">Stage: admission</h2>
-<p>38 codes.</p>
+<p>43 codes.</p>
 <dl class="kv">
 <dt id="err-account-without-credential"><code class="refusal">account_without_credential</code></dt>
 <dd><p>The order would create an account with no key and, since the panel sets no passwords, no way to log in - and did not say so.</p><p><span class="label">What to do</span> Give the account a key, or set inactive: true to create it deliberately without a way in; the panel then shows it as locked.</p><p><span class="badge retry-after-change">retry: after_change</span> <span class="badge not-failure">not a failure</span></p></dd>
@@ -631,6 +633,10 @@
 <dd><p>The bundle is still being assembled, so there is nothing to hand over yet.</p><p><span class="label">What to do</span> Wait until the screen says it is ready; the link is issued then.</p><p><span class="badge retry-automatic">retry: automatic</span> <span class="badge not-failure">not a failure</span></p></dd>
 <dt id="err-timer-calendar-unsupported"><code class="refusal">timer_calendar_unsupported</code></dt>
 <dd><p>The expression cannot be written as a systemd timer: it names both a day of the month and a day of the week, which cron runs when either matches and a timer only when both do. The two would run on different days, so neither was written.</p><p><span class="label">What to do</span> Order the entry as a cron entry, where the expression means what it says, or restrict only one of the two days in the timer.</p><p><span class="badge retry-after-change">retry: after_change</span> <span class="badge not-failure">not a failure</span></p></dd>
+<dt id="err-volume-group-lifecycle-out-of-scope"><code class="refusal">volume_group_lifecycle_out_of_scope</code></dt>
+<dd><p>The order asks the panel to build a volume group. The panel extends a group that exists and manages the volumes in it and nothing beyond that: how a machine's disks are carved up is decided when the machine is built.</p><p><span class="label">What to do</span> Create the group on the machine itself; the panel will read it, extend it and manage its volumes afterwards.</p><p><span class="badge retry-never">retry: never</span> <span class="badge counts-failure">counts as a failure</span></p></dd>
+<dt id="err-volume-shrink-out-of-scope"><code class="refusal">volume_shrink_out_of_scope</code></dt>
+<dd><p>The order asks the panel to make a volume group or a logical volume smaller. Shrinking takes away blocks the filesystem above may still be holding, and no read the panel can make afterwards says whether it was - so the panel grows both and shrinks neither.</p><p><span class="label">What to do</span> Move the data off and shrink the volume or the group on the machine itself, with the filesystem shrunk first. To free space through the panel, remove a volume instead: that is an operation whose result can be read back.</p><p><span class="badge retry-never">retry: never</span> <span class="badge counts-failure">counts as a failure</span></p></dd>
 </dl>
 <h2 id="stage-approval">Stage: approval</h2>
 <p>9 codes.</p>

@@ -26,6 +26,14 @@ const (
 	// about a machine's whole disk layout, not an operation the panel runs over a
 	// fleet.
 	CodeArrayLifecycleOutOfScope = "array_lifecycle_out_of_scope"
+	// CodeVolumeGroupLifecycleOutOfScope: building a volume group is a decision
+	// about how a machine's disks are carved up, not an operation the panel
+	// runs over a fleet.
+	CodeVolumeGroupLifecycleOutOfScope = "volume_group_lifecycle_out_of_scope"
+	// CodeVolumeShrinkOutOfScope: making a volume group or a logical volume
+	// smaller cuts blocks away that nothing readable afterwards proves were
+	// free.
+	CodeVolumeShrinkOutOfScope = "volume_shrink_out_of_scope"
 	// CodeVolumeUnknown: the host has no such volume group or logical
 	// volume.
 	CodeVolumeUnknown = "volume_unknown"
@@ -57,6 +65,45 @@ func ArrayLifecycleRefusalFor(kind string) *Refusal {
 		return nil
 	}
 	return &Refusal{Code: CodeArrayLifecycleOutOfScope, Reason: ArrayLifecycleRefusal}
+}
+
+// VolumeGroupLifecycleRefusal is the answer to an order that would build a
+// volume group.
+const VolumeGroupLifecycleRefusal = "the panel extends a volume group that exists and manages the volumes in it; " +
+	"building the group is a decision about how a machine's disks are carved up, " +
+	"taken on the machine when it is built, not an operation run over a running fleet"
+
+// VolumeShrinkRefusal is the answer to an order that would make a volume group
+// or a logical volume smaller.
+const VolumeShrinkRefusal = "the panel grows a volume group and a logical volume and shrinks neither; " +
+	"shrinking takes away blocks the filesystem above may still be holding, " +
+	"and nothing this host can be read for afterwards says whether it was"
+
+// volumeGroupLifecycleKinds are the plan names somebody reaches for when they
+// expect the panel to build a volume group.
+var volumeGroupLifecycleKinds = map[string]bool{
+	"vgcreate": true, "vg_create": true, "lvm_vg_create": true, "volume_group_create": true,
+}
+
+// volumeShrinkKinds are the plan names of the two shrinks: a group losing a
+// disk and a volume losing extents.
+var volumeShrinkKinds = map[string]bool{
+	"vgreduce": true, "vg_reduce": true, "lvm_vg_reduce": true, "volume_group_reduce": true,
+	"lvreduce": true, "lv_reduce": true, "lvm_lv_reduce": true, "volume_reduce": true,
+}
+
+// VolumeLifecycleRefusalFor answers a plan asked for under one of those names,
+// and nothing otherwise. The two answers differ because the two reasons do:
+// one is a layout decision, the other a change nothing can confirm.
+func VolumeLifecycleRefusalFor(kind string) *Refusal {
+	normalized := strings.ToLower(strings.TrimSpace(kind))
+	switch {
+	case volumeGroupLifecycleKinds[normalized]:
+		return &Refusal{Code: CodeVolumeGroupLifecycleOutOfScope, Reason: VolumeGroupLifecycleRefusal}
+	case volumeShrinkKinds[normalized]:
+		return &Refusal{Code: CodeVolumeShrinkOutOfScope, Reason: VolumeShrinkRefusal}
+	}
+	return nil
 }
 
 // ComputeRAIDMemberFail computes the plan of marking a member bad.

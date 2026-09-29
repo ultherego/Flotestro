@@ -3497,6 +3497,11 @@ func Validate(action ActionType, payload Payload) error {
 			if refusal := storage.ArrayLifecycleRefusalFor(payload.Storage.Plan); refusal != nil {
 				return &RefusalError{Code: refusal.Code, Err: refusal}
 			}
+			// Building a volume group, and shrinking a group or a volume, are
+			// outside the panel for their own reasons; each says which.
+			if refusal := storage.VolumeLifecycleRefusalFor(payload.Storage.Plan); refusal != nil {
+				return &RefusalError{Code: refusal.Code, Err: refusal}
+			}
 			if !storage.KnownPlanKind(payload.Storage.Plan) {
 				return fmt.Errorf("the panel computes no plan called %q", payload.Storage.Plan)
 			}

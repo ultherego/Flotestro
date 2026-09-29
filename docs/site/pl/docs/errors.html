@@ -91,7 +91,7 @@
 
   <main class="content">
 <h1>7. Błędy i odmowy</h1>
-<p class="lede">Każda odmowa, każde niepowodzenie i każde pominięcie, jakie panel, agent i helper mogą przypisać zadaniu, celowi kampanii albo żądaniu, niesie stały kod. Kod odpowiada na dwa pytania: co się stało i co można bezpiecznie zrobić dalej. Ta strona to cały wykaz, 260 pozycji, przepisany z <code>internal/opspec/errors.go</code>; panel udostępnia tę samą listę pod <code>GET /api/v1/errors</code>.</p>
+<p class="lede">Każda odmowa, każde niepowodzenie i każde pominięcie, jakie panel, agent i helper mogą przypisać zadaniu, celowi kampanii albo żądaniu, niesie stały kod. Kod odpowiada na dwa pytania: co się stało i co można bezpiecznie zrobić dalej. Ta strona to cały wykaz, 293 pozycji, przepisany z <code>internal/opspec/errors.go</code>; panel udostępnia tę samą listę pod <code>GET /api/v1/errors</code>.</p>
     <ul class="linkrow">
       <li><a href="#retry">Polityka ponowień</a></li>
       <li><a href="#failure">Czy kod liczy się jako niepowodzenie</a></li>
@@ -447,6 +447,8 @@
 <tr><td><a href="#err-versionlock-missing"><code class="refusal">versionlock_missing</code></a></td><td>helper</td><td><span class="badge retry-after-change">after_change</span></td><td>tak</td></tr>
 <tr><td><a href="#err-vlan-parent-missing"><code class="refusal">vlan_parent_missing</code></a></td><td>helper</td><td><span class="badge retry-after-change">after_change</span></td><td>tak</td></tr>
 <tr><td><a href="#err-volume-group-full"><code class="refusal">volume_group_full</code></a></td><td>helper</td><td><span class="badge retry-after-change">after_change</span></td><td>tak</td></tr>
+<tr><td><a href="#err-volume-group-lifecycle-out-of-scope"><code class="refusal">volume_group_lifecycle_out_of_scope</code></a></td><td>admission</td><td><span class="badge retry-never">never</span></td><td>tak</td></tr>
+<tr><td><a href="#err-volume-shrink-out-of-scope"><code class="refusal">volume_shrink_out_of_scope</code></a></td><td>admission</td><td><span class="badge retry-never">never</span></td><td>tak</td></tr>
 <tr><td><a href="#err-volume-unknown"><code class="refusal">volume_unknown</code></a></td><td>helper</td><td><span class="badge retry-after-change">after_change</span></td><td>tak</td></tr>
 <tr><td><a href="#err-webhook-secret-required"><code class="refusal">webhook_secret_required</code></a></td><td>notification</td><td><span class="badge retry-after-change">after_change</span></td><td>nie</td></tr>
 <tr><td><a href="#err-wrapped-key-unreadable"><code class="refusal">wrapped_key_unreadable</code></a></td><td>startup</td><td><span class="badge retry-after-change">after_change</span></td><td>nie</td></tr>
@@ -548,7 +550,7 @@
 <dd><p>Host jest wycofywany i nie przyjmuje operacji.</p><p><span class="label">Co zrobić</span> Nic; host odchodzi z floty. To nie jest niepowodzenie.</p><p><span class="badge retry-never">ponowienie: never</span> <span class="badge not-failure">nie jest niepowodzeniem</span></p></dd>
 </dl>
 <h2 id="stage-admission">Etap: admission</h2>
-<p>38 kodów.</p>
+<p>43 kodów.</p>
 <dl class="kv">
 <dt id="err-account-without-credential"><code class="refusal">account_without_credential</code></dt>
 <dd><p>Zlecenie utworzyłoby konto bez klucza i - skoro panel nie ustawia haseł - bez żadnego sposobu zalogowania się, a nie powiedziało tego wprost.</p><p><span class="label">Co zrobić</span> Nadaj kontu klucz albo ustaw inactive: true, żeby świadomie utworzyć je bez drogi wejścia; panel pokaże je wtedy jako zablokowane.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge not-failure">nie jest niepowodzeniem</span></p></dd>
@@ -626,6 +628,10 @@
 <dd><p>Paczka wciąż jest składana, więc nie ma jeszcze czego wydać.</p><p><span class="label">Co zrobić</span> Poczekaj, aż ekran pokaże, że jest gotowa; wtedy wydawany jest link.</p><p><span class="badge retry-automatic">ponowienie: automatic</span> <span class="badge not-failure">nie jest niepowodzeniem</span></p></dd>
 <dt id="err-timer-calendar-unsupported"><code class="refusal">timer_calendar_unsupported</code></dt>
 <dd><p>Wyrażenia nie da się zapisać jako timera systemd: podaje zarazem dzień miesiąca i dzień tygodnia, a cron uruchamia zadanie, gdy pasuje którykolwiek, timer zaś tylko wtedy, gdy pasują oba. Oba wypadłyby w różne dni, więc nie zapisano żadnego.</p><p><span class="label">Co zrobić</span> Zleć wpis jako wpis cron, gdzie wyrażenie znaczy to, co mówi, albo ogranicz w timerze tylko jeden z dwóch dni.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge not-failure">nie jest niepowodzeniem</span></p></dd>
+<dt id="err-volume-group-lifecycle-out-of-scope"><code class="refusal">volume_group_lifecycle_out_of_scope</code></dt>
+<dd><p>Zlecenie prosi panel o zbudowanie grupy woluminów. Panel rozszerza grupę, która już istnieje, i zarządza woluminami w niej, i niczym poza tym: to, jak podzielone są dyski maszyny, rozstrzyga się przy jej budowie.</p><p><span class="label">Co zrobić</span> Utwórz grupę na samej maszynie; panel potem ją odczyta, rozszerzy i będzie zarządzał jej woluminami.</p><p><span class="badge retry-never">ponowienie: never</span> <span class="badge counts-failure">liczy się jako niepowodzenie</span></p></dd>
+<dt id="err-volume-shrink-out-of-scope"><code class="refusal">volume_shrink_out_of_scope</code></dt>
+<dd><p>Zlecenie prosi panel o zmniejszenie grupy woluminów albo woluminu logicznego. Zmniejszanie zabiera bloki, które system plików powyżej może wciąż trzymać, a żaden odczyt, jaki panel potem wykona, nie powie, czy je trzymał - dlatego panel powiększa jedno i drugie, a nie zmniejsza żadnego.</p><p><span class="label">Co zrobić</span> Przenieś dane i zmniejsz wolumin albo grupę na samej maszynie, wcześniej zmniejszając system plików. Żeby zwolnić miejsce przez panel, usuń wolumin: to operacja, której wynik da się odczytać.</p><p><span class="badge retry-never">ponowienie: never</span> <span class="badge counts-failure">liczy się jako niepowodzenie</span></p></dd>
 </dl>
 <h2 id="stage-approval">Etap: approval</h2>
 <p>9 kodów.</p>
