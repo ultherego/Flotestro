@@ -337,6 +337,12 @@ func (s *Server) orderCampaign(w http.ResponseWriter, r *http.Request, request c
 		writeJSON(w, http.StatusOK, campaign)
 		return
 	}
+	if errors.Is(err, campaigns.ErrKeyReused) {
+		// The key is the caller's own word: answering with somebody else's
+		// campaign would tell them their order went through when it never did.
+		problem(w, http.StatusConflict, "idempotency_key_reused", err.Error())
+		return
+	}
 	if err != nil {
 		problem(w, http.StatusBadRequest, "invalid_campaign", err.Error())
 		return

@@ -980,6 +980,12 @@ func (s *Server) handleFleetRemediation(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusOK, map[string]any{"campaign": campaign, "groups": plan.Groups, "excluded": plan.excluded()})
 		return
 	}
+	if errors.Is(err, campaigns.ErrKeyReused) {
+		// The same refusal as on a single host: a used key does not answer
+		// for an order nobody placed.
+		problem(w, http.StatusConflict, "idempotency_key_reused", err.Error())
+		return
+	}
 	if err != nil {
 		problem(w, http.StatusBadRequest, "invalid_campaign", err.Error())
 		return

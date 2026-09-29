@@ -107,7 +107,7 @@ func (f installationFiles) collectSecretsKeys() ([]cryptostate.Material, error) 
 	if err != nil {
 		return nil, fmt.Errorf("the key of an installation from before the keys were named: %w", err)
 	}
-	for _, material := range found {
+	for i, material := range found {
 		if material.KeyID != secrets.LegacyKeyID {
 			continue
 		}
@@ -118,6 +118,12 @@ func (f installationFiles) collectSecretsKeys() ([]cryptostate.Material, error) 
 			return nil, fmt.Errorf(
 				"%s and %s both claim to be the key %q and hold different material",
 				f.LegacyKeyPath, material.Source, secrets.LegacyKeyID)
+		}
+		// The old path is remembered rather than dropped: it is a file this
+		// key was read from, and a removal that forgot it would leave the key
+		// lying under its old name.
+		if material.Source != f.LegacyKeyPath {
+			found[i].Aliases = append(found[i].Aliases, f.LegacyKeyPath)
 		}
 		return found, nil
 	}
@@ -229,12 +235,23 @@ func (f installationFiles) collectHelperSigning() ([]cryptostate.Material, error
 	return found, nil
 }
 
-// paths names every file the collected material came from, for the operator
-// who is about to be told these files can go.
+// materialPaths names every file the collected material came from, for the
+// operator who is about to be told these files can go.
+//
+// A key read from two paths contributes both. One of them left behind is a
+// copy of the installation's key still on a disk the operator was told is
+// clear of them.
 func materialPaths(materials []cryptostate.Material) []string {
 	paths := make([]string, 0, len(materials))
+	seen := map[string]bool{}
 	for _, material := range materials {
-		paths = append(paths, material.Source)
+		for _, path := range append([]string{material.Source}, material.Aliases...) {
+			if path == "" || seen[path] {
+				continue
+			}
+			seen[path] = true
+			paths = append(paths, path)
+		}
 	}
 	return paths
 }

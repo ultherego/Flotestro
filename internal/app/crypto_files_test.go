@@ -278,3 +278,73 @@ func TestTheWithdrawnAuthoritiesAreFoundAndPutBack(t *testing.T) {
 		t.Error("a withdrawn authority only on disk was called safe to remove")
 	}
 }
+
+// An installation adopted from before the keys were named holds one key under
+// two paths. The removal used to take the one path the material was recorded
+// under, so the alias survived a command whose whole purpose is to take the
+// installation's keys off the disk.
+func TestTheRemovalTakesEveryFileAKeyWasReadFrom(t *testing.T) {
+	files, _ := installation(t)
+	material := bytes.Repeat([]byte{2}, secrets.KeyLength)
+	aliased := filepath.Join(files.StateDir, cryptostate.KeysDir, secrets.LegacyKeyID+".key")
+	// The same key under its new name as well: what the state directory looks
+	// like once the key has been adopted and before anybody cleaned up.
+	if err := secrets.WriteKeyFile(aliased, material); err != nil {
+		t.Fatal(err)
+	}
+
+	materials, err := files.collect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := 0
+	for _, found := range materials {
+		if found.KeyID == secrets.LegacyKeyID {
+			legacy++
+		}
+	}
+	if legacy != 1 {
+		t.Fatalf("one key under two paths was collected %d times", legacy)
+	}
+
+	paths := materialPaths(materials)
+	seen := map[string]int{}
+	for _, path := range paths {
+		seen[path]++
+	}
+	for _, path := range []string{aliased, files.LegacyKeyPath} {
+		if seen[path] != 1 {
+			t.Errorf("%s is named %d times among the files to remove, not once", path, seen[path])
+		}
+	}
+	// Nothing but a file some key was read from may be removed.
+	for _, path := range paths {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("the removal names %s, which is not a file that was read: %v", path, err)
+		}
+	}
+}
+
+// Without the alias there is nothing to add: the key is named once, by the one
+// file it was read from.
+func TestAKeyReadFromOneFileIsNamedOnce(t *testing.T) {
+	files, _ := installation(t)
+	materials, err := files.collect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := materialPaths(materials)
+	seen := map[string]bool{}
+	for _, path := range paths {
+		if seen[path] {
+			t.Errorf("%s is named twice among the files to remove", path)
+		}
+		seen[path] = true
+	}
+	if !seen[files.LegacyKeyPath] {
+		t.Errorf("%s holds a key and is not among the files to remove", files.LegacyKeyPath)
+	}
+	if seen[filepath.Join(files.StateDir, cryptostate.KeysDir, secrets.LegacyKeyID+".key")] {
+		t.Error("a file that does not exist was named among the files to remove")
+	}
+}

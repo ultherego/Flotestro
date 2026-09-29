@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,6 +28,9 @@ var (
 	// ErrRepeated says the order carried an idempotency key already used:
 	// the campaign returned with it is the existing one, not a new one.
 	ErrRepeated = errors.New("the campaign was already created with this idempotency key")
+	// ErrKeyReused says the idempotency key names a campaign the caller did
+	// not order: the key was used for something else.
+	ErrKeyReused = errors.New("idempotency_key_reused")
 	// ErrConcurrentTransition says the row moved under the writer: its revision,
 	// its state or its claim token is not the one the writer read.
 	ErrConcurrentTransition = errors.New("the row changed since it was read; the transition was not applied")
@@ -150,7 +154,10 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []Target
 	}
 	if tag.RowsAffected() == 0 {
 		// The same key from the same creator: the campaign already exists
-		// and the repeat gets it back instead of a second one.
+		// and the repeat gets it back instead of a second one - but only a
+		// repeat of the same order. The key is the caller's word that two
+		// requests are one, and answering a different order with somebody
+		// else's campaign would tell them it went through when it never did.
 		rows, err := tx.Query(ctx, campaignColumns+" where created_by = $1 and idempotency_key = $2",
 			spec.CreatedBy, spec.IdempotencyKey)
 		if err != nil {
@@ -162,6 +169,14 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []Target
 		}
 		if len(existing) == 0 {
 			return nil, ErrConflict
+		}
+		differs, err := orderDiffers(existing[0], spec.ActionType, payload, selectorJSON)
+		if err != nil {
+			return nil, err
+		}
+		if differs != "" {
+			return nil, fmt.Errorf("%w: the key names the campaign %s, whose %s is another one",
+				ErrKeyReused, existing[0].ID, differs)
 		}
 		return &existing[0], ErrRepeated
 	}
@@ -191,6 +206,58 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []Target
 	}
 
 	return s.getTx(ctx, tx, campaignID)
+}
+
+// orderDiffers names the part of a repeated order that is not the part the
+// existing campaign was created from, and is empty when the two are one order.
+//
+// What is compared is what the caller asked for - the operation, its payload
+// and the selector as it was written - and not the hosts the selector resolved
+// to: a fleet that gained or lost a host between two identical orders has not
+// turned them into two different orders.
+func orderDiffers(existing Campaign, actionType string, payload, selector json.RawMessage) (string, error) {
+	if existing.ActionType != actionType {
+		return "action", nil
+	}
+	same, err := sameJSON(payload, existing.Payload)
+	if err != nil {
+		return "", err
+	}
+	if !same {
+		return "payload", nil
+	}
+	if same, err = sameJSON(selector, existing.Selector); err != nil {
+		return "", err
+	} else if !same {
+		return "selector", nil
+	}
+	return "", nil
+}
+
+// sameJSON compares two documents by what they say. The database returns jsonb
+// with its own key order and spacing, so the bytes of a fresh request never
+// match the bytes that come back from the row it is compared with.
+func sameJSON(a, b json.RawMessage) (bool, error) {
+	left, err := decodeJSON(a)
+	if err != nil {
+		return false, err
+	}
+	right, err := decodeJSON(b)
+	if err != nil {
+		return false, err
+	}
+	return reflect.DeepEqual(left, right), nil
+}
+
+func decodeJSON(raw json.RawMessage) (any, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, fmt.Errorf("reading a stored document of the campaign: %w", err)
+	}
+	return value, nil
 }
 
 // HostPlanSpec is a per-host plan computed in the panel and handed in

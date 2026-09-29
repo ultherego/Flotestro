@@ -34,7 +34,9 @@ podman-compose up -d
 It sets the two things that host needs, lingering and the unit that replays the
 restart policies at boot, and says what it found either way. `./host-setup.sh
 --check` changes nothing and answers whether this host brings the deployment
-back. Under the Docker daemon it says there is nothing to do.
+back. Run as root it enables the same unit for the system, where there is no
+lingering to set, and refuses with a reason if it cannot. Under the Docker
+daemon it says there is nothing to do.
 
 **Production basic** - one control plane against an external, backed-up
 PostgreSQL. This is the default for a company; the database keeps its own

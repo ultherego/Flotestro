@@ -33,6 +33,11 @@ type Material struct {
 	// Source is where the key was read from. It goes into the report and
 	// into the backup, so that an operator can put things back by hand.
 	Source string
+	// Aliases are the other files that hold this same key. An installation
+	// adopted from before the keys were named keeps one under both its old
+	// and its new path, and a removal that took only Source would leave the
+	// key on the disk it was meant to be taken off.
+	Aliases []string
 	// Bytes is what the row will hold: the raw key of the secret store,
 	// or the PEM the subsystem writes and reads.
 	Bytes []byte
