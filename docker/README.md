@@ -886,6 +886,23 @@ do: the backup belongs on encrypted storage, away from the host it was taken
 from, and it is worth restoring it into an isolated environment now and again
 to find out whether it actually works.
 
+`./backups` and everything under it belongs to the account the tools run as,
+which under rootless Podman is not the account that owns the deployment: `ls`
+there answers "Permission denied" and that is the directory working as
+intended. Copy a backup out with the tools rather than by hand -
+
+```
+docker compose --profile tools run --rm admin-tools verify <backup-id>
+```
+
+names what is there and checks the digests - or, to move the files somewhere
+else, read them through a container that mounts the directory:
+
+```
+podman run --rm --volume ./backups:/backups:ro --volume /somewhere/safe:/out \
+    docker.io/library/busybox:1.37 cp -a /backups/<backup-id> /out/
+```
+
 The database of the quick start is on an internal network, reachable from this
 deployment and nowhere else.
 
