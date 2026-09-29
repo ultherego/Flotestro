@@ -62,16 +62,28 @@ Mount it at `/run/secrets/flotestro-kek`, or name another path with `-kek-file` 
 itself, only the path.
 
 In the Compose deployment the key goes in `./secrets/kek` and `init` copies it beside the
-other secrets. `init` runs when the deployment is created and not again, so a key added to
-an existing deployment needs it brought down and up:
+other secrets. `./secrets/` is what the deployment holds; the copy in the volume is made
+from it at every start and never the other way round, so a key changed there takes effect
+and a key changed in the volume does not.
+
+A key added to a deployment that already runs reaches the panel once `init` has run again:
 
 ```fish
 podman-compose down
 podman-compose up -d
 ```
 
-The volumes survive that. Restarting the control plane alone does not bring the key in, and
-podman will not recreate one container of a pod by itself.
+Under Podman, stopping and starting the control plane does the same, because starting a
+container starts what it depends on. `podman restart` does not work here at all: the
+container depends on `init` and `migrate`, which have run and exited, and Podman refuses
+with "some dependencies of container ... are not started".
+
+```fish
+podman stop flotestro_control-plane_1
+podman start flotestro_control-plane_1
+```
+
+The volumes survive all of it.
 
 The key belongs in a different backup from the database, kept by different people. A backup
 that can be restored is the database dump **and** the key encryption key **and** the

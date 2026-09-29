@@ -452,11 +452,26 @@ characters and nothing else:
     openssl rand -hex 32 > ./secrets/kek
 
 `init` copies it beside the other secrets and gives it the mode and the owner
-the panel insists on. It does that when the deployment is created and not
-again, so a key put there afterwards needs the deployment brought down and up
-(`podman-compose down` then `podman-compose up -d`, or the Docker equivalent);
-restarting the control plane alone is not enough, and one container of a pod
-cannot be recreated by itself. The volumes survive that, so nothing is lost. An installation whose keys are still files never reads
+the panel insists on. `./secrets/` is what a deployment holds; the copy in the
+volume is made from it and never the other way round.
+
+A key added to a deployment that already runs reaches the panel once `init` has
+run again, which is what bringing the deployment up does:
+
+    podman-compose down
+    podman-compose up -d
+
+Under Podman, stopping and starting the control plane has the same effect,
+because starting a container starts the containers it depends on and `init` is
+one of them. `podman restart` does not: the container depends on `init` and
+`migrate`, which have run and exited, and Podman reads an exited dependency as
+one that is not started - it refuses with "some dependencies of container ...
+are not started". So the two steps, not the one:
+
+    podman stop flotestro_control-plane_1
+    podman start flotestro_control-plane_1
+
+The volumes survive all of this, so nothing is lost. An installation whose keys are still files never reads
 the path, so the file can be put there before the move and after it. The move
 itself, the rotation of the key and the removal of the old files are
 `flotestro-control-plane crypto import-state`, `crypto rewrap-kek` and
