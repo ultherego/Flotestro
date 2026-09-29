@@ -109,6 +109,7 @@
       <li><a href="#image">The control plane from its image</a></li>
       <li><a href="#admin">The first administrator</a></li>
       <li><a href="#backup">The backup pair</a></li>
+      <li><a href="#kek">The key encryption key</a></li>
       <li><a href="#hosts">The hosts</a></li>
       <li><a href="#relay">A site behind a relay</a></li>
       <li><a href="#airgap">The air-gapped profile</a></li>
@@ -395,6 +396,12 @@ curl -fsS http://127.0.0.1:8080/healthz</code></pre>
     while the CA is minutes old, and prove the restore before the fleet depends
     on it.</p>
 
+    <p>That is the pair while the keys are files. An installation that has moved
+    its keys into the database has a different one: the dump <strong>and</strong>
+    the key encryption key <strong>and</strong> the installation identifier, and
+    the state directory then holds nothing that cannot be made again (see
+    <a href="#kek">the key encryption key</a>).</p>
+
     <p class="filename">Once, before the first backup</p>
 <pre><code># ./backups is made and given to the right account by the init service.
 docker compose --profile tools run --rm admin-tools backup</code></pre>
@@ -429,6 +436,13 @@ docker compose --profile restore run --rm admin-restore restore 20260919T101500Z
     schema. It puts an installation back where there is none; it never writes
     over the identity of one that is still there.</p>
 
+    <div class="note">
+      <p class="note__title">The backup does not take the key encryption key</p>
+      <p><code>admin-tools backup</code> takes the database and the state
+      directory. It does not take the key encryption key, deliberately: that
+      key is kept apart, by different people.</p>
+    </div>
+
     <div class="note note--warning">
       <p class="note__title">The archives hold secrets</p>
       <p>The manifest does not, but <code>database.dump</code> and
@@ -436,6 +450,112 @@ docker compose --profile restore run --rm admin-restore restore 20260919T101500Z
       away from the host it was taken from, and it is worth restoring it into an
       isolated environment now and again to find out whether it actually
       works.</p>
+    </div>
+
+    <h2 id="kek">The key encryption key</h2>
+
+    <p>The private keys of an installation - the keys the secret store seals its
+    values with, the private key of the fleet CA and of a CA prepared to take
+    over, the key that signs the root helper's capabilities - can live as rows
+    of the database instead of files in the state directory. Each row is sealed
+    with a <em>key encryption key</em> that the deployment mounts as a secret.
+    The rows travel with the database, so every replica reads the same keys;
+    the key does not, so a copy of the dump alone opens nothing.</p>
+
+    <p>Nothing here happens by itself. The panel does not migrate at start, does
+    not rewrap on a schedule and never removes a key file. The full procedure
+    is the runbook
+    <a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/key-encryption-key.md"><code>docs/runbooks/key-encryption-key.md</code></a>;
+    this is what to know before you start it.</p>
+
+    <h3>The key itself</h3>
+
+    <p>Exactly one format is accepted: 64 hexadecimal characters, which is 32
+    bytes, with at most one trailing newline. The wrong length, a character
+    outside hexadecimal, a second line or an empty file is refused rather than
+    repaired, because a key that was quietly tidied up is a key nobody can
+    reproduce.</p>
+
+<pre><code>umask 077
+openssl rand -hex 32 &gt; flotestro-kek</code></pre>
+
+    <p>The file is read without following a link and judged on the descriptor
+    that was opened. It must be a regular file, not a symlink, owned by root or
+    by the panel's own account, mode <code>0400</code>, and neither readable nor
+    writable by the group or by anybody else. The panel looks for it at
+    <code>/run/secrets/flotestro-kek</code>; another path is named with
+    <code>-kek-file</code> or <code>FLOTESTRO_KEK_FILE</code>. Only the path is
+    configured: there is no flag and no environment variable that carries the
+    key itself.</p>
+
+    <div class="note note--warning">
+      <p class="note__title">A backup is three things, kept apart</p>
+      <p>A backup that can be restored is the database dump <strong>and</strong>
+      the key encryption key <strong>and</strong> the installation identifier.
+      Any two of the three are not a backup. The key belongs in a different
+      backup from the dump, kept by different people.</p>
+    </div>
+
+    <h3>The four commands</h3>
+
+    <p>They are subcommands of <code>flotestro-control-plane crypto</code>, run
+    from a host that reaches the fleet database (the image's binary, or the
+    admin-tools container), after a recent <code>pg_dump</code>. Every one of
+    them takes <code>--dry-run</code>, which prints what the run will print and
+    changes nothing, and requires <code>--backup-to</code>, the directory the
+    state before the change is written to; a command refuses to overwrite a file
+    it finds there, and the directory must not be inside the state directory,
+    because <code>crypto forget-files</code> copies the key files there before
+    removing them.</p>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>crypto import-state</code></td><td>Moves the keys found in the state directory into the database. Every key is wrapped and read back before anything is written, and all of them are written with the installation record in a single transaction: one key that cannot be read back stops the migration. The files are <strong>not</strong> removed; until you say otherwise they are the way back. Restart the panel afterwards with the key mounted.</td></tr>
+        <tr><td><code>crypto revert-state</code></td><td>Moves the keys back into files. The files are written first and the rows dropped only once they are there, so an interrupted revert leaves the keys in the database rather than nowhere.</td></tr>
+        <tr><td><code>crypto rewrap-kek --new-kek-file <var>path</var></code></td><td>Rotates the key encryption key. The keys themselves do not change - only the wrapping - so it can be done with the panel running. Every row and the record move together. Then mount the new key as <code>/run/secrets/flotestro-kek</code> on every replica and restart them; a replica still holding the old key refuses to start with <code>kek_mismatch</code>.</td></tr>
+        <tr><td><code>crypto forget-files -expect-revision <var>revision</var> -confirm-installation <var>installation-id</var></code></td><td>Removes the key files and so closes the way back. It refuses on the first of six checks that fails (the migration is finished and with this key, every key opens from the database and matches its file, the marker in the state directory names this installation, the crypto state still stands at the revision you pass, you said the installation identifier back, and the warning about what stops working is printed first). The revision and the identifier are in the <code>crypto</code> block of <code>GET /api/v1/status</code>.</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p>The rotation's backup holds the rows as they were; they open with the old
+    key and with no other, so keep that key until every replica runs on the new
+    one. To see where an installation stands, read the <code>crypto</code> block
+    of <code>GET /api/v1/status</code>: <code>provider</code> is
+    <code>local-sealed</code> while the keys are files and
+    <code>db-sealed</code> once they are rows, and then the block also carries
+    <code>kek_id</code>.</p>
+
+    <div class="note note--refusal">
+      <p class="note__title"><code>forget-files</code> is not a secure erase</p>
+      <p>The files are copied into the backup directory before they go. What the
+      command then does is <strong>remove and unlink</strong> them and synchronise
+      the directories. On an SSD, on a copy-on-write filesystem or on network
+      storage that is not a guaranteed physical erasure of the bytes, and nothing
+      here claims otherwise. If the material must be provably gone, that is a
+      property of the storage, not of this command. After it, a panel from before
+      the keys moved into the database will not start against this installation
+      without a backup of those files.</p>
+    </div>
+
+    <h3>Refusals</h3>
+
+    <p>A start with the keys in the database refuses, and changes nothing, in
+    five ways. A wrong key is not a rollback situation: mount the right one.</p>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Code</th><th>When</th></tr></thead>
+      <tbody>
+        <tr><td><code class="refusal">kek_file_missing</code></td><td>There is no file at the path the deployment names.</td></tr>
+        <tr><td><code class="refusal">kek_file_unsafe</code></td><td>The file is a link, not a regular file, owned by somebody else, or readable or writable by the group or by anybody else.</td></tr>
+        <tr><td><code class="refusal">kek_file_malformed</code></td><td>The content is not 64 hexadecimal characters with at most one trailing newline.</td></tr>
+        <tr><td><code class="refusal">kek_mismatch</code></td><td>The key in the file is not the one the installation's keys were wrapped with, for instance a replica still holding the key from before a rotation.</td></tr>
+        <tr><td><code class="refusal">wrapped_key_unreadable</code></td><td>A row does not open under the key the deployment holds although it says it was wrapped with it: it was changed, or it is in a form this panel does not read.</td></tr>
+      </tbody>
+    </table>
     </div>
 
     <h2 id="hosts">The hosts</h2>
@@ -742,6 +862,7 @@ docker compose --profile airgap up -d</code></pre>
         <tr><td><code class="refusal">duplicate_machine_id</code>, <code class="refusal">machine_id_mismatch</code></td><td>A machine already in the fleet under another host, or a token that does not fit this machine.</td></tr>
         <tr><td><code class="refusal">schema_behind</code>, <code class="refusal">schema_ahead</code></td><td>The binary's schema is older or newer than the database's.</td></tr>
         <tr><td><code class="refusal">secrets_key_unavailable</code>, <code class="refusal">issuer_key_unavailable</code>, <code class="refusal">pki_state_mismatch</code>, <code class="refusal">crypto_state_ambiguous</code></td><td>The cryptographic state of the installation is not usable; see the <a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/db-restore.md">database-restore runbook</a>.</td></tr>
+        <tr><td><code class="refusal">kek_file_missing</code>, <code class="refusal">kek_file_unsafe</code>, <code class="refusal">kek_file_malformed</code>, <code class="refusal">kek_mismatch</code>, <code class="refusal">wrapped_key_unreadable</code></td><td>The key encryption key of the installation is missing, unsafe, malformed or wrong; see <a href="#kek">the key encryption key</a>.</td></tr>
         <tr><td><code class="refusal">metrics_retention_too_short</code></td><td>A retention shorter than the query window plus the lateness; refused at start and on the settings screen alike.</td></tr>
       </tbody>
     </table>
