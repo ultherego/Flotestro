@@ -114,7 +114,12 @@ export function OperationForm({
             <p className="subtitle">{t("This operation takes no settings.")}</p>
           )}
           {problems.length > 0 && (
-            <p className="page-error">
+            // Not "page-error": a form that has not been filled in yet is not a
+            // broken page. The two were the same class, so an empty form read as
+            // a failure - to the operator, who saw "Error:" beside a field they
+            // had not touched, and to the end-to-end suite, which takes that
+            // class as the sign of a page that did not load.
+            <p className="form-problem">
               {problems.map((problem) => t(problem.message, problem.params)).join(" ")}
             </p>
           )}

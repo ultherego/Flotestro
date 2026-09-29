@@ -855,6 +855,10 @@ pre {
 
 .empty { color: var(--text-muted); padding: 24px 0; }
 .page-error { color: var(--error-text); }
+/* What a form says about itself while it is being filled in. It reads like an
+   error because it is one - the order would be refused - but it is not the page
+   failing, and nothing should treat it as such. */
+.form-problem { color: var(--error-text); }
 .source { color: var(--text-faint); font-size: 11px; }
 .login-screen {
   display: grid; place-items: center; min-height: 100vh; text-align: center; padding: 24px;
@@ -1437,8 +1441,8 @@ a.stat-link:hover { text-decoration: none; border-color: var(--border-strong); b
 /* A fixed-width control in a row of them, e.g. a TTL. */
 .field.narrow { max-width: 140px; }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.actions .source, .actions .page-error { flex: 1 1 200px; margin: 0; }
-.actions + .source, .actions + .page-error { margin-top: 10px; }
+.actions .source, .actions .page-error, .actions .form-problem { flex: 1 1 200px; margin: 0; }
+.actions + .source, .actions + .page-error, .actions + .form-problem { margin-top: 10px; }
 .card-body > .toggle { margin-bottom: 0; }
 /* The primary link-button: the one action a page leads to. */
 a.button.primary { background: var(--accent); border-color: transparent; color: var(--accent-contrast); }
