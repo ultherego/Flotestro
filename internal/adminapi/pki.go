@@ -224,6 +224,23 @@ func (s *Server) pkiActor(w http.ResponseWriter, r *http.Request) (authz.Princip
 	return actor, true
 }
 
+// authorityUsage counts what would stop trusting an authority if it were taken
+// out of the trust set.
+//
+// A prepared authority has signed nothing: it waits beside the one that signs
+// and takes over only when somebody hands the signing to it. Abandoning it is
+// allowed - and it was not, because a relay is attributed to an authority by
+// subject alone, which a prepared authority shares with the one it would
+// replace. It inherited those relays and could never be taken back out.
+func authorityUsage(state, subject, serial string, hosts, relays map[string]int) int {
+	if state == "pending" {
+		return 0
+	}
+	// A relay enrolled before the issuer was recorded counts here too: what
+	// nobody can attribute is not evidence that nobody uses it.
+	return hosts[subject+" "+serial] + relays[subject] + relays[""]
+}
+
 // handleRetireCA removes a retired CA from the trust set.
 func (s *Server) handleRetireCA(w http.ResponseWriter, r *http.Request) {
 	actor, ok := s.pkiActor(w, r)
@@ -259,10 +276,7 @@ func (s *Server) handleRetireCA(w http.ResponseWriter, r *http.Request) {
 	hostCount := 0
 	for _, ca := range s.trust.Authorities() {
 		if ca.Fingerprint == fingerprint {
-			hostCount = usage[ca.Subject+" "+ca.Serial] + relayUsage[ca.Subject]
-			// A relay enrolled before the issuer was recorded counts here too:
-			// what nobody can attribute is not evidence that nobody uses it.
-			hostCount += relayUsage[""]
+			hostCount = authorityUsage(ca.State, ca.Subject, ca.Serial, usage, relayUsage)
 		}
 	}
 

@@ -41,3 +41,32 @@ func TestTheReconcilerReadsTheStateRatherThanAssuming(t *testing.T) {
 		})
 	}
 }
+
+// A prepared authority has signed nothing, so nothing can be using it. The
+// count that guards a removal attributed a relay to an authority by subject
+// alone, and a prepared authority carries the subject of the one it would
+// replace - so on any installation with a relay it inherited that relay and
+// could never be abandoned, though the panel's own listing said nobody used it.
+func TestAPreparedAuthorityIsNotHeldByTheRelaysOfTheOneItWouldReplace(t *testing.T) {
+	const subject = "Flotestro Root CA"
+	usage := map[string]int{subject + " 111": 24}
+	relays := map[string]int{subject: 1, "": 1}
+
+	for _, test := range []struct {
+		name   string
+		state  string
+		serial string
+		want   int
+	}{
+		{"the authority that signs carries its hosts and its relays", "active", "111", 26},
+		{"a retired authority carries what still trusts it", "retired", "222", 2},
+		{"a prepared authority carries nothing", "pending", "333", 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := authorityUsage(test.state, subject, test.serial, usage, relays)
+			if got != test.want {
+				t.Errorf("usage = %d, expected %d", got, test.want)
+			}
+		})
+	}
+}
