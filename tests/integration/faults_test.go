@@ -99,9 +99,112 @@ func sessionEnd(ctx context.Context, pool *pgxpool.Pool, sessionID string) strin
 	return reason
 }
 
+// jobAttempt is one attempt of a job as the fault tests need it: which attempt
+// it is, when the panel handed it over and how it ended. The API view carries
+// neither the identifier nor the handover.
+type jobAttempt struct {
+	id           string
+	status       string
+	replayed     bool
+	dispatchedAt *time.Time
+}
+
+// jobAttempts reads the attempts of a job, oldest first.
+func jobAttempts(ctx context.Context, t *testing.T, pool *pgxpool.Pool, jobID string) []jobAttempt {
+	t.Helper()
+	rows, err := pool.Query(ctx, `
+		select id::text, coalesce(status, ''), replayed, dispatched_at
+		  from job_attempts where job_id = $1 order by attempt_number`, jobID)
+	if err != nil {
+		t.Fatalf("reading the attempts of %s: %v", jobID, err)
+	}
+	defer rows.Close()
+	var attempts []jobAttempt
+	for rows.Next() {
+		var attempt jobAttempt
+		if err := rows.Scan(&attempt.id, &attempt.status,
+			&attempt.replayed, &attempt.dispatchedAt); err != nil {
+			t.Fatalf("scanning an attempt of %s: %v", jobID, err)
+		}
+		attempts = append(attempts, attempt)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("reading the attempts of %s: %v", jobID, err)
+	}
+	return attempts
+}
+
+// soleAttempt returns the one attempt a job has and fails when it has another
+// number of them.
+func soleAttempt(ctx context.Context, t *testing.T, pool *pgxpool.Pool, jobID string) jobAttempt {
+	t.Helper()
+	attempts := jobAttempts(ctx, t, pool, jobID)
+	if len(attempts) != 1 {
+		t.Fatalf("the job %s carries %d attempts, expected the one it was handed over on", jobID, len(attempts))
+	}
+	return attempts[0]
+}
+
+// appliedSettlements counts the results the panel took for a job. The trail
+// records one per settlement, so this is the count the exactly-once property
+// is read from - the count of attempts says only how often the work went out.
+func appliedSettlements(ctx context.Context, t *testing.T, pool *pgxpool.Pool, jobID string) int {
+	t.Helper()
+	var applied int
+	if err := pool.QueryRow(ctx, `
+		select count(*) from audit_events
+		 where action = 'job.result' and target_id = $1 and detail->>'applied' = 'true'`,
+		jobID).Scan(&applied); err != nil {
+		t.Fatalf("counting the settlements of %s: %v", jobID, err)
+	}
+	return applied
+}
+
+// assertSettledByTheKeptAnswer checks the shape of a job whose session broke
+// after the host had finished the work. The agent writes the answer of a
+// finished task to its spool before it sends it (internal/agent/resultspool.go)
+// and offers it on the session that comes back, so the answer settles the very
+// attempt it belongs to, exactly once, and the host never runs the operation a
+// second time.
+func assertSettledByTheKeptAnswer(ctx context.Context, t *testing.T, pool *pgxpool.Pool,
+	jobID string, handedOver jobAttempt) {
+	t.Helper()
+	settled := soleAttempt(ctx, t, pool, jobID)
+	if settled.id != handedOver.id {
+		t.Fatalf("the job was settled on the attempt %s, the panel handed over %s",
+			settled.id, handedOver.id)
+	}
+	if settled.status != "succeeded" {
+		t.Errorf("the attempt the panel handed over ended as %q", settled.status)
+	}
+	// A replay means the panel ordered the operation again and the host answered
+	// out of its idempotency journal - the fallback, not this path.
+	if settled.replayed {
+		t.Error("the answer came from the host's idempotency journal; the operation was ordered a second time")
+	}
+	if !sameHandover(handedOver.dispatchedAt, settled.dispatchedAt) {
+		t.Errorf("the attempt was handed over a second time: %v -> %v",
+			handedOver.dispatchedAt, settled.dispatchedAt)
+	}
+	if applied := appliedSettlements(ctx, t, pool, jobID); applied != 1 {
+		t.Errorf("the trail records %d applied results; the answer the host kept settles the job exactly once",
+			applied)
+	}
+}
+
+// sameHandover says whether two attempts went out at the same moment.
+func sameHandover(before, after *time.Time) bool {
+	if before == nil || after == nil {
+		return before == after
+	}
+	return before.Equal(*after)
+}
+
 // assertReplayedFromTheJournal checks the shape of a job whose first attempt
-// lost its session: the first attempt was reclaimed by the lease, the last one
-// carries the stored result and says so.
+// lost its session and whose answer did not survive on the host either - the
+// spool evicted it, it aged out past its day, or it was too big for the spool.
+// The lease is then reclaimed, the job redelivered, and the host answers out of
+// its idempotency journal instead of running the operation again.
 func assertReplayedFromTheJournal(t *testing.T, attempts []attemptView) {
 	t.Helper()
 	if len(attempts) < 2 {
@@ -149,6 +252,9 @@ func TestThePanelRestartsWhileAJobRuns(t *testing.T) {
 		h.approve(job.ID, job.PayloadHash)
 	}
 	h.awaitJobState(job.ID, 60*time.Second, "dispatched", "running")
+	// The attempt the host is carrying when the panel goes away: the answer it
+	// produces belongs to this one and has to come back onto it.
+	handedOver := soleAttempt(ctx, t, pool, job.ID)
 
 	if output, err := exec.Command(restart[0], restart[1:]...).CombinedOutput(); err != nil {
 		t.Fatalf("restarting the panel with %q: %v: %s",
@@ -182,7 +288,7 @@ func TestThePanelRestartsWhileAJobRuns(t *testing.T) {
 	if !strings.Contains(final.ResultMessage, "the preview ended") {
 		t.Errorf("the result is not the stored preview summary: %q", final.ResultMessage)
 	}
-	assertReplayedFromTheJournal(t, h.attempts(job.ID))
+	assertSettledByTheKeptAnswer(ctx, t, pool, job.ID, handedOver)
 }
 
 // linkCut black-holes the traffic of one host to the gateway on the panel.
@@ -265,6 +371,7 @@ func TestAResultSurvivesALinkCut(t *testing.T) {
 		h.approve(job.ID, job.PayloadHash)
 	}
 	h.awaitJobState(job.ID, 60*time.Second, "dispatched", "running")
+	handedOver := soleAttempt(ctx, t, pool, job.ID)
 
 	cut := cutLink(t, nft, hostIP, port)
 	time.Sleep(linkCutDuration)
@@ -297,15 +404,14 @@ func TestAResultSurvivesALinkCut(t *testing.T) {
 		t.Fatal("no recorded attempt")
 	}
 	if len(attempts) == 1 {
-		// The retransmitted result won the race; the single attempt has to
-		// carry it, and it was not a replay - nothing was redelivered.
-		t.Log("the result arrived on the first attempt over the retransmitted socket")
-		if attempts[0].Status != "succeeded" || attempts[0].Replayed {
-			t.Errorf("the single attempt is %q, replayed = %v", attempts[0].Status, attempts[0].Replayed)
-		}
+		// The answer the host had already produced reached the panel: over the
+		// retransmitted socket, or out of the spool on the session that replaced
+		// the cut one. Either way nothing was redelivered.
+		t.Log("the answer the host kept settled the attempt it belongs to")
+		assertSettledByTheKeptAnswer(ctx, t, pool, job.ID, handedOver)
 		return
 	}
-	t.Log("the result arrived on a redelivery after the lease ran out")
+	t.Log("the answer did not survive on the host; it came back on a redelivery after the lease ran out")
 	assertReplayedFromTheJournal(t, attempts)
 }
 
