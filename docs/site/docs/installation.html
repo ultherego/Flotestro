@@ -178,6 +178,15 @@
 docker compose up -d
 docker compose cp control-plane:/var/lib/flotestro/bootstrap-token .</code></pre>
 
+    <p>Under rootless Podman, fetch one more file and run it once per host
+    before the <code>up</code>; without it the panel is down after the first
+    reboot of the machine. Under the Docker daemon there is nothing to prepare:</p>
+
+<pre><code>curl -fsSLO https://raw.githubusercontent.com/ultherego/Flotestro/main/docker/host-setup.sh
+chmod +x host-setup.sh
+./host-setup.sh
+podman-compose up -d</code></pre>
+
     <p>Every setting has a working default, so the panel answers on
     <code>http://localhost:8080</code> straight away. To serve hosts on other
     machines, put the address they reach it at in <code>.env</code> beside the
@@ -251,9 +260,17 @@ curl -fsS http://127.0.0.1:8080/healthz</code></pre>
         containers back with it; rootless Podman has no daemon that would.
         Lingering keeps the containers running after the last logout, and a
         unit shipped with Podman replays the restart policies at boot. Both are
-        set once, as the account that runs the deployment:
+        set once, as the account that runs the deployment, by
+        <code>./host-setup.sh</code>, which changes only what is not already set
+        and says what it found. What it does is these two commands, so you can
+        see it without running it:
         <code>loginctl enable-linger $USER</code> and
-        <code>systemctl --user enable podman-restart.service</code>. That is the
+        <code>systemctl --user enable podman-restart.service</code>.
+        <code>./host-setup.sh --check</code> changes nothing and answers whether
+        this host brings the deployment back after a reboot, exiting non-zero
+        when something is missing; it also warns if a compose file beside it
+        says <code>restart: unless-stopped</code>. Under the Docker daemon it
+        says there is nothing to do. That is the
         whole of it because the compose files say <code>restart: always</code>,
         not <code>restart: unless-stopped</code>: the unit runs
         <code>podman start --all --filter restart-policy=always</code>, so a
