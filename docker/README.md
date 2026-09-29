@@ -819,7 +819,10 @@ by. Neither is a backup of the other and neither is usable without the other:
 An installation that has run `crypto import-state` has moved those keys into
 the database, each sealed with the key encryption key. Its pair is then the
 dump and `./secrets/kek`, and the state volume no longer holds anything that
-cannot be made again. The two halves still have to be kept apart: a dump
+cannot be made again. `flotestro-admin-tools backup` says so when it runs, and
+writes the `kek_id` into the manifest so that a restore can tell whether the
+key in hand is the one that opens the dump - it does not, and must not, put the
+key itself in the backup. The two halves still have to be kept apart: a dump
 whose backup sits beside the key it is sealed with is one theft, not two. The
 `crypto` block of the status screen says which of the two arrangements an
 installation is in - `local-sealed` or `db-sealed`.
@@ -847,7 +850,7 @@ It writes `./backups/<backup-id>/` and nothing outside it:
 |---|---|
 | `database.dump` | `pg_dump --format=custom`, without owners and without privileges: the restore is done by whoever owns the empty database it goes into. |
 | `state.tar.zst` | The state directory, with numeric owners and the original modes - the state is `0700` and the keys in it are `0600`. |
-| `manifest.json` | What ties the two halves together: the backup identifier, the moment, the version and commit of the image, the installation identifier, the active key and issuer identifiers, the digests of both files and the digest of the image, when the deployment pins one. |
+| `manifest.json` | What ties the two halves together: the backup identifier, the moment, the version and commit of the image, the installation identifier, the active key and issuer identifiers, the key encryption key the rows are sealed with when the keys are in the database, the digests of both files and the digest of the image, when the deployment pins one. |
 | `SHA256SUMS` | The digests of the two archives, checked before every restore. |
 
 The manifest carries no DSN, no password and no secret value. The archives

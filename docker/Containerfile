@@ -274,7 +274,15 @@ backup() {
     if [ ! -d "$state_dir" ]; then
         fail "$state_dir is not a directory; the state volume of the control plane is mounted there"
     fi
-    if [ ! -f "$state_dir/ca.pem" ]; then
+    # Where the keys of this installation live decides what a pair is. While
+    # they are files, the state directory is half of it and a directory with no
+    # ca.pem in it is not the state of an installation. Once they are rows, the
+    # state directory holds nothing that cannot be made again, and the other
+    # half is the key encryption key - which is not in this backup and must not
+    # be, since a dump kept beside the key that opens it is one theft, not two.
+    local kek_id
+    kek_id="$(query "select coalesce(kek_id, '') from crypto_installation_state" 2>/dev/null || true)"
+    if [ -z "$kek_id" ] && [ ! -f "$state_dir/ca.pem" ]; then
         fail "$state_dir carries no ca.pem, so it is not the state of an installation; half a pair is not a backup"
     fi
     if [ ! -w "$backup_root" ]; then
@@ -288,7 +296,12 @@ backup() {
     fi
     mkdir "$dir"
 
-    note "the pair $id: the database and $state_dir"
+    if [ -n "$kek_id" ]; then
+        note "the pair $id: the database, sealed with the key encryption key $kek_id, and $state_dir"
+        note "this backup does NOT hold that key. Without it the dump opens nothing: keep it where the dump is not, and check you still have it before you rely on this backup"
+    else
+        note "the pair $id: the database and $state_dir"
+    fi
     note "the two halves belong to one point in time - stop the control plane for the dump, or at the very least hold the rotation of the CA and of the key encryption keys while it runs"
 
     # The revision of the crypto state before the dump and after the archive.
@@ -338,6 +351,7 @@ backup() {
         --arg installation_id "$installation_id" \
         --arg active_key_id "$active_key_id" \
         --arg issuer_id "$issuer_id" \
+        --arg kek_id "$kek_id" \
         --arg database_archive "database.dump" \
         --arg database_sha256 "$database_sha" \
         --arg state_archive "state.tar.zst" \
@@ -351,6 +365,7 @@ backup() {
           installation_id: ($installation_id | orNull),
           active_key_id: ($active_key_id | orNull),
           issuer_id: ($issuer_id | orNull),
+          kek_id: ($kek_id | orNull),
           database_method: "pg_dump-custom",
           database_archive: $database_archive,
           database_sha256: $database_sha256,
@@ -390,6 +405,11 @@ restore() {
         --dbname "$CONNECTION" "$dir/database.dump"
 
     note "the pair $(basename "$dir") is back: the state in $state_dir and the schema in the database"
+    local restored_kek
+    restored_kek="$(jq -r '.kek_id // ""' "$dir/manifest.json")"
+    if [ -n "$restored_kek" ]; then
+        note "the keys of this installation are rows of the database, sealed with $restored_kek - mount that key, and no other, or the control plane refuses to start with kek_mismatch"
+    fi
     note "next: start one control plane - it runs the migrator itself - and check that the installation identifier, the CA and the agents are the ones the manifest names"
 }
 

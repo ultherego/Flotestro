@@ -11,7 +11,10 @@ rollups all live in the database named by `FLOTESTRO_DATABASE_URL`.
 An installation that has run `crypto import-state` is the other way round: its private keys
 are rows of the database, sealed with the key encryption key the deployment mounts. Then the
 backup set is the dump **and** that key **and** the installation identifier, and none of the
-files below is part of it. Which of the two arrangements an installation is in, the `crypto`
+files below is part of it. `flotestro-admin-tools backup` takes such an installation without
+asking for `ca.pem`, records the `kek_id` in the manifest, and says in as many words that the
+key is not in the backup; `restore` reads that field back and names the key that has to be
+mounted. Which of the two arrangements an installation is in, the `crypto`
 block of `GET /api/v1/status` says: `local-sealed` or `db-sealed`. See
 [the key encryption key](key-encryption-key.md).
 
