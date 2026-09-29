@@ -385,6 +385,12 @@ curl -fsS http://127.0.0.1:8080/healthz</code></pre>
     certyfikaty floty. Weź parę teraz, kiedy CA ma kilka minut, i przećwicz odtworzenie, zanim
     flota zacznie od niego zależeć.</p>
 
+    <p>Tak wygląda para, dopóki klucze są plikami. Instalacja, która przeniosła
+    klucze do bazy, ma inną: dump <strong>oraz</strong> key encryption key
+    <strong>oraz</strong> identyfikator instalacji, a katalog stanu nie trzyma
+    wtedy niczego, czego nie dałoby się zrobić od nowa (zobacz
+    <a href="#kek">key encryption key</a>).</p>
+
     <p class="filename">Raz, przed pierwszą kopią</p>
 <pre><code># ./backups is made and given to the right account by the init service.
 docker compose --profile tools run --rm admin-tools backup</code></pre>
@@ -417,6 +423,13 @@ docker compose --profile restore run --rm admin-restore restore 20260919T101500Z
     stanu nie jest pusty albo docelowa baza ma jakiekolwiek tabele w schemacie
     <code>public</code>. Stawia instalację tam, gdzie jej nie ma; nigdy nie
     nadpisuje tożsamości tej, która wciąż stoi.</p>
+
+    <div class="note">
+      <p class="note__title">Backup nie zabiera key encryption key</p>
+      <p><code>admin-tools backup</code> zabiera bazę i katalog stanu. Key
+      encryption key celowo nie: ten klucz trzyma się osobno, w rękach innych
+      osób.</p>
+    </div>
 
     <div class="note note--warning">
       <p class="note__title">W archiwach są sekrety</p>
@@ -477,7 +490,9 @@ openssl rand -hex 32 &gt; flotestro-kek</code></pre>
     po świeżym <code>pg_dump</code>. Każde z nich przyjmuje <code>--dry-run</code>,
     który wypisuje to, co wypisze prawdziwe uruchomienie, i niczego nie zmienia,
     oraz wymaga <code>--backup-to</code> - katalogu, do którego zapisywany jest
-    stan sprzed zmiany; polecenie nie nadpisze pliku, który tam znajdzie.</p>
+    stan sprzed zmiany; polecenie nie nadpisze pliku, który tam znajdzie, a katalog nie może leżeć
+    wewnątrz katalogu stanu, bo <code>crypto forget-files</code> kopiuje tam pliki
+    z kluczami, zanim je usunie.</p>
 
     <div class="table-scroll">
     <table>

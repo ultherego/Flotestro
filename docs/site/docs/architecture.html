@@ -221,7 +221,10 @@
       <code>ca.key</code>, with <code>ca-pending.*</code> and
       <code>ca-retired/&lt;serial&gt;.pem</code> during a rotation. Agent
       certificates last <code>FLOTESTRO_AGENT_CERT_TTL</code>, 720 hours by
-      default, and the agent renews after two thirds of that.</dd>
+      default, and the agent renews after two thirds of that. An installation
+      can instead keep its private keys, the fleet CA's among them, as rows of
+      the database sealed with a key encryption key; see
+      <a href="installation.html#kek">the key encryption key</a>.</dd>
 
       <dt>Scheduler and campaign engine</dt>
       <dd>Turns approved work into leased tasks, holds the waves of a campaign,
@@ -484,7 +487,8 @@
     panel keeps the fleet's state nowhere else.</p>
 
     <p>What is <em>not</em> in the database is the state directory, and that is
-    the whole reason the two are one backup pair:</p>
+    the whole reason the two are one backup pair, for as long as the keys are
+    files:</p>
 
     <ul>
       <li><code>ca.pem</code>, <code>ca.key</code>, and during a rotation
@@ -501,6 +505,15 @@
       capability keyring.</li>
       <li><code>bootstrap-token</code>, on a first start only.</li>
     </ul>
+
+    <p>That is the shape of an installation whose keys are files
+    (<code>local-sealed</code>). An installation can move the CA keys, the
+    secret store's keys and the helper signing key into the database, each row
+    sealed with a key encryption key that is mounted as a secret and is not in
+    the database (<code>db-sealed</code>). The pair is then the dump, the key
+    encryption key and the installation identifier, and the state directory
+    holds nothing that cannot be made again. See
+    <a href="installation.html#kek">chapter 3</a>.</p>
 
     <div class="note note--refusal">
       <p class="note__title">Never restore one half without the other</p>

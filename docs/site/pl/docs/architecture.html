@@ -215,7 +215,10 @@
       <code>ca.key</code>, a podczas rotacji dochodzą <code>ca-pending.*</code> i
       <code>ca-retired/&lt;serial&gt;.pem</code>. Certyfikaty agentów żyją
       <code>FLOTESTRO_AGENT_CERT_TTL</code>, domyślnie 720 godzin, a agent
-      odnawia je po dwóch trzecich tego czasu.</dd>
+      odnawia je po dwóch trzecich tego czasu. Instalacja może zamiast tego
+      trzymać swoje klucze prywatne, w tym klucz fleet CA, jako wiersze w bazie
+      zapieczętowane key encryption key; zobacz
+      <a href="installation.html#kek">key encryption key</a>.</dd>
 
       <dt>Scheduler i silnik kampanii</dt>
       <dd>Zamienia zatwierdzoną pracę w zadania wydane na dzierżawę, prowadzi
@@ -484,7 +487,7 @@
     floty nigdzie indziej.</p>
 
     <p>W bazie <em>nie ma</em> katalogu stanu i właśnie dlatego oba tworzą
-    jedną parę kopii zapasowej:</p>
+    jedną parę kopii zapasowej - dopóki klucze są plikami:</p>
 
     <ul>
       <li><code>ca.pem</code>, <code>ca.key</code>, a podczas rotacji także
@@ -501,6 +504,15 @@
       jako zbiór kluczy dla capability.</li>
       <li><code>bootstrap-token</code>, tylko przy pierwszym starcie.</li>
     </ul>
+
+    <p>Tak wygląda instalacja, której klucze są plikami
+    (<code>local-sealed</code>). Instalacja może przenieść klucze CA, klucze
+    magazynu sekretów i klucz podpisujący helpera do bazy, każdy wiersz
+    zapieczętowany key encryption key, który jest montowany jako sekret i nie
+    leży w bazie (<code>db-sealed</code>). Parą jest wtedy dump, key encryption
+    key i identyfikator instalacji, a katalog stanu nie trzyma niczego, czego nie
+    dałoby się zrobić od nowa. Zobacz
+    <a href="installation.html#kek">rozdział 3</a>.</p>
 
     <div class="note note--refusal">
       <p class="note__title">Jednej połowy nie odtwarza się bez drugiej</p>

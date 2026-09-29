@@ -396,6 +396,12 @@ curl -fsS http://127.0.0.1:8080/healthz</code></pre>
     while the CA is minutes old, and prove the restore before the fleet depends
     on it.</p>
 
+    <p>That is the pair while the keys are files. An installation that has moved
+    its keys into the database has a different one: the dump <strong>and</strong>
+    the key encryption key <strong>and</strong> the installation identifier, and
+    the state directory then holds nothing that cannot be made again (see
+    <a href="#kek">the key encryption key</a>).</p>
+
     <p class="filename">Once, before the first backup</p>
 <pre><code># ./backups is made and given to the right account by the init service.
 docker compose --profile tools run --rm admin-tools backup</code></pre>
@@ -429,6 +435,13 @@ docker compose --profile restore run --rm admin-restore restore 20260919T101500Z
     is empty and the target database has no tables in its <code>public</code>
     schema. It puts an installation back where there is none; it never writes
     over the identity of one that is still there.</p>
+
+    <div class="note">
+      <p class="note__title">The backup does not take the key encryption key</p>
+      <p><code>admin-tools backup</code> takes the database and the state
+      directory. It does not take the key encryption key, deliberately: that
+      key is kept apart, by different people.</p>
+    </div>
 
     <div class="note note--warning">
       <p class="note__title">The archives hold secrets</p>
@@ -491,7 +504,9 @@ openssl rand -hex 32 &gt; flotestro-kek</code></pre>
     them takes <code>--dry-run</code>, which prints what the run will print and
     changes nothing, and requires <code>--backup-to</code>, the directory the
     state before the change is written to; a command refuses to overwrite a file
-    it finds there.</p>
+    it finds there, and the directory must not be inside the state directory,
+    because <code>crypto forget-files</code> copies the key files there before
+    removing them.</p>
 
     <div class="table-scroll">
     <table>
