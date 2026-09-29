@@ -413,6 +413,22 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
+// absent says that something this suite needs is not in the environment, and
+// what to do about it.
+//
+// A developer without a relay should be able to run the rest of the suite, so
+// the ordinary answer is a skip. The gate is a different reader: it is the
+// evidence a release stands on, and a capability that quietly skipped there is
+// a capability nobody tested and nobody noticed. FLOTESTRO_TEST_COMPLETE=1
+// turns every one of these into a failure, which is what the gate sets.
+func absent(t *testing.T, format string, args ...any) {
+	t.Helper()
+	if os.Getenv("FLOTESTRO_TEST_COMPLETE") == "1" {
+		t.Fatalf("this run is required to be complete and "+format, args...)
+	}
+	t.Skipf(format, args...)
+}
+
 func truncate(data []byte, limit int) string {
 	if len(data) <= limit {
 		return string(data)

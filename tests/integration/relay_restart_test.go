@@ -27,7 +27,7 @@ func TestARelayRestartLosesNoResult(t *testing.T) {
 	relayURL := envOr("FLOTESTRO_TEST_RELAY", defaultRelay)
 	address := strings.TrimPrefix(relayURL, "https://")
 	if conn, err := net.DialTimeout("tcp", address, 3*time.Second); err != nil {
-		t.Skipf("the lab relay at %s does not answer: %v", address, err)
+		absent(t, "the lab relay at %s does not answer: %v", address, err)
 	} else {
 		_ = conn.Close()
 	}
@@ -136,7 +136,7 @@ func relayHostName(t *testing.T, h *harness) string {
 			return name
 		}
 	}
-	t.Skipf("the fleet has no host named %s to restart the relay on", name)
+	absent(t, "the fleet has no host named %s to restart the relay on", name)
 	return ""
 }
 
