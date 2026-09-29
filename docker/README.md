@@ -23,14 +23,18 @@ local backup. For a laboratory, a demonstration and a small installation.
 docker compose up -d
 ```
 
-Under rootless Podman, two settings once per host before that, and nothing
-else - without them the panel is down after the first reboot:
+Under rootless Podman, one command once per host before that - without it the
+panel is down after the first reboot of the machine:
 
 ```
-loginctl enable-linger $USER
-systemctl --user enable podman-restart.service
+./host-setup.sh
 podman-compose up -d
 ```
+
+It sets the two things that host needs, lingering and the unit that replays the
+restart policies at boot, and says what it found either way. `./host-setup.sh
+--check` changes nothing and answers whether this host brings the deployment
+back. Under the Docker daemon it says there is nothing to do.
 
 **Production basic** - one control plane against an external, backed-up
 PostgreSQL. This is the default for a company; the database keeps its own
@@ -110,7 +114,11 @@ the compose file is honoured by the Docker daemon, which starts with the machine
 and brings the containers back with it. Rootless Podman has no such daemon:
 lingering keeps the containers running after the last logout, and a unit shipped
 with Podman replays the restart policies at boot. Both are set once, as the
-account that runs the deployment:
+account that runs the deployment, by the script beside this file:
+
+    ./host-setup.sh
+
+which is these two, and a check that they took:
 
     loginctl enable-linger $USER
     systemctl --user enable podman-restart.service
