@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ultherego/flotestro/internal/secrets"
@@ -227,4 +228,120 @@ func (p *Postgres) AssignIssuer(ctx context.Context, subject, serial, issuerID s
 		return 0, err
 	}
 	return tag.RowsAffected(), nil
+}
+
+// The keys of the installation as rows of the database. The methods sit on the
+// same Postgres as the record because they share a pool and a transaction
+// boundary, but they answer a separate interface: a panel that keeps its keys
+// in files has a record all the same.
+
+// WrappedKeys implements KeyStore.
+func (p *Postgres) WrappedKeys(ctx context.Context, purpose string) ([]WrappedKey, error) {
+	rows, err := p.pool.Query(ctx, `
+		select key_id, purpose, kek_id, envelope_version, nonce, ciphertext, created_at, retired_at
+		  from crypto_wrapped_keys where purpose = $1 order by key_id`, purpose)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var keys []WrappedKey
+	for rows.Next() {
+		var key WrappedKey
+		if err := rows.Scan(&key.KeyID, &key.Purpose, &key.KEKID, &key.EnvelopeVersion,
+			&key.Nonce, &key.Ciphertext, &key.CreatedAt, &key.RetiredAt); err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	return keys, rows.Err()
+}
+
+// WrappedKey implements KeyStore.
+func (p *Postgres) WrappedKey(ctx context.Context, keyID string) (WrappedKey, error) {
+	var key WrappedKey
+	err := p.pool.QueryRow(ctx, `
+		select key_id, purpose, kek_id, envelope_version, nonce, ciphertext, created_at, retired_at
+		  from crypto_wrapped_keys where key_id = $1`, keyID).
+		Scan(&key.KeyID, &key.Purpose, &key.KEKID, &key.EnvelopeVersion,
+			&key.Nonce, &key.Ciphertext, &key.CreatedAt, &key.RetiredAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return WrappedKey{}, fmt.Errorf("%w: %s", ErrWrappedKeyMissing, keyID)
+	}
+	return key, err
+}
+
+// PutWrappedKey implements KeyStore. The primary key does the refusing: two
+// replicas of one installation initialising at once both insert, and exactly
+// one of them wins.
+func (p *Postgres) PutWrappedKey(ctx context.Context, key WrappedKey) error {
+	_, err := p.pool.Exec(ctx, `
+		insert into crypto_wrapped_keys
+			(key_id, purpose, kek_id, envelope_version, nonce, ciphertext)
+		values ($1, $2, $3, $4, $5, $6)`,
+		key.KeyID, key.Purpose, key.KEKID, key.EnvelopeVersion, key.Nonce, key.Ciphertext)
+	var unique *pgconn.PgError
+	if errors.As(err, &unique) && unique.Code == "23505" {
+		return fmt.Errorf("%w: %s", ErrKeyExists, key.KeyID)
+	}
+	return err
+}
+
+// RetireWrappedKey implements KeyStore. A key already retired keeps the moment
+// it was retired at: the second call is the same statement of fact as the
+// first.
+func (p *Postgres) RetireWrappedKey(ctx context.Context, keyID string) error {
+	tag, err := p.pool.Exec(ctx, `
+		update crypto_wrapped_keys set retired_at = coalesce(retired_at, now())
+		 where key_id = $1`, keyID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("%w: %s", ErrWrappedKeyMissing, keyID)
+	}
+	return nil
+}
+
+// DeleteWrappedKey implements KeyStore.
+func (p *Postgres) DeleteWrappedKey(ctx context.Context, keyID string) error {
+	tag, err := p.pool.Exec(ctx, `delete from crypto_wrapped_keys where key_id = $1`, keyID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("%w: %s", ErrWrappedKeyMissing, keyID)
+	}
+	return nil
+}
+
+// KEKID says which key encryption key this installation's rows are wrapped
+// with. An empty answer is an installation that still keeps its keys in the
+// state directory.
+func (p *Postgres) KEKID(ctx context.Context) (string, error) {
+	var id *string
+	err := p.pool.QueryRow(ctx, `select kek_id from crypto_installation_state where singleton`).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNoRecord
+	}
+	if err != nil || id == nil {
+		return "", err
+	}
+	return *id, nil
+}
+
+// SetKEKID records the key encryption key the rows were wrapped with. It is
+// written once, by the migration of the keys into the database; a second,
+// different key arrives through a rewrap, which changes every row and this
+// column in one transaction.
+func (p *Postgres) SetKEKID(ctx context.Context, id string) error {
+	tag, err := p.pool.Exec(ctx, `
+		update crypto_installation_state set kek_id = $1, updated_at = now()
+		 where singleton`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNoRecord
+	}
+	return nil
 }
