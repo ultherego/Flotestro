@@ -26,6 +26,9 @@ operation under `pki.rotate`, held by `platform_admin` only.
 - The CA files live in `FLOTESTRO_STATE_DIR` (default `/var/lib/flotestro`): `ca.pem`, `ca.key`,
   `ca-pending.pem`, `ca-pending.key`, `ca-pending.at`, `ca-retired/<serial>.pem`. Back the
   directory up before the first step; they are not in the database (see `db-restore.md`).
+  An installation that has run `crypto import-state` keeps the same material as rows of the
+  database instead, sealed with the key encryption key the deployment mounts; back that key up
+  rather than the directory (see `key-encryption-key.md`). The rotation is the same either way.
 - No host you need is `quarantined`, `retiring` or in `recovery`: renewal refuses such a host
   (`lifecycle_<state>` in the denial audit), and it will keep `hosts_missing` above zero.
 

@@ -8,6 +8,13 @@ only source of truth: hosts, certificates, jobs and attempts, campaigns, budgets
 (encrypted), the outbox and its consumer cursor, the audit trail, monitoring samples and
 rollups all live in the database named by `FLOTESTRO_DATABASE_URL`.
 
+An installation that has run `crypto import-state` is the other way round: its private keys
+are rows of the database, sealed with the key encryption key the deployment mounts. Then the
+backup set is the dump **and** that key **and** the installation identifier, and none of the
+files below is part of it. Which of the two arrangements an installation is in, the `crypto`
+block of `GET /api/v1/status` says: `local-sealed` or `db-sealed`. See
+[the key encryption key](key-encryption-key.md).
+
 Not in the database, and therefore part of every backup set:
 
 - `FLOTESTRO_STATE_DIR` (default `/var/lib/flotestro`): `ca.pem`, `ca.key`, `ca-pending.pem`,

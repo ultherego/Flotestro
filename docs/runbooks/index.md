@@ -11,6 +11,10 @@ route or command for a step, the runbook says so rather than describing one.
   packages.
 - [CA rotation](ca-rotation.md): prepare, activate and retire a fleet CA; the trust-anchor
   campaign for hosts' own trust stores; rollback of a prepared CA.
+- [The key encryption key](key-encryption-key.md): generating it, moving the installation's
+  private keys into the database with `crypto import-state`, rotating the key with
+  `crypto rewrap-kek`, going back with `crypto revert-state`, and the six conditions
+  `crypto forget-files` asks before it removes a file.
 - [Database restore](db-restore.md): what the database holds and what lives in
   `FLOTESTRO_STATE_DIR`, backup with `pg_dump`, the restore drill, in-flight jobs after a restore,
   the audit chain check with `flotestro-auditverify`.
