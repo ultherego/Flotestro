@@ -193,12 +193,14 @@ func (d *DirectoryAuthorities) DropPrepared() error {
 	return nil
 }
 
-// WriteRetired implements AuthorityStore.
+// WriteRetired implements AuthorityStore. Atomically, like the other two: a
+// half-written certificate here is a trust anchor the fleet loses, and the
+// hosts that authority issued for stop being recognised.
 func (d *DirectoryAuthorities) WriteRetired(serial string, certPEM []byte) error {
 	if err := os.MkdirAll(filepath.Join(d.dir, retiredDir), 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(d.dir, retiredDir, serial+".pem"), certPEM, 0o644)
+	return writeFileAtomic(filepath.Join(d.dir, retiredDir, serial+".pem"), certPEM, 0o644)
 }
 
 // DropRetired implements AuthorityStore.
