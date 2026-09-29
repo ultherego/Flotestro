@@ -23,6 +23,15 @@ local backup. For a laboratory, a demonstration and a small installation.
 docker compose up -d
 ```
 
+Under rootless Podman, two settings once per host before that, and nothing
+else - without them the panel is down after the first reboot:
+
+```
+loginctl enable-linger $USER
+systemctl --user enable podman-restart.service
+podman-compose up -d
+```
+
 **Production basic** - one control plane against an external, backed-up
 PostgreSQL. This is the default for a company; the database keeps its own
 lifecycle, its own tuning and its own high availability. The overlay is what
@@ -96,18 +105,29 @@ and `loginctl enable-linger <account>`, or the panel stops with the session
 that started it. Every port the panel publishes is above 1024, so rootless
 needs no change there.
 
-**A reboot needs one more thing under Podman.** The restart policy in the
-compose file is honoured by the Docker daemon, which starts with the machine and
-brings the containers back with it. Rootless Podman has no such daemon: lingering
-keeps the containers running after the last logout, and after a reboot nothing
-starts them at all. The unit that replays the restart policies at boot is
-enabled once, as the account that runs the deployment:
+**A reboot needs two settings under Podman, and no more.** The restart policy in
+the compose file is honoured by the Docker daemon, which starts with the machine
+and brings the containers back with it. Rootless Podman has no such daemon:
+lingering keeps the containers running after the last logout, and a unit shipped
+with Podman replays the restart policies at boot. Both are set once, as the
+account that runs the deployment:
 
+    loginctl enable-linger $USER
     systemctl --user enable podman-restart.service
 
-Without it the panel is down after every reboot of the host, and the fleet has
-nowhere to report. The relay needs the same, and its own section below gives it
-a unit of its own for the same reason.
+That is the whole of it, because the compose files say `restart: always` and not
+`restart: unless-stopped`. The difference is not a preference: the unit Podman
+ships runs `podman start --all --filter restart-policy=always`, so a deployment
+that said `unless-stopped` would be skipped by it and would never come back
+after a reboot of the host - the unit reports success and starts nothing. The
+Docker daemon honours `always` at its own start too, so both engines behave the
+same way here.
+
+If a host has to come up with the panel deliberately down, take the deployment
+down (`podman-compose down`) rather than leaving a stopped container behind: a
+container that is merely stopped is started again at the next boot, which is
+what the policy says and what the fleet needs. The relay's compose file says the
+same, for the same reason.
 
 **Two more differences, both found by running it.** An image named without a
 registry - `postgres:17-bookworm` - is a short name, and Podman refuses to

@@ -165,7 +165,11 @@ services:
     # A tag is readable and is what an example shows. Production pins the
     # digest as well - image:tag@sha256:... - because a tag can be moved.
     image: ghcr.io/ultherego/flotestro-control-plane:${FLOTESTRO_VERSION:-latest}
-    restart: unless-stopped
+    # "always" and not "unless-stopped": rootless Podman replays the restart
+    # policies at boot with the unit it ships, and that unit starts only the
+    # containers whose policy is "always". A deployment that said
+    # unless-stopped would simply not come back after a reboot of the host.
+    restart: always
     user: "65532:65532"
 
     environment:
@@ -311,7 +315,11 @@ services:
     # compose.external-db.yaml, and that is chosen before it is initialised.
     # A major version is not changed by swapping the tag: that is pg_upgrade.
     image: docker.io/library/postgres:17-bookworm
-    restart: unless-stopped
+    # "always" and not "unless-stopped": rootless Podman replays the restart
+    # policies at boot with the unit it ships, and that unit starts only the
+    # containers whose policy is "always". A deployment that said
+    # unless-stopped would simply not come back after a reboot of the host.
+    restart: always
 
     environment:
       POSTGRES_DB: flotestro
@@ -357,7 +365,11 @@ services:
     # The reference keeps the registry it was built under although the site
     # cannot reach it: "docker load" restores the image under exactly that name.
     image: ghcr.io/ultherego/flotestro-package-repository:${FLOTESTRO_VERSION:-latest}
-    restart: unless-stopped
+    # "always" and not "unless-stopped": rootless Podman replays the restart
+    # policies at boot with the unit it ships, and that unit starts only the
+    # containers whose policy is "always". A deployment that said
+    # unless-stopped would simply not come back after a reboot of the host.
+    restart: always
     user: "65532:65532"
 
     ports:
