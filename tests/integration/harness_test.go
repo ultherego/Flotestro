@@ -14,9 +14,11 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,7 +47,7 @@ func newHarness(t *testing.T) *harness {
 	t.Helper()
 	token := os.Getenv("FLOTESTRO_TEST_TOKEN")
 	if token == "" {
-		t.Skip("FLOTESTRO_TEST_TOKEN is not set; run through Vagrant/test-integration.sh")
+		absent(t, "FLOTESTRO_TEST_TOKEN is not set; the suite has no identity to talk to the panel with")
 	}
 	h := &harness{
 		t:      t,
@@ -83,11 +85,11 @@ func (h *harness) database(ctx context.Context) *pgxpool.Pool {
 	}
 	pool, err := pgxpool.New(ctx, envOr("FLOTESTRO_TEST_DATABASE_URL", defaultDatabase))
 	if err != nil {
-		h.t.Skipf("no access to the fleet database: %v", err)
+		absent(h.t, "no access to the fleet database: %v", err)
 	}
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
-		h.t.Skipf("the fleet database does not answer: %v", err)
+		absent(h.t, "the fleet database does not answer: %v", err)
 	}
 	h.pool = pool
 	h.t.Cleanup(pool.Close)
@@ -328,7 +330,7 @@ func (h *harness) hostByFamily(family string) hostView {
 			return host
 		}
 	}
-	h.t.Skipf("no connected host of the %s family", family)
+	absent(h.t, "no connected host of the %s family", family)
 	return hostView{}
 }
 
@@ -341,7 +343,7 @@ func (h *harness) hostByName(hostname string) hostView {
 			return host
 		}
 	}
-	h.t.Skipf("no connected host named %s", hostname)
+	absent(h.t, "no connected host named %s", hostname)
 	return hostView{}
 }
 
@@ -413,20 +415,75 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
+// skipSentinel opens the one line the gate reads out of a skipped test.
+// Everything around it is prose for a person; the runner takes the fields.
+const skipSentinel = "FLOTESTRO-SKIP"
+
 // absent says that something this suite needs is not in the environment, and
 // what to do about it.
 //
 // A developer without a relay should be able to run the rest of the suite, so
 // the ordinary answer is a skip. The gate is a different reader: it is the
-// evidence a release stands on, and a capability that quietly skipped there is
-// a capability nobody tested and nobody noticed. FLOTESTRO_TEST_COMPLETE=1
-// turns every one of these into a failure, which is what the gate sets.
+// evidence a release stands on, and this class is the one it refuses the run
+// on, by name, so the report says which condition was missing.
 func absent(t *testing.T, format string, args ...any) {
 	t.Helper()
-	if os.Getenv("FLOTESTRO_TEST_COMPLETE") == "1" {
-		t.Fatalf("this run is required to be complete and "+format, args...)
+	t.Skipf("%s class=absent reason=%q", skipSentinel, reasonLine(format, args...))
+}
+
+// notApplicable says the scenario does not apply to this host and names the
+// host of the matrix that does execute it. Without that name the scenario has
+// left the run entirely, which is the thing the class exists to prevent.
+func notApplicable(t *testing.T, runsOn, format string, args ...any) {
+	t.Helper()
+	reason := reasonLine(format, args...)
+	if bad := unusableField("runs_on", runsOn); bad != "" {
+		t.Fatalf("not_applicable: %s (the reason was: %s)", bad, reason)
 	}
-	t.Skipf(format, args...)
+	t.Skipf("%s class=not_applicable runs_on=%s reason=%q", skipSentinel, runsOn, reason)
+}
+
+// waived says the limitation is named, dated and covered by substitute
+// evidence. It never yields a pass: the gate reports such a run as limited.
+func waived(t *testing.T, waiver, until, evidence, format string, args ...any) {
+	t.Helper()
+	reason := reasonLine(format, args...)
+	for _, bad := range []string{
+		unusableField("waiver", waiver),
+		unusableField("until", until),
+		unusableField("evidence", evidence),
+	} {
+		if bad != "" {
+			t.Fatalf("waived: %s (the reason was: %s)", bad, reason)
+		}
+	}
+	if _, err := time.Parse(time.DateOnly, until); err != nil {
+		t.Fatalf("waived: until=%q is not an ISO 8601 date (the reason was: %s)", until, reason)
+	}
+	t.Skipf("%s class=waived waiver=%s until=%s evidence=%s reason=%q",
+		skipSentinel, waiver, until, evidence, reason)
+}
+
+// unusableField refuses what the gate's parser would silently mangle. An empty
+// value leaves the field out of the line and a value with a space or a quote
+// ends the field early, and either turns an honest skip into an unexplained
+// gate failure a long way from the test that wrote it.
+// reasonLine builds the prose the report will carry. The gate reads the reason
+// as everything between the first pair of quotes, so a quote inside it would cut
+// the sentence short in the report and leave the operator half an explanation.
+func reasonLine(format string, args ...any) string {
+	reason := fmt.Sprintf(format, args...)
+	return strings.Join(strings.Fields(strings.ReplaceAll(reason, `"`, "'")), " ")
+}
+
+func unusableField(name, value string) string {
+	if value == "" {
+		return name + " is empty"
+	}
+	if strings.ContainsAny(value, " \t\r\n\"") {
+		return fmt.Sprintf("%s=%q carries whitespace or a quote, which the gate's parser cuts on", name, value)
+	}
+	return ""
 }
 
 func truncate(data []byte, limit int) string {
