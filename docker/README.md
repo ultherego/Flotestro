@@ -942,10 +942,10 @@ docker compose --profile tools run --rm admin-tools verify 20260919T101500Z
 
 The whole procedure, in order: stop every control plane; pick the database
 and the state of one backup identifier; restore the pair with the command
-above; start one control plane, which runs the migrator itself; check that
-the installation identifier, the CA and the key identifiers are the ones the
-manifest names, that the agents reconnect and that the audit trail still
-verifies; only then start the rest.
+above; bring the schema forward with the `migrate` run; start one control
+plane; check that the installation identifier, the CA and the key identifiers
+are the ones the manifest names, that the agents reconnect and that the audit
+trail still verifies; only then start the rest.
 
 The image carries the same `auditverify` the packages ship, so an export can
 be checked where it lies:

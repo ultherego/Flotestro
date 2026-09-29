@@ -416,7 +416,7 @@ restore() {
     if [ -n "$restored_kek" ]; then
         note "the keys of this installation are rows of the database, sealed with $restored_kek - mount that key, and no other, or the control plane refuses to start with kek_mismatch"
     fi
-    note "next: start one control plane - it runs the migrator itself - and check that the installation identifier, the CA and the agents are the ones the manifest names"
+    note "next: bring the schema forward with the migrate run, start one control plane, and check that the installation identifier, the CA and the agents are the ones the manifest names"
 }
 
 verify() {

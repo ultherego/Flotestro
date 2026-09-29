@@ -105,9 +105,9 @@ In the panel's journal:
    that instance cannot renew in time: look at the database latency and at its clock.
 
 6. **`raw_partitioned` is false.** The migration that converts the raw samples has not run
-   on this database. Check the `migrations` block of the status; the panel applies them at
-   start, so this is a panel that did not finish starting or a database it could not
-   migrate. Until it runs the retention deletes rows, which works but is the behaviour the
+   on this database. Check the `migrations` block of the status; the `migrate` run applies
+   them and no serving panel does, so this is a database that run has not reached. Until it
+   runs the retention deletes rows, which works but is the behaviour the
    partitions replaced.
 
 ## Verification

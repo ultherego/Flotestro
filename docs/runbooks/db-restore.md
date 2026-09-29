@@ -181,8 +181,8 @@ scales a second control plane with a state volume of its own against one databas
    `secrets.key` are 0600, owned by the service user): `tar -C / -xzf flotestro-state-<stamp>.tgz`.
 3. Create an empty database and restore into it:
    `createdb flotestro && pg_restore --no-owner --no-privileges --dbname=flotestro flotestro-<stamp>.dump`.
-   A restore over a live schema is not needed; the service applies any migration newer than the
-   dump at start, under the advisory lock `0x464c4f54`, one file per transaction.
+   A restore over a live schema is not needed; step 4 brings any migration newer than the
+   dump forward, under the advisory lock `0x464c4f54`, one file per transaction.
 4. Point the DSN in `./secrets/database-url` at the restored database, bring the schema forward
    with `docker compose run --rm migrate`, then `docker compose up -d control-plane`.
    Watch for "the database schema is current" and, if the dump predates a release, one line per
