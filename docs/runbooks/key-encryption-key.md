@@ -33,7 +33,11 @@ schedule and never removes a key file.
 - A recent `pg_dump` of the fleet database. The migration is one transaction, but the
   procedure that follows it is not.
 - A directory to write the backup of the state before each change to; every command requires
-  `--backup-to` and refuses to overwrite a file it finds there.
+  `--backup-to` and refuses to overwrite a file it finds there. It must not be inside the
+  state directory: `crypto forget-files` copies the key files there before removing them, and
+  a copy that lives in the directory being emptied is not a copy.
+- `flotestro-admin-tools backup` takes the database and the state directory. It does not take
+  the key encryption key, and it is not meant to: the key is kept apart, by different people.
 
 ## The key itself
 
