@@ -307,7 +307,10 @@ func (s *Server) handleFleetMonitoring(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	for _, rule := range rules {
+	// The count follows the list: a rule about another site is not this
+	// caller's to count either, and a number that moves with somebody else's
+	// rules says how many there are.
+	for _, rule := range visibleRules(principal, rules) {
 		if rule.Enabled {
 			view.Rules++
 		}
@@ -349,8 +352,35 @@ func (request alertRuleRequest) rule() monitoring.Rule {
 	}
 }
 
+// ruleScope is what a rule is about, as a scope: the part of the fleet its
+// selector can reach. A category the selector leaves open stays empty here
+// rather than becoming a wildcard - a rule that names no site is a rule about
+// every site, so only a reader of the whole fleet may have it. The selector
+// carries no team at all, which is why nothing is written there.
+//
+// The rest of the selector - the operating system, the groups, the expression
+// and the host list - only narrows further, because a selector is the
+// conjunction of everything it names. It can therefore take nothing away from
+// this answer, and it is left out of it.
+func ruleScope(sel monitoring.Selector) authz.Scope {
+	return authz.TargetOf(sel.Site, sel.Environment, "", sel.Owner, sel.Tags)
+}
+
+// visibleRules keeps the rules whose subject the principal may read. A rule
+// carries a selector, and a selector is the shape of somebody's fleet.
+func visibleRules(principal authz.Principal, rules []monitoring.Rule) []monitoring.Rule {
+	visible := make([]monitoring.Rule, 0, len(rules))
+	for _, rule := range rules {
+		if principal.Can(authz.PermMonitoringRead, ruleScope(rule.Selector)) {
+			visible = append(visible, rule)
+		}
+	}
+	return visible
+}
+
 func (s *Server) handleListAlertRules(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.authorizeCollection(w, r, authz.PermMonitoringRead, "alert_rule"); !ok {
+	principal, ok := s.authorizeCollection(w, r, authz.PermMonitoringRead, "alert_rule")
+	if !ok {
 		return
 	}
 	if !s.monitoringEnabled(w) {
@@ -361,6 +391,10 @@ func (s *Server) handleListAlertRules(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	// The list is narrowed to the rules of the caller's scope, the way a direct
+	// read of each would be answered: a rule of another site tells through its
+	// selector what stands there, which is not the caller's to know.
+	rules = visibleRules(principal, rules)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"items": rules, "count": len(rules),
 		// The vocabulary of a rule, so the form does not carry a copy; the
@@ -380,6 +414,14 @@ func (s *Server) handleGetAlertRule(w http.ResponseWriter, r *http.Request) {
 	}
 	rule, err := s.monitoring.GetRule(r.Context(), r.PathValue("id"))
 	if s.ruleProblem(w, err) {
+		return
+	}
+	// The rule is read in the scope of what it is about, once it is known: the
+	// refusal is a 403 with that scope on the trail, as a notification
+	// channel's is, and not an empty answer somebody would read as a rule that
+	// covers nothing.
+	if _, ok := s.authorize(w, r, authz.PermMonitoringRead, ruleScope(rule.Selector),
+		"alert_rule", rule.ID); !ok {
 		return
 	}
 	writeJSON(w, http.StatusOK, rule)

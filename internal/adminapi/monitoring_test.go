@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/monitoring"
 	"github.com/ultherego/flotestro/internal/paging"
 )
@@ -119,5 +120,139 @@ func TestParseAlertCursorRefusesWhatItDidNotIssue(t *testing.T) {
 		if body["code"] != "invalid_cursor" {
 			t.Errorf("%s was refused as %v, expected invalid_cursor", name, body["code"])
 		}
+	}
+}
+
+// An alert rule carries a selector over hosts, and a selector is the shape of
+// somebody's fleet: a rule reaches a reader only when the reader's scope
+// covers everything the selector can reach.
+
+// ruleOver is a rule named after what it watches, with the selector under
+// test; the rest of it is what every rule of these tests would carry.
+func ruleOver(name string, selector monitoring.Selector) monitoring.Rule {
+	return monitoring.Rule{
+		ID: name, Name: name, Metric: monitoring.MetricCPUPercent, Operator: "gt",
+		Threshold: 90, Severity: "warning", Selector: selector, Enabled: true,
+	}
+}
+
+// ruleNames reads back what a list carries, so a failure names the rule that
+// crossed the boundary rather than a count.
+func ruleNames(rules []monitoring.Rule) []string {
+	names := make([]string, 0, len(rules))
+	for _, rule := range rules {
+		names = append(names, rule.Name)
+	}
+	return names
+}
+
+func TestAViewerScopedToOneSiteSeesOnlyTheAlertRulesOfThatSite(t *testing.T) {
+	here := ruleOver("here", monitoring.Selector{Site: "lab", Environment: "test"})
+	there := ruleOver("there", monitoring.Selector{Site: "elsewhere", Environment: "test"})
+	otherEnvironment := ruleOver("other environment", monitoring.Selector{Site: "lab", Environment: "prod"})
+	fleet := ruleOver("fleet", monitoring.Selector{})
+	all := []monitoring.Rule{here, there, otherEnvironment, fleet}
+
+	viewer := principalWith(authz.RoleViewer, labScope)
+	visible := visibleRules(viewer, all)
+	if names := ruleNames(visible); len(names) != 1 || names[0] != "here" {
+		t.Fatalf("a viewer of one site sees %v, expected only the rule of that site", names)
+	}
+	// The same verdict by identifier: what the list leaves out, a direct read
+	// refuses, and what it keeps a direct read answers.
+	for _, rule := range []monitoring.Rule{there, otherEnvironment, fleet} {
+		if viewer.Can(authz.PermMonitoringRead, ruleScope(rule.Selector)) {
+			t.Errorf("a viewer of the lab may read the rule %q by identifier", rule.Name)
+		}
+	}
+	if !viewer.Can(authz.PermMonitoringRead, ruleScope(here.Selector)) {
+		t.Error("a viewer of the lab may not read the rule of the lab by identifier")
+	}
+
+	// The administrator of the whole installation still sees every one of them:
+	// narrowing the answer is not hiding the rules from whoever owns them.
+	admin := principalWith(authz.RolePlatformAdmin, authz.GlobalScope)
+	if names := ruleNames(visibleRules(admin, all)); len(names) != len(all) {
+		t.Errorf("a reader of the whole fleet sees %v, expected every rule", names)
+	}
+}
+
+// A selector that names nothing covers every host, so only a reader of the
+// whole fleet may have it. The same holds for a selector that narrows in a way
+// the scope model cannot express: what the query cannot check is not checked
+// as satisfied.
+func TestAnAlertRuleTheScopeModelCannotExpressReachesOnlyAReaderOfTheWholeFleet(t *testing.T) {
+	rules := []monitoring.Rule{
+		ruleOver("nothing named", monitoring.Selector{}),
+		ruleOver("by operating system", monitoring.Selector{OSFamily: "debian"}),
+		ruleOver("by expression", monitoring.Selector{Expression: "site = elsewhere"}),
+		ruleOver("by group", monitoring.Selector{Groups: []string{"databases"}}),
+		ruleOver("by host", monitoring.Selector{HostIDs: []string{"3f2504e0-4f89-11d3-9a0c-0305e82c3301"}}),
+	}
+	viewer := principalWith(authz.RoleViewer, labScope)
+	if names := ruleNames(visibleRules(viewer, rules)); len(names) != 0 {
+		t.Errorf("a viewer of one site sees %v, expected none of them", names)
+	}
+	admin := principalWith(authz.RolePlatformAdmin, authz.GlobalScope)
+	if names := ruleNames(visibleRules(admin, rules)); len(names) != len(rules) {
+		t.Errorf("a reader of the whole fleet sees %v, expected every rule", names)
+	}
+}
+
+// The scope of a rule is what its selector names, category by category, and a
+// category the selector leaves open is left open rather than filled with a
+// wildcard: the five categories are site, environment, team, owner and tag.
+func TestTheScopeOfAnAlertRuleIsWhatItsSelectorNames(t *testing.T) {
+	scope := ruleScope(monitoring.Selector{
+		Site: "lab", Environment: "test", Owner: "payments", Tags: []string{"role=db"},
+	})
+	if scope.Site != "lab" || scope.Environment != "test" {
+		t.Errorf("the placement of the rule is %s", scope)
+	}
+	// A selector carries no team at all, so a binding narrowed to one team
+	// reaches no rule: the rule watches the hosts of every team that matches.
+	if scope.TeamAny || scope.Team != "" {
+		t.Errorf("the rule claims a team: %s", scope)
+	}
+	team := principalWith(authz.RoleViewer, authz.OfTeam("11111111-1111-1111-1111-111111111111"))
+	if team.Can(authz.PermMonitoringRead, scope) {
+		t.Error("a viewer bound to one team reads a rule that names no team")
+	}
+
+	// Owner and tag are categories of their own, and each narrows on its own.
+	ofAnotherOwner := authz.Scope{
+		Site: authz.Wildcard, Environment: authz.Wildcard, TeamAny: true,
+		Owners: []string{"billing"}, Tags: []string{authz.Wildcard},
+	}
+	if principalWith(authz.RoleViewer, ofAnotherOwner).Can(authz.PermMonitoringRead, scope) {
+		t.Error("a viewer of another owner reads a rule about the hosts of payments")
+	}
+	ofTheOwner := ofAnotherOwner
+	ofTheOwner.Owners = []string{"payments"}
+	if !principalWith(authz.RoleViewer, ofTheOwner).Can(authz.PermMonitoringRead, scope) {
+		t.Error("a viewer of the owner may not read a rule about that owner's hosts")
+	}
+	ofAnotherTag := ofAnotherOwner
+	ofAnotherTag.Owners = []string{authz.Wildcard}
+	ofAnotherTag.Tags = []string{"role=web"}
+	if principalWith(authz.RoleViewer, ofAnotherTag).Can(authz.PermMonitoringRead, scope) {
+		t.Error("a viewer of the web hosts reads a rule about the database hosts")
+	}
+}
+
+// Nobody at all is not everybody: a principal whose binding has run out keeps
+// none of the rules it used to read.
+func TestAPrincipalWithoutMonitoringReadSeesNoAlertRuleAtAll(t *testing.T) {
+	rules := []monitoring.Rule{
+		ruleOver("here", monitoring.Selector{Site: "lab", Environment: "test"}),
+		ruleOver("fleet", monitoring.Selector{}),
+	}
+	if names := ruleNames(visibleRules(authz.Principal{}, rules)); len(names) != 0 {
+		t.Errorf("an identity with no binding sees %v", names)
+	}
+	// A right over something else is not a right over the rules.
+	approver := principalWith(authz.RoleApprover, authz.GlobalScope)
+	if names := ruleNames(visibleRules(approver, rules)); len(names) != 0 {
+		t.Errorf("an approver, who has no monitoring.read, sees %v", names)
 	}
 }
