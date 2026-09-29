@@ -36,7 +36,12 @@ func TestTheAuthoritiesOfTheFleetLiveInTheDatabaseAndSurviveAHandover(t *testing
 		t.Fatalf("the authorities of the installation could not be read: %v", err)
 	}
 	if len(existing) > 0 {
-		t.Skipf("this installation keeps %d authorities in the database; its own set is not a test's to touch",
+		// It keeps its own set, so what can be checked is that set: exactly one
+		// authority signs, at most one is prepared to take over, and every row
+		// says which it is. A skip here would leave the arrangement this whole
+		// stage produces unexamined by the suite that runs against it.
+		theLiveSetIsCoherent(ctx, t, store, existing)
+		t.Skipf("this installation keeps %d authorities in the database; its own set is not a test's to write to",
 			len(existing))
 	}
 
@@ -162,4 +167,46 @@ func retiredSerials(ctx context.Context, t *testing.T, store *cryptostate.Postgr
 		serials = append(serials, cert.SerialNumber.String())
 	}
 	return serials
+}
+
+// theLiveSetIsCoherent checks the authorities a running installation keeps,
+// without writing anything. The keys cannot be opened here - the key
+// encryption key belongs to the deployment and not to the suite - so what is
+// judged is the shape of the set: one signing authority, at most one prepared,
+// every row named after the certificate it carries, and all of them wrapped
+// with the one key the record names.
+func theLiveSetIsCoherent(ctx context.Context, t *testing.T, store *cryptostate.Postgres, rows []cryptostate.WrappedKey) {
+	t.Helper()
+	recorded, err := store.KEKID(ctx)
+	if err != nil {
+		t.Fatalf("the recorded key encryption key could not be read: %v", err)
+	}
+	if recorded == "" {
+		t.Fatal("the installation keeps authorities in the database and the record names no key encryption key")
+	}
+	record, err := store.Load(ctx)
+	if err != nil {
+		t.Fatalf("the installation record could not be read: %v", err)
+	}
+	signing := 0
+	for _, row := range rows {
+		if row.KEKID != recorded {
+			t.Errorf("the authority %s is wrapped with %s and the record names %s",
+				row.KeyID, row.KEKID, recorded)
+		}
+		if row.Retired() {
+			t.Errorf("the authority %s is marked retired; a withdrawn authority keeps no key at all",
+				row.KeyID)
+		}
+		if row.KeyID == record.IssuerID {
+			signing++
+		}
+	}
+	if signing != 1 {
+		t.Errorf("%d of the %d authorities is the one the record says signs (%s)",
+			signing, len(rows), record.IssuerID)
+	}
+	if len(rows) > 2 {
+		t.Errorf("the installation keeps %d authorities; one signs and at most one is prepared", len(rows))
+	}
 }
