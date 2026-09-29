@@ -65,9 +65,11 @@ jobs:
           # The newest status for that context, or the word "missing": a tag
           # that was never run through the laboratory and one that failed it
           # are different situations and the message says which.
-          state="$(gh api "repos/$REPOSITORY/commits/$SHA/statuses" \
-              --jq '[.[] | select(.context == "lab-suite")] | first | .state // "missing"')"
-          echo "lab-suite on $SHA: $state"
+          statuses="$(gh api "repos/$REPOSITORY/commits/$SHA/statuses")"
+          latest() { printf '%s' "$statuses" | jq -r "[.[] | select(.context == \"lab-suite\")] | first | $1"; }
+          state="$(latest '.state // "missing"')"
+          description="$(latest '.description // ""')"
+          echo "lab-suite on $SHA: $state ($description)"
           case "$state" in
             success) ;;
             missing)
@@ -76,6 +78,24 @@ jobs:
               exit 1 ;;
             *)
               echo "::error::the lab-suite status on this commit is \"$state\", not success." >&2
+              exit 1 ;;
+          esac
+
+          # A gate run that was green over approved limitations is recorded as
+          # success, because it is good enough to merge on. It is not good
+          # enough to ship: a stable release takes "pass" and nothing else, and
+          # lab-gate writes which it was as the first word of the description.
+          verdict="${description%% *}"
+          case "$verdict" in
+            verdict=pass) ;;
+            verdict=limited)
+              echo "::error::the laboratory verdict on this commit is \"limited\": it was green over approved limitations, which a stable release does not accept." >&2
+              exit 1 ;;
+            verdict=*)
+              echo "::error::the laboratory verdict on this commit is \"${verdict#verdict=}\", not a pass." >&2
+              exit 1 ;;
+            *)
+              echo "::error::the lab-suite status on this commit names no verdict (\"$description\"); it predates the checked gate. Record it again with the lab-gate workflow." >&2
               exit 1 ;;
           esac
 
