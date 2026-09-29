@@ -79,12 +79,17 @@ services:
         # owner and the same mode; the panel refuses a key file anybody else
         # could rewrite. Without it nothing changes: an installation whose keys
         # are still files never reads this path.
-        if [ -f /import/kek ]; then
-          cp /import/kek /run/flotestro/kek
-          chmod 0400 /run/flotestro/kek
-          chown 65532:65532 /run/flotestro/kek
-          echo "the key encryption key was taken from ./secrets/kek"
-        fi
+        # The key in use, and the one a rotation is moving to. The second is
+        # there because crypto rewrap-kek has to read the new key from inside
+        # the runtime, and nothing else can put a file there.
+        for name in kek kek-next; do
+          if [ -f "/import/$$name" ]; then
+            cp "/import/$$name" "/run/flotestro/$$name"
+            chmod 0400 "/run/flotestro/$$name"
+            chown 65532:65532 "/run/flotestro/$$name"
+            echo "the key encryption key was taken from ./secrets/$$name"
+          fi
+        done
         # The control plane and the tools run as 65532, PostgreSQL as 999, and
         # each reads only the file it needs.
         chmod 0400 /run/flotestro/database-url

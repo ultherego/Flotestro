@@ -424,6 +424,7 @@ anyone else is refused.
 | Webhook HMAC key | `FLOTESTRO_WEBHOOK_SECRET_FILE` | `/run/secrets/webhook_secret` | a bind mount you add |
 | NVD API key | `FLOTESTRO_VULN_NVD_KEY_FILE` | `/run/secrets/nvd_key` | a bind mount you add |
 | Key encryption key | `FLOTESTRO_KEK_FILE` (already a path) | `/run/flotestro/kek` | you, as `./secrets/kek`, copied by `init` |
+| Key encryption key a rotation moves to | named on the command line | `/run/flotestro/kek-next` | you, as `./secrets/kek-next`, copied by `init` |
 | FreeIPA keytab | `FLOTESTRO_IPA_KEYTAB` (already a path) | `/run/secrets/ipa.keytab` | a bind mount you add |
 | Kerberos configuration for that keytab | `FLOTESTRO_IPA_KRB5_CONF` (already a path) | `/etc/flotestro/krb5.conf` | a bind mount you add |
 

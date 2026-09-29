@@ -131,19 +131,34 @@ The keys themselves do not change — the envelopes, the certificates and the pi
 hold are untouched. Only the wrapping moves, which is why this can be done with the panel
 running and why losing the old key afterwards costs nothing.
 
+The new key has to be readable from inside the runtime, so in the Compose deployment it
+goes beside the current one, as `./secrets/kek-next`, and `init` puts it at
+`/run/flotestro/kek-next` at the next start of the control plane.
+
 ```fish
 umask 077
-openssl rand -hex 32 > /run/secrets/flotestro-kek-next
-flotestro-control-plane crypto rewrap-kek --new-kek-file /run/secrets/flotestro-kek-next \
-    --dry-run --backup-to /var/backups/flotestro
-flotestro-control-plane crypto rewrap-kek --new-kek-file /run/secrets/flotestro-kek-next \
-    --backup-to /var/backups/flotestro
+openssl rand -hex 32 > ./secrets/kek-next
+podman stop flotestro_control-plane_1; podman start flotestro_control-plane_1
+
+podman exec flotestro_control-plane_1 flotestro-control-plane crypto rewrap-kek \
+    -new-kek-file /run/flotestro/kek-next --dry-run --backup-to /var/backups/flotestro
+podman exec flotestro_control-plane_1 flotestro-control-plane crypto rewrap-kek \
+    -new-kek-file /run/flotestro/kek-next --backup-to /var/backups/flotestro
 ```
 
 Every row and the record move together, so there is no moment in which the database names
-one key and holds rows wrapped with another. Then mount the new key as
-`/run/secrets/flotestro-kek` on every replica and restart them. A replica still holding the
-old key refuses to start with `kek_mismatch`; it does not serve half the installation.
+one key and holds rows wrapped with another. The running panel keeps serving: the keys
+themselves did not change, only their wrapping.
+
+Then make the new key the deployment's key and restart every replica:
+
+```fish
+mv ./secrets/kek-next ./secrets/kek
+podman stop flotestro_control-plane_1; podman start flotestro_control-plane_1
+```
+
+A replica still holding the old key refuses to start with `kek_mismatch`; it does not serve
+half the installation.
 
 The backup written before the rewrap holds the rows as they were. They open with the old
 key and with no other, so keep that key until every replica is running on the new one.
