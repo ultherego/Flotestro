@@ -91,7 +91,7 @@
 
   <main class="content">
 <h1>7. Błędy i odmowy</h1>
-<p class="lede">Każda odmowa, każde niepowodzenie i każde pominięcie, jakie panel, agent i helper mogą przypisać zadaniu, celowi kampanii albo żądaniu, niesie stały kod. Kod odpowiada na dwa pytania: co się stało i co można bezpiecznie zrobić dalej. Ta strona to cały wykaz, 294 pozycji, przepisany z <code>internal/opspec/errors.go</code>; panel udostępnia tę samą listę pod <code>GET /api/v1/errors</code>.</p>
+<p class="lede">Każda odmowa, każde niepowodzenie i każde pominięcie, jakie panel, agent i helper mogą przypisać zadaniu, celowi kampanii albo żądaniu, niesie stały kod. Kod odpowiada na dwa pytania: co się stało i co można bezpiecznie zrobić dalej. Ta strona to cały wykaz, 295 pozycji, przepisany z <code>internal/opspec/errors.go</code>; panel udostępnia tę samą listę pod <code>GET /api/v1/errors</code>.</p>
     <ul class="linkrow">
       <li><a href="#retry">Polityka ponowień</a></li>
       <li><a href="#failure">Czy kod liczy się jako niepowodzenie</a></li>
@@ -152,7 +152,7 @@
 <tr><td><a href="#stage-notification"><code>notification</code></a></td><td>9</td></tr>
 <tr><td><a href="#stage-directory"><code>directory</code></a></td><td>2</td></tr>
 <tr><td><a href="#stage-provisioning"><code>provisioning</code></a></td><td>1</td></tr>
-<tr><td><a href="#stage-startup"><code>startup</code></a></td><td>25</td></tr>
+<tr><td><a href="#stage-startup"><code>startup</code></a></td><td>26</td></tr>
 </tbody></table></div>
 <h2 id="index">Wszystkie kody alfabetycznie</h2>
 <div class="table-scroll">
@@ -280,6 +280,7 @@
 <tr><td><a href="#err-kek-file-missing"><code class="refusal">kek_file_missing</code></a></td><td>startup</td><td><span class="badge retry-after-change">after_change</span></td><td>nie</td></tr>
 <tr><td><a href="#err-kek-file-unsafe"><code class="refusal">kek_file_unsafe</code></a></td><td>startup</td><td><span class="badge retry-after-change">after_change</span></td><td>nie</td></tr>
 <tr><td><a href="#err-kek-mismatch"><code class="refusal">kek_mismatch</code></a></td><td>startup</td><td><span class="badge retry-after-change">after_change</span></td><td>nie</td></tr>
+<tr><td><a href="#err-kek-rotated"><code class="refusal">kek_rotated</code></a></td><td>startup</td><td><span class="badge retry-after-change">after_change</span></td><td>nie</td></tr>
 <tr><td><a href="#err-key-not-found"><code class="refusal">key_not_found</code></a></td><td>helper</td><td><span class="badge retry-read-state">read_state</span></td><td>nie</td></tr>
 <tr><td><a href="#err-last-key-lockout"><code class="refusal">last_key_lockout</code></a></td><td>helper</td><td><span class="badge retry-after-change">after_change</span></td><td>nie</td></tr>
 <tr><td><a href="#err-lease-expired"><code class="refusal">lease_expired</code></a></td><td>reconcile</td><td><span class="badge retry-read-state">read_state</span></td><td>tak</td></tr>
@@ -1057,7 +1058,7 @@
 <dd><p>Krok, który nadaje kontu serwisowemu konektora prawo przeniesienia wpisu do kontenera kont zachowanych, nie zdołał dokończyć się sam: katalog odmówił konektorowi jednego z obiektów albo w ogóle nie publikuje uprawnienia niosącego ACI. Nic nie zostało nadane w połowie - krok zatrzymuje się na pierwszej odmowie, a każdy obiekt, który zdążył utworzyć, może utworzyć ponownie bez skutku.</p><p><span class="label">Co zrobić</span> Raport wymienia dokładne polecenia ipa, po kolei, do wykonania przez administratora katalogu, albo ACI do dodania, gdy katalog nie publikuje uprawnienia - uprawnienie nie wyraża moddn, więc to jedno dodaje się klientem LDAP. Uruchom potem krok ponownie; nie zmienia niczego, co już stoi, i potwierdza rzecz własną odpowiedzią katalogu o przeniesieniu.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge not-failure">nie jest niepowodzeniem</span></p></dd>
 </dl>
 <h2 id="stage-startup">Etap: startup</h2>
-<p>25 kodów.</p>
+<p>26 kodów.</p>
 <dl class="kv">
 <dt id="err-crypto-state-ambiguous"><code class="refusal">crypto_state_ambiguous</code></dt>
 <dd><p>Instalacja nie ma zapisu, a to, co istnieje, nie składa się ani na pustą instalację, ani na kompletną starą.</p><p><span class="label">Co zrobić</span> Przeczytaj powód w logu: odtwórz brakującą część katalogu stanu albo usuń pozostałość po porzuconej instalacji. Zobacz docs/runbooks/db-restore.md.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge not-failure">nie jest niepowodzeniem</span></p></dd>
@@ -1081,6 +1082,8 @@
 <dd><p>Plik z key encryption key da się podmienić komuś innemu niż jego właściciel: to link, nie zwykły plik, plik konta innego niż root albo konto panelu, albo plik czytelny lub zapisywalny dla grupy albo kogokolwiek innego.</p><p><span class="label">Co zrobić</span> Zrób z niego zwykły plik, którego właścicielem jest root albo konto panelu, z trybem 0400. Zobacz docs/runbooks/key-encryption-key.md.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge not-failure">nie jest niepowodzeniem</span></p></dd>
 <dt id="err-kek-mismatch"><code class="refusal">kek_mismatch</code></dt>
 <dd><p>Żaden z kluczy zamontowanych dla tego panelu nie jest tym, który zapisuje instalacja. Trwająca rotacja tu nie trafia - panel używa tego z dwóch zamontowanych kluczy, który wskazuje zapis instalacji - więc to klucz innej instalacji albo klucz sprzed rotacji, której nowy klucz nie jest już zamontowany. Nic nie zostało uszkodzone i nic nie jest obsługiwane w połowie.</p><p><span class="label">Co zrobić</span> Zamontuj klucz, który blok crypto na ekranie statusu podaje jako kek_id. W trakcie rotacji trzymaj oba klucze zamontowane, dopóki każda replika nie zostanie zrestartowana; do tego służy druga ścieżka, -kek-next-file. Zobacz docs/runbooks/key-encryption-key.md.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge not-failure">nie jest niepowodzeniem</span></p></dd>
+<dt id="err-kek-rotated"><code class="refusal">kek_rotated</code></dt>
+<dd><p>Ta instancja control plane próbowała zapisać klucz zapieczętowany tym KEK-iem, który wczytała przy starcie, a instalacja od tego czasu przeszła na inny: rewrap skończył się na innej replice w trakcie jej pracy albo klucze wróciły do plików. Nic nie zostało zapisane - wiersz zapieczętowany porzuconym kluczem byłby jedynym kluczem instalacji, którego potem nikt by nie otworzył.</p><p><span class="label">Co zrobić</span> Zrestartuj tę instancję, żeby wczytała klucz, który wskazuje zapis instalacji; po to właśnie oba klucze zostają zamontowane przez całą rotację, a jej odpowiedź readiness już mówi, że nie nadaje się do przyjmowania pracy. Potem zleć rzecz ponownie: nic nie zostało zapisane i nic nie jest uszkodzone. Zobacz docs/runbooks/key-encryption-key.md.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge not-failure">nie jest niepowodzeniem</span></p></dd>
 <dt id="err-metrics-retention-too-short"><code class="refusal">metrics_retention_too_short</code></dt>
 <dd><p>Retencja surowych próbek jest krótsza niż okno, które panel podaje w pełnej rozdzielczości, powiększone o najdłuższy dopuszczalny czas dotarcia próbki. Taka konfiguracja z definicji kasuje odczyt, który relay wciąż niesie, i to bez niczyjego zlecenia, więc panel odmawia na niej startu i odmawia jej zapisania z ekranu ustawień.</p><p><span class="label">Co zrobić</span> Podnieś retencję surowych próbek co najmniej do tej sumy albo obniż okno zapytań surowych lub maksymalne opóźnienie. Wszystkie trzy są opisane w wykazie konfiguracji przy ustawieniach monitoringu; nic nie zostało zapisane, więc obowiązujące wartości pozostają bez zmian.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge not-failure">nie jest niepowodzeniem</span></p></dd>
 <dt id="err-migration-checksum-mismatch"><code class="refusal">migration_checksum_mismatch</code></dt>

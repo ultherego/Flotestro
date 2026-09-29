@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -14,13 +15,29 @@ import (
 	"github.com/ultherego/flotestro/internal/secrets"
 )
 
-// memoryKeys is the database of wrapped keys without a database.
+// memoryKeys is the database of wrapped keys without a database. It keeps the
+// two columns of the installation record a write is judged against, because a
+// row sealed with a replica's own key may only be written while the record
+// still names that key.
 type memoryKeys struct {
 	mu   sync.Mutex
 	rows map[string]WrappedKey
+	// recordedKEK and recordedInstallation are what the record says. They
+	// are empty until the first key is written, the way an installation
+	// names no key encryption key until its keys move into the database.
+	recordedKEK          string
+	recordedInstallation string
 }
 
 func newMemoryKeys() *memoryKeys { return &memoryKeys{rows: map[string]WrappedKey{}} }
+
+// recordNames moves the record, which is what a rewrap run against another
+// replica does to this one.
+func (m *memoryKeys) recordNames(kekID, installationID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.recordedKEK, m.recordedInstallation = kekID, installationID
+}
 
 func (m *memoryKeys) WrappedKeys(_ context.Context, purpose string) ([]WrappedKey, error) {
 	m.mu.Lock()
@@ -47,6 +64,32 @@ func (m *memoryKeys) WrappedKey(_ context.Context, keyID string) (WrappedKey, er
 func (m *memoryKeys) PutWrappedKey(_ context.Context, key WrappedKey) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.insert(key)
+}
+
+// PutWrappedKeyUnderRecordedKEK refuses under the lock the way Postgres
+// refuses inside the transaction: the record is read and the row written with
+// nothing able to move the record in between.
+func (m *memoryKeys) PutWrappedKeyUnderRecordedKEK(_ context.Context, key WrappedKey) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.recordedKEK == "" {
+		m.recordedKEK, m.recordedInstallation = key.KEKID, key.InstallationID
+	}
+	if m.recordedInstallation != key.InstallationID {
+		return fatal(CodeWrappedKeyInstallationMismatch, fmt.Sprintf(
+			"the key %s was sealed for the installation %s and this database describes %s",
+			key.KeyID, wrappedKeyOwner(key.InstallationID), m.recordedInstallation), nil)
+	}
+	if m.recordedKEK != key.KEKID {
+		return fatal(CodeKEKRotated, fmt.Sprintf(
+			"the key %s was sealed with %s and the installation is now wrapped with %s",
+			key.KeyID, key.KEKID, m.recordedKEK), nil)
+	}
+	return m.insert(key)
+}
+
+func (m *memoryKeys) insert(key WrappedKey) error {
 	if _, taken := m.rows[key.KeyID]; taken {
 		return ErrKeyExists
 	}
@@ -582,5 +625,123 @@ func TestAnInstallationOpensAMixedSetOfForms(t *testing.T) {
 	elsewhere := unboundKEK(t, testKEKHex).For(otherInstallationID)
 	if _, err := elsewhere.Open(fresh); err == nil {
 		t.Error("the row of the second form opened for another installation")
+	}
+}
+
+// rewrapInMemory does to the fake what crypto rewrap-kek does to the database:
+// every row is opened under the old key, sealed under the new one, and the
+// record moves with them.
+func rewrapInMemory(t *testing.T, store *memoryKeys, from, to *InstallationKEK) {
+	t.Helper()
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	for id, row := range store.rows {
+		material, err := from.Open(row)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sealed, err := to.Seal(row.KeyID, row.Purpose, material)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sealed.RetiredAt = row.RetiredAt
+		store.rows[id] = sealed
+	}
+	store.recordedKEK, store.recordedInstallation = to.ID(), to.Installation()
+}
+
+// A replica seals with the key encryption key it loaded at its start. An
+// operator rewrapping the installation from another replica moves every row
+// and the record onto a new key, and this one notices nothing: the rewrap is
+// over by the time it next makes a key, so no rewrap will ever come back for
+// the row it would write. Every restart and every other replica would then
+// refuse that row with kek_mismatch - the one key of the installation nobody
+// can open - so the write is refused instead, and nothing is written.
+func TestAKeyIsNotWrittenUnderAKeyEncryptionKeyTheInstallationHasLeft(t *testing.T) {
+	ctx := context.Background()
+	held := testKEK(t, testKEKHex)
+	store := newMemoryKeys()
+	replica, err := NewDBProvider(ctx, store, held)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := replica.GenerateNamed(ctx, "k-one"); err != nil {
+		t.Fatal(err)
+	}
+
+	// The rewrap, run against another replica of the same installation.
+	rotated := testKEK(t, otherKEKHex)
+	rewrapInMemory(t, store, held, rotated)
+
+	for _, write := range []struct {
+		name string
+		id   string
+		do   func(id string) error
+	}{
+		{"a key made", "k-two", func(id string) error { return replica.GenerateNamed(ctx, id) }},
+		{"a key adopted", "k-three", func(id string) error {
+			return replica.Adopt(ctx, id, bytes.Repeat([]byte{7}, secrets.KeyLength))
+		}},
+	} {
+		err := write.do(write.id)
+		if !refusedWith(err, CodeKEKRotated) {
+			t.Errorf("%s after the rewrap answered %v, expected %s", write.name, err, CodeKEKRotated)
+		}
+		if _, err := store.WrappedKey(ctx, write.id); !errors.Is(err, ErrWrappedKeyMissing) {
+			t.Errorf("%s after the rewrap left a row behind: %v", write.name, err)
+		}
+	}
+
+	// The refusal does not teach this instance the new key: which of the
+	// mounted keys a panel uses is decided once, at a start, and an instance
+	// that changed it while running would leave the authorities it has already
+	// handed out on the key before.
+	if replica.KEKID() != held.ID() {
+		t.Errorf("the instance moved itself to %s", replica.KEKID())
+	}
+	// It is already unfit to serve, which is what brings the restart: the row
+	// of its active key no longer opens under the key it holds.
+	replica.SetActive("k-one")
+	if err := replica.Health(ctx); err == nil {
+		t.Error("an instance left behind by a rewrap reported itself healthy")
+	}
+
+	// And the restart is the recovery: an instance started on the key the
+	// record now names writes the key that was refused.
+	restarted, err := NewDBProvider(ctx, store, rotated)
+	if err != nil {
+		t.Fatalf("an instance started on the key the record names was refused: %v", err)
+	}
+	if err := restarted.GenerateNamed(ctx, "k-two"); err != nil {
+		t.Fatalf("the key was still refused after the restart: %v", err)
+	}
+	row, err := store.WrappedKey(ctx, "k-two")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.KEKID != rotated.ID() {
+		t.Errorf("the key was written under %s and the record names %s", row.KEKID, rotated.ID())
+	}
+}
+
+// The two things that can be wrong with the record under a write are told
+// apart: a key encryption key the installation has moved on from is this
+// replica's own staleness, a database describing another installation is a
+// deployment pointed at the wrong place. They are fixed differently.
+func TestAWriteIntoAnotherInstallationsDatabaseSaysWhichOfTheTwoItIs(t *testing.T) {
+	ctx := context.Background()
+	held := testKEK(t, testKEKHex)
+	store := newMemoryKeys()
+	replica, err := NewDBProvider(ctx, store, held)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.recordNames(held.ID(), otherInstallationID)
+	err = replica.GenerateNamed(ctx, "k-one")
+	if !refusedWith(err, CodeWrappedKeyInstallationMismatch) {
+		t.Errorf("the write answered %v, expected %s", err, CodeWrappedKeyInstallationMismatch)
+	}
+	if _, err := store.WrappedKey(ctx, "k-one"); !errors.Is(err, ErrWrappedKeyMissing) {
+		t.Errorf("a row was written into another installation's database: %v", err)
 	}
 }

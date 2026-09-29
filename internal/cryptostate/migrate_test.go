@@ -54,6 +54,7 @@ func (m *memoryStore) ImportKeys(ctx context.Context, kekID string, keys []Wrapp
 		m.retired[authority.Serial] = authority.Certificate
 	}
 	m.kekID = kekID
+	m.memoryKeys.recordNames(kekID, m.record.InstallationID)
 	// The database says the same thing the record does: moving the keys is
 	// switching the provider.
 	m.record.Provider = DBProviderName
@@ -81,6 +82,7 @@ func (m *memoryStore) ReplaceKeys(ctx context.Context, from, to string, keys []W
 		}
 	}
 	m.kekID = to
+	m.memoryKeys.recordNames(to, m.record.InstallationID)
 	return nil
 }
 
@@ -100,6 +102,7 @@ func (m *memoryStore) ForgetKeys(_ context.Context, kekID string, keyIDs []strin
 		return fmt.Errorf("%w: %d keys appeared while the revert ran", ErrRevisionMoved, left)
 	}
 	m.kekID = ""
+	m.memoryKeys.recordNames("", m.record.InstallationID)
 	m.retired = map[string][]byte{}
 	m.record.Provider = LocalProviderName
 	m.record.Revision++

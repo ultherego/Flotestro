@@ -288,6 +288,15 @@ func (p *DBSealedProvider) Adopt(ctx context.Context, id string, material []byte
 // once make the same key under the same name, and a row that holds the same
 // material is that, not a collision. Different material under a taken name is
 // refused, whoever asked.
+//
+// The row is sealed with the key this instance loaded at its start, so the
+// store is asked to write it only while the record still names that key. This
+// instance does not go looking for the key the record has moved to: the choice
+// between the mounted keys is SelectProvider's and is made once, at a start,
+// and a running instance that changed it would leave the authorities and the
+// helper's signer it has already handed out on the key before. Health already
+// refuses for this instance as soon as the rewrap lands, which is what brings
+// the restart that picks up the new key.
 func (p *DBSealedProvider) write(ctx context.Context, id string, material []byte, adopting bool) error {
 	p.mu.RLock()
 	existing, held := p.raw[id]
@@ -302,7 +311,7 @@ func (p *DBSealedProvider) write(ctx context.Context, id string, material []byte
 	if err != nil {
 		return err
 	}
-	switch err := p.store.PutWrappedKey(ctx, row); {
+	switch err := p.store.PutWrappedKeyUnderRecordedKEK(ctx, row); {
 	case errors.Is(err, ErrKeyExists):
 		// Somebody wrote the row between the check and the insert. Whether it is
 		// the same key decides whether this is a race that ended well or two

@@ -5,6 +5,7 @@ package integration
 import (
 	"bytes"
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -19,7 +20,8 @@ func TestTheAuthoritiesOfTheFleetLiveInTheDatabaseAndSurviveAHandover(t *testing
 	h := newHarness(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	store := cryptostate.NewPostgres(h.database(ctx))
+	pool := h.database(ctx)
+	store := cryptostate.NewPostgres(pool)
 
 	kek := installationKEK(ctx, t, store,
 		"3f1a9c0e5b7d2648a0c3e5f7091b2d4e6a8c0e2f4a6b8d0f1234567890abcdef")
@@ -41,6 +43,20 @@ func TestTheAuthoritiesOfTheFleetLiveInTheDatabaseAndSurviveAHandover(t *testing
 		t.Skipf("this installation keeps %d authorities in the database; its own set is not a test's to write to",
 			len(existing))
 	}
+
+	// An authority row may only be written while the record names the key it
+	// was sealed with, so the record has to name this test's key while it
+	// runs. It is cleared again afterwards, once the rows are gone.
+	switch err := store.SetKEKID(ctx, kek.ID()); {
+	case errors.Is(err, cryptostate.ErrNoRecord):
+		t.Skip("this database has no installation record; there is no installation to hold authorities")
+	case err != nil:
+		t.Fatalf("the record could not be made to name the key encryption key: %v", err)
+	}
+	t.Cleanup(func() {
+		forget := context.WithoutCancel(ctx)
+		_, _ = pool.Exec(forget, `update crypto_installation_state set kek_id = null where singleton`)
+	})
 
 	authorities := cryptostate.NewDBAuthorities(ctx, store, kek)
 	cleanup := func() {

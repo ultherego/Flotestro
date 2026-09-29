@@ -24,11 +24,13 @@ func newMemoryAuthorities() *memoryAuthorities {
 	return &memoryAuthorities{memoryKeys: newMemoryKeys(), retired: map[string][]byte{}}
 }
 
+// ReplaceAuthority is guarded the way Postgres guards it: the row is sealed
+// with the key one replica holds, and the record has to still name that key.
 func (m *memoryAuthorities) ReplaceAuthority(ctx context.Context, row WrappedKey, remove []string) error {
 	if err := m.DeleteAuthorities(ctx, remove); err != nil {
 		return err
 	}
-	return m.PutWrappedKey(ctx, row)
+	return m.PutWrappedKeyUnderRecordedKEK(ctx, row)
 }
 
 func (m *memoryAuthorities) DeleteAuthorities(_ context.Context, keyIDs []string) error {
@@ -158,6 +160,30 @@ func TestAPreparedAuthorityIsToldFromTheSigningOneByItsBlockAndNotByAName(t *tes
 	}
 	if blocks != 1 {
 		t.Errorf("%d of the two authorities carry a moment of preparation", blocks)
+	}
+}
+
+// An authority is sealed with the key one replica holds, like any other row,
+// so a replica left behind by a rewrap must not write one either. A CA nobody
+// can open is a fleet that renews nothing.
+func TestAnAuthorityIsNotWrittenUnderAKeyEncryptionKeyTheInstallationHasLeft(t *testing.T) {
+	ctx := context.Background()
+	store := newMemoryAuthorities()
+	// The installation is wrapped with one key and this replica holds
+	// another. It keeps no authority yet, so nothing it reads tells it so -
+	// a set it can open is not the same as a set it may write to.
+	store.recordNames(testKEK(t, otherKEKHex).ID(), testInstallationID)
+
+	_, err := pki.EnsureTrustFrom(NewDBAuthorities(ctx, store, testKEK(t, testKEKHex)))
+	if !refusedWith(err, CodeKEKRotated) {
+		t.Errorf("the first authority of the fleet was answered %v, expected %s", err, CodeKEKRotated)
+	}
+	rows, err := store.WrappedKeys(ctx, PurposeAgentCA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("the installation holds %d authorities nobody can open", len(rows))
 	}
 }
 

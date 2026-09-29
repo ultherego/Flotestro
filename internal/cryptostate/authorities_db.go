@@ -24,8 +24,10 @@ import (
 type AuthorityKeyStore interface {
 	KeyStore
 	// ReplaceAuthority writes one authority and removes the named ones in a
-	// single transaction. A replica reading in the middle of a handover must
-	// not find two authorities claiming to sign, or none.
+	// single transaction, and only while the installation record still names
+	// the key encryption key the row was sealed with. A replica reading in
+	// the middle of a handover must not find two authorities claiming to
+	// sign, or none - nor one wrapped with a key a rewrap has been past.
 	ReplaceAuthority(ctx context.Context, row WrappedKey, remove []string) error
 	// DeleteAuthorities removes authority rows together.
 	DeleteAuthorities(ctx context.Context, keyIDs []string) error

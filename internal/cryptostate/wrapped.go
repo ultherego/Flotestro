@@ -56,6 +56,15 @@ const (
 // has been cleared of naming another key and another installation.
 const CodeWrappedKeyUnreadable = "wrapped_key_unreadable"
 
+// CodeKEKRotated is the stable code of a write refused because the
+// installation has moved to another key encryption key since this replica
+// loaded the one it holds: a rewrap finished elsewhere while this replica was
+// running. It is kept apart from CodeKEKMismatch, which is a deployment given
+// the wrong key, and from the two codes above, which are rows already written:
+// here nothing was written, and the remedy is to restart this replica onto the
+// key the record now names.
+const CodeKEKRotated = "kek_rotated"
+
 // CodeWrappedKeyInstallationMismatch is the stable code of a row that belongs
 // to another installation. It is kept apart from CodeWrappedKeyUnreadable
 // because the two are fixed differently: a damaged row is restored from a
@@ -99,10 +108,18 @@ type KeyStore interface {
 	// WrappedKeys returns every key of a purpose, retired ones included:
 	// a retired key still opens what it sealed.
 	WrappedKeys(ctx context.Context, purpose string) ([]WrappedKey, error)
-	// PutWrappedKey writes a key that must not exist yet. A key id already
-	// taken comes back as ErrKeyExists, so that a caller racing another
-	// replica can read what is there and decide.
-	PutWrappedKey(ctx context.Context, key WrappedKey) error
+	// PutWrappedKeyUnderRecordedKEK writes a key that must not exist yet,
+	// and only while the installation record still names the key encryption
+	// key the row was sealed with. A key id already taken comes back as
+	// ErrKeyExists, so that a caller racing another replica can read what is
+	// there and decide; a record that has moved on comes back as
+	// CodeKEKRotated and no row is written.
+	//
+	// The check and the insert are one transaction because a replica seals
+	// with the key it loaded at start: a rewrap that finished in between
+	// would leave this row wrapped with a key the rewrap has already been
+	// past, and nothing would ever come back for it.
+	PutWrappedKeyUnderRecordedKEK(ctx context.Context, key WrappedKey) error
 	// WrappedKey reads one key by name.
 	WrappedKey(ctx context.Context, keyID string) (WrappedKey, error)
 	// RetireWrappedKey marks a key as no longer wrapping anything new. A key

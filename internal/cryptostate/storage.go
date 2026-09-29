@@ -293,9 +293,13 @@ func installationColumn(value string) *string {
 	return &value
 }
 
-// PutWrappedKey implements KeyStore. The primary key does the refusing: two
+// PutWrappedKey is the plain insert. The primary key does the refusing: two
 // replicas of one installation initialising at once both insert, and exactly
 // one of them wins.
+//
+// It checks nothing about the record, so it is not what a replica writes with:
+// a replica seals with the key it loaded at start and goes through
+// PutWrappedKeyUnderRecordedKEK.
 func (p *Postgres) PutWrappedKey(ctx context.Context, key WrappedKey) error {
 	_, err := p.pool.Exec(ctx, `
 		insert into crypto_wrapped_keys
@@ -308,6 +312,76 @@ func (p *Postgres) PutWrappedKey(ctx context.Context, key WrappedKey) error {
 		return fmt.Errorf("%w: %s", ErrKeyExists, key.KeyID)
 	}
 	return err
+}
+
+// PutWrappedKeyUnderRecordedKEK implements KeyStore: the write a replica makes
+// with the key encryption key it loaded at start.
+//
+// The record is read for share and the row inserted in the same transaction,
+// so a rewrap running at the same time is serialised against this write rather
+// than racing it. Either the rewrap waits, and the row it then finds still
+// wrapped with the old key stops it; or it goes first, and the record it
+// leaves behind names another key, which is what this refuses on.
+func (p *Postgres) PutWrappedKeyUnderRecordedKEK(ctx context.Context, key WrappedKey) error {
+	return p.inTransaction(ctx, func(tx pgx.Tx) error {
+		if err := recordStillNames(ctx, tx, key); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `
+			insert into crypto_wrapped_keys
+				(key_id, purpose, kek_id, installation_id, envelope_version, nonce, ciphertext)
+			values ($1, $2, $3, $4, $5, $6, $7)`,
+			key.KeyID, key.Purpose, key.KEKID, installationColumn(key.InstallationID),
+			key.EnvelopeVersion, key.Nonce, key.Ciphertext)
+		var unique *pgconn.PgError
+		if errors.As(err, &unique) && unique.Code == "23505" {
+			return fmt.Errorf("%w: %s", ErrKeyExists, key.KeyID)
+		}
+		return err
+	})
+}
+
+// recordStillNames holds the installation record still for the rest of the
+// transaction and says whether it is the one this row was sealed for.
+//
+// The share lock is the whole of it: a rewrap changes the record before it
+// touches a single row, so a writer holding this lock cannot be overtaken by
+// one. Both take the record first, so neither waits on the other's rows.
+func recordStillNames(ctx context.Context, tx pgx.Tx, key WrappedKey) error {
+	var recorded *string
+	var installation string
+	err := tx.QueryRow(ctx, `
+		select kek_id, installation_id::text from crypto_installation_state
+		 where singleton for share`).Scan(&recorded, &installation)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fatal(CodeKEKRotated, fmt.Sprintf(
+			"the key %s was sealed with %s and this database has no installation record",
+			key.KeyID, key.KEKID), nil)
+	}
+	if err != nil {
+		return fmt.Errorf("the installation record: %w", err)
+	}
+	if installation != key.InstallationID {
+		return fatal(CodeWrappedKeyInstallationMismatch, fmt.Sprintf(
+			"the key %s was sealed for the installation %s and this database describes %s",
+			key.KeyID, wrappedKeyOwner(key.InstallationID), installation), nil)
+	}
+	if installationOf(recorded) != key.KEKID {
+		return fatal(CodeKEKRotated, fmt.Sprintf(
+			"the key %s was sealed with %s and the installation is now wrapped with %s; "+
+				"the row would open for nobody",
+			key.KeyID, key.KEKID, recordedKEK(recorded)), nil)
+	}
+	return nil
+}
+
+// recordedKEK names what the record says, for an operator reading the refusal.
+// A record that names none is an installation whose keys went back to files.
+func recordedKEK(recorded *string) string {
+	if name := installationOf(recorded); name != "" {
+		return name
+	}
+	return "no key encryption key at all"
 }
 
 // RetireWrappedKey implements KeyStore. A key already retired keeps the moment
@@ -548,6 +622,11 @@ func (p *Postgres) inTransaction(ctx context.Context, do func(pgx.Tx) error) err
 // installation has two authorities that sign, or none.
 func (p *Postgres) ReplaceAuthority(ctx context.Context, row WrappedKey, remove []string) error {
 	return p.inTransaction(ctx, func(tx pgx.Tx) error {
+		// An authority is sealed with the key this replica loaded at start,
+		// like every other row, so it is written under the same guard.
+		if err := recordStillNames(ctx, tx, row); err != nil {
+			return err
+		}
 		if err := deleteAuthorities(ctx, tx, remove); err != nil {
 			return err
 		}
