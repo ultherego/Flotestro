@@ -363,16 +363,18 @@
       <thead><tr><th><code>FLOTESTRO_HELPER_CAPABILITY_MODE</code></th><th>Żądanie bez capability</th><th>Żądanie z błędnym</th></tr></thead>
       <tbody>
         <tr><td><code>observe</code></td><td>wykonuje się i trafia do logu</td><td>wykonuje się, a niepowodzenie trafia do logu</td></tr>
-        <tr><td><code>prefer</code> (domyślnie)</td><td>wykonuje się, liczone jako legacy agent</td><td>odmowa</td></tr>
-        <tr><td><code>enforce</code></td><td><code class="refusal">capability_required</code></td><td>odmowa</td></tr>
+        <tr><td><code>prefer</code></td><td>wykonuje się, liczone jako legacy agent</td><td>odmowa</td></tr>
+        <tr><td><code>enforce</code> (domyślnie)</td><td><code class="refusal">capability_required</code></td><td>odmowa</td></tr>
       </tbody>
     </table>
     </div>
 
-    <p>Odczyty nigdy nie wymagają capability. <code>enforce</code> włącza się na
-    hoście wtedy, gdy panelowe
-    <code>flotestro_helper_capability_total{outcome="legacy_agent"}</code>
-    stoi na zerze. Okno ważności jest krótkie i zależy od klasy akcji:
+    <p>Odczyty nigdy nie wymagają capability. <code>prefer</code> trafia do pliku
+    hosta wyłącznie przy aktualizacji hosta zainstalowanego przed capability;
+    takie hosty wyławia <code>GET /api/v1/hosts?helper_mode=prefer</code> i
+    panelowe <code>flotestro_helper_capability_total{outcome="legacy_agent"}</code>,
+    a każdy z nich wraca na <code>enforce</code>, gdy jego agent zacznie
+    przekazywać capability. Okno ważności jest krótkie i zależy od klasy akcji:
     domyślnie 5 minut, 10 dla transakcji pakietowej, 2 dla destrukcyjnej
     operacji na dyskach. Helper dopuszcza 30 sekund rozjazdu zegarów i odmawia
     oknu dłuższemu, niż pozwala klasa, przez

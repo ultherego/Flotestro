@@ -368,15 +368,18 @@
       <thead><tr><th><code>FLOTESTRO_HELPER_CAPABILITY_MODE</code></th><th>A request with no capability</th><th>A request with a bad one</th></tr></thead>
       <tbody>
         <tr><td><code>observe</code></td><td>runs, and is logged</td><td>runs, and the failure is logged</td></tr>
-        <tr><td><code>prefer</code> (default)</td><td>runs, counted as a legacy agent</td><td>refused</td></tr>
-        <tr><td><code>enforce</code></td><td><code class="refusal">capability_required</code></td><td>refused</td></tr>
+        <tr><td><code>prefer</code></td><td>runs, counted as a legacy agent</td><td>refused</td></tr>
+        <tr><td><code>enforce</code> (default)</td><td><code class="refusal">capability_required</code></td><td>refused</td></tr>
       </tbody>
     </table>
     </div>
 
-    <p>Reads never need a capability. Set <code>enforce</code> on a host once the
-    panel's <code>flotestro_helper_capability_total{outcome="legacy_agent"}</code>
-    stays at zero. The validity window is short and depends on the class of the
+    <p>Reads never need a capability. Only an upgrade of a host installed before
+    the capability writes <code>prefer</code> into that host's own file; find
+    those hosts with <code>GET /api/v1/hosts?helper_mode=prefer</code> and the
+    panel's <code>flotestro_helper_capability_total{outcome="legacy_agent"}</code>,
+    and put each one back on <code>enforce</code> once its agent forwards the
+    capability. The validity window is short and depends on the class of the
     action: 5 minutes by default, 10 for a package transaction, 2 for a
     destructive storage operation. The helper allows 30 seconds of clock skew,
     and refuses a longer window than its class permits with
