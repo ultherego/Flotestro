@@ -178,7 +178,7 @@
 <table>
 <thead><tr><th>Sekcja</th><th>Trasy</th></tr></thead>
 <tbody>
-<tr><td><a href="#routes-service">Endpointy serwisowe</a></td><td>13</td></tr>
+<tr><td><a href="#routes-service">Endpointy serwisowe</a></td><td>15</td></tr>
 <tr><td><a href="#routes-caller">Logowanie i własne rekordy wywołującego</a></td><td>8</td></tr>
 <tr><td><a href="#routes-fleet">Flota w skrócie</a></td><td>7</td></tr>
 <tr><td><a href="#routes-hosts">Hosty</a></td><td>59</td></tr>
@@ -207,8 +207,10 @@
 <tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/setup/test-directory</code></td><td><code>identity.read</code></td></tr>
 <tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/setup/test-oidc</code></td><td><code>settings.read</code>, <code>principal.manage</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/status</code></td><td><code>settings.read</code>, <code>principal.manage</code></td></tr>
-<tr><td><span class="badge method method-get">GET</span></td><td><code>/healthz</code></td><td><span class="caption">brak &mdash; endpoint odpowiada bez tożsamości</span></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/healthz</code><br><span class="caption">Liveness: proces odpowiada, bazy nikt nie pyta.</span></td><td><span class="caption">brak &mdash; endpoint odpowiada bez tożsamości</span></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/livez</code><br><span class="caption">Ta sama odpowiedź co <code>/healthz</code>, pod nazwą, której szuka orkiestrator.</span></td><td><span class="caption">brak &mdash; endpoint odpowiada bez tożsamości</span></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/metrics</code></td><td><code>metrics.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/readyz</code><br><span class="caption">Readiness: <code>503</code> <code>database_unavailable</code>, gdy pula nie dopinguje bazy, <code>database_read_only</code> na standby, <code>crypto_state_stale</code> na instancji zapóźnionej względem rekordu kluczy instalacji. To ten endpoint mówi, że instalacja obsługuje ruch.</span></td><td><span class="caption">brak &mdash; endpoint odpowiada bez tożsamości</span></td></tr>
 </tbody></table></div>
 <h3 id="routes-caller">Logowanie i własne rekordy wywołującego</h3>
 <div class="table-scroll">
@@ -508,7 +510,7 @@
 <tr><td><code>actor_resource_id</code></td><td><code>string</code></td><td>Host, relay albo kampania, które wykonały działanie.</td></tr>
 <tr><td><code>action</code></td><td><code>string</code></td><td></td></tr>
 <tr><td><code>action_prefix</code></td><td><code>string</code></td><td>Początek nazwy akcji; job. zostawia wszystkie zdarzenia dotyczące zadania.</td></tr>
-<tr><td><code>outcome</code></td><td><code>string</code></td><td>success, failure albo denied.</td></tr>
+<tr><td><code>outcome</code></td><td><code>string</code></td><td>success, failure, denied albo started - zmiana zapisana, zanim ją wykonano.</td></tr>
 <tr><td><code>since</code></td><td><code>string</code></td><td>RFC 3339; zdarzenia od tego momentu włącznie.</td></tr>
 <tr><td><code>until</code></td><td><code>string</code></td><td>RFC 3339; zdarzenia sprzed tego momentu.</td></tr>
 <tr><td><code>limit</code></td><td><code>integer</code></td><td>Rozmiar strony: domyślnie 100, najwyżej 500.</td></tr>
@@ -599,6 +601,7 @@
 <tr><td><code>failure_domain</code></td><td><code>string</code></td><td>Domena awarii, do której operator przypisał hosta.</td></tr>
 <tr><td><code>team</code></td><td><code>string</code></td><td>Identyfikator zespołu; zostawia jego hosty. Słowo none zostawia hosty, których nikt nie przypisał do żadnego zespołu.</td></tr>
 <tr><td><code>capability</code></td><td><code>string</code></td><td>Adapter, który host musi mieć dostępny, na przykład packages.apt.</td></tr>
+<tr><td><code>helper_mode</code></td><td><code>string</code></td><td>Tryb, w którym chodzi rootowy helper hosta: enforce, prefer, observe albo unknown dla hosta, który się nie odezwał. Host poza enforce wykona zmieniające żądanie, które przyjdzie bez podpisanego przez panel capability.</td></tr>
 <tr><td><code>connection_refusal</code></td><td><code>string</code></td><td>Powód, dla którego brama ostatnio odprawiła hosta od czasu jego ostatniej sesji: certificate_expired, certificate_not_yet_valid, unknown_certificate, revoked_certificate, identity_mismatch albo lifecycle_&lt;state&gt;.</td></tr>
 <tr><td><code>sort</code></td><td><code>string</code></td><td>Porządek listy w postaci column albo column:desc; dostępne kolumny to agent_version, connection_state, environment, failed_units, hostname, last_seen_at, lifecycle_state, owner, pending_security_updates, pending_updates, site. Domyślnie hostname rosnąco; nieznana kolumna kończy się odmową invalid_sort, a kursor wydany przy jednym porządku zostanie odrzucony przy innym. Licznik, którego host nie zgłosił, sortuje się poniżej zera, a host nigdy niewidziany przed każdym widzianym.</td></tr>
 <tr><td><code>limit</code></td><td><code>integer</code></td><td>Rozmiar strony: domyślnie 100, najwyżej 500.</td></tr>
@@ -615,7 +618,7 @@
 <tr><td><code>actor_resource_id</code></td><td><code>string</code></td><td>Host, relay albo kampania, które wykonały działanie.</td></tr>
 <tr><td><code>action</code></td><td><code>string</code></td><td></td></tr>
 <tr><td><code>action_prefix</code></td><td><code>string</code></td><td>Początek nazwy akcji; job. zostawia wszystkie zdarzenia dotyczące zadania.</td></tr>
-<tr><td><code>outcome</code></td><td><code>string</code></td><td>success, failure albo denied.</td></tr>
+<tr><td><code>outcome</code></td><td><code>string</code></td><td>success, failure, denied albo started - zmiana zapisana, zanim ją wykonano.</td></tr>
 <tr><td><code>since</code></td><td><code>string</code></td><td>RFC 3339; zdarzenia od tego momentu włącznie.</td></tr>
 <tr><td><code>until</code></td><td><code>string</code></td><td>RFC 3339; zdarzenia sprzed tego momentu.</td></tr>
 <tr><td><code>limit</code></td><td><code>integer</code></td><td>Rozmiar strony: domyślnie 100, najwyżej 500.</td></tr>
