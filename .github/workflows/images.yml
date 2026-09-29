@@ -3,10 +3,14 @@
 #
 # A release of the images is a supply chain and not a build. The three images
 # of docker/Containerfile are built for both official platforms, pushed under
-# a tag that is never rewritten, described by a bill of materials and a
+# a candidate tag nobody follows, described by a bill of materials and a
 # provenance statement, signed where the run has an identity to sign with,
-# and finally reported as digests - because a digest is what a deployment
-# pins and a tag is only what a human reads.
+# checked against that signature, and only then given the names a deployment
+# reads - the version, the commit, the minor alias, latest - by moving them
+# onto the digest that verified. The order is the whole of it: a run that
+# dies half way leaves no name pointing at an image nothing attests to. The
+# digests are reported last, because a digest is what a deployment pins and
+# a tag is only what a human reads.
 #
 # The packages of a release are built by release.yml from the same tag. The
 # two are deliberately separate workflows: a machine that can build an .rpm
@@ -410,10 +414,21 @@ jobs:
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
             version="${GITHUB_REF_NAME#v}"
             push=true
-            # The full SemVer tag and the commit tag are never rewritten:
-            # that is what production pins, beside the digest.
-            tags="$repository:$version,$repository:sha-${commit:0:12}"
-            # A stable release also moves latest and the minor alias, so that
+            # The build goes up under a candidate tag and nothing else. It is
+            # a name with no readers: no deployment pins it, no documentation
+            # mentions it, and a re-run of the same commit simply writes it
+            # again. Its only job is to give the digest somewhere to exist
+            # while it is signed and the signature is checked, before any name
+            # a human or a host follows points at it.
+            candidate="$repository:candidate-${commit:0:12}"
+            tags="$candidate"
+            # What the promotion moves afterwards, and in this order: least
+            # read first, so that a failure part way through stops short of
+            # the name most of the fleet follows. The full SemVer tag and the
+            # commit tag are never rewritten - that is what production pins,
+            # beside the digest.
+            promote="$repository:$version,$repository:sha-${commit:0:12}"
+            # A stable release also moves the minor alias and latest, so that
             # somebody who has just found the project can start without first
             # having to learn which version is current. A pre-release moves
             # neither: a host that follows latest must never be handed one.
@@ -421,12 +436,14 @@ jobs:
             case "$version" in
             *-*) ;;
             *)   stable=true
-                 tags="$tags,$repository:latest,$repository:${version%.*}" ;;
+                 promote="$promote,$repository:${version%.*},$repository:latest" ;;
             esac
           else
             version="0.0.0-sha-${commit:0:12}"
             push=false
             stable=false
+            candidate=""
+            promote=""
             tags="$repository:$version"
           fi
           {
@@ -439,6 +456,8 @@ jobs:
             echo "epoch=$epoch"
             echo "push=$push"
             echo "tags=$tags"
+            echo "candidate=$candidate"
+            echo "promote=$promote"
           } >> "$GITHUB_OUTPUT"
           echo "$repository $version ($commit, $created), push=$push"
 
@@ -490,6 +509,9 @@ jobs:
           # daemon, and there is nothing here to load it for. What is being
           # proved is that the Containerfile builds at all.
           push: ${{ steps.facts.outputs.push == 'true' }}
+          # On a tag this is the candidate and nothing else. The names a
+          # deployment reads are moved onto the digest further down, once the
+          # signature over it has been checked.
           tags: ${{ steps.facts.outputs.tags }}
           build-args: |
             VERSION=${{ steps.facts.outputs.version }}
@@ -576,6 +598,7 @@ jobs:
         if: steps.facts.outputs.push == 'true'
 
       - name: Sign the manifest
+        id: sign
         # Keyless: the signature is made against the identity of this
         # workflow, recorded in the public transparency log, and there is no
         # private key anywhere to be stolen or rotated. The identity comes
@@ -601,12 +624,17 @@ jobs:
             fi
             echo "::warning title=Unsigned image::this run received no OIDC identity, so $REFERENCE@$DIGEST is published without a cosign signature"
             echo "the run has no OIDC identity; nothing was signed and nothing pretends to be"
+            # Said out loud as an output, because the check below has to know
+            # the difference between "verified" and "there was nothing to
+            # verify" and must never treat the second as the first.
+            echo "signed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # --recursive: the signature covers the multi-platform index and
           # each platform manifest under it, so a deployment that pins the
           # index and one that pins a platform both have something to verify.
           cosign sign --yes --recursive "$REFERENCE@$DIGEST"
+          echo "signed=true" >> "$GITHUB_OUTPUT"
           echo "signed $REFERENCE@$DIGEST"
 
           # The CycloneDX bills are attached to the platform they describe.
@@ -625,6 +653,127 @@ jobs:
             done
           done
 
+      - name: The signature is checked before any name moves
+        # A signature nobody checks is a signature nobody can rely on: until
+        # something reads it back, "cosign sign succeeded" only says that a
+        # command exited zero. It is read back here, against the same digest
+        # that was just signed, because this is the last moment at which no
+        # tag a deployment follows points at the image - a signature that does
+        # not verify stops the run while the registry still serves the release
+        # before this one.
+        #
+        # The identity is taken out of the token rather than assembled from
+        # this workflow's name. The certificate carries job_workflow_ref, the
+        # workflow the signing job actually came from, and a tag reaches this
+        # file through the release, which calls it: the caller is release.yml
+        # and the signer is this file. Guessing the wrong one would turn a
+        # good signature into a red job - and loosening the guess until it
+        # passed would leave a check that proves nothing at all.
+        if: steps.sign.outputs.signed == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          REFERENCE: ${{ steps.facts.outputs.repository }}
+        run: |
+          set -euo pipefail
+          token="$(curl --silent --show-error --fail \
+            --header "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sigstore" | jq -r '.value')"
+          # The middle field of the token is its claims, base64url and without
+          # the padding base64 insists on.
+          claims="$(printf '%s' "$token" | cut -d. -f2 | tr '_-' '/+')"
+          case $(( ${#claims} % 4 )) in
+            2) claims="$claims==" ;;
+            3) claims="$claims=" ;;
+          esac
+          identity="https://github.com/$(printf '%s' "$claims" | base64 -d | jq -r '.job_workflow_ref')"
+          case "$identity" in
+            https://github.com/*/.github/workflows/*@*) ;;
+            *) echo "the token names no signing workflow, so there is nothing to verify against: $identity" >&2
+               exit 1 ;;
+          esac
+          if ! cosign verify \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity "$identity" \
+            "$REFERENCE@$DIGEST" > /dev/null; then
+            echo "::error title=Signature does not verify::$REFERENCE@$DIGEST does not verify as signed by $identity; no tag was moved" >&2
+            exit 1
+          fi
+          echo "verified $REFERENCE@$DIGEST as signed by $identity"
+
+      - name: The names a deployment reads are moved onto the verified digest
+        # Promotion, and nothing is rebuilt to do it: every name is pointed at
+        # the one manifest that was built, signed and verified a step ago. The
+        # order is the one the facts step wrote - version, commit, minor
+        # alias, latest - and it is least read first on purpose.
+        #
+        # imagetools create with one index as its source copies that index
+        # byte for byte, so the digest comes out the same - but "so it should"
+        # is not a thing to publish on. Each move is therefore read back
+        # before the next one starts, because a copy that had re-serialised
+        # the manifest would be a name pointing at a digest nothing verified,
+        # and the run has to stop at that name rather than carry the mistake
+        # all the way to latest.
+        #
+        # This is the window that remains, and it cannot be closed here: a
+        # registry has no way to move four names in one transaction, so a run
+        # that dies between two of them leaves some names on the new release
+        # and some on the one before. What it costs is bounded by the order -
+        # the worst case is a version tag that has moved and a latest that has
+        # not, which is a fleet still on the old release and an operator who
+        # can pin the new one. The names that did move are therefore printed
+        # in the failure, because that is the state somebody has to reason
+        # about. A whole re-run will not repair it: the version tag has moved,
+        # and the check further up refuses to republish it. What repairs it is
+        # pointing the names still missing at the digest in the error, which is
+        # the digest this run verified.
+        if: steps.facts.outputs.push == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          REFERENCE: ${{ steps.facts.outputs.repository }}
+          PROMOTE: ${{ steps.facts.outputs.promote }}
+          SIGNED: ${{ steps.sign.outputs.signed }}
+        run: |
+          set -euo pipefail
+          IFS=',' read -r -a wanted <<< "$PROMOTE"
+          moved=()
+          stop() {
+            echo "::error title=The tags moved only part of the way::$1" >&2
+            if [ ${#moved[@]} -gt 0 ]; then
+              echo "these already point at $DIGEST: ${moved[*]}" >&2
+            else
+              echo "no tag moved; the registry still serves the release before this one" >&2
+            fi
+            exit 1
+          }
+          for tag in "${wanted[@]}"; do
+            [ -n "$tag" ] || continue
+            docker buildx imagetools create --tag "$tag" "$REFERENCE@$DIGEST" \
+              || stop "$tag could not be pointed at $DIGEST"
+            # The digest of a manifest is the sha256 of its own bytes, so what
+            # the registry now serves under the name is computed from what it
+            # hands back.
+            published="sha256:$(docker buildx imagetools inspect --raw "$tag" \
+              | sha256sum | cut -d' ' -f1)"
+            if [ "$published" != "$DIGEST" ]; then
+              stop "$tag now serves $published and not the verified $DIGEST"
+            fi
+            moved+=("$tag")
+            echo "$tag -> $DIGEST"
+          done
+          if [ "${SIGNED:-false}" != true ]; then
+            echo "::warning title=Unsigned image published::$REFERENCE@$DIGEST carries no signature; the names moved because this is a pre-release, which is allowed to ship unsigned"
+          fi
+          {
+            echo "### ${REFERENCE##*/}"
+            echo
+            echo 'Moved onto the verified digest:'
+            echo
+            echo '```'
+            echo "$DIGEST"
+            printf '  %s\n' "${moved[@]}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: The digest of this image, read back from the registry
         if: steps.facts.outputs.push == 'true'
         env:
@@ -635,6 +784,8 @@ jobs:
           # Asked of the registry rather than taken from the build: what a
           # deployment pulls is what the registry serves under that tag, and the
           # two differing is exactly the case a pinned digest exists to catch.
+          # The version tag is the one that was promoted, so this is also the
+          # last word on whether the promotion above landed where it said.
           # The digest of a manifest is the sha256 of its own bytes, so it is
           # computed here rather than read out of a template field whose name
           # only a real tag would ever exercise.
@@ -645,7 +796,7 @@ jobs:
             *) echo "the registry gave no digest for $REFERENCE" >&2; exit 1 ;;
           esac
           if [ "$published" != "$BUILT" ]; then
-            echo "the registry serves $published under $REFERENCE; the build pushed $BUILT" >&2
+            echo "the registry serves $published under $REFERENCE; the run built, signed and verified $BUILT" >&2
             exit 1
           fi
           mkdir -p "$RUNNER_TEMP/digests"
