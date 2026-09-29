@@ -104,7 +104,43 @@ func (o *cryptoOptions) parse(args []string) error {
 	if o.backupTo == "" {
 		return errors.New("no backup directory was named; pass -backup-to")
 	}
+	// A copy that lives in the directory being emptied is not a copy:
+	// forget-files puts the key files in the backup directory and then removes
+	// them from the state directory.
+	inside, err := within(o.files.StateDir, o.backupTo)
+	if err != nil {
+		return err
+	}
+	if inside {
+		return fmt.Errorf("the backup directory %s is inside the state directory %s; "+
+			"a copy kept where the originals are is not a copy", o.backupTo, o.files.StateDir)
+	}
 	return nil
+}
+
+// within says whether one path lies inside another, with both resolved as far
+// as the filesystem allows: a symbolic link into the state directory is still
+// the state directory.
+func within(outer, inner string) (bool, error) {
+	outerPath, err := filepath.Abs(outer)
+	if err != nil {
+		return false, err
+	}
+	innerPath, err := filepath.Abs(inner)
+	if err != nil {
+		return false, err
+	}
+	if resolved, err := filepath.EvalSymlinks(outerPath); err == nil {
+		outerPath = resolved
+	}
+	if resolved, err := filepath.EvalSymlinks(innerPath); err == nil {
+		innerPath = resolved
+	}
+	relative, err := filepath.Rel(outerPath, innerPath)
+	if err != nil {
+		return false, nil
+	}
+	return relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)), nil
 }
 
 // open connects to the fleet database and reads the key encryption key.
