@@ -103,6 +103,7 @@
       <li><a href="#image">Control plane z obrazu</a></li>
       <li><a href="#admin">Pierwszy administrator</a></li>
       <li><a href="#backup">Para kopii zapasowej</a></li>
+      <li><a href="#kek">Key encryption key</a></li>
       <li><a href="#hosts">Hosty</a></li>
       <li><a href="#relay">Site za relayem</a></li>
       <li><a href="#airgap">Profil odcięty od sieci</a></li>
@@ -426,6 +427,107 @@ docker compose --profile restore run --rm admin-restore restore 20260919T101500Z
       działa.</p>
     </div>
 
+    <h2 id="kek">Key encryption key</h2>
+
+    <p>Klucze prywatne instalacji - klucze, którymi magazyn sekretów pieczętuje
+    swoje wartości, klucz prywatny fleet CA i CA przygotowanego do przejęcia
+    roli, klucz podpisujący capabilities root helpera - mogą leżeć jako wiersze
+    w bazie zamiast jako pliki w katalogu stanu. Każdy wiersz jest zapieczętowany
+    <em>key encryption key</em> (KEK), który wdrożenie montuje jako sekret.
+    Wiersze jadą razem z bazą, więc każda replika czyta te same klucze; klucz
+    nie jedzie, więc sam dump nie otwiera niczego.</p>
+
+    <p>Nic z tego nie dzieje się samo. Panel nie migruje przy starcie, nie robi
+    rewrapu według harmonogramu i nigdy nie usuwa pliku z kluczem. Pełna
+    procedura to runbook
+    <a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/key-encryption-key.md"><code>docs/runbooks/key-encryption-key.md</code></a>;
+    tu jest to, co warto wiedzieć, zanim się do niej siądzie.</p>
+
+    <h3>Sam klucz</h3>
+
+    <p>Przyjmowany jest dokładnie jeden format: 64 znaki szesnastkowe, czyli 32
+    bajty, z co najwyżej jednym końcowym znakiem nowej linii. Zła długość, znak
+    spoza zakresu hex, druga linia albo pusty plik są odrzucane, a nie naprawiane,
+    bo po cichu poprawiony klucz to klucz, którego nikt nie odtworzy.</p>
+
+<pre><code>umask 077
+openssl rand -hex 32 &gt; flotestro-kek</code></pre>
+
+    <p>Plik jest czytany bez podążania za dowiązaniem i oceniany na otwartym
+    deskryptorze. Musi to być zwykły plik, nie symlink, którego właścicielem jest
+    root albo konto samego panelu, z trybem <code>0400</code>, nieczytelny i
+    niezapisywalny dla grupy ani dla nikogo innego. Panel szuka go pod
+    <code>/run/secrets/flotestro-kek</code>; inną ścieżkę podaje się przez
+    <code>-kek-file</code> albo <code>FLOTESTRO_KEK_FILE</code>. Konfiguruje się
+    tylko ścieżkę: nie ma flagi ani zmiennej środowiskowej, która niosłaby sam
+    klucz.</p>
+
+    <div class="note note--warning">
+      <p class="note__title">Backup to trzy rzeczy, trzymane osobno</p>
+      <p>Backup, który da się odtworzyć, to dump bazy <strong>oraz</strong> key
+      encryption key <strong>oraz</strong> identyfikator instalacji. Dowolne dwie
+      z trzech to nie jest backup. Klucz należy do innego backupu niż dump,
+      trzymanego przez inne osoby.</p>
+    </div>
+
+    <h3>Cztery polecenia</h3>
+
+    <p>To podpolecenia <code>flotestro-control-plane crypto</code>, uruchamiane z
+    hosta, który sięga do bazy floty (binarka z obrazu albo kontener admin-tools),
+    po świeżym <code>pg_dump</code>. Każde z nich przyjmuje <code>--dry-run</code>,
+    który wypisuje to, co wypisze prawdziwe uruchomienie, i niczego nie zmienia,
+    oraz wymaga <code>--backup-to</code> - katalogu, do którego zapisywany jest
+    stan sprzed zmiany; polecenie nie nadpisze pliku, który tam znajdzie.</p>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Polecenie</th><th>Co robi</th></tr></thead>
+      <tbody>
+        <tr><td><code>crypto import-state</code></td><td>Przenosi klucze znalezione w katalogu stanu do bazy. Każdy klucz jest opakowany i odczytany z powrotem, zanim cokolwiek zostanie zapisane, a wszystkie trafiają do bazy razem z zapisem instalacji w jednej transakcji: jeden klucz, którego nie da się odczytać, zatrzymuje całą migrację. Pliki <strong>nie</strong> są usuwane; dopóki nie zdecydujesz inaczej, to droga powrotu. Potem zrestartuj panel z zamontowanym kluczem.</td></tr>
+        <tr><td><code>crypto revert-state</code></td><td>Przenosi klucze z powrotem do plików. Pliki powstają najpierw, wiersze znikają dopiero po nich, więc przerwany revert zostawia klucze w bazie, a nie nigdzie.</td></tr>
+        <tr><td><code>crypto rewrap-kek --new-kek-file <var>ścieżka</var></code></td><td>Rotuje KEK. Same klucze się nie zmieniają - zmienia się tylko opakowanie - więc da się to zrobić przy działającym panelu. Wszystkie wiersze i zapis instalacji przechodzą razem. Potem zamontuj nowy klucz jako <code>/run/secrets/flotestro-kek</code> na każdej replice i zrestartuj je; replika, która wciąż ma stary klucz, odmówi startu z <code>kek_mismatch</code>.</td></tr>
+        <tr><td><code>crypto forget-files -expect-revision <var>rewizja</var> -confirm-installation <var>id-instalacji</var></code></td><td>Usuwa pliki z kluczami, a tym samym zamyka drogę powrotu. Odmawia przy pierwszej z sześciu kontroli, która się nie powiedzie (migracja jest skończona i tym kluczem; każdy klucz otwiera się z bazy i zgadza z plikiem; znacznik w katalogu stanu wskazuje tę instalację; stan kryptograficzny nadal stoi na rewizji, którą podałeś; powtórzyłeś identyfikator instalacji; a ostrzeżenie o tym, co przestanie działać, jest wypisane przed usunięciem). Rewizję i identyfikator znajdziesz w bloku <code>crypto</code> odpowiedzi <code>GET /api/v1/status</code>.</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p>Backup zrobiony przed rewrapem trzyma wiersze takie, jakie były; otwiera je
+    stary klucz i żaden inny, więc trzymaj go, dopóki każda replika nie chodzi
+    na nowym. Żeby zobaczyć, gdzie instalacja stoi, sprawdź blok
+    <code>crypto</code> w <code>GET /api/v1/status</code>: <code>provider</code>
+    to <code>local-sealed</code>, dopóki klucze są plikami, i
+    <code>db-sealed</code>, gdy są wierszami - wtedy blok niesie też
+    <code>kek_id</code>.</p>
+
+    <div class="note note--refusal">
+      <p class="note__title"><code>forget-files</code> to nie secure erase</p>
+      <p>Pliki są kopiowane do katalogu z backupem, zanim znikną. Samo polecenie
+      robi potem <strong>remove i unlink</strong> i synchronizuje katalogi. Na SSD,
+      na systemie plików copy-on-write albo na storage sieciowym to nie jest
+      gwarantowane fizyczne skasowanie bajtów i nic tu nie twierdzi inaczej. Jeśli
+      materiał musi być dowodnie nie do odzyskania, to jest własność storage'u, a
+      nie tego polecenia. Po nim panel sprzed przeniesienia kluczy do bazy nie
+      wystartuje na tej instalacji bez backupu tych plików.</p>
+    </div>
+
+    <h3>Odmowy</h3>
+
+    <p>Start z kluczami w bazie odmawia, niczego nie zmieniając, na pięć sposobów.
+    Zły klucz to nie jest sytuacja do rollbacku: zamontuj właściwy.</p>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Kod</th><th>Kiedy</th></tr></thead>
+      <tbody>
+        <tr><td><code class="refusal">kek_file_missing</code></td><td>Pod ścieżką, którą wskazuje wdrożenie, nie ma pliku.</td></tr>
+        <tr><td><code class="refusal">kek_file_unsafe</code></td><td>Plik jest linkiem, nie jest zwykłym plikiem, należy do kogoś innego albo jest czytelny lub zapisywalny dla grupy albo kogokolwiek innego.</td></tr>
+        <tr><td><code class="refusal">kek_file_malformed</code></td><td>Zawartość to nie 64 znaki szesnastkowe z co najwyżej jednym końcowym znakiem nowej linii.</td></tr>
+        <tr><td><code class="refusal">kek_mismatch</code></td><td>Klucz w pliku nie jest tym, którym opakowano klucze instalacji, np. replika, która wciąż trzyma klucz sprzed rotacji.</td></tr>
+        <tr><td><code class="refusal">wrapped_key_unreadable</code></td><td>Wiersz nie otwiera się kluczem, który trzyma wdrożenie, choć twierdzi, że został nim opakowany: został zmieniony albo ma postać, której ten panel nie czyta.</td></tr>
+      </tbody>
+    </table>
+    </div>
+
     <h2 id="hosts">Hosty</h2>
 
     <p>Panel generuje dokładne polecenia dla każdego hosta i każdej rodziny
@@ -727,6 +829,7 @@ docker compose --profile airgap up -d</code></pre>
         <tr><td><code class="refusal">duplicate_machine_id</code>, <code class="refusal">machine_id_mismatch</code></td><td>Maszyna jest już we flocie pod innym hostem albo token nie pasuje do tej maszyny.</td></tr>
         <tr><td><code class="refusal">schema_behind</code>, <code class="refusal">schema_ahead</code></td><td>Schemat binarki jest starszy albo nowszy niż schemat bazy.</td></tr>
         <tr><td><code class="refusal">secrets_key_unavailable</code>, <code class="refusal">issuer_key_unavailable</code>, <code class="refusal">pki_state_mismatch</code>, <code class="refusal">crypto_state_ambiguous</code></td><td>Stan kryptograficzny instalacji nie nadaje się do użycia; zobacz <a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/db-restore.md">runbook odtwarzania bazy</a>.</td></tr>
+        <tr><td><code class="refusal">kek_file_missing</code>, <code class="refusal">kek_file_unsafe</code>, <code class="refusal">kek_file_malformed</code>, <code class="refusal">kek_mismatch</code>, <code class="refusal">wrapped_key_unreadable</code></td><td>Key encryption key instalacji jest nieobecny, niebezpieczny, uszkodzony albo niewłaściwy; zobacz <a href="#kek">key encryption key</a>.</td></tr>
         <tr><td><code class="refusal">metrics_retention_too_short</code></td><td>Retencja krótsza niż okno zapytania plus opóźnienie; odrzucana tak samo przy starcie, jak na ekranie ustawień.</td></tr>
       </tbody>
     </table>

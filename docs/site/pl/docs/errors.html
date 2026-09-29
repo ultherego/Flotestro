@@ -152,7 +152,7 @@
 <tr><td><a href="#stage-notification"><code>notification</code></a></td><td>5</td></tr>
 <tr><td><a href="#stage-directory"><code>directory</code></a></td><td>2</td></tr>
 <tr><td><a href="#stage-provisioning"><code>provisioning</code></a></td><td>1</td></tr>
-<tr><td><a href="#stage-startup"><code>startup</code></a></td><td>17</td></tr>
+<tr><td><a href="#stage-startup"><code>startup</code></a></td><td>22</td></tr>
 </tbody></table></div>
 <h2 id="index">Wszystkie kody alfabetycznie</h2>
 <div class="table-scroll">
@@ -276,6 +276,10 @@
 <tr><td><a href="#err-issuer-key-unavailable"><code class="refusal">issuer_key_unavailable</code></a></td><td>startup</td><td><span class="badge retry-after-change">after_change</span></td><td>nie</td></tr>
 <tr><td><a href="#err-job-create-failed"><code class="refusal">job_create_failed</code></a></td><td>dispatch</td><td><span class="badge retry-after-change">after_change</span></td><td>tak</td></tr>
 <tr><td><a href="#err-journal-unavailable"><code class="refusal">journal_unavailable</code></a></td><td>agent</td><td><span class="badge retry-after-change">after_change</span></td><td>tak</td></tr>
+<tr><td><a href="#err-kek-file-malformed"><code class="refusal">kek_file_malformed</code></a></td><td>startup</td><td><span class="badge retry-after-change">after_change</span></td><td>nie</td></tr>
+<tr><td><a href="#err-kek-file-missing"><code class="refusal">kek_file_missing</code></a></td><td>startup</td><td><span class="badge retry-after-change">after_change</span></td><td>nie</td></tr>
+<tr><td><a href="#err-kek-file-unsafe"><code class="refusal">kek_file_unsafe</code></a></td><td>startup</td><td><span class="badge retry-after-change">after_change</span></td><td>nie</td></tr>
+<tr><td><a href="#err-kek-mismatch"><code class="refusal">kek_mismatch</code></a></td><td>startup</td><td><span class="badge retry-after-change">after_change</span></td><td>nie</td></tr>
 <tr><td><a href="#err-key-not-found"><code class="refusal">key_not_found</code></a></td><td>helper</td><td><span class="badge retry-read-state">read_state</span></td><td>nie</td></tr>
 <tr><td><a href="#err-last-key-lockout"><code class="refusal">last_key_lockout</code></a></td><td>helper</td><td><span class="badge retry-after-change">after_change</span></td><td>nie</td></tr>
 <tr><td><a href="#err-lease-expired"><code class="refusal">lease_expired</code></a></td><td>reconcile</td><td><span class="badge retry-read-state">read_state</span></td><td>tak</td></tr>
@@ -445,6 +449,7 @@
 <tr><td><a href="#err-volume-group-full"><code class="refusal">volume_group_full</code></a></td><td>helper</td><td><span class="badge retry-after-change">after_change</span></td><td>tak</td></tr>
 <tr><td><a href="#err-volume-unknown"><code class="refusal">volume_unknown</code></a></td><td>helper</td><td><span class="badge retry-after-change">after_change</span></td><td>tak</td></tr>
 <tr><td><a href="#err-webhook-secret-required"><code class="refusal">webhook_secret_required</code></a></td><td>notification</td><td><span class="badge retry-after-change">after_change</span></td><td>nie</td></tr>
+<tr><td><a href="#err-wrapped-key-unreadable"><code class="refusal">wrapped_key_unreadable</code></a></td><td>startup</td><td><span class="badge retry-after-change">after_change</span></td><td>nie</td></tr>
 </tbody></table></div>
 <h2 id="stage-planning">Etap: planning</h2>
 <p>11 kodów.</p>
@@ -1047,7 +1052,7 @@
 <dd><p>Krok, który nadaje kontu serwisowemu konektora prawo przeniesienia wpisu do kontenera kont zachowanych, nie zdołał dokończyć się sam: katalog odmówił konektorowi jednego z obiektów albo w ogóle nie publikuje uprawnienia niosącego ACI. Nic nie zostało nadane w połowie - krok zatrzymuje się na pierwszej odmowie, a każdy obiekt, który zdążył utworzyć, może utworzyć ponownie bez skutku.</p><p><span class="label">Co zrobić</span> Raport wymienia dokładne polecenia ipa, po kolei, do wykonania przez administratora katalogu, albo ACI do dodania, gdy katalog nie publikuje uprawnienia - uprawnienie nie wyraża moddn, więc to jedno dodaje się klientem LDAP. Uruchom potem krok ponownie; nie zmienia niczego, co już stoi, i potwierdza rzecz własną odpowiedzią katalogu o przeniesieniu.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge not-failure">nie jest niepowodzeniem</span></p></dd>
 </dl>
 <h2 id="stage-startup">Etap: startup</h2>
-<p>17 kodów.</p>
+<p>22 kody.</p>
 <dl class="kv">
 <dt id="err-crypto-state-ambiguous"><code class="refusal">crypto_state_ambiguous</code></dt>
 <dd><p>Instalacja nie ma zapisu, a to, co istnieje, nie składa się ani na pustą instalację, ani na kompletną starą.</p><p><span class="label">Co zrobić</span> Przeczytaj powód w logu: odtwórz brakującą część katalogu stanu albo usuń pozostałość po porzuconej instalacji. Zobacz docs/runbooks/db-restore.md.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge not-failure">nie jest niepowodzeniem</span></p></dd>
@@ -1061,6 +1066,14 @@
 <dd><p>Katalog stanu i baza nie są jedną instalacją: wskazują dwie różne albo jedno z nich nie wskazuje żadnej, podczas gdy drugie ma historię. Log mówi, które z tych dwóch jest obce.</p><p><span class="label">Co zrobić</span> Nigdy nie skaluj control plane z osobnymi wolumenami stanu przy jednej bazie - dwa katalogi stanu to dwa CA floty i dwa klucze magazynu sekretów dla jednej instalacji. Daj replice katalog stanu tej instalacji albo skieruj ją na bazę, która należy do katalogu, jaki ma.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge not-failure">nie jest niepowodzeniem</span></p></dd>
 <dt id="err-issuer-key-unavailable"><code class="refusal">issuer_key_unavailable</code></dt>
 <dd><p>Certyfikat CA floty jest na miejscu, a jego klucza prywatnego nie ma, albo instalacja zapisuje CA, którego katalog stanu nie trzyma.</p><p><span class="label">Co zrobić</span> Odtwórz ca.key (i ca.pem) z kopii zapasowej katalogu stanu; nowe CA odcięłoby każdy host. Zobacz docs/runbooks/db-restore.md.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge not-failure">nie jest niepowodzeniem</span></p></dd>
+<dt id="err-kek-file-malformed"><code class="refusal">kek_file_malformed</code></dt>
+<dd><p>Plik z key encryption key nie zawiera dokładnie 64 znaków szesnastkowych z co najwyżej jednym końcowym znakiem nowej linii. Jest odrzucany, a nie naprawiany.</p><p><span class="label">Co zrobić</span> Odtwórz plik stamtąd, gdzie klucz jest przechowywany. Nowy klucz robi się przez openssl rand -hex 32, ale instalację na niego przenosi wyłącznie rewrap-kek. Zobacz docs/runbooks/key-encryption-key.md.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge not-failure">nie jest niepowodzeniem</span></p></dd>
+<dt id="err-kek-file-missing"><code class="refusal">kek_file_missing</code></dt>
+<dd><p>Instalacja trzyma klucze w bazie, zapieczętowane key encryption key, a pod ścieżką, którą wdrożenie dla niego wskazuje, nie ma pliku.</p><p><span class="label">Co zrobić</span> Zamontuj klucz pod /run/secrets/flotestro-kek albo podaj ścieżkę przez -kek-file lub FLOTESTRO_KEK_FILE. Nigdy nie generuj nowego klucza w jego miejsce: klucze instalacji otwiera tylko ten, którym je opakowano. Zobacz docs/runbooks/key-encryption-key.md.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge not-failure">nie jest niepowodzeniem</span></p></dd>
+<dt id="err-kek-file-unsafe"><code class="refusal">kek_file_unsafe</code></dt>
+<dd><p>Plik z key encryption key da się podmienić komuś innemu niż jego właściciel: to link, nie zwykły plik, plik konta innego niż root albo konto panelu, albo plik czytelny lub zapisywalny dla grupy albo kogokolwiek innego.</p><p><span class="label">Co zrobić</span> Zrób z niego zwykły plik, którego właścicielem jest root albo konto panelu, z trybem 0400. Zobacz docs/runbooks/key-encryption-key.md.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge not-failure">nie jest niepowodzeniem</span></p></dd>
+<dt id="err-kek-mismatch"><code class="refusal">kek_mismatch</code></dt>
+<dd><p>Klucz w pliku nie jest tym, którym opakowano klucze instalacji; trafia tu replika, która wciąż trzyma klucz sprzed rotacji. Nic nie zostało uszkodzone i nic nie jest obsługiwane w połowie.</p><p><span class="label">Co zrobić</span> Zamontuj właściwy klucz. Po crypto rewrap-kek zamontuj nowy klucz na każdej replice i zrestartuj je. Zobacz docs/runbooks/key-encryption-key.md.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge not-failure">nie jest niepowodzeniem</span></p></dd>
 <dt id="err-metrics-retention-too-short"><code class="refusal">metrics_retention_too_short</code></dt>
 <dd><p>Retencja surowych próbek jest krótsza niż okno, które panel podaje w pełnej rozdzielczości, powiększone o najdłuższy dopuszczalny czas dotarcia próbki. Taka konfiguracja z definicji kasuje odczyt, który relay wciąż niesie, i to bez niczyjego zlecenia, więc panel odmawia na niej startu i odmawia jej zapisania z ekranu ustawień.</p><p><span class="label">Co zrobić</span> Podnieś retencję surowych próbek co najmniej do tej sumy albo obniż okno zapytań surowych lub maksymalne opóźnienie. Wszystkie trzy są opisane w wykazie konfiguracji przy ustawieniach monitoringu; nic nie zostało zapisane, więc obowiązujące wartości pozostają bez zmian.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge not-failure">nie jest niepowodzeniem</span></p></dd>
 <dt id="err-pki-state-mismatch"><code class="refusal">pki_state_mismatch</code></dt>
@@ -1085,6 +1098,8 @@
 <dd><p>Ten panel nie trzyma materiału kluczy, więc nie zapieczętuje nowej paczki ani nie otworzy zapieczętowanej. Paczki czytelnej bez klucza ten panel nie zapisuje.</p><p><span class="label">Co zrobić</span> Przywróć dostawcę kluczy tej instalacji - plik klucza albo poświadczenie, z którym panel wystartował - i poproś ponownie.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge not-failure">nie jest niepowodzeniem</span></p></dd>
 <dt id="err-webhook-secret-required"><code class="refusal">webhook_secret_required</code></dt>
 <dd><p>Kanał webhooka nie ma sekretu podpisującego. Pusty klucz wciąż jest poprawnym kluczem HMAC, więc dostarczenie nim podpisane niesie nagłówek, który każdy może policzyć, a odbiornik weryfikujący nagłówek wtedy, gdy ten jest obecny, przyjąłby podrobioną treść.</p><p><span class="label">Co zrobić</span> Ustaw na kanale sekret podpisujący, przekaż ten sam sekret odbiornikowi i ponów niedostarczone wiadomości. Odbiornik, który nie umie zweryfikować podpisu, powinien stać za kanałem innego rodzaju.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge not-failure">nie jest niepowodzeniem</span></p></dd>
+<dt id="err-wrapped-key-unreadable"><code class="refusal">wrapped_key_unreadable</code></dt>
+<dd><p>Opakowany klucz w bazie nie otwiera się key encryption key, który trzyma wdrożenie, choć wiersz twierdzi, że został nim opakowany: wiersz został zmieniony albo ma postać, której ten panel nie czyta.</p><p><span class="label">Co zrobić</span> Nie edytuj wierszy; odtwórz je z backupu bazy zrobionego razem z key encryption key, który do niego należy. Zobacz docs/runbooks/key-encryption-key.md.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge not-failure">nie jest niepowodzeniem</span></p></dd>
 </dl>
     <ul class="linkrow">
       <li><a href="concepts.html">← 4. Jak przebiega zmiana</a></li>

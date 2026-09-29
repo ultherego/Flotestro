@@ -175,6 +175,26 @@
     <code class="refusal">superseded_by_result</code>, and an agent that restarted
     mid-operation answers <code class="refusal">outcome_unknown</code>.</p>
 
+    <h2><a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/key-encryption-key.md">The key encryption key</a></h2>
+
+    <p>Reach for it to keep the private keys of an installation in the database,
+    sealed with a key that is not in it, so that every replica reads the same
+    keys and a copy of the dump alone opens nothing. It covers making the key,
+    moving the keys in with <code>crypto import-state</code>, rotating the key
+    with <code>crypto rewrap-kek</code>, moving back with
+    <code>crypto revert-state</code> and, last, removing the files with
+    <code>crypto forget-files</code> - which is no guaranteed erasure on an SSD,
+    a copy-on-write filesystem or network storage. Every command takes
+    <code>--dry-run</code> and requires <code>--backup-to</code>.
+    <a href="installation.html#kek">Chapter 3</a> has the short form.</p>
+
+    <p>Codes: <code class="refusal">kek_file_missing</code>,
+    <code class="refusal">kek_file_unsafe</code>,
+    <code class="refusal">kek_file_malformed</code>,
+    <code class="refusal">kek_mismatch</code>,
+    <code class="refusal">wrapped_key_unreadable</code>,
+    <code class="refusal">secrets_key_unavailable</code>.</p>
+
     <h2><a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/queue-backlog.md">Queue backlog</a></h2>
 
     <p>Reach for it when work is queued and not starting. It exists to tell apart
