@@ -9,8 +9,11 @@ import {
   Fact, Facts, Foot, Message, ModuleHeader, ModulePage, Section, Summary, Table, Widgets, countWhere, useHost,
 } from "./shared";
 import { bulkPrefill } from "../Bulk";
-import { ActionGuard } from "../../components/ActionGuard";
+import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
+
+/** The one order this page places; refused, it leaves the page a read of what was last seen. */
+const VULNERABILITY_READS = ["packages.list"];
 
 type Finding = {
   provider: string;
@@ -306,6 +309,7 @@ export function Vulnerabilities() {
           </>
         }
       />
+      <ReadOnlyModuleNotice host={host.id} actions={VULNERABILITY_READS} />
       <p className="hm-freshness">
         <span>
           {!data

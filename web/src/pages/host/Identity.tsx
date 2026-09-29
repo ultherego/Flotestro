@@ -7,7 +7,8 @@ import { absoluteTime } from "../../lib/format";
 import { duration } from "../Monitoring";
 import {
   Fact, Facts, Field, Fields, Foot, Form, FormActions, FormNote, JobNotice, Message, ModuleFreshness, ModuleHeader,
-  ModulePage, Section, Table, Unknown, useHost, useModule, useReadOperation,
+  ModulePage, Section, Table, Unknown, orderReady, refusalOf, registryOrder, useHost, useModule, useReadOperation,
+  type RegistryOrder,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
@@ -124,6 +125,20 @@ type EnrollDetail = {
 const DOMAIN_PATTERN = /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$/;
 
 /**
+ * Joining a domain, as an order the operation registry composes: this page
+ * and the Bulk workspace then send one payload and refuse one set of names.
+ * The realm is put in capitals here, because that is what a realm is and the
+ * registry keeps what it is given.
+ */
+export function enrollOrder(
+  domain: string, realm: string, server: string, hostname: string,
+): RegistryOrder {
+  return registryOrder("identity.host.enroll", {
+    domain, realm: realm.trim().toUpperCase(), server, hostname,
+  });
+}
+
+/**
  * Joining the host to a domain. The order carries the domain, the realm, an
  * optional server and the host's FQDN; it carries no password.
  */
@@ -164,12 +179,11 @@ function JoinDomain({ host }: { host: Host }) {
 
   if (!mayJoin && !mayPreflight) return null;
 
-  const payload = {
-    domain_enroll: {
-      domain: domain.trim(), realm: realm.trim().toUpperCase(), server: server.trim(), hostname: hostname.trim(),
-    },
-  };
-  const valid = DOMAIN_PATTERN.test(domain.trim()) && realm.trim() !== "" && DOMAIN_PATTERN.test(hostname.trim());
+  const order = enrollOrder(domain, realm, server, hostname);
+  const payload = order.payload as { domain_enroll: { realm: string; hostname: string } };
+  // The registry lets the host keep the name it has; joining from here
+  // always names it, and a name that reaches the directory is qualified.
+  const valid = orderReady(order) && DOMAIN_PATTERN.test(hostname.trim());
   const checks = preflight.attempt?.detail?.checks ?? [];
   const blocked = checks.filter((check) => check.blocking && check.passed === false);
 
@@ -194,7 +208,10 @@ function JoinDomain({ host }: { host: Host }) {
           </Field>
         </Fields>
         {domain.trim() !== "" && !valid && (
-          <Message text={t("The domain and the host name must be fully qualified names, and the realm must not be empty.")} error />
+          <Message
+            text={refusalOf(t, order) || t("The domain and the host name must be fully qualified names, and the realm must not be empty.")}
+            error
+          />
         )}
         <FormActions>
           {/* The preview of the host's actions decides in the scope of the

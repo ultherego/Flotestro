@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  acceptRAWords, layerKind, layerMembers, layerSummary, privacyWords, routeProtocolWords,
-  type Interface,
+  acceptRAWords, layerKind, layerMembers, layerRemoveOrder, layerSummary, mtuOrder, privacyWords,
+  routeProtocolWords, routesOrder, type Interface,
 } from "./Network";
+import { emptyForm, operationForm, type FormValue } from "../../lib/operations";
 
 /* The layering is the one thing on this page that answers "what is this
    interface made of" rather than "what does it carry". A member that has
@@ -83,5 +84,85 @@ describe("routeProtocolWords", () => {
     expect(routeProtocolWords("ra")).toBe("router advertisement");
     expect(routeProtocolWords("kernel")).toBe("kernel (from an address)");
     expect(routeProtocolWords(undefined)).toBe("—");
+  });
+});
+
+/* Three of this page's changes go through the operation registry, so the
+   host page and the Bulk workspace send one payload and refuse one set of
+   values. The profile and the layer builder still compose their own. */
+
+function bulk(action: string, form: FormValue): Record<string, unknown> {
+  const entry = operationForm(action);
+  if (!entry) throw new Error(`the registry has no form for ${action}`);
+  return entry.toPayload({ ...emptyForm(entry), ...form });
+}
+
+function refusals(action: string, form: FormValue) {
+  const entry = operationForm(action);
+  return entry?.validate({ ...emptyForm(entry), ...form });
+}
+
+describe("mtuOrder", () => {
+  it("sends what the Bulk workspace sends", () => {
+    expect(mtuOrder("enp0s3", "9000", 120).payload)
+      .toEqual(bulk("network.mtu.set", { interface: "enp0s3", mtu: "9000", rollback_seconds: 120 }));
+    expect(mtuOrder("enp0s3", "9000", 120).payload)
+      .toEqual({ network: { interface: "enp0s3", mtu: "9000", rollback_seconds: 120 } });
+    expect(mtuOrder("enp0s3", "9000", 120).problems).toEqual([]);
+  });
+
+  // The refusal the page did not make before: an MTU the kernel would not
+  // take used to reach the host and come back as a failure.
+  it("refuses what the Bulk workspace refuses", () => {
+    for (const change of [{ mtu: "abc" }, { mtu: "99999" }, { mtu: "40" }, { rollback_seconds: 7200 }]) {
+      const form = { interface: "enp0s3", mtu: "9000", rollback_seconds: 120, ...change };
+      const order = mtuOrder(String(form.interface), String(form.mtu), Number(form.rollback_seconds));
+      expect(order.problems, JSON.stringify(change)).not.toEqual([]);
+      expect(order.problems).toEqual(refusals("network.mtu.set", form));
+    }
+  });
+});
+
+describe("routesOrder", () => {
+  const routes = ["198.51.100.0/24 via 192.0.2.1", "203.0.113.0/24 via 192.0.2.1 dev enp0s3"];
+
+  it("sends what the Bulk workspace sends", () => {
+    expect(routesOrder("enp0s3", routes, 120).payload)
+      .toEqual(bulk("network.route.ensure", {
+        interface: "enp0s3", routes: routes.join("\n"), rollback_seconds: 120,
+      }));
+    expect(routesOrder("enp0s3", routes, 120).payload)
+      .toEqual({ network: { interface: "enp0s3", rollback_seconds: 120, routes } });
+    expect(routesOrder("enp0s3", routes, 120).problems).toEqual([]);
+  });
+
+  // An empty list is the way of saying "this interface carries none", so it
+  // travels rather than being left out.
+  it("sends an empty list as an empty list", () => {
+    expect(routesOrder("enp0s3", [], 120).payload)
+      .toEqual({ network: { interface: "enp0s3", rollback_seconds: 120, routes: [] } });
+  });
+
+  it("refuses a route the host would not parse", () => {
+    const order = routesOrder("enp0s3", ["somewhere over there"], 120);
+    expect(order.problems).not.toEqual([]);
+    expect(order.problems).toEqual(refusals("network.route.ensure", {
+      interface: "enp0s3", routes: "somewhere over there", rollback_seconds: 120,
+    }));
+  });
+});
+
+describe("layerRemoveOrder", () => {
+  it("sends what the Bulk workspace sends", () => {
+    expect(layerRemoveOrder("bond0", 120).payload)
+      .toEqual(bulk("network.link.remove", { interface: "bond0", rollback_seconds: 120 }));
+    expect(layerRemoveOrder("bond0", 120).payload)
+      .toEqual({ network: { interface: "bond0", rollback_seconds: 120 } });
+    expect(layerRemoveOrder("bond0", 120).problems).toEqual([]);
+  });
+
+  it("refuses a name no interface could carry", () => {
+    expect(layerRemoveOrder("", 120).problems).not.toEqual([]);
+    expect(layerRemoveOrder("an interface with spaces", 120).problems).not.toEqual([]);
   });
 });

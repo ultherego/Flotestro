@@ -11,8 +11,11 @@ import {
 } from "./shared";
 import { capability } from "../../lib/modules";
 import { AlertStateBadge, SeverityBadge, SilenceBadges, duration, metricValue, type ScopedSilence } from "../Monitoring";
-import { ActionGuard } from "../../components/ActionGuard";
+import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
+
+/** The one order this page places; refused, it leaves the page a read of the samples already taken. */
+const MONITORING_READS = ["monitoring.probe.run"];
 
 const RANGES: { value: MetricRange; label: string }[] = [
   { value: "3h", label: "3 hours" },
@@ -240,6 +243,7 @@ export function Monitoring() {
           </div>
         }
       />
+      <ReadOnlyModuleNotice host={host.id} actions={MONITORING_READS} />
       <p className="hm-freshness">
         {series || state ? (
           lastSampleAt

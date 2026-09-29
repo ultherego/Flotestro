@@ -6,7 +6,8 @@ import { Time, Empty } from "../../components/ui";
 import { Breakdown } from "../../components/widgets";
 import {
   Check, Fact, Facts, Field, Fields, Foot, Form, FormActions, FormNote, Message, ModuleFreshness, ModuleHeader,
-  ModulePage, Section, Summary, Table, Widgets, countWhere, useHost, useModule,
+  ModulePage, Section, Summary, Table, Widgets, countWhere, orderReady, refusalOf, registryOrder, useHost, useModule,
+  type RegistryOrder,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
@@ -122,6 +123,31 @@ type Intent = {
  * pre-existing ones.
  */
 /** The changes this page offers; when every one is refused, the page says so once. */
+/* The four changes this page offers go through the operation registry, so
+   the host page and the Bulk workspace send one payload and refuse one set
+   of values. The preview of the next runs is a read the host answers and
+   has no registry entry; it stays as it is. */
+
+/** A new or rewritten entry, as an order. */
+export function ensureOrder(fields: {
+  id: string; expression: string; command: string[]; user: string;
+  comment: string; kind: string; adopt: boolean;
+}): RegistryOrder {
+  // The registry reads a list one entry per line; the command on this page
+  // is typed as one line and split on the spaces in it.
+  return registryOrder("schedule.ensure", { ...fields, command: fields.command.join("\n") });
+}
+
+/** Running an entry now, or taking it away, as an order. */
+export function entryOrder(action: string, id: string): RegistryOrder {
+  return registryOrder(action, { id });
+}
+
+/** Switching an entry off or on, as an order. */
+export function enableOrder(id: string, enabled: boolean): RegistryOrder {
+  return registryOrder("schedule.disable", { id, enabled });
+}
+
 const SCHEDULE_CHANGES = ["schedule.ensure", "schedule.run_now", "schedule.disable", "schedule.remove"];
 
 export function Schedules() {
@@ -216,7 +242,7 @@ export function Schedules() {
             kinds={scheduleKinds(host.capabilities)}
             entries={entries}
             onRequest={(payload) =>
-              request.mutate({ action: "schedule.ensure", payload: { schedule: payload } })
+              request.mutate({ action: "schedule.ensure", payload })
             }
           />
         </ActionGuard>
@@ -288,7 +314,7 @@ export function Schedules() {
                               action: "schedule.run_now",
                               label: t("Run now"),
                               description: t("{command} will run immediately on {host}, outside its schedule.", { command: command(entry), host: host.hostname }),
-                              payload: { schedule: { id: entry.id } },
+                              payload: entryOrder("schedule.run_now", entry.id).payload,
                             })
                           }
                           disabled={entry.source !== "managed"}
@@ -310,7 +336,7 @@ export function Schedules() {
                           onClick={() =>
                             request.mutate({
                               action: "schedule.disable",
-                              payload: { schedule: { id: entry.id, enabled: !entry.enabled } },
+                              payload: enableOrder(entry.id, !entry.enabled).payload,
                             })
                           }
                           disabled={entry.source !== "managed"}
@@ -326,7 +352,7 @@ export function Schedules() {
                               action: "schedule.remove",
                               label: t("Remove"),
                               description: t("{id} will be removed from {path}.", { id: entry.id, path: entry.path || t("the host") }),
-                              payload: { schedule: { id: entry.id } },
+                              payload: entryOrder("schedule.remove", entry.id).payload,
                             })
                           }
                           disabled={entry.source !== "managed"}
@@ -457,6 +483,12 @@ function NewEntry({
   // The host adopts a line by removing the file it is alone in, so a file it
   // shares with other entries it refuses - and so does the form.
   const shared = found.length > 1;
+  const entryRequest = ensureOrder({
+    id, expression, command: args, user, comment, kind,
+    // The consent travels with the order: the host refuses to take over
+    // anything it was not given for.
+    adopt: found.length > 0 && adopt,
+  });
 
   // The next runs come from the host, not from the browser: the browser
   // knows neither the host's zone nor its clock, and a preview in the wrong
@@ -608,21 +640,11 @@ function NewEntry({
             </button>
           </ActionGuard>
           <button
-            onClick={() =>
-              onRequest({
-                id,
-                kind,
-                expression,
-                command: args,
-                user,
-                comment,
-                enabled: true,
-                // The consent travels with the order: the host refuses to take
-                // over anything it was not given for.
-                adopt: found.length > 0 && adopt,
-              })
-            }
-            disabled={!id || !expression || args.length === 0 || shared || (found.length > 0 && !adopt)}
+            onClick={() => onRequest(entryRequest.payload)}
+            // What the host already runs under this name is this page's own
+            // refusal: the registry sees the form, not the host.
+            disabled={!orderReady(entryRequest) || shared || (found.length > 0 && !adopt)}
+            title={refusalOf(t, entryRequest)}
           >
             {t("Create")}
           </button>

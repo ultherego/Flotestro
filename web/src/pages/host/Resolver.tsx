@@ -4,12 +4,27 @@ import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Time, Empty } from "../../components/ui";
 import {
-  Check, Fact, Facts, Field, Fields, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage, Section,
-  Summary, Table, Widgets, countWhere, useHost, useModule,
+  Fact, Facts, Field, Fields, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage, Section,
+  Summary, Table, Widgets, countWhere, orderReady, refusalOf, registryOrder, useHost, useModule,
+  type RegistryOrder,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
+import { OperationForm } from "../../components/OperationForm";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
+import {
+  emptyForm, list as listOf, operationForm, text as textOf,
+  type FieldSuggestions, type FormValue,
+} from "../../lib/operations";
 import { useT } from "../../i18n";
+
+/**
+ * The resolver change as an order. It goes through the operation registry,
+ * so this page sends the payload the Bulk workspace sends and refuses the
+ * values it refuses - a name server that is not an address among them.
+ */
+export function resolverOrder(form: FormValue): RegistryOrder {
+  return registryOrder("dns.host.apply", form);
+}
 
 type Link = {
   name: string;
@@ -295,9 +310,16 @@ export function Resolver() {
       {form && (
         <ActionGuard action="dns.host.apply" host={host.id}>
           <ResolverChange
-            defaultInterface={managementLink?.name ?? ""}
-            defaultServers={(snapshot?.servers ?? []).join(", ")}
-            defaultDomains={(snapshot?.search_domains ?? []).map((d) => d.replace(/^~/, "")).join(", ")}
+            seed={{
+              interface: managementLink?.name ?? "",
+              servers: (snapshot?.servers ?? []).join("\n"),
+              // A domain the host reports with a leading tilde is routed, not
+              // searched; the name under it is what a search domain is.
+              search_domains: (snapshot?.search_domains ?? []).map((d) => d.replace(/^~/, "")).join("\n"),
+              ignore_auto_dns: true,
+              rollback_seconds: 120,
+            }}
+            suggestions={{ interface: (snapshot?.links ?? []).map((link) => link.name) }}
             onIntent={setIntent}
           />
         </ActionGuard>
@@ -362,25 +384,24 @@ export function Resolver() {
 }
 
 /**
- * The resolver change form.
+ * The resolver change form, drawn from the operation registry: the fields,
+ * the refusals and the payload are the ones the Bulk workspace uses.
  */
-function ResolverChange({
-  defaultInterface, defaultServers, defaultDomains, onIntent,
-}: {
-  defaultInterface: string;
-  defaultServers: string;
-  defaultDomains: string;
+function ResolverChange({ seed, suggestions, onIntent }: {
+  /** What this host resolves with now, as the form's starting value. */
+  seed: FormValue;
+  suggestions?: FieldSuggestions;
   onIntent: (intent: { description: string; payload: Record<string, unknown> }) => void;
 }) {
   const t = useT();
-  const [iface, setIface] = useState(defaultInterface);
-  const [servers, setServers] = useState(defaultServers);
-  const [domains, setDomains] = useState(defaultDomains);
-  const [ignoreDHCP, setIgnoreDHCP] = useState(true);
-  const [window, setWindow] = useState("120");
-
-  const list = (value: string) =>
-    value.split(",").map((element) => element.trim()).filter(Boolean);
+  const entry = operationForm("dns.host.apply");
+  const [value, setValue] = useState<FormValue>(() => (entry ? { ...emptyForm(entry), ...seed } : seed));
+  // A payload typed by hand in the advanced view is not one this page sends:
+  // the change is armed with a rollback the form's own fields carry.
+  const [json, setJson] = useState("");
+  if (!entry) return null;
+  const order = resolverOrder(value);
+  const domains = listOf(value, "search_domains");
 
   return (
     <Section
@@ -389,49 +410,29 @@ function ResolverChange({
       span={12}
     >
       <Form>
-        <Fields>
-          <Field label={t("Interface")} narrow>
-            <input value={iface} onChange={(e) => setIface(e.target.value)} placeholder={t("Interface")} />
-          </Field>
-          <Field label={t("DNS servers, comma separated")}>
-            <input
-              value={servers}
-              onChange={(e) => setServers(e.target.value)}
-              placeholder={t("DNS servers, comma separated")}
-            />
-          </Field>
-          <Field label={t("Search domains")}>
-            <input value={domains} onChange={(e) => setDomains(e.target.value)} placeholder={t("Search domains")} />
-          </Field>
-          <Field label={t("Rollback seconds")} narrow>
-            <input value={window} onChange={(e) => setWindow(e.target.value)} placeholder={t("Rollback seconds")} />
-          </Field>
-        </Fields>
-        <Check checked={ignoreDHCP} onChange={setIgnoreDHCP}>
-          {t("Ignore DNS servers offered by DHCP")}
-        </Check>
+        <OperationForm
+          entry={entry}
+          value={value}
+          onChange={setValue}
+          json={json}
+          onJson={setJson}
+          suggestions={suggestions}
+        />
         <FormActions>
           <button
             onClick={() =>
               onIntent({
                 description: t("{iface} will resolve through {servers}{domains}. The host rolls back after {seconds}s unless the agent confirms it still reaches the panel.", {
-                  iface,
-                  servers: list(servers).join(", "),
-                  domains: list(domains).length ? `, ${t("searching {domains}", { domains: list(domains).join(", ") })}` : "",
-                  seconds: Number(window) || 0,
+                  iface: textOf(value, "interface"),
+                  servers: listOf(value, "servers").join(", "),
+                  domains: domains.length ? `, ${t("searching {domains}", { domains: domains.join(", ") })}` : "",
+                  seconds: Number(value.rollback_seconds) || 0,
                 }),
-                payload: {
-                  dns: {
-                    interface: iface,
-                    servers: list(servers),
-                    search_domains: list(domains),
-                    ignore_auto_dns: ignoreDHCP,
-                    rollback_seconds: Number(window) || 0,
-                  },
-                },
+                payload: order.payload,
               })
             }
-            disabled={!iface || list(servers).length === 0}
+            disabled={!orderReady(order) || json !== ""}
+            title={refusalOf(t, order)}
           >
             {t("Apply resolver")}
           </button>

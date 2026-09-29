@@ -5,7 +5,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@testing-library/jest-dom/vitest";
 import type { HostActions } from "../../lib/actions";
 import type { LocalAccount } from "../../lib/types";
-import { AccountGroups, KeysPanel, type Request } from "./Accounts";
+import { AccountGroups, KeysPanel, accountOrder, type Request } from "./Accounts";
+import { emptyForm, operationForm, type FormValue } from "../../lib/operations";
 
 /**
  * The SSH key editor of an account.
@@ -195,5 +196,97 @@ describe("the groups of an account", () => {
     expect(badges.map((badge) => badge.textContent)).toEqual(["sudo", "docker"]);
     expect(badges[0]).toHaveClass("badge", "warn");
     expect(screen.getByText("users")).not.toHaveClass("badge");
+  });
+});
+
+/* Every order this page places goes through the operation registry, so the
+   host page and the Bulk workspace send one payload and refuse one set of
+   values. The page still keeps the refusals that read the account rather
+   than the form - the last key of an account with no password. */
+
+function bulk(action: string, form: FormValue): Record<string, unknown> {
+  const entry = operationForm(action);
+  if (!entry) throw new Error(`the registry has no form for ${action}`);
+  return entry.toPayload({ ...emptyForm(entry), ...form });
+}
+
+const KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB7 jane@laptop";
+const FINGERPRINT = "SHA256:" + "a".repeat(43);
+
+describe("accountOrder", () => {
+  it("sends what the Bulk workspace sends, action by action", () => {
+    expect(accountOrder({ action: "localuser.lock", name: "jane" }).payload)
+      .toEqual(bulk("localuser.lock", { name: "jane" }));
+
+    expect(accountOrder({
+      action: "localuser.create", name: "jane", gecos: "Jane Smith",
+      groups: ["developers", "adm"], ssh_keys: [KEY], create_home: true,
+    }).payload).toEqual(bulk("localuser.create", {
+      name: "jane", gecos: "Jane Smith", groups: "developers\nadm", ssh_keys: KEY, create_home: true,
+    }));
+
+    expect(accountOrder({ action: "localuser.groups.set", name: "jane", groups: ["developers"] }).payload)
+      .toEqual(bulk("localuser.groups.set", { name: "jane", groups: "developers" }));
+
+    expect(accountOrder({ action: "localuser.expiry.set", name: "jane", expires_at: "2026-12-31" }).payload)
+      .toEqual(bulk("localuser.expiry.set", { name: "jane", expires_at: "2026-12-31" }));
+
+    expect(accountOrder({
+      action: "localuser.sshkeys.remove", name: "jane", fingerprints: [FINGERPRINT], managed_file: true,
+    }).payload).toEqual(bulk("localuser.sshkeys.remove", {
+      name: "jane", fingerprints: FINGERPRINT, managed_file: true,
+    }));
+
+    expect(accountOrder({
+      action: "localuser.sshkeys.replace_all", name: "jane", ssh_keys: [KEY], expected_fingerprints: [FINGERPRINT],
+    }).payload).toEqual(bulk("localuser.sshkeys.replace_all", {
+      name: "jane", ssh_keys: KEY, expected_fingerprints: FINGERPRINT,
+    }));
+
+    expect(accountOrder({ action: "localuser.delete", name: "jane", remove_home: true }).payload)
+      .toEqual(bulk("localuser.delete", { name: "jane", remove_home: true }));
+  });
+
+  it("adds a key exactly as the Bulk workspace does, and keeps a comment on top of it", () => {
+    expect(accountOrder({ action: "localuser.sshkeys.add", name: "jane", keys: [{ public_key: KEY }] }).payload)
+      .toEqual(bulk("localuser.sshkeys.add", { name: "jane", public_keys: KEY }));
+    // The comment is the one thing the registry's key list does not carry,
+    // so it is put back rather than lost.
+    expect(accountOrder({
+      action: "localuser.sshkeys.add", name: "jane", keys: [{ public_key: KEY, comment: "jane@laptop" }],
+    }).payload).toEqual({ local_user: { name: "jane", keys: [{ public_key: KEY, comment: "jane@laptop" }] } });
+  });
+
+  // The refusals the page did not make before it went through the registry.
+  it("refuses on the host page what the Bulk workspace refuses", () => {
+    const refuses = (order: Parameters<typeof accountOrder>[0], sentence: string) => {
+      const problems = accountOrder(order).problems;
+      expect(problems, JSON.stringify(order)).not.toEqual([]);
+      expect(problems[0].message).toContain(sentence);
+    };
+
+    refuses({ action: "localuser.create", name: "Jane Smith", ssh_keys: [KEY] }, "An account name starts with");
+    refuses({ action: "localuser.create", name: "jane", gecos: "Jane: Smith", ssh_keys: [KEY] }, "no colon");
+    refuses({ action: "localuser.groups.set", name: "jane", groups: ["Developers"] }, "not a group name");
+    refuses({ action: "localuser.delete", name: "root" }, "is not deleted through the panel");
+    refuses({ action: "localuser.expiry.set", name: "jane", expires_at: "31/12/2026" }, "YYYY-MM-DD");
+    refuses(
+      { action: "localuser.sshkeys.add", name: "jane", keys: [{ public_key: "-----BEGIN OPENSSH PRIVATE KEY-----" }] },
+      "That is a private key",
+    );
+    refuses({ action: "localuser.sshkeys.add", name: "jane", keys: [{ public_key: "not a key" }] }, "A key is one line");
+    refuses({ action: "localuser.sshkeys.remove", name: "jane", fingerprints: ["ab:cd"] }, "not a fingerprint");
+    refuses(
+      { action: "localuser.sshkeys.replace_all", name: "jane", ssh_keys: [], expected_fingerprints: [FINGERPRINT] },
+      "takes every way in away",
+    );
+  });
+
+  it("gives the same refusals the Bulk workspace computes for the same form", () => {
+    const entry = operationForm("localuser.create");
+    const form: FormValue = { name: "Jane Smith", gecos: "", groups: "", ssh_keys: KEY, create_home: true };
+    expect(accountOrder({
+      action: "localuser.create", name: "Jane Smith", ssh_keys: [KEY], create_home: true,
+    }).problems).toEqual(entry?.validate({ ...emptyForm(entry), ...form }));
   });
 });

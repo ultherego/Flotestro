@@ -7,11 +7,31 @@ import { absoluteTime } from "../../lib/format";
 import { Meter } from "../../components/widgets";
 import {
   Check, Fact, Facts, Field, Fields, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage,
-  Section, Summary, Table, Widgets, countWhere, useHost, useModule,
+  Section, Summary, Table, Widgets, countWhere, orderReady, refusalOf, registryOrder, useHost, useModule,
+  type RegistryOrder,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
+
+/* The two changes this page offers go through the operation registry, so
+   the host page and the Bulk workspace send one payload and refuse one set
+   of values. The test of the sources has no registry entry and stays as it
+   is; it reads, it does not change the host. */
+
+/** Where the host is to take its time from, as an order. */
+export function timeSourcesOrder(servers: string[], allowStep: boolean, enableDropin: boolean): RegistryOrder {
+  // The registry reads a list one entry per line; the field on this page is
+  // one comma-separated line, because it also feeds the test above it.
+  return registryOrder("time.config.apply", {
+    servers: servers.join("\n"), allow_step: allowStep, enable_dropin: enableDropin,
+  });
+}
+
+/** The host's time zone, as an order. */
+export function timeZoneOrder(timezone: string): RegistryOrder {
+  return registryOrder("time.timezone.set", { timezone });
+}
 
 type Source = {
   address: string;
@@ -143,6 +163,8 @@ export function Time() {
   if (!module.data) return <Empty>{t("This host has not reported its clock yet.")}</Empty>;
 
   const serverList = servers.split(",").map((entry) => entry.trim()).filter(Boolean);
+  const sourcesRequest = timeSourcesOrder(serverList, allowStep, allowDropin);
+  const zoneRequest = timeZoneOrder(timezone);
   const offset = snapshot?.offset_seconds;
   const drifted = offset !== undefined && offset !== null && Math.abs(offset) >= STEP_THRESHOLD;
   // The sources by what the daemon makes of them, in chrony's words. An
@@ -386,17 +408,14 @@ export function Time() {
                       (allowStep
                         ? t("A step of the clock is allowed: databases, tokens and certificates will see time move.")
                         : t("A change that would step the clock by more than a second is refused.")),
-                    payload: {
-                      time: {
-                        servers: serverList,
-                        allow_step: allowStep,
-                        enable_dropin: allowDropin,
-                      },
-                    },
+                    payload: sourcesRequest.payload,
                   })
                 }
-                disabled={!serverList.length || (Boolean(snapshot?.write_reason) && !allowDropin)}
-                title={snapshot?.write_reason}
+                // The host's own refusal comes first: a daemon whose
+                // configuration reads no directory cannot be written to at
+                // all, whatever the servers say.
+                disabled={!orderReady(sourcesRequest) || (Boolean(snapshot?.write_reason) && !allowDropin)}
+                title={snapshot?.write_reason || refusalOf(t, sourcesRequest)}
               >
                 {t("Set as sources")}
               </button>
@@ -458,10 +477,11 @@ export function Time() {
                   description: t("{host} will report local time as {zone}. This changes what the host shows people and writes to the journal; it does not move the moment the host lives in.", {
                     host: host.hostname, zone: timezone,
                   }),
-                  payload: { time: { timezone } },
+                  payload: zoneRequest.payload,
                 })
               }
-              disabled={!timezone}
+              disabled={!orderReady(zoneRequest)}
+              title={refusalOf(t, zoneRequest)}
             >
               {t("Set timezone")}
             </button>

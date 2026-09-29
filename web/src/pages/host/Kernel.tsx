@@ -6,11 +6,14 @@ import { Time, Empty } from "../../components/ui";
 import { bytes } from "../../lib/format";
 import { Breakdown } from "../../components/widgets";
 import {
-  Fact, Facts, Field, Fields, Foot, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage, Section,
-  Summary, Table, Widgets, countWhere, useHost, useModule,
+  Fact, Facts, Field, Fields, Foot, Form, FormActions, FormNote, Message, ModuleFreshness, ModuleHeader, ModulePage,
+  Section, Summary, Table, Widgets, countWhere, orderReady, refusalOf, registryOrder, useHost, useModule,
+  type RegistryOrder,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
+import { OperationForm } from "../../components/OperationForm";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
+import { operationForm, startingForm, type FormValue } from "../../lib/operations";
 import { useT } from "../../i18n";
 
 type Setting = {
@@ -42,8 +45,24 @@ type Snapshot = {
 
 type Intent = { action: string; label: string; description: string; payload: Record<string, unknown> };
 
-/** A module name as the host validates it: lower-case letters, digits, underscores and hyphens. */
-const MODULE_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+/* The three changes this page offers, composed through the operation
+   registry: the host page and the Bulk workspace then send one payload and
+   refuse one set of values, rather than each keeping its own. */
+
+/** The settings the operator typed, as an order. */
+export function sysctlOrder(form: FormValue): RegistryOrder {
+  return registryOrder("sysctl.ensure", form);
+}
+
+/** Blocking a module, or giving back one the panel blocked. */
+export function moduleBlockOrder(name: string, blacklisted: boolean): RegistryOrder {
+  return registryOrder("kernel.module.blacklist", { module: name, blacklist: !blacklisted });
+}
+
+/** Loading a module the host needs now. */
+export function moduleLoadOrder(name: string): RegistryOrder {
+  return registryOrder("kernel.module.load", { module: name });
+}
 
 /**
  * Kernel settings and modules.
@@ -59,9 +78,14 @@ export function Kernel() {
   const [intent, setIntent] = useState<Intent | null>(null);
   const [message, setMessage] = useState("");
   const [filter, setFilter] = useState("");
-  const [key, setKey] = useState("");
-  const [value, setValue] = useState("");
+  const settingsEntry = operationForm("sysctl.ensure");
+  const [settingsForm, setSettingsForm] = useState<FormValue>(() => startingForm("sysctl.ensure"));
+  // The advanced view writes a payload the fields cannot show; the order
+  // then waits until the fields can carry it again.
+  const [settingsJson, setSettingsJson] = useState("");
   const [moduleName, setModuleName] = useState("");
+  const settingsRequest = sysctlOrder(settingsForm);
+  const loadRequest = moduleLoadOrder(moduleName);
 
   const request = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
@@ -172,42 +196,45 @@ export function Kernel() {
             ))}
           </tbody>
         </Table>
-        <ActionGuard action="sysctl.ensure" host={host.id}>
-          <div className="hm-section-body">
-            {/* What the form does is said before the first keystroke: the
-                key goes to the panel's own file and is applied at once. */}
-            <Form>
-              <Fields>
-                <Field
-                  label={t("Key")}
-                  help={t("A sysctl key. It is written to {path} and applied now; a key that is not in the profile above joins it.", { path: snapshot?.managed_path || "/etc/sysctl.d" })}
-                >
-                  <input value={key} onChange={(e) => setKey(e.target.value)} placeholder="vm.swappiness" />
-                </Field>
-                <Field label={t("Value")} narrow help={t("As sysctl takes it.")}>
-                  <input value={value} onChange={(e) => setValue(e.target.value)} placeholder="10" />
-                </Field>
-              </Fields>
-              <FormActions>
-                <button
-                  onClick={() =>
-                    setIntent({
-                      action: "sysctl.ensure",
-                      label: t("Set kernel setting"),
-                      description: t("{key} will be set to {value} on {host}, both now and after reboot. If the kernel does not take it immediately, the result says so.", {
-                        key, value, host: host.hostname,
-                      }),
-                      payload: { kernel: { settings: { [key]: value } } },
-                    })
-                  }
-                  disabled={!key || !value}
-                >
-                  {t("Set")}
-                </button>
-              </FormActions>
-            </Form>
-          </div>
-        </ActionGuard>
+        {settingsEntry && (
+          <ActionGuard action="sysctl.ensure" host={host.id}>
+            <div className="hm-section-body">
+              {/* The fields come from the operation registry, so this form and
+                  the Bulk wizard ask for the same things and refuse the same
+                  values - a key outside the panel's branches among them. */}
+              <Form>
+                <OperationForm
+                  entry={settingsEntry}
+                  value={settingsForm}
+                  onChange={setSettingsForm}
+                  json={settingsJson}
+                  onJson={setSettingsJson}
+                />
+                <FormActions>
+                  <button
+                    onClick={() =>
+                      setIntent({
+                        action: "sysctl.ensure",
+                        label: t("Set kernel settings"),
+                        description: t("{keys} will be set on {host}, both now and after reboot. If the kernel does not take a value immediately, the result says so.", {
+                          keys: settingsEntry.summary(settingsRequest.payload), host: host.hostname,
+                        }),
+                        payload: settingsRequest.payload,
+                      })
+                    }
+                    disabled={!orderReady(settingsRequest) || settingsJson !== ""}
+                    title={refusalOf(t, settingsRequest)}
+                  >
+                    {t("Set")}
+                  </button>
+                </FormActions>
+                <FormNote>
+                  {t("The settings are written to {path} and applied now; a key that is not in the profile above joins it.", { path: snapshot?.managed_path || "/etc/sysctl.d" })}
+                </FormNote>
+              </Form>
+            </div>
+          </ActionGuard>
+        )}
       </Section>
 
       <Section
@@ -237,21 +264,9 @@ export function Kernel() {
                 <td>{entry.blacklisted ? <span className="badge warn">{t("blocked by Flotestro")}</span> : t("loaded")}</td>
                 <td>
                   <ActionGuard action="kernel.module.blacklist" host={host.id}>
-                    <button
-                      className={entry.blacklisted ? "secondary" : "hm-danger"}
-                      onClick={() =>
-                        setIntent({
-                          action: "kernel.module.blacklist",
-                          label: entry.blacklisted ? t("Unblock module") : t("Block module"),
-                          description: entry.blacklisted
-                            ? t("{module} will be allowed to load again.", { module: entry.name })
-                            : t("{module} will be blocked from loading. A module already loaded stays loaded until reboot, and one pulled in by the initramfs needs that rebuilt too.", { module: entry.name }),
-                          payload: { kernel: { module: entry.name, blacklist: !entry.blacklisted } },
-                        })
-                      }
-                    >
-                      {entry.blacklisted ? t("Unblock") : t("Block")}
-                    </button>
+                    {/* The registry keeps the list of modules the panel will
+                        not block; the row reads its refusal from there. */}
+                    <BlockButton entry={entry} onIntent={setIntent} />
                   </ActionGuard>
                 </td>
               </tr>
@@ -276,7 +291,10 @@ export function Kernel() {
               <FormActions>
                 <button
                   className="secondary"
-                  disabled={!MODULE_PATTERN.test(moduleName.trim()) || (snapshot?.blacklist ?? []).includes(moduleName.trim())}
+                  // The blocked list is what this host reports, so it stays
+                  // here: the registry knows the operation, not the host.
+                  disabled={!orderReady(loadRequest) || (snapshot?.blacklist ?? []).includes(moduleName.trim())}
+                  title={refusalOf(t, loadRequest)}
                   onClick={() =>
                     setIntent({
                       action: "kernel.module.load",
@@ -284,7 +302,7 @@ export function Kernel() {
                       description: t("{module} will be loaded on {host} now. It stays loaded until the next reboot; whether it comes back then depends on what pulls it in.", {
                         module: moduleName.trim(), host: host.hostname,
                       }),
-                      payload: { kernel: { module: moduleName.trim() } },
+                      payload: loadRequest.payload,
                     })
                   }
                 >
@@ -316,5 +334,34 @@ export function Kernel() {
         />
       )}
     </ModulePage>
+  );
+}
+
+/**
+ * The block-or-unblock button of one module row. The registry composes the
+ * order, so the button is disabled with the reason on a module the panel
+ * refuses to block - the same refusal the Bulk workspace shows.
+ */
+function BlockButton({ entry, onIntent }: { entry: KernelModule; onIntent: (intent: Intent) => void }) {
+  const t = useT();
+  const order = moduleBlockOrder(entry.name, entry.blacklisted);
+  return (
+    <button
+      className={entry.blacklisted ? "secondary" : "hm-danger"}
+      disabled={!orderReady(order)}
+      title={refusalOf(t, order)}
+      onClick={() =>
+        onIntent({
+          action: order.action,
+          label: entry.blacklisted ? t("Unblock module") : t("Block module"),
+          description: entry.blacklisted
+            ? t("{module} will be allowed to load again.", { module: entry.name })
+            : t("{module} will be blocked from loading. A module already loaded stays loaded until reboot, and one pulled in by the initramfs needs that rebuilt too.", { module: entry.name }),
+          payload: order.payload,
+        })
+      }
+    >
+      {entry.blacklisted ? t("Unblock") : t("Block")}
+    </button>
   );
 }

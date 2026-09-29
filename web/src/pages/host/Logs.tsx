@@ -11,8 +11,11 @@ import {
 } from "./shared";
 import { useJournalPreview } from "../../lib/stream";
 import { readsPrefill } from "../Reads";
-import { ActionGuard } from "../../components/ActionGuard";
+import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
+
+/** The reads this page offers; when every one is refused, the page says so once. */
+const LOG_READS = ["journal.read", "logfile.read", "journal.follow"];
 
 type JournalResult = { lines?: string[]; truncated?: boolean };
 
@@ -474,6 +477,7 @@ export function Logs() {
         title={t("Logs")}
         description={t("The journal and log files, read from the host on request and always bounded.")}
       />
+      <ReadOnlyModuleNotice host={host.id} actions={LOG_READS} />
       <Message text={errorMessage} error />
       {/* A view that has ended still says what it could not carry: the gap
           belongs to the lines that came back, not to the moment they

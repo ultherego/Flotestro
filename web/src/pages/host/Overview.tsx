@@ -13,7 +13,8 @@ import {
 } from "../../lib/types";
 import {
   Check, Fact, Facts, Field, Fields, Foot, Form, FormActions, FormNote, Message, ModuleFreshness, ModuleHeader, ModulePage,
-  Section, Summary, Table, Widgets, countWhere, usageTone, useHost, useModule,
+  Section, Summary, Table, Widgets, countWhere, orderReady, refusalOf, registryOrder, usageTone, useHost, useModule,
+  type RegistryOrder,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { FacetList, useFleetFacets } from "../Bulk";
@@ -687,8 +688,14 @@ export function HostTeam({ host, editable }: { host: Host; editable: boolean }) 
   );
 }
 
-/** An RFC 1123 name as the host accepts it: lower-case labels joined by dots. */
-const HOSTNAME_PATTERN = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/;
+/**
+ * A rename as an order, composed by the operation registry: this page and
+ * the Bulk workspace then send one payload and refuse one set of names, the
+ * readable name among them.
+ */
+export function renameOrder(hostname: string, pretty: string): RegistryOrder {
+  return registryOrder("system.hostname.set", { hostname, pretty });
+}
 
 /**
  * Renaming the host.
@@ -718,7 +725,10 @@ function RenameHost({ host, reported }: { host: Host; reported?: string }) {
   });
 
   const name = hostname.trim();
-  const valid = HOSTNAME_PATTERN.test(name) && name.length <= 64 && name !== "localhost" && !name.endsWith(".localhost");
+  const order = renameOrder(hostname, pretty);
+  const refusal = refusalOf(t, order);
+  // The host already carrying the name is this page's own refusal: the
+  // registry compares the form with itself, not with the host.
   const unchanged = name === host.hostname;
 
   return (
@@ -750,15 +760,13 @@ function RenameHost({ host, reported }: { host: Host; reported?: string }) {
                 <input value={pretty} placeholder="Web 02" onChange={(e) => setPretty(e.target.value)} />
               </Field>
             </Fields>
-            {name !== "" && !valid && (
-              <Message text={t("This is not a valid hostname: lower-case letters, digits and hyphens, labels joined by dots.")} error />
-            )}
+            {name !== "" && refusal !== "" && <Message text={refusal} error />}
             {unchanged && <Message text={t("The host already has this name.")} />}
             <FormNote>
               {t("The host checks first whether the name resolves in DNS to another machine and whether the agent's certificate is bound to the name. /etc/hosts follows the rename; DNS, Kerberos and service certificates do not.")}
             </FormNote>
             <FormActions>
-              <button className="hm-danger" onClick={() => setConfirming(true)} disabled={!valid || unchanged || confirming}>
+              <button className="hm-danger" onClick={() => setConfirming(true)} disabled={!orderReady(order) || unchanged || confirming}>
                 {t("Rename host…")}
               </button>
               <button className="secondary" onClick={() => { setOpen(false); setConfirming(false); }}>{t("Cancel")}</button>
@@ -779,7 +787,7 @@ function RenameHost({ host, reported }: { host: Host; reported?: string }) {
               action: "system.hostname.set",
               reason,
               target_confirmation: confirmation,
-              payload: { hostname: { hostname: name, pretty: pretty.trim() } },
+              payload: order.payload,
             })
           }
           onCancel={() => setConfirming(false)}

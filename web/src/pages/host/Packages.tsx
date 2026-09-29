@@ -10,7 +10,8 @@ import { VirtualRows } from "../../components/virtual";
 import { ColumnChooser, Td, Th, useColumns } from "../../components/SortableTable";
 import {
   Check, Fact, Facts, Field, Fields, Foot, Form, FormActions, Message, ModuleFreshness, ModuleHeader,
-  ModulePage, RequestOperation, Section, Summary, Table, Unknown, Widgets, countWhere, useHost, useModule,
+  ModulePage, RequestOperation, Section, Summary, Table, Unknown, Widgets, countWhere, orderReady, refusalOf,
+  registryOrder, useHost, useModule, type RegistryOrder,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
@@ -287,6 +288,17 @@ export function heldCount(packages: PackagesState | undefined): number | undefin
  * they are three different decisions about the same host.
  */
 /** The changes this page offers; when every one is refused, the page says so once. */
+/**
+ * Replacing the agent, as an order the operation registry composes: this
+ * page and the Bulk workspace then send one payload and refuse one set of
+ * versions and checksums.
+ */
+export function agentUpgradeOrder(version: string, checksum: string, rollback: string): RegistryOrder {
+  return registryOrder("agent.upgrade", {
+    target_version: version, package_sha256: checksum, rollback_version: rollback,
+  });
+}
+
 const PACKAGE_CHANGES = [
   "packages.install", "packages.remove", "packages.upgrade", "packages.hold.set", "packages.repair",
   "packages.repository.set", "agent.upgrade",
@@ -313,6 +325,7 @@ export function Packages() {
   const [agentRollback, setAgentRollback] = useState("");
   const [repairing, setRepairing] = useState(false);
   const [message, setMessage] = useState("");
+  const agentRequest = agentUpgradeOrder(agentVersion, agentDigest, agentRollback);
 
   // The release channel is a policy recorded in the panel, not an operation:
   // nothing runs on the host, so it goes straight to the host record.
@@ -609,19 +622,11 @@ export function Packages() {
           <FormActions>
             <ActionGuard action="agent.upgrade" host={host.id}>
             <button
-              disabled={!agentVersion || agentVersion === host.agent_version}
-              onClick={() =>
-                request.mutate({
-                  action: "agent.upgrade",
-                  payload: {
-                    agent_upgrade: {
-                      target_version: agentVersion,
-                      ...(agentDigest ? { package_sha256: agentDigest } : {}),
-                      ...(agentRollback ? { rollback_version: agentRollback } : {}),
-                    },
-                  },
-                })
-              }
+              // The version the host already runs is this page's own
+              // refusal: the registry sees the form, not the host.
+              disabled={!orderReady(agentRequest) || agentVersion === host.agent_version}
+              title={refusalOf(t, agentRequest)}
+              onClick={() => request.mutate({ action: agentRequest.action, payload: agentRequest.payload })}
             >
               {t("Replace agent")}
             </button>

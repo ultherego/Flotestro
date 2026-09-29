@@ -5,12 +5,34 @@ import type { Job } from "../../lib/types";
 import { Time, Empty } from "../../components/ui";
 import { Breakdown } from "../../components/widgets";
 import {
-  Check, Fact, Facts, Field, Fields, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage, Section,
-  Summary, Table, Widgets, countWhere, useHost, useModule,
+  Fact, Facts, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage, Section,
+  Summary, Table, Widgets, countWhere, orderReady, refusalOf, registryOrder, useHost, useModule,
+  type RegistryOrder,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
+import { OperationForm } from "../../components/OperationForm";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
+import { emptyForm, operationForm, type FormValue } from "../../lib/operations";
 import { useT } from "../../i18n";
+
+/**
+ * A change to the server's settings as an order, composed by the operation
+ * registry so this page and the Bulk workspace send one payload and refuse
+ * one set of values.
+ */
+export function sshConfigOrder(form: FormValue): RegistryOrder {
+  return registryOrder("ssh.config.apply", form);
+}
+
+/**
+ * The settings the order would change, the lockout consent aside. An order
+ * that changes nothing is not one the panel places, and the registry has no
+ * way of saying so: "leave it alone" is a legal value for every field.
+ */
+export function sshConfigSettings(order: RegistryOrder): string[] {
+  const section = (order.payload.ssh ?? {}) as Record<string, unknown>;
+  return Object.keys(section).filter((name) => name !== "allow_lockout");
+}
 
 type HostKey = { type: string; bits: number; fingerprint: string; path: string };
 
@@ -277,7 +299,8 @@ export function SshServer() {
 }
 
 /**
- * The managed file editor.
+ * The managed file editor, drawn from the operation registry: the same
+ * fields, the same refusals and the same payload as the Bulk workspace.
  */
 function SshEditor({
   state, onIntent,
@@ -286,21 +309,13 @@ function SshEditor({
   onIntent: (intent: Intent) => void;
 }) {
   const t = useT();
-  const [root, setRoot] = useState("");
-  const [password, setPassword] = useState("");
-  const [pubkey, setPubkey] = useState("");
-  const [tries, setTries] = useState("");
-  const [groups, setGroups] = useState("");
-  const [lockout, setLockout] = useState(false);
-
-  const list = (value: string) => value.split(/[\s,]+/).filter(Boolean);
-  const change: Record<string, unknown> = {};
-  if (root) change.permit_root_login = root;
-  if (password) change.password_authentication = password;
-  if (pubkey) change.pubkey_authentication = pubkey;
-  if (tries) change.max_auth_tries = tries;
-  if (groups) change.allow_groups = list(groups);
-  if (lockout) change.allow_lockout = true;
+  const entry = operationForm("ssh.config.apply");
+  const [value, setValue] = useState<FormValue>(() => (entry ? emptyForm(entry) : {}));
+  const [json, setJson] = useState("");
+  if (!entry) return null;
+  const order = sshConfigOrder(value);
+  const settings = sshConfigSettings(order);
+  const section = (order.payload.ssh ?? {}) as Record<string, unknown>;
 
   return (
     <Section
@@ -309,58 +324,24 @@ function SshEditor({
       span={12}
     >
       <Form>
-        <Fields>
-          <Field label={t("Root login")}>
-            <select value={root} onChange={(e) => setRoot(e.target.value)}>
-              <option value="">{t("root login: leave")}</option>
-              <option value="no">{t("root login: no")}</option>
-              <option value="prohibit-password">{t("root login: keys only")}</option>
-              <option value="yes">{t("root login: yes")}</option>
-            </select>
-          </Field>
-          <Field label={t("Password")}>
-            <select value={password} onChange={(e) => setPassword(e.target.value)}>
-              <option value="">{t("password auth: leave")}</option>
-              <option value="no">{t("password auth: no")}</option>
-              <option value="yes">{t("password auth: yes")}</option>
-            </select>
-          </Field>
-          <Field label={t("Public key")}>
-            <select value={pubkey} onChange={(e) => setPubkey(e.target.value)}>
-              <option value="">{t("public key auth: leave")}</option>
-              <option value="yes">{t("public key auth: yes")}</option>
-              <option value="no">{t("public key auth: no")}</option>
-            </select>
-          </Field>
-          <Field label="MaxAuthTries" narrow>
-            <input value={tries} onChange={(e) => setTries(e.target.value)} placeholder="MaxAuthTries" />
-          </Field>
-          <Field label="AllowGroups">
-            <input value={groups} onChange={(e) => setGroups(e.target.value)} placeholder="AllowGroups" />
-          </Field>
-        </Fields>
-        {/* A server nobody can log into by any method is not secured - it is
-            unreachable. */}
-        <Check checked={lockout} onChange={setLockout}>
-          {t("Allow a configuration that leaves no working authentication method")}
-        </Check>
+        <OperationForm entry={entry} value={value} onChange={setValue} json={json} onJson={setJson} />
         <FormActions>
           <button
             onClick={() =>
               onIntent({
-                action: "ssh.config.apply",
+                action: order.action,
                 label: t("Apply sshd configuration"),
                 description: t("{changes} on {unit}. Existing sessions stay open.", {
-                  changes: Object.entries(change)
-                    .filter(([key]) => key !== "allow_lockout")
-                    .map(([key, value]) => `${key} = ${Array.isArray(value) ? value.join(" ") : value}`)
+                  changes: settings
+                    .map((name) => `${name} = ${describe(section[name])}`)
                     .join(", "),
                   unit: state?.unit ?? "sshd",
                 }),
-                payload: { ssh: change },
+                payload: order.payload,
               })
             }
-            disabled={Object.keys(change).filter((key) => key !== "allow_lockout").length === 0}
+            disabled={!orderReady(order) || settings.length === 0 || json !== ""}
+            title={refusalOf(t, order)}
           >
             {t("Apply")}
           </button>
@@ -368,4 +349,9 @@ function SshEditor({
       </Form>
     </Section>
   );
+}
+
+/** One setting as the confirmation sentence reads it. */
+function describe(value: unknown): string {
+  return Array.isArray(value) ? value.join(" ") : String(value);
 }

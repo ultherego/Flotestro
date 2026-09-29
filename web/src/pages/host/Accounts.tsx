@@ -4,10 +4,10 @@ import { api, ApiError } from "../../lib/api";
 import type { Host, Job, LocalAccount } from "../../lib/types";
 import { ErrorBox, Time, Empty } from "../../components/ui";
 import { Breakdown } from "../../components/widgets";
-import { ActionGuard } from "../../components/ActionGuard";
+import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import {
   Check, Field, Fields, Form, FormActions, FormNote, Message, ModuleHeader, ModulePage, Section, Summary, Table, Widgets,
-  countWhere, useHost,
+  countWhere, orderReady, refusalOf, registryOrder, useHost, type RegistryOrder,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
@@ -17,6 +17,13 @@ import { useT } from "../../i18n";
  * root directly, docker and lxd through the engine socket.
  */
 const PRIVILEGED_GROUPS = ["sudo", "wheel", "docker", "lxd"];
+
+/** The changes this page offers; when every one is refused, the page says so once. */
+const ACCOUNT_CHANGES = [
+  "localuser.create", "localuser.delete", "localuser.lock", "localuser.unlock",
+  "localuser.groups.set", "localuser.expiry.set",
+  "localuser.sshkeys.add", "localuser.sshkeys.remove", "localuser.sshkeys.replace_all",
+];
 
 /** The panel opened under an account row. */
 type Panel = "keys" | "groups" | "expiry" | "delete";
@@ -90,6 +97,7 @@ export function HostAccounts() {
           <span>{t("Source: the agent's report, observed")} <Time value={accounts[0].observed_at} /></span>
         </p>
       )}
+      <ReadOnlyModuleNotice host={host.id} actions={ACCOUNT_CHANGES} />
 
       <Widgets>
       {/* The accounts by how they can be entered: a key, a password, not at
@@ -356,6 +364,13 @@ export function KeysPanel({
     });
   };
 
+  const addOrder = accountOrder({
+    action: "localuser.sshkeys.add",
+    name: account.name,
+    keys: publicKey.trim() ? [{ public_key: publicKey.trim(), comment: comment.trim() || undefined }] : [],
+    managed_file: target === "managed" || undefined,
+  });
+
   const add = () => {
     request.mutate({
       action: "localuser.sshkeys.add",
@@ -450,7 +465,9 @@ export function KeysPanel({
 
       <FormActions>
         <ActionGuard action="localuser.sshkeys.add" host={hostID}>
-          <button disabled={!publicKey.trim() || request.busy} onClick={add}>{t("Add key")}</button>
+          <button disabled={!orderReady(addOrder) || request.busy} title={refusalOf(t, addOrder)} onClick={add}>
+            {t("Add key")}
+          </button>
         </ActionGuard>
         <ActionGuard action="localuser.sshkeys.replace_all" host={hostID}>
           <button className="hm-danger" disabled={replacing} onClick={() => setReplacing(true)}>
@@ -486,7 +503,15 @@ function ReplaceAllKeys({
   const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
   const cutsOff = lines.length === 0 && account.password_set !== true
     && account.ssh_keys.every((key) => fileOf(key) === file);
-  const ready = reason.trim().length >= 8 && (!cutsOff || allowLockout) && !request.busy;
+  const replaceOrder = accountOrder({
+    action: "localuser.sshkeys.replace_all",
+    name: account.name,
+    ssh_keys: lines,
+    expected_fingerprints: expected,
+    managed_file: file === "managed" || undefined,
+    allow_lockout: allowLockout || undefined,
+  });
+  const ready = reason.trim().length >= 8 && orderReady(replaceOrder) && !request.busy;
 
   return (
     <div className="hm-form">
@@ -529,9 +554,11 @@ function ReplaceAllKeys({
         </>
       )}
 
-      {cutsOff && (
+      {lines.length === 0 && (
         <Check checked={allowLockout} onChange={setAllowLockout}>
-          {t("The account keeps no key and has no password login: after this order nobody can log in as {name}. That is the intent.", { name: account.name })}
+          {cutsOff
+            ? t("The account keeps no key and has no password login: after this order nobody can log in as {name}. That is the intent.", { name: account.name })
+            : t("{file} of {name} will carry no key at all after this order. That is the intent.", { file: fileName(t, file), name: account.name })}
         </Check>
       )}
 
@@ -539,6 +566,7 @@ function ReplaceAllKeys({
         <button
           className="hm-danger"
           disabled={!ready}
+          title={refusalOf(t, replaceOrder)}
           onClick={() => {
             request.mutate({
               action: "localuser.sshkeys.replace_all",
@@ -724,8 +752,18 @@ function NewAccount({ host, onClose }: { host: Host; onClose: () => void }) {
   const privileged = groupList.filter((group) => PRIVILEGED_GROUPS.includes(group));
   // An account with neither a key nor a password is an account nobody can
   // enter.
-  const ready = name.trim() !== "" && (keyList.length > 0 ? !inactive : inactive)
-    && (privileged.length === 0 || reason.trim().length >= 8);
+  const createOrder = accountOrder({
+    action: "localuser.create",
+    name: name.trim(),
+    gecos: description.trim(),
+    groups: groupList,
+    ssh_keys: keyList,
+    create_home: true,
+    inactive: inactive || undefined,
+  });
+  // The reason for a privileged group is this page's own: the registry sees
+  // the form, not the permission the order will be weighed against.
+  const ready = orderReady(createOrder) && (privileged.length === 0 || reason.trim().length >= 8);
 
   return (
     <Section
@@ -768,6 +806,7 @@ function NewAccount({ host, onClose }: { host: Host; onClose: () => void }) {
           <ActionGuard action="localuser.create" host={host.id}>
             <button
               disabled={!ready}
+              title={refusalOf(t, createOrder)}
               onClick={() =>
                 request.mutate({
                   action: "localuser.create",
@@ -823,6 +862,38 @@ type Order = {
 export type Request = { mutate: (order: Order) => void; message: string; busy: boolean };
 
 /**
+ * One account order as the operation registry composes it, so this page and
+ * the Bulk workspace send one payload and refuse one set of values - a
+ * private key pasted into the key field among them.
+ */
+export function accountOrder(order: Order): RegistryOrder {
+  const keys = order.keys ?? [];
+  const composed = registryOrder(order.action, {
+    name: order.name,
+    gecos: order.gecos ?? "",
+    // The registry reads a list one entry per line; the fields on this page
+    // are typed as lines, as commas, or come from the host's own report.
+    groups: (order.groups ?? []).join("\n"),
+    ssh_keys: (order.ssh_keys ?? []).join("\n"),
+    public_keys: keys.map((key) => key.public_key).join("\n"),
+    fingerprints: (order.fingerprints ?? []).join("\n"),
+    expected_fingerprints: (order.expected_fingerprints ?? []).join("\n"),
+    allow_lockout: order.allow_lockout === true,
+    managed_file: order.managed_file === true,
+    inactive: order.inactive === true,
+    create_home: order.create_home === true,
+    expires_at: order.expires_at ?? "",
+    remove_home: order.remove_home === true,
+  });
+  // A comment of the key's own is the one thing the registry's key list does
+  // not carry, and this is the only place in the panel where one is typed.
+  if (!keys.some((key) => key.comment)) return composed;
+  const section = { ...(composed.payload.local_user as Record<string, unknown>) };
+  section.keys = keys.map((key) => (key.comment ? { ...key } : { public_key: key.public_key }));
+  return { ...composed, payload: { local_user: section } };
+}
+
+/**
  * Requesting an operation creates a plan, not an immediate change: a
  * mutating operation waits for approval by default.
  */
@@ -832,29 +903,19 @@ function useRequest(host: Host): Request {
   const [message, setMessage] = useState("");
 
   const mutation = useMutation({
-    mutationFn: ({ action, reason, target_confirmation, ...rest }: Order) =>
-      api.post<Job>(`/api/v1/hosts/${host.id}/operations`, {
-        action,
-        reason,
-        target_confirmation,
-        payload: {
-          local_user: {
-            name: rest.name,
-            gecos: rest.gecos || undefined,
-            groups: rest.groups,
-            ssh_keys: rest.ssh_keys,
-            keys: rest.keys,
-            fingerprints: rest.fingerprints,
-            expected_fingerprints: rest.expected_fingerprints,
-            allow_lockout: rest.allow_lockout,
-            managed_file: rest.managed_file,
-            inactive: rest.inactive,
-            create_home: rest.create_home,
-            expires_at: rest.expires_at,
-            remove_home: rest.remove_home,
-          },
-        },
-      }),
+    mutationFn: (order: Order) => {
+      const composed = accountOrder(order);
+      // The registry's refusal is the same one the Bulk workspace shows;
+      // nothing goes out until the order is one the panel would compose.
+      const refusal = composed.problems[0];
+      if (refusal) return Promise.reject(new Error(t(refusal.message, refusal.params)));
+      return api.post<Job>(`/api/v1/hosts/${host.id}/operations`, {
+        action: order.action,
+        reason: order.reason,
+        target_confirmation: order.target_confirmation,
+        payload: composed.payload,
+      });
+    },
     onSuccess: (job) => {
       setMessage(
         job.requires_approval

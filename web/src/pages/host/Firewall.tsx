@@ -7,7 +7,8 @@ import { bytes } from "../../lib/format";
 import { Breakdown, Meter } from "../../components/widgets";
 import {
   Check, Fact, Facts, Field, Fields, Foot, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage,
-  Section, Summary, Table, Widgets, countWhere, useHost, useModule,
+  Section, Summary, Table, Widgets, countWhere, orderReady, refusalOf, registryOrder, useHost, useModule,
+  type RegistryOrder,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
@@ -104,6 +105,59 @@ function adapterLabel(adapter: string): string {
  * The host's firewall. The panel changes only its own nftables table or
  * firewalld zone.
  */
+/* The four changes this page offers go through the operation registry, so
+   the host page and the Bulk workspace send one payload and refuse one set
+   of values. Two bindings travel on top of the composed payload, because
+   they are this screen's own and the registry entries do not carry them:
+   the fingerprint of the ruleset the operator read, and the watchdog a zone
+   change needs - firewalld keeps an established connection alive across a
+   reload, so a change that locks the host out looks like a success. */
+
+/** The rollback window a change ordered from this page carries. */
+const ROLLBACK_SECONDS = 120;
+
+/** A rule as an order, bound to the ruleset the operator was looking at. */
+export function ruleOrder(fields: {
+  rule_id: string; chain: string; action: string; protocol: string;
+  ports: string[]; sources: string[]; comment: string; break_glass: boolean;
+}, fingerprint: string): RegistryOrder {
+  // The registry reads a list one entry per line; the fields on this page
+  // are single lines separated by commas.
+  const composed = registryOrder("firewall.rule.ensure", {
+    ...fields,
+    ports: fields.ports.join("\n"),
+    sources: fields.sources.join("\n"),
+    rollback_seconds: ROLLBACK_SECONDS,
+  });
+  return withFirewall(composed, { expected_hash: fingerprint });
+}
+
+/** Taking a rule away, as an order. */
+export function ruleRemoveOrder(ruleID: string): RegistryOrder {
+  return registryOrder("firewall.rule.remove", {
+    rule_id: ruleID, rollback_seconds: ROLLBACK_SECONDS,
+  });
+}
+
+/** Opening or closing one port in a zone, as an order. */
+export function zonePortOrder(zone: string, port: string, protocol: string, enable: boolean): RegistryOrder {
+  const composed = registryOrder("firewall.zone.port", { zone, ports: port, protocol, enable });
+  return withFirewall(composed, { rollback_seconds: ROLLBACK_SECONDS });
+}
+
+/** Allowing or stopping a service in a zone, as an order. */
+export function zoneServiceOrder(zone: string, service: string, enable: boolean): RegistryOrder {
+  const composed = registryOrder("firewall.zone.service", { zone, service, enable });
+  return withFirewall(composed, { rollback_seconds: ROLLBACK_SECONDS });
+}
+
+/** The composed order with this page's own fields laid on top of it. */
+function withFirewall(order: RegistryOrder, extra: Record<string, unknown>): RegistryOrder {
+  const section = order.payload.firewall as Record<string, unknown> | undefined;
+  if (!section) return order;
+  return { ...order, payload: { firewall: { ...section, ...extra } } };
+}
+
 /** The changes this page offers; when every one is refused, the page says so once. */
 const FIREWALL_CHANGES = ["firewall.rule.ensure", "firewall.rule.remove", "firewall.zone.port", "firewall.zone.service"];
 
@@ -399,9 +453,13 @@ export function Firewall() {
                               action: "firewall.rule.remove",
                               label: t("Remove rule"),
                               description: t("{rule} will be removed from {host}. The remaining Flotestro rules are rebuilt in order.", { rule: ruleName(rule), host: host.hostname }),
-                              payload: { firewall: { rule_id: ruleName(rule), rollback_seconds: 120 } },
+                              payload: ruleRemoveOrder(ruleName(rule)).payload,
                             })
                           }
+                          // A rule the panel cannot name is a rule it cannot
+                          // take away; the row says so rather than sending it.
+                          disabled={!orderReady(ruleRemoveOrder(ruleName(rule)))}
+                          title={refusalOf(t, ruleRemoveOrder(ruleName(rule)))}
                         >
                           {t("Remove")}
                         </button>
@@ -457,6 +515,10 @@ function RuleWizard({ fingerprint, onIntent }: { fingerprint: string; onIntent: 
 
   const list = (value: string) =>
     value.split(",").map((element) => element.trim()).filter(Boolean);
+  const order = ruleOrder({
+    rule_id: id, chain, action, protocol,
+    ports: list(ports), sources: list(sources), comment, break_glass: breakGlass,
+  }, fingerprint);
 
   return (
     <Section
@@ -520,23 +582,11 @@ function RuleWizard({ fingerprint, onIntent }: { fingerprint: string; onIntent: 
                 }${list(sources).length ? ` ${t("from")} ${list(sources).join(", ")}` : ""} (${
                   chain === "input" ? t("incoming") : t("outgoing")
                 })`,
-                payload: {
-                  firewall: {
-                    rule_id: id,
-                    chain,
-                    action,
-                    protocol,
-                    ports: list(ports),
-                    sources: list(sources),
-                    comment,
-                    break_glass: breakGlass,
-                    rollback_seconds: 120,
-                    expected_hash: fingerprint,
-                  },
-                },
+                payload: order.payload,
               })
             }
-            disabled={!id}
+            disabled={!orderReady(order)}
+            title={refusalOf(t, order)}
           >
             {t("Create rule")}
           </button>
@@ -556,6 +606,10 @@ function ZonePort({
 }) {
   const t = useT();
   const [port, setPort] = useState("");
+  const portOrder = (operation: string) => {
+    const [number, protocol = "tcp"] = port.split("/");
+    return zonePortOrder(zone, number, protocol, operation === "open");
+  };
 
   return (
     <div className="operations">
@@ -577,21 +631,11 @@ function ZonePort({
               description: operation === "open"
                 ? t("{port} will be opened in zone {zone} on {host}, permanently and reloaded now.", { port: `${number}/${protocol}`, zone, host: hostname })
                 : t("{port} will be closed in zone {zone} on {host}, permanently and reloaded now.", { port: `${number}/${protocol}`, zone, host: hostname }),
-              payload: {
-                firewall: {
-                  zone,
-                  ports: [number],
-                  protocol,
-                  enable: operation === "open",
-                  // The same watchdog a rule change asks for: firewalld keeps an
-                  // established connection alive across a reload, so a change
-                  // that locks the host out looks like a success.
-                  rollback_seconds: 120,
-                },
-              },
+              payload: portOrder(operation).payload,
             });
           }}
-          disabled={!port}
+          disabled={!orderReady(portOrder(operation))}
+          title={refusalOf(t, portOrder(operation))}
         >
           {operation === "open" ? t("Open") : t("Close")}
         </button>
@@ -599,9 +643,6 @@ function ZonePort({
     </div>
   );
 }
-
-/** A firewalld service name as the host validates it. */
-const SERVICE_NAME_PATTERN = /^[a-z0-9][a-z0-9_.-]{0,31}$/;
 
 /**
  * Adding or removing a firewalld service in a zone.
@@ -618,7 +659,6 @@ function ZoneService({
   const t = useT();
   const [service, setService] = useState("");
   const name = service.trim();
-  const valid = SERVICE_NAME_PATTERN.test(name);
 
   return (
     <div className="operations">
@@ -643,17 +683,14 @@ function ZoneService({
               description: operation === "add"
                 ? t("The service {service} will be allowed in zone {zone} on {host}, permanently and reloaded now.", { service: name, zone, host: hostname })
                 : t("The service {service} will be removed from zone {zone} on {host}, permanently and reloaded now.", { service: name, zone, host: hostname }),
-              payload: {
-                firewall: {
-                  zone,
-                  service: name,
-                  enable: operation === "add",
-                  rollback_seconds: 120,
-                },
-              },
+              payload: zoneServiceOrder(zone, name, operation === "add").payload,
             })
           }
-          disabled={!valid || (operation === "remove" && !services.includes(name))}
+          // The service already being in the zone is this page's own
+          // refusal: the registry sees the form, not the zone.
+          disabled={!orderReady(zoneServiceOrder(zone, name, operation === "add"))
+            || (operation === "remove" && !services.includes(name))}
+          title={refusalOf(t, zoneServiceOrder(zone, name, operation === "add"))}
         >
           {operation === "add" ? t("Add service") : t("Remove service")}
         </button>

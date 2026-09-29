@@ -1,13 +1,14 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
-import type { Job } from "../../lib/types";
+import type { Host, Job } from "../../lib/types";
 import { ErrorBox, Time, Empty } from "../../components/ui";
 import { absoluteTime } from "../../lib/format";
 import { Breakdown } from "../../components/widgets";
 import {
   Fact, Facts, Field, Fields, Form, FormActions, JobNotice, Message, ModuleFreshness, ModuleHeader, ModulePage, Section,
-  Summary, Table, Widgets, countWhere, useHost, useModule, useReadOperation,
+  Summary, Table, Widgets, countWhere, orderReady, refusalOf, registryOrder, useHost, useModule, useReadOperation,
+  type RegistryOrder,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
@@ -145,6 +146,19 @@ function StatusBadge({ status, days }: { status: string; days?: number }) {
  * looks at the files it was pointed to and at those certmonger watches.
  */
 /** The changes this page offers; when every one is refused, the page says so once. */
+/**
+ * A renewal as an order the operation registry composes: this page and the
+ * Bulk workspace then send one payload and refuse one set of values - a
+ * request identifier or a reload unit the host would not take among them.
+ */
+export function renewOrder(
+  request: string, path: string, reloadUnit: string, probeTarget: string,
+): RegistryOrder {
+  return registryOrder("certificate.renew", {
+    request, path, reload_unit: reloadUnit, probe_target: probeTarget,
+  });
+}
+
 const CERTIFICATE_CHANGES = ["certificate.deploy", "certificate.renew"];
 
 export function Certificates() {
@@ -434,31 +448,10 @@ export function Certificates() {
                           certificate has no button, not a dead one. */}
                       {certificate.renewal === "tracked" && certificate.tracking?.request && (
                       <ActionGuard action="certificate.renew" host={host.id}>
-                        <button
-                          className="secondary"
-                          onClick={() =>
-                            setIntent({
-                              action: "certificate.renew",
-                              label: t("Renew certificate"),
-                              description:
-                                t("certmonger on {host} is asked to reissue request {request} for {path}", {
-                                  host: host.hostname, request: certificate.tracking?.request ?? "", path: certificate.path,
-                                }) +
-                                (certificate.reload_unit ? `, ${t("then {unit} is reloaded", { unit: certificate.reload_unit })}` : "") +
-                                ".",
-                              payload: {
-                                certificate: {
-                                  request: certificate.tracking?.request ?? "",
-                                  path: certificate.path,
-                                  reload_unit: certificate.reload_unit ?? "",
-                                  probe_target: certificate.probe_target ?? "",
-                                },
-                              },
-                            })
-                          }
-                        >
-                          {t("Renew")}
-                        </button>
+                        {/* The values come from the host's own report, which
+                            is why they are checked: the registry refuses a
+                            reload unit or a probe target the host would. */}
+                        <RenewButton host={host} certificate={certificate} onIntent={setIntent} />
                       </ActionGuard>
                       )}
                       {certificate.watched && (
@@ -801,5 +794,44 @@ function DeployForm({
         </FormActions>
       </Form>
     </Section>
+  );
+}
+
+/**
+ * The renewal button of one certificate row. The registry composes the
+ * order, so a row whose values the panel would not send says why instead of
+ * placing an order the host refuses.
+ */
+function RenewButton({ host, certificate, onIntent }: {
+  host: Host;
+  certificate: Certificate;
+  onIntent: (intent: Intent) => void;
+}) {
+  const t = useT();
+  const order = renewOrder(
+    certificate.tracking?.request ?? "", certificate.path,
+    certificate.reload_unit ?? "", certificate.probe_target ?? "",
+  );
+  return (
+    <button
+      className="secondary"
+      disabled={!orderReady(order)}
+      title={refusalOf(t, order)}
+      onClick={() =>
+        onIntent({
+          action: order.action,
+          label: t("Renew certificate"),
+          description:
+            t("certmonger on {host} is asked to reissue request {request} for {path}", {
+              host: host.hostname, request: certificate.tracking?.request ?? "", path: certificate.path,
+            }) +
+            (certificate.reload_unit ? `, ${t("then {unit} is reloaded", { unit: certificate.reload_unit })}` : "") +
+            ".",
+          payload: order.payload,
+        })
+      }
+    >
+      {t("Renew")}
+    </button>
   );
 }

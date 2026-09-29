@@ -10,11 +10,27 @@ import { Breakdown } from "../../components/widgets";
 import { ColumnChooser, Td, Th, useColumns, type ColumnDef, type Columns } from "../../components/SortableTable";
 import {
   Fact, Facts, Foot, Message, ModuleFreshness, ModuleHeader, ModulePage, Section, Summary, Table, Widgets, countWhere,
-  useHost, useModule, useModuleRefresh,
+  registryOrder, useHost, useModule, useModuleRefresh,
+  type RegistryOrder,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
+
+/* Every unit operation this page places goes through the operation
+   registry, so the host page and the Bulk workspace send one payload and
+   refuse one set of names - a unit reached through the address bar with a
+   suffix systemd does not know among them. */
+
+/** Starting, stopping, restarting or clearing the failed state of one unit. */
+export function unitOrder(action: string, unit: string): RegistryOrder {
+  return registryOrder(action, { unit });
+}
+
+/** Deciding whether a unit starts at boot, or whether it may start at all. */
+export function unitToggleOrder(action: string, unit: string, enabled: boolean): RegistryOrder {
+  return registryOrder(action, { unit, enabled });
+}
 
 type ServicesState = {
   failed_units: string[] | null;
@@ -158,14 +174,24 @@ export function Services() {
   });
 
   function operation(action: string, unit: string) {
-    request.mutate({ action, payload: { unit: { unit } } });
+    const order = unitOrder(action, unit);
+    if (order.problems.length > 0) {
+      setMessage(t(order.problems[0].message, order.problems[0].params));
+      return;
+    }
+    request.mutate({ action, payload: order.payload });
   }
 
   function toggle(action: string, unit: string, value: boolean) {
+    const order = unitToggleOrder(action, unit, value);
+    if (order.problems.length > 0) {
+      setMessage(t(order.problems[0].message, order.problems[0].params));
+      return;
+    }
     request.mutate({
       action,
       ...(action === "unit.mask.set" ? { reason: "unit masking from the panel" } : {}),
-      payload: { unit_toggle: { unit, enabled: value } },
+      payload: order.payload,
     });
   }
 
@@ -402,7 +428,7 @@ export function Services() {
             request.mutate({
               action: "unit.mask.set",
               reason,
-              payload: { unit_toggle: { unit: toMask.name, enabled: true } },
+              payload: unitToggleOrder("unit.mask.set", toMask.name, true).payload,
             })
           }
           onCancel={() => setToMask(null)}

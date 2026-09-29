@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { changePayload, operationBody, filterRows, heldCount, packageRows, packageVersion, planBinding, planExpired, planMode, type InstalledPackage, type PlanChange } from "./Packages";
+import { agentUpgradeOrder, changePayload, operationBody, filterRows, heldCount, packageRows, packageVersion, planBinding, planExpired, planMode, type InstalledPackage, type PlanChange } from "./Packages";
+import { emptyForm, operationForm, type FormValue } from "../../lib/operations";
 
 /* The table joins three answers of the host - the installed list, the
    holds and the last upgrade plan - and the join decides what a row says
@@ -188,5 +189,51 @@ describe("planMode", () => {
   it("asks for the plan of the change that is being prepared", () => {
     expect(planMode("packages.install")).toBe("install");
     expect(planMode("packages.upgrade")).toBe("upgrade");
+  });
+});
+
+/* Replacing the agent goes through the operation registry, so this page and
+   the Bulk workspace send one payload and refuse one set of versions. */
+
+describe("agentUpgradeOrder", () => {
+  const digest = "a".repeat(64);
+
+  function bulk(form: FormValue): Record<string, unknown> {
+    const entry = operationForm("agent.upgrade");
+    if (!entry) throw new Error("the registry has no form for agent.upgrade");
+    return entry.toPayload({ ...emptyForm(entry), ...form });
+  }
+
+  it("sends what the Bulk workspace sends", () => {
+    const order = agentUpgradeOrder("0.62.0", digest, "0.61.0");
+    expect(order.payload).toEqual(bulk({
+      target_version: "0.62.0", package_sha256: digest, rollback_version: "0.61.0",
+    }));
+    expect(order.payload).toEqual({
+      agent_upgrade: { target_version: "0.62.0", package_sha256: digest, rollback_version: "0.61.0" },
+    });
+    expect(order.problems).toEqual([]);
+    expect(agentUpgradeOrder("0.62.0", "", "").payload)
+      .toEqual({ agent_upgrade: { target_version: "0.62.0" } });
+  });
+
+  // The refusal the page did not make before: a mistyped checksum used to
+  // travel to the host and come back as a failed verification.
+  it("refuses what the Bulk workspace refuses", () => {
+    const entry = operationForm("agent.upgrade");
+    const cases: [string, string, string][] = [
+      ["", digest, ""],
+      ["0.62.0 (rc)", digest, ""],
+      ["0.62.0", "a".repeat(63), ""],
+      ["0.62.0", "not a checksum", ""],
+      ["0.62.0", digest, "0.61.0 or so"],
+    ];
+    for (const [version, checksum, rollback] of cases) {
+      const order = agentUpgradeOrder(version, checksum, rollback);
+      expect(order.problems, `${version}/${checksum}/${rollback}`).not.toEqual([]);
+      expect(order.problems).toEqual(entry?.validate({
+        ...emptyForm(entry), target_version: version, package_sha256: checksum, rollback_version: rollback,
+      }));
+    }
   });
 });

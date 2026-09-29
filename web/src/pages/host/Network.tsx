@@ -6,7 +6,8 @@ import { Time, Empty } from "../../components/ui";
 import { Breakdown } from "../../components/widgets";
 import {
   Fact, Facts, Field, Fields, Foot, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage, Section,
-  Summary, Table, Widgets, countWhere, useHost, useModule,
+  Summary, Table, Widgets, countWhere, orderReady, refusalOf, registryOrder, useHost, useModule,
+  type RegistryOrder,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
@@ -150,6 +151,35 @@ type Intent = {
 /**
  * The host's network: interfaces, addresses and routes read from the kernel.
  */
+/* Three of this page's changes go through the operation registry, so the
+   host page and the Bulk workspace send one payload and refuse one set of
+   values. The profile and the layer builder still compose their own: the
+   first tells "leave it alone" from "clear it" by sending empty values, and
+   the second carries per-kind fields the one registry entry does not keep
+   apart. */
+
+/** The rollback window a change ordered from a row carries. */
+const ROW_ROLLBACK_SECONDS = 120;
+
+/** The size of the frames one interface carries, as an order. */
+export function mtuOrder(iface: string, mtu: string, rollbackSeconds: number): RegistryOrder {
+  return registryOrder("network.mtu.set", { interface: iface, mtu, rollback_seconds: rollbackSeconds });
+}
+
+/** The routes one interface is to carry, as an order. */
+export function routesOrder(iface: string, routes: string[], rollbackSeconds: number): RegistryOrder {
+  // The registry reads a list one entry per line; the field on this page is
+  // one comma-separated line.
+  return registryOrder("network.route.ensure", {
+    interface: iface, routes: routes.join("\n"), rollback_seconds: rollbackSeconds,
+  });
+}
+
+/** Taking a bond, a bridge or a VLAN away, as an order. */
+export function layerRemoveOrder(iface: string, rollbackSeconds: number): RegistryOrder {
+  return registryOrder("network.link.remove", { interface: iface, rollback_seconds: rollbackSeconds });
+}
+
 /** The changes this page offers; when every one is refused, the page says so once. */
 const NETWORK_CHANGES = [
   "network.mtu.set", "network.route.ensure", "network.profile.apply",
@@ -541,22 +571,7 @@ export function Network() {
                   {writable && (
                     <td>
                       <ActionGuard action="network.link.remove" host={host.id}>
-                        <button
-                          className="secondary"
-                          onClick={() =>
-                            setIntent({
-                              action: "network.link.remove",
-                              label: t("Remove {iface}", { iface: iface.name }),
-                              description: t("{iface} is taken away and {members} go back to carrying their own traffic. The host rolls the removal back unless the agent proves it can still reach the panel.", {
-                                iface: iface.name,
-                                members: layerMembers(iface).join(", ") || t("nothing"),
-                              }),
-                              payload: { network: { interface: iface.name, rollback_seconds: 120 } },
-                            })
-                          }
-                        >
-                          {t("Remove")}
-                        </button>
+                        <LayerRemoveButton iface={iface} onIntent={setIntent} />
                       </ActionGuard>
                     </td>
                   )}
@@ -676,6 +691,8 @@ function InterfaceChange({
   const list = (value: string) =>
     value.split(",").map((element) => element.trim()).filter(Boolean);
   const seconds = Number(window) || 0;
+  const mtuRequest = mtuOrder(iface.name, mtu, seconds);
+  const routesRequest = routesOrder(iface.name, list(routes), seconds);
 
   return (
     <Section
@@ -713,12 +730,11 @@ function InterfaceChange({
                   action: "network.mtu.set",
                   label: t("Set MTU on {iface}", { iface: iface.name }),
                   description: t("{iface} will use MTU {mtu}. The host rolls back after {seconds}s unless the agent confirms connectivity.", { iface: iface.name, mtu, seconds }),
-                  payload: {
-                    network: { interface: iface.name, mtu, rollback_seconds: seconds },
-                  },
+                  payload: mtuRequest.payload,
                 })
               }
-              disabled={!mtu}
+              disabled={!orderReady(mtuRequest)}
+              title={refusalOf(t, mtuRequest)}
             >
               {t("Set MTU")}
             </button>
@@ -744,15 +760,11 @@ function InterfaceChange({
                   description: t("{iface} will carry exactly these routes: {routes}. Routes not listed here are removed from the profile.", {
                     iface: iface.name, routes: list(routes).join("; ") || t("none"),
                   }),
-                  payload: {
-                    network: {
-                      interface: iface.name,
-                      routes: list(routes),
-                      rollback_seconds: seconds,
-                    },
-                  },
+                  payload: routesRequest.payload,
                 })
               }
+              disabled={!orderReady(routesRequest)}
+              title={refusalOf(t, routesRequest)}
             >
               {t("Replace routes")}
             </button>
@@ -1107,4 +1119,34 @@ function relevant(iface: Interface): boolean {
   // wonder why the card has no address.
   if (layerKind(iface) !== "" || iface.master) return true;
   return (iface.addresses ?? []).length > 0 || iface.kind === "ethernet";
+}
+
+/**
+ * The button that takes a layer away. The registry composes the order, so a
+ * rollback window or an interface name the panel would not send says why
+ * here rather than coming back as a refusal from the host.
+ */
+function LayerRemoveButton({ iface, onIntent }: { iface: Interface; onIntent: (intent: Intent) => void }) {
+  const t = useT();
+  const order = layerRemoveOrder(iface.name, ROW_ROLLBACK_SECONDS);
+  return (
+    <button
+      className="secondary"
+      disabled={!orderReady(order)}
+      title={refusalOf(t, order)}
+      onClick={() =>
+        onIntent({
+          action: order.action,
+          label: t("Remove {iface}", { iface: iface.name }),
+          description: t("{iface} is taken away and {members} go back to carrying their own traffic. The host rolls the removal back unless the agent proves it can still reach the panel.", {
+            iface: iface.name,
+            members: layerMembers(iface).join(", ") || t("nothing"),
+          }),
+          payload: order.payload,
+        })
+      }
+    >
+      {t("Remove")}
+    </button>
+  );
 }

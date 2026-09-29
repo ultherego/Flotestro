@@ -4,7 +4,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@testing-library/jest-dom/vitest";
 import type { Host } from "../../lib/types";
-import { HostTeam } from "./Overview";
+import { HostTeam, renameOrder } from "./Overview";
+import { emptyForm, operationForm, type FormValue } from "../../lib/operations";
 
 /**
  * The team of a host, on the host's own page.
@@ -114,5 +115,42 @@ describe("the team of a host", () => {
     expect(put).toHaveBeenCalledWith("/api/v1/hosts/h1/team", {
       team: "", reason: "the payments group was disbanded",
     });
+  });
+});
+
+/* A rename goes through the operation registry, so this page and the Bulk
+   workspace send one payload and refuse one set of names. */
+
+describe("renameOrder", () => {
+  function bulk(form: FormValue): Record<string, unknown> {
+    const entry = operationForm("system.hostname.set");
+    if (!entry) throw new Error("the registry has no form for system.hostname.set");
+    return entry.toPayload({ ...emptyForm(entry), ...form });
+  }
+
+  it("sends what the Bulk workspace sends", () => {
+    const order = renameOrder("web02.example.internal", "Web 02");
+    expect(order.payload).toEqual(bulk({ hostname: "web02.example.internal", pretty: "Web 02" }));
+    expect(order.payload).toEqual({ hostname: { hostname: "web02.example.internal", pretty: "Web 02" } });
+    expect(order.problems).toEqual([]);
+    // An empty readable name is left out rather than sent as nothing.
+    expect(renameOrder("web02.example.internal", "").payload)
+      .toEqual({ hostname: { hostname: "web02.example.internal" } });
+  });
+
+  it("refuses what the Bulk workspace refuses", () => {
+    const entry = operationForm("system.hostname.set");
+    const cases: [string, string][] = [
+      ["", ""],
+      ["Web02.Example.Internal", ""],
+      ["localhost", ""],
+      ["web02.example.internal", "x".repeat(256)],
+      ["web02.example.internal", "one\ntwo"],
+    ];
+    for (const [hostname, pretty] of cases) {
+      expect(renameOrder(hostname, pretty).problems, `${hostname}/${pretty}`).not.toEqual([]);
+      expect(renameOrder(hostname, pretty).problems)
+        .toEqual(entry?.validate({ ...emptyForm(entry), hostname, pretty }));
+    }
   });
 });
