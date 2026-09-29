@@ -1096,7 +1096,9 @@ func (s *Server) handleCampaignTargets(w http.ResponseWriter, r *http.Request) {
 	// in the browser, and "the failed ones" is a question the database answers.
 	query := r.URL.Query()
 	filter := campaigns.TargetFilter{State: query.Get("state"), Search: query.Get("q")}
-	if wave, err := strconv.Atoi(query.Get("wave")); err == nil && wave >= 0 {
+	// wave=-1 names the hosts that take no part in the rollout, which is a
+	// question as fair as "who is in the canary".
+	if wave, err := strconv.Atoi(query.Get("wave")); err == nil && wave >= campaigns.WaveNone {
 		filter.Wave, filter.WaveSet = wave, true
 	}
 	cursor, err := campaigns.ParseTargetCursor(query.Get("cursor"))

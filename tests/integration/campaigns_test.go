@@ -51,15 +51,21 @@ type campaignView struct {
 }
 
 type campaignTargetView struct {
-	HostID    string `json:"host_id"`
-	Hostname  string `json:"hostname"`
-	Wave      int    `json:"wave"`
-	State     string `json:"state"`
-	ErrorCode string `json:"error_code"`
-	Message   string `json:"message"`
-	JobID     string `json:"job_id"`
-	PlanJobID string `json:"plan_job_id"`
+	HostID    string     `json:"host_id"`
+	Hostname  string     `json:"hostname"`
+	Wave      int        `json:"wave"`
+	State     string     `json:"state"`
+	ErrorCode string     `json:"error_code"`
+	Message   string     `json:"message"`
+	JobID     string     `json:"job_id"`
+	PlanJobID string     `json:"plan_job_id"`
+	StartedAt *time.Time `json:"started_at"`
 }
+
+// noWave is the wave of a target that takes no part in the campaign: it was
+// already settled when the campaign was created and never runs. Wave 0 is the
+// canary, so anything counting the canary counts wave 0 alone.
+const noWave = -1
 
 type campaignReportView struct {
 	State  string         `json:"state"`
@@ -213,13 +219,20 @@ func TestCampaignCreatesATargetSnapshot(t *testing.T) {
 		t.Fatalf("state = %s, expected awaiting_approval", campaign.State)
 	}
 	targets := h.campaignTargets(campaign.ID)
-	if len(targets) < 2 {
-		t.Fatalf("the snapshot has %d targets, expected at least 2", len(targets))
-	}
 
-	// Wave 0 is the canary and has exactly as many hosts as given.
-	canary := 0
+	// Wave 0 is the canary and has exactly as many hosts as given. The fleet may
+	// also hold hosts that take no part - excluded, ineligible, decommissioned -
+	// and those are in the snapshot settled and in no wave, so they are no part
+	// of the rollout and no part of the canary.
+	canary, rollout := 0, 0
 	for _, target := range targets {
+		if target.Wave == noWave {
+			if target.State == "pending" {
+				t.Errorf("target %s is in no wave and still waiting to run", target.Hostname)
+			}
+			continue
+		}
+		rollout++
 		if target.Wave == 0 {
 			canary++
 		}
@@ -227,8 +240,104 @@ func TestCampaignCreatesATargetSnapshot(t *testing.T) {
 			t.Errorf("target %s started before approval: %s", target.Hostname, target.State)
 		}
 	}
+	if rollout < 2 {
+		t.Fatalf("the snapshot runs on %d hosts out of %d targets, expected at least 2", rollout, len(targets))
+	}
 	if canary != campaign.CanarySize {
 		t.Errorf("the canary has %d hosts, expected %d", canary, campaign.CanarySize)
+	}
+}
+
+// campaignTargetPage reads one filtered page of a campaign's targets, with the
+// count of everything the filter names - which is how a screen says how many
+// hosts a wave holds without downloading the wave.
+func (h *harness) campaignTargetPage(id, query string) ([]campaignTargetView, int) {
+	h.t.Helper()
+	var result struct {
+		Items []campaignTargetView `json:"items"`
+		Total int                  `json:"total"`
+	}
+	h.get("/api/v1/campaigns/"+id+"/targets?"+query, &result)
+	return result.Items, result.Total
+}
+
+// TestTheCanaryCountsOnlyTheHostsThatWillRun: a fleet holding hosts that take
+// no part gives a canary of exactly the declared size, everywhere the number is
+// read. An operator approves a campaign on the strength of that number.
+func TestTheCanaryCountsOnlyTheHostsThatWillRun(t *testing.T) {
+	h := newHarness(t)
+	var lab []hostView
+	for _, host := range h.hosts() {
+		if host.Site == "lab" {
+			lab = append(lab, host)
+		}
+	}
+	if len(lab) < 3 {
+		t.Skip("the test needs three hosts in the lab")
+	}
+	// Everything but the first two hosts is left out by name: a campaign of two
+	// hosts beside a crowd that will never run, which is the shape of a fleet
+	// full of decommissioned machines.
+	var left []string
+	for _, host := range lab[2:] {
+		left = append(left, host.ID)
+	}
+	campaign := h.createCampaign(labCampaign("a canary beside hosts that take no part", "cron.service", map[string]any{
+		"selector": map[string]any{
+			"expression":     map[string]any{"site": "lab"},
+			"exclude":        left,
+			"exclude_reason": "they take no part in this campaign",
+		},
+		"canary_size": 1,
+		"wave_size":   1,
+	}))
+
+	targets := h.campaignTargets(campaign.ID)
+	canary, rollout, aside := 0, 0, 0
+	for _, target := range targets {
+		if target.Wave == noWave {
+			aside++
+			if target.State != "excluded" {
+				t.Errorf("the host %s is in no wave and stands %s", target.Hostname, target.State)
+			}
+			continue
+		}
+		rollout++
+		if target.Wave == 0 {
+			canary++
+		}
+	}
+	if aside != len(left) {
+		t.Fatalf("%d hosts take no part, expected the %d that were left out", aside, len(left))
+	}
+	if rollout != 2 {
+		t.Fatalf("the rollout runs on %d hosts, expected the 2 that were not left out", rollout)
+	}
+	if canary != campaign.CanarySize {
+		t.Errorf("the canary has %d hosts, expected %d", canary, campaign.CanarySize)
+	}
+
+	// The same question asked of the API: the count of a wave is what the panel
+	// and every client read, and it answers with the hosts that will run.
+	items, total := h.campaignTargetPage(campaign.ID, "wave=0")
+	if total != campaign.CanarySize || len(items) != campaign.CanarySize {
+		t.Errorf("wave 0 holds %d hosts over %d rows, expected %d", total, len(items), campaign.CanarySize)
+	}
+	for _, target := range items {
+		if target.State != "pending" {
+			t.Errorf("the canary host %s stands %s before any approval", target.Hostname, target.State)
+		}
+	}
+	// And the hosts that take no part are still nameable, with their reason.
+	items, total = h.campaignTargetPage(campaign.ID, "wave=-1")
+	if total != aside {
+		t.Errorf("the hosts that take no part count %d, expected %d", total, aside)
+	}
+	for _, target := range items {
+		if target.ErrorCode != "excluded" || target.Message == "" {
+			t.Errorf("the host %s takes no part without saying why: %s/%s",
+				target.Hostname, target.ErrorCode, target.Message)
+		}
 	}
 }
 
@@ -244,8 +353,15 @@ func TestCampaignWaitsForApproval(t *testing.T) {
 		t.Fatalf("the unapproved campaign changed its state to %s", current.State)
 	}
 	for _, target := range h.campaignTargets(campaign.ID) {
-		if target.State != "pending" {
-			t.Errorf("target %s started without approval", target.Hostname)
+		// Every host of the rollout is still waiting. A host that takes no part
+		// was settled the moment the campaign was created and is in no wave; it
+		// proves nothing about the approval, so what is asked of every target is
+		// that no task was ever given to it.
+		if target.Wave != noWave && target.State != "pending" {
+			t.Errorf("target %s started without approval: %s", target.Hostname, target.State)
+		}
+		if target.JobID != "" || target.PlanJobID != "" || target.StartedAt != nil {
+			t.Errorf("target %s was given a task before anybody approved the campaign", target.Hostname)
 		}
 	}
 }

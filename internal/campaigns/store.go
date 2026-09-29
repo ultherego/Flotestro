@@ -166,16 +166,12 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []Target
 		return &existing[0], ErrRepeated
 	}
 
-	// We count the waves from the ready hosts only.
+	// The waves are counted from the hosts that will run, and only those hosts
+	// are in a wave at all.
+	places := placeTargets(hosts, spec.CanarySize, spec.WaveSize)
 	ready := 0
-	for _, host := range hosts {
-		state := host.State
-		if state == "" {
-			state = TargetPending
-		}
-		wave, position := 0, 0
-		if state == TargetPending {
-			wave, position = AssignWave(ready, spec.CanarySize, spec.WaveSize)
+	for _, place := range places {
+		if place.Wave != WaveNone {
 			ready++
 		}
 		const insertTarget = `
@@ -185,8 +181,8 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []Target
 			values ($1, $2, $3, $4, $5, $6, $7, $8, $9,
 			        case when $7 = 'pending' then null else now() end)`
 		if _, err := tx.Exec(ctx, insertTarget, uuid.NewString(), campaignID,
-			host.ID, wave, position, nullable(host.BootID), string(state),
-			nullable(host.Reason), nullable(host.Message)); err != nil {
+			place.Host.ID, place.Wave, place.Position, nullable(place.Host.BootID), string(place.State),
+			nullable(place.Host.Reason), nullable(place.Host.Message)); err != nil {
 			return nil, fmt.Errorf("recording a campaign target: %w", err)
 		}
 	}
@@ -261,6 +257,47 @@ func AssignWave(index, canarySize, waveSize int) (wave, position int) {
 	}
 	remaining := index - canarySize
 	return remaining/waveSize + 1, remaining % waveSize
+}
+
+// WaveNone is the wave of a host that takes no part in the campaign: it was
+// already settled - decommissioned, ineligible for the operation, inside a
+// maintenance window - when the campaign was created. Wave zero would be the
+// canary, and everything that counts the canary counts wave zero.
+const WaveNone = -1
+
+// targetPlacement is one host's place in the rollout, as the snapshot records
+// it.
+type targetPlacement struct {
+	Host     TargetHost
+	State    TargetState
+	Wave     int
+	Position int
+}
+
+// placeTargets places the hosts of a campaign in the rollout. Only the hosts
+// that will run take a wave, and they take it in the order they were given, so
+// the canary is the first hosts of the list that can actually run.
+func placeTargets(hosts []TargetHost, canarySize, waveSize int) []targetPlacement {
+	places := make([]targetPlacement, 0, len(hosts))
+	ready, aside := 0, 0
+	for _, host := range hosts {
+		place := targetPlacement{Host: host, State: host.State, Wave: WaveNone}
+		if place.State == "" {
+			place.State = TargetPending
+		}
+		if place.State == TargetPending {
+			place.Wave, place.Position = AssignWave(ready, canarySize, waveSize)
+			ready++
+		} else {
+			// A host outside the rollout still takes a position of its own: the
+			// page cursor of the target list is the pair (wave, position), and
+			// rows sharing a pair fall off the edge of a page.
+			place.Position = aside
+			aside++
+		}
+		places = append(places, place)
+	}
+	return places
 }
 
 // Approve approves a campaign and lets it start.

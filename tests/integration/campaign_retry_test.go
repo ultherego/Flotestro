@@ -187,9 +187,26 @@ func TestCampaignListFiltersAndCountsProgress(t *testing.T) {
 		}
 		if item.ID == campaign.ID {
 			found = true
+			// The row is true when it counts the snapshot the campaign really
+			// holds: a fleet may contain hosts that take no part, and those are
+			// settled in the snapshot from the first moment rather than pending.
 			targets := h.campaignTargets(campaign.ID)
-			if item.Progress.Total != len(targets) || item.Progress.Pending != len(targets) {
-				t.Errorf("the fresh campaign counts %+v over %d targets", *item.Progress, len(targets))
+			pending, settled := 0, 0
+			for _, target := range targets {
+				if target.State == "pending" {
+					pending++
+				} else {
+					settled++
+				}
+			}
+			if item.Progress.Total != len(targets) || item.Progress.Pending != pending ||
+				item.Progress.Skipped != settled {
+				t.Errorf("the fresh campaign counts %+v over %d targets, %d of them pending",
+					*item.Progress, len(targets), pending)
+			}
+			// Nothing has run: the campaign is waiting for its approval.
+			if item.Progress.Succeeded+item.Progress.Failed+item.Progress.Unknown != 0 {
+				t.Errorf("a campaign awaiting approval already counts results: %+v", *item.Progress)
 			}
 		}
 	}

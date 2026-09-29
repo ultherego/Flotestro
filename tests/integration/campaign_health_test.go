@@ -157,6 +157,11 @@ func TestACanaryHealthFailureStopsTheNextWave(t *testing.T) {
 
 	var canary healthTargetView
 	for _, target := range h.healthTargets(campaign.ID) {
+		// A host that takes no part is in no wave and was settled before the
+		// campaign started; it says nothing about the barrier after the canary.
+		if target.Wave == noWave {
+			continue
+		}
 		if target.Wave == 0 {
 			canary = target
 			continue

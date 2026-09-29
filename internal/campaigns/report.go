@@ -22,14 +22,23 @@ func BuildReport(campaign Campaign, targets []Target) Report {
 	}
 	waveTotals := map[int]map[string]int{}
 	waveOpen := map[int]bool{}
+	maxWave := WaveNone
 	for _, target := range targets {
 		report.Totals[string(target.State)]++
-		if waveTotals[target.Wave] == nil {
-			waveTotals[target.Wave] = map[string]int{}
-		}
-		waveTotals[target.Wave][string(target.State)]++
-		if !target.State.Finished() {
-			waveOpen[target.Wave] = true
+		// The table describes the rollout, so a host that takes no part is in no
+		// row of it; the totals above still count it, because it is in the
+		// campaign.
+		if target.Participates() {
+			if waveTotals[target.Wave] == nil {
+				waveTotals[target.Wave] = map[string]int{}
+			}
+			waveTotals[target.Wave][string(target.State)]++
+			if !target.State.Finished() {
+				waveOpen[target.Wave] = true
+			}
+			if target.Wave > maxWave {
+				maxWave = target.Wave
+			}
 		}
 		// The failures are the hosts the operator has to look at.
 		if target.State == TargetFailed || target.State == TargetUnknown {
@@ -50,7 +59,10 @@ func BuildReport(campaign Campaign, targets []Target) Report {
 			report.OfflineQueued = append(report.OfflineQueued, target.HostID)
 		}
 	}
-	for wave := 0; wave < len(waveTotals); wave++ {
+	// Up to the last wave there is, not up to the number of waves: a campaign
+	// without a canary has no wave zero, and its last wave is one further on
+	// than counting the waves would reach.
+	for wave := 0; wave <= maxWave; wave++ {
 		totals, exists := waveTotals[wave]
 		if !exists {
 			continue

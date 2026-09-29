@@ -833,7 +833,11 @@ export function Campaign() {
                       {target.hostname || target.host_id.slice(0, 8)}
                     </Link>
                   </td>
-                  <td className="num">{target.wave}{target.wave === 0 && ` (${t("canary")})`}</td>
+                  {/* A host that was settled when the campaign was ordered is in
+                      no wave; showing it as wave zero would read as a canary. */}
+                  <td className="num" title={target.wave < 0 ? t("The host takes no part in the campaign and is in no wave.") : undefined}>
+                    {target.wave < 0 ? "—" : target.wave}{target.wave === 0 && ` (${t("canary")})`}
+                  </td>
                   {/* The consent covers the differences computed on the host,
                       not the intent. A host without a planning operation has
                       no plan to show; a host with one opens it below the table,
@@ -1264,7 +1268,10 @@ function eventDescription(entry: TimelineEntry): string {
     entry.payload?.message,
     entry.payload?.pause_reason,
   ].filter((part) => part);
-  if (typeof entry.payload?.wave === "number" && entry.aggregate_type === "campaign_target") {
+  // A host that takes no part carries no wave number; naming one would invent a
+  // place in the rollout it never had.
+  if (typeof entry.payload?.wave === "number" && entry.payload.wave >= 0
+    && entry.aggregate_type === "campaign_target") {
     parts.unshift(`wave ${entry.payload.wave}`);
   }
   return parts.join(" · ") || "—";

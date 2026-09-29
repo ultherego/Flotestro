@@ -2,6 +2,7 @@ package campaigns
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -529,5 +530,69 @@ func TestALateSuccessDoesNotResurrectACanceledCampaign(t *testing.T) {
 	targets[0].State = TargetCanceled
 	if !cancelSettled(targets) {
 		t.Fatal("a host canceled on the agent's word holds the campaign in canceling")
+	}
+}
+
+// TestAHostThatNeverTakesPartIsNotInTheCanary: a fleet whose hosts are mostly
+// settled before the campaign starts still gives a canary of exactly the
+// declared size, because a host that will not run is in no wave at all.
+func TestAHostThatNeverTakesPartIsNotInTheCanary(t *testing.T) {
+	// The case measured in the laboratory: 31 hosts, 27 of them decommissioned.
+	// The settled ones come first, where a wave assigned to them would land on
+	// the canary.
+	var fleet []TargetHost
+	for i := 0; i < 27; i++ {
+		fleet = append(fleet, TargetHost{ID: fmt.Sprintf("closed-%02d", i),
+			State: TargetIneligible, Reason: "decommissioned"})
+	}
+	for i := 0; i < 4; i++ {
+		fleet = append(fleet, TargetHost{ID: fmt.Sprintf("ready-%d", i)})
+	}
+
+	var canary []string
+	waves := map[int]int{}
+	noWave := 0
+	for _, place := range placeTargets(fleet, 1, 2) {
+		if place.Wave == WaveNone {
+			// Each host outside the rollout keeps a place of its own, so that the
+			// page cursor of the target list never has two rows under one pair.
+			if place.State != TargetIneligible || place.Position != noWave {
+				t.Errorf("%s takes no part and stands at %s/%d", place.Host.ID, place.State, place.Position)
+			}
+			noWave++
+			continue
+		}
+		waves[place.Wave]++
+		if place.Wave == 0 {
+			canary = append(canary, place.Host.ID)
+		}
+	}
+	if len(canary) != 1 || canary[0] != "ready-0" {
+		t.Fatalf("the canary holds %v, expected the one host that goes first", canary)
+	}
+	if noWave != 27 {
+		t.Errorf("%d hosts take no part, expected 27", noWave)
+	}
+	// The rest follow in waves of two, and the count of the waves is the count
+	// of the hosts that run.
+	if waves[1] != 2 || waves[2] != 1 || len(waves) != 3 {
+		t.Errorf("the waves hold %v, expected the canary, then two hosts, then one", waves)
+	}
+
+	// The same fleet read as a tally: the hosts that take no part are settled
+	// rows of the campaign, and they neither count as done nor water down the
+	// failure share the stop threshold reads.
+	var targets []Target
+	for _, place := range placeTargets(fleet, 1, 2) {
+		targets = append(targets, Target{HostID: place.Host.ID, Wave: place.Wave,
+			Position: place.Position, State: place.State})
+	}
+	targets[27].State = TargetFailed // ready-0, the canary
+	counts := tallyTargets(targets)
+	if counts.Total != 4 || counts.Finished != 1 || counts.Failed != 1 {
+		t.Fatalf("the tally reads %+v over a rollout of four hosts with one failed canary", counts)
+	}
+	if exceeded, _ := ThresholdExceeded(counts.Failed, counts.Finished, counts.Total, 20, 0); !exceeded {
+		t.Error("a failed canary beside 27 hosts that never ran did not cross the threshold of 20%")
 	}
 }

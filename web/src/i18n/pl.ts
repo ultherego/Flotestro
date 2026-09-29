@@ -2425,6 +2425,7 @@ export const pl: Record<string, string> = {
   "The host resources the operation holds while it runs. An exclusive claim keeps every other change off that resource; shared claims coexist and their weight is what they cost the host.": "Zasoby hosta, które operacja trzyma w trakcie działania. Claim exclusive nie dopuszcza innej zmiany na tym zasobie; claimy shared współistnieją, a ich waga to koszt dla hosta.",
   "The host returned no detail for {unit}.": "Host nie zwrócił szczegółów dla {unit}.",
   "The host reverts itself when the connectivity check fails, with no help from the panel.": "Host sam się cofa, gdy test łączności nie przejdzie, bez udziału panelu.",
+  "The host takes no part in the campaign and is in no wave.": "Host nie bierze udziału w kampanii i nie należy do żadnej fali.",
   "The host takes operations and secrets, and renews its certificate.": "Host przyjmuje operacje i sekrety oraz odnawia swój certyfikat.",
   "The host undid the change itself because the connectivity check failed.": "Host sam cofnął zmianę, bo sprawdzenie łączności nie przeszło.",
   "The host unenrolls itself with its own keytab and restores the files the join changed. Directory accounts stop signing in here at once; the entry in the directory stays, and a new join needs a new one-time password.": "Host wypisuje się z domeny własnym keytabem i przywraca pliki zmienione przy dołączaniu. Konta z katalogu od razu przestają się tu logować; wpis w katalogu zostaje, a ponowne dołączenie wymaga nowego hasła jednorazowego.",

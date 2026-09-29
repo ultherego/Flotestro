@@ -169,6 +169,14 @@ func (t TargetState) Succeeded() bool {
 	return t == TargetSucceeded || t == TargetNoChange
 }
 
+// Participates says whether the host takes part in the rollout at all. A host
+// that was already settled when the campaign was created is in no wave and
+// never runs; one that settled later had a wave and keeps it, so the wave is
+// what tells the two apart.
+func (t Target) Participates() bool {
+	return t.Wave != WaveNone
+}
+
 // HoldsWave says whether the host keeps its wave open. A settled host does
 // not.
 func (t Target) HoldsWave() bool {
@@ -756,6 +764,8 @@ func (t Target) ConnectivityLost() bool {
 // targets: how many are settled, how many of those ended well, how many failed
 // - the unknown ones among them, because unknown is not a success - how many
 type targetTally struct {
+	// Total counts the hosts of the rollout, which are the hosts that can run:
+	// one settled before the campaign started is in none of these numbers.
 	Total     int
 	Finished  int
 	Succeeded int
@@ -772,8 +782,15 @@ type targetTally struct {
 
 // tallyTargets counts the targets the way the stop rules read them.
 func tallyTargets(targets []Target) targetTally {
-	counts := targetTally{Total: len(targets)}
+	counts := targetTally{}
 	for _, target := range targets {
+		// A host that takes no part is in no tally: counting it as settled would
+		// water down the failure share the threshold reads, and a rollout of four
+		// hosts beside twenty-seven decommissioned ones would never stop itself.
+		if !target.Participates() {
+			continue
+		}
+		counts.Total++
 		if target.State.Finished() {
 			counts.Finished++
 		}
