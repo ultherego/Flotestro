@@ -234,8 +234,12 @@ func (o *Orchestrator) advance(ctx context.Context, campaign Campaign) error {
 
 	// We renew the token leases before settling anything: a host that is just
 	// finishing will give them back in a moment anyway, and a host halfway
-	// through a transaction must not lose them to the passage of time.
-	o.renewCapacity(ctx, targets)
+	// through a transaction must not lose them to the passage of time. The
+	// answer also says whether this pass may still start hosts at all.
+	mayLaunch, err := o.holdCapacity(ctx, campaign, targets)
+	if err != nil {
+		return err
+	}
 
 	// First we settle what is already running: without that the thresholds would
 	// be computed against a stale state.
@@ -291,6 +295,11 @@ func (o *Orchestrator) advance(ctx context.Context, campaign Campaign) error {
 	if !WithinMaintenanceWindow(time.Now(), campaign.MaintenanceStart, campaign.MaintenanceEnd) {
 		return nil
 	}
+	// The hosts at work are not counted against the fleet's budgets any more, so
+	// starting another one would put the fleet over a limit nobody can see.
+	if !mayLaunch {
+		return nil
+	}
 
 	wave := currentWave(targets)
 	if wave < 0 {
@@ -330,7 +339,11 @@ func (o *Orchestrator) advance(ctx context.Context, campaign Campaign) error {
 // keep their leases and are followed to their end, nothing new starts, and a
 // pausing campaign becomes paused once no host is in flight.
 func (o *Orchestrator) settle(ctx context.Context, campaign Campaign, targets []Target) error {
-	o.renewCapacity(ctx, targets)
+	// Nothing starts here, so only a lease taken by another runner stops the
+	// pass: that runner settles these hosts now.
+	if _, err := o.holdCapacity(ctx, campaign, targets); err != nil {
+		return err
+	}
 	for i := range targets {
 		if err := o.progressTarget(ctx, campaign, &targets[i]); err != nil {
 			o.log.Error("failure while settling a host of a paused campaign",
@@ -844,7 +857,11 @@ func (o *Orchestrator) expire(ctx context.Context, campaign Campaign, oldest tim
 
 // drain carries a canceled campaign to its end.
 func (o *Orchestrator) drain(ctx context.Context, campaign Campaign, targets []Target) error {
-	o.renewCapacity(ctx, targets)
+	// A canceled campaign starts nothing either, so again only a takeover stops
+	// the pass: the runner that holds the hosts carries them to their end.
+	if _, err := o.holdCapacity(ctx, campaign, targets); err != nil {
+		return err
+	}
 	for i := range targets {
 		if err := o.progressTarget(ctx, campaign, &targets[i]); err != nil {
 			o.log.Error("failure while draining a campaign target",

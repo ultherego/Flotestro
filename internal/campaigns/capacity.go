@@ -3,6 +3,9 @@ package campaigns
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
 
 	"github.com/ultherego/flotestro/internal/budgets"
 	"github.com/ultherego/flotestro/internal/hosts"
@@ -68,11 +71,46 @@ func (o *Orchestrator) releaseCapacity(ctx context.Context, target *Target) {
 	}
 }
 
-// renewCapacity extends the leases of the hosts that are still working.
-func (o *Orchestrator) renewCapacity(ctx context.Context, targets []Target) {
+// errCapacityUnproven says the tokens of the hosts at work could not be
+// renewed although no other runner holds them. The fleet stops counting those
+// hosts against the budgets, so a pass that reads this starts nobody new until
+// their leases are live again.
+var errCapacityUnproven = errors.New("the capacity leases of the hosts at work are not live")
+
+// leaseRenewer is the part of the capacity budgets a pass renews. It is an
+// interface so the answer to a lost lease can be pinned without a database.
+type leaseRenewer interface {
+	RenewFenced(ctx context.Context, leases []budgets.Fenced) error
+}
+
+// holdCapacity renews the tokens of the hosts at work and says whether this
+// pass may still start new ones. It returns ErrLeaseLost when the tokens carry
+// another runner's claim: from that moment the campaign is that runner's and
+// this pass writes nothing more.
+func (o *Orchestrator) holdCapacity(ctx context.Context, campaign Campaign, targets []Target) (bool, error) {
 	if o.budgets == nil {
-		return
+		return true, nil
 	}
+	return capacityHolds(ctx, o.budgets, campaign, targets, o.log)
+}
+
+func capacityHolds(ctx context.Context, renewer leaseRenewer, campaign Campaign,
+	targets []Target, log *slog.Logger) (bool, error) {
+	err := renewCapacity(ctx, renewer, targets)
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, errCapacityUnproven):
+		log.Warn("the capacity of the hosts at work was not renewed; the campaign starts nobody new this pass",
+			"campaign_id", campaign.ID, "err", err)
+		return false, nil
+	default:
+		return false, err
+	}
+}
+
+// renewCapacity extends the leases of the hosts that are still working.
+func renewCapacity(ctx context.Context, renewer leaseRenewer, targets []Target) error {
 	// Every renewal names the claim token the runner reads on the target;
 	// a lease that moved to another runner is left alone.
 	working := make([]budgets.Fenced, 0, len(targets))
@@ -82,10 +120,21 @@ func (o *Orchestrator) renewCapacity(ctx context.Context, targets []Target) {
 		}
 	}
 	if len(working) == 0 {
-		return
+		return nil
 	}
-	if err := o.budgets.RenewFenced(ctx, working); err != nil {
-		o.log.Error("the capacity of a campaign was not renewed", "err", err)
+	err := renewer.RenewFenced(ctx, working)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, budgets.ErrFenceStale):
+		// The tokens of these hosts carry another runner's claim, which only the
+		// runner that adopted them could have written: this instance lost the
+		// campaign and must not touch it again.
+		return fmt.Errorf("%w: %w", ErrLeaseLost, err)
+	default:
+		// Nobody took the hosts, but their grants are not live and the fleet no
+		// longer counts them, so no further host may be started over them.
+		return fmt.Errorf("%w: %w", errCapacityUnproven, err)
 	}
 }
 

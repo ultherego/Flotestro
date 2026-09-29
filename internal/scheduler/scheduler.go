@@ -148,7 +148,11 @@ func (s *Scheduler) housekeep(ctx context.Context) {
 	s.renewBudgets(ctx)
 }
 
-// renewBudgets keeps the tokens of the running tasks alive.
+// renewBudgets keeps the tokens of the running tasks alive. The list is the
+// fleet's, not this gateway's, and the leases carry no fencing token, so a
+// loss here says a grant ran out somewhere in the fleet, never that this
+// instance was superseded: what this instance may dispatch is fenced by the
+// job lease and the session's ownership of the host, further down.
 func (s *Scheduler) renewBudgets(ctx context.Context) {
 	if s.admission.budgets == nil {
 		return

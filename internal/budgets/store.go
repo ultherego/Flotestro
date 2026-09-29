@@ -327,6 +327,12 @@ func (s *Store) Renew(ctx context.Context, owners []string) error {
 // and its tokens are somebody else's now.
 var ErrLeaseLost = errors.New("the budget lease was lost")
 
+// ErrFenceStale is the half of ErrLeaseLost that names a takeover: the lease
+// is there and carries another holder's fencing token, so the work it guards
+// is that holder's now. A caller that reads this has been superseded and has
+// to stop; one that reads a plain ErrLeaseLost has merely run out of grant.
+var ErrFenceStale = fmt.Errorf("%w: the budget lease changed hands", ErrLeaseLost)
+
 // Fenced names one lease by its owner and the fencing token the caller
 // holds for it.
 type Fenced struct {
@@ -345,9 +351,10 @@ func (s *Store) RenewFenced(ctx context.Context, leases []Fenced) error {
 		owners = append(owners, lease.Owner)
 		tokens = append(tokens, lease.Token)
 	}
-	// Lost means the row is still there and is no longer ours: expired, or
-	// taken by another holder. A row that is gone is a target that finished.
-	var lost int
+	// The two losses are counted apart because they mean different things to the
+	// caller: a row under another token was taken from it, a row that merely
+	// expired is still its own. A row that is gone is a target that finished.
+	var stale, expired int
 	err := s.pool.QueryRow(ctx, `
 		with renewed as (
 		    update budget_leases l
@@ -357,17 +364,22 @@ func (s *Store) RenewFenced(ctx context.Context, leases []Fenced) error {
 		       and l.lease_until > now()
 		    returning l.owner
 		)
-		select count(*) from budget_leases l
+		select count(*) filter (where l.fencing_token <> held.token),
+		       count(*) filter (where l.fencing_token = held.token and l.lease_until <= now())
+		  from budget_leases l
 		  join unnest($1::text[], $2::bigint[]) as held (owner, token)
-		    on l.owner = held.owner
-		 where l.fencing_token <> held.token or l.lease_until <= now()`,
-		owners, tokens, s.lease.Seconds()).Scan(&lost)
+		    on l.owner = held.owner`,
+		owners, tokens, s.lease.Seconds()).Scan(&stale, &expired)
 	if err != nil {
 		return err
 	}
-	if lost > 0 {
-		return fmt.Errorf("%w: %d of %d had expired or changed hands",
-			ErrLeaseLost, lost, len(leases))
+	// The takeover is reported first: it is the answer the caller must act on
+	// even when some of its other leases only ran out.
+	if stale > 0 {
+		return fmt.Errorf("%w: %d of %d are held under another token", ErrFenceStale, stale, len(leases))
+	}
+	if expired > 0 {
+		return fmt.Errorf("%w: %d of %d had already expired", ErrLeaseLost, expired, len(leases))
 	}
 	return nil
 }
