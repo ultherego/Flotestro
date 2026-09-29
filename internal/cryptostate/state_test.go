@@ -719,3 +719,44 @@ func TestAnInstanceBroughtUpToTheRecordOfAnother(t *testing.T) {
 		t.Error("an instance that could not catch up reports itself current")
 	}
 }
+
+// A migration run beside a serving panel changes the record and not the
+// process. The instance cannot pick up a provider at run time - it is what the
+// panel was started with - so it says what it is and asks to be restarted,
+// rather than reporting a state it is not in.
+func TestAnInstanceDoesNotClaimAProviderItIsNotRunning(t *testing.T) {
+	ctx := context.Background()
+	l := newLab(t)
+	runtime := l.open(t)
+	storage := l.storage
+	before := runtime.Report(ctx)
+	if before.Provider != l.provider.Name() || before.RecordedProvider != "" || before.Stale != "" {
+		t.Fatalf("a panel that just started reports %+v", before)
+	}
+
+	// Somebody runs crypto import-state against the same database.
+	record, err := storage.Load(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.Provider = DBProviderName
+	record.Revision++
+	if err := storage.Update(ctx, *record); err != nil {
+		t.Fatal(err)
+	}
+	runtime.Reload(ctx)
+
+	after := runtime.Report(ctx)
+	if after.Provider != l.provider.Name() {
+		t.Errorf("the instance reports the provider %q and runs %q", after.Provider, l.provider.Name())
+	}
+	if after.RecordedProvider != DBProviderName {
+		t.Errorf("the instance does not say the record names %q", DBProviderName)
+	}
+	if after.Stale == "" {
+		t.Error("the instance is behind the record and says nothing about it")
+	}
+	if !strings.Contains(after.Stale, "restarted") {
+		t.Errorf("the reason does not say what to do: %q", after.Stale)
+	}
+}

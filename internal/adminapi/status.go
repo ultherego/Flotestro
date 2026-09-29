@@ -756,6 +756,11 @@ func (s *Server) cryptoStatus(ctx context.Context) statusBlock {
 		"initialised":        report.Initialised,
 		"adopted":            report.Adopted,
 	}
+	if report.RecordedProvider != "" {
+		// The record was changed beside this process, which a restart resolves
+		// and nothing else does.
+		facts["recorded_provider"] = report.RecordedProvider
+	}
 	if report.KEKID != "" {
 		// Which key encryption key the rows were sealed with, so an operator can
 		// tell the mounted secret from the one the installation expects.
@@ -763,6 +768,12 @@ func (s *Server) cryptoStatus(ctx context.Context) statusBlock {
 	}
 	if report.Err != nil {
 		return statusFailed("the cryptographic state of the installation is not usable: "+report.Err.Error(), facts)
+	}
+	// An instance that could not catch up with the record serves what it has
+	// and is one restart away from being right. Saying so here is the only way
+	// an operator learns of it without reading the log.
+	if report.Stale != "" {
+		return statusFailed("this replica is behind the installation record: "+report.Stale, facts)
 	}
 	block := statusOK(facts)
 	if report.PendingRewrap > 0 {

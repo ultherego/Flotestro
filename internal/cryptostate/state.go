@@ -109,6 +109,10 @@ type Runtime struct {
 	// record and could not be brought up to date. It signs and seals with what
 	// it has; the readiness answer says it is not fit to serve.
 	stale string
+	// recordedProvider is the provider a record this instance refused to
+	// adopt names. It is what turns "behind the record" into something an
+	// operator can act on.
+	recordedProvider string
 	// initialised and adopted say what this start did: made a new
 	// installation, or wrote the record for an existing one.
 	initialised bool
@@ -675,7 +679,19 @@ func (r *Runtime) Reload(ctx context.Context) {
 		return
 	}
 
-	// The key first: a seal with a key this instance does not hold fails at the
+	// A record that names another provider is a migration somebody ran beside
+	// this process. It cannot be picked up at run time - the provider is what
+	// the panel was started with - and pretending otherwise would leave an
+	// instance reading files while the record says the database.
+	if loaded.Provider != r.provider.Name() {
+		r.mu.Lock()
+		r.recordedProvider = loaded.Provider
+		r.mu.Unlock()
+		r.markStale("the installation was moved to the provider " + loaded.Provider +
+			" and this instance runs " + r.provider.Name() + "; it has to be restarted")
+		return
+	}
+	// The key next: a seal with a key this instance does not hold fails at the
 	// moment a secret is written, which is too late to be useful.
 	if err := r.provider.RequireKey(ctx, loaded.ActiveKeyID); err != nil {
 		r.markStale("the record names the key " + loaded.ActiveKeyID + " and this instance does not hold it")
@@ -755,7 +771,15 @@ func (r *Runtime) Rewrap(ctx context.Context) {
 // Report is the installation's cryptographic state for the status screen.
 type Report struct {
 	InstallationID string
-	Provider       string
+	// Provider is the one this process runs, which is not always the one
+	// the record names: a migration run beside a serving panel changes the
+	// record and not the process.
+	Provider string
+	// RecordedProvider is set only when the record names another one.
+	RecordedProvider string
+	// Stale says why this instance is behind the record, and is empty when
+	// it is not.
+	Stale string
 	// KEKID names the key encryption key the rows are wrapped with; it is
 	// empty for an installation whose keys are still files.
 	KEKID             string
@@ -785,11 +809,19 @@ func (r *Runtime) Report(ctx context.Context) Report {
 	record := r.record
 	store := r.store
 	report := Report{
-		InstallationID: record.InstallationID, Provider: record.Provider,
+		InstallationID: record.InstallationID, Provider: r.provider.Name(), Stale: r.stale,
 		ActiveKeyID: record.ActiveKeyID, IssuerID: record.IssuerID, IssuerFingerprint: record.IssuerFingerprint,
 		Revision: record.Revision, InitializedAt: record.InitializedAt,
 		Keys: r.provider.KeyIDs(), Initialised: r.initialised, Adopted: r.adopted,
 		VersionsByKey: map[string]int{},
+	}
+	// The record this instance holds is the one it could adopt; a record it
+	// refused names its provider here instead.
+	switch {
+	case r.recordedProvider != "" && r.recordedProvider != report.Provider:
+		report.RecordedProvider = r.recordedProvider
+	case record.Provider != report.Provider:
+		report.RecordedProvider = record.Provider
 	}
 	if db, sealed := r.provider.(*DBSealedProvider); sealed {
 		report.KEKID = db.KEKID()
