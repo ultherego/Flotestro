@@ -165,8 +165,14 @@ func TestTheMechanismIsAVisibleDecision(t *testing.T) {
 	if !adapter.Features["timers"] {
 		t.Skip("the host runs no systemd, so it carries no timers")
 	}
+	// The branch this host takes instead is the one TestManagedEntryLifecycle
+	// drives on the debian-family host: schedule.ensure without a kind, written
+	// as a cron entry and read back. So the order without a kind is executed,
+	// just not here.
 	if adapter.Features["cron"] {
-		t.Skip("the host has /etc/cron.d, so an order without a kind has somewhere to go")
+		notApplicable(t, "agent-debian",
+			"this host has /etc/cron.d, so an order without a kind has somewhere to go; "+
+				"TestManagedEntryLifecycle drives that order on the debian-family host")
 	}
 
 	t.Cleanup(func() {

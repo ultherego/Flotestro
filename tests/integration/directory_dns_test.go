@@ -65,7 +65,7 @@ func TestDirectoryRecordPlansTheReverseRecord(t *testing.T) {
 		}
 	}
 	if zone == "" {
-		t.Skip("the directory has no forward zone")
+		absent(t, "the directory has no forward zone")
 	}
 
 	var change directoryChange

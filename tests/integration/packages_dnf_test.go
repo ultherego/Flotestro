@@ -107,7 +107,7 @@ func TestPackageHoldOnDNF(t *testing.T) {
 			t.Fatalf("the hold ended in state %s without an explanation: %+v",
 				hold.State, attempts)
 		}
-		t.Skip("this host has no versionlock plugin")
+		absent(t, "this host has no versionlock plugin")
 	}
 
 	release, attempts := h.runOperation(host.ID, map[string]any{

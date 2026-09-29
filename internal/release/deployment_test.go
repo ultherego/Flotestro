@@ -1,12 +1,23 @@
 package release
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 )
+
+// absent emits the classification the release gate reads out of a skipped test,
+// exactly as the integration harness does. These two tests are the regression
+// tests for a panel that did not come back after a reboot and for a pre-flight
+// check that performed the migration it was asked about; a silent skip of
+// either reads like a pass.
+func absent(t *testing.T, format string, args ...any) {
+	t.Helper()
+	t.Skipf("FLOTESTRO-SKIP class=%s reason=%q", SkipAbsent, fmt.Sprintf(format, args...))
+}
 
 // The restart policy is not a preference. Rootless Podman replays the policies
 // at boot with the unit it ships, and that unit runs
@@ -24,7 +35,7 @@ func TestEveryServiceThatMustSurviveARebootSaysAlways(t *testing.T) {
 		path := filepath.Join("..", "..", "docker", file)
 		content, err := os.ReadFile(path)
 		if os.IsNotExist(err) {
-			t.Skipf("%s is not in this tree", path)
+			absent(t, "%s is not in this tree, so the restart policies were never read", path)
 		}
 		if err != nil {
 			t.Fatal(err)
@@ -78,7 +89,7 @@ func TestThePreFlightSchemaCheckDependsOnNothing(t *testing.T) {
 	path := filepath.Join("..", "..", "docker", "compose.yaml")
 	content, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		t.Skipf("%s is not in this tree", path)
+		absent(t, "%s is not in this tree, so the pre-flight service was never read", path)
 	}
 	if err != nil {
 		t.Fatal(err)

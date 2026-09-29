@@ -380,7 +380,7 @@ func TestIPv6OrderIsRefusedOnAHostWithoutTheFamily(t *testing.T) {
 	host := h.hostByFamily("debian")
 	state := hostLayeredNetwork(t, h, host.ID)
 	if state.WriteAdapter == "" {
-		t.Skip("the host has no mechanism to write the network configuration")
+		absent(t, "the host has no mechanism to write the network configuration")
 	}
 	if state.ManagementInterface == "" {
 		t.Skip("the host did not point at the management interface")
@@ -428,7 +428,7 @@ func TestVLANOnAFreeInterfaceIsBuiltAndRemoved(t *testing.T) {
 	host := h.hostByFamily("rhel")
 	state := hostLayeredNetwork(t, h, host.ID)
 	if state.WriteAdapter == "" {
-		t.Skip("the host has no mechanism to write the network configuration")
+		absent(t, "the host has no mechanism to write the network configuration")
 	}
 
 	carrying := map[string]bool{}
@@ -452,7 +452,7 @@ func TestVLANOnAFreeInterfaceIsBuiltAndRemoved(t *testing.T) {
 		}
 	}
 	if parent == "" {
-		t.Skip("the host has no free interface to hang a VLAN on")
+		absent(t, "the host has no free interface to hang a VLAN on")
 	}
 
 	const name = "flotest4094"

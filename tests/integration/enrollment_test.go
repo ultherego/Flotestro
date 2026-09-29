@@ -520,7 +520,7 @@ func TestAgentReplacementEndsWithTheHostComingBack(t *testing.T) {
 		target = h.newestAgentVersion()
 	}
 	if before.AgentVersion == target {
-		t.Skipf("the host is already at version %s", target)
+		absent(t, "the host is already at version %s, so the self-upgrade has nothing to upgrade", target)
 	}
 
 	job := h.createOperation(host.ID, map[string]any{

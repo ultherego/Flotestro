@@ -250,7 +250,7 @@ func labHostGroup(t *testing.T, h *harness) directoryHostGroupView {
 		return group.Name == "ipaservers"
 	})
 	if len(candidates) == 0 {
-		t.Skip("the directory has no host group the test may change")
+		absent(t, "the directory has no host group the test may change")
 	}
 	// A group without hosts first: adding is the simpler half to undo.
 	slices.SortFunc(candidates, func(a, b directoryHostGroupView) int { return len(a.Hosts) - len(b.Hosts) })
@@ -522,7 +522,7 @@ func TestServiceKeytabRotationIsASeparateRightAndRunsOnTheHost(t *testing.T) {
 		}
 	}
 	if principal == "" {
-		t.Skip("no connected fleet host carries a service principal with a keytab beyond host/ and the panel's own; the rotation itself is not exercised")
+		absent(t, "no connected fleet host carries a service principal with a keytab beyond host/ and the panel's own; the rotation itself is not exercised")
 	}
 
 	approver := secondPerson(t, h)

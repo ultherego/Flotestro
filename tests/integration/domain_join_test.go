@@ -167,7 +167,7 @@ func candidateForJoin(t *testing.T, h *harness) (hostView, string) {
 		}
 		return host, fqdnOf(host.Hostname)
 	}
-	t.Skipf("no debian-family host can join the domain: %s", strings.Join(skipped, "; "))
+	absent(t, "no debian-family host can join the domain: %s", strings.Join(skipped, "; "))
 	return hostView{}, ""
 }
 

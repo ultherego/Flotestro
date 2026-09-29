@@ -133,7 +133,7 @@ func TestTransactionRecordsVersionsBeforeAndAfter(t *testing.T) {
 	}, 3*time.Minute)
 	plan := planAttempts[len(planAttempts)-1].Detail
 	if plan == nil || len(plan.Changes) == 0 {
-		t.Skip("the host has no updates available")
+		absent(t, "the host has no updates available")
 	}
 
 	target := ""

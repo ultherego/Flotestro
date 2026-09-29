@@ -361,7 +361,8 @@ func TestUFWHostKeepsOwnershipInComments(t *testing.T) {
 		} else if !strings.Contains(state.ReadOnlyReason, "ufw") || !strings.Contains(state.ReadOnlyReason, "inactive") {
 			t.Errorf("a read-only host with an inactive ufw does not say why: %q", state.ReadOnlyReason)
 		}
-		t.Skipf("host %s: %s", host.Hostname, state.UFW.Reason)
+		absent(t, "host %s has ufw installed but inactive (%s), so the rule lifecycle is never ordered",
+			host.Hostname, state.UFW.Reason)
 	}
 
 	if state.Adapter != "ufw" || !state.Writable || !capability.Features["ufw"] || !capability.Features["write"] {

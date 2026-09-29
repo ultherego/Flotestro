@@ -358,7 +358,7 @@ func TestAResultSurvivesALinkCut(t *testing.T) {
 		t.Fatalf("counting the sessions from %s: %v", hostIP, err)
 	}
 	if sharing > 1 {
-		t.Skipf("%d hosts connect from %s; the cut would not be one link", sharing, hostIP)
+		absent(t, "%d hosts connect from %s; the cut would not be one link", sharing, hostIP)
 	}
 	port := "8443"
 	if gateway, err := url.Parse(envOr("FLOTESTRO_TEST_GATEWAY", defaultGateway)); err == nil && gateway.Port() != "" {

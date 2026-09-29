@@ -536,7 +536,7 @@ func TestHBACSimulationDeniesAUserOutsideTheGroup(t *testing.T) {
 	h.get("/api/v1/identity/hbac-rules", &rules)
 	for _, rule := range rules.Items {
 		if rule.Enabled && rule.AllUsers && rule.AllHosts {
-			t.Skipf("the rule %s admits everyone to every host; the denial of %s cannot be observed next to it",
+			absent(t, "the rule %s admits everyone to every host; the denial of %s cannot be observed next to it",
 				rule.Name, outsider)
 		}
 	}

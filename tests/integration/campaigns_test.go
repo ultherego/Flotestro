@@ -797,7 +797,7 @@ func TestPackageCampaignComputesAPlanOnEveryHost(t *testing.T) {
 				t.Fatalf("the campaign completed at planning with %s in state %s", target.Hostname, target.State)
 			}
 		}
-		t.Skip("no host of the fleet has a security update waiting; the plans were empty")
+		absent(t, "no host of the fleet has a security update waiting; the plans were empty")
 	}
 	if afterPlanning.State == "completed" {
 		t.Skip("every host was already in the desired state; the plans were empty")
@@ -2566,7 +2566,7 @@ func TestSSHCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 		}
 	}
 	if len(withoutGSSAPI) == 0 {
-		t.Skip("every host has GSSAPI, so the cut-off cannot be ordered")
+		absent(t, "every host has GSSAPI, so the cut-off cannot be ordered")
 	}
 	targets = withoutGSSAPI
 	cutOff := h.createCampaign(map[string]any{
@@ -2765,7 +2765,7 @@ func TestTimeSourceCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) 
 		t.Skip("no host accepts the time source change; only the refusals were checked")
 	}
 	if afterPlanning.State == "completed" {
-		t.Skip("every host was already in the desired state; the plans were empty")
+		absent(t, "every host was already in the desired state; the plans were empty")
 	}
 	if afterPlanning.State != "awaiting_approval" {
 		t.Fatalf("planning ended in state %s (%s)",

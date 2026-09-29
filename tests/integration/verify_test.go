@@ -158,8 +158,13 @@ func TestARestartSettlesOnTheReturnOfTheHost(t *testing.T) {
 	// The machines of this laboratory do not come back from a restart they order
 	// themselves: VirtualBox leaves the guest stopped, and the workstation brings
 	// it back with vagrant.
+	// A waiver would fit this better than absent: VirtualBox is a property of
+	// the laboratory, not of the product. It stays absent, and the gate stays
+	// red on it, until the owner issues the waiver identifier, its expiry and
+	// the substitute evidence.
 	if os.Getenv("FLOTESTRO_TEST_REBOOT") == "" {
-		t.Skip("set FLOTESTRO_TEST_REBOOT=1 on a fleet whose hosts come back from a restart on their own")
+		absent(t, "FLOTESTRO_TEST_REBOOT is not set: the hosts of this laboratory do not come back "+
+			"from a restart they order themselves")
 	}
 	h := newHarness(t)
 	host := h.hostByName("agent-debian")
