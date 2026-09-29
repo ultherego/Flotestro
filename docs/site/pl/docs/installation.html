@@ -236,6 +236,12 @@ curl -fsS http://127.0.0.1:8080/healthz</code></pre>
         <li>Jedna różnica zostaje: <code>podman-compose</code> nie ma
         <code>cp</code>, więc token bootstrap pobiera się tam poleceniem
         <code>podman cp flotestro_control-plane_1:/var/lib/flotestro/bootstrap-token .</code></li>
+        <li>Drugą jest restart maszyny. Demon Dockera wstaje razem z systemem
+        i podnosi kontenery; rootless Podman nie ma demona, który by to zrobił,
+        więc unit odtwarzający polityki restartu przy starcie włącza się raz, na
+        koncie prowadzącym wdrożenie:
+        <code>systemctl --user enable podman-restart.service</code>. Bez tego
+        panel po każdym reboocie hosta stoi.</li>
       </ul>
     </div>
 

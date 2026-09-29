@@ -96,6 +96,19 @@ and `loginctl enable-linger <account>`, or the panel stops with the session
 that started it. Every port the panel publishes is above 1024, so rootless
 needs no change there.
 
+**A reboot needs one more thing under Podman.** The restart policy in the
+compose file is honoured by the Docker daemon, which starts with the machine and
+brings the containers back with it. Rootless Podman has no such daemon: lingering
+keeps the containers running after the last logout, and after a reboot nothing
+starts them at all. The unit that replays the restart policies at boot is
+enabled once, as the account that runs the deployment:
+
+    systemctl --user enable podman-restart.service
+
+Without it the panel is down after every reboot of the host, and the fleet has
+nowhere to report. The relay needs the same, and its own section below gives it
+a unit of its own for the same reason.
+
 **Two more differences, both found by running it.** An image named without a
 registry - `postgres:17-bookworm` - is a short name, and Podman refuses to
 resolve one without a terminal to ask at; the files name

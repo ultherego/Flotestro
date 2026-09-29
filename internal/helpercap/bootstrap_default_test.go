@@ -104,8 +104,13 @@ func TestThePinIsRefusedWhenAnybodyElseCouldHaveWrittenIt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Group-writable is the other way somebody else decides.
-	if err := os.WriteFile(store.PinPath, []byte("\n"), 0o664); err != nil {
+	// Group-writable is the other way somebody else decides. The mode is set
+	// after the write: a umask of 022 - what a root shell runs with - would take
+	// the group bit straight back off and leave the case untested.
+	if err := os.WriteFile(store.PinPath, []byte("\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(store.PinPath, 0o664); err != nil {
 		t.Fatal(err)
 	}
 	if os.Geteuid() == 0 {
