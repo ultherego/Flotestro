@@ -21,7 +21,10 @@ type memoryStore struct {
 func newMemoryStore() *memoryStore {
 	return &memoryStore{
 		memoryKeys: newMemoryKeys(),
-		record:     &Record{InstallationID: "6283c373-ab8a-4527-ad96-9a59b46a9234", Revision: 4},
+		record: &Record{
+			InstallationID: "6283c373-ab8a-4527-ad96-9a59b46a9234",
+			Provider:       LocalProviderName, Revision: 4,
+		},
 	}
 }
 
@@ -44,6 +47,10 @@ func (m *memoryStore) ImportKeys(ctx context.Context, kekID string, keys []Wrapp
 		}
 	}
 	m.kekID = kekID
+	// The database says the same thing the record does: moving the keys is
+	// switching the provider.
+	m.record.Provider = DBProviderName
+	m.record.Revision++
 	return nil
 }
 
@@ -71,6 +78,8 @@ func (m *memoryStore) ForgetKeys(_ context.Context, kekID string) error {
 	m.rows = map[string]WrappedKey{}
 	m.mu.Unlock()
 	m.kekID = ""
+	m.record.Provider = LocalProviderName
+	m.record.Revision++
 	return nil
 }
 
@@ -121,6 +130,9 @@ func TestTheKeysOfAnInstallationMoveTogetherOrNotAtAll(t *testing.T) {
 	}
 	if store.kekID != kek.ID() {
 		t.Errorf("the record names %q", store.kekID)
+	}
+	if store.record.Provider != DBProviderName {
+		t.Errorf("the record still says the keys are sealed by %q", store.record.Provider)
 	}
 	if store.count() != len(materials) {
 		t.Errorf("the database holds %d keys of %d", store.count(), len(materials))
@@ -302,6 +314,9 @@ func TestARevertHandsBackTheMaterialBeforeTheRowsGo(t *testing.T) {
 	}
 	if store.count() != 0 || store.kekID != "" {
 		t.Error("the revert left the installation half in the database")
+	}
+	if store.record.Provider != LocalProviderName {
+		t.Errorf("the record still says the keys are sealed by %q", store.record.Provider)
 	}
 	if _, err := Export(ctx, store, kek); err == nil {
 		t.Error("an installation with no keys in the database exported some")

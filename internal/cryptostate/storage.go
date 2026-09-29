@@ -376,8 +376,13 @@ func (p *Postgres) ImportKeys(ctx context.Context, kekID string, keys []WrappedK
 		if err := insertKeys(ctx, tx, keys); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx,
-			`update crypto_installation_state set kek_id = $1, updated_at = now() where singleton`, kekID)
+		// Moving the keys is switching the provider: the record has to say so in
+		// the same transaction, or the next start would find an installation
+		// sealed by one provider and a panel running another.
+		_, err := tx.Exec(ctx, `
+			update crypto_installation_state
+			   set kek_id = $1, secrets_key_provider = $2, updated_at = now(), revision = revision + 1
+			 where singleton`, kekID, DBProviderName)
 		return err
 	})
 }
@@ -416,8 +421,9 @@ func (p *Postgres) ReplaceKeys(ctx context.Context, fromKEKID, toKEKID string, k
 func (p *Postgres) ForgetKeys(ctx context.Context, kekID string) error {
 	return p.inTransaction(ctx, func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `
-			update crypto_installation_state set kek_id = null, updated_at = now()
-			 where singleton and kek_id = $1`, kekID)
+			update crypto_installation_state
+			   set kek_id = null, secrets_key_provider = $2, updated_at = now(), revision = revision + 1
+			 where singleton and kek_id = $1`, kekID, LocalProviderName)
 		if err != nil {
 			return err
 		}
