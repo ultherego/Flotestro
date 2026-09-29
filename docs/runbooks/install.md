@@ -41,12 +41,18 @@ that are easy to get wrong and cost an hour each:
 - **Pin the digest in production.** The example shows a tag because a tag is readable; a tag
   can be rewritten by whoever publishes it and a digest cannot.
 
-The panel migrates its own schema before it listens. Wait for it:
+The panel does not migrate: `FLOTESTRO_AUTO_MIGRATE` is false in the deployment and the
+`migrate` service settles the schema before any replica serves. A panel started against a
+schema it does not expect refuses with `schema_behind` rather than serving half a product.
+Ask the binary the deployment points at, then the panel itself:
 
 ```
-docker compose logs -f control-plane        # "the database schema is current"
-curl -fsS http://127.0.0.1:8080/healthz
+docker compose run --rm control-plane schema-check   # exit 0 and the level it found
+curl -fsS http://127.0.0.1:8080/readyz
 ```
+
+`/readyz` and not `/healthz`: the latter says the process is alive, which it is even when
+the database is unreachable or has become a read-only standby.
 
 ### 2. The first administrator
 
