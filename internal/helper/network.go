@@ -48,9 +48,9 @@ func (s *Server) applyNetwork(ctx context.Context, request *helperv1.HelperReque
 	// The mechanism is detected the same way the agent detects it for the
 	// inventory: the host answers with the adapter it reported, not with one
 	// picked here.
-	adapter := network.DetectAdapter(network.Exists)
+	adapter := network.DetectAdapter(network.Exists, network.MaskedUnit)
 	if adapter == "" {
-		reason := network.ReadOnlyReason(adapter)
+		reason := network.ReadOnlyReason(adapter, network.Exists, network.MaskedUnit)
 		if action.GetOperation() == helperv1.NetworkRequest_OPERATION_PLAN {
 			// A missing mechanism is an answer of the plan, not a read error:
 			// the campaign is to see this host as a refusal.
@@ -393,7 +393,7 @@ func (s *Server) confirmChange(ctx context.Context, id string) *helperv1.HelperR
 			return reject(ErrorExecFailed,
 				"the change was reverted by netplan before the confirmation arrived")
 		}
-		return networkResponse(s.adapterProfiles(ctx, network.DetectAdapter(network.Exists)),
+		return networkResponse(s.adapterProfiles(ctx, network.DetectAdapter(network.Exists, network.MaskedUnit)),
 			"there is nothing to disarm: the rollback "+id+" no longer exists", nil)
 	}
 	switch plan.Adapter {

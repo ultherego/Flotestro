@@ -61,7 +61,8 @@ func CollectNetwork(ctx context.Context, managementAddress string) network.Snaps
 	}
 
 	network.MarkManagementChannel(&snapshot, managementAddress)
-	snapshot.WriteAdapter = network.DetectAdapter(network.Exists)
+	snapshot.WriteAdapter = network.DetectAdapter(network.Exists, network.MaskedUnit)
+	snapshot.ReadOnlyReason = network.ReadOnlyReason(snapshot.WriteAdapter, network.Exists, network.MaskedUnit)
 	return snapshot
 }
 

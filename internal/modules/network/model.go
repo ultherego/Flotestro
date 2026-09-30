@@ -157,6 +157,10 @@ type Snapshot struct {
 	// WriteAdapter names the mechanism the configuration can be changed
 	// with. Empty means a host on which the panel can only read.
 	WriteAdapter string `json:"write_adapter,omitempty"`
+	// ReadOnlyReason says why nothing can be written here. An installed
+	// mechanism that cannot carry a change is not the same answer as no
+	// mechanism at all.
+	ReadOnlyReason string `json:"read_only_reason,omitempty"`
 	// IPv6Disabled says the host turned the second family off for every interface
 	// at once, or that the kernel has no IPv6 at all.
 	IPv6Disabled *bool `json:"ipv6_disabled,omitempty"`

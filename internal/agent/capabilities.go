@@ -219,7 +219,7 @@ func DetectCapabilities() Capabilities {
 	cronD := isDir("/etc/cron.d")
 	schedules := cronD || systemd
 	networkRead := exists("/usr/sbin/ip") || exists("/sbin/ip") || exists("/usr/bin/ip")
-	networkWrite := network.DetectAdapter(network.Exists)
+	networkWrite := network.DetectAdapter(network.Exists, network.MaskedUnit)
 	resolver := exists("/etc/resolv.conf")
 	resolved := exists("/usr/bin/resolvectl") && exists("/run/systemd/resolve")
 	nft := exists("/usr/sbin/nft")
@@ -547,7 +547,7 @@ func networkAdapterReason(read bool, adapter string) string {
 	if !read {
 		return "this host has no iproute2 (ip) binary"
 	}
-	return network.ReadOnlyReason(adapter)
+	return network.ReadOnlyReason(adapter, network.Exists, network.MaskedUnit)
 }
 
 // firewallAdapterReason explains what the firewall module is missing.
