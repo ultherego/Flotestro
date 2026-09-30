@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/ultherego/flotestro/internal/plan"
 )
 
 // dnf5RemovalOutput is the real output of "dnf remove --assumeno" from Fedora
@@ -611,5 +613,82 @@ func TestAnUnreadableReplacedPackageIsRefused(t *testing.T) {
 		if len(changes) != 0 {
 			t.Errorf("%q was refused and still gave %d changes", line, len(changes))
 		}
+	}
+}
+
+// dnf5SelfUpgradeOutput is what "dnf --assumeno upgrade" really printed on the
+// laboratory's Fedora 42 host (dnf5 5.2.18.0) with one ordinary update
+// pending. The package obsoletes nothing: the "replacing" row is the version
+// the upgrade raises away from, and dnf5 writes one under every upgraded
+// package and counts it in the summary. Every hand-written table in this file
+// was missing it, which is why only a live host found it.
+const dnf5SelfUpgradeOutput = `Updating and loading repositories:
+Repositories loaded.
+Package                             Arch   Version Repository                  Size
+Upgrading:
+ flotestro-lab-security             noarch 1.0.1-1 flotestro-lab-security 290.0   B
+   replacing flotestro-lab-security noarch 1.0.0-1 flotestro-lab-security 290.0   B
+
+Transaction Summary:
+ Upgrading:          1 package
+ Replacing:          1 package
+
+Total size of inbound packages is 7 KiB. Need to download 7 KiB.
+After this operation, 0 B extra will be used (install 290 B, remove 290 B).
+Operation aborted by the user.
+`
+
+// An upgrade of one package is one change. Read as a row of its own the
+// superseded version becomes a removal of a name the host keeps, the screen
+// offers the operator a removal that will not happen, and the transaction is
+// handed a "dnf remove" of the version it has just replaced.
+func TestDNFUpgradeDoesNotPromiseToRemoveWhatItRaises(t *testing.T) {
+	changes, err := ParseDNFUpgradePlan(dnf5SelfUpgradeOutput)
+	if err != nil {
+		t.Fatalf("ParseDNFUpgradePlan: %v", err)
+	}
+	if len(changes) != 1 {
+		t.Fatalf("read %d changes from an upgrade of one package: %+v", len(changes), changes)
+	}
+	change := changes[0]
+	if change.Name != "flotestro-lab-security" || change.Action != ActionUpgrade ||
+		change.CandidateVersion != "1.0.1-1" || change.Architecture != "noarch" ||
+		change.Origin != "flotestro-lab-security" {
+		t.Errorf("the change = %+v", change)
+	}
+
+	upgrade := Plan{Manager: "dnf", Mode: ModeUpgrade, Changes: changes}
+	envelope := upgrade.Envelope()
+	for _, step := range envelope.Steps {
+		if step.Kind == ActionRemove {
+			t.Errorf("the plan carries a removal step: %+v", step)
+		}
+	}
+	for _, effect := range envelope.Effects.Expected {
+		if effect.Kind == plan.EffectPackageAbsent {
+			t.Errorf("the plan expects %s to be absent after an upgrade", effect.Subject)
+		}
+	}
+	if description := upgrade.Description(); description != "1 upgrade (dnf)" {
+		t.Errorf("the plan reads %q", description)
+	}
+}
+
+// The same row under "Removing:" is a real removal: an installonly package
+// drops its old build that way, and folding it would leave the old kernel on
+// the host with nothing in the plan saying it should go.
+func TestDNFUpgradeKeepsTheRemovalOfAnInstallonlyBuild(t *testing.T) {
+	changes, err := ParseDNFUpgradePlan(dnf5UpgradeOutput)
+	if err != nil {
+		t.Fatalf("ParseDNFUpgradePlan: %v", err)
+	}
+	removed := ""
+	for _, change := range changes {
+		if change.Name == "kernel-core" && change.Action == ActionRemove {
+			removed = change.CurrentVersion
+		}
+	}
+	if removed != "6.15.9-200.fc42" {
+		t.Errorf("the old kernel reads as %q, the plan must still take it away", removed)
 	}
 }
