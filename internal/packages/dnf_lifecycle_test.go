@@ -692,3 +692,63 @@ func TestDNFUpgradeKeepsTheRemovalOfAnInstallonlyBuild(t *testing.T) {
 		t.Errorf("the old kernel reads as %q, the plan must still take it away", removed)
 	}
 }
+
+// dnf5InstallonlyOutput is what "dnf --assumeno install" really printed on the
+// laboratory's Fedora 42 host (dnf5 5.2.18.0) for a transaction that has to
+// drop builds to stay under installonly_limit. The whole installonly shape is
+// here from a live host rather than composed: the same name and architecture
+// stands under "Removing:" and under "Installing:", and dnf writes no
+// "replacing" row for it, because this is an install and a removal and not an
+// upgrade. Nothing may fold these away - a folded row would leave the old
+// build on the host with nothing in the plan saying it should go.
+const dnf5InstallonlyOutput = `Updating and loading repositories:
+Repositories loaded.
+Package                 Arch   Version          Repository                  Size
+Removing:
+ flotestro-lab-security noarch 1.0.0-1          flotestro-lab-security 290.0   B
+ kernel                 x86_64 6.14.0-63.fc42   anaconda                 0.0   B
+ kernel                 x86_64 6.19.14-108.fc42 <unknown>                0.0   B
+ kernel-core            x86_64 6.14.0-63.fc42   anaconda                75.5 MiB
+ kernel-core            x86_64 6.19.14-108.fc42 <unknown>               98.1 MiB
+ kernel-modules         x86_64 6.14.0-63.fc42   anaconda                64.7 MiB
+ kernel-modules         x86_64 6.19.14-108.fc42 <unknown>               96.5 MiB
+ kernel-modules-core    x86_64 6.14.0-63.fc42   anaconda                38.3 MiB
+ kernel-modules-core    x86_64 6.19.14-108.fc42 <unknown>               70.7 MiB
+Installing:
+ flotestro-lab-security noarch 1.0.1-1          flotestro-lab-security 290.0   B
+
+Transaction Summary:
+ Installing:         1 package
+ Removing:           9 packages
+
+Total size of inbound packages is 7 KiB. Need to download 7 KiB.
+After this operation, 444 MiB will be freed (install 290 B, remove 444 MiB).
+Operation aborted by the user.
+`
+
+// Every removal of a live installonly transaction survives the fold, including
+// the one whose name arrives in the same transaction.
+func TestDNFKeepsEveryRemovalOfALiveInstallonlyTransaction(t *testing.T) {
+	changes, err := ParseDNFUpgradePlan(dnf5InstallonlyOutput)
+	if err != nil {
+		t.Fatalf("ParseDNFUpgradePlan: %v", err)
+	}
+	removed := map[string]string{}
+	arriving := 0
+	for _, change := range changes {
+		if change.Action == ActionRemove {
+			removed[change.Name+"-"+change.CurrentVersion] = change.Architecture
+			continue
+		}
+		arriving++
+	}
+	if len(removed) != 9 || arriving != 1 {
+		t.Fatalf("read %d removals and %d arrivals: %+v", len(removed), arriving, changes)
+	}
+	// The name that also arrives is the one a fold would take away.
+	for _, want := range []string{"flotestro-lab-security-1.0.0-1", "kernel-core-6.14.0-63.fc42"} {
+		if _, found := removed[want]; !found {
+			t.Errorf("%s does not read as a removal: %+v", want, removed)
+		}
+	}
+}

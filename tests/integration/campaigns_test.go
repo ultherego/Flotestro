@@ -1734,7 +1734,9 @@ func TestFirewallCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 	}
 	for _, hostID := range targets {
 		after := panelRule(t, h, hostID, name)
-		if !strings.Contains(after.Text, "tcp dport 25") {
+		// The fleet holds both adapters, so the rule is read in the words of
+		// the one that carries it.
+		if !namesTCPPort(after.Text, "25") {
 			t.Errorf("host %s after the campaign has the rule %q", hostID[:8], after.Text)
 		}
 	}

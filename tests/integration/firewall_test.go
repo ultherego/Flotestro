@@ -491,3 +491,12 @@ func panelRule(t *testing.T, h *harness, hostID, name string) ruleView {
 		time.Sleep(2 * time.Second)
 	}
 }
+
+// namesTCPPort says whether a rule text names that TCP port, in the spelling
+// of whichever adapter holds the rule: nft renders it "tcp dport 25", ufw
+// "port 25 proto tcp". A test that knows one spelling passes on one kind of
+// host and reports the other as a rule the product never wrote.
+func namesTCPPort(text, port string) bool {
+	return strings.Contains(text, "tcp dport "+port) ||
+		strings.Contains(text, "port "+port+" proto tcp")
+}
