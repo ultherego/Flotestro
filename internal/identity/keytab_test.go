@@ -347,7 +347,7 @@ func TestKeytabRotationPlanAndExecutionReachTheSameHostID(t *testing.T) {
 	}}
 	phases := executor.rotateKeytab(context.Background(), change, spec)
 	// The rotation is not finished when the task is placed - the host still has
-	// to report a new key version - so the state here is the intermediate one.
+	// to report the key it fetched - so the state here is the intermediate one.
 	// What this test is about is the routing: one identifier from the view
 	// through the plan to the task.
 	if StateFor(phases) != StatePartiallyApplied || len(phases) != 3 {

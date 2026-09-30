@@ -158,7 +158,7 @@ func (p *Planner) planKeytabRotate(ctx context.Context, spec *KeytabPayload) (Pl
 			"certificates issued to the service principal are revoked together with the keytab",
 			"the renewal runs on the fleet host of that name; a host that is not in the fleet or not connected refuses the rotation before the keytab is retired",
 			"the two halves cannot be ordered the other way round: the fetch itself replaces the key in the directory, so retiring afterwards would delete the key just fetched. The gap is inherent to the operation",
-			"the change is reported as partially applied until the host's renewal task reports a new key version; the retired key cannot be put back from the panel, and a renewal that fails is ordered again as identity.keytab.renew on " + host,
+			"the change is reported as partially applied until the host's renewal task reports the key it fetched; the retired key cannot be put back from the panel, and a renewal that fails is ordered again as identity.keytab.renew on " + host,
 		},
 	}
 	services, err := p.directory.Services(ctx)
@@ -291,11 +291,11 @@ func (e *Executor) rotateKeytab(ctx context.Context, change Change, spec *Keytab
 		return phases
 	}
 	// Placing the task is not renewing the keytab. The service holds a key the
-	// directory has retired until the host reports a new key version, so the
+	// directory has retired until the host reports the key it fetched, so the
 	// change stays out of a success until that task settles.
 	phases = append(phases, outstandingPhase(ordering, "task "+jobID+" carries the renewal on "+
 		host.Hostname+"; the keytab of "+spec.Principal+" is retired and the service cannot "+
-		"authenticate until that task reports a new key version. The retired key cannot be put "+
+		"authenticate until that task reports the key it fetched. The retired key cannot be put "+
 		"back from the panel: if the task fails, read its result and order identity.keytab.renew "+
 		"on "+host.Hostname+" again."))
 	return phases
