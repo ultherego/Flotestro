@@ -3,6 +3,9 @@
 #   docker compose up -d                                the whole default deployment
 #   docker compose up -d                                with a database somebody else runs
 #   docker compose --profile airgap up -d               plus the package repository of the release
+#   podman-compose -f compose.yaml -f compose.pasta.yaml up -d
+#                                                       rootless, and the fleet's
+#                                                       own addresses reach it
 #   docker compose --profile check run --rm schema-check    what the image would migrate
 #   docker compose --profile tools run --rm admin-tools backup
 #   docker compose --profile restore run --rm admin-restore restore <backup-id>
@@ -308,10 +311,9 @@ services:
       - "8443:8443"
       - "8444:8444"
 
-    networks:
-      - application
-      - database_egress
-      - database
+    # No network is named on purpose: compose refuses a service that declares
+    # both a network and a network mode, and only a network mode preserves the
+    # fleet's own addresses - see compose.pasta.yaml. The default network below.
 
     # The panel waits for a database that answers, not for a container that
     # exists, and says so while it waits - so nothing depends on postgres here.
@@ -387,6 +389,9 @@ services:
 
     networks:
       - database
+      # The panel names no network and joins the default one, so the database of
+      # the quickstart has to be on that network to be reachable by name at all.
+      - default
 
     # No port is published: reachable from this deployment and nowhere else.
     shm_size: 256m
@@ -427,8 +432,7 @@ services:
       # what a package manager trusts is the signature in the tree.
       - "8090:8080"
 
-    networks:
-      - application
+    # The default network, which is the one the panel is on.
 
     # Nothing is written, not even a temporary file, so there is no tmpfs
     # either: the tree is in the image layer and the process only reads it.
@@ -551,9 +555,13 @@ services:
         max-file: "5"
 
 networks:
-  # The panel and the edge.
-  application:
-  # The quickstart database: no route out, and none in from outside.
+  # The panel, the edge and the quickstart database, and the network a service
+  # joins when it names none. It carries the name it had as "application", so a
+  # deployment that is upgraded keeps the network it already has.
+  default:
+    name: flotestro_application
+  # The quickstart database, which publishes no port. It is on the network above
+  # as well, because the panel can name no network of its own.
   database:
     internal: true
   # The way out to an external database, kept separate so that the rule which

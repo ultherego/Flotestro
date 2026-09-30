@@ -184,6 +184,60 @@ with `mode=1777` instead of `uid=`/`gid=`, which Podman refuses, and the log
 driver is `json-file` instead of Docker's `local`, which Podman does not know.
 Rotation is the same either way.
 
+### The address the fleet connects from
+
+Rootless Podman publishes a port with `rootlesskit`, which proxies the
+connection and rewrites its source address to one inside the container network.
+`podman-run(1)` says so itself, and adds that the same handler is used for every
+container on a user-defined network - which the panel is on in the default file.
+The panel then records one address for the whole fleet: two agents cannot be told
+apart in the audit trail, and a single cut link looks like every link at once.
+Measured here before the change, with four hosts on four addresses: all four
+sessions came from `10.89.1.29`, the container's own address.
+
+Forwarding through `pasta(1)` preserves the original source address, and that is
+what the overlay beside this file selects:
+
+    podman-compose -f compose.yaml -f compose.pasta.yaml up -d
+
+Measured with it, on the same four hosts: `192.168.56.40`, `192.168.56.60`,
+`192.168.56.70` and - for the host whose fleet interface was down, reaching the
+panel through its gateway - `192.168.56.1`. One address per host, the same after
+a restart of the deployment and the same after a reboot of the machine. The
+versions this was measured on: Podman 5.4.2, `podman-compose` 1.3.0 and passt
+`0.0~git20250503` on Debian 13.
+
+The overlay gives that namespace an address of its own rather than the copy of
+the host's that `pasta` takes by default, and this is the one part of it that was
+not obvious: the unit that replays the restart policies at boot runs in the
+user's session, where nothing orders it after the network. A copy taken before
+the interface had an address left the panel with no route to its own database -
+measured, and it did not come back by itself, because the namespace is fixed when
+the container starts and no wait inside the panel can change it. With the address
+fixed in the overlay the panel came back on its own after a reboot, with the
+fleet on the addresses above. What `pasta` forwards does not depend on that
+address; it is `169.254.2.0/24`, beside the two addresses Podman itself uses
+there.
+
+What it asks in return. `pasta` gives the panel a network namespace rather than a
+compose network, and a namespace resolves no service name: compose refuses a
+service that declares both a network and a network mode, which is why the panel
+declares no network in `compose.yaml` and joins the default one there. An
+installation on a database somebody else runs needs nothing further - its DSN
+names an address. The quickstart database is reached the only way left, through
+the loopback of the host, so the overlay publishes it there and maps the name in
+its DSN to the address `pasta` translates to the host; that opens the quickstart
+database to the host's own accounts, and an installation that will not pay it
+runs its database elsewhere. Under the Docker daemon none of this applies: the
+overlay is Podman's, and the daemon's own port publishing keeps the source
+address.
+
+One thing is never a substitute. An address a client sends - a header, a field in
+a request - is not where a host's identity comes from. The panel identifies a host
+by its certificate and records the address the kernel reports for the connection;
+a deployment that cannot preserve it records the truth it has, and says so, rather
+than trusting what the connection claims about itself.
+
 ## Building the images
 
 ```
@@ -919,8 +973,10 @@ podman run --rm --volume ./backups:/backups:ro --volume /somewhere/safe:/out \
     docker.io/library/busybox:1.37 cp -a /backups/<backup-id> /out/
 ```
 
-The database of the quick start is on an internal network, reachable from this
-deployment and nowhere else.
+The database of the quick start publishes no port and is reachable from this
+deployment and nowhere else. With `compose.pasta.yaml` it does publish one, on
+the loopback of the host and for the panel alone - see "The address the fleet
+connects from".
 
 ### Putting it back
 

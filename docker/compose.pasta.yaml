@@ -1,0 +1,47 @@
+# The panel under rootless Podman, with the fleet's own addresses reaching it:
+#
+#   podman-compose -f compose.yaml -f compose.pasta.yaml up -d
+#
+# Why this file exists. Rootless Podman publishes a port with rootlesskit, which
+# proxies the connection and rewrites its source address to one inside the
+# container network - podman-run(1) says so itself, and it adds that the same
+# handler is used for every container on a user-defined network. The panel then
+# records one address for the whole fleet: it cannot tell two agents apart in
+# the audit trail, and a cut link looks like all of them. Forwarding through
+# pasta(1) preserves the original source address, and that is what this file
+# selects. A header from the client is never an answer here: the address a host
+# is identified by is the one the kernel reports for its connection.
+#
+# What it costs. pasta gives the panel a network namespace of its own, and a
+# namespace is not a compose network: the panel can reach no service by name.
+# An installation on a database somebody else runs needs nothing further, since
+# its DSN names an address. The quickstart database is reached the only way that
+# is left - through the loopback of the host - so it is published there and the
+# name in its DSN is mapped to the address pasta translates to the host. That
+# opens the quickstart database to the host's own accounts, which is the price
+# of this file; an installation that will not pay it runs its database
+# elsewhere, with compose.external-db.yaml.
+#
+# Measured, because writing it down proves nothing: with this file the panel
+# recorded one address per host - 192.168.56.40, .60, .70 and the gateway of the
+# fourth - and the same after a restart of the deployment and after a reboot of
+# the machine. Without it, one address for all four.
+services:
+  control-plane:
+    # An address of its own and not the copy of the host's that pasta takes by
+    # default: at boot the namespace is made before the interface has an address,
+    # and the panel then has no route to its own database and does not recover.
+    # The host is that network's gateway, which is pasta's own default for
+    # --map-host-loopback and how the panel reaches a database on the loopback.
+    network_mode: "pasta:-a,169.254.2.2,-n,24,-g,169.254.2.1,--map-host-loopback=169.254.2.1"
+
+    extra_hosts:
+      # The name in the DSN the quickstart writes. An external DSN names an
+      # address and never resolves this, so the entry costs it nothing.
+      - "postgres:169.254.2.1"
+
+  postgres:
+    ports:
+      # The loopback of the host and nothing else: this is the only route left
+      # from a namespace of its own back into the deployment.
+      - "127.0.0.1:5432:5432"
