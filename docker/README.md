@@ -815,7 +815,8 @@ for name in $images; do
   cosign verify \
     --certificate-identity-regexp '^https://github\.com/ultherego/Flotestro/\.github/workflows/images\.yml@refs/tags/v' \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-    "$reference"
+    "$reference" \
+    || { echo "$reference does not verify; it was not copied" >&2; break; }
   docker pull "$reference"
   docker save -o "flotestro-$name-$version.tar" "$reference"
 done

@@ -4,7 +4,7 @@ GEN_DIR   := internal/genproto
 LDFLAGS   := -s -w
 VERSION   ?= 0.1.0
 
-.PHONY: help build build-agent stage package-deb package-rpm generate test test-integration lint tidy clean
+.PHONY: help build build-agent stage package-deb package-rpm generate test test-integration lint shipcheck clean tidy
 
 help:
 	@grep -E '^[a-zA-Z-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*## "}{printf "  %-18s %s\n", $$1, $$2}'
@@ -54,6 +54,9 @@ test-integration: ## Integration tests against the test fleet
 lint: ## gofmt and go vet
 	@test -z "$$(gofmt -l cmd internal db)" || (gofmt -l cmd internal db && exit 1)
 	go vet ./...
+
+shipcheck: ## Holds the deployment and the documentation to what the code says (CI runs the same tool)
+	go run ./tools/shipcheck
 
 tidy: ## Tidies the dependencies
 	go mod tidy
