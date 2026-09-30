@@ -218,8 +218,8 @@ func (t *Trust) Refresh() error {
 	if set.active.AgentTTL == 0 {
 		set.active.AgentTTL = t.active.AgentTTL
 	}
-	if set.active.ReservedNames == nil {
-		set.active.ReservedNames = t.active.ReservedNames
+	if set.active.Reserved == nil {
+		set.active.Reserved = t.active.Reserved
 	}
 	t.active, t.pending, t.pendingAt, t.retired =
 		set.active, set.pending, set.pendingAt, set.retired
@@ -378,7 +378,7 @@ func (t *Trust) prepare() (Authority, func(*CA), *CA, error) {
 		return Authority{}, nil, nil, err
 	}
 	created.AgentTTL = t.active.AgentTTL
-	created.ReservedNames = t.active.ReservedNames
+	created.Reserved = t.active.Reserved
 
 	now := time.Now().UTC()
 	if err := t.store.WritePrepared(keyPEM, certPEM, now); err != nil {
@@ -465,8 +465,8 @@ func (t *Trust) activate() (Authority, func(*CA), *CA, error) {
 	if t.pending.AgentTTL == 0 {
 		t.pending.AgentTTL = t.active.AgentTTL
 	}
-	if t.pending.ReservedNames == nil {
-		t.pending.ReservedNames = t.active.ReservedNames
+	if t.pending.Reserved == nil {
+		t.pending.Reserved = t.active.Reserved
 	}
 	t.active = t.pending
 	t.pending = nil

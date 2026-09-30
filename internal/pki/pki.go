@@ -39,8 +39,32 @@ type CA struct {
 	PEM         []byte
 	// AgentTTL overrides the lifetime of an agent certificate.
 	AgentTTL time.Duration
-	// ReservedNames are the names and addresses the panel itself is seen under.
-	ReservedNames []string
+	// Reserved answers which names and addresses the panel itself is seen under.
+	// It is asked at every issue rather than holding a copy: the advertised
+	// address is the installation's choice and changes while the panel runs, and
+	// a CA carrying a stale copy would hand a relay a certificate for the name
+	// the agents now dial the panel at.
+	Reserved ReservedNames
+}
+
+// ReservedNames answers the names no relay may be issued a certificate for.
+type ReservedNames interface {
+	ReservedNames() []string
+}
+
+// FixedNames is a reserved set that does not change. A panel whose address is
+// declared in its environment has one, and so does a test.
+type FixedNames []string
+
+func (f FixedNames) ReservedNames() []string { return f }
+
+// reservedNames is what this CA keeps for the panel, or nothing when it was
+// given no source; loopback is refused to a relay either way.
+func (ca *CA) reservedNames() []string {
+	if ca == nil || ca.Reserved == nil {
+		return nil
+	}
+	return ca.Reserved.ReservedNames()
 }
 
 // The refusals of a CSR that the requester can act on.
@@ -83,7 +107,7 @@ func checkKeyPolicy(key any) error {
 func (ca *CA) checkRelayNames(dnsNames []string, addresses []net.IP) error {
 	reserved := map[string]bool{"localhost": true}
 	var reservedIPs []net.IP
-	for _, name := range ca.ReservedNames {
+	for _, name := range ca.reservedNames() {
 		if ip := net.ParseIP(name); ip != nil {
 			reservedIPs = append(reservedIPs, ip)
 			continue

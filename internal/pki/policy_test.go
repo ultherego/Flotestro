@@ -57,7 +57,7 @@ func TestRelayCertificateNeverCarriesAReservedName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ca.ReservedNames = []string{"panel.example.org", "192.168.56.10"}
+	ca.Reserved = FixedNames{"panel.example.org", "192.168.56.10"}
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 
 	refused := []struct {
@@ -89,5 +89,49 @@ func TestRelayCertificateNeverCarriesAReservedName(t *testing.T) {
 	}
 	if len(issued.DNSNames) != 1 || len(issued.IPAddresses) != 1 {
 		t.Errorf("issued names = %v %v", issued.DNSNames, issued.IPAddresses)
+	}
+}
+
+// liveNames is a reserved set that changes, the way the installation's
+// advertised address does.
+type liveNames struct{ names []string }
+
+func (l *liveNames) ReservedNames() []string { return l.names }
+
+// The quietest of the four consequences of a change of address. The CA used to
+// hold a copy of the panel's names taken when the process started, so a relay
+// registering after the administrator confirmed a new address was issued a
+// certificate for it - and then answered in the panel's place to every agent of
+// its site, while every screen said the installation was fine.
+func TestTheReservedNamesFollowTheAdvertisedAddress(t *testing.T) {
+	ca, err := EnsureCA(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := &liveNames{}
+	ca.Reserved = live
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+
+	// Nothing is reserved yet, so the name is a name like any other.
+	if _, err := ca.SignRelayCSR(csrWithKey(t, key, []string{"panel.example.test"}, nil),
+		"relay-1"); err != nil {
+		t.Fatalf("an unreserved name was refused: %v", err)
+	}
+	// The administrator confirms it as the panel's own address.
+	live.names = []string{"panel.example.test"}
+	if _, err := ca.SignRelayCSR(csrWithKey(t, key, []string{"panel.example.test"}, nil),
+		"relay-1"); !errors.Is(err, ErrRelayNameReserved) {
+		t.Errorf("a relay was issued a certificate for the panel's own address: %v", err)
+	}
+	// And the address the panel moved off stays refused: an agent that has not
+	// been reconfigured yet still dials it.
+	live.names = []string{"192.0.2.20", "panel.example.test"}
+	if _, err := ca.SignRelayCSR(csrWithKey(t, key, []string{"panel.example.test"}, nil),
+		"relay-1"); !errors.Is(err, ErrRelayNameReserved) {
+		t.Errorf("the address the panel left was handed to a relay: %v", err)
+	}
+	if _, err := ca.SignRelayCSR(csrWithKey(t, key, nil,
+		[]net.IP{net.ParseIP("192.0.2.20")}), "relay-1"); !errors.Is(err, ErrRelayNameReserved) {
+		t.Errorf("a relay was issued a certificate for the address in force: %v", err)
 	}
 }

@@ -301,7 +301,7 @@ func TestARefreshedTrustSetFollowsTheAuthorityAnotherReplicaActivated(t *testing
 		t.Fatal(err)
 	}
 	following.Active().AgentTTL = 3 * time.Hour
-	following.Active().ReservedNames = []string{"panel.example.test"}
+	following.Active().Reserved = FixedNames{"panel.example.test"}
 	originalIssuer := following.Active().IssuerID()
 
 	prepared, err := rotating.Prepare()
@@ -355,7 +355,7 @@ func TestARefreshedTrustSetFollowsTheAuthorityAnotherReplicaActivated(t *testing
 	if following.Active().AgentTTL != 3*time.Hour {
 		t.Errorf("the agent lifetime after the refresh = %s", following.Active().AgentTTL)
 	}
-	if len(following.Active().ReservedNames) != 1 {
+	if len(following.Active().Reserved.ReservedNames()) != 1 {
 		t.Error("the names reserved for the panel were lost with the handover")
 	}
 }
