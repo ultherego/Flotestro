@@ -2,6 +2,7 @@ package release
 
 import (
 	"bytes"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/printer"
@@ -28,6 +29,12 @@ var classificationHelpers = map[string]bool{
 	"absent": true, "notApplicable": true, "waived": true,
 }
 
+// Where the Go code of this repository lives. The ratchet used to read two of
+// these, which left cmd, db and tools free to grow skips nobody accounted for.
+// TestTheRatchetLooksWhereverGoCodeLives keeps the list from falling behind the
+// tree, because a guard narrowed until it passes is worth less than none.
+var goDirectories = []string{"cmd", "db", "internal", "tests", "tools"}
+
 // directSkip is one t.Skip/t.Skipf/t.SkipNow call as found in the tree.
 type directSkip struct {
 	file string // slash-separated, relative to the repository root
@@ -48,7 +55,7 @@ func TestNoDirectSkipOutsideTheClassificationHelpers(t *testing.T) {
 		absent(t, "the repository root is not at %s: %v", root, err)
 	}
 
-	found, err := findDirectSkips(root, "tests", "internal")
+	found, err := findDirectSkips(root, goDirectories...)
 	if err != nil {
 		t.Fatalf("reading the tree: %v", err)
 	}
@@ -57,12 +64,24 @@ func TestNoDirectSkipOutsideTheClassificationHelpers(t *testing.T) {
 		t.Fatalf("reading %s: %v", skipAllowlist, err)
 	}
 
+	for _, problem := range skipProblems(found, allowed) {
+		t.Error(problem)
+	}
+	t.Logf("%d direct skips in the tree, %d allowed", len(found), total(allowed))
+}
+
+// skipProblems compares what the tree holds against what the allowlist permits,
+// in both directions: a skip nobody allowed, and an entry with nothing left to
+// allow. It is a function rather than the body of the test so that the test
+// below can hand it a tree it built on purpose.
+func skipProblems(found []directSkip, allowed map[skipKey]int) []string {
 	byKey := map[skipKey][]directSkip{}
 	for _, skip := range found {
 		key := skipKey{file: skip.file, call: skip.call}
 		byKey[key] = append(byKey[key], skip)
 	}
 
+	var problems []string
 	for _, key := range sortedKeys(byKey) {
 		places := byKey[key]
 		if len(places) <= allowed[key] {
@@ -72,20 +91,108 @@ func TestNoDirectSkipOutsideTheClassificationHelpers(t *testing.T) {
 		for _, place := range places {
 			where = append(where, place.file+":"+strconv.Itoa(place.line))
 		}
-		t.Errorf("%s\nis a direct skip the gate cannot classify; %d of it are on %s and %d are in the tree: %s\n"+
-			"say which kind of skip it is with absent(), notApplicable() or waived() instead",
-			key.call, allowed[key], skipAllowlist, len(places), strings.Join(where, " "))
+		problems = append(problems, fmt.Sprintf(
+			"%s\nis a direct skip the gate cannot classify; %d of it are on %s and %d are in the tree: %s\n"+
+				"say which kind of skip it is with absent(), notApplicable() or waived() instead",
+			key.call, allowed[key], skipAllowlist, len(places), strings.Join(where, " ")))
 	}
 
 	for _, key := range sortedKeys(allowed) {
 		if surplus := allowed[key] - len(byKey[key]); surplus > 0 {
-			t.Errorf("%s allows %d of\n%s\nin %s, and %d are left: delete the stale line, "+
-				"because an allowlist that outlives what it allows stops being a ratchet",
-				skipAllowlist, allowed[key], key.call, key.file, len(byKey[key]))
+			problems = append(problems, fmt.Sprintf(
+				"%s allows %d of\n%s\nin %s, and %d are left: delete the stale line, "+
+					"because an allowlist that outlives what it allows stops being a ratchet",
+				skipAllowlist, allowed[key], key.call, key.file, len(byKey[key])))
 		}
 	}
+	return problems
+}
 
-	t.Logf("%d direct skips in the tree, %d allowed", len(found), total(allowed))
+// And the ratchet has to be able to see a new skip arrive, or a green run over
+// 233 allowed ones says nothing at all. Both directions are checked, because
+// each on its own can be made to pass by narrowing the other.
+func TestTheRatchetSeesASkipNobodyAllowed(t *testing.T) {
+	root := t.TempDir()
+	body := `package example
+
+import "testing"
+
+func TestSomething(t *testing.T) {
+	t.Skip("the condition nobody classified")
+}
+`
+	dir := filepath.Join(root, "internal", "example")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "example_test.go"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	found, err := findDirectSkips(root, goDirectories...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 1 || found[0].file != "internal/example/example_test.go" || found[0].line != 6 {
+		t.Fatalf("the walk did not find the one skip where it is: %+v", found)
+	}
+
+	problems := skipProblems(found, map[skipKey]int{})
+	if len(problems) != 1 || !strings.Contains(problems[0], "internal/example/example_test.go:6") {
+		t.Fatalf("an unallowed skip was not reported with its place: %v", problems)
+	}
+
+	// Allowed, it is silent; allowed twice over, the surplus entry is the
+	// failure instead.
+	key := skipKey{file: found[0].file, call: found[0].call}
+	if problems := skipProblems(found, map[skipKey]int{key: 1}); len(problems) != 0 {
+		t.Fatalf("an allowed skip was still reported: %v", problems)
+	}
+	if problems := skipProblems(found, map[skipKey]int{key: 2}); len(problems) != 1 {
+		t.Fatalf("an entry allowing more than the tree holds was not reported: %v", problems)
+	}
+}
+
+// The ratchet reads a list of directories, and a list is something the tree can
+// grow out of: cmd, db and tools were outside it for a while, so a skip added
+// there was allowed by nobody and seen by nothing.
+func TestTheRatchetLooksWhereverGoCodeLives(t *testing.T) {
+	root := filepath.Join("..", "..")
+	scanned := map[string]bool{}
+	for _, directory := range goDirectories {
+		scanned[directory] = true
+	}
+
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		// Dot directories hold no product code, and .claude holds the
+		// worktrees of other agents: walking those would read another
+		// checkout's tree as if it were this one.
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") || entry.Name() == "web" {
+			continue
+		}
+		holdsGo := false
+		err := filepath.WalkDir(filepath.Join(root, entry.Name()), func(path string, found os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if !found.IsDir() && strings.HasSuffix(path, ".go") {
+				holdsGo = true
+				return filepath.SkipAll
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if holdsGo && !scanned[entry.Name()] {
+			t.Errorf("%s/ holds Go files and goDirectories does not name it, "+
+				"so a direct skip added there is checked by nothing", entry.Name())
+		}
+	}
 }
 
 func sortedKeys[V any](m map[skipKey]V) []skipKey {
@@ -115,6 +222,12 @@ func total(counts map[skipKey]int) int {
 func findDirectSkips(root string, directories ...string) ([]directSkip, error) {
 	var found []directSkip
 	for _, directory := range directories {
+		// A directory that is not there holds no skips. Naming one that never
+		// existed is caught from the other side instead: the allowlist then has
+		// entries with nothing left to match, and that is a failure.
+		if _, err := os.Stat(filepath.Join(root, directory)); os.IsNotExist(err) {
+			continue
+		}
 		err := filepath.WalkDir(filepath.Join(root, directory), func(path string, entry os.DirEntry, err error) error {
 			if err != nil {
 				return err
