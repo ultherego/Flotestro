@@ -209,6 +209,11 @@ func (s *Server) orderCampaign(w http.ResponseWriter, r *http.Request, request c
 	if !ok {
 		return
 	}
+	// A compensation has had the original's hosts written in above, so a selector
+	// still empty here narrows nothing at all.
+	if !requireSelector(w, chosen) {
+		return
+	}
 	// The resolver cuts the fleet to the scopes of the operation's permission:
 	// the preview ran the same query, so what the operator saw counted is what
 	// the order carries.
@@ -612,6 +617,24 @@ func (s *Server) checkSelector(w http.ResponseWriter, chosen campaigns.Selector)
 	return chosen, true
 }
 
+// requireSelector refuses an order whose selector narrows nothing. It stands
+// apart from checkSelector because a compensation may legitimately arrive
+// without one: it takes the hosts the original changed, written in first.
+//
+// Empty catches the absent expression alone. An expression that is present and
+// names no condition is refused by checkSelector as invalid_selector, and one
+// that names a condition nothing matches ends in no_targets, so this refusal
+// only ever means "the order named nobody".
+func requireSelector(w http.ResponseWriter, chosen campaigns.Selector) bool {
+	if !chosen.Empty() {
+		return true
+	}
+	problem(w, http.StatusBadRequest, "selector_required",
+		"name the hosts the campaign concerns: a site, an environment, an expression or a host list; "+
+			"an empty selector is not an order on the whole fleet")
+	return false
+}
+
 // materialize turns the selector into the host list and answers a selector
 // that does not resolve or resolves to too much.
 func (s *Server) materialize(w http.ResponseWriter, r *http.Request, principal authz.Principal,
@@ -897,6 +920,10 @@ func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
 	// Without an operation the answer is a count and a sample, from the same
 	// filter the order would page through - in the caller's scopes - but counted
 	// in the database, so a selector wider than one campaign may carry is.
+	//
+	// This is also the one place an empty selector stays a fair question: the
+	// preview changes nothing, "how much of my fleet is this" has no other
+	// answer, and the order refuses that selector whatever was previewed here.
 	if action == "" && len(chosen.HostIDs) == 0 {
 		filter, err := s.selectorFilter(r, principal, permission, chosen)
 		if err != nil {
