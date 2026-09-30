@@ -31,6 +31,15 @@ func TestTheFinalStateFollowsTheResultsOfThePhases(t *testing.T) {
 			[]Phase{{Status: "failed"}}, StateFailed},
 		"no phases": {
 			nil, StateFailed},
+		// A phase whose work was ordered elsewhere and not confirmed keeps the
+		// change out of a success, however many phases succeeded before it.
+		"one phase is outstanding": {
+			[]Phase{{Status: "succeeded"}, {Status: "succeeded"}, {Status: PhaseOutstanding}},
+			StatePartiallyApplied},
+		"an outstanding phase after a failure": {
+			[]Phase{{Status: "failed"}, {Status: PhaseOutstanding}}, StatePartiallyApplied},
+		"a skipped phase is not outstanding": {
+			[]Phase{{Status: "succeeded"}, {Status: "skipped"}}, StateSucceeded},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

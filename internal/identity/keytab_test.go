@@ -143,7 +143,10 @@ func TestKeytabRotationRetiresOnlyWithAHostToRenew(t *testing.T) {
 	change := Change{ID: "c1", ApprovedBy: "approver", CreatedBy: "admin"}
 
 	phases := executor.rotateKeytab(context.Background(), change, &KeytabPayload{Principal: "HTTP/web1.flotestro.test"})
-	if StateFor(phases) != StateSucceeded || len(phases) != 3 {
+	// The host's half is ordered, not done: the change is partially applied
+	// until the task settles, which TestKeytabRotationIsNoSuccessBeforeTheHost
+	// covers on its own.
+	if StateFor(phases) != StatePartiallyApplied || len(phases) != 3 {
 		t.Fatalf("phases = %+v", phases)
 	}
 	if len(retired) != 1 || retired[0] != "HTTP/web1.flotestro.test" {
@@ -188,5 +191,44 @@ func TestKeytabRotationRetiresOnlyWithAHostToRenew(t *testing.T) {
 	phases = (&Executor{}).rotateKeytab(context.Background(), change, &KeytabPayload{Principal: "HTTP/web1.flotestro.test"})
 	if StateFor(phases) != StateFailed || len(retired) != 2 {
 		t.Errorf("without a fleet: %+v, retired %v", phases, retired)
+	}
+}
+
+// Ordering the renewal is not renewing the keytab. The directory half has
+// already retired the key, so a change reported as succeeded at the moment the
+// task was placed shows the operator a green rotation over a revoked key - and
+// the task may still fail. The phase stays outstanding until the host reports a
+// new key version, and the message says what state the host is in.
+func TestKeytabRotationIsNoSuccessBeforeTheHost(t *testing.T) {
+	fleet := &fakeFleet{hosts: map[string]FleetHost{
+		"web1.flotestro.test": {ID: "h1", Hostname: "web1.flotestro.test", OSFamily: "fedora", Online: true},
+	}}
+	executor := &Executor{fleet: fleet, retire: func(context.Context, string) error { return nil }}
+
+	phases := executor.rotateKeytab(context.Background(), Change{ID: "c1"},
+		&KeytabPayload{Principal: "HTTP/web1.flotestro.test"})
+	if len(phases) != 3 {
+		t.Fatalf("phases = %+v", phases)
+	}
+	ordering := phases[2]
+	if ordering.Status != PhaseOutstanding {
+		t.Errorf("the ordering phase is %q, expected %q", ordering.Status, PhaseOutstanding)
+	}
+	if state := StateFor(phases); state == StateSucceeded {
+		t.Errorf("a rotation nobody confirmed reads as %s", state)
+	}
+	// The operator has to learn three things from it: which task carries the
+	// renewal, that the service is without a usable key until it succeeds, and
+	// that the panel cannot put the retired key back.
+	for _, part := range []string{"job-h1", "cannot authenticate", "cannot be put back",
+		"identity.keytab.renew"} {
+		if !strings.Contains(ordering.Message, part) {
+			t.Errorf("the outstanding phase does not say %q: %q", part, ordering.Message)
+		}
+	}
+	// The result message of the change is that phase's, not the wording of a
+	// change whose phases failed: this state is a different one.
+	if message := intermediateStateOf(phases); !strings.Contains(message, "job-h1") {
+		t.Errorf("the change reports %q", message)
 	}
 }

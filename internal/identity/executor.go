@@ -183,9 +183,21 @@ func (e *Executor) execute(ctx context.Context, change Change) {
 	if state == StatePartiallyApplied {
 		// This state exists so as not to hide the fact that some of the
 		// changes were applied and some were not.
-		message = "some phases failed; the directory is in an intermediate state"
+		message = intermediateStateOf(phases)
 	}
 	e.finish(ctx, change, state, phases, message, revoked)
+}
+
+// intermediateStateOf says which intermediate state a change ended in: a phase
+// waiting on somebody else is not the same thing as a phase that failed, and
+// the operator has to read which one this is.
+func intermediateStateOf(phases []Phase) string {
+	for _, phase := range phases {
+		if phase.Status == PhaseOutstanding {
+			return phase.Name + ": " + phase.Message
+		}
+	}
+	return "some phases failed; the directory is in an intermediate state"
 }
 
 // createUser creates the account, adds it to the groups and sets the keys.
@@ -593,15 +605,22 @@ func (e *Executor) finish(ctx context.Context, change Change, state State,
 		outcome = audit.OutcomeFailure
 	}
 	failedPhases := make([]string, 0)
+	// A phase nobody has confirmed goes in the trail as well: an auditor reading
+	// this change has to see that the work was ordered and not that it landed.
+	outstandingPhases := make([]string, 0)
 	for _, phase := range phases {
-		if phase.Status == "failed" {
+		switch phase.Status {
+		case "failed":
 			failedPhases = append(failedPhases, phase.Name+": "+phase.Message)
+		case PhaseOutstanding:
+			outstandingPhases = append(outstandingPhases, phase.Name+": "+phase.Message)
 		}
 	}
 	detail := map[string]any{
 		"action_type": change.ActionType, "state": string(state),
 		"created_by": change.CreatedBy, "approved_by": change.ApprovedBy,
-		"failed_phases": failedPhases, "message": message,
+		"failed_phases": failedPhases, "outstanding_phases": outstandingPhases,
+		"message": message,
 	}
 	if revoked != nil {
 		// The count is what an auditor looks for after a membership change: whether
@@ -642,6 +661,15 @@ func startPhase(name string) Phase {
 func skipPhase(phase Phase, message string) Phase {
 	phase.FinishedAt = time.Now().UTC()
 	phase.Status = "skipped"
+	phase.Message = message
+	return phase
+}
+
+// outstandingPhase closes the panel's part of a phase whose result comes from
+// somewhere else - a task on a host - and says what is being waited for.
+func outstandingPhase(phase Phase, message string) Phase {
+	phase.FinishedAt = time.Now().UTC()
+	phase.Status = PhaseOutstanding
 	phase.Message = message
 	return phase
 }

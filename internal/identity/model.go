@@ -524,6 +524,11 @@ type Plan struct {
 // Blocked says whether the plan rules out execution.
 func (p Plan) Blocked() bool { return len(p.Conflicts) > 0 }
 
+// PhaseOutstanding is the status of a phase that did its part and whose result
+// is not in yet: work ordered somewhere else that nobody has confirmed. A
+// change holding one is not a success, and it is not a failure either.
+const PhaseOutstanding = "outstanding"
+
 // Phase is the result of one phase of the execution.
 type Phase struct {
 	Name       string    `json:"name"`
@@ -557,21 +562,26 @@ type Change struct {
 	SecretAvailable bool `json:"secret_available,omitempty"`
 }
 
-// StateFor decides the final state from the results of the phases.
+// StateFor decides the final state from the results of the phases. A phase
+// left outstanding keeps the change out of StateSucceeded: the work it ordered
+// elsewhere has not been confirmed, and a rotation reported as a success over
+// an unconfirmed renewal is the failure nobody sees.
 func StateFor(phases []Phase) State {
-	var succeeded, failed int
+	var succeeded, failed, outstanding int
 	for _, phase := range phases {
 		switch phase.Status {
 		case "succeeded":
 			succeeded++
 		case "failed":
 			failed++
+		case PhaseOutstanding:
+			outstanding++
 		}
 	}
 	switch {
-	case failed == 0 && succeeded > 0:
+	case failed == 0 && outstanding == 0 && succeeded > 0:
 		return StateSucceeded
-	case failed > 0 && succeeded > 0:
+	case outstanding > 0, failed > 0 && succeeded > 0:
 		return StatePartiallyApplied
 	default:
 		return StateFailed
