@@ -429,6 +429,16 @@ func (s *Scheduler) holdAmbiguous(ctx context.Context, item jobs.LeasedJob) {
 	metrics.JobDispatch.Inc("ambiguous", s.options.GatewayID)
 }
 
+// keepHandover writes down that the envelope left, for a delivery the store
+// would not record. Requeueing here would order the same change a second time
+// and leave the host's answer with nowhere to land.
+func (s *Scheduler) keepHandover(ctx context.Context, item jobs.LeasedJob, sessionID string) {
+	if err := s.store.RecordHandover(ctx, item.Job.ID, item.AttemptID, sessionID); err != nil {
+		s.log.Error("the hand-over of the task was not written down",
+			"job_id", item.Job.ID, "attempt_id", item.AttemptID, "err", err)
+	}
+}
+
 func (s *Scheduler) deliver(ctx context.Context, item jobs.LeasedJob, owner jobs.Owner) {
 	// The session and the ownership are settled before the envelope is built:
 	// the envelope issues secret leases and one-time credentials.
@@ -517,24 +527,22 @@ func (s *Scheduler) deliver(ctx context.Context, item jobs.LeasedJob, owner jobs
 	err = s.store.MarkDispatchedWithLease(ctx, item.Job.ID, item.AttemptID, session.Fence(), lease)
 	if errors.Is(err, jobs.ErrSessionStale) {
 		// The host left this gateway between the send and the record: the session
-		// the envelope went over is closed in the database.
-		s.log.Info("the task was sent over a session the host has left, going back to the queue",
+		// the envelope went over is closed in the database. The envelope left all
+		// the same, so the lease is not given back - the same rule as a dispatch
+		// lost to a settlement, for the same reason.
+		s.log.Info("the task was sent over a session the host has left; the lease is left to run out",
 			"job_id", item.Job.ID, "host_id", item.Job.HostID, "session_id", sessionID)
-		if releaseErr := s.store.ReleaseLease(ctx, item.Job.ID, item.AttemptID, "session_stale"); releaseErr != nil {
-			s.log.Error("the task was not returned to the queue", "job_id", item.Job.ID, "err", releaseErr)
-		}
+		s.keepHandover(ctx, item, sessionID)
 		metrics.JobDispatch.Inc("session_stale", s.options.GatewayID)
 		return
 	}
 	if errors.Is(err, jobs.ErrStaleFence) {
 		// The row is still open, but the host's ownership moved: another instance
-		// claimed the host between the check and the record; the task is requeued.
-		s.log.Info("the delivery was refused: the session no longer owns the host, going back to the queue",
+		// claimed the host between the check and the record. The ownership decides
+		// who may order, not whether this envelope went out - and it did.
+		s.log.Info("the delivery was refused: the session no longer owns the host; the lease is left to run out",
 			"job_id", item.Job.ID, "host_id", item.Job.HostID, "session_id", sessionID)
-		if releaseErr := s.store.ReleaseLease(ctx, item.Job.ID, item.AttemptID,
-			jobs.ErrorSessionFenceStale); releaseErr != nil {
-			s.log.Error("the task was not returned to the queue", "job_id", item.Job.ID, "err", releaseErr)
-		}
+		s.keepHandover(ctx, item, sessionID)
 		metrics.JobDispatch.Inc(jobs.ErrorSessionFenceStale, s.options.GatewayID)
 		metrics.SessionFence.Inc("dispatch_refused")
 		return

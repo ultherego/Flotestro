@@ -659,6 +659,36 @@ func (s *Store) MarkDispatchedWithLease(ctx context.Context, jobID, attemptID st
 	return tx.Commit(ctx)
 }
 
+// RecordHandover writes down that an envelope left over a session the store
+// would not accept as a dispatch - it closed, or the ownership moved, after the
+// send. Neither un-sends it, and the answer has to land on the attempt it went
+// out on.
+func (s *Store) RecordHandover(ctx context.Context, jobID, attemptID, sessionID string) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `
+		update job_attempts
+		   set dispatched_at = coalesce(dispatched_at, now()),
+		       session_id = coalesce(session_id, nullif($2, '')::uuid)
+		 where id = $1 and finished_at is null`,
+		attemptID, sessionID); err != nil {
+		return err
+	}
+	// A job still waiting to be handed over is now dispatched, because that is
+	// what happened: only from there may the host's answer settle it. A job that
+	// moved on already is left alone - this says nothing newer than it knows.
+	if _, err := tx.Exec(ctx,
+		`update jobs set state = $2, updated_at = now() where id = $1 and state = $3`,
+		jobID, string(StateDispatched), string(StateLeased)); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 // dispatchAfterSettlement judges a job that is no longer leased by the time
 // the delivery is recorded. A job that moved forward is the ordinary case: a
 // quick agent acknowledged the task first. A job settled meanwhile was settled
