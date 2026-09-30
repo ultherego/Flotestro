@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/modules/docker"
 	"github.com/ultherego/flotestro/internal/modules/storage"
 	"github.com/ultherego/flotestro/internal/opspec"
@@ -605,4 +606,50 @@ func TestVerifyingAFilesystemThatWasGrown(t *testing.T) {
 	// volume under it.
 	expectUnreadable(t, verifyStorageLayout(context.Background(), host(nil), in))
 	expectUnreadable(t, verifyStorageLayout(context.Background(), &hostReaders{}, in))
+}
+
+// The renewal of a service keytab is not verified by a higher key version. The
+// directory retires the keytab with service_disable, which removes the
+// principal's keys and the version counter with them, so the version the host
+// fetches next is usually LOWER than the one it held - measured on a live host,
+// 2 became 1. And the version the agent can read is the host principal's, not
+// the renewed service's: /etc/krb5.keytab is root's file.
+func TestVerifyingTheRenewalOfAServiceKeytab(t *testing.T) {
+	in := func(before, after uint32, beforeKnown bool) verifyInput {
+		return verifyInput{
+			action:  opspec.ActionIdentityKeytabRenew,
+			payload: opspec.Payload{Keytab: &opspec.KeytabPayload{Principal: "HTTP/web1.flotestro.test@FLOTESTRO.TEST"}},
+			result: &agentv1.TaskResult{KeytabRenewResult: &agentv1.KeytabRenewResult{
+				Principal:       "HTTP/web1.flotestro.test@FLOTESTRO.TEST",
+				KvnoBeforeKnown: beforeKnown, KvnoBefore: before, KvnoAfter: after,
+			}},
+		}
+	}
+	// The host principal carries version 3 and has nothing to do with the
+	// service's; the renewal reported 2 -> 1 and stands.
+	host := func(kvno uint32) *hostReaders {
+		return &hostReaders{
+			identity: func(context.Context) IdentityState {
+				return IdentityState{Enrolled: true, Domain: "flotestro.test"}
+			},
+			keytabKVNO: func(context.Context, string) (*uint32, error) { return &kvno, nil },
+		}
+	}
+	expectVerified(t, verifyKeytab(context.Background(), host(3), in(2, 1, true)))
+	expectVerified(t, verifyKeytab(context.Background(), host(3), in(0, 1, false)))
+
+	// A renewal that named no version at all is not a renewal anybody can check.
+	expectMismatch(t, verifyKeytab(context.Background(), host(3), in(2, 0, true)))
+
+	// The file the renewal wrote into is the one every Kerberos client on the
+	// host reads: a keytab that stopped being readable is not a verified state.
+	broken := host(3)
+	broken.keytabKVNO = func(context.Context, string) (*uint32, error) {
+		return nil, errors.New("klist: Key table file '/etc/krb5.keytab' not found")
+	}
+	expectUnreadable(t, verifyKeytab(context.Background(), broken, in(2, 1, true)))
+	missing := host(3)
+	missing.keytabKVNO = func(context.Context, string) (*uint32, error) { return nil, nil }
+	expectUnreadable(t, verifyKeytab(context.Background(), missing, in(2, 1, true)))
+	expectUnreadable(t, verifyKeytab(context.Background(), &hostReaders{}, in(2, 1, true)))
 }

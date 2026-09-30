@@ -24,7 +24,9 @@ const defaultTicketCacheDir = "/var/lib/flotestro-helper"
 // with ipa-getkeytab. The -k argument is the file the tool writes into, not a
 // credential: without -D/-w the tool binds over GSSAPI from the ticket cache,
 // so the helper first takes a ticket of the host principal out of the host's
-// own keytab and destroys it again afterwards.
+// own keytab and destroys it again afterwards. The principal's older entries go
+// before the fetch and the fetched key has to authenticate before the renewal
+// is reported - the two lessons of the live runs, both explained below.
 func (s *Server) renewKeytab(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.KeytabRenewRequest) *helperv1.HelperResponse {
 	principal := strings.TrimSpace(action.GetPrincipal())
@@ -90,9 +92,25 @@ func (s *Server) renewKeytab(ctx context.Context, request *helperv1.HelperReques
 	}
 	defer s.destroyTicket(fetchCtx)
 
-	// ipa-getkeytab adds the new key to the file and leaves the older entries in
-	// place, so a ticket issued under the old key still decrypts until it
-	// expires; the directory alone retired the old key.
+	// The entries the file already holds for this principal go before the fetch,
+	// and this is the whole repair. The directory retires the keytab with
+	// service_disable, which removes the principal's keys and the version counter
+	// with them, so the next fetch writes version 1 again - below the version the
+	// host already carries. ipa-getkeytab appends, a keytab lookup takes the
+	// highest version, and the old entry then shadows the key that was just
+	// fetched. Measured on a live host: with both versions in the file, kinit as
+	// the service fails preauthentication. An overlap cannot be had here either
+	// way, because the fetch itself resets the principal's secret.
+	if result.KvnoBeforeKnown {
+		if _, stderr, err := s.tool()(fetchCtx, 60*time.Second,
+			"ipa-rmkeytab", "-k", hostKeytabPath, "-p", principal); err != nil {
+			response := reject(ErrorExecFailed, "ipa-rmkeytab: "+firstLineOrError(err, stderr))
+			response.Stderr = []byte(stderr)
+			response.KeytabRenewResult = result
+			return response
+		}
+	}
+
 	if _, stderr, err := s.tool()(fetchCtx, timeLimit(request, 2*time.Minute, 5*time.Minute),
 		"ipa-getkeytab", "-k", hostKeytabPath, "-p", principal); err != nil {
 		response := reject(ErrorExecFailed, "ipa-getkeytab: "+firstLineOrError(err, stderr))
@@ -109,13 +127,15 @@ func (s *Server) renewKeytab(ctx context.Context, request *helperv1.HelperReques
 		return response
 	}
 	result.KvnoAfter = after
-	if result.KvnoBeforeKnown && after <= result.KvnoBefore {
-		// The tool said nothing was wrong and the file says nothing changed: the
-		// service still holds the key the directory retired, and reporting a success
-		// would hide exactly that.
-		response := reject(ErrorExecFailed,
-			"ipa-getkeytab returned, but the key version of "+principal+" is still "+
-				strconv.FormatUint(uint64(after), 10))
+
+	// The version number cannot be the verdict: after a retire it goes down, not
+	// up. What the operator needs to know is whether the service can authenticate
+	// with what the file now holds, and that is a question only the directory
+	// answers - so the helper asks it, with the fetched key, before reporting a
+	// renewal.
+	if reason := s.proveKeyAuthenticates(actionCtx, principal); reason != "" {
+		response := reject(ErrorExecFailed, "ipa-getkeytab returned "+
+			versionsPhrase(result)+", and the key does not authenticate: "+reason)
 		response.KeytabRenewResult = result
 		return response
 	}
@@ -125,6 +145,37 @@ func (s *Server) renewKeytab(ctx context.Context, request *helperv1.HelperReques
 		"kvno_before", result.KvnoBefore,
 		"kvno_before_known", result.KvnoBeforeKnown, "kvno_after", result.KvnoAfter)
 	return &helperv1.HelperResponse{Accepted: true, KeytabRenewResult: result}
+}
+
+// proveKeyAuthenticates takes a ticket as the renewed principal itself out of
+// the host keytab and gives it straight back. It returns the reason the key is
+// unusable, or the empty string when the directory accepted it.
+func (s *Server) proveKeyAuthenticates(ctx context.Context, principal string) string {
+	cache, discard, err := s.ticketCache()
+	if err != nil {
+		return "no credential cache of the helper's own for the proof: " + err.Error()
+	}
+	defer discard()
+
+	proofCtx := withToolEnv(ctx, "KRB5CCNAME=FILE:"+cache)
+	_, stderr, err := s.tool()(proofCtx, 60*time.Second,
+		"kinit", "-k", "-t", hostKeytabPath, principal)
+	if err != nil {
+		return "kinit -k -t " + hostKeytabPath + " " + principal + ": " + firstLineOrError(err, stderr)
+	}
+	s.destroyTicket(proofCtx)
+	return ""
+}
+
+// versionsPhrase names what the file held before and after, so a refusal after
+// the fetch says which key version it is talking about.
+func versionsPhrase(result *helperv1.KeytabRenewResult) string {
+	after := "key version " + strconv.FormatUint(uint64(result.GetKvnoAfter()), 10)
+	if !result.GetKvnoBeforeKnown() {
+		return after + " for " + result.GetPrincipal() + ", which held none before"
+	}
+	return "key version " + strconv.FormatUint(uint64(result.GetKvnoBefore()), 10) +
+		" of " + result.GetPrincipal() + " replaced by " + after
 }
 
 // ticketCache makes a credential cache under a directory of its own and

@@ -114,7 +114,11 @@ const (
 	// VerifierDomainMembership: the host is joined to, or has left, the
 	// domain, by the host's own configuration and keytab.
 	VerifierDomainMembership Verifier = "domain_membership"
-	// VerifierKeytab: the key version number of the principal went up.
+	// VerifierKeytab: the renewal named a key version for the principal and the
+	// host keytab still carries the host's own key. Not a higher version: the
+	// directory resets the counter when it retires the keytab, so the renewed
+	// version is usually lower, and the fetched key is proven by authenticating
+	// with it - which only the privileged half can do.
 	VerifierKeytab Verifier = "keytab"
 	// VerifierReboot: the host comes back with a boot identifier other than the
 	// one it had when the reboot was ordered.

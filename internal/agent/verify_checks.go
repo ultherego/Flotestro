@@ -2849,10 +2849,16 @@ func verifyDomainMembership(ctx context.Context, readers *hostReaders, in verify
 	return verified(expected, observed)
 }
 
-// verifyKeytab reads the key version number of the host principal: a
-// renewal that changed nothing leaves it where it was.
+// verifyKeytab settles a renewal on what the host still shows afterwards. Two
+// things it cannot be: a higher key version, because the directory resets the
+// counter when it retires the keytab, so the new version is usually lower; and
+// the renewed principal's own version, because /etc/krb5.keytab is root's file
+// and the reader here returns the host principal's. The fetched key was proven
+// against the directory by the privileged half before it reported the renewal;
+// what is left to observe is that the file the renewal wrote into still carries
+// the host's own key, and that the renewal named a version at all.
 func verifyKeytab(ctx context.Context, readers *hostReaders, in verifyInput) observation {
-	expected := "a key version higher than before"
+	expected := "a renewed key version and the host's own key still in the host keytab"
 	renewed := in.result.GetKeytabRenewResult()
 	if readers.keytabKVNO == nil {
 		return unreadable(expected, noReader("the keytab of the host"))
@@ -2876,20 +2882,12 @@ func verifyKeytab(ctx context.Context, readers *hostReaders, in verifyInput) obs
 	if kvno == nil {
 		return unreadable(expected, "the host did not report a key version")
 	}
-	observed := "kvno " + strconv.FormatUint(uint64(*kvno), 10)
-	if after := renewed.GetKvnoAfter(); after > 0 {
-		expected = "kvno " + strconv.FormatUint(uint64(after), 10)
-		if *kvno == after {
-			return verified(expected, observed)
-		}
-		return unverified(expected, observed, "the keytab carries "+observed+" and the renewal reported "+expected)
+	observed := "kvno " + strconv.FormatUint(uint64(*kvno), 10) + " for the host principal"
+	after := renewed.GetKvnoAfter()
+	if after == 0 {
+		return unverified(expected, observed,
+			"the renewal reported no key version for "+renewed.GetPrincipal())
 	}
-	if renewed.GetKvnoBeforeKnown() {
-		expected = "kvno above " + strconv.FormatUint(uint64(renewed.GetKvnoBefore()), 10)
-		if *kvno > renewed.GetKvnoBefore() {
-			return verified(expected, observed)
-		}
-		return unverified(expected, observed, "the keytab still carries "+observed+" after the renewal")
-	}
-	return unreadable(expected, "the key version before the renewal was not read")
+	return verified(expected, observed+", kvno "+strconv.FormatUint(uint64(after), 10)+
+		" for "+renewed.GetPrincipal())
 }

@@ -3,6 +3,7 @@ package helper
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -35,33 +36,79 @@ type keytabCall struct {
 	env  []string
 }
 
-// keytabTool stands in for klist, kinit, ipa-getkeytab and kdestroy: the
-// listing it prints is the one before the fetch until the fetch ran, and the
-// one after from then on. kinit writes a file where KRB5CCNAME points, so a
-// test can see whether the cache is still there afterwards.
+// keytabEntry is one key in the modelled keytab: a version and a principal,
+// which is what klist -k prints of it.
+type keytabEntry struct {
+	vno       uint32
+	principal string
+}
+
+// keytabTool stands in for klist, kinit, ipa-rmkeytab, ipa-getkeytab and
+// kdestroy over a keytab it keeps as a list of entries, so the tools change the
+// file instead of a test naming the listing that comes out. Three laws of the
+// real host are modelled, all three measured on agent-ubuntu on 2026-09-30:
+// ipa-getkeytab appends rather than replaces; the directory hands out the
+// version in nextVersion, which after a retire is 1 and therefore below what the
+// file already holds; and a Kerberos lookup takes the highest version in the
+// file, so a stale entry above the fetched one makes kinit fail
+// preauthentication.
 type keytabTool struct {
-	calls      []keytabCall
-	before     string
-	after      string
-	fetched    bool
-	fetchFails bool
-	kinitFails bool
-	// cache is the path kinit was told to write the ticket to.
+	calls   []keytabCall
+	entries []keytabEntry
+	// nextVersion is the version the directory gives the next fetch. A retire
+	// removed the principal's keys and the counter with them, so it is 1.
+	nextVersion uint32
+	// live is the version the directory accepts for the principal last fetched.
+	live       map[string]uint32
+	unreadable bool
+	// unreadableAfterFetch models a listing that reads before the fetch and not
+	// after it: the versions before are known and the proof is not.
+	unreadableAfterFetch bool
+	fetched              bool
+	fetchFails           bool
+	kinitFails           bool
+	rmFails              bool
+	// noFetch models a tool that reports success and writes nothing.
+	noFetch bool
+	// cache is the path the last kinit was told to write the ticket to.
 	cache string
+}
+
+func (f *keytabTool) listing() string {
+	rendered := "Keytab name: FILE:/etc/krb5.keytab\nKVNO Principal\n---- ----\n"
+	for _, entry := range f.entries {
+		rendered += fmt.Sprintf("%4d %s\n", entry.vno, entry.principal)
+	}
+	return rendered
+}
+
+// highestIn is the version a Kerberos lookup would take for a principal.
+func (f *keytabTool) highestIn(principal string) (uint32, bool) {
+	return highestKVNO(f.listing(), principal)
 }
 
 func (f *keytabTool) run(ctx context.Context, _ time.Duration, tool string, args ...string) (string, string, error) {
 	f.calls = append(f.calls, keytabCall{argv: append([]string{tool}, args...), env: toolEnvFrom(ctx)})
 	switch tool {
 	case "klist":
-		if f.fetched {
-			return f.after, "", nil
+		if f.unreadable || (f.unreadableAfterFetch && f.fetched) {
+			return "", "klist: Key table file '/etc/krb5.keytab' not found", errors.New("exit status 1")
 		}
-		return f.before, "", nil
+		return f.listing(), "", nil
 	case "kinit":
+		principal := args[len(args)-1]
 		if f.kinitFails {
-			return "", "kinit: Keytab contains no suitable keys for host/web1.flotestro.test@FLOTESTRO.TEST while getting initial credentials",
-				errors.New("exit status 1")
+			return "", "kinit: Keytab contains no suitable keys for " + principal +
+				" while getting initial credentials", errors.New("exit status 1")
+		}
+		if !strings.HasPrefix(strings.ToLower(principal), "host/") {
+			// The proof: the key the file offers for the principal is the one with
+			// the highest version, and only the version the directory holds works.
+			offered, found := f.highestIn(principal)
+			if !found || f.live[strings.ToLower(principal)] != offered {
+				return "", "kinit: Preauthentication failed while getting initial credentials",
+					errors.New("exit status 1")
+			}
 		}
 		f.cache = cachePathIn(toolEnvFrom(ctx))
 		if f.cache == "" {
@@ -71,11 +118,32 @@ func (f *keytabTool) run(ctx context.Context, _ time.Duration, tool string, args
 			return "", err.Error(), err
 		}
 		return "", "", nil
+	case "ipa-rmkeytab":
+		if f.rmFails {
+			return "", "Failed to open keytab '/etc/krb5.keytab'.", errors.New("exit status 1")
+		}
+		principal := args[len(args)-1]
+		f.entries = slices.DeleteFunc(f.entries, func(entry keytabEntry) bool {
+			return strings.EqualFold(entry.principal, principal)
+		})
+		return "", "", nil
 	case "ipa-getkeytab":
 		if f.fetchFails {
 			return "", "Failed to parse result: PrincipalName not found.", errors.New("exit status 1")
 		}
+		principal := args[len(args)-1]
+		// The fetch resets the principal's secret in the directory whatever else
+		// happens, so the version it hands out is the only one that authenticates.
+		if f.live == nil {
+			f.live = map[string]uint32{}
+		}
+		f.live[strings.ToLower(principal)] = f.nextVersion
 		f.fetched = true
+		if !f.noFetch {
+			for range 2 {
+				f.entries = append(f.entries, keytabEntry{vno: f.nextVersion, principal: principal})
+			}
+		}
 		return "Keytab successfully retrieved and stored in: /etc/krb5.keytab", "", nil
 	case "kdestroy":
 		if cache := cachePathIn(toolEnvFrom(ctx)); cache != "" {
@@ -116,6 +184,27 @@ func argvOf(calls []keytabCall) []string {
 	return rendered
 }
 
+const hostPrincipalOfWeb1 = "host/web1.flotestro.test@FLOTESTRO.TEST"
+const servicePrincipalOfWeb1 = "HTTP/web1.flotestro.test@FLOTESTRO.TEST"
+
+// beforeARenewal is the file the host carries when a rotation reaches it: its
+// own key, and version 2 of the service whose keytab the directory just
+// retired.
+func beforeARenewal() []keytabEntry {
+	return []keytabEntry{
+		{vno: 3, principal: hostPrincipalOfWeb1},
+		{vno: 3, principal: hostPrincipalOfWeb1},
+		{vno: 2, principal: servicePrincipalOfWeb1},
+		{vno: 2, principal: servicePrincipalOfWeb1},
+	}
+}
+
+// retiredKeytab is the host after the directory retired the service keytab with
+// service_disable: the counter went with the keys, so the next fetch gives 1.
+func retiredKeytab() *keytabTool {
+	return &keytabTool{entries: beforeARenewal(), nextVersion: 1}
+}
+
 const listingBefore = "Keytab name: FILE:/etc/krb5.keytab\nKVNO Principal\n---- ----\n" +
 	"   3 host/web1.flotestro.test@FLOTESTRO.TEST\n" +
 	"   3 host/web1.flotestro.test@FLOTESTRO.TEST\n" +
@@ -128,21 +217,25 @@ const listingAfter = listingBefore +
 
 // ipa-getkeytab binds over GSSAPI: -k is the file it writes into, not a
 // credential. So the renewal takes a ticket of the host principal out of the
-// host's own keytab first, runs the fetch with that ticket, and gives it back
-// afterwards; the key version number going up is the proof the fetch landed.
+// host's own keytab first, clears the principal's older entries, runs the
+// fetch with that ticket, proves the fetched key authenticates and gives every
+// ticket back afterwards.
 func TestKeytabRenewalTakesAHostTicketAndGivesItBack(t *testing.T) {
-	tool := &keytabTool{before: listingBefore, after: listingAfter}
+	tool := retiredKeytab()
 	server, directory := keytabServer(t, tool)
 
-	response := server.handle(context.Background(), keytabRequest("HTTP/web1.flotestro.test@FLOTESTRO.TEST"), nil)
+	response := server.handle(context.Background(), keytabRequest(servicePrincipalOfWeb1), nil)
 	if !response.GetAccepted() {
 		t.Fatalf("the renewal was refused: %s %s", response.GetErrorCode(), response.GetMessage())
 	}
 	expected := []string{
 		"klist -k /etc/krb5.keytab",
-		"kinit -k -t /etc/krb5.keytab host/web1.flotestro.test@FLOTESTRO.TEST",
-		"ipa-getkeytab -k /etc/krb5.keytab -p HTTP/web1.flotestro.test@FLOTESTRO.TEST",
+		"kinit -k -t /etc/krb5.keytab " + hostPrincipalOfWeb1,
+		"ipa-rmkeytab -k /etc/krb5.keytab -p " + servicePrincipalOfWeb1,
+		"ipa-getkeytab -k /etc/krb5.keytab -p " + servicePrincipalOfWeb1,
 		"klist -k /etc/krb5.keytab",
+		"kinit -k -t /etc/krb5.keytab " + servicePrincipalOfWeb1,
+		"kdestroy",
 		"kdestroy",
 	}
 	if argv := argvOf(tool.calls); !slices.Equal(argv, expected) {
@@ -154,49 +247,98 @@ func TestKeytabRenewalTakesAHostTicketAndGivesItBack(t *testing.T) {
 	if cache == "" || !strings.HasPrefix(cache, directory+string(filepath.Separator)) {
 		t.Fatalf("kinit wrote the ticket to %q, which is not under %s", cache, directory)
 	}
-	for _, index := range []int{2, 4} {
+	for _, index := range []int{2, 3} {
 		if got := cachePathIn(tool.calls[index].env); got != cache {
 			t.Errorf("%s ran with the cache %q, kinit filled %q",
 				joinedCall(tool.calls[index].argv), got, cache)
 		}
 	}
+	// The proof is a ticket of the service itself and belongs in a cache of its
+	// own: the host ticket is still needed while it runs.
+	proof := cachePathIn(tool.calls[5].env)
+	if proof == "" || proof == cache || !strings.HasPrefix(proof, directory+string(filepath.Separator)) {
+		t.Errorf("the proof ran with the cache %q and the fetch with %q", proof, cache)
+	}
 	// The klist runs carry no cache: they read a file, and a listing has no
 	// business with a ticket.
-	for _, index := range []int{0, 3} {
+	for _, index := range []int{0, 4} {
 		if got := cachePathIn(tool.calls[index].env); got != "" {
 			t.Errorf("the listing ran with the cache %q", got)
 		}
 	}
-	if _, err := os.Stat(cache); !os.IsNotExist(err) {
-		t.Errorf("the credential cache %s outlived the renewal: %v", cache, err)
+	for _, path := range []string{cache, proof} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("the credential cache %s outlived the renewal: %v", path, err)
+		}
 	}
 	if entries, err := os.ReadDir(directory); err != nil || len(entries) != 0 {
 		t.Errorf("the cache directory holds %v (err %v) after the renewal", entries, err)
 	}
 
 	result := response.GetKeytabRenewResult()
-	if result.GetPrincipal() != "HTTP/web1.flotestro.test@FLOTESTRO.TEST" {
+	if result.GetPrincipal() != servicePrincipalOfWeb1 {
 		t.Errorf("principal = %q", result.GetPrincipal())
 	}
-	if !result.GetKvnoBeforeKnown() || result.GetKvnoBefore() != 2 || result.GetKvnoAfter() != 3 {
-		t.Errorf("versions = %+v, expected 2 known -> 3", result)
+	// The version went DOWN and the renewal stands: the directory reset the
+	// counter when it retired the keytab. This is the whole point.
+	if !result.GetKvnoBeforeKnown() || result.GetKvnoBefore() != 2 || result.GetKvnoAfter() != 1 {
+		t.Errorf("versions = %+v, expected 2 known -> 1", result)
+	}
+}
+
+// The repair, pinned as a shape: the principal's older entries go before the
+// fetch, and the file ends with the fetched version alone. ipa-getkeytab
+// appends, a lookup takes the highest version, and after a retire the fetched
+// version is the lowest - so an entry left behind shadows the new key and the
+// service cannot authenticate with it.
+func TestKeytabRenewalRemovesTheOldEntriesBeforeTheFetch(t *testing.T) {
+	tool := retiredKeytab()
+	server, _ := keytabServer(t, tool)
+
+	response := server.handle(context.Background(), keytabRequest(servicePrincipalOfWeb1), nil)
+	if !response.GetAccepted() {
+		t.Fatalf("the renewal was refused: %s %s", response.GetErrorCode(), response.GetMessage())
+	}
+	remove, fetch := -1, -1
+	for index, call := range tool.calls {
+		switch call.argv[0] {
+		case "ipa-rmkeytab":
+			remove = index
+		case "ipa-getkeytab":
+			fetch = index
+		}
+	}
+	if remove < 0 || fetch < 0 || remove > fetch {
+		t.Fatalf("the old entries were not removed before the fetch: %v", argvOf(tool.calls))
+	}
+	versions := map[uint32]int{}
+	for _, entry := range tool.entries {
+		if strings.EqualFold(entry.principal, servicePrincipalOfWeb1) {
+			versions[entry.vno]++
+		}
+	}
+	if len(versions) != 1 || versions[1] == 0 {
+		t.Errorf("the keytab holds %v for %s, expected version 1 alone",
+			versions, servicePrincipalOfWeb1)
 	}
 }
 
 // A ticket taken from the host's own key must not outlive the fetch it was
 // taken for, whether the fetch worked or not.
 func TestKeytabRenewalGivesTheTicketBackWhenTheFetchFails(t *testing.T) {
-	tool := &keytabTool{before: listingBefore, after: listingBefore, fetchFails: true}
+	tool := retiredKeytab()
+	tool.fetchFails = true
 	server, directory := keytabServer(t, tool)
 
-	response := server.handle(context.Background(), keytabRequest("HTTP/web1.flotestro.test"), nil)
+	response := server.handle(context.Background(), keytabRequest(servicePrincipalOfWeb1), nil)
 	if response.GetAccepted() || response.GetErrorCode() != ErrorExecFailed {
 		t.Fatalf("accepted=%v code=%q", response.GetAccepted(), response.GetErrorCode())
 	}
 	expected := []string{
 		"klist -k /etc/krb5.keytab",
-		"kinit -k -t /etc/krb5.keytab host/web1.flotestro.test@FLOTESTRO.TEST",
-		"ipa-getkeytab -k /etc/krb5.keytab -p HTTP/web1.flotestro.test",
+		"kinit -k -t /etc/krb5.keytab " + hostPrincipalOfWeb1,
+		"ipa-rmkeytab -k /etc/krb5.keytab -p " + servicePrincipalOfWeb1,
+		"ipa-getkeytab -k /etc/krb5.keytab -p " + servicePrincipalOfWeb1,
 		"kdestroy",
 	}
 	if argv := argvOf(tool.calls); !slices.Equal(argv, expected) {
@@ -214,13 +356,17 @@ func TestKeytabRenewalGivesTheTicketBackWhenTheFetchFails(t *testing.T) {
 // operator has to read that rather than an exec failure of a tool. Nothing is
 // written: no ticket is taken and no fetch runs.
 func TestKeytabRenewalRefusesWhenTheHostHasNoKeyOfItsOwn(t *testing.T) {
+	serviceOnly := &keytabTool{nextVersion: 1, entries: []keytabEntry{
+		{vno: 2, principal: servicePrincipalOfWeb1},
+	}}
+	unreadable := retiredKeytab()
+	unreadable.unreadable = true
+	refused := retiredKeytab()
+	refused.kinitFails = true
 	for name, tool := range map[string]*keytabTool{
-		"the keytab lists no host principal": {
-			before: "Keytab name: FILE:/etc/krb5.keytab\nKVNO Principal\n---- ----\n" +
-				"   2 HTTP/web1.flotestro.test@FLOTESTRO.TEST\n",
-		},
-		"the keytab could not be read": {before: ""},
-		"kinit refused the host key":   {before: listingBefore, kinitFails: true},
+		"the keytab lists no host principal": serviceOnly,
+		"the keytab could not be read":       unreadable,
+		"kinit refused the host key":         refused,
 	} {
 		t.Run(name, func(t *testing.T) {
 			server, directory := keytabServer(t, tool)
@@ -230,8 +376,8 @@ func TestKeytabRenewalRefusesWhenTheHostHasNoKeyOfItsOwn(t *testing.T) {
 					response.GetAccepted(), response.GetErrorCode(), response.GetMessage())
 			}
 			for _, call := range tool.calls {
-				if call.argv[0] == "ipa-getkeytab" {
-					t.Errorf("the fetch ran without a ticket: %v", argvOf(tool.calls))
+				if call.argv[0] == "ipa-getkeytab" || call.argv[0] == "ipa-rmkeytab" {
+					t.Errorf("the keytab was touched without a ticket: %v", argvOf(tool.calls))
 				}
 			}
 			if entries, err := os.ReadDir(directory); err != nil || len(entries) != 0 {
@@ -242,17 +388,21 @@ func TestKeytabRenewalRefusesWhenTheHostHasNoKeyOfItsOwn(t *testing.T) {
 }
 
 // A principal with no key in the file yet is not a version of zero: the number
-// before is reported as unknown, and the fetch still counts when the file
-// lists the principal afterwards.
+// before is reported as unknown, nothing is removed, and the fetch still counts
+// when the file lists the principal afterwards.
 func TestKeytabRenewalOfAFreshPrincipalReportsNoVersionBefore(t *testing.T) {
-	tool := &keytabTool{
-		before: "KVNO Principal\n---- ----\n   3 host/web1.flotestro.test@FLOTESTRO.TEST\n",
-		after:  "KVNO Principal\n---- ----\n   3 host/web1.flotestro.test@FLOTESTRO.TEST\n   1 nfs/web1.flotestro.test@FLOTESTRO.TEST\n",
-	}
+	tool := &keytabTool{nextVersion: 1, entries: []keytabEntry{
+		{vno: 3, principal: hostPrincipalOfWeb1},
+	}}
 	server, _ := keytabServer(t, tool)
 	response := server.handle(context.Background(), keytabRequest("nfs/web1.flotestro.test"), nil)
 	if !response.GetAccepted() {
 		t.Fatalf("the renewal was refused: %s %s", response.GetErrorCode(), response.GetMessage())
+	}
+	for _, call := range tool.calls {
+		if call.argv[0] == "ipa-rmkeytab" {
+			t.Errorf("a principal with no key in the file was removed: %v", argvOf(tool.calls))
+		}
 	}
 	result := response.GetKeytabRenewResult()
 	if result.GetKvnoBeforeKnown() || result.GetKvnoBefore() != 0 || result.GetKvnoAfter() != 1 {
@@ -260,26 +410,36 @@ func TestKeytabRenewalOfAFreshPrincipalReportsNoVersionBefore(t *testing.T) {
 	}
 }
 
-// A fetch that left the version where it was is not a success, whatever the
-// tool's exit code said: the service would still hold the key the directory
-// retired.
-func TestKeytabRenewalRefusesWhenTheVersionDidNotChange(t *testing.T) {
+// A renewal is a success only when the key the file now holds authenticates
+// against the directory, whatever the tool's exit code said. The version number
+// cannot answer that: after a retire it goes down.
+func TestKeytabRenewalRefusesWhenTheFetchedKeyDoesNotAuthenticate(t *testing.T) {
+	wroteNothing := retiredKeytab()
+	wroteNothing.noFetch = true
+	removalFailed := retiredKeytab()
+	removalFailed.rmFails = true
+	listingLost := retiredKeytab()
+	listingLost.unreadableAfterFetch = true
 	for name, tool := range map[string]*keytabTool{
-		"the tool failed":            {before: listingBefore, after: listingBefore, fetchFails: true},
-		"the tool lied":              {before: listingBefore, after: listingBefore},
-		"the principal disappeared":  {before: listingBefore, after: "KVNO Principal\n"},
-		"the listing could not read": {before: listingBefore, after: ""},
+		"the tool wrote nothing":        wroteNothing,
+		"the removal failed":            removalFailed,
+		"the listing could not be read": listingLost,
 	} {
 		t.Run(name, func(t *testing.T) {
-			server, _ := keytabServer(t, tool)
-			response := server.handle(context.Background(), keytabRequest("HTTP/web1.flotestro.test"), nil)
+			server, directory := keytabServer(t, tool)
+			response := server.handle(context.Background(), keytabRequest(servicePrincipalOfWeb1), nil)
 			if response.GetAccepted() || response.GetErrorCode() != ErrorExecFailed {
-				t.Fatalf("accepted=%v code=%q message=%q", response.GetAccepted(), response.GetErrorCode(), response.GetMessage())
+				t.Fatalf("accepted=%v code=%q message=%q",
+					response.GetAccepted(), response.GetErrorCode(), response.GetMessage())
 			}
 			// The versions read so far travel with the refusal: the
 			// operator learns what the file held.
-			if result := response.GetKeytabRenewResult(); result == nil || result.GetKvnoBefore() != 2 {
-				t.Errorf("the refusal carries %+v", result)
+			if result := response.GetKeytabRenewResult(); result == nil ||
+				!result.GetKvnoBeforeKnown() || result.GetKvnoBefore() != 2 {
+				t.Errorf("the refusal carries %+v", response.GetKeytabRenewResult())
+			}
+			if entries, err := os.ReadDir(directory); err != nil || len(entries) != 0 {
+				t.Errorf("the cache directory holds %v (err %v) after the refusal", entries, err)
 			}
 		})
 	}
@@ -289,7 +449,7 @@ func TestKeytabRenewalRefusesWhenTheVersionDidNotChange(t *testing.T) {
 // tool: the host keytab is replaced by a re-join, and a shape that is not
 // service/host cannot be a principal ipa-getkeytab would take.
 func TestKeytabRenewalRefusesABadPrincipalBeforeAnyTool(t *testing.T) {
-	tool := &keytabTool{before: listingBefore, after: listingAfter}
+	tool := retiredKeytab()
 	server, _ := keytabServer(t, tool)
 	for _, principal := range []string{"", "HTTP", "HTTP/web1", "host/web1.flotestro.test", "HTTP/web1.flotestro.test -x", "HTTP/web1.flotestro.test;id"} {
 		response := server.handle(context.Background(), keytabRequest(principal), nil)

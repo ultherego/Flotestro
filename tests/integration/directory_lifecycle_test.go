@@ -599,6 +599,17 @@ func TestServiceKeytabRotationIsASeparateRightAndRunsOnTheHost(t *testing.T) {
 	}
 	attempts := h.attempts(jobID)
 	if len(attempts) == 0 || !strings.Contains(attempts[len(attempts)-1].Message, "key version") {
-		t.Errorf("the renewal does not report the key versions: %+v", attempts)
+		t.Fatalf("the renewal does not report the key versions: %+v", attempts)
+	}
+	// The versions are reported and neither of them is asserted to be higher than
+	// the other. The directory retires the keytab with service_disable, which
+	// takes the principal's version counter with the keys, so the version the host
+	// fetches back is usually LOWER - measured here on 2026-09-30: 2 became 1. The
+	// proof of the renewal is that the fetched key authenticates, which the
+	// privileged half takes before it reports the task, and the assertion that the
+	// number went up is exactly the bug this test was failing on.
+	message := attempts[len(attempts)-1].Message
+	if !strings.Contains(message, principal) || !strings.Contains(message, "became") {
+		t.Errorf("the renewal does not name the principal and both versions: %q", message)
 	}
 }
