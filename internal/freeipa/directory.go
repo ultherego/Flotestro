@@ -497,10 +497,11 @@ func strings_(record map[string]any, key string) []string {
 				result = append(result, text)
 				continue
 			}
-			// The directory wraps binary values as {"__base64__": ...} and
-			// timestamps as {"__datetime__": ...}; both carry a string.
+			// The directory wraps binary values as {"__base64__": ...},
+			// timestamps as {"__datetime__": ...} and every DNS name as
+			// {"__dns_name__": ...}; each carries a string.
 			if nested, ok := item.(map[string]any); ok {
-				for _, wrapper := range []string{"__base64__", "__datetime__"} {
+				for _, wrapper := range []string{"__base64__", "__datetime__", "__dns_name__"} {
 					if text, ok := nested[wrapper].(string); ok {
 						result = append(result, text)
 						break

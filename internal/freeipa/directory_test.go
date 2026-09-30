@@ -23,8 +23,11 @@ func TestStringsHandlesTheShapesOfAnswers(t *testing.T) {
 		"list":   {[]any{"a", "b"}, 2},
 		"string": {"a", 1},
 		"base64": {[]any{map[string]any{"__base64__": "encoded"}}, 1},
-		"empty":  {nil, 0},
-		"number": {[]any{42}, 0},
+		// Every DNS name comes wrapped, so a zone the directory holds is a
+		// zone the panel never lists until this one is unwrapped.
+		"dnsname": {[]any{map[string]any{"__dns_name__": "flotestro.test."}}, 1},
+		"empty":   {nil, 0},
+		"number":  {[]any{42}, 0},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
