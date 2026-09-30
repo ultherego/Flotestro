@@ -1,0 +1,23 @@
+# Keys docker/env.example offers that reach no container, as the tree stood when
+# this check landed. Compose loads env.example's neighbouring .env for ${...}
+# substitution only; without an env_file: nothing in it enters a container, so an
+# operator who uncomments one of these lines changes nothing and is told nothing.
+#
+# The list may only shrink: a key that becomes inert fails the check, and an entry
+# that has been wired up or removed fails too. Wiring one up is the deletion of
+# its line. See envExampleReachesTheDeployment in env.go.
+#
+# Why these are still here rather than fixed: the four IPA keys are one end of the
+# agreed integration passthrough, which is thirteen variables with the OIDC secret
+# as a file path and an explicit refusal on partial configuration - a decision
+# about the deployment, not a typo. FLOTESTRO_NOTIFY_ALLOW is the SSRF guard's
+# allow-list, which fails closed at its default, so the setting is ignored rather
+# than widened. FLOTESTRO_MIGRATION_ROLE belongs to the controlled migration step.
+#
+# Count when this check landed: 6
+FLOTESTRO_MIGRATION_ROLE
+FLOTESTRO_NOTIFY_ALLOW
+FLOTESTRO_IPA_URL
+FLOTESTRO_IPA_PRINCIPAL
+FLOTESTRO_IPA_KEYTAB
+FLOTESTRO_IPA_KRB5_CONF
