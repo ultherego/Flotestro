@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
-import { api, type Collection } from "../lib/api";
+import { api, ApiError, type Collection } from "../lib/api";
 import type {
   Campaign, CampaignTarget, Facet, FleetActivity, OperationContract, ResourceClaim, SelectorExpression,
 } from "../lib/types";
@@ -103,7 +103,9 @@ export function Bulk() {
   const preview = useQuery({
     queryKey: ["campaign-preview", params.toString()],
     queryFn: () => api.get<Preview>(`/api/v1/campaigns/preview?${params}`),
-    enabled: Boolean(order.action) && !listEmpty,
+    // Nor is an order that narrows nothing: the endpoint would answer with the
+    // fleet, and that count is one the order will be refused for.
+    enabled: Boolean(order.action) && !listEmpty && selectorNames(order),
   });
 
   const campaign = useQuery({
@@ -616,6 +618,21 @@ export function scheduleBody(order: Order): Record<string, unknown> {
 }
 
 /**
+ * Whether the order narrows the fleet at all. The server refuses a campaign
+ * whose selector names nobody - an empty selector is not an order on
+ * everything - so the wizard never builds one. It is read off the body the
+ * order really sends, so the wizard and the server agree on what was named.
+ */
+export function selectorNames(order: Order): boolean {
+  // A compensation may name nobody of its own: it takes the hosts the
+  // campaign it undoes changed, and the server writes them in.
+  if (order.compensates) return true;
+  const chosen = campaignBody(order).selector as Record<string, unknown>;
+  return Boolean(chosen.site || chosen.environment || chosen.os_family || chosen.expression
+    || (chosen.host_ids as string[] | undefined)?.length);
+}
+
+/**
  * The expression the order carries: the chosen group and the tag rules
  * joined by "all". Null means the flat filters decide.
  */
@@ -945,6 +962,21 @@ function scheduleWords(t: (text: string) => string, problem: ReturnType<typeof s
   return "";
 }
 
+/**
+ * The sentence a refused order is shown with: the wizard's own words where it
+ * has them, so a refusal reads in the operator's language, and the server's
+ * own sentence for everything else.
+ */
+function refusalWords(
+  t: (text: string, params?: Record<string, string | number>) => string,
+  error: unknown,
+): string {
+  if (error instanceof ApiError && error.code === "selector_required") {
+    return t("The order was refused: its selector names nobody, and an empty selector is not an order on everything. Go back to the targets and name a site, an environment, a group, a tag rule or a list of hosts.");
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
 function stepGates(
   t: (text: string, params?: Record<string, string | number>) => string,
   order: Order,
@@ -959,6 +991,7 @@ function stepGates(
   const hasTargets = order.targetMode === "hosts"
     ? order.hostIDs.length > 0
     : (preview?.count ?? 0) > 0;
+  const names = selectorNames(order);
   const hasEligible = (preview?.eligible ?? 0) > 0;
   const exclusionsExplained = order.exclude.length === 0 || order.excludeReason.trim() !== "";
   const window = windowWords(t, windowProblem(order.maintenanceStart, order.maintenanceEnd, new Date()));
@@ -982,11 +1015,13 @@ function stepGates(
             : formProblem
               ? t(formProblem.message, formProblem.params)
               : t("give the operation a valid payload") },
-    { open: hasAction && hasTargets && exclusionsExplained, reason: !exclusionsExplained
+    { open: hasAction && hasTargets && exclusionsExplained && names, reason: !exclusionsExplained
       ? t("give the exclusions a reason")
       : order.targetMode === "hosts" && order.hostIDs.length === 0
         ? t("pick at least one host from the list")
-        : t("the selector matches no host") },
+        : !names
+          ? t("narrow the fleet first: a site, an environment, a group, a tag rule or a list of hosts; an empty selector is not an order on everything")
+          : t("the selector matches no host") },
     { open: hasEligible, reason: t("no matched host can run this operation") },
     { open: hasEligible, reason: t("no matched host can run this operation") },
     { open: window === "" && schedule === "" && timeoutFits, reason: window || schedule || t("the job timeout is out of bounds") },
@@ -1395,6 +1430,7 @@ function TargetsStep({
     hostIDs: mode === "hosts" ? order.hostIDs : [],
   });
   const count = preview?.count ?? 0;
+  const names = selectorNames(order);
   return (
     <Card
       title={`2. ${t("Targets")}`}
@@ -1417,8 +1453,10 @@ function TargetsStep({
               ? order.hostIDs.length === 0
                 ? t("No host is picked yet; tick at least one in the list above.")
                 : t("{n} hosts picked by hand; the campaign is created on those alone.", { n: order.hostIDs.length })
-              : t("The selector matches {n} hosts", { n: count })}
-            {order.targetMode !== "hosts" && preview && preview.count > preview.limit && (
+              : !names
+                ? t("The fleet is not narrowed yet: name a site, an environment or an OS family above, or a group and tag rules. An empty selector is not an order on everything")
+                : t("The selector matches {n} hosts", { n: count })}
+            {order.targetMode !== "hosts" && names && preview && preview.count > preview.limit && (
               <> — {t("more than the {n} one campaign may carry", { n: preview.limit })}</>
             )}
             {order.targetMode !== "hosts" && "."}
@@ -1926,7 +1964,7 @@ function CreateStep({
       onCreated(campaign.id);
     },
     onError: (error) => {
-      setErrorMessage(error instanceof Error ? error.message : String(error));
+      setErrorMessage(refusalWords(t, error));
       // A refused order has spent its preview, whatever the reason: the next
       // attempt is placed from a fresh one, so the operator is not told
       // twice that the fleet moved.
@@ -1943,7 +1981,7 @@ function CreateStep({
       clearDraft(sessionStorageOrNull());
       setScheduled(created.id);
     },
-    onError: (error) => setErrorMessage(error instanceof Error ? error.message : String(error)),
+    onError: (error) => setErrorMessage(refusalWords(t, error)),
   });
   const scheduling = order.schedule.enabled;
 
