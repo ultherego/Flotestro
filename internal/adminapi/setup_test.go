@@ -110,3 +110,22 @@ func TestAProviderWithNoMappingIsStillUndone(t *testing.T) {
 		t.Errorf("two mappings report %q", done.State)
 	}
 }
+
+// The address the agents dial is the one step no installation may declare itself
+// out of: a panel started without the setting does not know what name it is
+// reached under, and not knowing is not the same as being settled. Optional would
+// drop it from the count, done would claim an address nobody confirmed - so it
+// has to be counted, and counted as unfinished.
+func TestAPanelWithNoAdvertisedAddressSettingIsNotSettledOnOne(t *testing.T) {
+	step := (&Server{}).advertisedAddressStep()
+	if step.Key != "advertised_address" {
+		t.Fatalf("the step is keyed %q", step.Key)
+	}
+	if step.State != setupWarning {
+		t.Errorf("with no advertised-address setting the step is %q: %s", step.State, step.Detail)
+	}
+	if counted := tally([]setupStep{step}); counted.Total != 1 || counted.Done != 0 {
+		t.Errorf("the step counts %d of %d; an address nobody confirmed is neither invisible "+
+			"nor finished", counted.Done, counted.Total)
+	}
+}

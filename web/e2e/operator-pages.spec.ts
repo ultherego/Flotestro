@@ -389,8 +389,14 @@ test.describe("setup", () => {
     const { errors } = watchErrors(page);
     const response = await request.get("/api/v1/setup");
     expect(response.ok(), `GET /api/v1/setup answered ${response.status()}`).toBeTruthy();
-    const checklist = (await response.json()) as { steps: { key: string; state: string }[]; done: number; total: number; complete: boolean };
-    expect(checklist.steps, "the checklist names ten steps").toHaveLength(10);
+    const checklist = (await response.json()) as { steps: { key: string; state: string; path: string }[]; done: number; total: number; complete: boolean };
+    // How many steps there are and what they are called is the server's
+    // contract, pinned once in tests/integration/setup_test.go. This test is
+    // about the page showing whatever the server sends, so it holds no copy of
+    // the number: the copy that used to be here failed the page over a step the
+    // page rendered correctly. Emptiness is still a fault, because every
+    // assertion below would pass over a checklist with nothing in it.
+    expect(checklist.steps.length, "the checklist named no steps at all").toBeGreaterThan(0);
 
     await page.goto("/setup");
     await expect(header(page, "First run")).toBeVisible();
@@ -402,6 +408,15 @@ test.describe("setup", () => {
       const step = cards.nth(index + 1);
       await expect(step.locator(".card-title")).toContainText(`${index + 1}.`);
       await expect(step.locator(".card-title .badge")).toHaveText(/^(Done|To do|Warning|Optional)$/);
+      // Which card is which step is read off the page, not off a table kept
+      // here: the card carries a link to the page the server named for that
+      // step, and a step dealt with on this screen carries none.
+      const away = step.locator(".card-actions a");
+      if (checklist.steps[index].path === "/setup") {
+        await expect(away).toHaveCount(0);
+      } else {
+        await expect(away).toHaveAttribute("href", checklist.steps[index].path);
+      }
     }
     // The first step left is the one highlighted; none when all is done.
     const undone = checklist.steps.findIndex((step) => step.state === "undone");

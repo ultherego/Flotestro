@@ -39,10 +39,17 @@ type connectionTestView struct {
 	} `json:"connector"`
 }
 
-// The keys every checklist carries, in the order the steps are taken.
+// The keys every checklist carries, in the order the steps are taken. A
+// hand-kept mirror of the order setupChecklist appends them in
+// (internal/adminapi/setup.go), and the build tag keeps `go vet ./...` from ever
+// comparing the two, so a step added on the server is caught only here - four
+// thousand seconds into the gate. The address step belongs between the directory
+// and the first host rather than at the end: no host can enrol until the address
+// the agents dial is settled.
 var setupStepKeys = []string{
-	"identity_provider", "group_mapping", "bootstrap_token", "directory", "hosts",
-	"relay", "policy", "alert_rule", "notification_channel", "fleet_ca",
+	"identity_provider", "group_mapping", "bootstrap_token", "directory",
+	"advertised_address", "hosts", "relay", "policy", "alert_rule",
+	"notification_channel", "fleet_ca",
 }
 
 // TestSetupChecklistNamesEveryStep checks that the checklist lists the steps
@@ -80,6 +87,24 @@ func TestSetupChecklistNamesEveryStep(t *testing.T) {
 	if checklist.Total == 0 || checklist.Done > checklist.Total {
 		t.Errorf("the counters make no sense: %d of %d", checklist.Done, checklist.Total)
 	}
+	// An optional step is an integration this installation has none of, so it
+	// counts neither for the total nor against it. Counted as done it would read
+	// as work somebody finished; counted into the total alone it would keep the
+	// checklist short of complete over a choice.
+	var counted, finished int
+	for _, step := range checklist.Steps {
+		if step.State == "optional" {
+			continue
+		}
+		counted++
+		if step.State == "done" {
+			finished++
+		}
+	}
+	if checklist.Total != counted || checklist.Done != finished {
+		t.Errorf("the checklist counts %d of %d, but the steps that are not optional are %d of %d",
+			checklist.Done, checklist.Total, finished, counted)
+	}
 	if checklist.Complete != (checklist.Next == "") {
 		t.Errorf("complete=%v disagrees with next=%q", checklist.Complete, checklist.Next)
 	}
@@ -105,10 +130,19 @@ func TestSetupChecklistIsReadByAViewer(t *testing.T) {
 		{"role": "viewer", "site": host.Site, "environment": host.Environment},
 	}))
 
-	var checklist setupView
-	viewer.get("/api/v1/setup", &checklist)
-	if len(checklist.Steps) != len(setupStepKeys) {
-		t.Fatalf("the viewer got %d steps, expected %d", len(checklist.Steps), len(setupStepKeys))
+	// The list is compared against the administrator's own read, not against the
+	// table above: what this test is about is the two readers seeing the same
+	// flow, and a step added on the server should fail one test, not two.
+	var mine, theirs setupView
+	h.get("/api/v1/setup", &mine)
+	viewer.get("/api/v1/setup", &theirs)
+	if len(theirs.Steps) != len(mine.Steps) {
+		t.Fatalf("the viewer got %d steps, the administrator %d", len(theirs.Steps), len(mine.Steps))
+	}
+	for i, step := range theirs.Steps {
+		if step.Key != mine.Steps[i].Key {
+			t.Errorf("step %d is %q for the viewer and %q for the administrator", i, step.Key, mine.Steps[i].Key)
+		}
 	}
 	// The identity provider test reveals the issuer and the key count;
 	// that is the settings screen's information, not a viewer's.
