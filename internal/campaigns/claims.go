@@ -11,11 +11,8 @@ import (
 // The claims: which orchestrator drives a campaign, and which one holds each
 // of its targets.
 
-// openTargetStates are the states of a target that is not settled: what a
-// runner claims when it takes a campaign over, and what it keeps claimed while
-// it drives it.
-const openTargetStates = `('pending', 'planning', 'awaiting_budget', 'queued_offline', 'dispatched',
-	'awaiting_lock', 'running', 'rebooting', 'verifying')`
+// openTargetStates is OpenTargetStates rendered once for the queries below.
+var openTargetStates = SQLList(OpenTargetStates)
 
 // ClaimRunner takes the runner lease of a campaign for the given runner, or
 // renews it when the runner holds it already.
@@ -102,7 +99,7 @@ func (s *Store) AdoptTargets(ctx context.Context, campaignID, runner string) err
 		update campaign_targets
 		   set claim_until = now() + make_interval(secs => $3)
 		 where campaign_id = $1 and claimed_by = $2::uuid
-		   and state in ('planning', 'dispatched', 'awaiting_lock', 'running', 'rebooting', 'verifying')`,
+		   and state in `+SQLList(ClaimedTargetStates),
 		campaignID, runner, RunnerLeaseTerm.Seconds()); err != nil {
 		return fmt.Errorf("renewing the claims of the campaign: %w", err)
 	}

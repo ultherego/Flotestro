@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -86,9 +87,11 @@ func (s State) mayBecome(to State) bool {
 		// when it reaches the gate.
 		return s == StatePlanned || s == StateCanary || s == StateRunning
 	case StatePausing:
-		return s == StatePlanned || s == StateCanary || s == StateRunning
+		// The same set Store.Pause takes from an operator: a campaign held at
+		// the gate by a stop threshold is paused, not left standing there.
+		return slices.Contains(PausableStates, s)
 	case StatePaused:
-		return s == StatePlanned || s == StateCanary || s == StateRunning || s == StatePausing
+		return slices.Contains(PausableStates, s) || s == StatePausing
 	case StateExpired:
 		return s == StatePlanned || s == StateAwaitingApproval
 	case StatePlanFailed:

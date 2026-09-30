@@ -444,15 +444,15 @@ func (s *Store) approvalsFrom(ctx context.Context, q approvalQuerier, campaignID
 
 // Pause holds a campaign back. The hosts already started finish their tasks.
 func (s *Store) Pause(ctx context.Context, campaignID, actor, reason string) (*Campaign, error) {
-	const query = `
+	var query = `
 		update campaigns set
 			state = case when exists (select 1 from campaign_targets t
 			                           where t.campaign_id = campaigns.id
-			                             and t.state in ('dispatched', 'awaiting_lock', 'running', 'rebooting', 'verifying'))
+			                             and t.state in ` + SQLList(InFlightTargetStates) + `)
 			             then $2 else $3 end,
 			paused_by = $4, paused_at = now(), pause_reason = $5, updated_at = now(),
 			revision = revision + 1
-		where id = $1 and state in ('planned', 'canary', 'manual_gate', 'running')
+		where id = $1 and state in ` + SQLList(PausableStates) + `
 		returning id`
 	var updated string
 	err := s.pool.QueryRow(ctx, query, campaignID, string(StatePausing), string(StatePaused),
@@ -515,7 +515,7 @@ func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*
 		update campaign_targets
 		   set state = 'canceled', finished_at = now(), settled_at = now(), state_since = now(),
 		       revision = revision + 1
-		 where campaign_id = $1 and state in ('pending', 'awaiting_budget', 'queued_offline', 'planning')`,
+		 where campaign_id = $1 and state in `+SQLList(UnstartedTargetStates),
 		campaignID); err != nil {
 		return nil, err
 	}
@@ -550,6 +550,8 @@ func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*
 			       finished_at = now(), settled_at = now(), state_since = now(), blocker = '',
 			       revision = revision + 1
 			 where campaign_id = $1 and job_id = any($2::uuid[])
+			   -- Narrower than InFlightTargetStates on purpose: a host that is
+			   -- rebooting or verifying has run the change, so it did start.
 			   and state in ('dispatched', 'awaiting_lock', 'running')`,
 			campaignID, takenBack); err != nil {
 			return nil, err
@@ -562,7 +564,7 @@ func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*
 		update campaign_targets
 		   set cancel_requested_at = coalesce(cancel_requested_at, now()), revision = revision + 1
 		 where campaign_id = $1
-		   and state in ('dispatched', 'awaiting_lock', 'running', 'rebooting', 'verifying')`,
+		   and state in `+SQLList(InFlightTargetStates),
 		campaignID); err != nil {
 		return nil, err
 	}
@@ -606,7 +608,7 @@ func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*
 	if err := tx.QueryRow(ctx, `
 		select count(*) from campaign_targets
 		 where campaign_id = $1
-		   and state in ('dispatched', 'awaiting_lock', 'running', 'rebooting', 'verifying')`,
+		   and state in `+SQLList(InFlightTargetStates),
 		campaignID).Scan(&underWay); err != nil {
 		return nil, err
 	}
@@ -758,17 +760,20 @@ func (s *Store) withReport(ctx context.Context, campaignID string, write func(tx
 	return tx.Commit(ctx)
 }
 
-// Active returns the campaigns the orchestrator has to handle.
-func (s *Store) Active(ctx context.Context) ([]Campaign, error) {
-	// Planning is an active state: the campaign changes nothing yet, but the
-	// orchestrator has work to do - every host computes its own plan.
-	return s.query(ctx, `
-		where state in ('planning', 'planned', 'awaiting_approval', 'canary', 'running', 'pausing', 'canceling')
+// activeCampaigns selects the campaigns the orchestrator has to handle:
+// planning is one of them, since the campaign changes nothing yet but every
+// host computes its own plan, and a paused campaign is one only while a host is
+// still carrying a task.
+var activeCampaigns = `
+		where state in ` + SQLList(DrivenStates) + `
 		   or (state = 'paused' and exists (select 1 from campaign_targets t
 		                                     where t.campaign_id = campaigns.id
-		                                       and t.state in ('dispatched', 'awaiting_lock', 'running',
-		                                                       'rebooting', 'verifying')))
-		order by created_at`)
+		                                       and t.state in ` + SQLList(InFlightTargetStates) + `))
+		order by created_at`
+
+// Active returns the campaigns the orchestrator has to handle.
+func (s *Store) Active(ctx context.Context) ([]Campaign, error) {
+	return s.query(ctx, activeCampaigns)
 }
 
 // OldestPlan returns when the oldest plan of the campaign was computed;
@@ -957,15 +962,16 @@ func (s *Store) CourseAfter(ctx context.Context, campaignID string, after int64,
 const maxCourseEntries = 2000
 
 // ActiveTargets says which hosts are already targets of campaigns under way.
+// A paused campaign counts here although the orchestrator does not drive it:
+// its hosts are still spoken for, and this answer is a note to whoever orders
+// the next campaign, not a limit on it.
 func (s *Store) ActiveTargets(ctx context.Context) (map[string]string, error) {
-	const query = `
+	var query = `
 		select t.host_id, t.campaign_id
 		  from campaign_targets t
 		  join campaigns c on c.id = t.campaign_id
-		 where c.state in ('planning', 'planned', 'awaiting_approval', 'canary',
-		                   'manual_gate', 'running', 'pausing', 'canceling')
-		   and t.state in ('pending', 'planning', 'awaiting_budget', 'queued_offline',
-		                   'dispatched', 'awaiting_lock', 'running', 'rebooting', 'verifying')`
+		 where c.state in ` + SQLList(UnfinishedStates) + `
+		   and t.state in ` + SQLList(OpenTargetStates)
 	rows, err := s.pool.Query(ctx, query)
 	if err != nil {
 		return nil, err
