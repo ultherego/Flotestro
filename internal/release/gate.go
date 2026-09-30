@@ -158,6 +158,19 @@ func ParseGateReport(data []byte) (GateReport, error) {
 	return report, nil
 }
 
+// stageIntegration is the stage that runs the Go suite; its presence is what
+// tells a report that reached the suite from one that stopped before it.
+const stageIntegration = "integration"
+
+// fullRunStages are the stages a run that calls itself complete has to account
+// for. A verdict is computed over the stages a report names, so a report that
+// simply leaves one out would be judged on the rest: the missing stage has to
+// be fatal, or omitting it is the way past the gate.
+var fullRunStages = []string{
+	"tree", "gofmt", "panel", "web", "vitest",
+	"agents", "relay", "preflight", stageIntegration, "playwright",
+}
+
 func (r GateReport) validate() error {
 	if *r.SchemaVersion != GateSchemaVersion {
 		return fmt.Errorf("the gate report declares schema_version %d; this checker reads %d",
@@ -201,9 +214,11 @@ func (r GateReport) validate() error {
 			return fmt.Errorf("the stage %s reports %q, which is neither pass nor fail", name, stage.Result)
 		}
 	}
-	// A quick run never reaches the suite, so it has no log of one; it is
-	// refused for being quick, by the verdict, not for the missing digest.
-	if _, named := r.Logs["go_test_json"]; !named && r.Quick != nil && !*r.Quick {
+	// A run that never reached the suite has no log of one. That is not a
+	// malformed report - a stage before it failed, and the verdict says so.
+	_, ranTheSuite := r.Stages[stageIntegration]
+	quick := r.Quick == nil || *r.Quick
+	if _, named := r.Logs["go_test_json"]; !named && ranTheSuite && !quick {
 		return fmt.Errorf("the gate report carries no digest of the raw go test -json log")
 	}
 	for name, value := range r.Logs {
@@ -268,6 +283,11 @@ func (r GateReport) ComputeVerdict() (string, []string) {
 	for _, name := range names {
 		if r.Stages[name].Result != "pass" {
 			fatal = append(fatal, fmt.Sprintf("the stage %s did not pass", name))
+		}
+	}
+	for _, name := range fullRunStages {
+		if _, ran := r.Stages[name]; !ran {
+			fatal = append(fatal, fmt.Sprintf("the run never reached the stage %s", name))
 		}
 	}
 

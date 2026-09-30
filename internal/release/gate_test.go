@@ -27,8 +27,19 @@ func goodReport() map[string]any {
 		"agents": []map[string]string{
 			{"host": "agent-debian", "version_before": "0.61.0", "version_after": "0.62.0"},
 		},
+		// Every stage a full run accounts for: a report that names only some of
+		// them is a run that stopped, and the verdict has to say so.
 		"stages": map[string]any{
+			"tree":        map[string]any{"result": "pass", "seconds": 1},
+			"gofmt":       map[string]any{"result": "pass", "seconds": 3},
+			"panel":       map[string]any{"result": "pass", "seconds": 97},
+			"web":         map[string]any{"result": "pass", "seconds": 24},
+			"vitest":      map[string]any{"result": "pass", "seconds": 70},
+			"agents":      map[string]any{"result": "pass", "seconds": 60},
+			"relay":       map[string]any{"result": "pass", "seconds": 2},
+			"preflight":   map[string]any{"result": "pass", "seconds": 57},
 			"integration": map[string]any{"result": "pass", "seconds": 2100},
+			"playwright":  map[string]any{"result": "pass", "seconds": 110},
 		},
 		"counts": map[string]int{
 			"discovered": 310, "passed": 310, "failed": 0,
@@ -319,5 +330,57 @@ func TestAQuickReportWithoutASuiteLogIsStillReadable(t *testing.T) {
 	}
 	if verdict, _ := parsed.ComputeVerdict(); verdict != VerdictFail {
 		t.Fatalf("a quick run reached %q", verdict)
+	}
+}
+
+// A run the preflight stopped has no suite log because the suite never ran.
+// That is a fail with a reason somebody can read, not a report the checker
+// refuses: refusing it would leave a legitimately red run with no verdict.
+func TestARunStoppedBeforeTheSuiteIsAFailAndNotARefusal(t *testing.T) {
+	report := goodReport()
+	stages := report["stages"].(map[string]any)
+	stages["preflight"] = map[string]any{"result": "fail", "seconds": 57}
+	delete(stages, "integration")
+	delete(stages, "playwright")
+	report["logs"] = map[string]string{}
+	report["counts"] = map[string]int{
+		"discovered": 0, "passed": 0, "failed": 0,
+		"skipped": 0, "absent": 0, "not_applicable": 0, "waived": 0,
+	}
+	report["verdict"] = "fail"
+	parsed, err := ParseGateReport(encode(t, report))
+	if err != nil {
+		t.Fatalf("the checker refused a report of a run that stopped early: %v", err)
+	}
+	verdict, reasons := parsed.ComputeVerdict()
+	if verdict != VerdictFail {
+		t.Fatalf("a run stopped at the preflight reached %q", verdict)
+	}
+	var named bool
+	for _, reason := range reasons {
+		if strings.Contains(reason, "preflight") {
+			named = true
+		}
+	}
+	if !named {
+		t.Errorf("the reasons do not name the stage that stopped the run: %v", reasons)
+	}
+}
+
+// Leaving a stage out of the report must not be the way past the gate: the
+// verdict is computed over the stages a report names, so an unnamed one has to
+// be fatal rather than simply absent from the arithmetic.
+func TestAReportThatOmitsTheSuiteCannotPass(t *testing.T) {
+	report := goodReport()
+	stages := report["stages"].(map[string]any)
+	delete(stages, "integration")
+	report["logs"] = map[string]string{}
+	report["verdict"] = "pass"
+	parsed, err := ParseGateReport(encode(t, report))
+	if err != nil {
+		t.Fatalf("the report did not parse: %v", err)
+	}
+	if verdict, reasons := parsed.ComputeVerdict(); verdict == VerdictPass {
+		t.Fatalf("a report with no suite stage reached pass; reasons %v", reasons)
 	}
 }
