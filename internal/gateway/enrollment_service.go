@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"net"
-	"strings"
 	"time"
 
 	"connectrpc.com/connect"
@@ -41,40 +40,37 @@ type EnrollmentService struct {
 	// helperSigner signs the trust bundle a new host hands to its root helper:
 	// the host identifier and the panel's capability keys.
 	helperSigner *helpercap.Signer
-	// advertisedLoopback records that every name in FLOTESTRO_ADVERTISE is a
-	// loopback address, which only a host on this machine can reach.
-	advertisedLoopback bool
+	// advertised answers whether the panel is reachable from nothing but the
+	// machine it runs on. It is asked per attempt rather than recorded once: the
+	// advertised address is the installation's choice and an administrator
+	// confirms it while the panel runs, so the door has to open at that moment
+	// and not at the next restart.
+	advertised advertisedReach
+}
+
+// advertisedReach is the one question this service asks of the advertised
+// address.
+type advertisedReach interface {
+	LoopbackOnly() bool
 }
 
 // SetHelperSigner connects the capability key.
 func (s *EnrollmentService) SetHelperSigner(signer *helpercap.Signer) { s.helperSigner = signer }
 
-// SetAdvertised takes what the panel tells the agents to come back to. A
-// default good on a laptop must not quietly become a production setting.
-func (s *EnrollmentService) SetAdvertised(names []string) {
-	s.advertisedLoopback = allLoopback(names)
+// SetAdvertised connects what the panel tells the agents to come back to. A
+// default good on a laptop must not quietly become a production setting, and a
+// detected address is a proposal until an administrator confirms it - so the
+// door stays shut to a host elsewhere until the answer here says the panel is
+// reachable at all.
+func (s *EnrollmentService) SetAdvertised(advertised advertisedReach) {
+	s.advertised = advertised
 }
 
-// allLoopback is true when the list names nothing a host on another machine
-// could reach. An empty list counts: the certificate is then issued for
-// 127.0.0.1 alone, and the packaged control-plane.env ships it empty.
-func allLoopback(names []string) bool {
-	for _, name := range names {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			continue
-		}
-		if ip := net.ParseIP(name); ip != nil {
-			if !ip.IsLoopback() {
-				return false
-			}
-			continue
-		}
-		if !strings.EqualFold(name, "localhost") {
-			return false
-		}
-	}
-	return true
+// advertisedLoopback is the refusal's condition. A service that was given no
+// source answers that the panel is reachable, because the refusal is a guard on
+// a known-bad configuration and not a default state to be in.
+func (s *EnrollmentService) advertisedLoopback() bool {
+	return s.advertised != nil && s.advertised.LoopbackOnly()
 }
 
 // helperTrustFor is the signed keyring for one host, or nil on a panel
@@ -168,7 +164,7 @@ func (s *EnrollmentService) Enroll(ctx context.Context,
 	}
 	// The certificate this host would be given names loopback alone, so it
 	// would fail on the very next connection. Refusing here says why.
-	if s.advertisedLoopback && !isLoopbackPeer(req.Peer().Addr) {
+	if s.advertisedLoopback() && !isLoopbackPeer(req.Peer().Addr) {
 		s.deny(ctx, req.Msg, "", enrollment.DenialAdvertiseLoopback,
 			denialMessage(enrollment.DenialAdvertiseLoopback), nil)
 		return nil, connect.NewError(connect.CodeFailedPrecondition,
@@ -571,7 +567,9 @@ func denialMessage(code string) string {
 	case enrollment.DenialMachineRetired:
 		return "the machine belongs to a retired host and is held back; a new-host token does not fit it yet"
 	case enrollment.DenialAdvertiseLoopback:
-		return "the panel presents itself to the fleet as loopback; set FLOTESTRO_ADVERTISE to an address this host can reach"
+		return "the panel presents itself to the fleet as loopback, so a certificate issued now " +
+			"would not match the address this host dials; confirm an address the fleet reaches " +
+			"in the panel's Setup screen"
 	default:
 		return "the token was refused"
 	}

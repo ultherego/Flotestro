@@ -2,37 +2,46 @@ package gateway
 
 import "testing"
 
+// reach is what the service asks of the advertised address. It changes without
+// being handed over again, the way the installation's own setting does when an
+// administrator confirms an address on this replica or on another one.
+type reach struct{ loopback bool }
+
+func (r *reach) LoopbackOnly() bool { return r.loopback }
+
 // A default that serves a trial on one machine must not quietly become a
 // production setting: a panel advertised as loopback admits a host on this
 // machine and nobody else, because the certificate it hands out names an
 // address a remote host cannot reach.
-func TestAdvertisedLoopbackIsRecognised(t *testing.T) {
-	cases := []struct {
-		names    []string
-		loopback bool
-	}{
-		// Nothing set at all: the packaged control-plane.env ships
-		// FLOTESTRO_ADVERTISE empty, and the certificate is then issued for
-		// 127.0.0.1 alone - the very case this refusal exists for.
-		{nil, true},
-		{[]string{}, true},
-		{[]string{""}, true},
-		{[]string{"127.0.0.1"}, true},
-		{[]string{"::1"}, true},
-		{[]string{"localhost"}, true},
-		{[]string{"LocalHost"}, true},
-		{[]string{"127.0.0.1", "localhost", "::1"}, true},
-		{[]string{"127.0.0.1", "panel.example.org"}, false},
-		{[]string{"192.168.1.10"}, false},
-		{[]string{"panel.example.org"}, false},
-		// An empty entry of a comma-separated list decides nothing.
-		{[]string{"127.0.0.1", ""}, true},
-		{[]string{"", "panel.example.org"}, false},
+//
+// The condition is asked of the store per attempt rather than recorded once at
+// the start: an administrator confirms an address while the panel runs, and the
+// door has to open at that moment - and, just as much, close again if the panel
+// goes back to advertising loopback alone.
+func TestTheLoopbackRefusalFollowsTheAdvertisedAddress(t *testing.T) {
+	service := &EnrollmentService{}
+	// A service that was given no source does not refuse: the refusal guards a
+	// configuration known to be bad, and is not a state to sit in by default.
+	if service.advertisedLoopback() {
+		t.Error("a service with no advertised address refuses every remote host")
 	}
-	for _, test := range cases {
-		if got := allLoopback(test.names); got != test.loopback {
-			t.Errorf("allLoopback(%q) = %v, want %v", test.names, got, test.loopback)
-		}
+	// The source is handed over once, at the start, and never again: what follows
+	// is the value in force changing underneath it.
+	advertised := &reach{loopback: true}
+	service.SetAdvertised(advertised)
+	if !service.advertisedLoopback() {
+		t.Error("a panel advertised as loopback admits a host it cannot serve")
+	}
+	// The confirmation of a reachable address opens the door without a restart.
+	advertised.loopback = false
+	if service.advertisedLoopback() {
+		t.Error("the panel advertises a reachable address and the door stayed shut")
+	}
+	// And the reverse: nothing about the flip is one-way, so a panel that goes
+	// back to loopback alone goes back to refusing.
+	advertised.loopback = true
+	if !service.advertisedLoopback() {
+		t.Error("the refusal did not come back with the loopback-only address")
 	}
 }
 

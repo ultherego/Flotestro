@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -33,6 +32,7 @@ import (
 	"golang.org/x/net/http2/h2c"
 
 	"github.com/ultherego/flotestro/internal/adminapi"
+	"github.com/ultherego/flotestro/internal/advertise"
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/budgets"
@@ -128,7 +128,7 @@ func Run() error {
 		config.Env("FLOTESTRO_ENROLLMENT_ADDR", ":8444"), "the address of the enrollment endpoint (TLS)")
 	flag.StringVar(&cfg.AdminAddr, "admin-addr",
 		config.Env("FLOTESTRO_ADMIN_ADDR", "127.0.0.1:8080"), "the address of the REST API")
-	advertised := flag.String("advertise",
+	advertiseFlag := flag.String("advertise",
 		config.Env("FLOTESTRO_ADVERTISE", "127.0.0.1"),
 		"the addresses and names the agents see the control plane under (comma separated)")
 	flag.IntVar(&cfg.HeartbeatSeconds, "heartbeat-seconds",
@@ -679,12 +679,24 @@ func Run() error {
 		return refuseCryptoStart(log, err)
 	}
 	trust := cryptoRuntime.Trust()
+
+	// The address the agents reach this panel at. It is the installation's choice
+	// and not this process's: an administrator confirms it in the Setup screen,
+	// every replica reads the same answer out of the database, and the four
+	// things it decides - the panel's certificate, the enrolment door, the
+	// generated agent configuration and the names a relay may not take - read it
+	// here rather than each holding a copy made at the start.
+	advertised := advertise.NewStore(advertise.NewRecords(pool), log, advertise.Parse(*advertiseFlag))
+	if err := advertised.Load(ctx); err != nil {
+		return fmt.Errorf("reading the advertised address of this installation: %w", err)
+	}
+
 	ca := trust.Active()
 	ca.AgentTTL = *agentCertTTL
 	// The names of the panel are reserved: a relay certificate carrying one of
 	// them would let the relay stand in for the panel towards the agents of its
-	// site.
-	ca.ReservedNames = splitList(*advertised)
+	// site. The CA asks at every issue, so a confirmation reaches this too.
+	ca.Reserved = advertised
 	log.Info("the CA is ready", "subject", ca.Certificate.Subject.CommonName,
 		"not_after", ca.Certificate.NotAfter.Format(time.RFC3339),
 		"agent_cert_ttl", ca.AgentTTL.String(),
@@ -705,16 +717,20 @@ func Run() error {
 
 	// A panel available under localhost alone will serve no fleet: the
 	// certificate of the gateway will not match the address the agent connects to
-	// the panel under.
-	if *advertised == "127.0.0.1" {
-		log.Warn("the panel presents itself to the agents as 127.0.0.1, so only a host " +
-			"on this machine can enrol; set FLOTESTRO_ADVERTISE to an address the fleet reaches")
+	// the panel under. It is no longer a dead end, though - an administrator
+	// confirms an address in the Setup screen and this panel follows without a
+	// restart - so the warning says where that is done.
+	if advertised.LoopbackOnly() {
+		log.Warn("the panel presents itself to the agents as loopback, so only a host on this " +
+			"machine can enrol; confirm an address the fleet reaches in the Setup screen, " +
+			"or set FLOTESTRO_ADVERTISE in the deployment")
 	}
-	dnsNames, ips := splitAdvertised(*advertised)
-	serverCert, err := newPanelCertificate(trust, dnsNames, ips, log)
+	serverCert, err := newPanelCertificate(trust, advertised, log)
 	if err != nil {
 		return err
 	}
+	// A confirmation made on another replica reaches this one.
+	go advertised.Run(ctx)
 
 	// The trust set changes when the CA is exchanged, so the verification of a
 	// client reads it at every handshake instead of holding a copy from the
@@ -904,7 +920,7 @@ func Run() error {
 	enrollmentService := gateway.NewEnrollmentService(certIssuer, hostStore, relayStore,
 		tokenStore, recorder, log)
 	enrollmentService.SetHelperSigner(helperSigner)
-	enrollmentService.SetAdvertised(splitList(*advertised))
+	enrollmentService.SetAdvertised(advertised)
 	relayService := gateway.NewRelayService(relayStore, certIssuer, recorder, registry,
 		enrollmentService, log)
 
@@ -1035,7 +1051,6 @@ func Run() error {
 	// The installation profile: the addresses the hosts connect to are the
 	// advertised ones, because those alone are in the gateway certificate.
 	installation := adminapi.Installation{
-		AdvertisedAddresses:  splitList(*advertised),
 		GatewayAddr:          cfg.GatewayAddr,
 		EnrollmentAddr:       cfg.EnrollmentAddr,
 		PackageRepositoryURL: *packageRepositoryURL,
@@ -1053,6 +1068,9 @@ func Run() error {
 			"version", manifest.Version, "images", len(manifest.Images))
 	}
 	panelServer.SetInstallation(installation)
+	// The installation screen composes what a new host is told to dial from the
+	// address in force at that moment, not from a copy taken at the start.
+	panelServer.SetAdvertised(advertised)
 	panelServer.SetRelays(relayStore)
 	// The buffer history of the relays: the gateway writes a point at every
 	// heartbeat, this loop rolls them up, applies the retention and evaluates the
@@ -1170,7 +1188,7 @@ func Run() error {
 		GatewayAddr:          cfg.GatewayAddr,
 		EnrollmentAddr:       cfg.EnrollmentAddr,
 		AdminAddr:            cfg.AdminAddr,
-		Advertised:           splitList(*advertised),
+		Advertised:           advertised.InForce().Names(),
 		GatewayID:            cfg.GatewayID,
 		PublicURL:            *publicURL,
 		WebRoot:              *webRoot,
@@ -1597,26 +1615,6 @@ func splitList(value string) []string {
 		}
 	}
 	return items
-}
-
-func splitAdvertised(value string) ([]string, []net.IP) {
-	var (
-		dnsNames []string
-		ips      = []net.IP{net.ParseIP("127.0.0.1")}
-	)
-	for _, part := range strings.Split(value, ",") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		if ip := net.ParseIP(part); ip != nil {
-			ips = append(ips, ip)
-			continue
-		}
-		dnsNames = append(dnsNames, part)
-	}
-	dnsNames = append(dnsNames, "localhost")
-	return dnsNames, ips
 }
 
 func defaultGatewayID() string {

@@ -823,10 +823,12 @@ func (s *Server) revokeNow(r *http.Request, hostID, reason string) (int, error) 
 
 // Installation describes how a new host reaches this panel and where it takes
 // its packages from.
+// The addresses the agents see the panel under are not in here: they are the
+// installation's own setting, confirmed by an administrator, and they change
+// while the panel runs. They are read from the advertised-address store at the
+// moment an instruction is composed, so an instruction handed out after a
+// confirmation names the address that is actually in the certificate.
 type Installation struct {
-	// AdvertisedAddresses are the names and addresses the agents see the control
-	// plane under, in order of preference.
-	AdvertisedAddresses []string
 	// GatewayAddr and EnrollmentAddr are the listen addresses; only their
 	// ports matter here.
 	GatewayAddr    string
@@ -1088,10 +1090,10 @@ func (s *Server) handleInstallationProfile(w http.ResponseWriter, r *http.Reques
 				"(FLOTESTRO_RELEASE_MANIFEST_FILE); the commands cannot name the image "+
 				"the relay is deployed from")
 	}
-	if onlyLoopback(s.installation.AdvertisedAddresses) && connection.Relay == nil {
+	if s.advertisedLoopback() && connection.Relay == nil {
 		profile.Warnings = append(profile.Warnings,
-			"the panel advertises only the loopback address; "+
-				"a host on another machine cannot reach it (FLOTESTRO_ADVERTISE)")
+			"the panel advertises only the loopback address, so a host on another machine "+
+				"cannot reach it; confirm an address the fleet reaches in the Setup screen")
 	}
 	writeJSON(w, http.StatusOK, profile)
 }
@@ -1171,41 +1173,21 @@ func (s *Server) installationConnection(r *http.Request, site, relayID string) (
 	}, nil
 }
 
-// reachableAddresses are the advertised addresses a host on another machine
-// can use.
+// reachableAddresses are the advertised addresses a host on another machine can
+// use, read from the store rather than from a copy taken at the start: an
+// administrator may have confirmed an address since this process began, and an
+// installation command naming the previous one would not connect.
 func (s *Server) reachableAddresses() []string {
-	var addresses, loopback []string
-	for _, address := range s.installation.AdvertisedAddresses {
-		address = strings.TrimSpace(address)
-		switch {
-		case address == "":
-		case isLoopback(address):
-			loopback = append(loopback, address)
-		default:
-			addresses = append(addresses, address)
-		}
+	if s.advertised == nil {
+		return nil
 	}
-	if len(addresses) == 0 {
-		return loopback
-	}
-	return addresses
+	return s.advertised.Reachable()
 }
 
-func isLoopback(address string) bool {
-	if address == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(address)
-	return ip != nil && ip.IsLoopback()
-}
-
-func onlyLoopback(addresses []string) bool {
-	for _, address := range addresses {
-		if address = strings.TrimSpace(address); address != "" && !isLoopback(address) {
-			return false
-		}
-	}
-	return true
+// advertisedLoopback says the panel is reachable from nothing but the machine it
+// runs on, so an instruction composed for a host elsewhere cannot work.
+func (s *Server) advertisedLoopback() bool {
+	return s.advertised == nil || s.advertised.LoopbackOnly()
 }
 
 // portOf reads the port of a listen address; the host part says where

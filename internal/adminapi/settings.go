@@ -95,6 +95,12 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	effective := *s.settings
+	// The advertised address is the installation's setting rather than this
+	// process's, so the screen shows what is in force now and not what the
+	// process was started with.
+	if s.advertised != nil {
+		effective.Advertised = s.advertised.InForce().Names()
+	}
 
 	// The migration level and the feed ages are read now rather than at
 	// start: both move while the panel runs.
