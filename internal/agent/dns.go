@@ -154,7 +154,7 @@ func (e *TaskExecutor) applyDNS(ctx context.Context, task *agentv1.TaskEnvelope,
 		if !waitForPanel(ctx, panelAddressOf, deadline.Add(-confirmationMargin)) {
 			return &agentv1.TaskResult{
 				TaskId: task.GetTaskId(), Status: agentv1.TaskResult_STATUS_FAILED,
-				ErrorCode: RejectNetworkUnreachable,
+				ErrorCode: RejectManagementUnproved,
 				Message:   "after the resolver change the host does not reach the panel; rollback at " + result.GetRollbackDeadline(),
 				DnsResult: details,
 			}

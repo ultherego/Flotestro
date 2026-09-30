@@ -77,9 +77,6 @@ const (
 	// RejectJournalUnavailable marks a mutation the agent did not start because
 	// its journal could not take the in-flight marker.
 	RejectJournalUnavailable = "journal_unavailable"
-	// RejectNetworkUnreachable marks a network change after which the host lost
-	// its route to the panel.
-	RejectNetworkUnreachable = "network_unreachable"
 	// RejectReadOnly marks a host running in observation mode.
 	RejectReadOnly = "agent_read_only"
 	// RejectResourceBusy marks a task that waited for a resource of the host and
