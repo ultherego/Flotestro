@@ -1064,9 +1064,9 @@ func (s *Store) List(ctx context.Context, filter ListFilter, scopes []authz.Scop
 		args = append(args, *filter.Since)
 		clause += fmt.Sprintf(" and created_at >= $%d", len(args))
 	}
-	if warunek, dodatkowe := scopeCondition(scopes, len(args)); warunek != "" {
-		clause += warunek
-		args = append(args, dodatkowe...)
+	if condition, bindings := scopeCondition(scopes, len(args)); condition != "" {
+		clause += condition
+		args = append(args, bindings...)
 	}
 	var total int
 	if err := s.pool.QueryRow(ctx, "select count(*) from campaigns "+clause, args...).Scan(&total); err != nil {
@@ -1121,12 +1121,12 @@ func (s *Store) attachProgress(ctx context.Context, items []Campaign) error {
 // bindings go to authz untouched: a copy holding fewer fields would leave the
 // rest empty, and an empty category reaches no row.
 func scopeCondition(scopes []authz.Scope, offset int) (string, []any) {
-	warunek, args := authz.ScopeSQL(scopes, authz.HostColumns("h"), offset)
-	if warunek == "" {
+	condition, args := authz.ScopeSQL(scopes, authz.HostColumns("h"), offset)
+	if condition == "" {
 		return "", nil
 	}
 	return " and exists (select 1 from campaign_targets t join hosts h on h.id = t.host_id" +
-		" where t.campaign_id = campaigns.id and " + warunek + ")", args
+		" where t.campaign_id = campaigns.id and " + condition + ")", args
 }
 
 const campaignColumns = `
