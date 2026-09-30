@@ -10,6 +10,7 @@ import { Actions, Card, Field, FieldGrid, PageHeader } from "../components/layou
 import { Meter } from "../components/widgets";
 import { useToast } from "../components/Toast";
 import { useT } from "../i18n";
+import { AdvertisedAddressSection } from "./AdvertisedAddress";
 
 /**
  * The first run.
@@ -163,6 +164,10 @@ export function Setup() {
       title: t("Notification channel"),
       meaning: t("A channel carries an alert out of the panel - to a chat, a pager or a mailbox - so it reaches somebody who is not looking at the dashboard. Optional: the alerts stand in the panel either way."),
     },
+    advertised_address: {
+      title: t("Address the agents dial"),
+      meaning: t("Every host comes back to one name, and that name is what the panel's own certificate is issued for. The panel offers the addresses it finds on this machine, but it adopts none of them: it cannot tell which of them the hosts route to, and the wrong one enrols a fleet that drops out again."),
+    },
     fleet_ca: {
       title: t("Fleet CA"),
       meaning: t("Every agent certificate is signed by the fleet CA and is trusted by nothing else. A CA near its end needs the next one prepared a month ahead, so every agent renews under it before the old one runs out."),
@@ -223,6 +228,9 @@ export function Setup() {
                 )}
                 {step.key === "directory" && capabilities.directory && mayAct(permissions, step.key) && (
                   <ConnectionTester path="/api/v1/setup/test-directory" label={t("Test the directory")} />
+                )}
+                {step.key === "advertised_address" && (
+                  <AdvertisedAddressSection mayConfirm={permissions.has("settings.advertise.write")} />
                 )}
                 {step.key === "group_mapping" && (
                   mayAct(permissions, step.key)

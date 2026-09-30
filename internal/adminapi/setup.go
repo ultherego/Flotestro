@@ -102,6 +102,8 @@ func (s *Server) setupChecklist(ctx context.Context) (setupChecklist, error) {
 
 	steps = append(steps, s.directoryStep())
 
+	steps = append(steps, s.advertisedAddressStep())
+
 	hosts, err := s.countRows(ctx, `select count(*) from hosts where lifecycle_state <> 'retired'`)
 	if err != nil {
 		return setupChecklist{}, err
@@ -159,6 +161,35 @@ func (s *Server) setupChecklist(ctx context.Context) (setupChecklist, error) {
 	}
 	checklist.Complete = checklist.Next == ""
 	return checklist, nil
+}
+
+// advertisedAddressStep judges the address the agents are told to dial. It comes
+// before the first host because no host can be enrolled until it is settled: the
+// enrolment door refuses a host elsewhere while the panel is reachable only from
+// the machine it runs on, and the certificate would not match the name anyway.
+func (s *Server) advertisedAddressStep() setupStep {
+	if s.advertised == nil {
+		return setupStep{Key: "advertised_address", State: setupWarning, Path: "/setup",
+			Detail: "this panel was started without the advertised-address setting; " +
+				"the address it is seen under is whatever its environment names"}
+	}
+	state := s.advertised.State()
+	names := strings.Join(state.InForce, ", ")
+	switch {
+	case state.Mismatch != "":
+		return setupStep{Key: "advertised_address", State: setupWarning, Path: "/setup",
+			Detail: state.Mismatch}
+	case state.LoopbackOnly:
+		return setupStep{Key: "advertised_address", State: setupUndone, Path: "/setup",
+			Detail: "the panel tells the agents to dial " + names + ", which reaches only the " +
+				"machine it runs on, so no host elsewhere can enrol"}
+	case state.Source == "environment":
+		return setupStep{Key: "advertised_address", State: setupDone, Path: "/settings",
+			Detail: "the deployment declares " + names + " in the environment of the control plane"}
+	default:
+		return setupStep{Key: "advertised_address", State: setupDone, Path: "/setup",
+			Detail: "the agents dial " + names + ", confirmed by " + state.ConfirmedBy}
+	}
 }
 
 // plural picks the noun for a count; the detail is a sentence, and "1
