@@ -349,6 +349,15 @@ const (
 	// The effective configuration of the installation: which provider signs
 	// people in, which directory the panel reads, what the step-up policy is.
 	PermSettingsRead Permission = "settings.read"
+	// PermSettingsAdvertiseWrite is naming the address the whole fleet dials. It
+	// is separate from reading the settings and from every other right because
+	// what it changes is the rendezvous point of the installation: the panel's
+	// own certificate is issued again for the new name, every agent configuration
+	// handed out afterwards carries it, and the name goes on being refused to a
+	// relay. No existing permission covers that - rotating the fleet CA is of the
+	// same gravity but a different subject, and managing relays or inviting hosts
+	// are narrower - so borrowing one would have granted an unrelated power.
+	PermSettingsAdvertiseWrite Permission = "settings.advertise.write"
 	// The support bundle of the panel. Asking for one reads everything the panel
 	// knows about itself, so it is a right of its own.
 	PermSupportBundleCreate Permission = "support.bundle.create"
@@ -551,7 +560,7 @@ var rolePermissions = map[Role][]Permission{
 		PermMonitoringRead, PermMonitoringProbe, PermMonitoringSilence, PermMonitoringRulesWrite,
 		PermNotificationRead, PermNotificationManage,
 		PermVulnerabilityRead,
-		PermSettingsRead,
+		PermSettingsRead, PermSettingsAdvertiseWrite,
 		// A bundle is a reading of the whole panel; it belongs to whoever
 		// administers the panel and to nobody else.
 		PermSupportBundleCreate, PermSupportBundleRead,

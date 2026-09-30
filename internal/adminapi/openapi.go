@@ -102,6 +102,7 @@ func (s *Server) openAPI() map[string]any {
 	register("SettingsArea", settingsArea{})
 	register("MonitoringSettings", monitoringSettingsBody{})
 	register("Setup", setupChecklist{})
+	register("AdvertisedAddress", advertisedAddressAnswer{})
 	register("StatusBlock", statusBlock{})
 	register("Principal", principalView{})
 	register("ReadSummary", readFanOut{})
@@ -992,6 +993,8 @@ var responseSchemas = map[string]map[string]any{
 			"areas": map[string]any{"type": "array", "items": ref("SettingsArea")},
 		},
 	},
+	"GET /api/v1/settings/advertised": ref("AdvertisedAddress"),
+	"PUT /api/v1/settings/advertised": ref("AdvertisedAddress"),
 	"GET /api/v1/settings/monitoring": map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -1904,6 +1907,21 @@ var requestSchemas = map[string]map[string]any{
 		"Empty means every alert of this host."),
 	"POST /api/v1/monitoring/silences": silenceBodySchema(
 		"Empty means every alert in the scope of the silence."),
+	"PUT /api/v1/settings/advertised": {
+		"type": "object",
+		"description": "The names are written out in full. A proposal is never confirmed by " +
+			"its position in the candidate list: a list read a moment later may be a " +
+			"different list.",
+		"required": []string{"names"},
+		"properties": map[string]any{
+			"names": map[string]any{"type": "array", "items": str(),
+				"description": "The addresses and DNS names the agents reach this panel at, in " +
+					"the order they try them. Each is an IP address or a DNS name; the port " +
+					"comes from the listener and never from here."},
+			"reason": map[string]any{"type": "string",
+				"description": "Kept on the audit trail beside the names."},
+		},
+	},
 	"PUT /api/v1/settings/monitoring": {
 		"type":        "object",
 		"description": "Durations are written the way Go reads them: 720h, 15m, 90s.",

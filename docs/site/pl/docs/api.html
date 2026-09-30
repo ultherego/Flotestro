@@ -178,7 +178,7 @@
 <table>
 <thead><tr><th>Sekcja</th><th>Trasy</th></tr></thead>
 <tbody>
-<tr><td><a href="#routes-service">Endpointy serwisowe</a></td><td>15</td></tr>
+<tr><td><a href="#routes-service">Endpointy serwisowe</a></td><td>17</td></tr>
 <tr><td><a href="#routes-caller">Logowanie i własne rekordy wywołującego</a></td><td>8</td></tr>
 <tr><td><a href="#routes-fleet">Flota w skrócie</a></td><td>7</td></tr>
 <tr><td><a href="#routes-hosts">Hosty</a></td><td>59</td></tr>
@@ -201,6 +201,8 @@
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/errors</code></td><td><span class="caption">dowolna uwierzytelniona tożsamość</span></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/openapi.json</code></td><td><span class="caption">brak &mdash; endpoint odpowiada bez tożsamości</span></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/settings</code><br><span class="caption">Konfiguracja efektywna, z zamaskowanymi sekretami: z czym ten panel został uruchomiony, dla tego, kto nim administruje.</span></td><td><code>settings.read</code>, <code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/settings/advertised</code><br><span class="caption">Adres, pod którym agenci dobijają do tego panelu: co obowiązuje, skąd się wzięło i adresy tej maszyny jako propozycje.</span></td><td><code>settings.read</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/settings/advertised</code><br><span class="caption">Administrator zatwierdza jeden z nich. Wykryty adres nigdy nie wchodzi sam z siebie, a zatwierdzenie jest odrzucane tam, gdzie adres deklaruje <code>FLOTESTRO_ADVERTISE</code>.</span></td><td><code>settings.advertise.write</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/settings/monitoring</code><br><span class="caption">Retencje monitoringu są ustawieniem instalacji, a nie procesu: czyta się je tutaj i zapisuje bez restartu.</span></td><td><code>settings.read</code></td></tr>
 <tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/settings/monitoring</code></td><td><code>monitoring.rules.write</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/setup</code><br><span class="caption">Pierwsze uruchomienie: czego instalacji jeszcze brakuje oraz dwa testy połączenia, które lista kontrolna udostępnia na miejscu.</span></td><td><span class="caption">dowolna uwierzytelniona tożsamość</span></td></tr>

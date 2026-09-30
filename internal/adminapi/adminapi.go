@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/ultherego/flotestro/internal/advertise"
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
 	backupstore "github.com/ultherego/flotestro/internal/backup"
@@ -124,6 +125,10 @@ type Server struct {
 	crypto cryptoState
 	// installation is what the panel knows about how the hosts reach it.
 	installation Installation
+	// advertised is the address the agents reach the panel at, as the
+	// installation has it now. Nil means a panel started without one, which
+	// answers that it advertises nothing rather than guessing.
+	advertised *advertise.Store
 	// groups holds the saved host selections: static member lists and
 	// dynamic selectors a campaign can name.
 	groups *selector.Store
@@ -486,6 +491,12 @@ func (s *Server) Routes() http.Handler {
 	// the process's: read here, and written without a restart.
 	s.route(mux, "GET /api/v1/settings/monitoring", s.handleMonitoringSettings)
 	s.route(mux, "PUT /api/v1/settings/monitoring", s.handleSetMonitoringSettings)
+	// The address the agents reach this panel at: what is in force, where it came
+	// from, and the addresses of this machine as proposals. Confirming one reissues
+	// the panel's certificate and changes what every new agent is told to dial, so
+	// it is a right of its own and a proposal is never adopted by itself.
+	s.route(mux, "GET /api/v1/settings/advertised", s.handleAdvertisedAddress)
+	s.route(mux, "PUT /api/v1/settings/advertised", s.handleConfirmAdvertisedAddress)
 	// The first run: what the installation still lacks, and the two
 	// connection tests the checklist offers in place.
 	s.route(mux, "GET /api/v1/setup", s.handleSetup)
