@@ -168,7 +168,7 @@ const stageIntegration = "integration"
 // be fatal, or omitting it is the way past the gate.
 var fullRunStages = []string{
 	"tree", "gofmt", "panel", "web", "vitest",
-	"agents", "relay", "preflight", stageIntegration, "playwright",
+	"agents", "relay", "fixtures", "preflight", stageIntegration, "playwright",
 }
 
 func (r GateReport) validate() error {

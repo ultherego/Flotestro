@@ -37,6 +37,7 @@ func goodReport() map[string]any {
 			"vitest":      map[string]any{"result": "pass", "seconds": 70},
 			"agents":      map[string]any{"result": "pass", "seconds": 60},
 			"relay":       map[string]any{"result": "pass", "seconds": 2},
+			"fixtures":    map[string]any{"result": "pass", "seconds": 40},
 			"preflight":   map[string]any{"result": "pass", "seconds": 57},
 			"integration": map[string]any{"result": "pass", "seconds": 2100},
 			"playwright":  map[string]any{"result": "pass", "seconds": 110},
@@ -382,5 +383,43 @@ func TestAReportThatOmitsTheSuiteCannotPass(t *testing.T) {
 	}
 	if verdict, reasons := parsed.ComputeVerdict(); verdict == VerdictPass {
 		t.Fatalf("a report with no suite stage reached pass; reasons %v", reasons)
+	}
+}
+
+// Leaving any one required stage out of the report must be fatal, not merely
+// absent from the arithmetic. The table walks fullRunStages itself, so a stage
+// added to the contract is covered the moment it is added - the ninth way this
+// gate could have lied was a stage the runner emitted and the checker did not
+// know, which no fixed list of cases would have caught.
+func TestOmittingAnyRequiredStageCannotPass(t *testing.T) {
+	for _, missing := range fullRunStages {
+		t.Run(missing, func(t *testing.T) {
+			report := goodReport()
+			stages := report["stages"].(map[string]any)
+			if _, named := stages[missing]; !named {
+				t.Fatalf("the good report does not name the required stage %s", missing)
+			}
+			delete(stages, missing)
+			if missing == stageIntegration {
+				report["logs"] = map[string]string{}
+			}
+			parsed, err := ParseGateReport(encode(t, report))
+			if err != nil {
+				t.Fatalf("the report did not parse: %v", err)
+			}
+			verdict, reasons := parsed.ComputeVerdict()
+			if verdict == VerdictPass {
+				t.Fatalf("a report with no %s stage reached pass; reasons %v", missing, reasons)
+			}
+			var named bool
+			for _, reason := range reasons {
+				if strings.Contains(reason, missing) {
+					named = true
+				}
+			}
+			if !named {
+				t.Errorf("the reasons do not name the missing stage %s: %v", missing, reasons)
+			}
+		})
 	}
 }
