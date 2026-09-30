@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -488,4 +489,35 @@ func withAPTProof(t *testing.T, proof packages.APTIndexProof) {
 	previous := establishAPTProof
 	establishAPTProof = func(context.Context, string, string) packages.APTIndexProof { return proof }
 	t.Cleanup(func() { establishAPTProof = previous })
+}
+
+// A refusal over an artefact names the fingerprint the order carried. Without it
+// the operator cannot tell whether the order was wrong or the artefact was.
+func TestAnArtefactRefusalNamesTheOrderedDigest(t *testing.T) {
+	digest := strings.Repeat("9f", 32)
+	// The refusal the gate of 30.09 caught: the repository answered with nothing,
+	// and the message said nothing about what was to be checked.
+	plain := errors.New("the repository gave no artefact of flotestro-agent=0.60.5")
+	named := namingOrderedDigest(plain, digest)
+	if !strings.Contains(named.Error(), digest) {
+		t.Errorf("the refusal %q does not name the ordered digest", named)
+	}
+	if !errors.Is(named, plain) {
+		t.Error("naming the digest lost the refusal underneath it")
+	}
+	// A mismatch already tells the operator both fingerprints, so nothing is
+	// added: one digest named twice reads as two digests.
+	mismatch := fmt.Errorf("%w: the order names %s and the host obtained %s",
+		errDigestMismatch, digest, strings.Repeat("ab", 32))
+	kept := namingOrderedDigest(mismatch, digest)
+	if kept.Error() != mismatch.Error() {
+		t.Errorf("a refusal that already names the digest became %q", kept)
+	}
+	if strings.Count(kept.Error(), digest) != 1 {
+		t.Errorf("the ordered digest is named twice in %q", kept)
+	}
+	// An order without a digest has no fingerprint to name.
+	if got := namingOrderedDigest(plain, ""); got != plain {
+		t.Errorf("a refusal of an order without a digest became %q", got)
+	}
 }
