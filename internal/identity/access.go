@@ -132,8 +132,8 @@ func EffectiveAccess(ctx context.Context, directory Directory, hostname, domain 
 // findHost matches a host name against the directory entries.
 func (v *directoryView) findHost(hostname, domain string) *freeipa.Host {
 	candidates := []string{strings.ToLower(strings.TrimSuffix(hostname, "."))}
-	if !strings.Contains(hostname, ".") && domain != "" {
-		candidates = append(candidates, strings.ToLower(hostname+"."+strings.TrimSuffix(domain, ".")))
+	if qualified := QualifiedHostname(hostname, domain); qualified != candidates[0] {
+		candidates = append(candidates, qualified)
 	}
 	for index := range v.hosts {
 		if slices.Contains(candidates, strings.ToLower(v.hosts[index].FQDN)) {

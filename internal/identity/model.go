@@ -509,6 +509,11 @@ type Plan struct {
 	// ReachableHosts and SudoRules show the access that follows from the membership.
 	ReachableHosts []string `json:"reachable_hosts,omitempty"`
 	SudoRules      []string `json:"sudo_rules,omitempty"`
+	// FleetHostID is the panel's own identifier of the host a keytab rotation
+	// will order the renewal on. Absent when the name the directory holds
+	// resolves to no host of the fleet or to more than one: the execution
+	// resolves it again and refuses a plan that named another host.
+	FleetHostID string `json:"fleet_host_id,omitempty"`
 	// Replaces says that a rule of the same name exists and will be brought
 	// to the declared state; the steps then carry the member diff.
 	Replaces bool `json:"replaces,omitempty"`

@@ -2,6 +2,7 @@ package identity
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -38,12 +39,19 @@ type FleetHost struct {
 	Online   bool
 }
 
+// FleetLookup binds the name a principal carries to a host of the panel, so
+// that the plan of a rotation and its execution name the same host.
+type FleetLookup interface {
+	// FleetHost resolves the FQDN of the principal to a host of the panel, or
+	// ErrHostNotInFleet when no host carries the name and ErrFleetHostAmbiguous
+	// when more than one does.
+	FleetHost(ctx context.Context, fqdn string) (FleetHost, error)
+}
+
 // HostOrderer finds the fleet host of a principal and orders the host's half
 // of the rotation on it.
 type HostOrderer interface {
-	// FleetHost resolves the FQDN of the principal to a host of the panel,
-	// or ErrHostNotInFleet.
-	FleetHost(ctx context.Context, fqdn string) (FleetHost, error)
+	FleetLookup
 	// OrderKeytabRenewal creates the pre-approved renewal task on the host
 	// and returns its identifier.
 	OrderKeytabRenewal(ctx context.Context, host FleetHost, principal string, change Change) (string, error)
@@ -51,7 +59,7 @@ type HostOrderer interface {
 
 // FleetOrderer is the HostOrderer over the panel's own tables.
 type FleetOrderer struct {
-	hosts *hosts.Store
+	hosts FleetLister
 	jobs  *jobs.Store
 	audit *audit.Recorder
 }
@@ -60,29 +68,25 @@ func NewFleetOrderer(pool *pgxpool.Pool, recorder *audit.Recorder) *FleetOrderer
 	return &FleetOrderer{hosts: hosts.NewStore(pool), jobs: jobs.NewStore(pool), audit: recorder}
 }
 
-// FleetHost matches the FQDN the principal names to a fleet host by its
-// hostname, case aside.
+// FleetHost binds the FQDN the principal names to a fleet host through the
+// resolution the view of the services uses, so that both name one identifier.
 func (o *FleetOrderer) FleetHost(ctx context.Context, fqdn string) (FleetHost, error) {
 	if o == nil || o.hosts == nil {
 		return FleetHost{}, fmt.Errorf("this panel has no fleet store to order the renewal through")
 	}
-	listed, err := o.hosts.List(ctx, hosts.ListFilter{Search: fqdn, Limit: 50})
+	host, err := LookupFleetHost(ctx, o.hosts, fqdn)
 	if err != nil {
 		return FleetHost{}, err
 	}
-	for _, host := range listed {
-		if !strings.EqualFold(host.Hostname, fqdn) {
-			continue
-		}
-		// A host on its way out of the fleet cannot be given a task: the
-		// rotation would retire a keytab nobody renews.
-		if host.LifecycleState != "" && host.LifecycleState != hosts.StateActive {
-			continue
-		}
-		return FleetHost{ID: host.ID, Hostname: host.Hostname, OSFamily: host.OSFamily,
-			Online: host.ConnectionState == "online"}, nil
+	// The safeguard sits after the binding: a host on its way out of the fleet
+	// cannot be given a task - the rotation would retire a keytab nobody renews -
+	// and now it is refused as itself rather than as a name nobody carries.
+	if host.LifecycleState != "" && host.LifecycleState != hosts.StateActive {
+		return FleetHost{}, fmt.Errorf("%w: %s is %s, not active",
+			ErrHostNotInFleet, host.Hostname, host.LifecycleState)
 	}
-	return FleetHost{}, fmt.Errorf("%w: %s", ErrHostNotInFleet, fqdn)
+	return FleetHost{ID: host.ID, Hostname: host.Hostname, OSFamily: host.OSFamily,
+		Online: host.ConnectionState == "online"}, nil
 }
 
 // OrderKeytabRenewal creates the renewal task under the change's consent: the
@@ -184,7 +188,39 @@ func (p *Planner) planKeytabRotate(ctx context.Context, spec *KeytabPayload) (Pl
 		plan.Conflicts = append(plan.Conflicts, fmt.Sprintf("the host %s does not manage the entry of %s (managed by %s); it could not fetch the new keytab",
 			host, spec.Principal, strings.Join(found.ManagedBy, ", ")))
 	}
+	p.bindFleetHost(ctx, &plan, host)
 	return plan, nil
+}
+
+// bindFleetHost names in the plan the host the renewal will be ordered on. The
+// execution resolves the same name again and refuses a plan that named another
+// host, so an unresolved binding is a conflict here rather than a failure after
+// the keytab is already retired.
+func (p *Planner) bindFleetHost(ctx context.Context, plan *Plan, host string) {
+	if p.fleet == nil {
+		return
+	}
+	bound, err := p.fleet.FleetHost(ctx, host)
+	switch {
+	case errors.Is(err, ErrFleetHostAmbiguous):
+		plan.Conflicts = append(plan.Conflicts, fmt.Sprintf(
+			"%s; the renewal could not be routed to one of them", err))
+	case errors.Is(err, ErrHostNotInFleet):
+		plan.Conflicts = append(plan.Conflicts, fmt.Sprintf(
+			"%s is not a host of this fleet; nobody would fetch the new keytab", host))
+	case err != nil:
+		plan.Warnings = append(plan.Warnings,
+			"the panel could not read its own host table, so the plan names no fleet host: "+err.Error())
+	default:
+		plan.FleetHostID = bound.ID
+		if !bound.Online {
+			// Not a conflict: the host may be back by the time the second person
+			// approves, and the execution refuses an absent host by itself.
+			plan.Warnings = append(plan.Warnings, fmt.Sprintf(
+				"the fleet host %s (%s) is not connected now; the rotation refuses while it stays away",
+				bound.Hostname, bound.ID))
+		}
+	}
 }
 
 // samePrincipal compares two principals with or without their realms: the
@@ -218,6 +254,17 @@ func (e *Executor) rotateKeytab(ctx context.Context, change Change, spec *Keytab
 	if err != nil {
 		return []Phase{finishPhase(resolving, fmt.Errorf("%w; the keytab is not retired", err), "")}
 	}
+	planned, err := plannedFleetHost(change)
+	if err != nil {
+		return []Phase{finishPhase(resolving, fmt.Errorf("%w; the keytab is not retired", err), "")}
+	}
+	if planned != "" && planned != host.ID {
+		// The fleet moved between the approval and now: the renewal would go to a
+		// host nobody approved it for.
+		return []Phase{finishPhase(resolving, fmt.Errorf(
+			"the plan named the host %s and %s now resolves to %s (%s); the keytab is not retired",
+			planned, spec.Host(), host.Hostname, host.ID), "")}
+	}
 	if !host.Online {
 		return []Phase{finishPhase(resolving, fmt.Errorf("%w: %s; the keytab is not retired", ErrHostOffline, host.Hostname), "")}
 	}
@@ -240,6 +287,22 @@ func (e *Executor) rotateKeytab(ctx context.Context, change Change, spec *Keytab
 	}
 	phases = append(phases, finishPhase(ordering, nil, "task "+jobID+": ipa-getkeytab on the host reports the old and the new key version"))
 	return phases
+}
+
+// plannedFleetHost reads the host the approved plan named. An empty identifier
+// is a plan made before the binding existed; the execution then routes the task
+// by its own resolution alone.
+func plannedFleetHost(change Change) (string, error) {
+	var planned struct {
+		FleetHostID string `json:"fleet_host_id"`
+	}
+	if len(change.Plan) == 0 {
+		return "", nil
+	}
+	if err := json.Unmarshal(change.Plan, &planned); err != nil {
+		return "", fmt.Errorf("the plan of the change does not read: %w", err)
+	}
+	return planned.FleetHostID, nil
 }
 
 // retireKeytab is the directory half of the rotation. The executor holds

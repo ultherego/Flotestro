@@ -2,11 +2,13 @@ package identity
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 
 	"github.com/ultherego/flotestro/internal/freeipa"
+	"github.com/ultherego/flotestro/internal/hosts"
 )
 
 // A keytab rotation is a known change of access with a permission of its own -
@@ -188,5 +190,220 @@ func TestKeytabRotationRetiresOnlyWithAHostToRenew(t *testing.T) {
 	phases = (&Executor{}).rotateKeytab(context.Background(), change, &KeytabPayload{Principal: "HTTP/web1.flotestro.test"})
 	if StateFor(phases) != StateFailed || len(retired) != 2 {
 		t.Errorf("without a fleet: %+v, retired %v", phases, retired)
+	}
+}
+
+// fakeHostTable stands in for the panel's host table: the search matches a
+// substring of the hostname, the way the store's filter does.
+type fakeHostTable struct{ rows []hosts.Host }
+
+func (f *fakeHostTable) List(_ context.Context, filter hosts.ListFilter) ([]hosts.Host, error) {
+	var listed []hosts.Host
+	for _, row := range f.rows {
+		if filter.Search == "" || strings.Contains(strings.ToLower(row.Hostname), strings.ToLower(filter.Search)) {
+			listed = append(listed, row)
+		}
+	}
+	return listed, nil
+}
+
+// boundFleet is the real binding over a fake host table, with the ordering
+// replaced: the identifiers it records are the ones the resolution reached.
+type boundFleet struct {
+	*FleetOrderer
+	ordered []string
+}
+
+func (b *boundFleet) OrderKeytabRenewal(_ context.Context, host FleetHost, _ string, _ Change) (string, error) {
+	b.ordered = append(b.ordered, host.ID)
+	return "job-" + host.ID, nil
+}
+
+// labFleetTable is the discrepancy the binding exists for: the directory holds
+// fully qualified names, the panel stores agent-debian short, and beside it a
+// name that is carried twice and a host on its way out of the fleet.
+func labFleetTable() *fakeHostTable {
+	return &fakeHostTable{rows: []hosts.Host{
+		{ID: "h-debian", Hostname: "agent-debian", OSFamily: "debian",
+			LifecycleState: hosts.StateActive, ConnectionState: "online"},
+		{ID: "h-arch-short", Hostname: "agent-arch", OSFamily: "arch",
+			LifecycleState: hosts.StateActive, ConnectionState: "online"},
+		{ID: "h-arch-full", Hostname: "agent-arch.flotestro.test", OSFamily: "arch",
+			LifecycleState: hosts.StateActive, ConnectionState: "online"},
+		{ID: "h-suse", Hostname: "agent-suse", OSFamily: "suse",
+			LifecycleState: hosts.StateRetired, ConnectionState: "online"},
+		{ID: "h-elsewhere", Hostname: "agent-elsewhere", OSFamily: "debian",
+			LifecycleState: hosts.StateActive, ConnectionState: "online",
+			Identity: hosts.HostIdentity{Domain: "other.test"}},
+	}}
+}
+
+// labServiceDirectory holds one service per case, each on a fully qualified
+// host as FreeIPA keeps it.
+func labServiceDirectory() *fakeDirectory {
+	keytab := true
+	directory := labDirectory()
+	directory.services = []freeipa.Service{
+		{Principal: "HTTP/agent-debian.flotestro.test@FLOTESTRO.TEST", Service: "HTTP",
+			Host: "agent-debian.flotestro.test", HasKeytab: &keytab,
+			ManagedBy: []string{"agent-debian.flotestro.test"}},
+		{Principal: "ldap/agent-arch.flotestro.test@FLOTESTRO.TEST", Service: "ldap",
+			Host: "agent-arch.flotestro.test", HasKeytab: &keytab,
+			ManagedBy: []string{"agent-arch.flotestro.test"}},
+		{Principal: "nfs/stranger.flotestro.test@FLOTESTRO.TEST", Service: "nfs",
+			Host: "stranger.flotestro.test", HasKeytab: &keytab,
+			ManagedBy: []string{"stranger.flotestro.test"}},
+		{Principal: "HTTP/agent-suse.flotestro.test@FLOTESTRO.TEST", Service: "HTTP",
+			Host: "agent-suse.flotestro.test", HasKeytab: &keytab,
+			ManagedBy: []string{"agent-suse.flotestro.test"}},
+	}
+	return directory
+}
+
+// The name the directory holds is fully qualified and the panel stores the host
+// short: the binding meets them, and both outcomes that are not a single host
+// stay unresolved and are told apart by the caller.
+func TestFleetBindingResolvesAShortHostnameAndRefusesTheRest(t *testing.T) {
+	fleet := &FleetOrderer{hosts: labFleetTable()}
+
+	host, err := fleet.FleetHost(context.Background(), "agent-debian.flotestro.test")
+	if err != nil {
+		t.Fatalf("the host the panel stores short: %v", err)
+	}
+	if host.ID != "h-debian" || host.Hostname != "agent-debian" || !host.Online {
+		t.Errorf("bound to %+v", host)
+	}
+
+	// No match and an ambiguous match are both unresolved, and neither is the
+	// other: the caller has to be able to say which one it met.
+	if _, err := fleet.FleetHost(context.Background(), "stranger.flotestro.test"); !errors.Is(err, ErrHostNotInFleet) ||
+		errors.Is(err, ErrFleetHostAmbiguous) {
+		t.Errorf("a name no host carries: %v", err)
+	}
+	_, err = fleet.FleetHost(context.Background(), "agent-arch.flotestro.test")
+	if !errors.Is(err, ErrFleetHostAmbiguous) || errors.Is(err, ErrHostNotInFleet) {
+		t.Errorf("a name two hosts carry: %v", err)
+	}
+	if !strings.Contains(err.Error(), "h-arch-short") || !strings.Contains(err.Error(), "h-arch-full") {
+		t.Errorf("the refusal does not name the hosts it could not choose between: %v", err)
+	}
+
+	// The safeguard sits after the binding: a host on its way out is refused as
+	// itself, not as a name nobody carries.
+	_, err = fleet.FleetHost(context.Background(), "agent-suse.flotestro.test")
+	if !errors.Is(err, ErrHostNotInFleet) || !strings.Contains(err.Error(), "agent-suse") ||
+		!strings.Contains(err.Error(), hosts.StateRetired) {
+		t.Errorf("a retired host: %v", err)
+	}
+
+	// A short name is a candidate, not a certainty: without a domain to qualify
+	// it with, it matches nothing the directory holds.
+	listed := labFleetTable().rows
+	if _, err := ResolveFleetHost(listed, "agent-debian.flotestro.test", ""); !errors.Is(err, ErrHostNotInFleet) {
+		t.Errorf("a short name matched without a domain: %v", err)
+	}
+	// A host that reported its own domain answers under that domain alone.
+	if _, err := ResolveFleetHost(listed, "agent-elsewhere.flotestro.test", "flotestro.test"); !errors.Is(err, ErrHostNotInFleet) {
+		t.Errorf("a host of another domain matched: %v", err)
+	}
+	elsewhere, err := ResolveFleetHost(listed, "agent-elsewhere.other.test", "flotestro.test")
+	if err != nil || elsewhere.ID != "h-elsewhere" {
+		t.Errorf("the host of another domain does not bind under its own: %+v %v", elsewhere, err)
+	}
+}
+
+// The owner's criterion: the plan and the execution route the renewal to one
+// and the same identifier, and neither of them guesses.
+func TestKeytabRotationPlanAndExecutionReachTheSameHostID(t *testing.T) {
+	table := labFleetTable()
+	fleet := &boundFleet{FleetOrderer: &FleetOrderer{hosts: table}}
+	planner := NewPlanner(labServiceDirectory()).WithFleet(fleet)
+	spec := &KeytabPayload{Principal: "HTTP/agent-debian.flotestro.test"}
+
+	plan, err := planner.Build(context.Background(), ActionKeytabRotate, Payload{Keytab: spec})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if plan.Blocked() {
+		t.Fatalf("the rotation of a host stored short is blocked: %v", plan.Conflicts)
+	}
+	if plan.FleetHostID != "h-debian" {
+		t.Fatalf("the plan names the fleet host %q", plan.FleetHostID)
+	}
+	// The plan the second person approved is the plan the execution is bound to.
+	approved, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := Change{ID: "c1", Plan: approved, ApprovedBy: "approver", CreatedBy: "admin"}
+
+	var retired []string
+	executor := &Executor{fleet: fleet, retire: func(_ context.Context, principal string) error {
+		retired = append(retired, principal)
+		return nil
+	}}
+	phases := executor.rotateKeytab(context.Background(), change, spec)
+	if StateFor(phases) != StateSucceeded || len(phases) != 3 {
+		t.Fatalf("phases = %+v", phases)
+	}
+	if len(fleet.ordered) != 1 || fleet.ordered[0] != plan.FleetHostID {
+		t.Fatalf("the plan routed to %q and the execution to %v", plan.FleetHostID, fleet.ordered)
+	}
+	if len(retired) != 1 || !strings.Contains(phases[2].Message, "job-"+plan.FleetHostID) {
+		t.Errorf("retired %v, ordering phase %q", retired, phases[2].Message)
+	}
+
+	// A plan that named another host is not carried out: the fleet moved under
+	// it, and the renewal would go to a host nobody approved.
+	moved, err := json.Marshal(Plan{Steps: plan.Steps, FleetHostID: "h-somebody-else"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	phases = executor.rotateKeytab(context.Background(), Change{ID: "c2", Plan: moved}, spec)
+	if StateFor(phases) != StateFailed || len(phases) != 1 || !strings.Contains(phases[0].Message, "not retired") {
+		t.Errorf("a plan that named another host: %+v", phases)
+	}
+	if len(retired) != 1 {
+		t.Errorf("a refused rotation retired a keytab: %v", retired)
+	}
+}
+
+// A name that resolves to no host and one that resolves to two are refused by
+// name, before the approval and again before the keytab is retired.
+func TestKeytabRotationRefusesAnUnresolvedBindingByName(t *testing.T) {
+	table := labFleetTable()
+	fleet := &boundFleet{FleetOrderer: &FleetOrderer{hosts: table}}
+	planner := NewPlanner(labServiceDirectory()).WithFleet(fleet)
+	executor := &Executor{fleet: fleet, retire: func(_ context.Context, principal string) error {
+		t.Errorf("the keytab of %s was retired without a host to renew it", principal)
+		return nil
+	}}
+
+	for name, expected := range map[string]struct{ principal, said string }{
+		"no match":        {"nfs/stranger.flotestro.test", "not a host of this fleet"},
+		"ambiguous match": {"ldap/agent-arch.flotestro.test", "more than one host of the fleet"},
+	} {
+		plan, err := planner.Build(context.Background(), ActionKeytabRotate,
+			Payload{Keytab: &KeytabPayload{Principal: expected.principal}})
+		if err != nil {
+			t.Fatalf("%s: Build: %v", name, err)
+		}
+		if !plan.Blocked() || !strings.Contains(strings.Join(plan.Conflicts, "\n"), expected.said) {
+			t.Errorf("%s: the conflicts are %v", name, plan.Conflicts)
+		}
+		if plan.FleetHostID != "" {
+			t.Errorf("%s: the plan names the host %q; an unresolved binding stays absent", name, plan.FleetHostID)
+		}
+		phases := executor.rotateKeytab(context.Background(), Change{ID: "c1"},
+			&KeytabPayload{Principal: expected.principal})
+		if StateFor(phases) != StateFailed || len(phases) != 1 {
+			t.Fatalf("%s: phases = %+v", name, phases)
+		}
+		if !strings.Contains(phases[0].Message, "not retired") {
+			t.Errorf("%s: the refusal does not say the keytab stays: %q", name, phases[0].Message)
+		}
+	}
+	if len(fleet.ordered) != 0 {
+		t.Errorf("an unresolved binding ordered a renewal: %v", fleet.ordered)
 	}
 }

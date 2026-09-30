@@ -36,10 +36,21 @@ type Directory interface {
 // Planner builds a preview of a change's impact.
 type Planner struct {
 	directory Directory
+	// fleet binds the host a principal names to a host of the panel; without it
+	// a plan names no fleet host, which is what an installation without the
+	// host tables gets.
+	fleet FleetLookup
 }
 
 func NewPlanner(directory Directory) *Planner {
 	return &Planner{directory: directory}
+}
+
+// WithFleet makes the plan of a keytab rotation name the host the execution will
+// order the renewal on, through the same resolution the execution uses.
+func (p *Planner) WithFleet(fleet FleetLookup) *Planner {
+	p.fleet = fleet
+	return p
 }
 
 // Build computes the plan for a change.
