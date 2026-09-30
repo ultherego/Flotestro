@@ -268,7 +268,7 @@ func (o *Orchestrator) advance(ctx context.Context, campaign Campaign) error {
 		return o.pauseOnWindowClosed(ctx, campaign, targets, windowClosed)
 	}
 	// We check the stop threshold before starting anything new.
-	if exceeded, reason := ThresholdExceeded(failed, finished, len(targets),
+	if exceeded, reason := ThresholdExceeded(failed, finished,
 		campaign.FailureThresholdPercent, campaign.FailureThresholdAbsolute); exceeded {
 		return o.pauseOnThreshold(ctx, campaign, targets, reason, failed, finished)
 	}

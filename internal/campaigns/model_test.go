@@ -10,14 +10,14 @@ import (
 func TestTheAbsoluteThresholdWorksFromTheFirstFailure(t *testing.T) {
 	// The absolute threshold exists to stop a campaign before it damages many
 	// hosts, so it does not wait for statistics.
-	exceeded, reason := ThresholdExceeded(1, 1, 100, 0, 1)
+	exceeded, reason := ThresholdExceeded(1, 1, 0, 1)
 	if !exceeded {
 		t.Fatal("the absolute threshold of 1 did not stop the campaign after the first failure")
 	}
 	if reason == "" {
 		t.Error("no description of the reason for stopping")
 	}
-	if exceeded, _ := ThresholdExceeded(1, 1, 100, 0, 2); exceeded {
+	if exceeded, _ := ThresholdExceeded(1, 1, 0, 2); exceeded {
 		t.Error("the threshold of 2 stopped the campaign after one failure")
 	}
 }
@@ -25,7 +25,7 @@ func TestTheAbsoluteThresholdWorksFromTheFirstFailure(t *testing.T) {
 func TestThePercentageThresholdDoesNotWorkWithoutData(t *testing.T) {
 	// Without finished hosts there is nothing to compute the share from;
 	// computing a percentage of zero would stop every campaign at the start.
-	if exceeded, _ := ThresholdExceeded(0, 0, 50, 20, 0); exceeded {
+	if exceeded, _ := ThresholdExceeded(0, 0, 20, 0); exceeded {
 		t.Fatal("the percentage threshold fired without finished hosts")
 	}
 }
@@ -33,13 +33,13 @@ func TestThePercentageThresholdDoesNotWorkWithoutData(t *testing.T) {
 func TestThePercentageThresholdCountsFromTheFinishedOnes(t *testing.T) {
 	// 2 failures out of 10 finished is 20%, so a threshold of 20% is reached
 	// even though the campaign has 100 targets.
-	exceeded, _ := ThresholdExceeded(2, 10, 100, 20, 0)
+	exceeded, _ := ThresholdExceeded(2, 10, 20, 0)
 	if !exceeded {
 		t.Fatal("the threshold of 20% did not fire at 2 failures out of 10 finished")
 	}
 	// The same result counted against the whole would be 2%, so the campaign
 	// would roll on even though every fifth host had failed.
-	if exceeded, _ := ThresholdExceeded(1, 10, 100, 20, 0); exceeded {
+	if exceeded, _ := ThresholdExceeded(1, 10, 20, 0); exceeded {
 		t.Error("the threshold of 20% fired at 10% of failures")
 	}
 }
@@ -289,7 +289,7 @@ func TestTheTallyCountsUnknownAsAFailure(t *testing.T) {
 	// Three of seven finished did not reach the desired state: 42 %, so a
 	// threshold of 40 % fires - and would not if the unknown ones were left out
 	// of the count.
-	if exceeded, _ := ThresholdExceeded(counts.Failed, counts.Finished, counts.Total, 40, 0); !exceeded {
+	if exceeded, _ := ThresholdExceeded(counts.Failed, counts.Finished, 40, 0); !exceeded {
 		t.Error("two unknown hosts and one failure did not cross a 40 % threshold")
 	}
 }
@@ -440,10 +440,10 @@ func TestACanaryHealthFailureCountsTowardsTheThreshold(t *testing.T) {
 	}
 	// The default threshold of the API is twenty percent: one failed out of
 	// one finished is a hundred, and the campaign pauses before wave one.
-	if exceeded, _ := ThresholdExceeded(counts.Failed, counts.Finished, len(targets), 20, 0); !exceeded {
+	if exceeded, _ := ThresholdExceeded(counts.Failed, counts.Finished, 20, 0); !exceeded {
 		t.Error("a failed canary health check did not cross the threshold before the next wave")
 	}
-	if exceeded, _ := ThresholdExceeded(counts.Failed, counts.Finished, len(targets), 0, 1); !exceeded {
+	if exceeded, _ := ThresholdExceeded(counts.Failed, counts.Finished, 0, 1); !exceeded {
 		t.Error("a failed canary health check did not count towards the absolute threshold")
 	}
 	// A host closed because the window ended mid-reboot is a failure too.
@@ -592,7 +592,7 @@ func TestAHostThatNeverTakesPartIsNotInTheCanary(t *testing.T) {
 	if counts.Total != 4 || counts.Finished != 1 || counts.Failed != 1 {
 		t.Fatalf("the tally reads %+v over a rollout of four hosts with one failed canary", counts)
 	}
-	if exceeded, _ := ThresholdExceeded(counts.Failed, counts.Finished, counts.Total, 20, 0); !exceeded {
+	if exceeded, _ := ThresholdExceeded(counts.Failed, counts.Finished, 20, 0); !exceeded {
 		t.Error("a failed canary beside 27 hosts that never ran did not cross the threshold of 20%")
 	}
 }
