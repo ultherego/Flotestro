@@ -77,7 +77,7 @@ func TestAnAliasOfAnUnknownCodeIsRefused(t *testing.T) {
 			t.Error("an alias of a code nobody lists was accepted")
 		}
 	}()
-	withAliases(reportedGuides, []documentAlias{{code: "x", reportedAs: "something_nobody_wrote"}})
+	withAliases(reportedGuides, []aliasedCode{{code: "x", reportedAs: "something_nobody_wrote"}})
 }
 
 // The refusals of the schedule user, the root grant, the missing validator and
