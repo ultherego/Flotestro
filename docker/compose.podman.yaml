@@ -354,9 +354,9 @@ services:
       # - ./feeds:/var/lib/flotestro-feeds:ro
 
     ports:
-      # The loopback alone by default: a reverse proxy with TLS puts the panel
-      # on the network. Without one, name the address here.
-      - "${FLOTESTRO_API_PUBLISH:-127.0.0.1}:8080:8080"
+      # Every address of this host by default: the first-run screen is opened
+      # from another machine. Narrow it here once a proxy stands in front.
+      - "${FLOTESTRO_API_PUBLISH:-0.0.0.0}:8080:8080"
       # The agent gateway (mTLS) and the enrollment (TLS) are reached directly
       # or through an L4 balancer: the panel terminates their TLS itself.
       - "8443:8443"

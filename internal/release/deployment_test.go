@@ -220,31 +220,57 @@ func TestThePreFlightSchemaCheckDependsOnNothing(t *testing.T) {
 	}
 }
 
-// The port the operator's browser reaches is published on the loopback unless
-// the deployment says otherwise, in every variant. Comparing the variants with
-// each other cannot catch this one: a change that opened the panel's API to the
-// network in both files at once would compare equal.
-func TestThePanelPublishesItsApiOnTheLoopbackByDefault(t *testing.T) {
-	loopback := regexp.MustCompile(`^\$\{FLOTESTRO_API_PUBLISH:-127\.0\.0\.1\}$`)
+// The port the operator's browser reaches. The quickstart is opened from another
+// machine, so the shipped default is every address of the host - and it stays a
+// substitution, because an installation that puts TLS in front of the panel
+// narrows it back to the loopback without editing the deployment. Comparing the
+// variants with each other catches neither property: a change that moved both
+// files off the host's addresses at once, or wrote the address in as a literal in
+// both, would compare equal. So the value is pinned here, and the variants are
+// also required to agree on it, which is the property the comparison would lose
+// if this port ever became a declared difference.
+func TestThePanelPublishesItsApiOnEveryAddressOfTheHostByDefault(t *testing.T) {
+	substitution := regexp.MustCompile(`^\$\{FLOTESTRO_API_PUBLISH:-([^}]*)\}$`)
+	const hostAddresses = "0.0.0.0"
+	agreed := map[string][]string{}
 	for _, deployment := range completePanels(t) {
 		published := normalise("ports", deployment.services["control-plane"]["ports"]).([]string)
-		found := false
+		found := 0
 		for _, port := range published {
 			field := strings.Split(port, "|")
 			if len(field) != 4 || field[2] != "8080" {
 				continue
 			}
-			found = true
-			if !loopback.MatchString(field[0]) {
-				t.Errorf("%s: the panel publishes its API on %q; the shipped default is the "+
-					"loopback, and a reverse proxy is what puts it on the network",
+			found++
+			agreed[field[0]] = append(agreed[field[0]], deployment.file)
+			match := substitution.FindStringSubmatch(field[0])
+			if match == nil {
+				t.Errorf("%s: the panel publishes its API on %q, which no setting can change; "+
+					"the host address is FLOTESTRO_API_PUBLISH so that an installation "+
+					"behind a proxy can narrow it back to the loopback",
 					deployment.file, field[0])
+				continue
+			}
+			if match[1] != hostAddresses {
+				t.Errorf("%s: FLOTESTRO_API_PUBLISH defaults to %q; the quickstart is opened "+
+					"from another machine, so the shipped default is %s and a narrower "+
+					"bind is the installation's own choice",
+					deployment.file, match[1], hostAddresses)
 			}
 		}
-		if !found {
+		switch found {
+		case 1:
+		case 0:
 			t.Errorf("%s: the panel publishes no port 8080, so the operator reaches nothing",
 				deployment.file)
+		default:
+			t.Errorf("%s: the panel publishes port 8080 %d times, and only one of them can be "+
+				"the one FLOTESTRO_API_PUBLISH governs", deployment.file, found)
 		}
+	}
+	if len(agreed) > 1 {
+		t.Errorf("the variants publish the panel's API differently: %v. One of them would put "+
+			"the first-run screen somewhere the other does not", agreed)
 	}
 }
 
@@ -939,8 +965,8 @@ func TestTheShapesOfOnePortAndOneMountCompareEqual(t *testing.T) {
 		},
 		{
 			key:         "ports",
-			one:         []any{"${FLOTESTRO_API_PUBLISH:-127.0.0.1}:8080:8080"},
-			other:       []any{"${FLOTESTRO_API_PUBLISH:-127.0.0.1}:8080:8080"},
+			one:         []any{"${FLOTESTRO_API_PUBLISH:-0.0.0.0}:8080:8080"},
+			other:       []any{"${FLOTESTRO_API_PUBLISH:-0.0.0.0}:8080:8080"},
 			shouldMatch: true,
 		},
 	} {
