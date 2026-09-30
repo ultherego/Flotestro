@@ -96,7 +96,7 @@
 
   <main class="content">
 <h1>7. Errors and refusals</h1>
-<p class="lede">Every refusal, failure and skip the panel, the agent and the helper can put on a task, a campaign target or a request carries a stable code. A code answers two questions: what happened, and what can safely be done next. This page is the whole guide, 295 entries, transcribed from <code>internal/opspec/errors.go</code>; the panel serves the same list at <code>GET /api/v1/errors</code>.</p>
+<p class="lede">Every refusal, failure and skip the panel, the agent and the helper can put on a task, a campaign target or a request carries a stable code. A code answers two questions: what happened, and what can safely be done next. This page is the whole guide, 296 entries, transcribed from <code>internal/opspec/errors.go</code>; the panel serves the same list at <code>GET /api/v1/errors</code>.</p>
     <ul class="linkrow">
       <li><a href="#retry">The retry policy</a></li>
       <li><a href="#failure">Whether a code counts as a failure</a></li>
@@ -148,7 +148,7 @@
 <tr><td><a href="#stage-approval"><code>approval</code></a></td><td>9</td></tr>
 <tr><td><a href="#stage-dispatch"><code>dispatch</code></a></td><td>23</td></tr>
 <tr><td><a href="#stage-agent"><code>agent</code></a></td><td>20</td></tr>
-<tr><td><a href="#stage-helper"><code>helper</code></a></td><td>85</td></tr>
+<tr><td><a href="#stage-helper"><code>helper</code></a></td><td>86</td></tr>
 <tr><td><a href="#stage-verify"><code>verify</code></a></td><td>10</td></tr>
 <tr><td><a href="#stage-reconcile"><code>reconcile</code></a></td><td>18</td></tr>
 <tr><td><a href="#stage-cancel"><code>cancel</code></a></td><td>3</td></tr>
@@ -266,6 +266,7 @@
 <tr><td><a href="#err-helper-capability-unsupported"><code class="refusal">helper_capability_unsupported</code></a></td><td>dispatch</td><td><span class="badge retry-after-change">after_change</span></td><td>yes</td></tr>
 <tr><td><a href="#err-helper-rejected"><code class="refusal">helper_rejected</code></a></td><td>helper</td><td><span class="badge retry-after-change">after_change</span></td><td>yes</td></tr>
 <tr><td><a href="#err-helper-unavailable"><code class="refusal">helper_unavailable</code></a></td><td>agent</td><td><span class="badge retry-automatic">automatic</span></td><td>yes</td></tr>
+<tr><td><a href="#err-host-kerberos-key-unusable"><code class="refusal">host_kerberos_key_unusable</code></a></td><td>helper</td><td><span class="badge retry-after-change">after_change</span></td><td>yes</td></tr>
 <tr><td><a href="#err-host-retiring"><code class="refusal">host_retiring</code></a></td><td>agent</td><td><span class="badge retry-never">never</span></td><td>no</td></tr>
 <tr><td><a href="#err-host-unavailable"><code class="refusal">host_unavailable</code></a></td><td>dispatch</td><td><span class="badge retry-after-change">after_change</span></td><td>no</td></tr>
 <tr><td><a href="#err-hostname-conflict"><code class="refusal">hostname_conflict</code></a></td><td>agent</td><td><span class="badge retry-after-change">after_change</span></td><td>yes</td></tr>
@@ -737,7 +738,7 @@
 <dd><p>The agent does not know this operation.</p><p><span class="label">What to do</span> Update the agent on the host.</p><p><span class="badge retry-after-change">retry: after_change</span> <span class="badge counts-failure">counts as a failure</span></p></dd>
 </dl>
 <h2 id="stage-helper">Stage: helper</h2>
-<p>85 codes.</p>
+<p>86 codes.</p>
 <dl class="kv">
 <dt id="err-account-tool-missing"><code class="refusal">account_tool_missing</code></dt>
 <dd><p>The shadow tool this account operation needs is not on the host; the message names it. Nothing was changed.</p><p><span class="label">What to do</span> Install the shadow tools of the distribution - passwd on Debian and Ubuntu, shadow-utils on Fedora and RHEL, shadow on Arch - and refresh the capabilities.</p><p><span class="badge retry-after-change">retry: after_change</span> <span class="badge counts-failure">counts as a failure</span></p></dd>
@@ -819,6 +820,8 @@
 <dd><p>The repair ran on the filesystem and a second, read-only pass still finds errors. fsck exits non-zero for a successful repair and for a failed one alike, so the operation is settled by that second pass and not by the code of the first.</p><p><span class="label">What to do</span> The filesystem needs a person at the console: unmount it, run the check by hand and read what it says, or restore from a backup. Ordering the same repair again changes nothing.</p><p><span class="badge retry-never">retry: never</span> <span class="badge counts-failure">counts as a failure</span></p></dd>
 <dt id="err-helper-rejected"><code class="refusal">helper_rejected</code></dt>
 <dd><p>The root helper refused the request at its final check of the host, before running anything; the message carries the helper's own word - malformed_request, unsupported_version or unknown_action.</p><p><span class="label">What to do</span> The agent and the helper on the host disagree on the contract: bring both to the same release, then order again.</p><p><span class="badge retry-after-change">retry: after_change</span> <span class="badge counts-failure">counts as a failure</span></p></dd>
+<dt id="err-host-kerberos-key-unusable"><code class="refusal">host_kerberos_key_unusable</code></dt>
+<dd><p>The operation needed a Kerberos ticket of the host&rsquo;s own and could not take one: /etc/krb5.keytab holds no host principal, the file could not be read, or kinit refused the key it holds. Nothing was written - a keytab renewal stops here rather than running a tool that would fail to authenticate.</p><p><span class="label">What to do</span> Read the host&rsquo;s domain membership on the identity screen: a host whose key no longer matches the directory has to recover its identity or join again. Once the host can take a ticket with its own key, order the renewal again.</p><p><span class="badge retry-after-change">retry: after_change</span> <span class="badge counts-failure">counts as a failure</span></p></dd>
 <dt id="err-inhibitors-unknown"><code class="refusal">inhibitors_unknown</code></dt>
 <dd><p>A restart or a shutdown asks logind what is holding it back - an update in flight, a session with open work. This host could not be asked: systemd-inhibit is not there, or its output was not in a shape the panel reads. Nothing was ordered, because an answer nobody could read is not permission to go ahead.</p><p><span class="label">What to do</span> Read the host. If the operation has to go now, order it again with the inhibitor override, which says in the trail that nobody checked.</p><p><span class="badge retry-after-change">retry: after_change</span> <span class="badge counts-failure">counts as a failure</span></p></dd>
 <dt id="err-insufficient-space"><code class="refusal">insufficient_space</code></dt>

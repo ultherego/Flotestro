@@ -220,6 +220,24 @@ func (e *exitStatusError) Error() string {
 	return fmt.Sprintf("%s: exit status %d: %s", e.tool, e.code, firstLineOf(e.stderr))
 }
 
+// toolEnvKey carries the environment the tools of one operation run with.
+// The runner seam takes argv only, and the keytab renewal has to point every
+// tool it runs at a credential cache of its own.
+type toolEnvKey struct{}
+
+// withToolEnv returns a context whose tool runs carry these VAR=value entries
+// on top of the fixed environment.
+func withToolEnv(ctx context.Context, env ...string) context.Context {
+	return context.WithValue(ctx, toolEnvKey{}, env)
+}
+
+// toolEnvFrom returns the extra environment of the operation, empty for one
+// that asked for none.
+func toolEnvFrom(ctx context.Context) []string {
+	env, _ := ctx.Value(toolEnvKey{}).([]string)
+	return env
+}
+
 // identityToolRunner is the seam the tests replace: the join and the leave
 // call real directory tools, and a unit test has neither a directory nor the
 // right to change the host running it.
@@ -247,7 +265,8 @@ func execIdentityTool(ctx context.Context, timeout time.Duration, input io.Reade
 	cmd := exec.CommandContext(cmdCtx, path, args...)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	cmd.Env = []string{"LC_ALL=C", "LANG=C", "PATH=/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/var/lib/flotestro-helper"}
+	cmd.Env = append([]string{"LC_ALL=C", "LANG=C", "PATH=/usr/sbin:/usr/bin:/sbin:/bin",
+		"HOME=/var/lib/flotestro-helper"}, toolEnvFrom(ctx)...)
 	if input != nil {
 		cmd.Stdin = input
 		// A password prompt reads the controlling terminal first and falls back to

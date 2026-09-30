@@ -35,6 +35,9 @@ const (
 	// refusal is better than pretending the operation ran.
 	ErrorUnsupported = "unsupported"
 	ErrorMalformed   = "malformed_request"
+	// ErrorHostKerberosKeyUnusable means the host could not authenticate with
+	// its own Kerberos key, so an operation that needs a ticket did nothing.
+	ErrorHostKerberosKeyUnusable = "host_kerberos_key_unusable"
 	// ErrorRepositoryAbsent means a backup repository that is not there yet.
 	ErrorRepositoryAbsent = "repository_absent"
 	// ErrorPreconditionFailed means an order placed against a host state other

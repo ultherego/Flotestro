@@ -539,8 +539,24 @@ func TestServiceKeytabRotationIsASeparateRightAndRunsOnTheHost(t *testing.T) {
 	}
 
 	approver := secondPerson(t, h)
-	final := orderAndRun(t, h, approver, "identity.keytab.rotate",
-		map[string]any{"keytab": map[string]any{"principal": principal}})
+	// A rotation is not a success at the moment the task is placed: the change
+	// stays partially applied until the host reports a new key version, so this
+	// one is ordered without orderAndRun's demand for "succeeded".
+	var change ruleChange
+	h.do(http.MethodPost, "/api/v1/identity/changes", map[string]any{
+		"action": "identity.keytab.rotate", "reason": directoryLifecycleReason,
+		"payload": map[string]any{"keytab": map[string]any{"principal": principal}},
+	}, &change, http.StatusCreated)
+	if len(change.Plan.Conflicts) > 0 {
+		t.Fatalf("the plan of the rotation has conflicts: %v", change.Plan.Conflicts)
+	}
+	final := approveAndRun(t, h, approver, change)
+	if final.State != "partially_applied" {
+		t.Fatalf("the rotation finished as %s: %s", final.State, final.ResultMessage)
+	}
+	if !strings.Contains(final.ResultMessage, "identity.keytab.renew") {
+		t.Errorf("the result does not say what is outstanding: %q", final.ResultMessage)
+	}
 	var detail struct {
 		Plan struct {
 			FleetHostID string `json:"fleet_host_id"`
@@ -562,8 +578,11 @@ func TestServiceKeytabRotationIsASeparateRightAndRunsOnTheHost(t *testing.T) {
 	if !strings.Contains(detail.Phases[0].Message, hostname) || !strings.Contains(detail.Phases[0].Message, hostID) {
 		t.Errorf("the first phase does not name the fleet host: %q", detail.Phases[0].Message)
 	}
-	// The last phase names the task on the host; the task's own result
-	// carries the key versions.
+	// The last phase names the task on the host and stays outstanding: the
+	// task's own result is what carries the key versions.
+	if detail.Phases[2].Status != "outstanding" {
+		t.Errorf("the ordering phase is %q: %q", detail.Phases[2].Status, detail.Phases[2].Message)
+	}
 	fields := strings.Fields(strings.TrimPrefix(detail.Phases[2].Message, "task "))
 	if len(fields) == 0 {
 		t.Fatalf("the ordering phase names no task: %q", detail.Phases[2].Message)

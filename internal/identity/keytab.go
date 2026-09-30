@@ -150,13 +150,15 @@ func (p *Planner) planKeytabRotate(ctx context.Context, spec *KeytabPayload) (Pl
 		Summary: fmt.Sprintf("Rotating the keytab of the service principal %s on the host %s", spec.Principal, host),
 		Steps: []string{
 			"retiring the current keytab of " + spec.Principal + " in the directory: the keytab and the certificates issued to the service are revoked, the entry stays",
-			"ordering identity.keytab.renew on the fleet host " + host + ": ipa-getkeytab fetches the new key into /etc/krb5.keytab with the host's own credentials",
+			"ordering identity.keytab.renew on the fleet host " + host + ": the host takes a Kerberos ticket with its own key out of /etc/krb5.keytab, and ipa-getkeytab fetches the new key into that file with it",
 		},
 		ReachableHosts: []string{host},
 		Warnings: []string{
 			"between the retirement and the renewal the service cannot authenticate: tickets it already issued keep working until they expire, new ones are refused",
 			"certificates issued to the service principal are revoked together with the keytab",
 			"the renewal runs on the fleet host of that name; a host that is not in the fleet or not connected refuses the rotation before the keytab is retired",
+			"the two halves cannot be ordered the other way round: the fetch itself replaces the key in the directory, so retiring afterwards would delete the key just fetched. The gap is inherent to the operation",
+			"the change is reported as partially applied until the host's renewal task reports a new key version; the retired key cannot be put back from the panel, and a renewal that fails is ordered again as identity.keytab.renew on " + host,
 		},
 	}
 	services, err := p.directory.Services(ctx)
@@ -243,8 +245,11 @@ func containsFold(values []string, wanted string) bool {
 	return false
 }
 
-// rotateKeytab carries out the two halves in the only safe order: the host is
-// resolved first, then the keytab retired; the other order is an outage.
+// rotateKeytab carries out the two halves in the only order there is: the host
+// is resolved first, then the keytab retired, then the renewal ordered. The
+// halves cannot be swapped - ipa-getkeytab sets a new key in the directory, so
+// service_disable after the fetch would delete the key just fetched - which is
+// why the gap between them is the one thing the operator has to be told about.
 func (e *Executor) rotateKeytab(ctx context.Context, change Change, spec *KeytabPayload) []Phase {
 	resolving := startPhase("finding the fleet host " + spec.Host())
 	if e.fleet == nil {
@@ -285,7 +290,14 @@ func (e *Executor) rotateKeytab(ctx context.Context, change Change, spec *Keytab
 		phases = append(phases, finishPhase(ordering, fmt.Errorf("%w; the keytab is retired and the renewal has to be ordered by hand", err), ""))
 		return phases
 	}
-	phases = append(phases, finishPhase(ordering, nil, "task "+jobID+": ipa-getkeytab on the host reports the old and the new key version"))
+	// Placing the task is not renewing the keytab. The service holds a key the
+	// directory has retired until the host reports a new key version, so the
+	// change stays out of a success until that task settles.
+	phases = append(phases, outstandingPhase(ordering, "task "+jobID+" carries the renewal on "+
+		host.Hostname+"; the keytab of "+spec.Principal+" is retired and the service cannot "+
+		"authenticate until that task reports a new key version. The retired key cannot be put "+
+		"back from the panel: if the task fails, read its result and order identity.keytab.renew "+
+		"on "+host.Hostname+" again."))
 	return phases
 }
 

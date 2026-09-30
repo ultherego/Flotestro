@@ -51,6 +51,10 @@ type Server struct {
 	// agentStateDir is the directory the final wipe clears. Empty means the
 	// agent's real one; a test points it at a directory of its own.
 	agentStateDir string
+	// ticketCacheDir is where the keytab renewal puts the credential cache it
+	// owns. Empty means the helper's state directory; a test points it at its
+	// own, because a unit test may not write under /var/lib.
+	ticketCacheDir string
 	// scopes wraps the tools of a heavy operation in a transient resource
 	// scope. A test stands in a host without systemd-run through it.
 	scopes scopeRunner

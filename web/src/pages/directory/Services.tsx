@@ -56,7 +56,7 @@ export function Services() {
           target={rotating.principal}
           danger
           label={t("Plan keytab rotation")}
-          description={t("The directory retires the current keytab of the principal - the keytab and the certificates issued to the service are revoked, the entry stays - and the fleet host of that name is ordered to fetch a new one with its own credentials. Between the two the service cannot authenticate. A second person approves the change; the task on the host reports the old and the new key version.")}
+          description={t("The directory retires the current keytab of the principal - the keytab and the certificates issued to the service are revoked, the entry stays - and the fleet host of that name is ordered to fetch a new one with a ticket it takes from its own host key. Between the two the service cannot authenticate, and the retired key cannot be put back from here. A second person approves the change; it stays partially applied until the task on the host reports the old and the new key version.")}
           busy={mutation.isPending}
           onConfirm={(why) => mutation.mutate(
             { action: "identity.keytab.rotate", reason: why, payload: { keytab: { principal: rotating.principal } } },
