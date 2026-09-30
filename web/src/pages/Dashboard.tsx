@@ -8,6 +8,7 @@ import { ErrorBox, ErrorCode, Time, Empty, JobState } from "../components/ui";
 import { Card, PageHeader, Stat, StatGrid } from "../components/layout";
 import { BarChart, Breakdown, StatusBar } from "../components/widgets";
 import { FleetCoverage, type Coverage } from "../components/FleetCoverage";
+import { FirstRunCard } from "../components/FirstRunCard";
 import { useT } from "../i18n";
 
 /**
@@ -130,22 +131,12 @@ export function Dashboard() {
       />
 
       {/* An empty fleet is a panel on its first run, not a fleet with
-          nothing wrong: the card says what comes first and leads to the
-          checklist, so the empty tiles below are not the whole answer. */}
+          nothing wrong: the card reads the server's checklist, so the empty
+          tiles below are not the whole answer and this screen keeps no
+          account of the flow of its own. */}
       {s?.hosts === 0 && (
         <div style={{ marginBottom: 16 }}>
-          <Card
-            tone="warn"
-            title={t("No host is enrolled yet")}
-            description={t("A fresh panel is set up in this order; the checklist tracks every step.")}
-            actions={<Link className="button primary" to="/setup">{t("Open the first-run checklist")}</Link>}
-          >
-            <ol className="steps">
-              <li>{t("Connect the identity provider and map the first group to a role, if this installation is to have one; without one the panel signs its operators in with API tokens.")}</li>
-              <li>{t("Hand the fleet to another administrator - a mapped group, or an API token of your own - and revoke the bootstrap token.")}</li>
-              <li>{t("Enrol the first host with the one-line installation from the add-host screen.")}</li>
-            </ol>
-          </Card>
+          <FirstRunCard />
         </div>
       )}
 

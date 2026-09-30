@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { firstUndone, mayAct, pageName, readableDetail, stepTone, tokensAlone } from "./Setup";
+import {
+  firstUndone, mayAct, pageName, readableDetail, remainingSteps, stepTone, tokensAlone,
+  type SetupStep,
+} from "./setup";
 
-/* The first-run page decides a few things without the server: which step
-   is highlighted, what colour a state gets, who may press a test button
-   and what the button beside a step is called. All of it is pure and is
-   checked here without a screen. */
+/* What the panel decides about the first run without the server: which step
+   is highlighted, what colour a state gets, which steps are still work, who
+   may press a test button and what the button beside a step is called. Both
+   the first-run screen and the dashboard card read these, so they are checked
+   once, here, without a screen. */
 
 describe("firstUndone", () => {
   it("highlights the first step that is undone, past the done, warning and optional ones", () => {
@@ -24,6 +28,31 @@ describe("firstUndone", () => {
       { key: "fleet_ca", state: "warning" },
     ])).toBeUndefined();
     expect(firstUndone([])).toBeUndefined();
+  });
+});
+
+describe("remainingSteps", () => {
+  const step = (key: string, state: SetupStep["state"]): SetupStep =>
+    ({ key, state, detail: `detail of ${key}`, path: `/${key}` });
+
+  it("keeps the faults and the warnings, in the order the server gave them", () => {
+    expect(remainingSteps([
+      step("identity_provider", "done"),
+      step("advertised_address", "undone"),
+      step("hosts", "undone"),
+      step("fleet_ca", "warning"),
+    ]).map((s) => s.key)).toEqual(["advertised_address", "hosts", "fleet_ca"]);
+  });
+
+  it("asks for nothing on an installation that integrates with nothing", () => {
+    // An optional step is an integration this panel has none of: the provider
+    // and the group mapping are not work, and nothing here demands them.
+    expect(remainingSteps([
+      step("identity_provider", "optional"),
+      step("group_mapping", "optional"),
+      step("directory", "optional"),
+      step("hosts", "undone"),
+    ]).map((s) => s.key)).toEqual(["hosts"]);
   });
 });
 

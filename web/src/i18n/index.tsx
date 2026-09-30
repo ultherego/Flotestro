@@ -17,6 +17,9 @@ const catalogues: Record<Locale, Record<string, string>> = { en: {}, pl };
 
 type Params = Record<string, string | number>;
 
+/** The translation function, as t() and useT() hand it out. */
+export type Translate = (text: string, params?: Params) => string;
+
 // The current locale is also kept outside React, so that helpers used
 // outside components (formatting, notifications) translate the same way as
 // the screens.
@@ -78,7 +81,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
  * The translation function bound to the locale of the provider, so that a
  * language switch re-renders every screen that uses it.
  */
-export function useT(): (text: string, params?: Params) => string {
+export function useT(): Translate {
   const { locale } = useContext(LocaleContext);
   return useCallback((text: string, params?: Params) => {
     const translated = catalogues[locale][text] ?? text;
