@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -86,9 +87,11 @@ func (s State) mayBecome(to State) bool {
 		// when it reaches the gate.
 		return s == StatePlanned || s == StateCanary || s == StateRunning
 	case StatePausing:
-		return s == StatePlanned || s == StateCanary || s == StateRunning
+		// The same set Store.Pause takes from an operator: a campaign held at
+		// the gate by a stop threshold is paused, not left standing there.
+		return slices.Contains(PausableStates, s)
 	case StatePaused:
-		return s == StatePlanned || s == StateCanary || s == StateRunning || s == StatePausing
+		return slices.Contains(PausableStates, s) || s == StatePausing
 	case StateExpired:
 		return s == StatePlanned || s == StateAwaitingApproval
 	case StatePlanFailed:
@@ -877,8 +880,10 @@ type WaveSummary struct {
 }
 
 // ThresholdExceeded checks whether the number of failures has crossed the
-// campaign's threshold.
-func ThresholdExceeded(failed, finished, total, percentThreshold, absoluteThreshold int) (bool, string) {
+// campaign's threshold. The share is of the hosts that finished, never of the
+// campaign's size: a campaign is stopped by what has already gone wrong, not by
+// what a thousand hosts that have not started yet would dilute it to.
+func ThresholdExceeded(failed, finished, percentThreshold, absoluteThreshold int) (bool, string) {
 	if absoluteThreshold > 0 && failed >= absoluteThreshold {
 		return true, fmt.Sprintf("the number of failures %d reached the threshold %d", failed, absoluteThreshold)
 	}

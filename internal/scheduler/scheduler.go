@@ -47,8 +47,102 @@ type Options struct {
 	// SendTimeout bounds the wait for a session to accept a task.
 	SendTimeout time.Duration
 	// DispatchRate paces the envelopes leaving this gateway, in envelopes per
-	// second, with a burst of one second's worth.
+	// second. It is the only knob an operator sets, so it is the knob that
+	// governs: the burst, and any of Interval and BatchSize left open, are
+	// derived from it, and a combination that cannot reach it is refused.
 	DispatchRate float64
+}
+
+const (
+	defaultInterval      = 2 * time.Second
+	defaultLeaseDuration = 5 * time.Minute
+	defaultSendTimeout   = 5 * time.Second
+	defaultBatchSize     = 32
+	// maxBatchSize bounds one pass: the queue is read and the leases are taken
+	// with one statement each, so a pass is not allowed to grow without end.
+	maxBatchSize = 1000
+)
+
+// ErrDispatchRateUnreachable names a configuration whose pace the loop cannot
+// keep, so the number an operator set would not be the number in force.
+var ErrDispatchRateUnreachable = errors.New("the configured dispatch rate cannot be reached")
+
+// tasksPerPass says how many tasks one pass has to carry for the rate to hold:
+// a pass happens every interval, and what it leaves behind waits for the next.
+func tasksPerPass(rate float64, interval time.Duration) int {
+	return int(math.Ceil(rate * interval.Seconds()))
+}
+
+// burst is the bucket's capacity: a whole pass's worth, never less than one
+// second's. Tokens earned above the capacity are lost between two passes, so a
+// burst of one second with a pass every two seconds halves the rate.
+func (o Options) burst() int {
+	if o.DispatchRate <= 0 {
+		return 0
+	}
+	return max(int(math.Ceil(o.DispatchRate)), tasksPerPass(o.DispatchRate, o.Interval))
+}
+
+// withDefaults fills what the caller left open, deriving the batch and - when
+// the batch a rate needs would not fit one pass - the interval from the rate.
+func (o Options) withDefaults() Options {
+	// Only a caller that named neither may have its interval moved: one that
+	// named an interval asked for that latency and gets a refusal instead.
+	derive := o.Interval <= 0 && o.BatchSize <= 0 && o.DispatchRate > 0
+	if o.Interval <= 0 {
+		o.Interval = defaultInterval
+		if derive && tasksPerPass(o.DispatchRate, o.Interval) > maxBatchSize {
+			o.Interval = time.Duration(float64(maxBatchSize) / o.DispatchRate * float64(time.Second))
+		}
+	}
+	// A pass has to carry what the gap earned; the burst may be larger than
+	// that without the batch following, since a burst costs no statement.
+	if o.BatchSize <= 0 {
+		o.BatchSize = max(defaultBatchSize, tasksPerPass(o.DispatchRate, o.Interval))
+	}
+	if o.LeaseDuration <= 0 {
+		o.LeaseDuration = defaultLeaseDuration
+	}
+	if o.SendTimeout <= 0 {
+		o.SendTimeout = defaultSendTimeout
+	}
+	return o
+}
+
+// EffectiveRate says how many envelopes per second this configuration really
+// sends: the rate governs only while a pass takes enough tasks and the burst
+// holds a whole pass's worth. Without a rate the batch and the interval alone
+// set the pace.
+func (o Options) EffectiveRate() float64 {
+	filled := o.withDefaults()
+	room := filled.BatchSize
+	if burst := filled.burst(); burst > 0 && burst < room {
+		room = burst
+	}
+	ceiling := float64(room) / filled.Interval.Seconds()
+	if filled.DispatchRate > 0 && filled.DispatchRate < ceiling {
+		return filled.DispatchRate
+	}
+	return ceiling
+}
+
+// Validate refuses knobs that contradict each other and names what to change:
+// delivering at a sixth of the configured rate without a word is worse than
+// not starting at all.
+func (o Options) Validate() error {
+	filled := o.withDefaults()
+	if filled.BatchSize > maxBatchSize {
+		return fmt.Errorf("%w: %g per second every %s needs %d tasks in one pass, and a pass carries at most %d; "+
+			"lower the rate, shorten the interval or lower the batch size",
+			ErrDispatchRateUnreachable, filled.DispatchRate, filled.Interval, filled.BatchSize, maxBatchSize)
+	}
+	if effective := filled.EffectiveRate(); filled.DispatchRate > 0 && effective < filled.DispatchRate {
+		return fmt.Errorf("%w: a batch of %d with a burst of %d every %s delivers %g per second, not the configured %g; "+
+			"that rate needs a batch of %d",
+			ErrDispatchRateUnreachable, filled.BatchSize, filled.burst(), filled.Interval,
+			effective, filled.DispatchRate, tasksPerPass(filled.DispatchRate, filled.Interval))
+	}
+	return nil
 }
 
 // SecretLeases issues short leases for the secrets named in a task.
@@ -86,18 +180,7 @@ func (s *Scheduler) SetBudgets(store Budgets) {
 
 func New(store *jobs.Store, registry *gateway.Registry, recorder *audit.Recorder,
 	credentials EnrollmentCredentials, log *slog.Logger, options Options) *Scheduler {
-	if options.Interval <= 0 {
-		options.Interval = 2 * time.Second
-	}
-	if options.LeaseDuration <= 0 {
-		options.LeaseDuration = 5 * time.Minute
-	}
-	if options.BatchSize <= 0 {
-		options.BatchSize = 32
-	}
-	if options.SendTimeout <= 0 {
-		options.SendTimeout = 5 * time.Second
-	}
+	options = options.withDefaults()
 	scheduler := &Scheduler{store: store, registry: registry, audit: recorder,
 		credentials: credentials, log: log, options: options}
 	scheduler.admission = admission{waits: store, log: log, gateway: options.GatewayID}
@@ -106,9 +189,9 @@ func New(store *jobs.Store, registry *gateway.Registry, recorder *audit.Recorder
 	if store != nil && store.Pool() != nil {
 		scheduler.SetBudgets(budgets.NewStore(store.Pool(), log))
 	}
-	// The burst is one second of the rate: a pass after a quiet moment
-	// sends what a second would have, no more, whatever the batch size.
-	scheduler.bucket = NewBucket(options.DispatchRate, int(math.Ceil(options.DispatchRate)), nil)
+	// The burst is one pass of the rate: a pass after a quiet moment sends what
+	// the gap earned, and the batch was sized to carry exactly that.
+	scheduler.bucket = NewBucket(options.DispatchRate, options.burst(), nil)
 	return scheduler
 }
 

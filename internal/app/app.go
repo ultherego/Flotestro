@@ -1319,13 +1319,20 @@ func Run() error {
 
 	// The scheduler delivers approved jobs to the hosts connected to this
 	// gateway and watches over the leases and the TTLs.
-	dispatcher := scheduler.New(jobStore, registry, recorder, directory, log, scheduler.Options{
+	dispatchOptions := scheduler.Options{
 		GatewayID:     cfg.GatewayID,
 		LeaseDuration: 5 * time.Minute,
 		DispatchRate:  float64(max(*dispatchRate, 0)),
-	})
+	}
+	// The pace an operator configured has to be the pace that goes out; a
+	// configuration that cannot reach it refuses the start rather than deliver
+	// at a fraction of it silently.
+	if err := dispatchOptions.Validate(); err != nil {
+		return fmt.Errorf("the dispatch pacing: %w", err)
+	}
+	dispatcher := scheduler.New(jobStore, registry, recorder, directory, log, dispatchOptions)
 	if *dispatchRate > 0 {
-		log.Info("the dispatch is paced", "envelopes_per_second", *dispatchRate)
+		log.Info("the dispatch is paced", "envelopes_per_second", dispatchOptions.EffectiveRate())
 	} else {
 		log.Warn("the dispatch is not paced: every leased task goes out at once")
 	}

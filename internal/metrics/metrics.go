@@ -562,9 +562,14 @@ func (c *Collector) relayBufferMetrics(ctx context.Context) []metric {
 func (c *Collector) campaignMetrics(ctx context.Context) []metric {
 	var result []metric
 
+	// The two lists below are campaigns.UnfinishedStates written out: the
+	// campaigns package collects these metrics, so it cannot be imported here.
+	// A campaign standing at the manual gate or draining a cancel used to be
+	// missing from the gauge, which is how an operator lost sight of it.
 	if samples, err := c.labelPairs(ctx, `
 		select state, action_type, count(*) from campaigns
-		 where state in ('planning', 'planned', 'awaiting_approval', 'canary', 'running', 'pausing', 'paused')
+		 where state in ('planning', 'planned', 'awaiting_approval', 'canary', 'manual_gate',
+		                 'running', 'pausing', 'paused', 'canceling')
 		 group by 1, 2`, "state", "action"); err == nil {
 		result = append(result, metric{
 			name: "flotestro_campaigns_active", kind: "gauge",
@@ -579,7 +584,8 @@ func (c *Collector) campaignMetrics(ctx context.Context) []metric {
 		select t.state, coalesce(nullif(t.error_code, ''), 'none'), count(*)
 		  from campaign_targets t
 		  join campaigns c on c.id = t.campaign_id
-		 where c.state in ('planning', 'planned', 'awaiting_approval', 'canary', 'manual_gate', 'running', 'pausing', 'paused', 'canceling')
+		 where c.state in ('planning', 'planned', 'awaiting_approval', 'canary', 'manual_gate',
+		                   'running', 'pausing', 'paused', 'canceling')
 		 group by 1, 2`, "state", "reason_code"); err == nil {
 		result = append(result, metric{
 			name: "flotestro_campaign_targets", kind: "gauge",
