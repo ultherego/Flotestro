@@ -129,10 +129,15 @@
       <li><strong>DNS</strong> that resolves the names the panel will advertise,
       from the hosts and from the operator's browser. Those names enter the
       agent gateway's certificate, so they are the names the fleet really
-      reaches - never a Compose service name.</li>
-      <li><strong>Ports</strong>: 8080 for the panel behind a reverse proxy, 8443
-      and 8444 reached by the fleet directly. The TLS of the last two is end to
-      end and must not be terminated by an HTTP proxy.</li>
+      reaches - never a Compose service name. A laboratory needs none of it: an
+      address serves where a name would, and the panel offers the ones it finds
+      on its own machine.</li>
+      <li><strong>Ports</strong>: 8080 for the panel and its API, published on
+      every address of its host; 8443 and 8444 reached by the fleet directly. The
+      TLS of the last two is end to end and must not be terminated by an HTTP
+      proxy. An installation that puts a reverse proxy in front of the panel
+      narrows 8080 back to the loopback with
+      <code>FLOTESTRO_API_PUBLISH</code>.</li>
       <li><strong>A signed package repository</strong> the hosts can reach. The
       release publishes one; an isolated site runs the package-repository image
       of the air-gapped profile.</li>
@@ -187,11 +192,40 @@ chmod +x host-setup.sh
 ./host-setup.sh
 podman-compose up -d</code></pre>
 
-    <p>Every setting has a working default, so the panel answers on
-    <code>http://localhost:8080</code> straight away. To serve hosts on other
-    machines, put the address they reach it at in <code>.env</code> beside the
-    file &mdash; <code>env.example</code> lists every setting and names the
-    three that matter.</p>
+    <p>Then, from another machine:</p>
+
+    <ol class="steps">
+      <li>Open <code>http://&lt;the panel host's address&gt;:8080</code>. Port
+      8080 is published on every address of the host, so no domain, no
+      certificate and no tunnel are involved.</li>
+      <li>Sign in with the token in <code>./bootstrap-token</code>.</li>
+      <li>Confirm the address the agents dial, on the first-run screen. The panel
+      offers the addresses it finds on that machine and adopts none of them by
+      itself: it cannot tell which of them the hosts route to, and the wrong one
+      enrols a fleet that drops out again.</li>
+      <li>Install an agent on a separate host with the commands the <em>Add
+      host</em> screen prints for it, and enrol it.</li>
+    </ol>
+
+    <div class="note note--warning">
+      <p class="note__title">That is plain HTTP</p>
+      <p>The bootstrap token and every administrative request travel in clear on
+      the network. It is the accepted price of a deployment with nothing to
+      prepare, and it is a laboratory's price to pay; a company running a fleet
+      from this panel puts TLS in front of it &mdash; a reverse proxy, a
+      certificate, a domain &mdash; and narrows
+      <code>FLOTESTRO_API_PUBLISH</code> to the loopback when it does. The
+      fleet's own traffic is unaffected either way: the enrollment on 8444 and
+      the agents' mTLS on 8443 terminate their own TLS against Flotestro's PKI
+      and never pass through an HTTP proxy.</p>
+    </div>
+
+    <p>Every setting has a working default, so none of that needs
+    <code>.env</code> at all. <code>env.example</code> lists every setting and
+    names the three that matter, and an identity provider is not among them: a
+    panel with no OIDC issuer and no FreeIPA signs its operators in with API
+    tokens, which the first-run checklist counts as a choice rather than as an
+    unfinished step.</p>
 
     <p>Production basic, against a database somebody else runs. The overlay
     <code>compose.external-db.yaml</code> is what makes it that installation:
@@ -377,6 +411,13 @@ curl -fsS http://127.0.0.1:8080/readyz</code></pre>
       while it is still valid.</li>
     </ol>
 
+    <p>Steps 2 to 4 belong to an installation that has an identity provider. One
+    that stays on API tokens skips them and is not behind: the checklist marks
+    both the provider and the group mapping optional and counts neither. What it
+    does not skip is the handover &mdash; issue an API token of your own with
+    <code>platform_admin</code>, sign in with it, and only then revoke the
+    bootstrap one.</p>
+
     <p>A mapping is a group of an issuer, a role and a scope. The panel writes
     them on the access screen; the request behind the button is:</p>
 
@@ -410,10 +451,10 @@ curl -fsS http://127.0.0.1:8080/readyz</code></pre>
     <table>
       <thead><tr><th>Step</th><th>Done when</th></tr></thead>
       <tbody>
-        <tr><td><code>identity_provider</code></td><td>The issuer answers and names its signing keys.</td></tr>
-        <tr><td><code>group_mapping</code></td><td>At least one group decides a role at login.</td></tr>
-        <tr><td><code>bootstrap_token</code></td><td>The token is revoked or expired - that is, it no longer works.</td></tr>
-        <tr><td><code>directory</code></td><td>Optional: the FreeIPA connector is configured.</td></tr>
+        <tr><td><code>identity_provider</code></td><td>The issuer answers and names its signing keys. An installation that named no issuer is <code>optional</code> and is not counted: it signs its operators in with API tokens. One that named an issuer it cannot reach is <code>warning</code> and says what the issuer answered, because that is a fault and not a choice.</td></tr>
+        <tr><td><code>group_mapping</code></td><td>At least one group decides a role at login. With no identity provider there is no login token to map, so the step is <code>optional</code>; with one configured and no mapping it stays <code>undone</code>, because the panel then signs people in and grants them nothing.</td></tr>
+        <tr><td><code>bootstrap_token</code></td><td>The token is revoked or expired - that is, it no longer works. It stays <code>undone</code> while it is the only fleet administrator, and what to do about it follows the installation: create the first group mapping where there is a provider, issue an API token of your own where there is none.</td></tr>
+        <tr><td><code>directory</code></td><td>Optional: the FreeIPA connector is configured. A connector whose keytab cannot be read, or that has stopped answering, is reported as the fault it is.</td></tr>
         <tr><td><code>hosts</code></td><td>At least one host is enrolled and not retired.</td></tr>
         <tr><td><code>relay</code></td><td>Optional: needed only for a site whose hosts cannot reach the panel directly.</td></tr>
         <tr><td><code>policy</code></td><td>At least one policy declares what is to be true on the hosts; without one the panel reports the hosts as they are and judges nothing.</td></tr>

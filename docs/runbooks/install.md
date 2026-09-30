@@ -19,13 +19,42 @@ real systemd is a `--privileged` container with nothing isolated about it
   section of `docker/README.md` for what differs.
 - DNS that resolves the names the panel will advertise, from the hosts and from the
   operator's browser. They enter the agent gateway's certificate, so they are the names
-  the fleet really reaches, never a Compose service name.
-- Ports: 8080 for the panel behind a reverse proxy, 8443 and 8444 reached by the fleet
-  directly - their TLS is end to end and must not be terminated by an HTTP proxy.
+  the fleet really reaches, never a Compose service name. A laboratory needs none of it:
+  an address serves where a name would, and the panel offers the ones it finds.
+- Ports: 8080 for the panel and its API, published on every address of its host; 8443 and
+  8444 reached by the fleet directly - their TLS is end to end and must not be terminated
+  by an HTTP proxy. An installation with a reverse proxy in front narrows 8080 back to the
+  loopback with `FLOTESTRO_API_PUBLISH`.
 - A signed package repository the hosts can reach. The release produces one; an isolated
   site uses the package-repository image of the air-gapped profile.
 
 ## Procedure
+
+### 0. The whole of it, for a laboratory
+
+Six steps, no file edited and nothing else installed:
+
+```
+curl -fsSLO https://raw.githubusercontent.com/ultherego/Flotestro/main/docker/compose.yaml
+docker compose up -d
+docker compose cp control-plane:/var/lib/flotestro/bootstrap-token .
+```
+
+Then open `http://<the panel host's address>:8080` from another machine, sign in with that
+token, confirm the address the agents dial on the first-run screen, and install an agent on
+a separate host with the commands "Add host" prints. The database, the initialisation and
+the migration happen on their own; no domain, no certificate, no tunnel, no OIDC issuer and
+no FreeIPA are involved, and the first-run checklist counts an installation that
+deliberately has none of them as complete rather than as unfinished.
+
+**That is plain HTTP: the bootstrap token and every administrative request travel in clear
+on the network.** For a laboratory that is accepted. A company running a real fleet from
+this panel puts TLS in front of it - a reverse proxy, a certificate, a domain - and narrows
+`FLOTESTRO_API_PUBLISH` to the loopback when it does. The fleet's own traffic never
+depended on it: the enrollment on 8444 and the agents' mTLS on 8443 terminate their own TLS
+against Flotestro's PKI.
+
+The rest of this runbook is the installation that carries a company's fleet.
 
 ### 1. The control plane
 
@@ -60,6 +89,12 @@ An installation with no identities writes a bootstrap token into its state. Take
 in with it, connect the identity provider, map its groups to roles, and then delete it -
 the control plane warns at every start while it is still valid, and a group from a token
 grants nothing by itself until a mapping says so.
+
+An installation that names no identity provider signs its operators in with API tokens
+instead, and that is a shape the panel supports rather than a step left half done: the
+checklist marks the provider and the group mapping optional and counts neither. What still
+has to happen is the handover - issue an API token of your own with `platform_admin`, sign
+in with it, and only then revoke the bootstrap one.
 
 ```
 docker compose cp control-plane:/var/lib/flotestro/bootstrap-token ./bootstrap-token

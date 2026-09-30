@@ -123,10 +123,15 @@
       <li><strong>DNS</strong>, który rozwiązuje nazwy ogłaszane przez panel - z
       hostów i z przeglądarki operatora. Te nazwy wchodzą do certyfikatu gatewaya
       agentów, więc są nazwami, pod którymi flota naprawdę się łączy - nigdy
-      nazwą usługi Compose.</li>
-      <li><strong>Porty</strong>: 8080 dla panelu za reverse proxy, 8443 i 8444
-      osiągane przez flotę bezpośrednio. TLS tych dwóch ostatnich jest end to end
-      i nie wolno go terminować na proxy HTTP.</li>
+      nazwą usługi Compose. Laboratorium nie potrzebuje tego wcale: adres robi
+      to samo co nazwa, a panel podpowiada te, które widzi na swojej
+      maszynie.</li>
+      <li><strong>Porty</strong>: 8080 dla panelu i jego API, wystawiony na
+      wszystkich adresach swojego hosta; 8443 i 8444 osiągane przez flotę
+      bezpośrednio. TLS tych dwóch ostatnich jest end to end i nie wolno go
+      terminować na proxy HTTP. Instalacja, która stawia przed panelem reverse
+      proxy, zawęża 8080 z powrotem do loopbacku przez
+      <code>FLOTESTRO_API_PUBLISH</code>.</li>
       <li><strong>Podpisane repozytorium pakietów</strong> osiągalne z hostów.
       Wydanie publikuje takie repozytorium; odizolowany site uruchamia obraz
       pakietów z profilu odciętego od sieci.</li>
@@ -180,11 +185,39 @@ chmod +x host-setup.sh
 ./host-setup.sh
 podman-compose up -d</code></pre>
 
-    <p>Każde ustawienie ma działającą wartość domyślną, więc panel od razu
-    odpowiada pod <code>http://localhost:8080</code>. Żeby obsługiwał hosty na
-    innych maszynach, wpisz adres, pod którym go osiągają, do <code>.env</code>
-    obok tego pliku &mdash; <code>env.example</code> wymienia każde ustawienie i
-    wskazuje te trzy, które mają znaczenie.</p>
+    <p>Dalej, z innej maszyny:</p>
+
+    <ol class="steps">
+      <li>Wejdź na <code>http://&lt;adres hosta panelu&gt;:8080</code>. Port 8080
+      jest wystawiony na wszystkich adresach hosta, więc nie ma tu domeny,
+      certyfikatu ani tunelu.</li>
+      <li>Zaloguj się tokenem z <code>./bootstrap-token</code>.</li>
+      <li>Zatwierdź adres, pod który dzwonią agenci, na ekranie pierwszego
+      uruchomienia. Panel podpowiada adresy, które widzi na tej maszynie, i
+      żadnego nie bierze sam: nie wie, którym z nich hosty do niego trasują, a
+      zły wciąga flotę, która zaraz wypada.</li>
+      <li>Zainstaluj agenta na osobnym hoście poleceniami, które wypisuje ekran
+      <em>Dodaj host</em>, i zrób enrollment.</li>
+    </ol>
+
+    <div class="note note--warning">
+      <p class="note__title">To jest czysty HTTP</p>
+      <p>Token bootstrap i każde żądanie administracyjne jadą po sieci jawnie.
+      Taka jest cena wdrożenia, które nie wymaga niczego przygotowanego, i w
+      laboratorium jest do zapłacenia; firma, która prowadzi z tego panelu
+      flotę, stawia przed nim TLS &mdash; reverse proxy, certyfikat, domenę
+      &mdash; i przy okazji zawęża <code>FLOTESTRO_API_PUBLISH</code> do
+      loopbacku. Ruchu samej floty to nie dotyczy w żadnym wariancie: enrollment
+      na 8444 i mTLS agentów na 8443 terminują własny TLS na PKI Flotestro i
+      nigdy nie idą przez proxy HTTP.</p>
+    </div>
+
+    <p>Każde ustawienie ma działającą wartość domyślną, więc nic z tego nie
+    potrzebuje <code>.env</code>. <code>env.example</code> wymienia każde
+    ustawienie i wskazuje te trzy, które mają znaczenie - dostawcy tożsamości
+    nie ma wśród nich: panel bez issuera OIDC i bez FreeIPA loguje operatorów na
+    tokenach API, a lista kontrolna pierwszego uruchomienia traktuje to jako
+    decyzję, nie jako niedokończony krok.</p>
 
     <p>Wdrożenie produkcyjne podstawowe, na bazie prowadzonej przez kogoś
     innego. Dopiero nakładka <code>compose.external-db.yaml</code> robi z
@@ -368,6 +401,13 @@ curl -fsS http://127.0.0.1:8080/readyz</code></pre>
       ostrzega przy każdym starcie.</li>
     </ol>
 
+    <p>Kroki od 2 do 4 należą do instalacji, która ma dostawcę tożsamości. Ta,
+    która zostaje na tokenach API, pomija je i nie jest z tego powodu zaległa:
+    lista kontrolna oznacza i dostawcę, i mapowanie jako <code>optional</code> i
+    żadnego nie liczy. Czego nie pomija, to przekazanie floty &mdash; wystaw
+    własny token API z rolą <code>platform_admin</code>, zaloguj się na nim i
+    dopiero wtedy unieważnij bootstrapowy.</p>
+
     <p>Mapowanie to grupa u issuera, rola i zakres. Panel zapisuje je na ekranie
     dostępu; żądanie, które stoi za przyciskiem, wygląda tak:</p>
 
@@ -400,10 +440,10 @@ curl -fsS http://127.0.0.1:8080/readyz</code></pre>
     <table>
       <thead><tr><th>Krok</th><th>Zrobiony, gdy</th></tr></thead>
       <tbody>
-        <tr><td><code>identity_provider</code></td><td>Issuer odpowiada i podaje klucze podpisujące.</td></tr>
-        <tr><td><code>group_mapping</code></td><td>Co najmniej jedna grupa rozstrzyga o roli przy logowaniu.</td></tr>
-        <tr><td><code>bootstrap_token</code></td><td>Token jest unieważniony albo wygasł - czyli już nie działa.</td></tr>
-        <tr><td><code>directory</code></td><td>Opcjonalnie: konektor FreeIPA jest skonfigurowany.</td></tr>
+        <tr><td><code>identity_provider</code></td><td>Issuer odpowiada i podaje klucze podpisujące. Instalacja, która nie wskazała żadnego issuera, ma stan <code>optional</code> i nie jest liczona: loguje operatorów na tokenach API. Ta, która wskazała issuera i go nie dowozi, ma <code>warning</code> i mówi, co issuer odpowiedział - to błąd konfiguracji, a nie decyzja.</td></tr>
+        <tr><td><code>group_mapping</code></td><td>Co najmniej jedna grupa rozstrzyga o roli przy logowaniu. Bez dostawcy tożsamości nie ma tokenu logowania, więc krok jest <code>optional</code>; z dostawcą i bez mapowania zostaje <code>undone</code>, bo panel wpuszcza ludzi i nic im nie nadaje.</td></tr>
+        <tr><td><code>bootstrap_token</code></td><td>Token jest unieważniony albo wygasł - czyli już nie działa. Zostaje <code>undone</code>, dopóki jest jedynym administratorem floty, a co z nim zrobić, zależy od instalacji: założyć pierwsze mapowanie tam, gdzie jest dostawca, albo wystawić własny token API tam, gdzie go nie ma.</td></tr>
+        <tr><td><code>directory</code></td><td>Opcjonalnie: konektor FreeIPA jest skonfigurowany. Konektor, którego keytaba nie da się odczytać albo który przestał odpowiadać, jest zgłaszany jako błąd, którym jest.</td></tr>
         <tr><td><code>hosts</code></td><td>Co najmniej jeden host przeszedł enrollment i nie został wycofany.</td></tr>
         <tr><td><code>relay</code></td><td>Opcjonalnie: potrzebny tylko dla site'u, którego hosty nie docierają do panelu bezpośrednio.</td></tr>
         <tr><td><code>policy</code></td><td>Co najmniej jedna polityka deklaruje, co ma być prawdą na hostach; bez niej panel raportuje hosty takimi, jakie są, i niczego nie ocenia.</td></tr>

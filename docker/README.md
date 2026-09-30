@@ -637,6 +637,42 @@ the installation identifier.
 
 ## The first start
 
+The quick start, from an empty directory. Nothing is edited and nothing is
+prepared: the database, the initialisation and the migration run themselves.
+
+```
+curl -fsSLO https://raw.githubusercontent.com/ultherego/Flotestro/main/docker/compose.yaml
+docker compose up -d
+docker compose cp control-plane:/var/lib/flotestro/bootstrap-token .
+```
+
+Then, from another machine:
+
+1. Open `http://<the panel host's address>:8080`. Port 8080 is published on every
+   address of the host, so no domain, no certificate and no tunnel are involved;
+   `FLOTESTRO_API_PUBLISH` in `.env` narrows it to one address, or back to the
+   loopback for an installation that puts a proxy in front.
+2. Sign in with the token in `./bootstrap-token`.
+3. Confirm the address the agents dial, on the first-run screen. The panel offers
+   the addresses it finds on this machine and adopts none of them by itself: it
+   cannot tell which of them the hosts route to, and the wrong one enrols a fleet
+   that drops out again.
+4. Install an agent on a separate host with the commands the "Add host" screen
+   prints for it, and enrol it.
+
+**That is plain HTTP: the bootstrap token and every administrative request travel
+in clear on the network.** It is the accepted price of a deployment with nothing
+to prepare, and it is a laboratory's price to pay; a company running a fleet from
+this panel puts TLS in front of it - a reverse proxy, a certificate, a domain -
+and narrows `FLOTESTRO_API_PUBLISH` to the loopback when it does. The fleet's own
+traffic is unaffected either way: the enrollment on 8444 and the agents' mTLS on
+8443 terminate their own TLS against Flotestro's PKI and never pass through an
+HTTP proxy.
+
+Nothing about the identity provider is part of this. A panel with no OIDC issuer
+and no FreeIPA is a supported installation that signs its operators in with API
+tokens, and the first-run checklist says so rather than counting it as unfinished.
+
 Production basic, from an empty directory:
 
 ```
@@ -690,16 +726,11 @@ docker compose --profile tools run --rm admin-tools backup
 Delete `./bootstrap-token` and the token in the panel once the real accounts
 exist; the control plane warns at every start while it is still valid.
 
-The quick start profile needs none of that. With no `./secrets/database-url`
-to import, init makes a password for the local database, writes the DSN and
-gives each file to the account that reads it:
-
-```
-docker compose up -d
-```
-
-That DSN carries `sslmode=disable`, which is acceptable only there, on one
-host and an internal network; an external database requires `verify-full`.
+The quick start above needs none of that because it has no external database to
+name: with no `./secrets/database-url` to import, init makes a password for the
+local one, writes the DSN and gives each file to the account that reads it. That
+DSN carries `sslmode=disable`, which is acceptable only there, on one host and an
+internal network; an external database requires `verify-full`.
 
 ### A second control plane
 
@@ -1182,10 +1213,14 @@ before the panel is started, and once it is, the rest is an ordinary upgrade.
 | The relay's identity, certificate and spool | `/var/lib/flotestro-relay`, owned by `flotestro-relay` | the volume `flotestro-relay-state`, mounted at `/var/lib/flotestro-relay` |
 | The relay's configuration | `/etc/flotestro/relay.yaml` | `./relay.yaml`, bind-mounted read-only at that same path |
 
-The ports do not move. The package listened on `127.0.0.1:8080` for the API and
-the browser and on `:8443` and `:8444` for the fleet, and the deployment
-publishes exactly those, so a reverse proxy in front of the panel keeps working
-and the agents dial the address they already know.
+The port numbers do not move: the package listened on 8080 for the API and the
+browser and on `:8443` and `:8444` for the fleet, and the deployment publishes
+exactly those, so the agents dial the address they already know. One address does
+move. The package bound 8080 to `127.0.0.1` and the deployment publishes it on
+every address of the host, because a panel nobody has put a proxy in front of yet
+has to be reachable from the operator's machine. An installation that does have
+one puts `FLOTESTRO_API_PUBLISH=127.0.0.1` in `.env` and is back to what the
+package did.
 
 ### The settings have to be written out again
 
