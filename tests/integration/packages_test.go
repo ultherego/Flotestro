@@ -51,12 +51,81 @@ func TestUpdatePlanDoesNotChangeTheHost(t *testing.T) {
 				t.Error("a plan with changes has no hash")
 			}
 			for _, change := range detail.Changes {
-				if change.Name == "" || change.CandidateVersion == "" {
+				switch change.Action {
+				case "install", "upgrade", "downgrade", "remove":
+				default:
+					t.Errorf("the direction of %s is %q", change.Name, change.Action)
+				}
+				// What a removal takes away has a version on the host and no
+				// candidate: the old build of an installonly package, or a package
+				// something else obsoletes. Demanding a candidate of it would refuse
+				// every honest removal.
+				if change.Name == "" ||
+					(change.Action != "remove" && change.CandidateVersion == "") ||
+					(change.Action == "remove" && change.CurrentVersion == "") {
 					t.Errorf("incomplete change description: %+v", change)
 				}
+				// A plan that says a package goes away while the same plan raises it
+				// promises a removal the transaction will not make, and hands the
+				// transaction a removal of the version it has just installed.
+				if change.Action == "remove" && raises(detail.Changes, change) {
+					t.Errorf("the plan removes %s and raises it in one transaction: %+v",
+						change.Name, detail.Changes)
+				}
+			}
+
+			// The name of this test is a claim about the host. Had the plan
+			// installed anything, the same plan computed again would no longer
+			// offer it.
+			again := h.planChanges(host.ID)
+			if !sameChanges(detail.Changes, again) {
+				t.Errorf("the host moved under the plan: %+v then %+v", detail.Changes, again)
 			}
 		})
 	}
+}
+
+// raises says whether the plan also brings the package of that removal, in the
+// same architecture, back in another direction.
+func raises(changes []packageChange, removal packageChange) bool {
+	for _, change := range changes {
+		if change.Action != "remove" && change.Name == removal.Name &&
+			change.Architecture == removal.Architecture {
+			return true
+		}
+	}
+	return false
+}
+
+// sameChanges compares two plans of one host element by element. The order is
+// the plan's own, so a difference in it is a difference in the plan.
+func sameChanges(first, second []packageChange) bool {
+	if len(first) != len(second) {
+		return false
+	}
+	for i := range first {
+		if first[i] != second[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// planChanges orders a plan and returns its elements.
+func (h *harness) planChanges(hostID string) []packageChange {
+	h.t.Helper()
+	job, attempts := h.runOperation(hostID, map[string]any{
+		"action":  "packages.plan",
+		"payload": planPayload(false),
+	}, 3*time.Minute)
+	if job.State != "succeeded" {
+		h.t.Fatalf("the plan failed: %s (%s)", job.State, job.ResultErrorCode)
+	}
+	detail := attempts[len(attempts)-1].Detail
+	if detail == nil {
+		h.t.Fatal("plan without a result")
+	}
+	return detail.Changes
 }
 
 // TestPlanIsRepeatable checks that the same host state gives the same hash.

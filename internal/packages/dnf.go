@@ -820,6 +820,7 @@ func dnfInstallChanges(output string) ([]Change, error) {
 	if len(unreadable) > 0 {
 		return nil, dnfReplacedUnreadable(unreadable)
 	}
+	entries = withoutSupersededVersions(entries)
 	changes := make([]Change, 0, len(entries))
 	for _, entry := range entries {
 		changes = append(changes, dnfChangeOf(entry))
@@ -851,6 +852,9 @@ func ParseDNFUpgradePlan(output string) ([]Change, error) {
 			"were read from its table, so the plan would name fewer changes than it makes",
 			announced, len(entries))}
 	}
+	// The fold comes after the count: dnf counts the superseded version in its
+	// summary, so folding first would read a complete table as a short one.
+	entries = withoutSupersededVersions(entries)
 	changes := make([]Change, 0, len(entries))
 	for _, entry := range entries {
 		change := dnfChangeOf(entry)
@@ -1035,6 +1039,31 @@ func dnfReplacedEntry(line string) (entry dnfEntry, replaced, readable bool) {
 		return dnfEntry{}, true, false
 	}
 	return entry, true, entry.Name != "" && entry.Architecture != "" && entry.Version != ""
+}
+
+// withoutSupersededVersions drops the "replacing" rows naming the version a
+// transaction raises away from: a row of the same name and architecture as an
+// arriving row is that package's previous version, not a package the host
+// loses. dnf5 writes one under every ordinary upgrade. Kept as a removal it
+// makes the plan promise to take away a name that stays installed, and the
+// transaction is then told to remove it as well. A same-name row under
+// "Removing:" is left alone - that is how an installonly package really drops
+// its old build.
+func withoutSupersededVersions(entries []dnfEntry) []dnfEntry {
+	arriving := map[string]bool{}
+	for _, entry := range entries {
+		if dnfSectionAction(entry.Section) != ActionRemove {
+			arriving[entry.Name+"."+entry.Architecture] = true
+		}
+	}
+	kept := make([]dnfEntry, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Section == dnfReplacingSection && arriving[entry.Name+"."+entry.Architecture] {
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	return kept
 }
 
 // matchesSummary recognises a summary line in both generations of dnf.

@@ -286,16 +286,24 @@ type attemptView struct {
 	Detail *packageDetail `json:"detail"`
 }
 
+// packageChange is one element of a package plan. Action is part of the
+// identity of the element, not decoration: a removal carries the version that
+// goes away and no candidate, so a test reading versions has to know which
+// direction it holds.
+type packageChange struct {
+	Name             string `json:"name"`
+	CurrentVersion   string `json:"current_version"`
+	CandidateVersion string `json:"candidate_version"`
+	Architecture     string `json:"architecture"`
+	Action           string `json:"action"`
+	Security         bool   `json:"security"`
+}
+
 // packageDetail is the typed result of a package operation.
 type packageDetail struct {
-	Kind    string `json:"kind"`
-	Manager string `json:"manager"`
-	Changes []struct {
-		Name             string `json:"name"`
-		CurrentVersion   string `json:"current_version"`
-		CandidateVersion string `json:"candidate_version"`
-		Security         bool   `json:"security"`
-	} `json:"changes"`
+	Kind    string          `json:"kind"`
+	Manager string          `json:"manager"`
+	Changes []packageChange `json:"changes"`
 	Applied []struct {
 		Name             string `json:"name"`
 		CurrentVersion   string `json:"current_version"`
