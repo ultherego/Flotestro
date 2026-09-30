@@ -2292,15 +2292,22 @@ func TestResolverCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 		if host.ConnectionState != "online" {
 			continue
 		}
+		// The resolver is a different power from the network: writing it needs
+		// dns.write, the capability this campaign's operation declares. Selecting
+		// on the network's write mechanism instead picked hosts the panel then
+		// refused, and that refusal was the product being right.
+		if !hostWritesResolver(host) {
+			continue
+		}
 		state := hostNetworkSnapshot(t, h, host.ID)
-		if state.WriteAdapter == "" || state.ManagementInterface == "" {
+		if state.ManagementInterface == "" {
 			continue
 		}
 		interfaces[host.ID] = state.ManagementInterface
 		targets = append(targets, host.ID)
 	}
 	if len(targets) == 0 {
-		t.Skip("the fleet has no host with a mechanism to write the network configuration")
+		absent(t, "the fleet has no host that can write its resolver")
 	}
 	iface := interfaces[targets[0]]
 	selected := targets[:0]

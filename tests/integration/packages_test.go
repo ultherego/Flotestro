@@ -219,10 +219,14 @@ func TestTransactionRecordsVersionsBeforeAndAfter(t *testing.T) {
 		t.Skip("no safe package for the test")
 	}
 
+	// An upgrade is held to the plan it was approved against, so the order carries
+	// the hash of the plan this test just read.
 	job, attempts := h.runOperation(host.ID, map[string]any{
 		"action": "packages.upgrade",
 		"payload": map[string]any{
-			"package_upgrade": map[string]any{"packages": []string{target}},
+			"package_upgrade": map[string]any{
+				"packages": []string{target}, "plan_hash": plan.PlanHash,
+			},
 		},
 	}, 10*time.Minute)
 

@@ -236,6 +236,33 @@ type inventoryFragment struct {
 	ObservedAt        time.Time       `json:"observed_at"`
 }
 
+// hostAdapterFeature reads one feature of one adapter out of the host's
+// registry. The second result is false when the adapter or the feature is not
+// reported at all, which the panel reads as unknown and not as a no.
+func hostAdapterFeature(host hostView, adapter, feature string) (value, known bool) {
+	for _, capability := range host.Capabilities {
+		if capability.Name != adapter {
+			continue
+		}
+		value, known = capability.Features[feature]
+		return value, known
+	}
+	return false, false
+}
+
+// hostWritesResolver mirrors the panel's own rule for the dns.write
+// requirement, so a target is chosen by the capability the operation declares
+// rather than by a neighbouring one.
+func hostWritesResolver(host hostView) bool {
+	value, known := hostAdapterFeature(host, "dns", "write")
+	if value {
+		return true
+	}
+	// An agent silent about the feature leaves the decision to execution time,
+	// exactly as the panel's requirement does.
+	return !known && hasCapability(host, "dns")
+}
+
 // hostCapability mirrors the adapter registry of a host.
 type hostCapability struct {
 	Name      string          `json:"name"`

@@ -610,3 +610,35 @@ Speed: 1000 Mbps
 		t.Errorf("the monitoring interval: %d", details.MIIMonMS)
 	}
 }
+
+// TestLayerAdapterRefusalSeparatesWritingFromBuilding pins which mechanisms can
+// create a link. The capability registry reports the "links" feature from this
+// rule, so a change here changes what the panel believes a host can do.
+func TestLayerAdapterRefusalSeparatesWritingFromBuilding(t *testing.T) {
+	for _, adapter := range []string{AdapterNmstate, AdapterNetplan} {
+		if refusal := LayerAdapterRefusal(adapter); refusal != nil {
+			t.Errorf("%s builds links, it was refused with %q", adapter, refusal.Code)
+		}
+	}
+
+	// NetworkManager writes the profile an interface already has, which is a
+	// smaller power than creating one; the two refusals stay distinguishable
+	// because the operator's next step differs.
+	managed := LayerAdapterRefusal(AdapterNetworkManager)
+	if managed == nil {
+		t.Fatal("NetworkManager alone cannot build a link and was not refused")
+	}
+	if managed.Code != CodeLinkMechanismUnsupported {
+		t.Errorf("refusal code = %q, want %q", managed.Code, CodeLinkMechanismUnsupported)
+	}
+	none := LayerAdapterRefusal("")
+	if none == nil {
+		t.Fatal("a host with no write mechanism was not refused")
+	}
+	if none.Code != CodeLinkMechanismUnsupported {
+		t.Errorf("refusal code = %q, want %q", none.Code, CodeLinkMechanismUnsupported)
+	}
+	if none.Reason == managed.Reason {
+		t.Error("a host with no mechanism reads the same reason as one with NetworkManager")
+	}
+}
