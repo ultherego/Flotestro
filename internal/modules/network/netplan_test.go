@@ -253,16 +253,56 @@ func TestDetectionPrefersDesiredStateMechanisms(t *testing.T) {
 			return false
 		}
 	}
-	if got := DetectAdapter(present(NetplanPath, NetplanDir)); got != AdapterNetplan {
+	nothingMasked := func(string) bool { return false }
+	// The renderer unit as an Ubuntu host of the fleet has it.
+	networkd := "/usr/lib/systemd/system/" + NetworkdUnit
+	if got := DetectAdapter(present(NetplanPath, NetplanDir, networkd), nothingMasked); got != AdapterNetplan {
 		t.Errorf("an Ubuntu host detected %q", got)
 	}
-	if got := DetectAdapter(present(NetplanPath, NetplanDir, NmcliPath, "/run/NetworkManager")); got != AdapterNetworkManager {
+	if got := DetectAdapter(present(NetplanPath, NetplanDir, NmcliPath, "/run/NetworkManager"), nothingMasked); got != AdapterNetworkManager {
 		t.Errorf("a NetworkManager host with netplan detected %q", got)
 	}
-	if got := DetectAdapter(present(NmstatectlPathAlt, NmcliPath, "/run/NetworkManager")); got != AdapterNmstate {
+	if got := DetectAdapter(present(NmstatectlPathAlt, NmcliPath, "/run/NetworkManager"), nothingMasked); got != AdapterNmstate {
 		t.Errorf("an nmstate host detected %q", got)
 	}
-	if got := DetectAdapter(present()); got != "" || ReadOnlyReason(got) == "" {
+	if got := DetectAdapter(present(), nothingMasked); got != "" || ReadOnlyReason(got, present(), nothingMasked) == "" {
 		t.Errorf("a host without a mechanism detected %q", got)
+	}
+}
+
+// netplan writes nothing itself: it renders to systemd-networkd or to
+// NetworkManager. With neither able to run, naming netplan as the write
+// mechanism promises a change that is applied to nothing and then reverted.
+func TestNetplanWithoutARendererIsNotAWriteMechanism(t *testing.T) {
+	present := func(paths ...string) func(string) bool {
+		return func(path string) bool {
+			for _, candidate := range paths {
+				if candidate == path {
+					return true
+				}
+			}
+			return false
+		}
+	}
+	networkd := "/lib/systemd/system/" + NetworkdUnit
+	maskedNetworkd := func(unit string) bool { return unit == NetworkdUnit }
+	nothingMasked := func(string) bool { return false }
+
+	host := present(NetplanPath, NetplanDir, networkd)
+	if got := DetectAdapter(host, maskedNetworkd); got != "" {
+		t.Errorf("a host whose netplan renderer is masked detected %q", got)
+	}
+	reason := ReadOnlyReason("", host, maskedNetworkd)
+	if !strings.Contains(reason, "netplan") || !strings.Contains(reason, "systemd-networkd") {
+		t.Errorf("the reason does not say what netplan is missing: %q", reason)
+	}
+	// The unit absent altogether is the same answer as the unit masked.
+	if got := DetectAdapter(present(NetplanPath, NetplanDir), nothingMasked); got != "" {
+		t.Errorf("a host without the renderer unit detected %q", got)
+	}
+	// NetworkManager running is a renderer even without nmcli to drive it
+	// directly.
+	if got := DetectAdapter(present(NetplanPath, NetplanDir, "/run/NetworkManager"), maskedNetworkd); got != AdapterNetplan {
+		t.Errorf("a netplan host rendered by NetworkManager detected %q", got)
 	}
 }

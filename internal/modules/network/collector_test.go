@@ -140,17 +140,36 @@ func TestSysDataSupplementsLink(t *testing.T) {
 // A host without a write mechanism is meant to say so directly, not stay
 // silent.
 func TestMissingWriteAdapterHasReason(t *testing.T) {
-	if adapter := DetectAdapter(func(string) bool { return false }); adapter != "" {
+	nothing := func(string) bool { return false }
+	if adapter := DetectAdapter(nothing, nothing); adapter != "" {
 		t.Errorf("adapter = %q", adapter)
 	}
-	if ReadOnlyReason("") == "" {
+	if ReadOnlyReason("", nothing, nothing) == "" {
 		t.Error("missing adapter without a reason")
 	}
-	if ReadOnlyReason(AdapterNetworkManager) != "" {
+	if ReadOnlyReason(AdapterNetworkManager, nothing, nothing) != "" {
 		t.Error("a host with an adapter reports an unavailability reason")
 	}
 	present := map[string]bool{"/usr/bin/nmcli": true, "/run/NetworkManager": true}
-	if adapter := DetectAdapter(func(s string) bool { return present[s] }); adapter != AdapterNetworkManager {
+	if adapter := DetectAdapter(func(s string) bool { return present[s] }, nothing); adapter != AdapterNetworkManager {
 		t.Errorf("adapter = %q", adapter)
+	}
+}
+
+// A mask is a symlink to /dev/null, so the question is answered on disk.
+func TestAMaskedUnitIsReadFromDisk(t *testing.T) {
+	dir := t.TempDir()
+	masked := func(unit string) bool { return unitMaskedIn(dir, unit) }
+	if err := os.Symlink(os.DevNull, filepath.Join(dir, "masked.service")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ordinary.service"), []byte("[Unit]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !masked("masked.service") {
+		t.Error("a unit linked to /dev/null was not read as masked")
+	}
+	if masked("ordinary.service") || masked("absent.service") {
+		t.Error("a unit file or an absent unit was read as masked")
 	}
 }

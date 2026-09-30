@@ -423,9 +423,19 @@ func obtainArtefact(ctx context.Context, managerName, spec, digest string) (stri
 	}
 	path, err := fetchArtefact(ctx, managerName, spec, digest)
 	if err != nil {
-		return "", "", err
+		return "", "", namingOrderedDigest(err, digest)
 	}
 	return path, artefactSourceRepository, nil
+}
+
+// namingOrderedDigest adds the fingerprint the order carried to a refusal that
+// does not already name it: a refusal over a digest nobody can read leaves the
+// operator unable to tell whether the order or the artefact was wrong.
+func namingOrderedDigest(err error, digest string) error {
+	if digest == "" || strings.Contains(err.Error(), digest) {
+		return err
+	}
+	return fmt.Errorf("%w; the order named the digest %s", err, digest)
 }
 
 // keptArtefactFor finds the artefact of the ordered version among the ones the

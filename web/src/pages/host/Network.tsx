@@ -104,6 +104,7 @@ type Snapshot = {
   management_interface?: string;
   management_address?: string;
   write_adapter?: string;
+  read_only_reason?: string;
   /** Set when the host has the second family switched off for every interface, or has no IPv6 at all. */
   ipv6_disabled?: boolean;
   /** Why the bonds, the bridges and the VLANs could not be read; the addresses may still be there. */
@@ -334,7 +335,9 @@ export function Network() {
       {!snapshot?.write_adapter && (
         <p className="warning">
           <span>
-            {t("Read-only on this host: no NetworkManager, nmstate or netplan, so the panel will not change its network configuration.")}
+            {snapshot?.read_only_reason
+              ? t("Read-only on this host: {reason}", { reason: snapshot.read_only_reason })
+              : t("Read-only on this host: no NetworkManager, nmstate or netplan, so the panel will not change its network configuration.")}
           </span>
         </p>
       )}
