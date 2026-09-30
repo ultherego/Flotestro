@@ -36,6 +36,7 @@ func goodReport() map[string]any {
 			"web":         map[string]any{"result": "pass", "seconds": 24},
 			"vitest":      map[string]any{"result": "pass", "seconds": 70},
 			"agents":      map[string]any{"result": "pass", "seconds": 60},
+			"fleet":       map[string]any{"result": "pass", "seconds": 12},
 			"relay":       map[string]any{"result": "pass", "seconds": 2},
 			"fixtures":    map[string]any{"result": "pass", "seconds": 40},
 			"preflight":   map[string]any{"result": "pass", "seconds": 57},

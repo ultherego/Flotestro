@@ -168,7 +168,11 @@ const stageIntegration = "integration"
 // be fatal, or omitting it is the way past the gate.
 var fullRunStages = []string{
 	"tree", "gofmt", "panel", "web", "vitest",
-	"agents", "relay", "fixtures", "preflight", stageIntegration, "playwright",
+	// fleet proves the deployment the agents stage reports rather than assuming
+	// it. On 30.09 every host agreed it ran 0.62.0 while one of them ran a build
+	// from four days earlier, published under the same version: a deployment
+	// nobody verified is a suite judging code the gate was not given.
+	"agents", "fleet", "relay", "fixtures", "preflight", stageIntegration, "playwright",
 }
 
 func (r GateReport) validate() error {
