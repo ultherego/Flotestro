@@ -183,7 +183,7 @@
 <table>
 <thead><tr><th>Section</th><th>Routes</th></tr></thead>
 <tbody>
-<tr><td><a href="#routes-service">Service endpoints</a></td><td>15</td></tr>
+<tr><td><a href="#routes-service">Service endpoints</a></td><td>17</td></tr>
 <tr><td><a href="#routes-caller">Signing in, and the caller's own records</a></td><td>8</td></tr>
 <tr><td><a href="#routes-fleet">The fleet at a glance</a></td><td>7</td></tr>
 <tr><td><a href="#routes-hosts">Hosts</a></td><td>59</td></tr>
@@ -206,6 +206,8 @@
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/errors</code></td><td><span class="caption">any authenticated identity</span></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/openapi.json</code></td><td><span class="caption">none &mdash; the endpoint answers without an identity</span></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/settings</code><br><span class="caption">The effective configuration, secrets masked: what this panel was started with, for whoever administers it.</span></td><td><code>settings.read</code>, <code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/settings/advertised</code><br><span class="caption">The address the agents reach this panel at: what is in force, where it came from, and the addresses of this machine as proposals.</span></td><td><code>settings.read</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/settings/advertised</code><br><span class="caption">An administrator confirms one. A detected address is never adopted by itself, and a confirmation is refused where <code>FLOTESTRO_ADVERTISE</code> declares the address instead.</span></td><td><code>settings.advertise.write</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/settings/monitoring</code><br><span class="caption">The monitoring retentions are the installation's own setting rather than the process's: read here, and written without a restart.</span></td><td><code>settings.read</code></td></tr>
 <tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/settings/monitoring</code></td><td><code>monitoring.rules.write</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/setup</code><br><span class="caption">The first run: what the installation still lacks, and the two connection tests the checklist offers in place.</span></td><td><span class="caption">any authenticated identity</span></td></tr>
@@ -443,7 +445,7 @@
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/hbac-rules</code><br><span class="caption">The access and sudo rules require a separate permission: they describe who may enter a host and elevate privileges.</span></td><td><code>identity.policy.read</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/host-groups</code></td><td><code>identity.read</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/hosts</code></td><td><code>identity.read</code></td></tr>
-<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/services</code></td><td><code>identity.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/services</code><br><span class="caption">Every service principal carries <code>host</code> as the directory holds it - fully qualified - and <code>fleet_host_id</code>, the host of this panel that name resolves to and that a keytab rotation orders the renewal on. The binding is absent when no host of the fleet carries that name or when more than one does.</span></td><td><code>identity.read</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/status</code><br><span class="caption">The identity directory in read-only mode.</span></td><td><code>identity.read</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/sudo-rules</code></td><td><code>identity.policy.read</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/users</code></td><td><code>identity.read</code></td></tr>
