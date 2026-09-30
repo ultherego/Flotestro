@@ -112,7 +112,7 @@ func (s *Server) openAPI() map[string]any {
 	register("DirectoryGroup", freeipa.Group{})
 	register("DirectoryHost", freeipa.Host{})
 	register("DirectoryHostGroup", freeipa.HostGroup{})
-	register("DirectoryService", freeipa.Service{})
+	register("DirectoryService", directoryService{})
 	register("DirectoryHBACRule", freeipa.HBACRule{})
 	register("DirectorySudoRule", freeipa.SudoRule{})
 	register("DirectoryZone", freeipa.Zone{})
@@ -222,6 +222,10 @@ func (s *Server) openAPI() map[string]any {
 		"permission_denied, capability_missing, host_quarantined, host_recovery, host_retired, read_only_host, helper_unavailable or lifecycle_state_mismatch; empty when the action is allowed.")
 	describe(schemas, "HostAction", "note",
 		"A fact about an allowed action: the order will wait in the queue for an offline host, or it will ask for fresh authentication. It refuses nothing.")
+	describe(schemas, "DirectoryService", "fleet_host_id",
+		"The host of this panel that carries the name the principal names, which is the host a keytab rotation orders the renewal on. "+
+			"The directory holds nothing but fully qualified names and the panel stores some hosts short, so the binding is resolved from the two; "+
+			"it is absent when no host of the fleet carries that name or when more than one does, and it is never the name itself standing in for an identifier.")
 	describe(schemas, "HostAccess", "known",
 		"Whether the directory has an entry for the host. False leaves the directory's rules undetermined, not absent; the local rules are reported either way.")
 	describe(schemas, "HostAccess", "local_sudo_rules",

@@ -74,7 +74,11 @@ func (s *Server) handleCreateDirectoryChange(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	plan, err := identity.NewPlanner(s.directory).Build(r.Context(), action, payload)
+	// The plan names the fleet host a keytab rotation would order the renewal on,
+	// through the resolution the execution repeats.
+	plan, err := identity.NewPlanner(s.directory).
+		WithFleet(identity.NewFleetOrderer(s.pool, s.audit)).
+		Build(r.Context(), action, payload)
 	if err != nil {
 		problem(w, http.StatusBadGateway, "directory_unavailable", err.Error())
 		return

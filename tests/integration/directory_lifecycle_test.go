@@ -498,16 +498,23 @@ func TestServiceKeytabRotationIsASeparateRightAndRunsOnTheHost(t *testing.T) {
 			Service   string `json:"service"`
 			Host      string `json:"host"`
 			HasKeytab *bool  `json:"has_keytab"`
+			// FleetHostID is the binding: the directory holds the name in full
+			// and the panel may store the host short, so the projection resolves
+			// the two and names the host by its identifier.
+			FleetHostID string `json:"fleet_host_id"`
 		} `json:"items"`
 	}
 	h.get("/api/v1/identity/services", &services)
 	fleet := map[string]hostView{}
 	for _, host := range h.hosts() {
 		if host.ConnectionState == "online" {
-			fleet[strings.ToLower(host.Hostname)] = host
+			fleet[host.ID] = host
 		}
 	}
-	principal, hostname := "", ""
+	// The service is picked by the binding, not by comparing names: a test that
+	// qualified the panel's short name itself would prove nothing about the
+	// panel, which is what has to do the resolving.
+	principal, hostname, hostID := "", "", ""
 	for _, service := range services.Items {
 		if strings.EqualFold(service.Service, "host") || strings.EqualFold(service.Service, "flotestro") ||
 			strings.EqualFold(service.Principal, status.Connector.Principal) {
@@ -516,19 +523,28 @@ func TestServiceKeytabRotationIsASeparateRightAndRunsOnTheHost(t *testing.T) {
 		if service.HasKeytab == nil || !*service.HasKeytab {
 			continue
 		}
-		if host, ok := fleet[strings.ToLower(service.Host)]; ok {
-			principal, hostname = service.Principal, host.Hostname
+		if service.FleetHostID == "" {
+			continue
+		}
+		if strings.EqualFold(service.Host, service.FleetHostID) {
+			t.Fatalf("the binding of %s is the name, not an identifier: %q", service.Principal, service.FleetHostID)
+		}
+		if host, ok := fleet[service.FleetHostID]; ok {
+			principal, hostname, hostID = service.Principal, host.Hostname, host.ID
 			break
 		}
 	}
 	if principal == "" {
-		absent(t, "no connected fleet host carries a service principal with a keytab beyond host/ and the panel's own; the rotation itself is not exercised")
+		absent(t, "no service principal with a keytab beyond host/ and the panel's own is bound to a connected fleet host; the rotation itself is not exercised")
 	}
 
 	approver := secondPerson(t, h)
 	final := orderAndRun(t, h, approver, "identity.keytab.rotate",
 		map[string]any{"keytab": map[string]any{"principal": principal}})
 	var detail struct {
+		Plan struct {
+			FleetHostID string `json:"fleet_host_id"`
+		} `json:"plan"`
 		Phases []struct {
 			Name    string `json:"name"`
 			Status  string `json:"status"`
@@ -536,10 +552,14 @@ func TestServiceKeytabRotationIsASeparateRightAndRunsOnTheHost(t *testing.T) {
 		} `json:"phases"`
 	}
 	h.get("/api/v1/identity/changes/"+final.ID, &detail)
+	// The plan routes the renewal to the host the view bound the service to.
+	if detail.Plan.FleetHostID != hostID {
+		t.Fatalf("the view bound %s to %s and the plan to %q", principal, hostID, detail.Plan.FleetHostID)
+	}
 	if len(detail.Phases) != 3 {
 		t.Fatalf("the rotation ran %d phases: %+v", len(detail.Phases), detail.Phases)
 	}
-	if !strings.Contains(detail.Phases[0].Message, hostname) {
+	if !strings.Contains(detail.Phases[0].Message, hostname) || !strings.Contains(detail.Phases[0].Message, hostID) {
 		t.Errorf("the first phase does not name the fleet host: %q", detail.Phases[0].Message)
 	}
 	// The last phase names the task on the host; the task's own result
@@ -550,6 +570,11 @@ func TestServiceKeytabRotationIsASeparateRightAndRunsOnTheHost(t *testing.T) {
 	}
 	jobID := strings.TrimSuffix(fields[0], ":")
 	job := h.awaitTerminal(jobID, 3*time.Minute)
+	// The owner's criterion: one identifier from the view through the plan to
+	// the task the host actually ran.
+	if job.HostID != hostID {
+		t.Fatalf("the plan routed the renewal to %s and the task landed on %s", hostID, job.HostID)
+	}
 	if job.State != "succeeded" {
 		t.Fatalf("the renewal on %s ended as %s", hostname, job.State)
 	}
