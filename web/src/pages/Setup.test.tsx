@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { firstUndone, mayAct, pageName, readableDetail, stepTone } from "./Setup";
+import { firstUndone, mayAct, pageName, readableDetail, stepTone, tokensAlone } from "./Setup";
 
 /* The first-run page decides a few things without the server: which step
    is highlighted, what colour a state gets, who may press a test button
@@ -24,6 +24,25 @@ describe("firstUndone", () => {
       { key: "fleet_ca", state: "warning" },
     ])).toBeUndefined();
     expect(firstUndone([])).toBeUndefined();
+  });
+});
+
+describe("tokensAlone", () => {
+  it("reads an optional provider as an installation that signs in with API tokens", () => {
+    expect(tokensAlone([
+      { key: "identity_provider", state: "optional" },
+      { key: "group_mapping", state: "optional" },
+    ])).toBe(true);
+  });
+
+  it("does not read a provider that is configured and broken as one that is absent", () => {
+    // The two states are the distinction: what to do about the bootstrap token
+    // differs, and a warning here is a provider to repair, not one to do without.
+    expect(tokensAlone([{ key: "identity_provider", state: "warning" }])).toBe(false);
+    expect(tokensAlone([{ key: "identity_provider", state: "done" }])).toBe(false);
+    expect(tokensAlone([{ key: "identity_provider", state: "undone" }])).toBe(false);
+    expect(tokensAlone([{ key: "relay", state: "optional" }])).toBe(false);
+    expect(tokensAlone([])).toBe(false);
   });
 });
 

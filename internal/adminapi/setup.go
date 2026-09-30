@@ -14,7 +14,12 @@ import (
 
 // The first run.
 
-// The states of a step.
+// The states of a step. The pair that carries the weight is optional against
+// warning: an integration nobody configured is optional and is left out of the
+// count entirely, because a panel with no identity provider and no directory is
+// a supported installation and not an unfinished one; an integration that is
+// configured and does not answer is a warning, which is counted and says what
+// went wrong. Undone stays for what the installation itself still has to do.
 const (
 	setupDone     = "done"
 	setupUndone   = "undone"
@@ -80,21 +85,19 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 func (s *Server) setupChecklist(ctx context.Context) (setupChecklist, error) {
 	var steps []setupStep
 
+	// Whether an identity provider is configured at all decides how three of the
+	// steps below read, so it is settled once here rather than guessed at each.
+	providerConfigured := s.oidc != nil
+
 	steps = append(steps, s.identityProviderStep(ctx))
 
 	mappings, err := s.countRows(ctx, `select count(*) from group_role_mappings`)
 	if err != nil {
 		return setupChecklist{}, err
 	}
-	if mappings > 0 {
-		steps = append(steps, setupStep{Key: "group_mapping", State: setupDone, Path: "/access?tab=mappings",
-			Detail: fmt.Sprintf("%d group %s decide who gets which role at login", mappings, plural(mappings, "mapping", "mappings"))})
-	} else {
-		steps = append(steps, setupStep{Key: "group_mapping", State: setupUndone, Path: "/setup",
-			Detail: "no group is mapped to a role: whoever signs in through the identity provider gets nothing"})
-	}
+	steps = append(steps, groupMappingStep(mappings, providerConfigured))
 
-	bootstrap, live, err := s.bootstrapStep(ctx, mappings > 0)
+	bootstrap, live, err := s.bootstrapStep(ctx, mappings > 0, providerConfigured)
 	if err != nil {
 		return setupChecklist{}, err
 	}
@@ -144,7 +147,19 @@ func (s *Server) setupChecklist(ctx context.Context) (setupChecklist, error) {
 	steps = append(steps, s.notificationStep(ctx))
 	steps = append(steps, s.fleetCAStep())
 
-	checklist := setupChecklist{Steps: steps, BootstrapLive: live}
+	checklist := tally(steps)
+	checklist.BootstrapLive = live
+	return checklist, nil
+}
+
+// tally counts the steps. An optional step is not counted at all - neither into
+// the total nor against it - which is what makes an integration the installation
+// deliberately has none of cost the operator nothing: the count reads "n of n"
+// and the checklist is complete. A warning is counted but leads nowhere, so a
+// configured integration that has stopped answering is visible without becoming
+// a step somebody has to finish before the fleet can be run.
+func tally(steps []setupStep) setupChecklist {
+	checklist := setupChecklist{Steps: steps}
 	for _, step := range steps {
 		if step.State == setupOptional {
 			continue
@@ -160,7 +175,7 @@ func (s *Server) setupChecklist(ctx context.Context) (setupChecklist, error) {
 		}
 	}
 	checklist.Complete = checklist.Next == ""
-	return checklist, nil
+	return checklist
 }
 
 // advertisedAddressStep judges the address the agents are told to dial. It comes
@@ -208,10 +223,13 @@ func (s *Server) countRows(ctx context.Context, query string) (int, error) {
 }
 
 // identityProviderStep asks the provider, through the cache, whether it still
-// answers.
+// answers. An installation that named none is not behind on this step: it is an
+// installation that signs its operators in with API tokens, which is a shape the
+// panel supports. One that named a provider and cannot reach it is a fault, and
+// the difference between the two is the whole point of the two states.
 func (s *Server) identityProviderStep(ctx context.Context) setupStep {
 	if s.oidc == nil {
-		return setupStep{Key: "identity_provider", State: setupUndone, Path: "/settings",
+		return setupStep{Key: "identity_provider", State: setupOptional, Path: "/settings",
 			Detail: "no identity provider is configured: the panel accepts API tokens alone"}
 	}
 	probe, err := s.oidc.ProbeCached(ctx, setupProbeMaxAge)
@@ -223,10 +241,38 @@ func (s *Server) identityProviderStep(ctx context.Context) setupStep {
 		Detail: fmt.Sprintf("%s answers with %d signing %s", probe.Issuer, probe.Keys, plural(probe.Keys, "key", "keys"))}
 }
 
-// bootstrapStep judges the token the installation started with. It is done
-// when the token no longer works.
-func (s *Server) bootstrapStep(ctx context.Context, mappingExists bool) (setupStep, bool, error) {
-	live, _, err := s.authz.BootstrapTokenState(ctx)
+// groupMappingStep judges the mappings that turn a group of a login token into a
+// role in a scope. With no identity provider there is no login token, so there is
+// nothing a mapping could be written about: an absent mapping is then the shape of
+// the installation and not a step left undone. With a provider configured it is a
+// real half-configuration - the panel signs people in and grants them nothing -
+// and that is the case the undone state is for.
+func groupMappingStep(mappings int, providerConfigured bool) setupStep {
+	switch {
+	case mappings > 0:
+		return setupStep{Key: "group_mapping", State: setupDone, Path: "/access?tab=mappings",
+			Detail: fmt.Sprintf("%d group %s decide who gets which role at login", mappings, plural(mappings, "mapping", "mappings"))}
+	case !providerConfigured:
+		return setupStep{Key: "group_mapping", State: setupOptional, Path: "/access?tab=mappings",
+			Detail: "no identity provider signs anybody in, so no group can be mapped: the roles ride on API tokens"}
+	default:
+		return setupStep{Key: "group_mapping", State: setupUndone, Path: "/setup",
+			Detail: "no group is mapped to a role: whoever signs in through the identity provider gets nothing"}
+	}
+}
+
+// bootstrapStep judges the token the installation started with. It is done when
+// the token no longer works.
+//
+// What has to happen before it can be revoked is that somebody else holds the
+// fleet administrator role - not that a group mapping exists. An installation
+// with no identity provider can never write one, and a checklist that asked for
+// it would leave the only key in the fleet lying live for good, with an
+// instruction its operator cannot carry out. A mapping is only the first half of
+// a handover anyway: the role binding appears when somebody signs in under it, so
+// what to do next is said in terms of whichever half is still missing.
+func (s *Server) bootstrapStep(ctx context.Context, mappingExists, providerConfigured bool) (setupStep, bool, error) {
+	live, otherAdmins, err := s.authz.BootstrapTokenState(ctx)
 	if err != nil {
 		return setupStep{}, false, err
 	}
@@ -250,12 +296,18 @@ func (s *Server) bootstrapStep(ctx context.Context, mappingExists bool) (setupSt
 	}
 	step := setupStep{Key: "bootstrap_token", Path: "/access?tab=identities"}
 	switch {
-	case !mappingExists:
+	case !otherAdmins && !providerConfigured:
 		step.State = setupUndone
-		step.Detail = "the bootstrap token still works; create the first group mapping, sign in through the provider, then revoke it"
+		step.Detail = "the bootstrap token is the only fleet administrator; issue an API token of your own with the platform_admin role, sign in with it, then revoke this one"
+	case !otherAdmins && !mappingExists:
+		step.State = setupUndone
+		step.Detail = "the bootstrap token is the only fleet administrator; create the first group mapping, sign in through the provider, then revoke it"
+	case !otherAdmins:
+		step.State = setupUndone
+		step.Detail = "a group is mapped but nobody has signed in under it yet, so the bootstrap token is still the only fleet administrator; sign in through the provider, then revoke it"
 	case usedRecently:
 		step.State = setupWarning
-		step.Detail = "the bootstrap token was used in the last 24 hours; the mapped administrators should revoke it"
+		step.Detail = "the bootstrap token was used in the last 24 hours; whoever can sign in without it should revoke it"
 	default:
 		step.State = setupUndone
 		step.Detail = "the bootstrap token still works and nobody uses it; revoke it in the access screen"

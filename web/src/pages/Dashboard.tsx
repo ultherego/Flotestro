@@ -141,8 +141,8 @@ export function Dashboard() {
             actions={<Link className="button primary" to="/setup">{t("Open the first-run checklist")}</Link>}
           >
             <ol className="steps">
-              <li>{t("Test the identity provider and map the first group to a role, so the team can sign in.")}</li>
-              <li>{t("Revoke the bootstrap token once a mapped administrator has signed in.")}</li>
+              <li>{t("Connect the identity provider and map the first group to a role, if this installation is to have one; without one the panel signs its operators in with API tokens.")}</li>
+              <li>{t("Hand the fleet to another administrator - a mapped group, or an API token of your own - and revoke the bootstrap token.")}</li>
               <li>{t("Enrol the first host with the one-line installation from the add-host screen.")}</li>
             </ol>
           </Card>

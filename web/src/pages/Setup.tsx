@@ -66,6 +66,16 @@ export function firstUndone(steps: Pick<SetupStep, "key" | "state">[]): string |
   return steps.find((step) => step.state === "undone")?.key;
 }
 
+/**
+ * Whether this installation signs its operators in with API tokens alone. The
+ * server says so by leaving the provider optional; a provider that is configured
+ * and does not answer is a warning, and what to do about the bootstrap token
+ * differs between the two - there is no provider to sign in through here.
+ */
+export function tokensAlone(steps: Pick<SetupStep, "key" | "state">[]): boolean {
+  return steps.some((step) => step.key === "identity_provider" && step.state === "optional");
+}
+
 /** The colour a state is shown in: done is fine, undone is a fault, a warning is a warning. */
 export function stepTone(state: SetupState): "ok" | "warn" | "error" | "unknown" {
   switch (state) {
@@ -130,15 +140,15 @@ export function Setup() {
   const guide: Record<string, { title: string; meaning: string }> = {
     identity_provider: {
       title: t("Identity provider"),
-      meaning: t("Operators sign in through the company's identity provider (Keycloak, Entra, any OpenID Connect issuer), so leaving the company means leaving the panel, and every action in the trail carries a real name. Without it the panel takes API tokens alone."),
+      meaning: t("Operators sign in through the company's identity provider (Keycloak, Entra, any OpenID Connect issuer), so leaving the company means leaving the panel, and every action in the trail carries a real name. An installation that names none takes API tokens alone, which is a choice and not an unfinished step; one that names a provider it cannot reach is the fault this step reports."),
     },
     group_mapping: {
       title: t("First group mapping"),
-      meaning: t("A group in the login token grants nothing by itself: a mapping turns a group into a role in a scope. The first one usually maps the platform team to platform_admin fleet-wide; until it exists nobody who signs in can do anything."),
+      meaning: t("A group in the login token grants nothing by itself: a mapping turns a group into a role in a scope. The first one usually maps the platform team to platform_admin fleet-wide; until it exists nobody who signs in through the provider can do anything. With no provider there is no login token to map and none is needed."),
     },
     bootstrap_token: {
       title: t("Bootstrap token"),
-      meaning: t("The token the installation started with is a fleet-wide administrator key lying in a file. It exists to create the first mapping; once the mapped administrators can sign in, revoke it and delete the file."),
+      meaning: t("The token the installation started with is a fleet-wide administrator key lying in a file. It exists to hand the fleet to somebody else - a mapped group, or an API token of your own where there is no provider - and once that administrator can sign in, revoke it and delete the file."),
     },
     directory: {
       title: t("Directory connector"),
@@ -202,7 +212,9 @@ export function Setup() {
             />
             {list.bootstrap_live && (
               <p className="source" style={{ marginTop: 10 }}>
-                {t("The bootstrap token still works. It is for the first mapping only: once an administrator signs in through the provider, revoke it.")}
+                {tokensAlone(list.steps)
+                  ? t("The bootstrap token still works, and nothing else administers this installation: issue an API token of your own, sign in with it, then revoke this one.")
+                  : t("The bootstrap token still works. It is for the first mapping only: once an administrator signs in through the provider, revoke it.")}
               </p>
             )}
           </Card>
