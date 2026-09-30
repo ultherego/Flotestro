@@ -189,48 +189,118 @@ Rotation is the same either way.
 Rootless Podman publishes a port with `rootlesskit`, which proxies the
 connection and rewrites its source address to one inside the container network.
 `podman-run(1)` says so itself, and adds that the same handler is used for every
-container on a user-defined network - which the panel is on in the default file.
-The panel then records one address for the whole fleet: two agents cannot be told
-apart in the audit trail, and a single cut link looks like every link at once.
-Measured here before the change, with four hosts on four addresses: all four
-sessions came from `10.89.1.29`, the container's own address.
+container on a user-defined network. The panel then records one address for the
+whole fleet: two agents cannot be told apart in the audit trail, and a single cut
+link looks like every link at once. Measured before the change, with four hosts
+on four addresses: all four sessions came from `10.89.1.29`, the container's own
+address.
 
 Forwarding through `pasta(1)` preserves the original source address, and that is
-what the overlay beside this file selects:
+what the Podman file selects:
 
-    podman-compose -f compose.yaml -f compose.pasta.yaml up -d
+    podman-compose -f compose.podman.yaml up -d
 
-Measured with it, on the same four hosts: `192.168.56.40`, `192.168.56.60`,
-`192.168.56.70` and - for the host whose fleet interface was down, reaching the
-panel through its gateway - `192.168.56.1`. One address per host, the same after
-a restart of the deployment and the same after a reboot of the machine. The
-versions this was measured on: Podman 5.4.2, `podman-compose` 1.3.0 and passt
-`0.0~git20250503` on Debian 13.
+`compose.yaml` is the file for the Docker daemon and is untouched by any of this:
+the daemon's own port publishing keeps the source address, and the quickstart
+database there is on an internal network, publishes nothing and is reachable from
+the deployment and nowhere else.
 
-The overlay gives that namespace an address of its own rather than the copy of
-the host's that `pasta` takes by default, and this is the one part of it that was
-not obvious: the unit that replays the restart policies at boot runs in the
-user's session, where nothing orders it after the network. A copy taken before
-the interface had an address left the panel with no route to its own database -
-measured, and it did not come back by itself, because the namespace is fixed when
-the container starts and no wait inside the panel can change it. With the address
-fixed in the overlay the panel came back on its own after a reboot, with the
-fleet on the addresses above. What `pasta` forwards does not depend on that
-address; it is `169.254.2.0/24`, beside the two addresses Podman itself uses
-there.
+There are two complete files rather than a base and an overlay because neither
+engine allows a service to declare a network and a network mode at the same time,
+and `podman-compose` 1.3.0 can take a network away in no overlay: it reads a file
+with `yaml.safe_load`, so a `!reset` tag is a parse error, and `extends` and
+`network_mode` both merge the base's networks back in. Two files describing one
+deployment is a defect waiting for the edit that reaches only one of them, so
+`internal/release/deployment_test.go` compares the whole of both service by
+service after normalising the shapes that mean the same thing, and every
+difference the Podman file is allowed is listed in its own `x-compose-variant`
+with the reason. An undeclared difference fails the build, and so does a
+declaration that no longer matches one.
 
-What it asks in return. `pasta` gives the panel a network namespace rather than a
-compose network, and a namespace resolves no service name: compose refuses a
-service that declares both a network and a network mode, which is why the panel
-declares no network in `compose.yaml` and joins the default one there. An
-installation on a database somebody else runs needs nothing further - its DSN
-names an address. The quickstart database is reached the only way left, through
-the loopback of the host, so the overlay publishes it there and maps the name in
-its DSN to the address `pasta` translates to the host; that opens the quickstart
-database to the host's own accounts, and an installation that will not pay it
-runs its database elsewhere. Under the Docker daemon none of this applies: the
-overlay is Podman's, and the daemon's own port publishing keeps the source
-address.
+#### The namespace and the addresses in it
+
+The Podman file gives the panel a namespace with an address of its own rather
+than the copy of the host's that `pasta` takes by default:
+
+    network_mode: "pasta:-a,169.254.2.2,-n,24,-g,169.254.2.1,--map-host-loopback=169.254.2.1"
+
+which is the namespace `169.254.2.0/24`, the panel on `169.254.2.2` and the host
+as its gateway on `169.254.2.1`. Fixing it is the one part of this that was not
+obvious. The unit that replays the restart policies at boot runs in the user's
+session, where nothing orders it after the network: a copy taken before the
+interface had an address left the panel with no route to its own database, and it
+did not come back by itself, because the namespace is fixed when the container
+starts and no wait inside the panel can change it. Measured both ways - with the
+copy the panel was down after a reboot until a container was started by hand;
+with the address fixed it came back on its own.
+
+`169.254.2.0/24` and not the first link-local subnet, because Podman itself uses
+`169.254.1.1` for `--dns-forward` and `169.254.1.2` for `--map-guest-addr` in the
+same range, and they are in the `pasta` command line beside these. What `pasta`
+forwards does not depend on the address.
+
+A namespace resolves no service name, so the panel reaches its database by
+address. An installation on a database somebody else runs needs nothing further -
+its DSN names one. The quickstart database is reached the only way that is left,
+through the loopback of the host, so the Podman file publishes it on
+`127.0.0.1:5432` and maps the name in its DSN to `169.254.2.1`, which is what
+`--map-host-loopback` translates to the host's own loopback.
+
+#### What that door costs, and what was measured of it
+
+The quickstart database keeps the internal network with no route out in the Podman
+file as well: a published port is forwarded into the container's namespace without
+giving that network a way out, which was measured on this runtime before the file
+was written. What the door adds is that every account on the panel's own host can
+reach the database, and nothing else. Measured on the laboratory, on the panel
+deployed from `compose.podman.yaml`:
+
+From another machine of the fleet, at every address the panel might answer on -
+its fleet address, its NAT address, the internal network, the `pasta` namespace,
+the addresses Podman uses in it, and the gateway of Podman's default bridge - with
+a TCP connection followed by a PostgreSQL `SSLRequest`, and with temporary routes
+for the container subnets pointed at the panel so the packets really arrived
+there:
+
+    192.168.56.10:5432   connection refused        169.254.2.1:5432   unreachable
+    192.168.56.10:5433   connection refused        169.254.2.2:5432   unreachable
+    10.0.2.15:5432       connection refused        169.254.1.1:5432   unreachable
+    10.89.0.10:5432      unreachable               169.254.1.2:5432   unreachable
+    10.89.0.1:5432       unreachable               10.88.0.1:5432     unreachable
+
+Nothing answered. The same probe reached `8080`, `8443` and `8444` of the same
+host in the same run, so it was not blind. The panel forwards nothing
+(`/proc/sys/net/ipv4/ip_forward` is `0`) and does not route its own loopback
+(`route_localnet` is `0`), and rootless Podman keeps its bridges inside the
+user's network namespace, so `10.89.0.0/24` does not exist on the host at all.
+
+From an unrelated container on the panel's host - started with `podman run` and
+never through a compose project, so that nothing of the deployment could be
+adopted - on Podman's default network, on a network of its own and with no
+network, the same ten addresses were refused or unreachable in all three cases,
+`pg_isready` included, and `host.containers.internal:5432` with them.
+
+Two things do reach it, and neither is an outsider. A container given
+`--network=host` has the host's own network namespace, which is the host's own
+account by another name - the door is open to those by design, and that is the
+price stated above; `root`, the deployment's account and an unrelated system
+account all reached `127.0.0.1:5432`. And a container attached to
+`flotestro_database` by name reaches the database on that network, which is what
+"reachable from this deployment" means and is equally true under `compose.yaml`.
+An installation that will not pay either runs its database elsewhere, with
+`compose.external-db.yaml`, which needs nothing from this file.
+
+#### What it was measured on
+
+Podman 5.4.2, `podman-compose` 1.3.0, passt `0.0~git20250503.587980c-2+deb13u1`,
+Debian GNU/Linux 13 (trixie), kernel `6.12.48+deb13-amd64`, rootless under an
+ordinary account with lingering on and `podman-restart.service` enabled in its
+session. With the Podman file the panel recorded one address per host -
+`192.168.56.30`, `192.168.56.40`, `192.168.56.60` and `192.168.56.70` - after the
+deployment, and the same four after a reboot of the machine, which is the case the
+fixed address exists for: the panel answered `/readyz` 65 seconds after the reboot
+was ordered with nothing started by hand, the namespace came back with the same
+parameters, and the database was no more reachable from off the host than before.
 
 One thing is never a substitute. An address a client sends - a header, a field in
 a request - is not where a host's identity comes from. The panel identifies a host
@@ -973,10 +1043,12 @@ podman run --rm --volume ./backups:/backups:ro --volume /somewhere/safe:/out \
     docker.io/library/busybox:1.37 cp -a /backups/<backup-id> /out/
 ```
 
-The database of the quick start publishes no port and is reachable from this
-deployment and nowhere else. With `compose.pasta.yaml` it does publish one, on
-the loopback of the host and for the panel alone - see "The address the fleet
-connects from".
+The database of the quick start is on an internal network with no route out and
+publishes no port, so it is reachable from this deployment and nowhere else. With
+`compose.podman.yaml` it keeps that network and publishes one port as well, on the
+loopback of the host, because that is the only route the panel's own namespace
+leaves it - see "The address the fleet connects from" for what that costs and for
+what was measured of it.
 
 ### Putting it back
 

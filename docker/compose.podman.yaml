@@ -1,24 +1,76 @@
-# The Flotestro control plane and what it is deployed with, in profiles.
+# The Flotestro control plane under rootless Podman, complete and on its own.
 #
-#   docker compose up -d                                the whole default deployment
-#   docker compose up -d                                with a database somebody else runs
-#   docker compose --profile airgap up -d               plus the package repository of the release
-#   podman-compose -f compose.podman.yaml up -d         rootless, and the fleet's
-#                                                       own addresses reach it
-#   docker compose --profile check run --rm schema-check    what the image would migrate
-#   docker compose --profile tools run --rm admin-tools backup
-#   docker compose --profile restore run --rm admin-restore restore <backup-id>
+#   podman-compose -f compose.podman.yaml up -d         the whole default deployment
+#   podman-compose -f compose.podman.yaml up -d         with a database somebody else runs
+#   podman-compose -f compose.podman.yaml --profile airgap up -d
+#                                                       plus the package repository
+#   podman-compose -f compose.podman.yaml --profile check run --rm schema-check
+#   podman-compose -f compose.podman.yaml --profile tools run --rm admin-tools backup
+#   podman-compose -f compose.podman.yaml --profile restore run --rm admin-restore restore <backup-id>
 #
-# The quickstart needs nothing prepared: this file alone brings up a panel and
-# a database, and the init service below makes the secrets they share. Every
-# setting has a working default; env.example lists all of them and names the
-# three an installation for real hosts has to change.
+# Why there are two files at all. Rootless Podman publishes a port with
+# rootlesskit, which proxies the connection and rewrites its source address to
+# one inside the container network; podman-run(1) says so, and adds that the same
+# handler is used for every container on a user-defined network. The panel then
+# records one address for the whole fleet: two agents cannot be told apart in the
+# audit trail, and a single cut link looks like every link at once. Measured on
+# four hosts with four addresses, all four sessions arrived from one. pasta(1)
+# preserves the original source address, so the panel here is given a pasta
+# namespace instead of a compose network. Under the Docker daemon none of this
+# applies, and compose.yaml is the file to use.
 #
-# Nothing but the control plane starts unless its profile is named, so an
-# installation pointed at an external database cannot quietly run a second
-# beside it. Profiles combine: --profile tools --profile airgap.
+# Why this one is complete instead of an overlay on compose.yaml. Neither engine
+# allows a service to declare a network and a network mode at once, and
+# podman-compose 1.3.0 can take a network away in no overlay: it reads the files
+# with yaml.safe_load, so a !reset tag is a parse error, and extends and
+# network_mode both merge the base's networks back in. Saying it completely is
+# the only way to say it. What has to hold in both files is asserted of both by
+# internal/release/deployment_test.go, which reads them - so neither can be
+# changed alone.
+#
+# Everything below is compose.yaml, and only two things differ:
+#   - the panel has a pasta namespace instead of the application network, and
+#     reaches its database by address because a namespace resolves no name;
+#   - the quickstart database opens one door, on the loopback of the host, which
+#     is the only route from that namespace back into the deployment.
+# The database keeps the internal network with no route out: measured on this
+# runtime, a container on an internal network still publishes on the loopback.
+# That door is open to the host's own accounts, and that is the price of this
+# file; an installation that will not pay it runs its database somewhere else,
+# with compose.external-db.yaml, which needs nothing from here.
+#
+# Measured on Podman 5.4.2, podman-compose 1.3.0 and passt 0.0~git20250503 under
+# Debian 13 - see README.md, "The address the fleet connects from", for the
+# addresses and for what the laboratory checked the isolation of that door with.
 name: flotestro
 
+# Every way this file differs from compose.yaml, and what each difference is for.
+# internal/release/deployment_test.go compares the whole of both files service by
+# service, after bringing the shapes that mean the same thing to one of them, and
+# fails on a difference that is not named here - a variable, a mount, a
+# capability, a service, anything. It fails as well on an entry here that no
+# longer matches a difference, so the list cannot grow into a blanket permission.
+# "x-" is the prefix compose reserves for extensions: both engines ignore this.
+x-compose-variant:
+  control-plane.networks: >-
+    the panel takes a network namespace instead, and compose refuses a service
+    that declares a network and a network mode at the same time
+  control-plane.network_mode: >-
+    only pasta preserves the source address of an agent's connection; rootless
+    Podman's own port handler rewrites it to the container's own
+  control-plane.extra_hosts: >-
+    a namespace resolves no service name, so the name in the quickstart's DSN is
+    mapped to the address pasta translates to the host
+  postgres.ports: >-
+    the loopback of the host is the only route from the panel's namespace back
+    into the deployment; the internal network stays, and nothing off the host
+    reaches this
+  package-repository.networks: >-
+    the panel is not on that network here, so naming it would leave one service
+    alone on it, and podman-compose warns about that on every command
+  .networks: >-
+    the network the panel shares with the edge in compose.yaml has no members
+    here, and a declared network nobody joins is a warning on every command
 services:
   # Everything the deployment needs before it starts, so that nobody has to
   # run printf, mkdir, chown and chmod by hand and get the uid right.
@@ -310,10 +362,25 @@ services:
       - "8443:8443"
       - "8444:8444"
 
-    networks:
-      - application
-      - database_egress
-      - database
+    # A network mode and not a network, and this is the whole reason this file
+    # exists: Podman's own rootless port handler would rewrite the source address
+    # of every agent, and only pasta preserves it.
+    #
+    # An address of its own rather than the copy of the host's that pasta takes by
+    # default. The unit that replays the restart policies at boot runs in the
+    # user's session, where nothing orders it after the network: a copy taken
+    # before the interface had an address left the panel with no route to its own
+    # database, and it did not recover, because the namespace is fixed when the
+    # container starts. The host is the gateway of that network, which is pasta's
+    # own default for --map-host-loopback and how the panel reaches the database.
+    network_mode: "pasta:-a,169.254.2.2,-n,24,-g,169.254.2.1,--map-host-loopback=169.254.2.1"
+
+    extra_hosts:
+      # The name in the DSN the quickstart writes. A namespace resolves no service
+      # name, so the only postgres this panel can reach is the door below on the
+      # loopback of the host. An installation on a database somebody else runs
+      # names an address in its DSN and never resolves this, so it costs nothing.
+      - "postgres:169.254.2.1"
 
     # The panel waits for a database that answers, not for a container that
     # exists, and says so while it waits - so nothing depends on postgres here.
@@ -387,10 +454,21 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - shared_secrets:/run/flotestro:ro
 
+    # The internal network, with no route out and none in from outside, exactly
+    # as in compose.yaml: the door below is a published port, which rootless
+    # Podman forwards into the namespace of this container without giving that
+    # network a way out - measured on this runtime.
     networks:
       - database
 
-    # No port is published: reachable from this deployment and nowhere else.
+    ports:
+      # The loopback of the host and nothing else: from a namespace of its own
+      # this is the only route left back into the deployment. It is reachable by
+      # every account on this host and by nothing off it, which the laboratory
+      # measures from another machine and from a container outside this
+      # deployment - README.md says with what.
+      - "127.0.0.1:5432:5432"
+
     shm_size: 256m
     # A database killed mid-checkpoint comes back into recovery.
     stop_grace_period: 60s
@@ -429,8 +507,10 @@ services:
       # what a package manager trusts is the signature in the tree.
       - "8090:8080"
 
-    networks:
-      - application
+    # No network is named: the panel is in a namespace of its own here, so the
+    # network it shares with the edge in compose.yaml would have this one service
+    # on it - and podman-compose warns about a network nobody joined on every
+    # command it is given. The fleet reaches the repository on the port below.
 
     # Nothing is written, not even a temporary file, so there is no tmpfs
     # either: the tree is in the image layer and the process only reads it.
@@ -553,8 +633,6 @@ services:
         max-file: "5"
 
 networks:
-  # The panel and the edge.
-  application:
   # The quickstart database: no route out, and none in from outside.
   database:
     internal: true

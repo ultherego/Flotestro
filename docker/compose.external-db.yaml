@@ -4,6 +4,12 @@
 #   docker compose -f compose.yaml -f compose.external-db.yaml run --rm migrate
 #   docker compose -f compose.yaml -f compose.external-db.yaml up -d
 #
+# On rootless podman the base is the other file, and this one needs nothing from
+# the difference between them - its DSN names an address, which is the one thing a
+# network namespace can still reach:
+#
+#   podman-compose -f compose.podman.yaml -f compose.external-db.yaml up -d
+#
 # Chosen before the installation is initialised: moving a live one to another
 # database is a data migration, not a change of a variable.
 #
