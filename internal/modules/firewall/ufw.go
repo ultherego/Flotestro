@@ -188,9 +188,13 @@ func UFWDeleteArguments(rule RuleSpec) ([][]string, error) {
 // ufwRule renders one ufw rule as an argument list. The comment goes as a
 // single argument: nothing here passes through a shell.
 func ufwRule(rule RuleSpec, source string, remove bool) []string {
-	command := []string{UFWPath, "--force"}
+	command := []string{UFWPath}
+	// --force belongs to a deletion, which ufw would otherwise ask about. On a
+	// rule being added it is not an option ufw has, and it refuses the whole
+	// command as invalid syntax - measured on ufw 0.36.2, every action and both
+	// the short and the full form.
 	if remove {
-		command = append(command, "delete")
+		command = append(command, "--force", "delete")
 	}
 	command = append(command, ufwAction(rule.Action))
 	direction := "in"

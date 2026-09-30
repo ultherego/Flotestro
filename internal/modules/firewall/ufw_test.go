@@ -99,7 +99,7 @@ func TestUFWRuleIsAssembledFromFieldsThePanelUnderstands(t *testing.T) {
 		t.Fatalf("steps = %d", len(steps))
 	}
 	command := strings.Join(steps[0], " ")
-	if command != UFWPath+" --force deny in on enp0s8 proto tcp from 10.10.0.0/16 to any port 25,1000:2000 comment flotestro:smtp - test" {
+	if command != UFWPath+" deny in on enp0s8 proto tcp from 10.10.0.0/16 to any port 25,1000:2000 comment flotestro:smtp - test" {
 		t.Errorf("command = %q", command)
 	}
 	// The comment travels as one argument: nothing here passes through a
@@ -125,8 +125,45 @@ func TestUFWRuleIsAssembledFromFieldsThePanelUnderstands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(steps[0], " ") != UFWPath+" --force allow out proto udp from any to any port 53 comment flotestro:web" {
+	if strings.Join(steps[0], " ") != UFWPath+" allow out proto udp from any to any port 53 comment flotestro:web" {
 		t.Errorf("command = %q", strings.Join(steps[0], " "))
+	}
+}
+
+// TestUFWForceBelongsOnlyToADeletion pins the shape of the command itself, not
+// the fields in it. Until 30.09 every rule carried --force and ufw refused all
+// of them; the table above pinned the broken form, so only a real host found it.
+func TestUFWForceBelongsOnlyToADeletion(t *testing.T) {
+	rule := RuleSpec{
+		ID: "smtp", Chain: ChainInput, Action: ActionDrop, Protocol: "tcp",
+		Ports: []string{"25"}, Sources: []string{"10.10.0.0/16"},
+	}
+
+	// Measured on ufw 0.36.2: --force is not an option ufw has for a rule it
+	// adds, and it refuses the whole command with "ERROR: Invalid syntax" -
+	// every action, both the short and the full form.
+	added, err := UFWArguments(rule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range added {
+		for _, argument := range step {
+			if argument == "--force" {
+				t.Errorf("an added rule carries --force, which ufw refuses: %v", step)
+			}
+		}
+	}
+
+	// A deletion is the other half: there ufw would ask, and --force is the
+	// answer. It sits before the verb, because ufw reads it as an option.
+	removed, err := UFWDeleteArguments(rule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range removed {
+		if len(step) < 3 || step[1] != "--force" || step[2] != "delete" {
+			t.Errorf("a deletion has to go as --force delete: %v", step)
+		}
 	}
 }
 
