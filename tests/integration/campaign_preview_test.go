@@ -4,6 +4,7 @@ package integration
 
 import (
 	"net/http"
+	"net/url"
 	"testing"
 )
 
@@ -28,25 +29,32 @@ type campaignRefusal struct {
 	Title  string `json:"title"`
 }
 
+// restartFleet is the selector the preview and the order both name. An empty
+// selector is no longer an order, so the two have to agree on one; the site is
+// read off a host of the laboratory rather than written in.
+func restartFleet(h *harness) string {
+	return h.hostByFamily("debian").Site
+}
+
 func restartPreview(t *testing.T, h *harness) previewAnswer {
 	t.Helper()
 	var answer previewAnswer
-	h.get("/api/v1/campaigns/preview?action=unit.restart", &answer)
+	h.get("/api/v1/campaigns/preview?action=unit.restart&site="+url.QueryEscape(restartFleet(h)), &answer)
 	if answer.Eligible == 0 {
 		t.Skip("no host of the laboratory is ready for a unit restart")
 	}
 	return answer
 }
 
-// restartOrder is a campaign order for the whole ready fleet, named so two
-// tests do not collide on one name.
-func restartOrder(name string, token previewAnswer) map[string]any {
+// restartOrder is a campaign order for the ready hosts of one site, named so
+// two tests do not collide on one name.
+func restartOrder(h *harness, name string, token previewAnswer) map[string]any {
 	order := map[string]any{
 		"action":    "unit.restart",
 		"name":      name,
 		"reason":    "integration test of the preview binding",
 		"payload":   map[string]any{"unit": map[string]any{"unit": "cron.service"}},
-		"selector":  map[string]any{},
+		"selector":  map[string]any{"site": restartFleet(h)},
 		"wave_size": 1,
 	}
 	if token.PreviewID != "" {
@@ -75,14 +83,14 @@ func TestAnOrderPlacedFromAPreviewCarriesItsTokenAndSpendsIt(t *testing.T) {
 		t.Error("the token does not say when it stops standing")
 	}
 
-	campaign := h.createCampaign(restartOrder("preview binding", answer))
+	campaign := h.createCampaign(restartOrder(h, "preview binding", answer))
 	if campaign.ID == "" {
 		t.Fatal("the campaign was not created")
 	}
 
 	// The second order names a preview that already created a campaign.
 	var refusal campaignRefusal
-	h.do(http.MethodPost, "/api/v1/campaigns", restartOrder("preview binding again", answer),
+	h.do(http.MethodPost, "/api/v1/campaigns", restartOrder(h, "preview binding again", answer),
 		&refusal, http.StatusConflict)
 	if refusal.Code != "preview_consumed" {
 		t.Errorf("a spent preview was refused as %q: %s", refusal.Code, refusal.Detail)
@@ -97,7 +105,7 @@ func TestAPreviewOfOneSelectorDoesNotOrderAnother(t *testing.T) {
 	answer := restartPreview(t, h)
 	host := h.hostByFamily("debian")
 
-	order := restartOrder("preview of another selector", answer)
+	order := restartOrder(h, "preview of another selector", answer)
 	order["selector"] = map[string]any{"host_ids": []string{host.ID}}
 	var refusal campaignRefusal
 	h.do(http.MethodPost, "/api/v1/campaigns", order, &refusal, http.StatusConflict)
@@ -115,7 +123,7 @@ func TestAPreviewOfOneSelectorDoesNotOrderAnother(t *testing.T) {
 func TestATokenWithAnotherFingerprintIsRefused(t *testing.T) {
 	h := newHarness(t)
 	answer := restartPreview(t, h)
-	order := restartOrder("preview with a wrong fingerprint", answer)
+	order := restartOrder(h, "preview with a wrong fingerprint", answer)
 	order["preview_digest"] = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
 
 	var refusal campaignRefusal
@@ -133,7 +141,7 @@ func TestAPreviewIsNotTransferable(t *testing.T) {
 	answer := restartPreview(t, operator)
 
 	var refusal campaignRefusal
-	h.do(http.MethodPost, "/api/v1/campaigns", restartOrder("somebody else's preview", answer),
+	h.do(http.MethodPost, "/api/v1/campaigns", restartOrder(h, "somebody else's preview", answer),
 		&refusal, http.StatusConflict)
 	if refusal.Code != "preview_principal_mismatch" {
 		t.Errorf("another operator's preview was refused as %q: %s", refusal.Code, refusal.Detail)
@@ -146,13 +154,13 @@ func TestAPreviewIsNotTransferable(t *testing.T) {
 func TestAPreviewOfAnotherOperationDoesNotOrderThisOne(t *testing.T) {
 	h := newHarness(t)
 	var answer previewAnswer
-	h.get("/api/v1/campaigns/preview?action=packages.upgrade", &answer)
+	h.get("/api/v1/campaigns/preview?action=packages.upgrade&site="+url.QueryEscape(restartFleet(h)), &answer)
 	if answer.PreviewID == "" {
 		t.Skip("no host is ready for a package upgrade, so there is no token to misuse")
 	}
 
 	var refusal campaignRefusal
-	h.do(http.MethodPost, "/api/v1/campaigns", restartOrder("preview of another operation", answer),
+	h.do(http.MethodPost, "/api/v1/campaigns", restartOrder(h, "preview of another operation", answer),
 		&refusal, http.StatusConflict)
 	switch refusal.Code {
 	case "preview_permission_mismatch", "preview_action_mismatch", "preview_targets_changed":
@@ -167,7 +175,7 @@ func TestAPreviewOfAnotherOperationDoesNotOrderThisOne(t *testing.T) {
 func TestAnOrderWithoutAPreviewIsStillAccepted(t *testing.T) {
 	h := newHarness(t)
 	restartPreview(t, h)
-	campaign := h.createCampaign(restartOrder("order without a preview", previewAnswer{}))
+	campaign := h.createCampaign(restartOrder(h, "order without a preview", previewAnswer{}))
 	if campaign.ID == "" {
 		t.Fatal("an order without a token was refused under prefer")
 	}

@@ -3,7 +3,7 @@ import {
   campaignBody, clearDraft, DRAFT_KEY, emptyOrder, jobTimeoutValid, loadDraft, MIN_REASON,
   orderForm, orderTargets, parseUnits, prefilledOrder, previewTokenOf, reasonValid,
   REVERSE_OPERATION, reversePayload,
-  saveDraft, windowInstant, windowProblem, wizardOperations, type Operation,
+  saveDraft, selectorNames, windowInstant, windowProblem, wizardOperations, type Operation,
 } from "./Bulk";
 
 /* The wizard's decisions - what counts as a reason, whether the window
@@ -110,6 +110,46 @@ describe("orderTargets", () => {
     expect(orderTargets({ hostIDs: [] }, { count: 40, eligible: 30 })).toBe(30);
     expect(orderTargets({ hostIDs: [] }, { count: 40 })).toBe(40);
     expect(orderTargets({ hostIDs: [] }, undefined)).toBe(0);
+  });
+});
+
+describe("selectorNames", () => {
+  /* An empty selector is the whole fleet, and the server refuses a campaign
+     ordered that way; the wizard has to know the same rule, or it offers a
+     step it cannot get past. */
+  const order = { ...emptyOrder(), name: "Restart cron", action: "unit.restart", unit: "cron.service" };
+
+  it("says nobody is named while nothing narrows the fleet", () => {
+    expect(selectorNames(order)).toBe(false);
+    // Exclusions name who stays out of a set nobody named yet.
+    expect(selectorNames({ ...order, exclude: ["h1"], excludeReason: "the primary" })).toBe(false);
+    // The expression way with no group and no rule compiles to nothing.
+    expect(selectorNames({ ...order, targetMode: "expression" })).toBe(false);
+  });
+
+  it("sees every way the order may narrow the fleet", () => {
+    expect(selectorNames({ ...order, site: "lab" })).toBe(true);
+    expect(selectorNames({ ...order, environment: "test" })).toBe(true);
+    expect(selectorNames({ ...order, osFamily: "debian" })).toBe(true);
+    expect(selectorNames({ ...order, targetMode: "hosts", hostIDs: ["h1"] })).toBe(true);
+    expect(selectorNames({ ...order, targetMode: "expression", group: "web" })).toBe(true);
+    expect(selectorNames({
+      ...order, targetMode: "expression",
+      rules: [{ field: "tag", value: "role=web", negated: false }],
+    })).toBe(true);
+  });
+
+  it("lets a compensation name nobody, because it takes the hosts the original changed", () => {
+    expect(selectorNames({ ...order, compensates: "c1" })).toBe(true);
+  });
+
+  it("agrees with the body the order really sends", () => {
+    for (const candidate of [order, { ...order, site: "lab" }, { ...order, targetMode: "expression" as const, group: "web" }]) {
+      const chosen = campaignBody(candidate).selector as Record<string, unknown>;
+      const named = Boolean(chosen.site || chosen.environment || chosen.os_family || chosen.expression
+        || (chosen.host_ids as string[] | undefined)?.length);
+      expect(selectorNames(candidate)).toBe(named);
+    }
   });
 });
 

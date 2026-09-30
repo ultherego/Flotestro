@@ -58,9 +58,11 @@ func TestAnIdempotencyKeyUsedForAnotherCampaignIsRefused(t *testing.T) {
 	}
 
 	// And the same operation over other hosts: the selector is part of what
-	// was ordered, and a campaign is the hosts it runs on.
+	// was ordered, and a campaign is the hosts it runs on. The other selector
+	// names the host's site, because an order naming nobody is refused before
+	// the key is ever read.
 	otherHosts := order(cron)
-	otherHosts["selector"] = map[string]any{}
+	otherHosts["selector"] = map[string]any{"site": host.Site}
 	h.do(http.MethodPost, "/api/v1/campaigns", otherHosts, &refusal, http.StatusConflict)
 	if refusal.Code != "idempotency_key_reused" {
 		t.Errorf("another selector under a used key was refused as %q: %s", refusal.Code, refusal.Detail)

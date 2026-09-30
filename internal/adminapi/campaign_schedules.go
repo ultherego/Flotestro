@@ -84,6 +84,14 @@ func (s *Server) readScheduleSpec(w http.ResponseWriter, r *http.Request) (*camp
 	if _, ok := s.checkSelector(w, order.Selector); !ok {
 		return nil, false
 	}
+	// The stored order goes through the campaign door when it fires, which refuses
+	// an empty selector too; it is refused here as well so the operator learns it
+	// while writing the schedule, not from a run record at four in the morning. A
+	// compensation is exempt: its hosts are the original's changed ones, resolved
+	// when the order is placed.
+	if order.CompensatesCampaignID == "" && !requireSelector(w, order.Selector) {
+		return nil, false
+	}
 	return checked, true
 }
 
