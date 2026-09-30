@@ -74,7 +74,6 @@ tests/integration/campaigns_test.go:1991	t.Skip("the fleet has no host with a me
 tests/integration/campaigns_test.go:2042	t.Skip("every host was already in the desired state; the plans were empty")
 tests/integration/campaigns_test.go:2135	t.Skip("the fleet has no host with firewalld and an active zone")
 tests/integration/campaigns_test.go:2173	t.Skip("every host was already in the desired state; the plans were empty")
-tests/integration/campaigns_test.go:2296	t.Skip("the fleet has no host with a mechanism to write the network configuration")
 tests/integration/campaigns_test.go:2336	t.Skip("every host was already in the desired state; the plans were empty")
 tests/integration/campaigns_test.go:2443	t.Skip("the fleet has fewer than two connected hosts with sshd")
 tests/integration/campaigns_test.go:2608	t.Skip("the fleet has fewer than two connected hosts")

@@ -421,23 +421,16 @@ func TestIPv6OrderIsRefusedOnAHostWithoutTheFamily(t *testing.T) {
 	}
 }
 
-// TestVLANOnAFreeInterfaceIsBuiltAndRemoved is the one layered change this
-// suite applies.
-func TestVLANOnAFreeInterfaceIsBuiltAndRemoved(t *testing.T) {
-	h := newHarness(t)
-	host := h.hostByFamily("rhel")
-	state := hostLayeredNetwork(t, h, host.ID)
-	if state.WriteAdapter == "" {
-		absent(t, "the host has no mechanism to write the network configuration")
-	}
-
+// freeVLANParent names an interface a VLAN may be hung on, or "" when the host
+// has none: the management link, a layer's member and an addressed interface are
+// all in use, and only a real ethernet link is taken as a parent.
+func freeVLANParent(state layeredNetworkView) string {
 	carrying := map[string]bool{}
 	for _, iface := range state.Interfaces {
 		if iface.VLAN != nil {
 			carrying[iface.VLAN.Parent] = true
 		}
 	}
-	parent := ""
 	for _, iface := range state.Interfaces {
 		switch {
 		case iface.Management || iface.Name == state.ManagementInterface:
@@ -445,14 +438,54 @@ func TestVLANOnAFreeInterfaceIsBuiltAndRemoved(t *testing.T) {
 		case iface.Master != "" || carrying[iface.Name]:
 		case len(iface.Addresses) > 0:
 		default:
-			parent = iface.Name
-		}
-		if parent != "" {
-			break
+			return iface.Name
 		}
 	}
-	if parent == "" {
-		absent(t, "the host has no free interface to hang a VLAN on")
+	return ""
+}
+
+// hostBuildsLinks says whether the host reports a mechanism that can create a
+// bond, a bridge or a VLAN. Picking a host to test on asks for a yes the host
+// actually gave: an agent silent about the feature is not taken, so a fleet of
+// such agents ends the test as absent instead of blaming the product.
+func hostBuildsLinks(host hostView) bool {
+	value, known := hostAdapterFeature(host, "network", "links")
+	return known && value
+}
+
+// TestVLANOnAFreeInterfaceIsBuiltAndRemoved is the one layered change this
+// suite applies.
+func TestVLANOnAFreeInterfaceIsBuiltAndRemoved(t *testing.T) {
+	h := newHarness(t)
+
+	// Building a VLAN needs two things on one host, and the fleet may hold them
+	// apart: a mechanism that can create a link, and a free interface to hang it
+	// on. The host is therefore chosen by both, not by its family.
+	var host hostView
+	var parent string
+	builders, spares := 0, 0
+	for _, candidate := range h.hosts() {
+		if candidate.ConnectionState != "online" {
+			continue
+		}
+		if !hostBuildsLinks(candidate) {
+			continue
+		}
+		builders++
+		state := hostLayeredNetwork(t, h, candidate.ID)
+		free := freeVLANParent(state)
+		if free == "" {
+			continue
+		}
+		spares++
+		host, parent = candidate, free
+		break
+	}
+	switch {
+	case builders == 0:
+		absent(t, "no host in the fleet has a mechanism that can build a link")
+	case spares == 0:
+		absent(t, "no host that can build a link has a free interface to hang a VLAN on")
 	}
 
 	const name = "flotest4094"

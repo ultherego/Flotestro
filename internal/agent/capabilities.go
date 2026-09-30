@@ -323,8 +323,11 @@ func DetectCapabilities() Capabilities {
 			// the module works, only in read mode - and it says why.
 			ReadOnly: networkWrite == "",
 			Features: map[string]bool{
-				"routes":                      networkRead,
-				"write":                       networkWrite != "",
+				"routes": networkRead,
+				"write":  networkWrite != "",
+				// links is a smaller set than write: changing the profile an
+				// interface already has does not mean the mechanism can create one.
+				"links":                       network.LayerAdapterRefusal(networkWrite) == nil,
 				network.AdapterNetworkManager: networkWrite == network.AdapterNetworkManager,
 				network.AdapterNmstate:        networkWrite == network.AdapterNmstate,
 				network.AdapterNetplan:        networkWrite == network.AdapterNetplan,
