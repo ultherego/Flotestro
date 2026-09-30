@@ -22,17 +22,23 @@ import (
 	"github.com/ultherego/flotestro/internal/systemd"
 )
 
+// LocalMarker is a word the executor leaves in the code of a result for the
+// session loop, which reads it and sends nothing back. It shares the field with
+// the refusals and is none of them: no operator ever reads one, so the
+// catalogue of refusals does not carry them and the type says why.
+type LocalMarker = string
+
 // StatusAfterReplacement marks a result there is no point in sending back: the
 // agent has just been replaced and its return is what decides on the success.
-const StatusAfterReplacement = "agent_upgrade_in_flight"
+const StatusAfterReplacement LocalMarker = "agent_upgrade_in_flight"
 
 // StatusAwaitingReturn marks a result there is no point in sending back
 // because the operation's verifier is the host coming up again: a restart.
-const StatusAwaitingReturn = "reboot_in_flight"
+const StatusAwaitingReturn LocalMarker = "reboot_in_flight"
 
 // StatusInProgress marks the answer to a redelivery of an operation this
 // process is still carrying out.
-const StatusInProgress = "operation_in_progress"
+const StatusInProgress LocalMarker = "operation_in_progress"
 
 // StageInProgress is the stage of the progress report that answers such a
 // redelivery.
@@ -54,7 +60,7 @@ const (
 
 // StatusAbandoned marks a task whose wait for the resources of the host ended
 // with the session.
-const StatusAbandoned = "session_ended"
+const StatusAbandoned LocalMarker = "session_ended"
 
 // Stable refusal codes. They are part of the contract and do not depend on the
 // language.
@@ -77,9 +83,6 @@ const (
 	// RejectJournalUnavailable marks a mutation the agent did not start because
 	// its journal could not take the in-flight marker.
 	RejectJournalUnavailable = "journal_unavailable"
-	// RejectNetworkUnreachable marks a network change after which the host lost
-	// its route to the panel.
-	RejectNetworkUnreachable = "network_unreachable"
 	// RejectReadOnly marks a host running in observation mode.
 	RejectReadOnly = "agent_read_only"
 	// RejectResourceBusy marks a task that waited for a resource of the host and

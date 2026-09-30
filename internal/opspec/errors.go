@@ -37,7 +37,8 @@ type ErrorGuide struct {
 	// campaign. An excluded or skipped host is visible but not a failure.
 	CountsAsFailure bool `json:"counts_as_failure"`
 	// Alias is the code the panel really puts on a job or a target when this
-	// entry is another of the campaigns document's names for the same thing.
+	// entry is another name for the same thing: one of the campaigns document's
+	// names, or a word one component says that the next one rewrites.
 	Alias string `json:"alias,omitempty"`
 }
 
@@ -58,27 +59,36 @@ func ErrorGuideFor(code string) (ErrorGuide, bool) {
 	return ErrorGuide{}, false
 }
 
-// errorGuides is the guide as served: the codes the machinery reports,
-// followed by the names of the campaigns document that stand for one of them.
-var errorGuides = withAliases(reportedGuides, documentAliases)
+// errorGuides is the guide as served: the codes the machinery reports, followed
+// by the names that stand for one of them.
+var errorGuides = withAliases(reportedGuides, aliasedCodes)
 
-// documentAlias is a name the campaigns document (chapter 51) gives a
-// condition the panel reports under another code.
-type documentAlias struct {
+// aliasedCode is a name for a condition the panel reports under another code.
+type aliasedCode struct {
 	code, reportedAs, meaning string
 }
 
-var documentAliases = []documentAlias{
+var aliasedCodes = []aliasedCode{
+	// The names the campaigns document (chapter 51) gives conditions the panel
+	// reports under a code of its own.
 	{code: "verification_failed", reportedAs: "health_check_failed",
 		meaning: "The post-change verification of the host failed: the panel reports it as health_check_failed for a failed check and as unit_unhealthy for a unit that is not active after the change."},
 	{code: "connectivity_rollback", reportedAs: "rolled_back",
 		meaning: "The host's connectivity watchdog undid the change on its own because the management channel did not come back; the panel reports it as rolled_back."},
 	{code: "target_limit_policy", reportedAs: "selector_too_broad",
 		meaning: "The selector names more hosts than the policy lets one campaign carry; the panel reports it as selector_too_broad."},
+	// The words the root helper says that the agent rewrites before the result
+	// leaves the host. They are in the guide because they appear in the message,
+	// in the helper's journal and in the agent's, and an operator who reads one
+	// there has to be able to look it up.
+	{code: "locked", reportedAs: "resource_busy",
+		meaning: "The root helper's word for a resource of the host that another operation of the panel holds; the agent turns it into resource_busy, naming the class of the resource, before the result leaves the host."},
+	{code: "unsupported_version", reportedAs: "helper_rejected",
+		meaning: "The root helper's word for a request whose protocol version it does not speak; the agent turns it into helper_rejected, keeping the helper's word in the message, before the result leaves the host."},
 }
 
-// withAliases appends the document's names to the guide.
-func withAliases(guides []ErrorGuide, aliases []documentAlias) []ErrorGuide {
+// withAliases appends the alternative names to the guide.
+func withAliases(guides []ErrorGuide, aliases []aliasedCode) []ErrorGuide {
 	result := make([]ErrorGuide, 0, len(guides)+len(aliases))
 	result = append(result, guides...)
 	for _, alias := range aliases {
@@ -287,6 +297,24 @@ var reportedGuides = []ErrorGuide{
 	{Code: "secret_unavailable", Stage: "dispatch", Retry: RetryAutomatic,
 		Meaning: "The secret the operation needs could not be issued.",
 		Action:  "Fix the secret store; the attempt is repeated until the deadline.", CountsAsFailure: true},
+	{Code: "invalid_request", Stage: "agent", Retry: RetryNever,
+		Meaning: "The host read the payload of the order and would not take it: a field the operation needs is missing, or a value in it is not one this host could act on. Nothing was attempted.",
+		Action:  "The message names what was refused. Order the operation again with the field filled in; if the order left the panel unchanged, the panel and the agent disagree on the contract and both are to be brought to one release.", CountsAsFailure: true},
+	{Code: "agent_internal_error", Stage: "agent", Retry: RetryReadState,
+		Meaning: "The agent broke down while carrying the operation out and ended the task with a result rather than taking its whole process down with it. Whether anything changed on the host is not said by this code.",
+		Action:  "Read the state of the host before ordering again, and read the agent journal on it around the time of the attempt. One host failing this way is that host's agent; every host failing it is the operation.", CountsAsFailure: true},
+	{Code: "agent_read_only", Stage: "agent", Retry: RetryAfterChange,
+		Meaning: "The agent on this host runs in observation mode: it reads and reports and performs no change, so a mutation is refused before anything else is even checked.",
+		Action:  "Take the host out of observation mode if it is meant to change, or leave it out of the campaign. Not a failure."},
+	{Code: "journal_failed", Stage: "agent", Retry: RetryAfterChange,
+		Meaning: "journalctl ran on the host and ended with an error of its own, so the read returned nothing.",
+		Action:  "Read the tool's output in the attempt: the filter may name a unit or a boot this host does not have, or the journal on it is damaged.", CountsAsFailure: true},
+	{Code: "inventory_refresh_unavailable", Stage: "agent", Retry: RetryAutomatic,
+		Meaning: "The refresh reached an agent with no session to send the new picture back over, so it was not started: a refresh whose answer has no receiver would report a success nothing ever arrived from.",
+		Action:  "Nothing; order the refresh again once the host is connected. Not a failure."},
+	{Code: "inventory_refresh_failed", Stage: "agent", Retry: RetryAfterChange,
+		Meaning: "The agent read the host for the refresh and the read itself failed; the message names what broke.",
+		Action:  "Read what the message names on the host - a missing tool, a permission, a file that is not there - and order the refresh again.", CountsAsFailure: true},
 	// The states the control plane refuses to start in.
 	{Code: "secrets_key_unavailable", Stage: "startup", Retry: RetryAfterChange,
 		Meaning: "The installation has secrets or a recorded key, and the key that opens them is missing or is not the installation's.",
@@ -384,9 +412,48 @@ var reportedGuides = []ErrorGuide{
 	{Code: "unsafe_restore_target", Stage: "helper", Retry: RetryAfterChange,
 		Meaning: "The restore target, or a directory above it, is a symbolic link or is writable by others.",
 		Action:  "The unpacking runs as root and would write wherever the path led at that moment. Restore into a directory whose path nobody else can change."},
+	{Code: "repository_absent", Stage: "helper", Retry: RetryAfterChange,
+		Meaning: "The backup repository the operation works on is not on the host: nothing has ever been written into it, so there is neither a state to read nor an archive to restore from.",
+		Action:  "Order the first copy into the repository, or point the operation at a repository the host already carries; the message names the path that is missing.", CountsAsFailure: true},
 	{Code: "unsupported", Stage: "helper", Retry: RetryNever,
 		Meaning: "The host does not support this operation.",
 		Action:  "Exclude the host or change the operation.", CountsAsFailure: true},
+
+	// What the host answers about a unit: the two refusals of its name, and the
+	// three answers systemctl's exit code gives about the operation itself.
+	{Code: "protected_unit", Stage: "helper", Retry: RetryNever,
+		Meaning: "The unit is on the host's protected list: stopping, disabling or masking it would take the agent, the root helper or the boot of the host with it. Nothing was done, and the root side refuses it even where the agent did not.",
+		Action:  "Order the operation on another unit. A protected unit is operated on the host itself, by somebody who can bring it back.", CountsAsFailure: true},
+	{Code: "invalid_unit", Stage: "helper", Retry: RetryNever,
+		Meaning: "The name the order carries is not one systemd would take as a unit: its shape, its suffix or a character in it. Nothing was done.",
+		Action:  "Order the unit under the name the host itself shows - the units module lists them - rather than under a service's common name.", CountsAsFailure: true},
+	{Code: "unit_not_found", Stage: "helper", Retry: RetryAfterChange,
+		Meaning: "systemctl answered that the host has no such unit.",
+		Action:  "Refresh the units module and order the unit under the name the host really carries, or install the package that provides it first.", CountsAsFailure: true},
+	{Code: "unit_not_active", Stage: "helper", Retry: RetryAfterChange,
+		Meaning: "systemctl answered that the unit is not active, so the operation had nothing to act on. This is the operation's own answer, not the verification that follows a change.",
+		Action:  "Read the unit on the host: start it first, or order the operation its present state allows.", CountsAsFailure: true},
+	{Code: "unit_action_failed", Stage: "helper", Retry: RetryAfterChange,
+		Meaning: "systemctl ended the operation with an error that is neither a missing unit nor an inactive one.",
+		Action:  "The exit code and the first line of the error are in the attempt; read the unit's own journal on the host for the rest.", CountsAsFailure: true},
+
+	// What a package manager of the host answers when a transaction will not
+	// run, or did not finish.
+	{Code: "package_manager_locked", Stage: "helper", Retry: RetryAfterChange,
+		Meaning: "The package manager's own lock on the host is held by something outside the panel - an unattended upgrade, the distribution's timer, a shell session. Nothing was attempted.",
+		Action:  "Order again once the lock is free; the message names the lock file. A host that holds it for hours has its own upgrade timer to answer for.", CountsAsFailure: true},
+	{Code: "package_database_broken", Stage: "helper", Retry: RetryReadState,
+		Meaning: "The package database of the host could not be read or written, so what the host has installed is not known from it and a transaction against it would be guesswork.",
+		Action:  "Repair the database on the host - dpkg --configure -a, rpm --rebuilddb, pacman -Dk - read the packages again, and plan the change on what the host really has.", CountsAsFailure: true},
+	{Code: "kernel_modules_hidden", Stage: "helper", Retry: RetryAfterChange,
+		Meaning: "The process that would run the transaction does not see the module tree of the running kernel, so a kernel package could install without its modules and the host would come up without them.",
+		Action:  "Find out why /lib/modules is not visible on the host - a stale mount, a container without it - and order the change once it is.", CountsAsFailure: true},
+	{Code: "transaction_failed", Stage: "helper", Retry: RetryReadState,
+		Meaning: "The package transaction broke down. Part of the change may have landed: the result carries what the host managed to apply before it stopped.",
+		Action:  "Read the tool's output and the applied list in the attempt, put the host's packages back in order, and plan again before repeating - the old plan describes a host that no longer exists.", CountsAsFailure: true},
+	{Code: "unsupported_manager", Stage: "helper", Retry: RetryNever,
+		Meaning: "The package manager of the host is not one this product drives - apt, dnf and pacman are - or none could be recognised at all. Nothing was attempted.",
+		Action:  "Leave the host out of package operations, or install the manager of its distribution and refresh the capabilities.", CountsAsFailure: true},
 	{Code: "hostname_conflict", Stage: "agent", Retry: RetryAfterChange,
 		Meaning: "The new hostname resolves in DNS to an address that is not this host's.",
 		Action:  "Fix the DNS record or pick another name; the host was not renamed.", CountsAsFailure: true},
@@ -740,6 +807,21 @@ var reportedGuides = []ErrorGuide{
 	{Code: "system_account", Stage: "helper", Retry: RetryAfterChange,
 		Meaning: "The account's identifier lies outside the UID range of people in the host's login.defs (UID_MIN..UID_MAX): it belongs to a service or to the system, and the order did not say it meant one.",
 		Action:  "Pick the account of a person; a change to a service account is ordered with system: true, and root and the agent's own account are never changed through the panel.", CountsAsFailure: true},
+	{Code: "invalid_account", Stage: "helper", Retry: RetryNever,
+		Meaning: "The order names an account, a group, a shell or an expiry date the host would not take: the name cannot be a POSIX account on it, or a value beside it is not one the shadow tools accept. Nothing was written.",
+		Action:  "The message names what was refused. Order the account again with a name of at most 32 lower-case characters and values the host's own tools would take.", CountsAsFailure: true},
+	{Code: "shadows_directory_account", Stage: "helper", Retry: RetryNever,
+		Meaning: "The host already resolves that name through the directory, so a local account under it would shadow the directory's one and the host would let two different people in under one name. Nothing was written.",
+		Action:  "Give the local account another name, or manage that account in the directory instead of on the host.", CountsAsFailure: true},
+	{Code: "account_exists", Stage: "helper", Retry: RetryAfterChange,
+		Meaning: "The account the order creates is already on the host. Nothing was written: a create does not adopt an account somebody else made, because its groups, its shell and its keys are not the ones the order describes.",
+		Action:  "Read the account in the inventory and order the change you meant - the groups, a lock, the keys - or remove it on the host first if it is to be created anew.", CountsAsFailure: true},
+	{Code: "account_missing", Stage: "helper", Retry: RetryAfterChange,
+		Meaning: "The order changes an account the host does not have. Nothing was written.",
+		Action:  "Refresh the accounts module and order the change against an account the host really carries, or create it first.", CountsAsFailure: true},
+	{Code: "symlink_refused", Stage: "helper", Retry: RetryNever,
+		Meaning: "The home directory or the key directory the write would go into is a symbolic link, so root would write wherever the link led at that moment rather than where the order said. Nothing was written.",
+		Action:  "Make the path a real directory on the host, or move the account's home to one, and order again.", CountsAsFailure: true},
 
 	// The dead letters of the notification queue (security remediation, chapter
 	// 10).
@@ -818,6 +900,9 @@ var reportedGuides = []ErrorGuide{
 	{Code: "agent_upgrade_metadata_stale", Stage: "agent", Retry: RetryAutomatic,
 		Meaning: "The host did not confirm that it refreshed its repository metadata, so the version the order names may not be installable from the lists its package manager holds. The replacement was not started.",
 		Action:  "Read the reason the refresh carries in the message - an unreachable repository, a busy package manager - and order again once the host can reach its repository.", CountsAsFailure: true},
+	{Code: "self_replacement_unavailable", Stage: "helper", Retry: RetryNever,
+		Meaning: "The host cannot replace its own agent safely: the transient unit the replacement has to run in could not be started, or the running agent is not the one the package would replace. Nothing was installed - a replacement that runs inside the process being replaced ends in neither a new agent nor the old one.",
+		Action:  "Read the message in the attempt, then upgrade this host's package by hand and let the new agent report back; the panel picks the version up from its next inventory.", CountsAsFailure: true},
 	{Code: "agent_package_digest_mismatch", Stage: "helper", Retry: RetryAfterChange,
 		Meaning: "The package file the host obtained for the ordered version does not hash to the digest of the release. The repository signature says where the file came from; the digest says whether it is the file the release published, and it is not. Nothing was installed.",
 		Action:  "Compare the digest on the release with the repository the host uses: a stale mirror and a package rebuilt under the same version both look like this. Do not order the upgrade again until they agree.", CountsAsFailure: true},
