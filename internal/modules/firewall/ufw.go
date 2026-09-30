@@ -129,12 +129,7 @@ func (r RuleSpec) UFWMarker() string {
 // UFWRuleID reads the rule name out of a ufw comment. An empty result means
 // a rule that is not the panel's.
 func UFWRuleID(comment string) string {
-	rest, found := strings.CutPrefix(comment, CommentPrefix)
-	if !found {
-		return ""
-	}
-	id, _, _ := strings.Cut(strings.TrimSpace(rest), " ")
-	return id
+	return RuleIDOfComment(comment)
 }
 
 // ValidateUFW checks what ufw can express on top of the panel's own

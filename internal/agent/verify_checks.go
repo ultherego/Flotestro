@@ -1913,11 +1913,13 @@ func verifyFirewallRuleset(ctx context.Context, readers *hostReaders, in verifyI
 			return unreadable(expected, "the order names no rule")
 		}
 		// The comment is the only durable ownership marker: the handle is
-		// assigned by the kernel and changes at every reload.
-		marker := firewall.CommentPrefix + " " + payload.RuleID
+		// assigned by the kernel and changes at every reload. The name is read
+		// out of the comment rather than compared with one spelling of it: nft
+		// writes "flotestro: name" and ufw "flotestro:name", so matching the
+		// nft form found no ufw rule the host really carried.
 		present := false
 		for _, rule := range snapshot.Rules {
-			if strings.Contains(rule.Comment, marker) || strings.Contains(rule.Text, marker) {
+			if firewall.RuleIDOfComment(rule.Comment) == payload.RuleID {
 				present = true
 				break
 			}

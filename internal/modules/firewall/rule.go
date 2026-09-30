@@ -120,6 +120,18 @@ func (r RuleSpec) Marker() string {
 	return CommentPrefix + " " + r.ID + " - " + r.Comment
 }
 
+// RuleIDOfComment reads the rule name out of an ownership comment, whichever
+// adapter wrote it: nft writes "flotestro: name", ufw "flotestro:name". An
+// empty result means the comment is not the panel's.
+func RuleIDOfComment(comment string) string {
+	rest, found := strings.CutPrefix(comment, CommentPrefix)
+	if !found {
+		return ""
+	}
+	id, _, _ := strings.Cut(strings.TrimSpace(rest), " ")
+	return id
+}
+
 // Expression assembles the rule text in the nft language.
 func (r RuleSpec) Expression() []string {
 	var parts []string

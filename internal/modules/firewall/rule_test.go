@@ -225,3 +225,31 @@ func TestRegistryRebuildsTableFromScratch(t *testing.T) {
 		t.Error("removed a rule that does not exist")
 	}
 }
+
+// One reader for both spellings of the marker. nft writes "flotestro: name"
+// and ufw, whose comment is a single argument, "flotestro:name"; the
+// verification used to look for the nft form and so found no ufw rule the host
+// really carried.
+func TestTheRuleNameIsReadFromEitherAdaptersComment(t *testing.T) {
+	spec := RuleSpec{ID: "lifecycle-test", Chain: ChainInput, Action: ActionDrop,
+		Protocol: "tcp", Ports: []string{"25"}, Sources: []string{"10.10.0.0/16"}}
+	for _, marker := range []string{spec.Marker(), spec.UFWMarker()} {
+		if id := RuleIDOfComment(marker); id != spec.ID {
+			t.Errorf("comment %q reads as rule %q", marker, id)
+		}
+	}
+	spec.Comment = "test"
+	for _, marker := range []string{spec.Marker(), spec.UFWMarker()} {
+		if id := RuleIDOfComment(marker); id != spec.ID {
+			t.Errorf("comment %q reads as rule %q", marker, id)
+		}
+	}
+	// A name is not matched by a prefix of itself, and a comment that is not
+	// the panel's names no rule.
+	if id := RuleIDOfComment(CommentPrefix + " lifecycle-test2"); id == spec.ID {
+		t.Errorf("%q read as %q", CommentPrefix+" lifecycle-test2", id)
+	}
+	if id := RuleIDOfComment("flotestro lab: ssh must stay reachable"); id != "" {
+		t.Errorf("a foreign comment reads as rule %q", id)
+	}
+}
