@@ -308,6 +308,54 @@ services:
       # The name of this gateway, and the name a second replica must not
       # repeat. The container's own hostname is random, so it cannot serve.
       FLOTESTRO_GATEWAY_ID: ${FLOTESTRO_GATEWAY_ID:-cp-01}
+
+      #==================================================================#
+      #              INTEGRATIONS, IF THE COMPANY HAS THEM               #
+      #==================================================================#
+      #
+      # The panel reads fourteen variables for these two integrations and this
+      # file passed none of them, so a deployment made the documented way could
+      # not be connected to Keycloak or FreeIPA at all: the keys went into ./.env
+      # and stopped there, because compose substitutes ${...} from that file and
+      # does not hand it to a container. Nothing broke loudly - the panel simply
+      # served without single sign-on and without a directory, and an operator who
+      # had filled in ./.env had no reason to suspect otherwise.
+      #
+      # All of them are optional and empty by default: an installation with no
+      # identity provider is a finished installation. Partial configuration is
+      # refused by name at start rather than half-applied.
+      #==================================================================#
+      #                      OIDC - SINGLE SIGN-ON                       #
+      #==================================================================#
+      FLOTESTRO_OIDC_ISSUER: ${FLOTESTRO_OIDC_ISSUER:-}
+      FLOTESTRO_OIDC_CLIENT_ID: ${FLOTESTRO_OIDC_CLIENT_ID:-}
+      FLOTESTRO_OIDC_GROUPS_CLAIM: ${FLOTESTRO_OIDC_GROUPS_CLAIM:-}
+      FLOTESTRO_OIDC_ADMIN_LOGOUT: ${FLOTESTRO_OIDC_ADMIN_LOGOUT:-}
+      # The client secret travels as a path, never as a value - the same rule the
+      # DSN above follows. Setting both forms is refused: "a secret comes either
+      # from the environment or from a file, never from both".
+      FLOTESTRO_OIDC_CLIENT_SECRET_FILE: ${FLOTESTRO_OIDC_CLIENT_SECRET_FILE:-}
+      #==================================================================#
+      #                     FREEIPA - THE DIRECTORY                      #
+      #==================================================================#
+      # _URL and _SERVER are one setting with two names, and the code prefers
+      # _URL. Both are passed, or whichever of them an operator wrote in ./.env
+      # would be the inert one.
+      FLOTESTRO_IPA_URL: ${FLOTESTRO_IPA_URL:-}
+      FLOTESTRO_IPA_SERVER: ${FLOTESTRO_IPA_SERVER:-}
+      FLOTESTRO_IPA_REALM: ${FLOTESTRO_IPA_REALM:-}
+      FLOTESTRO_IPA_PRINCIPAL: ${FLOTESTRO_IPA_PRINCIPAL:-}
+      # Three files of the connector. They stay files: the panel hands their
+      # paths to a library rather than reading the bytes. Mount them under
+      # ./integration and name them here with the path inside the container.
+      FLOTESTRO_IPA_KEYTAB: ${FLOTESTRO_IPA_KEYTAB:-}
+      FLOTESTRO_IPA_KRB5_CONF: ${FLOTESTRO_IPA_KRB5_CONF:-}
+      FLOTESTRO_IPA_CA_CERT: ${FLOTESTRO_IPA_CA_CERT:-}
+      # Whether the panel may change the directory or only read it.
+      FLOTESTRO_DIRECTORY_WRITE: ${FLOTESTRO_DIRECTORY_WRITE:-}
+      # Diagnostic only, and loud about what it costs: the trace copies what the
+      # panel sends to the directory, so it is off unless somebody is reading it.
+      FLOTESTRO_IPA_TRACE: ${FLOTESTRO_IPA_TRACE:-}
       # A mutating task leaves the panel only with a signed capability for exactly
       # that change, which is what the panel does with no value here. No default is
       # written in: podman-compose passes a ${VAR:-default} through as the literal
@@ -345,10 +393,20 @@ services:
       # The state: the fleet CA, the secret store keys, the helper signing key,
       # the bootstrap token and the feed cache. Losing it loses the fleet.
       - control_plane_state:/var/lib/flotestro
-      # The keytab and the Kerberos configuration of the directory connector,
-      # when FreeIPA is configured; the image carries neither:
+      # The files of the two integrations, when a company has them; the image
+      # carries none of them. Uncomment what applies and name the same paths in
+      # ./.env - a path the panel is not told about is a file it never opens.
+      # A bind mount whose source does not exist becomes a directory, which is
+      # why these are commented rather than left pointing at nothing.
+      #
+      #   FLOTESTRO_IPA_KEYTAB=/run/secrets/ipa.keytab
       # - ./secrets/ipa.keytab:/run/secrets/ipa.keytab:ro
+      #   FLOTESTRO_IPA_KRB5_CONF=/etc/flotestro/krb5.conf
       # - ./secrets/krb5.conf:/etc/flotestro/krb5.conf:ro
+      #   FLOTESTRO_IPA_CA_CERT=/run/secrets/ipa-ca.crt
+      # - ./secrets/ipa-ca.crt:/run/secrets/ipa-ca.crt:ro
+      #   FLOTESTRO_OIDC_CLIENT_SECRET_FILE=/run/secrets/oidc-client-secret
+      # - ./secrets/oidc-client-secret:/run/secrets/oidc-client-secret:ro
       # Vulnerability feeds copied onto an isolated site, read-only and outside
       # the state, which is one half of the backup pair - see README.md:
       # - ./feeds:/var/lib/flotestro-feeds:ro
