@@ -192,7 +192,16 @@ if ls "$RELEASE"/*.pkg.tar.* >/dev/null 2>&1; then
         name="$(basename "$package")"
         arch="${name%.pkg.tar.*}"; arch="${arch##*-}"
         arch_dir="$REPO/arch/$CHANNEL"
-        [ "$arch" = x86_64 ] || arch_dir="$arch_dir/$arch"
+        # "any" belongs beside x86_64 and not in a directory of its own: pacman
+        # takes an architecture-independent package as compatible with every
+        # architecture, and the Server line of a host points at the root of the
+        # channel. Sent to arch/<channel>/any it landed in a database nothing
+        # reads, and the package - signed, indexed and present - was simply
+        # invisible: "the pacman database does not know flotestro-lab-broken".
+        case "$arch" in
+            x86_64 | any) ;;
+            *) arch_dir="$arch_dir/$arch" ;;
+        esac
         mkdir -p "$arch_dir"
         printf '%s\n' "$arch_dir" >> "$touched"
         # The packages themselves are signed separately from the database:

@@ -302,10 +302,20 @@ func cutLink(t *testing.T, nft, hostIP, port string) *linkCut {
 	// A table left by an interrupted run would make "add table" fail, so it
 	// goes first, and its absence is not an error.
 	_ = exec.Command(nft, "delete", "table", "inet", nftTable).Run()
+	// Both hooks, because where the packet is seen depends on where the panel
+	// runs. A listener on the machine itself takes the connection on input; the
+	// deployment the documentation describes puts the panel in a container, and
+	// the published port is a DNAT - the packet is then forwarded to the
+	// container and never passes input at all. Measured on the laboratory's own
+	// panel: the rule sat on input, the fleet kept its session through a cut
+	// that cut nothing, and the test failed saying the host had not opened a new
+	// session - which was true, because it had never lost the old one.
 	commands := [][]string{
 		{"add", "table", "inet", nftTable},
 		{"add", "chain", "inet", nftTable, "input", "{ type filter hook input priority 0; policy accept; }"},
 		{"add", "rule", "inet", nftTable, "input", "ip", "saddr", hostIP, "tcp", "dport", port, "drop"},
+		{"add", "chain", "inet", nftTable, "forward", "{ type filter hook forward priority 0; policy accept; }"},
+		{"add", "rule", "inet", nftTable, "forward", "ip", "saddr", hostIP, "tcp", "dport", port, "drop"},
 	}
 	cut := &linkCut{t: t, nft: nft}
 	// The cleanup is registered before the first command: whichever of them
