@@ -140,6 +140,19 @@ func (h *harness) enrollRelay(t *testing.T, names []string) testRelay {
 
 	t.Cleanup(func() {
 		ctx := context.Background()
+		// The sessions first: a relay that carried one is referenced from
+		// agent_sessions, and the delete below then fails on the foreign key -
+		// quietly, because this is a cleanup and its complaint only reached the
+		// test log. Eight such records were found in the laboratory on 01.10,
+		// and the suite had been choosing one of them as the relay to dial.
+		for _, statement := range []string{
+			`delete from agent_sessions where relay_id = $1::uuid`,
+			`delete from enrollment_requests where relay_id = $1::uuid`,
+		} {
+			if _, err := h.database(ctx).Exec(ctx, statement, result.HostID); err != nil {
+				t.Logf("what relay %s left behind was not cleaned up: %v", result.HostID, err)
+			}
+		}
 		if _, err := h.database(ctx).Exec(ctx,
 			`delete from relays where id = $1::uuid`, result.HostID); err != nil {
 			t.Logf("relay %s was not cleaned up: %v", result.HostID, err)
@@ -366,9 +379,17 @@ func (h *harness) labRelay(t *testing.T) (string, string) {
 	ctx := context.Background()
 	var relayID string
 	var names []string
+	// The relay this laboratory runs is the one still calling home. The tests
+	// above enrol relays of their own and leave the records behind, several of
+	// them with a last_seen of their own minute, so neither "newest enrolled"
+	// nor "has ever reported" picks the right one: on 01.10 the suite dialled
+	// revoked-relay.flotestro.test, a record from a test that no process serves
+	// and whose name is in no certificate. A running relay reports every half
+	// minute; one that a test made stops the moment that test ends.
 	err := h.database(ctx).QueryRow(ctx, `
 		select id::text, advertised_names from relays
-		where revoked_at is null order by enrolled_at desc limit 1`).Scan(&relayID, &names)
+		where revoked_at is null and last_seen_at > now() - interval '5 minutes'
+		order by last_seen_at desc limit 1`).Scan(&relayID, &names)
 	if err != nil || len(names) == 0 {
 		absent(t, "the test fleet has no relay: %v", err)
 	}
