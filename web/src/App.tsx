@@ -121,6 +121,26 @@ export function App() {
   // item that leads only to a refusal is an interface defect, not a
   // safeguard.
   const permissions = new Set(data?.permissions ?? []);
+  // A sign-in that carries no permission at all. Every section below is hidden
+  // for want of one, so the panel would render its shell around nothing and say
+  // nothing - which is what an operator met after the first sign-in through an
+  // identity provider whose groups nobody had mapped yet. The checklist knew;
+  // the person who had just signed in was not told.
+  if (!isLoading && !error && permissions.size === 0) {
+    return (
+      <div className="empty" style={{ padding: 40, maxWidth: 760 }}>
+        <h1>{t("Signed in, with nothing granted")}</h1>
+        <p className="prose">
+          {t("You are signed in as {name}, and this sign-in carries no role. The panel shows only what a role allows, so there is nothing here to show - this is not an error and nothing is broken.", {
+            name: data?.display_name || data?.subject || t("an unnamed principal"),
+          })}
+        </p>
+        <p className="prose">
+          {t("Whoever administers this installation grants it: a group of the identity provider is mapped to a role under Access, or a role is bound to this principal directly. Until then every page refuses, which is the panel working as intended.")}
+        </p>
+      </div>
+    );
+  }
   const managesAccess = permissions.has("principal.manage");
   const seesAudit = permissions.has("audit.read");
   const seesCampaigns = permissions.has("campaign.read");

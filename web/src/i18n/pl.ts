@@ -5739,4 +5739,10 @@ export const pl: Record<string, string> = {
   "No image reference to copy: set FLOTESTRO_RELEASE_MANIFEST_FILE on the control plane and open this page again.": "Nie ma czego kopiować: ustaw FLOTESTRO_RELEASE_MANIFEST_FILE na control plane i otwórz tę stronę jeszcze raz.",
   "Pull the relay image, pinned by digest": "Pobierz obraz relaya, przypięty digestem",
   "{where}, reaches only this machine": "{where}, dobija tylko do tej maszyny",
+  "Signed in, with nothing granted": "Zalogowany, bez żadnych uprawnień",
+  "You are signed in as {name}, and this sign-in carries no role. The panel shows only what a role allows, so there is nothing here to show - this is not an error and nothing is broken.": "Jesteś zalogowany jako {name}, a to logowanie nie niesie żadnej roli. Panel pokazuje tylko to, na co pozwala rola, więc nie ma tu czego pokazać - to nie jest błąd i nic nie jest zepsute.",
+  "Whoever administers this installation grants it: a group of the identity provider is mapped to a role under Access, or a role is bound to this principal directly. Until then every page refuses, which is the panel working as intended.": "Nadaje to administrator tej instalacji: grupę z dostawcy tożsamości mapuje się na rolę w sekcji Dostęp albo wiąże rolę wprost z tym podmiotem. Do tego czasu każda strona odmawia i tak właśnie panel ma działać.",
+  "an unnamed principal": "podmiot bez nazwy",
+  "Where the keys live": "Gdzie leżą klucze",
+  "The fleet CA, the secret store and the helper's signing key are either files in the state directory or rows in the database. Files mean the state directory is half of the backup pair and a database restored beside a different one is an installation that cannot talk to its own fleet.": "CA floty, magazyn sekretów i klucz podpisujący helpera leżą albo w plikach w katalogu stanu, albo w wierszach bazy. Pliki znaczą, że katalog stanu jest połową pary kopii, a baza odtworzona obok innego katalogu to instalacja, która nie dogada się z własną flotą.",
 };

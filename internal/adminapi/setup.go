@@ -3,6 +3,7 @@ package adminapi
 import (
 	"context"
 	"fmt"
+	"github.com/ultherego/flotestro/internal/cryptostate"
 	"net/http"
 	"strings"
 	"time"
@@ -146,6 +147,7 @@ func (s *Server) setupChecklist(ctx context.Context) (setupChecklist, error) {
 	steps = append(steps, s.alertRuleStep(ctx))
 	steps = append(steps, s.notificationStep(ctx))
 	steps = append(steps, s.fleetCAStep())
+	steps = append(steps, s.installationKeysStep())
 
 	checklist := tally(steps)
 	checklist.BootstrapLive = live
@@ -382,6 +384,36 @@ func (s *Server) notificationStep(ctx context.Context) setupStep {
 	}
 	return setupStep{Key: "notification_channel", State: setupOptional, Path: "/notifications",
 		Detail: "no notification channel: an alert is seen only by whoever opens the panel"}
+}
+
+// installationKeysStep says where the keys of this installation live, because
+// the answer decides what losing a machine costs. An installation whose keys are
+// files in the state directory looks exactly like one whose keys are rows in the
+// database - every other step is green either way - and the difference only
+// shows on the day the state directory is gone, when the fleet CA, the secret
+// store and the helper's signing key are gone with it. It is said here rather
+// than left for that day.
+func (s *Server) installationKeysStep() setupStep {
+	if s.process == nil || s.process.Crypto == nil {
+		return setupStep{Key: "installation_keys", State: setupOptional, Path: "/status",
+			Detail: "this panel started without the cryptographic guard, so where its keys live is unknown"}
+	}
+	provider := s.process.Crypto.Provider()
+	if provider == nil {
+		return setupStep{Key: "installation_keys", State: setupOptional, Path: "/status",
+			Detail: "the installation names no key provider"}
+	}
+	switch provider.Name() {
+	case cryptostate.LocalProviderName:
+		return setupStep{Key: "installation_keys", State: setupWarning, Path: "/status",
+			Detail: "the keys of this installation are files in the state directory: " +
+				"a backup of the database alone cannot bring it back, and losing that directory " +
+				"loses the fleet CA, the secret store and the helper's signing key with it"}
+	default:
+		return setupStep{Key: "installation_keys", State: setupDone, Path: "/status",
+			Detail: "the keys of this installation are rows in the database, wrapped by the key " +
+				"the deployment mounts"}
+	}
 }
 
 // fleetCAStep watches the end of the signing CA.

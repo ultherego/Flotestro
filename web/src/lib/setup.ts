@@ -181,6 +181,10 @@ export function stepGuide(t: Translate): Record<string, { title: string; meaning
       title: t("Notification channel"),
       meaning: t("A channel carries an alert out of the panel - to a chat, a pager or a mailbox - so it reaches somebody who is not looking at the dashboard. Optional: the alerts stand in the panel either way."),
     },
+    installation_keys: {
+      title: t("Where the keys live"),
+      meaning: t("The fleet CA, the secret store and the helper's signing key are either files in the state directory or rows in the database. Files mean the state directory is half of the backup pair and a database restored beside a different one is an installation that cannot talk to its own fleet."),
+    },
     fleet_ca: {
       title: t("Fleet CA"),
       meaning: t("Every agent certificate is signed by the fleet CA and is trusted by nothing else. A CA near its end needs the next one prepared a month ahead, so every agent renews under it before the old one runs out."),

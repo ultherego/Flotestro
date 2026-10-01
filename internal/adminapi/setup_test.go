@@ -129,3 +129,19 @@ func TestAPanelWithNoAdvertisedAddressSettingIsNotSettledOnOne(t *testing.T) {
 			"nor finished", counted.Done, counted.Total)
 	}
 }
+
+// An installation keeps the fleet CA, the secret store and the helper's signing
+// key either in files under the state directory or in rows of the database, and
+// every other step of the checklist looks the same either way. The difference is
+// the whole of what losing a machine costs, so the panel says which it is.
+func TestTheChecklistSaysWhereTheKeysOfTheInstallationLive(t *testing.T) {
+	server := &Server{}
+	unknown := server.installationKeysStep()
+	if unknown.State != setupOptional {
+		t.Errorf("a panel without the guard reports %q, and it does not know: %s",
+			unknown.State, unknown.Detail)
+	}
+	if !strings.Contains(unknown.Detail, "unknown") {
+		t.Errorf("the detail does not say the answer is unknown: %q", unknown.Detail)
+	}
+}
