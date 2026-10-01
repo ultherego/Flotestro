@@ -65,8 +65,23 @@ echo 'deb [signed-by=/etc/apt/keyrings/flotestro.asc] https://ultherego.github.i
 sudo apt update && sudo apt install flotestro-agent
 ```
 
-`dnf` and `pacman` are on the [repository's own pages](https://ultherego.github.io/Flotestro/packages/),
-which also list what it carries, and in the
+For `dnf`, the same key and one file under `/etc/yum.repos.d`:
+
+```bash
+sudo rpm --import https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc
+printf '%s\n' '[flotestro]' 'name=Flotestro' \
+    'baseurl=https://ultherego.github.io/Flotestro/packages/rpm/stable' \
+    'enabled=1' 'gpgcheck=1' 'repo_gpgcheck=1' \
+    'gpgkey=https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc' |
+    sudo tee /etc/yum.repos.d/flotestro.repo >/dev/null
+sudo dnf install flotestro-agent
+```
+
+For `pacman`, a server line in `/etc/pacman.conf`:
+`Server = https://ultherego.github.io/Flotestro/packages/arch/stable`.
+
+What the repository carries is on [its own pages](https://ultherego.github.io/Flotestro/packages/),
+and the rest is in the
 [documentation](https://ultherego.github.io/Flotestro/docs/installation.html).
 The panel writes the enrollment command for each host under **Add host**, and
 [`ansible`](ansible) does the same for a hundred hosts at once.

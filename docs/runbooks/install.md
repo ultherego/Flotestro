@@ -125,8 +125,22 @@ being run:
 | start | `systemctl enable --now flotestro-agent` |
 
 The token is one-time and short-lived. Pass it by file or on standard input, never in the
-environment: `sudo -u flotestro-agent flotestro-agentctl enroll --token-file /run/token`,
-and delete the file afterwards.
+environment. The command runs as `flotestro-agent`, so a file written by root is a file it
+cannot open - give it to that account and nobody else:
+
+```bash
+printf '%s' "$TOKEN" | sudo install -m 0400 -o flotestro-agent -g flotestro-agent /dev/stdin /run/token
+sudo -u flotestro-agent flotestro-agentctl enroll --token-file /run/token
+sudo rm -f /run/token
+```
+
+One command writes the file, because a file created first and written afterwards is a file
+the writer no longer owns: 0400 to `flotestro-agent` leaves the operator unable to fill it.
+
+Standard input avoids the file altogether, which is the shorter way when the token is
+already in the shell: `printf '%s' "$TOKEN" | sudo -u flotestro-agent flotestro-agentctl
+enroll`. Either way the token is gone afterwards - a one-time secret left in a file is a
+one-time secret only by courtesy.
 
 A host whose identity already exists keeps it: a package upgrade does not re-enroll, which
 is why installing onto a host that carried a previous installation needs its identity
