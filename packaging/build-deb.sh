@@ -64,8 +64,16 @@ agent)
                 flotestro-firewall-restore.service; do
         install -m 0644 "$here/systemd/$unit" "$root/lib/systemd/system/$unit"
     done
-    install -m 0640 "$here/agent.yaml" "$root/etc/flotestro/agent.yaml"
     install -d -m 0755 "$root/usr/share/flotestro"
+    # agent.yaml travels as a template and not as a conffile: the panel composes
+    # this file per host and an operator writes it before the package is
+    # installed, which is the order the documentation gives. dpkg then sees a
+    # file "created by you" at a path the package owns and asks what to do with
+    # it - and an automated run, having nobody to answer, leaves the package
+    # unpacked and unconfigured, so the service account is never created. The
+    # maintainer script writes it only when it is absent, which is what
+    # helper.yaml beside it has always done.
+    install -m 0644 "$here/agent.yaml" "$root/usr/share/flotestro/agent.yaml"
     install -m 0644 "$here/helper.yaml" "$root/usr/share/flotestro/helper.yaml"
     install -m 0644 "$here/helper-legacy.yaml" "$root/usr/share/flotestro/helper-legacy.yaml"
     # The service account is declared for systemd-sysusers, the same way as

@@ -50,6 +50,14 @@ configure)
             echo "flotestro-agent: this host ran without /etc/flotestro/helper.yaml, so the upgrade wrote capabilities.mode: prefer into it - the mode it was already in. Move it to enforce when its agent forwards the panel's capability; the panel lists the hosts still on prefer" >&2
         fi
     fi
+    # The panel composes agent.yaml per host and an operator puts it in place,
+    # so the package never replaces one that is already there - it only supplies
+    # a starting point for a host that has none. The same rule as helper.yaml
+    # above, and the reason neither is a conffile.
+    if [ ! -f /etc/flotestro/agent.yaml ] && [ -f /usr/share/flotestro/agent.yaml ]; then
+        install -m 0640 -o root -g root /usr/share/flotestro/agent.yaml \
+            /etc/flotestro/agent.yaml
+    fi
     # The configuration is read by the agent itself, so it must be able to
     # open it - but nobody besides it and root may replace it: the right to
     # write here is the right to redirect the host to somebody else's panel.
