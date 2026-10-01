@@ -66,6 +66,13 @@ var checks = []check{
 		run: airgapImagesAreSigned,
 	},
 	{
+		name: "checklist-mirror-is-complete",
+		why: "the first-run checklist is built on the server and mirrored by hand in the integration " +
+			"suite, which is behind a build tag: a step added on one side is caught only when the " +
+			"gate reaches the integration stage, an hour in",
+		run: checklistMirrorIsComplete,
+	},
+	{
 		name: "table-headers-declare-scope",
 		why: "a column header that does not say scope stops being a header to a screen reader as " +
 			"soon as the browser takes its table for a layout, which it does whenever the table " +

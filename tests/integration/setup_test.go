@@ -49,7 +49,7 @@ type connectionTestView struct {
 var setupStepKeys = []string{
 	"identity_provider", "group_mapping", "bootstrap_token", "directory",
 	"advertised_address", "hosts", "relay", "policy", "alert_rule",
-	"notification_channel", "fleet_ca",
+	"notification_channel", "fleet_ca", "installation_keys",
 }
 
 // TestSetupChecklistNamesEveryStep checks that the checklist lists the steps

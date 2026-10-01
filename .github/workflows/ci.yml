@@ -748,6 +748,7 @@ jobs:
             healthcheck-form \
             airgap-verify-stops \
             table-headers-declare-scope \
+            checklist-mirror-is-complete \
             env-example-reaches-the-deployment
 
       - name: Findings that are open work
