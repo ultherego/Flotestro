@@ -23,6 +23,10 @@ const CertificateRegistryPath = "/var/lib/flotestro-helper/certificates.json"
 // as it does the registry of files.
 var certificateRegistryPath = CertificateRegistryPath
 
+// legacyCertificateRegistryPath is the name this registry carried before the
+// helper was translated to English.
+var legacyCertificateRegistryPath = "/var/lib/flotestro-helper/certyfikaty.json"
+
 // certificateFactNames translates the protocol enumeration into fact names.
 var certificateFactNames = map[helperv1.CertificateRequest_Fact]string{
 	helperv1.CertificateRequest_FACT_KEY_METADATA:      certificates.FactKeyMetadata,
@@ -480,6 +484,7 @@ func (s *Server) writeCertificateRegistry(targets []certificates.Target) {
 		return
 	}
 	_ = os.Rename(temporary, certificateRegistryPath)
+	retireLegacyRegistry(legacyCertificateRegistryPath, certificateRegistryPath)
 }
 
 // trustStore reads the anchors the host has now.

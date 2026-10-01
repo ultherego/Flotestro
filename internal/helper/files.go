@@ -32,6 +32,14 @@ const FileRegistryPath = "/var/lib/flotestro-helper/files.json"
 // exists and is writable, which is the lab and not a build runner.
 var fileRegistryPath = FileRegistryPath
 
+// legacyFileRegistryPath is the name this registry carried before the helper was
+// translated to English. A rename leaves the old file on every host that ran the
+// earlier build, and it is removed the first time the new one is written: see
+// retireLegacyRegistry for why that matters.
+// A var for the same reason fileRegistryPath is one: the tests point both at a
+// directory of their own.
+var legacyFileRegistryPath = "/var/lib/flotestro-helper/pliki.json"
+
 // ErrorValidatorUnavailable means a content check the order relies on that
 // this host cannot run: the tool is not installed.
 const ErrorValidatorUnavailable = "validator_unavailable"
@@ -778,6 +786,20 @@ func (s *Server) forgetManagedFile(path string) error {
 // writeFileRegistry replaces the registry as a whole. The staging name is of
 // this write alone, and both the file and its directory are flushed: a
 // registry that half survives a power cut is worse than none.
+// retireLegacyRegistry removes the registry's former name once the current one
+// is written. Nothing reads the old file, so this is not a migration of content -
+// the harm is in it existing: an operator reading the state directory takes it
+// for something the product writes, and a later change that walked the directory
+// by pattern would find two registries and no rule for which wins. The product's
+// files carry English names, and a host upgraded from an older build should end
+// up looking like one installed today.
+func retireLegacyRegistry(legacy, current string) {
+	if legacy == current {
+		return
+	}
+	_ = os.Remove(legacy)
+}
+
 func (s *Server) writeFileRegistry(entries []registryEntry) error {
 	data, err := json.Marshal(entries)
 	if err != nil {
@@ -811,6 +833,7 @@ func (s *Server) writeFileRegistry(entries []registryEntry) error {
 	if err := os.Rename(temporary, fileRegistryPath); err != nil {
 		return err
 	}
+	retireLegacyRegistry(legacyFileRegistryPath, fileRegistryPath)
 	return syncDirectory(directory)
 }
 
