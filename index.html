@@ -429,9 +429,13 @@ sudo pacman -Sy &amp;&amp; sudo pacman -S --noconfirm flotestro-agent</code></pr
       the one-time token and the start. The shape of the last two steps:</p>
 
     <pre><code>sudo tee /var/lib/flotestro-agent/ca.pem &gt;/dev/null   # the fleet CA, fingerprint shown in the panel
-sudo sed -i -e 's|^  enrollment_url: .*|  enrollment_url: "https://panel.example.org:8444"|' \
-            -e 's|^  gateway_urls: .*|  gateway_urls: ["https://panel.example.org:8443"]|' /etc/flotestro/agent.yaml
-echo "$TOKEN" | sudo -u flotestro-agent flotestro-agentctl enroll   # one-time, from the panel
+# /etc/flotestro/agent.yaml is composed by the panel and carries the two
+# addresses; a host that was given the file needs nothing edited here:
+#   connection:
+#     enrollment_url: "https://panel.example.org:8444"
+#     gateway_urls:
+#       - "https://panel.example.org:8443"
+printf '%s' "$TOKEN" | sudo -u flotestro-agent flotestro-agentctl enroll   # one-time, from the panel
 sudo systemctl enable --now flotestro-agent
 flotestro-agentctl diagnose                                        # explains a host that does not show up</code></pre>
 
