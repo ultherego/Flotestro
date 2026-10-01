@@ -4,6 +4,41 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [semantic versioning](https://semver.org/). Dates are the
 day the tag was published.
 
+## [0.61.2] - 2026-10-01
+
+A second patch from the same run: what installing the product the documented way
+found after 0.61.1 went out, and one defect of the panel that the browser suite
+had been reporting honestly while I took it for a defect of the test.
+
+### Fixed
+
+- Every table in the panel says which column a cell belongs to. The headers were
+  bare `<th>`, which is enough for a reader who can see the table and not enough
+  for one who cannot: a browser decides for itself whether a table carries data or
+  only arranges a layout, and a short table whose headers declare nothing is taken
+  for layout - its headers then stop being headers in the accessibility tree, and
+  a screen reader reads each cell without saying which column it is in. Measured
+  on a page with two rows: five headers in the markup, zero column headers exposed
+  to assistive technology; with `scope` on the same five, all five came back.
+- The quickstart on the site no longer shows an edit that the configuration the
+  panel composes cannot take. It told an operator to point the agent at the panel
+  with two `sed` expressions; the second matched nothing, because the panel writes
+  `gateway_urls` as a list under its own key, so the command changed nothing, said
+  nothing and exited zero. A host configured that way kept whatever address it
+  had. The two settings are shown as the file carries them instead.
+- `packaging/sign-repo.sh` asks for `dpkg-scanpackages` by name, the way it
+  already asked for `gpg`, `rpmsign`, `createrepo_c` and `repo-add`. Without it
+  the apt half - the half that runs first - stopped with a message from the shell,
+  after the signing key had been made and the pool filled.
+- The gate recomputes a laboratory verdict and its own arithmetic could be made to
+  lie: a negative count of failures passed the test for failures, and the number
+  of tests discovered was only compared with zero. Every count must now be a
+  quantity, and the three outcomes have to add up to what was discovered.
+- The fuzz check in CI can tell its two failures apart again. `set -uo pipefail`
+  does not take `-e` off, so the step ended at the first target that exited
+  non-zero - before the verdict that distinguishes an input the fuzzer found from
+  a run that did not fit in its budget, and without printing what the target said.
+
 ## [0.61.1] - 2026-10-01
 
 A patch cut from the development line for four defects found by installing the
@@ -186,24 +221,6 @@ product the way the documentation describes it, on hosts built from nothing.
 
 ### Fixed
 
-- The quickstart on the site no longer shows an edit that the configuration the
-  panel composes cannot take. It told an operator to point the agent at the panel
-  with two `sed` expressions; the second matched nothing, because the panel writes
-  `gateway_urls` as a list under its own key, so the command changed nothing, said
-  nothing and exited zero. A host configured that way kept whatever address it
-  had. The two settings are shown as the file carries them instead.
-- `packaging/sign-repo.sh` asks for `dpkg-scanpackages` by name, the way it
-  already asked for `gpg`, `rpmsign`, `createrepo_c` and `repo-add`. Without it
-  the apt half - the half that runs first - stopped with a message from the shell,
-  after the signing key had been made and the pool filled.
-- The gate recomputes a laboratory verdict and its own arithmetic could be made to
-  lie: a negative count of failures passed the test for failures, and the number
-  of tests discovered was only compared with zero. Every count must now be a
-  quantity, and the three outcomes have to add up to what was discovered.
-- The fuzz check in CI can tell its two failures apart again. `set -uo pipefail`
-  does not take `-e` off, so the step ended at the first target that exited
-  non-zero - before the verdict that distinguishes an input the fuzzer found from
-  a run that did not fit in its budget, and without printing what the target said.
 - An instance whose database has become a standby leaves the rotation. The start
   refused a standby outright, but a failover under a running panel left the
   instance alive and ready while every change it was handed failed on its own,
