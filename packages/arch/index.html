@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flotestro for pacman</title>
+<meta name="description" content="The Arch Linux tree of the signed Flotestro package repository: the lines that add it and the packages it carries.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;600&display=swap">
+<link rel="stylesheet" href="../../style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header__inner">
+    <a class="brand" href="https://ultherego.github.io/Flotestro/">Flotestro</a>
+    <nav class="site-nav">
+      <a href="https://ultherego.github.io/Flotestro/">Overview</a>
+      <a href="https://ultherego.github.io/Flotestro/docs/">Documentation</a>
+      <a href="https://ultherego.github.io/Flotestro/packages/" aria-current="page">Packages</a>
+      <a href="https://github.com/ultherego/Flotestro">Source</a>
+    </nav>
+  </div>
+</header>
+
+<div class="layout layout--plain">
+  <main class="content">
+    <h1>Flotestro for pacman</h1>
+
+    <p class="lede">The pacman tree of the
+    <a href="../">Flotestro package repository</a>, for Arch Linux. There is no
+    directory listing to browse; this page is what the tree holds and how to add
+    it.</p>
+
+    <h2>Adding it</h2>
+
+    <p class="filename">On the host, as an administrator</p>
+<pre><code>curl -fsS https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc | sudo pacman-key --add -
+sudo pacman-key --lsign-key "$(curl -fsS https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc | gpg --show-keys --with-colons | awk -F: '/^fpr:/ {print $10; exit}')"
+printf '%s\n' '[flotestro]' 'SigLevel = Required DatabaseRequired' 'Server = https://ultherego.github.io/Flotestro/packages/arch/stable' | sudo tee -a /etc/pacman.conf &gt;/dev/null
+sudo pacman -Sy
+sudo pacman -S --noconfirm flotestro-agent</code></pre>
+
+    <p>The key is signed locally after it is added, or pacman holds it without
+    trusting it and refuses every package. <code>SigLevel = Required
+    DatabaseRequired</code> is the point of the exercise: the package and the
+    database must both carry a signature this host accepts. Put another channel in
+    the <code>Server</code> line in place of <code>stable</code> to follow that one
+    instead.</p>
+
+    <h2>What it carries</h2>
+    <p>One package, <code>flotestro-agent</code>, carrying the three binaries a
+    managed host runs: the agent, the root helper
+    <code>flotestro-agent-helper</code> it asks for the operations that need
+    privileges, and <code>flotestro-agentctl</code>, which enrolls the host and
+    answers questions about it locally. The agent is a native package because it
+    manages the host itself - its PID 1, its devices, its package database.</p>
+
+    <p>The panel and the relay are not here. They are published as OCI images,
+    <code>ghcr.io/ultherego/flotestro-control-plane</code> and
+    <code>ghcr.io/ultherego/flotestro-relay</code>, and deployed with Compose;
+    <a href="https://ultherego.github.io/Flotestro/docs/installation.html">Installation</a> is the procedure.</p>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Package</th><th>Versions in the tree</th></tr></thead>
+      <tbody>
+        <tr><td><code>flotestro-agent</code></td><td>0.60.4, 0.60.5, 0.61.0</td></tr>
+        <tr><td><code>flotestro-relay</code></td><td>0.60.4, 0.60.5, 0.61.0</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p>Versions of <code>flotestro-control-plane</code> and
+    <code>flotestro-relay</code> published before 0.62.0 are still in this tree.
+    A published file is never withdrawn, so a host that has not moved yet still
+    finds what it is running; they are history and not a way to install either.
+    Both are deployed from their images now.</p>
+
+    <h2>The layout</h2>
+
+    <p>One database per channel and architecture. pacman reads a single
+    <code>&lt;Server&gt;/flotestro.db</code>, and an entry for a foreign
+    architecture in it is an entry every host refuses - so <code>x86_64</code>,
+    the architecture Arch Linux itself has, stands at
+    <code>arch/&lt;channel&gt;</code> where the command above points, and any
+    other one gets a directory of its own beside it.</p>
+
+    <h2>What proves where a package came from</h2>
+
+    <p>The package file itself, with a detached <code>.sig</code> beside it, and
+    the <a href="stable/flotestro.db"><code>flotestro.db</code></a> with one of its own.
+    <code>gpg</code> against pacman's keyring names the key that made the
+    signature, so an agent upgrade on a host of this family may demand a
+    particular one.</p>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="site-footer__inner">
+    <p>Every index here is signed with <a href="https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc">flotestro-repo.asc</a>.</p>
+    <p><a href="https://github.com/ultherego/Flotestro">github.com/ultherego/Flotestro</a></p>
+  </div>
+</footer>
+
+</body>
+</html>

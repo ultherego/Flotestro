@@ -1,8 +1,110 @@
 <!doctype html>
+<html lang="en">
+<head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Flotestro packages</title>
-<h1>Flotestro packages</h1>
-<p>The signed apt, dnf and pacman repository the Flotestro fleet installs from.
-The panel writes the commands for a host under <em>Add host</em>; the key that
-signs every index is <a href="flotestro-repo.asc">flotestro-repo.asc</a>.</p>
-<p><a href="https://github.com/ultherego/Flotestro">github.com/ultherego/Flotestro</a></p>
+<meta name="description" content="The signed apt, dnf and pacman repository the hosts of a Flotestro fleet install their agent from.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;600&display=swap">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header__inner">
+    <a class="brand" href="https://ultherego.github.io/Flotestro/">Flotestro</a>
+    <nav class="site-nav">
+      <a href="https://ultherego.github.io/Flotestro/">Overview</a>
+      <a href="https://ultherego.github.io/Flotestro/docs/">Documentation</a>
+      <a href="https://ultherego.github.io/Flotestro/packages/" aria-current="page">Packages</a>
+      <a href="https://github.com/ultherego/Flotestro">Source</a>
+    </nav>
+  </div>
+</header>
+
+<div class="layout layout--plain">
+  <main class="content">
+    <h1>Flotestro packages</h1>
+
+    <p class="lede">The signed repository the hosts of a Flotestro fleet install
+    their agent from. Three trees, one per package manager, carrying the same
+    package and signed with the same key.</p>
+
+    <ul class="cards">
+      <li class="card">
+        <p class="card__title"><a href="deb/">apt</a></p>
+        <p>Debian, Ubuntu and their derivatives. A flat repository under
+        <code>deb/</code>, one suite per channel.</p>
+      </li>
+      <li class="card">
+        <p class="card__title"><a href="rpm/">dnf</a></p>
+        <p>Fedora, RHEL and what follows them. One <code>createrepo_c</code> tree
+        per channel under <code>rpm/</code>.</p>
+      </li>
+      <li class="card">
+        <p class="card__title"><a href="arch/">pacman</a></p>
+        <p>Arch Linux. One <code>flotestro.db</code> per channel and architecture
+        under <code>arch/</code>.</p>
+      </li>
+    </ul>
+
+    <h2>What it carries</h2>
+    <p>One package, <code>flotestro-agent</code>, carrying the three binaries a
+    managed host runs: the agent, the root helper
+    <code>flotestro-agent-helper</code> it asks for the operations that need
+    privileges, and <code>flotestro-agentctl</code>, which enrolls the host and
+    answers questions about it locally. The agent is a native package because it
+    manages the host itself - its PID 1, its devices, its package database.</p>
+
+    <p>The panel and the relay are not here. They are published as OCI images,
+    <code>ghcr.io/ultherego/flotestro-control-plane</code> and
+    <code>ghcr.io/ultherego/flotestro-relay</code>, and deployed with Compose;
+    <a href="https://ultherego.github.io/Flotestro/docs/installation.html">Installation</a> is the procedure.</p>
+
+    <h2>The key</h2>
+
+    <p>Every index in every tree is signed, and the public half of the key that
+    signs them is <a href="flotestro-repo.asc"><code>flotestro-repo.asc</code></a>.
+    A host imports it before it installs anything. HTTPS says who served a file
+    and the signature says who built it, and for a package that will run as root
+    on every machine in a fleet the second question is the one that matters.</p>
+
+    <p>The panel writes the whole command for a host under <strong>Add host</strong>,
+    with the channel and the address of this repository already in it. The three
+    pages above are the same lines, for reading and for a host the panel has not
+    been told about yet.</p>
+
+    <h2>Channels</h2>
+
+    <p>A channel is a suite for apt, a directory for dnf and pacman, and a word in
+    the command a host is given. <code>stable</code> is a finished release. A
+    pre-release goes to a channel of its own that a host asking for
+    <code>stable</code> never reads, and it is not moved into <code>stable</code>
+    afterwards: the version that was tested is the version that is published.</p>
+
+    <p>A published file is never replaced. Each release adds to the trees and every
+    index is composed again over all of them, so a host on an older version keeps
+    finding the version it runs and a rollback has something to roll back to.</p>
+
+    <h2>What is beside the repository</h2>
+
+    <p><code>releases/&lt;version&gt;/</code> holds the manifests of one release -
+    <code>SHA256SUMS</code>, its signature, and the provenance statement naming
+    the run that built it. Those cover the release as it was built; the
+    <code>.rpm</code> files in the tree carry a signature of their own that the
+    loose files do not, and <code>rpm --checksig</code> is what answers for
+    them.</p>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="site-footer__inner">
+    <p>Every index here is signed with <a href="https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc">flotestro-repo.asc</a>.</p>
+    <p><a href="https://github.com/ultherego/Flotestro">github.com/ultherego/Flotestro</a></p>
+  </div>
+</footer>
+
+</body>
+</html>

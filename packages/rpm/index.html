@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flotestro for dnf</title>
+<meta name="description" content="The Fedora and RHEL tree of the signed Flotestro package repository: the lines that add it and the packages it carries.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;600&display=swap">
+<link rel="stylesheet" href="../../style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header__inner">
+    <a class="brand" href="https://ultherego.github.io/Flotestro/">Flotestro</a>
+    <nav class="site-nav">
+      <a href="https://ultherego.github.io/Flotestro/">Overview</a>
+      <a href="https://ultherego.github.io/Flotestro/docs/">Documentation</a>
+      <a href="https://ultherego.github.io/Flotestro/packages/" aria-current="page">Packages</a>
+      <a href="https://github.com/ultherego/Flotestro">Source</a>
+    </nav>
+  </div>
+</header>
+
+<div class="layout layout--plain">
+  <main class="content">
+    <h1>Flotestro for dnf</h1>
+
+    <p class="lede">The <code>.rpm</code> tree of the
+    <a href="../">Flotestro package repository</a>, for Fedora, RHEL and what
+    follows them. There is no directory listing to browse; this page is what the
+    tree holds and how to add it.</p>
+
+    <h2>Adding it</h2>
+
+    <p class="filename">On the host, as an administrator</p>
+<pre><code>sudo rpm --import https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc
+printf '%s\n' '[flotestro]' 'name=Flotestro' 'baseurl=https://ultherego.github.io/Flotestro/packages/rpm/stable' \
+  'enabled=1' 'gpgcheck=1' 'repo_gpgcheck=1' 'gpgkey=https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc' \
+  | sudo tee /etc/yum.repos.d/flotestro.repo &gt;/dev/null
+sudo dnf install -y flotestro-agent</code></pre>
+
+    <p><code>gpgcheck</code> is the signature on the package and
+    <code>repo_gpgcheck</code> the one on the metadata; both are on. The first
+    protects the file and the second the list of files, and a repository checked
+    only the first way could still offer a different version of a package that
+    verifies. Put another channel in the <code>baseurl</code> in place of
+    <code>stable</code> to follow that one instead.</p>
+
+    <h2>What it carries</h2>
+    <p>One package, <code>flotestro-agent</code>, carrying the three binaries a
+    managed host runs: the agent, the root helper
+    <code>flotestro-agent-helper</code> it asks for the operations that need
+    privileges, and <code>flotestro-agentctl</code>, which enrolls the host and
+    answers questions about it locally. The agent is a native package because it
+    manages the host itself - its PID 1, its devices, its package database.</p>
+
+    <p>The panel and the relay are not here. They are published as OCI images,
+    <code>ghcr.io/ultherego/flotestro-control-plane</code> and
+    <code>ghcr.io/ultherego/flotestro-relay</code>, and deployed with Compose;
+    <a href="https://ultherego.github.io/Flotestro/docs/installation.html">Installation</a> is the procedure.</p>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Package</th><th>Versions in the tree</th></tr></thead>
+      <tbody>
+        <tr><td><code>flotestro-agent</code></td><td>0.60.4, 0.60.5, 0.61.0</td></tr>
+        <tr><td><code>flotestro-control-plane</code></td><td>0.60.4, 0.60.5, 0.61.0</td></tr>
+        <tr><td><code>flotestro-relay</code></td><td>0.60.4, 0.60.5, 0.61.0</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p>Versions of <code>flotestro-control-plane</code> and
+    <code>flotestro-relay</code> published before 0.62.0 are still in this tree.
+    A published file is never withdrawn, so a host that has not moved yet still
+    finds what it is running; they are history and not a way to install either.
+    Both are deployed from their images now.</p>
+
+    <h2>The layout</h2>
+
+    <p>One <code>createrepo_c</code> tree per channel,
+    <code>rpm/&lt;channel&gt;</code>, with the metadata under
+    <code>repodata/</code> and
+    <a href="stable/repodata/repomd.xml"><code>repomd.xml</code></a> signed beside
+    itself as <code>repomd.xml.asc</code>. The metadata is composed over the whole
+    directory, so the index offers every version the channel has carried and dnf
+    takes the highest.</p>
+
+    <h2>What proves where a package came from</h2>
+
+    <p>The package file itself. The signature is in its header, written by
+    <code>rpmsign</code> with the release key, and <code>rpm --checksig</code>
+    names the key that made it. An agent upgrade on a host of this family may
+    therefore demand a particular signing key, and a package signed by anything
+    else is refused before it is installed.</p>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="site-footer__inner">
+    <p>Every index here is signed with <a href="https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc">flotestro-repo.asc</a>.</p>
+    <p><a href="https://github.com/ultherego/Flotestro">github.com/ultherego/Flotestro</a></p>
+  </div>
+</footer>
+
+</body>
+</html>

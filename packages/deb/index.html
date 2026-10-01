@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flotestro for apt</title>
+<meta name="description" content="The Debian and Ubuntu tree of the signed Flotestro package repository: the lines that add it and the packages it carries.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;600&display=swap">
+<link rel="stylesheet" href="../../style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header__inner">
+    <a class="brand" href="https://ultherego.github.io/Flotestro/">Flotestro</a>
+    <nav class="site-nav">
+      <a href="https://ultherego.github.io/Flotestro/">Overview</a>
+      <a href="https://ultherego.github.io/Flotestro/docs/">Documentation</a>
+      <a href="https://ultherego.github.io/Flotestro/packages/" aria-current="page">Packages</a>
+      <a href="https://github.com/ultherego/Flotestro">Source</a>
+    </nav>
+  </div>
+</header>
+
+<div class="layout layout--plain">
+  <main class="content">
+    <h1>Flotestro for apt</h1>
+
+    <p class="lede">The <code>.deb</code> tree of the
+    <a href="../">Flotestro package repository</a>, for Debian, Ubuntu and their
+    derivatives. There is no directory listing to browse; this page is what the
+    tree holds and how to add it.</p>
+
+    <h2>Adding it</h2>
+
+    <p class="filename">On the host, as an administrator</p>
+<pre><code>sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsS https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc | sudo tee /etc/apt/keyrings/flotestro.asc &gt;/dev/null
+echo 'deb [signed-by=/etc/apt/keyrings/flotestro.asc] https://ultherego.github.io/Flotestro/packages/deb stable main' | sudo tee /etc/apt/sources.list.d/flotestro.list &gt;/dev/null
+sudo apt-get update
+sudo apt-get install -y flotestro-agent</code></pre>
+
+    <p><code>signed-by</code> binds the key to this one source, so the key that
+    signs Flotestro cannot vouch for anything else on the host. Put another
+    channel in place of <code>stable</code> to follow that one instead.</p>
+
+    <h2>What it carries</h2>
+    <p>One package, <code>flotestro-agent</code>, carrying the three binaries a
+    managed host runs: the agent, the root helper
+    <code>flotestro-agent-helper</code> it asks for the operations that need
+    privileges, and <code>flotestro-agentctl</code>, which enrolls the host and
+    answers questions about it locally. The agent is a native package because it
+    manages the host itself - its PID 1, its devices, its package database.</p>
+
+    <p>The panel and the relay are not here. They are published as OCI images,
+    <code>ghcr.io/ultherego/flotestro-control-plane</code> and
+    <code>ghcr.io/ultherego/flotestro-relay</code>, and deployed with Compose;
+    <a href="https://ultherego.github.io/Flotestro/docs/installation.html">Installation</a> is the procedure.</p>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Package</th><th>Versions in the tree</th></tr></thead>
+      <tbody>
+        <tr><td><code>flotestro-agent</code></td><td>0.60.4, 0.60.5, 0.61.0</td></tr>
+        <tr><td><code>flotestro-control-plane</code></td><td>0.60.4, 0.60.5, 0.61.0</td></tr>
+        <tr><td><code>flotestro-relay</code></td><td>0.60.4, 0.60.5, 0.61.0</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p>Versions of <code>flotestro-control-plane</code> and
+    <code>flotestro-relay</code> published before 0.62.0 are still in this tree.
+    A published file is never withdrawn, so a host that has not moved yet still
+    finds what it is running; they are history and not a way to install either.
+    Both are deployed from their images now.</p>
+
+    <h2>The layout</h2>
+
+    <p>A flat repository with one component: the fleet has one package source,
+    not a distribution tree.
+    <code>dists/&lt;channel&gt;/main/binary-amd64</code> and
+    <code>binary-arm64</code> hold the index and
+    <code>pool/&lt;channel&gt;</code> the files. The index lists every version the
+    channel has carried rather than the newest alone, so an older one can still be
+    asked for by name; apt takes the highest by itself.</p>
+
+    <h2>What proves where a package came from</h2>
+
+    <p>The repository index, not the file. Debian's trust model does not sign
+    individual packages - <code>dpkg-sig</code> and <code>debsig-verify</code>
+    exist, no distribution enables them and <code>apt</code> never consults them -
+    so a signature on the <code>.deb</code> would prove nothing to the host that
+    installs it. What binds the bytes here is a chain:
+    <a href="dists/stable/InRelease"><code>InRelease</code></a> is signed and
+    carries the checksum of <code>Packages</code>, and <code>Packages</code>
+    carries the checksum of every <code>.deb</code>.</p>
+
+    <p>So an agent upgrade planned for a host of this family names no signing key,
+    and a plan that names one is refused with
+    <code class="refusal">agent_package_signer_not_applicable</code> before it is
+    sent. What the host reports instead is what it can establish: the address the
+    file came from, the release file of that repository, and the key
+    <code>gpgv</code> accepted the signature of the index on.</p>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="site-footer__inner">
+    <p>Every index here is signed with <a href="https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc">flotestro-repo.asc</a>.</p>
+    <p><a href="https://github.com/ultherego/Flotestro">github.com/ultherego/Flotestro</a></p>
+  </div>
+</footer>
+
+</body>
+</html>
