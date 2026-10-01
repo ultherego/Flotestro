@@ -179,6 +179,16 @@ jobs:
       - name: Every target
         run: |
           set -uo pipefail
+          # -e comes from the shell this runs in ("bash -e {0}") and the line
+          # above does not take it off. With it, the capture below ends the step
+          # at the first target that exits non-zero, before the verdict under it
+          # can tell an input the fuzzer found from a runner that ran out of
+          # time - and it ends it without printing what the target said, because
+          # the output is still in the variable. That is exactly the random red
+          # this step was written to avoid, and it is measured: one run died in
+          # the group of a target that passes in seconds elsewhere, with no
+          # annotation and no output at all. So -e goes off by name.
+          set +e
           failed=0
           # A here-document and not a pipe: a loop behind a pipe runs in a
           # subshell, and the verdict set inside it would never come back - the
