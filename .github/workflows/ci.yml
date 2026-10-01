@@ -747,6 +747,7 @@ jobs:
             site-languages \
             healthcheck-form \
             airgap-verify-stops \
+            table-headers-declare-scope \
             env-example-reaches-the-deployment
 
       - name: Findings that are open work

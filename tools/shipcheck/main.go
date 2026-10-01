@@ -66,6 +66,13 @@ var checks = []check{
 		run: airgapImagesAreSigned,
 	},
 	{
+		name: "table-headers-declare-scope",
+		why: "a column header that does not say scope stops being a header to a screen reader as " +
+			"soon as the browser takes its table for a layout, which it does whenever the table " +
+			"is short; the cells are then read without their column",
+		run: tableHeadersDeclareScope,
+	},
+	{
 		name: "env-example-reaches-the-deployment",
 		why: "a key offered in env.example has to reach the deployment; one that reaches nothing " +
 			"is a setting the operator makes and the product never reads",

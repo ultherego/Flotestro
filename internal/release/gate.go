@@ -172,7 +172,16 @@ var fullRunStages = []string{
 	// it. On 30.09 every host agreed it ran 0.62.0 while one of them ran a build
 	// from four days earlier, published under the same version: a deployment
 	// nobody verified is a suite judging code the gate was not given.
-	"agents", "fleet", "relay", "fixtures", "preflight", stageIntegration, "playwright",
+	"agents", "fleet", "relay",
+	// identity asks each level of the laboratory which commit it is, before
+	// anything is measured on it. Three failures in one day had the same shape:
+	// the suite talked to something that was not the commit being gated and
+	// every stage stayed green - a panel on the right port but from an older
+	// deployment, a database belonging to a second installation, a relay from
+	// another day that answered and was registered. A report without this stage
+	// is a report that never established what it tested.
+	"identity",
+	"fixtures", "preflight", stageIntegration, "playwright",
 }
 
 func (r GateReport) validate() error {
