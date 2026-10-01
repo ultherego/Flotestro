@@ -155,8 +155,8 @@ export function HostAccounts() {
           <Table>
             <thead>
               <tr>
-                <th>{t("Account")}</th><th className="hm-num">UID</th><th>{t("Source")}</th><th>{t("Access")}</th>
-                <th>{t("SSH keys")}</th><th>{t("Groups")}</th><th>{t("Expires")}</th><th>{t("Actions")}</th>
+                <th scope="col">{t("Account")}</th><th scope="col" className="hm-num">UID</th><th scope="col">{t("Source")}</th><th scope="col">{t("Access")}</th>
+                <th scope="col">{t("SSH keys")}</th><th scope="col">{t("Groups")}</th><th scope="col">{t("Expires")}</th><th scope="col">{t("Actions")}</th>
               </tr>
             </thead>
             <tbody>
@@ -399,7 +399,7 @@ export function KeysPanel({
         <Table>
           <thead>
             <tr>
-              <th>{t("Type")}</th><th>{t("Fingerprint")}</th><th>{t("Comment")}</th><th>{t("Key file")}</th><th>{t("Actions")}</th>
+              <th scope="col">{t("Type")}</th><th scope="col">{t("Fingerprint")}</th><th scope="col">{t("Comment")}</th><th scope="col">{t("Key file")}</th><th scope="col">{t("Actions")}</th>
             </tr>
           </thead>
           <tbody>

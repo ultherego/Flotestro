@@ -181,9 +181,9 @@ export function Profile({ theme, setTheme }: {
             <table>
               <thead>
                 <tr>
-                  <th>{t("Role")}</th><th>{t("Site")}</th><th>{t("Environment")}</th>
-                  <th>{t("Team")}</th><th>{t("Owners")}</th><th>{t("Tags")}</th>
-                  <th>{t("Valid until")}</th>
+                  <th scope="col">{t("Role")}</th><th scope="col">{t("Site")}</th><th scope="col">{t("Environment")}</th>
+                  <th scope="col">{t("Team")}</th><th scope="col">{t("Owners")}</th><th scope="col">{t("Tags")}</th>
+                  <th scope="col">{t("Valid until")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -221,7 +221,7 @@ export function Profile({ theme, setTheme }: {
           ) : (
             <table>
               <thead>
-                <tr><th>{t("Area")}</th><th>{t("Allowed")}</th></tr>
+                <tr><th scope="col">{t("Area")}</th><th scope="col">{t("Allowed")}</th></tr>
               </thead>
               <tbody>
                 {groupPermissions(me.permissions).map((group) => (
@@ -425,7 +425,7 @@ function OwnSessions({ query }: { query: { data?: Collection<OwnSession>; error:
   return (
     <table>
       <thead>
-        <tr><th>{t("Session")}</th><th>{t("Signed in")}</th><th>{t("Last seen")}</th><th>{t("Ends")}</th><th>{t("From")}</th></tr>
+        <tr><th scope="col">{t("Session")}</th><th scope="col">{t("Signed in")}</th><th scope="col">{t("Last seen")}</th><th scope="col">{t("Ends")}</th><th scope="col">{t("From")}</th></tr>
       </thead>
       <tbody>
         {query.data.items.map((session) => (
@@ -459,7 +459,7 @@ function OwnTokens({ query }: { query: { data?: Collection<ApiToken>; error: unk
   return (
     <table>
       <thead>
-        <tr><th>{t("Token")}</th><th>{t("Description")}</th><th>{t("Issued")}</th><th>{t("Last used")}</th><th>{t("Expires")}</th></tr>
+        <tr><th scope="col">{t("Token")}</th><th scope="col">{t("Description")}</th><th scope="col">{t("Issued")}</th><th scope="col">{t("Last used")}</th><th scope="col">{t("Expires")}</th></tr>
       </thead>
       <tbody>
         {query.data.items.map((token) => (

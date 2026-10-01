@@ -130,8 +130,8 @@ export function CertificateAuthority({ reportError }: { reportError: (error: Api
         <table>
           <thead>
             <tr>
-              <th>{t("State")}</th><th>{t("Serial")}</th><th>{t("Valid until")}</th>
-              <th className="num">{t("Certificates")}</th><th>{t("Notes")}</th><th /></tr>
+              <th scope="col">{t("State")}</th><th scope="col">{t("Serial")}</th><th scope="col">{t("Valid until")}</th>
+              <th scope="col" className="num">{t("Certificates")}</th><th scope="col">{t("Notes")}</th><th scope="col" /></tr>
           </thead>
           <tbody>
             {list.map((ca) => (

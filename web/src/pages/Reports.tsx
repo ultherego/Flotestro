@@ -477,11 +477,11 @@ function PatchStatusCard({ report, hosts, more, loading, error, ready, params }:
               <table data-testid="patch-hosts">
                 <thead>
                   <tr>
-                    <th>{t("Host")}</th><th>{t("Site")}</th><th>{t("Environment")}</th>
-                    <th className="num">{t("Pending")}</th><th className="num">{t("Security")}</th><th>{t("Reboot")}</th>
-                    <th>{t("Last upgrade")}</th>
-                    {report.campaigns_read && <th className="num">{t("Campaigns")}</th>}
-                    <th>{t("Agent")}</th><th>{t("Last seen")}</th>
+                    <th scope="col">{t("Host")}</th><th scope="col">{t("Site")}</th><th scope="col">{t("Environment")}</th>
+                    <th scope="col" className="num">{t("Pending")}</th><th scope="col" className="num">{t("Security")}</th><th scope="col">{t("Reboot")}</th>
+                    <th scope="col">{t("Last upgrade")}</th>
+                    {report.campaigns_read && <th scope="col" className="num">{t("Campaigns")}</th>}
+                    <th scope="col">{t("Agent")}</th><th scope="col">{t("Last seen")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -587,10 +587,10 @@ function CampaignsCard({ report, error, ready, params }: { report?: CampaignsRep
               <table data-testid="report-campaigns">
                 <thead>
                   <tr>
-                    <th>{t("Campaign")}</th><th>{t("Operation")}</th><th>{t("State")}</th>
-                    <th>{t("Requested by")}</th><th>{t("Approved by")}</th><th>{t("Finished")}</th><th>{t("Duration")}</th>
-                    <th className="num">{t("Targets")}</th><th className="num">{t("Succeeded")}</th><th className="num">{t("Failed")}</th>
-                    <th className="num">{t("Unknown")}</th><th className="num">{t("Skipped")}</th><th className="num">{t("Rate")}</th>
+                    <th scope="col">{t("Campaign")}</th><th scope="col">{t("Operation")}</th><th scope="col">{t("State")}</th>
+                    <th scope="col">{t("Requested by")}</th><th scope="col">{t("Approved by")}</th><th scope="col">{t("Finished")}</th><th scope="col">{t("Duration")}</th>
+                    <th scope="col" className="num">{t("Targets")}</th><th scope="col" className="num">{t("Succeeded")}</th><th scope="col" className="num">{t("Failed")}</th>
+                    <th scope="col" className="num">{t("Unknown")}</th><th scope="col" className="num">{t("Skipped")}</th><th scope="col" className="num">{t("Rate")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -698,10 +698,10 @@ function ComplianceCard({ report, error, ready, params }: { report?: ComplianceR
                   <table data-testid="report-policies">
                     <thead>
                       <tr>
-                        <th>{t("Policy")}</th><th className="num">{t("Version")}</th><th>{t("Mode")}</th>
-                        <th className="num">{t("Hosts")}</th><th className="num">{t("Compliant")}</th><th className="num">{t("Drift")}</th>
-                        <th className="num">{t("Error")}</th><th className="num">{t("Not applicable")}</th><th className="num">{t("Unknown")}</th>
-                        <th>{t("Hosts in drift")}</th>
+                        <th scope="col">{t("Policy")}</th><th scope="col" className="num">{t("Version")}</th><th scope="col">{t("Mode")}</th>
+                        <th scope="col" className="num">{t("Hosts")}</th><th scope="col" className="num">{t("Compliant")}</th><th scope="col" className="num">{t("Drift")}</th>
+                        <th scope="col" className="num">{t("Error")}</th><th scope="col" className="num">{t("Not applicable")}</th><th scope="col" className="num">{t("Unknown")}</th>
+                        <th scope="col">{t("Hosts in drift")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -733,7 +733,7 @@ function ComplianceCard({ report, error, ready, params }: { report?: ComplianceR
                     <h3 className="card-title">{t("Hosts in drift")}</h3>
                     <table data-testid="report-drift-hosts">
                       <thead>
-                        <tr><th>{t("Host")}</th><th>{t("Site")}</th><th>{t("Environment")}</th><th className="num">{t("Policies")}</th><th className="num">{t("Rules")}</th></tr>
+                        <tr><th scope="col">{t("Host")}</th><th scope="col">{t("Site")}</th><th scope="col">{t("Environment")}</th><th scope="col" className="num">{t("Policies")}</th><th scope="col" className="num">{t("Rules")}</th></tr>
                       </thead>
                       <tbody>
                         {policies.drift_hosts.map((host) => (
@@ -776,8 +776,8 @@ function ComplianceCard({ report, error, ready, params }: { report?: ComplianceR
                 <table data-testid="report-security">
                   <thead>
                     <tr>
-                      <th>{t("Check")}</th><th>{t("Severity")}</th><th className="num">{t("Failed")}</th>
-                      <th className="num">{t("Passed")}</th><th className="num">{t("Unknown")}</th><th className="num">{t("Not applicable")}</th>
+                      <th scope="col">{t("Check")}</th><th scope="col">{t("Severity")}</th><th scope="col" className="num">{t("Failed")}</th>
+                      <th scope="col" className="num">{t("Passed")}</th><th scope="col" className="num">{t("Unknown")}</th><th scope="col" className="num">{t("Not applicable")}</th>
                     </tr>
                   </thead>
                   <tbody>

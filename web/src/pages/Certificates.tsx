@@ -325,7 +325,7 @@ function Trust({ leaves }: { leaves: Item[] }) {
       ) : (
         <table>
           <thead>
-            <tr><th>{t("Authority")}</th><th>{t("Hosts")}</th><th className="num">{t("Leaves issued by it")}</th><th>{t("Valid until")}</th><th>{t("Fingerprint")}</th><th>{t("Stage")}</th></tr>
+            <tr><th scope="col">{t("Authority")}</th><th scope="col">{t("Hosts")}</th><th scope="col" className="num">{t("Leaves issued by it")}</th><th scope="col">{t("Valid until")}</th><th scope="col">{t("Fingerprint")}</th><th scope="col">{t("Stage")}</th></tr>
           </thead>
           <tbody>
             {shown.map((anchor) => {

@@ -129,12 +129,12 @@ export function SecretPage() {
             <table>
               <thead>
                 <tr>
-                  <th className="num">{t("Version")}</th>
-                  <th className="num">{t("Size")}</th>
-                  <th>{t("Created by")}</th>
-                  <th>{t("Created")}</th>
-                  <th>{t("State")}</th>
-                  <th></th>
+                  <th scope="col" className="num">{t("Version")}</th>
+                  <th scope="col" className="num">{t("Size")}</th>
+                  <th scope="col">{t("Created by")}</th>
+                  <th scope="col">{t("Created")}</th>
+                  <th scope="col">{t("State")}</th>
+                  <th scope="col"></th>
                 </tr>
               </thead>
               <tbody>

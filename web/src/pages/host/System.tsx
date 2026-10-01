@@ -255,7 +255,7 @@ export function System() {
           stand on, with the reason where one is missing. */}
       <Section title={t("Detected capabilities")} count={(host.capabilities ?? []).length} span={6} flush>
         <Table>
-          <thead><tr><th>{t("Adapter")}</th><th>{t("State")}</th><th>{t("Reason")}</th></tr></thead>
+          <thead><tr><th scope="col">{t("Adapter")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Reason")}</th></tr></thead>
           <tbody>
             {(host.capabilities ?? []).length === 0 ? (
               <tr><td colSpan={3} className="empty">{t("The host has not reported its adapters.")}</td></tr>
@@ -294,7 +294,7 @@ export function System() {
         flush
       >
         <Table>
-          <thead><tr><th>{t("Kernel")}</th><th>{t("Release")}</th><th>{t("First seen")}</th><th>{t("Last seen")}</th></tr></thead>
+          <thead><tr><th scope="col">{t("Kernel")}</th><th scope="col">{t("Release")}</th><th scope="col">{t("First seen")}</th><th scope="col">{t("Last seen")}</th></tr></thead>
           <tbody>
             {history.error ? (
               <tr><td colSpan={4} className="empty">{t("The history could not be read.")}</td></tr>
@@ -318,7 +318,7 @@ export function System() {
       {missing && Object.keys(missing).length > 0 && (
         <Section title={t("Not read")} count={Object.keys(missing).length} span={12} flush>
           <Table>
-            <thead><tr><th>{t("Fact")}</th><th>{t("Reason")}</th></tr></thead>
+            <thead><tr><th scope="col">{t("Fact")}</th><th scope="col">{t("Reason")}</th></tr></thead>
             <tbody>
               {Object.entries(missing).map(([key, reason]) => (
                 <tr key={key}><td className="hm-mono">{key}</td><td>{reason}</td></tr>

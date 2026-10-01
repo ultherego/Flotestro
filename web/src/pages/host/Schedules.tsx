@@ -257,8 +257,8 @@ export function Schedules() {
           <Table>
             <thead>
               <tr>
-                <th>{t("Name")}</th><th>{t("Kind")}</th><th>{t("Owner")}</th><th>{t("Schedule")}</th>
-                <th>{t("Next run")}</th><th>{t("Command")}</th><th>{t("State")}</th><th>{t("Actions")}</th>
+                <th scope="col">{t("Name")}</th><th scope="col">{t("Kind")}</th><th scope="col">{t("Owner")}</th><th scope="col">{t("Schedule")}</th>
+                <th scope="col">{t("Next run")}</th><th scope="col">{t("Command")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Actions")}</th>
               </tr>
             </thead>
             <tbody>

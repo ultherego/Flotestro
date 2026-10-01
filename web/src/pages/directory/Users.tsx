@@ -212,8 +212,8 @@ export function Users() {
           <table>
             <thead>
               <tr>
-                <th>{t("Account")}</th><th>{t("Full name")}</th><th className="num">UID</th><th>{t("Groups")}</th>
-                <th className="num">{t("SSH keys")}</th><th>{t("Expires")}</th><th>{t("State")}</th><th></th>
+                <th scope="col">{t("Account")}</th><th scope="col">{t("Full name")}</th><th scope="col" className="num">UID</th><th scope="col">{t("Groups")}</th>
+                <th scope="col" className="num">{t("SSH keys")}</th><th scope="col">{t("Expires")}</th><th scope="col">{t("State")}</th><th scope="col"></th>
               </tr>
             </thead>
             <tbody>
@@ -270,7 +270,7 @@ export function Users() {
           <Empty>{t("No preserved accounts.")}</Empty>
         ) : (
           <table>
-            <thead><tr><th>{t("Account")}</th><th>{t("Full name")}</th><th className="num">UID</th><th>{t("Last password change")}</th></tr></thead>
+            <thead><tr><th scope="col">{t("Account")}</th><th scope="col">{t("Full name")}</th><th scope="col" className="num">UID</th><th scope="col">{t("Last password change")}</th></tr></thead>
             <tbody>
               {(preserved.data?.items ?? []).map((user) => (
                 <tr key={user.uid}>
@@ -455,7 +455,7 @@ function RecentChanges() {
         <Empty>{t("No directory changes yet.")}</Empty>
       ) : (
         <table>
-          <thead><tr><th>{t("Change")}</th><th>{t("Type")}</th><th>{t("State")}</th><th>{t("Ordered by")}</th><th>{t("When")}</th><th>{t("Result")}</th><th></th></tr></thead>
+          <thead><tr><th scope="col">{t("Change")}</th><th scope="col">{t("Type")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Ordered by")}</th><th scope="col">{t("When")}</th><th scope="col">{t("Result")}</th><th scope="col"></th></tr></thead>
           <tbody>
             {(changes.data?.items ?? []).map((item) => (
               <tr key={item.id}>

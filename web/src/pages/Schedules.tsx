@@ -483,8 +483,8 @@ export function Schedules() {
             <table>
               <thead>
                 <tr>
-                  <th>{t("Name")}</th><th>{t("Operation")}</th><th>{t("Rule")}</th><th>{t("Next run")}</th>
-                  <th>{t("Last run")}</th><th>{t("Author")}</th><th>{t("Actions")}</th>
+                  <th scope="col">{t("Name")}</th><th scope="col">{t("Operation")}</th><th scope="col">{t("Rule")}</th><th scope="col">{t("Next run")}</th>
+                  <th scope="col">{t("Last run")}</th><th scope="col">{t("Author")}</th><th scope="col">{t("Actions")}</th>
                 </tr>
               </thead>
               <tbody>

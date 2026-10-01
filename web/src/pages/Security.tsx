@@ -190,8 +190,8 @@ export function FleetSecurity() {
           <table>
             <thead>
               <tr>
-                {remediates && <th title={t("Tick the checks to fix on the fleet; a check without a remediating operation cannot be ticked.")}>{t("Fix")}</th>}
-                <th>{t("Check")}</th><th className="num">{t("Need action")}</th><th className="num">{t("Passed")}</th><th className="num">{t("Unknown")}</th><th className="num">{t("N/A")}</th><th>{t("Expected")}</th><th className="num">{t("Fixable")}</th>
+                {remediates && <th scope="col" title={t("Tick the checks to fix on the fleet; a check without a remediating operation cannot be ticked.")}>{t("Fix")}</th>}
+                <th scope="col">{t("Check")}</th><th scope="col" className="num">{t("Need action")}</th><th scope="col" className="num">{t("Passed")}</th><th scope="col" className="num">{t("Unknown")}</th><th scope="col" className="num">{t("N/A")}</th><th scope="col">{t("Expected")}</th><th scope="col" className="num">{t("Fixable")}</th>
               </tr>
             </thead>
             <tbody>
@@ -458,7 +458,7 @@ function FleetRemediation({ checks, selected }: { checks: Check[]; selected: Set
             <>
               <h4 className="widget-subhead">{t("Hosts without a plan")}</h4>
               <table>
-                <thead><tr><th>{t("Host")}</th><th>{t("Reason")}</th><th>{t("Message")}</th></tr></thead>
+                <thead><tr><th scope="col">{t("Host")}</th><th scope="col">{t("Reason")}</th><th scope="col">{t("Message")}</th></tr></thead>
                 <tbody>
                   {preview.excluded.map((host) => (
                     <tr key={host.host_id}>

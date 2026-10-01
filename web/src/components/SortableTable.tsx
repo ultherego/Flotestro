@@ -163,7 +163,7 @@ export function Th({ columns, name, sort, onSort, children, className, ...rest }
   const active = sortable && sort?.column === column.sort ? sort : null;
   const ariaSort = !sortable ? undefined : active ? (active.descending ? "descending" : "ascending") : "none";
   return (
-    <th className={cellClass(column, className)} aria-sort={ariaSort} {...rest}>
+    <th scope="col" className={cellClass(column, className)} aria-sort={ariaSort} {...rest}>
       {sortable ? (
         <button
           type="button"

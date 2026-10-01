@@ -541,7 +541,7 @@ export function Hosts() {
               <thead>
                 <tr>
                   {canSelect && (
-                    <th style={{ width: 28 }}>
+                    <th scope="col" style={{ width: 28 }}>
                       <input
                         type="checkbox"
                         aria-label={t("select every loaded host")}

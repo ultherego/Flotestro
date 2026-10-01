@@ -235,12 +235,12 @@ export function Teams() {
             <table>
               <thead>
                 <tr>
-                  <th>{t("Team")}</th>
-                  <th>{t("What belongs here")}</th>
-                  <th className="num">{t("Hosts")}</th>
-                  <th>{t("Created by")}</th>
-                  <th>{t("When")}</th>
-                  <th />
+                  <th scope="col">{t("Team")}</th>
+                  <th scope="col">{t("What belongs here")}</th>
+                  <th scope="col" className="num">{t("Hosts")}</th>
+                  <th scope="col">{t("Created by")}</th>
+                  <th scope="col">{t("When")}</th>
+                  <th scope="col" />
                 </tr>
               </thead>
               <tbody>

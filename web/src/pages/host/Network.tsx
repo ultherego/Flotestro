@@ -419,8 +419,8 @@ export function Network() {
         <Table>
           <thead>
             <tr>
-              <th>{t("Interface")}</th><th>{t("Kind")}</th><th>{t("Layering")}</th><th>{t("State")}</th><th>{t("Addresses")}</th>
-              <th className="hm-num">MTU</th><th>{t("Link")}</th><th>MAC</th><th>{t("Driver")}</th>{writable && <th>{t("Actions")}</th>}
+              <th scope="col">{t("Interface")}</th><th scope="col">{t("Kind")}</th><th scope="col">{t("Layering")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Addresses")}</th>
+              <th scope="col" className="hm-num">MTU</th><th scope="col">{t("Link")}</th><th scope="col">MAC</th><th scope="col">{t("Driver")}</th>{writable && <th scope="col">{t("Actions")}</th>}
             </tr>
           </thead>
           <tbody>
@@ -531,8 +531,8 @@ export function Network() {
           <Table>
             <thead>
               <tr>
-                <th>{t("Interface")}</th><th>{t("Kind")}</th><th>{t("Members")}</th>
-                <th>{t("Settings")}</th><th>{t("State")}</th>{writable && <th>{t("Actions")}</th>}
+                <th scope="col">{t("Interface")}</th><th scope="col">{t("Kind")}</th><th scope="col">{t("Members")}</th>
+                <th scope="col">{t("Settings")}</th><th scope="col">{t("State")}</th>{writable && <th scope="col">{t("Actions")}</th>}
               </tr>
             </thead>
             <tbody>
@@ -601,8 +601,8 @@ export function Network() {
           <Table>
             <thead>
               <tr>
-                <th>{t("Destination")}</th><th>{t("Gateway")}</th><th>{t("Interface")}</th>
-                <th>{t("Source")}</th><th>{t("Protocol")}</th><th className="hm-num">{t("Metric")}</th><th>{t("Family")}</th>
+                <th scope="col">{t("Destination")}</th><th scope="col">{t("Gateway")}</th><th scope="col">{t("Interface")}</th>
+                <th scope="col">{t("Source")}</th><th scope="col">{t("Protocol")}</th><th scope="col" className="hm-num">{t("Metric")}</th><th scope="col">{t("Family")}</th>
               </tr>
             </thead>
             <tbody>

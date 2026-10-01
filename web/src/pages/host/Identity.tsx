@@ -291,7 +291,7 @@ function PreflightResult({ attempt, blocked }: {
       </p>
       {checks.length > 0 && (
         <Table>
-          <thead><tr><th>{t("Check")}</th><th>{t("Result")}</th><th>{t("Detail")}</th></tr></thead>
+          <thead><tr><th scope="col">{t("Check")}</th><th scope="col">{t("Result")}</th><th scope="col">{t("Detail")}</th></tr></thead>
           <tbody>
             {checks.map((check) => (
               <tr key={check.name}>
@@ -620,7 +620,7 @@ function EffectiveAccess({ host }: { host: Host }) {
 
           <Section title={t("HBAC rules reaching this host")} count={data.hbac_rules.length} flush>
             <Table>
-              <thead><tr><th>{t("Rule")}</th><th>{t("Enabled")}</th><th>{t("Via")}</th><th>{t("Who")}</th><th>{t("Services")}</th></tr></thead>
+              <thead><tr><th scope="col">{t("Rule")}</th><th scope="col">{t("Enabled")}</th><th scope="col">{t("Via")}</th><th scope="col">{t("Who")}</th><th scope="col">{t("Services")}</th></tr></thead>
               <tbody>
                 {data.hbac_rules.length === 0 ? (
                   <tr><td colSpan={5} className="empty">{t("No HBAC rule reaches this host: nobody from the directory can sign in.")}</td></tr>
@@ -647,7 +647,7 @@ function EffectiveAccess({ host }: { host: Host }) {
 
           <Section title={t("sudo rules reaching this host")} count={data.sudo_rules.length} flush>
             <Table>
-              <thead><tr><th>{t("Rule")}</th><th>{t("Enabled")}</th><th>{t("Via")}</th><th>{t("Who")}</th><th>{t("Commands")}</th><th>{t("Run as")}</th><th>{t("Risk")}</th></tr></thead>
+              <thead><tr><th scope="col">{t("Rule")}</th><th scope="col">{t("Enabled")}</th><th scope="col">{t("Via")}</th><th scope="col">{t("Who")}</th><th scope="col">{t("Commands")}</th><th scope="col">{t("Run as")}</th><th scope="col">{t("Risk")}</th></tr></thead>
               <tbody>
                 {data.sudo_rules.length === 0 ? (
                   <tr><td colSpan={7} className="empty">{t("No sudo rule from the directory reaches this host.")}</td></tr>
@@ -712,7 +712,7 @@ function LocalSudoRules({ access }: { access: HostAccess }) {
             </p>
           )}
           <Table>
-            <thead><tr><th>{t("Who")}</th><th>{t("Hosts")}</th><th>{t("Commands")}</th><th>{t("Run as")}</th><th>{t("Password")}</th><th>{t("Risk")}</th><th>{t("Source")}</th></tr></thead>
+            <thead><tr><th scope="col">{t("Who")}</th><th scope="col">{t("Hosts")}</th><th scope="col">{t("Commands")}</th><th scope="col">{t("Run as")}</th><th scope="col">{t("Password")}</th><th scope="col">{t("Risk")}</th><th scope="col">{t("Source")}</th></tr></thead>
             <tbody>
               {rules.length === 0 ? (
                 <tr><td colSpan={7} className="empty">{t("The local sudoers files grant nothing.")}</td></tr>

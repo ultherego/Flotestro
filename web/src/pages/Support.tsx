@@ -175,15 +175,15 @@ export function Support() {
             <table>
               <thead>
                 <tr>
-                  <th>{t("Asked for")}</th>
-                  <th>{t("By")}</th>
-                  <th>{t("Reason")}</th>
-                  <th>{t("State")}</th>
-                  <th className="num">{t("Files")}</th>
-                  <th className="num">{t("Size")}</th>
-                  <th>{t("Digest")}</th>
-                  <th>{t("Fetched")}</th>
-                  <th></th>
+                  <th scope="col">{t("Asked for")}</th>
+                  <th scope="col">{t("By")}</th>
+                  <th scope="col">{t("Reason")}</th>
+                  <th scope="col">{t("State")}</th>
+                  <th scope="col" className="num">{t("Files")}</th>
+                  <th scope="col" className="num">{t("Size")}</th>
+                  <th scope="col">{t("Digest")}</th>
+                  <th scope="col">{t("Fetched")}</th>
+                  <th scope="col"></th>
                 </tr>
               </thead>
               <tbody>

@@ -480,9 +480,9 @@ export function FleetMonitoring() {
             <table>
               <thead>
                 <tr>
-                  <th>{t("Rule")}</th><th>{t("Condition")}</th><th>{t("For")}</th><th>{t("No data")}</th>
-                  <th>{t("Severity")}</th><th>{t("Scope")}</th><th>{t("Enabled")}</th>
-                  <th>{t("Updated")}</th>{canWrite && <th></th>}
+                  <th scope="col">{t("Rule")}</th><th scope="col">{t("Condition")}</th><th scope="col">{t("For")}</th><th scope="col">{t("No data")}</th>
+                  <th scope="col">{t("Severity")}</th><th scope="col">{t("Scope")}</th><th scope="col">{t("Enabled")}</th>
+                  <th scope="col">{t("Updated")}</th>{canWrite && <th scope="col"></th>}
                 </tr>
               </thead>
               <tbody>
@@ -573,7 +573,7 @@ export function FleetMonitoring() {
           ) : (
             <table>
               <thead>
-                <tr><th>{t("Host")}</th><th>{t("Rule")}</th><th>{t("Severity")}</th><th>{t("State")}</th><th className="num">{t("Value")}</th><th>{t("Started")}</th><th>{t("Resolved")}</th><th>{t("Note")}</th></tr>
+                <tr><th scope="col">{t("Host")}</th><th scope="col">{t("Rule")}</th><th scope="col">{t("Severity")}</th><th scope="col">{t("State")}</th><th scope="col" className="num">{t("Value")}</th><th scope="col">{t("Started")}</th><th scope="col">{t("Resolved")}</th><th scope="col">{t("Note")}</th></tr>
               </thead>
               <tbody>
                 {history.data.items.map((alert) => (
@@ -623,7 +623,7 @@ export function FleetMonitoring() {
           ) : (
             <table>
               <thead>
-                <tr><th>{t("Host")}</th><th>{t("Rule")}</th><th>{t("Until")}</th><th>{t("Reason")}</th><th></th></tr>
+                <tr><th scope="col">{t("Host")}</th><th scope="col">{t("Rule")}</th><th scope="col">{t("Until")}</th><th scope="col">{t("Reason")}</th><th scope="col"></th></tr>
               </thead>
               <tbody>
                 {silenceItems.map((silence) => (
@@ -704,7 +704,7 @@ function AgentFootprintCard({ footprint, loaded }: { footprint?: FleetFootprint;
       ) : (
         <table>
           <thead>
-            <tr><th>{t("Host")}</th><th className="num">{t("Agent RSS")}</th><th className="num">{t("Agent CPU")}</th></tr>
+            <tr><th scope="col">{t("Host")}</th><th scope="col" className="num">{t("Agent RSS")}</th><th scope="col" className="num">{t("Agent CPU")}</th></tr>
           </thead>
           <tbody>
             {over.map((host) => (
@@ -876,9 +876,9 @@ function FiringTable({ alerts, canAcknowledge, onChanged, onMessage }: {
     <table>
       <thead>
         <tr>
-          <th>{t("Host")}</th><th>{t("Rule")}</th><th>{t("State")}</th><th>{t("Severity")}</th>
-          <th className="num">{t("Value")}</th><th>{t("Detail")}</th><th>{t("Since")}</th>
-          <th>{t("Silenced")}</th><th>{t("Taken")}</th><th></th>
+          <th scope="col">{t("Host")}</th><th scope="col">{t("Rule")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Severity")}</th>
+          <th scope="col" className="num">{t("Value")}</th><th scope="col">{t("Detail")}</th><th scope="col">{t("Since")}</th>
+          <th scope="col">{t("Silenced")}</th><th scope="col">{t("Taken")}</th><th scope="col"></th>
         </tr>
       </thead>
       <tbody>

@@ -439,9 +439,9 @@ export function Vulnerabilities() {
           <Table>
             <thead>
               <tr>
-                <th>{t("Severity")}</th><th className="hm-num">CVSS</th><th>{t("Advisory")}</th><th>{t("Package")}</th>
-                <th>{t("Installed")}</th><th>{t("Compared")}</th><th>{t("Fixed in")}</th>
-                <th>{t("Vendor fix")}</th><th>{t("In repositories")}</th><th></th>
+                <th scope="col">{t("Severity")}</th><th scope="col" className="hm-num">CVSS</th><th scope="col">{t("Advisory")}</th><th scope="col">{t("Package")}</th>
+                <th scope="col">{t("Installed")}</th><th scope="col">{t("Compared")}</th><th scope="col">{t("Fixed in")}</th>
+                <th scope="col">{t("Vendor fix")}</th><th scope="col">{t("In repositories")}</th><th scope="col"></th>
               </tr>
             </thead>
             <tbody>

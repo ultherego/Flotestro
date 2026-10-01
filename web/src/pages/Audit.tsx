@@ -328,7 +328,7 @@ export function Audit() {
             <Empty>{t("No events.")}</Empty>
           ) : (
             <table>
-              <thead><tr><th>{t("Time")}</th><th>{t("Actor")}</th><th>{t("Kind")}</th><th>{t("Operation")}</th><th>{t("Target")}</th><th>{t("Result")}</th><th>{t("Details")}</th></tr></thead>
+              <thead><tr><th scope="col">{t("Time")}</th><th scope="col">{t("Actor")}</th><th scope="col">{t("Kind")}</th><th scope="col">{t("Operation")}</th><th scope="col">{t("Target")}</th><th scope="col">{t("Result")}</th><th scope="col">{t("Details")}</th></tr></thead>
               <tbody>
                 {events.map((event) => {
                   const changes = changedKeys(event.before, event.after);

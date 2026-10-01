@@ -185,7 +185,7 @@ export function HostAudit() {
           <Empty>{filtered ? t("No event matches the filter.") : t("No events.")}</Empty>
         ) : (
           <Table>
-            <thead><tr><th>{t("Time")}</th><th>{t("Actor")}</th><th>{t("Operation")}</th><th>{t("Result")}</th><th>{t("Details")}</th></tr></thead>
+            <thead><tr><th scope="col">{t("Time")}</th><th scope="col">{t("Actor")}</th><th scope="col">{t("Operation")}</th><th scope="col">{t("Result")}</th><th scope="col">{t("Details")}</th></tr></thead>
             <tbody>
               {events.map((event) => {
                 const open = expanded === event.id;

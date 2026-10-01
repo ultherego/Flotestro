@@ -67,7 +67,7 @@ export function HostPolicies() {
             >
               <Table>
                 <thead>
-                  <tr><th>{t("Rule")}</th><th>{t("Verdict")}</th><th>{t("Reason")}</th><th title={t("The inventory revision the rule was judged against.")}>{t("Judged against")}</th><th>{t("Evaluated")}</th></tr>
+                  <tr><th scope="col">{t("Rule")}</th><th scope="col">{t("Verdict")}</th><th scope="col">{t("Reason")}</th><th scope="col" title={t("The inventory revision the rule was judged against.")}>{t("Judged against")}</th><th scope="col">{t("Evaluated")}</th></tr>
                 </thead>
                 <tbody>
                   {group.results.map((result) => (

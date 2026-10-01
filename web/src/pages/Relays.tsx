@@ -119,8 +119,8 @@ export function Relays() {
             <table>
               <thead>
                 <tr>
-                  <th>{t("Name")}</th><th>{t("Site")}</th><th>{t("State")}</th><th>{t("Last seen")}</th>
-                  <th className="num">{t("Hosts attested")}</th><th>{t("Buffer")}</th><th>{t("Certificate expires")}</th>
+                  <th scope="col">{t("Name")}</th><th scope="col">{t("Site")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Last seen")}</th>
+                  <th scope="col" className="num">{t("Hosts attested")}</th><th scope="col">{t("Buffer")}</th><th scope="col">{t("Certificate expires")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -451,8 +451,8 @@ function HostsTable({ hosts }: { hosts: RelayHost[] }) {
     <table>
       <thead>
         <tr>
-          <th>{t("Host")}</th><th>{t("Site")}</th><th>{t("Lifecycle")}</th>
-          <th>{t("Agent")}</th><th>{t("Connected")}</th><th>{t("Last heartbeat")}</th>
+          <th scope="col">{t("Host")}</th><th scope="col">{t("Site")}</th><th scope="col">{t("Lifecycle")}</th>
+          <th scope="col">{t("Agent")}</th><th scope="col">{t("Connected")}</th><th scope="col">{t("Last heartbeat")}</th>
         </tr>
       </thead>
       <tbody>

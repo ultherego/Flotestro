@@ -349,8 +349,8 @@ export function Certificates() {
           <Table>
             <thead>
               <tr>
-                <th>{t("Path")}</th><th>{t("Subject")}</th><th>{t("Expires")}</th><th>{t("Renewal")}</th>
-                <th>{t("Source")}</th><th title={t("The private key file: its mode and owner. The key itself is never read.")}>{t("Key file")}</th><th>{t("Actions")}</th>
+                <th scope="col">{t("Path")}</th><th scope="col">{t("Subject")}</th><th scope="col">{t("Expires")}</th><th scope="col">{t("Renewal")}</th>
+                <th scope="col">{t("Source")}</th><th scope="col" title={t("The private key file: its mode and owner. The key itself is never read.")}>{t("Key file")}</th><th scope="col">{t("Actions")}</th>
               </tr>
             </thead>
             <tbody>
@@ -484,7 +484,7 @@ export function Certificates() {
           flush
         >
           <Table>
-            <thead><tr><th>{t("Fact")}</th><th>{t("Reason")}</th></tr></thead>
+            <thead><tr><th scope="col">{t("Fact")}</th><th scope="col">{t("Reason")}</th></tr></thead>
             <tbody>
               {Object.entries(data.missing).map(([fact, reason]) => (
                 <tr key={fact}><td className="hm-mono">{fact}</td><td className="source">{reason}</td></tr>
@@ -568,7 +568,7 @@ function Details({ hostID, certificate }: { hostID: string; certificate?: Certif
         ) : (
           <Table>
             <thead>
-              <tr><th>{t("Fingerprint")}</th><th>{t("Expires")}</th><th>{t("Key")}</th><th>{t("Deployed")}</th><th>{t("By")}</th></tr>
+              <tr><th scope="col">{t("Fingerprint")}</th><th scope="col">{t("Expires")}</th><th scope="col">{t("Key")}</th><th scope="col">{t("Deployed")}</th><th scope="col">{t("By")}</th></tr>
             </thead>
             <tbody>
               {(history.data?.items ?? []).map((deployment) => (

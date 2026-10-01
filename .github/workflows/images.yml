@@ -247,31 +247,47 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p secrets && printf 'postgres://x@example.invalid/x\n' > secrets/database-url
-          started() { docker compose -f compose.yaml "$@" config --services; }
-          external() { docker compose -f compose.yaml -f compose.external-db.yaml "$@" config --services; }
+          # Each listing is taken once and kept. Asking compose again for every
+          # service meant that a listing which failed - compose exiting non-zero
+          # with nothing on stdout - was indistinguishable from a service that is
+          # not there, and the step blamed whichever service it happened to be
+          # checking: "no postgres" on one run, "no init" on the next, a pass on
+          # the one between, over three commits that did not touch the question.
+          # A listing that cannot be produced now fails as itself, with compose's
+          # own message.
+          listing() {
+            local what="$1"; shift
+            if ! "$@" config --services; then
+              echo "compose could not list the services of the $what deployment" >&2
+              exit 1
+            fi
+          }
+          default_services="$(listing default docker compose -f compose.yaml)"
+          external_services="$(listing external-database docker compose -f compose.yaml -f compose.external-db.yaml)"
+          airgap_services="$(listing airgap docker compose -f compose.yaml --profile airgap)"
           for service in init postgres migrate control-plane; do
-            if ! started | grep -qx "$service"; then
+            if ! grep -qx "$service" <<< "$default_services"; then
               echo "the default deployment starts no $service service" >&2
               exit 1
             fi
           done
           for service in package-repository admin-tools admin-restore; do
-            if started | grep -qx "$service"; then
+            if grep -qx "$service" <<< "$default_services"; then
               echo "compose.yaml starts $service with no profile named" >&2
               exit 1
             fi
           done
-          if external | grep -qx postgres; then
+          if grep -qx postgres <<< "$external_services"; then
             echo "the external-database deployment starts a postgres of its own" >&2
             exit 1
           fi
           for service in init migrate control-plane; do
-            if ! external | grep -qx "$service"; then
+            if ! grep -qx "$service" <<< "$external_services"; then
               echo "the external-database deployment starts no $service service" >&2
               exit 1
             fi
           done
-          if ! started --profile airgap | grep -qx package-repository; then
+          if ! grep -qx package-repository <<< "$airgap_services"; then
             echo "--profile airgap starts no package-repository service" >&2
             exit 1
           fi

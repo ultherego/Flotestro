@@ -367,7 +367,7 @@ function BlockWidget({ name, facts }: { name: string; facts: Record<string, unkn
       return (
         <table>
           <thead>
-            <tr><th>{t("Consumer")}</th><th>{t("Behind")}</th><th>{t("Failures")}</th><th>{t("Last delivery")}</th></tr>
+            <tr><th scope="col">{t("Consumer")}</th><th scope="col">{t("Behind")}</th><th scope="col">{t("Failures")}</th><th scope="col">{t("Last delivery")}</th></tr>
           </thead>
           <tbody>
             {consumers.map((consumer) => (
@@ -392,7 +392,7 @@ function BlockWidget({ name, facts }: { name: string; facts: Record<string, unkn
       return (
         <table>
           <thead>
-            <tr><th>{t("Feed")}</th><th>{t("Age")}</th><th>{t("Advisories")}</th><th>{t("State")}</th></tr>
+            <tr><th scope="col">{t("Feed")}</th><th scope="col">{t("Age")}</th><th scope="col">{t("Advisories")}</th><th scope="col">{t("State")}</th></tr>
           </thead>
           <tbody>
             {feeds.map((feed) => (
@@ -421,7 +421,7 @@ function BlockWidget({ name, facts }: { name: string; facts: Record<string, unkn
       return (
         <table>
           <thead>
-            <tr><th>{t("Kind")}</th><th>{t("Retention")}</th><th>{t("Removed by the last sweep")}</th></tr>
+            <tr><th scope="col">{t("Kind")}</th><th scope="col">{t("Retention")}</th><th scope="col">{t("Removed by the last sweep")}</th></tr>
           </thead>
           <tbody>
             {kinds.map((kind) => (

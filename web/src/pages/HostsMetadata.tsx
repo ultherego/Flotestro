@@ -180,7 +180,7 @@ export function HostsMetadata({ hosts, permissions, onClose }: {
           </p>
           <table>
             <thead>
-              <tr><th>{t("Host")}</th><th>{t("Outcome")}</th><th>{t("Detail")}</th></tr>
+              <tr><th scope="col">{t("Host")}</th><th scope="col">{t("Outcome")}</th><th scope="col">{t("Detail")}</th></tr>
             </thead>
             <tbody>
               {result.results.map((outcome) => {

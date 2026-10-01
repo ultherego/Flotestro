@@ -212,7 +212,7 @@ export function Files() {
         ) : (
           <Table>
             <thead>
-              <tr><th>{t("Path")}</th><th>{t("State")}</th><th>{t("Mode")}</th><th>{t("Last change")}</th><th>{t("Actions")}</th></tr>
+              <tr><th scope="col">{t("Path")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Mode")}</th><th scope="col">{t("Last change")}</th><th scope="col">{t("Actions")}</th></tr>
             </thead>
             <tbody>
               {list.map((file) => (
@@ -363,7 +363,7 @@ function History({
     <>
       <Section title={<span className="hm-mono">{file.path}</span>} count={(history.data?.items ?? []).length} flush>
         <Table>
-          <thead><tr><th>{t("Version")}</th><th className="hm-num">{t("Size")}</th><th>{t("Applied")}</th><th>{t("By")}</th><th>{t("Actions")}</th></tr></thead>
+          <thead><tr><th scope="col">{t("Version")}</th><th scope="col" className="hm-num">{t("Size")}</th><th scope="col">{t("Applied")}</th><th scope="col">{t("By")}</th><th scope="col">{t("Actions")}</th></tr></thead>
           <tbody>
             {(history.data?.items ?? []).map((version) => (
               <tr key={`${version.sha256 || version.secret_name}-${version.applied_at}`}>
@@ -463,12 +463,12 @@ function HostVersions({
       <Table>
         <thead>
           <tr>
-            <th>{t("Version")}</th>
-            <th className="hm-num">{t("Size")}</th>
-            <th>{t("Mode")}</th>
-            <th>{t("Kept")}</th>
-            <th>{t("Ordered by")}</th>
-            <th>{t("Actions")}</th>
+            <th scope="col">{t("Version")}</th>
+            <th scope="col" className="hm-num">{t("Size")}</th>
+            <th scope="col">{t("Mode")}</th>
+            <th scope="col">{t("Kept")}</th>
+            <th scope="col">{t("Ordered by")}</th>
+            <th scope="col">{t("Actions")}</th>
           </tr>
         </thead>
         <tbody>

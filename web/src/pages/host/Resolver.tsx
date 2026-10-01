@@ -285,7 +285,7 @@ export function Resolver() {
             specific moment, not a state that could be refreshed. */}
         {testJob && (
           <Table>
-            <thead><tr><th>{t("Name")}</th><th>{t("Addresses")}</th><th>{t("Answered by")}</th><th className="hm-num">{t("Took")}</th></tr></thead>
+            <thead><tr><th scope="col">{t("Name")}</th><th scope="col">{t("Addresses")}</th><th scope="col">{t("Answered by")}</th><th scope="col" className="hm-num">{t("Took")}</th></tr></thead>
             <tbody>
               {answers.map((query) => (
                 <tr key={query.name}>
@@ -331,7 +331,7 @@ export function Resolver() {
         ) : (
           <Table>
             <thead>
-              <tr><th>{t("Link")}</th><th>{t("Servers")}</th><th>{t("Domains")}</th><th>{t("Answers other names")}</th><th>DNSSEC</th><th title="DNS over TLS">DoT</th></tr>
+              <tr><th scope="col">{t("Link")}</th><th scope="col">{t("Servers")}</th><th scope="col">{t("Domains")}</th><th scope="col">{t("Answers other names")}</th><th scope="col">DNSSEC</th><th scope="col" title="DNS over TLS">DoT</th></tr>
             </thead>
             <tbody>
               {snapshot.links.map((link) => (

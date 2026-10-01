@@ -286,7 +286,7 @@ export function Secrets() {
           ) : (
             <table>
               <thead>
-                <tr><th>{t("Name")}</th><th className="num">{t("Version")}</th><th>{t("What for")}</th><th>{t("Created")}</th><th>{t("State")}</th><th></th></tr>
+                <tr><th scope="col">{t("Name")}</th><th scope="col" className="num">{t("Version")}</th><th scope="col">{t("What for")}</th><th scope="col">{t("Created")}</th><th scope="col">{t("State")}</th><th scope="col"></th></tr>
               </thead>
               <tbody>
                 {shown.map((secret) => {

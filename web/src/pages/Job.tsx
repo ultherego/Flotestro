@@ -393,7 +393,7 @@ export function JobPage() {
             <Empty>{data.requires_approval ? t("No approval yet.") : t("The operation needs no approval.")}</Empty>
           ) : (
             <table>
-              <thead><tr><th>{t("Approver")}</th><th>{t("Reason")}</th><th>{t("When")}</th></tr></thead>
+              <thead><tr><th scope="col">{t("Approver")}</th><th scope="col">{t("Reason")}</th><th scope="col">{t("When")}</th></tr></thead>
               <tbody>
                 {data.approvals.map((approval) => (
                   <tr key={`${approval.approver}:${approval.approved_at}`}>

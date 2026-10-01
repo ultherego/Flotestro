@@ -310,7 +310,7 @@ export function Dashboard() {
           ) : (
             <table>
               <thead>
-                <tr><th>{t("Name")}</th><th>{t("State")}</th><th>{t("Operation")}</th><th>{t("Pause reason")}</th></tr>
+                <tr><th scope="col">{t("Name")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Operation")}</th><th scope="col">{t("Pause reason")}</th></tr>
               </thead>
               <tbody>
                 {activeCampaigns.map((campaign) => (
@@ -337,7 +337,7 @@ export function Dashboard() {
             <Empty>{t("No failed operations.")}</Empty>
           ) : (
             <table>
-              <thead><tr><th>{t("Time")}</th><th>{t("Host")}</th><th>{t("Operation")}</th><th>{t("Error")}</th></tr></thead>
+              <thead><tr><th scope="col">{t("Time")}</th><th scope="col">{t("Host")}</th><th scope="col">{t("Operation")}</th><th scope="col">{t("Error")}</th></tr></thead>
               <tbody>
                 {/* The time leads to the job itself, the host to its
                     history: the two questions a failure raises. */}
@@ -369,7 +369,7 @@ export function Dashboard() {
             <Empty>{t("No denials in recent events.")}</Empty>
           ) : (
             <table>
-              <thead><tr><th>{t("Time")}</th><th>{t("Actor")}</th><th>{t("Operation")}</th><th>{t("Reason")}</th></tr></thead>
+              <thead><tr><th scope="col">{t("Time")}</th><th scope="col">{t("Actor")}</th><th scope="col">{t("Operation")}</th><th scope="col">{t("Reason")}</th></tr></thead>
               <tbody>
                 {denied.map((event) => (
                   <tr key={event.id}>

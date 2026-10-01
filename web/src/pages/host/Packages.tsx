@@ -651,7 +651,7 @@ export function Packages() {
           ) : (
             <>
               <Table>
-                <thead><tr><th>{t("Package")}</th><th>{t("Reason")}</th></tr></thead>
+                <thead><tr><th scope="col">{t("Package")}</th><th scope="col">{t("Reason")}</th></tr></thead>
                 <tbody>
                   {plan.plan.removals.map((pkg) => (
                     <tr key={pkg}>
@@ -837,7 +837,7 @@ function PlanThenApply({ host, action, packages, planLabel, applyLabel, busy, on
         <>
           {plan.changes && plan.changes.length > 0 ? (
             <Table>
-              <thead><tr><th>{t("Package")}</th><th>{t("From")}</th><th>{t("To")}</th></tr></thead>
+              <thead><tr><th scope="col">{t("Package")}</th><th scope="col">{t("From")}</th><th scope="col">{t("To")}</th></tr></thead>
               <tbody>
                 {plan.changes.map((change) => (
                   <tr key={`${change.name}/${change.architecture ?? ""}`}>
@@ -1216,12 +1216,12 @@ function TransactionHistory({ hostId }: { hostId: string }) {
           <Table>
             <thead>
               <tr>
-                <th>{t("When")}</th>
-                <th>{t("Operation")}</th>
-                <th>{t("Outcome")}</th>
-                <th>{t("Applied")}</th>
-                <th>{t("By")}</th>
-                <th>{t("Job")}</th>
+                <th scope="col">{t("When")}</th>
+                <th scope="col">{t("Operation")}</th>
+                <th scope="col">{t("Outcome")}</th>
+                <th scope="col">{t("Applied")}</th>
+                <th scope="col">{t("By")}</th>
+                <th scope="col">{t("Job")}</th>
               </tr>
             </thead>
             <tbody>
@@ -1325,8 +1325,8 @@ function Repositories({
           <Table>
             <thead>
               <tr>
-                <th>{t("Source")}</th><th>{t("Address")}</th><th>{t("State")}</th><th>{t("Signatures")}</th>
-                <th>{t("Managed by")}</th><th>{t("Actions")}</th>
+                <th scope="col">{t("Source")}</th><th scope="col">{t("Address")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Signatures")}</th>
+                <th scope="col">{t("Managed by")}</th><th scope="col">{t("Actions")}</th>
               </tr>
             </thead>
             <tbody>

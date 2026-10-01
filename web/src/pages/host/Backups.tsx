@@ -385,8 +385,8 @@ export function Backups() {
           <Table>
             <thead>
               <tr>
-                <th>{t("Definition")}</th><th>{t("Destination")}</th><th>{t("Last copy")}</th>
-                <th>{t("Verified")}</th><th className="hm-num">{t("Size")}</th><th>{t("Actions")}</th>
+                <th scope="col">{t("Definition")}</th><th scope="col">{t("Destination")}</th><th scope="col">{t("Last copy")}</th>
+                <th scope="col">{t("Verified")}</th><th scope="col" className="hm-num">{t("Size")}</th><th scope="col">{t("Actions")}</th>
               </tr>
             </thead>
             <tbody>
@@ -529,7 +529,7 @@ export function Backups() {
           ) : (
             <Table>
               <thead>
-                <tr><th>{t("Copy")}</th><th>{t("Taken")}</th><th>{t("Paths")}</th><th>{t("Restore")}</th></tr>
+                <tr><th scope="col">{t("Copy")}</th><th scope="col">{t("Taken")}</th><th scope="col">{t("Paths")}</th><th scope="col">{t("Restore")}</th></tr>
               </thead>
               <tbody>
                 {[...repositoryState.snapshots].reverse().map((snapshot) => (
@@ -571,7 +571,7 @@ export function Backups() {
           ) : (
             <Table>
               <thead>
-                <tr><th>{t("When")}</th><th>{t("Operation")}</th><th>{t("Result")}</th><th>{t("Copy")}</th><th className="hm-num">{t("Added")}</th><th>{t("By")}</th></tr>
+                <tr><th scope="col">{t("When")}</th><th scope="col">{t("Operation")}</th><th scope="col">{t("Result")}</th><th scope="col">{t("Copy")}</th><th scope="col" className="hm-num">{t("Added")}</th><th scope="col">{t("By")}</th></tr>
               </thead>
               <tbody>
                 {(history.data?.items ?? []).map((run, index) => (

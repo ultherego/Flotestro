@@ -264,7 +264,7 @@ function Repositories({ repositories }: { repositories: Repository[] }) {
     <Card className="span-6" title={t("Repositories")} flush>
       <table>
         <thead>
-          <tr><th>{t("Repository")}</th><th className="num">{t("Hosts")}</th><th className="num">{t("Oldest backup")}</th><th className="num">{t("Parallel writes")}</th></tr>
+          <tr><th scope="col">{t("Repository")}</th><th scope="col" className="num">{t("Hosts")}</th><th scope="col" className="num">{t("Oldest backup")}</th><th scope="col" className="num">{t("Parallel writes")}</th></tr>
         </thead>
         <tbody>
           {repositories.map((item) => (

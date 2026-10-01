@@ -359,15 +359,15 @@ function BudgetTable({ budgets, canWrite }: { budgets: BudgetState[]; canWrite: 
     <table>
       <thead>
         <tr>
-          <th>{t("Key")}</th>
-          <th className="num">{t("Capacity")}</th>
-          <th>{t("In use")}</th>
-          <th title={t("The campaigns, jobs and reads that hold tokens of this budget right now.")}>{t("Held by")}</th>
-          <th className="num" title={t("How many campaigns, jobs and reads ask for tokens of this budget at the moment.")}>{t("Claimants")}</th>
-          <th className="num" title={t("The most tokens one claimant may hold while others ask: the capacity split between the claimants, never below one.")}>{t("Share per claimant")}</th>
-          <th className="num" title={t("Jobs queued until a token of this budget frees up.")}>{t("Waiting jobs")}</th>
-          <th className="num" title={t("Campaign hosts waiting for a token of this budget before they start.")}>{t("Waiting hosts")}</th>
-          {canWrite && <th />}
+          <th scope="col">{t("Key")}</th>
+          <th scope="col" className="num">{t("Capacity")}</th>
+          <th scope="col">{t("In use")}</th>
+          <th scope="col" title={t("The campaigns, jobs and reads that hold tokens of this budget right now.")}>{t("Held by")}</th>
+          <th scope="col" className="num" title={t("How many campaigns, jobs and reads ask for tokens of this budget at the moment.")}>{t("Claimants")}</th>
+          <th scope="col" className="num" title={t("The most tokens one claimant may hold while others ask: the capacity split between the claimants, never below one.")}>{t("Share per claimant")}</th>
+          <th scope="col" className="num" title={t("Jobs queued until a token of this budget frees up.")}>{t("Waiting jobs")}</th>
+          <th scope="col" className="num" title={t("Campaign hosts waiting for a token of this budget before they start.")}>{t("Waiting hosts")}</th>
+          {canWrite && <th scope="col" />}
         </tr>
       </thead>
       <tbody>

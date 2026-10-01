@@ -475,7 +475,7 @@ export function Security() {
           <Empty>{t("This host did not report its listening sockets.")}</Empty>
         ) : (
           <Table>
-            <thead><tr><th>{t("Proto")}</th><th>{t("Address")}</th><th className="hm-num">{t("Port")}</th><th>{t("Process")}</th><th>{t("Reach")}</th></tr></thead>
+            <thead><tr><th scope="col">{t("Proto")}</th><th scope="col">{t("Address")}</th><th scope="col" className="hm-num">{t("Port")}</th><th scope="col">{t("Process")}</th><th scope="col">{t("Reach")}</th></tr></thead>
             <tbody>
               {sockets
                 .slice()
@@ -521,7 +521,7 @@ export function Security() {
           <Table>
             <thead>
               <tr>
-                <th></th><th>{t("Check")}</th><th>{t("State")}</th><th>{t("Expected")}</th><th>{t("Observed")}</th><th>{t("Fix")}</th>
+                <th scope="col"></th><th scope="col">{t("Check")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Expected")}</th><th scope="col">{t("Observed")}</th><th scope="col">{t("Fix")}</th>
               </tr>
             </thead>
             <tbody>
@@ -664,7 +664,7 @@ export function Security() {
               </div>
               <Table>
                 <thead>
-                  <tr><th className="hm-num">#</th><th>{t("Check")}</th><th>{t("Operation")}</th><th>{t("Lock")}</th><th>{t("Job")}</th><th>{t("State")}</th></tr>
+                  <tr><th scope="col" className="hm-num">#</th><th scope="col">{t("Check")}</th><th scope="col">{t("Operation")}</th><th scope="col">{t("Lock")}</th><th scope="col">{t("Job")}</th><th scope="col">{t("State")}</th></tr>
                 </thead>
                 <tbody>
                   {(plan.steps ?? []).map((step) => (

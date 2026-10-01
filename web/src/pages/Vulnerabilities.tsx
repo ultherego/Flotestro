@@ -259,9 +259,9 @@ export function FeedCandidates({ candidates }: { candidates: Candidate[] }) {
       <table data-testid="feed-candidates">
         <thead>
           <tr>
-            <th>{t("Provider")}</th><th>{t("Reason")}</th>
-            <th className="num">{t("Fetched")}</th><th className="num">{t("In force")}</th>
-            <th>{t("Held back")}</th><th />
+            <th scope="col">{t("Provider")}</th><th scope="col">{t("Reason")}</th>
+            <th scope="col" className="num">{t("Fetched")}</th><th scope="col" className="num">{t("In force")}</th>
+            <th scope="col">{t("Held back")}</th><th scope="col" />
           </tr>
         </thead>
         <tbody>
@@ -460,7 +460,7 @@ export function FleetVulnerabilities() {
           ) : (
             <table>
               <thead>
-                <tr><th>{t("Provider")}</th><th className="num">{t("Advisories")}</th><th>{t("Releases")}</th><th>{t("Fetched")}</th><th>{t("State")}</th></tr>
+                <tr><th scope="col">{t("Provider")}</th><th scope="col" className="num">{t("Advisories")}</th><th scope="col">{t("Releases")}</th><th scope="col">{t("Fetched")}</th><th scope="col">{t("State")}</th></tr>
               </thead>
               <tbody>
                 {data.sources.map((source) => (
@@ -574,9 +574,9 @@ export function FleetVulnerabilities() {
               <table>
                 <thead>
                   <tr>
-                    <th>CVE</th><th>{t("Severity")}</th><th className="num">CVSS</th>
-                    <th className="num">{t("Hosts")}</th><th className="num">{t("Vendor fix")}</th>
-                    <th>{t("Packages")}</th><th>{t("First seen")}</th>
+                    <th scope="col">CVE</th><th scope="col">{t("Severity")}</th><th scope="col" className="num">CVSS</th>
+                    <th scope="col" className="num">{t("Hosts")}</th><th scope="col" className="num">{t("Vendor fix")}</th>
+                    <th scope="col">{t("Packages")}</th><th scope="col">{t("First seen")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -618,11 +618,11 @@ export function FleetVulnerabilities() {
             <table>
               <thead>
                 <tr>
-                  <th>{t("Host")}</th><th>{t("Distribution")}</th><th className="num">{t("Open findings")}</th>
-                  <th className="num">{t("Vendor fix")}</th><th className="num">{t("No fix")}</th>
-                  <th className="num">{t("Not established")}</th>
-                  <th title={t("The share of the installed packages the vendor's tracker could say something about.")}>{t("Coverage")}</th>
-                  <th>{t("Assessed")}</th>
+                  <th scope="col">{t("Host")}</th><th scope="col">{t("Distribution")}</th><th scope="col" className="num">{t("Open findings")}</th>
+                  <th scope="col" className="num">{t("Vendor fix")}</th><th scope="col" className="num">{t("No fix")}</th>
+                  <th scope="col" className="num">{t("Not established")}</th>
+                  <th scope="col" title={t("The share of the installed packages the vendor's tracker could say something about.")}>{t("Coverage")}</th>
+                  <th scope="col">{t("Assessed")}</th>
                 </tr>
               </thead>
               <tbody>

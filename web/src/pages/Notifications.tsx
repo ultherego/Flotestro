@@ -544,8 +544,8 @@ export function Notifications() {
             <table>
               <thead>
                 <tr>
-                  <th>{t("Name")}</th><th>{t("Kind")}</th><th>{t("Address")}</th><th>{t("Events")}</th>
-                  <th>{t("Filter")}</th><th>{t("Last delivery")}</th>{canManage && <th>{t("Actions")}</th>}
+                  <th scope="col">{t("Name")}</th><th scope="col">{t("Kind")}</th><th scope="col">{t("Address")}</th><th scope="col">{t("Events")}</th>
+                  <th scope="col">{t("Filter")}</th><th scope="col">{t("Last delivery")}</th>{canManage && <th scope="col">{t("Actions")}</th>}
                 </tr>
               </thead>
               <tbody>
@@ -616,9 +616,9 @@ export function Notifications() {
             <table>
               <thead>
                 <tr>
-                  <th>{t("When")}</th><th>{t("Channel")}</th><th>{t("Event")}</th>
-                  <th>{t("State")}</th><th className="num">{t("Attempt")}</th><th>{t("Next attempt")}</th>
-                  <th>{t("Last error")}</th>{canManage && <th>{t("Actions")}</th>}
+                  <th scope="col">{t("When")}</th><th scope="col">{t("Channel")}</th><th scope="col">{t("Event")}</th>
+                  <th scope="col">{t("State")}</th><th scope="col" className="num">{t("Attempt")}</th><th scope="col">{t("Next attempt")}</th>
+                  <th scope="col">{t("Last error")}</th>{canManage && <th scope="col">{t("Actions")}</th>}
                 </tr>
               </thead>
               <tbody>

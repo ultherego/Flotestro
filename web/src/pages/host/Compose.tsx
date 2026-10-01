@@ -216,7 +216,7 @@ export function Compose() {
           <Empty>{t("This project has not been deployed from the panel yet.")}</Empty>
         ) : (
           <Table>
-            <thead><tr><th>{t("When")}</th><th>{t("By")}</th><th>{t("State")}</th><th>{t("Plan")}</th><th></th></tr></thead>
+            <thead><tr><th scope="col">{t("When")}</th><th scope="col">{t("By")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Plan")}</th><th scope="col"></th></tr></thead>
             <tbody>
               {versions.data.items.map((version) => (
                 <tr key={version.job_id}>
@@ -256,7 +256,7 @@ export function Compose() {
             ))}
 
             <Table>
-              <thead><tr><th>{t("Object")}</th><th>{t("Name")}</th><th>{t("Change")}</th></tr></thead>
+              <thead><tr><th scope="col">{t("Object")}</th><th scope="col">{t("Name")}</th><th scope="col">{t("Change")}</th></tr></thead>
               <tbody>
                 {!plan.changes?.length ? (
                   <tr><td colSpan={3} className="empty">{t("Nothing would change on this host.")}</td></tr>
@@ -281,7 +281,7 @@ export function Compose() {
             flush
           >
             <Table>
-              <thead><tr><th>{t("Service")}</th><th>{t("Image")}</th><th>{t("Digest that will run")}</th><th className="hm-num">{t("Replicas")}</th></tr></thead>
+              <thead><tr><th scope="col">{t("Service")}</th><th scope="col">{t("Image")}</th><th scope="col">{t("Digest that will run")}</th><th scope="col" className="hm-num">{t("Replicas")}</th></tr></thead>
               <tbody>
                 {(plan.services ?? []).map((service) => (
                   <tr key={service.name}>

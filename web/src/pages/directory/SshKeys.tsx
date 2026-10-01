@@ -83,7 +83,7 @@ export function SshKeys() {
             <Empty>{t("No account has an SSH key in the directory.")}</Empty>
           ) : (
             <table>
-              <thead><tr><th>{t("Account")}</th><th className="num">{t("Keys")}</th><th>{t("Fingerprints")}</th><th>{t("State")}</th><th></th></tr></thead>
+              <thead><tr><th scope="col">{t("Account")}</th><th scope="col" className="num">{t("Keys")}</th><th scope="col">{t("Fingerprints")}</th><th scope="col">{t("State")}</th><th scope="col"></th></tr></thead>
               <tbody>
                 {withKeys.map((user) => (
                   <tr key={user.uid}>
@@ -108,7 +108,7 @@ export function SshKeys() {
             <Empty>{t("Every account has at least one key.")}</Empty>
           ) : (
             <table>
-              <thead><tr><th>{t("Account")}</th><th>{t("State")}</th><th></th></tr></thead>
+              <thead><tr><th scope="col">{t("Account")}</th><th scope="col">{t("State")}</th><th scope="col"></th></tr></thead>
               <tbody>
                 {withoutKeys.map((user) => (
                   <tr key={user.uid}>

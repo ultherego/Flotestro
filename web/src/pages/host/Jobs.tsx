@@ -226,7 +226,7 @@ export function HostJobs() {
           <Empty>{filtered ? t("No job matches the filter.") : t("No jobs for this host.")}</Empty>
         ) : (
           <Table>
-            <thead><tr><th>{t("Operation")}</th><th>{t("State")}</th><th>{t("Requested by")}</th><th>{t("Approved by")}</th><th>{t("Result")}</th><th>{t("Created")}</th><th></th></tr></thead>
+            <thead><tr><th scope="col">{t("Operation")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Requested by")}</th><th scope="col">{t("Approved by")}</th><th scope="col">{t("Result")}</th><th scope="col">{t("Created")}</th><th scope="col"></th></tr></thead>
             <tbody>
               {jobs.map((job) => {
                 const contract = contractOf(job.action_type);

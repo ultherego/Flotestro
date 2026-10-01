@@ -249,11 +249,11 @@ export function PlanChanges({ changes, shown = ROWS_SHOWN }: { changes?: (string
       <table className="plan-changes-table">
         <thead>
           <tr>
-            <th>{t("Package")}</th>
-            <th>{t("Change")}</th>
-            <th>{t("Now")}</th>
-            <th>{t("After")}</th>
-            <th>{t("Note")}</th>
+            <th scope="col">{t("Package")}</th>
+            <th scope="col">{t("Change")}</th>
+            <th scope="col">{t("Now")}</th>
+            <th scope="col">{t("After")}</th>
+            <th scope="col">{t("Note")}</th>
           </tr>
         </thead>
         <tbody>

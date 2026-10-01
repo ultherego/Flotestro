@@ -213,7 +213,7 @@ export function SshServer() {
 
       <Section title={t("Authentication methods")} span={5} flush>
         <Table>
-          <thead><tr><th>{t("Method")}</th><th>{t("Enabled")}</th></tr></thead>
+          <thead><tr><th scope="col">{t("Method")}</th><th scope="col">{t("Enabled")}</th></tr></thead>
           <tbody>
             {methods.map(([name, value]) => (
               <tr key={name}>
@@ -233,7 +233,7 @@ export function SshServer() {
         flush
       >
         <Table>
-          <thead><tr><th>{t("Type")}</th><th className="hm-num">{t("Bits")}</th><th>{t("Fingerprint")}</th><th>{t("Actions")}</th></tr></thead>
+          <thead><tr><th scope="col">{t("Type")}</th><th scope="col" className="hm-num">{t("Bits")}</th><th scope="col">{t("Fingerprint")}</th><th scope="col">{t("Actions")}</th></tr></thead>
           <tbody>
             {(snapshot?.host_keys ?? []).map((key) => (
               <tr key={key.path}>

@@ -225,12 +225,12 @@ export function Policies() {
             <table>
               <thead>
                 <tr>
-                  <th>{t("Name")}</th>
-                  <th>{t("Version")}</th>
-                  <th>{t("Remediation")}</th>
-                  <th>{t("Rules")}</th>
-                  <th>{t("Compliance")}</th>
-                  <th>{t("Last evaluated")}</th>
+                  <th scope="col">{t("Name")}</th>
+                  <th scope="col">{t("Version")}</th>
+                  <th scope="col">{t("Remediation")}</th>
+                  <th scope="col">{t("Rules")}</th>
+                  <th scope="col">{t("Compliance")}</th>
+                  <th scope="col">{t("Last evaluated")}</th>
                 </tr>
               </thead>
               <tbody>

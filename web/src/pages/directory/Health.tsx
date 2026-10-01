@@ -85,7 +85,7 @@ export function Health() {
             <Empty>{t("The keytab holds no entries.")}</Empty>
           ) : (
             <table>
-              <thead><tr><th>{t("Principal")}</th><th className="num">KVNO</th><th>{t("Written")}</th></tr></thead>
+              <thead><tr><th scope="col">{t("Principal")}</th><th scope="col" className="num">KVNO</th><th scope="col">{t("Written")}</th></tr></thead>
               <tbody>
                 {connector.keytab_entries.map((entry, index) => (
                   <tr key={index}>
@@ -115,7 +115,7 @@ export function Health() {
           <Empty>{t("Every enrolled host last reported the directory reachable.")}</Empty>
         ) : (
           <table>
-            <thead><tr><th>{t("Host")}</th><th>{t("Site / environment")}</th><th>{t("Checked")}</th><th>{t("Verdict")}</th></tr></thead>
+            <thead><tr><th scope="col">{t("Host")}</th><th scope="col">{t("Site / environment")}</th><th scope="col">{t("Checked")}</th><th scope="col">{t("Verdict")}</th></tr></thead>
             <tbody>
               {fleet.offline_from_directory.map((host) => (
                 <tr key={host.id}>

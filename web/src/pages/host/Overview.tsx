@@ -1328,7 +1328,7 @@ function RecentActivity({ host }: { host: Host }) {
         <Table>
           <thead>
             <tr>
-              <th>{t("When")}</th><th>{t("Kind")}</th><th>{t("What")}</th><th>{t("State")}</th><th>{t("Who")}</th>
+              <th scope="col">{t("When")}</th><th scope="col">{t("Kind")}</th><th scope="col">{t("What")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Who")}</th>
             </tr>
           </thead>
           <tbody>
@@ -1492,7 +1492,7 @@ function Adapters({ host }: { host: ReturnType<typeof useHost> }) {
   }
   return (
     <Table>
-      <thead><tr><th>{t("Adapter")}</th><th>{t("State")}</th><th>{t("Features")}</th><th>{t("Reason")}</th></tr></thead>
+      <thead><tr><th scope="col">{t("Adapter")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Features")}</th><th scope="col">{t("Reason")}</th></tr></thead>
       <tbody>
         {adapters.map((adapter) => (
           <tr key={adapter.name}>

@@ -75,8 +75,8 @@ export function Services() {
           <table>
             <thead>
               <tr>
-                <th>{t("Principal")}</th><th>{t("Service")}</th><th>{t("Host")}</th><th>{t("Keytab")}</th><th>{t("Managed by")}</th>
-                {canRotate && <th></th>}
+                <th scope="col">{t("Principal")}</th><th scope="col">{t("Service")}</th><th scope="col">{t("Host")}</th><th scope="col">{t("Keytab")}</th><th scope="col">{t("Managed by")}</th>
+                {canRotate && <th scope="col"></th>}
               </tr>
             </thead>
             <tbody>

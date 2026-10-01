@@ -303,7 +303,7 @@ export function Containers() {
       {state?.projects && state.projects.length > 0 && (
         <Section title={t("Compose projects")} count={state.projects.length} span={12} flush>
           <Table>
-            <thead><tr><th>{t("Project")}</th><th>{t("Services")}</th><th className="hm-num">{t("Running")}</th></tr></thead>
+            <thead><tr><th scope="col">{t("Project")}</th><th scope="col">{t("Services")}</th><th scope="col" className="hm-num">{t("Running")}</th></tr></thead>
             <tbody>
               {state.projects.map((project) => (
                 <tr key={project.name}>
@@ -658,7 +658,7 @@ function PlanView({ plan, stale }: { plan: ComputedPlan; stale: boolean }) {
       )}
       {plan.changes?.length ? (
         <Table>
-          <thead><tr><th>{t("Setting")}</th><th>{t("On the host")}</th><th>{t("Declared")}</th></tr></thead>
+          <thead><tr><th scope="col">{t("Setting")}</th><th scope="col">{t("On the host")}</th><th scope="col">{t("Declared")}</th></tr></thead>
           <tbody>
             {plan.changes.map((change) => (
               <tr key={change.field}>
@@ -844,7 +844,7 @@ function Events() {
         </Empty>
       ) : (
         <Table>
-          <thead><tr><th>{t("Time")}</th><th>{t("Kind")}</th><th>{t("Action")}</th><th>{t("Object")}</th><th>{t("Details")}</th></tr></thead>
+          <thead><tr><th scope="col">{t("Time")}</th><th scope="col">{t("Kind")}</th><th scope="col">{t("Action")}</th><th scope="col">{t("Object")}</th><th scope="col">{t("Details")}</th></tr></thead>
           <tbody>
             {list.map((event, index) => (
               <tr key={`${event.time}-${index}`}>
@@ -1037,8 +1037,8 @@ function ContainerTable({
     <Table>
       <thead>
         <tr>
-          <th>{t("Name")}</th><th>{t("State")}</th><th>{t("Image")}</th><th>{t("Health")}</th>
-          <th className="hm-num">{t("Restarts")}</th><th>{t("Ports")}</th><th>{t("Networks")}</th><th>Compose</th><th>{t("Actions")}</th>
+          <th scope="col">{t("Name")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Image")}</th><th scope="col">{t("Health")}</th>
+          <th scope="col" className="hm-num">{t("Restarts")}</th><th scope="col">{t("Ports")}</th><th scope="col">{t("Networks")}</th><th scope="col">Compose</th><th scope="col">{t("Actions")}</th>
         </tr>
       </thead>
       <tbody>
@@ -1132,7 +1132,7 @@ function ImageTable({
   if (!images?.length) return <EmptyList read={read} what={t("images")} />;
   return (
     <Table>
-      <thead><tr><th>{t("Tags")}</th><th className="hm-num">{t("Size")}</th><th>{t("In use")}</th><th>{t("Actions")}</th></tr></thead>
+      <thead><tr><th scope="col">{t("Tags")}</th><th scope="col" className="hm-num">{t("Size")}</th><th scope="col">{t("In use")}</th><th scope="col">{t("Actions")}</th></tr></thead>
       <tbody>
         {images.map((image) => (
           <tr key={image.id}>
@@ -1235,8 +1235,8 @@ function NetworkTable({
     <Table>
       <thead>
         <tr>
-          <th>{t("Name")}</th><th>{t("Driver")}</th><th>{t("Subnets")}</th><th>{t("Flags")}</th>
-          <th>Compose</th><th>{t("Attached containers")}</th><th>{t("Actions")}</th>
+          <th scope="col">{t("Name")}</th><th scope="col">{t("Driver")}</th><th scope="col">{t("Subnets")}</th><th scope="col">{t("Flags")}</th>
+          <th scope="col">Compose</th><th scope="col">{t("Attached containers")}</th><th scope="col">{t("Actions")}</th>
         </tr>
       </thead>
       <tbody>
@@ -1310,8 +1310,8 @@ function VolumeTable({
     <Table>
       <thead>
         <tr>
-          <th>{t("Name")}</th><th>{t("Driver")}</th><th className="hm-num">{t("Size")}</th><th>{t("Mountpoint")}</th>
-          <th>Compose</th><th>{t("Used by")}</th><th>{t("Actions")}</th>
+          <th scope="col">{t("Name")}</th><th scope="col">{t("Driver")}</th><th scope="col" className="hm-num">{t("Size")}</th><th scope="col">{t("Mountpoint")}</th>
+          <th scope="col">Compose</th><th scope="col">{t("Used by")}</th><th scope="col">{t("Actions")}</th>
         </tr>
       </thead>
       <tbody>

@@ -335,7 +335,7 @@ function Mappings() {
           {list.data?.items.length ? (
             <table>
               <thead>
-                <tr><th>{t("Group")}</th><th>{t("Role")}</th><th>{t("Scope")}</th><th>{t("Added by")}</th><th>{t("When")}</th><th /></tr>
+                <tr><th scope="col">{t("Group")}</th><th scope="col">{t("Role")}</th><th scope="col">{t("Scope")}</th><th scope="col">{t("Added by")}</th><th scope="col">{t("When")}</th><th scope="col" /></tr>
               </thead>
               <tbody>
                 {list.data.items.map((mapping) => (
@@ -660,7 +660,7 @@ function Identities({ initialSearch }: { initialSearch: string }) {
           ) : (
           <table>
             <thead>
-              <tr><th>{t("Subject")}</th><th>{t("Name")}</th><th>{t("Kind")}</th><th>{t("Roles and scopes")}</th><th>{t("Tokens")}</th><th /></tr>
+              <tr><th scope="col">{t("Subject")}</th><th scope="col">{t("Name")}</th><th scope="col">{t("Kind")}</th><th scope="col">{t("Roles and scopes")}</th><th scope="col">{t("Tokens")}</th><th scope="col" /></tr>
             </thead>
             <tbody>
               {shown.map((principal) => (
@@ -1041,7 +1041,7 @@ function Sessions({ principal, revoking, onRevoke }: {
   return (
     <table>
       <thead>
-        <tr><th>{t("Session")}</th><th>{t("Signed in")}</th><th>{t("Last seen")}</th><th>{t("Ends")}</th><th>{t("From")}</th><th /></tr>
+        <tr><th scope="col">{t("Session")}</th><th scope="col">{t("Signed in")}</th><th scope="col">{t("Last seen")}</th><th scope="col">{t("Ends")}</th><th scope="col">{t("From")}</th><th scope="col" /></tr>
       </thead>
       <tbody>
         {data.items.map((session) => (
@@ -1220,8 +1220,8 @@ function Roles() {
           <table>
             <thead>
               <tr>
-                <th>{t("Permission")}</th>
-                {matrix.roles.map((role) => <th key={role}>{role}</th>)}
+                <th scope="col">{t("Permission")}</th>
+                {matrix.roles.map((role) => <th scope="col" key={role}>{role}</th>)}
               </tr>
             </thead>
             <tbody>
@@ -1303,8 +1303,8 @@ function Review() {
             <table>
               <thead>
                 <tr>
-                  <th>{t("Subject")}</th><th>{t("Kind")}</th><th>{t("Roles and scopes")}</th>
-                  <th>{t("Last use")}</th><th>{t("Tokens")}</th><th>{t("Flags")}</th>
+                  <th scope="col">{t("Subject")}</th><th scope="col">{t("Kind")}</th><th scope="col">{t("Roles and scopes")}</th>
+                  <th scope="col">{t("Last use")}</th><th scope="col">{t("Tokens")}</th><th scope="col">{t("Flags")}</th>
                 </tr>
               </thead>
               <tbody>

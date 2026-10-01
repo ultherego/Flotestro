@@ -137,7 +137,7 @@ function Groups() {
           <Empty>{t("No groups.")}</Empty>
         ) : (
           <table>
-            <thead><tr><th>{t("Group")}</th><th className="num">GID</th><th>{t("Description")}</th><th>{t("Members")}</th><th></th></tr></thead>
+            <thead><tr><th scope="col">{t("Group")}</th><th scope="col" className="num">GID</th><th scope="col">{t("Description")}</th><th scope="col">{t("Members")}</th><th scope="col"></th></tr></thead>
             <tbody>
               {data.items.map((group) => (
                 <tr key={group.name}>
@@ -287,7 +287,7 @@ function HBACRules() {
           <Empty>{t("No rules.")}</Empty>
         ) : (
           <table>
-            <thead><tr><th>{t("Rule")}</th><th>{t("Enabled")}</th><th>{t("Who")}</th><th>{t("Hosts")}</th><th>{t("Services")}</th><th>{t("Risk")}</th><th></th></tr></thead>
+            <thead><tr><th scope="col">{t("Rule")}</th><th scope="col">{t("Enabled")}</th><th scope="col">{t("Who")}</th><th scope="col">{t("Hosts")}</th><th scope="col">{t("Services")}</th><th scope="col">{t("Risk")}</th><th scope="col"></th></tr></thead>
             <tbody>
               {data.items.map((rule) => (
                 <tr key={rule.name}>
@@ -515,7 +515,7 @@ function SudoRules() {
           <Empty>{t("No sudo rules.")}</Empty>
         ) : (
           <table>
-            <thead><tr><th>{t("Rule")}</th><th>{t("Enabled")}</th><th>{t("Applies to")}</th><th>{t("Hosts")}</th><th>{t("Commands")}</th><th>{t("Risk")}</th><th></th></tr></thead>
+            <thead><tr><th scope="col">{t("Rule")}</th><th scope="col">{t("Enabled")}</th><th scope="col">{t("Applies to")}</th><th scope="col">{t("Hosts")}</th><th scope="col">{t("Commands")}</th><th scope="col">{t("Risk")}</th><th scope="col"></th></tr></thead>
             <tbody>
               {data.items.map((rule) => (
                 <tr key={rule.name}>
@@ -672,7 +672,7 @@ function DirectoryDNS() {
           <Empty>{t("This zone has no records the panel can read.")}</Empty>
         ) : (
           <table>
-            <thead><tr><th>{t("Name")}</th><th>{t("Type")}</th><th>{t("Value")}</th><th className="num">TTL</th></tr></thead>
+            <thead><tr><th scope="col">{t("Name")}</th><th scope="col">{t("Type")}</th><th scope="col">{t("Value")}</th><th scope="col" className="num">TTL</th></tr></thead>
             <tbody>
               {(records.data?.items ?? []).map((item, index) => (
                 <tr key={`${item.name}-${item.type}-${index}`}>

@@ -172,7 +172,7 @@ export function Kernel() {
       <Section title={t("Settings")} count={settings.length} span={12} flush>
         <Table>
           <thead>
-            <tr><th>{t("Key")}</th><th>{t("Current")}</th><th>{t("Desired")}</th><th>{t("Owner")}</th></tr>
+            <tr><th scope="col">{t("Key")}</th><th scope="col">{t("Current")}</th><th scope="col">{t("Desired")}</th><th scope="col">{t("Owner")}</th></tr>
           </thead>
           <tbody>
             {settings.map((setting) => (
@@ -253,7 +253,7 @@ export function Kernel() {
       >
         <Table>
           <thead>
-            <tr><th>{t("Module")}</th><th className="hm-num">{t("Size")}</th><th>{t("Used by")}</th><th>{t("State")}</th><th>{t("Actions")}</th></tr>
+            <tr><th scope="col">{t("Module")}</th><th scope="col" className="hm-num">{t("Size")}</th><th scope="col">{t("Used by")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Actions")}</th></tr>
           </thead>
           <tbody>
             {modules.slice(0, 60).map((entry) => (

@@ -224,7 +224,7 @@ export function Power() {
           <Empty>{t("Nothing is holding a shutdown on this host.")}</Empty>
         ) : (
           <Table>
-            <thead><tr><th>{t("Who")}</th><th>{t("User")}</th><th>{t("What")}</th><th>{t("Why")}</th><th>{t("Mode")}</th></tr></thead>
+            <thead><tr><th scope="col">{t("Who")}</th><th scope="col">{t("User")}</th><th scope="col">{t("What")}</th><th scope="col">{t("Why")}</th><th scope="col">{t("Mode")}</th></tr></thead>
             <tbody>
               {snapshot.inhibitors.map((inhibitor, i) => (
                 <tr key={`${inhibitor.who}-${i}`}>
@@ -312,7 +312,7 @@ export function Power() {
           <Empty>{t("The journal on this host lists no earlier boots.")}</Empty>
         ) : (
           <Table>
-            <thead><tr><th className="hm-num">#</th><th>{t("Boot ID")}</th><th>{t("First entry")}</th><th>{t("Last entry")}</th></tr></thead>
+            <thead><tr><th scope="col" className="hm-num">#</th><th scope="col">{t("Boot ID")}</th><th scope="col">{t("First entry")}</th><th scope="col">{t("Last entry")}</th></tr></thead>
             <tbody>
               {[...snapshot.last_boots].reverse().map((boot) => (
                 <tr key={boot.boot_id}>

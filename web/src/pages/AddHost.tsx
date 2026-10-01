@@ -823,7 +823,7 @@ export function AddHost() {
           <table>
             <thead>
               <tr>
-                <th>{t("What for")}</th><th>{t("Scope")}</th><th>{t("Status")}</th><th className="num">{t("Uses")}</th><th>{t("Expires")}</th><th>{t("Requested by")}</th><th></th>
+                <th scope="col">{t("What for")}</th><th scope="col">{t("Scope")}</th><th scope="col">{t("Status")}</th><th scope="col" className="num">{t("Uses")}</th><th scope="col">{t("Expires")}</th><th scope="col">{t("Requested by")}</th><th scope="col"></th>
               </tr>
             </thead>
             <tbody>

@@ -229,9 +229,9 @@ function GroupList() {
             <table>
               <thead>
                 <tr>
-                  <th>{t("Group")}</th><th>{t("Kind")}</th><th>{t("Selector")}</th>
-                  <th className="num">{t("Hosts")}</th><th>{t("Created by")}</th><th>{t("Updated")}</th>
-                  {canWrite && <th></th>}
+                  <th scope="col">{t("Group")}</th><th scope="col">{t("Kind")}</th><th scope="col">{t("Selector")}</th>
+                  <th scope="col" className="num">{t("Hosts")}</th><th scope="col">{t("Created by")}</th><th scope="col">{t("Updated")}</th>
+                  {canWrite && <th scope="col"></th>}
                 </tr>
               </thead>
               <tbody>
@@ -409,7 +409,7 @@ export function HostChooser({ selected, onChange, title }: {
       ) : (
         <table>
           <thead>
-            <tr><th></th><th>{t("Host")}</th><th>{t("State")}</th><th>{t("Site")}</th><th>{t("Environment")}</th><th>{t("Tags")}</th></tr>
+            <tr><th scope="col"></th><th scope="col">{t("Host")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Site")}</th><th scope="col">{t("Environment")}</th><th scope="col">{t("Tags")}</th></tr>
           </thead>
           <tbody>
             {rows.map((host) => (
@@ -778,7 +778,7 @@ function UsedBy({ usage, kind }: { usage: GroupUsage; kind: HostGroup["kind"] })
       {total > 0 && (
         <table>
           <thead>
-            <tr><th>{t("Record")}</th><th>{t("Name")}</th><th>{t("State")}</th></tr>
+            <tr><th scope="col">{t("Record")}</th><th scope="col">{t("Name")}</th><th scope="col">{t("State")}</th></tr>
           </thead>
           <tbody>
             {usage.campaigns.map((campaign) => (
@@ -954,7 +954,7 @@ function GroupPage({ id }: { id: string }) {
               <thead>
                 <tr>
                   {seesCampaigns && (
-                    <th>
+                    <th scope="col">
                       <input
                         type="checkbox"
                         aria-label={t("Select every loaded host")}
@@ -963,8 +963,8 @@ function GroupPage({ id }: { id: string }) {
                       />
                     </th>
                   )}
-                  <th>{t("Host")}</th><th>{t("State")}</th><th>{t("System")}</th><th>{t("Site")}</th>
-                  <th>{t("Environment")}</th><th>{t("Tags")}</th><th>{t("Last seen")}</th>
+                  <th scope="col">{t("Host")}</th><th scope="col">{t("State")}</th><th scope="col">{t("System")}</th><th scope="col">{t("Site")}</th>
+                  <th scope="col">{t("Environment")}</th><th scope="col">{t("Tags")}</th><th scope="col">{t("Last seen")}</th>
                 </tr>
               </thead>
               <tbody>

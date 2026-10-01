@@ -1256,7 +1256,7 @@ function ScopeStep({
             {t("{n} operations change hosts but cannot run as a campaign — with reasons", { n: refusals.length })}
           </summary>
           <table>
-            <thead><tr><th>{t("Operation")}</th><th>{t("Why not")}</th></tr></thead>
+            <thead><tr><th scope="col">{t("Operation")}</th><th scope="col">{t("Why not")}</th></tr></thead>
             <tbody>
               {refusals.map((item) => (
                 <tr key={item.action}>
@@ -1326,7 +1326,7 @@ function MappingEditor({
       <div className="field wide">
         <span className="field-label">{t("New names, one host at a time")}</span>
         <table>
-          <thead><tr><th>{t("Current hostname")}</th><th>{t("New FQDN")}</th><th></th></tr></thead>
+          <thead><tr><th scope="col">{t("Current hostname")}</th><th scope="col">{t("New FQDN")}</th><th scope="col"></th></tr></thead>
           <tbody>
             {rows.map((host) => {
               const name = order.mapping[host.id] ?? "";
@@ -1653,7 +1653,7 @@ function EligibilityStep({ order, preview, checking, nav }: { order: Order; prev
     >
       <table>
         <thead>
-          <tr><th>{t("Bucket")}</th><th className="num">{t("Hosts")}</th><th>{t("Which")}</th></tr>
+          <tr><th scope="col">{t("Bucket")}</th><th scope="col" className="num">{t("Hosts")}</th><th scope="col">{t("Which")}</th></tr>
         </thead>
         <tbody>
           <tr>
@@ -2189,7 +2189,7 @@ function TargetTable({ targets, action }: { targets: ReturnType<typeof useTarget
       height={480}
       columns={5}
       rowKey={(target) => target.host_id}
-      head={<tr><th>{t("Host")}</th><th>{t("Wave")}</th><th>{t("State")}</th><th>{t("Blocker")}</th><th>{t("Message")}</th></tr>}
+      head={<tr><th scope="col">{t("Host")}</th><th scope="col">{t("Wave")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Blocker")}</th><th scope="col">{t("Message")}</th></tr>}
       onNearEnd={targets.hasNextPage && !targets.isFetchingNextPage ? () => targets.fetchNextPage() : undefined}
       loading={targets.isFetchingNextPage}
       render={(target) => (

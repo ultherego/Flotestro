@@ -655,7 +655,7 @@ export function Campaign() {
       {approvals.data && approvals.data.items.length > 0 && (
         <Card title={t("Approval record")} description={t("Who consented to what, on what authentication and why. The record is written once and never changed.")} flush>
           <table>
-            <thead><tr><th>{t("Approved by")}</th><th>{t("Requested by")}</th><th>{t("Authentication")}</th><th>{t("Reason")}</th><th>{t("Change ticket")}</th><th>{t("When")}</th></tr></thead>
+            <thead><tr><th scope="col">{t("Approved by")}</th><th scope="col">{t("Requested by")}</th><th scope="col">{t("Authentication")}</th><th scope="col">{t("Reason")}</th><th scope="col">{t("Change ticket")}</th><th scope="col">{t("When")}</th></tr></thead>
             <tbody>
               {approvals.data.items.map((record) => (
                 <tr key={record.id}>
@@ -700,7 +700,7 @@ export function Campaign() {
       {report.data && (
         <Card title={t("Waves")} flush>
           <table>
-            <thead><tr><th className="num">{t("Wave")}</th><th>{t("Canary")}</th><th>{t("Closed")}</th><th>{t("Summary")}</th></tr></thead>
+            <thead><tr><th scope="col" className="num">{t("Wave")}</th><th scope="col">{t("Canary")}</th><th scope="col">{t("Closed")}</th><th scope="col">{t("Summary")}</th></tr></thead>
             <tbody>
               {report.data.waves.map((wave) => (
                 <tr key={wave.wave}>
@@ -770,7 +770,7 @@ export function Campaign() {
           <Empty>{t("No event matches the filter.")}</Empty>
         ) : (
           <table>
-            <thead><tr><th>{t("When")}</th><th>{t("Event")}</th><th>{t("Host")}</th><th>{t("Detail")}</th></tr></thead>
+            <thead><tr><th scope="col">{t("When")}</th><th scope="col">{t("Event")}</th><th scope="col">{t("Host")}</th><th scope="col">{t("Detail")}</th></tr></thead>
             <tbody>
               {events.map((entry) => (
                 <tr key={entry.id}>
@@ -819,7 +819,7 @@ export function Campaign() {
             height={480}
             columns={rowCompensation ? 9 : 8}
             rowKey={(target) => target.host_id}
-            head={<tr><th>{t("Host")}</th><th className="num">{t("Wave")}</th><th>{t("Plan")}</th><th>{t("Steps")}</th><th>{t("State")}</th><th>{t("Progress")}</th><th>{t("Error code")}</th><th>{t("Message")}</th>{rowCompensation && <th>{t("Way back")}</th>}</tr>}
+            head={<tr><th scope="col">{t("Host")}</th><th scope="col" className="num">{t("Wave")}</th><th scope="col">{t("Plan")}</th><th scope="col">{t("Steps")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Progress")}</th><th scope="col">{t("Error code")}</th><th scope="col">{t("Message")}</th>{rowCompensation && <th scope="col">{t("Way back")}</th>}</tr>}
             onNearEnd={targets.hasNextPage && !targets.isFetchingNextPage ? () => targets.fetchNextPage() : undefined}
             loading={targets.isFetchingNextPage}
             render={(target) => {

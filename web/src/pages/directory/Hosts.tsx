@@ -58,7 +58,7 @@ export function Hosts() {
           <table>
             <thead>
               <tr>
-                <th>{t("Host")}</th><th>{t("Enrolled")}</th><th>{t("Host groups")}</th><th>{t("Managed by")}</th><th>{t("Fleet host")}</th><th></th>
+                <th scope="col">{t("Host")}</th><th scope="col">{t("Enrolled")}</th><th scope="col">{t("Host groups")}</th><th scope="col">{t("Managed by")}</th><th scope="col">{t("Fleet host")}</th><th scope="col"></th>
               </tr>
             </thead>
             <tbody>

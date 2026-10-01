@@ -303,7 +303,7 @@ export function Time() {
         ) : (
           <Table>
             <thead>
-              <tr><th>{t("Address")}</th><th>{t("Mode")}</th><th>{t("State")}</th><th className="hm-num">{t("Stratum")}</th><th className="hm-num">{t("Poll")}</th><th>{t("Reach")}</th><th className="hm-num">{t("Offset")}</th></tr>
+              <tr><th scope="col">{t("Address")}</th><th scope="col">{t("Mode")}</th><th scope="col">{t("State")}</th><th scope="col" className="hm-num">{t("Stratum")}</th><th scope="col" className="hm-num">{t("Poll")}</th><th scope="col">{t("Reach")}</th><th scope="col" className="hm-num">{t("Offset")}</th></tr>
             </thead>
             <tbody>
               {snapshot.sources.map((source) => (
@@ -333,7 +333,7 @@ export function Time() {
           <Empty>{t("No time servers are configured on this host.")}</Empty>
         ) : (
           <Table>
-            <thead><tr><th>{t("Address")}</th><th>{t("From")}</th><th>{t("Kind")}</th><th>{t("Owner")}</th></tr></thead>
+            <thead><tr><th scope="col">{t("Address")}</th><th scope="col">{t("From")}</th><th scope="col">{t("Kind")}</th><th scope="col">{t("Owner")}</th></tr></thead>
             <tbody>
               {snapshot.configured_servers.map((server, i) => (
                 <tr key={`${server.address}-${i}`}>
@@ -427,7 +427,7 @@ export function Time() {
         {testJob && (
           <Table>
             <thead>
-              <tr><th>{t("Server")}</th><th>{t("Answered from")}</th><th className="hm-num">{t("Stratum")}</th><th className="hm-num">{t("Offset")}</th><th className="hm-num">{t("Round trip")}</th></tr>
+              <tr><th scope="col">{t("Server")}</th><th scope="col">{t("Answered from")}</th><th scope="col" className="hm-num">{t("Stratum")}</th><th scope="col" className="hm-num">{t("Offset")}</th><th scope="col" className="hm-num">{t("Round trip")}</th></tr>
             </thead>
             <tbody>
               {probes.map((probe) => (

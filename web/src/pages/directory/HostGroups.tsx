@@ -77,7 +77,7 @@ export function HostGroups() {
           <Empty>{t("The directory has no host groups.")}</Empty>
         ) : (
           <table>
-            <thead><tr><th>{t("Host group")}</th><th>{t("Description")}</th><th>{t("Hosts")}</th><th>{t("Nested groups")}</th><th></th></tr></thead>
+            <thead><tr><th scope="col">{t("Host group")}</th><th scope="col">{t("Description")}</th><th scope="col">{t("Hosts")}</th><th scope="col">{t("Nested groups")}</th><th scope="col"></th></tr></thead>
             <tbody>
               {data.items.map((group) => (
                 <tr key={group.name}>

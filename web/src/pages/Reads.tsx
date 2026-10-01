@@ -96,7 +96,7 @@ function ReadsList() {
             <>
               <table>
                 <thead>
-                  <tr><th>{t("Operation")}</th><th className="num">{t("Hosts")}</th><th>{t("Progress")}</th><th>{t("Reason")}</th><th>{t("Created")}</th></tr>
+                  <tr><th scope="col">{t("Operation")}</th><th scope="col" className="num">{t("Hosts")}</th><th scope="col">{t("Progress")}</th><th scope="col">{t("Reason")}</th><th scope="col">{t("Created")}</th></tr>
                 </thead>
                 <tbody>
                   {reads.map((read) => (
@@ -410,7 +410,7 @@ function FanOutPage({ id }: { id: string }) {
         <Card className="span-12" title={t("Hosts")} flush>
           <table>
             <thead>
-              <tr><th>{t("Host")}</th><th>{t("State")}</th><th>{t("Result")}</th><th>{t("Finished")}</th><th>{t("Job")}</th></tr>
+              <tr><th scope="col">{t("Host")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Result")}</th><th scope="col">{t("Finished")}</th><th scope="col">{t("Job")}</th></tr>
             </thead>
             <tbody>
               {view.hosts.map((host) => (
@@ -579,7 +579,7 @@ function StructuredResult({ action, host }: { action: string; host: ReadFanOutHo
         <Toolbar end={<span className="source">{t("{n} of {total} processes", { n: processes.length, total: snapshot.total ?? processes.length })}{snapshot.truncated ? ` · ${t("output truncated")}` : ""}</span>} />
         <table>
           <thead>
-            <tr><th className="num">PID</th><th>{t("User")}</th><th>{t("Command")}</th><th>{t("State")}</th><th className="num">RSS</th><th className="num">{t("Threads")}</th></tr>
+            <tr><th scope="col" className="num">PID</th><th scope="col">{t("User")}</th><th scope="col">{t("Command")}</th><th scope="col">{t("State")}</th><th scope="col" className="num">RSS</th><th scope="col" className="num">{t("Threads")}</th></tr>
           </thead>
           <tbody>
             {processes.map((process) => (
@@ -603,7 +603,7 @@ function StructuredResult({ action, host }: { action: string; host: ReadFanOutHo
     return (
       <table>
         <thead>
-          <tr><th>{t("Name")}</th><th>{t("Addresses")}</th><th>{t("Server")}</th><th className="num">{t("Took")}</th></tr>
+          <tr><th scope="col">{t("Name")}</th><th scope="col">{t("Addresses")}</th><th scope="col">{t("Server")}</th><th scope="col" className="num">{t("Took")}</th></tr>
         </thead>
         <tbody>
           {queries.map((query) => (

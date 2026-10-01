@@ -126,11 +126,11 @@ export function Tags() {
             <table>
               <thead>
                 <tr>
-                  <th>{t("Tag")}</th>
-                  <th>{t("Key")}</th>
-                  <th>{t("Value")}</th>
-                  <th className="num">{t("Hosts")}</th>
-                  <th />
+                  <th scope="col">{t("Tag")}</th>
+                  <th scope="col">{t("Key")}</th>
+                  <th scope="col">{t("Value")}</th>
+                  <th scope="col" className="num">{t("Hosts")}</th>
+                  <th scope="col" />
                 </tr>
               </thead>
               <tbody>

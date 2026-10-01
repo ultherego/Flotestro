@@ -415,7 +415,7 @@ export function Monitoring() {
             <Empty>{t("The sample lists no filesystem.")}</Empty>
           ) : (
             <Table>
-              <thead><tr><th>{t("Mount")}</th><th>{t("Used")}</th></tr></thead>
+              <thead><tr><th scope="col">{t("Mount")}</th><th scope="col">{t("Used")}</th></tr></thead>
               <tbody>
                 {(latest.filesystems ?? []).map((fs) => (
                   <tr key={fs.mount}>
@@ -513,8 +513,8 @@ export function Monitoring() {
             <Table>
               <thead>
                 <tr>
-                  <th>{t("Rule")}</th><th>{t("Severity")}</th><th>{t("State")}</th><th className="hm-num">{t("Value")}</th>
-                  <th>{t("Detail")}</th><th>{t("Since")}</th><th></th>
+                  <th scope="col">{t("Rule")}</th><th scope="col">{t("Severity")}</th><th scope="col">{t("State")}</th><th scope="col" className="hm-num">{t("Value")}</th>
+                  <th scope="col">{t("Detail")}</th><th scope="col">{t("Since")}</th><th scope="col"></th>
                 </tr>
               </thead>
               <tbody>
@@ -562,7 +562,7 @@ export function Monitoring() {
           ) : (
             <Table>
               <thead>
-                <tr><th>{t("Until")}</th><th>{t("Rule")}</th><th>{t("Scope")}</th><th>{t("Reason")}</th><th>{t("By")}</th><th></th></tr>
+                <tr><th scope="col">{t("Until")}</th><th scope="col">{t("Rule")}</th><th scope="col">{t("Scope")}</th><th scope="col">{t("Reason")}</th><th scope="col">{t("By")}</th><th scope="col"></th></tr>
               </thead>
               <tbody>
                 {silences.map((entry) => (

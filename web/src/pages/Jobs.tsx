@@ -470,7 +470,7 @@ export function Jobs() {
             <table>
               <thead>
                 <tr>
-                  <th>
+                  <th scope="col">
                     {awaitingJobs.length > 0 && (
                       <input type="checkbox" checked={allSelected} onChange={toggleAll} aria-label={t("Select every job awaiting approval")} />
                     )}
@@ -484,7 +484,7 @@ export function Jobs() {
                       onSort={(_next, sortColumn) => setFilter("sort", nextSort(filters.sort, sortColumn))}
                     />
                   ))}
-                  <th></th>
+                  <th scope="col"></th>
                 </tr>
               </thead>
               <tbody>

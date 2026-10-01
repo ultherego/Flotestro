@@ -277,7 +277,7 @@ export function Services() {
           <Empty>{t("No unit is in a failed state.")}</Empty>
         ) : (
           <Table>
-            <thead><tr><th>{t("Unit")}</th><th>{t("Actions")}</th></tr></thead>
+            <thead><tr><th scope="col">{t("Unit")}</th><th scope="col">{t("Actions")}</th></tr></thead>
             <tbody>
               {failed.map((unit) => (
                 <tr key={unit}>

@@ -499,8 +499,8 @@ export function Storage() {
         <Table>
           <thead>
             <tr>
-              <th>{t("Mount point")}</th><th>{t("Source")}</th><th>{t("Type")}</th><th>{t("State")}</th>
-              <th>{t("Space used")}</th><th>{t("Inodes used")}</th><th>{t("Owner")}</th><th>{t("Actions")}</th>
+              <th scope="col">{t("Mount point")}</th><th scope="col">{t("Source")}</th><th scope="col">{t("Type")}</th><th scope="col">{t("State")}</th>
+              <th scope="col">{t("Space used")}</th><th scope="col">{t("Inodes used")}</th><th scope="col">{t("Owner")}</th><th scope="col">{t("Actions")}</th>
             </tr>
           </thead>
           <tbody>
@@ -580,7 +580,7 @@ export function Storage() {
       <Section title={t("Devices")} count={devices.length} span={12} flush>
         <Table>
           <thead>
-            <tr><th>{t("Device")}</th><th>{t("Type")}</th><th className="hm-num">{t("Size")}</th><th>{t("Filesystem")}</th><th>{t("Mounted at")}</th><th>{t("Identity")}</th><th>{t("Actions")}</th></tr>
+            <tr><th scope="col">{t("Device")}</th><th scope="col">{t("Type")}</th><th scope="col" className="hm-num">{t("Size")}</th><th scope="col">{t("Filesystem")}</th><th scope="col">{t("Mounted at")}</th><th scope="col">{t("Identity")}</th><th scope="col">{t("Actions")}</th></tr>
           </thead>
           <tbody>
             {devices.map((device) => (
@@ -782,7 +782,7 @@ export function Storage() {
           <Empty>{t("This host has LVM but no volume groups.")}</Empty>
         ) : (
           <Table>
-            <thead><tr><th>{t("Group")}</th><th className="hm-num">{t("Size")}</th><th>{t("Allocated")}</th><th className="hm-num">{t("Free")}</th><th className="hm-num">{t("Volumes")}</th><th>{t("Actions")}</th></tr></thead>
+            <thead><tr><th scope="col">{t("Group")}</th><th scope="col" className="hm-num">{t("Size")}</th><th scope="col">{t("Allocated")}</th><th scope="col" className="hm-num">{t("Free")}</th><th scope="col" className="hm-num">{t("Volumes")}</th><th scope="col">{t("Actions")}</th></tr></thead>
             <tbody>
               {snapshot.groups.map((group) => (
                 <tr key={group.name}>
@@ -848,7 +848,7 @@ export function Storage() {
       {snapshot?.physical_volumes?.length ? (
         <Section title={t("Physical volumes")} count={snapshot.physical_volumes.length} span={12} flush>
           <Table>
-            <thead><tr><th>{t("Device")}</th><th>{t("Group")}</th><th className="hm-num">{t("Size")}</th><th className="hm-num">{t("Free")}</th></tr></thead>
+            <thead><tr><th scope="col">{t("Device")}</th><th scope="col">{t("Group")}</th><th scope="col" className="hm-num">{t("Size")}</th><th scope="col" className="hm-num">{t("Free")}</th></tr></thead>
             <tbody>
               {snapshot.physical_volumes.map((physical) => (
                 <tr key={physical.path}>
@@ -868,7 +868,7 @@ export function Storage() {
       {snapshot?.volumes?.length ? (
         <Section title={t("Volumes")} count={snapshot.volumes.length} span={6} flush>
           <Table>
-            <thead><tr><th>{t("Logical volume")}</th><th>{t("Group")}</th><th className="hm-num">{t("Size")}</th><th>{t("Kind")}</th><th>{t("Actions")}</th></tr></thead>
+            <thead><tr><th scope="col">{t("Logical volume")}</th><th scope="col">{t("Group")}</th><th scope="col" className="hm-num">{t("Size")}</th><th scope="col">{t("Kind")}</th><th scope="col">{t("Actions")}</th></tr></thead>
             <tbody>
               {snapshot.volumes.map((volume) => (
                 <tr key={volume.path}>
@@ -1126,8 +1126,8 @@ function ArrayCard({ array, hostID, onIntent, onAdd }: {
       <Table>
         <thead>
           <tr>
-            <th>{t("Member")}</th><th className="hm-num">{t("Slot")}</th><th>{t("Role")}</th>
-            <th>{t("Identity")}</th><th>{t("Actions")}</th>
+            <th scope="col">{t("Member")}</th><th scope="col" className="hm-num">{t("Slot")}</th><th scope="col">{t("Role")}</th>
+            <th scope="col">{t("Identity")}</th><th scope="col">{t("Actions")}</th>
           </tr>
         </thead>
         <tbody>
@@ -1346,8 +1346,8 @@ function SmartReport({ device, onClose }: { device: Device; onClose: () => void 
             <Table>
               <thead>
                 <tr>
-                  <th className="hm-num">ID</th><th>{t("Attribute")}</th><th className="hm-num">{t("Value")}</th>
-                  <th className="hm-num">{t("Worst")}</th><th className="hm-num">{t("Threshold")}</th><th className="hm-num">{t("Raw")}</th>
+                  <th scope="col" className="hm-num">ID</th><th scope="col">{t("Attribute")}</th><th scope="col" className="hm-num">{t("Value")}</th>
+                  <th scope="col" className="hm-num">{t("Worst")}</th><th scope="col" className="hm-num">{t("Threshold")}</th><th scope="col" className="hm-num">{t("Raw")}</th>
                 </tr>
               </thead>
               <tbody>

@@ -585,7 +585,7 @@ function Results({ policyID }: { policyID: string }) {
       ) : (
         <table>
           <thead>
-            <tr><th>{t("Host")}</th><th>{t("Rule")}</th><th>{t("Verdict")}</th><th>{t("Reason")}</th><th>{t("Version")}</th><th>{t("Evaluated")}</th></tr>
+            <tr><th scope="col">{t("Host")}</th><th scope="col">{t("Rule")}</th><th scope="col">{t("Verdict")}</th><th scope="col">{t("Reason")}</th><th scope="col">{t("Version")}</th><th scope="col">{t("Evaluated")}</th></tr>
           </thead>
           <tbody>
             {rows.map((result) => (
@@ -621,7 +621,7 @@ function Versions({ policyID }: { policyID: string }) {
   if (versions.data.items.length === 0) return <EmptyState>{t("Never published.")}</EmptyState>;
   return (
     <table>
-      <thead><tr><th>{t("Version")}</th><th>{t("Published")}</th><th>{t("By")}</th><th>{t("Authentication")}</th><th>{t("Reason")}</th><th>{t("Rules")}</th><th>{t("Remediation")}</th></tr></thead>
+      <thead><tr><th scope="col">{t("Version")}</th><th scope="col">{t("Published")}</th><th scope="col">{t("By")}</th><th scope="col">{t("Authentication")}</th><th scope="col">{t("Reason")}</th><th scope="col">{t("Rules")}</th><th scope="col">{t("Remediation")}</th></tr></thead>
       <tbody>
         {versions.data.items.map((version) => (
           <tr key={version.version}>
@@ -651,7 +651,7 @@ function Campaigns({ policyID }: { policyID: string }) {
   if (campaigns.data.items.length === 0) return <EmptyState>{t("No campaign ordered: report mode, no drift, or a drift nothing can fix.")}</EmptyState>;
   return (
     <table>
-      <thead><tr><th>{t("Campaign")}</th><th>{t("State")}</th><th>{t("Version")}</th><th>{t("Created")}</th></tr></thead>
+      <thead><tr><th scope="col">{t("Campaign")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Version")}</th><th scope="col">{t("Created")}</th></tr></thead>
       <tbody>
         {campaigns.data.items.map((campaign) => (
           <tr key={campaign.id}>

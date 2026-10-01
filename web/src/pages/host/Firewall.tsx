@@ -328,7 +328,7 @@ export function Firewall() {
         >
           <Table>
             <thead>
-              <tr><th>{t("Reason")}</th><th>{t("Rule")}</th><th>{t("Where")}</th><th>{t("What it means")}</th></tr>
+              <tr><th scope="col">{t("Reason")}</th><th scope="col">{t("Rule")}</th><th scope="col">{t("Where")}</th><th scope="col">{t("What it means")}</th></tr>
             </thead>
             <tbody>
               {snapshot.drift.map((entry, index) => (
@@ -354,7 +354,7 @@ export function Firewall() {
         >
           <Table>
             <thead>
-              <tr><th>{t("Zone")}</th><th>{t("State")}</th><th>{t("Target")}</th><th>{t("Interfaces")}</th><th>{t("Services")}</th><th>{t("Ports")}</th><th>{t("Actions")}</th></tr>
+              <tr><th scope="col">{t("Zone")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Target")}</th><th scope="col">{t("Interfaces")}</th><th scope="col">{t("Services")}</th><th scope="col">{t("Ports")}</th><th scope="col">{t("Actions")}</th></tr>
             </thead>
             <tbody>
               {zones.map((zone) => (
@@ -416,7 +416,7 @@ export function Firewall() {
         ) : (
           <Table>
             <thead>
-              <tr><th>{t("Table")}</th><th>{t("Chain")}</th><th>{t("Rule")}</th><th>{t("Owner")}</th><th>{t("Counters")}</th><th>{t("Actions")}</th></tr>
+              <tr><th scope="col">{t("Table")}</th><th scope="col">{t("Chain")}</th><th scope="col">{t("Rule")}</th><th scope="col">{t("Owner")}</th><th scope="col">{t("Counters")}</th><th scope="col">{t("Actions")}</th></tr>
             </thead>
             <tbody>
               {rules.map((rule) => (
