@@ -424,3 +424,57 @@ func TestOmittingAnyRequiredStageCannotPass(t *testing.T) {
 		})
 	}
 }
+
+// The arithmetic of a report is evidence only while it can be checked against
+// itself. Until this test, "failed > 0" let a negative count through and
+// "discovered == 0" was the only thing asked of the number of tests: a report
+// that discovered 310, passed one and failed minus ninety-nine earned a pass.
+func TestTheCountsOfAReportHaveToAddUp(t *testing.T) {
+	for _, bad := range []struct {
+		name   string
+		counts map[string]int
+		reason string
+	}{
+		{
+			name: "a negative number of failures",
+			counts: map[string]int{
+				"discovered": 310, "passed": 1, "failed": -99,
+				"skipped": 0, "absent": 0, "not_applicable": 0, "waived": 0,
+			},
+			reason: "negative number of failed",
+		},
+		{
+			name: "fewer tests accounted for than discovered",
+			counts: map[string]int{
+				"discovered": 310, "passed": 12, "failed": 0,
+				"skipped": 0, "absent": 0, "not_applicable": 0, "waived": 0,
+			},
+			reason: "accounts for 12",
+		},
+		{
+			name: "more tests accounted for than discovered",
+			counts: map[string]int{
+				"discovered": 310, "passed": 400, "failed": 0,
+				"skipped": 0, "absent": 0, "not_applicable": 0, "waived": 0,
+			},
+			reason: "accounts for 400",
+		},
+	} {
+		t.Run(bad.name, func(t *testing.T) {
+			report := goodReport()
+			report["counts"] = bad.counts
+			report["verdict"] = "fail"
+			parsed, err := ParseGateReport(encode(t, report))
+			if err != nil {
+				t.Fatal(err)
+			}
+			verdict, reasons := parsed.ComputeVerdict()
+			if verdict != VerdictFail {
+				t.Fatalf("%s reached %q", bad.name, verdict)
+			}
+			if !strings.Contains(strings.Join(reasons, "; "), bad.reason) {
+				t.Fatalf("the refusal does not say why: %v", reasons)
+			}
+		})
+	}
+}

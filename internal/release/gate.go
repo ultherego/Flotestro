@@ -353,7 +353,39 @@ func (r GateReport) ComputeVerdict() (string, []string) {
 		if counts.Absent != absent || counts.NotApplicable != notApplicable || counts.Waived != waived {
 			fatal = append(fatal, "the counts of the skips do not match the skips themselves")
 		}
-		if counts.Failed > 0 {
+		// A count below zero is not a quantity of tests, and every comparison
+		// under it reads the wrong way round: "failed > 0" lets a negative
+		// through, and so does a discovered count that only has to differ from
+		// zero. A report that says it ran -99 failures is not a green run that
+		// happens to be odd - it is a report that cannot be believed at all.
+		negative := ""
+		for _, count := range []struct {
+			name  string
+			value int
+		}{
+			{"discovered", counts.Discovered}, {"passed", counts.Passed},
+			{"failed", counts.Failed}, {"skipped", counts.Skipped},
+			{"absent", counts.Absent}, {"not applicable", counts.NotApplicable},
+			{"waived", counts.Waived},
+		} {
+			if count.value < 0 {
+				negative = count.name
+				break
+			}
+		}
+		if negative != "" {
+			fatal = append(fatal, fmt.Sprintf("the report counts a negative number of %s tests", negative))
+		}
+		// And the three outcomes are a partition of what was discovered: every
+		// test the run found ended passed, failed or skipped. Without this the
+		// numbers can be made to say anything - discovered 310 over one pass
+		// and ninety-nine failures that are carried as a negative.
+		if counts.Passed+counts.Failed+counts.Skipped != counts.Discovered {
+			fatal = append(fatal, fmt.Sprintf(
+				"the report discovered %d tests and accounts for %d of them",
+				counts.Discovered, counts.Passed+counts.Failed+counts.Skipped))
+		}
+		if counts.Failed != 0 {
 			fatal = append(fatal, fmt.Sprintf("%d tests failed", counts.Failed))
 		}
 		if counts.Discovered == 0 || counts.Passed == 0 {
