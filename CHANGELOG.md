@@ -4,6 +4,23 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [semantic versioning](https://semver.org/). Dates are the
 day the tag was published.
 
+## [0.61.4] - 2026-10-01
+
+A patch over 0.61.3 for one defect of the gate's own making, and the rule that
+keeps it from coming back.
+
+### Fixed
+
+- The first-run checklist is mirrored by hand in the integration suite, which
+  asserts the order of its steps, and that suite is behind a build tag - so
+  `go vet ./...` never compares the two and a step added on the server is caught
+  only when the gate reaches the integration stage. `installation_keys` did
+  exactly that: the run was forty-nine minutes old when it said "expected 11
+  steps, got 12". The mirror names the step now, and `shipcheck` gained a rule
+  that compares the two files in milliseconds, with the negative control to
+  prove it fails when they disagree.
+
+
 ## [0.61.3] - 2026-10-01
 
 What a day of installing the product the documented way found after 0.61.2, and
