@@ -4,6 +4,41 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [semantic versioning](https://semver.org/). Dates are the
 day the tag was published.
 
+## [0.61.3] - 2026-10-01
+
+What a day of installing the product the documented way found after 0.61.2, and
+two things the panel knew and did not say.
+
+### Fixed
+
+- The checklist says where the keys of the installation live. The fleet CA, the
+  secret store and the helper's signing key are either files under the state
+  directory or rows in the database, and every other step looks the same either
+  way - so an installation whose keys are files reported itself finished, and the
+  difference is the whole of what losing that machine costs. For files it is a
+  warning, because a backup of the database alone cannot bring such an
+  installation back.
+- A sign-in that carries no permission gets a page instead of an empty panel.
+  Every section hides itself for want of a permission, so a first sign-in through
+  an identity provider whose groups nobody had mapped yet rendered the frame
+  around nothing. The checklist knew; the person who had just signed in was not
+  told. Now they are, along with what grants it.
+- `packaging/sign-repo.sh` publishes an architecture-independent package where a
+  host looks for it. A package built `any` went to a directory with a database of
+  its own, and a host reads the one at the root of the channel: signed, indexed
+  and present, it was invisible to every host.
+- The fault-injection test cuts the link where a containerised panel sees it. The
+  rule sat on the input hook, which is where a packet arrives when the panel
+  listens on the machine itself; the documented deployment publishes a port as a
+  DNAT, so the packet is forwarded and never passes input. The scenario had never
+  run on the deployment the documentation describes.
+- The integration suite finds the relay that is running rather than the one
+  enrolled last, and clears the records it makes. Its cleanup deleted the relay
+  row while two other tables referenced it, and the complaint went to the test
+  log, where nothing reads it.
+- The gate's own contract requires the stage that establishes what was tested.
+
+
 ## [0.61.2] - 2026-10-01
 
 A second patch from the same run: what installing the product the documented way
