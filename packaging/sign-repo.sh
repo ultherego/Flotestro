@@ -60,6 +60,13 @@ place() {
 # components. The fleet has one package source, not a distribution tree.
 if ls "$RELEASE"/*.deb >/dev/null 2>&1; then
     echo "==> APT repository ($CHANNEL)"
+    # The one tool this half cannot do without, asked for by name like rpmsign
+    # and repo-add below. Without this line it was the only missing tool that
+    # announced itself as "dpkg-scanpackages: command not found" from the shell,
+    # halfway through - after the key had been made and the pool filled, and with
+    # nothing saying what to install.
+    command -v dpkg-scanpackages >/dev/null ||
+        { echo "dpkg-scanpackages is missing - it is in dpkg-dev" >&2; exit 1; }
     apt_dir="$REPO/deb/dists/$CHANNEL/main"
     # The pool belongs to the channel. One pool shared by all of them would
     # put a pre-release .deb into the stable index the next time that index
