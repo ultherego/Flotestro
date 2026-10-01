@@ -4,6 +4,53 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [semantic versioning](https://semver.org/). Dates are the
 day the tag was published.
 
+## [0.61.1] - 2026-10-01
+
+A patch cut from the development line for four defects found by installing the
+product the way the documentation describes it, on hosts built from nothing.
+
+### Fixed
+
+- The `.deb` no longer ships `/etc/flotestro/agent.yaml` as a conffile. The panel
+  composes that file per host and an operator puts it in place before installing
+  the package, so dpkg met a file "created by you" where the package expected its
+  own and asked what to do about it. An automated install has nobody to answer,
+  and the package was left unpacked and unconfigured - which means the service
+  account was never created, so the enrollment that follows could not run at all,
+  and `apt` then refused to repair it without naming a configuration file as the
+  reason. It travels as a template now and the maintainer script writes it only
+  where nothing is there, the way `helper.yaml` beside it always has. Only the
+  `.deb` was affected; the `.rpm` carries the same file as `%config(noreplace)`.
+- The container deployment passes the fourteen settings of the identity provider
+  and of the directory that the panel reads. It passed none of them, so a
+  deployment made the documented way could not be connected to Keycloak or
+  FreeIPA at all: the keys went into `.env` and stopped there, because Compose
+  substitutes from that file and does not hand it to a container. Nothing broke
+  loudly - the panel served without single sign-on and without a directory, and
+  an operator who had filled in `.env` had no reason to suspect otherwise. Both
+  deployment variants carry them, the client secret travels as a path and never
+  as a value, and the four files of the two integrations are named beside the
+  mount each one needs.
+- The helper removes the names its registries carried before its root was
+  translated to English. A rename leaves the old file on every host that ran the
+  earlier build, and nothing read it: an operator reading the state directory
+  took it for something the product writes, and a host upgraded from an older
+  build carried file names under a product whose rule is that every name is
+  English.
+- The install runbook printed an enrollment that cannot run as printed. The
+  command is executed as `flotestro-agent` and the token file it named was
+  written by root, so it answered `permission denied`.
+
+### Changed
+
+- `env.example` documents the settings of the identity provider, which it never
+  did, and groups all of them in sections. It had listed four FreeIPA keys and no
+  OIDC key at all, with the FreeIPA ones under a heading about running your own
+  database.
+- The README gives the `dnf` and `pacman` addresses of the package repository
+  inline, as it already did for `apt`. It had sent a reader to the repository's
+  own pages for those two, and those pages were a stub.
+
 ## [0.62.0] - 2026-09-26
 
 ### Added
