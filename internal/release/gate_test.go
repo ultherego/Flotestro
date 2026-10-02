@@ -43,6 +43,7 @@ func goodReport() map[string]any {
 			"preflight":   map[string]any{"result": "pass", "seconds": 57},
 			"integration": map[string]any{"result": "pass", "seconds": 2100},
 			"playwright":  map[string]any{"result": "pass", "seconds": 110},
+			"unchanged":   map[string]any{"result": "pass", "seconds": 1},
 		},
 		"counts": map[string]int{
 			"discovered": 310, "passed": 310, "failed": 0,

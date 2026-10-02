@@ -1027,7 +1027,10 @@ func (p *Pacman) Upgrade(ctx context.Context, options Options) (Apply, error) {
 			apply.SelfRepair = append(apply.SelfRepair,
 				"the damaged archives were removed from the cache ("+strings.Join(removed, ", ")+
 					") and the transaction was retried")
-			result = runWithProgress(ctx, 45*time.Minute, options.Progress, false, pacmanPath, args...)
+			// Merged like the first attempt: a retry on the unmerged runner would
+			// leave Combined empty, and the scriptlet failures of the transaction
+			// that actually ran would be read off nothing.
+			result = runMergedWithProgress(ctx, 45*time.Minute, options.Progress, pacmanPath, args...)
 		}
 	}
 

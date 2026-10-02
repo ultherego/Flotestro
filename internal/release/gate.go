@@ -182,6 +182,14 @@ var fullRunStages = []string{
 	// is a report that never established what it tested.
 	"identity",
 	"fixtures", "preflight", stageIntegration, "playwright",
+	// unchanged asks the same question as tree, after everything has been built
+	// from the tree rather than before. tree proves what the working tree held
+	// when the run started; the report records HEAD^{tree}, which is the commit's
+	// tree whatever the working tree held later. On 02.10 a file was edited while
+	// a run was between stages, and the image of the panel may have carried four
+	// lines that are not in the commit - and nothing in the report would have
+	// said so.
+	"unchanged",
 }
 
 func (r GateReport) validate() error {
