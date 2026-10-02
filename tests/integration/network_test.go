@@ -188,15 +188,38 @@ func TestBadNetworkConfigurationDoesNotReachTheHost(t *testing.T) {
 	}
 }
 
+// hostWithoutAWriteMechanism finds a host whose network the panel can read and
+// not write. An empty host means every host in the fleet has a mechanism, and
+// the boundary this scenario guards has nowhere to be tested.
+func hostWithoutAWriteMechanism(t *testing.T, h *harness) (hostView, networkSnapshot) {
+	t.Helper()
+	for _, host := range h.hosts() {
+		if host.ConnectionState != "online" {
+			continue
+		}
+		state := hostNetworkSnapshot(t, h, host.ID)
+		if state.WriteAdapter != "" {
+			continue
+		}
+		return host, state
+	}
+	return hostView{}, networkSnapshot{}
+}
+
 // TestHostWithoutAWriteMechanismRefusesWhenOrdered checks the boundary the
 // capability registry is to guard: a host that will not keep the change across
 // a reboot is not to get it at all.
 func TestHostWithoutAWriteMechanismRefusesWhenOrdered(t *testing.T) {
 	h := newHarness(t)
-	host := h.hostByFamily("debian")
-	state := hostNetworkSnapshot(t, h, host.ID)
-	if state.WriteAdapter != "" {
-		t.Skipf("the host has the write adapter %s", state.WriteAdapter)
+	// By what the host cannot do, not by its family. Two hosts of this fleet are
+	// of the debian family and only one of them has no write mechanism, so asking
+	// for "the debian host" returned whichever the panel happened to list first -
+	// and on 02.10 that was the one with netplan, which skipped the scenario,
+	// unclassified, in a run where everything else passed. The mirror of the same
+	// mistake in TestIPv6OrderIsRefusedOnAHostWithoutTheFamily.
+	host, _ := hostWithoutAWriteMechanism(t, h)
+	if host.ID == "" {
+		absent(t, "every connected host of the fleet can write its network configuration")
 	}
 
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",

@@ -189,7 +189,6 @@ tests/integration/network_layers_test.go:134	t.Skip("no connected host of the la
 tests/integration/network_layers_test.go:206	t.Skipf("the host cannot read its layering: %s", state.LayeringUnavailableReason)
 tests/integration/network_layers_test.go:248	t.Skip("the host did not point at the management interface")
 tests/integration/network_layers_test.go:386	t.Skip("the host did not point at the management interface")
-tests/integration/network_test.go:199	t.Skipf("the host has the write adapter %s", state.WriteAdapter)
 tests/integration/network_test.go:224	t.Skip("the host has no mechanism to write the network configuration")
 tests/integration/network_test.go:228	t.Skip("the host did not point at the management interface")
 tests/integration/network_test.go:293	t.Skipf("no connected host writes its network through %s", adapter)
