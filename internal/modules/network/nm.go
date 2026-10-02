@@ -226,8 +226,28 @@ func RouteArguments(connection string, routes, routes6 []string) ([][]string, er
 	}, nil
 }
 
+// ipv6MethodsWithoutDNS are the IPv6 methods that carry no resolver settings.
+// NetworkManager refuses ipv6.dns, ipv6.dns-search and ipv6.ignore-auto-dns on a
+// connection in one of them - "this property is not allowed for
+// 'method=link-local'" - and refuses the whole nmcli invocation with them, so a
+// resolver change that named both families failed outright on a host whose
+// second family is off. The IPv4 half was perfectly writable. 02.10, measured on
+// agent-arch.
+var ipv6MethodsWithoutDNS = map[string]bool{
+	"link-local": true,
+	"disabled":   true,
+	"ignore":     true,
+}
+
+// ipv6CarriesDNS says whether a connection in this IPv6 method accepts resolver
+// settings. An empty method is one nmcli did not report, and is left as it was.
+func ipv6CarriesDNS(method string) bool {
+	return !ipv6MethodsWithoutDNS[method]
+}
+
 // DNSArguments assembles the change of the resolver alone.
-func DNSArguments(connection string, servers, domains []string, ignoreAuto bool) ([][]string, error) {
+func DNSArguments(connection string, servers, domains []string, ignoreAuto bool,
+	method6 string) ([][]string, error) {
 	if connection == "" {
 		return nil, fmt.Errorf("resolver change without a connection name")
 	}
@@ -249,14 +269,26 @@ func DNSArguments(connection string, servers, domains []string, ignoreAuto bool)
 	// refused by nmcli, and the operator sees the refusal of a command they
 	// never composed.
 	v4, v6 := splitDNSFamilies(servers)
-	return [][]string{
-		{NmcliPath, "connection", "modify", connection,
-			"ipv4.dns", strings.Join(v4, ","),
-			"ipv4.dns-search", strings.Join(domains, ","),
-			"ipv4.ignore-auto-dns", ignore,
+	modification := []string{NmcliPath, "connection", "modify", connection,
+		"ipv4.dns", strings.Join(v4, ","),
+		"ipv4.dns-search", strings.Join(domains, ","),
+		"ipv4.ignore-auto-dns", ignore}
+	switch {
+	case ipv6CarriesDNS(method6):
+		modification = append(modification,
 			"ipv6.dns", strings.Join(v6, ","),
 			"ipv6.dns-search", strings.Join(domains, ","),
-			"ipv6.ignore-auto-dns", ignore},
+			"ipv6.ignore-auto-dns", ignore)
+	case len(v6) > 0:
+		// Asked for a server the connection cannot hold. Saying so is the answer;
+		// writing the IPv4 half and keeping quiet about the rest would report a
+		// resolver the host does not have.
+		return nil, fmt.Errorf("the connection %s has IPv6 method %q, which carries no "+
+			"resolver settings, and the change names the IPv6 server %s",
+			connection, method6, strings.Join(v6, ", "))
+	}
+	return [][]string{
+		modification,
 		{NmcliPath, "connection", "up", connection},
 	}, nil
 }
@@ -308,10 +340,19 @@ func ProfileArguments(profile Profile) ([][]string, error) {
 		"ipv4.dns", strings.Join(v4, ","),
 		"ipv4.dns-search", strings.Join(profile.DNSSearch, ","),
 		"ipv4.ignore-auto-dns", ignore,
-		"ipv6.dns", strings.Join(v6, ","),
-		"ipv6.dns-search", strings.Join(profile.DNSSearch, ","),
-		"ipv6.ignore-auto-dns", ignore,
 		"ipv4.routes", strings.Join(profile.Routes, ",")}
+	// The resolver keys of the second family only where that family can hold
+	// them; see ipv6CarriesDNS.
+	if ipv6CarriesDNS(profile.Method6) {
+		modification = append(modification,
+			"ipv6.dns", strings.Join(v6, ","),
+			"ipv6.dns-search", strings.Join(profile.DNSSearch, ","),
+			"ipv6.ignore-auto-dns", ignore)
+	} else if len(v6) > 0 {
+		return nil, fmt.Errorf("the profile sets IPv6 method %q, which carries no "+
+			"resolver settings, and names the IPv6 server %s",
+			profile.Method6, strings.Join(v6, ", "))
+	}
 	// The second family is written only when the profile says something about it.
 	if profile.Method6 != "" {
 		modification = append(modification,

@@ -209,7 +209,7 @@ ipv6.ignore-auto-dns:yes
 	}
 
 	commands, err := DNSArguments("lab", []string{"10.0.0.53", "2001:db8::53"},
-		[]string{"lab.example"}, true)
+		[]string{"lab.example"}, true, "auto")
 	if err != nil {
 		t.Fatalf("composing the resolver change: %v", err)
 	}

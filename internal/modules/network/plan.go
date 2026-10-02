@@ -186,7 +186,8 @@ func ComputeProfile(iface string, current Profile, want ProfileRequest, ipv6 IPv
 func ComputeDNS(iface string, current Profile, servers, domains []string,
 	ignoreAuto bool) Plan {
 	plan := newPlan(iface, current, PlanDNS)
-	if _, err := DNSArguments(current.Connection, servers, domains, ignoreAuto); err != nil {
+	if _, err := DNSArguments(current.Connection, servers, domains, ignoreAuto,
+		current.Method6); err != nil {
 		return plan.withRefusal(err.Error())
 	}
 	desired := current

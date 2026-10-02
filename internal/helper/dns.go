@@ -66,7 +66,7 @@ func (s *Server) applyDNS(ctx context.Context, request *helperv1.HelperRequest,
 	}
 
 	steps, err := network.DNSArguments(connection, action.GetServers(),
-		action.GetSearchDomains(), action.GetIgnoreAutoDns())
+		action.GetSearchDomains(), action.GetIgnoreAutoDns(), profile.Method6)
 	if err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}

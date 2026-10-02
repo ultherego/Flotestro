@@ -93,6 +93,24 @@ func hostLayeredNetwork(t *testing.T, h *harness, hostID string) layeredNetworkV
 	return state
 }
 
+// hostThatWritesItsNetwork finds a host whose network can be written at all -
+// through any of the three mechanisms, NetworkManager included, since a profile
+// is not a link. An empty host means the fleet has none.
+func hostThatWritesItsNetwork(t *testing.T, h *harness) (hostView, layeredNetworkView) {
+	t.Helper()
+	for _, host := range h.hosts() {
+		if host.ConnectionState != "online" {
+			continue
+		}
+		state := hostLayeredNetwork(t, h, host.ID)
+		if state.WriteAdapter == "" || state.ManagementInterface == "" {
+			continue
+		}
+		return host, state
+	}
+	return hostView{}, layeredNetworkView{}
+}
+
 // hostThatBuildsLayers finds a host whose write mechanism can build a bond, a
 // bridge or a VLAN.
 func hostThatBuildsLayers(t *testing.T, h *harness) (hostView, layeredNetworkView) {
@@ -377,10 +395,19 @@ func TestBondOfOneMemberIsRefusedBeforeItLeavesThePanel(t *testing.T) {
 // named refusal rather than as a change that seemed to work.
 func TestIPv6OrderIsRefusedOnAHostWithoutTheFamily(t *testing.T) {
 	h := newHarness(t)
-	host := h.hostByFamily("debian")
-	state := hostLayeredNetwork(t, h, host.ID)
-	if state.WriteAdapter == "" {
-		absent(t, "the host has no mechanism to write the network configuration")
+	// By what the host can do, not by its family. This asked for the
+	// debian-family host and required it to have a write mechanism, while
+	// TestHostWithoutAWriteMechanismRefusesWhenOrdered asks for the same host and
+	// requires it to have none - so no fleet could satisfy both, and whichever
+	// way the laboratory was arranged one of them was skipped. 02.10: the
+	// arrangement was changed twice in one day, each time closing one scenario and
+	// opening the other, before anybody read the two selectors side by side.
+	//
+	// Nothing here is about Debian. What it needs is a host whose mechanism can
+	// write a profile and that says which interface is its own.
+	host, state := hostThatWritesItsNetwork(t, h)
+	if host.ID == "" {
+		absent(t, "no connected host of the fleet has a mechanism to write its network configuration")
 	}
 	if state.ManagementInterface == "" {
 		t.Skip("the host did not point at the management interface")
