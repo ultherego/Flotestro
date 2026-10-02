@@ -115,6 +115,16 @@ func (ca *CA) checkRelayNames(dnsNames []string, addresses []net.IP) error {
 		reserved[canonicalName(name)] = true
 	}
 	for _, name := range dnsNames {
+		// A wildcard is every name at once. The names of a relay come from its
+		// own first request and are kept in the registry from then on, so one
+		// relay asking for "*.example.test" would be issued a certificate that
+		// stands for every host and every other relay of that domain - and keep
+		// it at every renewal. The registry names what a relay is reached at,
+		// one name at a time, and has no use for a pattern.
+		if strings.Contains(name, "*") {
+			return fmt.Errorf("%w: %s is a wildcard, and a relay is reached at names, not at patterns",
+				ErrRelayNameReserved, name)
+		}
 		if reserved[canonicalName(name)] {
 			return fmt.Errorf("%w: %s is a name of the panel", ErrRelayNameReserved, name)
 		}

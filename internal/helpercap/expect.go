@@ -439,7 +439,7 @@ func CheckBinding(request *helperv1.HelperRequest, bound *BoundPayload) error {
 		}
 		switch action.Schedule.GetOperation() {
 		case helperv1.ScheduleRequest_OPERATION_ENSURE, helperv1.ScheduleRequest_OPERATION_RUN_NOW:
-			if err := sameList("schedule command", action.Schedule.GetCommand(), payload.Schedule.Command); err != nil {
+			if err := sameSequence("schedule command", action.Schedule.GetCommand(), payload.Schedule.Command); err != nil {
 				return err
 			}
 			// When the entry runs is as much of the order as what it runs.
@@ -750,10 +750,10 @@ func CheckBinding(request *helperv1.HelperRequest, bound *BoundPayload) error {
 		if err := same("interface", resolver.GetInterface(), payload.DNS.Interface); err != nil {
 			return err
 		}
-		if err := sameList("resolvers", resolver.GetServers(), payload.DNS.Servers); err != nil {
+		if err := sameSequence("resolvers", resolver.GetServers(), payload.DNS.Servers); err != nil {
 			return err
 		}
-		if err := sameList("search domains", resolver.GetSearchDomains(), payload.DNS.SearchDomains); err != nil {
+		if err := sameSequence("search domains", resolver.GetSearchDomains(), payload.DNS.SearchDomains); err != nil {
 			return err
 		}
 		if resolver.GetIgnoreAutoDns() != payload.DNS.IgnoreAutoDNS {
@@ -1318,6 +1318,19 @@ func toggleWord(operation helperv1.UnitActionRequest_Operation, on bool) string 
 func same(what, got, want string) error {
 	if got != want {
 		return binding(fmt.Sprintf("the request names the %s %q, the bound payload %q", what, got, want))
+	}
+	return nil
+}
+
+// sameSequence compares in order, for the lists where the order is the meaning:
+// the argv of a command, the resolvers a host asks in turn, the domains it
+// appends in turn. sameList below sorts, which is right for a set of packages or
+// images and wrong here - a request naming the same elements in another order
+// would then satisfy a capability signed for the first order, and what the panel
+// approved is not what the host would do.
+func sameSequence(what string, got, want []string) error {
+	if !slices.Equal(got, want) {
+		return binding(fmt.Sprintf("the request names other %s, or in another order, than the bound payload", what))
 	}
 	return nil
 }
