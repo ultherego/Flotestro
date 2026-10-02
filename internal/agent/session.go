@@ -485,6 +485,9 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 		opts.Executor.inventoryRefresh = func(ctx context.Context, modules []string) Refresh {
 			return inventory.refresh(ctx, modules)
 		}
+		// A change the agent made itself needs no operation to be seen: the
+		// module it touched is collected on the next turn of the same loop.
+		opts.Executor.inventoryStale = inventory.requestModules
 	}
 
 	// The resource sampler is built before the receive loop rather than next to

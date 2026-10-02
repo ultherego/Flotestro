@@ -128,6 +128,10 @@ type TaskExecutor struct {
 	// inventoryRefresh orders an inventory collection and waits for the revision
 	// that came out of it.
 	inventoryRefresh func(ctx context.Context, modules []string) Refresh
+	// inventoryStale says that a module's picture is older than the host, and
+	// does not wait: the answer of the task is the answer of the task, and a
+	// collection that takes seconds must not be charged to it.
+	inventoryStale func(modules []string)
 	// hostID is what the agent's certificate names. Empty means the executor
 	// was not told, and the rename preflight says so rather than guessing.
 	hostID string
@@ -508,7 +512,29 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 	result := e.perform(ctx, task, action, payload)
 	// The change is done; now the host is read again and the result says
 	// what was seen. A change nobody could observe is not a success.
-	return e.verifyOutcome(ctx, task, action, payload, before, result)
+	outcome := e.verifyOutcome(ctx, task, action, payload, before, result)
+	// And the panel is told that the picture it holds of this module is older
+	// than the host. Without it the host's page answers from the last cycle:
+	// a VLAN built through the panel was absent from the network tab for the
+	// rest of the inventory interval, which is fifteen minutes by default.
+	e.inventoryBehindTheHost(action, outcome)
+	return outcome
+}
+
+// inventoryBehindTheHost orders a collection of the module an operation has just
+// written to. Only a change that succeeded: a refusal and a failure leave the
+// host as the panel already believes it to be, and a read never moves it. The
+// order does not block and its result is not waited for - what matters is that
+// the next picture is taken, not that this task carries the cost of it.
+func (e *TaskExecutor) inventoryBehindTheHost(action opspec.ActionType, result *agentv1.TaskResult) {
+	if e.inventoryStale == nil || result.GetStatus() != agentv1.TaskResult_STATUS_SUCCEEDED {
+		return
+	}
+	module := action.InventoryModule()
+	if module == "" {
+		return
+	}
+	e.inventoryStale([]string{module})
 }
 
 // perform hands the task to the module of its operation.
