@@ -184,6 +184,21 @@ func TestPolicyJudgesAUnitOverTheDebianFamily(t *testing.T) {
 func packageDriftPolicy(t *testing.T, h *harness, mode string) (policyView, policyOutcomeView, map[string]hostView) {
 	t.Helper()
 	online := h.connectedDebianHosts(t)
+	// The rule compares the panel's copy of the package list with the digest the
+	// host reports, and the copy is refreshed on the vulnerability cycle. The
+	// suite installs and removes packages of its own, so by the time this runs the
+	// copy is older than the host as often as not - and this scenario then skipped,
+	// on 02.10 and for however long before that. Reading the list is an ordinary
+	// operation, so the scenario asks for it rather than waiting for a cycle it
+	// does not control.
+	for id := range online {
+		if job, attempts := h.runOperation(id, map[string]any{
+			"action": "packages.list", "reason": "the panel's copy before a policy is judged",
+		}, 5*time.Minute); job.State != "succeeded" {
+			t.Fatalf("reading the package list of %s: %s %s",
+				online[id].Hostname, job.State, lastMessage(attempts))
+		}
+	}
 	policy := h.createPolicy(t, uniqueSubject("pkg-"+mode), mode, []map[string]any{
 		{"kind": "package_installed", "name": "nonexistent-pkg-xyz"},
 	})
@@ -195,7 +210,8 @@ func packageDriftPolicy(t *testing.T, h *harness, mode string) (policyView, poli
 			continue
 		}
 		if result.Verdict == "error" {
-			t.Skipf("%s: the package copy is not usable (%s); the vulnerability cycle has not fetched it", host.Hostname, result.Reason)
+			t.Fatalf("%s: the package copy is not usable after this scenario read it: %s",
+				host.Hostname, result.Reason)
 		}
 		if result.Verdict != "drift" {
 			t.Fatalf("%s: verdict %s (%s), want drift", host.Hostname, result.Verdict, result.Reason)

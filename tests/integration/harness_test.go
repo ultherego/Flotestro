@@ -371,16 +371,38 @@ func (h *harness) hostByFamily(family string) hostView {
 
 // hostByName returns the connected host of that name; the lab's Ubuntu
 // host is of the debian family, so a family is not enough to pick it.
+// hostByName waits for the named host to be connected, within a bound.
+//
+// It used to look once. A host whose session had just been cut - by a relay that
+// another scenario restarted, by an agent the laboratory had restarted a second
+// earlier - was then reported absent, and the scenario that needed it was skipped
+// over a gap that closes by itself. On 02.10 two relay scenarios were skipped
+// that way in a run where the agent of that very host was finishing tasks
+// throughout, which is how the gap was found at all.
+//
+// The bound matters more than the wait: a host that is really gone still ends the
+// scenario as absent, and it does so with the same words.
 func (h *harness) hostByName(hostname string) hostView {
 	h.t.Helper()
-	for _, host := range h.hosts() {
-		if host.Hostname == hostname && host.ConnectionState == "online" {
-			return host
+	deadline := time.Now().Add(hostOnlineBound)
+	for {
+		for _, host := range h.hosts() {
+			if host.Hostname == hostname && host.ConnectionState == "online" {
+				return host
+			}
 		}
+		if time.Now().After(deadline) {
+			absent(h.t, "no connected host named %s within %s", hostname, hostOnlineBound)
+			return hostView{}
+		}
+		time.Sleep(3 * time.Second)
 	}
-	absent(h.t, "no connected host named %s", hostname)
-	return hostView{}
 }
+
+// hostOnlineBound is how long a host may take to come back into the fleet. The
+// agent reconnects with full jitter from two seconds, and the panel marks a
+// session live on the first heartbeat.
+const hostOnlineBound = 90 * time.Second
 
 // createOperation orders an operation and returns the resulting job.
 func (h *harness) createOperation(hostID string, body map[string]any) jobView {

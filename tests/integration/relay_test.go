@@ -467,9 +467,21 @@ func TestTheFleetComesThroughTheRelay(t *testing.T) {
 	h := newHarness(t)
 	relayID, _ := h.labRelay(t)
 	ctx := context.Background()
-	if hosts := relayedFleetHosts(ctx, t, h.database(ctx), relayID); len(hosts) == 0 {
-		absent(t, "no host of the fleet connects through the relay %s, so the path it exists for is untested",
-			relayID)
+	// Within a bound, because a session cut a moment ago comes back on its own and
+	// a laboratory that never arranged this path does not. Looking once reported
+	// the second where the first was true: on 02.10 this was absent in a run whose
+	// fixtures had arranged the path and whose host was working throughout.
+	deadline := time.Now().Add(hostOnlineBound)
+	for {
+		if hosts := relayedFleetHosts(ctx, t, h.database(ctx), relayID); len(hosts) > 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			absent(t, "no host of the fleet connects through the relay %s within %s, "+
+				"so the path it exists for is untested", relayID, hostOnlineBound)
+			return
+		}
+		time.Sleep(3 * time.Second)
 	}
 }
 

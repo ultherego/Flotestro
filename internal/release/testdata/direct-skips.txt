@@ -198,7 +198,6 @@ tests/integration/packages_test.go:418	t.Skipf("hold=%v: the agent of %s does no
 tests/integration/packages_test.go:564	t.Skipf("host %s already has a broken package database; the scenario needs a clean baseline", host.Hostname)
 tests/integration/packages_test.go:608	t.Skipf("the lab repository does not carry %s; run Vagrant/lab-broken-package.sh (%s)", labBrokenPackage, last.Message)
 tests/integration/policy_test.go:112	t.Skip("no connected host of the debian family")
-tests/integration/policy_test.go:198	t.Skipf("%s: the package copy is not usable (%s); the vulnerability cycle has not fetched it", host.Hostname, result.Reason)
 tests/integration/reads_test.go:62	t.Skipf("only %d hosts are connected; a fan-out needs at least two", len(online))
 tests/integration/relay_health_test.go:66	t.Skipf("the lab relay at %s does not answer: %v", address, err)
 tests/integration/relay_health_test.go:126	t.Skipf("the lab relay at %s does not answer: %v", address, err)
