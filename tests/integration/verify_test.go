@@ -155,15 +155,18 @@ func TestARestartOfAMaskedUnitIsNeverASuccess(t *testing.T) {
 // restart used to end succeeded on the exit code of the scheduling, which is
 // the same exit code a host that never comes back produces.
 func TestARestartSettlesOnTheReturnOfTheHost(t *testing.T) {
-	// The machines of this laboratory do not come back from a restart they order
-	// themselves: VirtualBox leaves the guest stopped, and the workstation brings
-	// it back with vagrant.
-	// A waiver would fit this better than absent: VirtualBox is a property of
-	// the laboratory, not of the product. It stays absent, and the gate stays
-	// red on it, until the owner issues the waiver identifier, its expiry and
-	// the substitute evidence.
-	if os.Getenv("FLOTESTRO_TEST_REBOOT") == "" {
-		absent(t, "FLOTESTRO_TEST_REBOOT is not set: the hosts of this laboratory do not come back "+
+	// This used to be skipped on the grounds that the machines of this laboratory
+	// do not come back from a restart they order themselves - VirtualBox leaving
+	// the guest stopped. Measured on 02.10: agent-debian ordered its own restart
+	// and was answering again ten seconds later, on a new boot identifier. The
+	// premise was false, and a readiness criterion of the security document went
+	// untested for as long as it stood.
+	//
+	// So the scenario runs, and a laboratory whose hosts really do not come back
+	// says so by setting FLOTESTRO_TEST_REBOOT=0 - which is a claim about that
+	// laboratory, made deliberately, rather than a default nobody rechecks.
+	if os.Getenv("FLOTESTRO_TEST_REBOOT") == "0" {
+		absent(t, "FLOTESTRO_TEST_REBOOT=0: this laboratory says its hosts do not come back "+
 			"from a restart they order themselves")
 	}
 	h := newHarness(t)
