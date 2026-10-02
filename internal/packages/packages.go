@@ -337,8 +337,13 @@ func Detect() (Manager, error) {
 
 // commandResult separates the fact that a process ran from its result.
 type commandResult struct {
-	Stdout   string
-	Stderr   string
+	Stdout string
+	Stderr string
+	// Combined is both streams in the order the lines arrived. Some answers only
+	// exist in that order: pacman prints "installing foo..." on stdout and the
+	// failure of foo's scriptlet on stderr, so read apart the two say that
+	// something failed and nothing says what. Only runWithProgress fills it.
+	Combined string
 	ExitCode int
 	Ran      bool
 	Err      error
@@ -592,6 +597,19 @@ func environment() []string {
 }
 
 // lockHeld checks the lock of a file without starting a process.
+//
+// Both kinds, because Linux keeps them apart. flock(2) and the POSIX record
+// locks of fcntl(2) are independent: a process holding one is invisible to a
+// test of the other. APT and dpkg take the POSIX lock on
+// /var/lib/dpkg/lock-frontend, so a check that only tried flock answered "no
+// lock" while a real apt-get held the file - and the agent went on to start a
+// transaction that then waited on, or lost to, the one already running. Measured
+// on agent-debian on 02.10: with a POSIX lock held by another process, flock
+// acquired the file and fcntl refused it.
+//
+// The POSIX side asks with F_GETLK rather than taking the lock: a question
+// cannot, even for an instant, become the thing that blocks the transaction it
+// is asking about.
 func lockHeld(path string) (bool, bool) {
 	file, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
@@ -599,13 +617,34 @@ func lockHeld(path string) (bool, bool) {
 	}
 	defer file.Close()
 
-	err = unix.Flock(int(file.Fd()), unix.LOCK_EX|unix.LOCK_NB)
-	if err != nil {
+	if err := unix.Flock(int(file.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		// EWOULDBLOCK means somebody else holds the lock.
 		return true, true
 	}
 	_ = unix.Flock(int(file.Fd()), unix.LOCK_UN)
+
+	if held, checked := posixLockHeld(file); checked {
+		return held, true
+	}
 	return false, true
+}
+
+// posixLockHeld asks the kernel whether a write lock on the whole file would
+// conflict with one somebody already holds. The second value says whether the
+// kernel answered at all.
+func posixLockHeld(file *os.File) (bool, bool) {
+	probe := unix.Flock_t{
+		Type:   unix.F_WRLCK,
+		Whence: io.SeekStart,
+		Start:  0,
+		// Zero length means "to the end of the file", however it grows.
+		Len: 0,
+	}
+	if err := unix.FcntlFlock(file.Fd(), unix.F_GETLK, &probe); err != nil {
+		return false, false
+	}
+	// F_UNLCK in the answer means nothing in the way.
+	return probe.Type != unix.F_UNLCK, true
 }
 
 // modulesHidden checks whether the module tree of the running kernel is

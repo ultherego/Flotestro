@@ -1019,7 +1019,7 @@ func (p *Pacman) Upgrade(ctx context.Context, options Options) (Apply, error) {
 
 	before := p.installedVersions(ctx)
 	args := []string{"-Syu", "--noconfirm", "--noprogressbar", "--ignore", AgentPackage}
-	result := runWithProgress(ctx, 45*time.Minute, options.Progress, false, pacmanPath, args...)
+	result := runMergedWithProgress(ctx, 45*time.Minute, options.Progress, pacmanPath, args...)
 
 	// A damaged file in the cache has exactly one correct answer: fetch it again.
 	if (!result.Ran || result.ExitCode != 0) && BrokenDownload(result.Stderr, result.Stdout) {
@@ -1033,6 +1033,10 @@ func (p *Pacman) Upgrade(ctx context.Context, options Options) (Apply, error) {
 
 	after := p.installedVersions(ctx)
 	apply.Applied = diffVersions(before, after)
+	// pacman finishes with zero over a failed .INSTALL, so the defect is in the
+	// report or nowhere. Read from the combined output: which package the failure
+	// belongs to is only in the order the two streams arrived in.
+	apply.ScriptletErrors = PacmanScriptletFailures(result.Combined)
 	apply.DatabaseBroken = p.DatabaseBroken(ctx)
 	apply.RebootRequired = pacmanRebootRequired()
 	if !result.Ran || result.ExitCode != 0 {
@@ -1178,6 +1182,69 @@ func pacmanPrintedNames(output string) []string {
 	return names
 }
 
+// PacmanScriptletFailures names the packages whose install scriptlet failed.
+//
+// pacman runs a package's .INSTALL and does not fail the transaction when it
+// does: the exit code is zero, the package is installed, and the only trace is a
+// line of its own. A report that said nothing about it would say the transaction
+// went through - which it did, over a package left half configured.
+//
+// What it looks like, measured on agent-arch with a package whose post_install
+// returns 1:
+//
+//	installing flotestro-lab-broken...
+//	flotestro-lab-broken: the maintainer script ... fails by design
+//	error: command failed to execute correctly
+//
+// The name is not on the error line, so it comes from the operation line above
+// it. After ":: Running post-transaction hooks..." the same error belongs to a
+// hook and to no package, and is left alone.
+func PacmanScriptletFailures(output string) []string {
+	const failed = "error: command failed to execute correctly"
+	var names []string
+	seen := map[string]bool{}
+	current := ""
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, ":: Running post-transaction hooks") {
+			// From here on nothing belongs to a package.
+			current = ""
+			continue
+		}
+		if name, ok := pacmanOperationTarget(line); ok {
+			current = name
+			continue
+		}
+		if !strings.Contains(line, failed) || current == "" {
+			continue
+		}
+		if !seen[current] {
+			seen[current] = true
+			names = append(names, current)
+		}
+	}
+	return names
+}
+
+// pacmanOperationTarget reads the package out of a line that says what pacman is
+// doing to it.
+func pacmanOperationTarget(line string) (string, bool) {
+	for _, verb := range []string{"installing ", "upgrading ", "downgrading ",
+		"reinstalling ", "removing "} {
+		rest, found := strings.CutPrefix(line, verb)
+		if !found {
+			continue
+		}
+		name, ends := strings.CutSuffix(rest, "...")
+		if !ends || name == "" {
+			// Without the ellipsis it is prose and not pacman's progress line.
+			return "", false
+		}
+		return name, true
+	}
+	return "", false
+}
+
 // targetNotFound recognises the answer "there is no such package".
 var targetNotFound = regexp.MustCompile(`(?m)^error: target not found: (\S+)`)
 
@@ -1269,10 +1336,14 @@ func (p *Pacman) Install(ctx context.Context, options Options) (Apply, error) {
 	}
 
 	args := append([]string{"-S", "--needed", "--noconfirm", "--noprogressbar"}, options.Packages...)
-	result := runWithProgress(ctx, 45*time.Minute, options.Progress, false, pacmanPath, args...)
+	result := runMergedWithProgress(ctx, 45*time.Minute, options.Progress, pacmanPath, args...)
 
 	after := p.installedVersions(ctx)
 	apply.Applied = diffVersions(before, after)
+	// pacman finishes with zero over a failed .INSTALL, so the defect is in the
+	// report or nowhere. Read from the combined output: which package the failure
+	// belongs to is only in the order the two streams arrived in.
+	apply.ScriptletErrors = PacmanScriptletFailures(result.Combined)
 	apply.DatabaseBroken = p.DatabaseBroken(ctx)
 	apply.RebootRequired = pacmanRebootRequired()
 	if !result.Ran || result.ExitCode != 0 {
@@ -1329,10 +1400,14 @@ func (p *Pacman) Remove(ctx context.Context, options Options, expected []string)
 
 	before := p.installedVersions(ctx)
 	args := append([]string{"-Rs", "--noconfirm", "--noprogressbar"}, options.Packages...)
-	result := runWithProgress(ctx, 45*time.Minute, options.Progress, false, pacmanPath, args...)
+	result := runMergedWithProgress(ctx, 45*time.Minute, options.Progress, pacmanPath, args...)
 
 	after := p.installedVersions(ctx)
 	apply.Applied = diffVersions(before, after)
+	// pacman finishes with zero over a failed .INSTALL, so the defect is in the
+	// report or nowhere. Read from the combined output: which package the failure
+	// belongs to is only in the order the two streams arrived in.
+	apply.ScriptletErrors = PacmanScriptletFailures(result.Combined)
 	apply.DatabaseBroken = p.DatabaseBroken(ctx)
 	if !result.Ran || result.ExitCode != 0 {
 		apply.Output = tailLines(result.Stderr, result.Stdout, maxResultLines)

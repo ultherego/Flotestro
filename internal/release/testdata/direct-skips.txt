@@ -195,7 +195,6 @@ tests/integration/network_test.go:228	t.Skip("the host did not point at the mana
 tests/integration/network_test.go:293	t.Skipf("no connected host writes its network through %s", adapter)
 tests/integration/packages_test.go:150	t.Skip("no safe package for the test")
 tests/integration/packages_test.go:418	t.Skipf("hold=%v: the agent of %s does not report the holds yet", hold, host.Hostname)
-tests/integration/packages_test.go:542	t.Skip("the pacman adapter reports no install feature")
 tests/integration/packages_test.go:564	t.Skipf("host %s already has a broken package database; the scenario needs a clean baseline", host.Hostname)
 tests/integration/packages_test.go:608	t.Skipf("the lab repository does not carry %s; run Vagrant/lab-broken-package.sh (%s)", labBrokenPackage, last.Message)
 tests/integration/policy_test.go:112	t.Skip("no connected host of the debian family")

@@ -224,21 +224,42 @@ type attentionReader interface {
 	PackagesNeedingAttention(ctx context.Context) []string
 }
 
+// databaseReader is the part of a package adapter that can say whether its own
+// database is in a state a transaction can run against. Every adapter has this,
+// and only apt can name the packages that block one - a package waiting for its
+// configuration is a notion of dpkg and debconf, and pacman and dnf have nothing
+// like it.
+type databaseReader interface {
+	DatabaseBroken(ctx context.Context) bool
+}
+
 // packageStateNow reads the state of the package database the cheap way.
+//
+// The attention list where there is one, and the database verdict otherwise.
+// Asking only for the attention list left every manager but apt answering
+// nothing at all, and the verifier of a repair then had to report that the
+// adapter said nothing about the database - so a repair on Arch ended
+// applied_unverified however well it had gone. 02.10.
 func packageStateNow(ctx context.Context) *agentv1.PackageApplyResult {
 	manager, err := packages.Detect()
 	if err != nil {
 		return nil
 	}
-	reader, ok := manager.(attentionReader)
+	if reader, ok := manager.(attentionReader); ok {
+		attention := reader.PackagesNeedingAttention(ctx)
+		return &agentv1.PackageApplyResult{
+			Manager:                  manager.Name(),
+			PackageDatabaseBroken:    len(attention) > 0,
+			PackagesNeedingAttention: attention,
+		}
+	}
+	reader, ok := manager.(databaseReader)
 	if !ok {
 		return nil
 	}
-	attention := reader.PackagesNeedingAttention(ctx)
 	return &agentv1.PackageApplyResult{
-		Manager:                  manager.Name(),
-		PackageDatabaseBroken:    len(attention) > 0,
-		PackagesNeedingAttention: attention,
+		Manager:               manager.Name(),
+		PackageDatabaseBroken: reader.DatabaseBroken(ctx),
 	}
 }
 

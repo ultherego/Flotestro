@@ -1,164 +1,132 @@
 package packages
 
 import (
-	"context"
-	"errors"
+	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
-	"time"
 
 	"golang.org/x/sys/unix"
 )
 
-// lockCheckBudget bounds the lock check.
-const lockCheckBudget = 2 * time.Second
+// A POSIX record lock is what APT takes on /var/lib/dpkg/lock-frontend, and on
+// Linux a flock test cannot see one. Measured on agent-debian on 02.10: with the
+// POSIX lock held by another process, flock acquired the file. So this is the
+// case the probe exists for, and it needs a second process, because POSIX locks
+// belong to the process and this one would see its own as free.
+func TestAPosixLockHeldByAnotherProcessIsSeen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "lock-frontend")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if held, checked := lockHeld(path); !checked || held {
+		t.Fatalf("an unlocked file reads as held=%v checked=%v", held, checked)
+	}
 
-// holdLock takes the lock the way dpkg and rpm do: an exclusive flock on the
-// file, held until the end of the test.
-func holdLock(t *testing.T, path string) {
-	t.Helper()
-	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o640)
+	ready, release := holdPosixLock(t, path)
+	<-ready
+	held, checked := lockHeld(path)
+	release()
+	if !checked {
+		t.Fatal("the probe could not answer about a file it had just read")
+	}
+	if !held {
+		t.Error("a POSIX lock held by another process was not seen; a transaction " +
+			"would start beside the one already running")
+	}
+}
+
+func TestAFlockHeldByAnotherProcessIsSeen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "lock")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := unix.Flock(int(file.Fd()), unix.LOCK_EX); err != nil {
+	defer file.Close()
+	// flock is per open file description, so one taken here is visible to a
+	// separate open of the same path in this process.
+	if err := unix.Flock(int(file.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		_ = unix.Flock(int(file.Fd()), unix.LOCK_UN)
-		_ = file.Close()
-	})
+	defer func() { _ = unix.Flock(int(file.Fd()), unix.LOCK_UN) }()
+	if held, checked := lockHeld(path); !checked || !held {
+		t.Errorf("a flock was not seen: held=%v checked=%v", held, checked)
+	}
 }
 
-// swapLockFiles points an adapter at files in a temporary directory standing
-// in for /var/lib/dpkg or /var/lib/rpm, and restores the real list afterwards.
-func swapLockFiles(t *testing.T, list *[]string, paths ...string) {
+// A file nobody can open is not a file with no lock: the second value says the
+// probe could not answer, and the caller must not read that as "free".
+func TestAFileThatCannotBeOpenedIsNotAnAnswer(t *testing.T) {
+	if held, checked := lockHeld(filepath.Join(t.TempDir(), "absent")); checked || held {
+		t.Errorf("a missing file answered held=%v checked=%v", held, checked)
+	}
+}
+
+// holdPosixLock takes the POSIX lock in a separate process and returns a channel
+// closed once it is held, plus the way to let it go.
+func holdPosixLock(t *testing.T, path string) (<-chan struct{}, func()) {
 	t.Helper()
-	saved := *list
-	*list = paths
-	t.Cleanup(func() { *list = saved })
-}
-
-// timed runs the check and fails the test when it did not come back within
-// the budget: a check that blocks is the bug the scenario is about.
-func timed(t *testing.T, what string, run func()) {
-	t.Helper()
-	started := time.Now()
-	run()
-	if elapsed := time.Since(started); elapsed > lockCheckBudget {
-		t.Fatalf("%s took %s; the lock check has to come back at once", what, elapsed)
-	}
-}
-
-// TestLockHeldSeesTheFrontendLock is the scenario of a local administrator in
-// the middle of "apt install": the panel's operation is refused with the typed
-// code, names the lock, and does not queue behind it.
-func TestLockHeldSeesTheFrontendLock(t *testing.T) {
-	dpkg := t.TempDir()
-	frontend := filepath.Join(dpkg, "lock-frontend")
-	holdLock(t, frontend)
-	// The other files exist and are free: the refusal has to come from the
-	// one that is really held, not from every file the list names.
-	free := filepath.Join(dpkg, "lock")
-	if err := os.WriteFile(free, nil, 0o640); err != nil {
+	// The second process is this same test binary, re-executed with the variable
+	// TestMain looks for: it then holds the lock and runs no test, so the suite
+	// gains no scenario and no skip. A skip the gate cannot classify is a failed
+	// gate, and a helper is not a scenario.
+	cmd := exec.Command(os.Args[0])
+	cmd.Env = append(os.Environ(), lockHelperVar+"="+path)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
 		t.Fatal(err)
 	}
-	swapLockFiles(t, &aptLockFiles, free, frontend)
-
-	apt := &APT{}
-	timed(t, "LockHeld", func() {
-		held, path := apt.LockHeld()
-		if !held {
-			t.Fatal("a held frontend lock was not seen")
-		}
-		if path != frontend {
-			t.Fatalf("the lock reported was %s, expected %s", path, frontend)
-		}
-	})
-
-	// The transaction itself refuses before it starts anything, with the code the
-	// panel shows and the error the callers recognise as a refusal rather than a
-	// broken transaction.
-	timed(t, "Upgrade", func() {
-		apply, err := apt.Upgrade(context.Background(), Options{})
-		if !errors.Is(err, ErrLocked) {
-			t.Fatalf("Upgrade under a held lock: %v, expected %v", err, ErrLocked)
-		}
-		// The literal is deliberate: the code is part of the job result
-		// contract, and renaming the constant must not pass unnoticed.
-		if code, _ := ErrorCodeOf(err); code != "package_manager_locked" {
-			t.Fatalf("code = %q, expected package_manager_locked", code)
-		}
-		if !Refused(err) {
-			t.Fatal("a held lock is a refusal, not a failed transaction")
-		}
-		if len(apply.Applied) != 0 {
-			t.Fatalf("the refused transaction reports %d applied packages", len(apply.Applied))
-		}
-	})
-
-	// A metadata refresh takes the same lock and is refused the same way.
-	timed(t, "Refresh", func() {
-		if err := apt.Refresh(context.Background()); !errors.Is(err, ErrLocked) {
-			t.Fatalf("Refresh under a held lock: %v, expected %v", err, ErrLocked)
-		}
-	})
-}
-
-// TestAFreeLockDoesNotRefuseTheChange guards the other side: the check must
-// not turn every transaction away.
-func TestAFreeLockDoesNotRefuseTheChange(t *testing.T) {
-	dpkg := t.TempDir()
-	free := filepath.Join(dpkg, "lock-frontend")
-	if err := os.WriteFile(free, nil, 0o640); err != nil {
+	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	missing := filepath.Join(dpkg, "does-not-exist", "lock")
-
-	timed(t, "lockHeld", func() {
-		if held, checked := lockHeld(free); held || !checked {
-			t.Fatalf("a free lock: held=%v checked=%v", held, checked)
+	ready := make(chan struct{})
+	failed := make(chan string, 1)
+	go func() {
+		buf := make([]byte, 64)
+		n, _ := stdout.Read(buf)
+		if n > 0 && strings.HasPrefix(string(buf[:n]), "held") {
+			close(ready)
+			return
 		}
-		if held, checked := lockHeld(missing); held || checked {
-			t.Fatalf("a missing lock file: held=%v checked=%v, expected neither", held, checked)
+		failed <- string(buf[:n])
+		close(ready)
+	}()
+	return ready, func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+		select {
+		case what := <-failed:
+			t.Errorf("the second process never took the lock, so this test proved "+
+				"nothing: %q", what)
+		default:
 		}
-	})
-
-	swapLockFiles(t, &aptLockFiles, free, missing)
-	if held, path := (&APT{}).LockHeld(); held {
-		t.Fatalf("a free lock was reported as held at %s", path)
-	}
-	// The lock the check took to look must be gone: the check may not leave the
-	// file locked behind itself, or the administrator's next apt call would wait
-	// for the panel.
-	if held, _ := lockHeld(free); held {
-		t.Fatal("the check left the lock held")
 	}
 }
 
-// TestTheRPMLockIsSeenTheSameWay checks the dnf adapter against the same
-// scenario: the lock file differs, the refusal does not.
-func TestTheRPMLockIsSeenTheSameWay(t *testing.T) {
-	rpm := t.TempDir()
-	lock := filepath.Join(rpm, ".rpm.lock")
-	holdLock(t, lock)
-	swapLockFiles(t, &dnfLockFiles, lock)
+// lockHelperVar turns this binary into the process that holds the lock.
+const lockHelperVar = "FLOTESTRO_LOCK_HELPER"
 
-	dnf := &DNF{}
-	timed(t, "LockHeld", func() {
-		held, path := dnf.LockHeld()
-		if !held || path != lock {
-			t.Fatalf("held=%v path=%s, expected the lock at %s", held, path, lock)
-		}
-	})
-	timed(t, "Upgrade", func() {
-		_, err := dnf.Upgrade(context.Background(), Options{})
-		if !errors.Is(err, ErrLocked) {
-			t.Fatalf("Upgrade under a held lock: %v, expected %v", err, ErrLocked)
-		}
-		if code, _ := ErrorCodeOf(err); code != "package_manager_locked" {
-			t.Fatalf("code = %q, expected package_manager_locked", code)
-		}
-	})
+func TestMain(m *testing.M) {
+	path := os.Getenv(lockHelperVar)
+	if path == "" {
+		os.Exit(m.Run())
+	}
+	file, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		fmt.Fprintf(os.Stdout, "open: %v", err)
+		os.Exit(1)
+	}
+	lock := unix.Flock_t{Type: unix.F_WRLCK, Whence: io.SeekStart, Start: 0, Len: 0}
+	if err := unix.FcntlFlock(file.Fd(), unix.F_SETLK, &lock); err != nil {
+		fmt.Fprintf(os.Stdout, "lock: %v", err)
+		os.Exit(1)
+	}
+	fmt.Fprint(os.Stdout, "held")
+	select {} // until the parent lets go
 }

@@ -611,8 +611,14 @@ func TestAFailingMaintainerScriptIsATypedFailure(t *testing.T) {
 		t.Run(tc.family, func(t *testing.T) {
 			h := newHarness(t)
 			host := h.hostByFamily(tc.family)
-			if tc.family == "arch" && !capabilityFeature(host, "packages.pacman", "install") {
-				t.Skip("the pacman adapter reports no install feature")
+			// "install" is not a feature any adapter publishes: installing is what
+			// an available package adapter does, and Features names what it does
+			// beyond that - repair, hold, plan, security. So this guard asked for a
+			// key that is not in the vocabulary, was false on every host, and the
+			// arch case was skipped on every run since it was written, unclassified
+			// at that. What it has to ask is whether the host has pacman at all.
+			if tc.family == "arch" && !capabilityAvailable(host, "packages.pacman") {
+				absent(t, "the host %s has no pacman adapter", host.Hostname)
 			}
 			brokenMaintainerScriptScenario(t, h, host, tc.expect)
 		})

@@ -428,11 +428,37 @@ func (d *DNF) Refresh(ctx context.Context) error {
 	if held, path := d.LockHeld(); held {
 		return fmt.Errorf("%w: %s", ErrLocked, path)
 	}
-	result := run(ctx, 10*time.Minute, dnfPath, "--quiet", "makecache")
+	// The same cache directory the unprivileged read will ask for, named rather
+	// than left to dnf's own default: this runs as root and the read does not, and
+	// the two default to different places.
+	result := run(ctx, 10*time.Minute, dnfPath,
+		"--quiet", "--setopt=cachedir="+dnfCacheDir(), "makecache")
 	if !result.Ran || result.ExitCode != 0 {
 		return fmt.Errorf("dnf makecache: %s", result.Reason())
 	}
+	warmDNFCacheForTheUnprivilegedRead(ctx)
 	return nil
+}
+
+// warmDNFCacheForTheUnprivilegedRead compiles the metadata cache the way the
+// agent's read will want it, while this still runs as root.
+//
+// makecache is not enough. libdnf5 recompiles the solv file when the options of
+// the read differ from the options it was written with, and writing it means
+// creating a temporary file in a directory that belongs to root. The agent plans
+// unprivileged, so the recompilation fails - "cannot create temporary file ...
+// Read-only file system" under the agent's own sandbox, "Permission denied"
+// without it - and the plan of a host whose repository has just been republished
+// fails with a filesystem error no operator can act on. Measured on agent-fedora
+// on 02.10: after makecache the agent's read still failed; after the same read as
+// root it succeeded.
+//
+// The exit code is not checked. check-update answers 100 when there are updates
+// and 0 when there are none, this is a warm-up and not a question, and a refresh
+// that fetched the metadata has done its job either way.
+func warmDNFCacheForTheUnprivilegedRead(ctx context.Context) {
+	args := append([]string{"--quiet"}, append(dnfReadArgs(), "check-update")...)
+	_ = run(ctx, 5*time.Minute, dnfPath, args...)
 }
 
 // Upgrade carries the transaction out.

@@ -66,6 +66,27 @@ func (d *throttler) send(p Progress, now time.Time) {
 // gets a status descriptor of its own (APT::Status-Fd).
 func runWithProgress(ctx context.Context, timeout time.Duration, progress ProgressFunc,
 	statusFd bool, path string, args ...string) commandResult {
+	return runTool(ctx, timeout, progress, statusFd, false, path, args...)
+}
+
+// runMergedWithProgress is the same, with both streams of the tool on one pipe.
+//
+// Two pipes read by two goroutines cannot say which of their lines came first:
+// the kernel buffers them apart and the readers race. Some answers are only in
+// that order - pacman prints "installing foo..." on its stdout and the failure
+// of foo's scriptlet on its stderr, so read apart, one says a package was
+// installed and the other that something failed, and nothing says what. A single
+// pipe is the order the tool wrote in, because it is the tool writing.
+//
+// The merged text lands in both Stdout and Combined, and Stderr is empty: every
+// reader of a pacman result already joins the two before looking at them.
+func runMergedWithProgress(ctx context.Context, timeout time.Duration, progress ProgressFunc,
+	path string, args ...string) commandResult {
+	return runTool(ctx, timeout, progress, false, true, path, args...)
+}
+
+func runTool(ctx context.Context, timeout time.Duration, progress ProgressFunc,
+	statusFd, merge bool, path string, args ...string) commandResult {
 	info, err := os.Stat(path)
 	if err != nil || info.IsDir() || info.Mode()&0o111 == 0 {
 		return commandResult{ExitCode: -1, Err: errorf("%s: the tool is missing", path)}
@@ -92,8 +113,12 @@ func runWithProgress(ctx context.Context, timeout time.Duration, progress Progre
 	if err != nil {
 		return commandResult{ExitCode: -1, Err: err}
 	}
-	stderrPipe, err := cmd.StderrPipe()
-	if err != nil {
+	var stderrPipe io.ReadCloser
+	if merge {
+		// The tool's stderr is the same file as its stdout, so the kernel keeps
+		// the lines in the order the tool wrote them.
+		cmd.Stderr = cmd.Stdout
+	} else if stderrPipe, err = cmd.StderrPipe(); err != nil {
 		return commandResult{ExitCode: -1, Err: err}
 	}
 
@@ -122,9 +147,12 @@ func runWithProgress(ctx context.Context, timeout time.Duration, progress Progre
 		_ = cmd.ExtraFiles[0].Close()
 	}
 
-	wait.Add(2)
+	wait.Add(1)
 	go func() { defer wait.Done(); readOutput(stdoutPipe, stdout, throttle) }()
-	go func() { defer wait.Done(); readOutput(stderrPipe, stderr, throttle) }()
+	if stderrPipe != nil {
+		wait.Add(1)
+		go func() { defer wait.Done(); readOutput(stderrPipe, stderr, throttle) }()
+	}
 
 	// The readers have to finish before Wait: Wait closes the pipes, so called
 	// earlier it would cut the output that has not been read yet.
@@ -132,6 +160,9 @@ func runWithProgress(ctx context.Context, timeout time.Duration, progress Progre
 	runErr := cmd.Wait()
 
 	result := commandResult{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: -1, Err: runErr}
+	if merge {
+		result.Combined = result.Stdout
+	}
 	switch {
 	case runErr == nil:
 		result.Ran, result.ExitCode = true, 0

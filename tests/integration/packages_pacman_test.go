@@ -169,3 +169,16 @@ func capabilityFeature(host hostView, name, feature string) bool {
 	}
 	return false
 }
+
+// capabilityAvailable says whether the host offers the adapter at all. Separate
+// from capabilityFeature because an adapter's baseline and its extras are
+// different questions: a guard that asked for an extra named "install" skipped
+// its scenario on every host for as long as it existed.
+func capabilityAvailable(host hostView, name string) bool {
+	for _, capability := range host.Capabilities {
+		if capability.Name == name {
+			return capability.Available
+		}
+	}
+	return false
+}

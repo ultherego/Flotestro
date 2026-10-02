@@ -274,12 +274,24 @@ func (p *Pacman) ApplyExact(ctx context.Context, approved Plan, options Options)
 		// never saw. An orphan left behind is the honest outcome of an approved
 		// change; a package nobody approved going away is not.
 		removing := append([]string{"-R", "--noconfirm", "--noprogressbar"}, removals...)
-		result = runWithProgress(ctx, 45*time.Minute, options.Progress, false, pacmanPath, removing...)
+		// Merged, like the installation below: a failed scriptlet is named on one
+		// stream and reported on the other, and pacman leaves the transaction
+		// successful either way.
+		result = runMergedWithProgress(ctx, 45*time.Minute, options.Progress, pacmanPath, removing...)
+		apply.ScriptletErrors = append(apply.ScriptletErrors,
+			PacmanScriptletFailures(result.Combined)...)
 	}
 	if len(files) > 0 && result.Ran && result.ExitCode == 0 {
 		command = "pacman -U"
 		args := append([]string{"-U", "--noconfirm", "--noprogressbar"}, files...)
-		result = runWithProgress(ctx, 45*time.Minute, options.Progress, false, pacmanPath, args...)
+		result = runMergedWithProgress(ctx, 45*time.Minute, options.Progress, pacmanPath, args...)
+		// This is the path a plan-bound change takes, and the only one that runs
+		// the scriptlets of the archives: the download above runs none. Until
+		// 02.10 it set no scriptlet errors at all, so a package whose .INSTALL
+		// failed was reported as installed and nothing else - which is what
+		// pacman's own exit code says, and the reason the field exists.
+		apply.ScriptletErrors = append(apply.ScriptletErrors,
+			PacmanScriptletFailures(result.Combined)...)
 	}
 
 	after := p.installedVersions(ctx)

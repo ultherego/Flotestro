@@ -6,6 +6,7 @@ import (
 
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/opspec"
+	"github.com/ultherego/flotestro/internal/packages"
 )
 
 // The names of the modules live in two packages: the panel's refresh scope is in
@@ -65,4 +66,19 @@ func TestAChangeWithoutASessionIsStillAnswered(t *testing.T) {
 	executor := &TaskExecutor{}
 	executor.inventoryBehindTheHost(opspec.ActionNetworkLinkApply,
 		&agentv1.TaskResult{Status: agentv1.TaskResult_STATUS_SUCCEEDED})
+}
+
+// Every package adapter has to be able to answer the question the verifier of a
+// repair asks. Only apt can name the packages waiting for their configuration -
+// that is a notion of dpkg - and asking only for that left the others answering
+// nothing, so a repair on Arch ended applied_unverified however well it had gone.
+func TestEveryPackageAdapterCanAnswerAboutItsDatabase(t *testing.T) {
+	for _, manager := range []any{&packages.APT{}, &packages.DNF{}, &packages.Pacman{}} {
+		_, attention := manager.(attentionReader)
+		_, database := manager.(databaseReader)
+		if !attention && !database {
+			t.Errorf("%T can say nothing about its database, so a repair on that host "+
+				"cannot be verified", manager)
+		}
+	}
 }
