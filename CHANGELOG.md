@@ -4,6 +4,32 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [semantic versioning](https://semver.org/). Dates are the
 day the tag was published.
 
+## [0.61.5] - 2026-10-02
+
+Two findings of the code audit, in what a signed capability binds, and one
+scenario that read two rows and assumed they were sampled together.
+
+### Fixed
+
+- A capability binds the order of the three lists where the order is the meaning:
+  the argv of a scheduled command, the resolvers a host asks in turn, and the
+  search domains it appends in turn. The comparison sorted both sides first,
+  which is right for a set of packages or images and wrong here - a request
+  naming the same elements in another order satisfied a capability signed for the
+  first order, so the panel approved one command and the host would have run
+  another, approved one resolver first and the host would have asked another.
+- A relay is refused a wildcard among its names. They come from the relay's own
+  first certificate request and stay in the registry from then on, so a relay
+  asking for `*.example.test` would be issued a certificate standing for every
+  host and every other relay of that domain, and would keep it at every renewal.
+- The budget scenario asks the job once more before calling the budget wrong. The
+  state of a job and the state of a budget are two reads of two different rows and
+  the lease is given back the moment the job ends, so a job that finished between
+  them left a budget that rightly listed nobody. The product was not what was
+  wrong: the lease is taken before the job is admitted, so no job ever runs
+  without its place in the budget.
+
+
 ## [0.61.4] - 2026-10-01
 
 A patch over 0.61.3 for one defect of the gate's own making, and the rule that
