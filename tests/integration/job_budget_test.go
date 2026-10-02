@@ -138,6 +138,15 @@ func TestJobWaitsForTheMutationBudget(t *testing.T) {
 		if !shown && earlier.State != "queued" && later.State == "queued" {
 			running := h.budgetState(key)
 			if !holds(running, "job:"+one.ID) {
+				// The state of the job and the state of the budget are two reads
+				// of two different rows, and the lease is given back the moment
+				// the job ends. A job that finished between them leaves a budget
+				// that rightly lists nobody, so the job is asked again before
+				// this is called a fault: only a job that is still running and
+				// not held is one.
+				if terminal(h.waitingJob(one.ID).State) {
+					break
+				}
 				t.Errorf("the budget does not list the running job among its holders: %+v", running.Holders)
 			}
 			if running.WaitingJobs != 1 {
