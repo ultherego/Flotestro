@@ -274,6 +274,15 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec) (*Job, error) 
 // Approve records an approval and lets the task through once it has collected
 // enough of them.
 func (s *Store) Approve(ctx context.Context, tx pgx.Tx, jobID, actor, reason string) (*Job, error) {
+	// The row of the job is taken first, so two people approving at the same
+	// moment serialise on it. Without that each transaction counted the
+	// approvals in its own snapshot, saw only its own, and both answered
+	// "still waiting" - two approvals written down, a task that needed two,
+	// and a third request needed to let it through.
+	if _, err := tx.Exec(ctx, `select 1 from jobs where id = $1 for update`, jobID); err != nil {
+		return nil, err
+	}
+
 	const recordApproval = `
 		insert into job_approvals (job_id, approver, reason)
 		values ($1, $2, $3)

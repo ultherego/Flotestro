@@ -178,6 +178,19 @@ func (s *Server) applyBackup(ctx context.Context, request *helperv1.HelperReques
 			}
 			return reject(code, err.Error())
 		}
+		// CheckTarget lets a directory that does not exist through, as long as
+		// its parent does, and nothing created it: restic makes its own target
+		// and borg does not - it is handed the directory as the working one of
+		// its process, so the restore ended on "chdir: no such file or
+		// directory" instead of on anything an operator could act on.
+		//
+		// Mkdir and not MkdirAll: CheckTarget demands the parent exists exactly
+		// so that a typo does not build a tree in a random place, and MkdirAll
+		// would undo that. 0700 and root, because what lands here is the
+		// content of a backup and nobody has asked for it to be readable.
+		if err := os.Mkdir(order.Restore.Target, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+			return reject(ErrorExecFailed, "the target of the restore was not created: "+err.Error())
+		}
 		result, err := adapter.RestoreData(actionCtx, order)
 		response := backupResponse(result, err)
 		// The helper counts what now lies under the target, because it is the part
