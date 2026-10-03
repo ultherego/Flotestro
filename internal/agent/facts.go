@@ -114,7 +114,12 @@ type Facts struct {
 	RebootRequired   *bool          `json:"reboot_required,omitempty"`
 	Identity         IdentityState  `json:"identity"`
 	LocalAccounts    []LocalAccount `json:"local_accounts,omitempty"`
-	Interfaces       []string       `json:"network_interfaces"`
+	// LocalAccountsReason says why the accounts of the host could not be read.
+	// An empty list with no reason is a host with no local accounts, which
+	// does not happen; an empty list with a reason is a host nobody could ask,
+	// and the panel must not show it as one without privileged accounts.
+	LocalAccountsReason string   `json:"local_accounts_reason,omitempty"`
+	Interfaces          []string `json:"network_interfaces"`
 	// Containers is the summary of the container engine.
 	Containers *docker.Summary `json:"containers,omitempty"`
 	// Network is the picture of the interfaces and the routes from the kernel. A
@@ -613,19 +618,41 @@ func parseKeyValueFile(path string) map[string]string {
 }
 
 func iterLines(path string) func(func(string) bool) {
+	lines, _ := readLines(path)
+	return lines
+}
+
+// maxFactLine is the longest line a fact file may carry. The default of
+// bufio.Scanner is 64 KiB, and a group with very many members is exactly the
+// kind of host these answers are about: the read used to stop there and look
+// like the end of the file.
+const maxFactLine = 1 << 20
+
+// readLines yields the lines of a file and, beside them, a way to ask why the
+// reading stopped. A file that could not be opened, or a read that broke half
+// way, is not a file with no lines in it - and the difference decides whether
+// an empty answer replaces the previous picture of the host or leaves it
+// alone. Reading /etc/passwd and finding nothing is not the same as a host
+// with no accounts.
+func readLines(path string) (func(func(string) bool), func() error) {
+	var failure error
 	return func(yield func(string) bool) {
+		failure = nil
 		file, err := os.Open(path)
 		if err != nil {
+			failure = err
 			return
 		}
 		defer file.Close()
 		scanner := bufio.NewScanner(file)
+		scanner.Buffer(make([]byte, 0, 64*1024), maxFactLine)
 		for scanner.Scan() {
 			if !yield(scanner.Text()) {
 				return
 			}
 		}
-	}
+		failure = scanner.Err()
+	}, func() error { return failure }
 }
 
 func networkInterfaces() []string {

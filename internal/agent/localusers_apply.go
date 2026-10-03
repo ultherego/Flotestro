@@ -134,7 +134,11 @@ func difference(left, right []string) []string {
 // readSingleAccount returns the state of one account together with the
 // privileged part.
 func (e *TaskExecutor) readSingleAccount(ctx context.Context, name string) *LocalAccount {
-	accounts := ReadLocalAccounts()
+	// The reason is not carried here: this answers about one account the
+	// caller named, and an account that is not in what was read is reported as
+	// absent either way. The reason belongs to the picture of the whole host,
+	// which the inventory collects.
+	accounts, _ := ReadLocalAccounts()
 	index := -1
 	for i := range accounts {
 		if accounts[i].Name == name {

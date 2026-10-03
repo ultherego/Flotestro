@@ -104,7 +104,7 @@ func TestTheClassificationOfAccounts(t *testing.T) {
 	// The range is the shared classifier's; the inventory takes it as read
 	// from login.defs rather than keeping a boundary of its own.
 	uidRange := accounts.UIDRange{Min: 1000, Max: 60000}
-	found := parsePasswd(path, uidRange, func(string) []string { return nil })
+	found, _ := parsePasswd(path, uidRange, func(string) []string { return nil })
 	sources := map[string]AccountSource{}
 	for _, account := range found {
 		sources[account.Name] = account.Source
@@ -126,5 +126,41 @@ func TestTheClassificationOfAccounts(t *testing.T) {
 		if account.Name == "smith" && account.Gecos != "John Smith" {
 			t.Errorf("the description of the account was read as %q", account.Gecos)
 		}
+	}
+}
+
+// A file that cannot be read is not a host with no accounts, and the panel
+// must not show it as one without privileged accounts. The reader used to
+// swallow both the open error and a read that broke half way, and the empty
+// list it returned then replaced the previous picture of the host as a fresh
+// fact.
+func TestAPasswdThatCouldNotBeReadIsNotAHostWithoutAccounts(t *testing.T) {
+	found, reason := parsePasswd(filepath.Join(t.TempDir(), "nothing-here"),
+		accounts.UIDRange{Min: 1000, Max: 60000},
+		func(string) []string { return nil })
+	if len(found) != 0 {
+		t.Errorf("accounts = %v over a file that is not there", found)
+	}
+	if reason == "" {
+		t.Fatal("a file that could not be opened gave no reason, so an empty list " +
+			"cannot be told from a host with no accounts")
+	}
+}
+
+// A file that reads cleanly gives no reason, so the reason is a signal and not
+// noise.
+func TestAPasswdThatReadsCleanlyGivesNoReason(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "passwd")
+	if err := os.WriteFile(path, []byte("root:x:0:0:root:/root:/bin/bash\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	found, reason := parsePasswd(path,
+		accounts.UIDRange{Min: 1000, Max: 60000},
+		func(string) []string { return nil })
+	if reason != "" {
+		t.Errorf("reason = %q over a file that read cleanly", reason)
+	}
+	if len(found) != 1 {
+		t.Errorf("accounts = %v, want the one in the file", found)
 	}
 }

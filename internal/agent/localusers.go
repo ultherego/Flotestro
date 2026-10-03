@@ -52,15 +52,18 @@ type LocalAccount struct {
 }
 
 // ReadLocalAccounts reads the accounts from /etc/passwd. The file is readable
-// by everyone, so this part needs no helper.
-func ReadLocalAccounts() []LocalAccount {
+// by everyone, so this part needs no helper. The second value says why the
+// reading did not finish: an empty list with no reason is a host with no
+// local accounts, which does not happen.
+func ReadLocalAccounts() ([]LocalAccount, string) {
 	return parsePasswd("/etc/passwd", accounts.LoadUIDRange(), groupsOf)
 }
 
 // parsePasswd reads the accounts from the given file.
-func parsePasswd(path string, uidRange accounts.UIDRange, groups func(string) []string) []LocalAccount {
+func parsePasswd(path string, uidRange accounts.UIDRange, groups func(string) []string) ([]LocalAccount, string) {
 	var found []LocalAccount
-	for line := range iterLines(path) {
+	lines, readFailure := readLines(path)
+	for line := range lines {
 		fields := strings.Split(line, ":")
 		if len(fields) < 7 {
 			continue
@@ -88,7 +91,13 @@ func parsePasswd(path string, uidRange accounts.UIDRange, groups func(string) []
 		account.Groups = groups(fields[0])
 		found = append(found, account)
 	}
-	return found
+	if err := readFailure(); err != nil {
+		// What was read is handed over with the reason beside it: a partial
+		// list that says it is partial is worth more than an empty one that
+		// says nothing, and both have to be told from a host with no accounts.
+		return found, err.Error()
+	}
+	return found, ""
 }
 
 // groupsOf returns the groups of an account.

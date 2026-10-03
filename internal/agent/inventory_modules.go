@@ -112,7 +112,7 @@ var moduleCollectors = map[string]InventoryModule{
 		collect: func(ctx context.Context, facts *Facts, _ string) {
 			// The local accounts are read from the file; the lock state and the
 			// SSH keys need root and are filled in by the helper.
-			facts.LocalAccounts = ReadLocalAccounts()
+			facts.LocalAccounts, facts.LocalAccountsReason = ReadLocalAccounts()
 			if privilegedAccounts == nil {
 				return
 			}
