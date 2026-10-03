@@ -45,6 +45,39 @@ func sourceKey() string {
 		"\n-----END PGP PUBLIC KEY BLOCK-----\n"
 }
 
+// sourceSettleBound is how long the panel's copy of a host's sources may take to
+// show what the host was left with.
+//
+// The copy is refreshed by a collection the agent orders when a task that may
+// have changed the host ends, and that collection does not block the task's
+// answer - so an assertion made the instant the operation returns can be read
+// against a picture taken a moment earlier. Before the agent collected after a
+// failed change at all, this copy simply did not move, and reading it once
+// happened to work; it was stale in a way that matched. Now it moves, and
+// looking once is looking at a race. 03.10.
+const sourceSettleBound = 60 * time.Second
+
+// awaitSource waits for the panel's copy of one source to settle into what the
+// caller expects, and fails naming what it last saw. The bound is what keeps this
+// a test: a source that never settles still ends the scenario.
+func awaitSource(t *testing.T, h *harness, hostID, id, expected string,
+	settled func(*repositoryView) bool) *repositoryView {
+	t.Helper()
+	deadline := time.Now().Add(sourceSettleBound)
+	for {
+		seen := findSource(hostSources(h, hostID).Repositories.Repositories, id)
+		if settled(seen) {
+			return seen
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the panel's copy never showed %s within %s; the source stands as %+v",
+				expected, sourceSettleBound, seen)
+			return nil
+		}
+		time.Sleep(2 * time.Second)
+	}
+}
+
 // hostSources reads the package sources from the host inventory.
 func hostSources(h *harness, hostID string) packagesFragmentView {
 	h.t.Helper()
@@ -137,10 +170,8 @@ func TestPackageSourceWithAPasswordFromTheStore(t *testing.T) {
 	if failed.State == "succeeded" {
 		t.Fatal("a source that cannot be fetched was accepted")
 	}
-	after := findSource(hostSources(h, host.ID).Repositories.Repositories, id)
-	if after == nil || after.Enabled {
-		t.Fatalf("after the failed change the source looks like this: %+v", after)
-	}
+	awaitSource(t, h, host.ID, id, "the source still there and disabled",
+		func(seen *repositoryView) bool { return seen != nil && !seen.Enabled })
 
 	// Removal takes the source away together with the key and the password.
 	removal, attempts := h.runOperation(host.ID, map[string]any{
@@ -150,9 +181,8 @@ func TestPackageSourceWithAPasswordFromTheStore(t *testing.T) {
 	if removal.State != "succeeded" {
 		t.Fatalf("removing the source ended in state %s: %+v", removal.State, attempts)
 	}
-	if remaining := findSource(hostSources(h, host.ID).Repositories.Repositories, id); remaining != nil {
-		t.Fatalf("the source remained after removal: %+v", remaining)
-	}
+	awaitSource(t, h, host.ID, id, "the source gone",
+		func(seen *repositoryView) bool { return seen == nil })
 }
 
 // TestUnreachableSourceRollsBackTheChange guards the rollback on both
@@ -203,10 +233,8 @@ func TestUnreachableSourceRollsBackTheChange(t *testing.T) {
 			if len(attempts) == 0 || !strings.Contains(attempts[len(attempts)-1].Message, "was restored") {
 				t.Fatalf("the refusal does not mention the rollback: %+v", attempts)
 			}
-			after := findSource(hostSources(h, host.ID).Repositories.Repositories, id)
-			if after == nil || after.Enabled {
-				t.Fatalf("after the failed change the source looks like this: %+v", after)
-			}
+			awaitSource(t, h, host.ID, id, "the rolled-back source, still there and disabled",
+				func(seen *repositoryView) bool { return seen != nil && !seen.Enabled })
 		})
 	}
 }
