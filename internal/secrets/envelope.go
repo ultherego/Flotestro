@@ -115,6 +115,17 @@ func (e Envelope) Open(ctx context.Context, keys KeyProvider, associated []byte)
 	if err != nil {
 		return nil, err
 	}
+	// GCM panics on a nonce of the wrong length instead of refusing it, and
+	// the nonce is a column: one damaged row would take the process down, and
+	// the rewrap that reads every row runs on a timer.
+	if len(e.Nonce) != aead.NonceSize() {
+		return nil, fmt.Errorf("%w: the nonce of the envelope is %d bytes and this key takes %d",
+			ErrCorruptedVersion, len(e.Nonce), aead.NonceSize())
+	}
+	if len(e.Ciphertext) < aead.Overhead() {
+		return nil, fmt.Errorf("%w: the ciphertext of the envelope is %d bytes, shorter than the %d of its own tag",
+			ErrCorruptedVersion, len(e.Ciphertext), aead.Overhead())
+	}
 	value, err := aead.Open(nil, e.Nonce, e.Ciphertext, associated)
 	if err != nil {
 		return nil, fmt.Errorf("the envelope does not open in this row: %w", err)

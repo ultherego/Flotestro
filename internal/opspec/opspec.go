@@ -2296,17 +2296,35 @@ func (p Payload) Secrets() []SecretRef {
 		if !p.Backup.PasswordSecret.Empty() {
 			references = append(references, *p.Backup.PasswordSecret)
 		}
-		// The order is fixed so that two identical orders issue their leases
-		// in the same order.
-		names := make([]string, 0, len(p.Backup.EnvSecrets))
-		for name := range p.Backup.EnvSecrets {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		for _, name := range names {
-			reference := p.Backup.EnvSecrets[name]
-			references = append(references, reference)
-		}
+		references = append(references, inNameOrder(p.Backup.EnvSecrets)...)
+	}
+	// A container takes secrets into its environment the same way a backup
+	// tool does. Leaving them out here left the scheduler issuing no lease for
+	// them, so the host was refused the value it had been ordered to use and
+	// the feature did not work at all.
+	// The references travel beside the description, under env_secrets of the
+	// order - Validate refuses them inside the container's own environment.
+	if p.DockerEnsure != nil {
+		references = append(references, inNameOrder(p.DockerEnsure.EnvSecrets)...)
+	}
+	return references
+}
+
+// inNameOrder returns the references of an environment, by variable name. The
+// order is fixed so that two identical orders issue their leases in the same
+// order.
+func inNameOrder(environment map[string]SecretRef) []SecretRef {
+	if len(environment) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(environment))
+	for name := range environment {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	references := make([]SecretRef, 0, len(names))
+	for _, name := range names {
+		references = append(references, environment[name])
 	}
 	return references
 }

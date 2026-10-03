@@ -3,7 +3,9 @@ package remediation
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/ultherego/flotestro/internal/audit"
@@ -62,6 +64,14 @@ func (r *Runner) tick(ctx context.Context) {
 func (r *Runner) advance(ctx context.Context, plan Plan) error {
 	step := plan.Current()
 	if step == nil {
+		// The plan ends by what its steps did. Nothing left to run used to be
+		// read as success, so a plan told to carry on past a failure finished
+		// succeeded and started the path that follows a success.
+		if failed := plan.Failed(); len(failed) > 0 {
+			return r.finish(ctx, plan, StatePartial, fmt.Sprintf(
+				"%d of %d steps failed and the plan was told to carry on: %s",
+				len(failed), len(plan.Steps), strings.Join(failed, ", ")))
+		}
 		return r.finish(ctx, plan, StateSucceeded, "")
 	}
 

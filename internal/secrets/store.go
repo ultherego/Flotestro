@@ -548,6 +548,10 @@ func (s *Store) RewrapBatch(ctx context.Context, limit int) (moved, remaining in
 		return 0, 0, err
 	}
 
+	// damaged counts the rows no key can take: the pass steps over them and
+	// says how many it stepped over, so the operator sees them instead of the
+	// rotation stopping dead on the first one.
+	damaged := 0
 	for _, row := range batch {
 		var fresh Envelope
 		associated := AssociatedData(row.secretID, row.version, kindSecret, EnvelopeVersion)
@@ -561,6 +565,14 @@ func (s *Store) RewrapBatch(ctx context.Context, limit int) (moved, remaining in
 				return moved, 0, fmt.Errorf("%w: the legacy key is not registered", ErrKeyUnavailable)
 			}
 			value, err := cipher.Decrypt(row.envelope.Nonce, row.envelope.Ciphertext, row.secretID, row.version)
+			if errors.Is(err, ErrCorruptedVersion) {
+				// A row this key cannot take is left where it is and counted as
+				// still owed. Stopping the batch on it would hold the rotation
+				// of every other secret hostage to one damaged row, and the
+				// rotation is what makes a withdrawn key stop opening anything.
+				damaged++
+				continue
+			}
 			if err != nil {
 				return moved, 0, fmt.Errorf("secret %s version %d: %w", row.secretID, row.version, err)
 			}
@@ -570,6 +582,10 @@ func (s *Store) RewrapBatch(ctx context.Context, limit int) (moved, remaining in
 			}
 		} else {
 			fresh, err = row.envelope.Rewrap(ctx, s.keys, active)
+			if errors.Is(err, ErrCorruptedVersion) {
+				damaged++
+				continue
+			}
 			if err != nil {
 				return moved, 0, fmt.Errorf("secret %s version %d: %w", row.secretID, row.version, err)
 			}
@@ -592,6 +608,14 @@ func (s *Store) RewrapBatch(ctx context.Context, limit int) (moved, remaining in
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return 0, 0, err
+	}
+	if damaged > 0 {
+		// Reported as an error with what was done in it: the caller has moved
+		// what it could and still has to say that some rows cannot be moved at
+		// all. The pass is not repeated over them for ever, because remaining
+		// counts them and the caller stops when nothing moves.
+		return moved, remaining, fmt.Errorf("%w: %d versions in this batch cannot be opened by any key the panel holds",
+			ErrCorruptedVersion, damaged)
 	}
 	return moved, remaining, nil
 }

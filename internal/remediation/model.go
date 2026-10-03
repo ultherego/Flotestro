@@ -18,6 +18,10 @@ const (
 	StateSucceeded = "succeeded"
 	StateFailed    = "failed"
 	StateStopped   = "stopped"
+	// StatePartial means the plan ran to its end over a step that failed,
+	// because it was told to carry on. Running past a failure was the
+	// operator's choice; calling the result a success was nobody's.
+	StatePartial = "partial"
 )
 
 // The states of a step.
@@ -147,6 +151,19 @@ func (p Plan) Current() *Step {
 		}
 	}
 	return nil
+}
+
+// Failed names the steps that did not go through. A plan with no step left to
+// run is not a plan that succeeded: with StopOnFailure off, the steps after a
+// failure are carried out and the failure stays where it was.
+func (p Plan) Failed() []string {
+	var failed []string
+	for _, step := range p.Steps {
+		if step.State == StepFailed {
+			failed = append(failed, step.CheckID)
+		}
+	}
+	return failed
 }
 
 // Progress summarises the execution of a plan.

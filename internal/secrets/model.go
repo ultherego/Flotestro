@@ -38,6 +38,11 @@ var (
 	ErrNoLease = errors.New("no valid lease for this secret")
 	// ErrDestroyed means a version whose content has been destroyed.
 	ErrDestroyed = errors.New("the content of this version has been destroyed")
+	// ErrCorruptedVersion means a stored version whose shape the key cannot
+	// take: a nonce of the wrong length, most of all. GCM panics on one
+	// instead of refusing it, and the nonce comes from a row somebody else
+	// wrote - so the shape is checked before the key ever sees it.
+	ErrCorruptedVersion = errors.New("the stored version of this secret is damaged")
 )
 
 var secretName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{1,62}$`)
@@ -232,12 +237,39 @@ func (s *Cipher) Encrypt(value []byte, secretID string, version int) (nonce, cip
 }
 
 // Decrypt returns the value of a version sealed the first way.
+//
+// The second attempt, without the associated data, opens the rows written
+// before the row key was bound into them. It is also the reason the binding
+// is not one: a value of the first form opens in any row, so a ciphertext
+// moved between two secrets in the table is handed out as the other one.
+// Closing that needs those rows rewritten once and the attempt removed, which
+// is a migration and not this function.
 func (s *Cipher) Decrypt(nonce, ciphertext []byte, secretID string, version int) ([]byte, error) {
+	if err := s.checkShape(nonce, ciphertext, secretID, version); err != nil {
+		return nil, err
+	}
 	value, err := s.aead.Open(nil, nonce, ciphertext, associatedData(secretID, version))
 	if err == nil {
 		return value, nil
 	}
 	return s.aead.Open(nil, nonce, ciphertext, nil)
+}
+
+// checkShape refuses a stored version the key cannot take. GCM panics on a
+// nonce of the wrong length rather than returning an error, and these bytes
+// come from the database: one damaged row would otherwise take the process
+// down - and the rewrap that reads every row runs on a timer, so it would
+// take it down again after every restart.
+func (s *Cipher) checkShape(nonce, ciphertext []byte, secretID string, version int) error {
+	if len(nonce) != s.aead.NonceSize() {
+		return fmt.Errorf("%w: the nonce of %s version %d is %d bytes and this key takes %d",
+			ErrCorruptedVersion, secretID, version, len(nonce), s.aead.NonceSize())
+	}
+	if len(ciphertext) < s.aead.Overhead() {
+		return fmt.Errorf("%w: the ciphertext of %s version %d is %d bytes, shorter than the %d of its own tag",
+			ErrCorruptedVersion, secretID, version, len(ciphertext), s.aead.Overhead())
+	}
+	return nil
 }
 
 // associatedData renders the row key the ciphertext is bound to.

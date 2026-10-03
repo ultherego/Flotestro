@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -775,12 +776,17 @@ func (r *Runtime) Rewrap(ctx context.Context) {
 	}
 	total := 0
 	for {
-		moved, remaining, err := store.RewrapBatch(ctx, rewrapBatch)
+		moved, remaining, err := r.rewrapBatch(ctx, store)
 		if err != nil {
 			if ctx.Err() == nil {
 				r.log.Error("rewrapping the secret store stopped; it resumes at the next start", "err", err, "moved", total)
 			}
-			return
+			if moved == 0 {
+				return
+			}
+			// A batch that moved something and still reported a problem - rows
+			// no key can open - has more to do. It stops below, when a pass
+			// moves nothing.
 		}
 		total += moved
 		if remaining == 0 || moved == 0 {
@@ -790,6 +796,23 @@ func (r *Runtime) Rewrap(ctx context.Context) {
 	if total > 0 {
 		r.log.Info("the secret store was rewrapped onto the active key", "versions", total)
 	}
+}
+
+// rewrapBatch runs one batch and turns a panic in it into an error. This loop
+// is its own goroutine on a ticker, and there is no recover above it: a single
+// stored value of the wrong shape would take the whole panel down, and down
+// again after every restart, because the next pass reads the same row. The
+// shape is checked before the key sees it, so this is the net under that
+// check, not a substitute for it.
+func (r *Runtime) rewrapBatch(ctx context.Context, store *secrets.Store) (moved, remaining int, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("rewrapping a batch of the secret store panicked: %v", recovered)
+			r.log.Error("the rewrap of the secret store panicked and the pass was abandoned",
+				"err", err, "stack", string(debug.Stack()))
+		}
+	}()
+	return store.RewrapBatch(ctx, rewrapBatch)
 }
 
 // Report is the installation's cryptographic state for the status screen.
