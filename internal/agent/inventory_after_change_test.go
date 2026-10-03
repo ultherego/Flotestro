@@ -4,7 +4,6 @@ import (
 	"slices"
 	"testing"
 
-	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/opspec"
 	"github.com/ultherego/flotestro/internal/packages"
 )
@@ -25,38 +24,45 @@ func TestEveryModuleThePanelCanRefreshIsOneTheAgentCanCollect(t *testing.T) {
 	}
 }
 
-func TestAChangeThatSucceededLeavesItsModuleStale(t *testing.T) {
-	for _, c := range []struct {
-		name   string
-		action opspec.ActionType
-		status agentv1.TaskResult_Status
-		want   []string
-	}{
-		{"a change that succeeded", opspec.ActionNetworkLinkApply,
-			agentv1.TaskResult_STATUS_SUCCEEDED, []string{"network"}},
-		// A change that did not happen leaves the host as the panel believes it
-		// to be, so there is nothing to collect again.
-		{"a change that failed", opspec.ActionNetworkLinkApply,
-			agentv1.TaskResult_STATUS_FAILED, nil},
-		{"a change that was refused", opspec.ActionNetworkLinkApply,
-			agentv1.TaskResult_STATUS_REJECTED, nil},
-		{"a read", opspec.ActionDockerRead,
-			agentv1.TaskResult_STATUS_SUCCEEDED, nil},
-		// The refresh is itself an operation on the inventory; ordering another
-		// one from its own result would never end.
-		{"a refresh", opspec.ActionInventoryRefresh,
-			agentv1.TaskResult_STATUS_SUCCEEDED, nil},
-	} {
-		t.Run(c.name, func(t *testing.T) {
+func TestTheModuleIsCollectedHoweverTheChangeEnded(t *testing.T) {
+	// The task's own verdict says nothing about whether the host moved. A change
+	// that was made and could not be read back ends FAILED with
+	// applied_unverified; a transaction that broke halfway ends FAILED over a host
+	// it already changed; a change rolled back is a second change. All of them
+	// leave the panel holding a picture it has to stop believing.
+	for _, name := range []string{"succeeded", "applied_unverified", "failed halfway", "rolled back"} {
+		t.Run(name, func(t *testing.T) {
 			var ordered []string
 			executor := &TaskExecutor{inventoryStale: func(modules []string) {
 				ordered = append(ordered, modules...)
 			}}
-			executor.inventoryBehindTheHost(c.action, &agentv1.TaskResult{Status: c.status})
-			if !slices.Equal(ordered, c.want) {
-				t.Errorf("collected %v, want %v", ordered, c.want)
+			executor.inventoryBehindTheHost(opspec.ActionNetworkLinkApply)
+			if want := []string{"network"}; !slices.Equal(ordered, want) {
+				t.Errorf("collected %v, want %v", ordered, want)
 			}
 		})
+	}
+}
+
+func TestAnOperationThatChangesNoPictureCollectsNothing(t *testing.T) {
+	for _, action := range []opspec.ActionType{
+		// A read moves nothing.
+		opspec.ActionDockerRead,
+		// The refresh is itself an operation on the inventory; ordering another
+		// one from its own result would never end.
+		opspec.ActionInventoryRefresh,
+		opspec.ActionReadJournal,
+		// A change the inventory keeps no picture of.
+		opspec.ActionProcessSignal,
+	} {
+		var ordered []string
+		executor := &TaskExecutor{inventoryStale: func(modules []string) {
+			ordered = append(ordered, modules...)
+		}}
+		executor.inventoryBehindTheHost(action)
+		if len(ordered) != 0 {
+			t.Errorf("%s collected %v", action, ordered)
+		}
 	}
 }
 
@@ -64,8 +70,7 @@ func TestAChangeThatSucceededLeavesItsModuleStale(t *testing.T) {
 // to come back.
 func TestAChangeWithoutASessionIsStillAnswered(t *testing.T) {
 	executor := &TaskExecutor{}
-	executor.inventoryBehindTheHost(opspec.ActionNetworkLinkApply,
-		&agentv1.TaskResult{Status: agentv1.TaskResult_STATUS_SUCCEEDED})
+	executor.inventoryBehindTheHost(opspec.ActionNetworkLinkApply)
 }
 
 // Every package adapter has to be able to answer the question the verifier of a

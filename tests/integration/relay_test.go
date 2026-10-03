@@ -474,7 +474,7 @@ func TestTheFleetComesThroughTheRelay(t *testing.T) {
 	deadline := time.Now().Add(hostOnlineBound)
 	for {
 		if hosts := relayedFleetHosts(ctx, t, h.database(ctx), relayID); len(hosts) > 0 {
-			theRelaySaysSoItself(t, h, relayID, hosts)
+			theRelaySaysSoItself(t, h, relayID)
 			return
 		}
 		if time.Now().After(deadline) {
@@ -486,45 +486,117 @@ func TestTheFleetComesThroughTheRelay(t *testing.T) {
 	}
 }
 
-// theRelaySaysSoItself puts the panel's claim beside the relay's own words.
+// theRelaySaysSoItself puts the panel's claim beside the relay's own words, about
+// a session it has just watched open.
 //
 // The panel answers "this host comes through that relay" from the row it wrote
-// when the session opened. When the question is whether that row is right - and
-// it was: a count of attested sessions was once true while the session belonged
-// to a synthetic host of another scenario and a relay from a previous deployment
-// - the row cannot be the evidence for itself. So the relay is asked what it
-// attested, through the product, out of its own journal on the machine it runs
-// on. A host the panel attributes to the relay and the relay never mentions is
-// the disagreement worth failing on.
-func theRelaySaysSoItself(t *testing.T, h *harness, relayID string, hostIDs []string) {
+// when the session opened, and when the question is whether that row is right the
+// row cannot be the evidence for itself. The first version of this read the last
+// two thousand lines of the relay's journal and looked for the phrase and for the
+// host separately: a line left by any session of any day satisfied both, so it
+// could confirm today's row with last week's event.
+//
+// So the session is made, not found. The agent on the host behind the relay is
+// restarted through the panel, the panel is waited for to attribute the new
+// session to the relay, and only the journal written since then is read. What has
+// to be there is one line: the attestation, naming this host, carrying the
+// certificate it presented and the relay instance that carried it. Then an
+// operation is ordered on that host and has to go through, because a session that
+// was attested and carries nothing is not the path this scenario is about.
+func theRelaySaysSoItself(t *testing.T, h *harness, relayID string) {
 	t.Helper()
-	relayHost := h.hostByName(relayHostName(t, h))
-	read, attempts := h.runOperation(relayHost.ID, map[string]any{
-		"action": "journal.read", "reason": "what the relay says it attested",
+	ctx := context.Background()
+	behind := h.hostByName(relayHostName(t, h))
+
+	// The relay is restarted, not the agent: the agent's own unit is protected
+	// against exactly this, and rightly - the panel does not get to restart the
+	// thing that carries its orders. Taking the relay down cuts the sessions
+	// through it, and the host opens a new one, which is the session to read back.
+	restart, restartAttempts := h.runOperation(behind.ID, map[string]any{
+		"action": "unit.restart", "reason": "a session of its own to read back",
+		"payload": unitPayload("flotestro-relay.service"),
+	}, 3*time.Minute)
+	if restart.State != "succeeded" {
+		absent(t, "the relay on %s could not be restarted, so there is no session to read back: %s",
+			behind.Hostname, lastMessage(restartAttempts))
+		return
+	}
+
+	// The panel has to place the new session behind the relay before its words are
+	// worth comparing with anything.
+	deadline := time.Now().Add(hostOnlineBound)
+	var attributed bool
+	for !attributed && time.Now().Before(deadline) {
+		for _, id := range relayedFleetHosts(ctx, t, h.database(ctx), relayID) {
+			attributed = attributed || id == behind.ID
+		}
+		if !attributed {
+			time.Sleep(3 * time.Second)
+		}
+	}
+	if !attributed {
+		t.Fatalf("after its agent was restarted, %s did not come back through the relay %s within %s",
+			behind.Hostname, relayID, hostOnlineBound)
+	}
+
+	// Only what was written since the restart. A window and not the whole journal:
+	// the point is that this session was attested, not that some session once was.
+	read, attempts := h.runOperation(behind.ID, map[string]any{
+		"action": "journal.read", "reason": "what the relay says it attested just now",
 		"payload": map[string]any{"journal": map[string]any{
-			"unit": "flotestro-relay.service", "lines": 2000}},
+			"unit": "flotestro-relay.service", "lines": 500, "since": relayWindow,
+		}},
 	}, 3*time.Minute)
 	if read.State != "succeeded" {
 		absent(t, "the journal of the relay on %s could not be read: %s",
-			relayHost.Hostname, lastMessage(attempts))
+			behind.Hostname, lastMessage(attempts))
 		return
 	}
 	var journal strings.Builder
 	for _, attempt := range attempts {
 		journal.WriteString(attempt.Stdout)
 	}
-	text := journal.String()
-	if !strings.Contains(text, "attested to the centre") {
-		absent(t, "the journal of the relay says nothing about attesting a session; "+
-			"it may be older than the line that says so")
-		return
+	if line := attestationLineFor(journal.String(), behind.ID); line == "" {
+		t.Fatalf("the panel places the session of %s behind the relay %s, and the relay's "+
+			"journal of the last %s carries no line attesting that host with a certificate "+
+			"and an instance", behind.Hostname, relayID, relayWindow)
 	}
-	for _, hostID := range hostIDs {
-		if !strings.Contains(text, hostID) {
-			t.Errorf("the panel attributes the session of host %s to the relay %s, "+
-				"and the relay never says it attested that host", hostID, relayID)
+
+	// And the attested session carries work. Without this the scenario would be
+	// satisfied by a relay that announces a session and forwards nothing.
+	work, workAttempts := h.runOperation(behind.ID, map[string]any{
+		"action": "unit.status", "reason": "work through the session the relay attested",
+		"payload": map[string]any{"unit_status": map[string]any{
+			"units": []string{"flotestro-agent.service"}}},
+	}, 2*time.Minute)
+	if work.State != "succeeded" {
+		t.Fatalf("the session the relay attested carries no work: %s/%s: %s",
+			work.State, work.ResultErrorCode, lastMessage(workAttempts))
+	}
+}
+
+// relayWindow is how far back the relay's journal is read: far enough to hold the
+// restart just ordered, short enough that nothing older can answer for it.
+const relayWindow = "-3min"
+
+// attestationLineFor returns the line in which the relay attested this host, or
+// nothing. One line and not three readings of the journal: the host, the
+// certificate it presented and the relay that carried it have to be the same
+// event, or they are three facts that never met.
+func attestationLineFor(journal, hostID string) string {
+	for _, line := range strings.Split(journal, "\n") {
+		if !strings.Contains(line, "attested to the centre") {
+			continue
 		}
+		if !strings.Contains(line, "host_id="+hostID) {
+			continue
+		}
+		if !strings.Contains(line, "fingerprint=") || !strings.Contains(line, "relay_instance=") {
+			continue
+		}
+		return line
 	}
+	return ""
 }
 
 // TestRelayPageListsTheAttestedHosts guards that the relay page names the

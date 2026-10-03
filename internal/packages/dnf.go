@@ -436,7 +436,13 @@ func (d *DNF) Refresh(ctx context.Context) error {
 	if !result.Ran || result.ExitCode != 0 {
 		return fmt.Errorf("dnf makecache: %s", result.Reason())
 	}
-	warmDNFCacheForTheUnprivilegedRead(ctx)
+	if err := warmDNFCacheForTheUnprivilegedRead(ctx); err != nil {
+		// The metadata was fetched; what failed is leaving it in a shape the
+		// unprivileged read can use. Saying "refreshed" here would hand the agent a
+		// cache its next plan fails on, with a filesystem error no operator can act
+		// on - which is the failure this step was added for.
+		return err
+	}
 	return nil
 }
 
@@ -456,9 +462,31 @@ func (d *DNF) Refresh(ctx context.Context) error {
 // The exit code is not checked. check-update answers 100 when there are updates
 // and 0 when there are none, this is a warm-up and not a question, and a refresh
 // that fetched the metadata has done its job either way.
-func warmDNFCacheForTheUnprivilegedRead(ctx context.Context) {
+func warmDNFCacheForTheUnprivilegedRead(ctx context.Context) error {
 	args := append([]string{"--quiet"}, append(dnfReadArgs(), "check-update")...)
-	_ = run(ctx, 5*time.Minute, dnfPath, args...)
+	return warmedTheCache(run(ctx, 5*time.Minute, dnfPath, args...))
+}
+
+// warmedTheCache reads the result of that read. check-update answers 0 when there
+// is nothing to update and 100 when there is, and both mean it got as far as
+// compiling the cache - which is the only thing being asked of it here. Anything
+// else is an answer, and so is not running at all: a tool that never started and
+// one that was killed by the timeout both leave the cache exactly as it was,
+// and the step that ignored its result reported success over both. 03.10.
+func warmedTheCache(result commandResult) error {
+	switch {
+	case !result.Ran:
+		reason := "it did not run"
+		if result.Err != nil {
+			reason = result.Err.Error()
+		}
+		return fmt.Errorf("the metadata cache was not compiled for the unprivileged read: %s", reason)
+	case result.ExitCode == 0 || result.ExitCode == 100:
+		return nil
+	default:
+		return fmt.Errorf("the metadata cache was not compiled for the unprivileged read: %s",
+			result.Reason())
+	}
 }
 
 // Upgrade carries the transaction out.

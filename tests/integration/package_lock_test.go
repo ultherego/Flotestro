@@ -39,7 +39,36 @@ func TestALocalLockRefusesThePackageChangeWithoutHanging(t *testing.T) {
 			host.Hostname, dpkgLockUnit)
 	}
 
+	// The package goes, so that installing it is a real change. A scenario that
+	// planned an installation of something already installed would prove nothing
+	// on either side of the lock.
+	//
+	// Through both approvals: a removal is destructive and one approval leaves it
+	// waiting for the second until the wait runs out, which is how this step first
+	// failed rather than the thing it prepares for.
+	if installedVersionOf(t, h, host.ID, testPackage) != "" {
+		removal := h.createOperation(host.ID, map[string]any{
+			"action": "packages.remove", "reason": "a clean start for the lock scenario",
+			"target_confirmation": host.Hostname,
+			"payload": map[string]any{"package_change": map[string]any{
+				"packages": []string{testPackage}, "expected_removals": []string{testPackage},
+			}},
+		})
+		if state := h.approve(removal.ID, removal.PayloadHash); state.State == "awaiting_approval" {
+			second := h.withToken(h.createPrincipal(uniqueSubject("second-person-lock-scenario"),
+				[]map[string]string{{"role": "approver", "site": host.Site, "environment": host.Environment}}))
+			second.approve(removal.ID, removal.PayloadHash)
+		}
+		if gone := h.awaitTerminal(removal.ID, 10*time.Minute); gone.State != "succeeded" {
+			t.Fatalf("clearing %s before the scenario ended %s: %s",
+				testPackage, gone.State, gone.ResultMessage)
+		}
+	}
+
 	before := installedVersionOf(t, h, host.ID, testPackage)
+	if before != "" {
+		t.Fatalf("%s is still installed as %q, so installing it is no change", testPackage, before)
+	}
 
 	// The plan comes before the lock, not after. A change is bound to the plan it
 	// was approved from, and planning is a read that needs no lock - so taking the
@@ -56,6 +85,14 @@ func TestALocalLockRefusesThePackageChangeWithoutHanging(t *testing.T) {
 	plan := removalPlanFromAttempts(t, planAttempts)
 	if plan.PlanHash == "" {
 		t.Fatalf("the plan carries no hash: %+v", plan)
+	}
+	// A plan with nothing in it would make the whole scenario vacuous: the refusal
+	// below would be a refusal to do nothing, and the positive control after it
+	// would succeed at doing nothing. The package is removed first for the same
+	// reason - on a host that already has it there is no change to plan.
+	if len(plan.Changes) == 0 {
+		t.Fatalf("the plan of installing %s carries no change, so nothing below would be "+
+			"tested: %+v", testPackage, plan)
 	}
 	change := map[string]any{"package_change": map[string]any{
 		"packages": []string{testPackage}, "plan_hash": plan.PlanHash,
@@ -116,12 +153,21 @@ func TestALocalLockRefusesThePackageChangeWithoutHanging(t *testing.T) {
 		"action": "packages.install", "reason": "the same change once the lock is free",
 		"payload": change,
 	}, 10*time.Minute)
-	if again.ResultErrorCode == "package_manager_locked" {
-		t.Fatalf("the change is still refused for the lock after the holder stopped: %s",
-			lastMessage(againAttempts))
+	// The whole order has to go through, not merely stop being refused for the
+	// lock: accepting any other ending would let a transaction that broke for its
+	// own reasons stand in for the proof that the lock was the only obstacle.
+	if again.State != "succeeded" {
+		t.Fatalf("with the lock free the same change ended %s/%s: %s",
+			again.State, again.ResultErrorCode, lastMessage(againAttempts))
 	}
-	t.Logf("refused in %s while held; once free the same order ended %s (%s)",
-		took.Round(time.Second), again.State, again.ResultErrorCode)
+	// And the host has to show it. A job that reports success over a package that
+	// is not there would be the defect this scenario is placed to catch.
+	installed := installedVersionOf(t, h, host.ID, testPackage)
+	if installed == "" {
+		t.Fatalf("the change succeeded with the lock free and %s is not installed", testPackage)
+	}
+	t.Logf("refused in %s while held; once free the same order installed %s %s",
+		took.Round(time.Second), testPackage, installed)
 }
 
 // unitKnownToHost asks the host about the unit rather than assuming the laboratory

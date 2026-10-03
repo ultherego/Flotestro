@@ -501,6 +501,23 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 	// instant, and the panel counts the host as running from here.
 	if action.Mutating() {
 		e.phases.move(task.GetTaskId(), PhaseMutating)
+		// From this line the host may be different, whatever the task ends as, so
+		// the module it touches is collected again on every way out of here. This
+		// is the line that separates a refusal from a failure: everything before it
+		// left the host alone - the preconditions, the claims, the journal marker -
+		// and everything after it may not have.
+		//
+		// Asking only about a task that ended SUCCEEDED was wrong in three ways. A
+		// change that was made and could not be read back ends FAILED with
+		// applied_unverified, and the host is then exactly what the panel must
+		// stop believing. A transaction that broke halfway ends FAILED over a host
+		// it already changed. And a change rolled back is a second change.
+		//
+		// A refusal inside the helper - a lock held, a mechanism that cannot do it -
+		// buys a collection nobody needed, which costs seconds. A missed one leaves
+		// the panel answering with a picture from before the change, which is the
+		// defect this was written for.
+		defer e.inventoryBehindTheHost(action)
 	} else {
 		e.phases.move(task.GetTaskId(), PhaseStarted)
 	}
@@ -512,22 +529,18 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 	result := e.perform(ctx, task, action, payload)
 	// The change is done; now the host is read again and the result says
 	// what was seen. A change nobody could observe is not a success.
-	outcome := e.verifyOutcome(ctx, task, action, payload, before, result)
-	// And the panel is told that the picture it holds of this module is older
-	// than the host. Without it the host's page answers from the last cycle:
-	// a VLAN built through the panel was absent from the network tab for the
-	// rest of the inventory interval, which is fifteen minutes by default.
-	e.inventoryBehindTheHost(action, outcome)
-	return outcome
+	return e.verifyOutcome(ctx, task, action, payload, before, result)
 }
 
-// inventoryBehindTheHost orders a collection of the module an operation has just
-// written to. Only a change that succeeded: a refusal and a failure leave the
-// host as the panel already believes it to be, and a read never moves it. The
-// order does not block and its result is not waited for - what matters is that
-// the next picture is taken, not that this task carries the cost of it.
-func (e *TaskExecutor) inventoryBehindTheHost(action opspec.ActionType, result *agentv1.TaskResult) {
-	if e.inventoryStale == nil || result.GetStatus() != agentv1.TaskResult_STATUS_SUCCEEDED {
+// inventoryBehindTheHost orders a collection of the module an operation may have
+// written to. It is deferred from the moment the task enters the mutating phase,
+// so it runs however the task ends; what it must never do is depend on the
+// task's own verdict, because a change that was made can end as a failure.
+//
+// The order does not block and its result is not waited for - what matters is
+// that the next picture is taken, not that this task carries the cost of it.
+func (e *TaskExecutor) inventoryBehindTheHost(action opspec.ActionType) {
+	if e.inventoryStale == nil {
 		return
 	}
 	module := action.InventoryModule()
