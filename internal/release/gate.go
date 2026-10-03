@@ -167,7 +167,13 @@ const stageIntegration = "integration"
 // simply leaves one out would be judged on the rest: the missing stage has to
 // be fatal, or omitting it is the way past the gate.
 var fullRunStages = []string{
-	"tree", "gofmt", "panel", "web", "vitest",
+	"tree", "gofmt",
+	// static is the source-level probe for code that compiles, never panics and
+	// stops a check from running. The first probe it carries found one wrong type
+	// assertion that had switched off an ownership check, emptied two inventory
+	// fields and refused every backup runbook - and go vet had nothing to say.
+	"static",
+	"panel", "web", "vitest",
 	// fleet proves the deployment the agents stage reports rather than assuming
 	// it. On 30.09 every host agreed it ran 0.62.0 while one of them ran a build
 	// from four days earlier, published under the same version: a deployment

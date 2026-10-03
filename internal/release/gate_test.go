@@ -32,6 +32,7 @@ func goodReport() map[string]any {
 		"stages": map[string]any{
 			"tree":        map[string]any{"result": "pass", "seconds": 1},
 			"gofmt":       map[string]any{"result": "pass", "seconds": 3},
+			"static":      map[string]any{"result": "pass", "seconds": 1},
 			"panel":       map[string]any{"result": "pass", "seconds": 97},
 			"web":         map[string]any{"result": "pass", "seconds": 24},
 			"vitest":      map[string]any{"result": "pass", "seconds": 70},

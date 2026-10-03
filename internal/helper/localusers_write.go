@@ -16,6 +16,7 @@ import (
 
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 	"github.com/ultherego/flotestro/internal/modules/accounts"
+	"github.com/ultherego/flotestro/internal/platform/fsmeta"
 )
 
 // localUserNamePattern rejects names that cannot be a POSIX account. The name
@@ -352,7 +353,15 @@ func checkRemovableHome(account accountRecord) error {
 	if !info.IsDir() {
 		return fmt.Errorf("the home %s is not a directory", home)
 	}
-	if owner, ok := ownerOf(info); ok && owner != account.UID {
+	owner, read := ownerOf(info)
+	if !read {
+		// An owner the host did not report is not the account's owner. Letting
+		// the check through on an unread answer is how it came to be skipped
+		// everywhere at once.
+		return fmt.Errorf("the owner of the home directory %s was not read, so it is not known "+
+			"whether it belongs to the account", home)
+	}
+	if owner != account.UID {
 		return fmt.Errorf("the home directory %s belongs to UID %d, not to the account", home, owner)
 	}
 	return nil
@@ -510,11 +519,8 @@ func readAuthorizedKeysFile(home string) ([]byte, error) {
 
 // ownerOf reads the owner of a file from its stat record.
 func ownerOf(info os.FileInfo) (int, bool) {
-	stat, ok := info.Sys().(*unix.Stat_t)
-	if !ok {
-		return 0, false
-	}
-	return int(stat.Uid), true
+	uid, _, ok := fsmeta.Owner(info)
+	return uid, ok
 }
 
 // requireLocalAccount rejects operations on system accounts, on accounts that

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/sys/unix"
+	"github.com/ultherego/flotestro/internal/platform/fsmeta"
 )
 
 // Runbook runs a script prepared by the host administrator.
@@ -41,11 +41,11 @@ func (r *Runbook) Path(name string) (string, error) {
 	if !info.Mode().IsRegular() {
 		return "", fmt.Errorf("the runbook %q is not a regular file", name)
 	}
-	stat, ok := info.Sys().(*unix.Stat_t)
+	uid, _, ok := fsmeta.Owner(info)
 	if !ok {
 		return "", fmt.Errorf("the owner of the runbook %q could not be read", name)
 	}
-	if stat.Uid != 0 {
+	if uid != 0 {
 		return "", fmt.Errorf("the runbook %q does not belong to root", name)
 	}
 	if info.Mode().Perm()&0o022 != 0 {

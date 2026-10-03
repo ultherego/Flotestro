@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/ultherego/flotestro/internal/platform/fsmeta"
 )
 
 // Runner runs a host tool. Injection instead of a direct call lets the
@@ -178,9 +180,9 @@ func DescribeKey(path string) KeyMetadata {
 		description.Mode = "0000"[:4-len(description.Mode)] + description.Mode
 	}
 	description.WorldReadable = info.Mode().Perm()&0o004 != 0
-	if stat, ok := info.Sys().(*unix.Stat_t); ok {
-		description.Owner = userName(int(stat.Uid))
-		description.Group = groupName(int(stat.Gid))
+	if uid, gid, ok := fsmeta.Owner(info); ok {
+		description.Owner = userName(uid)
+		description.Group = groupName(gid)
 	}
 	return description
 }
@@ -347,9 +349,5 @@ func AddTracked(targets []Target, trackings map[string]Tracking) []Target {
 
 // fileOwner reads the owner identifiers from the file metadata.
 func fileOwner(info os.FileInfo) (int, int, bool) {
-	stat, ok := info.Sys().(*unix.Stat_t)
-	if !ok {
-		return -1, -1, false
-	}
-	return int(stat.Uid), int(stat.Gid), true
+	return fsmeta.Owner(info)
 }

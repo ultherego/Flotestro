@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/ultherego/flotestro/internal/platform/fsmeta"
 )
 
 // Fingerprint computes the digest of file content.
@@ -137,9 +139,9 @@ func Describe(path string) File {
 	description.Mode = fmt.Sprintf("%04o", info.Mode().Perm())
 	modified := info.ModTime()
 	description.ModifiedAt = &modified
-	if stat, ok := info.Sys().(*unix.Stat_t); ok {
-		description.Owner = userName(int(stat.Uid))
-		description.Group = groupName(int(stat.Gid))
+	if uid, gid, ok := fsmeta.Owner(info); ok {
+		description.Owner = userName(uid)
+		description.Group = groupName(gid)
 	}
 	// A symlink is not a configuration file, only a pointer to another file. The
 	// panel does not read it and does not pretend to know its content.
