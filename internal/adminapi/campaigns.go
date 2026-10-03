@@ -174,7 +174,13 @@ func (s *Server) orderCampaign(w http.ResponseWriter, r *http.Request, request c
 	// attached here when the panel holds a copy, so the plans, the consent and
 	// what reaches the hosts are the same thing.
 	if action == opspec.ActionFileRollback && payload.File != nil && payload.File.VersionSHA256 != "" {
-		content, err := s.files.Content(r.Context(), payload.File.VersionSHA256)
+		// The digest is read inside the caller's own scope: a rollback is
+		// ordered on a host they hold, and the version they name has to be one
+		// they may read. Otherwise the content of another site's configuration
+		// would travel onto a host of theirs - and from there they could read
+		// it.
+		content, err := s.files.ContentInScope(r.Context(), payload.File.VersionSHA256,
+			authz.FromContext(r.Context()).ScopesFor(authz.PermFileRead))
 		switch {
 		case err == nil:
 			payload.File.Content = string(content)

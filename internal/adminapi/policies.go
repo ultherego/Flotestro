@@ -256,6 +256,11 @@ func (s *Server) handlePublishPolicy(w http.ResponseWriter, r *http.Request) {
 		if rule.Kind != policy.KindFileContent {
 			continue
 		}
+		// Existence only, and deliberately not bounded by scope: this asks
+		// whether the digest names a version the panel holds at all, and the
+		// answer carries no content. Narrowing it would refuse a policy that
+		// names a version carried by hosts outside the author's scope, which
+		// is a different decision from who may read the file.
 		if _, err := s.files.Content(r.Context(), rule.SHA256); errors.Is(err, managedfiles.ErrNotFound) {
 			problem(w, http.StatusBadRequest, "version_unknown",
 				policy.ErrInvalidRule{Index: index, Reason: "the panel holds no file version " + rule.SHA256}.Error())

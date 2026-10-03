@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/ultherego/flotestro/internal/authz"
 	filesmodule "github.com/ultherego/flotestro/internal/modules/files"
 )
 
@@ -76,12 +77,50 @@ func (s *Store) SaveVersion(ctx context.Context, q executor, content []byte) (st
 	return digest, nil
 }
 
-// Content returns the content of the version with the given digest.
+// Content returns the content of the version with the given digest, without
+// asking whose it is. Only a caller that has already bounded the question by
+// host may use it; everything that answers a request uses ContentInScope.
 func (s *Store) Content(ctx context.Context, digest string) ([]byte, error) {
 	const query = `select content from file_versions where sha256 = $1`
 	var content []byte
 	err := s.pool.QueryRow(ctx, query, digest).Scan(&content)
 	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return content, err
+}
+
+// ContentInScope returns the content of a version carried by a host the caller
+// may see, and ErrNotFound when no such host carries it.
+//
+// A digest is not a secret: it travels in the results of tasks, in the plan an
+// operator looks at, in the operation journal and in the answers of the API,
+// which reach a wider circle than the content of the file. Reading the content
+// by the digest alone therefore handed the configuration of one site to
+// whoever held the permission in another.
+func (s *Store) ContentInScope(ctx context.Context, digest string, scopes []authz.Scope) ([]byte, error) {
+	condition, args := authz.ScopeSQL(scopes, authz.Columns{
+		Site: "h.site", Environment: "h.environment", Team: "h.team_id",
+		Owner: "h.owner", Tags: "h.tags",
+	}, 1)
+	where := ""
+	if condition != "" {
+		where = " and " + condition
+	}
+	query := `
+		select v.content from file_versions v
+		 where v.sha256 = $1
+		   and exists (
+		       select 1 from hosts h
+		        where (h.id in (select host_id from managed_files where desired_sha256 = v.sha256)
+		            or h.id in (select host_id from managed_file_history where sha256 = v.sha256))` +
+		where + `)`
+	var content []byte
+	err := s.pool.QueryRow(ctx, query, append([]any{digest}, args...)...).Scan(&content)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// A version nobody the caller may see carries is, to the caller, a
+		// version that is not there. Saying "you may not read this one" would
+		// confirm that the digest names something.
 		return nil, ErrNotFound
 	}
 	return content, err

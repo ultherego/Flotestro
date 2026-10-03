@@ -114,10 +114,16 @@ func (s *Server) handleFileVersion(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, "invalid_sha256", "sha256 must be 64 hex characters")
 		return
 	}
-	if _, ok := s.authorizeCollection(w, r, authz.PermFileRead, "file"); !ok {
+	principal, ok := s.authorizeCollection(w, r, authz.PermFileRead, "file")
+	if !ok {
 		return
 	}
-	content, err := s.files.Content(r.Context(), fingerprint)
+	// The permission alone is not the answer: authorizeCollection asks whether
+	// the caller holds it anywhere, and the version is read by its digest. A
+	// digest travels in task results, in plans and in the operation journal,
+	// so knowing one is no proof of being allowed to read what it names.
+	content, err := s.files.ContentInScope(r.Context(), fingerprint,
+		principal.ScopesFor(authz.PermFileRead))
 	if errors.Is(err, managedfiles.ErrNotFound) {
 		problem(w, http.StatusNotFound, "version_not_found", "no such file version")
 		return
