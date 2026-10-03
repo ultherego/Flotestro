@@ -214,7 +214,11 @@ func ProtectsManagementChannel(rule RuleSpec, panelAddress string, agentPort int
 	if rule.Action == ActionAccept {
 		return nil
 	}
-	if rule.Chain == ChainInput && matchesPort(rule, agentPort) {
+	// The agent connects out to the panel, so a rule on the output chain that
+	// drops the panel's port cuts the management channel just as surely as one
+	// on input - and it is the same number in both directions. The check used
+	// to ask about input alone, so output/drop/tcp dport 8443 went through.
+	if matchesPort(rule, agentPort) {
 		return fmt.Errorf("the rule covers the port %d the host talks to the panel through", agentPort)
 	}
 	if panelAddress != "" && matchesAddress(rule, panelAddress) {

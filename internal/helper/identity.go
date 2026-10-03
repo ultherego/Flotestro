@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -126,19 +127,25 @@ func sssdStatus(ctx context.Context, domain string) (*bool, []string, error) {
 		return nil, nil, err
 	}
 
-	var online *bool
-	lower := strings.ToLower(stdout)
-	switch {
-	case strings.Contains(lower, "online"):
-		value := true
-		online = &value
-	case strings.Contains(lower, "offline"):
-		value := false
-		online = &value
-	}
-
 	issues := parseConfigCheck(ctx)
-	return online, issues, nil
+	return parseOnlineStatus(stdout), issues, nil
+}
+
+// onlineStatus reads the value of the status line rather than looking for a
+// word anywhere in the output. The word matters: "offline" contains "online",
+// so a search for the latter answered "online" for every state a domain can
+// be in, and the branch for offline was unreachable.
+var onlineStatus = regexp.MustCompile(`(?i)online\s*status\s*:\s*(online|offline)`)
+
+// parseOnlineStatus returns what sssctl said about the connection, and nothing
+// when it did not say: an answer that was not given is not "offline".
+func parseOnlineStatus(output string) *bool {
+	match := onlineStatus.FindStringSubmatch(output)
+	if match == nil {
+		return nil
+	}
+	value := strings.EqualFold(match[1], "online")
+	return &value
 }
 
 // parseConfigCheck reads the result of the SSSD configuration check. The tool
