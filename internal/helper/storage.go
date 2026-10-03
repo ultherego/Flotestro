@@ -485,7 +485,16 @@ func (s *Server) checkFilesystem(ctx context.Context, action *helperv1.StorageRe
 		// than by the code of the pass that wrote to it.
 		second, secondErr := s.runScoped(ctx, opspec.FamilyStorage, []string{fsckPath, "-n", device})
 		output += "\n" + second
-		if secondCode, ok := exitCode(secondErr); ok && secondCode&(fsckErrorsRemain|fsckOperationalError) != 0 {
+		secondCode, ran, reason := ranWith(secondErr)
+		if !ran {
+			// The pass that was to confirm the repair did not run, so there is
+			// nothing to confirm it. Reading an absent status as a zero is how
+			// a check nobody performed came to confirm a repair.
+			return reject(storage.CodeFilesystemUnverified,
+				"the repair of "+device+" ran and the second, read-only pass did not ("+reason+
+					"); the result of the repair is unverified")
+		}
+		if secondCode&(fsckErrorsRemain|fsckOperationalError) != 0 {
 			return reject(storage.CodeFilesystemErrorsRemain,
 				"the repair of "+device+" ran and a second, read-only pass still finds errors (fsck code "+
 					strconv.Itoa(secondCode)+")")
@@ -505,16 +514,31 @@ const (
 	fsckOperationalError = 8 | 16 | 32 | 128
 )
 
-// exitCode reads the status a tool ended with.
-func exitCode(err error) (int, bool) {
+// ranWith returns the status of a tool that ran, whether it ran at all, and
+// why it did not.
+//
+// A tool that did not run has no status, and an absent status must not be read
+// as a zero: that is how a filesystem check nobody performed came to confirm a
+// repair, how a lock nobody could probe counted as absent, and how a package
+// cache that was never prepared counted as ready. The third value is there so
+// the caller can say which it was.
+func ranWith(err error) (code int, ran bool, reason string) {
 	if err == nil {
-		return 0, true
+		return 0, true, ""
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
-		return exitErr.ExitCode(), true
+		return exitErr.ExitCode(), true, ""
 	}
-	return 0, false
+	return 0, false, err.Error()
+}
+
+// exitCode reads the status a tool ended with. ranWith says the same and also
+// why a tool did not run; this stays for the callers that have the reason
+// already.
+func exitCode(err error) (int, bool) {
+	code, ran, _ := ranWith(err)
+	return code, ran
 }
 
 // extendVolume grows a logical volume together with its filesystem.

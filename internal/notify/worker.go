@@ -2,6 +2,7 @@ package notify
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -239,6 +240,14 @@ func (w *Worker) send(ctx context.Context, row Delivery) error {
 		return nil
 	}
 	if err := w.store.Settle(ctx, row.ID, w.owner, outcome); err != nil {
+		if errors.Is(err, ErrLeaseLost) {
+			// Another instance holds this row now, or it was settled already.
+			// Ordinary in several replicas - and never a delivery, so nothing
+			// is counted and nothing is logged as an error.
+			w.log.Debug("the lease on a delivery was lost before its outcome was written",
+				"delivery", row.ID, "state", outcome.State)
+			return nil
+		}
 		return err
 	}
 	metrics.NotificationDeliveries.Inc(outcome.State)
@@ -267,6 +276,10 @@ func (w *Worker) keptBack(ctx context.Context, row Delivery) (bool, error) {
 		return false, err
 	}
 	if err := w.store.settleSuppressed(ctx, row.ID, w.owner, verdict); err != nil {
+		if errors.Is(err, ErrLeaseLost) {
+			w.log.Debug("the lease on a delivery was lost before it was kept back", "delivery", row.ID)
+			return true, nil
+		}
 		return false, err
 	}
 	metrics.NotificationDeliveries.Inc(StateSuppressed)

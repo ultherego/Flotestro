@@ -280,6 +280,12 @@ var ErrNotFound = errors.New("there is no such notification channel")
 // ErrDeliveryNotFound means there is no such row of the queue.
 var ErrDeliveryNotFound = errors.New("there is no such notification delivery")
 
+// ErrLeaseLost means a write whose condition on the lease held nothing: the
+// lease is somebody else's now, or the row was settled already. In several
+// replicas this is ordinary, not a failure - but it is never a delivery, and
+// the caller must not count one.
+var ErrLeaseLost = errors.New("the lease on this delivery is no longer held")
+
 // The bounds of a channel.
 const (
 	MaxName   = 120

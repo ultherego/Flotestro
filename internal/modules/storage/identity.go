@@ -30,6 +30,10 @@ const (
 	// CodeFilesystemErrorsRemain: a repair ran and the filesystem still has
 	// errors.
 	CodeFilesystemErrorsRemain = "filesystem_errors_remain"
+	// CodeFilesystemUnverified: a repair ran and the read-only pass that was
+	// to confirm it did not. The repair is not a failure and not a success:
+	// nobody looked afterwards.
+	CodeFilesystemUnverified = "filesystem_unverified"
 )
 
 // Refusal is a refusal with a typed code. The helper answers with the code,

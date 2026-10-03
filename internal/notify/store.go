@@ -763,28 +763,43 @@ type Outcome struct {
 // Settle takes only the outcomes of an attempt that was made, and this one
 // never reached the sender.
 func (s *Store) settleSuppressed(ctx context.Context, id, owner string, verdict Verdict) error {
-	_, err := s.pool.Exec(ctx, `
+	tag, err := s.pool.Exec(ctx, `
 		update notification_deliveries
 		   set state = 'suppressed', lease_owner = null, lease_until = null,
 		       policy_id = $3, suppression_reason = $4,
 		       last_error_code = '', last_error = $5, updated_at = now()
 		 where id = $1 and lease_owner = $2 and state = 'leased'`,
 		id, owner, nullableID(verdict.PolicyID), verdict.Reason, verdict.Sentence)
-	return err
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrLeaseLost
+	}
+	return nil
 }
 
 // Settle writes the outcome of an attempt on a row the owner holds.
+//
+// The condition on the lease is the point of these statements, and its answer
+// is the row count: zero means the lease is somebody else's now, or the row
+// was settled already, and the attempt this call describes did not land. The
+// count used to be discarded, so a worker counted a delivery that never
+// happened and never tried again.
 func (s *Store) Settle(ctx context.Context, id, owner string, outcome Outcome) error {
-	var err error
+	var (
+		tag pgconn.CommandTag
+		err error
+	)
 	switch outcome.State {
 	case StateDelivered:
-		_, err = s.pool.Exec(ctx, `
+		tag, err = s.pool.Exec(ctx, `
 			update notification_deliveries
 			   set state = 'delivered', delivered_at = now(), lease_owner = null, lease_until = null,
 			       last_error_code = '', last_error = '', updated_at = now()
 			 where id = $1 and lease_owner = $2 and state = 'leased'`, id, owner)
 	case StateRetryWait:
-		_, err = s.pool.Exec(ctx, `
+		tag, err = s.pool.Exec(ctx, `
 			update notification_deliveries
 			   set state = 'retry_wait', next_attempt_at = now() + make_interval(secs => $3),
 			       lease_owner = null, lease_until = null,
@@ -792,7 +807,7 @@ func (s *Store) Settle(ctx context.Context, id, owner string, outcome Outcome) e
 			 where id = $1 and lease_owner = $2 and state = 'leased'`,
 			id, owner, outcome.NextAttempt.Seconds(), outcome.ErrorCode, outcome.Error)
 	case StateDeadLetter:
-		_, err = s.pool.Exec(ctx, `
+		tag, err = s.pool.Exec(ctx, `
 			update notification_deliveries
 			   set state = 'dead_letter', lease_owner = null, lease_until = null,
 			       last_error_code = $3, last_error = $4, updated_at = now()
@@ -801,7 +816,13 @@ func (s *Store) Settle(ctx context.Context, id, owner string, outcome Outcome) e
 	default:
 		return fmt.Errorf("a row cannot be settled as %q", outcome.State)
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrLeaseLost
+	}
+	return nil
 }
 
 // Retry returns a dead letter to the queue: an operator corrected the channel
