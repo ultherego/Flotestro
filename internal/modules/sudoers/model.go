@@ -21,6 +21,10 @@ type Snapshot struct {
 	// SyntaxCheck is what the host's own checker said about the files sudo
 	// loads. Nil means the host said nothing: an agent from before this read.
 	SyntaxCheck *SyntaxCheck `json:"syntax_check,omitempty"`
+	// Truncated says the walk stopped at its limit, so part of the policy was
+	// not read. Every question about the whole policy then answers "unknown":
+	// an answer from a part of it is worse than none.
+	Truncated bool `json:"truncated,omitempty"`
 	// UnavailableReason says why the main file was not read at all.
 	UnavailableReason string    `json:"unavailable_reason,omitempty"`
 	ObservedAt        time.Time `json:"observed_at"`
@@ -130,8 +134,16 @@ type Problem struct {
 	Reason string `json:"reason"`
 }
 
+// Complete says whether the whole policy was read. A question about the whole
+// of it cannot be answered from a part.
+func (s Snapshot) Complete() bool {
+	return s.UnavailableReason == "" && !s.Truncated
+}
+
 // PasswordlessGlobally says whether a global Defaults line turns
-// authentication off for everybody.
+// authentication off for everybody. A policy read only in part answers false
+// here as readily as one that turns nothing off, so the caller has to ask
+// Complete first.
 func (s Snapshot) PasswordlessGlobally() bool {
 	for _, entry := range s.Defaults {
 		if entry.Scope == "" && entry.DisablesAuthentication {

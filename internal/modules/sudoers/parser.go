@@ -2,6 +2,7 @@ package sudoers
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"path"
 	"regexp"
@@ -34,6 +35,7 @@ func Parse(root fs.FS, main string, now time.Time) Snapshot {
 	lines := reader.walk(main, "")
 	snapshot.Files = reader.files
 	snapshot.Problems = reader.problems
+	snapshot.Truncated = reader.truncated
 
 	if len(reader.files) > 0 && reader.files[0].Reason != "" {
 		// The main file was not read: nothing below it is known, and the
@@ -79,6 +81,9 @@ type reader struct {
 	visited  map[string]bool
 	files    []File
 	problems []Problem
+	// truncated says the walk hit its limit, so the policy below it was not
+	// read. A question about the whole policy cannot be answered from a part.
+	truncated bool
 }
 
 // walk reads one file and, in order, the files it includes at the place of the
@@ -86,7 +91,21 @@ type reader struct {
 // which Defaults win.
 func (r *reader) walk(file, includedFrom string) []logicalLine {
 	display := "/" + strings.TrimPrefix(file, "/")
-	if r.visited[file] || len(r.files) >= maxFiles {
+	if r.visited[file] {
+		return nil
+	}
+	if len(r.files) >= maxFiles {
+		// The picture stops here, and it has to say so. A read error eight
+		// lines below records the file with its reason; the limit recorded
+		// nothing at all, so a policy read only in part looked whole - and
+		// the questions asked of it, such as who may become root without a
+		// password, were answered from the part that was read.
+		r.truncated = true
+		r.problems = append(r.problems, Problem{
+			Source: display,
+			Reason: fmt.Sprintf("the reading stopped at %d files, so this file and whatever it "+
+				"includes were not read", maxFiles),
+		})
 		return nil
 	}
 	r.visited[file] = true
