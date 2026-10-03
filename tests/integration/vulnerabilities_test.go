@@ -123,17 +123,31 @@ func hostVulnerabilities(h *harness, hostID string) vulnerabilityReportView {
 // hostOfDistribution looks for a host by distribution, not by family.
 func hostOfDistribution(h *harness, distribution string) (hostView, vulnerabilityReportView) {
 	h.t.Helper()
-	for _, host := range h.hosts() {
-		if host.ConnectionState != "online" {
-			continue
+	// Within a bound. The distribution comes from the assessment, and the
+	// assessment is made by the vulnerability cycle - so a panel that was
+	// restarted, or a host that was enrolled a few minutes ago, has hosts whose
+	// report names no distribution yet. Looking once called that "the test fleet
+	// has no host of the distribution debian", which is a statement about the
+	// fleet and was false: on 03.10 four scenarios failed on it in a run where
+	// every host reported its distribution correctly minutes later.
+	deadline := time.Now().Add(hostOnlineBound)
+	for {
+		for _, host := range h.hosts() {
+			if host.ConnectionState != "online" {
+				continue
+			}
+			report := hostVulnerabilities(h, host.ID)
+			if report.State.Distribution == distribution {
+				return host, withFreshList(h, host.ID, report)
+			}
 		}
-		report := hostVulnerabilities(h, host.ID)
-		if report.State.Distribution == distribution {
-			return host, withFreshList(h, host.ID, report)
+		if time.Now().After(deadline) {
+			h.t.Fatalf("no host of the test fleet was assessed as the distribution %s within %s",
+				distribution, hostOnlineBound)
+			return hostView{}, vulnerabilityReportView{}
 		}
+		time.Sleep(3 * time.Second)
 	}
-	h.t.Fatalf("the test fleet has no host of the distribution %s", distribution)
-	return hostView{}, vulnerabilityReportView{}
 }
 
 // withFreshList settles an assessment that describes the state before the last
