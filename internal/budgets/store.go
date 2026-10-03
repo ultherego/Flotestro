@@ -351,10 +351,18 @@ func (s *Store) RenewFenced(ctx context.Context, leases []Fenced) error {
 		owners = append(owners, lease.Owner)
 		tokens = append(tokens, lease.Token)
 	}
-	// The two losses are counted apart because they mean different things to the
-	// caller: a row under another token was taken from it, a row that merely
-	// expired is still its own. A row that is gone is a target that finished.
-	var stale, expired int
+	// The three losses are counted apart because they mean different things to
+	// the caller: a row under another token was taken from it, a row that
+	// merely expired is still its own, and a row that is not there any more
+	// was accounted for by nobody.
+	//
+	// The join used to be an inner one, and "a row that is gone is a target
+	// that finished" was written next to it. The sweep removes rows whose
+	// lease ran out, and a job over a host can still be running under one -
+	// so a swept row made the renewal answer "renewed", the campaign went on
+	// to the next host, and the capacity that row stood for was counted by
+	// nobody. A left join is what lets the caller see it.
+	var stale, expired, missing int
 	err := s.pool.QueryRow(ctx, `
 		with renewed as (
 		    update budget_leases l
@@ -364,12 +372,13 @@ func (s *Store) RenewFenced(ctx context.Context, leases []Fenced) error {
 		       and l.lease_until > now()
 		    returning l.owner
 		)
-		select count(*) filter (where l.fencing_token <> held.token),
-		       count(*) filter (where l.fencing_token = held.token and l.lease_until <= now())
-		  from budget_leases l
-		  join unnest($1::text[], $2::bigint[]) as held (owner, token)
-		    on l.owner = held.owner`,
-		owners, tokens, s.lease.Seconds()).Scan(&stale, &expired)
+		select count(*) filter (where l.owner is not null and l.fencing_token <> held.token),
+		       count(*) filter (where l.owner is not null and l.fencing_token = held.token
+		                          and l.lease_until <= now()),
+		       count(*) filter (where l.owner is null)
+		  from unnest($1::text[], $2::bigint[]) as held (owner, token)
+		  left join budget_leases l on l.owner = held.owner`,
+		owners, tokens, s.lease.Seconds()).Scan(&stale, &expired, &missing)
 	if err != nil {
 		return err
 	}
@@ -380,6 +389,10 @@ func (s *Store) RenewFenced(ctx context.Context, leases []Fenced) error {
 	}
 	if expired > 0 {
 		return fmt.Errorf("%w: %d of %d had already expired", ErrLeaseLost, expired, len(leases))
+	}
+	if missing > 0 {
+		return fmt.Errorf("%w: %d of %d are no longer in the table, so the capacity they stood for "+
+			"is accounted for by nobody", ErrLeaseLost, missing, len(leases))
 	}
 	return nil
 }
