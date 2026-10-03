@@ -278,6 +278,15 @@ func ComposeCommand(arguments []string) (string, error) {
 		if strings.Contains(argument, "%") {
 			return "", fmt.Errorf("the argument %q contains a percent sign", argument)
 		}
+		// Whitespace inside an argument does not survive the round trip: the
+		// command is kept as one line and the reader splits it on whitespace
+		// again, so one argument comes back as two. Quoting would only move
+		// the problem, because the reader has no quoting - and an approved
+		// "rm -rf /var/tmp/old cache" would then remove two other directories.
+		if strings.ContainsAny(argument, " \t\n\r\v\f") {
+			return "", fmt.Errorf("the argument %q contains whitespace; the schedule keeps the "+
+				"command as one line, so an argument with a space has to go into a script", argument)
+		}
 	}
 	return strings.Join(arguments, " "), nil
 }

@@ -88,30 +88,7 @@ func WriteFstabEntry(path, source, target, fsType, options string) error {
 	if err != nil {
 		return err
 	}
-	lines := strings.Split(string(content), "\n")
-	result := make([]string, 0, len(lines)+2)
-
-	skip := false
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if skip {
-			skip = false
-			// The row after the panel marker belongs to the panel: it is
-			// replaced.
-			if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
-				continue
-			}
-		}
-		if strings.HasPrefix(trimmed, PanelMarker) {
-			// The marker of our own entry with the same target is removed
-			// together with it.
-			if strings.Contains(trimmed, target) {
-				skip = true
-				continue
-			}
-		}
-		result = append(result, line)
-	}
+	result := withoutEntry(strings.Split(string(content), "\n"), target)
 
 	// Empty rows are removed from the end so the file does not grow at
 	// every change.
@@ -129,24 +106,50 @@ func RemoveFstabEntry(path, target string) error {
 	if err != nil {
 		return err
 	}
-	lines := strings.Split(string(content), "\n")
-	result := make([]string, 0, len(lines))
+	return writeAtomically(path, strings.Join(
+		withoutEntry(strings.Split(string(content), "\n"), target), "\n"))
+}
+
+// withoutEntry returns the file without the panel's entry for one target: the
+// marker and the row under it, which belongs to the panel.
+//
+// The target is read out of the marker and compared whole. Comparing it as a
+// substring made "/mnt/data" select the marker of "/mnt/data-archive" and take
+// its mount out of fstab with it - a mount nobody touched, missing after the
+// next reboot and nowhere else, because the panel reads /proc/mounts and not
+// fstab until then.
+//
+// Both callers share this: the selection used to be written out twice, and a
+// fix in one would have left the other choosing by prefix.
+func withoutEntry(lines []string, target string) []string {
+	result := make([]string, 0, len(lines)+2)
 	skip := false
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if skip {
 			skip = false
+			// The row after the panel marker belongs to the panel.
 			if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
 				continue
 			}
 		}
-		if strings.HasPrefix(trimmed, PanelMarker) && strings.Contains(trimmed, target) {
+		if name, ok := markerTarget(trimmed); ok && name == target {
 			skip = true
 			continue
 		}
 		result = append(result, line)
 	}
-	return writeAtomically(path, strings.Join(result, "\n"))
+	return result
+}
+
+// markerTarget reads the target out of the panel's marker. The marker is
+// written as "<PanelMarker>: <target>", so the target is what follows it.
+func markerTarget(trimmed string) (string, bool) {
+	rest, ok := strings.CutPrefix(trimmed, PanelMarker+":")
+	if !ok {
+		return "", false
+	}
+	return strings.TrimSpace(rest), true
 }
 
 func writeAtomically(path, content string) error {
