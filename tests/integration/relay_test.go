@@ -474,6 +474,7 @@ func TestTheFleetComesThroughTheRelay(t *testing.T) {
 	deadline := time.Now().Add(hostOnlineBound)
 	for {
 		if hosts := relayedFleetHosts(ctx, t, h.database(ctx), relayID); len(hosts) > 0 {
+			theRelaySaysSoItself(t, h, relayID, hosts)
 			return
 		}
 		if time.Now().After(deadline) {
@@ -482,6 +483,47 @@ func TestTheFleetComesThroughTheRelay(t *testing.T) {
 			return
 		}
 		time.Sleep(3 * time.Second)
+	}
+}
+
+// theRelaySaysSoItself puts the panel's claim beside the relay's own words.
+//
+// The panel answers "this host comes through that relay" from the row it wrote
+// when the session opened. When the question is whether that row is right - and
+// it was: a count of attested sessions was once true while the session belonged
+// to a synthetic host of another scenario and a relay from a previous deployment
+// - the row cannot be the evidence for itself. So the relay is asked what it
+// attested, through the product, out of its own journal on the machine it runs
+// on. A host the panel attributes to the relay and the relay never mentions is
+// the disagreement worth failing on.
+func theRelaySaysSoItself(t *testing.T, h *harness, relayID string, hostIDs []string) {
+	t.Helper()
+	relayHost := h.hostByName(relayHostName(t, h))
+	read, attempts := h.runOperation(relayHost.ID, map[string]any{
+		"action": "journal.read", "reason": "what the relay says it attested",
+		"payload": map[string]any{"journal": map[string]any{
+			"unit": "flotestro-relay.service", "lines": 2000}},
+	}, 3*time.Minute)
+	if read.State != "succeeded" {
+		absent(t, "the journal of the relay on %s could not be read: %s",
+			relayHost.Hostname, lastMessage(attempts))
+		return
+	}
+	var journal strings.Builder
+	for _, attempt := range attempts {
+		journal.WriteString(attempt.Stdout)
+	}
+	text := journal.String()
+	if !strings.Contains(text, "attested to the centre") {
+		absent(t, "the journal of the relay says nothing about attesting a session; "+
+			"it may be older than the line that says so")
+		return
+	}
+	for _, hostID := range hostIDs {
+		if !strings.Contains(text, hostID) {
+			t.Errorf("the panel attributes the session of host %s to the relay %s, "+
+				"and the relay never says it attested that host", hostID, relayID)
+		}
 	}
 }
 

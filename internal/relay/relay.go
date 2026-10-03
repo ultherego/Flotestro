@@ -329,6 +329,20 @@ func (r *Relay) Connect(ctx context.Context,
 
 	upstream := r.centre().Connect(sessionCtx)
 	attestHost(upstream.RequestHeader(), hostID, cert)
+	// Said out loud, because the attestation is otherwise invisible from here.
+	// The panel records which relay carried a session and answers "this host comes
+	// through that relay" from its own row - and when the question is whether that
+	// row is right, the row cannot be the evidence. Now the relay says which host
+	// it attested and with which certificate, so the two can be put side by side.
+	fingerprint := hex.EncodeToString(pki.Fingerprint(cert))
+	r.log.Info("the session of a host was attested to the centre",
+		"host_id", hostID, "fingerprint", fingerprint, "relay_instance", r.instanceID)
+	started := time.Now()
+	defer func() {
+		r.log.Info("the attested session of a host ended",
+			"host_id", hostID, "fingerprint", fingerprint,
+			"relay_instance", r.instanceID, "seconds", int(time.Since(started).Seconds()))
+	}()
 	defer func() {
 		_ = upstream.CloseRequest()
 		_ = upstream.CloseResponse()
