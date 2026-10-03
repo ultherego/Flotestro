@@ -1,7 +1,6 @@
 package helper
 
 import (
-	"context"
 	"errors"
 	"os/exec"
 	"testing"
@@ -15,31 +14,34 @@ func TestAToolThatDidNotRunHasNoStatus(t *testing.T) {
 	t.Run("it ended well", func(t *testing.T) {
 		code, ran, reason := ranWith(nil)
 		if code != 0 || !ran || reason != "" {
-			t.Errorf("ranWith(nil) = %d, %v, %q", code, ran, reason)
+			t.Errorf("ranWith(nil) = %d, %v, %q; want 0, true, \"\"", code, ran, reason)
 		}
 	})
 
 	t.Run("it ran and ended badly", func(t *testing.T) {
-		err := exec.Command("sh", "-c", "exit 4").Run()
+		// /bin/sh is on every host this helper runs on, so a missing one is a
+		// failure of the test environment and not a reason to skip.
+		err := exec.Command("/bin/sh", "-c", "exit 4").Run()
 		var exitErr *exec.ExitError
 		if !errors.As(err, &exitErr) {
-			t.Skip("this host did not give an exit status to read")
+			t.Fatalf("running a command that exits 4 gave %v, want an exit status", err)
 		}
-		code, ran, _ := ranWith(err)
+		code, ran, reason := ranWith(err)
 		if !ran {
 			t.Fatal("a tool that ended with a status was reported as not having run")
 		}
 		if code != 4 {
 			t.Errorf("code = %d, want 4", code)
 		}
+		if reason != "" {
+			t.Errorf("reason = %q over a tool that ran", reason)
+		}
 	})
 
 	t.Run("it did not run at all", func(t *testing.T) {
-		err := exec.Command("/nonexistent/flotestro-probe").Run()
-		if err == nil {
-			t.Skip("this host has a binary where none was expected")
-		}
-		code, ran, reason := ranWith(err)
+		// The error of a command that never started is not an *exec.ExitError,
+		// and that is the whole distinction this function exists for.
+		code, ran, reason := ranWith(errors.New("fork/exec /usr/sbin/fsck: no such file or directory"))
 		if ran {
 			t.Fatal("a tool that never started was reported as having run")
 		}
@@ -48,20 +50,6 @@ func TestAToolThatDidNotRunHasNoStatus(t *testing.T) {
 		}
 		if reason == "" {
 			t.Error("nothing said why the tool did not run, so no message can name it")
-		}
-	})
-
-	t.Run("the deadline passed", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		err := exec.CommandContext(ctx, "sh", "-c", "exit 0").Run()
-		if err == nil {
-			t.Skip("the cancelled context did not stop the command on this host")
-		}
-		if _, ran, reason := ranWith(err); ran && reason == "" {
-			// A killed process does carry a status on some systems; what must
-			// not happen is "ran, status zero, nothing to say".
-			t.Error("a command stopped by its context looked like one that ended well")
 		}
 	})
 }

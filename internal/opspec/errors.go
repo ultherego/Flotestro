@@ -704,6 +704,9 @@ var reportedGuides = []ErrorGuide{
 	{Code: "filesystem_errors_remain", Stage: "helper", Retry: RetryNever,
 		Meaning: "The repair ran on the filesystem and a second, read-only pass still finds errors. fsck exits non-zero for a successful repair and for a failed one alike, so the operation is settled by that second pass and not by the code of the first.",
 		Action:  "The filesystem needs a person at the console: unmount it, run the check by hand and read what it says, or restore from a backup. Ordering the same repair again changes nothing.", CountsAsFailure: true},
+	{Code: "filesystem_unverified", Stage: "helper", Retry: RetryAfterChange,
+		Meaning: "The repair ran on the filesystem and the second, read-only pass that was to confirm it did not run at all - a missing fsck, a killed process, a deadline. The repair is neither proven nor disproven: nobody looked afterwards.",
+		Action:  "Check the filesystem by hand, or order the check again without the repair: this host changed and nothing confirmed the change. A repair reported as done without that pass would be a repair nobody verified.", CountsAsFailure: true},
 
 	// The layers above a bare disk: the software array and the volume manager.
 	{Code: "array_unknown", Stage: "helper", Retry: RetryAfterChange,
