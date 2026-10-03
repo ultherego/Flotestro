@@ -108,21 +108,46 @@ func (s Snapshot) Supplemented(extra Supplement) Snapshot {
 
 // MACState determines which mandatory access control system protects the host.
 func MACState() Mandatory {
+	return macStateFrom(SELinuxDir, EnforceFile, MACConfiguration, AppArmorFile)
+}
+
+// macStateFrom is MACState over the given paths, so that the order in which
+// the two mechanisms are asked about can be checked without a host that has
+// either of them.
+func macStateFrom(selinuxDir, enforceFile, configuration, apparmorFile string) Mandatory {
 	// SELinux is recognised by its filesystem, not by the configuration file: the
 	// configuration is sometimes left on a host where SELinux is disabled in the
 	// kernel, and would look like protection.
-	configuration, _ := os.ReadFile(MACConfiguration)
-	configuredMode, policy := ParseSELinuxConfiguration(string(configuration))
+	configurationContent, _ := os.ReadFile(configuration)
+	configuredMode, policy := ParseSELinuxConfiguration(string(configurationContent))
 
-	if exists(SELinuxDir) {
+	if exists(selinuxDir) {
 		mac := Mandatory{System: SystemSELinux, ConfiguredMode: configuredMode, Policy: policy}
-		if content, err := os.ReadFile(EnforceFile); err == nil {
+		if content, err := os.ReadFile(enforceFile); err == nil {
 			mac.Mode = ParseEnforceMode(string(content))
 		} else {
 			mac.Reason = "mode not read: " + err.Error()
 		}
 		return mac
 	}
+	// The kernel is asked about the other mechanism before the configuration
+	// file is believed about this one. A leftover /etc/selinux/config - an
+	// image migrated from a Red Hat family, a Debian with the selinux package
+	// installed - used to answer here and hide a running AppArmor behind
+	// "SELinux, disabled": the facts about its profiles were then never
+	// collected, because they are asked for only when the system is AppArmor,
+	// and the panel showed a protected host as having no mandatory access
+	// control at all.
+	if content, err := os.ReadFile(apparmorFile); err == nil {
+		if strings.TrimSpace(string(content)) != "Y" {
+			return Mandatory{
+				System: SystemAppArmor, Mode: ModeDisabled,
+				Reason: "AppArmor is present but disabled in the kernel",
+			}
+		}
+		return Mandatory{System: SystemAppArmor, Mode: ModeEnforcing}
+	}
+
 	if configuredMode != "" {
 		// The configuration says "enforcing", and the kernel has no SELinux
 		// at all. This is exactly the case that looks like protection.
@@ -131,16 +156,6 @@ func MACState() Mandatory {
 			ConfiguredMode: configuredMode, Policy: policy,
 			Reason: "SELinux is disabled in the kernel despite the configuration entry",
 		}
-	}
-
-	if content, err := os.ReadFile(AppArmorFile); err == nil {
-		if strings.TrimSpace(string(content)) != "Y" {
-			return Mandatory{
-				System: SystemAppArmor, Mode: ModeDisabled,
-				Reason: "AppArmor is present but disabled in the kernel",
-			}
-		}
-		return Mandatory{System: SystemAppArmor, Mode: ModeEnforcing}
 	}
 	return Mandatory{Reason: "this host has neither SELinux nor AppArmor"}
 }
