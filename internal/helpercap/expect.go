@@ -18,6 +18,10 @@ type Expectation struct {
 	Kind string
 	// Mutating says the request changes the host.
 	Mutating bool
+	// Authorized says the request is carried out under a capability although it
+	// changes nothing: a read that runs a tool with what the order carried is
+	// not covered by the exemption a read has.
+	Authorized bool
 	// Actions are the action types a capability may name for the request.
 	Actions []opspec.ActionType
 }
@@ -30,6 +34,13 @@ func (e Expectation) Allows(action string) bool {
 
 func mutating(kind string, actions ...opspec.ActionType) Expectation {
 	return Expectation{Kind: kind, Mutating: true, Actions: actions}
+}
+
+// authorizedRead is a request that changes nothing on the host and is still
+// carried out under a capability, because it runs a tool with the arguments and
+// the environment the order carried.
+func authorizedRead(kind string, actions ...opspec.ActionType) Expectation {
+	return Expectation{Kind: kind, Authorized: true, Actions: actions}
 }
 
 func read(kind string) Expectation {
@@ -354,7 +365,10 @@ func Expect(request *helperv1.HelperRequest) Expectation {
 	case *helperv1.HelperRequest_Backup:
 		switch action.Backup.GetOperation() {
 		case helperv1.BackupRequest_OPERATION_PLAN:
-			return read("backup.plan")
+			// A plan runs the backup tool as root, with the repository, the
+			// arguments and the environment the order carries: a read of the
+			// host, and an execution on it.
+			return authorizedRead("backup.plan", opspec.ActionBackupPlan)
 		case helperv1.BackupRequest_OPERATION_RUN:
 			return mutating("backup.run", opspec.ActionBackupRun)
 		case helperv1.BackupRequest_OPERATION_VERIFY:

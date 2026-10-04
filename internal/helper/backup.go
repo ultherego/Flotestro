@@ -72,6 +72,19 @@ func (s *Server) applyBackup(ctx context.Context, request *helperv1.HelperReques
 		},
 	}
 	if len(action.GetEnv()) > 0 {
+		// The same check the panel makes, made here, where the boundary is. The
+		// panel's copy guards against a mistake of the operator's; this one
+		// guards against the agent, and the agent is the adversary the
+		// capability model is written for. A backup tool runs as root and has
+		// variables that run commands, so an order naming any variable it likes
+		// was code execution as root with no capability at all.
+		names := make([]string, 0, len(action.GetEnv()))
+		for name := range action.GetEnv() {
+			names = append(names, name)
+		}
+		if err := backup.ValidateEnvironment(names); err != nil {
+			return reject(ErrorMalformed, err.Error())
+		}
 		order.Environment = map[string][]byte{}
 		for name, value := range action.GetEnv() {
 			order.Environment[name] = value

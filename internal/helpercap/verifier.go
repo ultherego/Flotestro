@@ -226,7 +226,7 @@ func (p *Policy) Counters() (legacy, verified, refused, observed uint64) {
 // Decide applies the mode to a request.
 func (p *Policy) Decide(request *helperv1.HelperRequest) Decision {
 	expectation := Expect(request)
-	if !expectation.Mutating {
+	if !expectation.Mutating && !expectation.Authorized {
 		return Decision{Allowed: true, Outcome: OutcomeRead}
 	}
 	if request.GetCapability() == nil {

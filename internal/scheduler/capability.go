@@ -57,7 +57,9 @@ const ErrorHelperCapabilityUnsupported = "helper_capability_unsupported"
 func (s *Scheduler) attachCapability(ctx context.Context, item jobs.LeasedJob,
 	envelope *agentv1.TaskEnvelope) (string, error) {
 	action := opspec.ActionType(item.Job.ActionType)
-	if !action.Mutating() {
+	// Every change goes under a capability, and so does a read that runs a tool
+	// with what the order carried: the helper refuses those without one.
+	if !action.UnderCapability() {
 		return "", nil
 	}
 	if s.capabilities.Signer == nil {

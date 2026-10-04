@@ -44,17 +44,22 @@ func repositoryAbsent(output string) bool {
 
 // toolEnvironment assembles the variables for the tool process.
 func toolEnvironment(order Order, passwordVariable string) []string {
-	environment := []string{
-		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-		"LC_ALL=C",
-		"HOME=" + workingDir(),
-		"TMPDIR=" + workingDir(),
-	}
-	if len(order.Password) > 0 && passwordVariable != "" {
-		environment = append(environment, passwordVariable+"="+string(order.Password))
-	}
+	// What the order carried goes first. os/exec deduplicates cmd.Env keeping
+	// the last occurrence of a name, so appending the order's variables after
+	// these let a PATH, a HOME or a TMPDIR from the order win over them - and
+	// the tool runs as root.
+	var environment []string
 	for name, value := range order.Environment {
 		environment = append(environment, name+"="+string(value))
+	}
+	environment = append(environment,
+		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+		"LC_ALL=C",
+		"HOME="+workingDir(),
+		"TMPDIR="+workingDir(),
+	)
+	if len(order.Password) > 0 && passwordVariable != "" {
+		environment = append(environment, passwordVariable+"="+string(order.Password))
 	}
 	return environment
 }

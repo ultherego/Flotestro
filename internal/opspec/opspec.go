@@ -661,6 +661,15 @@ func (a ActionType) Mutating() bool {
 	return ok && spec.mutating
 }
 
+// UnderCapability says whether the helper carries the operation out under a
+// capability of the panel. Every change is; so is a read that runs a tool with
+// what the order carried, because there the exemption of a read - "it changes
+// nothing" - is not the whole truth.
+func (a ActionType) UnderCapability() bool {
+	spec, ok := actionSpecs[a]
+	return ok && (spec.mutating || spec.authorized)
+}
+
 // RequiredCapability returns the host capability without which the operation
 // makes no sense.
 func (a ActionType) RequiredCapability() string {
@@ -678,7 +687,14 @@ func (a ActionType) DefaultTimeout() int {
 }
 
 type actionSpec struct {
-	mutating       bool
+	mutating bool
+	// authorized marks an operation that changes nothing on the host and is
+	// still carried out under a capability. A read is exempt from the
+	// capability because it changes nothing - which holds only while a read
+	// really runs nothing. backup.plan runs the backup tool as root with
+	// arguments and an environment the order carries, so it is a read of the
+	// host and an execution on it, and the exemption did not fit.
+	authorized     bool
 	capability     string
 	permission     string
 	timeoutSeconds int
@@ -997,7 +1013,7 @@ var actionSpecs = map[ActionType]actionSpec{
 		timeoutSeconds: 120, risk: RiskMedium, maxOutputBytes: 64 << 10},
 
 	// The plan reads the backup repository: the list of copies and their size.
-	ActionBackupPlan: {mutating: false, capability: "backup", permission: "backup.read",
+	ActionBackupPlan: {mutating: false, authorized: true, capability: "backup", permission: "backup.read",
 		timeoutSeconds: 600, risk: RiskLow, lockClass: LockBackup, maxOutputBytes: 512 << 10},
 	// A copy reads the whole named range of the host and sends it to the
 	// repository.

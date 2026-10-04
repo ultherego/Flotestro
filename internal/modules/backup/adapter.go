@@ -378,12 +378,53 @@ func checkWritableByOthers(path string, info os.FileInfo) error {
 		ErrUnsafeTarget, path)
 }
 
+// ErrForbiddenVariable means a variable the panel does not set for a backup
+// tool: the tool runs as root, and the variables that are not credentials are
+// the ones that run commands or move the loader.
+var ErrForbiddenVariable = errors.New("forbidden_environment_variable")
+
+// credentialVariables are the variables a backup tool takes from the panel: the
+// credentials of a repository and nothing else.
+//
+// A backup tool has variables that run commands - RESTIC_PASSWORD_COMMAND,
+// BORG_PASSCOMMAND, BORG_RSH - and borg is Python, which adds PYTHONPATH; the
+// loader adds LD_PRELOAD and LD_LIBRARY_PATH to every process there is. None of
+// them is a credential, and all of them end in code running as root. A check on
+// the shape of a name admits every one of them, so the names are listed.
+var credentialVariables = map[string]bool{
+	"AWS_ACCESS_KEY_ID": true, "AWS_SECRET_ACCESS_KEY": true, "AWS_SESSION_TOKEN": true,
+	"AWS_DEFAULT_REGION": true, "AWS_PROFILE": true,
+	"B2_ACCOUNT_ID": true, "B2_ACCOUNT_KEY": true,
+	"AZURE_ACCOUNT_NAME": true, "AZURE_ACCOUNT_KEY": true,
+	"GOOGLE_PROJECT_ID": true, "GOOGLE_APPLICATION_CREDENTIALS": true,
+	"OS_AUTH_URL": true, "OS_USERNAME": true, "OS_PASSWORD": true,
+	"OS_PROJECT_NAME": true, "OS_USER_DOMAIN_NAME": true, "OS_PROJECT_DOMAIN_NAME": true,
+	"RESTIC_REPOSITORY": true, "BORG_REPO": true,
+}
+
+// CredentialVariables returns the names the panel may set, for a message that
+// tells the operator what is allowed rather than only what is not.
+func CredentialVariables() []string {
+	names := make([]string, 0, len(credentialVariables))
+	for name := range credentialVariables {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 // ValidateEnvironment checks the names of the variables the panel sets for
-// the tool.
+// the tool. A name of the right shape is not the same thing as a name a backup
+// tool may be given: the variables below are the credentials of a repository,
+// and everything else is refused.
 func ValidateEnvironment(variables []string) error {
 	for _, name := range variables {
 		if !variableName.MatchString(name) {
 			return fmt.Errorf("invalid environment variable name %q", name)
+		}
+		if !credentialVariables[name] {
+			return fmt.Errorf("%w: %s is not one of the credentials a backup tool takes from "+
+				"the panel (%s)", ErrForbiddenVariable, name, strings.Join(CredentialVariables(), ", "))
 		}
 	}
 	return nil

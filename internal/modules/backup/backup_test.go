@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -220,5 +221,71 @@ func TestARepositoryThatIsNotThereYetIsNamedAsSuch(t *testing.T) {
 		if repositoryAbsent(output) {
 			t.Errorf("a refusal that leaves the state unknown was read as an empty repository: %q", output)
 		}
+	}
+}
+
+// A backup tool runs as root and has variables that run commands:
+// RESTIC_PASSWORD_COMMAND, BORG_PASSCOMMAND, BORG_RSH. Borg is Python, which
+// adds PYTHONPATH, and the loader adds LD_PRELOAD to every process there is.
+// A check on the shape of a name admits all of them, so the names the panel
+// may set are listed (audit of 6c38561, HP-01).
+func TestOnlyTheCredentialsOfARepositoryAreAccepted(t *testing.T) {
+	for _, name := range []string{
+		"RESTIC_PASSWORD_COMMAND", "BORG_PASSCOMMAND", "BORG_RSH", "PYTHONPATH",
+		"LD_PRELOAD", "LD_LIBRARY_PATH", "PATH", "HOME", "TMPDIR", "IFS",
+	} {
+		err := ValidateEnvironment([]string{name})
+		if !errors.Is(err, ErrForbiddenVariable) {
+			t.Errorf("the variable %s was accepted: %v", name, err)
+		}
+		// The refusal says what is allowed, not only that this is not.
+		if err != nil && !strings.Contains(err.Error(), "RESTIC_REPOSITORY") {
+			t.Errorf("the refusal of %s does not say what the panel may set: %v", name, err)
+		}
+	}
+	if err := ValidateEnvironment([]string{
+		"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "RESTIC_REPOSITORY", "BORG_REPO",
+	}); err != nil {
+		t.Errorf("the credentials of a repository were refused: %v", err)
+	}
+	// A name of the wrong shape is still refused as such.
+	if err := ValidateEnvironment([]string{"not a name"}); err == nil {
+		t.Error("a name of the wrong shape was accepted")
+	}
+}
+
+// os/exec deduplicates cmd.Env keeping the last occurrence of a name, so what
+// the order carried has to come first: appended after the safe values it won
+// over them, and the tool runs as root (HP-01).
+func TestTheSafeVariablesWinOverTheOnesTheOrderCarried(t *testing.T) {
+	order := Order{
+		Environment: map[string][]byte{
+			"PATH":   []byte("/tmp/attacker/bin"),
+			"HOME":   []byte("/tmp/attacker"),
+			"TMPDIR": []byte("/tmp/attacker"),
+		},
+		Password: []byte("secret"),
+	}
+	environment := toolEnvironment(order, "RESTIC_PASSWORD")
+
+	// The effective value of a name is its last occurrence, which is what
+	// os/exec keeps.
+	effective := map[string]string{}
+	for _, entry := range environment {
+		name, value, _ := strings.Cut(entry, "=")
+		effective[name] = value
+	}
+	for name, wrong := range map[string]string{
+		"PATH": "/tmp/attacker/bin", "HOME": "/tmp/attacker", "TMPDIR": "/tmp/attacker",
+	} {
+		if effective[name] == wrong {
+			t.Errorf("%s came from the order: %s", name, effective[name])
+		}
+	}
+	if !strings.HasPrefix(effective["PATH"], "/usr/local/sbin") {
+		t.Errorf("PATH = %q", effective["PATH"])
+	}
+	if effective["RESTIC_PASSWORD"] != "secret" {
+		t.Errorf("the password of the repository did not reach the tool: %q", effective["RESTIC_PASSWORD"])
 	}
 }
