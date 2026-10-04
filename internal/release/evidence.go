@@ -29,6 +29,12 @@ const evidenceLimit = 512 << 20
 // and the account of the bytes that back it.
 type Evidence struct {
 	Report GateReport
+	// ReportBytes is result.json exactly as the bundle carried it. The caller
+	// that wants to show the report takes it from here: a second reader of the
+	// archive is a second answer to "which member is the report", and the two
+	// disagreed - this checker accepts ./result.json and the workflow's tar
+	// asked for result.json, which exits 2.
+	ReportBytes []byte
 	// Digest is the bundle itself, so the commit status can name the file the
 	// verdict was computed over.
 	Digest string
@@ -168,10 +174,11 @@ func VerifyEvidence(bundle io.Reader, sha, treeFromGit string) (Evidence, error)
 		return Evidence{}, fmt.Errorf("reading the end of the evidence bundle: %w", err)
 	}
 	return Evidence{
-		Report:   report,
-		Digest:   "sha256:" + hex.EncodeToString(digester.Sum(nil)),
-		Verified: verified,
-		Bytes:    total,
+		Report:      report,
+		ReportBytes: raw,
+		Digest:      "sha256:" + hex.EncodeToString(digester.Sum(nil)),
+		Verified:    verified,
+		Bytes:       total,
 	}, nil
 }
 

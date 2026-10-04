@@ -141,7 +141,8 @@ jobs:
           # the report does not account for, a tree git does not hold, a
           # capability the manifest leaves out, a verdict the numbers deny -
           # leaves this step red and records nothing.
-          if ! out="$(go run ./internal/release/gatecheck -sha "$SHA" -tree "$TREE" "$BUNDLE")"; then
+          if ! out="$(go run ./internal/release/gatecheck -sha "$SHA" -tree "$TREE" \
+                  -report report.json "$BUNDLE")"; then
             echo "::error::the laboratory evidence does not support a verdict; nothing was recorded." >&2
             exit 1
           fi
@@ -157,8 +158,17 @@ jobs:
             echo "summary=$summary"
             echo "bundle_digest=$bundle_digest"
           } >> "$GITHUB_OUTPUT"
-          # The report of the run, from the bundle, for the summary of this run.
-          tar -xzOf "$BUNDLE" result.json > report.json
+          # The report comes from gatecheck, which has already decided which
+          # member of the archive it is. This step used to open the archive
+          # itself and ask for the member named result.json, while the gate
+          # writes its archive from a directory - so the member is named
+          # ./result.json, that command exited 2, and a verified bundle
+          # stopped the workflow before the status was written. Two readers of
+          # one archive, disagreeing about which member is the report.
+          if [ ! -s report.json ]; then
+            echo "::error::gatecheck wrote no report; nothing was recorded." >&2
+            exit 1
+          fi
           echo "the evidence says: $verdict"
 
       - name: Record the status

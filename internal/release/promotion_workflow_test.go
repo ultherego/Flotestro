@@ -103,6 +103,22 @@ func TestOnlyAnApprovedJobMovesThePublicNames(t *testing.T) {
 	}
 }
 
+// Two parsers of one archive is how a verified bundle stopped the workflow
+// before it recorded anything: the checker accepts ./result.json, the step
+// beside it asked tar for result.json, and the gate writes the archive with
+// tar -C dir . - so that member is named ./result.json and the command exits 2.
+// The workflow takes the report from the checker now, and this is here so that
+// a convenience cannot put the second parser back.
+func TestOnlyTheCheckerReadsTheEvidenceArchive(t *testing.T) {
+	script := parsedWorkflow(t, "lab-gate.yml").script("record")
+	if strings.Contains(script, "tar -xzOf") || strings.Contains(script, "tar -xf") {
+		t.Error("lab-gate.yml opens the evidence archive itself again")
+	}
+	if !strings.Contains(script, "-report report.json") {
+		t.Error("lab-gate.yml does not ask the checker for the report it verified")
+	}
+}
+
 // The release of the packages waits for the same approval, and the gate is read
 // there the same way. A promotion that trusted a branch-level status would
 // release a tree nobody ran.
