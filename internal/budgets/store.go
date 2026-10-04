@@ -458,15 +458,49 @@ func (s *Store) sweep(ctx context.Context) error {
 
 // SetCapacity writes the capacity policy of one budget. The key may be exact
 // ('site:warsaw:packages') or a pattern ('site:*:packages').
+// ErrCapacityMoved means the budget changed between the read the caller
+// decided on and this write.
+var ErrCapacityMoved = errors.New("the budget changed since it was read")
+
+// SetCapacity writes the capacity of one budget. expected is the moment the
+// caller read, and the write happens only if the row still carries it.
+//
+// The endpoint above asks for If-Match and compares it with what it read, and
+// then wrote without a condition: two requests that read the same version both
+// passed that check, both wrote, and the second overwrote the first while both
+// answered success. A capacity raised over somebody else's change a minute ago
+// is a policy nobody decided, which is what the header is there to prevent.
+//
+// A zero expected is the first write of a budget that does not exist yet.
 func (s *Store) SetCapacity(ctx context.Context, key string, capacity int,
-	note string) error {
-	const query = `
-		insert into budget_limits (key, capacity, note)
-		values ($1, $2, $3)
-		on conflict (key) do update
-		   set capacity = excluded.capacity, note = excluded.note, updated_at = now()`
-	_, err := s.pool.Exec(ctx, query, key, capacity, note)
-	return err
+	note string, expected time.Time) error {
+	if expected.IsZero() {
+		const insert = `
+			insert into budget_limits (key, capacity, note)
+			values ($1, $2, $3)
+			on conflict (key) do nothing`
+		tag, err := s.pool.Exec(ctx, insert, key, capacity, note)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			// Somebody created it between the read and here.
+			return ErrCapacityMoved
+		}
+		return nil
+	}
+	const update = `
+		update budget_limits
+		   set capacity = $2, note = $3, updated_at = now()
+		 where key = $1 and updated_at = $4`
+	tag, err := s.pool.Exec(ctx, update, key, capacity, note, expected)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrCapacityMoved
+	}
+	return nil
 }
 
 // State describes one budget for the operator's screen.

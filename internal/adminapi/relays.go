@@ -133,19 +133,32 @@ func (s *Server) handleGetRelay(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusNotFound, "relay_not_found", "no such relay")
 		return
 	}
-	hosts, err := s.relays.AttestedHosts(r.Context(), relay.ID)
+	attested, err := s.relays.AttestedHosts(r.Context(), relay.ID)
 	if err != nil {
 		s.fail(w, err)
 		return
+	}
+	// The scope of the relay is not the scope of the hosts under it. Checking
+	// only the relay listed every host at that site, so a principal narrowed
+	// to one team read the identifiers, names, lifecycle states and agent
+	// versions of every other team's hosts.
+	visible := make([]relays.AttestedHost, 0, len(attested))
+	for _, host := range attested {
+		if principal.Can(authz.PermHostRead,
+			authz.TargetOf(host.Site, host.Environment, host.TeamID, host.Owner, host.Tags)) {
+			visible = append(visible, host)
+		}
 	}
 	names, err := s.relays.Names(r.Context(), relay.ID)
 	if err != nil && !errors.Is(err, relays.ErrNotFound) {
 		s.fail(w, err)
 		return
 	}
-	view := s.relayView(*relay, len(hosts), time.Now())
+	// The count is of what the relay carries, which is a fact about the relay;
+	// the list is of what this caller may see.
+	view := s.relayView(*relay, len(attested), time.Now())
 	view.AdvertisedNames = names
-	writeJSON(w, http.StatusOK, map[string]any{"relay": view, "hosts": hosts})
+	writeJSON(w, http.StatusOK, map[string]any{"relay": view, "hosts": visible})
 }
 
 // relayBufferHistoryView is the answer of the buffer history endpoint.

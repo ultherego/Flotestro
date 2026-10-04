@@ -348,13 +348,28 @@ type AttestedHost struct {
 	AgentVersion    string     `json:"agent_version,omitempty"`
 	ConnectedAt     time.Time  `json:"connected_at"`
 	LastHeartbeatAt *time.Time `json:"last_heartbeat_at,omitempty"`
+	// TeamID, Owner and Tags travel with the row so that whoever knows the
+	// principal can decide whether they may see this host. They are not in the
+	// answer of the API: they are here to be judged, not shown.
+	TeamID string   `json:"-"`
+	Owner  string   `json:"-"`
+	Tags   []string `json:"-"`
 }
 
-// AttestedHosts lists the hosts with an open session attested by the relay.
+// AttestedHosts lists the hosts with an open session attested by the relay,
+// with what it takes to decide who may see each of them.
+//
+// The page that shows them used to check the scope on the relay alone - site
+// and environment - and then list every host under it: a principal narrowed to
+// one team read the identifiers, names, lifecycle states and agent versions of
+// hosts of every other team at that site. The scope of a host is the host's
+// own, so the row carries it and the caller, which knows the principal,
+// judges it. This package cannot ask authz itself: relays is below it.
 func (s *Store) AttestedHosts(ctx context.Context, id string) ([]AttestedHost, error) {
 	const query = `
 		select h.id, h.hostname, h.site, coalesce(h.environment, ''), h.lifecycle_state,
-		       coalesce(s.agent_version, ''), s.started_at, s.last_heartbeat_at
+		       coalesce(s.agent_version, ''), s.started_at, s.last_heartbeat_at,
+		       coalesce(h.team_id::text, ''), coalesce(h.owner, ''), coalesce(h.tags, '{}')
 		from agent_sessions s join hosts h on h.id = s.host_id
 		where s.relay_id = $1 and s.ended_at is null
 		order by h.hostname`
@@ -369,7 +384,7 @@ func (s *Store) AttestedHosts(ctx context.Context, id string) ([]AttestedHost, e
 		var host AttestedHost
 		if err := rows.Scan(&host.HostID, &host.Hostname, &host.Site, &host.Environment,
 			&host.LifecycleState, &host.AgentVersion, &host.ConnectedAt,
-			&host.LastHeartbeatAt); err != nil {
+			&host.LastHeartbeatAt, &host.TeamID, &host.Owner, &host.Tags); err != nil {
 			return nil, err
 		}
 		list = append(list, host)

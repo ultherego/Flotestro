@@ -13,6 +13,7 @@ import (
 
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
+	"github.com/ultherego/flotestro/internal/budgets"
 )
 
 // handleListBudgets shows the fleet capacity and how much of it is taken.
@@ -132,7 +133,20 @@ func (s *Server) handleSetBudget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.budgets.SetCapacity(r.Context(), key, request.Capacity, request.Note); err != nil {
+	// The moment the decision rested on travels into the write. Comparing the
+	// header here and writing without a condition let two requests that read
+	// the same version both pass and both write, the second over the first,
+	// and both answer success.
+	var expected time.Time
+	if current != nil {
+		expected = current.UpdatedAt
+	}
+	if err := s.budgets.SetCapacity(r.Context(), key, request.Capacity, request.Note, expected); err != nil {
+		if errors.Is(err, budgets.ErrCapacityMoved) {
+			problem(w, http.StatusConflict, "budget_changed",
+				"the budget changed since it was read; read it again and decide over what it holds now")
+			return
+		}
 		s.fail(w, err)
 		return
 	}
