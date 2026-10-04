@@ -195,7 +195,7 @@ func TestANoPasswdDropInIsRootWithoutAPassword(t *testing.T) {
 		t.Errorf("deploy update rule = %+v", update)
 	}
 
-	passwordless := snapshot.RootWithoutPassword()
+	passwordless, _ := snapshot.RootWithoutPassword()
 	if len(passwordless) != 1 || passwordless[0].Source != "/etc/sudoers.d/90-cloud-init-users" {
 		t.Errorf("root without a password = %+v", passwordless)
 	}
@@ -331,7 +331,7 @@ func TestAGlobalAuthenticateOffMakesEveryRootRulePasswordless(t *testing.T) {
 	if !snapshot.PasswordlessGlobally() {
 		t.Fatal("the global !authenticate was not read")
 	}
-	if rules := snapshot.RootWithoutPassword(); len(rules) != 1 || rules[0].NoPasswd {
+	if rules, _ := snapshot.RootWithoutPassword(); len(rules) != 1 || rules[0].NoPasswd {
 		t.Errorf("root without a password = %+v", rules)
 	}
 }

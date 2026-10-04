@@ -526,8 +526,18 @@ func evaluateRootWithoutPassword(input Input) Result {
 	if policy.UnavailableReason != "" {
 		return unknown(missingCode(policy.UnavailableReason), policy.UnavailableReason)
 	}
-	passwordless := policy.RootWithoutPassword()
+	passwordless, complete := policy.RootWithoutPassword()
 	if len(passwordless) == 0 {
+		// "No such rule" and "nobody could tell" are different answers, and
+		// this check is the one an operator reads to believe the host has no
+		// passwordless root. A Defaults line scoped to a host, a runas or a
+		// command cannot be resolved from the files alone, and a policy read
+		// only in part may hold the grant below where the reading stopped.
+		if !complete {
+			return unknown(ReasonParseError, "the sudo policy could not be judged in full: "+
+				"a Defaults line applies by a scope this reading cannot resolve, or the files "+
+				"were read only in part")
+		}
 		// The files the host's checker refuses are not the files sudo loads, so
 		// what the parser read cannot be called a clean policy.
 		if policy.SyntaxCheck.Refused() {

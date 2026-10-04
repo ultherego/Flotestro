@@ -153,18 +153,71 @@ func (s Snapshot) PasswordlessGlobally() bool {
 	return false
 }
 
+// passwordlessFor says whether a Defaults line that applies to this rule turns
+// authentication off, and whether the question could be answered at all.
+//
+// A scope is not decoration. Defaults:%wheel !authenticate turns the password
+// off for that group and for nobody else, and asking only about the global
+// scope meant a configuration giving a whole group passwordless root was
+// reported as carrying no such rule. Treating any scope as global would be the
+// other mistake: Defaults!/usr/bin/foo concerns one command, and
+// Defaults@otherhost concerns a host that is not this one.
+func (s Snapshot) passwordlessFor(rule Rule) (passwordless, known bool) {
+	known = true
+	for _, entry := range s.Defaults {
+		if !entry.DisablesAuthentication {
+			continue
+		}
+		switch entry.Scope {
+		case "":
+			return true, true
+		case "user":
+			if ruleNames(rule, entry.Target) {
+				return true, true
+			}
+		case "host", "runas", "command":
+			// Which host this is, which identity the command will run as and
+			// which command it will be are not things a snapshot of the files
+			// settles. The answer is unknown rather than no.
+			known = false
+		}
+	}
+	return false, known
+}
+
+// ruleNames says whether the rule grants to this user or group, as the
+// Defaults line names them.
+func ruleNames(rule Rule, target string) bool {
+	for _, grantee := range rule.Users {
+		if grantee == target {
+			return true
+		}
+	}
+	return false
+}
+
 // RootWithoutPassword lists the rules that make somebody root without a
-// password: root-equivalent rules tagged NOPASSWD, and every root-equivalent
-// rule when a global default turns authentication off.
-func (s Snapshot) RootWithoutPassword() []Rule {
-	global := s.PasswordlessGlobally()
+// password: root-equivalent rules tagged NOPASSWD, and root-equivalent rules a
+// Defaults line turns authentication off for. The second value says the answer
+// is incomplete - a Defaults line whose scope a snapshot cannot resolve, or a
+// policy read only in part - so that a caller does not read "no such rule" out
+// of "nobody could tell".
+func (s Snapshot) RootWithoutPassword() ([]Rule, bool) {
+	complete := s.Complete()
 	var result []Rule
 	for _, rule := range s.Rules {
-		if rule.RootEquivalent && (rule.NoPasswd || global) {
+		if !rule.RootEquivalent {
+			continue
+		}
+		passwordless, known := s.passwordlessFor(rule)
+		if !known {
+			complete = false
+		}
+		if rule.NoPasswd || passwordless {
 			result = append(result, rule)
 		}
 	}
-	return result
+	return result, complete
 }
 
 // RootEquivalentRules lists the rules that let somebody become root.
