@@ -240,6 +240,23 @@ func (e *Executor) createUser(ctx context.Context, spec *UserPayload) ([]Phase, 
 	return append(phases, phase), &revoked
 }
 
+// deniedLocally turns the outcome of marking - or lifting - a local denial into
+// a phase. An account of the directory that has never signed in to the panel
+// has no identity here to deny, and that is not a failure of the step: the
+// account exists where it exists and the panel knows nobody by that name.
+//
+// It is one function because it was two. The lock path made the distinction and
+// said why in a comment; the preserve path handed the error straight to
+// finishPhase, so preserving an account the panel knows nobody by ended the
+// whole change as partially_applied over a step that had nothing to do. The
+// gate found it on 04.10, six days after the lock path was fixed.
+func deniedLocally(phase Phase, count int64, err error, marked, nothing string) Phase {
+	if errors.Is(err, ErrNoPrincipal) {
+		return skipPhase(phase, nothing)
+	}
+	return finishPhase(phase, err, describeCount(marked, count))
+}
+
 // setUserAccess locks or unlocks an account.
 func (e *Executor) setUserAccess(ctx context.Context, ref *ReferencePayload, enable bool) ([]Phase, *sessionRevocation) {
 	var phases []Phase
@@ -248,19 +265,10 @@ func (e *Executor) setUserAccess(ctx context.Context, ref *ReferencePayload, ena
 	if !enable {
 		phase := startPhase("the local denial marker")
 		count, err := e.store.SetLocalDeny(ctx, ref.UID, ref.Reason, true)
-		switch {
-		case errors.Is(err, ErrNoPrincipal):
-			// An account of the directory that has never signed in to the panel
-			// has no identity here to deny, and that is not a failure of the
-			// step: the account exists where it exists and the panel knows
-			// nobody by that name. Saying "identities marked: 0" as a success
-			// was the thing ID-01 found - this says which of the two it is.
-			phases = append(phases, skipPhase(phase,
-				"the panel knows no identity by that name, so there was nothing to deny locally"))
-		default:
-			phases = append(phases, finishPhase(phase, err,
-				describeCount("identities marked", count)))
-		}
+		// Saying "identities marked: 0" as a success was the thing ID-01 found;
+		// this says which of the two it is.
+		phases = append(phases, deniedLocally(phase, count, err, "identities marked",
+			"the panel knows no identity by that name, so there was nothing to deny locally"))
 
 		phase = startPhase("revoking the panel sessions")
 		result, err := e.revokeSessions(ctx, ref.UID, firstNonEmpty(ref.Reason, "the account was locked"))
@@ -283,15 +291,9 @@ func (e *Executor) setUserAccess(ctx context.Context, ref *ReferencePayload, ena
 	if enable && err == nil {
 		phase := startPhase("lifting the local denial marker")
 		count, denyErr := e.store.SetLocalDeny(ctx, ref.UID, "", false)
-		if errors.Is(denyErr, ErrNoPrincipal) {
-			// The same distinction as on the way in: an account the panel
-			// knows nobody by has no marker here to lift.
-			phases = append(phases, skipPhase(phase,
-				"the panel knows no identity by that name, so there was nothing to lift"))
-		} else {
-			phases = append(phases, finishPhase(phase, denyErr,
-				describeCount("identities unlocked", count)))
-		}
+		// The same distinction as on the way in.
+		phases = append(phases, deniedLocally(phase, count, denyErr, "identities unlocked",
+			"the panel knows no identity by that name, so there was nothing to lift"))
 	}
 	return phases, revoked
 }
@@ -533,7 +535,8 @@ func (e *Executor) preserveUser(ctx context.Context, change Change,
 	reason := firstNonEmpty(ref.Reason, "the account was preserved")
 	phase = startPhase("the local denial marker")
 	count, err := e.denyLocally(ctx, ref.UID, reason, true)
-	phases = append(phases, finishPhase(phase, err, describeCount("identities marked", count)))
+	phases = append(phases, deniedLocally(phase, count, err, "identities marked",
+		"the panel knows no identity by that name, so there was nothing to deny locally"))
 
 	phase = startPhase("revoking the panel sessions")
 	result, err := e.revokeSessions(ctx, ref.UID, reason)
