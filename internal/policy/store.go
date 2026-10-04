@@ -385,15 +385,26 @@ func (s *Store) ReplaceResults(ctx context.Context, policyID string, version int
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if _, err := tx.Exec(ctx, `delete from policy_results where policy_id = $1`, policyID); err != nil {
-		return err
-	}
+	// The verdicts are written over the rows that are there, not deleted and
+	// made again.
+	//
+	// The trigger that notifies on drift says in its own comment that a drift
+	// which stays is not news at every evaluation, and it implements that by
+	// not firing when an update finds the row already in drift. Deleting and
+	// inserting made every evaluation an insert, so the condition never held
+	// and a standing drift sent a notification on every pass - once a minute
+	// on a fleet nobody had touched. The rows carry a primary key on
+	// (policy_id, host_id, rule_index), so there is nothing to add for this.
 	batch := &pgx.Batch{}
 	for _, result := range results {
 		batch.Queue(`
 			insert into policy_results (policy_id, host_id, rule_index, version, verdict, reason,
 			                            observed_revision, evaluated_at)
-			values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+			values ($1, $2, $3, $4, $5, $6, $7, $8)
+			on conflict (policy_id, host_id, rule_index) do update
+			   set version = excluded.version, verdict = excluded.verdict,
+			       reason = excluded.reason, observed_revision = excluded.observed_revision,
+			       evaluated_at = excluded.evaluated_at`,
 			policyID, result.HostID, result.RuleIndex, version, result.Verdict, result.Reason,
 			result.ObservedRevision, now)
 	}
@@ -401,6 +412,14 @@ func (s *Store) ReplaceResults(ctx context.Context, policyID string, version int
 		if err := tx.SendBatch(ctx, batch).Close(); err != nil {
 			return fmt.Errorf("recording the verdicts: %w", err)
 		}
+	}
+	// What this pass did not touch is gone from the policy: a host out of
+	// scope, a rule removed. The timestamp of the pass is what tells them
+	// apart, so this has to come after the writes above.
+	if _, err := tx.Exec(ctx,
+		`delete from policy_results where policy_id = $1 and evaluated_at < $2`,
+		policyID, now); err != nil {
+		return err
 	}
 	if _, err := tx.Exec(ctx, `update policies set last_evaluated_at = $2 where id = $1`, policyID, now); err != nil {
 		return err

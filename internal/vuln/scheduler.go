@@ -145,10 +145,38 @@ func (h *Scheduler) Run(ctx context.Context) {
 }
 
 // RecalculateHosts recomputes the assessment of the named hosts.
+//
+// Under the same lease as the full pass. The comment on Cycle says why that
+// lease exists - two instances rewriting the findings of a host is duplicated
+// work whose last commit wins, whichever of them read the fresher inputs - and
+// this path, which runs from the event loop, took no lease at all. So the
+// leased pass and an event-driven one could rewrite the same rows at the same
+// time, and the winner was whichever finished later. The danger the lease was
+// put there to remove came back through the other door.
+//
+// An instance that does not hold the lease leaves these hosts alone: the pass
+// that does hold it covers the whole fleet anyway, so nothing is lost but the
+// promptness.
 func (h *Scheduler) RecalculateHosts(ctx context.Context, ids []string) {
 	if len(ids) == 0 {
 		return
 	}
+	lease, held, err := h.store.TakeCorrelatorLease(ctx, jobs.InstanceID())
+	if err != nil {
+		h.log.Error("the correlator lease was not read", "err", err)
+		return
+	}
+	if !held {
+		h.log.Debug("another instance holds the correlator lease; these hosts wait for its pass",
+			"hosts", len(ids))
+		return
+	}
+	defer func() {
+		if err := h.store.ReleaseCorrelatorLease(context.WithoutCancel(ctx), lease); err != nil {
+			h.log.Warn("the correlator lease was not given back", "err", err)
+		}
+	}()
+
 	descriptions, err := h.describedHosts(ctx, ids)
 	if err != nil {
 		h.log.Error("the hosts to recompute the assessment for were not read", "err", err)
