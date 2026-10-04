@@ -231,28 +231,39 @@ func (s *EnrollmentService) enrollThroughRelay(ctx context.Context,
 		if err := tx.Commit(ctx); err != nil {
 			return nil, connect.NewError(connect.CodeInternal, err)
 		}
+		action, target := "host.enroll", "host"
+		if scope.Kind == enrollment.KindRelay {
+			action, target = "relay.enroll", "relay"
+		}
 		s.audit.Record(ctx, audit.Event{
 			ActorType: audit.ActorAgent, ActorID: msg.GetMachineId(),
-			Action: "host.enroll", TargetType: "host", TargetID: replayed.HostID,
+			Action: action, TargetType: target, TargetID: replayed.HostID,
 			Outcome: audit.OutcomeSuccess,
 			Detail: map[string]any{
 				"replay": true, "token_id": scope.TokenID,
 				"cert_serial": replayed.CertificateSerial,
 			},
 		})
-		s.log.Info("a repeated enrollment attempt", "host_id", replayed.HostID,
-			"machine_id", msg.GetMachineId())
-		return connect.NewResponse(&agentv1.EnrollResponse{
+		s.log.Info("a repeated enrollment attempt", "id", replayed.HostID,
+			"kind", scope.Kind, "machine_id", msg.GetMachineId())
+		answer := &agentv1.EnrollResponse{
 			HostId:         replayed.HostID,
 			CertificatePem: replayed.CertificatePEM,
 			CaBundlePem:    replayed.CABundlePEM,
-			HelperTrust:    s.helperTrustFor(replayed.HostID),
-		}), nil
+		}
+		// A relay has no helper and no capability keyring, so the trust of a
+		// host would be an answer to a question it never asked - and
+		// helperTrustFor would be looking up a host identifier that names a
+		// relay.
+		if scope.Kind != enrollment.KindRelay {
+			answer.HelperTrust = s.helperTrustFor(replayed.HostID)
+		}
+		return connect.NewResponse(answer), nil
 	}
 
 	// The token settles what comes into being.
 	if scope.Kind == enrollment.KindRelay {
-		return s.enrollRelay(ctx, tx, msg, scope)
+		return s.enrollRelay(ctx, tx, msg, scope, attempt)
 	}
 
 	// The purpose of the order settles what may be done with a machine the panel
@@ -388,7 +399,7 @@ func (s *EnrollmentService) enrollThroughRelay(ctx context.Context,
 
 // enrollRelay registers the relay of a site and issues a certificate for it.
 func (s *EnrollmentService) enrollRelay(ctx context.Context, tx pgx.Tx,
-	msg *agentv1.EnrollRequest, scope enrollment.Scope,
+	msg *agentv1.EnrollRequest, scope enrollment.Scope, attempt enrollment.AttemptInput,
 ) (*connect.Response[agentv1.EnrollResponse], error) {
 	name := msg.GetHostname()
 	if name == "" {
@@ -416,13 +427,31 @@ func (s *EnrollmentService) enrollRelay(ctx context.Context, tx pgx.Tx,
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
+	// nil: this is the first certificate of the relay, so there is no
+	// fingerprint the decision rested on.
 	if err := s.relays.SaveCertificate(ctx, tx, relayID, issued.Serial,
 		issued.Fingerprint, issued.NotAfter,
-		relays.Issuer{Subject: issued.IssuerSubject, Serial: issued.IssuerSerial}); err != nil {
+		relays.Issuer{Subject: issued.IssuerSubject, Serial: issued.IssuerSerial}, nil); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	// The network names from the first CSR become a record in the registry.
 	if err := s.relays.SaveNames(ctx, tx, relayID, networkNames(issued)); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	// The attempt is written in the same transaction as the relay and its
+	// certificate, for the reason the host branch gives in its own words: a
+	// write after the commit might not arrive, and the idempotence would then
+	// be only apparent. This branch did not write it at all, and the token is
+	// already spent by the time either branch runs - so an answer lost in the
+	// network left the relay with a certificate recorded in the panel and
+	// absent from the relay, and the retry found no attempt to replay and was
+	// refused as an invalid token. The relay could not be enrolled again
+	// without an operator revoking it and issuing another token.
+	if err := s.tokens.RecordAttempt(ctx, tx, scope.TokenID, attempt, enrollment.Replay{
+		HostID: relayID, CertificatePEM: issued.PEM, CABundlePEM: trust,
+		CertificateSerial: issued.Serial,
+	}); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 

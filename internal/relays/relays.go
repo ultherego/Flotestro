@@ -121,13 +121,27 @@ func (s *Store) Upsert(ctx context.Context, tx pgx.Tx, name, site, environment s
 	return id, nil
 }
 
+// ErrCertificateMoved means the row is not the one the caller decided on any
+// more: it was revoked, or another certificate took its place, while the
+// certificate being written was being signed.
+var ErrCertificateMoved = errors.New("the certificate of this relay moved while it was being issued")
+
 // SaveCertificate writes the current certificate of a relay and keeps the one
 // it replaces. The answer to a renewal can be lost, and the relay commits its
 // new identity only when the answer arrives: without the overlap it would then
 // hold a certificate the panel no longer knows, and the renewal that could fix
 // that refuses an unknown certificate.
 func (s *Store) SaveCertificate(ctx context.Context, tx pgx.Tx, id, serial string,
-	fingerprint []byte, notAfter time.Time, issuer Issuer) error {
+	fingerprint []byte, notAfter time.Time, issuer Issuer, decidedOn []byte) error {
+	// The write carries the condition the caller decided on: the row was not
+	// revoked, and it held this fingerprint. A renewal reads those facts, signs
+	// a certificate - which takes a moment - and then writes; a revocation
+	// committed in that moment used to be wiped by "revoked_at = null", and
+	// the relay got its authority back with nothing in the journal but a
+	// successful renewal.
+	//
+	// decidedOn nil is the first certificate of a relay, where there is no
+	// fingerprint yet to have decided on.
 	const query = `
 		update relays
 		   set previous_fingerprint_sha256 = case
@@ -136,12 +150,20 @@ func (s *Store) SaveCertificate(ctx context.Context, tx pgx.Tx, id, serial strin
 		       previous_not_after = case
 		           when fingerprint_sha256 is null or fingerprint_sha256 = $2 then previous_not_after
 		           else not_after end,
-		       fingerprint_sha256 = $2, serial = $3, not_after = $4, revoked_at = null,
+		       fingerprint_sha256 = $2, serial = $3, not_after = $4,
 		       issuer_subject = nullif($5, ''), issuer_serial = nullif($6, '')
-		 where id = $1`
-	_, err := tx.Exec(ctx, query, id, fingerprint, serial, notAfter,
-		issuer.Subject, issuer.Serial)
-	return err
+		 where id = $1
+		   and revoked_at is null
+		   and ($7::bytea is null or fingerprint_sha256 = $7)`
+	tag, err := tx.Exec(ctx, query, id, fingerprint, serial, notAfter,
+		issuer.Subject, issuer.Serial, decidedOn)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrCertificateMoved
+	}
+	return nil
 }
 
 // Issuer names the authority that signed a relay certificate, so that

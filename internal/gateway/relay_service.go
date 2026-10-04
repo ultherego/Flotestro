@@ -159,9 +159,18 @@ func (s *RelayService) RenewCertificate(ctx context.Context,
 	// The previous certificate stops being the one the panel recognises the relay
 	// by, but stays valid until the end of its term: the relay switches the
 	// listener without tearing down the sessions of the agents.
+	// The fingerprint the refusals above were decided on. Between that decision
+	// and this write the certificate was signed, and a revocation committed in
+	// the meantime must refuse the renewal rather than disappear under it.
 	if err := s.relays.SaveCertificate(ctx, tx, relayID, issued.Serial,
 		issued.Fingerprint, issued.NotAfter,
-		relays.Issuer{Subject: issued.IssuerSubject, Serial: issued.IssuerSerial}); err != nil {
+		relays.Issuer{Subject: issued.IssuerSubject, Serial: issued.IssuerSerial},
+		pki.Fingerprint(cert)); err != nil {
+		if errors.Is(err, relays.ErrCertificateMoved) {
+			s.refuse(ctx, relayID, "revoked_or_replaced_while_issuing")
+			return nil, connect.NewError(connect.CodeAborted,
+				errors.New("the certificate of this relay was revoked or replaced while the renewal was being signed"))
+		}
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	if err := s.relays.RecordRenewal(ctx, tx, relayID); err != nil {
