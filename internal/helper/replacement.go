@@ -205,10 +205,11 @@ func (s *Server) orderAgentReplacement(ctx context.Context, manager packages.Man
 		}
 	}
 
-	if err := writeReplacementOrder(order); err != nil {
+	digest, err := writeReplacementOrder(order)
+	if err != nil {
 		return reject(ErrorSelfReplacement, err.Error())
 	}
-	if err := StartAgentReplacement(ctx, spec); err != nil {
+	if err := StartAgentReplacement(ctx, spec, digest); err != nil {
 		return reject(ErrorSelfReplacement, err.Error())
 	}
 	s.log.Info("the agent replacement was started outside the helper",
@@ -224,9 +225,12 @@ func (s *Server) orderAgentReplacement(ctx context.Context, manager packages.Man
 
 // StartAgentReplacement starts the transient unit that calls this same helper
 // binary in replacement mode.
-func StartAgentReplacement(ctx context.Context, spec string) error {
+func StartAgentReplacement(ctx context.Context, spec, digest string) error {
 	if _, ok := agentReplacement([]string{spec}); !ok {
 		return fmt.Errorf("%q is not the agent package", spec)
+	}
+	if digest == "" {
+		return fmt.Errorf("a replacement is not started without the digest of its order")
 	}
 	systemdRun, err := exec.LookPath("systemd-run")
 	if err != nil {
@@ -247,7 +251,7 @@ func StartAgentReplacement(ctx context.Context, spec string) error {
 		// The package transaction has its own time limit; this one is the last
 		// net, so that a hung installation does not stay on the host forever.
 		"--property=TimeoutStartSec=3600",
-		"--", binary, "-agent-replacement", spec)
+		"--", binary, "-agent-replacement", spec, "-replacement-order", digest)
 	cmd.Env = toolEnvironment()
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
@@ -256,10 +260,31 @@ func StartAgentReplacement(ctx context.Context, spec string) error {
 }
 
 // RunAgentReplacement installs the given version of the agent package.
-func RunAgentReplacement(ctx context.Context, spec string, log *slog.Logger) error {
+func RunAgentReplacement(ctx context.Context, spec, expectedOrder string, log *slog.Logger) error {
 	if _, ok := agentReplacement([]string{spec}); !ok {
 		return fmt.Errorf("%q is not the agent package", spec)
 	}
+	if expectedOrder == "" {
+		return fmt.Errorf("this replacement was started without the digest of its order; nothing is " +
+			"installed, because the digest is what tells the order it was started for from any other " +
+			"file at that path")
+	}
+	// Nothing is installed without the order: the artefact that was proven is
+	// named in it, together with the one to go back to, and installing the bare
+	// name out of a repository instead is not a fallback - it is a different
+	// operation, the one operation that cannot be ordered again from the panel
+	// if it goes wrong.
+	order, digest, err := readReplacementOrder(spec)
+	if err != nil {
+		return fmt.Errorf("%w; nothing is installed, because the artefact that was proven is named "+
+			"in the order and this is the one operation that cannot be ordered again from the panel "+
+			"if it goes wrong", err)
+	}
+	if digest != expectedOrder {
+		return fmt.Errorf("the order on disk is not the order this replacement was started for "+
+			"(%s, started for %s); nothing is installed", digest, expectedOrder)
+	}
+
 	if err := packages.SetRuntimeDir("/var/lib/flotestro-helper"); err != nil {
 		return fmt.Errorf("the working directory of the helper: %w", err)
 	}
@@ -273,8 +298,7 @@ func RunAgentReplacement(ctx context.Context, spec string, log *slog.Logger) err
 	}
 
 	target := spec
-	order, hasOrder := readReplacementOrder(spec)
-	if hasOrder && order.ArtefactPath != "" {
+	if order.ArtefactPath != "" {
 		if err := verifyDigest(order.ArtefactPath, order.ArtefactSHA256); err != nil {
 			log.Error("the artefact of the agent release was not installed",
 				"package", spec, "artefact", order.ArtefactPath, "err", err)
@@ -998,34 +1022,50 @@ func replacementOrderPath() string {
 }
 
 // writeReplacementOrder records what the transient unit is to install.
-func writeReplacementOrder(order replacementOrder) error {
+func writeReplacementOrder(order replacementOrder) (string, error) {
 	if err := os.MkdirAll(agentUpgradeDir, 0o700); err != nil {
-		return fmt.Errorf("the directory of the replacement order: %w", err)
+		return "", fmt.Errorf("the directory of the replacement order: %w", err)
 	}
 	encoded, err := json.Marshal(order)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if err := os.WriteFile(replacementOrderPath(), encoded, 0o600); err != nil {
-		return fmt.Errorf("writing the replacement order: %w", err)
+		return "", fmt.Errorf("writing the replacement order: %w", err)
 	}
-	return nil
+	// The digest travels in the argv of the unit. The order names the artefact
+	// that was proven and the one to go back to, and it travels by file alone:
+	// a file that is gone, truncated or rewritten used to leave the worker
+	// installing the bare name out of a repository instead - unproven, and with
+	// no way back - at the one operation that cannot be ordered again from the
+	// panel if it goes wrong.
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:]), nil
 }
 
-// readReplacementOrder reads the order of this replacement.
-func readReplacementOrder(spec string) (replacementOrder, bool) {
+// orderDigest is the digest of the order as it is on disk.
+func orderDigest(encoded []byte) string {
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:])
+}
+
+// readReplacementOrder reads the order of this replacement and the digest of
+// the bytes it read, so the caller can tell the order it was started for from
+// another one that happens to be on disk.
+func readReplacementOrder(spec string) (replacementOrder, string, error) {
 	content, err := os.ReadFile(replacementOrderPath())
 	if err != nil {
-		return replacementOrder{}, false
+		return replacementOrder{}, "", fmt.Errorf("reading the replacement order: %w", err)
 	}
 	var order replacementOrder
 	if err := json.Unmarshal(content, &order); err != nil {
-		return replacementOrder{}, false
+		return replacementOrder{}, "", fmt.Errorf("the replacement order could not be read: %w", err)
 	}
 	if order.Spec != spec {
-		return replacementOrder{}, false
+		return replacementOrder{}, "", fmt.Errorf("the order on disk is for %q and this replacement is of %q",
+			order.Spec, spec)
 	}
-	return order, true
+	return order, orderDigest(content), nil
 }
 
 // installedAgentVersion reads the version of the agent package as the package

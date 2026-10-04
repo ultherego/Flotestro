@@ -5,6 +5,7 @@ package integration
 import (
 	"net/http"
 	"testing"
+	"time"
 )
 
 // A digest is not a secret. It travels in the results of tasks, in the plan an
@@ -18,9 +19,28 @@ func TestAFileVersionIsNotReadableOutsideItsScope(t *testing.T) {
 	h.requireHealthy()
 
 	host := h.hostByFamily("debian")
-	file := managedFile(t, h, host.ID, testPath)
+	// The file is this test's own: another test manages testPath and removes it
+	// again, so depending on it would make this test pass or fail by the order
+	// the suite happens to run in.
+	path := "/etc/flotestro-version-scope.conf"
+	t.Cleanup(func() {
+		h.runOperation(host.ID, map[string]any{
+			"action": "file.remove", "reason": "cleanup after the version scope test",
+			"payload": map[string]any{"file": map[string]any{"path": path}},
+		}, 2*time.Minute)
+	})
+	job, attempts := h.runOperation(host.ID, map[string]any{
+		"action": "file.ensure", "reason": "a version to read inside and outside its scope",
+		"payload": map[string]any{"file": map[string]any{
+			"path": path, "content": "key = scope\n", "mode": "640"}},
+	}, 2*time.Minute)
+	if job.State != "succeeded" {
+		t.Fatalf("the file was not written: state = %s, %s", job.State, lastMessage(attempts))
+	}
+
+	file := managedFile(t, h, host.ID, path)
 	if file.DesiredSHA256 == "" {
-		t.Fatalf("the managed file %s on %s carries no version to read", testPath, host.Hostname)
+		t.Fatalf("the managed file %s on %s carries no version to read", path, host.Hostname)
 	}
 
 	// The owner of the host reads it, which is the behaviour that has to keep

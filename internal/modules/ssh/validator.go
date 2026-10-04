@@ -61,18 +61,49 @@ func Validate(settings Settings) error {
 	return nil
 }
 
+// PanelDirectives reads the directives the panel's own file sets. The file is
+// written by ComposeDropIn, so every line of it that is not the header is one
+// directive and its value.
+func PanelDirectives(content string) map[string]string {
+	directives := map[string]string{}
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, found := strings.Cut(line, " ")
+		if !found {
+			continue
+		}
+		directives[key] = strings.TrimSpace(value)
+	}
+	return directives
+}
+
 // CutsOffAllMethods says whether at least one authentication method remains
 // after the change.
+//
+// A field the order leaves out does not mean "keep": the panel's file is
+// replaced whole, so a directive the order omits and the panel's current file
+// sets is removed from the host. What the server applies afterwards comes from
+// the rest of its configuration and from the defaults this build of sshd was
+// compiled with - neither of which the panel may invent. Such a value is
+// unknown, and an unknown is not a way in: it cannot be the method that saves
+// a change from locking everybody out.
 func CutsOffAllMethods(desired Settings, state Snapshot) bool {
-	value := func(wanted, current string) string {
+	managed := PanelDirectives(state.Managed)
+	value := func(directive, wanted, current string) string {
 		if wanted != "" {
 			return wanted
 		}
+		if _, setByThePanel := managed[directive]; setByThePanel {
+			return ""
+		}
 		return current
 	}
-	password := value(desired.PasswordAuthentication, state.PasswordAuthentication)
-	pubkey := value(desired.PubkeyAuthentication, state.PubkeyAuthentication)
-	interactive := value(desired.KbdInteractive, state.KbdInteractive)
+	password := value("PasswordAuthentication", desired.PasswordAuthentication, state.PasswordAuthentication)
+	pubkey := value("PubkeyAuthentication", desired.PubkeyAuthentication, state.PubkeyAuthentication)
+	interactive := value("KbdInteractiveAuthentication", desired.KbdInteractive, state.KbdInteractive)
 	// GSSAPI is left to the state: the panel does not set it, but a
 	// domain-joined host may rely on it.
 	gssapi := state.GSSAPIAuthentication

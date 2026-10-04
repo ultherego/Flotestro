@@ -67,6 +67,13 @@ func ParseFingerprint(line, path string) (HostKey, bool) {
 	}, true
 }
 
+// DirectiveOrder is the order the panel writes its directives in, and the order
+// anything that lists them follows.
+var DirectiveOrder = []string{
+	"Port", "PermitRootLogin", "PasswordAuthentication", "PubkeyAuthentication",
+	"KbdInteractiveAuthentication", "MaxAuthTries", "AllowUsers", "AllowGroups", "DenyUsers",
+}
+
 // ComposeDropIn composes the content of the panel's configuration file. Only
 // the settings the operator asked for are written.
 func ComposeDropIn(settings Settings) (string, error) {

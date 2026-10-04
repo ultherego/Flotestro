@@ -44,6 +44,8 @@ func run() error {
 			"rebuild the panel's own firewall table from its registry and finish")
 		agentReplacement = flag.String("agent-replacement", "",
 			"install the named version of the agent package and finish")
+		replacementOrder = flag.String("replacement-order", "",
+			"the digest of the order this replacement was started for")
 		idleTimeout = flag.Duration("idle-timeout",
 			time.Duration(config.EnvInt("FLOTESTRO_HELPER_IDLE_SECONDS", 300))*time.Second,
 			"the idle time after which the helper finishes its work")
@@ -60,8 +62,9 @@ func run() error {
 	if *agentReplacement != "" {
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
-		log.Info("the replacement of the agent", "package", *agentReplacement)
-		return helper.RunAgentReplacement(ctx, *agentReplacement, log)
+		log.Info("the replacement of the agent",
+			"package", *agentReplacement, "order", *replacementOrder)
+		return helper.RunAgentReplacement(ctx, *agentReplacement, *replacementOrder, log)
 	}
 
 	// The restore mode is called at boot by flotestro-firewall-restore.service:

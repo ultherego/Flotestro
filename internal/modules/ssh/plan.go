@@ -108,6 +108,15 @@ func Compute(state Snapshot, desired Settings, allowLockout bool) Plan {
 	case state.Managed != content:
 		plan.Changes = append(plan.Changes, "the panel's file will be overwritten")
 	}
+	// And a directive the order leaves out is a directive removed from the host,
+	// not one kept. It is named in the plan, because an operator who orders a
+	// port cannot be expected to know that it also takes away the password
+	// refusal the panel set a month ago.
+	for _, directive := range RemovedDirectives(state.Managed, content) {
+		plan.Changes = append(plan.Changes,
+			directive+" will be removed from the panel's file; afterwards the host applies what "+
+				"the rest of its configuration says")
+	}
 
 	plan.Action = PlanUpdate
 	if len(plan.Changes) == 0 {
@@ -115,6 +124,25 @@ func Compute(state Snapshot, desired Settings, allowLockout bool) Plan {
 	}
 	plan.PlanHash = planFingerprint(plan)
 	return plan
+}
+
+// RemovedDirectives names the directives the panel's file sets now and the
+// composed one does not, in the order ComposeDropIn writes them. The file is
+// replaced whole, so these are the lines the change takes off the host.
+func RemovedDirectives(managed, proposed string) []string {
+	if managed == "" {
+		return nil
+	}
+	before, after := PanelDirectives(managed), PanelDirectives(proposed)
+	var removed []string
+	for _, directive := range DirectiveOrder {
+		if value, had := before[directive]; had {
+			if _, kept := after[directive]; !kept {
+				removed = append(removed, directive+" "+value)
+			}
+		}
+	}
+	return removed
 }
 
 // Refuse records a refusal reason learned after the differences were computed

@@ -146,3 +146,51 @@ func TestDivergenceBetweenOrderAndStateIsNamed(t *testing.T) {
 		t.Error("a matching setting treated as divergent")
 	}
 }
+
+// The panel's file is replaced whole, so a directive the order leaves out is
+// removed from the host - not kept. The guard may not take the value it has
+// now as the value it will have, because that value is the one the directive
+// being removed put there (audit of 6c38561, HA-005).
+func TestADirectiveTheOrderLeavesOutIsRemovedAndNotKept(t *testing.T) {
+	state := ParseEffective(effectiveOutput)
+	// A host the panel has already configured: keys only, no passwords, no
+	// keyboard-interactive. The effective state reports what that file put there.
+	state.Managed, _ = ComposeDropIn(Settings{
+		PasswordAuthentication: "no", PubkeyAuthentication: "yes", KbdInteractive: "no",
+	})
+	state.ManagedPresent = true
+	state.PasswordAuthentication, state.PubkeyAuthentication, state.KbdInteractive = "no", "yes", "no"
+
+	// The operator now orders a port and nothing else. Keys were a way in only
+	// because the panel's file said so, and that line goes with the rewrite:
+	// what the host will apply afterwards is not the panel's to know.
+	if !CutsOffAllMethods(Settings{Port: "2222"}, state) {
+		t.Error("a change that removes every directive the panel set read as leaving a way in")
+	}
+	// Said in the order, it is a way in again.
+	if CutsOffAllMethods(Settings{Port: "2222", PubkeyAuthentication: "yes"}, state) {
+		t.Error("a method the order itself asks for read as cut off")
+	}
+	// A method the panel never set is the host's own and stays: here GSSAPI,
+	// which the panel does not write.
+	withDomain := state
+	withDomain.GSSAPIAuthentication = "yes"
+	if CutsOffAllMethods(Settings{Port: "2222"}, withDomain) {
+		t.Error("a method outside the panel's file read as removed by rewriting that file")
+	}
+
+	// And the operator is told, in the plan, which lines the order takes away.
+	plan := Compute(state, Settings{Port: "2222", PubkeyAuthentication: "yes"}, false)
+	if plan.Refusal != "" {
+		t.Fatalf("refused: %s", plan.Refusal)
+	}
+	removed := strings.Join(plan.Changes, "; ")
+	for _, directive := range []string{"PasswordAuthentication no", "KbdInteractiveAuthentication no"} {
+		if !strings.Contains(removed, directive) {
+			t.Errorf("the plan does not say that %q is removed: %s", directive, removed)
+		}
+	}
+	if strings.Contains(removed, "PubkeyAuthentication yes will be removed") {
+		t.Errorf("a directive the order keeps named as removed: %s", removed)
+	}
+}

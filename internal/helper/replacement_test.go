@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -175,14 +177,20 @@ func TestAReplacementOrderIsReadOnlyForItsOwnPackage(t *testing.T) {
 		ArtefactSHA256: strings.Repeat("ab", 32),
 		OrderedAt:      time.Now().UTC(),
 	}
-	if err := writeReplacementOrder(order); err != nil {
+	written, err := writeReplacementOrder(order)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if read, ok := readReplacementOrder("flotestro-agent=0.55.0"); !ok ||
-		read.ArtefactPath != order.ArtefactPath {
-		t.Fatalf("the order of its own package read as %+v, %v", read, ok)
+	read, digest, err := readReplacementOrder("flotestro-agent=0.55.0")
+	if err != nil || read.ArtefactPath != order.ArtefactPath {
+		t.Fatalf("the order of its own package read as %+v, %v", read, err)
 	}
-	if _, ok := readReplacementOrder("flotestro-agent=0.56.0"); ok {
+	// The digest of the order travels in the argv of the unit, so the worker
+	// can tell the order it was started for from another file at that path.
+	if digest != written {
+		t.Fatalf("the order was written as %s and read back as %s", written, digest)
+	}
+	if _, _, err := readReplacementOrder("flotestro-agent=0.56.0"); err == nil {
 		t.Fatal("the order of another version was taken as the order of this one")
 	}
 }
@@ -292,7 +300,7 @@ func TestTheKeptArtefactIsReleasedOnlyOnceTheHostHoldsTheOrderedVersion(t *testi
 	}
 
 	kept := writeKeptArtefact(t, "flotestro-agent_0.54.0-1_amd64.deb", "the way back")
-	if err := writeReplacementOrder(order); err != nil {
+	if _, err := writeReplacementOrder(order); err != nil {
 		t.Fatal(err)
 	}
 	released, err := releaseKeptArtefacts()
@@ -305,7 +313,7 @@ func TestTheKeptArtefactIsReleasedOnlyOnceTheHostHoldsTheOrderedVersion(t *testi
 	if _, err := os.Stat(kept); err == nil {
 		t.Error("the artefact kept for a return is still on the host after the release")
 	}
-	if _, ok := readReplacementOrder(order.Spec); ok {
+	if _, _, err := readReplacementOrder(order.Spec); err == nil {
 		t.Error("the order of the settled replacement is still on the host")
 	}
 }
@@ -519,5 +527,52 @@ func TestAnArtefactRefusalNamesTheOrderedDigest(t *testing.T) {
 	// An order without a digest has no fingerprint to name.
 	if got := namingOrderedDigest(plain, ""); got != plain {
 		t.Errorf("a refusal of an order without a digest became %q", got)
+	}
+}
+
+// The proof of a replacement travels with the order and the order's digest
+// travels in the argv: a worker that cannot read the order it was started for
+// installs nothing. Installing the bare name out of a repository instead is
+// not a fallback - it is the unproven artefact, with no way back, at the one
+// operation that cannot be ordered again from the panel (HA-006).
+func TestAReplacementWithoutItsOrderInstallsNothing(t *testing.T) {
+	withUpgradeDirs(t, t.TempDir(), nil)
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	const spec = "flotestro-agent=0.55.0"
+	order := replacementOrder{
+		Spec:           spec,
+		ArtefactPath:   filepath.Join(t.TempDir(), "agent.deb"),
+		ArtefactSHA256: strings.Repeat("ab", 32),
+		OrderedAt:      time.Now().UTC(),
+	}
+	digest, err := writeReplacementOrder(order)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// No digest in the argv: the worker cannot tell which order it was started
+	// for, so it does not install.
+	if err := RunAgentReplacement(context.Background(), spec, "", log); err == nil ||
+		!strings.Contains(err.Error(), "without the digest of its order") {
+		t.Fatalf("err = %v", err)
+	}
+	// A digest of another order: the file on disk is not the one consented to.
+	if err := RunAgentReplacement(context.Background(), spec, strings.Repeat("cd", 32), log); err == nil ||
+		!strings.Contains(err.Error(), "not the order this replacement was started for") {
+		t.Fatalf("err = %v", err)
+	}
+	// The order gone: nothing is installed, and the refusal says why.
+	if err := os.Remove(replacementOrderPath()); err != nil {
+		t.Fatal(err)
+	}
+	if err := RunAgentReplacement(context.Background(), spec, digest, log); err == nil ||
+		!strings.Contains(err.Error(), "nothing is installed") {
+		t.Fatalf("err = %v", err)
+	}
+	// And a replacement is not started without the digest either, so the two
+	// ends cannot drift apart.
+	if err := StartAgentReplacement(context.Background(), spec, ""); err == nil ||
+		!strings.Contains(err.Error(), "without the digest of its order") {
+		t.Fatalf("err = %v", err)
 	}
 }
