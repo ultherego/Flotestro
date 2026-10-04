@@ -2,6 +2,9 @@ package cryptostate
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -25,12 +28,37 @@ func newMemoryAuthorities() *memoryAuthorities {
 }
 
 // ReplaceAuthority is guarded the way Postgres guards it: the row is sealed
-// with the key one replica holds, and the record has to still name that key.
-func (m *memoryAuthorities) ReplaceAuthority(ctx context.Context, row WrappedKey, remove []string) error {
+// with the key one replica holds, the record has to still name that key, and
+// the authorities have to be the ones the caller read before it decided.
+func (m *memoryAuthorities) ReplaceAuthority(ctx context.Context, row WrappedKey, remove, seen []string) error {
+	if err := m.authoritiesStillThese(seen); err != nil {
+		return err
+	}
 	if err := m.DeleteAuthorities(ctx, remove); err != nil {
 		return err
 	}
 	return m.PutWrappedKeyUnderRecordedKEK(ctx, row)
+}
+
+// authoritiesStillThese answers the way the database does: the installation
+// holds exactly the authorities the caller read, or the write is refused.
+func (m *memoryAuthorities) authoritiesStillThese(seen []string) error {
+	m.memoryKeys.mu.Lock()
+	var now []string
+	for id, row := range m.memoryKeys.rows {
+		if row.Purpose == PurposeAgentCA {
+			now = append(now, id)
+		}
+	}
+	m.memoryKeys.mu.Unlock()
+	sort.Strings(now)
+	want := append([]string(nil), seen...)
+	sort.Strings(want)
+	if !slices.Equal(now, want) {
+		return fmt.Errorf("%w: this instance read the authorities %v and the installation now holds %v",
+			ErrRevisionMoved, want, now)
+	}
+	return nil
 }
 
 func (m *memoryAuthorities) DeleteAuthorities(_ context.Context, keyIDs []string) error {
@@ -358,5 +386,48 @@ func TestTheHelperSigningKeyIsReadFromTheDatabaseAndNeverMadeThere(t *testing.T)
 	}
 	if string(gotPrevious) != string(previous) {
 		t.Errorf("the key rotated from is %q", gotPrevious)
+	}
+}
+
+// The authority of the installation is written with the condition the decision
+// used: which authorities were there when the caller read them. Without it
+// another replica could activate an authority between that read and this
+// write, and this write would delete it and put its own in - the fleet signing
+// with an authority nobody activated, and both writes reported as successes
+// (audit of 6c38561, CR-02).
+func TestWritingTheAuthorityCarriesWhatItRead(t *testing.T) {
+	store := newMemoryAuthorities()
+	dbTrust(t, store)
+
+	rows, err := store.WrappedKeys(context.Background(), PurposeAgentCA)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("the installation holds %d authorities (%v)", len(rows), err)
+	}
+	first := rows[0]
+	// Two further rows, which stand for the authorities two replicas would
+	// write. What they hold does not matter here; which names are in the table
+	// does.
+	second, third := first, first
+	second.KeyID, third.KeyID = "second-authority", "third-authority"
+
+	ctx := context.Background()
+	// A replica that read the first authority replaces it: the condition holds.
+	if err := store.ReplaceAuthority(ctx, second, []string{first.KeyID}, []string{first.KeyID}); err != nil {
+		t.Fatalf("a write that carried what it read was refused: %v", err)
+	}
+	// A second replica decided on the same reading, which is no longer true.
+	err = store.ReplaceAuthority(ctx, third, []string{first.KeyID}, []string{first.KeyID})
+	if !errors.Is(err, ErrRevisionMoved) {
+		t.Fatalf("err = %v, expected the write to be refused", err)
+	}
+	// And what the first replica activated is still there.
+	rows, err = store.WrappedKeys(ctx, PurposeAgentCA)
+	if err != nil || len(rows) != 1 || rows[0].KeyID != second.KeyID {
+		t.Fatalf("the installation now holds %+v (%v)", rows, err)
+	}
+	// Reading again is all it takes to go on: the condition is the read, not a
+	// lock somebody has to hold.
+	if err := store.ReplaceAuthority(ctx, third, []string{second.KeyID}, []string{second.KeyID}); err != nil {
+		t.Fatalf("a write after reading the state again: %v", err)
 	}
 }

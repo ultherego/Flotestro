@@ -817,6 +817,14 @@ func newObservedHTTP2Client(material tls.Certificate, trust *x509.CertPool,
 		Certificates: []tls.Certificate{material},
 		RootCAs:      trust,
 		MinVersion:   tls.VersionTLS13,
+		// h2, said out loud. http2.Transport puts this into the configuration
+		// when it does the handshake itself; a dialer of our own has to say it,
+		// and without it the handshake offers no protocol at all. A server that
+		// speaks both then answers HTTP/1.1 while this client reads frames, and
+		// the session dies on "frame too large, note that the frame header
+		// looked like an HTTP/1.1 header" - which is what the relay did to every
+		// host behind it.
+		NextProtos: []string{"h2"},
 	}
 	if peer != nil {
 		config.VerifyConnection = peer.observe

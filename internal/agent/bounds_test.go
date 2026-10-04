@@ -2,12 +2,15 @@ package agent
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/net/http2"
 )
 
 // A tool of the host can write more than the agent has room for. Counting rows
@@ -172,5 +175,28 @@ func TestTheConfiguredWaitsAreTheWaitsTheSessionUses(t *testing.T) {
 	reversed := SessionOptions{ReconnectMin: time.Minute, ReconnectMax: time.Second}
 	if low, high := reversed.backoff(); high < low {
 		t.Errorf("the waits came back as %s..%s", low, high)
+	}
+}
+
+// The client of a session has to say "h2" in the handshake. http2.Transport
+// puts that into the configuration when it does the handshake itself, and a
+// dialer of our own - which is how the connect timeout is bounded - has to say
+// it: without it the handshake offers no protocol, a server that speaks both
+// answers HTTP/1.1, and the session dies reading an HTTP/1.1 response as a
+// frame. Which is what happened to every host behind the relay.
+func TestTheSessionClientOffersHTTP2InTheHandshake(t *testing.T) {
+	client := newObservedHTTP2Client(tls.Certificate{}, nil, nil, 5*time.Second)
+	transport, ok := client.Transport.(*http2.Transport)
+	if !ok {
+		t.Fatalf("the transport of a session is %T", client.Transport)
+	}
+	if got := transport.TLSClientConfig.NextProtos; len(got) != 1 || got[0] != "h2" {
+		t.Fatalf("the handshake offers %v", got)
+	}
+	// And the dial still goes through our own dialer, which is what bounds the
+	// attempt: the two have to hold together, because the dialer is the reason
+	// the protocol has to be named.
+	if transport.DialTLSContext == nil {
+		t.Fatal("the attempt is not bounded by a dialer of ours")
 	}
 }

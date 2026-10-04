@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -620,11 +623,20 @@ func (p *Postgres) inTransaction(ctx context.Context, do func(pgx.Tx) error) err
 // ReplaceAuthority implements AuthorityKeyStore. The removal and the insert
 // share a transaction, so that no replica ever reads a moment in which the
 // installation has two authorities that sign, or none.
-func (p *Postgres) ReplaceAuthority(ctx context.Context, row WrappedKey, remove []string) error {
+func (p *Postgres) ReplaceAuthority(ctx context.Context, row WrappedKey, remove, seen []string) error {
 	return p.inTransaction(ctx, func(tx pgx.Tx) error {
 		// An authority is sealed with the key this replica loaded at start,
 		// like every other row, so it is written under the same guard.
 		if err := recordStillNames(ctx, tx, row); err != nil {
+			return err
+		}
+		// And the write carries the condition the decision used: which
+		// authorities were there when the caller read them. Without it another
+		// replica could activate an authority between that read and this
+		// write, and this write would delete it and put its own in - the
+		// installation signing with an authority nobody activated, and the
+		// trail saying both succeeded.
+		if err := authoritiesStillThese(ctx, tx, seen); err != nil {
 			return err
 		}
 		if err := deleteAuthorities(ctx, tx, remove); err != nil {
@@ -648,6 +660,46 @@ func (p *Postgres) DeleteAuthorities(ctx context.Context, keyIDs []string) error
 	return p.inTransaction(ctx, func(tx pgx.Tx) error {
 		return deleteAuthorities(ctx, tx, keyIDs)
 	})
+}
+
+// authoritiesStillThese refuses when the authorities of the installation are
+// not the ones the caller read. The rows are locked, so a second writer waits
+// here rather than racing past.
+func authoritiesStillThese(ctx context.Context, tx pgx.Tx, seen []string) error {
+	rows, err := tx.Query(ctx,
+		`select key_id from crypto_wrapped_keys where purpose = $1 order by key_id for update`,
+		PurposeAgentCA)
+	if err != nil {
+		return fmt.Errorf("the authorities of the installation: %w", err)
+	}
+	var now []string
+	for rows.Next() {
+		var keyID string
+		if err := rows.Scan(&keyID); err != nil {
+			rows.Close()
+			return err
+		}
+		now = append(now, keyID)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	want := append([]string(nil), seen...)
+	sort.Strings(want)
+	if !slices.Equal(now, want) {
+		return fmt.Errorf("%w: this instance read the authorities %s and the installation now holds %s",
+			ErrRevisionMoved, orNone(want), orNone(now))
+	}
+	return nil
+}
+
+// orNone names a set for a refusal somebody has to read.
+func orNone(ids []string) string {
+	if len(ids) == 0 {
+		return "none"
+	}
+	return strings.Join(ids, ", ")
 }
 
 // deleteAuthorities removes rows by name, and only rows that are authorities:

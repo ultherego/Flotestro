@@ -28,7 +28,9 @@ type AuthorityKeyStore interface {
 	// the key encryption key the row was sealed with. A replica reading in
 	// the middle of a handover must not find two authorities claiming to
 	// sign, or none - nor one wrapped with a key a rewrap has been past.
-	ReplaceAuthority(ctx context.Context, row WrappedKey, remove []string) error
+	// seen names the authorities the caller read before it decided; the write
+	// is refused when the installation no longer holds exactly those.
+	ReplaceAuthority(ctx context.Context, row WrappedKey, remove, seen []string) error
 	// DeleteAuthorities removes authority rows together.
 	DeleteAuthorities(ctx context.Context, keyIDs []string) error
 	// RetiredAuthorities returns the certificates withdrawn from signing,
@@ -181,7 +183,22 @@ func (a *DBAuthorities) WriteActive(keyPEM, certPEM []byte) error {
 	if prepared != nil && prepared.keyID == keyID {
 		remove = append(remove, keyID)
 	}
-	return a.replace(row, remove)
+	return a.replace(row, remove, observed(active, prepared))
+}
+
+// observed names the authorities a decision rested on, so the write can carry
+// that condition: between the read and the write another replica may have
+// activated an authority of its own, and a write without the condition would
+// delete it.
+func observed(active, prepared *authority) []string {
+	var seen []string
+	if active != nil {
+		seen = append(seen, active.keyID)
+	}
+	if prepared != nil {
+		seen = append(seen, prepared.keyID)
+	}
+	return seen
 }
 
 // WritePrepared implements pki.AuthorityStore.
@@ -202,7 +219,7 @@ func (a *DBAuthorities) WritePrepared(keyPEM, certPEM []byte, preparedAt time.Ti
 	if prepared != nil {
 		remove = append(remove, prepared.keyID)
 	}
-	return a.replace(row, remove)
+	return a.replace(row, remove, observed(active, prepared))
 }
 
 // DropPrepared implements pki.AuthorityStore.
@@ -251,17 +268,17 @@ func (a *DBAuthorities) seal(keyPEM, certPEM []byte, preparedAt time.Time) (Wrap
 }
 
 // replace writes the row and removes the ones it takes the place of.
-func (a *DBAuthorities) replace(row WrappedKey, remove []string) error {
+func (a *DBAuthorities) replace(row WrappedKey, remove, seen []string) error {
 	ctx, cancel := context.WithTimeout(a.ctx, authorityTimeout)
 	defer cancel()
-	seen := map[string]bool{}
+	listed := map[string]bool{}
 	names := make([]string, 0, len(remove))
 	for _, name := range remove {
-		if seen[name] {
+		if listed[name] {
 			continue
 		}
-		seen[name] = true
+		listed[name] = true
 		names = append(names, name)
 	}
-	return a.store.ReplaceAuthority(ctx, row, names)
+	return a.store.ReplaceAuthority(ctx, row, names, seen)
 }
