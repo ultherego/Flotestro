@@ -32,7 +32,6 @@ import (
 // the two have to come out identical - so the fields live in one struct rather
 // than in two lists that drift apart.
 type backupOrder struct {
-	Operation   string
 	ID          string
 	Tool        string
 	Repository  string
@@ -69,7 +68,14 @@ func (o backupOrder) digest() string {
 	write := func(name string, value any) {
 		fmt.Fprintf(&text, "%s=%v\n", name, value)
 	}
-	write("operation", o.Operation)
+	// The operation is deliberately not here. Which operation is being carried
+	// out is bound by the action type of the capability and by Expect, which
+	// says for each request kind which action types may authorize it - and the
+	// verification of a copy legitimately sends a plan under the capability of
+	// the run it verifies. Putting the operation in the digest made those two
+	// disagree by construction, so every verified backup ended as
+	// "applied_unverified": the change made and the verifier refused at the
+	// door for a difference nobody had introduced.
 	write("id", o.ID)
 	write("tool", o.Tool)
 	write("repository", o.Repository)
@@ -98,12 +104,12 @@ func (o backupOrder) digest() string {
 
 // BackupOrderDigest is the digest of the order a capability authorizes, from
 // the payload the panel signed.
-func BackupOrderDigest(operation string, payload *opspec.BackupPayload) string {
+func BackupOrderDigest(payload *opspec.BackupPayload) string {
 	if payload == nil {
 		return ""
 	}
 	order := backupOrder{
-		Operation: operation, ID: payload.ID, Tool: payload.Tool,
+		ID: payload.ID, Tool: payload.Tool,
 		Repository: payload.Repository, Paths: payload.Paths,
 		Excludes: payload.Excludes, Tags: payload.Tags,
 		KeepLast: payload.KeepLast, KeepDaily: payload.KeepDaily,
@@ -127,7 +133,7 @@ func backupRequestDigest(request *helperv1.BackupRequest) string {
 		return ""
 	}
 	order := backupOrder{
-		Operation: backupOperationName(request.GetOperation()), ID: request.GetId(),
+		ID:   request.GetId(),
 		Tool: request.GetTool(), Repository: request.GetRepository(),
 		Paths: request.GetPaths(), Excludes: request.GetExcludes(), Tags: request.GetTags(),
 		KeepLast: int(request.GetKeepLast()), KeepDaily: int(request.GetKeepDaily()),
@@ -143,20 +149,4 @@ func backupRequestDigest(request *helperv1.BackupRequest) string {
 		order.EnvNames = append(order.EnvNames, name)
 	}
 	return order.digest()
-}
-
-// backupOperationName names the operation the same way on both sides: the
-// action type the panel put in the payload.
-func backupOperationName(operation helperv1.BackupRequest_Operation) string {
-	switch operation {
-	case helperv1.BackupRequest_OPERATION_PLAN:
-		return string(opspec.ActionBackupPlan)
-	case helperv1.BackupRequest_OPERATION_RUN:
-		return string(opspec.ActionBackupRun)
-	case helperv1.BackupRequest_OPERATION_VERIFY:
-		return string(opspec.ActionBackupVerify)
-	case helperv1.BackupRequest_OPERATION_RESTORE:
-		return string(opspec.ActionBackupRestore)
-	}
-	return operation.String()
 }

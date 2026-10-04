@@ -219,9 +219,32 @@ func (s Snapshot) PhysicalVolumeAt(path string) *PhysicalVolume {
 }
 
 // DeviceAt returns the device with the given path or nil.
-func (s Snapshot) DeviceAt(path string) *Device {
+// A device is named by a path or by a durable identifier - UUID=, LABEL=,
+// PARTUUID=, PARTLABEL= - and ValidateSource takes all of them wherever a
+// device is named. The resolution lives here, in the one place every layer
+// asks, because it did not: the mount plans resolved the forms, the device
+// plans compared paths, the helper's apply had a third rule and the verifier
+// after a change had a fourth. One order by label therefore planned on one
+// host, refused on another and, once that was fixed, was reported as a change
+// that did not happen - three bugs out of one missing line, fixed one caller
+// at a time.
+func (s Snapshot) DeviceAt(source string) *Device {
+	if name, found := strings.CutPrefix(source, "UUID="); found {
+		return s.deviceWhere(func(d Device) bool { return strings.EqualFold(d.UUID, name) })
+	}
+	if name, found := strings.CutPrefix(source, "LABEL="); found {
+		return s.deviceWhere(func(d Device) bool { return d.Label != "" && d.Label == name })
+	}
+	if name, found := strings.CutPrefix(source, "PARTUUID="); found {
+		return s.deviceWhere(func(d Device) bool { return strings.EqualFold(d.PartUUID, name) })
+	}
+	return s.deviceWhere(func(d Device) bool { return d.Path == source })
+}
+
+// deviceWhere returns the first device the predicate accepts.
+func (s Snapshot) deviceWhere(accepts func(Device) bool) *Device {
 	for i := range s.Devices {
-		if s.Devices[i].Path == path {
+		if accepts(s.Devices[i]) {
 			return &s.Devices[i]
 		}
 	}

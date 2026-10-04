@@ -52,18 +52,21 @@ func TestTheCertificateAHostConnectsWithIsRecordedAsPresented(t *testing.T) {
 			}
 			time.Sleep(3 * time.Second)
 		}
-		// And the moment is the first session with it, not the latest: the
-		// guard asks whether the host had the certificate by a given moment.
-		var changes int
+		// The moment is never before the certificate existed. It can be well
+		// after: a certificate issued at enrollment and first recorded as
+		// presented by this release carries today's moment against an old
+		// created_at, which is exactly what an upgrade looks like - asking for
+		// the two to be close was asking the fleet to have been reissued.
+		var impossible int
 		if err := pool.QueryRow(ctx, `
 			select count(*) from agent_certificates
-			 where host_id = $1::uuid and presented_at > created_at + interval '1 day'`,
-			host.ID).Scan(&changes); err != nil {
+			 where host_id = $1::uuid and presented_at < created_at`,
+			host.ID).Scan(&impossible); err != nil {
 			t.Fatal(err)
 		}
-		if changes > 0 {
-			t.Errorf("%s has %d certificates whose first session is recorded a day after they were issued",
-				host.Hostname, changes)
+		if impossible > 0 {
+			t.Errorf("%s has %d certificates recorded as presented before they were issued",
+				host.Hostname, impossible)
 		}
 	}
 }

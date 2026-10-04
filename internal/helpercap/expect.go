@@ -584,10 +584,9 @@ func CheckBinding(request *helperv1.HelperRequest, bound *BoundPayload, prior Pr
 		// runbook. One digest binds the lot and keeps binding it when a field
 		// is added - which is how this came to bind the identifier alone, and
 		// a consent to restore a definition authorized restoring any snapshot
-		// anywhere with overwriting. The operation comes from the signed
-		// payload, not from the request.
+		// anywhere with overwriting.
 		return same("backup order", backupRequestDigest(action.Backup),
-			BackupOrderDigest(string(bound.Action), payload.Backup))
+			BackupOrderDigest(payload.Backup))
 
 	case *helperv1.HelperRequest_Certificate:
 		switch action.Certificate.GetOperation() {

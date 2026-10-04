@@ -182,3 +182,38 @@ func TestAPackageOrderIsBoundBeyondTheListOfPackages(t *testing.T) {
 		}
 	}
 }
+
+// The verification of a copy sends a plan under the capability of the run it
+// verifies, so the binding may not depend on which of the two the request is:
+// putting the operation in the digest made the two sides disagree by
+// construction and every verified backup ended as "applied_unverified".
+func TestTheBackupOrderBindsTheSameWhicheverOperationCarriesIt(t *testing.T) {
+	approved := &opspec.BackupPayload{
+		ID: "nightly", Tool: "restic", Repository: "/srv/nightly",
+		Paths: []string{"/etc"}, KeepLast: 7,
+	}
+	bound := &BoundPayload{Action: opspec.ActionBackupRun,
+		Payload: opspec.Payload{Backup: approved}}
+	request := func(operation helperv1.BackupRequest_Operation) *helperv1.HelperRequest {
+		return &helperv1.HelperRequest{Action: &helperv1.HelperRequest_Backup{
+			Backup: &helperv1.BackupRequest{
+				Operation: operation, Id: "nightly", Tool: "restic",
+				Repository: "/srv/nightly", Paths: []string{"/etc"}, KeepLast: 7,
+			}}}
+	}
+	for _, operation := range []helperv1.BackupRequest_Operation{
+		helperv1.BackupRequest_OPERATION_RUN,
+		helperv1.BackupRequest_OPERATION_PLAN,
+	} {
+		if err := CheckBinding(request(operation), bound, nil); err != nil {
+			t.Errorf("%s under the capability of a run was refused: %v", operation, err)
+		}
+	}
+	// And the order itself still binds: another repository is another order,
+	// whichever operation names it.
+	elsewhere := request(helperv1.BackupRequest_OPERATION_PLAN)
+	elsewhere.GetBackup().Repository = "/srv/somewhere-else"
+	if err := CheckBinding(elsewhere, bound, nil); err == nil {
+		t.Error("another repository was accepted under the approved capability")
+	}
+}

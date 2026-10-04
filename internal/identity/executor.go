@@ -244,8 +244,19 @@ func (e *Executor) setUserAccess(ctx context.Context, ref *ReferencePayload, ena
 	if !enable {
 		phase := startPhase("the local denial marker")
 		count, err := e.store.SetLocalDeny(ctx, ref.UID, ref.Reason, true)
-		phases = append(phases, finishPhase(phase, err,
-			describeCount("identities marked", count)))
+		switch {
+		case errors.Is(err, ErrNoPrincipal):
+			// An account of the directory that has never signed in to the panel
+			// has no identity here to deny, and that is not a failure of the
+			// step: the account exists where it exists and the panel knows
+			// nobody by that name. Saying "identities marked: 0" as a success
+			// was the thing ID-01 found - this says which of the two it is.
+			phases = append(phases, skipPhase(phase,
+				"the panel knows no identity by that name, so there was nothing to deny locally"))
+		default:
+			phases = append(phases, finishPhase(phase, err,
+				describeCount("identities marked", count)))
+		}
 
 		phase = startPhase("revoking the panel sessions")
 		result, err := e.revokeSessions(ctx, ref.UID, firstNonEmpty(ref.Reason, "the account was locked"))
@@ -268,8 +279,15 @@ func (e *Executor) setUserAccess(ctx context.Context, ref *ReferencePayload, ena
 	if enable && err == nil {
 		phase := startPhase("lifting the local denial marker")
 		count, denyErr := e.store.SetLocalDeny(ctx, ref.UID, "", false)
-		phases = append(phases, finishPhase(phase, denyErr,
-			describeCount("identities unlocked", count)))
+		if errors.Is(denyErr, ErrNoPrincipal) {
+			// The same distinction as on the way in: an account the panel
+			// knows nobody by has no marker here to lift.
+			phases = append(phases, skipPhase(phase,
+				"the panel knows no identity by that name, so there was nothing to lift"))
+		} else {
+			phases = append(phases, finishPhase(phase, denyErr,
+				describeCount("identities unlocked", count)))
+		}
 	}
 	return phases, revoked
 }

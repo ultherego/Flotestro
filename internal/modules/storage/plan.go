@@ -166,29 +166,10 @@ func (p *MountPlan) ObserveTarget(state string) {
 	p.PlanHash = mountPlanFingerprint(*p)
 }
 
-// SourceDevice resolves the order source to a host device. The source may be a
-// path, UUID= or LABEL=.
-func (s Snapshot) SourceDevice(source string) *Device {
-	switch {
-	case strings.HasPrefix(source, "UUID="):
-		uuid := strings.TrimPrefix(source, "UUID=")
-		for i := range s.Devices {
-			if s.Devices[i].UUID == uuid {
-				return &s.Devices[i]
-			}
-		}
-	case strings.HasPrefix(source, "LABEL="):
-		label := strings.TrimPrefix(source, "LABEL=")
-		for i := range s.Devices {
-			if s.Devices[i].Label != "" && s.Devices[i].Label == label {
-				return &s.Devices[i]
-			}
-		}
-	default:
-		return s.DeviceAt(source)
-	}
-	return nil
-}
+// SourceDevice resolves the order source to a host device. It is DeviceAt under
+// the name the mount plans have always called it: the resolution lives in one
+// place now, so the two cannot answer differently.
+func (s Snapshot) SourceDevice(source string) *Device { return s.DeviceAt(source) }
 
 // sameSource says whether the mount found points at the same device.
 func sameSource(found string, device *Device) bool {
