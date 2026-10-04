@@ -173,6 +173,39 @@ func TestTheCapabilityBindsTheTargetOfTheRemainingOrders(t *testing.T) {
 				Repository: &helperv1.RepositoryRequest{Id: "vendor", Url: "https://elsewhere.example/deb"}}},
 		},
 		{
+			// The identifier and the address agree and the source is a
+			// different one: signatures unchecked, another key, and the whole
+			// order turned into a removal. Two fields of binding let all of
+			// that through under a signature of the panel's (PKG-02).
+			name: "repository without its signatures",
+			payload: opspec.Payload{Repository: &opspec.RepositoryPayload{
+				ID: "vendor", URL: "https://vendor.example/deb", Enabled: true,
+				GPGKey: "-----BEGIN PGP PUBLIC KEY BLOCK-----\nvendor\n-----END PGP PUBLIC KEY BLOCK-----\n",
+				Suites: []string{"stable"}, Components: []string{"main"}}},
+			honest: &helperv1.HelperRequest{Action: &helperv1.HelperRequest_Repository{
+				Repository: &helperv1.RepositoryRequest{
+					Id: "vendor", Url: "https://vendor.example/deb", Enabled: true,
+					GpgKey: "-----BEGIN PGP PUBLIC KEY BLOCK-----\nvendor\n-----END PGP PUBLIC KEY BLOCK-----\n",
+					Suites: []string{"stable"}, Components: []string{"main"}}}},
+			forged: &helperv1.HelperRequest{Action: &helperv1.HelperRequest_Repository{
+				Repository: &helperv1.RepositoryRequest{
+					Id: "vendor", Url: "https://vendor.example/deb", Enabled: true,
+					AllowUnsigned: true,
+					GpgKey:        "-----BEGIN PGP PUBLIC KEY BLOCK-----\nsomebody else\n-----END PGP PUBLIC KEY BLOCK-----\n",
+					Suites:        []string{"stable"}, Components: []string{"main"}}}},
+		},
+		{
+			name: "repository turned into a removal",
+			payload: opspec.Payload{Repository: &opspec.RepositoryPayload{
+				ID: "security", URL: "https://security.example/deb", Enabled: true}},
+			honest: &helperv1.HelperRequest{Action: &helperv1.HelperRequest_Repository{
+				Repository: &helperv1.RepositoryRequest{
+					Id: "security", Url: "https://security.example/deb", Enabled: true}}},
+			forged: &helperv1.HelperRequest{Action: &helperv1.HelperRequest_Repository{
+				Repository: &helperv1.RepositoryRequest{
+					Id: "security", Url: "https://security.example/deb", Remove: true}}},
+		},
+		{
 			name:   "backup definition",
 			action: opspec.ActionBackupRestore,
 			payload: opspec.Payload{Backup: &opspec.BackupPayload{

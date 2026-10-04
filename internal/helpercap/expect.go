@@ -429,7 +429,10 @@ func CheckBinding(request *helperv1.HelperRequest, bound *BoundPayload, prior Pr
 			if payload.PackageUpgrade == nil {
 				return binding("the bound payload describes no package upgrade")
 			}
-			return sameList("packages", action.PackageAction.GetPackages(), payload.PackageUpgrade.Packages)
+			if err := sameList("packages", action.PackageAction.GetPackages(),
+				payload.PackageUpgrade.Packages); err != nil {
+				return err
+			}
 		case helperv1.PackageActionRequest_OPERATION_INSTALL,
 			helperv1.PackageActionRequest_OPERATION_REMOVE,
 			helperv1.PackageActionRequest_OPERATION_HOLD:
@@ -448,8 +451,17 @@ func CheckBinding(request *helperv1.HelperRequest, bound *BoundPayload, prior Pr
 				action.PackageAction.GetHold() != payload.PackageChange.Hold {
 				return binding("the request holds or releases the packages the other way than the bound payload")
 			}
+		default:
+			return nil
 		}
-		return nil
+		// And the rest of the order, which went unchecked: the plan the change
+		// is bound to, the header of its envelope, its expiry, security_only
+		// and allow_downgrade. A consent to install two packages authorized
+		// installing them out of any plan, including one from last week with
+		// allow_downgrade on - a way back to a version with a known hole.
+		return same("package order", packageRequestDigest(action.PackageAction),
+			packageOrderDigest(packageOperationName(action.PackageAction.GetOperation()),
+				payload.PackageChange, payload.PackageUpgrade))
 
 	case *helperv1.HelperRequest_Schedule:
 		if payload.Schedule == nil {
@@ -540,7 +552,16 @@ func CheckBinding(request *helperv1.HelperRequest, bound *BoundPayload, prior Pr
 		if err := same("repository", action.Repository.GetId(), payload.Repository.ID); err != nil {
 			return err
 		}
-		return same("repository address", action.Repository.GetUrl(), payload.Repository.URL)
+		if err := same("repository address", action.Repository.GetUrl(), payload.Repository.URL); err != nil {
+			return err
+		}
+		// And the rest of the source: whether signatures are checked, which key
+		// checks them, whether the source is being removed. Nine of its
+		// fourteen fields went unchecked, so one consent covered a source with
+		// signature checking off and another key - any package the holder
+		// likes, with its scripts running as root.
+		return same("repository order", repositoryRequestDigest(action.Repository),
+			repositoryOrderDigest(payload.Repository))
 
 	case *helperv1.HelperRequest_Backup:
 		if payload.Backup == nil {

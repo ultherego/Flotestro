@@ -1,7 +1,9 @@
 package helpercap
 
 import (
+	"encoding/hex"
 	"testing"
+	"time"
 
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 	"github.com/ultherego/flotestro/internal/opspec"
@@ -93,5 +95,70 @@ func TestATrustChangeIsBoundToTheMaterialItInstalls(t *testing.T) {
 	// one that needs no plan.
 	if !opspec.ActionCertificateTrustEnsure.RequiresPlan() {
 		t.Error("a trust change still takes no plan")
+	}
+}
+
+// The binding of a package action compared the list of packages and, for a
+// hold, the direction. The plan the change is bound to - which the agent puts
+// on the request - the header of its envelope, its expiry, security_only and
+// allow_downgrade went unchecked: a consent to install two packages authorized
+// installing them out of any plan, including one from last week with
+// allow_downgrade on, which is a way back to a version with a known hole
+// (audit of 6c38561, PKG-01).
+func TestAPackageOrderIsBoundBeyondTheListOfPackages(t *testing.T) {
+	approved := &opspec.PackageChangePayload{
+		Packages: []string{"nginx", "openssl"},
+		PlanHash: "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2",
+		Plan: &opspec.PlanReference{
+			SchemaVersion: 1, PlannerVersion: "apt-1", InventoryRevision: "inv-9",
+			ResourceRevision: "res-4", ExpiresAt: "2026-10-04T18:00:00Z",
+			Changes: []opspec.PlanChangeEntry{{
+				Name: "nginx", CurrentVersion: "1.0", CandidateVersion: "1.1",
+				Architecture: "amd64", Origin: "debian", Action: "upgrade"}},
+		},
+	}
+	bound := &BoundPayload{Action: opspec.ActionPackageInstall,
+		Payload: opspec.Payload{PackageChange: approved}}
+
+	order := func(change func(*helperv1.PackageActionRequest)) *helperv1.HelperRequest {
+		hash, err := hex.DecodeString(approved.PlanHash)
+		if err != nil {
+			t.Fatal(err)
+		}
+		expiry, err := time.Parse(time.RFC3339, approved.Plan.ExpiresAt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := &helperv1.PackageActionRequest{
+			Operation: helperv1.PackageActionRequest_OPERATION_INSTALL,
+			Packages:  []string{"nginx", "openssl"},
+			PlanHash:  hash, PlanSchemaVersion: 1, PlannerVersion: "apt-1",
+			PlanInventoryRevision: "inv-9", PlanResourceRevision: "res-4",
+			PlanExpiresAtUnix: expiry.Unix(),
+			ExactSpecs: []*helperv1.PackageExactSpec{{
+				Name: "nginx", CurrentVersion: "1.0", CandidateVersion: "1.1",
+				Architecture: "amd64", Origin: "debian", Action: "upgrade"}},
+		}
+		change(request)
+		return &helperv1.HelperRequest{
+			Action: &helperv1.HelperRequest_PackageAction{PackageAction: request}}
+	}
+
+	if err := CheckBinding(order(func(*helperv1.PackageActionRequest) {}), bound, nil); err != nil {
+		t.Fatalf("the order the panel signed was refused: %v", err)
+	}
+	for name, change := range map[string]func(*helperv1.PackageActionRequest){
+		"a plan of its own":    func(r *helperv1.PackageActionRequest) { r.PlanHash = make([]byte, 32) },
+		"another planner":      func(r *helperv1.PackageActionRequest) { r.PlannerVersion = "apt-0" },
+		"another inventory":    func(r *helperv1.PackageActionRequest) { r.PlanInventoryRevision = "inv-1" },
+		"a later expiry":       func(r *helperv1.PackageActionRequest) { r.PlanExpiresAtUnix += 86400 },
+		"a downgrade":          func(r *helperv1.PackageActionRequest) { r.AllowDowngrade = true },
+		"only security":        func(r *helperv1.PackageActionRequest) { r.SecurityOnly = true },
+		"another candidate":    func(r *helperv1.PackageActionRequest) { r.ExactSpecs[0].CandidateVersion = "0.9" },
+		"a removal nobody saw": func(r *helperv1.PackageActionRequest) { r.ExpectedRemovals = []string{"openssh-server"} },
+	} {
+		if err := CheckBinding(order(change), bound, nil); err == nil {
+			t.Errorf("%s was accepted under the approved capability", name)
+		}
 	}
 }
