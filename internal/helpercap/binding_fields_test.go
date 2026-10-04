@@ -173,8 +173,8 @@ func TestTheCapabilityBindsTheTargetOfTheRemainingOrders(t *testing.T) {
 				Repository: &helperv1.RepositoryRequest{Id: "vendor", Url: "https://elsewhere.example/deb"}}},
 		},
 		{
-			name:    "backup definition",
-			action:  opspec.ActionBackupRestore,
+			name:   "backup definition",
+			action: opspec.ActionBackupRestore,
 			payload: opspec.Payload{Backup: &opspec.BackupPayload{
 				ID: "nightly", SnapshotID: "latest", Target: "/srv/restore", Overwrite: "never"}},
 			honest: &helperv1.HelperRequest{Action: &helperv1.HelperRequest_Backup{
@@ -191,8 +191,8 @@ func TestTheCapabilityBindsTheTargetOfTheRemainingOrders(t *testing.T) {
 			// decides what happens does not: another snapshot, over the root
 			// of the host, overwriting. One field of binding let this through
 			// under a signature of the panel's.
-			name:    "backup order",
-			action:  opspec.ActionBackupRestore,
+			name:   "backup order",
+			action: opspec.ActionBackupRestore,
 			payload: opspec.Payload{Backup: &opspec.BackupPayload{
 				ID: "nightly", SnapshotID: "latest", Target: "/srv/restore", Overwrite: "never"}},
 			honest: &helperv1.HelperRequest{Action: &helperv1.HelperRequest_Backup{

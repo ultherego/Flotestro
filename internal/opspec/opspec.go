@@ -901,7 +901,7 @@ var actionSpecs = map[ActionType]actionSpec{
 	// decides whom the host believes. The digest of the material says what is
 	// installed; the plan says what it is installed over.
 	ActionCertificateTrustEnsure: {mutating: true, requiresPlan: true, capability: "certificates",
-		permission: "certificate.trust.write",
+		permission:     "certificate.trust.write",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockCertificates, verifier: VerifierTrustAnchor},
 	// Withdrawing trust breaks connections nobody changed, if the authority
 	// still signs anything. The host checks that at its own end.
