@@ -1812,23 +1812,33 @@ func TestMountCampaignResolvesTheUUIDOnEveryHost(t *testing.T) {
 		}, 2*time.Minute)
 		state := hostStorageSnapshot(t, h, host.ID)
 		for _, device := range state.Devices {
-			if device.FSType == "ext4" && device.UUID != "" &&
+			// A campaign carries one payload to every host, so the source has
+			// to name the same thing on all of them. The device path does not:
+			// which letter the kernel gives a disk is its own business, and on
+			// 04.10 the same spare was /dev/sda on one host and /dev/sdb on
+			// the other - so this test used to skip, and a skip the gate
+			// cannot classify makes the verdict fail.
+			//
+			// The label is read off the host rather than assumed, and it is
+			// what a real deployment mounts by. The product takes LABEL= and
+			// UUID= as sources; UUID differs per host, a label does not.
+			if device.FSType == "ext4" && device.UUID != "" && device.Label != "" &&
 				len(device.Mountpoints) == 0 && !inFstab(state, device) {
-				sources[host.ID] = device.Path
+				sources[host.ID] = device.Label
 				hosts = append(hosts, host.ID)
 				break
 			}
 		}
 	}
 	if len(hosts) < 2 {
-		t.Skip("the fleet has fewer than two debian hosts with a free ext4 filesystem")
+		t.Skip("the fleet has fewer than two debian hosts with a free, labelled ext4 filesystem")
 	}
 	hosts = hosts[:2]
 	if sources[hosts[0]] != sources[hosts[1]] {
-		t.Skipf("the free filesystems have different paths: %s and %s",
+		t.Skipf("the free filesystems carry different labels: %s and %s",
 			sources[hosts[0]], sources[hosts[1]])
 	}
-	path := sources[hosts[0]]
+	path := "LABEL=" + sources[hosts[0]]
 
 	t.Cleanup(func() {
 		for _, hostID := range hosts {
@@ -1943,7 +1953,8 @@ func inFstab(state storageSnapshot, device deviceView) bool {
 			continue
 		}
 		if mount.Source == device.Path ||
-			mount.Source == "UUID="+device.UUID {
+			mount.Source == "UUID="+device.UUID ||
+			(device.Label != "" && mount.Source == "LABEL="+device.Label) {
 			return true
 		}
 	}

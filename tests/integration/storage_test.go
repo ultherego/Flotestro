@@ -16,6 +16,7 @@ type deviceView struct {
 	SizeBytes   uint64   `json:"size_bytes"`
 	FSType      string   `json:"fs_type"`
 	UUID        string   `json:"uuid"`
+	Label       string   `json:"label"`
 	Parent      string   `json:"parent"`
 	ByID        string   `json:"by_id"`
 	Mountpoints []string `json:"mountpoints"`
