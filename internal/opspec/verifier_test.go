@@ -199,6 +199,7 @@ func TestEveryOperationThatNeedsAPlanRefusesAnOrderWithoutOne(t *testing.T) {
 		bindings[action] = pair
 	}
 	bindings[ActionCertificateDeploy] = certificatePlanBinding(t)
+	bindings[ActionCertificateTrustEnsure] = trustPlanBinding(t)
 
 	for _, action := range AllActions() {
 		if !action.RequiresPlan() {
@@ -263,6 +264,37 @@ func certificatePlanBinding(t *testing.T) struct{ bound, unbound Payload } {
 		Path: "/etc/ssl/local/storefront.crt", Certificate: string(pemBytes), PlanHash: "a1b2c3"}}
 	unbound := Payload{Certificate: &CertificatePayload{
 		Path: "/etc/ssl/local/storefront.crt", Certificate: string(pemBytes)}}
+	return struct{ bound, unbound Payload }{bound: bound, unbound: unbound}
+}
+
+// trustPlanBinding is the order that adds an authority to the host's trust
+// store, with and without the plan it is bound to. Of the operations marked
+// critical this was the only one that required no plan, and it is the one that
+// decides whom the host believes.
+func trustPlanBinding(t *testing.T) struct{ bound, unbound Payload } {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{
+		SerialNumber:          big.NewInt(2),
+		Subject:               pkix.Name{CommonName: "Flotestro Lab CA"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	bound := Payload{Certificate: &CertificatePayload{
+		AnchorID: "lab-ca", Certificate: string(pemBytes), PlanHash: "d4e5f6"}}
+	unbound := Payload{Certificate: &CertificatePayload{
+		AnchorID: "lab-ca", Certificate: string(pemBytes)}}
 	return struct{ bound, unbound Payload }{bound: bound, unbound: unbound}
 }
 

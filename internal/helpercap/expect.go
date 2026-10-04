@@ -579,10 +579,28 @@ func CheckBinding(request *helperv1.HelperRequest, bound *BoundPayload) error {
 			{"renewal request", action.Certificate.GetRequest(), certificate.Request},
 			{"trust anchor", action.Certificate.GetAnchorId(), certificate.AnchorID},
 			{"plan digest", action.Certificate.GetPlanHash(), certificate.PlanHash},
+			// The material itself, where the request carries it. The binding
+			// compared the name of the anchor and the plan digest and not the
+			// bytes, and the plan digest is checked by the helper only when it
+			// gets one - so a consent to trust authority A installed the bytes
+			// of authority B under the file name of A, and the host began to
+			// believe everything B signs. The trust store decides which panel
+			// this host believes: of all the operations marked critical this is
+			// the one that changes that, and it was bound by a name.
 		} {
 			if err := same(field.what, field.got, field.want); err != nil {
 				return err
 			}
+		}
+		switch action.Certificate.GetOperation() {
+		case helperv1.CertificateRequest_OPERATION_DEPLOY,
+			helperv1.CertificateRequest_OPERATION_TRUST_ENSURE:
+			// Only where the order carries material: a renewal and a trust
+			// removal name what is already on the host and send no bytes, so
+			// there would be nothing to compare and an empty digest would
+			// refuse them.
+			return same("certificate material", contentDigest(action.Certificate.GetCertificate()),
+				contentDigest([]byte(certificate.Certificate)))
 		}
 		return nil
 

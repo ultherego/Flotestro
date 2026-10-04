@@ -47,3 +47,51 @@ func TestABackupPlanIsCarriedOutUnderACapability(t *testing.T) {
 		t.Error("a read that runs nothing was put under a capability")
 	}
 }
+
+// A consent to trust an authority named the anchor and the plan digest, and
+// not the bytes - and the helper checks the plan digest only when it gets one.
+// So a capability for authority A installed the bytes of authority B under the
+// file name of A, and the host began to believe everything B signs (audit of
+// 6c38561, HP-04).
+func TestATrustChangeIsBoundToTheMaterialItInstalls(t *testing.T) {
+	const approved = "-----BEGIN CERTIFICATE-----\nAPPROVED\n-----END CERTIFICATE-----\n"
+	const other = "-----BEGIN CERTIFICATE-----\nSOMEBODY ELSE\n-----END CERTIFICATE-----\n"
+	bound := &BoundPayload{
+		Action: opspec.ActionCertificateTrustEnsure,
+		Payload: opspec.Payload{Certificate: &opspec.CertificatePayload{
+			AnchorID: "lab-ca", Certificate: approved, PlanHash: "d4e5f6"}},
+	}
+	request := func(material string) *helperv1.HelperRequest {
+		return &helperv1.HelperRequest{Action: &helperv1.HelperRequest_Certificate{
+			Certificate: &helperv1.CertificateRequest{
+				Operation: helperv1.CertificateRequest_OPERATION_TRUST_ENSURE,
+				AnchorId:  "lab-ca", PlanHash: "d4e5f6", Certificate: []byte(material)}}}
+	}
+	if err := CheckBinding(request(approved), bound); err != nil {
+		t.Fatalf("the approved authority was refused: %v", err)
+	}
+	if err := CheckBinding(request(other), bound); err == nil {
+		t.Fatal("another authority was installed under the approved capability")
+	}
+
+	// A renewal and a trust removal name what is already on the host and send
+	// no material, so there is nothing to compare and they are not refused for
+	// an empty digest.
+	for _, operation := range []helperv1.CertificateRequest_Operation{
+		helperv1.CertificateRequest_OPERATION_RENEW,
+		helperv1.CertificateRequest_OPERATION_TRUST_REMOVE,
+	} {
+		naming := &helperv1.HelperRequest{Action: &helperv1.HelperRequest_Certificate{
+			Certificate: &helperv1.CertificateRequest{
+				Operation: operation, AnchorId: "lab-ca", PlanHash: "d4e5f6"}}}
+		if err := CheckBinding(naming, bound); err != nil {
+			t.Errorf("%s was refused although it carries no material: %v", operation, err)
+		}
+	}
+
+	// And of the operations marked critical, this one no longer is the only
+	// one that needs no plan.
+	if !opspec.ActionCertificateTrustEnsure.RequiresPlan() {
+		t.Error("a trust change still takes no plan")
+	}
+}

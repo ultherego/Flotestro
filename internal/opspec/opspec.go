@@ -896,7 +896,12 @@ var actionSpecs = map[ActionType]actionSpec{
 		timeoutSeconds: 120, risk: RiskLow, maxOutputBytes: 512 << 10},
 	// Trusting an authority is a decision wider than one file: from that
 	// moment the host accepts every certificate this authority signs.
-	ActionCertificateTrustEnsure: {mutating: true, capability: "certificates", permission: "certificate.trust.write",
+	// requiresPlan, like every other critical operation: of the ones marked
+	// critical this was the only one without it, and it is the operation that
+	// decides whom the host believes. The digest of the material says what is
+	// installed; the plan says what it is installed over.
+	ActionCertificateTrustEnsure: {mutating: true, requiresPlan: true, capability: "certificates",
+		permission: "certificate.trust.write",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockCertificates, verifier: VerifierTrustAnchor},
 	// Withdrawing trust breaks connections nobody changed, if the authority
 	// still signs anything. The host checks that at its own end.
@@ -1766,6 +1771,11 @@ func CheckPlanBinding(action ActionType, payload Payload) error {
 		if payload.Certificate == nil || payload.Certificate.PlanHash == "" {
 			return &RefusalError{Code: RefusalPlanBindingMissing,
 				Err: fmt.Errorf("%s needs the hash of a certificate plan computed on the host", action)}
+		}
+	case ActionCertificateTrustEnsure:
+		if payload.Certificate == nil || payload.Certificate.PlanHash == "" {
+			return &RefusalError{Code: RefusalPlanBindingMissing,
+				Err: fmt.Errorf("%s needs the hash of a trust plan computed on the host", action)}
 		}
 	case ActionBackupRestore:
 		// A restore is bound to the set of copies the operator chose from. The
