@@ -91,7 +91,7 @@
 
   <main class="content">
 <h1>7. Błędy i odmowy</h1>
-<p class="lede">Każda odmowa, każde niepowodzenie i każde pominięcie, jakie panel, agent i helper mogą przypisać zadaniu, celowi kampanii albo żądaniu, niesie stały kod. Kod odpowiada na dwa pytania: co się stało i co można bezpiecznie zrobić dalej. Ta strona to cały wykaz, 321 pozycji, przepisany z <code>internal/opspec/errors.go</code>; panel udostępnia tę samą listę pod <code>GET /api/v1/errors</code>.</p>
+<p class="lede">Każda odmowa, każde niepowodzenie i każde pominięcie, jakie panel, agent i helper mogą przypisać zadaniu, celowi kampanii albo żądaniu, niesie stały kod. Kod odpowiada na dwa pytania: co się stało i co można bezpiecznie zrobić dalej. Ta strona to cały wykaz, 322 pozycji, przepisany z <code>internal/opspec/errors.go</code>; panel udostępnia tę samą listę pod <code>GET /api/v1/errors</code>.</p>
     <ul class="linkrow">
       <li><a href="#retry">Polityka ponowień</a></li>
       <li><a href="#failure">Czy kod liczy się jako niepowodzenie</a></li>
@@ -168,7 +168,7 @@
 <tr><td><a href="#stage-approval"><code>approval</code></a></td><td>9</td></tr>
 <tr><td><a href="#stage-dispatch"><code>dispatch</code></a></td><td>23</td></tr>
 <tr><td><a href="#stage-agent"><code>agent</code></a></td><td>27</td></tr>
-<tr><td><a href="#stage-helper"><code>helper</code></a></td><td>104</td></tr>
+<tr><td><a href="#stage-helper"><code>helper</code></a></td><td>105</td></tr>
 <tr><td><a href="#stage-verify"><code>verify</code></a></td><td>10</td></tr>
 <tr><td><a href="#stage-reconcile"><code>reconcile</code></a></td><td>18</td></tr>
 <tr><td><a href="#stage-cancel"><code>cancel</code></a></td><td>3</td></tr>
@@ -278,6 +278,7 @@
 <tr><td><a href="#err-file-version-not-kept"><code class="refusal">file_version_not_kept</code></a></td><td>helper</td><td><span class="badge retry-after-change">after_change</span></td><td>tak</td></tr>
 <tr><td><a href="#err-file-version-unknown"><code class="refusal">file_version_unknown</code></a></td><td>helper</td><td><span class="badge retry-after-replan">after_replan</span></td><td>tak</td></tr>
 <tr><td><a href="#err-filesystem-errors-remain"><code class="refusal">filesystem_errors_remain</code></a></td><td>helper</td><td><span class="badge retry-never">never</span></td><td>tak</td></tr>
+<tr><td><a href="#err-filesystem-unverified"><code class="refusal">filesystem_unverified</code></a></td><td>helper</td><td><span class="badge retry-after-change">after_change</span></td><td>tak</td></tr>
 <tr><td><a href="#err-fingerprint-mismatch"><code class="refusal">fingerprint_mismatch</code></a></td><td>approval</td><td><span class="badge retry-never">never</span></td><td>nie</td></tr>
 <tr><td><a href="#err-gateway-id-in-use"><code class="refusal">gateway_id_in_use</code></a></td><td>startup</td><td><span class="badge retry-after-change">after_change</span></td><td>nie</td></tr>
 <tr><td><a href="#err-global-silence-denied"><code class="refusal">global_silence_denied</code></a></td><td>admission</td><td><span class="badge retry-never">never</span></td><td>nie</td></tr>
@@ -772,7 +773,7 @@
 <dd><p>Agent nie zna tej operacji.</p><p><span class="label">Co zrobić</span> Zaktualizuj agenta na hoście.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge counts-failure">liczy się jako niepowodzenie</span></p></dd>
 </dl>
 <h2 id="stage-helper">Etap: helper</h2>
-<p>104 kodów.</p>
+<p>105 kodów.</p>
 <dl class="kv">
 <dt id="err-account-exists"><code class="refusal">account_exists</code></dt>
 <dd><p>Konto, które tworzy zlecenie, jest już na hoście. Nic nie zostało zapisane: tworzenie nie przygarnia konta, które zrobił ktoś inny, bo jego grupy, powłoka i klucze nie są tymi, które opisuje zlecenie.</p><p><span class="label">Co zrobić</span> Przeczytaj konto w inwentarzu i zleć zmianę, którą miałeś na myśli - grupy, blokadę, klucze - albo najpierw usuń je na hoście, jeśli ma być utworzone od nowa.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge counts-failure">liczy się jako niepowodzenie</span></p></dd>
@@ -856,6 +857,8 @@
 <dd><p>Zlecenie prosiło o powrót do treści, której kopii ten host nie trzyma. Nic nie zostało zapisane: operator wskazał jedną wersję, a najnowsza kopia nią nie jest.</p><p><span class="label">Co zrobić</span> Odczytaj z hosta zachowane wersje pliku i zleć powrót do jednej z nich; odmowa wymienia to, co host ma.</p><p><span class="badge retry-after-replan">ponowienie: after_replan</span> <span class="badge counts-failure">liczy się jako niepowodzenie</span></p></dd>
 <dt id="err-filesystem-errors-remain"><code class="refusal">filesystem_errors_remain</code></dt>
 <dd><p>Naprawa systemu plików przeszła, a drugie przejście, tylko do odczytu, wciąż znajduje błędy. fsck kończy się kodem niezerowym zarówno po naprawie udanej, jak i nieudanej, więc o wyniku operacji rozstrzyga to drugie przejście, a nie kod pierwszego.</p><p><span class="label">Co zrobić</span> System plików wymaga człowieka przy konsoli: odmontuj go, uruchom kontrolę ręcznie i przeczytaj, co mówi, albo odtwórz go z kopii zapasowej. Ponowne zlecenie tej samej naprawy niczego nie zmieni.</p><p><span class="badge retry-never">ponowienie: never</span> <span class="badge counts-failure">liczy się jako niepowodzenie</span></p></dd>
+<dt id="err-filesystem-unverified"><code class="refusal">filesystem_unverified</code></dt>
+<dd><p>Naprawa systemu plików przeszła, a drugie przejście, tylko do odczytu, które miało ją potwierdzić, wcale się nie wykonało - brak fsck, zabity proces, przekroczony czas. Naprawa nie jest ani dowiedziona, ani zaprzeczona: nikt nie sprawdził po niej.</p><p><span class="label">Co zrobić</span> Sprawdź system plików ręcznie albo zleć kontrolę jeszcze raz, bez naprawy: ten host się zmienił i nic tej zmiany nie potwierdziło. Naprawa zgłoszona jako wykonana bez tego przejścia byłaby naprawą, której nikt nie zweryfikował.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge counts-failure">liczy się jako niepowodzenie</span></p></dd>
 <dt id="err-helper-rejected"><code class="refusal">helper_rejected</code></dt>
 <dd><p>Root helper odrzucił żądanie przy swojej końcowej kontroli hosta, zanim cokolwiek uruchomił; komunikat niesie jego własne słowo - malformed_request, unsupported_version albo unknown_action.</p><p><span class="label">Co zrobić</span> Agent i helper na hoście nie zgadzają się co do kontraktu: doprowadź oba do tego samego wydania, potem zleć ponownie.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge counts-failure">liczy się jako niepowodzenie</span></p></dd>
 <dt id="err-host-kerberos-key-unusable"><code class="refusal">host_kerberos_key_unusable</code></dt>
