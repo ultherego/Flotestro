@@ -114,9 +114,18 @@ type backupRepositoryState struct {
 // readers returns the readers of the executor: the ones a test set, or the
 // real ones assembled on first use.
 func (e *TaskExecutor) readers() *hostReaders {
-	if e.verifyReaders == nil {
-		e.verifyReaders = e.defaultReaders()
-	}
+	// Built once. The executor is shared and runs tasks at the same time when
+	// their claims are disjoint, so the first two mutating tasks of a session
+	// used to read and write this field together - a plain data race in
+	// ordinary, allowed concurrency.
+	//
+	// The nil check stays inside, so a test that puts its own readers in
+	// before the first use still has them.
+	e.readersOnce.Do(func() {
+		if e.verifyReaders == nil {
+			e.verifyReaders = e.defaultReaders()
+		}
+	})
 	return e.verifyReaders
 }
 

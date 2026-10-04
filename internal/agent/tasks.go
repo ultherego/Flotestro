@@ -143,6 +143,9 @@ type TaskExecutor struct {
 	// verifyReaders are the reads the verifiers observe the host through after a
 	// change.
 	verifyReaders *hostReaders
+	// readersOnce builds them once: the executor is shared and two tasks whose
+	// claims are disjoint run at the same time.
+	readersOnce sync.Once
 	// taskSecrets holds what a running task has fetched, so the read, the change
 	// and the verification after it share one lease of the secret.
 	secretsMu   sync.Mutex

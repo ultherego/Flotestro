@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -56,101 +57,105 @@ type relationship struct {
 // Advisories translates one VEX document into findings of the panel. It takes
 // the named releases of the base RHEL alone.
 func Advisories(document []byte, releases map[string]bool) ([]vuln.Advisory, error) {
-	decoder := json.NewDecoder(bytes.NewReader(document))
-	opening, err := decoder.Token()
-	if err != nil {
+	// The members of a JSON object have no order (RFC 8259), so the sections
+	// are taken as they come and correlated afterwards. Reading them in the
+	// order the file happened to use made the result depend on the vendor's
+	// serialisation: vulnerabilities before the product tree were refused
+	// outright, and relationships before branches silently produced no
+	// streams at all. Either could arrive with any release of the tool that
+	// writes these documents.
+	//
+	// One document is one advisory and the size of the archive is already
+	// bounded, so holding its sections costs nothing worth saving.
+	var sections map[string]json.RawMessage
+	if err := json.Unmarshal(document, &sections); err != nil {
 		return nil, fmt.Errorf("the VEX document: %w", err)
-	}
-	if opening != json.Delim('{') {
-		return nil, fmt.Errorf("the VEX document starts with %v rather than with an object", opening)
 	}
 
 	var header documentHeader
+	if raw, ok := sections["document"]; ok {
+		if err := json.Unmarshal(raw, &header); err != nil {
+			return nil, fmt.Errorf("the header of the document: %w", err)
+		}
+	}
+
 	products := map[string]string{}
 	streams := map[string]string{}
-	treeRead := false
-	var result []vuln.Advisory
-
-	for decoder.More() {
-		token, err := decoder.Token()
-		if err != nil {
+	tree, hasTree := sections["product_tree"]
+	if hasTree {
+		if err := readTree(json.NewDecoder(bytes.NewReader(tree)), releases, products, streams); err != nil {
 			return nil, err
 		}
-		mergeKey, _ := token.(string)
-		switch mergeKey {
-		case "document":
-			if err := decoder.Decode(&header); err != nil {
-				return nil, fmt.Errorf("the header of the document: %w", err)
-			}
-		case "product_tree":
-			if err := readTree(decoder, releases, products, streams); err != nil {
-				return nil, err
-			}
-			treeRead = true
-		case "vulnerabilities":
-			// The product tree comes in the document before the vulnerabilities and it
-			// alone says which release an identifier concerns.
-			if !treeRead {
-				return nil, fmt.Errorf("the VEX document has vulnerabilities before the product tree")
-			}
-			gathered, err := readVulnerabilities(decoder, header, products, streams)
-			if err != nil {
-				return nil, err
-			}
-			result = append(result, gathered...)
-		default:
-			if err := skip(decoder); err != nil {
-				return nil, err
-			}
+	}
+
+	raw, ok := sections["vulnerabilities"]
+	if !ok {
+		// A document that names no vulnerability yields no finding, which is
+		// an answer and not a fault.
+		return nil, nil
+	}
+	if !hasTree {
+		// The product tree alone says which release an identifier concerns, so
+		// vulnerabilities without one cannot be placed. A tree that is there
+		// and yields nothing is a different thing: the releases this source
+		// takes simply do not appear in it, and the answer is no finding.
+		return nil, fmt.Errorf("the VEX document has vulnerabilities and no product tree to place them in")
+	}
+	found, err := readVulnerabilities(json.NewDecoder(bytes.NewReader(raw)), header, products, streams)
+	if err != nil {
+		return nil, err
+	}
+	// In one order, always. The statuses of a vulnerability are read from maps,
+	// so the same document used to yield the same findings in a different
+	// order on every run - which costs nothing to the store, since it upserts
+	// them, and costs a reader every comparison between two runs.
+	sort.Slice(found, func(i, j int) bool {
+		if found[i].AdvisoryID != found[j].AdvisoryID {
+			return found[i].AdvisoryID < found[j].AdvisoryID
 		}
-	}
-	if _, err := decoder.Token(); err != nil {
-		return nil, fmt.Errorf("the VEX document was cut before the closing: %w", err)
-	}
-	return result, nil
+		if found[i].Release != found[j].Release {
+			return found[i].Release < found[j].Release
+		}
+		if found[i].SourcePackage != found[j].SourcePackage {
+			return found[i].SourcePackage < found[j].SourcePackage
+		}
+		return found[i].BinaryPackage < found[j].BinaryPackage
+	})
+	return found, nil
 }
 
 // readTree reads the product tree: which product is which release and which
 // compound identifier belongs to which stream.
 func readTree(decoder *json.Decoder, releases map[string]bool,
 	products, streams map[string]string) error {
-	opening, err := decoder.Token()
-	if err != nil {
-		return err
+	// Inside the tree the order matters as much as outside it: the branches
+	// fill the products, and the relationships are read against them. Taken in
+	// the order the file used, relationships before branches saw an empty map
+	// and silently bound nothing - no error, no streams, and an advisory whose
+	// packages nobody could place.
+	var sections map[string]json.RawMessage
+	if err := decoder.Decode(&sections); err != nil {
+		return fmt.Errorf("the product tree: %w", err)
 	}
-	if opening != json.Delim('{') {
-		return fmt.Errorf("the product tree is not an object")
+
+	if raw, ok := sections["branches"]; ok {
+		// There are a few hundred branches and they carry the CPEs - those we
+		// read as a whole.
+		var branches []branch
+		if err := json.Unmarshal(raw, &branches); err != nil {
+			return fmt.Errorf("the product branches: %w", err)
+		}
+		for _, entry := range branches {
+			collectReleases(entry, releases, products)
+		}
 	}
-	for decoder.More() {
-		token, err := decoder.Token()
-		if err != nil {
+
+	if raw, ok := sections["relationships"]; ok {
+		if err := readRelationships(json.NewDecoder(bytes.NewReader(raw)), products, streams); err != nil {
 			return err
 		}
-		mergeKey, _ := token.(string)
-		switch mergeKey {
-		case "branches":
-			// There are a few hundred branches and they carry the CPEs - those
-			// we read as a whole.
-			var branches []branch
-			if err := decoder.Decode(&branches); err != nil {
-				return fmt.Errorf("the product branches: %w", err)
-			}
-			for _, entry := range branches {
-				collectReleases(entry, releases, products)
-			}
-		case "relationships":
-			if err := readRelationships(decoder, products, streams); err != nil {
-				return err
-			}
-		default:
-			if err := skip(decoder); err != nil {
-				return err
-			}
-		}
 	}
-	// The closing of the tree object.
-	_, err = decoder.Token()
-	return err
+	return nil
 }
 
 // readRelationships binds packages to products, skipping foreign products at

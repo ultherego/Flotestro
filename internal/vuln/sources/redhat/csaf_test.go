@@ -1,6 +1,10 @@
 package redhat
 
 import (
+	"encoding/json"
+	"fmt"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -232,4 +236,100 @@ func TestSplitNEVRA(t *testing.T) {
 			t.Errorf("%q -> (%q, %q, %q, %v)", c.nevra, name, arch, version, ok)
 		}
 	}
+}
+
+// The members of a JSON object have no order, so the reading of a document must
+// not depend on the order its author happened to write them in. It did, twice
+// over: vulnerabilities before the product tree were refused outright, and
+// relationships before branches bound nothing at all - no error, no streams,
+// and an advisory whose packages nobody could place. Either could arrive with
+// the next release of the tool that writes these documents.
+//
+// Every permutation of the top-level members, and of the two inside the tree,
+// has to give the same findings as the document as written.
+func TestTheReadingDoesNotDependOnTheOrderOfTheMembers(t *testing.T) {
+	releases := map[string]bool{"9": true, "10": true}
+
+	want, err := Advisories([]byte(vexSample), releases)
+	if err != nil {
+		t.Fatalf("the document as written did not read: %v", err)
+	}
+	if len(want) == 0 {
+		t.Fatal("the sample yielded no advisory, so this test would prove nothing")
+	}
+
+	var sections map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(vexSample), &sections); err != nil {
+		t.Fatal(err)
+	}
+	var tree map[string]json.RawMessage
+	if err := json.Unmarshal(sections["product_tree"], &tree); err != nil {
+		t.Fatal(err)
+	}
+
+	top := keysOf(sections)
+	inner := keysOf(tree)
+	for _, order := range permutations(top) {
+		for _, treeOrder := range permutations(inner) {
+			name := strings.Join(order, ",") + " / " + strings.Join(treeOrder, ",")
+			t.Run(name, func(t *testing.T) {
+				rebuilt := rebuild(t, sections, order, tree, treeOrder)
+				got, err := Advisories(rebuilt, releases)
+				if err != nil {
+					t.Fatalf("this order did not read: %v", err)
+				}
+				if !reflect.DeepEqual(got, want) {
+					t.Errorf("the findings differ from the document as written:\ngot  %+v\nwant %+v", got, want)
+				}
+			})
+		}
+	}
+}
+
+// rebuild writes the document again with its members in the given order. The
+// text is assembled by hand, because encoding a map would sort the keys and
+// defeat the point.
+func rebuild(t *testing.T, sections map[string]json.RawMessage, order []string,
+	tree map[string]json.RawMessage, treeOrder []string) []byte {
+	t.Helper()
+	var treeParts []string
+	for _, key := range treeOrder {
+		treeParts = append(treeParts, fmt.Sprintf("%q:%s", key, tree[key]))
+	}
+	rebuiltTree := "{" + strings.Join(treeParts, ",") + "}"
+
+	var parts []string
+	for _, key := range order {
+		body := string(sections[key])
+		if key == "product_tree" {
+			body = rebuiltTree
+		}
+		parts = append(parts, fmt.Sprintf("%q:%s", key, body))
+	}
+	return []byte("{" + strings.Join(parts, ",") + "}")
+}
+
+func keysOf(sections map[string]json.RawMessage) []string {
+	keys := make([]string, 0, len(sections))
+	for key := range sections {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func permutations(in []string) [][]string {
+	if len(in) <= 1 {
+		return [][]string{append([]string(nil), in...)}
+	}
+	var out [][]string
+	for i := range in {
+		rest := make([]string, 0, len(in)-1)
+		rest = append(rest, in[:i]...)
+		rest = append(rest, in[i+1:]...)
+		for _, tail := range permutations(rest) {
+			out = append(out, append([]string{in[i]}, tail...))
+		}
+	}
+	return out
 }

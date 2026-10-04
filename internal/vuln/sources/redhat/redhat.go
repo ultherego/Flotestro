@@ -59,6 +59,9 @@ type Source struct {
 	archive string
 	// releases says which releases the records were built for.
 	releases map[string]bool
+	// staging is the generation being built, while the one in use is still
+	// being read. Empty outside a full fetch.
+	staging string
 }
 
 // New creates the source.
@@ -216,8 +219,17 @@ func (z *Source) load(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
-// documentDirectory points at the place for the findings that were read.
+// documentDirectory points at the place for the findings that were read, which
+// during a full fetch is the one being built beside the one still in use.
 func (z *Source) documentDirectory() string {
+	if z.staging != "" {
+		return z.staging
+	}
+	return z.liveDirectory()
+}
+
+// liveDirectory is the set the assessment reads.
+func (z *Source) liveDirectory() string {
 	return filepath.Join(z.Directory, "documents")
 }
 
@@ -241,14 +253,22 @@ func (z *Source) fullFetch(ctx context.Context) error {
 	// The archive is from the day it carries in its name rather than from today.
 	before := ArchiveDate(name)
 
-	// A full fetch starts from a clean directory: a document the vendor has
-	// withdrawn must not survive in the records as a finding.
-	if err := os.RemoveAll(z.documentDirectory()); err != nil {
+	// A full fetch starts from a clean directory - a document the vendor has
+	// withdrawn must not survive in the records as a finding - but the clean
+	// directory is a new one beside the set still in use, not the set itself.
+	// Emptying it first meant a download that broke half way, an archive over
+	// the size limit or a stream zstd refused left the panel with no
+	// assessment at all and a state that still described the generation it had
+	// just deleted.
+	staging := z.liveDirectory() + ".incoming"
+	if err := os.RemoveAll(staging); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(z.documentDirectory(), 0o750); err != nil {
+	if err := os.MkdirAll(staging, 0o750); err != nil {
 		return err
 	}
+	z.staging = staging
+	defer func() { z.staging = "" }()
 
 	response, err := z.get(ctx, name)
 	if err != nil {
@@ -297,6 +317,29 @@ func (z *Source) fullFetch(ctx context.Context) error {
 	if documents == 0 {
 		return fmt.Errorf("the archive %s has not a single document", name)
 	}
+
+	// Whole, so it takes the place of the set in use. The old one is kept under
+	// another name until the new one is in place, so a failure here leaves a
+	// working generation rather than none.
+	previous := z.liveDirectory() + ".previous"
+	if err := os.RemoveAll(previous); err != nil {
+		return err
+	}
+	if err := os.Rename(z.liveDirectory(), previous); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.Rename(staging, z.liveDirectory()); err != nil {
+		// Put the working set back before giving up.
+		if back := os.Rename(previous, z.liveDirectory()); back != nil && !os.IsNotExist(back) {
+			return fmt.Errorf("the new generation did not take its place (%w) and the previous one "+
+				"was not put back (%v); the assessment has no documents until the next fetch", err, back)
+		}
+		return err
+	}
+	if err := os.RemoveAll(previous); err != nil {
+		return err
+	}
+
 	z.archive, z.mark = name, before
 	return nil
 }

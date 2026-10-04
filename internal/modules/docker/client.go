@@ -81,6 +81,63 @@ func (c *Client) get(ctx context.Context, path string, query url.Values, out any
 	return c.call(ctx, http.MethodGet, path, query, out)
 }
 
+// postReportingStream makes a POST whose answer is a stream of JSON objects
+// and fails on the first one that carries an error.
+//
+// The engine answers 200 and reports the failure inside the body, so a status
+// code is not an answer. The pull used to read the body into io.Discard, so a
+// refused pull looked like a successful one - and the step after it removed a
+// running container before finding out there was no image to make the new one
+// from.
+func (c *Client) postReportingStream(ctx context.Context, path string, query url.Values) error {
+	target := "http://docker/" + apiVersion + path
+	if len(query) > 0 {
+		target += "?" + query.Encode()
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target, nil)
+	if err != nil {
+		return err
+	}
+	response, err := c.http.Do(request)
+	if err != nil {
+		return fmt.Errorf("%w: %s", ErrUnavailable, shortenError(err))
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= 400 {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 512))
+		return fmt.Errorf("the engine answered %d: %s",
+			response.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	scanner := bufio.NewScanner(io.LimitReader(response.Body, 8<<20))
+	scanner.Buffer(make([]byte, 0, 8<<10), 256<<10)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var message struct {
+			Error       string `json:"error"`
+			ErrorDetail struct {
+				Message string `json:"message"`
+			} `json:"errorDetail"`
+		}
+		// A line that is not one of the objects we know is progress, not a
+		// failure: the stream carries layer counters as well.
+		if err := json.Unmarshal(line, &message); err != nil {
+			continue
+		}
+		if message.Error != "" || message.ErrorDetail.Message != "" {
+			reason := message.ErrorDetail.Message
+			if reason == "" {
+				reason = message.Error
+			}
+			return fmt.Errorf("the engine reported: %s", strings.TrimSpace(reason))
+		}
+	}
+	return scanner.Err()
+}
+
 func (c *Client) call(ctx context.Context, method, path string, query url.Values, out any) error {
 	target := "http://docker/" + apiVersion + path
 	if len(query) > 0 {

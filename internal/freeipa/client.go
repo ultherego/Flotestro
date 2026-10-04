@@ -433,10 +433,15 @@ func (c *Client) post(ctx context.Context, payload []byte) (json.RawMessage, err
 		return nil, fmt.Errorf("the directory response: %w", err)
 	}
 	// FLOTESTRO_IPA_TRACE prints every exchange with the directory; for
-	// troubleshooting a connector, never for normal operation - the records carry
-	// personal data.
+	// troubleshooting a connector, never for normal operation - the records
+	// carry personal data, and some of them carry credentials.
 	if os.Getenv("FLOTESTRO_IPA_TRACE") != "" {
-		fmt.Fprintf(os.Stderr, "ipa-trace request=%s\nipa-trace result=%s\n", truncateTrace(payload), truncateTrace(decoded.Result))
+		// The payload is the request, so it names the command: no parameter
+		// has to be threaded down here for the trace to know which answer it
+		// must not print.
+		command := methodOf(payload)
+		fmt.Fprintf(os.Stderr, "ipa-trace command=%s request=%s\nipa-trace result=%s\n",
+			command, redactTrace(payload), traceResult(command, decoded.Result))
 	}
 	if decoded.Error != nil {
 		// A refused command is an answer of a reachable directory: the connector
@@ -664,4 +669,92 @@ func truncateTrace(raw []byte) string {
 		return string(raw[:4000]) + "..."
 	}
 	return string(raw)
+}
+
+// credentialFields are the names whose values are the credential itself. The
+// list is of names, and a redaction by name is only ever as complete as the
+// list - which is why the result of a command that returns a credential is not
+// printed at all, rather than trusted to this.
+var credentialFields = map[string]bool{
+	"userpassword": true, "password": true, "current_password": true,
+	"random": true, "randompassword": true, "otp": true,
+	"ipatokenotpkey": true, "krbprincipalkey": true,
+	"sshpubkey": true, "ipasshpubkey": true,
+}
+
+// commandsReturningACredential answer with the secret they just made. Their
+// result is not printed: the trace was written for connector troubles, and a
+// one-time password in the container log outlives the trouble by the retention
+// of whatever collects those logs.
+var commandsReturningACredential = map[string]bool{
+	"passwd": true, "user_add": true, "user_mod": true, "stageuser_add": true,
+	"otptoken_add": true, "host_add": true, "host_mod": true, "service_add": true,
+}
+
+// redactTrace replaces the values of the credential fields in a request. The
+// parsed body is walked rather than the bytes matched, so a field the next
+// release of the directory adds under a nested key is still found by its name.
+func redactTrace(raw []byte) string {
+	var body any
+	if err := json.Unmarshal(raw, &body); err != nil {
+		// Not parseable here means not printable: the bytes could carry
+		// anything, including the password this is meant to hide.
+		return "[not printed: the request did not parse]"
+	}
+	return truncateTrace([]byte(mustMarshal(redactValue(body))))
+}
+
+func redactValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, inner := range typed {
+			if credentialFields[strings.ToLower(key)] {
+				out[key] = "[redacted]"
+				continue
+			}
+			out[key] = redactValue(inner)
+		}
+		return out
+	case []any:
+		out := make([]any, 0, len(typed))
+		for _, inner := range typed {
+			out = append(out, redactValue(inner))
+		}
+		return out
+	default:
+		return value
+	}
+}
+
+func mustMarshal(value any) string {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return "[not printed: the request did not encode]"
+	}
+	return string(encoded)
+}
+
+// methodOf reads the command out of a JSON-RPC body.
+func methodOf(payload []byte) string {
+	var body struct {
+		Method string `json:"method"`
+	}
+	if err := json.Unmarshal(payload, &body); err != nil {
+		return "unknown"
+	}
+	if body.Method == "" {
+		return "unknown"
+	}
+	return body.Method
+}
+
+// traceResult prints what came back, except from the commands whose answer is
+// the credential. An unrecognised command counts as one of them: a trace is a
+// diagnostic, and the cost of printing one secret outlives the diagnosis.
+func traceResult(method string, result json.RawMessage) string {
+	if method == "unknown" || commandsReturningACredential[method] {
+		return "[not printed: the result of " + method + " may carry a credential]"
+	}
+	return truncateTrace(result)
 }

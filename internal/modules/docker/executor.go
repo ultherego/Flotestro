@@ -62,9 +62,11 @@ func (c *Client) RemoveContainer(ctx context.Context, id string, removeVolumes b
 func (c *Client) PullImage(ctx context.Context, reference string) (string, error) {
 	query := url.Values{}
 	query.Set("fromImage", reference)
-	// The engine streams the pull progress as a sequence of JSON objects; the
-	// content is not needed, so it is read to the end and discarded.
-	if err := c.post(ctx, "/images/create", query); err != nil {
+	// The engine streams the pull progress as a sequence of JSON objects, and
+	// it reports a refusal inside that stream with a 200 on the envelope. The
+	// content used to be read to the end and discarded, so a pull that failed
+	// was indistinguishable from one that worked.
+	if err := c.postReportingStream(ctx, "/images/create", query); err != nil {
 		return "", err
 	}
 	var details struct {
@@ -72,9 +74,12 @@ func (c *Client) PullImage(ctx context.Context, reference string) (string, error
 		RepoDigests []string `json:"RepoDigests"`
 	}
 	if err := c.get(ctx, "/images/"+url.PathEscape(reference)+"/json", nil, &details); err != nil {
-		// The image was pulled; a missing digest does not invalidate the
-		// operation.
-		return "", nil
+		// An image that cannot be inspected right after it was pulled is an
+		// image that is not there. The premise of the old comment here - "the
+		// image was pulled, a missing digest does not invalidate the
+		// operation" - was false whenever the pull had failed inside its own
+		// stream, and swallowing this turned that failure into a success.
+		return "", fmt.Errorf("the image %s was not found after the pull: %w", reference, err)
 	}
 	if len(details.RepoDigests) > 0 {
 		return details.RepoDigests[0], nil

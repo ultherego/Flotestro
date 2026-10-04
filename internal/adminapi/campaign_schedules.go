@@ -299,9 +299,18 @@ func (s *Server) OrderFromSchedule(ctx context.Context, schedule campaigns.Sched
 	// preview behind it.
 	request.PreviewID, request.PreviewDigest = "", ""
 
+	// The order is placed on behalf of the person who made the schedule, and it
+	// stays theirs: the orchestrator checks the creator's rights again on every
+	// host before it dispatches, and it looks them up by this subject. A
+	// synthetic "schedule:<id>" found no principal, so every host of every
+	// scheduled campaign was finished as out_of_scope - the feature did not
+	// work at all, while looking as though it did.
+	//
+	// The schedule is the audit actor instead, which is what it is: the audit
+	// entries below record it as audit.ActorSystem with its own identifier, and
+	// its name travels in the detail. Giving the synthetic subject rights of
+	// its own would have hidden this behind an account with no owner.
 	actor := *author
-	actor.Subject = "schedule:" + schedule.ID
-	actor.DisplayName = schedule.Name
 	inner, err := http.NewRequestWithContext(authz.ContextWithPrincipal(ctx, actor),
 		http.MethodPost, "/api/v1/campaigns", nil)
 	if err != nil {
