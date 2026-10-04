@@ -855,3 +855,40 @@ func TestTheInstanceThatDidNotRotateSignsWithTheAuthorityTheOtherOneActivated(t 
 		t.Errorf("the pool of the instance rejects a certificate it has just issued: %v", err)
 	}
 }
+
+// The activation hook of the fleet CA writes the installation record. It used
+// to write the whole record out of the copy it held in memory, so a key
+// rotation another replica had committed since the last read was put back to
+// the old key and the old sentinel: the secrets sealed with one key and the
+// record naming another (audit of 6c38561, CR-03).
+func TestTheActivationHookDoesNotUndoAKeyRotation(t *testing.T) {
+	l := newLab(t)
+	runtime := l.open(t)
+
+	// What this instance believes, and what the row says after another replica
+	// rotated the key: a different active key and a different revision.
+	before := runtime.record
+	rotated := before
+	rotated.ActiveKeyID = "rotated-by-another-replica"
+	rotated.Revision = before.Revision + 7
+	l.storage.mu.Lock()
+	l.storage.record = &rotated
+	l.storage.mu.Unlock()
+
+	// The hook runs with the stale copy in hand.
+	runtime.recordIssuer(context.Background(), runtime.trust.Active())
+
+	after, err := l.storage.Load(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.ActiveKeyID != rotated.ActiveKeyID {
+		t.Fatalf("the active secrets key came back as %q; the other replica had set %q",
+			after.ActiveKeyID, rotated.ActiveKeyID)
+	}
+	// And the hook did its own job: the authority that signs is recorded.
+	if after.IssuerID != runtime.trust.Active().IssuerID() {
+		t.Fatalf("the record names the issuer %q, and the authority that signs is %q",
+			after.IssuerID, runtime.trust.Active().IssuerID())
+	}
+}

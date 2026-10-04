@@ -558,22 +558,52 @@ func (r *Runtime) rotate(ctx context.Context, to string) error {
 }
 
 // recordIssuer is the activation hook: the record follows the files.
+//
+// Under the revision this instance read, like the key rotation above it. The
+// hook used to write the whole record out of the copy it held in memory, so a
+// key rotation another replica had committed since the last read was put back
+// to the old key and the old sentinel - the secrets of the installation sealed
+// with one key and the record naming another. The fields this hook owns are the
+// two it sets; everything else comes from the row as it is now.
 func (r *Runtime) recordIssuer(ctx context.Context, active *pki.CA) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	moved := r.record
-	moved.IssuerID = active.IssuerID()
-	moved.IssuerFingerprint = active.FingerprintHex()
-	if err := r.storage.Update(ctx, moved); err != nil {
-		r.log.Error("the fleet CA took over signing, but the installation record could not be updated; the next start catches it up",
-			"err", err, "issuer_id", moved.IssuerID)
-		return
-	}
-	if loaded, err := r.storage.Load(ctx); err == nil {
+	for attempt := 0; attempt < recordAttempts; attempt++ {
+		moved := r.record
+		moved.IssuerID = active.IssuerID()
+		moved.IssuerFingerprint = active.FingerprintHex()
+		err := r.storage.UpdateIfRevision(ctx, moved, r.record.Revision)
+		if err == nil {
+			if loaded, loadErr := r.storage.Load(ctx); loadErr == nil {
+				r.record = *loaded
+			}
+			r.assignIssuers(ctx)
+			return
+		}
+		if !errors.Is(err, ErrRevisionMoved) {
+			r.log.Error("the fleet CA took over signing, but the installation record could not be updated; the next start catches it up",
+				"err", err, "issuer_id", moved.IssuerID)
+			return
+		}
+		// Somebody else wrote the row. Read it again and set the two fields on
+		// what is there now rather than on what was there before.
+		loaded, loadErr := r.storage.Load(ctx)
+		if loadErr != nil {
+			r.log.Error("the installation record moved and could not be read again; the next start catches it up",
+				"err", loadErr, "issuer_id", moved.IssuerID)
+			return
+		}
 		r.record = *loaded
 	}
-	r.assignIssuers(ctx)
+	r.log.Error("the installation record moved under this instance at every attempt; "+
+		"the next start catches it up", "attempts", recordAttempts)
 }
+
+// recordAttempts bounds the retries of a conditional write of the record. The
+// row is written by a handover and a key rotation, both of which are an
+// operator's decision, so a conflict is rare and a third attempt means
+// something else is wrong.
+const recordAttempts = 3
 
 // notePreparation is the preparation hook: nothing in the record changes,
 // because what is prepared signs nothing and the record names the authority
@@ -583,7 +613,18 @@ func (r *Runtime) recordIssuer(ctx context.Context, active *pki.CA) {
 func (r *Runtime) notePreparation(ctx context.Context) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if err := r.storage.Update(ctx, r.record); err != nil {
+	// Under the revision this instance read: writing the whole record out of a
+	// copy in memory would put back a key rotation another replica committed in
+	// the meantime. And a conflict here is the intent already satisfied - what
+	// this hook wants is for the revision to move, and somebody else moved it.
+	err := r.storage.UpdateIfRevision(ctx, r.record, r.record.Revision)
+	if errors.Is(err, ErrRevisionMoved) {
+		if loaded, loadErr := r.storage.Load(ctx); loadErr == nil {
+			r.record = *loaded
+		}
+		return
+	}
+	if err != nil {
 		r.log.Error("a new fleet CA was prepared, but the installation record did not move on; "+
 			"the other instances learn of it only at their next start, and activating before "+
 			"they have would cut off the hosts they serve", "err", err)
