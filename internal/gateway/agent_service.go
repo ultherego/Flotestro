@@ -578,6 +578,21 @@ func (s *AgentService) refuseEnvelope(ctx context.Context, hostID string, err er
 	return connect.NewError(code, errors.New(refusal.Detail))
 }
 
+// identitySSSDOnline reads the one field of the identity section that is a
+// pointer, so that a report without that section says nothing about the domain
+// instead of ending the stream.
+//
+// The four fields beside it are read through generated getters, which are nil
+// safe; this one was a direct field access on a message GetIdentity() returns
+// as nil whenever the agent sent no identity at all. And nothing is not
+// "offline": the panel keeps the pointer so that an unknown stays unknown.
+func identitySSSDOnline(identity *agentv1.IdentityState) *bool {
+	if identity == nil {
+		return nil
+	}
+	return identity.SssdOnline
+}
+
 // learnPublicKey writes the key of an older certificate on its record once the
 // relay's certificate supplied it.
 func (s *AgentService) learnPublicKey(ctx context.Context, hostID string, verified *Verified) {
@@ -841,7 +856,7 @@ func (s *AgentService) consume(ctx context.Context, hostID string, session *Sess
 			IdentityEnrolled:   identity.GetEnrolled(),
 			IdentityDomain:     identity.GetDomain(),
 			IdentityRealm:      identity.GetRealm(),
-			IdentitySSSDOnline: identity.SssdOnline,
+			IdentitySSSDOnline: identitySSSDOnline(identity),
 
 			LocalAccounts: localAccountsFromReport(report),
 			Fragments:     fragmentsFromReport(report),

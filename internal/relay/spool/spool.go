@@ -783,6 +783,28 @@ func (s *Spool) rebuild() error {
 				createdAt: record.CreatedAt, expiresAt: record.ExpiresAt, full: record.Full(),
 				size: size, segment: id, offset: offset,
 			}
+			if existing, seen := s.index[record.ID]; seen {
+				// A compaction that stopped between writing the record into the
+				// active segment and removing the old one leaves the same record
+				// in two. The index kept one of them and byHost kept both, so an
+				// acknowledgement deleted the indexed copy and left the other
+				// pointing at a dead offset: the record was delivered again for
+				// as long as the spool lived, and live never came back to zero,
+				// so the compaction counted bytes that were not there.
+				//
+				// The segments are walked in ascending order, so the copy seen
+				// now is the one the compaction wrote. The entry byHost already
+				// points at is moved to it, rather than a second one appended.
+				s.live -= int64(existing.size)
+				if previous, ok := s.segments[existing.segment]; ok {
+					previous.live--
+					s.segments[existing.segment] = previous
+				}
+				*existing = *item
+				s.live += int64(size)
+				state.live++
+				return nil
+			}
 			s.index[record.ID] = item
 			s.byHost[record.HostID] = append(s.byHost[record.HostID], item)
 			s.live += int64(size)

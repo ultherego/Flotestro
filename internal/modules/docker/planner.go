@@ -290,7 +290,18 @@ func planNetworkFrom(state Snapshot, spec NetworkSpec, force bool) (Plan, error)
 		plan.Warnings = append(plan.Warnings, "the containers "+strings.Join(plan.Detaches, ", ")+
 			" lose this network and are not reattached; recreate them from their own descriptions afterwards")
 	}
-	plan.Digest = planDigest(KindNetwork, PlanReplace, desired, current.ID)
+	// The containers that lose the network are part of what was approved. The
+	// digest covered the description and the network's identifier only, so a
+	// replan that found another container attached since kept the same digest,
+	// checkApproval accepted the old plan, and the execution detached a target
+	// the operator never saw - and the warning above says they are not put
+	// back.
+	// Sorted, so that the engine's own order does not change the digest of the
+	// same plan.
+	detaches := append([]string(nil), plan.Detaches...)
+	sort.Strings(detaches)
+	plan.Digest = planDigest(KindNetwork, PlanReplace, desired,
+		append([]string{current.ID}, detaches...)...)
 	return plan, nil
 }
 

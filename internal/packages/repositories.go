@@ -1,6 +1,7 @@
 package packages
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/url"
@@ -180,6 +181,21 @@ func (r Repository) Absent() bool { return r.URL == "" }
 
 // SourceFiles assembles the files that describe a source.
 func SourceFiles(repo Repository, manager, key string, password []byte) ([]File, error) {
+	// The password is the only field of a source that is interpolated into the
+	// description of it and never checked. Validate looks at the address and at
+	// the user name - and it never sees this value, because the panel does not
+	// read the secret: only the host does, right before the write. So the check
+	// belongs here.
+	//
+	// A line break in it is not a password but another section of the file: for
+	// DNF a second repository, with gpgcheck off, under a name of the writer's
+	// choosing; for APT another machine line in the netrc. Whoever may write a
+	// secret would otherwise gain "add an unsigned source to every host that
+	// uses this one", and the scripts of its packages run as root.
+	if bytes.ContainsAny(password, "\n\r\x00") {
+		return nil, fmt.Errorf("the password of the source contains a line break, so it cannot be " +
+			"written into the description of the source")
+	}
 	switch manager {
 	case "apt":
 		return aptFiles(repo, key, password)

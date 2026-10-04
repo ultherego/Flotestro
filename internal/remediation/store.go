@@ -56,11 +56,13 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, steps []Step) 
 	}
 	if err := tx.QueryRow(ctx, `
 		insert into remediation_plans
-		    (host_id, plan_hash, plan_hash_version, reason, created_by, stop_on_failure, state)
-		values ($1, $2, $3, $4, $5, $6, $7)
+		    (host_id, plan_hash, plan_hash_version, reason, created_by, stop_on_failure, state,
+		     boot_id_before)
+		values ($1, $2, $3, $4, $5, $6, $7, nullif($8, ''))
 		returning id, created_at`,
 		spec.HostID, spec.PlanHash, spec.PlanHashVersion, spec.Reason,
-		spec.CreatedBy, spec.StopOnFailure, StateRunning).Scan(&plan.ID, &plan.CreatedAt); err != nil {
+		spec.CreatedBy, spec.StopOnFailure, StateRunning,
+		spec.BootIDBefore).Scan(&plan.ID, &plan.CreatedAt); err != nil {
 		return nil, err
 	}
 
@@ -132,7 +134,8 @@ func (s *Store) Running(ctx context.Context) ([]Plan, error) {
 func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Plan, error) {
 	rows, err := s.pool.Query(ctx, `
 		select id, host_id, plan_hash, plan_hash_version, reason, created_by,
-		       stop_on_failure, state, created_at, finished_at
+		       stop_on_failure, state, created_at, finished_at,
+		       coalesce(boot_id_before, '')
 		  from remediation_plans `+clause, args...)
 	if err != nil {
 		return nil, err
@@ -144,7 +147,7 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Plan, 
 		var plan Plan
 		if err := rows.Scan(&plan.ID, &plan.HostID, &plan.PlanHash, &plan.PlanHashVersion,
 			&plan.Reason, &plan.CreatedBy, &plan.StopOnFailure, &plan.State,
-			&plan.CreatedAt, &plan.FinishedAt); err != nil {
+			&plan.CreatedAt, &plan.FinishedAt, &plan.BootIDBefore); err != nil {
 			return nil, err
 		}
 		plans = append(plans, plan)
