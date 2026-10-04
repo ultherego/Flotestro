@@ -373,9 +373,11 @@ func (c *Client) Networks(ctx context.Context) ([]Network, error) {
 			Config []struct {
 				Subnet  string `json:"Subnet"`
 				Gateway string `json:"Gateway"`
+				IPRange string `json:"IPRange"`
 			} `json:"Config"`
 		} `json:"IPAM"`
-		Labels map[string]string `json:"Labels"`
+		Options map[string]string `json:"Options"`
+		Labels  map[string]string `json:"Labels"`
 	}
 	if err := c.get(ctx, "/networks", nil, &raw); err != nil {
 		return nil, err
@@ -389,6 +391,7 @@ func (c *Client) Networks(ctx context.Context) ([]Network, error) {
 			Labels:     labelsWithoutSecrets(entry.Labels),
 			Predefined: predefinedNetwork(entry.Name),
 			Compose:    entry.Labels["com.docker.compose.project"],
+			Options:    entry.Options,
 		}
 		for _, config := range entry.IPAM.Config {
 			if config.Subnet != "" {
@@ -396,6 +399,15 @@ func (c *Client) Networks(ctx context.Context) ([]Network, error) {
 			}
 			if config.Gateway != "" {
 				network.Gateways = append(network.Gateways, config.Gateway)
+			}
+			if config.IPRange != "" {
+				network.IPRanges = append(network.IPRanges, config.IPRange)
+			}
+			// The engine keeps both families in one list of configurations, and
+			// a gateway with a colon in it is the second family's. Without this
+			// an ipv6_gateway in a declaration had nothing to be compared with.
+			if strings.Contains(config.Gateway, ":") {
+				network.IPv6Gateways = append(network.IPv6Gateways, config.Gateway)
 			}
 		}
 		networks = append(networks, network)

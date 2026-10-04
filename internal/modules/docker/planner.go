@@ -327,6 +327,20 @@ func networkChanges(current Network, desired NetworkSpec) []Change {
 	if desired.Gateway != "" && !contains(current.Gateways, desired.Gateway) {
 		add("gateway", strings.Join(current.Gateways, ", "), desired.Gateway)
 	}
+	// The three a declaration could name and the comparison could not read.
+	if desired.IPRange != "" && !contains(current.IPRanges, desired.IPRange) {
+		add("ip_range", strings.Join(current.IPRanges, ", "), desired.IPRange)
+	}
+	if desired.IPv6Gateway != "" && !contains(current.IPv6Gateways, desired.IPv6Gateway) {
+		add("ipv6_gateway", strings.Join(current.IPv6Gateways, ", "), desired.IPv6Gateway)
+	}
+	// A driver option the declaration names has to be the one the network has.
+	// An option it does not name is left alone: the engine sets defaults of its
+	// own, and calling those a difference would propose replacing every network
+	// on the host.
+	for _, key := range sortedKeys(desired.Options) {
+		add("option "+key, current.Options[key], desired.Options[key])
+	}
 	for _, key := range sortedKeys(desired.Labels) {
 		add("label "+key, current.Labels[key], desired.Labels[key])
 	}

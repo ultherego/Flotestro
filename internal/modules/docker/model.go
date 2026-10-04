@@ -89,12 +89,22 @@ type Network struct {
 	Gateways []string `json:"gateways,omitempty"`
 	// Internal marks a network without an exit to the outside, Attachable - a
 	// network a container from outside the service may be attached to.
-	Internal   bool              `json:"internal"`
-	Attachable bool              `json:"attachable"`
-	IPv6       bool              `json:"ipv6"`
-	Ingress    bool              `json:"ingress,omitempty"`
-	Labels     map[string]string `json:"labels,omitempty"`
-	CreatedAt  time.Time         `json:"created_at,omitempty"`
+	Internal   bool `json:"internal"`
+	Attachable bool `json:"attachable"`
+	IPv6       bool `json:"ipv6"`
+	Ingress    bool `json:"ingress,omitempty"`
+	// IPRanges and the addresses of the second family, and the driver's own
+	// options. A declaration may name all three, and the comparison could not
+	// read them: this structure did not carry them, so the collector did not
+	// collect them and the plan said "no change" over a network whose address
+	// range or driver options were somebody else's. A declaration that reports
+	// nothing to do and then creates nothing is the worst of the three
+	// outcomes, because it is the one nobody looks at again.
+	IPRanges     []string          `json:"ip_ranges,omitempty"`
+	IPv6Gateways []string          `json:"ipv6_gateways,omitempty"`
+	Options      map[string]string `json:"options,omitempty"`
+	Labels       map[string]string `json:"labels,omitempty"`
+	CreatedAt    time.Time         `json:"created_at,omitempty"`
 	// Predefined marks a network built into the engine - bridge, host, none. The
 	// engine does not allow removing it, so the panel must not propose that.
 	Predefined bool `json:"predefined"`

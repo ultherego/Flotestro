@@ -409,3 +409,58 @@ func withLabels(labels map[string]string) ContainerSpec {
 	s.Labels = labels
 	return s
 }
+
+// A declaration of a network that already exists is compared field by field,
+// and three of the fields it may name were read by nothing: the address range
+// the engine hands out of the subnet, the gateway of the second family, and the
+// driver's own options. The structure did not carry them, so the collector did
+// not collect them and the plan said "nothing to do" over a network whose range
+// or driver options were somebody else's (audit of 6c38561, HOP-D02).
+func TestANetworkDeclarationComparesTheFieldsItMayName(t *testing.T) {
+	current := Network{
+		Name: "app", Driver: "bridge",
+		Subnets:      []string{"10.9.0.0/24"},
+		Gateways:     []string{"10.9.0.1", "fd00:9::1"},
+		IPRanges:     []string{"10.9.0.128/25"},
+		IPv6Gateways: []string{"fd00:9::1"},
+		Options:      map[string]string{"com.docker.network.bridge.name": "br-app"},
+		Labels:       map[string]string{"owner": "payments"},
+	}
+	// The same network declared as it is: nothing to change.
+	same := NetworkSpec{
+		Name: "app", Driver: "bridge", Subnet: "10.9.0.0/24", Gateway: "10.9.0.1",
+		IPRange: "10.9.0.128/25", IPv6Gateway: "fd00:9::1",
+		Options: map[string]string{"com.docker.network.bridge.name": "br-app"},
+		Labels:  map[string]string{"owner": "payments"},
+	}
+	if changes := networkChanges(current, same); len(changes) != 0 {
+		t.Fatalf("a network declared as it stands reports %+v", changes)
+	}
+
+	for name, desired := range map[string]NetworkSpec{
+		"another range": func() NetworkSpec { s := same; s.IPRange = "10.9.0.0/25"; return s }(),
+		"another gateway of the second family": func() NetworkSpec {
+			s := same
+			s.IPv6Gateway = "fd00:9::ffff"
+			return s
+		}(),
+		"another bridge name": func() NetworkSpec {
+			s := same
+			s.Options = map[string]string{"com.docker.network.bridge.name": "br-somebody-else"}
+			return s
+		}(),
+	} {
+		changes := networkChanges(current, desired)
+		if len(changes) == 0 {
+			t.Errorf("%s reports nothing to change", name)
+		}
+	}
+
+	// An option the declaration does not name is the engine's own default and
+	// not a difference: calling it one would propose replacing every network.
+	quiet := same
+	quiet.Options = nil
+	if changes := networkChanges(current, quiet); len(changes) != 0 {
+		t.Errorf("a declaration that names no options reports %+v", changes)
+	}
+}
