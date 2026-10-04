@@ -207,6 +207,15 @@ var fullRunStages = []string{
 }
 
 func (r GateReport) validate() error {
+	// A key that is present with the value null decodes to a nil pointer, and
+	// the presence check above is satisfied by the key alone. Dereferencing it
+	// here crashed the checker on a report that said "schema_version": null -
+	// and a checker that crashes is a checker that gives no verdict, which is
+	// the one thing it must not do with a report somebody pasted in.
+	if r.SchemaVersion == nil {
+		return fmt.Errorf("the gate report declares no schema_version; " +
+			"null is not a version and an absent answer is not an answer")
+	}
 	if *r.SchemaVersion != GateSchemaVersion {
 		return fmt.Errorf("the gate report declares schema_version %d; this checker reads %d",
 			*r.SchemaVersion, GateSchemaVersion)

@@ -421,6 +421,32 @@ func (s *Server) transitionJob(w http.ResponseWriter, r *http.Request, operation
 		return
 	}
 
+	// An approval of a highest-risk change asks who is approving, the same way
+	// ordering it asked. It was the one decision path of high consequence that
+	// went from an hour-old session: a change that cuts access to a host or
+	// wipes data needed fresh authentication to be ordered and none to be let
+	// through - and in an environment that requires a second person, approving
+	// is the decision that matters.
+	var approvalProof map[string]any
+	if operation == "approve" {
+		action := opspec.ActionType(current.ActionType)
+		var payload opspec.Payload
+		if len(current.Payload) > 0 {
+			// A payload that will not decode is not a payload that asks for
+			// nothing: the action alone then decides, which is the stricter
+			// reading of the two.
+			_ = json.Unmarshal(current.Payload, &payload)
+		}
+		if s.requiresFreshAuth(r.Context(), current.HostID, action, payload) {
+			proof, ok := s.requireStepUp(w, r, principal, request.Reason,
+				"job.approve", "job", jobID)
+			if !ok {
+				return
+			}
+			approvalProof = proof
+		}
+	}
+
 	if operation == "approve" && request.PayloadHash != "" && request.PayloadHash != current.PayloadHash {
 		s.audit.Record(r.Context(), audit.Event{
 			ActorType: audit.ActorUser, ActorID: actor,
@@ -517,6 +543,10 @@ func (s *Server) transitionJob(w http.ResponseWriter, r *http.Request, operation
 			// a destructive operation the first approval starts nothing yet, and that
 			// has to be visible after the fact.
 			"approvals": job.CollectedApprovals, "required_approvals": job.RequiredApprovals,
+			// Who approved and how they proved it, beside what they approved:
+			// the trail of a highest-risk change has to carry the second
+			// authentication, not only the permission.
+			"step_up": approvalProof,
 		},
 	}); err != nil {
 		s.fail(w, err)

@@ -364,7 +364,28 @@ func (s *MetricsSpool) readCounter() (uint64, counterState) {
 func (s *MetricsSpool) writeCounter(sequence uint64) error {
 	temporary := filepath.Join(s.dir, metricsSpoolCounter+".writing")
 	line := s.bootID + " " + strconv.FormatUint(sequence, 10) + "\n"
-	if err := os.WriteFile(temporary, []byte(line), 0o600); err != nil {
+	// The bytes reach the disk before the name does. A rename is atomic in the
+	// directory and says nothing about the content of the file it renames: with
+	// the write still in the page cache, a power cut could leave the counter
+	// present and empty - and the panel spends a number for ever, so a counter
+	// that lost its content costs this host its metrics until its next boot.
+	// The spool exists for the power cut; its own counter has to survive one.
+	handle, err := os.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := handle.WriteString(line); err != nil {
+		handle.Close()
+		_ = os.Remove(temporary)
+		return err
+	}
+	if err := handle.Sync(); err != nil {
+		handle.Close()
+		_ = os.Remove(temporary)
+		return err
+	}
+	if err := handle.Close(); err != nil {
+		_ = os.Remove(temporary)
 		return err
 	}
 	if err := os.Rename(temporary, filepath.Join(s.dir, metricsSpoolCounter)); err != nil {

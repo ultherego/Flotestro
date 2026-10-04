@@ -44,3 +44,27 @@ func TestActionPrefixTakesOnlyTheShapeOfAnOperationType(t *testing.T) {
 		}
 	}
 }
+
+// Approving a highest-risk change asks who is approving, the same way ordering
+// it asked. It was the one decision path of high consequence that went from an
+// hour-old session - and where a second person is required, approving is the
+// decision that matters (audit of 6c38561, AUTHZ-03).
+func TestApprovingAHighestRiskChangeAsksForFreshAuthentication(t *testing.T) {
+	// The rule is the one the creation uses, so the two cannot drift: an
+	// action whose risk is critical or destructive needs the confirmation.
+	for _, action := range []opspec.ActionType{
+		opspec.ActionLocalSSHKeysReplaceAll, opspec.ActionDiskWipe, opspec.ActionHostFinalWipe,
+	} {
+		if !opspec.PayloadRequiresFreshAuthForAccount(action, opspec.Payload{},
+			opspec.AccountPrivilegeOrdinary) {
+			t.Errorf("%s does not ask for fresh authentication, so approving it would not either", action)
+		}
+	}
+	// And an ordinary one does not, because then every approval would turn
+	// into a second login and the rule would be turned off by whoever has to
+	// work with it.
+	if opspec.PayloadRequiresFreshAuthForAccount(opspec.ActionUnitRestart, opspec.Payload{},
+		opspec.AccountPrivilegeOrdinary) {
+		t.Error("restarting a unit asks for fresh authentication")
+	}
+}

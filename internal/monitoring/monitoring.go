@@ -639,21 +639,26 @@ func (s *Store) Record(ctx context.Context, hostID string, sample Sample) (Recor
 			returning true`,
 			hostID, sample.BootID, int64(sample.Sequence), sample.At,
 			orNullTime(sample.ReceivedAt)).Scan(&taken)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// The panel holds this reading already.
+			//
+			// By its number and not by its moment, deliberately: the host's
+			// clock can move between two deliveries of one sample, and an
+			// identity that depends on the clock does not survive that. So a
+			// sequence this host has used is spent, whatever moment comes with
+			// it - the contract the agent relies on to drop its copy.
+			//
+			// It also means a host that lost its counter and renumbered inside
+			// one boot writes into spent numbers, and every such sample is
+			// dropped here with its metrics (ACOL-02). The answer to that is on
+			// the host - it must not renumber into a used range - and the part
+			// of it that needs the panel to say how far it got is a change to
+			// the protocol, written down as the owner's decision.
+			return OutcomeDuplicate, nil
+		}
+		if err != nil {
 			return OutcomeUnknown, err
 		}
-		// A number this host has used before is not the same thing as a
-		// reading the panel holds. The host numbers its samples from a counter
-		// file, and a counter lost to a power cut starts the numbering again
-		// inside the same boot - so every sample after that loss fell on a
-		// taken number and was dropped here, together with its metrics. The
-		// host stayed online with charts that had stopped, until its next
-		// boot, and the monitoring of this product is built in: nothing else
-		// would have covered it.
-		//
-		// What identifies a reading is its moment, which the insert below
-		// enforces. A genuine resend carries the same moment and is refused
-		// there, as before; a new reading under a used number is stored.
 	}
 
 	stored, err := tx.Exec(ctx, `

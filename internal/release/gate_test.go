@@ -503,3 +503,34 @@ func TestAReportWithoutTheIdentityStageIsNotAFullRun(t *testing.T) {
 		t.Fatalf("the refusal does not name the stage: %v", reasons)
 	}
 }
+
+// A key that is present with the value null satisfies the presence check and
+// decodes to a nil pointer. Dereferencing it crashed the checker on a report
+// that said "schema_version": null - and a checker that crashes gives no
+// verdict, which is the one thing it must not do with a report somebody pasted
+// into a workflow (audit of 6c38561, DEP-07).
+func TestAReportWithANullSchemaVersionIsRefusedRatherThanCrashing(t *testing.T) {
+	report := goodReport()
+	report["schema_version"] = nil
+	if _, err := ParseGateReport(encode(t, report)); err == nil {
+		t.Fatal("a report with a null schema_version was accepted")
+	} else if !strings.Contains(err.Error(), "schema_version") {
+		t.Fatalf("the refusal does not name the field: %v", err)
+	}
+
+	// The other nullable answers of the report are already read as "not
+	// answered": a null there is a report that says nothing about the tree or
+	// about the kind of run, and both are refused as such rather than taken
+	// for a yes.
+	for _, field := range []string{"quick", "tree_clean"} {
+		relaxed := goodReport()
+		relaxed[field] = nil
+		parsed, err := ParseGateReport(encode(t, relaxed))
+		if err != nil {
+			continue
+		}
+		if verdict, _ := parsed.ComputeVerdict(); verdict == VerdictPass {
+			t.Errorf("a report whose %s is null passed", field)
+		}
+	}
+}
