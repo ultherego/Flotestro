@@ -223,10 +223,25 @@ func (e *TaskExecutor) readFileState(ctx context.Context, path string) (fileStat
 // fetched them: the value lives for the read and no longer.
 func (e *TaskExecutor) readBackupRepository(ctx context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.BackupPayload) (backupRepositoryState, error) {
+	// The whole order, not the part this read needs. The capability binds a
+	// digest of the order it authorized, and this read runs under the
+	// capability of the run it verifies: a request that fills six fields of
+	// the order it was signed for is a different order, and the helper refuses
+	// it with payload_binding_mismatch - which is how a verified backup ended
+	// as applied_unverified on a host whose definition carried a retention.
+	// Only the operation differs, and the operation is deliberately outside
+	// the digest for exactly this reason.
 	request := &helperv1.BackupRequest{
 		Operation: helperv1.BackupRequest_OPERATION_PLAN,
 		Id:        payload.ID, Tool: payload.Tool, Repository: payload.Repository,
 		Paths: payload.Paths, Excludes: payload.Excludes, Tags: payload.Tags,
+		KeepLast: int32(payload.KeepLast), KeepDaily: int32(payload.KeepDaily),
+		KeepWeekly: int32(payload.KeepWeekly), KeepMonthly: int32(payload.KeepMonthly),
+		Prune: payload.Prune, Runbook: payload.Runbook,
+		Initialize: payload.Initialize, ReadData: payload.ReadData,
+		SnapshotId: payload.SnapshotID, Target: payload.Target,
+		Include: payload.Include, Overwrite: payload.Overwrite,
+		Plan: payload.Plan, PlanHash: payload.PlanHash,
 	}
 	if !payload.PasswordSecret.Empty() {
 		value, refusal := e.fetchSecret(ctx, task, *payload.PasswordSecret)

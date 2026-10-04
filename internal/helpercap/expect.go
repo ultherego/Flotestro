@@ -585,8 +585,11 @@ func CheckBinding(request *helperv1.HelperRequest, bound *BoundPayload, prior Pr
 		// is added - which is how this came to bind the identifier alone, and
 		// a consent to restore a definition authorized restoring any snapshot
 		// anywhere with overwriting.
-		return same("backup order", backupRequestDigest(action.Backup),
-			BackupOrderDigest(payload.Backup))
+		if backupRequestDigest(action.Backup) != BackupOrderDigest(payload.Backup) {
+			return binding("the request and the bound backup order differ in " +
+				strings.Join(BackupOrderDifference(action.Backup, payload.Backup), ", "))
+		}
+		return nil
 
 	case *helperv1.HelperRequest_Certificate:
 		switch action.Certificate.GetOperation() {
