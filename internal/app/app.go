@@ -833,6 +833,31 @@ func Run() error {
 		go executor.Run(ctx)
 	}
 
+	// The authorization of work nobody is watching reads group membership from
+	// the directories themselves: a session's snapshot says what was true at
+	// the login, and after a logout it can never be renewed. Each system
+	// answers for its own issuer, behind a cache of bounded age.
+	groupDirectory := authz.NewGroupDirectory(authz.GroupConfirmationMaxAge)
+	if identityProvider != nil {
+		groupDirectory.AddIssuerSource(identity.NewProviderGroupSource(identityProvider))
+		log.Info("the groups of the panel's own issuer are read from the provider",
+			"issuer", identityProvider.Issuer(), "max_age", authz.GroupConfirmationMaxAge.String())
+		// The question goes to the realm's admin API, so an issuer that is not
+		// a Keycloak realm cannot answer it. Said here rather than when the
+		// first campaign pauses; the empty subject reaches no network.
+		if _, err := identityProvider.GroupsOfSubject(ctx, ""); errors.Is(err, oidc.ErrNotKeycloak) {
+			log.Warn("the issuer is not a Keycloak realm, so group memberships cannot be confirmed; "+
+				"background work of identities whose roles come from groups will pause with a reason",
+				"issuer", identityProvider.Issuer())
+		}
+	}
+	if directory != nil && *ipaRealm != "" {
+		groupDirectory.SetLinkedSource(identity.NewDirectoryGroupSource(*ipaRealm, directory))
+		log.Info("the groups of an explicitly linked directory account are read from the directory",
+			"issuer", identity.DirectoryIssuer(*ipaRealm), "max_age", authz.GroupConfirmationMaxAge.String())
+	}
+	authzStore.SetGroupDirectory(groupDirectory)
+
 	// A membership taken away in Keycloak or FreeIPA behind the panel's back
 	// reaches a live session through this loop rather than at the next login.
 	if identityProvider != nil && *sessionGroupRefresh > 0 {
@@ -1372,8 +1397,11 @@ func Run() error {
 	// The runner carries the remediation plans out step by step: every step is an
 	// ordinary job of a module, and the next one starts only once the previous
 	// one has succeeded.
+	// The rights behind a plan are confirmed before every step, under the
+	// identity that ordered it: a campaign's plan under the campaign's creator.
 	go remediation.NewRunner(remediationStore, jobStore, hostStore, recorder,
-		log, 5*time.Second).Run(ctx)
+		log, 5*time.Second).
+		WithRightsCheck(authzStore, campaignCreators{store: campaignStore}).Run(ctx)
 
 	// The desired-state policies: judged from the inventory at their own
 	// intervals, never by reading a host; a drift becomes a remediation campaign
@@ -1630,6 +1658,23 @@ func defaultGatewayID() string {
 		return "gateway-1"
 	}
 	return name
+}
+
+// campaignCreators names the identity that ordered a campaign, for the rights
+// check of a remediation plan the campaign started.
+type campaignCreators struct {
+	store *campaigns.Store
+}
+
+func (c campaignCreators) CreatorOfCampaign(ctx context.Context, campaignID string) (string, error) {
+	campaign, err := c.store.Get(ctx, campaignID)
+	if err != nil {
+		return "", err
+	}
+	if campaign == nil {
+		return "", fmt.Errorf("the campaign %s is gone", campaignID)
+	}
+	return campaign.CreatedBy, nil
 }
 
 // subjectPermissions reads the permissions of a task's creator for the grants

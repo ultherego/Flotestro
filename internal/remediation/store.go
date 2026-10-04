@@ -212,6 +212,17 @@ func (s *Store) FinishStep(ctx context.Context, stepID, state, reason string) er
 	return err
 }
 
+// HoldStep writes on a step that has not started why it is waiting. The state
+// stays pending: the step is not settled, it is held, and the next pass asks
+// the same question again.
+func (s *Store) HoldStep(ctx context.Context, stepID, reason string) error {
+	_, err := s.pool.Exec(ctx, `
+		update remediation_steps
+		   set reason = $2
+		 where id = $1 and state = $3`, stepID, nullable(reason), StepPending)
+	return err
+}
+
 // SkipRemaining settles the steps that will no longer start.
 func (s *Store) SkipRemaining(ctx context.Context, planID, reason string) error {
 	_, err := s.pool.Exec(ctx, `

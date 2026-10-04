@@ -49,6 +49,14 @@ func (s *Scheduler) SetHelperCapabilities(capabilities HelperCapabilities) {
 // errCapabilityUnsupported marks a host held back under enforce.
 var errCapabilityUnsupported = errors.New("the agent of the host does not forward a helper capability")
 
+// errCreatorRightsUnconfirmed marks a task whose creator's rights nobody could
+// read. The capability's grants follow from those rights, so the task waits
+// with the reason instead of going out under an authorization nobody checked.
+var errCreatorRightsUnconfirmed = errors.New("the rights of the task's creator are not confirmed")
+
+// ErrorCreatorRightsUnconfirmed is the reason such a task is put back with.
+const ErrorCreatorRightsUnconfirmed = "creator_rights_unconfirmed"
+
 // ErrorHelperCapabilityUnsupported is the code such a task ends with.
 const ErrorHelperCapabilityUnsupported = "helper_capability_unsupported"
 
@@ -92,13 +100,17 @@ func (s *Scheduler) attachCapability(ctx context.Context, item jobs.LeasedJob,
 	// The grants come from the creator's permissions; a creator the store does
 	// not know - a system task, a subject removed since - gets the permission of
 	// the action alone, which is the narrow side.
+	//
+	// A question that was asked and not answered is a different matter: the
+	// rights may be narrower than the action, and nobody can tell. The task
+	// waits with the reason rather than leaving on a guess.
 	var permissions []string
 	if s.capabilities.Permissions != nil && item.Job.CreatedBy != "" {
 		permissions, err = s.capabilities.Permissions.PermissionsOfSubject(ctx, item.Job.CreatedBy)
 		if err != nil {
-			s.log.Warn("the permissions of the creator of the task were not read; the capability carries the action's own grant only",
+			s.log.Warn("the task waits: the rights of its creator were not read",
 				"job_id", item.Job.ID, "created_by", item.Job.CreatedBy, "err", err)
-			permissions = nil
+			return "", fmt.Errorf("%w: %v", errCreatorRightsUnconfirmed, err)
 		}
 	}
 	approved := item.Job.ApprovedBy != "" || len(item.Job.Approvals) > 0

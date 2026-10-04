@@ -480,6 +480,19 @@ func (s *Scheduler) deliver(ctx context.Context, item jobs.LeasedJob, owner jobs
 			}
 			return
 		}
+		if errors.Is(err, errCreatorRightsUnconfirmed) {
+			// Nobody could say what the creator may do now, so nothing goes out.
+			// The task goes back to the queue with the reason on its attempt and
+			// leaves once the question has an answer: an unchecked authorization
+			// is not a narrower one.
+			if releaseErr := s.store.ReleaseLease(ctx, item.Job.ID, item.AttemptID,
+				ErrorCreatorRightsUnconfirmed+": "+err.Error()); releaseErr != nil {
+				s.log.Error("the held task was not returned to the queue",
+					"job_id", item.Job.ID, "err", releaseErr)
+			}
+			metrics.JobDispatch.Inc(ErrorCreatorRightsUnconfirmed, s.options.GatewayID)
+			return
+		}
 		// A secret that was retired or deleted never comes back, so a task that
 		// needs it is settled now with the reason instead of asking the store again
 		if errors.Is(err, secrets.ErrRetired) || errors.Is(err, secrets.ErrNotFound) {

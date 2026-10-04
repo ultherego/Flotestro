@@ -470,6 +470,7 @@ func (s *Server) Routes() http.Handler {
 	// Enabling gives a disabled identity its roles back; the sessions and
 	// the tokens that ended with the disabling stay ended.
 	s.route(mux, "POST /api/v1/principals/{id}/enable", s.handleEnablePrincipal)
+	s.route(mux, "PUT /api/v1/principals/{id}/directory-account", s.handleLinkDirectoryAccount)
 	// The live browser sessions of an identity, ended one at a time.
 	s.route(mux, "GET /api/v1/principals/{id}/sessions", s.handleListSessions)
 	s.route(mux, "DELETE /api/v1/principals/{id}/sessions/{sid}", s.handleRevokeSession)

@@ -629,6 +629,36 @@ func (o *Orchestrator) pauseOnWindowClosed(ctx context.Context, campaign Campaig
 	return nil
 }
 
+// pauseOnRightsUnconfirmed holds a campaign back because nobody can say
+// whether its creator still holds the right to what it carries: the resolver
+// failed, the directory is unreachable, or the only confirmation of a group
+// membership is older than the panel accepts.
+//
+// It pauses rather than skipping the host. A skip is a judgement - "this
+// person may not touch this machine" - and nobody made it; the campaign waits
+// with the reason on it, visible in the panel, and an operator resumes it once
+// the question has an answer.
+func (o *Orchestrator) pauseOnRightsUnconfirmed(ctx context.Context, campaign Campaign,
+	targets []Target, hostID, detail string) error {
+	reason := PauseCreatorRightsUnconfirmed + ": " + detail
+	if err := o.pause(ctx, &campaign, targets, reason); err != nil {
+		return err
+	}
+	o.audit.Record(ctx, audit.Event{
+		ActorType: audit.ActorSystem, ActorID: "campaign:" + campaign.ID,
+		Action: "campaign.pause", TargetType: "campaign", TargetID: campaign.ID,
+		RequestID: campaign.RequestID, Outcome: audit.OutcomeFailure,
+		Detail: map[string]any{
+			"reason": PauseCreatorRightsUnconfirmed, "host_id": hostID,
+			"created_by": campaign.CreatedBy, "detail": detail,
+		},
+	})
+	o.log.Warn("the campaign was held back: the rights of its creator could not be confirmed",
+		"campaign_id", campaign.ID, "host_id", hostID,
+		"created_by", campaign.CreatedBy, "detail", detail)
+	return nil
+}
+
 // pause holds a campaign back by the machinery's own decision - a threshold
 // crossed, a window closed, sessions lost.
 func (o *Orchestrator) pause(ctx context.Context, campaign *Campaign, targets []Target, reason string) error {

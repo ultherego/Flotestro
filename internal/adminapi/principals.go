@@ -123,6 +123,70 @@ func (s *Server) principalTarget(w http.ResponseWriter, r *http.Request) (*authz
 	return principal, true
 }
 
+// linkDirectoryAccountRequest names the directory account, or clears the link
+// with an empty uid.
+type linkDirectoryAccountRequest struct {
+	DirectoryUID string `json:"directory_uid"`
+}
+
+// handleLinkDirectoryAccount writes down which directory account an identity
+// is. Only a linked identity is asked about at the directory: a uid that looks
+// like somebody's username is not evidence of the same person, and the groups
+// of the directory are not the groups of the identity provider.
+func (s *Server) handleLinkDirectoryAccount(w http.ResponseWriter, r *http.Request) {
+	actor, ok := s.authorize(w, r, authz.PermPrincipalManage, authz.GlobalScope, "principal", r.PathValue("id"))
+	if !ok {
+		return
+	}
+	target, ok := s.principalTarget(w, r)
+	if !ok {
+		return
+	}
+	var request linkDirectoryAccountRequest
+	reason, ok := requestReason(w, r, &request)
+	if !ok {
+		return
+	}
+	uid := strings.TrimSpace(request.DirectoryUID)
+	evidence, ok := s.requireStepUp(w, r, actor, reason, "principal.directory_link", "principal", target.ID)
+	if !ok {
+		return
+	}
+
+	tx, err := s.authz.Pool().Begin(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	if err := s.authz.LinkDirectoryAccount(r.Context(), tx, target.ID, uid); err != nil {
+		if errors.Is(err, authz.ErrNotFound) {
+			problem(w, http.StatusNotFound, "principal_not_found", "no such identity")
+			return
+		}
+		s.fail(w, err)
+		return
+	}
+	if err := s.audit.RecordTx(r.Context(), tx, audit.Event{
+		ActorType: audit.ActorUser, ActorID: actor.Subject,
+		Action: "principal.directory_link", TargetType: "principal", TargetID: target.ID,
+		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
+		Detail: withStepUp(map[string]any{
+			"subject": target.Subject, "directory_uid": uid,
+		}, evidence),
+	}); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"principal_id": target.ID, "subject": target.Subject, "directory_uid": uid,
+	})
+}
+
 // handleDisablePrincipal takes the access of an identity away.
 func (s *Server) handleDisablePrincipal(w http.ResponseWriter, r *http.Request) {
 	actor, ok := s.authorize(w, r, authz.PermPrincipalManage, authz.GlobalScope, "principal", r.PathValue("id"))
