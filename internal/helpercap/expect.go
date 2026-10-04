@@ -536,7 +536,18 @@ func CheckBinding(request *helperv1.HelperRequest, bound *BoundPayload) error {
 		if payload.Backup == nil {
 			return binding("the bound payload describes no backup definition")
 		}
-		return same("backup definition", action.Backup.GetId(), payload.Backup.ID)
+		if err := same("backup definition", action.Backup.GetId(), payload.Backup.ID); err != nil {
+			return err
+		}
+		// Everything else the request carries is the order itself: which
+		// snapshot, where to, over what, with which retention, running which
+		// runbook. One digest binds the lot and keeps binding it when a field
+		// is added - which is how this came to bind the identifier alone, and
+		// a consent to restore a definition authorized restoring any snapshot
+		// anywhere with overwriting. The operation comes from the signed
+		// payload, not from the request.
+		return same("backup order", backupRequestDigest(action.Backup),
+			BackupOrderDigest(string(bound.Action), payload.Backup))
 
 	case *helperv1.HelperRequest_Certificate:
 		switch action.Certificate.GetOperation() {

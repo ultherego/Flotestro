@@ -151,6 +151,7 @@ func TestTheCapabilityBindsWhichProcessAndWhichSignal(t *testing.T) {
 func TestTheCapabilityBindsTheTargetOfTheRemainingOrders(t *testing.T) {
 	cases := []struct {
 		name    string
+		action  opspec.ActionType
 		payload opspec.Payload
 		honest  *helperv1.HelperRequest
 		forged  *helperv1.HelperRequest
@@ -173,15 +174,39 @@ func TestTheCapabilityBindsTheTargetOfTheRemainingOrders(t *testing.T) {
 		},
 		{
 			name:    "backup definition",
-			payload: opspec.Payload{Backup: &opspec.BackupPayload{ID: "nightly"}},
+			action:  opspec.ActionBackupRestore,
+			payload: opspec.Payload{Backup: &opspec.BackupPayload{
+				ID: "nightly", SnapshotID: "latest", Target: "/srv/restore", Overwrite: "never"}},
 			honest: &helperv1.HelperRequest{Action: &helperv1.HelperRequest_Backup{
-				Backup: &helperv1.BackupRequest{Id: "nightly"}}},
+				Backup: &helperv1.BackupRequest{
+					Operation: helperv1.BackupRequest_OPERATION_RESTORE, Id: "nightly",
+					SnapshotId: "latest", Target: "/srv/restore", Overwrite: "never"}}},
 			forged: &helperv1.HelperRequest{Action: &helperv1.HelperRequest_Backup{
-				Backup: &helperv1.BackupRequest{Id: "archive"}}},
+				Backup: &helperv1.BackupRequest{
+					Operation: helperv1.BackupRequest_OPERATION_RESTORE, Id: "archive",
+					SnapshotId: "latest", Target: "/srv/restore", Overwrite: "never"}}},
+		},
+		{
+			// The identifier of the definition agrees and everything that
+			// decides what happens does not: another snapshot, over the root
+			// of the host, overwriting. One field of binding let this through
+			// under a signature of the panel's.
+			name:    "backup order",
+			action:  opspec.ActionBackupRestore,
+			payload: opspec.Payload{Backup: &opspec.BackupPayload{
+				ID: "nightly", SnapshotID: "latest", Target: "/srv/restore", Overwrite: "never"}},
+			honest: &helperv1.HelperRequest{Action: &helperv1.HelperRequest_Backup{
+				Backup: &helperv1.BackupRequest{
+					Operation: helperv1.BackupRequest_OPERATION_RESTORE, Id: "nightly",
+					SnapshotId: "latest", Target: "/srv/restore", Overwrite: "never"}}},
+			forged: &helperv1.HelperRequest{Action: &helperv1.HelperRequest_Backup{
+				Backup: &helperv1.BackupRequest{
+					Operation: helperv1.BackupRequest_OPERATION_RESTORE, Id: "nightly",
+					SnapshotId: "older", Target: "/", Overwrite: "always"}}},
 		},
 	}
 	for _, test := range cases {
-		bound := &BoundPayload{Payload: test.payload}
+		bound := &BoundPayload{Action: test.action, Payload: test.payload}
 		if err := CheckBinding(test.honest, bound); err != nil {
 			t.Errorf("%s: the approved request was refused: %v", test.name, err)
 		}
