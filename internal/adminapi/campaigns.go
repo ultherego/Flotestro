@@ -1086,6 +1086,10 @@ func (s *Server) handleListCampaigns(w http.ResponseWriter, r *http.Request) {
 		State:     strings.TrimSpace(query.Get("state")),
 		Action:    strings.TrimSpace(query.Get("action")),
 		CreatedBy: strings.TrimSpace(query.Get("requester")),
+		// Which schedule placed it, which is not who ordered it: the campaign
+		// belongs to the person whose schedule it is, and their rights are
+		// what the orchestrator checks per host before it dispatches.
+		ScheduleID: strings.TrimSpace(query.Get("schedule")),
 	}
 	if text := strings.TrimSpace(query.Get("since")); text != "" {
 		since, err := time.Parse(time.RFC3339, text)

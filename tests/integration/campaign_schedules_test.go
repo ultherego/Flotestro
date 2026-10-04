@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"github.com/ultherego/flotestro/internal/authz"
 	"net/http"
 	"net/url"
 	"strings"
@@ -119,8 +120,14 @@ func TestAScheduledCampaignIsPlacedAtItsMomentAndWaitsForApproval(t *testing.T) 
 	if campaign.State != "awaiting_approval" {
 		t.Errorf("the placed campaign is %s, expected awaiting_approval: a schedule cannot waive the consent", campaign.State)
 	}
-	if campaign.CreatedBy != "schedule:"+schedule.ID {
-		t.Errorf("the placed campaign was requested by %q, expected schedule:%s", campaign.CreatedBy, schedule.ID)
+	// The order belongs to the person whose schedule it is, not to the
+	// schedule: the orchestrator checks the creator's rights again on every
+	// host before it dispatches, and it looks them up by this subject. A
+	// synthetic "schedule:<id>" answered to no principal, so every host of
+	// every scheduled campaign was finished as out_of_scope.
+	if campaign.CreatedBy != authz.BootstrapSubject {
+		t.Errorf("the placed campaign was requested by %q, expected the author of the schedule %q",
+			campaign.CreatedBy, authz.BootstrapSubject)
 	}
 	if campaign.Name != "scheduled cron restart" {
 		t.Errorf("the placed campaign is named %q", campaign.Name)
@@ -131,13 +138,28 @@ func TestAScheduledCampaignIsPlacedAtItsMomentAndWaitsForApproval(t *testing.T) 
 	if targets := h.campaignTargets(campaign.ID); len(targets) != 2 {
 		t.Errorf("the placed campaign has %d targets, expected the two hosts of the order", len(targets))
 	}
-	// The campaign list finds it by its requester, like any other.
+	// Which schedule placed it is a question of its own, and the list answers
+	// it: the requester is the person, so it cannot also be the schedule.
 	var listed struct {
 		Items []campaignView `json:"items"`
 	}
-	h.get("/api/v1/campaigns?requester="+url.QueryEscape("schedule:"+schedule.ID), &listed)
+	h.get("/api/v1/campaigns?schedule="+url.QueryEscape(schedule.ID), &listed)
 	if len(listed.Items) != 1 || listed.Items[0].ID != campaign.ID {
 		t.Errorf("the campaign list filtered by the schedule returns %d campaigns", len(listed.Items))
+	}
+	// And it is still the person's campaign when asked for by requester.
+	var byRequester struct {
+		Items []campaignView `json:"items"`
+	}
+	h.get("/api/v1/campaigns?requester="+url.QueryEscape(authz.BootstrapSubject), &byRequester)
+	var found bool
+	for _, item := range byRequester.Items {
+		if item.ID == campaign.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("the campaign the schedule placed is not among its author's campaigns")
 	}
 }
 
@@ -174,8 +196,9 @@ func TestRunNowPlacesTheScheduledOrderAtOnce(t *testing.T) {
 		h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/cancel",
 			map[string]any{"reason": "end of the test"}, nil, 0)
 	})
-	if campaign.State != "awaiting_approval" || campaign.CreatedBy != "schedule:"+schedule.ID {
-		t.Errorf("run-now placed a campaign in %s requested by %q", campaign.State, campaign.CreatedBy)
+	if campaign.State != "awaiting_approval" || campaign.CreatedBy != authz.BootstrapSubject {
+		t.Errorf("run-now placed a campaign in %s requested by %q, expected awaiting_approval and %q",
+			campaign.State, campaign.CreatedBy, authz.BootstrapSubject)
 	}
 	// A recurring order names its moment, so this month's window is told
 	// from the next one's.

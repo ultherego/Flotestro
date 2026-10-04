@@ -1025,6 +1025,14 @@ type ListFilter struct {
 	Action string
 	// CreatedBy is the subject that ordered the campaign.
 	CreatedBy string
+	// ScheduleID keeps the campaigns one schedule placed.
+	//
+	// The campaign is owned by the person whose schedule it is - their rights
+	// are what the orchestrator checks before every dispatch - so the subject
+	// cannot also say which schedule placed it. The idempotency key does:
+	// OrderFromSchedule writes it as "schedule:<id>:<moment>", which is what
+	// makes a retried tick place one campaign instead of two.
+	ScheduleID string
 	// Since keeps the campaigns created at or after the moment.
 	Since  *time.Time
 	Limit  int
@@ -1059,6 +1067,12 @@ func (s *Store) List(ctx context.Context, filter ListFilter, scopes []authz.Scop
 	if filter.CreatedBy != "" {
 		args = append(args, filter.CreatedBy)
 		clause += fmt.Sprintf(" and created_by = $%d", len(args))
+	}
+	if filter.ScheduleID != "" {
+		// A prefix of the idempotency key. The identifier is a UUID, so it
+		// carries no character that like would read as a pattern.
+		args = append(args, "schedule:"+filter.ScheduleID+":%")
+		clause += fmt.Sprintf(" and idempotency_key like $%d", len(args))
 	}
 	if filter.Since != nil {
 		args = append(args, *filter.Since)
