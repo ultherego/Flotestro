@@ -483,7 +483,7 @@ export function KeysPanel({
           <input value={comment} placeholder="jane@laptop" onChange={(event) => setComment(event.target.value)} />
         </Field>
         <Field
-          label={t("Reason (at least 8 characters, kept in the audit trail)")}
+          label={t("Reason for adding the key (at least 8 characters)")}
           help={t("A key added to an account is a way into it, so the trail says why it was added and not only who added it.")}
           wide
         >
@@ -567,7 +567,7 @@ function ReplaceAllKeys({
         >
           <textarea rows={4} value={text} placeholder="ssh-ed25519 AAAA… jane@laptop&#10;ssh-ed25519 AAAA… deploy@ci" onChange={(event) => setText(event.target.value)} />
         </Field>
-        <Field label={t("Reason")} help={t("Writing the whole list anew is a critical change of access: at least 8 characters, recorded with the order.")} wide>
+        <Field label={t("Reason for replacing the list (at least 8 characters)")} help={t("Writing the whole list anew is a critical change of access: at least 8 characters, recorded with the order.")} wide>
           <input value={reason} onChange={(event) => setReason(event.target.value)} />
         </Field>
       </Fields>

@@ -143,6 +143,7 @@ describe("the SSH key editor", () => {
     const pasted = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHZ8Kx3vQOZKq0M0hDPuJHf5Zx1kJHgqRqYqGZ6XxLm1";
     fireEvent.change(screen.getByPlaceholderText("ssh-ed25519 AAAA… jane@laptop"), { target: { value: pasted } });
     fireEvent.change(screen.getByPlaceholderText("jane@laptop"), { target: { value: "bob@desktop" } });
+    fireEvent.change(screen.getByLabelText(/^Reason for adding the key/), { target: { value: "bob joins the on-call rota" } });
     fireEvent.click(await screen.findByRole("button", { name: "Add key" }));
 
     const order = lastOrder();
@@ -167,7 +168,7 @@ describe("the SSH key editor", () => {
 
     const replacement = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEeq4cJ7bMk0d6pQ0y0m0K0yS7T4a0m9v1c2X3y4Z5b6";
     fireEvent.change(screen.getByLabelText(/^The complete list/), { target: { value: replacement } });
-    fireEvent.change(screen.getByLabelText(/^Reason/), { target: { value: "rotating the key of a leaver" } });
+    fireEvent.change(screen.getByLabelText(/^Reason for replacing the list/), { target: { value: "rotating the key of a leaver" } });
     fireEvent.click(screen.getByRole("button", { name: "Replace all keys" }));
 
     const order = lastOrder();

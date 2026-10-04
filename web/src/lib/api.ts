@@ -123,6 +123,9 @@ export async function fetchWithCredentials(path: string, options: RequestInit = 
   const headers: Record<string, string> = { ...(options.headers as Record<string, string> | undefined) };
   const bearer = bearerToken();
   if (bearer) headers["Authorization"] = `Bearer ${bearer}`;
+  // No header of its own means no header set: a caller that passed none gets
+  // the request it wrote, with the session added and nothing else.
+  if (Object.keys(headers).length === 0) return fetch(path, { ...options, credentials: "same-origin" });
   return fetch(path, { ...options, headers, credentials: "same-origin" });
 }
 
