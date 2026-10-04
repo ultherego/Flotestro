@@ -273,7 +273,25 @@ func (o *Orchestrator) lastAttempt(ctx context.Context, jobID string) (*jobs.Att
 	if len(attempts) == 0 {
 		return nil, nil
 	}
-	return &attempts[len(attempts)-1], nil
+	// The newest attempt that was not set aside by a result of its own.
+	//
+	// A first attempt can expire, a second be sent, and the first's success
+	// arrive late and settle the job after all - and then the second is marked
+	// superseded_by_result and carries no details, because nothing was ever
+	// read back through it. Taking simply the last attempt read those empty
+	// details: the campaign reported applied_unverified over a change that had
+	// been verified, or missed a reboot the real result had asked for.
+	for i := len(attempts) - 1; i >= 0; i-- {
+		if attempts[i].Status == jobs.AttemptStatusSuperseded ||
+			attempts[i].ErrorCode == jobs.AttemptStatusSuperseded {
+			continue
+		}
+		return &attempts[i], nil
+	}
+	// Every attempt was set aside, which says nothing about the host either
+	// way: the caller is told there is nothing to read rather than handed an
+	// attempt that was never carried out.
+	return nil, nil
 }
 
 // unverifiedChange says why a task that reports success is not one, from the
