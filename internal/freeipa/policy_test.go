@@ -124,21 +124,7 @@ func optionStrings(call rpcCall, key string) []string {
 }
 
 func TestEnsureHBACRuleCreatesAMissingRuleAndFillsIt(t *testing.T) {
-	fake, client := newFakeDirectory(t)
-	// The first read finds nothing; the read after the write sees the rule.
-	shown := 0
-	fake.answers["hbacrule_show"] = func(call rpcCall) (any, *rpcError) {
-		shown++
-		if shown == 1 {
-			return notFound(call)
-		}
-		return answerWith(map[string]any{
-			"cn": []any{"ops-ssh"}, "ipaenabledflag": []any{false},
-			"memberuser_group": []any{"ops"}, "memberhost_hostgroup": []any{"web"},
-			"memberservice_hbacsvc": []any{"sshd"},
-		})(call)
-	}
-
+	fake, client, _ := newHBACDirectory(t, nil)
 	rule, err := client.EnsureHBACRule(context.Background(), HBACRuleSpec{
 		Name: "ops-ssh", Description: "operators on the web tier", Enabled: false,
 		UserGroups: []string{"ops"}, HostGroups: []string{"web"}, Services: []string{"sshd"},
@@ -150,8 +136,10 @@ func TestEnsureHBACRuleCreatesAMissingRuleAndFillsIt(t *testing.T) {
 		t.Fatalf("the rule read back is %+v", rule)
 	}
 
-	want := []string{"hbacrule_show", "hbacrule_add", "hbacrule_add_user", "hbacrule_add_host",
-		"hbacrule_add_service", "hbacrule_disable", "hbacrule_show"}
+	// The rule is disabled before it has a member, and a declaration that leaves
+	// it disabled never sends the enable.
+	want := []string{"hbacrule_show", "hbacrule_add", "hbacrule_disable", "hbacrule_add_user",
+		"hbacrule_add_host", "hbacrule_add_service", "hbacrule_show"}
 	if got := fake.methods(); !slices.Equal(got, want) {
 		t.Fatalf("the commands were %v, expected %v", got, want)
 	}
@@ -169,11 +157,9 @@ func TestEnsureHBACRuleCreatesAMissingRuleAndFillsIt(t *testing.T) {
 }
 
 func TestEnsureHBACRuleReachesTheDeclaredMembers(t *testing.T) {
-	fake, client := newFakeDirectory(t)
-	fake.answers["hbacrule_show"] = answerWith(map[string]any{
-		"cn": []any{"ops-ssh"}, "ipaenabledflag": []any{true}, "description": []any{"old"},
-		"memberuser_user": []any{"alice", "bob"}, "hostcategory": []any{"all"},
-		"memberservice_hbacsvc": []any{"sshd"},
+	fake, client, _ := newHBACDirectory(t, &HBACRule{
+		Name: "ops-ssh", Description: "old", Enabled: true,
+		Users: []string{"alice", "bob"}, AllHosts: true, Services: []string{"sshd"},
 	})
 
 	_, err := client.EnsureHBACRule(context.Background(), HBACRuleSpec{
@@ -209,20 +195,25 @@ func TestEnsureHBACRuleReachesTheDeclaredMembers(t *testing.T) {
 	if got := optionStrings(added, "user"); !slices.Equal(got, []string{"carol"}) {
 		t.Fatalf("added %v, expected carol alone", got)
 	}
-	// Services did not change and the rule stays enabled: no command for either.
-	for _, method := range []string{"hbacrule_add_service", "hbacrule_remove_service",
-		"hbacrule_enable", "hbacrule_disable", "hbacrule_add"} {
+	// Services did not change: no command for them, and the entry itself is not
+	// rewritten.
+	for _, method := range []string{"hbacrule_add_service", "hbacrule_remove_service", "hbacrule_add"} {
 		if slices.Contains(methods, method) {
 			t.Errorf("%s was sent although nothing changed there", method)
 		}
 	}
+	// The rule leaves service for the length of the change and comes back only
+	// after every member is in.
+	disableAt := slices.Index(methods, "hbacrule_disable")
+	enableAt := slices.Index(methods, "hbacrule_enable")
+	if disableAt != 1 || enableAt < 0 || enableAt < slices.Index(methods, "hbacrule_add_user") {
+		t.Fatalf("the rule was changed while it was in service: %v", methods)
+	}
 }
 
 func TestEnsureHBACRuleSetsACategoryAfterRemovingMembers(t *testing.T) {
-	fake, client := newFakeDirectory(t)
-	fake.answers["hbacrule_show"] = answerWith(map[string]any{
-		"cn": []any{"everyone"}, "ipaenabledflag": []any{true},
-		"memberhost_host": []any{"web1.flotestro.test"},
+	fake, client, _ := newHBACDirectory(t, &HBACRule{
+		Name: "everyone", Enabled: true, Hosts: []string{"web1.flotestro.test"},
 	})
 	_, err := client.EnsureHBACRule(context.Background(), HBACRuleSpec{
 		Name: "everyone", Enabled: true, AllHosts: true, AllUsers: true, AllServices: true,
@@ -264,10 +255,9 @@ func TestAPartialMembershipFailureIsNotASuccess(t *testing.T) {
 }
 
 func TestEnsureSudoRuleWritesEveryMemberKind(t *testing.T) {
-	fake, client := newFakeDirectory(t)
-	fake.answers["sudorule_show"] = answerWith(map[string]any{
-		"cn": []any{"ops-restart"}, "ipaenabledflag": []any{true}, "ipasudoopt": []any{"!authenticate"},
-		"memberallowcmd_sudocmd": []any{"/usr/bin/systemctl"},
+	fake, client, _ := newSudoDirectory(t, &SudoRule{
+		Name: "ops-restart", Enabled: true, Options: []string{"!authenticate"},
+		Commands: []string{"/usr/bin/systemctl"},
 	})
 	_, err := client.EnsureSudoRule(context.Background(), SudoRuleSpec{
 		Name: "ops-restart", Enabled: true,
@@ -301,6 +291,14 @@ func TestEnsureSudoRuleWritesEveryMemberKind(t *testing.T) {
 	}
 	if slices.Contains(methods, "sudorule_add") || slices.Contains(methods, "sudorule_mod") {
 		t.Errorf("the entry itself was rewritten although nothing changed there: %v", methods)
+	}
+	// The rule leaves service for the length of the change and comes back only
+	// after every command and option is in.
+	if disableAt := slices.Index(methods, "sudorule_disable"); disableAt != 1 {
+		t.Fatalf("the rule was changed while it was in service: %v", methods)
+	}
+	if enableAt := slices.Index(methods, "sudorule_enable"); enableAt < slices.Index(methods, "sudorule_add_option") {
+		t.Fatalf("the rule came back into service before its options: %v", methods)
 	}
 }
 
@@ -506,17 +504,7 @@ func TestHBACTestParsesADenial(t *testing.T) {
 // between a rule for named hosts and commands and a rule for everything.
 func TestEnsureSudoRuleNeverEmitsACategoryForNamedMembers(t *testing.T) {
 	t.Run("a new rule with names", func(t *testing.T) {
-		fake, client := newFakeDirectory(t)
-		fake.answers["sudorule_show"] = func(call rpcCall) (any, *rpcError) {
-			if fake.count("sudorule_add") == 0 {
-				return notFound(call)
-			}
-			return map[string]any{"result": map[string]any{
-				"cn": []any{"ops-restart"}, "ipaenabledflag": []any{true},
-				"memberhost_host":        []any{"web1.flotestro.test"},
-				"memberallowcmd_sudocmd": []any{"/usr/bin/systemctl"},
-			}}, nil
-		}
+		fake, client, _ := newSudoDirectory(t, nil)
 		_, err := client.EnsureSudoRule(context.Background(), SudoRuleSpec{
 			Name: "ops-restart", Enabled: true, UserGroups: []string{"ops"},
 			Hosts: []string{"web1.flotestro.test"}, Commands: []string{"/usr/bin/systemctl"},
@@ -531,12 +519,10 @@ func TestEnsureSudoRuleNeverEmitsACategoryForNamedMembers(t *testing.T) {
 	})
 
 	t.Run("an ALL rule narrowed to names", func(t *testing.T) {
-		fake, client := newFakeDirectory(t)
 		// The directory holds the widest shape: every host, every command.
-		fake.answers["sudorule_show"] = answerWith(map[string]any{
-			"cn": []any{"ops-restart"}, "ipaenabledflag": []any{true},
-			"hostcategory": []any{"all"}, "cmdcategory": []any{"all"},
-			"memberuser_group": []any{"ops"},
+		fake, client, _ := newSudoDirectory(t, &SudoRule{
+			Name: "ops-restart", Enabled: true, AllHosts: true, AllCommands: true,
+			UserGroups: []string{"ops"},
 		})
 		_, err := client.EnsureSudoRule(context.Background(), SudoRuleSpec{
 			Name: "ops-restart", Enabled: true, UserGroups: []string{"ops"},
