@@ -38,10 +38,13 @@ func (p *Planner) planHBACRule(ctx context.Context, spec *HBACRulePayload) (Plan
 		}
 	}
 	if current == nil {
-		plan.Steps = append(plan.Steps, "creating the rule "+spec.Name)
+		plan.Steps = append(plan.Steps, "creating the rule "+spec.Name+", disabled")
 	} else {
 		plan.Replaces = true
 		plan.Steps = append(plan.Steps, "the rule "+spec.Name+" exists; bringing it to the declared state")
+		if current.Enabled {
+			plan.Steps = append(plan.Steps, "taking the rule out of service while its members change")
+		}
 		plan.Steps = append(plan.Steps, memberDiffSteps("users", current.Users, spec.Users)...)
 		plan.Steps = append(plan.Steps, memberDiffSteps("user groups", current.UserGroups, spec.UserGroups)...)
 		plan.Steps = append(plan.Steps, memberDiffSteps("hosts", current.Hosts, spec.Hosts)...)
@@ -51,12 +54,16 @@ func (p *Planner) planHBACRule(ctx context.Context, spec *HBACRulePayload) (Plan
 		plan.Steps = append(plan.Steps, categorySteps("users", current.AllUsers, spec.AllUsers)...)
 		plan.Steps = append(plan.Steps, categorySteps("hosts", current.AllHosts, spec.AllHosts)...)
 		plan.Steps = append(plan.Steps, categorySteps("services", current.AllServices, spec.AllServices)...)
-		if current.Enabled != spec.Enabled {
-			plan.Steps = append(plan.Steps, enableStep(spec.Enabled))
-		}
 	}
-	if current == nil && !spec.Enabled {
+	// The flag comes last, and only if the directory answers with the declared
+	// state: a change that stops half-way leaves the rule disabled.
+	switch {
+	case spec.Enabled:
+		plan.Steps = append(plan.Steps, "enabling the rule once the directory confirms its members")
+	case current == nil:
 		plan.Steps = append(plan.Steps, "the rule stays disabled")
+	case current.Enabled:
+		plan.Steps = append(plan.Steps, enableStep(false))
 	}
 
 	plan.Conflicts = append(plan.Conflicts, view.missingMembers(spec.Users, spec.UserGroups, spec.Hosts, spec.HostGroups)...)

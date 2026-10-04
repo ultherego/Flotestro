@@ -351,13 +351,52 @@ func isEmptyModification(err error) bool {
 	return strings.Contains(text, "(EmptyModError)") || strings.Contains(text, "no modifications")
 }
 
+// The outcome of a rule change that stopped half-way.
+const (
+	// RuleRestored: the rule carries the state it carried before the change,
+	// the enabled flag included.
+	RuleRestored = "hbac_rule_restored"
+	// RuleWithdrawn: the rule was being created, so it is not in the directory -
+	// it was taken out again, or it was never added.
+	RuleWithdrawn = "hbac_rule_withdrawn"
+	// RuleRestoreFailed: the previous state could not be put back, so what the
+	// rule carries is nobody's decision any more. The loudest of the outcomes.
+	RuleRestoreFailed = "hbac_rule_restore_failed"
+)
+
+// RuleChangeError reports a rule change that did not go through: the step that
+// failed, and what became of the rule afterwards.
+type RuleChangeError struct {
+	// Rule is the name of the rule; Step names the part of the change that failed.
+	Rule string
+	Step string
+	// Outcome is RuleRestored, RuleWithdrawn or RuleRestoreFailed.
+	Outcome string
+	// Err is the failure that stopped the change; Restore says why the previous
+	// state could not be put back, when it could not.
+	Err     error
+	Restore error
+}
+
+func (e *RuleChangeError) Error() string {
+	if e.Restore != nil {
+		return fmt.Sprintf("the rule %s, %s: %v; the previous state could not be put back: %v [%s]",
+			e.Rule, e.Step, e.Err, e.Restore, e.Outcome)
+	}
+	return fmt.Sprintf("the rule %s, %s: %v [%s]", e.Rule, e.Step, e.Err, e.Outcome)
+}
+
+func (e *RuleChangeError) Unwrap() error { return e.Err }
+
 // EnsureHBACRule brings the rule to the declared state and returns it as the
-// directory holds it afterwards.
+// directory holds it afterwards. The rule grants nothing while the change runs:
+// it is created, or taken out of service, disabled, and it is enabled only once
+// the directory answers with the declared state.
 func (c *Client) EnsureHBACRule(ctx context.Context, spec HBACRuleSpec) (*HBACRule, error) {
 	if err := spec.Validate(); err != nil {
 		return nil, err
 	}
-	current, err := c.ShowHBACRule(ctx, spec.Name)
+	before, err := c.ShowHBACRule(ctx, spec.Name)
 	if err != nil {
 		return nil, fmt.Errorf("reading the HBAC rule %s: %w", spec.Name, err)
 	}
@@ -365,16 +404,88 @@ func (c *Client) EnsureHBACRule(ctx context.Context, spec HBACRuleSpec) (*HBACRu
 	// whatever happens next - also after a failure half-way through.
 	defer c.invalidate()
 
+	if step, err := c.applyHBACRule(ctx, spec, before); err != nil {
+		if before == nil && step == stepCreateRule {
+			// The rule was never added, so there is nothing to take back - and a
+			// rule of that name that appeared meanwhile is not this change's.
+			return nil, &RuleChangeError{Rule: spec.Name, Step: step, Outcome: RuleWithdrawn, Err: err}
+		}
+		return nil, c.restoreHBACRule(ctx, spec.Name, step, err, before)
+	}
+
+	// The flag is set on the strength of what the directory answers, not of what
+	// the change believes it sent: a member the directory dropped would otherwise
+	// be enabled along with the rest.
+	const readBack = "comparing the rule read back with the declaration"
+	rule, err := c.ShowHBACRule(ctx, spec.Name)
+	if err != nil {
+		return nil, c.restoreHBACRule(ctx, spec.Name, readBack, err, before)
+	}
+	if rule == nil {
+		return nil, c.restoreHBACRule(ctx, spec.Name, readBack,
+			fmt.Errorf("the directory no longer holds the rule"), before)
+	}
+	if gaps := hbacRuleDifferences(*rule, spec); len(gaps) > 0 {
+		return nil, c.restoreHBACRule(ctx, spec.Name, readBack,
+			fmt.Errorf("the rule is incomplete: %s", strings.Join(gaps, "; ")), before)
+	}
+	if !spec.Enabled {
+		return rule, nil
+	}
+	if err := c.setRuleEnabled(ctx, "hbacrule", spec.Name, false, true); err != nil {
+		return nil, c.restoreHBACRule(ctx, spec.Name, "enabling the rule", err, before)
+	}
+	enabled, err := c.ShowHBACRule(ctx, spec.Name)
+	if err != nil {
+		return nil, fmt.Errorf("reading the HBAC rule %s back: %w", spec.Name, err)
+	}
+	if enabled == nil || !enabled.Enabled {
+		return nil, c.restoreHBACRule(ctx, spec.Name, "enabling the rule",
+			fmt.Errorf("the rule reads back disabled although the directory accepted the change"), before)
+	}
+	return enabled, nil
+}
+
+// applyHBACRule writes the declared members and categories with the rule
+// disabled. It names the step that failed, if one did.
+func (c *Client) applyHBACRule(ctx context.Context, spec HBACRuleSpec, current *HBACRule) (string, error) {
+	for _, step := range c.hbacRuleSteps(spec, current) {
+		if err := step.run(ctx); err != nil {
+			return step.name, err
+		}
+	}
+	return "", nil
+}
+
+// hbacRuleSteps is the change broken into the directory commands it takes, in
+// the order the directory accepts them.
+func (c *Client) hbacRuleSteps(spec HBACRuleSpec, current *HBACRule) []ruleStep {
+	var steps []ruleStep
 	if current == nil {
+		current = &HBACRule{Name: spec.Name}
 		options := map[string]any{}
 		if spec.Description != "" {
 			options["description"] = spec.Description
 		}
-		if _, err := c.call(ctx, "hbacrule_add", []string{spec.Name}, options); err != nil {
-			return nil, fmt.Errorf("creating the HBAC rule %s: %w", spec.Name, err)
-		}
-		current = &HBACRule{Name: spec.Name, Enabled: true}
+		steps = append(steps, ruleStep{stepCreateRule, func(ctx context.Context) error {
+			if _, err := c.call(ctx, "hbacrule_add", []string{spec.Name}, options); err != nil {
+				return fmt.Errorf("creating the HBAC rule %s: %w", spec.Name, err)
+			}
+			return nil
+		}})
+		// The directory creates a rule enabled, so it would take part in the
+		// decision before it has a single member.
+		steps = append(steps, ruleStep{"disabling the new rule", func(ctx context.Context) error {
+			return c.setRuleEnabled(ctx, "hbacrule", spec.Name, true, false)
+		}})
 	} else {
+		if current.Enabled {
+			// A rule being changed grants whatever its half-written members say,
+			// so it comes out of service until the new state is confirmed.
+			steps = append(steps, ruleStep{"taking the rule out of service", func(ctx context.Context) error {
+				return c.setRuleEnabled(ctx, "hbacrule", spec.Name, true, false)
+			}})
+		}
 		options := map[string]any{}
 		if current.Description != spec.Description {
 			options["description"] = nullable(spec.Description)
@@ -389,12 +500,12 @@ func (c *Client) EnsureHBACRule(ctx context.Context, spec HBACRuleSpec) (*HBACRu
 		if current.AllServices && !spec.AllServices {
 			options["servicecategory"] = nil
 		}
-		if err := c.modifyRule(ctx, "hbacrule_mod", spec.Name, options); err != nil {
-			return nil, err
-		}
+		steps = append(steps, ruleStep{"clearing the categories the declaration drops", func(ctx context.Context) error {
+			return c.modifyRule(ctx, "hbacrule_mod", spec.Name, options)
+		}})
 	}
 
-	steps := []memberStep{
+	members := []memberStep{
 		{"hbacrule_remove_user", "user", diff(current.Users, spec.Users).removed},
 		{"hbacrule_remove_user", "group", diff(current.UserGroups, spec.UserGroups).removed},
 		{"hbacrule_remove_host", "host", diff(current.Hosts, spec.Hosts).removed},
@@ -408,10 +519,10 @@ func (c *Client) EnsureHBACRule(ctx context.Context, spec HBACRuleSpec) (*HBACRu
 		{"hbacrule_add_service", "hbacsvc", diff(current.Services, spec.Services).added},
 		{"hbacrule_add_service", "hbacsvcgroup", diff(current.ServiceGroups, spec.ServiceGroups).added},
 	}
-	for _, step := range steps {
-		if err := c.changeRuleMembers(ctx, step.method, spec.Name, step.kind, step.names); err != nil {
-			return nil, err
-		}
+	for _, member := range members {
+		steps = append(steps, ruleStep{hbacMemberLabel(member.method, member.kind), func(ctx context.Context) error {
+			return c.changeRuleMembers(ctx, member.method, spec.Name, member.kind, member.names)
+		}})
 	}
 
 	categories := map[string]any{}
@@ -424,14 +535,162 @@ func (c *Client) EnsureHBACRule(ctx context.Context, spec HBACRuleSpec) (*HBACRu
 	if spec.AllServices && !current.AllServices {
 		categories["servicecategory"] = "all"
 	}
-	if err := c.modifyRule(ctx, "hbacrule_mod", spec.Name, categories); err != nil {
-		return nil, err
-	}
+	steps = append(steps, ruleStep{"setting the categories", func(ctx context.Context) error {
+		return c.modifyRule(ctx, "hbacrule_mod", spec.Name, categories)
+	}})
+	return steps
+}
 
-	if err := c.setRuleEnabled(ctx, "hbacrule", spec.Name, current.Enabled, spec.Enabled); err != nil {
-		return nil, err
+// restoreHBACRule puts the rule back the way it stood before the change and
+// returns the error that tells both halves of the story.
+func (c *Client) restoreHBACRule(ctx context.Context, name, step string, cause error, before *HBACRule) error {
+	failure := &RuleChangeError{Rule: name, Step: step, Err: cause}
+	if before == nil {
+		// The directory held no such rule before the change, so that is the
+		// state to go back to.
+		if err := c.removeRule(ctx, "hbacrule_del", name); err != nil {
+			failure.Outcome, failure.Restore = RuleRestoreFailed, err
+			return failure
+		}
+		failure.Outcome = RuleWithdrawn
+		return failure
 	}
-	return c.ShowHBACRule(ctx, spec.Name)
+	if err := c.restoreHBACState(ctx, *before); err != nil {
+		failure.Outcome, failure.Restore = RuleRestoreFailed, err
+		return failure
+	}
+	failure.Outcome = RuleRestored
+	return failure
+}
+
+// restoreHBACState writes the previous state back whole - members, categories
+// and description - and only then the enabled flag the rule had.
+func (c *Client) restoreHBACState(ctx context.Context, before HBACRule) error {
+	now, err := c.ShowHBACRule(ctx, before.Name)
+	if err != nil {
+		return err
+	}
+	if now == nil {
+		return fmt.Errorf("the directory no longer holds the rule")
+	}
+	wanted := hbacSpecOf(before)
+	wanted.Enabled = false
+	if step, err := c.applyHBACRule(ctx, wanted, now); err != nil {
+		return fmt.Errorf("%s: %w", step, err)
+	}
+	back, err := c.ShowHBACRule(ctx, before.Name)
+	if err != nil {
+		return err
+	}
+	if back == nil {
+		return fmt.Errorf("the directory no longer holds the rule")
+	}
+	if gaps := hbacRuleDifferences(*back, wanted); len(gaps) > 0 {
+		return fmt.Errorf("the previous state did not come back whole: %s", strings.Join(gaps, "; "))
+	}
+	return c.setRuleEnabled(ctx, "hbacrule", before.Name, false, before.Enabled)
+}
+
+// hbacSpecOf reads a rule as a declaration of itself, so that the state before
+// a change can be written back with the same path that changed it.
+func hbacSpecOf(rule HBACRule) HBACRuleSpec {
+	return HBACRuleSpec{
+		Name: rule.Name, Description: rule.Description, Enabled: rule.Enabled,
+		Users: rule.Users, UserGroups: rule.UserGroups,
+		Hosts: rule.Hosts, HostGroups: rule.HostGroups,
+		Services: rule.Services, ServiceGroups: rule.ServiceGroups,
+		AllUsers: rule.AllUsers, AllHosts: rule.AllHosts, AllServices: rule.AllServices,
+	}
+}
+
+// hbacRuleDifferences names where the rule the directory holds departs from the
+// declaration. The enabled flag is left out: it is what the comparison decides.
+func hbacRuleDifferences(rule HBACRule, spec HBACRuleSpec) []string {
+	var differences []string
+	if rule.Description != spec.Description {
+		differences = append(differences,
+			fmt.Sprintf("the description reads %q, declared %q", rule.Description, spec.Description))
+	}
+	members := []struct {
+		kind         string
+		held, wanted []string
+	}{
+		{"users", rule.Users, spec.Users},
+		{"user groups", rule.UserGroups, spec.UserGroups},
+		{"hosts", rule.Hosts, spec.Hosts},
+		{"host groups", rule.HostGroups, spec.HostGroups},
+		{"services", rule.Services, spec.Services},
+		{"service groups", rule.ServiceGroups, spec.ServiceGroups},
+	}
+	for _, member := range members {
+		missing, extra := memberGap(member.held, member.wanted)
+		if len(missing) > 0 {
+			differences = append(differences,
+				fmt.Sprintf("the %s %s are not in the rule", member.kind, strings.Join(missing, ", ")))
+		}
+		if len(extra) > 0 {
+			differences = append(differences,
+				fmt.Sprintf("the %s %s are in the rule and not declared", member.kind, strings.Join(extra, ", ")))
+		}
+	}
+	categories := []struct {
+		kind         string
+		held, wanted bool
+	}{
+		{"user", rule.AllUsers, spec.AllUsers},
+		{"host", rule.AllHosts, spec.AllHosts},
+		{"service", rule.AllServices, spec.AllServices},
+	}
+	for _, category := range categories {
+		if category.held != category.wanted {
+			differences = append(differences,
+				fmt.Sprintf("the rule covers every %s: %t, declared %t", category.kind, category.held, category.wanted))
+		}
+	}
+	return differences
+}
+
+// memberGap compares two member lists ignoring order and letter case: the
+// directory answers with the name of the entry it found, not with the name the
+// declaration spelled.
+func memberGap(held, wanted []string) (missing, extra []string) {
+	folded := func(names []string) []string {
+		out := make([]string, 0, len(names))
+		for _, name := range names {
+			out = append(out, strings.ToLower(strings.TrimSpace(name)))
+		}
+		return out
+	}
+	inRule, declared := folded(held), folded(wanted)
+	for index, name := range declared {
+		if !slices.Contains(inRule, name) {
+			missing = append(missing, wanted[index])
+		}
+	}
+	for index, name := range inRule {
+		if !slices.Contains(declared, name) {
+			extra = append(extra, held[index])
+		}
+	}
+	return missing, extra
+}
+
+// hbacMemberNames spell out a member kind for the name of a step.
+var hbacMemberNames = map[string]string{
+	"user": "users", "group": "user groups", "host": "hosts",
+	"hostgroup": "host groups", "hbacsvc": "services", "hbacsvcgroup": "service groups",
+}
+
+func hbacMemberLabel(method, kind string) string {
+	verb := "adding"
+	if strings.Contains(method, "_remove_") {
+		verb = "removing"
+	}
+	name := hbacMemberNames[kind]
+	if name == "" {
+		name = kind
+	}
+	return verb + " the " + name
 }
 
 // RemoveHBACRule deletes an access rule. A rule that does not exist is not
@@ -597,6 +856,17 @@ type memberStep struct {
 	kind   string
 	names  []string
 }
+
+// ruleStep is one command of a rule change, named so that a failure can say
+// where the change stopped.
+type ruleStep struct {
+	name string
+	run  func(ctx context.Context) error
+}
+
+// stepCreateRule is the step that adds the entry: the one step a failure leaves
+// nothing behind to put back.
+const stepCreateRule = "creating the rule"
 
 // changeRuleMembers adds or removes members of one kind.
 func (c *Client) changeRuleMembers(ctx context.Context, method, name, kind string, members []string) error {

@@ -136,6 +136,14 @@ func TestTheRulePlanResolvesHostsAndUsers(t *testing.T) {
 	if len(plan.Warnings) != 0 {
 		t.Fatalf("a narrow rule got warnings: %v", plan.Warnings)
 	}
+	// The plan says what the execution does: the rule is born disabled and the
+	// flag waits for the directory to confirm the members.
+	joined := strings.Join(plan.Steps, "\n")
+	for _, want := range []string{"creating the rule ops-ssh, disabled", "once the directory confirms its members"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("the steps lack %q:\n%s", want, joined)
+		}
+	}
 }
 
 func TestTheRulePlanShowsTheDiffAgainstTheExistingRule(t *testing.T) {
