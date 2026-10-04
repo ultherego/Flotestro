@@ -102,11 +102,70 @@ func (o backupOrder) digest() string {
 	return hex.EncodeToString(sum[:])
 }
 
+// BackupOrderDifference names the fields in which the request and the bound
+// payload disagree. Field names only: a refusal says which part of the order
+// differs without printing a repository address or a path back into a log.
+//
+// It exists because the refusal used to print two digests and nothing else. A
+// verifier read that filled six fields of a twenty-field order was then
+// indistinguishable from a tampered order, and the answer to "which field"
+// cost an hour of reading the two sides. One line of the refusal now says it.
+func BackupOrderDifference(request *helperv1.BackupRequest, payload *opspec.BackupPayload) []string {
+	got, want := orderOfRequest(request), orderOfPayload(payload)
+	var differing []string
+	for _, field := range []struct {
+		name      string
+		got, want any
+	}{
+		{"id", got.ID, want.ID},
+		{"tool", got.Tool, want.Tool},
+		{"repository", got.Repository, want.Repository},
+		{"paths", strings.Join(got.Paths, "\x1f"), strings.Join(want.Paths, "\x1f")},
+		{"excludes", strings.Join(got.Excludes, "\x1f"), strings.Join(want.Excludes, "\x1f")},
+		{"tags", strings.Join(got.Tags, "\x1f"), strings.Join(want.Tags, "\x1f")},
+		{"keep_last", got.KeepLast, want.KeepLast},
+		{"keep_daily", got.KeepDaily, want.KeepDaily},
+		{"keep_weekly", got.KeepWeekly, want.KeepWeekly},
+		{"keep_monthly", got.KeepMonthly, want.KeepMonthly},
+		{"prune", got.Prune, want.Prune},
+		{"runbook", got.Runbook, want.Runbook},
+		{"initialize", got.Initialize, want.Initialize},
+		{"read_data", got.ReadData, want.ReadData},
+		{"snapshot_id", got.SnapshotID, want.SnapshotID},
+		{"target", got.Target, want.Target},
+		{"include", strings.Join(got.Include, "\x1f"), strings.Join(want.Include, "\x1f")},
+		{"overwrite", got.Overwrite, want.Overwrite},
+		{"plan", got.Plan, want.Plan},
+		{"plan_hash", got.PlanHash, want.PlanHash},
+		{"password", got.HasPassword, want.HasPassword},
+		{"env", strings.Join(sorted(got.EnvNames), "\x1f"), strings.Join(sorted(want.EnvNames), "\x1f")},
+	} {
+		if fmt.Sprintf("%v", field.got) != fmt.Sprintf("%v", field.want) {
+			differing = append(differing, field.name)
+		}
+	}
+	return differing
+}
+
+func sorted(values []string) []string {
+	out := append([]string(nil), values...)
+	sort.Strings(out)
+	return out
+}
+
 // BackupOrderDigest is the digest of the order a capability authorizes, from
 // the payload the panel signed.
 func BackupOrderDigest(payload *opspec.BackupPayload) string {
 	if payload == nil {
 		return ""
+	}
+	return orderOfPayload(payload).digest()
+}
+
+// orderOfPayload is the canonical order as the panel signed it.
+func orderOfPayload(payload *opspec.BackupPayload) backupOrder {
+	if payload == nil {
+		return backupOrder{}
 	}
 	order := backupOrder{
 		ID: payload.ID, Tool: payload.Tool,
@@ -124,13 +183,18 @@ func BackupOrderDigest(payload *opspec.BackupPayload) string {
 	for name := range payload.EnvSecrets {
 		order.EnvNames = append(order.EnvNames, name)
 	}
-	return order.digest()
+	return order
 }
 
 // backupRequestDigest is the same digest, from the request the helper received.
 func backupRequestDigest(request *helperv1.BackupRequest) string {
+	return orderOfRequest(request).digest()
+}
+
+// orderOfRequest is the canonical order as the helper received it.
+func orderOfRequest(request *helperv1.BackupRequest) backupOrder {
 	if request == nil {
-		return ""
+		return backupOrder{}
 	}
 	order := backupOrder{
 		ID:   request.GetId(),
@@ -148,5 +212,5 @@ func backupRequestDigest(request *helperv1.BackupRequest) string {
 	for name := range request.GetEnv() {
 		order.EnvNames = append(order.EnvNames, name)
 	}
-	return order.digest()
+	return order
 }
