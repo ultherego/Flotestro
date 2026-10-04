@@ -185,10 +185,24 @@ func (c *Consumer) claimRound(ctx context.Context) (*round, error) {
 	if failures >= narrowAfter {
 		limit = 1
 	}
+	// Only events no earlier event can still come before. The identifier is a
+	// sequence number, taken at the insert and visible at the commit, so a
+	// transaction that took 100 and stayed open while another took 101 and
+	// committed used to leave this cursor at 101 - and 100, committing
+	// afterwards, never satisfied "id > 101" again. It stayed in the table and
+	// reached no durable consumer: no webhook, no notification, and nothing
+	// said so, because from the cursor's side nothing had happened.
+	//
+	// So an event is read once every transaction that could still insert a
+	// lower number has finished: pg_snapshot_xmin names the oldest one that is
+	// still running. An event from before this column existed waits for
+	// nothing, which is what the null means.
 	rows, err := tx.Query(ctx, `
 		select id, aggregate_type, aggregate_id, event_type, payload, occurred_at
 		  from outbox_events
 		 where id > $1
+		   and (inserted_xid is null
+		        or inserted_xid < pg_snapshot_xmin(pg_current_snapshot()))
 		 order by id
 		 limit $2`, lastID, limit)
 	if err != nil {
