@@ -92,6 +92,26 @@ func unpack(t *testing.T, bundle []byte) map[string][]byte {
 	return files
 }
 
+// tar -czf ... -C dir . is how the gate writes the bundle, and it names every
+// entry with a leading "./" plus a directory entry per folder. A checker that
+// only accepted the bare names would refuse every real bundle while every test
+// passed, so this is the shape the laboratory actually produces.
+func TestTheBundleTheLaboratoryWritesIsAccepted(t *testing.T) {
+	bundle, sha, tree := goodBundle(t)
+	files := unpack(t, bundle)
+	asTarWritesIt := map[string][]byte{}
+	for name, content := range files {
+		asTarWritesIt["./"+name] = content
+	}
+	evidence, err := VerifyEvidence(bytes.NewReader(bundleOf(t, asTarWritesIt)), sha, tree)
+	if err != nil {
+		t.Fatalf("the bundle as tar writes it was refused: %v", err)
+	}
+	if evidence.Verified != 2 {
+		t.Fatalf("%d files were verified, expected 2", evidence.Verified)
+	}
+}
+
 func TestABundleThatBacksItsReportIsAccepted(t *testing.T) {
 	bundle, sha, tree := goodBundle(t)
 	evidence, err := VerifyEvidence(bytes.NewReader(bundle), sha, tree)
