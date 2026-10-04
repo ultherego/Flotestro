@@ -1786,6 +1786,8 @@ export const pl: Record<string, string> = {
   "Reason": "Powód",
   "Reason (at least 8 characters)": "Powód (min. 8 znaków)",
   "Reason (at least 8 characters, kept in the audit trail)": "Powód (min. 8 znaków, trafia do audytu)",
+  "This operation is critical: the approval is recorded with a reason of at least 8 characters.": "Ta operacja jest krytyczna: zatwierdzenie jest zapisywane z powodem o długości co najmniej 8 znaków.",
+  "reason for the approval, at least 8 characters": "powód zatwierdzenia, co najmniej 8 znaków",
   "Reason for adding the key (at least 8 characters)": "Powód dodania klucza (min. 8 znaków)",
   "Reason for replacing the list (at least 8 characters)": "Powód nadpisania listy (min. 8 znaków)",
   "Reason (kept in the audit trail)": "Powód (trafia do audytu)",
