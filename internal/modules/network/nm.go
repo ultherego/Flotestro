@@ -46,7 +46,16 @@ type Profile struct {
 	// else's search domains and with the DHCP servers rejected.
 	DNSSearch     []string `json:"dns_search,omitempty"`
 	IgnoreAutoDNS bool     `json:"ignore_auto_dns,omitempty"`
-	Routes        []string `json:"routes,omitempty"`
+	// DNSSearch6 and IgnoreAutoDNS6 are the same two settings of the second
+	// family, kept apart because the host keeps them apart. Merging them into
+	// one pair was right for showing a resolver - a server is a server - and
+	// wrong for the snapshot a rollback restores from: a profile with
+	// ipv4.ignore-auto-dns=no and ipv6=yes came back with yes on both, and the
+	// search domains came back as the union of the two lists. A rollback then
+	// changed a resolver policy nobody had asked it to change.
+	DNSSearch6     []string `json:"dns_search6,omitempty"`
+	IgnoreAutoDNS6 bool     `json:"ignore_auto_dns6,omitempty"`
+	Routes         []string `json:"routes,omitempty"`
 	// The second family.
 	Method6    string   `json:"method6,omitempty"`
 	Addresses6 []string `json:"addresses6,omitempty"`
@@ -148,9 +157,9 @@ func ParseProfile(output string) Profile {
 		case "ipv6.dns":
 			profile.DNS = append(profile.DNS, valueList(value)...)
 		case "ipv6.dns-search":
-			profile.DNSSearch = appendMissing(profile.DNSSearch, valueList(value))
+			profile.DNSSearch6 = valueList(value)
 		case "ipv6.ignore-auto-dns":
-			profile.IgnoreAutoDNS = profile.IgnoreAutoDNS || value == "yes"
+			profile.IgnoreAutoDNS6 = value == "yes"
 		case "802-3-ethernet.mtu":
 			profile.MTU = value
 		}
@@ -332,6 +341,17 @@ func ProfileArguments(profile Profile) ([][]string, error) {
 	if profile.IgnoreAutoDNS {
 		ignore = "yes"
 	}
+	ignore6 := "no"
+	if profile.IgnoreAutoDNS6 {
+		ignore6 = "yes"
+	}
+	// A profile that says nothing about the second family's search domains
+	// takes the first family's, which is what an order written by hand means;
+	// a snapshot read from the host carries both, so a rollback restores both.
+	search6 := profile.DNSSearch6
+	if search6 == nil {
+		search6 = profile.DNSSearch
+	}
 	v4, v6 := splitDNSFamilies(profile.DNS)
 	modification := []string{NmcliPath, "connection", "modify", profile.Connection,
 		"ipv4.method", profile.Method,
@@ -346,8 +366,8 @@ func ProfileArguments(profile Profile) ([][]string, error) {
 	if ipv6CarriesDNS(profile.Method6) {
 		modification = append(modification,
 			"ipv6.dns", strings.Join(v6, ","),
-			"ipv6.dns-search", strings.Join(profile.DNSSearch, ","),
-			"ipv6.ignore-auto-dns", ignore)
+			"ipv6.dns-search", strings.Join(search6, ","),
+			"ipv6.ignore-auto-dns", ignore6)
 	} else if len(v6) > 0 {
 		return nil, fmt.Errorf("the profile sets IPv6 method %q, which carries no "+
 			"resolver settings, and names the IPv6 server %s",

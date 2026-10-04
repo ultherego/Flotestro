@@ -319,11 +319,25 @@ func (s *Server) changeZone(ctx context.Context, action *helperv1.FirewallReques
 				"the port "+action.GetPorts()[0]+" is the management channel; "+
 					"closing it deliberately needs explicit operator consent")
 		}
+		present, known := s.zoneHasPort(ctx, action.GetZone(), action.GetPorts()[0], action.GetProtocol())
+		if !known {
+			return reject(ErrorUnsupported,
+				"this host could not say whether the port "+action.GetPorts()[0]+" is already open in "+
+					action.GetZone()+", so the change cannot be made reversible")
+		}
+		if present == action.GetEnable() {
+			return firewallResponse(s.readFirewall(ctx),
+				"the zone already carries this port the way the order asks for", nil)
+		}
 		steps, err = firewall.PortArguments(action.GetZone(), action.GetPorts()[0],
 			action.GetProtocol(), action.GetEnable())
 		if err == nil {
+			// The way back is the state that was, not the opposite of what was
+			// asked. A repeated "open" over an open port used to arm a
+			// rollback that closed it, so a confirmation that never arrived
+			// took away access that existed before the change.
 			undo, err = firewall.PortArguments(action.GetZone(), action.GetPorts()[0],
-				action.GetProtocol(), !action.GetEnable())
+				action.GetProtocol(), present)
 		}
 	} else {
 		// A service is a name for a set of ports, and removing it closes every
@@ -342,9 +356,19 @@ func (s *Server) changeZone(ctx context.Context, action *helperv1.FirewallReques
 						strconv.Itoa(management)+"; closing it deliberately needs explicit operator consent")
 			}
 		}
+		present, known := s.zoneHasService(ctx, action.GetZone(), action.GetService())
+		if !known {
+			return reject(ErrorUnsupported,
+				"this host could not say whether the service "+action.GetService()+" is already open in "+
+					action.GetZone()+", so the change cannot be made reversible")
+		}
+		if present == action.GetEnable() {
+			return firewallResponse(s.readFirewall(ctx),
+				"the zone already carries this service the way the order asks for", nil)
+		}
 		steps, err = firewall.ServiceArguments(action.GetZone(), action.GetService(), action.GetEnable())
 		if err == nil {
-			undo, err = firewall.ServiceArguments(action.GetZone(), action.GetService(), !action.GetEnable())
+			undo, err = firewall.ServiceArguments(action.GetZone(), action.GetService(), present)
 		}
 	}
 	if err != nil {
@@ -375,6 +399,43 @@ func (s *Server) changeZone(ctx context.Context, action *helperv1.FirewallReques
 	return firewallResponse(s.readFirewall(ctx),
 		"the zone was changed; rollback at "+plan.Deadline.Format(time.RFC3339)+
 			" unless the agent confirms connectivity", &plan)
+}
+
+// zoneHasPort says whether the zone already carries the port, and whether the
+// host could be asked at all. The answer decides the way back: an absent
+// answer is not "no".
+func (s *Server) zoneHasPort(ctx context.Context, zone, port, protocol string) (present, known bool) {
+	snapshot := s.readFirewall(ctx)
+	if snapshot.UnavailableReason != "" {
+		return false, false
+	}
+	entry := port
+	if protocol != "" {
+		entry = port + "/" + protocol
+	}
+	for _, carried := range snapshot.Zones {
+		if carried.Name != zone {
+			continue
+		}
+		return slices.Contains(carried.Ports, entry), true
+	}
+	// A zone the host does not list carries nothing, which is an answer.
+	return false, true
+}
+
+// zoneHasService says whether the zone already carries the service.
+func (s *Server) zoneHasService(ctx context.Context, zone, service string) (present, known bool) {
+	snapshot := s.readFirewall(ctx)
+	if snapshot.UnavailableReason != "" {
+		return false, false
+	}
+	for _, carried := range snapshot.Zones {
+		if carried.Name != zone {
+			continue
+		}
+		return slices.Contains(carried.Services, service), true
+	}
+	return false, true
 }
 
 // armZoneRollback writes the inverse of a zone change and arms the timer that
