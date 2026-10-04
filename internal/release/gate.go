@@ -173,7 +173,15 @@ var fullRunStages = []string{
 	// assertion that had switched off an ownership check, emptied two inventory
 	// fields and refused every backup runbook - and go vet had nothing to say.
 	"static",
-	"panel", "web", "vitest",
+	"panel",
+	// schema asks the panel's own log whether the code names a column or a
+	// table the migrations do not create. On 04.10 a column written by the
+	// remediation store and created by no migration made every read of the
+	// remediation plans fail and its endpoint answer 500 - and the gate found
+	// it an hour into the suite, while the panel had been saying it in its log
+	// every five seconds since it started.
+	"schema",
+	"web", "vitest",
 	// fleet proves the deployment the agents stage reports rather than assuming
 	// it. On 30.09 every host agreed it ran 0.62.0 while one of them ran a build
 	// from four days earlier, published under the same version: a deployment

@@ -34,6 +34,7 @@ func goodReport() map[string]any {
 			"gofmt":       map[string]any{"result": "pass", "seconds": 3},
 			"static":      map[string]any{"result": "pass", "seconds": 1},
 			"panel":       map[string]any{"result": "pass", "seconds": 97},
+			"schema":      map[string]any{"result": "pass", "seconds": 2},
 			"web":         map[string]any{"result": "pass", "seconds": 24},
 			"vitest":      map[string]any{"result": "pass", "seconds": 70},
 			"agents":      map[string]any{"result": "pass", "seconds": 60},
