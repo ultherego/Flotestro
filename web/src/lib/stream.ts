@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { readEventStream } from "./eventstream";
 
 /** The progress of an operation in flight. Undetermined values are omitted, not zeroed. */
 export type Progress = {
@@ -19,21 +20,25 @@ export function useProgressStream(path: string | null, keys: unknown[][]) {
 
   useEffect(() => {
     if (!path) return;
-    const source = new EventSource(path, { withCredentials: true });
-
     const refresh = () => {
       for (const key of keys) {
         queryClient.invalidateQueries({ queryKey: key });
       }
     };
-    source.addEventListener("job", refresh);
-    // A durable event of the trail refreshes as well.
-    source.addEventListener("timeline", refresh);
-    // Connecting refreshes too: the screen may have missed changes before
-    // the stream opened.
-    source.addEventListener("ready", refresh);
+    // Read with fetch and not with EventSource: EventSource carries no header,
+    // so on a session signed in with a token - every installation before an
+    // identity provider - the stream was answered 401 and the screen fell back
+    // to polling without saying why.
+    const controller = new AbortController();
+    void readEventStream(path, (event) => {
+      // "ready" refreshes too: the screen may have missed changes before the
+      // stream opened.
+      if (event.event === "job" || event.event === "timeline" || event.event === "ready") {
+        refresh();
+      }
+    }, controller.signal);
 
-    return () => source.close();
+    return () => controller.abort();
     // The query keys are constant within a screen; the dependency is the path.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, queryClient]);
@@ -64,19 +69,20 @@ export function useEnrollmentStream(requestId: string | null, keys: unknown[][])
       setLastTurn(null);
       return;
     }
-    const source = new EventSource("/api/v1/events", { withCredentials: true });
     const refresh = () => {
       for (const key of keys) {
         queryClient.invalidateQueries({ queryKey: key });
       }
     };
-    source.addEventListener("ready", () => {
-      setConnected(true);
-      refresh();
-    });
-    source.addEventListener("enrollment", (event) => {
+    const controller = new AbortController();
+    void readEventStream("/api/v1/events", (event) => {
+      if (event.event === "ready") {
+        refresh();
+        return;
+      }
+      if (event.event !== "enrollment") return;
       try {
-        const data = JSON.parse((event as MessageEvent).data);
+        const data = JSON.parse(event.data);
         const turn: EnrollmentTurn | undefined = data.enrollment;
         if (!turn || turn.request_id !== requestId) return;
         setLastTurn(turn);
@@ -84,13 +90,12 @@ export function useEnrollmentStream(requestId: string | null, keys: unknown[][])
       } catch {
         // An unreadable turn is skipped: the poll still reads the order.
       }
-    });
-    // A broken stream is resumed by the browser; until then the poll is
-    // the only source, and the screen is told so.
-    source.onerror = () => setConnected(false);
+      // A stream that broke is opened again by the reader; until it answers,
+      // the poll is the only source and the screen is told so.
+    }, controller.signal, setConnected);
 
     return () => {
-      source.close();
+      controller.abort();
       setConnected(false);
     };
     // The query keys are constant within a screen; the dependency is the order.
@@ -122,22 +127,23 @@ export function useProgress(path: string | null): Map<string, Progress> {
       setProgress(new Map());
       return;
     }
-    const source = new EventSource(path, { withCredentials: true });
-
-    source.addEventListener("progress", (event) => {
-      try {
-        const data = JSON.parse((event as MessageEvent).data);
-        const report: Progress = { job_id: data.job_id, ...(data.progress ?? {}) };
-        setProgress((previous) => new Map(previous).set(report.job_id, report));
-      } catch {
-        // An unreadable report is skipped: the preview must not topple the screen.
+    const controller = new AbortController();
+    void readEventStream(path, (event) => {
+      if (event.event === "progress") {
+        try {
+          const data = JSON.parse(event.data);
+          const report: Progress = { job_id: data.job_id, ...(data.progress ?? {}) };
+          setProgress((previous) => new Map(previous).set(report.job_id, report));
+        } catch {
+          // An unreadable report is skipped: the preview must not topple the screen.
+        }
+        return;
       }
-    });
-    // The end of an operation ends its bar - otherwise it would stay on the
-    // screen and suggest something is still running.
-    source.addEventListener("job", (event) => {
+      if (event.event !== "job") return;
+      // The end of an operation ends its bar - otherwise it would stay on the
+      // screen and suggest something is still running.
       try {
-        const data = JSON.parse((event as MessageEvent).data);
+        const data = JSON.parse(event.data);
         if (["succeeded", "failed", "canceled", "expired", "rejected"].includes(data.state)) {
           setProgress((previous) => {
             const copy = new Map(previous);
@@ -149,9 +155,9 @@ export function useProgress(path: string | null): Map<string, Progress> {
         // as above
       }
       queryClient.invalidateQueries({ queryKey: ["jobs"] });
-    });
+    }, controller.signal);
 
-    return () => source.close();
+    return () => controller.abort();
   }, [path, queryClient]);
 
   return progress;
@@ -174,12 +180,11 @@ export function useJournalPreview(path: string | null, paused: boolean) {
     if (!path) return;
     setLines([]);
     setDropped(0);
-    const source = new EventSource(path, { withCredentials: true });
-
-    source.addEventListener("log", (event) => {
-      if (pausedRef.current) return;
+    const controller = new AbortController();
+    void readEventStream(path, (event) => {
+      if (event.event !== "log" || pausedRef.current) return;
       try {
-        const data = JSON.parse((event as MessageEvent).data);
+        const data = JSON.parse(event.data);
         const chunk: LogChunk = data.log;
         if (!chunk) return;
         setLines((previous) => {
@@ -194,9 +199,9 @@ export function useJournalPreview(path: string | null, paused: boolean) {
       } catch {
         // An unreadable chunk is skipped: the preview must not topple the screen.
       }
-    });
+    }, controller.signal);
 
-    return () => source.close();
+    return () => controller.abort();
   }, [path]);
 
   return { lines, dropped };

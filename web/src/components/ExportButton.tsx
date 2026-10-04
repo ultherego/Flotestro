@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useToast } from "./Toast";
 import { useT } from "../i18n";
+import { fetchWithCredentials } from "../lib/api";
 
 /**
  * The export of a list screen as a CSV file.
@@ -21,7 +22,7 @@ export function ExportButton({ path, params, disabled = false, label }: {
   const download = async () => {
     setExporting(true);
     try {
-      const response = await fetch(exportAddress(path, params), { credentials: "same-origin" });
+      const response = await fetchWithCredentials(exportAddress(path, params));
       if (!response.ok) {
         let detail = response.statusText;
         try { detail = ((await response.json()) as { detail?: string }).detail ?? detail; } catch { /* a proxy's page, not the API's answer */ }

@@ -108,6 +108,24 @@ async function request<T>(
   return (await requestWithMeta<T>(method, path, body, options)).data;
 }
 
+/**
+ * A download that carries the same credentials as every other read.
+ *
+ * The audit export, the support bundle and the files behind ExportButton used
+ * fetch(..., { credentials: "same-origin" }) - that is, the session cookie and
+ * nothing else. The cookie is set on the OIDC callback and nowhere else, so on
+ * an installation signed in with a token - which is the default one, without an
+ * identity provider - those three paths were answered 401 while the rest of the
+ * screen worked. The token lives in this module; a download that goes around it
+ * is a download without it.
+ */
+export async function fetchWithCredentials(path: string, options: RequestInit = {}): Promise<Response> {
+  const headers: Record<string, string> = { ...(options.headers as Record<string, string> | undefined) };
+  const bearer = bearerToken();
+  if (bearer) headers["Authorization"] = `Bearer ${bearer}`;
+  return fetch(path, { ...options, headers, credentials: "same-origin" });
+}
+
 export const api = {
   get: <T>(path: string, options?: RequestOptions) => request<T>("GET", path, undefined, options),
   // A read that needs the entity tag with the record: the tag names the

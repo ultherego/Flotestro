@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "../lib/api";
+import { api, fetchWithCredentials } from "../lib/api";
 import { ErrorBox, Empty, Time } from "../components/ui";
 import { Actions, Card, FieldGrid, PageHeader, Toolbar } from "../components/layout";
 import { ReasonField, errorText, reasonGiven, usePermissions } from "./Secrets";
@@ -88,7 +88,7 @@ export function Support() {
   const fetchBundle = useMutation({
     mutationFn: async (bundle: SupportBundle) => {
       const link = await api.post<DownloadLink>(`/api/v1/support/bundles/${bundle.id}/download`, { reason });
-      const response = await fetch(link.url, { credentials: "same-origin" });
+      const response = await fetchWithCredentials(link.url);
       if (!response.ok) {
         let detail = response.statusText;
         try {

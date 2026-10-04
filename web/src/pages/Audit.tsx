@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
-import { api, ApiError, loadedItems, LIST_PAGE, type Page } from "../lib/api";
+import { api, ApiError, fetchWithCredentials, loadedItems, LIST_PAGE, type Page } from "../lib/api";
 import { useDebounced } from "../lib/debounce";
 import { toInstant } from "../lib/format";
 import type { AuditEvent } from "../lib/types";
@@ -142,7 +142,7 @@ export function Audit() {
     setExporting(true);
     setExportError(null);
     try {
-      const response = await fetch(`/api/v1/audit/export${filterKey ? `?${filterKey}` : ""}`, { credentials: "same-origin" });
+      const response = await fetchWithCredentials(`/api/v1/audit/export${filterKey ? `?${filterKey}` : ""}`);
       if (!response.ok) {
         let detail = response.statusText;
         try { detail = ((await response.json()) as { detail?: string }).detail ?? detail; } catch { /* a proxy's page, not the API's answer */ }
