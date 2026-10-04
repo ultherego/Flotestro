@@ -284,9 +284,27 @@ backup() {
     # answer is not a "no": swallowing the error here would read an unreachable
     # server as an installation that keeps its keys in files, and take a backup
     # of the wrong shape without saying so.
-    local kek_id
-    if ! kek_id="$(query "select coalesce(kek_id, '') from crypto_installation_state" 2>&1)"; then
-        fail "the installation record could not be read, so it is not known where the keys of this installation are: $kek_id"
+    # One read of the whole record, and it is the first thing this function
+    # does with the database. Every field the manifest carries comes from it:
+    # read one at a time, the window that is supposed to protect the pair began
+    # after the first value was already in hand, so a rotation between two of
+    # the reads wrote a manifest naming a key the dump is not sealed with.
+    local record kek_id crypto_revision installation_id active_key_id issuer_id
+    if ! record="$(query "select coalesce(kek_id, '') || E'\t' || revision || E'\t' ||
+                          coalesce(installation_id::text, '') || E'\t' ||
+                          coalesce(active_secrets_key_id, '') || E'\t' ||
+                          coalesce(active_agent_ca_id::text, '')
+                          from crypto_installation_state" 2>&1)"; then
+        fail "the installation record could not be read, so it is not known where the keys of this installation are: $record"
+    fi
+    IFS=$'\t' read -r kek_id crypto_revision installation_id active_key_id issuer_id <<< "$record"
+    # A revision that did not arrive is not a revision to compare against, and
+    # a backup whose pair cannot be checked is not a backup. The reads used to
+    # carry "2>/dev/null || true", which left the variable empty - and the
+    # guard below reads "if the revision is not empty", so a failed read did
+    # not stop the backup: it switched off its only check.
+    if [ -z "$crypto_revision" ]; then
+        fail "the installation record carries no revision, so it cannot be told whether the key material moved while the backup ran"
     fi
     if [ -z "$kek_id" ] && [ ! -f "$state_dir/ca.pem" ]; then
         fail "$state_dir carries no ca.pem, so it is not the state of an installation; half a pair is not a backup"
@@ -310,11 +328,6 @@ backup() {
     fi
     note "the two halves belong to one point in time - stop the control plane for the dump, or at the very least hold the rotation of the CA and of the key encryption keys while it runs"
 
-    # The revision of the crypto state before the dump and after the archive.
-    # A rotation between the two makes a pair that does not belong together.
-    local revision_before
-    revision_before="$(query 'select revision from crypto_installation_state' 2>/dev/null || true)"
-
     # --no-owner and --no-privileges: the restore is done by whoever owns
     # the empty database it goes into, which on a rebuilt installation is
     pg_dump --format=custom --no-owner --no-privileges \
@@ -324,11 +337,22 @@ backup() {
     tar --numeric-owner --zstd --create --file "$dir/state.tar.zst" \
         --directory "$state_dir" .
 
-    local revision_after
-    revision_after="$(query 'select revision from crypto_installation_state' 2>/dev/null || true)"
-    if [ -n "$revision_before" ] && [ "$revision_before" != "$revision_after" ]; then
+    # The same record again, read as one row, and compared whole. Reading the
+    # revision alone and then reading the identity of the CA afterwards left the
+    # activation of an authority outside the window: the manifest recorded an
+    # issuer newer than the dump, and the check had already finished.
+    local record_after
+    if ! record_after="$(query "select coalesce(kek_id, '') || E'\t' || revision || E'\t' ||
+                                coalesce(installation_id::text, '') || E'\t' ||
+                                coalesce(active_secrets_key_id, '') || E'\t' ||
+                                coalesce(active_agent_ca_id::text, '')
+                                from crypto_installation_state" 2>&1)"; then
         rm -rf "$dir"
-        fail "the key material was rotated while the backup ran (revision $revision_before -> $revision_after); the two halves would not open each other, so nothing was kept - run it again"
+        fail "the installation record could not be read after the archive, so it is not known whether the key material moved while the backup ran: $record_after"
+    fi
+    if [ "$record" != "$record_after" ]; then
+        rm -rf "$dir"
+        fail "the key material moved while the backup ran ($record -> $record_after); the two halves would not open each other, so nothing was kept - run it again"
     fi
 
     ( cd "$dir" && sha256sum database.dump state.tar.zst > SHA256SUMS )
@@ -336,12 +360,9 @@ backup() {
     database_sha="$(awk '$2 == "database.dump" { print $1 }' "$dir/SHA256SUMS")"
     state_sha="$(awk '$2 == "state.tar.zst" { print $1 }' "$dir/SHA256SUMS")"
 
-    # The identity of the installation, read from the database it was just
-    # taken from. It is what tells two backups of two installations apart
-    local installation_id active_key_id issuer_id
-    installation_id="$(query 'select installation_id from crypto_installation_state' 2>/dev/null || true)"
-    active_key_id="$(query 'select active_secrets_key_id from crypto_installation_state' 2>/dev/null || true)"
-    issuer_id="$(query 'select active_agent_ca_id from crypto_installation_state' 2>/dev/null || true)"
+    # The identity of the installation is already in hand: it was read before
+    # the dump, inside the window, and proved unchanged after it. Reading it
+    # here would have been reading it outside the window.
 
     # The digest of the image is not something a container can read about
     # itself: it comes from the deployment that pinned it. An installation
