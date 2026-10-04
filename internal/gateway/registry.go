@@ -53,6 +53,10 @@ type Session struct {
 	// finalReady carries the agent's answer to the final task to whoever drives
 	// the decommission handshake.
 	finalReady chan *agentv1.FinalReady
+	// wipeReport carries what became of the wipe. Without it the handshake had
+	// only the end of the session to go on, and a failed wipe ends its session
+	// exactly as a successful one does.
+	wipeReport chan *agentv1.FinalWipeReport
 	// finished closes when the stream of the session has ended for good.
 	finished     chan struct{}
 	finishedOnce sync.Once
@@ -69,6 +73,7 @@ func NewSession(id, hostID, agentVersion, bootID, remoteAddr string, buffer int)
 		outbound:   make(chan *agentv1.ServerMessage, buffer),
 		closed:     make(chan struct{}),
 		finalReady: make(chan *agentv1.FinalReady, 1),
+		wipeReport: make(chan *agentv1.FinalWipeReport, 1),
 		finished:   make(chan struct{}),
 	}
 }
@@ -78,6 +83,21 @@ func NewSession(id, hostID, agentVersion, bootID, remoteAddr string, buffer int)
 func (s *Session) Fence() jobs.Fence {
 	return jobs.Fence{SessionID: s.ID, Token: s.FenceToken}
 }
+
+// AcceptWipeReport hands the agent's account of the wipe to the handshake. A
+// second one is dropped: the handshake reads one, and the first is the one the
+// host sent before it left.
+func (s *Session) AcceptWipeReport(report *agentv1.FinalWipeReport) bool {
+	select {
+	case s.wipeReport <- report:
+		return true
+	default:
+		return false
+	}
+}
+
+// WipeReport is where the handshake waits for that account.
+func (s *Session) WipeReport() <-chan *agentv1.FinalWipeReport { return s.wipeReport }
 
 // AcceptFinalReady hands the agent's answer to the handshake. A second
 // answer, or one nobody asked for, is dropped: the handshake reads one.

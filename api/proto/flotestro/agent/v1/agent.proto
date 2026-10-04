@@ -461,18 +461,19 @@ message MetricsAck {
 // session, which a failed wipe closes just as a successful one does, and
 // recorded the commit.
 message FinalWipeReport {
-  // The commit this is the answer to.
-  string commit_id = 1;
+  // The commit this is the answer to, by the identifier FinalCommit carries.
+  string task_id = 1;
   // Whether the root helper accepted the order at all.
   bool accepted = 2;
   // The refusal, when it refused: the entry of the error guide and the
   // sentence the helper gave.
   string error_code = 3;
   string message = 4;
-  // What the helper reports it did. Each one is optional: a value the agent
-  // could not read is not sent, and the panel keeps it unknown rather than
-  // reading an absent answer as a no.
-  optional bool removed = 5;
+  // What the helper reports it did. The paths are the evidence - a wipe that
+  // says it removed nothing and a wipe nobody could ask are different
+  // answers - and the two flags are optional, so a value the agent could not
+  // read stays unknown rather than passing for a no.
+  repeated string removed_paths = 5;
   optional bool service_disabled = 6;
   optional bool stop_scheduled = 7;
 }

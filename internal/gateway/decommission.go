@@ -60,8 +60,18 @@ type DecommissionOutcome struct {
 	// RemoteCleanupUnconfirmed says the host did not confirm it stopped: it had
 	// no session here, or it did not answer the final task in time.
 	RemoteCleanupUnconfirmed bool `json:"remote_cleanup_unconfirmed"`
-	// Phase names how the handshake ended: committed, no_session, timeout.
+	// Phase names how the handshake ended: wiped, wipe_refused, committed,
+	// no_session, timeout.
 	Phase string `json:"phase"`
+	// WipeErrorCode and WipeMessage are what the host said when the wipe did
+	// not go through. A host in that state is alive with a revoked
+	// certificate, which is a thing an operator has to be able to see.
+	WipeErrorCode string `json:"wipe_error_code,omitempty"`
+	WipeMessage   string `json:"wipe_message,omitempty"`
+	// RemovedPaths is what the host reports the helper removed. Evidence, not
+	// a flag: a wipe that removed nothing and a wipe nobody could ask are
+	// different answers.
+	RemovedPaths []string `json:"removed_paths,omitempty"`
 	// RunningTasks are the attempts the agent reported still running when
 	// it answered. They were cut short by the commit.
 	RunningTasks        []string `json:"running_tasks"`
@@ -81,6 +91,17 @@ type DecommissionOutcome struct {
 
 // The phases of the outcome.
 const (
+	// PhaseWiped: the host reported that the wipe went through. This is the
+	// only phase that is evidence of it.
+	PhaseWiped = "wiped"
+	// PhaseWipeRefused: the host reported that the wipe did not go through.
+	// It is leaving the fleet with its identity still on disk.
+	PhaseWipeRefused = "wipe_refused"
+	// PhaseCommitted: the commit was delivered and the session ended without
+	// an answer. It used to be the phase of a successful decommission, which
+	// is what this finding was: a failed wipe closes its session too, and the
+	// agent said nothing. An older agent still ends here, and the outcome says
+	// the remote cleanup is unconfirmed.
 	PhaseCommitted = "committed"
 	PhaseNoSession = "no_session"
 	PhaseTimeout   = "timeout"
@@ -255,17 +276,48 @@ func (d *Decommissioner) carryOut(ctx context.Context, order Decommission,
 		return d.retire(ctx, order, outcome)
 	}
 
-	// The agent leaves on its own after the commit.
+	// The agent reports what became of the wipe and then leaves. The report is
+	// the only evidence of the wipe there is: the end of a session says nothing,
+	// because a host whose wipe failed closes its session exactly as one whose
+	// wipe went through.
 	leave := time.NewTimer(d.leaveTimeout)
 	defer leave.Stop()
 	select {
+	case report := <-session.WipeReport():
+		outcome.RemovedPaths = report.GetRemovedPaths()
+		if report.GetAccepted() {
+			outcome.Phase = PhaseWiped
+		} else {
+			outcome.Phase = PhaseWipeRefused
+			outcome.RemoteCleanupUnconfirmed = true
+			outcome.WipeErrorCode = report.GetErrorCode()
+			outcome.WipeMessage = report.GetMessage()
+			d.log.Error("the host reports that its identity was not wiped; it is leaving the fleet "+
+				"with a revoked certificate and its identity still on disk",
+				"host_id", order.HostID, "code", report.GetErrorCode(), "message", report.GetMessage())
+		}
+		// The session ends by itself on a wipe that went through; on one that
+		// did not, the agent keeps running and this closes it.
+		select {
+		case <-session.Finished():
+		case <-time.After(d.leaveTimeout):
+			outcome.SessionClosed = d.registry.EndSession(order.HostID, "host.decommission")
+		case <-ctx.Done():
+			return outcome, ctx.Err()
+		}
 	case <-session.Finished():
+		// No report: an agent from before it existed, or one that could not
+		// send it. Either way nothing here establishes that the identity is
+		// gone, so the outcome does not claim it does.
+		outcome.Phase = PhaseCommitted
+		outcome.RemoteCleanupUnconfirmed = true
 	case <-leave.C:
+		outcome.Phase = PhaseCommitted
+		outcome.RemoteCleanupUnconfirmed = true
 		outcome.SessionClosed = d.registry.EndSession(order.HostID, "host.decommission")
 	case <-ctx.Done():
 		return outcome, ctx.Err()
 	}
-	outcome.Phase = PhaseCommitted
 	return d.retire(ctx, order, outcome)
 }
 

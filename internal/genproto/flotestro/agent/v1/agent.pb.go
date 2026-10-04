@@ -3505,20 +3505,21 @@ func (x *MetricsAck) GetHighestSequenceHeld() uint64 {
 // recorded the commit.
 type FinalWipeReport struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The commit this is the answer to.
-	CommitId string `protobuf:"bytes,1,opt,name=commit_id,json=commitId,proto3" json:"commit_id,omitempty"`
+	// The commit this is the answer to, by the identifier FinalCommit carries.
+	TaskId string `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
 	// Whether the root helper accepted the order at all.
 	Accepted bool `protobuf:"varint,2,opt,name=accepted,proto3" json:"accepted,omitempty"`
 	// The refusal, when it refused: the entry of the error guide and the
 	// sentence the helper gave.
 	ErrorCode string `protobuf:"bytes,3,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`
 	Message   string `protobuf:"bytes,4,opt,name=message,proto3" json:"message,omitempty"`
-	// What the helper reports it did. Each one is optional: a value the agent
-	// could not read is not sent, and the panel keeps it unknown rather than
-	// reading an absent answer as a no.
-	Removed         *bool `protobuf:"varint,5,opt,name=removed,proto3,oneof" json:"removed,omitempty"`
-	ServiceDisabled *bool `protobuf:"varint,6,opt,name=service_disabled,json=serviceDisabled,proto3,oneof" json:"service_disabled,omitempty"`
-	StopScheduled   *bool `protobuf:"varint,7,opt,name=stop_scheduled,json=stopScheduled,proto3,oneof" json:"stop_scheduled,omitempty"`
+	// What the helper reports it did. The paths are the evidence - a wipe that
+	// says it removed nothing and a wipe nobody could ask are different
+	// answers - and the two flags are optional, so a value the agent could not
+	// read stays unknown rather than passing for a no.
+	RemovedPaths    []string `protobuf:"bytes,5,rep,name=removed_paths,json=removedPaths,proto3" json:"removed_paths,omitempty"`
+	ServiceDisabled *bool    `protobuf:"varint,6,opt,name=service_disabled,json=serviceDisabled,proto3,oneof" json:"service_disabled,omitempty"`
+	StopScheduled   *bool    `protobuf:"varint,7,opt,name=stop_scheduled,json=stopScheduled,proto3,oneof" json:"stop_scheduled,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -3553,9 +3554,9 @@ func (*FinalWipeReport) Descriptor() ([]byte, []int) {
 	return file_flotestro_agent_v1_agent_proto_rawDescGZIP(), []int{21}
 }
 
-func (x *FinalWipeReport) GetCommitId() string {
+func (x *FinalWipeReport) GetTaskId() string {
 	if x != nil {
-		return x.CommitId
+		return x.TaskId
 	}
 	return ""
 }
@@ -3581,11 +3582,11 @@ func (x *FinalWipeReport) GetMessage() string {
 	return ""
 }
 
-func (x *FinalWipeReport) GetRemoved() bool {
-	if x != nil && x.Removed != nil {
-		return *x.Removed
+func (x *FinalWipeReport) GetRemovedPaths() []string {
+	if x != nil {
+		return x.RemovedPaths
 	}
-	return false
+	return nil
 }
 
 func (x *FinalWipeReport) GetServiceDisabled() bool {
@@ -16612,18 +16613,16 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x10STATUS_DUPLICATE\x10\x02\x12\x1b\n" +
 	"\x17STATUS_REJECTED_TOO_OLD\x10\x03\x12\x1b\n" +
 	"\x17STATUS_REJECTED_INVALID\x10\x04B\x18\n" +
-	"\x16_highest_sequence_held\"\xb2\x02\n" +
-	"\x0fFinalWipeReport\x12\x1b\n" +
-	"\tcommit_id\x18\x01 \x01(\tR\bcommitId\x12\x1a\n" +
+	"\x16_highest_sequence_held\"\xa8\x02\n" +
+	"\x0fFinalWipeReport\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x1a\n" +
 	"\baccepted\x18\x02 \x01(\bR\baccepted\x12\x1d\n" +
 	"\n" +
 	"error_code\x18\x03 \x01(\tR\terrorCode\x12\x18\n" +
-	"\amessage\x18\x04 \x01(\tR\amessage\x12\x1d\n" +
-	"\aremoved\x18\x05 \x01(\bH\x00R\aremoved\x88\x01\x01\x12.\n" +
-	"\x10service_disabled\x18\x06 \x01(\bH\x01R\x0fserviceDisabled\x88\x01\x01\x12*\n" +
-	"\x0estop_scheduled\x18\a \x01(\bH\x02R\rstopScheduled\x88\x01\x01B\n" +
-	"\n" +
-	"\b_removedB\x13\n" +
+	"\amessage\x18\x04 \x01(\tR\amessage\x12#\n" +
+	"\rremoved_paths\x18\x05 \x03(\tR\fremovedPaths\x12.\n" +
+	"\x10service_disabled\x18\x06 \x01(\bH\x00R\x0fserviceDisabled\x88\x01\x01\x12*\n" +
+	"\x0estop_scheduled\x18\a \x01(\bH\x01R\rstopScheduled\x88\x01\x01B\x13\n" +
 	"\x11_service_disabledB\x11\n" +
 	"\x0f_stop_scheduled\"\x8a\x01\n" +
 	"\n" +

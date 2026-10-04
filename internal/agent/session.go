@@ -678,7 +678,18 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 				// The second step ends the session - and the process - when the wipe went
 				// through.
 				go func() {
-					if err := applyFinalCommit(sessionCtx, payload.FinalCommit, final, wipe, opts.Log); err != nil {
+					// The report goes out on this session, whatever the wipe
+					// came to: the panel otherwise reads a closed session,
+					// which a failed wipe closes too.
+					report := func(built *agentv1.FinalWipeReport) {
+						if err := send(&agentv1.AgentMessage{
+							Payload: &agentv1.AgentMessage_FinalWipeReport{FinalWipeReport: built},
+						}); err != nil {
+							opts.Log.Error("the report of the final wipe was not sent; the panel will see "+
+								"a closed session and no answer", "err", err)
+						}
+					}
+					if err := applyFinalCommit(sessionCtx, payload.FinalCommit, final, wipe, report, opts.Log); err != nil {
 						reportError(err)
 					}
 				}()

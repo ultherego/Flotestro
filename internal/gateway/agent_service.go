@@ -991,6 +991,16 @@ func (s *AgentService) consume(ctx context.Context, hostID string, session *Sess
 		}
 		return nil
 
+	case *agentv1.AgentMessage_FinalWipeReport:
+		// The last message of a leaving host. Dropping it would leave the
+		// handshake reading a closed session, which proves nothing about the
+		// wipe.
+		if session == nil || !session.AcceptWipeReport(payload.FinalWipeReport) {
+			s.log.Warn("a report of a final wipe nobody is waiting for",
+				"host_id", hostID, "task_id", payload.FinalWipeReport.GetTaskId())
+		}
+		return nil
+
 	case *agentv1.AgentMessage_FinalReady:
 		// The answer to the final task goes to the handshake waiting on this
 		// session.

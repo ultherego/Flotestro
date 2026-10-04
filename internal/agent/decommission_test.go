@@ -139,8 +139,11 @@ func TestFinalCommitWipesThroughTheHelperAndEndsTheAgent(t *testing.T) {
 			Removed: []string{"/var/lib/flotestro-agent/identity"}, ServiceDisabled: true,
 		}}, nil
 	}
+	var reports []*agentv1.FinalWipeReport
+	report := func(built *agentv1.FinalWipeReport) { reports = append(reports, built) }
 	err := applyFinalCommit(context.Background(),
-		&agentv1.FinalCommit{LocalIdentityWipe: true, Reason: "handed over"}, handshake, wipe, quietLogger())
+		&agentv1.FinalCommit{LocalIdentityWipe: true, Reason: "handed over", TaskId: "task-9"},
+		handshake, wipe, report, quietLogger())
 	if !errors.Is(err, ErrDecommissioned) {
 		t.Fatalf("err = %v, expected ErrDecommissioned", err)
 	}
@@ -149,6 +152,22 @@ func TestFinalCommitWipesThroughTheHelperAndEndsTheAgent(t *testing.T) {
 	}
 	if !handshake.done.Load() {
 		t.Fatal("the handshake is not marked as done")
+	}
+	// The panel is told what became of the wipe, and the paths are the
+	// evidence: the end of the session says nothing, because a host whose wipe
+	// failed ends its session too.
+	if len(reports) != 1 {
+		t.Fatalf("the agent sent %d reports of the wipe, expected one", len(reports))
+	}
+	if !reports[0].GetAccepted() || reports[0].GetTaskId() != "task-9" {
+		t.Fatalf("the report is %+v", reports[0])
+	}
+	if paths := reports[0].GetRemovedPaths(); len(paths) != 1 ||
+		paths[0] != "/var/lib/flotestro-agent/identity" {
+		t.Fatalf("the report names the removed paths %v", paths)
+	}
+	if !reports[0].GetServiceDisabled() {
+		t.Error("the report does not say the service was disabled")
 	}
 }
 
@@ -159,23 +178,41 @@ func TestFinalCommitRefusedByTheHelperKeepsTheAgentRunning(t *testing.T) {
 	handshake := newFinalHandshake()
 	handshake.begin("handed over")
 
+	var reports []*agentv1.FinalWipeReport
+	report := func(built *agentv1.FinalWipeReport) { reports = append(reports, built) }
+
 	refusing := func(context.Context, *agentv1.FinalCommit) (*helperv1.HelperResponse, error) {
 		return &helperv1.HelperResponse{Accepted: false, ErrorCode: "exec_failed", Message: "no"}, nil
 	}
 	if err := applyFinalCommit(context.Background(),
-		&agentv1.FinalCommit{LocalIdentityWipe: true}, handshake, refusing, quietLogger()); err != nil {
+		&agentv1.FinalCommit{LocalIdentityWipe: true}, handshake, refusing, report, quietLogger()); err != nil {
 		t.Fatalf("a refused wipe ended the agent: %v", err)
 	}
 	unreachable := func(context.Context, *agentv1.FinalCommit) (*helperv1.HelperResponse, error) {
 		return nil, errors.New("connecting to the helper: no such file")
 	}
 	if err := applyFinalCommit(context.Background(),
-		&agentv1.FinalCommit{LocalIdentityWipe: true}, handshake, unreachable, quietLogger()); err != nil {
+		&agentv1.FinalCommit{LocalIdentityWipe: true}, handshake, unreachable, report, quietLogger()); err != nil {
 		t.Fatalf("an unreachable helper ended the agent: %v", err)
 	}
+	// "Says so" is the word this test used for a line in the host's own
+	// journal - on a host that is being thrown away. It means the panel now.
+	if len(reports) != 2 {
+		t.Fatalf("the agent sent %d reports, expected one per failed wipe", len(reports))
+	}
+	if reports[0].GetAccepted() || reports[0].GetErrorCode() != "exec_failed" {
+		t.Fatalf("the refusal was reported as %+v", reports[0])
+	}
+	if reports[1].GetAccepted() || reports[1].GetErrorCode() != WipeNoAnswer {
+		t.Fatalf("the unreachable helper was reported as %+v", reports[1])
+	}
+	// And a wipe nobody could even ask for.
 	if err := applyFinalCommit(context.Background(),
-		&agentv1.FinalCommit{LocalIdentityWipe: true}, handshake, nil, quietLogger()); err != nil {
+		&agentv1.FinalCommit{LocalIdentityWipe: true}, handshake, nil, report, quietLogger()); err != nil {
 		t.Fatalf("a missing helper ended the agent: %v", err)
+	}
+	if len(reports) != 3 || reports[2].GetErrorCode() != WipeNoHelper {
+		t.Fatalf("a missing helper was reported as %+v", reports[len(reports)-1])
 	}
 	if handshake.done.Load() {
 		t.Fatal("the handshake is marked as done after a refusal")
@@ -193,7 +230,7 @@ func TestFinalCommitWithoutAWipeOnlyEndsTheAgent(t *testing.T) {
 		return &helperv1.HelperResponse{Accepted: true}, nil
 	}
 	err := applyFinalCommit(context.Background(),
-		&agentv1.FinalCommit{LocalIdentityWipe: false}, handshake, wipe, quietLogger())
+		&agentv1.FinalCommit{LocalIdentityWipe: false}, handshake, wipe, nil, quietLogger())
 	if !errors.Is(err, ErrDecommissioned) || called {
 		t.Fatalf("err = %v, helper called = %v", err, called)
 	}
@@ -209,7 +246,7 @@ func TestFinalCommitWithoutAFinalTaskIsIgnored(t *testing.T) {
 		return &helperv1.HelperResponse{Accepted: true}, nil
 	}
 	if err := applyFinalCommit(context.Background(),
-		&agentv1.FinalCommit{LocalIdentityWipe: true}, handshake, wipe, quietLogger()); err != nil || called {
+		&agentv1.FinalCommit{LocalIdentityWipe: true}, handshake, wipe, nil, quietLogger()); err != nil || called {
 		t.Fatalf("err = %v, helper called = %v", err, called)
 	}
 }

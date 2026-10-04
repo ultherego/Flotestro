@@ -188,9 +188,33 @@ func helperWiper(client *HelperClient) finalWiper {
 	}
 }
 
+// wipeReporter sends the last message of the last session. It is a parameter
+// and not a field, so a caller that has no session - the tests - gets the same
+// code path without one.
+type wipeReporter func(*agentv1.FinalWipeReport)
+
+// reportWipe sends the report, or says in the log why it could not. Nothing
+// depends on it arriving: the host is leaving either way, and the panel reads
+// its absence as an unanswered wipe rather than a successful one.
+func reportWipe(report wipeReporter, log *slog.Logger, built *agentv1.FinalWipeReport) {
+	if report == nil {
+		return
+	}
+	report(built)
+	_ = log
+}
+
 // applyFinalCommit carries the second step out.
+//
+// Every path through it now ends in a report to the panel. Until it did, the
+// agent knew the outcome exactly and told nobody: all three failure paths - no
+// helper, no answer from the helper, a refusal with a code - ended in a local
+// log line and a process that kept running, while the panel saw a closed
+// session. A failed wipe closes its session just as a successful one does, so
+// the panel wrote "committed" over a host that had kept its identity, and the
+// only record of the truth was the journal of a host being thrown away.
 func applyFinalCommit(ctx context.Context, commit *agentv1.FinalCommit, handshake *finalHandshake,
-	wipe finalWiper, log *slog.Logger) error {
+	wipe finalWiper, report wipeReporter, log *slog.Logger) error {
 	if !handshake.isLeaving() {
 		// A commit without a final task before it is not the handshake; the panel
 		// does not send one, so this is either an old panel or a message meant for
@@ -207,6 +231,11 @@ func applyFinalCommit(ctx context.Context, commit *agentv1.FinalCommit, handshak
 	if wipe == nil {
 		log.Error("the panel committed the decommission, but this agent has no helper to wipe the identity with; " +
 			"the agent keeps running with a revoked certificate")
+		reportWipe(report, log, &agentv1.FinalWipeReport{
+			TaskId: commit.GetTaskId(), Accepted: false,
+			ErrorCode: WipeNoHelper,
+			Message:   "this agent has no root helper, so nothing removed the identity",
+		})
 		return nil
 	}
 	wipeCtx, cancel := context.WithTimeout(ctx, finalWipeTimeout)
@@ -214,17 +243,42 @@ func applyFinalCommit(ctx context.Context, commit *agentv1.FinalCommit, handshak
 	response, err := wipe(wipeCtx, commit)
 	if err != nil {
 		log.Error("the helper did not answer the final wipe; the agent keeps running", "err", err)
+		reportWipe(report, log, &agentv1.FinalWipeReport{
+			TaskId: commit.GetTaskId(), Accepted: false,
+			ErrorCode: WipeNoAnswer, Message: err.Error(),
+		})
 		return nil
 	}
 	if !response.GetAccepted() {
 		log.Error("the helper refused the final wipe; the agent keeps running",
 			"code", response.GetErrorCode(), "message", response.GetMessage())
+		reportWipe(report, log, &agentv1.FinalWipeReport{
+			TaskId: commit.GetTaskId(), Accepted: false,
+			ErrorCode: response.GetErrorCode(), Message: response.GetMessage(),
+		})
 		return nil
 	}
 	result := response.GetFinalWipeResult()
 	log.Warn("the identity of this host was wiped; the agent ends",
 		"reason", commit.GetReason(), "removed", result.GetRemoved(),
 		"service_disabled", result.GetServiceDisabled(), "stop_scheduled", result.GetStopScheduled())
+	// Sent before the session ends, and before done is set: after that the
+	// process is on its way out and there is nothing left to send with.
+	disabled, scheduled := result.GetServiceDisabled(), result.GetStopScheduled()
+	reportWipe(report, log, &agentv1.FinalWipeReport{
+		TaskId: commit.GetTaskId(), Accepted: true,
+		RemovedPaths: result.GetRemoved(), ServiceDisabled: &disabled, StopScheduled: &scheduled,
+	})
 	handshake.done.Store(true)
 	return ErrDecommissioned
 }
+
+// The codes the agent itself names, for the two failures that happen before
+// the helper has said anything. A refusal by the helper travels under the
+// helper's own code.
+const (
+	// WipeNoHelper: this agent has no root helper at all.
+	WipeNoHelper = "final_wipe_no_helper"
+	// WipeNoAnswer: the helper was asked and did not answer within the window.
+	WipeNoAnswer = "final_wipe_no_answer"
+)
