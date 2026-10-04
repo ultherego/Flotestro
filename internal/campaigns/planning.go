@@ -680,7 +680,13 @@ func withPlan(action opspec.ActionType, payload opspec.Payload, hash string,
 		}
 
 	case opspec.ActionNetworkProfileApply, opspec.ActionNetworkRouteEnsure,
-		opspec.ActionNetworkMTUSet:
+		opspec.ActionNetworkMTUSet,
+		// The layer actions belong here too. PlanningAction names
+		// ActionNetworkPlan for them, so the campaign computes a plan per host
+		// and used to throw the digest away: an empty one reached the helper,
+		// which compares the digest only when it gets one, and the change went
+		// onto a host whose state had moved since the operator approved it.
+		opspec.ActionNetworkLinkApply, opspec.ActionNetworkLinkRemove:
 		// The network binds by the plan digest: the host computes the plan once more
 		// before the change, and a profile changed since planning stops it.
 		if payload.Network != nil {

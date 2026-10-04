@@ -430,7 +430,65 @@ func (c *Client) PreserveUserAt(ctx context.Context, uid string, planned EntryRe
 	if reason, moved := planned.Moved(current); moved {
 		return fmt.Errorf("%w: %s (the plan was %s)", ErrEntryMoved, reason, planned.Binding())
 	}
-	return c.PreserveUser(ctx, uid)
+	if err := c.PreserveUser(ctx, uid); err != nil {
+		return err
+	}
+
+	// The directory offers no compare-and-delete, so the binding is proven
+	// after the fact - and what makes that honest is that a preserve is
+	// undoable. Between the check above and the call, the entry could be
+	// deleted and another created under the same name, and the operator's
+	// consent for the first would have been carried out on the second.
+	after, err := c.PreservedEntry(ctx, uid)
+	if err != nil {
+		return fmt.Errorf("the account %s was preserved and could not be read back, so it is not "+
+			"known whether it is the entry the plan named: %w", uid, err)
+	}
+	if reason, moved := planned.Moved(after); moved {
+		if undo := c.UndeleteUser(ctx, uid); undo != nil {
+			return fmt.Errorf("%w: %s; putting it back failed too, so %s stays preserved and "+
+				"needs a person: %v", ErrEntryMoved, reason, uid, undo)
+		}
+		return fmt.Errorf("%w: %s; the account was put back", ErrEntryMoved, reason)
+	}
+	return nil
+}
+
+// PreservedEntry reads a preserved account, which user_show does not return
+// without being told to look among them.
+func (c *Client) PreservedEntry(ctx context.Context, uid string) (EntryReference, error) {
+	if !userNamePattern.MatchString(uid) {
+		return EntryReference{}, fmt.Errorf("invalid account name %q", uid)
+	}
+	result, err := c.call(ctx, "user_show", []string{uid},
+		map[string]any{"all": true, "preserved": true})
+	if err != nil {
+		var refusal *DirectoryError
+		if errors.As(err, &refusal) && refusal.Name == "NotFound" {
+			return EntryReference{}, fmt.Errorf("%w: %s", ErrEntryNotFound, uid)
+		}
+		return EntryReference{}, err
+	}
+	var decoded struct {
+		Result map[string]any `json:"result"`
+	}
+	if err := json.Unmarshal(result, &decoded); err != nil {
+		return EntryReference{}, err
+	}
+	return entryFromRecord(decoded.Result), nil
+}
+
+// UndeleteUser brings a preserved account back, which is what makes the check
+// after a preserve something other than an observation.
+func (c *Client) UndeleteUser(ctx context.Context, uid string) error {
+	if !userNamePattern.MatchString(uid) {
+		return fmt.Errorf("invalid account name %q", uid)
+	}
+	if _, err := c.call(ctx, "user_undel", []string{uid}, nil); err != nil {
+		return fmt.Errorf("putting the account %s back: %w", uid, err)
+	}
+	c.invalidate()
+	return nil
 }
 
 // ResetUserPassword asks the directory for a new password of the account.
