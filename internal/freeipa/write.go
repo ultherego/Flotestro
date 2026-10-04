@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -105,6 +106,32 @@ func (c *Client) RemoveGroupMembers(ctx context.Context, group string, users []s
 	return c.changeGroupMembers(ctx, "group_remove_member", group, users)
 }
 
+// PartialChange says which accounts the directory took and which it refused.
+// A batch that half succeeded is not a failure to retry whole: the accounts
+// that moved have to have their sessions ended, and the cache is stale whatever
+// the verdict - so the names travel with the error rather than being folded
+// into its text.
+type PartialChange struct {
+	// Method is the directory call that was made, and Group the group it was
+	// made on.
+	Method string
+	Group  string
+	// Applied are the accounts the directory moved.
+	Applied []string
+	// Refused maps an account to the reason the directory gave.
+	Refused map[string]string
+}
+
+func (p *PartialChange) Error() string {
+	refused := make([]string, 0, len(p.Refused))
+	for name, reason := range p.Refused {
+		refused = append(refused, name+": "+reason)
+	}
+	sort.Strings(refused)
+	return fmt.Sprintf("the membership of %s changed for %d of %d accounts; refused %s",
+		p.Group, len(p.Applied), len(p.Applied)+len(p.Refused), strings.Join(refused, "; "))
+}
+
 func (c *Client) changeGroupMembers(ctx context.Context, method, group string, users []string) error {
 	if !groupNamePattern.MatchString(group) {
 		return fmt.Errorf("invalid group name %q", group)
@@ -124,25 +151,62 @@ func (c *Client) changeGroupMembers(ctx context.Context, method, group string, u
 	}
 
 	// The directory returns a list of failures instead of an error when some of
-	// the accounts were not added.
+	// the accounts were not added. The cache is invalidated first and whatever
+	// the verdict: a batch that half succeeded moved accounts, and leaving the
+	// cache alone made the panel read the batch as unchanged - so the sessions
+	// of the accounts that did move were never ended, and somebody removed
+	// from a group went on working with the scope they had.
+	c.invalidate()
+
 	var decoded struct {
 		Failed map[string]map[string][]any `json:"failed"`
 	}
 	if err := json.Unmarshal(result, &decoded); err == nil {
-		var problems []string
+		refused := map[string]string{}
 		for _, category := range decoded.Failed {
 			for _, entries := range category {
 				for _, entry := range entries {
-					problems = append(problems, fmt.Sprint(entry))
+					name, reason := refusedAccount(entry)
+					if name == "" {
+						continue
+					}
+					refused[name] = reason
 				}
 			}
 		}
-		if len(problems) > 0 {
-			return fmt.Errorf("some accounts were not changed: %s", strings.Join(problems, "; "))
+		if len(refused) > 0 {
+			applied := make([]string, 0, len(users))
+			for _, user := range users {
+				if _, no := refused[user]; !no {
+					applied = append(applied, user)
+				}
+			}
+			return &PartialChange{Method: method, Group: group, Applied: applied, Refused: refused}
 		}
 	}
-	c.invalidate()
 	return nil
+}
+
+// refusedAccount reads one entry of the directory's failure list. The entry is
+// a pair of the account and the reason - ["alice", "This entry is already a
+// member"] - and anything else is reported without a name, because a name
+// guessed out of an unknown shape would end the wrong session.
+func refusedAccount(entry any) (string, string) {
+	pair, ok := entry.([]any)
+	if !ok || len(pair) == 0 {
+		return "", ""
+	}
+	name, ok := pair[0].(string)
+	if !ok {
+		return "", ""
+	}
+	reason := "the directory gave no reason"
+	if len(pair) > 1 {
+		if text, ok := pair[1].(string); ok && text != "" {
+			reason = text
+		}
+	}
+	return name, reason
 }
 
 // SetUserSSHKeys sets the complete set of an account's public keys. A private

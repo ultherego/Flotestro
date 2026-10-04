@@ -373,21 +373,31 @@ func (e *Executor) changeGroupMembers(ctx context.Context, spec *GroupPayload) (
 	// Only the members the directory actually moved lose their session: a
 	// user whose change was refused still holds the scope they had.
 	var changed []string
+	// A batch the directory took only in part is not a step that did nothing:
+	// the accounts it moved are named in the error, and their sessions end
+	// although the step failed. Without this they kept the scope they had
+	// while the panel reported a failure.
+	moved := func(err error, asked []string) []string {
+		if err == nil {
+			return asked
+		}
+		var partial *freeipa.PartialChange
+		if errors.As(err, &partial) {
+			return partial.Applied
+		}
+		return nil
+	}
 	if len(spec.Add) > 0 {
 		phase := startPhase("adding members to the group " + spec.Group)
 		err := e.directory.AddGroupMembers(ctx, spec.Group, spec.Add)
 		phases = append(phases, finishPhase(phase, err, ""))
-		if err == nil {
-			changed = append(changed, spec.Add...)
-		}
+		changed = append(changed, moved(err, spec.Add)...)
 	}
 	if len(spec.Remove) > 0 {
 		phase := startPhase("removing members from the group " + spec.Group)
 		err := e.directory.RemoveGroupMembers(ctx, spec.Group, spec.Remove)
 		phases = append(phases, finishPhase(phase, err, ""))
-		if err == nil {
-			changed = append(changed, spec.Remove...)
-		}
+		changed = append(changed, moved(err, spec.Remove)...)
 	}
 	if len(changed) == 0 {
 		return phases, nil
