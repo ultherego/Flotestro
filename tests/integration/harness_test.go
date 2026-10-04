@@ -412,11 +412,24 @@ func (h *harness) createOperation(hostID string, body map[string]any) jobView {
 	return job
 }
 
+// approve consents to a payload the way an operator does. A critical or
+// destructive operation needs a reason with the approval, and the suite is not
+// exempt from the rule it exists to exercise, so every approval carries one.
 func (h *harness) approve(jobID, payloadHash string) jobView {
 	h.t.Helper()
+	return h.approveWithReason(jobID, payloadHash, "approved by the integration suite")
+}
+
+// approveWithReason is the same consent with the reason spelled out, for the
+// tests that are about the reason.
+func (h *harness) approveWithReason(jobID, payloadHash, reason string) jobView {
+	h.t.Helper()
 	var job jobView
-	h.do(http.MethodPost, "/api/v1/jobs/"+jobID+"/approve",
-		map[string]any{"payload_hash": payloadHash}, &job, http.StatusOK)
+	body := map[string]any{"payload_hash": payloadHash}
+	if reason != "" {
+		body["reason"] = reason
+	}
+	h.do(http.MethodPost, "/api/v1/jobs/"+jobID+"/approve", body, &job, http.StatusOK)
 	return job
 }
 

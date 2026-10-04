@@ -16,6 +16,7 @@ import {
 import { BarChart, Breakdown, StatusBar } from "../components/widgets";
 import { OPERATIONS_INTERVAL, REFRESH_INTERVAL, useProgress } from "../lib/stream";
 import { bulkPrefill } from "./Bulk";
+import { needsReason } from "../lib/actions";
 import { useT } from "../i18n";
 
 /** The states the filter offers. */
@@ -165,6 +166,7 @@ export function Jobs() {
   const [reviewing, setReviewing] = useState<string>("");
   const [canceling, setCanceling] = useState<string>("");
   const [cancelReason, setCancelReason] = useState("");
+  const [approveReason, setApproveReason] = useState("");
   // The jobs ticked for a batch decision, by identifier.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [batchReason, setBatchReason] = useState("");
@@ -243,11 +245,18 @@ export function Jobs() {
     refetchInterval: REFRESH_INTERVAL,
   });
 
+  // An approval of a critical or destructive payload carries a reason: the
+  // panel asks for it exactly where the control plane requires it, so the
+  // operator reads the rule rather than a refusal.
   const approve = useMutation({
-    mutationFn: (job: Job) =>
-      api.post(`/api/v1/jobs/${job.id}/approve`, { payload_hash: job.payload_hash }),
+    mutationFn: ({ job, reason }: { job: Job; reason: string }) =>
+      api.post(`/api/v1/jobs/${job.id}/approve`, {
+        payload_hash: job.payload_hash,
+        reason: reason.trim() || undefined,
+      }),
     onSuccess: () => {
       setReviewing("");
+      setApproveReason("");
       queryClient.invalidateQueries({ queryKey: ["jobs"] });
     },
   });
@@ -601,8 +610,24 @@ export function Jobs() {
                           </p>
                           <pre>{prettyJSON(job.payload)}</pre>
                           <Actions>
-                            <button onClick={() => approve.mutate(job)} disabled={approve.isPending}>{t("Approve this payload")}</button>
-                            <button className="secondary" onClick={() => setReviewing("")}>{t("Back")}</button>
+                            {needsReason(job.action_type) && (
+                              <input
+                                autoFocus
+                                placeholder={t("reason for the approval, at least 8 characters")}
+                                value={approveReason}
+                                onChange={(e) => setApproveReason(e.target.value)}
+                              />
+                            )}
+                            <button
+                              onClick={() => approve.mutate({ job, reason: approveReason })}
+                              disabled={approve.isPending || (needsReason(job.action_type) && !reasonAccepted(approveReason))}
+                              title={needsReason(job.action_type) && !reasonAccepted(approveReason)
+                                ? t("This operation is critical: the approval is recorded with a reason of at least 8 characters.")
+                                : ""}
+                            >
+                              {t("Approve this payload")}
+                            </button>
+                            <button className="secondary" onClick={() => { setReviewing(""); setApproveReason(""); }}>{t("Back")}</button>
                             {approve.error && <span className="page-error">{approve.error instanceof Error ? approve.error.message : String(approve.error)}</span>}
                           </Actions>
                         </td>

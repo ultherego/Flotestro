@@ -104,3 +104,54 @@ func TestChangingAccessRulesRequiresAReason(t *testing.T) {
 		t.Error("the refusals for a missing reason did not reach the audit log")
 	}
 }
+
+// TestApprovingACriticalPayloadRequiresAReason is the other half of the rule
+// the panel now follows: fresh authentication is demanded of an approval of a
+// critical or destructive payload, and the step-up policy demands a reason
+// with it.
+//
+// The approval used to pass with nothing but the payload hash, so the record
+// of the riskiest consent in the product said who and what, never why. Two
+// call sites of the panel sent no reason at all, which is the half of this
+// change the suite is here to keep: a rule the interface cannot satisfy is a
+// rule that gets reverted.
+func TestApprovingACriticalPayloadRequiresAReason(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	// A reboot is critical by classification and asks only for systemd, so it
+	// is the cheapest critical payload to order. It is never approved here, and
+	// the job is cancelled at the end of the test, so no host restarts for it.
+	job := h.createOperation(host.ID, map[string]any{
+		"action": "system.reboot", "reason": "ordering a critical payload to test its approval",
+		"payload": map[string]any{"reboot": map[string]any{
+			"delay_seconds": 3600, "reason": "Flotestro: never approved, this job is cancelled",
+		}},
+	})
+	if !job.RequiresApproval {
+		absent(h.t, "this installation does not hold a reboot for approval, so there is no approval to test")
+	}
+	t.Cleanup(func() {
+		h.do(http.MethodPost, "/api/v1/jobs/"+job.ID+"/cancel",
+			map[string]any{"reason": "cleanup after the approval reason test"}, nil, http.StatusOK)
+	})
+
+	for name, reason := range map[string]string{
+		"no reason":        "",
+		"reason too short": "because",
+	} {
+		t.Run(name, func(t *testing.T) {
+			var problem struct {
+				Code string `json:"code"`
+			}
+			body := map[string]any{"payload_hash": job.PayloadHash}
+			if reason != "" {
+				body["reason"] = reason
+			}
+			h.do(http.MethodPost, "/api/v1/jobs/"+job.ID+"/approve", body, &problem, http.StatusBadRequest)
+			if problem.Code != "reason_required" {
+				t.Errorf("code = %q, expected reason_required", problem.Code)
+			}
+		})
+	}
+}

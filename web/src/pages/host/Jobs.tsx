@@ -11,6 +11,7 @@ import { Foot, ModuleHeader, ModulePage, Section, Summary, Table, Widgets, count
 import { OPERATIONS_INTERVAL, useProgress } from "../../lib/stream";
 import { contractWords, useOperations } from "../Bulk";
 import { AttemptHead, hoursAgo, prettyJSON, reasonAccepted } from "../Jobs";
+import { needsReason } from "../../lib/actions";
 import { useT } from "../../i18n";
 
 /** The states a job passes through before the host has touched anything. */
@@ -74,6 +75,7 @@ export function HostJobs() {
   // The row whose payload is on screen for approval, and the row whose
   // cancel reason is being typed: one of each at a time.
   const [reviewing, setReviewing] = useState<string>("");
+  const [approveReason, setApproveReason] = useState("");
   const [canceling, setCanceling] = useState<string>("");
   const [cancelReason, setCancelReason] = useState("");
 
@@ -104,10 +106,17 @@ export function HostJobs() {
   const permissions = whoami.data?.permissions ?? [];
   const mayCancel = permissions.includes("job.cancel");
   const mayApprove = permissions.includes("job.approve");
+  // The same rule as the fleet-wide list: a critical or destructive payload is
+  // approved with a reason, asked for here rather than refused by the server.
   const approve = useMutation({
-    mutationFn: (job: Job) => api.post(`/api/v1/jobs/${job.id}/approve`, { payload_hash: job.payload_hash }),
+    mutationFn: ({ job, reason }: { job: Job; reason: string }) =>
+      api.post(`/api/v1/jobs/${job.id}/approve`, {
+        payload_hash: job.payload_hash,
+        reason: reason.trim() || undefined,
+      }),
     onSuccess: () => {
       setReviewing("");
+      setApproveReason("");
       queryClient.invalidateQueries({ queryKey: ["jobs"] });
     },
   });
@@ -334,8 +343,24 @@ export function HostJobs() {
                       </p>
                       <pre>{prettyJSON(job.payload)}</pre>
                       <div className="operations">
-                        <button onClick={() => approve.mutate(job)} disabled={approve.isPending}>{t("Approve this payload")}</button>
-                        <button className="secondary" onClick={() => setReviewing("")}>{t("Back")}</button>
+                        {needsReason(job.action_type) && (
+                          <input
+                            autoFocus
+                            placeholder={t("reason for the approval, at least 8 characters")}
+                            value={approveReason}
+                            onChange={(e) => setApproveReason(e.target.value)}
+                          />
+                        )}
+                        <button
+                          onClick={() => approve.mutate({ job, reason: approveReason })}
+                          disabled={approve.isPending || (needsReason(job.action_type) && !reasonAccepted(approveReason))}
+                          title={needsReason(job.action_type) && !reasonAccepted(approveReason)
+                            ? t("This operation is critical: the approval is recorded with a reason of at least 8 characters.")
+                            : ""}
+                        >
+                          {t("Approve this payload")}
+                        </button>
+                        <button className="secondary" onClick={() => { setReviewing(""); setApproveReason(""); }}>{t("Back")}</button>
                       </div>
                     </td>
                   </tr>
