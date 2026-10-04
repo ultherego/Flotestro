@@ -26,7 +26,7 @@ const ACCOUNT_CHANGES = [
 ];
 
 /** The panel opened under an account row. */
-type Panel = "keys" | "groups" | "expiry" | "delete";
+type Panel = "keys" | "groups" | "expiry" | "delete" | "unlock";
 
 /** One key of an account, as the inventory reports it. */
 type AccountKey = LocalAccount["ssh_keys"][number];
@@ -220,8 +220,8 @@ function Row({ host, account }: { host: Host; account: LocalAccount }) {
               {account.locked === true ? (
                 <ActionGuard action="localuser.unlock" host={host.id}>
                   <button
-                    title={t("Lets the account log in again; the order goes out at once.")}
-                    onClick={() => request.mutate({ action: "localuser.unlock", name: account.name })}
+                    title={t("Lets the account log in again; the reason is kept in the audit trail.")}
+                    onClick={() => toggle("unlock")}
                   >
                     {t("Unlock")}
                   </button>
@@ -267,6 +267,30 @@ function Row({ host, account }: { host: Host; account: LocalAccount }) {
         <tr>
           <td colSpan={8}>
             <ExpiryPanel hostID={host.id} account={account} request={request} onClose={() => setPanel(null)} />
+          </td>
+        </tr>
+      )}
+      {panel === "unlock" && (
+        <tr className="hm-panel-row">
+          <td colSpan={8}>
+            {/* Letting an account log in again hands somebody access, and the
+                panel keeps the reason. It used to go out with no reason at all,
+                and the trail then said who unlocked and not why - over the one
+                operation whose whole effect is "this account can be used
+                again". */}
+            <TargetConfirmation
+              host={host}
+              target={account.name}
+              reasonOnly
+              label={t("Unlock {name}", { name: account.name })}
+              description={t("The account {name} will be able to log in to {host} again.", { name: account.name, host: host.hostname })}
+              busy={request.busy}
+              onConfirm={(reason) => {
+                request.mutate({ action: "localuser.unlock", name: account.name, reason });
+                setPanel(null);
+              }}
+              onCancel={() => setPanel(null)}
+            />
           </td>
         </tr>
       )}
@@ -341,6 +365,7 @@ export function KeysPanel({
   const keys = account.ssh_keys;
   const [publicKey, setPublicKey] = useState("");
   const [comment, setComment] = useState("");
+  const [keyReason, setKeyReason] = useState("");
   const [target, setTarget] = useState<KeyFile>("authorized_keys");
   // The fingerprint whose removal is waiting for the lockout consent.
   const [lockoutFor, setLockoutFor] = useState<string | null>(null);
@@ -377,9 +402,11 @@ export function KeysPanel({
       name: account.name,
       keys: [{ public_key: publicKey.trim(), comment: comment.trim() || undefined }],
       managed_file: target === "managed" || undefined,
+      reason: keyReason.trim(),
     });
     setPublicKey("");
     setComment("");
+    setKeyReason("");
   };
 
   return (
@@ -455,6 +482,13 @@ export function KeysPanel({
         <Field label={t("Comment")} help={t("Appended only when the key carries none of its own.")}>
           <input value={comment} placeholder="jane@laptop" onChange={(event) => setComment(event.target.value)} />
         </Field>
+        <Field
+          label={t("Reason (at least 8 characters, kept in the audit trail)")}
+          help={t("A key added to an account is a way into it, so the trail says why it was added and not only who added it.")}
+          wide
+        >
+          <input value={keyReason} placeholder={t("why this key is being added")} onChange={(event) => setKeyReason(event.target.value)} />
+        </Field>
         <Field label={t("Key file")} help={t("The panel's file keeps its keys apart from the ones the user wrote; sshd has to list it in AuthorizedKeysFile, or the host refuses the write.")}>
           <select value={target} onChange={(event) => setTarget(event.target.value as KeyFile)}>
             <option value="authorized_keys">{t("the user's authorized_keys")}</option>
@@ -465,7 +499,11 @@ export function KeysPanel({
 
       <FormActions>
         <ActionGuard action="localuser.sshkeys.add" host={hostID}>
-          <button disabled={!orderReady(addOrder) || request.busy} title={refusalOf(t, addOrder)} onClick={add}>
+          <button
+            disabled={!orderReady(addOrder) || keyReason.trim().length < 8 || request.busy}
+            title={keyReason.trim().length < 8 ? t("The reason is kept in the audit trail and is at least 8 characters.") : refusalOf(t, addOrder)}
+            onClick={add}
+          >
             {t("Add key")}
           </button>
         </ActionGuard>

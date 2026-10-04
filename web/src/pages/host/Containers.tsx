@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
+import { needsReason } from "../../lib/actions";
 import type { Job } from "../../lib/types";
 import { Time, Empty } from "../../components/ui";
 import { bytes } from "../../lib/format";
@@ -563,7 +564,7 @@ function Declaration({ kind, lists }: {
               className={destructive ? "hm-danger" : undefined}
               disabled={!computed || stale || !computed.digest || apply.isPending ||
                 computed.action === "no_change" || computed.action === "absent"}
-              onClick={() => (destructive ? setConfirming(true) : order())}
+              onClick={() => (destructive || needsReason(action) ? setConfirming(true) : order())}
             >
               {t("Carry the plan out")}
             </button>
@@ -585,9 +586,18 @@ function Declaration({ kind, lists }: {
       {confirming && (
         <TargetConfirmation
           host={host}
-          danger
-          label={t("Remove {name}", { name: target })}
-          description={t("What is stored in it goes with it, and the removal cannot be undone.")}
+          danger={destructive}
+          // A declaration of the highest risk is not a removal, and the dialog
+          // says which of the two it is: the panel refuses either without a
+          // reason, and a wording that threatens data loss over a container
+          // being declared teaches the operator to read nothing.
+          reasonOnly={!destructive}
+          label={destructive
+            ? t("Remove {name}", { name: target })
+            : t("Declare {name}", { name: target })}
+          description={destructive
+            ? t("What is stored in it goes with it, and the removal cannot be undone.")
+            : t("This change is of the highest risk, so the panel keeps the reason in the audit trail and asks who is ordering it.")}
           busy={apply.isPending}
           onConfirm={(reason, confirmation) => order(reason, confirmation)}
           onCancel={() => setConfirming(false)}

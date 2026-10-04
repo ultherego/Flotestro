@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
+import { copyToClipboard } from "../../lib/clipboard";
 import { refusalName, type Host, type Job, type Whoami } from "../../lib/types";
 import { relativeTime } from "../../lib/format";
 import { Time, ConnectionState } from "../../components/ui";
@@ -225,17 +226,20 @@ function useInventoryRefresh(host: Host, scope?: string) {
  */
 function HostIdentifier({ host }: { host: Host }) {
   const t = useT();
-  const [copied, setCopied] = useState(false);
+  // Three states, because the browser has three answers: not asked yet, on the
+  // clipboard, and refused. A panel over plain HTTP has no navigator.clipboard
+  // at all, and saying "copied" there told the operator the identifier was
+  // somewhere it was not.
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
   const copy = () => {
-    navigator.clipboard?.writeText(host.id);
-    setCopied(true);
+    void copyToClipboard(host.id).then((done) => setState(done ? "copied" : "failed"));
   };
   return (
     <span className="chip inventory-refresh" title={host.id}>
       <span className="chip-tag">{t("id")}</span>
       <span className="chip-mono" data-testid="host-id">{host.id.slice(0, 8)}</span>
       <button type="button" className="link" onClick={copy} title={t("copy the full identifier")}>
-        {copied ? t("copied") : t("copy")}
+        {state === "copied" ? t("copied") : state === "failed" ? t("copy by hand") : t("copy")}
       </button>
     </span>
   );

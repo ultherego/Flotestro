@@ -2,6 +2,7 @@ import { Fragment, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { api, ApiError, type Collection } from "../lib/api";
+import { copyToClipboard } from "../lib/clipboard";
 import type { AccessReview, ApiToken, GroupMapping, Principal, ReviewFlag, ReviewedPrincipal } from "../lib/types";
 import { ErrorBox, Time, Empty } from "../components/ui";
 import { toInstant } from "../lib/format";
@@ -631,7 +632,7 @@ function Identities({ initialSearch }: { initialSearch: string }) {
             {issued.token_expires_at && <> · {t("expires")} <Time value={issued.token_expires_at} /></>}
           </div>
           <div className="operations">
-            <button onClick={() => { navigator.clipboard?.writeText(issued.token); setCopied(true); }}>
+            <button onClick={() => { void copyToClipboard(issued.token).then(setCopied); }}>
               {copied ? t("Token copied") : t("Copy token")}
             </button>
             <button className="secondary" onClick={() => setIssued(null)}>{t("Close")}</button>

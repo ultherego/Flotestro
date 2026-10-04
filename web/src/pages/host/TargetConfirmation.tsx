@@ -6,7 +6,7 @@ import { useT } from "../../i18n";
  * The confirmation of an irreversible operation.
  */
 export function TargetConfirmation({
-  host, description, label, onConfirm, onCancel, busy, danger, target,
+  host, description, label, onConfirm, onCancel, busy, danger, target, reasonOnly,
 }: {
   host: Host;
   description: string;
@@ -20,6 +20,14 @@ export function TargetConfirmation({
    * name of that thing is the one that goes away and the one typed.
    */
   target?: string;
+  /**
+   * reasonOnly asks for the reason and nothing else. An operation that takes
+   * data away is confirmed by typing its name; one that is merely of the
+   * highest risk - declaring a container, unlocking an account - needs the
+   * reason the panel will refuse the order without, and asking to type a name
+   * there teaches the operator to type names without reading them.
+   */
+  reasonOnly?: boolean;
   onConfirm: (reason: string, confirmation: string) => void;
   onCancel: () => void;
   busy: boolean;
@@ -28,7 +36,7 @@ export function TargetConfirmation({
   const [reason, setReason] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const expected = target ?? host.hostname;
-  const ready = reason.trim().length >= 8 && confirmation === expected;
+  const ready = reason.trim().length >= 8 && (reasonOnly || confirmation === expected);
 
   return (
     <div className={danger ? "form danger" : "form"} data-testid="target-confirmation">
@@ -44,10 +52,12 @@ export function TargetConfirmation({
         {t("Reason (at least 8 characters, kept in the audit trail)")}
         <input value={reason} onChange={(e) => setReason(e.target.value)} />
       </label>
-      <label>
-        {target === undefined ? t("Type the hostname to confirm:") : t("Type the name to confirm:")} <code>{expected}</code>
-        <input value={confirmation} onChange={(e) => setConfirmation(e.target.value)} />
-      </label>
+      {!reasonOnly && (
+        <label>
+          {target === undefined ? t("Type the hostname to confirm:") : t("Type the name to confirm:")} <code>{expected}</code>
+          <input value={confirmation} onChange={(e) => setConfirmation(e.target.value)} />
+        </label>
+      )}
       <div className="operations">
         <button className={danger ? "danger" : undefined} disabled={!ready || busy} onClick={() => onConfirm(reason, confirmation)}>
           {busy ? t("Requesting…") : label}

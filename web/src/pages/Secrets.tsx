@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient, type UseMutationResult } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
+import { copyToClipboard } from "../lib/clipboard";
 import type { Whoami } from "../lib/types";
 import { ErrorBox, Time, Empty } from "../components/ui";
 import { absoluteTime } from "../lib/format";
@@ -98,11 +99,14 @@ export function usePermissions(): Set<string> {
  */
 export function useCopy() {
   const [copied, setCopied] = useState("");
+  const [failed, setFailed] = useState("");
   const copy = (label: string, text: string) => {
-    navigator.clipboard?.writeText(text);
-    setCopied(label);
+    void copyToClipboard(text).then((done) => {
+      setCopied(done ? label : "");
+      setFailed(done ? "" : label);
+    });
   };
-  return { copied, copy };
+  return { copied, failed, copy };
 }
 
 /* ---------------------------------------------------------------------- */
@@ -170,7 +174,7 @@ export function Secrets() {
   // so they belong to that row alone and vanish when it closes.
   const [pending, setPending] = useState<{ name: string; action: RowAction } | null>(null);
   const [notice, setNotice] = useState("");
-  const { copied, copy } = useCopy();
+  const { copied, failed, copy } = useCopy();
 
   const list = useQuery({
     queryKey: ["secrets"],
@@ -302,6 +306,7 @@ export function Secrets() {
                       canRotate={canWrite}
                       canRetire={canDestroy}
                       copied={copied === secret.name}
+                      failed={failed === secret.name}
                       onCopy={() => copy(secret.name, secretReference(secret.name, secret.current_version))}
                       rotate={rotate}
                       retire={retire}
@@ -324,7 +329,7 @@ type RetireMutation = UseMutationResult<Secret, Error, { name: string; reason: s
  * One secret of the list with its actions.
  */
 function SecretRow({
-  secret, open, onToggle, onClose, canRotate, canRetire, copied, onCopy, rotate, retire,
+  secret, open, onToggle, onClose, canRotate, canRetire, copied, failed, onCopy, rotate, retire,
 }: {
   secret: Secret;
   open: RowAction | null;
@@ -333,6 +338,7 @@ function SecretRow({
   canRotate: boolean;
   canRetire: boolean;
   copied: boolean;
+  failed: boolean;
   onCopy: () => void;
   rotate: RotateMutation;
   retire: RetireMutation;
@@ -364,7 +370,7 @@ function SecretRow({
                 delivery, so the button goes with the lease. */}
             {!secret.retired_at && (
               <button className="secondary" onClick={onCopy} title={secretReference(secret.name, secret.current_version)}>
-                {copied ? t("Copied") : t("Copy reference")}
+                {copied ? t("Copied") : failed ? t("Copy by hand") : t("Copy reference")}
               </button>
             )}
             {!secret.retired_at && canRotate && (

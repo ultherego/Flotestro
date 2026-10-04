@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "./api";
+import { ACTION_RISK, type ActionType } from "../generated/actions";
 
 /**
  * What one host lets the signed-in operator do, action by action.
@@ -157,4 +158,20 @@ export function moduleAccessOf(
 export function useModuleAccess(hostID: string, actions: string[]): ModuleAccess {
   const query = useHostActions(hostID);
   return moduleAccessOf(query.data, query, actions);
+}
+
+/**
+ * Whether the panel will refuse this order without a reason and a second
+ * confirmation of who is ordering it.
+ *
+ * The risk of every action is generated into ACTION_RISK from the one table
+ * the panel judges by, and it was used nowhere in the interface: so a form for
+ * a critical action sent no reason, the panel answered 4xx, and the operator
+ * saw a refusal with nothing to do about it. The rule is the panel's own -
+ * critical and destructive need fresh authentication - read from the same
+ * table rather than restated per screen.
+ */
+export function needsReason(action: string): boolean {
+  const risk = ACTION_RISK[action as ActionType];
+  return risk === "critical" || risk === "destructive";
 }

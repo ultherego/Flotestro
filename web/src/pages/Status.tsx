@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
+import { copyToClipboard } from "../lib/clipboard";
 import { absoluteTime, bytes, relativeTime } from "../lib/format";
 import { Empty, ErrorBox, Pair, Pairs, Time } from "../components/ui";
 import { Card, PageHeader } from "../components/layout";
@@ -201,9 +202,14 @@ export function Status() {
 
   const copyDiagnostics = () => {
     if (!data) return;
-    navigator.clipboard?.writeText(JSON.stringify(data, null, 2));
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 3000);
+    // A bundle reported as copied and not copied is pasted as whatever was on
+    // the clipboard before - into a ticket, as the state of somebody's fleet.
+    void copyToClipboard(JSON.stringify(data, null, 2)).then((done) => {
+      setCopied(done);
+      if (done) {
+        window.setTimeout(() => setCopied(false), 3000);
+      }
+    });
   };
 
   return (
