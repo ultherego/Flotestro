@@ -158,7 +158,13 @@ type Scope struct {
 
 // Replay is the record of an attempt that has already succeeded.
 type Replay struct {
+	// HostID is the identity that was issued. For a relay it is the relay's
+	// identifier, and Relay says which of the two it is: the row keeps a host
+	// in one column and a relay in another, each with the key that says the
+	// row it names is real, and writing a relay's identifier into the host
+	// column was refused by the database.
 	HostID            string
+	Relay             bool
 	CertificatePEM    []byte
 	CABundlePEM       []byte
 	CertificateSerial string
@@ -472,7 +478,8 @@ func (s *Store) replay(ctx context.Context, tx pgx.Tx, requestID string,
 	input AttemptInput) (*Replay, error) {
 	fingerprint := sha256.Sum256(input.CSR)
 	const query = `
-		select coalesce(host_id::text, ''), certificate_pem, ca_bundle_pem,
+		select coalesce(host_id::text, relay_id::text, ''), relay_id is not null,
+		       certificate_pem, ca_bundle_pem,
 		       coalesce(certificate_serial, ''), csr_sha256
 		from enrollment_attempts
 		where request_id = $1::uuid and (client_request_id = $2::uuid or csr_sha256 = $3)
@@ -485,13 +492,14 @@ func (s *Store) replay(ctx context.Context, tx pgx.Tx, requestID string,
 	}
 	var (
 		hostID    string
+		relay     bool
 		certPEM   []byte
 		bundlePEM []byte
 		serial    string
 		storedCSR []byte
 	)
 	err := tx.QueryRow(ctx, query, requestID, client, fingerprint[:]).
-		Scan(&hostID, &certPEM, &bundlePEM, &serial, &storedCSR)
+		Scan(&hostID, &relay, &certPEM, &bundlePEM, &serial, &storedCSR)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -504,7 +512,7 @@ func (s *Store) replay(ctx context.Context, tx pgx.Tx, requestID string,
 		return nil, &Denial{RequestID: requestID, Code: DenialRequestReused}
 	}
 	return &Replay{
-		HostID: hostID, CertificatePEM: certPEM,
+		HostID: hostID, Relay: relay, CertificatePEM: certPEM,
 		CABundlePEM: bundlePEM, CertificateSerial: serial,
 	}, nil
 }
@@ -518,17 +526,29 @@ func (s *Store) RecordAttempt(ctx context.Context, tx pgx.Tx, requestID string,
 	if client == "" {
 		client = uuid.NewString()
 	}
+	// A host goes into the host column and a relay into the relay column: each
+	// has the foreign key that says the row it names is real, and a relay's
+	// identifier in the host column is refused by the database - which is how
+	// every relay enrollment came to answer 500 the day the relay branch began
+	// recording its attempt.
+	var host, relay any
+	if result.Relay {
+		relay = nullable(result.HostID)
+	} else {
+		host = nullable(result.HostID)
+	}
 	const query = `
 		insert into enrollment_attempts
-			(request_id, client_request_id, csr_sha256, machine_id, host_id,
+			(request_id, client_request_id, csr_sha256, machine_id, host_id, relay_id,
 			 certificate_pem, ca_bundle_pem, certificate_serial, completed_at)
-		values ($1::uuid, $2::uuid, $3, $4, $5::uuid, $6, $7, $8, now())
+		values ($1::uuid, $2::uuid, $3, $4, $5::uuid, $6::uuid, $7, $8, $9, now())
 		on conflict (request_id, client_request_id) do update set
-			host_id = excluded.host_id, certificate_pem = excluded.certificate_pem,
+			host_id = excluded.host_id, relay_id = excluded.relay_id,
+			certificate_pem = excluded.certificate_pem,
 			ca_bundle_pem = excluded.ca_bundle_pem,
 			certificate_serial = excluded.certificate_serial, completed_at = now()`
 	if _, err := tx.Exec(ctx, query, requestID, client, fingerprint[:], input.MachineID,
-		nullable(result.HostID), result.CertificatePEM, result.CABundlePEM,
+		host, relay, result.CertificatePEM, result.CABundlePEM,
 		nullable(result.CertificateSerial)); err != nil {
 		return fmt.Errorf("recording the enrollment attempt: %w", err)
 	}
@@ -536,10 +556,11 @@ func (s *Store) RecordAttempt(ctx context.Context, tx pgx.Tx, requestID string,
 	const settle = `
 		update enrollment_requests
 		set enrolled_host_id = coalesce($2::uuid, enrolled_host_id),
-		    status = case when uses >= max_uses then $3 else status end,
+		    enrolled_relay_id = coalesce($3::uuid, enrolled_relay_id),
+		    status = case when uses >= max_uses then $4 else status end,
 		    updated_at = now()
 		where id = $1::uuid`
-	if _, err := tx.Exec(ctx, settle, requestID, nullable(result.HostID),
+	if _, err := tx.Exec(ctx, settle, requestID, host, relay,
 		StatusEnrolled); err != nil {
 		return fmt.Errorf("settling the request: %w", err)
 	}

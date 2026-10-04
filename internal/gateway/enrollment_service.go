@@ -231,6 +231,14 @@ func (s *EnrollmentService) enrollThroughRelay(ctx context.Context,
 		if err := tx.Commit(ctx); err != nil {
 			return nil, connect.NewError(connect.CodeInternal, err)
 		}
+		// The attempt says which kind it issued, and the token says which kind
+		// it may issue. The two disagreeing means the row found is not this
+		// token's work, and answering it would hand a relay a host's identity
+		// or the other way round.
+		if replayed.Relay != (scope.Kind == enrollment.KindRelay) {
+			return nil, connect.NewError(connect.CodeFailedPrecondition,
+				errors.New("the attempt recorded under this token is of another kind"))
+		}
 		action, target := "host.enroll", "host"
 		if scope.Kind == enrollment.KindRelay {
 			action, target = "relay.enroll", "relay"
@@ -449,7 +457,7 @@ func (s *EnrollmentService) enrollRelay(ctx context.Context, tx pgx.Tx,
 	// refused as an invalid token. The relay could not be enrolled again
 	// without an operator revoking it and issuing another token.
 	if err := s.tokens.RecordAttempt(ctx, tx, scope.TokenID, attempt, enrollment.Replay{
-		HostID: relayID, CertificatePEM: issued.PEM, CABundlePEM: trust,
+		HostID: relayID, Relay: true, CertificatePEM: issued.PEM, CABundlePEM: trust,
 		CertificateSerial: issued.Serial,
 	}); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
