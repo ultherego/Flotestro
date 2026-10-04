@@ -8,7 +8,7 @@ import (
 func deviceState() Snapshot {
 	return Snapshot{
 		Devices: []Device{
-			{Path: "/dev/sdb", FSType: "ext4", UUID: "abc", SizeBytes: 2 << 30},
+			{Path: "/dev/sdb", FSType: "ext4", UUID: "abc", Label: "spare", SizeBytes: 2 << 30},
 			{Path: "/dev/sda1", FSType: "ext4", UUID: "root", Mountpoints: []string{"/"}},
 			{Path: "/dev/mapper/vg0-data", FSType: "xfs", UUID: "lv", Mountpoints: []string{"/data"}},
 			{Path: "/dev/sdc"},
@@ -69,5 +69,49 @@ func TestLVExtendPlanCountsFreeSpace(t *testing.T) {
 	}
 	if ok.PlanHash == full.PlanHash || ok.PlanHash == "" {
 		t.Error("plan fingerprints do not differ")
+	}
+}
+
+// One payload goes to every host of a campaign, and the letter the kernel
+// gives a disk is not the same on two machines: the plans take the device by
+// label and by UUID, as every other place that names a device does, and the
+// plan they return names the path this host gives it.
+func TestADevicePlanTakesTheDeviceByLabelAndByUUID(t *testing.T) {
+	for _, named := range []string{"LABEL=spare", "UUID=abc", "/dev/sdb"} {
+		plan := ComputeCheck(deviceState(), named, false)
+		if plan.Action != PlanRun || plan.Refusal != "" {
+			t.Fatalf("%s: %+v", named, plan)
+		}
+		if plan.Device != "/dev/sdb" {
+			t.Fatalf("%s: the plan names the device %q, not the path the host gives it", named, plan.Device)
+		}
+		// The same device named three ways is one plan: the digest an operator
+		// consents to cannot depend on the form the order used.
+		if plan.PlanHash != ComputeCheck(deviceState(), "/dev/sdb", false).PlanHash {
+			t.Fatalf("%s: a different plan digest than the same device by path", named)
+		}
+	}
+	// And one nothing answers to is refused, not guessed at.
+	if plan := ComputeCheck(deviceState(), "LABEL=nowhere", false); plan.Refusal == "" || plan.Found {
+		t.Fatalf("a label no device carries: %+v", plan)
+	}
+	// Growing a filesystem and the destructive pair take the same forms.
+	if plan := ComputeFSResize(deviceState(), "LABEL=spare"); plan.Action != PlanRun ||
+		plan.Device != "/dev/sdb" {
+		t.Fatalf("resize by label: %+v", plan)
+	}
+	// The destructive pair as well - with a device that carries the stable
+	// identity they insist on.
+	identified := Snapshot{Devices: []Device{{
+		Path: "/dev/sdd", FSType: "ext4", UUID: "def", Label: "scratch", SizeBytes: 2 << 30,
+		ByID: "/dev/disk/by-id/wwn-0x5000", WWN: "0x5000", Serial: "S1",
+	}}}
+	if plan := ComputeWipe(identified, "UUID=def"); plan.Action != PlanRun ||
+		plan.Device != "/dev/sdd" {
+		t.Fatalf("wipe by uuid: %+v", plan)
+	}
+	if plan := ComputeFormat(identified, "LABEL=scratch", "ext4", "fresh"); plan.Action != PlanRun ||
+		plan.Device != "/dev/sdd" {
+		t.Fatalf("format by label: %+v", plan)
 	}
 }

@@ -1020,13 +1020,8 @@ func (s *Server) checkSourceExists(ctx context.Context, source string) error {
 // device now. A path is returned as it is, and an identifier nothing answers to
 // is not resolved - which is an answer, not a path to guess at.
 func (s *Server) resolveDevice(ctx context.Context, source string) (string, bool) {
-	wanted, isLabel := strings.CutPrefix(source, "LABEL=")
-	if !isLabel {
-		var isUUID bool
-		wanted, isUUID = strings.CutPrefix(source, "UUID=")
-		if !isUUID {
-			return source, true
-		}
+	if !strings.HasPrefix(source, "LABEL=") && !strings.HasPrefix(source, "UUID=") {
+		return source, true
 	}
 	output, err := toolOutput(ctx, storage.LsblkPath, "-J", "-b", "-o",
 		"NAME,PATH,TYPE,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINTS")
@@ -1037,15 +1032,13 @@ func (s *Server) resolveDevice(ctx context.Context, source string) (string, bool
 	if err != nil {
 		return "", false
 	}
-	for _, entry := range devices {
-		if isLabel && entry.Label == wanted {
-			return entry.Path, true
-		}
-		if !isLabel && entry.UUID == wanted {
-			return entry.Path, true
-		}
+	// The same rule the plans resolve by, asked of the devices this host has
+	// now: one rule, so a device the plan found cannot be one the apply misses.
+	found := storage.Snapshot{Devices: devices}.SourceDevice(source)
+	if found == nil {
+		return "", false
 	}
-	return "", false
+	return found.Path, true
 }
 
 func (s *Server) mountPoint(ctx context.Context, device string) string {

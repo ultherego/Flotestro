@@ -544,3 +544,102 @@ func TestShadowExpiryBecomesADate(t *testing.T) {
 		t.Errorf("open = %q, odd = %q", states["open"].expiresAt, states["odd"].expiresAt)
 	}
 }
+
+// A file sshd does not open is not a way into the account. The managed file
+// holds a key, sshd reads only the home file, and the order takes the last key
+// out of the home file: the guard has to refuse, because afterwards nobody can
+// log in. Counting the managed file regardless is how the account was left
+// locked out (audit of 6c38561, HA-001).
+func TestTheLastHomeKeyIsNotCoveredByAFileSSHDDoesNotRead(t *testing.T) {
+	uid := userRangeUID(t)
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".ssh"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHZ8Kx3vQOZKq0M0hDPuJHf5Zx1kJHgqRqYqGZ6XxLm1 smith\n"
+	if err := os.WriteFile(filepath.Join(home, ".ssh", "authorized_keys"), []byte(key), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "smith"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const managedKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAy6mWJn8OaXk4SvEPQ3oMfQ1fCxQbqc1hXGr6rHj2wZ panel\n"
+	if err := os.WriteFile(filepath.Join(root, "smith", accounts.ManagedKeysFileName),
+		[]byte(managedKey), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	previousRoot, previousShadow, previousSSHD := managedKeysRoot, shadowReader, effectiveSSHDConfig
+	t.Cleanup(func() {
+		managedKeysRoot, shadowReader, effectiveSSHDConfig = previousRoot, previousShadow, previousSSHD
+	})
+	managedKeysRoot = root
+	// No password to fall back on.
+	shadowReader = func() (map[string]shadowState, error) {
+		return map[string]shadowState{"smith": {locked: true}}, nil
+	}
+	// sshd reads the home file only; the managed file is not among its files.
+	effectiveSSHDConfig = func(context.Context) (string, error) {
+		return "authorizedkeysfile .ssh/authorized_keys\n", nil
+	}
+
+	tool := &fakeAccountTool{}
+	server := accountServer(tool, map[string]accountRecord{
+		"smith": {Name: "smith", UID: uid, GID: os.Getgid(), Home: home, InPasswd: true},
+	})
+	response := server.handle(context.Background(), accountRequest(
+		helperv1.LocalUserActionRequest_OPERATION_SET_SSH_KEYS,
+		func(a *helperv1.LocalUserActionRequest) { a.SshKeys = nil }), nil)
+	if response.GetAccepted() || response.GetErrorCode() != ErrorLastKeyLockout {
+		t.Fatalf("accepted=%v code=%q message=%q",
+			response.GetAccepted(), response.GetErrorCode(), response.GetMessage())
+	}
+	// The refusal says where the keys that did not count are, and why.
+	if !strings.Contains(response.GetMessage(), accounts.ManagedKeysPattern) {
+		t.Fatalf("the refusal does not name the file sshd does not read: %q", response.GetMessage())
+	}
+	if content, err := os.ReadFile(filepath.Join(home, ".ssh", "authorized_keys")); err != nil ||
+		string(content) != key {
+		t.Fatalf("the key file was changed: %q (%v)", content, err)
+	}
+
+	// The same order, on a host where sshd does read the managed file, goes
+	// through: there the key really is another way in.
+	effectiveSSHDConfig = func(context.Context) (string, error) {
+		return "authorizedkeysfile .ssh/authorized_keys " + accounts.ManagedKeysPattern + "\n", nil
+	}
+	if response := server.handle(context.Background(), accountRequest(
+		helperv1.LocalUserActionRequest_OPERATION_SET_SSH_KEYS,
+		func(a *helperv1.LocalUserActionRequest) { a.SshKeys = nil }), nil); !response.GetAccepted() {
+		t.Fatalf("code=%q message=%q", response.GetErrorCode(), response.GetMessage())
+	}
+}
+
+// Writing the managed file needs to know that sshd opens it. A configuration
+// that could not be read is not one that does.
+func TestWritingTheManagedFileRefusesWhenTheSSHDConfigurationCannotBeRead(t *testing.T) {
+	uid := userRangeUID(t)
+	previous := effectiveSSHDConfig
+	t.Cleanup(func() { effectiveSSHDConfig = previous })
+	effectiveSSHDConfig = func(context.Context) (string, error) {
+		return "", errors.New("this host has no sshd server")
+	}
+
+	tool := &fakeAccountTool{}
+	server := accountServer(tool, map[string]accountRecord{
+		"smith": {Name: "smith", UID: uid, GID: os.Getgid(), Home: t.TempDir(), InPasswd: true},
+	})
+	response := server.handle(context.Background(), accountRequest(
+		helperv1.LocalUserActionRequest_OPERATION_ADD_SSH_KEYS,
+		func(a *helperv1.LocalUserActionRequest) {
+			a.ManagedFile = true
+			a.Keys = []*helperv1.LocalSSHKeyInput{{
+				PublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHZ8Kx3vQOZKq0M0hDPuJHf5Zx1kJHgqRqYqGZ6XxLm1",
+			}}
+		}), nil)
+	if response.GetAccepted() || response.GetErrorCode() != ErrorManagedFileNotRead {
+		t.Fatalf("accepted=%v code=%q", response.GetAccepted(), response.GetErrorCode())
+	}
+}

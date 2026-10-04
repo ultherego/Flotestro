@@ -132,10 +132,17 @@ func ComputeCheck(state Snapshot, device string, repair bool) DevicePlan {
 	if state.UnavailableReason != "" {
 		return plan.withRefusal(state.UnavailableReason)
 	}
-	found := state.DeviceAt(device)
+	found := state.SourceDevice(device)
 	if found == nil {
 		return plan.withRefusal("the host does not see the device " + device)
 	}
+	// The order may name the filesystem by its label or its UUID - that is what
+	// one payload sent to a fleet has to use, because the letter the kernel
+	// gives a disk is not the same on two machines - and everything below here,
+	// the mounted guard and the fsck arguments included, works with paths. The
+	// plan carries the path this host gives it now.
+	device = found.Path
+	plan.Device = device
 	plan.describe(found)
 	if found.FSType == "" {
 		return plan.withRefusal("there is no filesystem to check on " + device)
@@ -167,10 +174,12 @@ func ComputeFSResize(state Snapshot, device string) DevicePlan {
 	if state.UnavailableReason != "" {
 		return plan.withRefusal(state.UnavailableReason)
 	}
-	found := state.DeviceAt(device)
+	found := state.SourceDevice(device)
 	if found == nil {
 		return plan.withRefusal("the host does not see the device " + device)
 	}
+	device = found.Path
+	plan.Device = device
 	plan.describe(found)
 	arguments, err := FSResizeArguments(device, found.FSType, plan.Mountpoint)
 	if err != nil {
@@ -232,13 +241,19 @@ func ComputeLVExtend(state Snapshot, device, size string) DevicePlan {
 // ComputeFormat computes the plan of creating a filesystem on a device.
 func ComputeFormat(state Snapshot, device, fsType, label string) DevicePlan {
 	plan := DevicePlan{Operation: PlanFormat, Device: device, DesiredFSType: fsType, DesiredLabel: label}
-	arguments, err := FormatArguments(device, fsType, label)
-	if err != nil {
+	if err := ValidateSource(device); err != nil {
 		return plan.withRefusal(err.Error())
 	}
+	// The target is resolved before the command is written: the arguments take
+	// the path, the order may name the device by its label or its UUID.
 	found, refusal := plan.destructiveTarget(state)
 	if refusal != "" {
 		return plan.withRefusal(refusal)
+	}
+	device = plan.Device
+	arguments, err := FormatArguments(device, fsType, label)
+	if err != nil {
+		return plan.withRefusal(err.Error())
 	}
 	if err := ValidateDestructiveTarget(plan, *found); err != nil {
 		return plan.withTypedRefusal(err)
@@ -253,13 +268,17 @@ func ComputeFormat(state Snapshot, device, fsType, label string) DevicePlan {
 // ComputeWipe computes the plan of removing the filesystem signatures.
 func ComputeWipe(state Snapshot, device string) DevicePlan {
 	plan := DevicePlan{Operation: PlanWipe, Device: device}
-	arguments, err := WipeArguments(device)
-	if err != nil {
+	if err := ValidateSource(device); err != nil {
 		return plan.withRefusal(err.Error())
 	}
 	found, refusal := plan.destructiveTarget(state)
 	if refusal != "" {
 		return plan.withRefusal(refusal)
+	}
+	device = plan.Device
+	arguments, err := WipeArguments(device)
+	if err != nil {
+		return plan.withRefusal(err.Error())
 	}
 	if err := ValidateDestructiveTarget(plan, *found); err != nil {
 		return plan.withTypedRefusal(err)
@@ -277,10 +296,13 @@ func (p *DevicePlan) destructiveTarget(state Snapshot) (*Device, string) {
 	if state.UnavailableReason != "" {
 		return nil, state.UnavailableReason
 	}
-	found := state.DeviceAt(p.Device)
+	found := state.SourceDevice(p.Device)
 	if found == nil {
 		return nil, "the host does not see the device " + p.Device
 	}
+	// A durable identifier names the device as well as a path does; what goes
+	// into the arguments of a destructive command is the path.
+	p.Device = found.Path
 	p.describe(found)
 	return found, ""
 }

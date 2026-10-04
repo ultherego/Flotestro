@@ -51,6 +51,12 @@ func (s *AgentService) FetchSecret(ctx context.Context,
 	hostID := who.HostID
 	// A direct caller was already checked against the record of the certificate
 	// it presented: a revoked or unknown one fetches nothing.
+	// A host that offers a one-time key is answered sealed, relay or no relay:
+	// the agent refuses an answer in the clear to a fetch it offered a key for,
+	// because an answer in the clear is one a carrier could have replaced.
+	// Through a relay the key is first proved by the envelope; on a direct
+	// connection the request arrived over the host's own authenticated channel,
+	// which is what the certificate check above established.
 	var sealTo []byte
 	if who.RelayID != "" {
 		verified, problem := s.verifySecretEnvelope(ctx, who, req.Msg)
@@ -58,6 +64,8 @@ func (s *AgentService) FetchSecret(ctx context.Context,
 			return nil, problem
 		}
 		s.learnPublicKey(ctx, hostID, verified)
+		sealTo = req.Msg.GetEphemeralPublicKey()
+	} else if len(req.Msg.GetEphemeralPublicKey()) > 0 {
 		sealTo = req.Msg.GetEphemeralPublicKey()
 	}
 	if s.secrets == nil {
