@@ -139,3 +139,38 @@ func TestTheTailBufferNeverGrowsPastItsLimit(t *testing.T) {
 		t.Error("half a megabyte was written and nothing was reported as cut")
 	}
 }
+
+// The three connection settings of the configuration file are parsed,
+// range-checked and shown to the operator - and used to reach nothing: the
+// backoff was two constants and one attempt was bounded by the operating
+// system alone (audit of 6c38561, ROOT-02).
+func TestTheConfiguredWaitsAreTheWaitsTheSessionUses(t *testing.T) {
+	opts := SessionOptions{
+		ConnectTimeout: 7 * time.Second,
+		ReconnectMin:   30 * time.Second,
+		ReconnectMax:   10 * time.Minute,
+	}
+	if low, high := opts.backoff(); low != 30*time.Second || high != 10*time.Minute {
+		t.Errorf("the configured waits came back as %s..%s", low, high)
+	}
+	if got := opts.attemptTimeout(); got != 7*time.Second {
+		t.Errorf("the configured timeout of an attempt came back as %s", got)
+	}
+
+	// Nothing configured is the default, not zero: a host set up before the
+	// file existed goes on working.
+	empty := SessionOptions{}
+	if low, high := empty.backoff(); low != minBackoff || high != maxBackoff {
+		t.Errorf("without a configuration the waits are %s..%s", low, high)
+	}
+	if got := empty.attemptTimeout(); got != connectTimeout {
+		t.Errorf("without a configuration the timeout of an attempt is %s", got)
+	}
+
+	// A pair the wrong way round is not a negative window. The file refuses it,
+	// and a caller that is not the file does not get to produce one either.
+	reversed := SessionOptions{ReconnectMin: time.Minute, ReconnectMax: time.Second}
+	if low, high := reversed.backoff(); high < low {
+		t.Errorf("the waits came back as %s..%s", low, high)
+	}
+}

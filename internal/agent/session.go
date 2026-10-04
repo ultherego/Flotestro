@@ -50,8 +50,21 @@ type SessionOptions struct {
 	Log                *slog.Logger
 	// Renewed signals a renewal of the certificate.
 	Renewed <-chan struct{}
+	// ConnectTimeout bounds one attempt to reach a gateway, and ReconnectMin
+	// and ReconnectMax bound the wait between attempts. They come from the
+	// configuration file, where they are parsed and range-checked; a zero means
+	// the caller did not set them and the defaults below are used.
+	ConnectTimeout time.Duration
+	ReconnectMin   time.Duration
+	ReconnectMax   time.Duration
 	// State writes to disk what is happening with the agent.
 	State *StateWriter
+	// OnSession is called when the panel has answered Hello with the session
+	// configuration, and again with false when that session ends. It is what a
+	// measurement counts: a goroutine that started is not a session the panel
+	// agreed to, and counting one as the other is how a scale run reports a
+	// fleet the panel never saw.
+	OnSession func(established bool)
 	// StateDir is where the agent keeps what has to survive a restart.
 	StateDir string
 
@@ -69,12 +82,43 @@ type SessionOptions struct {
 const (
 	minBackoff = 2 * time.Second
 	maxBackoff = 5 * time.Minute
+	// connectTimeout bounds one attempt to reach a gateway when the
+	// configuration names none.
+	connectTimeout = 30 * time.Second
 )
+
+// backoff returns the waits between attempts this agent was configured with,
+// and the defaults where it was not. The configuration file parses and
+// range-checks the three values; before this they were parsed, validated,
+// shown to the operator and then never used, so a host told to come back after
+// thirty seconds came back after two.
+func (o SessionOptions) backoff() (time.Duration, time.Duration) {
+	low, high := o.ReconnectMin, o.ReconnectMax
+	if low <= 0 {
+		low = minBackoff
+	}
+	if high <= 0 {
+		high = maxBackoff
+	}
+	if high < low {
+		high = low
+	}
+	return low, high
+}
+
+// attemptTimeout bounds one attempt to reach a gateway.
+func (o SessionOptions) attemptTimeout() time.Duration {
+	if o.ConnectTimeout <= 0 {
+		return connectTimeout
+	}
+	return o.ConnectTimeout
+}
 
 // Run keeps the connection to the gateway and resumes it with backoff and
 // jitter.
 func Run(ctx context.Context, opts SessionOptions) error {
-	manager := endpoints.New(opts.GatewayURLs, minBackoff, maxBackoff)
+	low, high := opts.backoff()
+	manager := endpoints.New(opts.GatewayURLs, low, high)
 	if len(manager.Gateways()) == 0 {
 		return errors.New("the agent has no gateway to connect to")
 	}
@@ -109,7 +153,7 @@ func Run(ctx context.Context, opts SessionOptions) error {
 		material := opts.Identity.Certificate
 		peer := newPeerIdentity()
 		client := agentv1connect.NewAgentServiceClient(
-			newObservedHTTP2Client(material, opts.Identity.CAPool, peer),
+			newObservedHTTP2Client(material, opts.Identity.CAPool, peer, opts.attemptTimeout()),
 			gateway.URL,
 			// The Connect protocol does not support full duplex, so the
 			// bidirectional stream travels over gRPC on top of HTTP/2.
@@ -296,6 +340,10 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 	opts.Log.Info("the session was established",
 		"host_id", opts.Identity.HostID, "heartbeat", heartbeatInterval.String())
 	opts.State.Connected(opts.gatewayURL, time.Now())
+	if opts.OnSession != nil {
+		opts.OnSession(true)
+		defer opts.OnSession(false)
+	}
 
 	// Send is not safe for concurrent calls.
 	var sendMu sync.Mutex
@@ -758,12 +806,13 @@ func panelAddress(gatewayURL string) string {
 }
 
 func newHTTP2Client(identity *Identity) *http.Client {
-	return newObservedHTTP2Client(identity.Certificate, identity.CAPool, nil)
+	return newObservedHTTP2Client(identity.Certificate, identity.CAPool, nil, connectTimeout)
 }
 
 // newObservedHTTP2Client builds the client of a session and lets the observer
 // read the server's identity from the handshake.
-func newObservedHTTP2Client(material tls.Certificate, trust *x509.CertPool, peer *peerIdentity) *http.Client {
+func newObservedHTTP2Client(material tls.Certificate, trust *x509.CertPool,
+	peer *peerIdentity, timeout time.Duration) *http.Client {
 	config := &tls.Config{
 		Certificates: []tls.Certificate{material},
 		RootCAs:      trust,
@@ -772,9 +821,24 @@ func newObservedHTTP2Client(material tls.Certificate, trust *x509.CertPool, peer
 	if peer != nil {
 		config.VerifyConnection = peer.observe
 	}
+	if timeout <= 0 {
+		timeout = connectTimeout
+	}
+	// The timeout the operator set bounds reaching the gateway: the dial and
+	// the handshake, which is what "connect_timeout" names. Without it the
+	// attempt was bounded by the operating system alone, and a gateway that
+	// accepts the connection and then says nothing held the agent for minutes
+	// while the next gateway in the list waited.
+	dialer := &tls.Dialer{NetDialer: &net.Dialer{Timeout: timeout}, Config: config}
 	return &http.Client{
 		Transport: &http2.Transport{
 			TLSClientConfig: config,
+			DialTLSContext: func(ctx context.Context, network, address string,
+				_ *tls.Config) (net.Conn, error) {
+				attempt, cancel := context.WithTimeout(ctx, timeout)
+				defer cancel()
+				return dialer.DialContext(attempt, network, address)
+			},
 			ReadIdleTimeout: 30 * time.Second,
 			PingTimeout:     15 * time.Second,
 		},
@@ -873,6 +937,8 @@ func withJitter(base time.Duration) time.Duration {
 	if base <= 0 {
 		return minBackoff
 	}
+	// Half the wait plus a random part of it: two hosts that lost the same
+	// gateway do not come back in step.
 	return base/2 + time.Duration(rand.Int64N(int64(base)))
 }
 

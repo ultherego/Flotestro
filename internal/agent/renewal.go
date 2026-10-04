@@ -160,7 +160,7 @@ func renewCertificate(ctx context.Context, identity *Identity, options RenewalOp
 			peer := newPeerIdentity()
 			client := agentv1connect.NewAgentServiceClient(&http.Client{
 				Timeout:   60 * time.Second,
-				Transport: newObservedHTTP2Client(material, identity.CAPool, peer).Transport,
+				Transport: newObservedHTTP2Client(material, identity.CAPool, peer, connectTimeout).Transport,
 			}, gatewayURL)
 
 			request := &agentv1.RenewCertificateRequest{

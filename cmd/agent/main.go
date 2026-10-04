@@ -85,7 +85,21 @@ func main() {
 		})
 		log.Info("the configuration was read", "file", *configPath,
 			"gateways", len(cfg.Connection.GatewayURLs), "mode", *mode)
-	} else {
+	}
+	// What the agent will actually run with is checked, not what the file said.
+	// A flag or an environment variable overrides the file, and the mode was
+	// then compared with one value only - so "read-only" or "readonly" in
+	// --mode or FLOTESTRO_AGENT_MODE was not the observation mode, it was the
+	// full one, with no word about it: an operator who asked to watch the host
+	// got an agent that changes it.
+	cfg.Agent.Mode = *mode
+	cfg.Agent.MaxConcurrentTasks = *maxTasks
+	if err := agentconfig.CheckRuntime(cfg); err != nil {
+		log.Error("the configuration the agent would run with", "err", err,
+			"mode", *mode, "max_tasks", *maxTasks)
+		os.Exit(1)
+	}
+	if !fromFile {
 		// Backwards compatibility: a host set up before the YAML file was introduced
 		// goes on working with the environment variables.
 		log.Warn("no configuration file, using the environment variables",
@@ -216,7 +230,12 @@ func main() {
 		Renewed:            renewals,
 		// The state on disk is the only source agentctl on a host without the
 		// panel learns from whether the agent really speaks to the gateway.
-		State: agent.NewStateWriter(*stateDir, identity.HostID),
+		// The three connection settings of the configuration file, which used to
+		// be parsed, range-checked, logged and then ignored.
+		ConnectTimeout: cfg.Connection.ConnectTimeout,
+		ReconnectMin:   cfg.Connection.ReconnectMin,
+		ReconnectMax:   cfg.Connection.ReconnectMax,
+		State:          agent.NewStateWriter(*stateDir, identity.HostID),
 		// The samples the panel has not acknowledged are kept under the state
 		// directory, so a broken session costs a second delivery rather than a hole
 		// in the host's chart.

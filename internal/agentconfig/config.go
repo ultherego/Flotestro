@@ -208,6 +208,23 @@ func duration(text string, fallback time.Duration) (time.Duration, error) {
 	return value, nil
 }
 
+// CheckRuntime guards the values an override can change: the mode of work and
+// the limit of parallel tasks. A flag or an environment variable wins over the
+// file, so what the agent runs with is not what Load validated - and the mode
+// used to be judged by one comparison against read_only, which made every
+// other spelling the full mode, silently. This is not Check: a host with no
+// configuration file has no schema version and no paths from a file to judge,
+// and the override is still the operator's word.
+func CheckRuntime(c Config) error {
+	if c.Agent.Mode != ModeFull && c.Agent.Mode != ModeReadOnly {
+		return fmt.Errorf("%w: %s", ErrMode, c.Agent.Mode)
+	}
+	if c.Agent.MaxConcurrentTasks < 1 || c.Agent.MaxConcurrentTasks > 16 {
+		return fmt.Errorf("%w: %d", ErrTaskLimit, c.Agent.MaxConcurrentTasks)
+	}
+	return nil
+}
+
 // Check guards the contract of the configuration file.
 func Check(cfg Config) error { return cfg.Check() }
 
@@ -238,11 +255,8 @@ func (c Config) Check() error {
 	if !filepath.IsAbs(c.Helper.Socket) {
 		return fmt.Errorf("%w: %s", ErrHelperSocket, c.Helper.Socket)
 	}
-	if c.Agent.MaxConcurrentTasks < 1 || c.Agent.MaxConcurrentTasks > 16 {
-		return fmt.Errorf("%w: %d", ErrTaskLimit, c.Agent.MaxConcurrentTasks)
-	}
-	if c.Agent.Mode != ModeFull && c.Agent.Mode != ModeReadOnly {
-		return fmt.Errorf("%w: %s", ErrMode, c.Agent.Mode)
+	if err := CheckRuntime(c); err != nil {
+		return err
 	}
 	if c.Connection.ConnectTimeout < time.Second || c.Connection.ConnectTimeout > 2*time.Minute {
 		return fmt.Errorf("%w: %s", ErrConnectTimeout, c.Connection.ConnectTimeout)

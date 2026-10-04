@@ -249,3 +249,44 @@ func TestLoadFromAFile(t *testing.T) {
 		t.Fatalf("a missing file = %v", err)
 	}
 }
+
+// A flag or an environment variable overrides the file, so what the agent runs
+// with is not what Load validated. The mode used to be judged by one
+// comparison against read_only, which made "read-only", "readonly" and every
+// typo the full mode - an agent that changes the host, ordered by somebody who
+// asked to watch it, and nothing said so (audit of 6c38561, ROOT-03).
+func TestTheModeAnOverrideGivesIsChecked(t *testing.T) {
+	base := Defaults()
+	for _, mode := range []string{"read-only", "readonly", "observe", "READ_ONLY", ""} {
+		cfg := base
+		cfg.Agent.Mode = mode
+		if err := CheckRuntime(cfg); !errors.Is(err, ErrMode) {
+			t.Errorf("the mode %q was accepted: %v", mode, err)
+		}
+	}
+	for _, mode := range []string{ModeFull, ModeReadOnly} {
+		cfg := base
+		cfg.Agent.Mode = mode
+		if err := CheckRuntime(cfg); err != nil {
+			t.Errorf("the mode %q was refused: %v", mode, err)
+		}
+	}
+	// The limit of parallel tasks comes from an override as well.
+	for _, limit := range []int{0, -1, 17} {
+		cfg := base
+		cfg.Agent.MaxConcurrentTasks = limit
+		if err := CheckRuntime(cfg); !errors.Is(err, ErrTaskLimit) {
+			t.Errorf("the limit %d was accepted: %v", limit, err)
+		}
+	}
+	// And it is not Check: a host with no configuration file has no schema
+	// version and no paths from a file, and the override is still a word of
+	// the operator's that has to be judged.
+	empty := Config{Agent: Agent{Mode: ModeReadOnly, MaxConcurrentTasks: 1}}
+	if err := CheckRuntime(empty); err != nil {
+		t.Errorf("a configuration without a file was refused: %v", err)
+	}
+	if err := Check(empty); err == nil {
+		t.Error("Check accepted a configuration with no schema version")
+	}
+}

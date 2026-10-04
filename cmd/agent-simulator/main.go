@@ -260,8 +260,6 @@ func simulate(ctx context.Context, index int, sim simulation, counters *stats, l
 		round := sim.fleet.round.Load()
 		sessionCtx, cancel := context.WithCancel(ctx)
 		sim.fleet.join(index, cancel)
-		counters.connected.Add(1)
-		counters.raised.Add(1)
 
 		err := agent.Run(sessionCtx, agent.SessionOptions{
 			GatewayURLs:  []string{sim.gatewayURL},
@@ -272,9 +270,20 @@ func simulate(ctx context.Context, index int, sim simulation, counters *stats, l
 			InventoryInterval:  30 * time.Minute,
 			MaxConcurrentTasks: 1,
 			Log:                log,
+			// A session counts when the panel has answered Hello with the
+			// session configuration, not when the goroutine started: before
+			// this the measurement counted goroutines, so "10 000 connected"
+			// was 10 000 attempts and the panel may have agreed to fewer.
+			OnSession: func(established bool) {
+				if established {
+					counters.connected.Add(1)
+					counters.raised.Add(1)
+					return
+				}
+				counters.connected.Add(-1)
+			},
 		})
 
-		counters.connected.Add(-1)
 		sim.fleet.leave(index)
 		cancel()
 
