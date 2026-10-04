@@ -95,10 +95,28 @@ func TestLaterBundlesMustBeSignedByATrustedKey(t *testing.T) {
 		t.Fatalf("a bundle altered after signing: %v", err)
 	}
 
-	// The trusted panel may move the identity: a re-enrollment.
+	// A bundle naming another host is refused, signature or no signature. It
+	// used to be taken as a re-enrollment and this test required that - which
+	// was the hole: the signature proves the panel issued the bundle, not whom
+	// it was sent to, so a bundle meant for host-2 renamed this helper, and
+	// the verifier then compared every capability against the name that had
+	// just been written. Nor did it take a capability: the keyring update runs
+	// before the capability check, because that is how the keys for the check
+	// arrive (audit of 6c38561, CR-06).
+	if _, err := store.Apply(signer.TrustBundle("host-2", now)); CodeOf(err) != ErrorWrongHost {
+		t.Fatalf("a bundle naming another host: %v", err)
+	}
+	if id, err := store.HostID(); err != nil || id != "host-1" {
+		t.Fatalf("the helper is now %q (%v)", id, err)
+	}
+
+	// The way to a new identity is a reset, which takes root on the host.
+	if err := store.Reset(); err != nil {
+		t.Fatal(err)
+	}
 	moved, err := store.Apply(signer.TrustBundle("host-2", now))
-	if err != nil || moved.HostID != "host-2" || !moved.Changed {
-		t.Fatalf("a re-enrollment signed by the trusted key: %+v, %v", moved, err)
+	if err != nil || moved.HostID != "host-2" || !moved.Bootstrap {
+		t.Fatalf("an enrollment after a reset: %+v, %v", moved, err)
 	}
 }
 
@@ -265,5 +283,59 @@ func TestReplayStoreSweepsExpiredRecords(t *testing.T) {
 	}
 	if info, err := os.Stat(dir); err != nil || info.Mode().Perm() != 0o700 {
 		t.Errorf("the replay directory has mode %v", info.Mode())
+	}
+}
+
+// In the overlap of a rotation the panel signs with the retired key, so a
+// bundle holding the old key alone still verifies after the overlap bundle has
+// been accepted - and the keyring would then drop the new key as "not in the
+// bundle". One replay of an old bundle and the rotation is undone. The moment
+// of issue is in the bytes that are signed; nothing compared it with anything
+// (audit of 6c38561, CR-07).
+func TestAnOlderBundleDoesNotUndoARotation(t *testing.T) {
+	store := newStore(t)
+	old := newSigner(t)
+	early := time.Unix(1_800_000_000, 0)
+	first := old.TrustBundle("host-1", early)
+	if _, err := store.Apply(first); err != nil {
+		t.Fatal(err)
+	}
+
+	// The overlap: the new key arrives in a bundle signed by the old one.
+	fresh := newSigner(t)
+	fresh.previous = old
+	later := early.Add(time.Hour)
+	if _, err := store.Apply(fresh.TrustBundle("host-1", later)); err != nil {
+		t.Fatalf("the overlap bundle: %v", err)
+	}
+	after, _, err := store.Keyring()
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := len(after.IDs())
+
+	// The first bundle, replayed. It verifies - it was signed by a key the
+	// helper still trusts - and it must not be taken.
+	if _, err := store.Apply(first); CodeOf(err) != ErrorTrustStale {
+		t.Fatalf("a replayed bundle: %v", err)
+	}
+	now, _, err := store.Keyring()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(now.IDs()) != keys {
+		t.Fatalf("the keyring holds %d keys after the replay, %d before it",
+			len(now.IDs()), keys)
+	}
+
+	// A bundle issued at the same moment is still taken: the panel may send
+	// the same state again, and refusing that would make a retry a failure.
+	if _, err := store.Apply(fresh.TrustBundle("host-1", later)); err != nil {
+		t.Fatalf("the same bundle again: %v", err)
+	}
+	// And the rotation finishes: the new key alone, signed by itself, later.
+	fresh.previous = nil
+	if _, err := store.Apply(fresh.TrustBundle("host-1", later.Add(time.Hour))); err != nil {
+		t.Fatalf("the bundle that retires the old key: %v", err)
 	}
 }

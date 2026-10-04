@@ -82,6 +82,11 @@ const (
 	// ErrorTrustPin: the first bundle a host is handed is signed by a key the
 	// operator did not write down on that host beforehand.
 	ErrorTrustPin = "trust_pin_mismatch"
+	// ErrorTrustStale: the bundle is older than the one this helper has already
+	// accepted. In the overlap of a rotation the panel signs with the old key,
+	// so an older bundle still verifies - and taking it would withdraw the key
+	// the rotation added.
+	ErrorTrustStale = "trust_bundle_stale"
 	// ErrorUnknownKey: the keyring holds no key of that identifier.
 	ErrorUnknownKey = "capability_unknown_key"
 	// ErrorBadSignature: the signature does not verify under the named key.

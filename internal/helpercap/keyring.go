@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/x509"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -366,13 +367,40 @@ func (t TrustStore) Apply(bundle *helperv1.HelperTrustBundle) (*TrustUpdate, err
 		return nil, refusal(ErrorTrustUntrusted, "the signature of the bundle does not verify")
 	}
 
-	changed := false
-	if currentHost != bundle.GetHostId() {
-		if err := writeRootFile(t.HostIDPath, []byte(bundle.GetHostId()+"\n"), 0o600); err != nil {
-			return nil, err
-		}
-		changed = true
+	// The identity of an enrolled host does not change with a bundle. The
+	// signature proves that the panel issued the bundle and not whom it was
+	// sent to, so a bundle meant for another host used to rename this one -
+	// and the verifier then compared every capability against the name that
+	// had just been put there, so a consent for host B was carried out on host
+	// A. Nor did it take a capability to do: the keyring update runs before the
+	// capability check, deliberately, because that is how the keys the check
+	// needs arrive. Changing the name is a re-enrollment and goes through a
+	// reset of the keyring, which takes root on the host.
+	if !bootstrap && currentHost != bundle.GetHostId() {
+		return nil, refusal(ErrorWrongHost, fmt.Sprintf(
+			"the bundle names the host %s and this helper is %s; "+
+				"a change of identity goes through a reset of the keyring",
+			bundle.GetHostId(), currentHost))
 	}
+
+	// A bundle older than the one this helper already accepted is refused. In
+	// the overlap of a key rotation the panel signs with the old key, so the
+	// bundle {K1} signed by K1 verifies after {K1,K2} has been accepted - and
+	// the loop below would then remove K2 as "not in the bundle". One replay
+	// and the rotation is undone. The moment is already in the bytes that are
+	// signed; nothing compared it with anything.
+	accepted, err := t.acceptedState()
+	if err != nil {
+		return nil, err
+	}
+	if accepted.IssuedUnix > bundle.GetIssuedUnix() {
+		return nil, refusal(ErrorTrustStale, fmt.Sprintf(
+			"the bundle was issued at %d and this helper has accepted one issued at %d; "+
+				"an older bundle would undo a key rotation",
+			bundle.GetIssuedUnix(), accepted.IssuedUnix))
+	}
+
+	changed := false
 	if err := os.MkdirAll(t.Dir, 0o755); err != nil {
 		return nil, err
 	}
@@ -404,13 +432,77 @@ func (t TrustStore) Apply(bundle *helperv1.HelperTrustBundle) (*TrustUpdate, err
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
+
+	// The identity goes to disk last, after the keys it belongs with. Written
+	// first, an update that failed in the middle - no space, EPERM on the
+	// directory - left the host carrying a name with the keyring of the
+	// previous one, which is a state neither bundle describes.
+	if currentHost != bundle.GetHostId() {
+		if err := writeRootFile(t.HostIDPath, []byte(bundle.GetHostId()+"\n"), 0o600); err != nil {
+			return nil, err
+		}
+		changed = true
+	}
+	if err := t.rememberAccepted(bundle); err != nil {
+		return nil, err
+	}
 	return &TrustUpdate{HostID: bundle.GetHostId(), KeyIDs: ids, Changed: changed, Bootstrap: bootstrap}, nil
+}
+
+// acceptedBundle is what the helper remembers about the trust it last took.
+type acceptedBundle struct {
+	HostID     string `json:"host_id"`
+	IssuedUnix int64  `json:"issued_unix"`
+	SignedBy   string `json:"signed_by_key_id"`
+}
+
+// acceptedPath is where that note lives: beside the keys, owned by root.
+func (t TrustStore) acceptedPath() string { return filepath.Join(t.Dir, "accepted.json") }
+
+// acceptedState reads the note. A missing or unreadable note is no note at all:
+// a host enrolled before this release has none, and the first bundle after the
+// upgrade writes one.
+func (t TrustStore) acceptedState() (acceptedBundle, error) {
+	content, err := os.ReadFile(t.acceptedPath())
+	if errors.Is(err, os.ErrNotExist) {
+		return acceptedBundle{}, nil
+	}
+	if err != nil {
+		return acceptedBundle{}, err
+	}
+	var accepted acceptedBundle
+	if err := json.Unmarshal(content, &accepted); err != nil {
+		// A damaged note is not a claim about any moment. Refusing every
+		// bundle over it would cut the host off from the panel for good.
+		return acceptedBundle{}, nil
+	}
+	return accepted, nil
+}
+
+// rememberAccepted writes down what was taken, so the next bundle can be told
+// from a replay of an older one.
+func (t TrustStore) rememberAccepted(bundle *helperv1.HelperTrustBundle) error {
+	encoded, err := json.Marshal(acceptedBundle{
+		HostID:     bundle.GetHostId(),
+		IssuedUnix: bundle.GetIssuedUnix(),
+		SignedBy:   bundle.GetSignedByKeyId(),
+	})
+	if err != nil {
+		return err
+	}
+	return writeRootFile(t.acceptedPath(), append(encoded, '\n'), 0o600)
 }
 
 // Reset forgets the host identity and every trusted key, so the next bundle is
 // taken on trust again.
 func (t TrustStore) Reset() error {
 	if err := os.Remove(t.HostIDPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	// The note about the bundle last accepted goes too: it is a statement about
+	// the trust being forgotten here, and keeping it would hold the next
+	// enrollment to the moment of a panel this host no longer answers to.
+	if err := os.Remove(t.acceptedPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	entries, err := os.ReadDir(t.Dir)
