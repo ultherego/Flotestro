@@ -301,7 +301,13 @@ func (p *Planner) accessFor(ctx context.Context, groups []string, uid string) (a
 		return result, err
 	}
 	for _, rule := range rules {
-		if !rule.Enabled || !matchesSubject(rule.Users, rule.UserGroups, uid, groups) {
+		// A category is a match of its own and carries empty lists, so judging
+		// the lists first made the rules of the widest reach the ones the
+		// impact plan never showed: the operator approved a change of
+		// membership over "no impact" while a rule covering the whole fleet
+		// was about to give that person access everywhere. rules.go asks this
+		// way for the sudo rules; this file did not.
+		if !rule.Enabled || (!rule.AllUsers && !matchesSubject(rule.Users, rule.UserGroups, uid, groups)) {
 			continue
 		}
 		if rule.AllowsEverything {
@@ -321,7 +327,13 @@ func (p *Planner) accessFor(ctx context.Context, groups []string, uid string) (a
 		return result, err
 	}
 	for _, rule := range sudoRules {
-		if !rule.Enabled || !matchesSubject(rule.Users, rule.UserGroups, uid, groups) {
+		// A category is a match of its own and carries empty lists, so judging
+		// the lists first made the rules of the widest reach the ones the
+		// impact plan never showed: the operator approved a change of
+		// membership over "no impact" while a rule covering the whole fleet
+		// was about to give that person access everywhere. rules.go asks this
+		// way for the sudo rules; this file did not.
+		if !rule.Enabled || (!rule.AllUsers && !matchesSubject(rule.Users, rule.UserGroups, uid, groups)) {
 			continue
 		}
 		label := rule.Name
@@ -337,7 +349,11 @@ func (p *Planner) accessFor(ctx context.Context, groups []string, uid string) (a
 	return result, nil
 }
 
-// matchesSubject says whether the rule covers the account or one of its groups.
+// matchesSubject says whether the rule names this account among its subjects.
+//
+// A rule can also cover a category - every user - and a category carries empty
+// lists, so a caller has to ask about it separately. Every caller does, which
+// is why this stays about the lists alone.
 func matchesSubject(ruleUsers, ruleGroups []string, uid string, groups []string) bool {
 	if uid != "" && slices.Contains(ruleUsers, uid) {
 		return true

@@ -204,18 +204,37 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	principal := authz.FromContext(r.Context())
 	session, hasSession := authz.SessionFromContext(r.Context())
 
+	var revokeErr error
 	if hasSession {
-		if err := s.authz.RevokeSession(r.Context(), session.ID, "logout"); err != nil {
-			s.log.Error("the session was not revoked", "session_id", session.ID, "err", err)
+		revokeErr = s.authz.RevokeSession(r.Context(), session.ID, "logout")
+		outcome := audit.OutcomeSuccess
+		detail := map[string]any{"session_id": session.ID}
+		if revokeErr != nil {
+			// The journal is the only lasting record of this, and it used to
+			// say "success" whatever happened: a session that outlived its own
+			// logout looked, afterwards, like one that had ended.
+			s.log.Error("the session was not revoked", "session_id", session.ID, "err", revokeErr)
+			outcome = audit.OutcomeFailure
+			detail["error"] = revokeErr.Error()
+			detail["session_still_live"] = true
 		}
 		s.audit.Record(r.Context(), audit.Event{
 			ActorType: audit.ActorUser, ActorID: principal.Subject,
 			Action: "auth.logout", TargetType: "principal", TargetID: principal.ID,
-			Outcome: audit.OutcomeSuccess,
-			Detail:  map[string]any{"session_id": session.ID},
+			Outcome: outcome, Detail: detail,
 		})
 	}
+	// The cookies go whatever happened: the copy in this browser is gone
+	// either way, and that part did work.
 	s.clearSessionCookies(w, r)
+	if revokeErr != nil {
+		// A cookie copied earlier still opens the session, so the answer says
+		// so instead of reporting a logout that did not finish.
+		problem(w, http.StatusInternalServerError, "logout_unconfirmed",
+			"this browser is signed out, and the session was not ended on the server; "+
+				"it expires on its own, and an operator can end it from the sessions page")
+		return
+	}
 
 	target := "/"
 	if s.oidc != nil && hasSession && session.IDToken != "" {

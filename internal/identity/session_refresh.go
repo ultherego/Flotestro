@@ -23,6 +23,10 @@ type GroupRefresher interface {
 type SessionGroupStore interface {
 	StaleGroupSnapshots(ctx context.Context, before time.Time, limit int) ([]authz.RefreshableSession, error)
 	RecordGroupRefresh(ctx context.Context, sessionID string, groups []string, tokens authz.SessionTokens) error
+	// RecordTokens writes what a renewal returned without touching the group
+	// snapshot or its age: a renewal that carried no identity token said
+	// nothing about the groups.
+	RecordTokens(ctx context.Context, sessionID string, tokens authz.SessionTokens) error
 	RevokeSession(ctx context.Context, sessionID, reason string) error
 }
 
@@ -39,6 +43,11 @@ const (
 	RefreshUnchanged RefreshOutcome = "unchanged"
 	// RefreshChanged means the session now carries a different group set.
 	RefreshChanged RefreshOutcome = "changed"
+	// RefreshUnverified means the renewal went through and said nothing about
+	// the groups: the provider returned no identity token, so the snapshot is
+	// as old as it was. The age of that snapshot is somebody's business, and
+	// the word has to exist for it to be theirs.
+	RefreshUnverified RefreshOutcome = "unverified"
 	// RefreshRevoked means the provider no longer honours the refresh token
 	// and the session was ended.
 	RefreshRevoked RefreshOutcome = "revoked"
@@ -132,10 +141,27 @@ func (r *SessionGroupRefresher) refreshOne(ctx context.Context, session authz.Re
 		return RefreshRevoked
 	}
 
-	// A renewal without an identity token carries no groups.
+	// A renewal without an identity token carries no groups, so there is
+	// nothing to refresh: the tokens are recorded and the snapshot keeps the
+	// age it had. Writing it as a refresh moved the freshness marker over
+	// knowledge nobody had gained, and the marker is the only thing that
+	// bounds how stale the groups may be.
+	if claims == nil {
+		if err := r.sessions.RecordTokens(ctx, session.ID, authz.SessionTokens{
+			RefreshToken:    tokens.RefreshToken,
+			IDToken:         tokens.IDToken,
+			AccessExpiresAt: tokens.ExpiresAt,
+		}); err != nil {
+			r.log.Error("the renewed tokens were not recorded",
+				"session_id", session.ID, "subject", session.Subject, "err", err)
+			return RefreshDeferred
+		}
+		return RefreshUnverified
+	}
+
 	groups := session.Groups
 	outcome := RefreshUnchanged
-	if claims != nil && !sameGroupSet(session.Groups, claims.Groups) {
+	if !sameGroupSet(session.Groups, claims.Groups) {
 		groups = claims.Groups
 		outcome = RefreshChanged
 	}

@@ -188,6 +188,31 @@ func (s *Server) writeFile(ctx context.Context, request *helperv1.HelperRequest,
 	if err := files.ValidateContent(string(content)); err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
+
+	current := files.Describe(path)
+	if current.UnavailableReason != "" {
+		return reject(ErrorUnsupported, current.UnavailableReason)
+	}
+
+	// Each part of the inode the order leaves out stays as it is on the host.
+	// The staged file is a fresh inode and belongs to the helper, which is
+	// root, so "not named" used to mean "given to root": a write of the
+	// content alone took /etc/postgresql away from postgres and nothing
+	// reported it. The rollback branch above says the same thing in its own
+	// comment and did it for the version it restores; this does it for every
+	// write, from what the host carries now.
+	if current.Exists {
+		if requestedMode == "" {
+			requestedMode = current.Mode
+		}
+		if owner == "" {
+			owner = current.Owner
+		}
+		if group == "" {
+			group = current.Group
+		}
+	}
+
 	mode, err := files.ValidateMode(requestedMode)
 	if err != nil {
 		return reject(ErrorMalformed, err.Error())
@@ -195,11 +220,6 @@ func (s *Server) writeFile(ctx context.Context, request *helperv1.HelperRequest,
 	uid, gid, err := files.Ownership(owner, group)
 	if err != nil {
 		return reject(ErrorMalformed, err.Error())
-	}
-
-	current := files.Describe(path)
-	if current.UnavailableReason != "" {
-		return reject(ErrorUnsupported, current.UnavailableReason)
 	}
 	current.FromSecret = s.managedFromSecret(path)
 	// A change made after the operator looked at the file must not disappear

@@ -557,7 +557,11 @@ const (
 // beyond the operation's own: an entry for root, a write without a validator.
 func PayloadPermissions(action ActionType, payload Payload) []string {
 	var required []string
-	if action == ActionScheduleEnsure && payload.Schedule != nil && payload.Schedule.User == "root" {
+	// The grant is about running something as root, not about writing the entry
+	// down. Asking for it only when the entry is created let whoever held
+	// schedule.run execute an existing root entry on demand without it.
+	if (action == ActionScheduleEnsure || action == ActionScheduleRunNow) &&
+		payload.Schedule != nil && payload.Schedule.User == "root" {
 		required = append(required, PermissionScheduleRootExec)
 	}
 	if (action == ActionFileEnsure || action == ActionFileRollback) &&
@@ -3086,6 +3090,15 @@ func Validate(action ActionType, payload Payload) error {
 		if !scheduleIdentifier.MatchString(payload.Schedule.ID) {
 			return fmt.Errorf("invalid schedule identifier %q", payload.Schedule.ID)
 		}
+		// Run-now deliberately does not require the account and the command
+		// here. It would be the stronger consent - the helper compares them
+		// with the entry on the host whenever the order carries them - but
+		// Validate also judges a campaign template, a shape filled in before
+		// any host is chosen, and one entry identifier can stand for different
+		// commands on different hosts. Requiring them would make a run-now
+		// campaign impossible rather than safer. Binding them properly means
+		// the panel reading each host's entry from the inventory and carrying
+		// that per host, which is a change of its own.
 		if action != ActionScheduleEnsure {
 			return nil
 		}

@@ -1830,12 +1830,15 @@ func TestMountCampaignResolvesTheUUIDOnEveryHost(t *testing.T) {
 			}
 		}
 	}
+	// absent, not a bare skip: the laboratory prepares this condition, so its
+	// absence is a laboratory that did not, and a full gate reads that as a
+	// failure rather than letting the scenario quietly not happen.
 	if len(hosts) < 2 {
-		t.Skip("the fleet has fewer than two debian hosts with a free, labelled ext4 filesystem")
+		absent(t, "the fleet has fewer than two debian hosts with a free, labelled ext4 filesystem")
 	}
 	hosts = hosts[:2]
 	if sources[hosts[0]] != sources[hosts[1]] {
-		t.Skipf("the free filesystems carry different labels: %s and %s",
+		absent(t, "the free filesystems carry different labels: %s and %s",
 			sources[hosts[0]], sources[hosts[1]])
 	}
 	path := "LABEL=" + sources[hosts[0]]

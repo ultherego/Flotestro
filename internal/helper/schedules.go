@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -478,7 +479,23 @@ func (s *Server) runNow(ctx context.Context, action *helperv1.ScheduleRequest) *
 		return reject(ErrorMalformed, "the entry has no command")
 	}
 
-	cmd := entryCommand(ctx, entry)
+	// The entry on the host has to be the entry the consent was given for. The
+	// order names both now, and the panel binds them; here they are compared
+	// with what the file actually says, because whatever can write to the
+	// schedule directory decides what the identifier stands for.
+	if named := action.GetUser(); named != "" && named != entry.User {
+		return reject(ErrorPreconditionFailed,
+			"the entry "+entry.ID+" runs as "+entry.User+" on this host, and the order says "+named)
+	}
+	if named := action.GetCommand(); len(named) > 0 && !slices.Equal(named, entry.Command) {
+		return reject(ErrorPreconditionFailed,
+			"the entry "+entry.ID+" runs something else on this host than the order says")
+	}
+
+	cmd, response := entryCommand(ctx, entry)
+	if response != nil {
+		return response
+	}
 	output, err := cmd.CombinedOutput()
 	message := strings.TrimSpace(string(output))
 	if len(message) > 4000 {
@@ -495,15 +512,31 @@ func (s *Server) runNow(ctx context.Context, action *helperv1.ScheduleRequest) *
 
 // entryCommand assembles the execution of the entry's command. Running it by
 // hand is to give the same result as running it from the schedule.
-func entryCommand(ctx context.Context, entry *schedules.Schedule) *exec.Cmd {
-	environment := []string{"LC_ALL=C", "LANG=C", "PATH=/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/root"}
+func entryCommand(ctx context.Context, entry *schedules.Schedule) (*exec.Cmd, *helperv1.HelperResponse) {
+	// HOME belongs to the account, not to the helper. The comment above says
+	// this has to give the same result as the schedule, and cron gives an
+	// entry for backup HOME=/home/backup - not the helper's own /root.
+	home := "/root"
+	if entry.User != "" && entry.User != "root" {
+		if account, err := user.Lookup(entry.User); err == nil && account.HomeDir != "" {
+			home = account.HomeDir
+		}
+	}
+	environment := []string{"LC_ALL=C", "LANG=C", "PATH=/usr/sbin:/usr/bin:/sbin:/bin", "HOME=" + home}
 	systemdRunPath, err := exec.LookPath("systemd-run")
 	if err != nil {
-		// A host without systemd has no PrivateTmp for the helper either, so a
-		// direct execution is equivalent here.
+		// Without systemd-run the account cannot be kept: a plain exec from the
+		// helper runs as root, which is a different operation from the one that
+		// was approved - and it was running silently, so an entry for backup
+		// executed with every privilege the helper has.
+		if entry.User != "" && entry.User != "root" {
+			return nil, reject(ErrorUnsupported,
+				"this host has no systemd-run, so the entry cannot be run as "+entry.User+
+					"; running it as root instead would be another operation than the one approved")
+		}
 		cmd := exec.CommandContext(ctx, entry.Command[0], entry.Command[1:]...)
 		cmd.Env = environment
-		return cmd
+		return cmd, nil
 	}
 	arguments := []string{"--collect", "--wait", "--pipe", "--quiet",
 		"--unit=flotestro-schedule-" + entry.ID,
@@ -515,7 +548,7 @@ func entryCommand(ctx context.Context, entry *schedules.Schedule) *exec.Cmd {
 	arguments = append(arguments, entry.Command...)
 	cmd := exec.CommandContext(ctx, systemdRunPath, arguments...)
 	cmd.Env = environment
-	return cmd
+	return cmd, nil
 }
 
 // readSchedules assembles the picture of the recurring jobs of the host.

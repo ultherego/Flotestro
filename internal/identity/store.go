@@ -14,6 +14,9 @@ import (
 var (
 	// ErrNotFound means there is no change with the given identifier.
 	ErrNotFound = errors.New("the change does not exist")
+	// ErrNoPrincipal means the panel holds no identity under the name an
+	// operation was aimed at. A denial that marks nobody is not a denial.
+	ErrNoPrincipal = errors.New("the panel holds no identity under that name")
 	// ErrConflict means an operation not allowed in the current state.
 	ErrConflict = errors.New("the operation is not allowed in the current state of the change")
 	// ErrBlocked means a plan that rules out execution.
@@ -236,6 +239,16 @@ func (s *Store) SetLocalDeny(ctx context.Context, subject, reason string, denied
 	tag, err := s.pool.Exec(ctx, query, args...)
 	if err != nil {
 		return 0, err
+	}
+	if tag.RowsAffected() == 0 {
+		// The caller is locking an account out, and the count went into a
+		// phase the operator read as a success: "identities marked: 0" beside
+		// a step that said it had done its work. The subject here is the name
+		// of an account, and principals are keyed by what the identity
+		// provider calls the person - so a denial aimed at the wrong key
+		// marked nobody and said nothing.
+		return 0, fmt.Errorf("%w: no identity of the panel answers to %q, so the denial marked nobody",
+			ErrNoPrincipal, subject)
 	}
 	return tag.RowsAffected(), nil
 }

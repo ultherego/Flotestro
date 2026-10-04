@@ -31,15 +31,27 @@ func (f *fakeProvider) Refresh(_ context.Context, refreshToken string) (*oidc.To
 
 // fakeGroupStore records what the refresher writes.
 type fakeGroupStore struct {
-	due      []authz.RefreshableSession
-	recorded map[string][]string
-	tokens   map[string]authz.SessionTokens
-	revoked  map[string]string
-	writeErr error
+	// tokensOnly names the sessions whose tokens were written without the
+	// group snapshot being touched.
+	tokensOnly []string
+	due        []authz.RefreshableSession
+	recorded   map[string][]string
+	tokens     map[string]authz.SessionTokens
+	revoked    map[string]string
+	writeErr   error
 }
 
 func (f *fakeGroupStore) StaleGroupSnapshots(context.Context, time.Time, int) ([]authz.RefreshableSession, error) {
 	return f.due, nil
+}
+
+// RecordTokens is what a renewal with no identity token writes: the tokens,
+// and nothing about the groups.
+func (f *fakeGroupStore) RecordTokens(_ context.Context, sessionID string,
+	tokens authz.SessionTokens) error {
+	f.tokensOnly = append(f.tokensOnly, sessionID)
+	_ = tokens
+	return nil
 }
 
 func (f *fakeGroupStore) RecordGroupRefresh(_ context.Context, sessionID string, groups []string, tokens authz.SessionTokens) error {
@@ -88,6 +100,9 @@ func TestTheRefresherDecidesFromTheProviderAnswer(t *testing.T) {
 		groups  []string
 		revoked bool
 		action  string
+		// tokensOnly says the renewal had to write the tokens and leave the
+		// group snapshot, and its age, where they were.
+		tokensOnly bool
 	}{
 		{
 			name: "the same groups in another order confirm the snapshot",
@@ -114,11 +129,18 @@ func TestTheRefresherDecidesFromTheProviderAnswer(t *testing.T) {
 			outcome: RefreshChanged, groups: []string{}, action: "auth.groups_changed",
 		},
 		{
-			name: "a renewal without an identity token keeps the snapshot and the new tokens",
+			// RefreshUnchanged says the provider confirmed the snapshot. A
+			// renewal with no identity token confirmed nothing - it carried no
+			// groups at all - and recording it as a refresh moved the freshness
+			// marker over knowledge nobody had gained. That marker is the only
+			// thing bounding how stale a group snapshot may be, so a person
+			// removed from an administrative group kept it for as long as the
+			// session lived.
+			name: "a renewal without an identity token says nothing about the groups",
 			provider: &fakeProvider{
 				tokens: &oidc.TokenSet{RefreshToken: "rt-new"},
 			},
-			outcome: RefreshUnchanged, groups: []string{"ops", "admins"},
+			outcome: RefreshUnverified, groups: nil, tokensOnly: true,
 		},
 		{
 			name:     "an invalid grant ends the session",
@@ -148,6 +170,14 @@ func TestTheRefresherDecidesFromTheProviderAnswer(t *testing.T) {
 			}
 			if tc.provider.asked[0] != "rt-old" {
 				t.Fatalf("the provider was asked with %q, expected the stored refresh token", tc.provider.asked[0])
+			}
+
+			if tc.tokensOnly && !slices.Contains(store.tokensOnly, "s-1") {
+				t.Fatal("the tokens were not written, so a renewal that said nothing " +
+					"about the groups lost what it did bring back")
+			}
+			if !tc.tokensOnly && len(store.tokensOnly) != 0 {
+				t.Fatalf("the tokens were written apart from the snapshot: %v", store.tokensOnly)
 			}
 
 			written, wrote := store.recorded["s-1"]

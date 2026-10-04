@@ -319,6 +319,26 @@ func (s *Store) RecordGroupRefresh(ctx context.Context, sessionID string,
 	return err
 }
 
+// RecordTokens writes the tokens a renewal returned and leaves the group
+// snapshot where it was, age and all.
+//
+// A renewal without an identity token carries no groups, and recording it as a
+// refresh moved groups_refreshed_at to now over a snapshot nobody had checked:
+// the marker exists to bound how old the knowledge of somebody's groups may
+// be, and stamping it on no knowledge made that bound unreachable. A person
+// removed from an administrative group kept it for as long as the session
+// lived.
+func (s *Store) RecordTokens(ctx context.Context, sessionID string, tokens SessionTokens) error {
+	_, err := s.pool.Exec(ctx, `
+		update web_sessions set
+			refresh_token = coalesce(nullif($2, ''), refresh_token),
+			id_token = coalesce(nullif($3, ''), id_token),
+			access_expires_at = coalesce($4, access_expires_at)
+		where id = $1 and revoked_at is null`,
+		sessionID, tokens.RefreshToken, tokens.IDToken, nullableTime(tokens.AccessExpiresAt))
+	return err
+}
+
 // PurgeExpired deletes expired sessions and abandoned login flows.
 func (s *Store) PurgeExpired(ctx context.Context) error {
 	if _, err := s.pool.Exec(ctx,
