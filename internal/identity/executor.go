@@ -12,6 +12,7 @@ import (
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/freeipa"
+	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/plan"
 )
 
@@ -115,7 +116,10 @@ func (e *Executor) tick(ctx context.Context) {
 		return
 	}
 	for _, change := range pending {
-		claimed, err := e.store.Claim(ctx, change.ID)
+		// The claim names this instance and lapses on its own, so a change
+		// whose carrier stops is taken again instead of staying in running
+		// where nothing reads it.
+		claimed, err := e.store.Claim(ctx, change.ID, jobs.InstanceID())
 		if err != nil {
 			e.log.Error("the directory change was not claimed", "change_id", change.ID, "err", err)
 			continue

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -120,13 +121,26 @@ func (s *Store) Cancel(ctx context.Context, changeID, actor, reason string) (*Ch
 	return s.Get(ctx, changeID)
 }
 
+// ClaimTerm is how long a claim on a directory change holds. It covers a slow
+// directory with room to spare: what it bounds is not the work but how long a
+// change stays invisible after the replica carrying it stops.
+const ClaimTerm = 15 * time.Minute
+
 // Claim takes a change for execution. The condition on the state means two
-// replicas will not carry out the same change in parallel.
-func (s *Store) Claim(ctx context.Context, changeID string) (bool, error) {
+// replicas will not carry out the same change in parallel - and the claim is
+// recorded with a holder and a term, because a change left in running by a
+// replica that stopped was afterwards seen by nobody: Pending reads the
+// planned ones, so there was no way back to it and no view that showed it as
+// overdue.
+func (s *Store) Claim(ctx context.Context, changeID, holder string) (bool, error) {
 	const query = `
-		update directory_changes set state = $2, started_at = now(), updated_at = now()
-		where id = $1 and state = $3`
-	tag, err := s.pool.Exec(ctx, query, changeID, string(StateRunning), string(StatePlanned))
+		update directory_changes
+		   set state = $2, started_at = now(), updated_at = now(),
+		       claimed_by = $4, claim_expires_at = now() + make_interval(secs => $5::double precision)
+		 where id = $1
+		   and (state = $3 or (state = $2 and claim_expires_at < now()))`
+	tag, err := s.pool.Exec(ctx, query, changeID, string(StateRunning), string(StatePlanned),
+		nullable(holder), ClaimTerm.Seconds())
 	if err != nil {
 		return false, err
 	}
@@ -142,15 +156,28 @@ func (s *Store) Finish(ctx context.Context, changeID string, state State,
 	}
 	const query = `
 		update directory_changes set state = $2, phases = $3, result_message = $4,
-		                             finished_at = now(), updated_at = now()
+		                             finished_at = now(), updated_at = now(),
+		                             claimed_by = null, claim_expires_at = null
 		where id = $1`
 	_, err = s.pool.Exec(ctx, query, changeID, string(state), phasesJSON, nullable(message))
 	return err
 }
 
-// Pending returns the approved changes waiting for execution.
+// Pending returns the approved changes waiting for execution, and the ones
+// somebody claimed and did not finish within the term. The second half is what
+// brings back a change whose replica stopped between the claim and the finish:
+// without it the row stayed in running and was read by nothing.
 func (s *Store) Pending(ctx context.Context) ([]Change, error) {
-	return s.query(ctx, "where state = 'planned' order by created_at limit 20")
+	return s.query(ctx, `where state = 'planned'
+	                        or (state = 'running' and claim_expires_at < now())
+	                     order by created_at limit 20`)
+}
+
+// Stalled returns the changes whose claim has lapsed, so the panel can show a
+// change that is overdue rather than one that silently stays.
+func (s *Store) Stalled(ctx context.Context) ([]Change, error) {
+	return s.query(ctx, `where state = 'running' and claim_expires_at < now()
+	                     order by started_at limit 50`)
 }
 
 // Get zwraca zmiane.
