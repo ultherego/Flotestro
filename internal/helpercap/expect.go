@@ -390,10 +390,20 @@ func Expect(request *helperv1.HelperRequest) Expectation {
 	return mutating("unknown")
 }
 
+// PriorSysctl answers what the host held before the change of a task, as the
+// helper itself read it. It is the one honest source for a rollback: putting
+// values back means carrying values the panel never signed, and without the
+// helper's own reading the binding could not compare values at all - which is
+// why it compared names only, and a signed consent to set dmesg_restrict to 1
+// was carried out as 0. A nil answer is "no record", and then the request has
+// to match the order.
+type PriorSysctl func(taskID string) map[string]string
+
 // CheckBinding compares what the request names with what the bound payload
 // names, for the operations whose payload carries the target: the unit, the
 // packages, the schedule entry with its user and command, the file path, the.
-func CheckBinding(request *helperv1.HelperRequest, bound *BoundPayload) error {
+// prior may be nil, and then nothing is a rollback.
+func CheckBinding(request *helperv1.HelperRequest, bound *BoundPayload, prior PriorSysctl) error {
 	payload := bound.Payload
 	switch action := request.GetAction().(type) {
 	case *helperv1.HelperRequest_UnitAction:
@@ -857,9 +867,8 @@ func CheckBinding(request *helperv1.HelperRequest, bound *BoundPayload) error {
 		}
 		switch action.Kernel.GetOperation() {
 		case helperv1.KernelRequest_OPERATION_SYSCTL_ENSURE:
-			// Only the keys: an unverified change is rolled back with the host's
-			// previous values under this very capability.
-			return boundSysctlKeys(action.Kernel.GetSettings(), payload.Kernel.Settings)
+			return boundSysctl(action.Kernel.GetSettings(), payload.Kernel.Settings,
+				priorValues(prior, request.GetTaskId()))
 		case helperv1.KernelRequest_OPERATION_MODULE_LOAD:
 			return same("module", action.Kernel.GetModule(), payload.Kernel.Module)
 		case helperv1.KernelRequest_OPERATION_MODULE_BLACKLIST:
@@ -1210,7 +1219,12 @@ func sameTimeSources(request *helperv1.TimeRequest, payload *opspec.TimePayload)
 // boundSysctlKeys binds the keys and not their values: an unverified change is
 // rolled back with the host's previous readings under the same capability, and
 // the baseline drops the keys the agent could not read.
-func boundSysctlKeys(got, want map[string]string) error {
+// boundSysctl compares the settings of the request with the ones the panel
+// signed - names and values both. The one request that legitimately carries
+// other values is the rollback of an unverified change, which puts back what
+// the helper itself read before the change; that set is taken from the helper's
+// own record and has to match it exactly.
+func boundSysctl(got, want, before map[string]string) error {
 	if len(got) == 0 {
 		return binding("the request names no kernel setting")
 	}
@@ -1220,11 +1234,46 @@ func boundSysctlKeys(got, want map[string]string) error {
 	}
 	slices.Sort(keys)
 	for _, key := range keys {
-		if _, named := want[key]; !named {
+		wanted, named := want[key]
+		if !named {
 			return binding(fmt.Sprintf("the request sets the kernel setting %q, which the bound payload does not name", key))
+		}
+		if got[key] == wanted {
+			continue
+		}
+		// Not the value the panel signed: the only other value this capability
+		// authorizes is the one that was there before the change.
+		was, recorded := before[key]
+		if !recorded {
+			return binding(fmt.Sprintf(
+				"the request sets the kernel setting %q to %q and the bound payload says %q",
+				key, got[key], wanted))
+		}
+		if got[key] != was {
+			return binding(fmt.Sprintf(
+				"the request sets the kernel setting %q to %q; the bound payload says %q and this host "+
+					"held %q before the change, so it is neither the change nor its rollback",
+				key, got[key], wanted, was))
+		}
+	}
+	// A rollback puts back every key the change touched, and a request that
+	// mixes the two - some keys back, some to the new value - is neither
+	// operation. Told apart by the first key: the whole request goes one way.
+	rollback := got[keys[0]] != want[keys[0]]
+	for _, key := range keys {
+		if (got[key] != want[key]) != rollback {
+			return binding("the request puts some kernel settings back and sets others, which is neither the change nor its rollback")
 		}
 	}
 	return nil
+}
+
+// priorValues asks the helper's record, with nil standing for "no record".
+func priorValues(prior PriorSysctl, taskID string) map[string]string {
+	if prior == nil || taskID == "" {
+		return nil
+	}
+	return prior(taskID)
 }
 
 // serviceDigests flattens the per-service image digests into a comparable list.

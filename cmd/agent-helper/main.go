@@ -174,7 +174,13 @@ func run() error {
 	defer replay.Close()
 	trust := helpercap.TrustStore{Dir: settings.TrustDir, HostIDPath: settings.HostIDPath,
 		RequireRoot: true, PinPath: settings.PinPath, Bootstrap: settings.Bootstrap}
-	server.SetCapabilityPolicy(helpercap.NewPolicy(settings.Mode, helpercap.NewVerifier(trust, replay, log)), trust)
+	verifier := helpercap.NewVerifier(trust, replay, log)
+	// The one request that legitimately carries values the panel never signed is
+	// the rollback of an unverified kernel change, and what it may carry is what
+	// this helper read before that change - from its own record, not from the
+	// caller.
+	verifier.SetPriorSysctl(helper.SysctlBefore)
+	server.SetCapabilityPolicy(helpercap.NewPolicy(settings.Mode, verifier), trust)
 	hostID, _ := trust.HostID()
 	keyring, skipped, _ := trust.Keyring()
 	log.Info("the capability policy of the helper",

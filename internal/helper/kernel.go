@@ -3,7 +3,9 @@ package helper
 import (
 	"context"
 	"encoding/json"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -27,7 +29,7 @@ func (s *Server) applyKernel(ctx context.Context, request *helperv1.HelperReques
 	case helperv1.KernelRequest_OPERATION_READ:
 		return kernelResponse(s.readKernel(actionCtx, action.GetKeys()), "", nil, nil)
 	case helperv1.KernelRequest_OPERATION_SYSCTL_ENSURE:
-		return s.writeSysctl(actionCtx, action)
+		return s.writeSysctl(actionCtx, request.GetTaskId(), action)
 	case helperv1.KernelRequest_OPERATION_MODULE_LOAD:
 		return s.loadModule(actionCtx, action)
 	case helperv1.KernelRequest_OPERATION_MODULE_BLACKLIST:
@@ -51,7 +53,8 @@ func kernelGuard(operation helperv1.KernelRequest_Operation) string {
 }
 
 // writeSysctl writes the settings persistently and applies them right away.
-func (s *Server) writeSysctl(ctx context.Context, action *helperv1.KernelRequest) *helperv1.HelperResponse {
+func (s *Server) writeSysctl(ctx context.Context, taskID string,
+	action *helperv1.KernelRequest) *helperv1.HelperResponse {
 	settings := action.GetSettings()
 	if len(settings) == 0 {
 		return reject(ErrorMalformed, "the change contains no setting")
@@ -61,14 +64,30 @@ func (s *Server) writeSysctl(ctx context.Context, action *helperv1.KernelRequest
 	}
 
 	// A key the host does not know would stay in the file forever and do
-	// nothing. Its existence is checked before anything is written.
+	// nothing. Its existence is checked before anything is written, and what
+	// it holds now is written down in the same pass: the values this host had
+	// before the change are what a rollback puts back, and the helper's own
+	// reading is the only honest source for them. A rollback carries values
+	// the panel never signed, so without this record the binding could not
+	// compare values at all - and a signed consent to set dmesg_restrict to 1
+	// was carried out as 0 (audit of 6c38561, CR-09).
+	before := map[string]string{}
 	for key := range settings {
 		if err := kernel.ValidateKey(key); err != nil {
 			return reject(ErrorMalformed, err.Error())
 		}
-		if _, err := toolOutput(ctx, kernel.SysctlPath, "-n", key); err != nil {
+		value, err := toolOutput(ctx, kernel.SysctlPath, "-n", key)
+		if err != nil {
 			return reject(ErrorPreconditionFailed,
 				"this kernel does not know the setting "+key)
+		}
+		before[key] = strings.TrimSpace(value)
+	}
+	if taskID != "" {
+		if err := recordSysctlBefore(taskID, before); err != nil {
+			return reject(ErrorExecFailed,
+				"the values this host has now were not written down, so the change would have no way back: "+
+					err.Error())
 		}
 	}
 
@@ -307,4 +326,45 @@ func kernelResponse(snapshot kernel.Snapshot, message string,
 			PendingReboot: pending, AppliedRuntime: applied,
 		},
 	}
+}
+
+// sysctlBeforeDir keeps, per task, the values this host had before a kernel
+// setting was changed. A rollback puts back what was there, which is a set of
+// values the panel never signed - so the binding of the capability cannot
+// compare them with the order, and the helper's own reading is what tells
+// "what was there" from "whatever the caller likes".
+var sysctlBeforeDir = "/var/lib/flotestro-helper/sysctl-before"
+
+// recordSysctlBefore writes down the values of one task's keys.
+func recordSysctlBefore(taskID string, before map[string]string) error {
+	if err := os.MkdirAll(sysctlBeforeDir, 0o700); err != nil {
+		return err
+	}
+	encoded, err := json.Marshal(before)
+	if err != nil {
+		return err
+	}
+	return writeKernelFile(sysctlBeforePath(taskID), string(encoded)+"\n", 0o600)
+}
+
+// SysctlBefore answers what this host held before the change of that task, or
+// nothing when there is no record. Nothing is the honest answer: a task with no
+// record has no previous state to put back, and the request has to match the
+// order instead.
+func SysctlBefore(taskID string) map[string]string {
+	content, err := os.ReadFile(sysctlBeforePath(taskID))
+	if err != nil {
+		return nil
+	}
+	var before map[string]string
+	if err := json.Unmarshal(content, &before); err != nil {
+		return nil
+	}
+	return before
+}
+
+// sysctlBeforePath keeps one file per task, under a name that cannot leave the
+// directory whatever the task identifier is.
+func sysctlBeforePath(taskID string) string {
+	return filepath.Join(sysctlBeforeDir, url.PathEscape(taskID)+".json")
 }

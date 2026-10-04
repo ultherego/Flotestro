@@ -38,7 +38,7 @@ func TestTheCapabilityBindsWhichWayAUnitIsToggled(t *testing.T) {
 		{"unmask under an approval to mask", helperv1.UnitActionRequest_OPERATION_UNMASK, true, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			err := CheckBinding(toggle(test.request), approved(test.signedFor))
+			err := CheckBinding(toggle(test.request), approved(test.signedFor), nil)
 			if test.refuse && err == nil {
 				t.Error("the request was carried out under a capability for the other direction")
 			}
@@ -50,7 +50,7 @@ func TestTheCapabilityBindsWhichWayAUnitIsToggled(t *testing.T) {
 	// A toggle whose payload says nothing about a unit is not a toggle anybody
 	// approved.
 	if err := CheckBinding(toggle(helperv1.UnitActionRequest_OPERATION_ENABLE),
-		&BoundPayload{Payload: opspec.Payload{Unit: &opspec.UnitPayload{Unit: "nginx.service"}}}); err == nil {
+		&BoundPayload{Payload: opspec.Payload{Unit: &opspec.UnitPayload{Unit: "nginx.service"}}}, nil); err == nil {
 		t.Error("a toggle passed under a payload that describes no toggle")
 	}
 }
@@ -71,7 +71,7 @@ func TestTheCapabilityBindsEveryFieldOfAStorageOrder(t *testing.T) {
 	bound := &BoundPayload{Payload: opspec.Payload{Storage: &opspec.StoragePayload{
 		Source: "UUID=1111", Target: "/srv/data", FSType: "ext4", Options: "defaults", Persist: true}}}
 
-	if err := CheckBinding(mount(func(*helperv1.StorageRequest) {}), bound); err != nil {
+	if err := CheckBinding(mount(func(*helperv1.StorageRequest) {}), bound, nil); err != nil {
 		t.Fatalf("the mount the capability was signed for was refused: %v", err)
 	}
 	for _, test := range []struct {
@@ -85,7 +85,7 @@ func TestTheCapabilityBindsEveryFieldOfAStorageOrder(t *testing.T) {
 		{"not written to fstab after all", func(r *helperv1.StorageRequest) { r.Persist = false }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if err := CheckBinding(mount(test.change), bound); err == nil {
+			if err := CheckBinding(mount(test.change), bound, nil); err == nil {
 				t.Error("the changed order was accepted under the same capability")
 			}
 		})
@@ -100,22 +100,22 @@ func TestTheCapabilityBindsEveryFieldOfAStorageOrder(t *testing.T) {
 		}}}
 	volume := &BoundPayload{Payload: opspec.Payload{Storage: &opspec.StoragePayload{
 		Group: "data", Volume: "logs", Size: "+10G", ExpectedVolumeUUID: "aaaa-bbbb"}}}
-	if err := CheckBinding(extend, volume); err != nil {
+	if err := CheckBinding(extend, volume, nil); err != nil {
 		t.Fatalf("the volume the capability named was refused: %v", err)
 	}
 	other := &BoundPayload{Payload: opspec.Payload{Storage: &opspec.StoragePayload{
 		Group: "data", Volume: "database", Size: "+10G", ExpectedVolumeUUID: "cccc-dddd"}}}
-	if err := CheckBinding(extend, other); err == nil {
+	if err := CheckBinding(extend, other, nil); err == nil {
 		t.Error("a capability for one logical volume extended another")
 	}
 	// A storage order under a payload that describes no storage at all.
-	if err := CheckBinding(extend, &BoundPayload{}); err == nil {
+	if err := CheckBinding(extend, &BoundPayload{}, nil); err == nil {
 		t.Error("a storage order passed under a payload that describes no storage")
 	}
 	// A read takes no capability and has nothing to compare.
 	read := &helperv1.HelperRequest{Action: &helperv1.HelperRequest_Storage{
 		Storage: &helperv1.StorageRequest{Operation: helperv1.StorageRequest_OPERATION_READ_LVM}}}
-	if err := CheckBinding(read, &BoundPayload{}); err != nil {
+	if err := CheckBinding(read, &BoundPayload{}, nil); err != nil {
 		t.Errorf("a read was refused: %v", err)
 	}
 }
@@ -131,10 +131,10 @@ func TestTheCapabilityBindsARenewalAndATrustChange(t *testing.T) {
 	}
 	bound := &BoundPayload{Payload: opspec.Payload{
 		Certificate: &opspec.CertificatePayload{AnchorID: "panel-2026"}}}
-	if err := CheckBinding(trust("panel-2026"), bound); err != nil {
+	if err := CheckBinding(trust("panel-2026"), bound, nil); err != nil {
 		t.Fatalf("the anchor the capability named was refused: %v", err)
 	}
-	if err := CheckBinding(trust("panel-2025"), bound); err == nil {
+	if err := CheckBinding(trust("panel-2025"), bound, nil); err == nil {
 		t.Error("a capability for one trust anchor removed another")
 	}
 
@@ -146,10 +146,10 @@ func TestTheCapabilityBindsARenewalAndATrustChange(t *testing.T) {
 	}
 	one := &BoundPayload{Payload: opspec.Payload{
 		Certificate: &opspec.CertificatePayload{Request: "20260927000000"}}}
-	if err := CheckBinding(renew("20260927000000"), one); err != nil {
+	if err := CheckBinding(renew("20260927000000"), one, nil); err != nil {
 		t.Fatalf("the renewal the capability named was refused: %v", err)
 	}
-	if err := CheckBinding(renew("20260101000000"), one); err == nil {
+	if err := CheckBinding(renew("20260101000000"), one, nil); err == nil {
 		t.Error("a capability for one renewal renewed another certificate")
 	}
 }
@@ -159,11 +159,11 @@ func TestTheCapabilityBindsARenewalAndATrustChange(t *testing.T) {
 func TestTheCapabilityForAnAuditReloadIsNotOneForTheProtectionMode(t *testing.T) {
 	reload := &helperv1.HelperRequest{Action: &helperv1.HelperRequest_Security{
 		Security: &helperv1.SecurityRequest{Operation: helperv1.SecurityRequest_OPERATION_AUDIT_RELOAD}}}
-	if err := CheckBinding(reload, &BoundPayload{}); err != nil {
+	if err := CheckBinding(reload, &BoundPayload{}, nil); err != nil {
 		t.Fatalf("a reload under a capability for a reload was refused: %v", err)
 	}
 	mode := &BoundPayload{Payload: opspec.Payload{Security: &opspec.SecurityPayload{Mode: "permissive"}}}
-	if err := CheckBinding(reload, mode); err == nil {
+	if err := CheckBinding(reload, mode, nil); err == nil {
 		t.Error("a capability signed for the protection mode reloaded the audit rules")
 	}
 }

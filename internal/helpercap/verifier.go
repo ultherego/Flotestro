@@ -24,7 +24,16 @@ type Verifier struct {
 	keyring func() (*Keyring, error)
 	replay  *ReplayStore
 	now     func() time.Time
+	// priorSysctl answers what this host held before the change of a task, so
+	// the rollback of an unverified change can be told from a request that
+	// simply names other values.
+	priorSysctl PriorSysctl
 }
+
+// SetPriorSysctl connects the helper's own record of what was there before a
+// kernel change. Without it nothing is a rollback and every request has to
+// match the order exactly.
+func (v *Verifier) SetPriorSysctl(prior PriorSysctl) { v.priorSysctl = prior }
 
 // NewVerifier builds a verifier over a trust store and a replay store.
 func NewVerifier(trust TrustStore, replay *ReplayStore, log *slog.Logger) *Verifier {
@@ -113,7 +122,7 @@ func (v *Verifier) Verify(request *helperv1.HelperRequest, expectation Expectati
 		return Reservation{}, refusal(ErrorPayloadBinding,
 			fmt.Sprintf("the bound payload is of %s, the capability of %s", bound.Action, capability.GetActionType()))
 	}
-	if err := CheckBinding(request, bound); err != nil {
+	if err := CheckBinding(request, bound, v.priorSysctl); err != nil {
 		return Reservation{}, err
 	}
 	ring, err := v.keyring()

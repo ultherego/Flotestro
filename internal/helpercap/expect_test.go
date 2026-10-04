@@ -67,10 +67,10 @@ func TestATrustChangeIsBoundToTheMaterialItInstalls(t *testing.T) {
 				Operation: helperv1.CertificateRequest_OPERATION_TRUST_ENSURE,
 				AnchorId:  "lab-ca", PlanHash: "d4e5f6", Certificate: []byte(material)}}}
 	}
-	if err := CheckBinding(request(approved), bound); err != nil {
+	if err := CheckBinding(request(approved), bound, nil); err != nil {
 		t.Fatalf("the approved authority was refused: %v", err)
 	}
-	if err := CheckBinding(request(other), bound); err == nil {
+	if err := CheckBinding(request(other), bound, nil); err == nil {
 		t.Fatal("another authority was installed under the approved capability")
 	}
 
@@ -84,7 +84,7 @@ func TestATrustChangeIsBoundToTheMaterialItInstalls(t *testing.T) {
 		naming := &helperv1.HelperRequest{Action: &helperv1.HelperRequest_Certificate{
 			Certificate: &helperv1.CertificateRequest{
 				Operation: operation, AnchorId: "lab-ca", PlanHash: "d4e5f6"}}}
-		if err := CheckBinding(naming, bound); err != nil {
+		if err := CheckBinding(naming, bound, nil); err != nil {
 			t.Errorf("%s was refused although it carries no material: %v", operation, err)
 		}
 	}

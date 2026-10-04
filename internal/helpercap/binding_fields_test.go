@@ -125,7 +125,7 @@ func TestTheCapabilityBindsWhichProcessAndWhichSignal(t *testing.T) {
 			Pid: 4242, Signal: "TERM", ExpectedStartTicks: 99,
 		},
 	}}
-	if err := CheckBinding(honest, &BoundPayload{Payload: payload}); err != nil {
+	if err := CheckBinding(honest, &BoundPayload{Payload: payload}, nil); err != nil {
 		t.Fatalf("the request the panel approved was refused: %v", err)
 	}
 	for _, change := range []struct {
@@ -139,7 +139,7 @@ func TestTheCapabilityBindsWhichProcessAndWhichSignal(t *testing.T) {
 		forged := &helperv1.HelperRequest{Action: &helperv1.HelperRequest_ProcessSignal{
 			ProcessSignal: change.request,
 		}}
-		if err := CheckBinding(forged, &BoundPayload{Payload: payload}); err == nil {
+		if err := CheckBinding(forged, &BoundPayload{Payload: payload}, nil); err == nil {
 			t.Errorf("%s was accepted under the approved capability", change.name)
 		}
 	}
@@ -207,10 +207,10 @@ func TestTheCapabilityBindsTheTargetOfTheRemainingOrders(t *testing.T) {
 	}
 	for _, test := range cases {
 		bound := &BoundPayload{Action: test.action, Payload: test.payload}
-		if err := CheckBinding(test.honest, bound); err != nil {
+		if err := CheckBinding(test.honest, bound, nil); err != nil {
 			t.Errorf("%s: the approved request was refused: %v", test.name, err)
 		}
-		if err := CheckBinding(test.forged, bound); err == nil {
+		if err := CheckBinding(test.forged, bound, nil); err == nil {
 			t.Errorf("%s: another target was accepted under the approved capability", test.name)
 		}
 	}
