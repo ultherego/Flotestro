@@ -4,8 +4,11 @@ package backup
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -67,6 +70,26 @@ type Run struct {
 	Message         string     `json:"message,omitempty"`
 	StartedBy       string     `json:"started_by,omitempty"`
 	RecordedAt      time.Time  `json:"recorded_at"`
+	// ConfigSHA256 is the fingerprint of the definition this run used. A
+	// definition keeps its key when its repository or its paths change, so a
+	// run is evidence about the configuration it ran with and about no other.
+	// Empty on the runs recorded before this was written down.
+	ConfigSHA256 string `json:"config_sha256,omitempty"`
+}
+
+// ConfigFingerprint is the fingerprint of what a definition does: which tool,
+// which repository, which paths, which exclusions and which runbook. The
+// retention is deliberately not in it - keeping fewer copies does not make the
+// copies that exist evidence about somewhere else.
+func ConfigFingerprint(definition Definition) string {
+	var text strings.Builder
+	text.WriteString("tool=" + definition.Tool + "\n")
+	text.WriteString("repository=" + definition.Repository + "\n")
+	text.WriteString("paths=" + strings.Join(definition.Paths, "\x1f") + "\n")
+	text.WriteString("excludes=" + strings.Join(definition.Excludes, "\x1f") + "\n")
+	text.WriteString("runbook=" + definition.Runbook + "\n")
+	sum := sha256.Sum256([]byte(text.String()))
+	return hex.EncodeToString(sum[:])
 }
 
 // executor allows calling the same queries inside and outside a transaction.
@@ -159,8 +182,9 @@ func (s *Store) Set(ctx context.Context, q executor, definition Definition) (Def
 		insert into backup_definitions (host_id, name, tool, repository, paths, excludes, tags,
 		                                keep_last, keep_daily, keep_weekly, keep_monthly, prune,
 		                                runbook, initialize, password_secret, env_secrets, note,
-		                                created_by, updated_by)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $18)
+		                                created_by, updated_by, config_sha256)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $18,
+		        $19)
 		on conflict (host_id, name) do update set
 			tool = excluded.tool, repository = excluded.repository, paths = excluded.paths,
 			excludes = excluded.excludes, tags = excluded.tags, keep_last = excluded.keep_last,
@@ -172,13 +196,17 @@ func (s *Store) Set(ctx context.Context, q executor, definition Definition) (Def
 			-- "unchanged" and never "remove the password of this repository".
 			password_secret = coalesce(nullif(excluded.password_secret, ''), backup_definitions.password_secret),
 			env_secrets = excluded.env_secrets, note = excluded.note,
-			updated_by = excluded.updated_by, updated_at = now()
+			updated_by = excluded.updated_by, updated_at = now(),
+			-- The fingerprint moves with what the definition does, which is
+			-- what makes the older runs stop answering for it.
+			config_sha256 = excluded.config_sha256
 		returning id::text, created_at, updated_at`
 	err = q.QueryRow(ctx, query, definition.HostID, definition.Name, definition.Tool,
 		definition.Repository, definition.Paths, definition.Excludes, definition.Tags,
 		definition.KeepLast, definition.KeepDaily, definition.KeepWeekly, definition.KeepMonthly,
 		definition.Prune, definition.Runbook, definition.Initialize,
-		definition.PasswordSecret, environment, definition.Note, definition.UpdatedBy).
+		definition.PasswordSecret, environment, definition.Note, definition.UpdatedBy,
+		ConfigFingerprint(definition)).
 		Scan(&definition.ID, &definition.CreatedAt, &definition.UpdatedAt)
 	definition.CreatedBy = definition.UpdatedBy
 	return definition, err
@@ -202,18 +230,31 @@ func (s *Store) RecordRun(ctx context.Context, q executor, run Run) error {
 	const query = `
 		insert into backup_runs (host_id, definition, kind, job_id, outcome, snapshot_id,
 		                         bytes_added, total_bytes, files_new, duration_seconds,
-		                         snapshots, repository_size, last_success_at, message, started_by)
-		values ($1, $2, $3, nullif($4, '')::uuid, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`
+		                         snapshots, repository_size, last_success_at, message, started_by,
+		                         config_sha256)
+		values ($1, $2, $3, nullif($4, '')::uuid, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+		        nullif($16, ''))`
 	_, err := q.Exec(ctx, query, run.HostID, run.Definition, run.Kind,
 		run.JobID, run.Outcome, run.SnapshotID, run.BytesAdded,
 		run.TotalBytes, run.FilesNew, run.DurationSeconds, run.Snapshots,
-		run.RepositorySize, run.LastSuccessAt, run.Message, run.StartedBy)
+		run.RepositorySize, run.LastSuccessAt, run.Message, run.StartedBy,
+		run.ConfigSHA256)
 	return err
 }
 
 const runColumns = `host_id::text, definition, kind, coalesce(job_id::text, ''), outcome,
 	snapshot_id, bytes_added, total_bytes, files_new, duration_seconds, snapshots,
-	repository_size, last_success_at, message, started_by, recorded_at`
+	repository_size, last_success_at, message, started_by, recorded_at,
+	coalesce(config_sha256, '')`
+
+// aliasedRunColumns is the same list for a query that joins the definitions:
+// the two tables share host_id and definition, so the columns say which table
+// they come from. One list written twice would drift; this one is the first
+// with a prefix put on it.
+const aliasedRunColumns = `r.host_id::text, r.definition, r.kind, coalesce(r.job_id::text, ''), r.outcome,
+	r.snapshot_id, r.bytes_added, r.total_bytes, r.files_new, r.duration_seconds, r.snapshots,
+	r.repository_size, r.last_success_at, r.message, r.started_by, r.recorded_at,
+	coalesce(r.config_sha256, '')`
 
 // Runs returns the history of the host's operations, newest first.
 func (s *Store) Runs(ctx context.Context, hostID, definition string, limit int) ([]Run, error) {
@@ -240,9 +281,16 @@ func (s *Store) Runs(ctx context.Context, hostID, definition string, limit int) 
 
 // Latest returns the newest run of every kind for every definition.
 func (s *Store) Latest(ctx context.Context, hostID string) (map[string]map[string]Run, error) {
-	rows, err := s.pool.Query(ctx, `select distinct on (definition, kind) `+runColumns+`
-		from backup_runs where host_id = $1 and outcome = 'succeeded'
-		order by definition, kind, recorded_at desc`, hostID)
+	// Only the runs of the configuration the definition carries now. A change
+	// of the repository or the paths keeps the key of the definition, so the
+	// proof of an older copy used to answer for a place the copy is not in.
+	rows, err := s.pool.Query(ctx, `select distinct on (r.definition, r.kind) `+aliasedRunColumns+`
+		from backup_runs r
+		join backup_definitions d on d.host_id = r.host_id and d.name = r.definition
+		where r.host_id = $1 and r.outcome = 'succeeded'
+		  and (r.config_sha256 is null or d.config_sha256 is null
+		       or r.config_sha256 = d.config_sha256)
+		order by r.definition, r.kind, r.recorded_at desc`, hostID)
 	if err != nil {
 		return nil, err
 	}
@@ -267,9 +315,13 @@ func (s *Store) LatestInFleet(ctx context.Context, hostIDs []string, kind string
 	if len(hostIDs) == 0 {
 		return nil, nil
 	}
-	rows, err := s.pool.Query(ctx, `select distinct on (host_id, definition) `+runColumns+`
-		from backup_runs where host_id = any($1) and kind = $2 and outcome = 'succeeded'
-		order by host_id, definition, recorded_at desc`, hostIDs, kind)
+	rows, err := s.pool.Query(ctx, `select distinct on (r.host_id, r.definition) `+aliasedRunColumns+`
+		from backup_runs r
+		join backup_definitions d on d.host_id = r.host_id and d.name = r.definition
+		where r.host_id = any($1) and r.kind = $2 and r.outcome = 'succeeded'
+		  and (r.config_sha256 is null or d.config_sha256 is null
+		       or r.config_sha256 = d.config_sha256)
+		order by r.host_id, r.definition, r.recorded_at desc`, hostIDs, kind)
 	if err != nil {
 		return nil, err
 	}
@@ -313,7 +365,7 @@ func readRun(rows pgx.Rows) (Run, error) {
 		&run.JobID, &run.Outcome, &run.SnapshotID, &run.BytesAdded,
 		&run.TotalBytes, &run.FilesNew, &run.DurationSeconds,
 		&run.Snapshots, &run.RepositorySize, &run.LastSuccessAt,
-		&run.Message, &run.StartedBy, &run.RecordedAt); err != nil {
+		&run.Message, &run.StartedBy, &run.RecordedAt, &run.ConfigSHA256); err != nil {
 		return Run{}, err
 	}
 	return run, nil

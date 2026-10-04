@@ -3950,6 +3950,16 @@ func (s *AgentService) saveBackupRun(ctx context.Context, hostID, jobID string,
 		HostID: hostID, Definition: payload.Backup.ID, Kind: kind,
 		JobID: jobID, Outcome: "failed", Message: result.GetMessage(),
 		StartedBy: job.CreatedBy,
+		// The configuration this run actually used, out of the order it ran
+		// with. A definition keeps its key when its repository or its paths
+		// change, so a run is evidence about the configuration it used and
+		// about no other - and the readiness of a host used to be answered out
+		// of a copy that no longer exists where the definition now looks.
+		ConfigSHA256: backupstore.ConfigFingerprint(backupstore.Definition{
+			Tool: payload.Backup.Tool, Repository: payload.Backup.Repository,
+			Paths: payload.Backup.Paths, Excludes: payload.Backup.Excludes,
+			Runbook: payload.Backup.Runbook,
+		}),
 	}
 	if succeeded {
 		run.Outcome = "succeeded"
