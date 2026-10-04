@@ -488,10 +488,16 @@ var allowedMethods = map[string]bool{
 	"hbactest": true,
 
 	// The write operations.
-	"user_add":            true,
-	"user_mod":            true,
-	"user_disable":        true,
-	"user_enable":         true,
+	"user_add":     true,
+	"user_mod":     true,
+	"user_disable": true,
+	"user_enable":  true,
+	// Putting a preserved account back. It is what makes the check after a
+	// preserve something other than an observation: the binding is proven once
+	// the account has moved, so the answer to "this is not the entry the plan
+	// named" has to be an undo. Without the command in this list the undo was
+	// refused by the adapter itself and the account stayed preserved.
+	"user_undel":          true,
 	"group_add_member":    true,
 	"group_remove_member": true,
 	// Host group membership.

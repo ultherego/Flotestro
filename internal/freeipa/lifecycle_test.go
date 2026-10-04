@@ -74,21 +74,69 @@ func TestPreserveUserAtChecksEveryValueThePlanCarries(t *testing.T) {
 		return answerWith(record)
 	}
 
+	// The read back after the move: a search among the preserved accounts,
+	// which answers with a list. user_show refuses the preserved option on the
+	// directory of the laboratory ("Unknown option: preserved"), and asking it
+	// there turned every successful preserve into a failure.
+	preserved := func(uuid string) func(rpcCall) (any, *rpcError) {
+		return func(rpcCall) (any, *rpcError) {
+			return map[string]any{"result": []any{map[string]any{
+				// A preserved account sits in another container and carries the
+				// same identifier, which is the whole of the question after the
+				// fact.
+				"dn":          "uid=jane,cn=deleted users,cn=accounts,dc=test",
+				"ipauniqueid": []any{uuid},
+			}}}, nil
+		}
+	}
+
 	fake, client := newFakeDirectory(t)
 	// The directory of the laboratory reports no modify timestamp; the
 	// plan bound to the two values it does report, and those agree.
 	fake.answers["user_show"] = entry(planned.EntryUUID, "")
+	fake.answers["user_find"] = preserved(planned.EntryUUID)
 	if err := client.PreserveUserAt(context.Background(), "jane", planned); err != nil {
 		t.Fatalf("a plan bound to the entry it named was refused: %v", err)
 	}
 	if fake.count("user_del") != 1 {
 		t.Fatalf("the move was ordered %d times", fake.count("user_del"))
 	}
+	if fake.count("user_undel") != 0 {
+		t.Fatal("the account was put back although it is the entry the plan named")
+	}
+
+	// Deleted and created again between the read and the call: the identifier
+	// of the preserved entry is another one, so the account goes back.
+	swapped, client := newFakeDirectory(t)
+	swapped.answers["user_show"] = entry(planned.EntryUUID, "")
+	swapped.answers["user_find"] = preserved("0b1d4c8e-0000-0000-0000-000000000009")
+	if err := client.PreserveUserAt(context.Background(), "jane", planned); !errors.Is(err, ErrEntryMoved) {
+		t.Fatalf("another entry was preserved and kept: %v", err)
+	}
+	if swapped.count("user_undel") != 1 {
+		t.Fatalf("the account was put back %d times", swapped.count("user_undel"))
+	}
+
+	// A directory that offers no read of its preserved accounts: could not ask
+	// is not disproven. The preserve was carried out and the binding before the
+	// call held, so it stands - and nothing is put back.
+	silent, client := newFakeDirectory(t)
+	silent.answers["user_show"] = entry(planned.EntryUUID, "")
+	silent.answers["user_find"] = func(rpcCall) (any, *rpcError) {
+		return nil, &rpcError{Name: "OptionError", Message: "Unknown option: preserved"}
+	}
+	if err := client.PreserveUserAt(context.Background(), "jane", planned); err != nil {
+		t.Fatalf("a preserve on a directory that cannot be asked afterwards was reported as failed: %v", err)
+	}
+	if silent.count("user_undel") != 0 {
+		t.Fatal("the account was put back because the directory could not be asked")
+	}
 
 	// Another entry under the same name: the identifier says so, and
 	// nothing is ordered.
 	reused, client := newFakeDirectory(t)
 	reused.answers["user_show"] = entry("0b1d4c8e-0000-0000-0000-000000000002", "")
+	reused.answers["user_find"] = preserved("0b1d4c8e-0000-0000-0000-000000000002")
 	err := client.PreserveUserAt(context.Background(), "jane", planned)
 	if !errors.Is(err, ErrEntryMoved) {
 		t.Fatalf("a different entry under the same name was preserved: %v", err)

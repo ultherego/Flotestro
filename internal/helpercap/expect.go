@@ -368,7 +368,16 @@ func Expect(request *helperv1.HelperRequest) Expectation {
 			// A plan runs the backup tool as root, with the repository, the
 			// arguments and the environment the order carries: a read of the
 			// host, and an execution on it.
-			return authorizedRead("backup.plan", opspec.ActionBackupPlan)
+			//
+			// The capability of a copy authorizes it too. The verification of a
+			// copy reads the repository with a plan - before the run and after
+			// it - under the capability of that run, so admitting only the
+			// capability of a plan made every verified backup end as
+			// "applied_unverified": the change made and the verifier refused
+			// at the door. A capability to run a copy already authorizes
+			// running the tool, which is the whole of what a plan does.
+			return authorizedRead("backup.plan", opspec.ActionBackupPlan,
+				opspec.ActionBackupRun, opspec.ActionBackupVerify, opspec.ActionBackupRestore)
 		case helperv1.BackupRequest_OPERATION_RUN:
 			return mutating("backup.run", opspec.ActionBackupRun)
 		case helperv1.BackupRequest_OPERATION_VERIFY:

@@ -57,8 +57,13 @@ func TestAFileVersionIsNotReadableOutsideItsScope(t *testing.T) {
 
 	// Somebody who holds file.read in another site knows the digest - it is in
 	// every plan and every result - and must not get the content.
-	stranger := h.withToken(h.createPrincipal(uniqueSubject("operator-another-site"),
-		[]map[string]string{{"role": "operator", "site": "nowhere", "environment": "nowhere"}}))
+	// The role has to be one that holds file.read, in a site that holds no
+	// hosts: a caller without the permission anywhere is refused by the
+	// permission check and never reaches the question this test is about. With
+	// "operator" - which does not hold file.read at all - the answer was 403
+	// and the scope of the version was never consulted.
+	stranger := h.withToken(h.createPrincipal(uniqueSubject("admin-another-site"),
+		[]map[string]string{{"role": "platform_admin", "site": "nowhere", "environment": "nowhere"}}))
 	// Not found rather than forbidden: saying "you may not read this one"
 	// would confirm that the digest names something.
 	stranger.do(http.MethodGet, "/api/v1/files/versions/"+file.DesiredSHA256,

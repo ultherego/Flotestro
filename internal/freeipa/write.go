@@ -504,6 +504,15 @@ func (c *Client) PreserveUserAt(ctx context.Context, uid string, planned EntryRe
 	// deleted and another created under the same name, and the operator's
 	// consent for the first would have been carried out on the second.
 	after, err := c.PreservedEntry(ctx, uid)
+	if errors.Is(err, ErrPreservedReadUnsupported) {
+		// Could not ask is not disproven. The preserve was carried out and the
+		// binding before the call held; this directory simply offers no read of
+		// its preserved accounts, so there is no after-the-fact proof to have.
+		// Treating that as a failure undid every successful preserve on such a
+		// directory - which is the same mistake as reading "the probe could not
+		// run" as "the answer is no".
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("the account %s was preserved and could not be read back, so it is not "+
 			"known whether it is the entry the plan named: %w", uid, err)
@@ -523,26 +532,49 @@ func (c *Client) PreserveUserAt(ctx context.Context, uid string, planned EntryRe
 
 // PreservedEntry reads a preserved account, which user_show does not return
 // without being told to look among them.
+// ErrPreservedReadUnsupported means this directory offers no read of the
+// preserved accounts. The option exists in the API of FreeIPA and not in every
+// build of it: on 04.10 user_show answered "Unknown option: preserved
+// (OptionError)". It is a limit of the directory, not a fact about the entry.
+var ErrPreservedReadUnsupported = errors.New("the directory offers no read of the preserved accounts")
+
 func (c *Client) PreservedEntry(ctx context.Context, uid string) (EntryReference, error) {
 	if !userNamePattern.MatchString(uid) {
 		return EntryReference{}, fmt.Errorf("invalid account name %q", uid)
 	}
-	result, err := c.call(ctx, "user_show", []string{uid},
-		map[string]any{"all": true, "preserved": true})
+	// user_find and not user_show: the preserved flag belongs to the search in
+	// every build that has it at all, and user_show refused the option on the
+	// directory of 04.10 - which turned every successful preserve into a
+	// failure, because the read back could not be made.
+	result, err := c.call(ctx, "user_find", []string{uid},
+		map[string]any{"all": true, "preserved": true, "sizelimit": 2})
 	if err != nil {
 		var refusal *DirectoryError
-		if errors.As(err, &refusal) && refusal.Name == "NotFound" {
+		switch {
+		case errors.As(err, &refusal) && refusal.Name == "NotFound":
 			return EntryReference{}, fmt.Errorf("%w: %s", ErrEntryNotFound, uid)
+		case errors.As(err, &refusal) && refusal.Name == "OptionError":
+			return EntryReference{}, fmt.Errorf("%w: %s", ErrPreservedReadUnsupported, refusal.Message)
 		}
 		return EntryReference{}, err
 	}
 	var decoded struct {
-		Result map[string]any `json:"result"`
+		Result []map[string]any `json:"result"`
 	}
 	if err := json.Unmarshal(result, &decoded); err != nil {
 		return EntryReference{}, err
 	}
-	return entryFromRecord(decoded.Result), nil
+	// A search answers with a list. The name is the one asked for, so more than
+	// one entry is a directory holding two accounts under one name - which is
+	// not something to pick from.
+	switch len(decoded.Result) {
+	case 0:
+		return EntryReference{}, fmt.Errorf("%w: %s", ErrEntryNotFound, uid)
+	case 1:
+		return entryFromRecord(decoded.Result[0]), nil
+	}
+	return EntryReference{}, fmt.Errorf("the directory holds %d preserved accounts named %s",
+		len(decoded.Result), uid)
 }
 
 // UndeleteUser brings a preserved account back, which is what makes the check

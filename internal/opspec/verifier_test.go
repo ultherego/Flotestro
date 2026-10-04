@@ -199,7 +199,6 @@ func TestEveryOperationThatNeedsAPlanRefusesAnOrderWithoutOne(t *testing.T) {
 		bindings[action] = pair
 	}
 	bindings[ActionCertificateDeploy] = certificatePlanBinding(t)
-	bindings[ActionCertificateTrustEnsure] = trustPlanBinding(t)
 
 	for _, action := range AllActions() {
 		if !action.RequiresPlan() {
@@ -268,9 +267,9 @@ func certificatePlanBinding(t *testing.T) struct{ bound, unbound Payload } {
 }
 
 // trustPlanBinding is the order that adds an authority to the host's trust
-// store, with and without the plan it is bound to. Of the operations marked
-// critical this was the only one that required no plan, and it is the one that
-// decides whom the host believes.
+// store, with and without the plan it is bound to. It is kept for the day the
+// owner decides a trust change goes through a planning step: the operation is
+// critical and carries no plan today, because the panel orders it directly.
 func trustPlanBinding(t *testing.T) struct{ bound, unbound Payload } {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

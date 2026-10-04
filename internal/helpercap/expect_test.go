@@ -28,6 +28,23 @@ func TestABackupPlanIsCarriedOutUnderACapability(t *testing.T) {
 	if !expectation.Allows(string(opspec.ActionBackupPlan)) {
 		t.Error("the capability of a backup plan does not authorize the plan")
 	}
+	// And so does the capability of a copy: the verification of a copy reads
+	// the repository with a plan, before the run and after it, under the
+	// capability of that run. Admitting only the capability of a plan ended
+	// every verified backup as "applied_unverified" - the change made and the
+	// verifier refused at the door.
+	for _, action := range []opspec.ActionType{
+		opspec.ActionBackupRun, opspec.ActionBackupVerify, opspec.ActionBackupRestore,
+	} {
+		if !expectation.Allows(string(action)) {
+			t.Errorf("the capability of %s does not authorize the plan its verification reads", action)
+		}
+	}
+	// Not anything else, though: a capability for another module does not buy
+	// a run of the backup tool.
+	if expectation.Allows(string(opspec.ActionUnitStart)) {
+		t.Error("a capability for another operation authorizes a backup plan")
+	}
 
 	// The policy refuses it without one, in enforce mode.
 	decision := NewPolicy(ModeEnforce, nil).Decide(plan)
@@ -91,10 +108,13 @@ func TestATrustChangeIsBoundToTheMaterialItInstalls(t *testing.T) {
 		}
 	}
 
-	// And of the operations marked critical, this one no longer is the only
-	// one that needs no plan.
-	if !opspec.ActionCertificateTrustEnsure.RequiresPlan() {
-		t.Error("a trust change still takes no plan")
+	// What this capability does not bind, said out loud: a trust change carries
+	// no plan, so nothing here says what the authority is installed over. The
+	// panel orders this operation directly - its own button does - and
+	// requiring a plan would be a change to that flow, which is the owner's.
+	// The material is bound, which is what closes the hole the audit found.
+	if opspec.ActionCertificateTrustEnsure.RequiresPlan() {
+		t.Error("a trust change now takes a plan; the panel's direct order has to carry one")
 	}
 }
 
