@@ -339,6 +339,28 @@ func (e EntryReference) Moved(now EntryReference) (string, bool) {
 	return "", false
 }
 
+// Replaced says whether the entry there now is a different one than the plan
+// named, judged only by what an operation does not change. A preserve moves the
+// account into the deleted-users container and stamps it, so afterwards the DN
+// and the modify timestamp necessarily differ and say nothing about identity -
+// asking Moved after the fact answers "moved" every single time. The unique
+// identifier survives the move, and it is the whole of the question: is this
+// still the entry the operator consented to.
+//
+// Without an identifier on either side there is nothing to compare, and this
+// says so by answering no: the binding before the call is then all the proof
+// there is, which is what BoundTo and Unbound report to the operator.
+func (e EntryReference) Replaced(now EntryReference) (string, bool) {
+	if e.EntryUUID == "" || now.EntryUUID == "" {
+		return "", false
+	}
+	if e.EntryUUID != now.EntryUUID {
+		return "the entry carries the identifier " + now.EntryUUID +
+			" and the plan named " + e.EntryUUID, true
+	}
+	return "", false
+}
+
 // UserEntry reads the identity of an account's entry: its DN, its unique
 // identifier and the moment it last changed.
 func (c *Client) UserEntry(ctx context.Context, uid string) (EntryReference, error) {

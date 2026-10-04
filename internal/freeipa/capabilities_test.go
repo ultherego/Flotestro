@@ -309,3 +309,49 @@ func TestThePlanSaysWhichOfTheThreeValuesItBoundTo(t *testing.T) {
 		t.Fatalf("an empty reference reads %q", (EntryReference{}).Binding())
 	}
 }
+
+// The check after a preserve asks a different question than the check before
+// it. Before: is this still the entry the plan named, in the place it named.
+// After: is this still the same entry at all - because the preserve itself
+// moved it and stamped it, so Moved would answer "moved" for every preserve
+// that worked, and the account would be put back each time.
+func TestTheCheckAfterAPreserveJudgesTheIdentifierAlone(t *testing.T) {
+	planned := EntryReference{
+		DN:              "uid=alice,cn=users,cn=accounts,dc=ipa,dc=example,dc=test",
+		EntryUUID:       "0b1d4c8e-0000-0000-0000-000000000001",
+		ModifyTimestamp: "20260917103000Z",
+	}
+	// What a successful preserve leaves: another container, another timestamp,
+	// the same identifier.
+	preserved := EntryReference{
+		DN:              "uid=alice,cn=deleted users,cn=accounts,cn=provisioning,dc=ipa,dc=example,dc=test",
+		EntryUUID:       planned.EntryUUID,
+		ModifyTimestamp: "20261004132500Z",
+	}
+	if reason, replaced := planned.Replaced(preserved); replaced {
+		t.Fatalf("a preserve that worked read as a different entry: %s", reason)
+	}
+	if _, moved := planned.Moved(preserved); !moved {
+		t.Fatal("Moved no longer answers the question it is for")
+	}
+
+	// And what the check exists for: deleted and created again under the same
+	// name between the read and the call.
+	swapped := preserved
+	swapped.EntryUUID = "0b1d4c8e-0000-0000-0000-000000000002"
+	if _, replaced := planned.Replaced(swapped); !replaced {
+		t.Error("another entry under the same name read as the one the plan named")
+	}
+
+	// Without an identifier on either side there is nothing to compare after
+	// the fact, and the answer is no rather than a refusal of every preserve.
+	unidentified := EntryReference{DN: planned.DN}
+	if _, replaced := unidentified.Replaced(preserved); replaced {
+		t.Error("a plan with no identifier refused its own preserve")
+	}
+	silent := preserved
+	silent.EntryUUID = ""
+	if _, replaced := planned.Replaced(silent); replaced {
+		t.Error("a directory that reports no identifier refused the preserve")
+	}
+}

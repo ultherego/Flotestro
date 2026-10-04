@@ -22,6 +22,36 @@ var effectiveSSHDConfig = func(ctx context.Context) (string, error) {
 	return toolOutput(ctx, sshdPath, "-T")
 }
 
+// sshdReadsManagedFile answers whether the effective sshd configuration lists
+// the panel's managed key file among the files it takes keys from. The error is
+// handed back rather than folded into a false: not being able to ask is not an
+// answer, and only the caller knows whether its decision may rest on an
+// unknown.
+func (s *Server) sshdReadsManagedFile(ctx context.Context) (bool, error) {
+	effective, err := effectiveSSHDConfig(ctx)
+	if err != nil {
+		return false, err
+	}
+	return accounts.ManagedFileReadBySSHD(effective), nil
+}
+
+// refuseUnreadManagedFile is the refusal shared by every order that writes the
+// managed file: it needs a yes, not the absence of a no, because a key in a
+// file sshd does not open is not a way into the account.
+func refuseUnreadManagedFile(reads bool, err error) *helperv1.HelperResponse {
+	switch {
+	case err != nil:
+		return reject(ErrorManagedFileNotRead,
+			"the sshd configuration could not be read, so it cannot be told that sshd opens "+
+				accounts.ManagedKeysPattern+": "+err.Error())
+	case !reads:
+		return reject(ErrorManagedFileNotRead, fmt.Sprintf(
+			"sshd on this host does not read %s; add it to AuthorizedKeysFile or edit the user's authorized_keys instead",
+			accounts.ManagedKeysPattern))
+	}
+	return nil
+}
+
 // editLocalUserKeys changes the keys of an account one operation at a time
 // (security remediation, chapter 14.
 func (s *Server) editLocalUserKeys(ctx context.Context, request *helperv1.HelperRequest,
@@ -39,21 +69,11 @@ func (s *Server) editLocalUserKeys(ctx context.Context, request *helperv1.Helper
 	// ~/.ssh/authorized_keys passed the guard because "there is still the
 	// managed file", and the account was left with no way in.
 	managed := action.GetManagedFile()
-	effective, sshdErr := effectiveSSHDConfig(ctx)
-	managedCounts := sshdErr == nil && accounts.ManagedFileReadBySSHD(effective)
+	managedCounts, sshdErr := s.sshdReadsManagedFile(ctx)
 
 	if managed {
-		// Writing the managed file needs a yes, not the absence of a no: a
-		// configuration that could not be read is not one that reads it.
-		if sshdErr != nil {
-			return reject(ErrorManagedFileNotRead,
-				"the sshd configuration could not be read, so it cannot be told that sshd opens "+
-					accounts.ManagedKeysPattern+": "+sshdErr.Error())
-		}
-		if !managedCounts {
-			return reject(ErrorManagedFileNotRead, fmt.Sprintf(
-				"sshd on this host does not read %s; add it to AuthorizedKeysFile or edit the user's authorized_keys instead",
-				accounts.ManagedKeysPattern))
+		if response := refuseUnreadManagedFile(managedCounts, sshdErr); response != nil {
+			return response
 		}
 	}
 
@@ -280,6 +300,53 @@ func readManagedKeysFile(name string) ([]byte, error) {
 		return nil, err
 	}
 	return content[:n], nil
+}
+
+// removeManagedKeysFile takes the panel's key file of an account away, and the
+// directory of that account with it when nothing else is in it. A root that is
+// not there holds no file: that is nothing to remove, not something to create.
+// The path is walked without following a link, as the write does.
+func removeManagedKeysFile(name string) error {
+	root := filepath.Clean(managedKeysRoot)
+	rootFD, err := unix.Openat2(unix.AT_FDCWD, root, &unix.OpenHow{
+		Flags:   unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC,
+		Resolve: unix.RESOLVE_NO_SYMLINKS,
+	})
+	switch {
+	case errors.Is(err, unix.ENOENT), errors.Is(err, unix.ENOTDIR):
+		return nil
+	case errors.Is(err, unix.ELOOP), errors.Is(err, unix.EXDEV):
+		return &symlinkError{path: root}
+	case err != nil:
+		return fmt.Errorf("opening %s: %w", root, err)
+	}
+	defer unix.Close(rootFD)
+
+	dirFD, err := unix.Openat2(rootFD, name, &unix.OpenHow{
+		Flags:   unix.O_RDONLY | unix.O_DIRECTORY | unix.O_NOFOLLOW | unix.O_CLOEXEC,
+		Resolve: unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_BENEATH,
+	})
+	switch {
+	case errors.Is(err, unix.ENOENT), errors.Is(err, unix.ENOTDIR):
+		return nil
+	case errors.Is(err, unix.ELOOP), errors.Is(err, unix.EXDEV):
+		return &symlinkError{path: filepath.Join(root, name)}
+	case err != nil:
+		return fmt.Errorf("opening the directory of %s: %w", name, err)
+	}
+	if err := unix.Unlinkat(dirFD, accounts.ManagedKeysFileName, 0); err != nil &&
+		!errors.Is(err, unix.ENOENT) {
+		unix.Close(dirFD)
+		return fmt.Errorf("removing the managed file of %s: %w", name, err)
+	}
+	unix.Close(dirFD)
+	// A directory that still holds something is left where it is: what had to
+	// go is gone, and the rest is not this order's to decide.
+	if err := unix.Unlinkat(rootFD, name, unix.AT_REMOVEDIR); err != nil &&
+		!errors.Is(err, unix.ENOENT) && !errors.Is(err, unix.ENOTEMPTY) {
+		return fmt.Errorf("removing the directory of %s: %w", name, err)
+	}
+	return nil
 }
 
 // writeManagedKeysFile replaces the account's managed file atomically: a

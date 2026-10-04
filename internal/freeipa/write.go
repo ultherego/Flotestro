@@ -444,7 +444,10 @@ func (c *Client) PreserveUserAt(ctx context.Context, uid string, planned EntryRe
 		return fmt.Errorf("the account %s was preserved and could not be read back, so it is not "+
 			"known whether it is the entry the plan named: %w", uid, err)
 	}
-	if reason, moved := planned.Moved(after); moved {
+	// Judged by the identifier alone: the preserve itself moved the entry and
+	// stamped it, so the DN and the timestamp have changed by definition and
+	// comparing them would refuse every preserve that worked.
+	if reason, moved := planned.Replaced(after); moved {
 		if undo := c.UndeleteUser(ctx, uid); undo != nil {
 			return fmt.Errorf("%w: %s; putting it back failed too, so %s stays preserved and "+
 				"needs a person: %v", ErrEntryMoved, reason, uid, undo)

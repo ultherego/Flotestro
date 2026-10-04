@@ -213,6 +213,17 @@ func (s *Server) createLocalUser(ctx context.Context, request *helperv1.HelperRe
 	if err != nil {
 		return reject(ErrorInvalidKey, err.Error())
 	}
+	// And they have to land where sshd looks. The keys are parsed before the
+	// account exists for the reason the comment above gives - an account with no
+	// way in that nobody asked for - and a key written to a file sshd does not
+	// open is that same account, reported as created correctly. Asked before
+	// useradd, so the account does not come into being either way.
+	if action.GetManagedFile() && len(keys) > 0 {
+		reads, sshdErr := s.sshdReadsManagedFile(ctx)
+		if response := refuseUnreadManagedFile(reads, sshdErr); response != nil {
+			return response
+		}
+	}
 	if len(keys) == 0 && !action.GetInactive() {
 		// The panel refuses this earlier; the host refuses it too, because the host
 		// is the boundary that holds when the panel is not the one asking.
@@ -321,6 +332,17 @@ func (s *Server) deleteLocalUser(ctx context.Context, request *helperv1.HelperRe
 		}
 		args = append(args, "--remove")
 	}
+	// The panel's key file lives outside the home and belongs to root, so
+	// userdel does not take it - not even with --remove. An account created
+	// later under the same name would inherit the keys of whoever had the name
+	// before, and the create writes into that file without reading what is in
+	// it. Before userdel: an account gone with its keys left behind is the
+	// state being avoided, so a file that cannot be removed stops the deletion.
+	if err := removeManagedKeysFile(name); err != nil {
+		return reject(ErrorExecFailed,
+			"the managed key file of "+name+" was not removed, so the account stays: "+err.Error())
+	}
+
 	args = append(args, name)
 	if _, stderr, err := s.tool()(ctx, 120*time.Second, "userdel", args...); err != nil {
 		return reject(ErrorExecFailed, "userdel: "+firstLineOf(stderr))

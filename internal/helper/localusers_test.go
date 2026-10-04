@@ -643,3 +643,88 @@ func TestWritingTheManagedFileRefusesWhenTheSSHDConfigurationCannotBeRead(t *tes
 		t.Fatalf("accepted=%v code=%q", response.GetAccepted(), response.GetErrorCode())
 	}
 }
+
+// A key written where sshd does not look makes an account with no way in -
+// the very thing the parse before useradd exists to prevent - so the create
+// asks the same question the edit does, and asks it before the account exists
+// (audit of 6c38561, HA-002).
+func TestCreatingAnAccountRefusesAManagedFileSSHDDoesNotRead(t *testing.T) {
+	previous := effectiveSSHDConfig
+	t.Cleanup(func() { effectiveSSHDConfig = previous })
+	effectiveSSHDConfig = func(context.Context) (string, error) {
+		return "authorizedkeysfile .ssh/authorized_keys\n", nil
+	}
+	const key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHZ8Kx3vQOZKq0M0hDPuJHf5Zx1kJHgqRqYqGZ6XxLm1 x"
+
+	tool := &fakeAccountTool{}
+	server := accountServer(tool, map[string]accountRecord{})
+	create := func(a *helperv1.LocalUserActionRequest) {
+		a.ManagedFile = true
+		a.SshKeys = []string{key}
+	}
+	response := server.handle(context.Background(), accountRequest(
+		helperv1.LocalUserActionRequest_OPERATION_CREATE, create), nil)
+	if response.GetAccepted() || response.GetErrorCode() != ErrorManagedFileNotRead {
+		t.Fatalf("accepted=%v code=%q", response.GetAccepted(), response.GetErrorCode())
+	}
+	// And the account did not come into being on the way to the refusal.
+	if len(tool.calls) != 0 {
+		t.Fatalf("the account was created before the refusal: %v", tool.calls)
+	}
+
+	// On a host where sshd does read the file, the same order proceeds.
+	effectiveSSHDConfig = func(context.Context) (string, error) {
+		return "authorizedkeysfile .ssh/authorized_keys " + accounts.ManagedKeysPattern + "\n", nil
+	}
+	if response := server.handle(context.Background(), accountRequest(
+		helperv1.LocalUserActionRequest_OPERATION_CREATE, create), nil); len(tool.calls) == 0 ||
+		!strings.HasPrefix(joinedCall(tool.calls[0]), "useradd") {
+		t.Fatalf("code=%q message=%q calls=%v",
+			response.GetErrorCode(), response.GetMessage(), tool.calls)
+	}
+}
+
+// The panel's key file is outside the home and belongs to root, so userdel
+// does not take it - and an account created later under the same name would
+// inherit the keys of whoever had the name before (HA-003).
+func TestDeletingAnAccountTakesItsManagedKeysWithIt(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "smith"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	managed := filepath.Join(root, "smith", accounts.ManagedKeysFileName)
+	if err := os.WriteFile(managed, []byte("ssh-ed25519 AAAA panel\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	previous := managedKeysRoot
+	t.Cleanup(func() { managedKeysRoot = previous })
+	managedKeysRoot = root
+
+	home := filepath.Join(t.TempDir(), "smith")
+	if err := os.Mkdir(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	tool := &fakeAccountTool{}
+	server := accountServer(tool, map[string]accountRecord{
+		"smith": {Name: "smith", UID: userRangeUID(t), GID: os.Getgid(), Home: home, InPasswd: true},
+	})
+	response := server.handle(context.Background(), accountRequest(
+		helperv1.LocalUserActionRequest_OPERATION_DELETE,
+		func(a *helperv1.LocalUserActionRequest) { a.RemoveHome = true }), nil)
+	if !response.GetAccepted() {
+		t.Fatalf("accepted=%v (%s)", response.GetAccepted(), response.GetMessage())
+	}
+	if _, err := os.Stat(managed); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the managed key file stayed behind: %v", err)
+	}
+	// The directory of the account goes with it: an empty one is where the
+	// next account of that name would be written.
+	if _, err := os.Stat(filepath.Join(root, "smith")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the directory of the account stayed behind: %v", err)
+	}
+	// The keys go before userdel, not after: an account gone with its keys
+	// left behind is the state being avoided.
+	if len(tool.calls) == 0 || joinedCall(tool.calls[0]) != "userdel --remove smith" {
+		t.Fatalf("calls=%v", tool.calls)
+	}
+}
