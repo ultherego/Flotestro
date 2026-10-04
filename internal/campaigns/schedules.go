@@ -514,14 +514,83 @@ func (s *Store) DueSchedules(ctx context.Context, now time.Time) ([]Schedule, er
 // ClaimSchedule moves a due schedule past its moment: the row's next moment
 // becomes the one given and the run is noted.
 func (s *Store) ClaimSchedule(ctx context.Context, id string, due time.Time, next *time.Time) (bool, error) {
-	tag, err := s.pool.Exec(ctx, `
+	// The occurrence is written in the same transaction as the claim. Between
+	// moving next_run_at and ordering the campaign there used to be nothing
+	// durable saying "this moment was taken and the campaign does not exist
+	// yet", so a process that stopped there lost the whole occurrence - and for
+	// a one-shot schedule there is no next moment, so it was lost for good.
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	tag, err := tx.Exec(ctx, `
 		update campaign_schedules
 		   set next_run_at = $3, last_run_at = now(), updated_at = now()
 		 where id = $1 and next_run_at = $2`, id, due, next)
 	if err != nil {
 		return false, err
 	}
-	return tag.RowsAffected() == 1, nil
+	if tag.RowsAffected() != 1 {
+		// Another instance took this moment.
+		return false, nil
+	}
+	if _, err := tx.Exec(ctx, `
+		insert into schedule_occurrences (schedule_id, due_at, state)
+		values ($1, $2, 'pending')
+		on conflict (schedule_id, due_at) do nothing`, id, due); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// PendingOccurrence is a moment a schedule was claimed for and whose campaign
+// was never placed.
+type PendingOccurrence struct {
+	ScheduleID string
+	DueAt      time.Time
+}
+
+// PendingOccurrences lists the claimed moments that were never settled, older
+// than the grace - which keeps a tick from picking up the occurrence it has
+// just claimed itself.
+func (s *Store) PendingOccurrences(ctx context.Context, grace time.Duration) ([]PendingOccurrence, error) {
+	rows, err := s.pool.Query(ctx, `
+		select schedule_id::text, due_at from schedule_occurrences
+		 where state = 'pending' and created_at < now() - make_interval(secs => $1::double precision)
+		 order by created_at limit 50`, grace.Seconds())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var pending []PendingOccurrence
+	for rows.Next() {
+		var item PendingOccurrence
+		if err := rows.Scan(&item.ScheduleID, &item.DueAt); err != nil {
+			return nil, err
+		}
+		pending = append(pending, item)
+	}
+	return pending, rows.Err()
+}
+
+// SettleOccurrence records what became of a claimed moment: the campaign it
+// placed, or the refusal it got.
+func (s *Store) SettleOccurrence(ctx context.Context, id string, due time.Time,
+	campaignID, refusal string) error {
+	state := "placed"
+	if campaignID == "" {
+		state = "refused"
+	}
+	_, err := s.pool.Exec(ctx, `
+		update schedule_occurrences
+		   set state = $3, campaign_id = nullif($4, '')::uuid, error = nullif($5, ''), updated_at = now()
+		 where schedule_id = $1 and due_at = $2`, id, due, state, campaignID, refusal)
+	return err
 }
 
 // RecordScheduleRun writes what a run did: the campaign it placed, or
