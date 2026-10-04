@@ -26,8 +26,11 @@ func goodReport() map[string]any {
 			{"name": "agent-debian", "distribution": "debian", "version": "13"},
 			{"name": "agent-fedora", "distribution": "fedora", "version": "42"},
 		},
+		// One entry per host of the fleet: a host under test whose agent
+		// version nobody recorded is a host the suite exercised blind.
 		"agents": []map[string]string{
 			{"host": "agent-debian", "version_before": "0.61.0", "version_after": "0.62.0"},
+			{"host": "agent-fedora", "version_before": "0.61.0", "version_after": "0.62.0"},
 		},
 		// Every stage a full run accounts for: a report that names only some of
 		// them is a run that stopped, and the verdict has to say so.

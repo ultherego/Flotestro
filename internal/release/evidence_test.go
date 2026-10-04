@@ -244,3 +244,44 @@ func containsText(reasons []string, text string) bool {
 	}
 	return false
 }
+
+// The first real bundle the laboratory produced was refused, and the refusal
+// was wrong. agents-after.tsv names every host the panel knows an agent on -
+// including the synthetic hosts the suite enrols for its own scenarios, which
+// have no distribution to read over ssh and so never reach hosts.tsv. A fleet
+// that gains hosts during a run is not a malformed report.
+//
+// The direction that does matter is the other one: a host the report lists and
+// no agent version for it.
+func TestAFleetThatGainedHostsDuringTheRunIsNotMalformed(t *testing.T) {
+	report := goodReport()
+	agents := report["agents"].([]map[string]string)
+	report["agents"] = append(agents,
+		map[string]string{"host": "clone-a-1791139767261194926",
+			"version_before": "test", "version_after": "test"})
+	parsed, err := ParseGateReport(encode(t, report))
+	if err != nil {
+		t.Fatalf("a report naming an agent of an enrolled host was refused: %v", err)
+	}
+	if verdict, reasons := parsed.ComputeVerdict(); verdict != VerdictPass {
+		t.Fatalf("the verdict is %q: %v", verdict, reasons)
+	}
+}
+
+func TestAHostWithNoAgentVersionIsAFail(t *testing.T) {
+	report := goodReport()
+	report["agents"] = []map[string]string{
+		{"host": "agent-debian", "version_before": "0.61.0", "version_after": "0.62.0"},
+	}
+	parsed, err := ParseGateReport(encode(t, report))
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdict, reasons := parsed.ComputeVerdict()
+	if verdict != VerdictFail {
+		t.Fatalf("a host with no recorded agent version reached %q", verdict)
+	}
+	if !containsText(reasons, "no agent version is reported for agent-fedora") {
+		t.Fatalf("the reasons do not name the host: %v", reasons)
+	}
+}

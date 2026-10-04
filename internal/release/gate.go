@@ -180,6 +180,10 @@ func ParseGateReport(data []byte) (GateReport, error) {
 	return report, nil
 }
 
+// panelHost is the machine that runs the control plane rather than an agent, so
+// the report names it as a host and no agent version belongs to it.
+const panelHost = "panel"
+
 // stageIntegration is the stage that runs the Go suite; its presence is what
 // tells a report that reached the suite from one that stopped before it.
 const stageIntegration = "integration"
@@ -308,9 +312,6 @@ func (r GateReport) validate() error {
 		if agent.Host == "" || agent.Before == "" || agent.After == "" {
 			return fmt.Errorf("the agent on %q is reported without both its versions", agent.Host)
 		}
-		if !named[agent.Host] {
-			return fmt.Errorf("an agent is reported on %q, which the report does not name as a host", agent.Host)
-		}
 	}
 	if err := r.validateCapabilityManifest(named); err != nil {
 		return err
@@ -340,12 +341,14 @@ func (r GateReport) validateCapabilityManifest(hosts map[string]bool) error {
 				"the capability manifest reports no host for %s and no reason; an adapter nobody could order is not an absence of one",
 				capability)
 		}
-		for _, host := range entry.Hosts {
-			if !hosts[host] {
-				return fmt.Errorf("the capability manifest offers %s on %q, which the report does not name as a host",
-					capability, host)
-			}
-		}
+		// The hosts a manifest names are not checked against the host list, for
+		// the reason the same check on the agents had to go: hosts.tsv is the
+		// fleet that answered over ssh, the manifest comes from the panel's own
+		// host table, and the suite enrols hosts of its own while it runs. The
+		// two sets are different by construction, and a host in one and not the
+		// other says nothing about the report. What the verdict asks instead is
+		// that the fleet is not empty and that every declared adapter is
+		// accounted for.
 	}
 	return nil
 }
@@ -396,16 +399,44 @@ func (r GateReport) ComputeVerdict() (string, []string) {
 	// A run over an empty fleet skips every scenario as not applicable and the
 	// arithmetic still adds up: "it runs on another host" cannot be false when
 	// there is no other host, and the capability manifest accounts for nothing.
-	if len(r.Hosts) == 0 {
-		fatal = append(fatal, "the run names no host: a suite that ran against nothing attests nothing")
-	}
-	if len(r.Agents) == 0 {
-		fatal = append(fatal, "the run names no agent: nothing says the fleet carried a build of this commit")
-	}
-	for _, capability := range agent.AllCapabilities {
-		if _, accounted := r.CapabilityManifest[capability]; !accounted {
-			fatal = append(fatal, fmt.Sprintf(
-				"the capability manifest says nothing about %s, which the agent declares", capability))
+	//
+	// Asked only of a full run. A quick one has no fleet by definition and is
+	// already a fail for being quick; adding a line per adapter to that would
+	// bury the reason somebody has to read.
+	if r.Quick != nil && !*r.Quick {
+		if len(r.Hosts) == 0 {
+			fatal = append(fatal, "the run names no host: a suite that ran against nothing attests nothing")
+		}
+		if len(r.Agents) == 0 {
+			fatal = append(fatal, "the run names no agent: nothing says the fleet carried a build of this commit")
+		}
+		for _, capability := range agent.AllCapabilities {
+			if _, accounted := r.CapabilityManifest[capability]; !accounted {
+				fatal = append(fatal, fmt.Sprintf(
+					"the capability manifest says nothing about %s, which the agent declares", capability))
+			}
+		}
+		// A host under test whose agent version nobody recorded: the suite then
+		// exercised a binary the report cannot name.
+		//
+		// Only this direction. The other one - an agent on a host the report
+		// does not list - was a refusal in the schema for an hour, and the first
+		// real bundle showed why it cannot be: the suite enrols synthetic hosts
+		// of its own, which have no distribution to read over ssh. A fleet that
+		// gains hosts during a run is not a malformed report.
+		versions := make(map[string]bool, len(r.Agents))
+		for _, reported := range r.Agents {
+			versions[reported.Host] = true
+		}
+		for _, host := range r.Hosts {
+			if host.Name == panelHost {
+				continue
+			}
+			if !versions[host.Name] {
+				fatal = append(fatal, fmt.Sprintf(
+					"no agent version is reported for %s, so nothing says which build the suite exercised there",
+					host.Name))
+			}
 		}
 	}
 	// The clock a waiver expires against is the run's own end: a report is
