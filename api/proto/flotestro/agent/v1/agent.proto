@@ -170,6 +170,24 @@ message FetchSecretResponse {
   bytes sealed_nonce = 5;
   bytes server_public_key = 6;
   string sealing = 7;
+  // The receipt the root helper checks before it writes these bytes into a
+  // file. Until it existed, a write that said "fill this file from the secret
+  // db-password" was checked against nothing at all and the helper wrote
+  // whatever the request carried - into a place often worth more than the
+  // secret. The digest cannot live in the capability: version 0 means
+  // "whatever is current when the task is delivered", so when the panel signs
+  // the consent it does not yet know the content.
+  //
+  // Two fields for one receipt, for the same reason sha256 is empty on a
+  // sealed answer: on a direct session the digest is already in sha256 above,
+  // so the receipt travels beside it; on a relayed one it is sealed to the
+  // host's ephemeral key, because a digest of a short secret in a relay's log
+  // would be the hint this protocol is careful not to give.
+  flotestro.helper.v1.SecretReceipt secret_receipt = 8;
+  // The same receipt, serialised and sealed to the ephemeral key with the
+  // scheme sealing names and its own associated data.
+  bytes sealed_receipt = 9;
+  bytes sealed_receipt_nonce = 10;
 }
 
 // IdentityChallengeRequest carries nothing: the identity comes from the
@@ -267,6 +285,11 @@ message AgentMessage {
     FinalReady final_ready = 8;
     // The answer to a CancelTask: what the cancel found on the host.
     CancelAck cancel_ack = 9;
+    // The last thing a decommissioned host says: what became of the wipe.
+    // Without it the panel writes "committed" on the strength of a closed
+    // session, and a host whose wipe failed closes its session too - so the
+    // only record of the truth is the journal of a host being thrown away.
+    FinalWipeReport final_wipe_report = 10;
   }
   // The host's own signature over the payload, for a session that goes
   // through a relay. Outside the oneof: every kind of message carries it,
@@ -414,6 +437,41 @@ message MetricsAck {
   // The entry of the error guide behind a refusal; empty on a sample that
   // was stored.
   string reason_code = 4;
+  // The highest sequence this panel holds for that boot.
+  //
+  // A host whose sequence counter is lost while its spool is empty has
+  // nothing to resume from: the numbering restarts below what the panel
+  // already holds, and every sample is refused as one it has - at a sample a
+  // minute, for as long as the host had been up. This is the one answer that
+  // ends it, and only the panel has it. Absent from a panel that keeps no
+  // samples; a host that is told nothing keeps walking its numbering up, as
+  // before.
+  optional uint64 highest_sequence_held = 5;
+}
+
+// FinalWipeReport is what became of the wipe on the host, sent by the agent
+// as the last message of its last session.
+//
+// The agent knows the outcome exactly and used to keep it: all three failure
+// paths - no helper, no answer from the helper, a refusal with a code - ended
+// in a local log line and a process that kept running. The panel saw a closed
+// session, which a failed wipe closes just as a successful one does, and
+// recorded the commit.
+message FinalWipeReport {
+  // The commit this is the answer to.
+  string commit_id = 1;
+  // Whether the root helper accepted the order at all.
+  bool accepted = 2;
+  // The refusal, when it refused: the entry of the error guide and the
+  // sentence the helper gave.
+  string error_code = 3;
+  string message = 4;
+  // What the helper reports it did. Each one is optional: a value the agent
+  // could not read is not sent, and the panel keeps it unknown rather than
+  // reading an absent answer as a no.
+  optional bool removed = 5;
+  optional bool service_disabled = 6;
+  optional bool stop_scheduled = 7;
 }
 
 // MessageAck names a message of a relayed session the panel has consumed:
