@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ultherego/flotestro/internal/hosts"
@@ -64,6 +65,13 @@ type Scheduler struct {
 	log       *slog.Logger
 	// refreshes carries the hosts that have just sent new data.
 	refreshes chan string
+	// pass keeps the two paths of this process out of each other's way: the
+	// periodic cycle and the event-driven recomputation. The lease keeps
+	// instances apart and cannot do this job, because Take renews a lease the
+	// same instance already holds - so the event path took the lease the
+	// running cycle was holding and released it on the way out, and the cycle
+	// lost its lease in the middle of its own pass.
+	pass sync.Mutex
 }
 
 // NewScheduler creates the schedule of the correlator.
@@ -157,10 +165,24 @@ func (h *Scheduler) Run(ctx context.Context) {
 // An instance that does not hold the lease leaves these hosts alone: the pass
 // that does hold it covers the whole fleet anyway, so nothing is lost but the
 // promptness.
+//
+// Inside this process the mutex decides, not the lease: Take renews a lease the
+// same instance holds rather than refusing it, so this path used to take the
+// lease of the cycle running beside it and release it on the way out - and that
+// cycle finished its work without a lease, or stopped. When a pass of this
+// process is running, these hosts are left to it, because it holds the lease
+// and covers the whole fleet.
 func (h *Scheduler) RecalculateHosts(ctx context.Context, ids []string) {
 	if len(ids) == 0 {
 		return
 	}
+	if !h.pass.TryLock() {
+		h.log.Debug("a pass of this instance is running; these hosts are left to it",
+			"hosts", len(ids))
+		return
+	}
+	defer h.pass.Unlock()
+
 	lease, held, err := h.store.TakeCorrelatorLease(ctx, jobs.InstanceID())
 	if err != nil {
 		h.log.Error("the correlator lease was not read", "err", err)
@@ -215,6 +237,10 @@ func (h *Scheduler) describedHosts(ctx context.Context,
 // Cycle makes one pass: the synchronisation of the feeds and the assessment
 // of the hosts.
 func (h *Scheduler) Cycle(ctx context.Context) {
+	// One pass at a time in this process, one instance at a time in the fleet.
+	h.pass.Lock()
+	defer h.pass.Unlock()
+
 	// One instance does this pass. Every replica downloading every feed - close
 	// to a million findings for a Red Hat release - and then rewriting the
 	// findings of every host is duplicated work whose last commit wins, whichever
