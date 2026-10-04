@@ -96,7 +96,7 @@
 
   <main class="content">
 <h1>7. Errors and refusals</h1>
-<p class="lede">Every refusal, failure and skip the panel, the agent and the helper can put on a task, a campaign target or a request carries a stable code. A code answers two questions: what happened, and what can safely be done next. This page is the whole guide, 322 entries, transcribed from <code>internal/opspec/errors.go</code>; the panel serves the same list at <code>GET /api/v1/errors</code>.</p>
+<p class="lede">Every refusal, failure and skip the panel, the agent and the helper can put on a task, a campaign target or a request carries a stable code. A code answers two questions: what happened, and what can safely be done next. This page is the whole guide, 324 entries, transcribed from <code>internal/opspec/errors.go</code>; the panel serves the same list at <code>GET /api/v1/errors</code>.</p>
     <ul class="linkrow">
       <li><a href="#retry">The retry policy</a></li>
       <li><a href="#failure">Whether a code counts as a failure</a></li>
@@ -172,7 +172,7 @@
 <tr><td><a href="#stage-admission"><code>admission</code></a></td><td>43</td></tr>
 <tr><td><a href="#stage-approval"><code>approval</code></a></td><td>9</td></tr>
 <tr><td><a href="#stage-dispatch"><code>dispatch</code></a></td><td>23</td></tr>
-<tr><td><a href="#stage-agent"><code>agent</code></a></td><td>27</td></tr>
+<tr><td><a href="#stage-agent"><code>agent</code></a></td><td>29</td></tr>
 <tr><td><a href="#stage-helper"><code>helper</code></a></td><td>105</td></tr>
 <tr><td><a href="#stage-verify"><code>verify</code></a></td><td>10</td></tr>
 <tr><td><a href="#stage-reconcile"><code>reconcile</code></a></td><td>18</td></tr>
@@ -291,6 +291,8 @@
 <tr><td><a href="#err-health-create-failed"><code class="refusal">health_create_failed</code></a></td><td>dispatch</td><td><span class="badge retry-after-change">after_change</span></td><td>yes</td></tr>
 <tr><td><a href="#err-helper-capability-unsupported"><code class="refusal">helper_capability_unsupported</code></a></td><td>dispatch</td><td><span class="badge retry-after-change">after_change</span></td><td>yes</td></tr>
 <tr><td><a href="#err-helper-rejected"><code class="refusal">helper_rejected</code></a></td><td>helper</td><td><span class="badge retry-after-change">after_change</span></td><td>yes</td></tr>
+<tr><td><a href="#err-final-wipe-no-answer"><code class="refusal">final_wipe_no_answer</code></a></td><td>agent</td><td><span class="badge retry-after-change">after_change</span></td><td>yes</td></tr>
+<tr><td><a href="#err-final-wipe-no-helper"><code class="refusal">final_wipe_no_helper</code></a></td><td>agent</td><td><span class="badge retry-after-change">after_change</span></td><td>yes</td></tr>
 <tr><td><a href="#err-helper-unavailable"><code class="refusal">helper_unavailable</code></a></td><td>agent</td><td><span class="badge retry-automatic">automatic</span></td><td>yes</td></tr>
 <tr><td><a href="#err-host-kerberos-key-unusable"><code class="refusal">host_kerberos_key_unusable</code></a></td><td>helper</td><td><span class="badge retry-after-change">after_change</span></td><td>yes</td></tr>
 <tr><td><a href="#err-host-retiring"><code class="refusal">host_retiring</code></a></td><td>agent</td><td><span class="badge retry-never">never</span></td><td>no</td></tr>
@@ -720,7 +722,7 @@
 <dd><p>The host was not connected and the campaign's policy leaves such a host out.</p><p><span class="label">What to do</span> Nothing, or order again once the host is back. Not a failure.</p><p><span class="badge retry-after-change">retry: after_change</span> <span class="badge not-failure">not a failure</span></p></dd>
 </dl>
 <h2 id="stage-agent">Stage: agent</h2>
-<p>27 codes.</p>
+<p>29 codes.</p>
 <dl class="kv">
 <dt id="err-agent-internal-error"><code class="refusal">agent_internal_error</code></dt>
 <dd><p>The agent broke down while carrying the operation out and ended the task with a result rather than taking its whole process down with it. Whether anything changed on the host is not said by this code.</p><p><span class="label">What to do</span> Read the state of the host before ordering again, and read the agent journal on it around the time of the attempt. One host failing this way is that host's agent; every host failing it is the operation.</p><p><span class="badge retry-read-state">retry: read_state</span> <span class="badge counts-failure">counts as a failure</span></p></dd>
@@ -728,6 +730,10 @@
 <dd><p>The agent on this host runs in observation mode: it reads and reports and performs no change, so a mutation is refused before anything else is even checked.</p><p><span class="label">What to do</span> Take the host out of observation mode if it is meant to change, or leave it out of the campaign. Not a failure.</p><p><span class="badge retry-after-change">retry: after_change</span> <span class="badge not-failure">not a failure</span></p></dd>
 <dt id="err-agent-upgrade-metadata-stale"><code class="refusal">agent_upgrade_metadata_stale</code></dt>
 <dd><p>The host did not confirm that it refreshed its repository metadata, so the version the order names may not be installable from the lists its package manager holds. The replacement was not started.</p><p><span class="label">What to do</span> Read the reason the refresh carries in the message - an unreachable repository, a busy package manager - and order again once the host can reach its repository.</p><p><span class="badge retry-automatic">retry: automatic</span> <span class="badge counts-failure">counts as a failure</span></p></dd>
+<dt id="err-final-wipe-no-answer"><code class="refusal">final_wipe_no_answer</code></dt>
+<dd><p>The root helper was asked to remove the identity and did not answer within the window. Whether it removed anything is unknown, which is not the same as nothing.</p><p><span class="label">What to do</span> Read the host's journal for flotestro-helper, then order the decommission again; it is safe to repeat.</p><p><span class="badge retry-after-change">retry: after_change</span> <span class="badge counts-failure">counts as a failure</span></p></dd>
+<dt id="err-final-wipe-no-helper"><code class="refusal">final_wipe_no_helper</code></dt>
+<dd><p>The panel committed the decommission and this host has no root helper, so nothing removed its identity. The certificate is revoked and the host keeps running with the identity still on its disk.</p><p><span class="label">What to do</span> Install and start flotestro-helper on the host and order the decommission again, or remove /var/lib/flotestro-agent by hand before the machine is reused.</p><p><span class="badge retry-after-change">retry: after_change</span> <span class="badge counts-failure">counts as a failure</span></p></dd>
 <dt id="err-helper-unavailable"><code class="refusal">helper_unavailable</code></dt>
 <dd><p>The root helper did not answer.</p><p><span class="label">What to do</span> Check flotestro-helper.socket on the host; the attempt is repeated.</p><p><span class="badge retry-automatic">retry: automatic</span> <span class="badge counts-failure">counts as a failure</span></p></dd>
 <dt id="err-host-retiring"><code class="refusal">host_retiring</code></dt>
