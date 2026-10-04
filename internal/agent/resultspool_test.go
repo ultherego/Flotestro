@@ -6,6 +6,8 @@ package agent
 
 import (
 	"errors"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -259,5 +261,43 @@ func TestAnAttemptIdentifierThatIsNotOneIsNotWrittenToDisk(t *testing.T) {
 	}
 	if spool.Len() != 0 {
 		t.Fatalf("the spool holds %d refused results", spool.Len())
+	}
+}
+
+// A task started in one session finishes in a goroutine that holds that
+// session's spool, and the next session used to open its own: the directory is
+// read once, at the open, so the file the old goroutine wrote was invisible
+// until the agent restarted - and the time-to-live could take it first. The
+// panel meanwhile held the job leased over a host where the change had already
+// been made, which is the one case this spool exists for (audit of 6c38561,
+// TR-05).
+func TestEverySessionOfAProcessSharesOneResultSpool(t *testing.T) {
+	dir := t.TempDir()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	resetProcessResultSpool()
+	t.Cleanup(resetProcessResultSpool)
+
+	first, err := ProcessResultSpool(dir, 10, 1<<20, time.Hour, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The session that follows asks for the spool of the process and is given
+	// the same object, not a second reading of the directory.
+	second, err := ProcessResultSpool(dir, 10, 1<<20, time.Hour, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Fatal("two sessions of one process hold two spools over one directory")
+	}
+
+	// A result written through the first - which is what a task of the previous
+	// session does - is offered by the second.
+	if err := first.Enqueue(&agentv1.TaskResult{TaskId: "task-after-the-reconnect"}); err != nil {
+		t.Fatal(err)
+	}
+	pending := second.Pending(time.Now())
+	if len(pending) != 1 || pending[0].GetTaskId() != "task-after-the-reconnect" {
+		t.Fatalf("the session that followed offers %d results: %+v", len(pending), pending)
 	}
 }

@@ -88,6 +88,53 @@ type spooledResult struct {
 	size      int64
 }
 
+// The spool of one process. A task started in one session finishes in a
+// goroutine that holds that session's spool object, and the next session used
+// to build its own: the directory was read once, at the open, so the file the
+// old goroutine wrote was invisible to the new session until the agent
+// restarted - and the time-to-live could remove it first. The panel meanwhile
+// held the job leased over a host where the change had already been made,
+// which is the one case this spool exists for.
+//
+// Two live objects over one directory also counted their own sequence numbers
+// and kept their own limits, so the directory could grow to twice the limit.
+var (
+	processSpoolOnce sync.Once
+	processSpool     *ResultSpool
+	processSpoolErr  error
+	processSpoolDir  string
+)
+
+// ProcessResultSpool returns the spool of this agent process, opening it the
+// first time it is asked for. Every session shares it, which is what makes a
+// result written after a reconnect visible to the session that follows.
+func ProcessResultSpool(stateDir string, limit int, maxSize int64, ttl time.Duration,
+	log *slog.Logger) (*ResultSpool, error) {
+	processSpoolOnce.Do(func() {
+		processSpool, processSpoolErr = OpenResultSpool(stateDir, limit, maxSize, ttl, log)
+		processSpoolDir = stateDir
+	})
+	if processSpoolErr != nil {
+		return nil, processSpoolErr
+	}
+	// One process serves one state directory. A second one would be a different
+	// agent in the same process, which is not a thing this product builds, and
+	// saying so is better than handing back a spool over another directory.
+	if stateDir != processSpoolDir {
+		return nil, fmt.Errorf("the result spool of this process is under %s and this session asks for %s",
+			processSpoolDir, stateDir)
+	}
+	return processSpool, nil
+}
+
+// resetProcessResultSpool forgets the spool of this process. Only a test calls
+// it: a process has one agent and one state directory, and the whole point of
+// the singleton is that nothing opens a second one.
+func resetProcessResultSpool() {
+	processSpoolOnce = sync.Once{}
+	processSpool, processSpoolErr, processSpoolDir = nil, nil, ""
+}
+
 // OpenResultSpool opens - and if need be creates - the spool under the agent's
 // state directory.
 func OpenResultSpool(stateDir string, limit int, maxSize int64, ttl time.Duration,

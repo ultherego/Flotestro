@@ -555,7 +555,9 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 		acknowledged: sessionConfig.GetTaskResultsAcknowledged(),
 	}
 	if opts.StateDir != "" {
-		spool, err := OpenResultSpool(opts.StateDir, ResultSpoolSize, ResultSpoolBytes,
+		// The spool of the process, not of this session: a result written by a
+		// task of the previous session has to be visible here.
+		spool, err := ProcessResultSpool(opts.StateDir, ResultSpoolSize, ResultSpoolBytes,
 			ResultSpoolTTL, opts.Log)
 		if err != nil {
 			opts.Log.Error("the results are not kept for a resend; a broken session loses them",
