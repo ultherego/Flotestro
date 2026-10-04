@@ -436,6 +436,18 @@ func (s *Server) checkFilesystem(ctx context.Context, action *helperv1.StorageRe
 	if err := storage.ValidateSource(device); err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
+	// ValidateSource takes a durable identifier as readily as a path - UUID= and
+	// LABEL= are the forms a real deployment names a filesystem by - and
+	// everything below this point works with paths. The mounted check compares
+	// paths, so a device named by its label used to slip past it, and fsck
+	// would run on a mounted filesystem: the very thing the refusal below
+	// exists to prevent, bypassed by naming the same device another way.
+	resolved, known := s.resolveDevice(ctx, device)
+	if !known {
+		return reject(ErrorUnsupported,
+			"no device on this host answers to "+device)
+	}
+	device = resolved
 	if response := s.checkDevicePlanDigest(ctx, action); response != nil {
 		return response
 	}
@@ -1004,6 +1016,38 @@ func (s *Server) checkSourceExists(ctx context.Context, source string) error {
 }
 
 // mountPoint returns the place where the device is mounted.
+// resolveDevice turns a durable identifier into the path the host gives that
+// device now. A path is returned as it is, and an identifier nothing answers to
+// is not resolved - which is an answer, not a path to guess at.
+func (s *Server) resolveDevice(ctx context.Context, source string) (string, bool) {
+	wanted, isLabel := strings.CutPrefix(source, "LABEL=")
+	if !isLabel {
+		var isUUID bool
+		wanted, isUUID = strings.CutPrefix(source, "UUID=")
+		if !isUUID {
+			return source, true
+		}
+	}
+	output, err := toolOutput(ctx, storage.LsblkPath, "-J", "-b", "-o",
+		"NAME,PATH,TYPE,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINTS")
+	if err != nil {
+		return "", false
+	}
+	devices, err := storage.ParseDevices(output)
+	if err != nil {
+		return "", false
+	}
+	for _, entry := range devices {
+		if isLabel && entry.Label == wanted {
+			return entry.Path, true
+		}
+		if !isLabel && entry.UUID == wanted {
+			return entry.Path, true
+		}
+	}
+	return "", false
+}
+
 func (s *Server) mountPoint(ctx context.Context, device string) string {
 	output, err := toolOutput(ctx, storage.LsblkPath, "-J", "-b", "-o",
 		"NAME,PATH,TYPE,SIZE,MOUNTPOINTS")

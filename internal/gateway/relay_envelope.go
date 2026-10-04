@@ -342,17 +342,22 @@ func (r relaySequences) Claim(ctx context.Context, hostID, sessionID string,
 		// moved with it, so this number is new work.
 		claim.Fresh = true
 	case noted:
-		// The inbox has no memory of this number and the watermark says it is
-		// spent: the record was swept after its retention, or somebody is
-		// presenting the numbers of a session that is over. Either way the panel
-		// does not do the work again, and the row it just made says so.
-		claim.Applied = true
-		if _, err := r.pool.Exec(ctx, `
-			update relay_inbox set state = 'applied', applied_at = now()
-			 where host_id = $1 and session_id = $2 and sequence = $3`,
-			hostID, sessionID, int64(sequence)); err != nil {
-			return Claim{}, fmt.Errorf("recording a spent sequence: %w", err)
-		}
+		// The row was created by this statement, so no gateway has ever claimed
+		// this number: it is new work. The watermark says nothing about that.
+		//
+		// It used to decide here, and the spool delivers by priority before
+		// sequence - that is what priorities are for - so a message numbered
+		// below one already carried arrived as a matter of course, found the
+		// watermark above it, and was recorded as applied and acknowledged to
+		// the relay without the panel ever doing the work. A task result, a
+		// metrics sample, an inventory report: gone, with nothing in the log
+		// but the word "applied" in a row.
+		//
+		// What the watermark was guarding against - a number swept after its
+		// retention and presented again - is handled by the sweep instead: it
+		// keeps the inbox of a live session whole, so "never seen" keeps
+		// meaning never seen.
+		claim.Fresh = true
 	case state == "applied":
 		claim.Applied = true
 	case state == "dead":
@@ -413,17 +418,28 @@ const sequenceRetention = 30 * 24 * time.Hour
 // than the retention, and with them what was recorded about their messages.
 // A message still owed is kept: it is work the panel has not done.
 func (r relaySequences) Sweep(ctx context.Context) (int64, error) {
-	if _, err := r.pool.Exec(ctx, `
-		delete from relay_inbox
-		 where state <> 'received' and coalesce(applied_at, received_at) < now() - $1::interval`,
-		fmt.Sprintf("%d seconds", int(sequenceRetention.Seconds()))); err != nil {
-		return 0, fmt.Errorf("sweeping the relay inbox: %w", err)
-	}
+	window := fmt.Sprintf("%d seconds", int(sequenceRetention.Seconds()))
+	// The sessions first, and the inbox only for sessions that are gone.
+	//
+	// Claim now reads "this number was never claimed" as new work, which is
+	// only true while the inbox of a live session is complete. A session row's
+	// clock moves with every claim and an inbox row's does not, so a long-lived
+	// session used to lose its oldest numbers while the session itself stayed -
+	// and those numbers would then be done a second time. Keeping the two in
+	// this order costs one pass of delay and makes the question answerable.
 	tag, err := r.pool.Exec(ctx, `
-		delete from relay_host_sequences where updated_at < now() - $1::interval`,
-		fmt.Sprintf("%d seconds", int(sequenceRetention.Seconds())))
+		delete from relay_host_sequences where updated_at < now() - $1::interval`, window)
 	if err != nil {
 		return 0, err
+	}
+	if _, err := r.pool.Exec(ctx, `
+		delete from relay_inbox i
+		 where i.state <> 'received'
+		   and coalesce(i.applied_at, i.received_at) < now() - $1::interval
+		   and not exists (select 1 from relay_host_sequences s
+		                    where s.host_id = i.host_id and s.session_id = i.session_id)`,
+		window); err != nil {
+		return 0, fmt.Errorf("sweeping the relay inbox: %w", err)
 	}
 	return tag.RowsAffected(), nil
 }

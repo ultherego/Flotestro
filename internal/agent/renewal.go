@@ -192,6 +192,23 @@ func renewCertificate(ctx context.Context, identity *Identity, options RenewalOp
 		return fmt.Errorf("a renewal without a trust bundle")
 	}
 
+	// A bundle that arrives with the certificate it signs proves nothing: it is
+	// the answer vouching for itself, and through a relay the handshake ends at
+	// the relay. The renewal proves the host to the panel; nothing in this
+	// path proved the panel to the host, so a new certificate under a new
+	// authority was written to disk as the authority this host trusts.
+	//
+	// The new certificate therefore has to verify under the trust in force,
+	// which is what a CA rotation with an overlap looks like. One that does not
+	// is a rotation somebody has to decide on, by enrolling the host again, and
+	// the agent says so rather than taking it.
+	if len(identity.TrustPEM) > 0 {
+		if err := identitystore.VerifiesUnder(response.Msg.GetCertificatePem(), identity.TrustPEM); err != nil {
+			return fmt.Errorf("the renewed certificate does not verify under the trust this host "+
+				"already holds, so the authority behind it is not one this host believes: %w", err)
+		}
+	}
+
 	renewed, err := store.Commit(identitystore.Generation{
 		Key:            key,
 		CertificatePEM: response.Msg.GetCertificatePem(),

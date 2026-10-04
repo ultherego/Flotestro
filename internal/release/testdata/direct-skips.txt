@@ -79,8 +79,6 @@ tests/integration/campaigns_test.go:2644	t.Skip("every host was already in the d
 tests/integration/campaigns_test.go:2719	t.Skip("the fleet has no two hosts and a working time source")
 tests/integration/campaigns_test.go:2765	t.Skip("no host accepts the time source change; only the refusals were checked")
 tests/integration/campaigns_test.go:2817	t.Skip("no host in this laboratory reaches the time server; only the refusals were checked")
-tests/integration/campaigns_test.go:2848	t.Skip("the fleet has fewer than two hosts with an unmounted ext4 filesystem")
-tests/integration/campaigns_test.go:2859	t.Skipf("the unmounted filesystems have different paths")
 tests/integration/campaigns_test.go:2877	t.Skip("every host was already in the desired state; the plans were empty")
 tests/integration/campaigns_test.go:2983	t.Skip("the fleet has fewer than two connected hosts")
 tests/integration/campaigns_test.go:3138	t.Skip("the fleet has fewer than two connected hosts")

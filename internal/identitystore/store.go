@@ -141,6 +141,38 @@ func (m *Store) NewKey() (Key, error) { return m.source.New() }
 // Dir returns the identity directory.
 func (m *Store) Dir() string { return m.root }
 
+// VerifiesUnder says whether the certificate of a generation is signed by an
+// authority in the given bundle.
+//
+// Check verifies a generation against its own trust bundle, which answers
+// "are these three things consistent with one another" and not "may this host
+// believe them". A renewal arrives with both the certificate and the bundle
+// from the same answer, so a consistent pair signed by anybody at all passed -
+// and the agent then wrote that authority to disk as the one it trusts. The
+// caller that knows what this host trusted a moment ago asks this instead.
+func VerifiesUnder(certificatePEM, trustPEM []byte) error {
+	block, _ := pem.Decode(certificatePEM)
+	if block == nil {
+		return fmt.Errorf("%w: the certificate carries no PEM block", ErrKeyPair)
+	}
+	leaf, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrKeyPair, err)
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(trustPEM) {
+		return ErrTrust
+	}
+	if _, err := leaf.Verify(x509.VerifyOptions{
+		Roots:       roots,
+		KeyUsages:   []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		CurrentTime: time.Now(),
+	}); err != nil {
+		return fmt.Errorf("%w: %v", ErrChain, err)
+	}
+	return nil
+}
+
 // Check verifies a generation before any change on disk.
 func Check(g Generation) error {
 	key, err := g.key()

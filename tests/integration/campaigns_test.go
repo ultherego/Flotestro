@@ -2869,27 +2869,35 @@ func TestFilesystemCheckCampaignComputesAPlanOnEveryHost(t *testing.T) {
 		}, 2*time.Minute)
 		state := hostStorageSnapshot(t, h, host.ID)
 		for _, device := range state.Devices {
-			if device.FSType == "ext4" && device.UUID != "" && len(device.Mountpoints) == 0 {
-				paths[host.ID] = device.Path
+			// By label, for the reason the mount campaign gives: one payload
+			// goes to every host, and the letter the kernel gives a disk is
+			// not the same on two machines. The product takes LABEL= wherever
+			// it takes a device.
+			if device.FSType == "ext4" && device.UUID != "" && device.Label != "" &&
+				len(device.Mountpoints) == 0 {
+				paths[host.ID] = device.Label
 				targets = append(targets, host.ID)
 				break
 			}
 		}
 	}
+	// absent, not a bare skip: the laboratory prepares this, so its absence is
+	// a laboratory that did not.
 	if len(targets) < 2 {
-		t.Skip("the fleet has fewer than two hosts with an unmounted ext4 filesystem")
+		absent(t, "the fleet has fewer than two hosts with an unmounted, labelled ext4 filesystem")
 	}
-	path := paths[targets[0]]
+	label := paths[targets[0]]
 	selected := targets[:0]
 	for _, hostID := range targets {
-		if paths[hostID] == path {
+		if paths[hostID] == label {
 			selected = append(selected, hostID)
 		}
 	}
 	targets = selected
 	if len(targets) < 2 {
-		t.Skipf("the unmounted filesystems have different paths")
+		absent(t, "the unmounted filesystems carry different labels")
 	}
+	path := "LABEL=" + label
 
 	campaign := h.createCampaign(map[string]any{
 		"name": "filesystem check on the fleet", "action": "filesystem.check",

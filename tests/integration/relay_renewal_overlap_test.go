@@ -37,7 +37,10 @@ func TestARelayIsStillRecognisedByTheCertificateItsRenewalReplaced(t *testing.T)
 		_, _ = pool.Exec(context.Background(), `delete from relays where id = $1::uuid`, id)
 	})
 
-	save := func(fingerprint []byte) {
+	// decidedOn is the fingerprint the caller read before it decided to write,
+	// which the store now requires: a renewal that outran a revocation used to
+	// clear revoked_at and hand the relay its authority back.
+	save := func(fingerprint, decidedOn []byte) {
 		t.Helper()
 		tx, err := pool.Begin(ctx)
 		if err != nil {
@@ -46,7 +49,7 @@ func TestARelayIsStillRecognisedByTheCertificateItsRenewalReplaced(t *testing.T)
 		defer func() { _ = tx.Rollback(ctx) }()
 		if err := store.SaveCertificate(ctx, tx, id, "serial-"+string(fingerprint),
 			fingerprint, time.Now().Add(30*24*time.Hour),
-			relays.Issuer{Subject: "CN=Flotestro Fleet CA", Serial: "01"}); err != nil {
+			relays.Issuer{Subject: "CN=Flotestro Fleet CA", Serial: "01"}, decidedOn); err != nil {
 			t.Fatalf("saving the certificate: %v", err)
 		}
 		if err := tx.Commit(ctx); err != nil {
@@ -54,8 +57,10 @@ func TestARelayIsStillRecognisedByTheCertificateItsRenewalReplaced(t *testing.T)
 		}
 	}
 
-	save(first)
-	save(second)
+	// The first certificate of a relay rests on no fingerprint; the second
+	// rests on the first.
+	save(first, nil)
+	save(second, first)
 
 	// The renewal went out and its answer was lost: the relay still holds the
 	// first certificate and has to be let back in with it.

@@ -47,6 +47,19 @@ func fetchSecret(ctx context.Context, client agentv1connect.AgentServiceClient,
 	if answer.GetSealing() != "" || len(answer.GetSealedValue()) > 0 {
 		return openSealedSecret(ephemeral, answer, taskID, name)
 	}
+	// This fetch offered a one-time key, so the panel seals the answer. One
+	// that comes back in the clear is not the panel's answer, whoever carried
+	// it: a relay that strips the sealing fields and puts its own value in
+	// with its own digest would otherwise be believed, because the digest
+	// below is checked against the same answer that brought it.
+	//
+	// It closes the downgrade. Proving that the key the panel sealed *with* is
+	// the panel's needs the answer signed, which is a change to the protocol
+	// and not this line - the sealing itself is still only as good as the
+	// server key that arrived with it.
+	if ephemeral != nil {
+		return nil, errors.New("this fetch offered a one-time key and the answer came back unsealed")
+	}
 	value := answer.GetValue()
 	// The panel gives the digest of what it issued: this checks that
 	// exactly that arrived and not content damaged on the way.
