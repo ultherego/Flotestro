@@ -855,7 +855,16 @@ func (e *Executor) writeSudoRule(ctx context.Context, spec *SudoRulePayload, ens
 	if rule != nil {
 		message = describeSudoRule(*rule)
 	}
-	return []Phase{finishPhase(phase, err, message)}
+	phases := []Phase{finishPhase(phase, err, message)}
+
+	// What the rule allows after a failed change is its own result: a rule the
+	// directory would not take back is louder than the change that failed.
+	var change *freeipa.RuleChangeError
+	if errors.As(err, &change) {
+		restore := startPhase("restoring the sudo rule " + spec.Name)
+		phases = append(phases, finishPhase(restore, change.Restore, change.Outcome))
+	}
+	return phases
 }
 
 func describeHBACRule(rule freeipa.HBACRule) string {

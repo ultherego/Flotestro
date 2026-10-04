@@ -318,7 +318,8 @@ func TestTheSudoPlanDiffsTheExistingRule(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 	joined := strings.Join(plan.Steps, "\n")
-	for _, want := range []string{"adding commands: /usr/bin/systemctl", "no longer covering every command"} {
+	for _, want := range []string{"adding commands: /usr/bin/systemctl", "no longer covering every command",
+		"taking the rule out of service", "once the directory confirms its commands"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("the steps lack %q:\n%s", want, joined)
 		}

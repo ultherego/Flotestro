@@ -255,10 +255,9 @@ func TestAPartialMembershipFailureIsNotASuccess(t *testing.T) {
 }
 
 func TestEnsureSudoRuleWritesEveryMemberKind(t *testing.T) {
-	fake, client := newFakeDirectory(t)
-	fake.answers["sudorule_show"] = answerWith(map[string]any{
-		"cn": []any{"ops-restart"}, "ipaenabledflag": []any{true}, "ipasudoopt": []any{"!authenticate"},
-		"memberallowcmd_sudocmd": []any{"/usr/bin/systemctl"},
+	fake, client, _ := newSudoDirectory(t, &SudoRule{
+		Name: "ops-restart", Enabled: true, Options: []string{"!authenticate"},
+		Commands: []string{"/usr/bin/systemctl"},
 	})
 	_, err := client.EnsureSudoRule(context.Background(), SudoRuleSpec{
 		Name: "ops-restart", Enabled: true,
@@ -292,6 +291,14 @@ func TestEnsureSudoRuleWritesEveryMemberKind(t *testing.T) {
 	}
 	if slices.Contains(methods, "sudorule_add") || slices.Contains(methods, "sudorule_mod") {
 		t.Errorf("the entry itself was rewritten although nothing changed there: %v", methods)
+	}
+	// The rule leaves service for the length of the change and comes back only
+	// after every command and option is in.
+	if disableAt := slices.Index(methods, "sudorule_disable"); disableAt != 1 {
+		t.Fatalf("the rule was changed while it was in service: %v", methods)
+	}
+	if enableAt := slices.Index(methods, "sudorule_enable"); enableAt < slices.Index(methods, "sudorule_add_option") {
+		t.Fatalf("the rule came back into service before its options: %v", methods)
 	}
 }
 
@@ -497,17 +504,7 @@ func TestHBACTestParsesADenial(t *testing.T) {
 // between a rule for named hosts and commands and a rule for everything.
 func TestEnsureSudoRuleNeverEmitsACategoryForNamedMembers(t *testing.T) {
 	t.Run("a new rule with names", func(t *testing.T) {
-		fake, client := newFakeDirectory(t)
-		fake.answers["sudorule_show"] = func(call rpcCall) (any, *rpcError) {
-			if fake.count("sudorule_add") == 0 {
-				return notFound(call)
-			}
-			return map[string]any{"result": map[string]any{
-				"cn": []any{"ops-restart"}, "ipaenabledflag": []any{true},
-				"memberhost_host":        []any{"web1.flotestro.test"},
-				"memberallowcmd_sudocmd": []any{"/usr/bin/systemctl"},
-			}}, nil
-		}
+		fake, client, _ := newSudoDirectory(t, nil)
 		_, err := client.EnsureSudoRule(context.Background(), SudoRuleSpec{
 			Name: "ops-restart", Enabled: true, UserGroups: []string{"ops"},
 			Hosts: []string{"web1.flotestro.test"}, Commands: []string{"/usr/bin/systemctl"},
@@ -522,12 +519,10 @@ func TestEnsureSudoRuleNeverEmitsACategoryForNamedMembers(t *testing.T) {
 	})
 
 	t.Run("an ALL rule narrowed to names", func(t *testing.T) {
-		fake, client := newFakeDirectory(t)
 		// The directory holds the widest shape: every host, every command.
-		fake.answers["sudorule_show"] = answerWith(map[string]any{
-			"cn": []any{"ops-restart"}, "ipaenabledflag": []any{true},
-			"hostcategory": []any{"all"}, "cmdcategory": []any{"all"},
-			"memberuser_group": []any{"ops"},
+		fake, client, _ := newSudoDirectory(t, &SudoRule{
+			Name: "ops-restart", Enabled: true, AllHosts: true, AllCommands: true,
+			UserGroups: []string{"ops"},
 		})
 		_, err := client.EnsureSudoRule(context.Background(), SudoRuleSpec{
 			Name: "ops-restart", Enabled: true, UserGroups: []string{"ops"},

@@ -355,13 +355,13 @@ func isEmptyModification(err error) bool {
 const (
 	// RuleRestored: the rule carries the state it carried before the change,
 	// the enabled flag included.
-	RuleRestored = "hbac_rule_restored"
+	RuleRestored = "rule_restored"
 	// RuleWithdrawn: the rule was being created, so it is not in the directory -
 	// it was taken out again, or it was never added.
-	RuleWithdrawn = "hbac_rule_withdrawn"
+	RuleWithdrawn = "rule_withdrawn"
 	// RuleRestoreFailed: the previous state could not be put back, so what the
 	// rule carries is nobody's decision any more. The loudest of the outcomes.
-	RuleRestoreFailed = "hbac_rule_restore_failed"
+	RuleRestoreFailed = "rule_restore_failed"
 )
 
 // RuleChangeError reports a rule change that did not go through: the step that
@@ -388,6 +388,152 @@ func (e *RuleChangeError) Error() string {
 
 func (e *RuleChangeError) Unwrap() error { return e.Err }
 
+// ruleKind is one rule family's half of a guarded change: how to read the rule,
+// how to write a declaration onto it, and how to hold the two against each
+// other. R is the rule, S its declaration.
+type ruleKind[R any, S any] struct {
+	// family is the prefix of the directory commands, label the rule as an
+	// operator reads it, name the rule this change is about.
+	family string
+	label  string
+	name   string
+	show   func(ctx context.Context) (*R, error)
+	// steps breaks the change into commands; neither steps nor gaps looks at the
+	// enabled flag, which is set last and on its own.
+	steps   func(spec S, current *R) []ruleStep
+	gaps    func(rule R, spec S) []string
+	specOf  func(rule R) S
+	enabled func(rule R) bool
+}
+
+// ensureRule brings a rule to the declared state with the rule out of service
+// for the length of the change: it is created, or disabled, before its members
+// move, and the flag goes back on only once the directory itself answers with
+// the declared state. A failure at any step puts the previous state back whole.
+func ensureRule[R any, S any](ctx context.Context, c *Client, kind ruleKind[R, S], spec S, wanted bool) (*R, error) {
+	before, err := kind.show(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("reading the %s %s: %w", kind.label, kind.name, err)
+	}
+	// Every step from here on changes the directory, so the cache is stale
+	// whatever happens next - also after a failure half-way through.
+	defer c.invalidate()
+
+	if step, err := applySteps(ctx, kind.steps(spec, before)); err != nil {
+		if before == nil && step == stepCreateRule {
+			// The rule was never added, so there is nothing to take back - and a
+			// rule of that name that appeared meanwhile is not this change's.
+			return nil, &RuleChangeError{Rule: kind.name, Step: step, Outcome: RuleWithdrawn, Err: err}
+		}
+		return nil, restoreRule(ctx, c, kind, step, err, before)
+	}
+
+	// The flag is set on the strength of what the directory answers, not of what
+	// the change believes it sent: a member the directory dropped would otherwise
+	// be enabled along with the rest.
+	const readBack = "comparing the rule read back with the declaration"
+	rule, err := kind.show(ctx)
+	if err != nil {
+		return nil, restoreRule(ctx, c, kind, readBack, err, before)
+	}
+	if rule == nil {
+		return nil, restoreRule(ctx, c, kind, readBack,
+			fmt.Errorf("the directory no longer holds the rule"), before)
+	}
+	if gaps := kind.gaps(*rule, spec); len(gaps) > 0 {
+		return nil, restoreRule(ctx, c, kind, readBack,
+			fmt.Errorf("the rule is incomplete: %s", strings.Join(gaps, "; ")), before)
+	}
+	if !wanted {
+		return rule, nil
+	}
+	if err := c.setRuleEnabled(ctx, kind.family, kind.name, false, true); err != nil {
+		return nil, restoreRule(ctx, c, kind, "enabling the rule", err, before)
+	}
+	enabled, err := kind.show(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("reading the %s %s back: %w", kind.label, kind.name, err)
+	}
+	if enabled == nil || !kind.enabled(*enabled) {
+		return nil, restoreRule(ctx, c, kind, "enabling the rule",
+			fmt.Errorf("the rule reads back disabled although the directory accepted the change"), before)
+	}
+	return enabled, nil
+}
+
+// applySteps runs the commands of a change and names the step that failed, if
+// one did.
+func applySteps(ctx context.Context, steps []ruleStep) (string, error) {
+	for _, step := range steps {
+		if err := step.run(ctx); err != nil {
+			return step.name, err
+		}
+	}
+	return "", nil
+}
+
+// restoreRule puts the rule back the way it stood before the change and returns
+// the error that tells both halves of the story.
+func restoreRule[R any, S any](ctx context.Context, c *Client, kind ruleKind[R, S],
+	step string, cause error, before *R) error {
+	failure := &RuleChangeError{Rule: kind.name, Step: step, Err: cause}
+	if before == nil {
+		// The directory held no such rule before the change, so that is the
+		// state to go back to.
+		if err := c.removeRule(ctx, kind.family+"_del", kind.name); err != nil {
+			failure.Outcome, failure.Restore = RuleRestoreFailed, err
+			return failure
+		}
+		failure.Outcome = RuleWithdrawn
+		return failure
+	}
+	if err := restoreRuleState(ctx, c, kind, *before); err != nil {
+		failure.Outcome, failure.Restore = RuleRestoreFailed, err
+		return failure
+	}
+	failure.Outcome = RuleRestored
+	return failure
+}
+
+// restoreRuleState writes the previous state back whole - members, categories
+// and description - and only then the enabled flag the rule had.
+func restoreRuleState[R any, S any](ctx context.Context, c *Client, kind ruleKind[R, S], before R) error {
+	now, err := kind.show(ctx)
+	if err != nil {
+		return err
+	}
+	if now == nil {
+		return fmt.Errorf("the directory no longer holds the rule")
+	}
+	wanted := kind.specOf(before)
+	if step, err := applySteps(ctx, kind.steps(wanted, now)); err != nil {
+		return fmt.Errorf("%s: %w", step, err)
+	}
+	back, err := kind.show(ctx)
+	if err != nil {
+		return err
+	}
+	if back == nil {
+		return fmt.Errorf("the directory no longer holds the rule")
+	}
+	if gaps := kind.gaps(*back, wanted); len(gaps) > 0 {
+		return fmt.Errorf("the previous state did not come back whole: %s", strings.Join(gaps, "; "))
+	}
+	return c.setRuleEnabled(ctx, kind.family, kind.name, false, kind.enabled(before))
+}
+
+// hbacKind is the access rule half of a guarded change.
+func (c *Client) hbacKind(name string) ruleKind[HBACRule, HBACRuleSpec] {
+	return ruleKind[HBACRule, HBACRuleSpec]{
+		family: "hbacrule", label: "HBAC rule", name: name,
+		show:    func(ctx context.Context) (*HBACRule, error) { return c.ShowHBACRule(ctx, name) },
+		steps:   c.hbacRuleSteps,
+		gaps:    hbacRuleDifferences,
+		specOf:  hbacSpecOf,
+		enabled: func(rule HBACRule) bool { return rule.Enabled },
+	}
+}
+
 // EnsureHBACRule brings the rule to the declared state and returns it as the
 // directory holds it afterwards. The rule grants nothing while the change runs:
 // it is created, or taken out of service, disabled, and it is enabled only once
@@ -396,65 +542,7 @@ func (c *Client) EnsureHBACRule(ctx context.Context, spec HBACRuleSpec) (*HBACRu
 	if err := spec.Validate(); err != nil {
 		return nil, err
 	}
-	before, err := c.ShowHBACRule(ctx, spec.Name)
-	if err != nil {
-		return nil, fmt.Errorf("reading the HBAC rule %s: %w", spec.Name, err)
-	}
-	// Every step from here on changes the directory, so the cache is stale
-	// whatever happens next - also after a failure half-way through.
-	defer c.invalidate()
-
-	if step, err := c.applyHBACRule(ctx, spec, before); err != nil {
-		if before == nil && step == stepCreateRule {
-			// The rule was never added, so there is nothing to take back - and a
-			// rule of that name that appeared meanwhile is not this change's.
-			return nil, &RuleChangeError{Rule: spec.Name, Step: step, Outcome: RuleWithdrawn, Err: err}
-		}
-		return nil, c.restoreHBACRule(ctx, spec.Name, step, err, before)
-	}
-
-	// The flag is set on the strength of what the directory answers, not of what
-	// the change believes it sent: a member the directory dropped would otherwise
-	// be enabled along with the rest.
-	const readBack = "comparing the rule read back with the declaration"
-	rule, err := c.ShowHBACRule(ctx, spec.Name)
-	if err != nil {
-		return nil, c.restoreHBACRule(ctx, spec.Name, readBack, err, before)
-	}
-	if rule == nil {
-		return nil, c.restoreHBACRule(ctx, spec.Name, readBack,
-			fmt.Errorf("the directory no longer holds the rule"), before)
-	}
-	if gaps := hbacRuleDifferences(*rule, spec); len(gaps) > 0 {
-		return nil, c.restoreHBACRule(ctx, spec.Name, readBack,
-			fmt.Errorf("the rule is incomplete: %s", strings.Join(gaps, "; ")), before)
-	}
-	if !spec.Enabled {
-		return rule, nil
-	}
-	if err := c.setRuleEnabled(ctx, "hbacrule", spec.Name, false, true); err != nil {
-		return nil, c.restoreHBACRule(ctx, spec.Name, "enabling the rule", err, before)
-	}
-	enabled, err := c.ShowHBACRule(ctx, spec.Name)
-	if err != nil {
-		return nil, fmt.Errorf("reading the HBAC rule %s back: %w", spec.Name, err)
-	}
-	if enabled == nil || !enabled.Enabled {
-		return nil, c.restoreHBACRule(ctx, spec.Name, "enabling the rule",
-			fmt.Errorf("the rule reads back disabled although the directory accepted the change"), before)
-	}
-	return enabled, nil
-}
-
-// applyHBACRule writes the declared members and categories with the rule
-// disabled. It names the step that failed, if one did.
-func (c *Client) applyHBACRule(ctx context.Context, spec HBACRuleSpec, current *HBACRule) (string, error) {
-	for _, step := range c.hbacRuleSteps(spec, current) {
-		if err := step.run(ctx); err != nil {
-			return step.name, err
-		}
-	}
-	return "", nil
+	return ensureRule(ctx, c, c.hbacKind(spec.Name), spec, spec.Enabled)
 }
 
 // hbacRuleSteps is the change broken into the directory commands it takes, in
@@ -473,8 +561,9 @@ func (c *Client) hbacRuleSteps(spec HBACRuleSpec, current *HBACRule) []ruleStep 
 			}
 			return nil
 		}})
-		// The directory creates a rule enabled, so it would take part in the
-		// decision before it has a single member.
+		// The directory creates a rule enabled and takes no flag on the add, so
+		// the rule is enabled for the length of one call; with no user, host or
+		// service of its own it matches nothing in that window.
 		steps = append(steps, ruleStep{"disabling the new rule", func(ctx context.Context) error {
 			return c.setRuleEnabled(ctx, "hbacrule", spec.Name, true, false)
 		}})
@@ -541,56 +630,6 @@ func (c *Client) hbacRuleSteps(spec HBACRuleSpec, current *HBACRule) []ruleStep 
 	return steps
 }
 
-// restoreHBACRule puts the rule back the way it stood before the change and
-// returns the error that tells both halves of the story.
-func (c *Client) restoreHBACRule(ctx context.Context, name, step string, cause error, before *HBACRule) error {
-	failure := &RuleChangeError{Rule: name, Step: step, Err: cause}
-	if before == nil {
-		// The directory held no such rule before the change, so that is the
-		// state to go back to.
-		if err := c.removeRule(ctx, "hbacrule_del", name); err != nil {
-			failure.Outcome, failure.Restore = RuleRestoreFailed, err
-			return failure
-		}
-		failure.Outcome = RuleWithdrawn
-		return failure
-	}
-	if err := c.restoreHBACState(ctx, *before); err != nil {
-		failure.Outcome, failure.Restore = RuleRestoreFailed, err
-		return failure
-	}
-	failure.Outcome = RuleRestored
-	return failure
-}
-
-// restoreHBACState writes the previous state back whole - members, categories
-// and description - and only then the enabled flag the rule had.
-func (c *Client) restoreHBACState(ctx context.Context, before HBACRule) error {
-	now, err := c.ShowHBACRule(ctx, before.Name)
-	if err != nil {
-		return err
-	}
-	if now == nil {
-		return fmt.Errorf("the directory no longer holds the rule")
-	}
-	wanted := hbacSpecOf(before)
-	wanted.Enabled = false
-	if step, err := c.applyHBACRule(ctx, wanted, now); err != nil {
-		return fmt.Errorf("%s: %w", step, err)
-	}
-	back, err := c.ShowHBACRule(ctx, before.Name)
-	if err != nil {
-		return err
-	}
-	if back == nil {
-		return fmt.Errorf("the directory no longer holds the rule")
-	}
-	if gaps := hbacRuleDifferences(*back, wanted); len(gaps) > 0 {
-		return fmt.Errorf("the previous state did not come back whole: %s", strings.Join(gaps, "; "))
-	}
-	return c.setRuleEnabled(ctx, "hbacrule", before.Name, false, before.Enabled)
-}
-
 // hbacSpecOf reads a rule as a declaration of itself, so that the state before
 // a change can be written back with the same path that changed it.
 func hbacSpecOf(rule HBACRule) HBACRuleSpec {
@@ -654,10 +693,20 @@ func hbacRuleDifferences(rule HBACRule, spec HBACRuleSpec) []string {
 // directory answers with the name of the entry it found, not with the name the
 // declaration spelled.
 func memberGap(held, wanted []string) (missing, extra []string) {
+	return gap(held, wanted, func(name string) string { return strings.ToLower(strings.TrimSpace(name)) })
+}
+
+// exactGap compares two lists ignoring the order alone, for the values the
+// directory keeps as they were written: a command path, a sudo option.
+func exactGap(held, wanted []string) (missing, extra []string) {
+	return gap(held, wanted, strings.TrimSpace)
+}
+
+func gap(held, wanted []string, key func(string) string) (missing, extra []string) {
 	folded := func(names []string) []string {
 		out := make([]string, 0, len(names))
 		for _, name := range names {
-			out = append(out, strings.ToLower(strings.TrimSpace(name)))
+			out = append(out, key(name))
 		}
 		return out
 	}
@@ -699,32 +748,64 @@ func (c *Client) RemoveHBACRule(ctx context.Context, name string) error {
 	return c.removeRule(ctx, "hbacrule_del", name)
 }
 
-// EnsureSudoRule brings the sudo rule to the declared state and returns it
-// as the directory holds it afterwards. The order follows EnsureHBACRule.
+// sudoKind is the sudo rule half of a guarded change.
+func (c *Client) sudoKind(name string) ruleKind[SudoRule, SudoRuleSpec] {
+	return ruleKind[SudoRule, SudoRuleSpec]{
+		family: "sudorule", label: "sudo rule", name: name,
+		show:    func(ctx context.Context) (*SudoRule, error) { return c.ShowSudoRule(ctx, name) },
+		steps:   c.sudoRuleSteps,
+		gaps:    sudoRuleDifferences,
+		specOf:  sudoSpecOf,
+		enabled: func(rule SudoRule) bool { return rule.Enabled },
+	}
+}
+
+// EnsureSudoRule brings the sudo rule to the declared state and returns it as
+// the directory holds it afterwards. A sudo rule hands out command execution as
+// another account, so it is written the way an access rule is: out of service
+// until the directory answers with the declared commands, members and options.
 func (c *Client) EnsureSudoRule(ctx context.Context, spec SudoRuleSpec) (*SudoRule, error) {
 	if err := spec.Validate(); err != nil {
 		return nil, err
 	}
-	current, err := c.ShowSudoRule(ctx, spec.Name)
-	if err != nil {
-		return nil, fmt.Errorf("reading the sudo rule %s: %w", spec.Name, err)
-	}
-	defer c.invalidate()
+	return ensureRule(ctx, c, c.sudoKind(spec.Name), spec, spec.Enabled)
+}
 
+// sudoRuleSteps is the change broken into the directory commands it takes, in
+// the order the directory accepts them.
+func (c *Client) sudoRuleSteps(spec SudoRuleSpec, current *SudoRule) []ruleStep {
+	var steps []ruleStep
 	if current == nil {
+		current = &SudoRule{Name: spec.Name}
 		options := map[string]any{}
 		if spec.Description != "" {
 			options["description"] = spec.Description
 		}
-		if _, err := c.call(ctx, "sudorule_add", []string{spec.Name}, options); err != nil {
-			return nil, fmt.Errorf("creating the sudo rule %s: %w", spec.Name, err)
-		}
-		current = &SudoRule{Name: spec.Name, Enabled: true}
+		steps = append(steps, ruleStep{stepCreateRule, func(ctx context.Context) error {
+			if _, err := c.call(ctx, "sudorule_add", []string{spec.Name}, options); err != nil {
+				return fmt.Errorf("creating the sudo rule %s: %w", spec.Name, err)
+			}
+			return nil
+		}})
+		// The directory creates a rule enabled and takes no flag on the add, so
+		// the rule is enabled for the length of one call; with no user, host or
+		// command of its own it allows nothing in that window.
+		steps = append(steps, ruleStep{"disabling the new rule", func(ctx context.Context) error {
+			return c.setRuleEnabled(ctx, "sudorule", spec.Name, true, false)
+		}})
 	} else {
+		if current.Enabled {
+			// A rule being changed allows whatever its half-written commands say,
+			// so it comes out of service until the new state is confirmed.
+			steps = append(steps, ruleStep{"taking the rule out of service", func(ctx context.Context) error {
+				return c.setRuleEnabled(ctx, "sudorule", spec.Name, true, false)
+			}})
+		}
 		options := map[string]any{}
 		if current.Description != spec.Description {
 			options["description"] = nullable(spec.Description)
 		}
+		// Clearing a category first makes room for the members it excluded.
 		if current.AllUsers && !spec.AllUsers {
 			options["usercategory"] = nil
 		}
@@ -737,12 +818,12 @@ func (c *Client) EnsureSudoRule(ctx context.Context, spec SudoRuleSpec) (*SudoRu
 		if current.RunAsAnyUser && !spec.RunAsAnyUser {
 			options["ipasudorunasusercategory"] = nil
 		}
-		if err := c.modifyRule(ctx, "sudorule_mod", spec.Name, options); err != nil {
-			return nil, err
-		}
+		steps = append(steps, ruleStep{"clearing the categories the declaration drops", func(ctx context.Context) error {
+			return c.modifyRule(ctx, "sudorule_mod", spec.Name, options)
+		}})
 	}
 
-	steps := []memberStep{
+	members := []memberStep{
 		{"sudorule_remove_user", "user", diff(current.Users, spec.Users).removed},
 		{"sudorule_remove_user", "group", diff(current.UserGroups, spec.UserGroups).removed},
 		{"sudorule_remove_host", "host", diff(current.Hosts, spec.Hosts).removed},
@@ -760,26 +841,32 @@ func (c *Client) EnsureSudoRule(ctx context.Context, spec SudoRuleSpec) (*SudoRu
 		{"sudorule_add_runasuser", "user", diff(current.RunAs, spec.RunAsUsers).added},
 		{"sudorule_add_runasgroup", "group", diff(current.RunAsGroups, spec.RunAsGroups).added},
 	}
-	for _, step := range steps {
-		if err := c.changeRuleMembers(ctx, step.method, spec.Name, step.kind, step.names); err != nil {
-			return nil, err
-		}
+	for _, member := range members {
+		steps = append(steps, ruleStep{sudoMemberLabel(member.method, member.kind), func(ctx context.Context) error {
+			return c.changeRuleMembers(ctx, member.method, spec.Name, member.kind, member.names)
+		}})
 	}
 
-	// The directory takes one option per call.
+	// The directory takes one option per call, so a step covers them all.
 	options := diff(current.Options, spec.Options)
-	for _, option := range options.removed {
-		if _, err := c.call(ctx, "sudorule_remove_option", []string{spec.Name},
-			map[string]any{"ipasudoopt": option}); err != nil {
-			return nil, fmt.Errorf("removing the option %s from the sudo rule %s: %w", option, spec.Name, err)
+	steps = append(steps, ruleStep{"removing the options", func(ctx context.Context) error {
+		for _, option := range options.removed {
+			if _, err := c.call(ctx, "sudorule_remove_option", []string{spec.Name},
+				map[string]any{"ipasudoopt": option}); err != nil {
+				return fmt.Errorf("removing the option %s from the sudo rule %s: %w", option, spec.Name, err)
+			}
 		}
-	}
-	for _, option := range options.added {
-		if _, err := c.call(ctx, "sudorule_add_option", []string{spec.Name},
-			map[string]any{"ipasudoopt": option}); err != nil {
-			return nil, fmt.Errorf("adding the option %s to the sudo rule %s: %w", option, spec.Name, err)
+		return nil
+	}})
+	steps = append(steps, ruleStep{"adding the options", func(ctx context.Context) error {
+		for _, option := range options.added {
+			if _, err := c.call(ctx, "sudorule_add_option", []string{spec.Name},
+				map[string]any{"ipasudoopt": option}); err != nil {
+				return fmt.Errorf("adding the option %s to the sudo rule %s: %w", option, spec.Name, err)
+			}
 		}
-	}
+		return nil
+	}})
 
 	categories := map[string]any{}
 	if spec.AllUsers && !current.AllUsers {
@@ -794,14 +881,103 @@ func (c *Client) EnsureSudoRule(ctx context.Context, spec SudoRuleSpec) (*SudoRu
 	if spec.RunAsAnyUser && !current.RunAsAnyUser {
 		categories["ipasudorunasusercategory"] = "all"
 	}
-	if err := c.modifyRule(ctx, "sudorule_mod", spec.Name, categories); err != nil {
-		return nil, err
-	}
+	steps = append(steps, ruleStep{"setting the categories", func(ctx context.Context) error {
+		return c.modifyRule(ctx, "sudorule_mod", spec.Name, categories)
+	}})
+	return steps
+}
 
-	if err := c.setRuleEnabled(ctx, "sudorule", spec.Name, current.Enabled, spec.Enabled); err != nil {
-		return nil, err
+// sudoSpecOf reads a rule as a declaration of itself, so that the state before
+// a change can be written back with the same path that changed it.
+func sudoSpecOf(rule SudoRule) SudoRuleSpec {
+	return SudoRuleSpec{
+		Name: rule.Name, Description: rule.Description, Enabled: rule.Enabled,
+		Users: rule.Users, UserGroups: rule.UserGroups,
+		Hosts: rule.Hosts, HostGroups: rule.HostGroups,
+		Commands: rule.Commands, CommandGroups: rule.CommandGroups,
+		RunAsUsers: rule.RunAs, RunAsGroups: rule.RunAsGroups, Options: rule.Options,
+		AllUsers: rule.AllUsers, AllHosts: rule.AllHosts,
+		AllCommands: rule.AllCommands, RunAsAnyUser: rule.RunAsAnyUser,
 	}
-	return c.ShowSudoRule(ctx, spec.Name)
+}
+
+// sudoRuleDifferences names where the rule the directory holds departs from the
+// declaration. The enabled flag is left out: it is what the comparison decides.
+func sudoRuleDifferences(rule SudoRule, spec SudoRuleSpec) []string {
+	var differences []string
+	if rule.Description != spec.Description {
+		differences = append(differences,
+			fmt.Sprintf("the description reads %q, declared %q", rule.Description, spec.Description))
+	}
+	members := []struct {
+		kind         string
+		held, wanted []string
+		// exact marks the lists the directory does not fold: a command is a path
+		// and an option carries a value.
+		exact bool
+	}{
+		{kind: "users", held: rule.Users, wanted: spec.Users},
+		{kind: "user groups", held: rule.UserGroups, wanted: spec.UserGroups},
+		{kind: "hosts", held: rule.Hosts, wanted: spec.Hosts},
+		{kind: "host groups", held: rule.HostGroups, wanted: spec.HostGroups},
+		{kind: "commands", held: rule.Commands, wanted: spec.Commands, exact: true},
+		{kind: "command groups", held: rule.CommandGroups, wanted: spec.CommandGroups},
+		{kind: "run-as accounts", held: rule.RunAs, wanted: spec.RunAsUsers},
+		{kind: "run-as groups", held: rule.RunAsGroups, wanted: spec.RunAsGroups},
+		{kind: "options", held: rule.Options, wanted: spec.Options, exact: true},
+	}
+	for _, member := range members {
+		missing, extra := memberGap(member.held, member.wanted)
+		if member.exact {
+			missing, extra = exactGap(member.held, member.wanted)
+		}
+		if len(missing) > 0 {
+			differences = append(differences,
+				fmt.Sprintf("the %s %s are not in the rule", member.kind, strings.Join(missing, ", ")))
+		}
+		if len(extra) > 0 {
+			differences = append(differences,
+				fmt.Sprintf("the %s %s are in the rule and not declared", member.kind, strings.Join(extra, ", ")))
+		}
+	}
+	categories := []struct {
+		kind         string
+		held, wanted bool
+	}{
+		{"user", rule.AllUsers, spec.AllUsers},
+		{"host", rule.AllHosts, spec.AllHosts},
+		{"command", rule.AllCommands, spec.AllCommands},
+		{"run-as account", rule.RunAsAnyUser, spec.RunAsAnyUser},
+	}
+	for _, category := range categories {
+		if category.held != category.wanted {
+			differences = append(differences,
+				fmt.Sprintf("the rule covers every %s: %t, declared %t", category.kind, category.held, category.wanted))
+		}
+	}
+	return differences
+}
+
+// sudoMemberNames spell out a member kind for the name of a step; the run-as
+// kinds share the option key of the plain members, so the command tells them
+// apart.
+var sudoMemberNames = map[string]string{
+	"user:user": "users", "user:group": "user groups",
+	"host:host": "hosts", "host:hostgroup": "host groups",
+	"allow_command:sudocmd": "commands", "allow_command:sudocmdgroup": "command groups",
+	"runasuser:user": "run-as accounts", "runasgroup:group": "run-as groups",
+}
+
+func sudoMemberLabel(method, kind string) string {
+	verb, rest := "adding", strings.TrimPrefix(method, "sudorule_add_")
+	if strings.Contains(method, "_remove_") {
+		verb, rest = "removing", strings.TrimPrefix(method, "sudorule_remove_")
+	}
+	name := sudoMemberNames[rest+":"+kind]
+	if name == "" {
+		name = kind
+	}
+	return verb + " the " + name
 }
 
 // RemoveSudoRule deletes a sudo rule. A rule that does not exist is not an
