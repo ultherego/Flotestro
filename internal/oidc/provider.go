@@ -359,6 +359,47 @@ func (p *Provider) LogoutSubject(ctx context.Context, subject string) error {
 	return nil
 }
 
+// GroupsOfSubject asks the provider which groups it places a user in now, by
+// the subject identifier of the identity token. It is the authorization of
+// work nobody is watching: a session snapshot says what was true at the login,
+// this says what is true now.
+//
+// The names are the group paths with the leading separator removed, which is
+// how the groups claim of a token spells them, so one mapping fits both.
+func (p *Provider) GroupsOfSubject(ctx context.Context, subjectID string) ([]string, error) {
+	server, realm, ok := keycloakRealm(p.Issuer())
+	if !ok {
+		return nil, ErrNotKeycloak
+	}
+	if strings.TrimSpace(subjectID) == "" {
+		return nil, fmt.Errorf("%w: the subject identifier is empty", ErrSubjectNotFound)
+	}
+	token, err := p.serviceToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+	address := server + "/admin/realms/" + neturl.PathEscape(realm) +
+		"/users/" + neturl.PathEscape(subjectID) + "/groups"
+	var groups []struct {
+		Name string `json:"name"`
+		Path string `json:"path"`
+	}
+	if err := p.adminCall(ctx, token, http.MethodGet, address, &groups); err != nil {
+		return nil, fmt.Errorf("reading the groups of %s: %w", subjectID, err)
+	}
+	names := make([]string, 0, len(groups))
+	for _, group := range groups {
+		name := strings.TrimPrefix(group.Path, "/")
+		if name == "" {
+			name = group.Name
+		}
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+	return names, nil
+}
+
 // serviceToken gets an access token for the panel's own client through the
 // client credentials grant.
 func (p *Provider) serviceToken(ctx context.Context) (string, error) {

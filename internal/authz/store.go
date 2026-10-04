@@ -36,6 +36,10 @@ type Store struct {
 	// sessionIdle is the idle window of a browser session, refreshed on
 	// every request. Zero means defaultIdleWindow.
 	sessionIdle time.Duration
+	// groups resolves group membership from the directories for the
+	// authorization of work nobody is watching. Nil means no directory is
+	// configured, and then a group mapping grants nothing in the background.
+	groups *GroupDirectory
 }
 
 func NewStore(pool *pgxpool.Pool) *Store {
@@ -45,6 +49,12 @@ func NewStore(pool *pgxpool.Pool) *Store {
 // SetSessionIdle sets the idle window the sessions are refreshed with.
 func (s *Store) SetSessionIdle(idle time.Duration) {
 	s.sessionIdle = idle
+}
+
+// SetGroupDirectory connects the resolver that reads group membership from the
+// directories themselves.
+func (s *Store) SetGroupDirectory(groups *GroupDirectory) {
+	s.groups = groups
 }
 
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
@@ -343,16 +353,29 @@ func (s *Store) Authenticate(ctx context.Context, value string) (*Principal, err
 	return &principal, nil
 }
 
-// PrincipalBySubject resolves an identity by its subject with its current
-// bindings.
+// PrincipalBySubject resolves an identity by its subject with the rights it
+// holds now. It is the authorization path of work nobody is watching - a
+// campaign dispatching a host, a remediation starting its next step - so the
+// groups come from the directories themselves, not from the snapshot a browser
+// session left behind. Logging out therefore does not interrupt ordered work,
+// while losing a group does.
+//
+// The direct bindings and the local blocks - a disabled account, a denial
+// marker, a revoked binding - are read here regardless of what any directory
+// says. An unanswered question about the groups is returned as
+// ErrGroupsUnavailable: the caller pauses with that reason rather than
+// dispatching on rights nobody confirmed.
 func (s *Store) PrincipalBySubject(ctx context.Context, subject string) (*Principal, error) {
 	const query = `
-		select id, subject, display_name, kind, coalesce(issuer, '') from principals
+		select id, subject, display_name, kind, coalesce(issuer, ''),
+		       coalesce(subject_id, ''), coalesce(directory_uid, '')
+		from principals
 		where subject = $1 and disabled_at is null and denied_at is null`
 	var principal Principal
-	var issuer string
+	var issuer, subjectID, directoryUID string
 	err := s.pool.QueryRow(ctx, query, subject).
-		Scan(&principal.ID, &principal.Subject, &principal.DisplayName, &principal.Kind, &issuer)
+		Scan(&principal.ID, &principal.Subject, &principal.DisplayName, &principal.Kind,
+			&issuer, &subjectID, &directoryUID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrUnauthenticated
 	}
@@ -363,24 +386,105 @@ func (s *Store) PrincipalBySubject(ctx context.Context, subject string) (*Princi
 	if err != nil {
 		return nil, err
 	}
-	var groups []string
-	err = s.pool.QueryRow(ctx, `
-		select groups from web_sessions
-		 where principal_id = $1
-		 order by coalesce(groups_refreshed_at, created_at) desc
-		 limit 1`, principal.ID).Scan(&groups)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return nil, err
+	mapped, err := s.directoryBindings(ctx, issuer, subjectID, directoryUID)
+	if err != nil {
+		// The identity, its direct bindings and the local blocks are known;
+		// only the group side is not. Both go back, because a group can add a
+		// right and never take one away: a caller whose operation is already
+		// carried by a binding granted by hand has no question left to answer.
+		// A caller that ignores the error sees the narrow side of the rights.
+		principal.Bindings = bindings
+		return &principal, err
 	}
-	if len(groups) > 0 && issuer != "" {
-		mapped, err := s.MappedBindings(ctx, issuer, groups)
+	principal.Bindings = mergeBindings(bindings, mapped)
+	return &principal, nil
+}
+
+// directoryBindings turns the group membership of the directories into
+// bindings. Each system is asked about its own account and answers only for
+// its own issuer: the groups of one never satisfy a mapping of another.
+func (s *Store) directoryBindings(ctx context.Context, issuer, subjectID, directoryUID string) ([]Binding, error) {
+	var bindings []Binding
+	// An identity's own issuer first, then the directory account somebody
+	// linked it to by hand. A link is required because a FreeIPA uid that
+	// looks like a Keycloak username is not evidence of the same person.
+	if issuer != "" {
+		mapped, err := s.mappedFromSource(ctx, issuer, func() (GroupConfirmation, error) {
+			return s.groups.ConfirmIssuer(ctx, issuer, subjectID)
+		})
 		if err != nil {
 			return nil, err
 		}
-		bindings = mergeBindings(bindings, mapped)
+		bindings = append(bindings, mapped...)
 	}
-	principal.Bindings = bindings
-	return &principal, nil
+	if directoryUID != "" {
+		linked := ""
+		if s.groups != nil {
+			linked = s.groups.LinkedIssuer()
+		}
+		// Without the directory there is no telling what its groups would
+		// grant - not even which issuer to look the mappings up under - so the
+		// answer is missing rather than empty.
+		if linked == "" {
+			return nil, fmt.Errorf("%w: the identity is linked to the directory account %s "+
+				"and no directory is configured to confirm it", ErrGroupsUnavailable, directoryUID)
+		}
+		mapped, err := s.mappedFromSource(ctx, linked, func() (GroupConfirmation, error) {
+			return s.groups.ConfirmLinked(ctx, directoryUID)
+		})
+		if err != nil {
+			return nil, err
+		}
+		bindings = append(bindings, mapped...)
+	}
+	return bindings, nil
+}
+
+// mappedFromSource asks one system about its groups and maps them, but only
+// where that issuer has a mapping at all: without one the groups could grant
+// nothing, so an unreachable directory is then no obstacle to the work.
+func (s *Store) mappedFromSource(ctx context.Context, issuer string,
+	confirm func() (GroupConfirmation, error)) ([]Binding, error) {
+	mapped, err := s.hasGroupMappings(ctx, issuer)
+	if err != nil {
+		return nil, err
+	}
+	if !mapped {
+		return nil, nil
+	}
+	if s.groups == nil {
+		return nil, fmt.Errorf("%w: the issuer %s maps groups to roles and no directory "+
+			"is configured to confirm them", ErrGroupsUnavailable, issuer)
+	}
+	confirmation, err := confirm()
+	if err != nil {
+		return nil, err
+	}
+	return s.MappedBindings(ctx, confirmation.Issuer, confirmation.Groups)
+}
+
+// hasGroupMappings says whether any group of this issuer grants a role.
+func (s *Store) hasGroupMappings(ctx context.Context, issuer string) (bool, error) {
+	var exists bool
+	err := s.pool.QueryRow(ctx,
+		`select exists (select 1 from group_role_mappings where issuer = $1)`, issuer).Scan(&exists)
+	return exists, err
+}
+
+// LinkDirectoryAccount writes down which directory account an identity is,
+// or clears the link with an empty uid. The link is what makes the directory
+// answer about this identity at all.
+func (s *Store) LinkDirectoryAccount(ctx context.Context, tx pgx.Tx, principalID, uid string) error {
+	tag, err := tx.Exec(ctx, `
+		update principals set directory_uid = $2, updated_at = now()
+		where id = $1`, principalID, nullable(strings.TrimSpace(uid)))
+	if err != nil {
+		return fmt.Errorf("linking the directory account: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // bindingsOf returns the bindings that grant something now.

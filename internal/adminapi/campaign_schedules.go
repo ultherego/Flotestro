@@ -275,6 +275,14 @@ func (s *Server) OrderFromSchedule(ctx context.Context, schedule campaigns.Sched
 		return nil, campaigns.ScheduleRefusal{Code: "author_unavailable",
 			Detail: "the schedule's author " + schedule.CreatedBy + " is disabled or gone; nothing is placed under their name"}
 	}
+	if errors.Is(err, authz.ErrGroupsUnavailable) {
+		// Nobody said the author may not order this; nobody could say what
+		// they hold at all. That is not a refusal to settle the moment with:
+		// the reason is recorded and the next tick asks the directory again.
+		s.recordScheduleRefusal(ctx, schedule, "author_rights_unconfirmed", err.Error())
+		return nil, fmt.Errorf("the rights of the schedule's author %s are not confirmed: %w",
+			schedule.CreatedBy, err)
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -410,8 +410,14 @@ func (o *Orchestrator) launchWave(ctx context.Context, campaign Campaign,
 		// The creator's right is checked again, per host, right before the dispatch:
 		// the approval was given hours ago, and a role withdrawn since then must not
 		// carry a change onto the host through a campaign that was ordered while it.
-		if refused, detail := o.creatorMayDispatch(ctx, campaign, host); refused {
-			o.finishTarget(ctx, campaign, target, TargetSkipped, "out_of_scope", detail)
+		switch verdict := o.creatorMayDispatch(ctx, campaign, host); {
+		case verdict.Unknown:
+			// Nobody can say whether the right is still held. The campaign stops
+			// with the reason: carrying the change on unconfirmed rights and
+			// writing the host off as out of scope are both answers nobody gave.
+			return o.pauseOnRightsUnconfirmed(ctx, campaign, targets, host.ID, verdict.Reason)
+		case !verdict.Held:
+			o.finishTarget(ctx, campaign, target, TargetSkipped, "out_of_scope", verdict.Reason)
 			continue
 		}
 		// A maintenance window means "somebody is working on this machine".
@@ -434,7 +440,12 @@ func (o *Orchestrator) launchWave(ctx context.Context, campaign Campaign,
 		// A fleet remediation has no single task: the host's plan of steps starts in
 		// the remediation store, and the runner carries it.
 		if opspec.ActionType(campaign.ActionType) == opspec.ActionSecurityRemediate {
-			if err := o.startRemediation(ctx, campaign, target, host); err != nil {
+			if err := o.startRemediation(ctx, campaign, target, host, targets); err != nil {
+				// The campaign was paused because nobody could confirm the
+				// creator's rights; the wave ends here and nothing is written off.
+				if errors.Is(err, errWavePaused) {
+					return nil
+				}
 				return err
 			}
 			if target.State == TargetRunning {
@@ -524,32 +535,94 @@ func (o *Orchestrator) launch(ctx context.Context, campaign *Campaign, target *T
 	return jobID, nil
 }
 
-// creatorMayDispatch says whether the campaign's creator still holds campaign.
-// create and the operation's permission in the scope of the host.
-func (o *Orchestrator) creatorMayDispatch(ctx context.Context, campaign Campaign, host *hosts.Host) (bool, string) {
-	if o.Authorizer == nil {
-		return false, ""
+// RightsVerdict is what a check of an orderer's rights came to. Held and gone
+// are answers; unknown is the absence of one, and the two are not the same
+// thing: a right that is gone closes the host, a right nobody can confirm
+// stops the campaign.
+type RightsVerdict struct {
+	Held    bool
+	Unknown bool
+	Reason  string
+}
+
+func rightsHeld() RightsVerdict { return RightsVerdict{Held: true} }
+
+func rightsGone(reason string) RightsVerdict { return RightsVerdict{Reason: reason} }
+
+func rightsUnconfirmed(reason string) RightsVerdict {
+	return RightsVerdict{Unknown: true, Reason: reason}
+}
+
+// judgeLookup reads the outcome of a rights lookup. A missing or disabled
+// identity is an answer - that person orders nothing any more - while a
+// failure of the lookup, and a group membership no directory confirmed, are
+// not answers at all.
+func judgeLookup(subject string, principal *authz.Principal, err error) RightsVerdict {
+	switch {
+	case errors.Is(err, authz.ErrUnauthenticated), errors.Is(err, authz.ErrNotFound):
+		return rightsGone("the identity that ordered the work (" + subject + ") is disabled or gone")
+	case errors.Is(err, authz.ErrGroupsUnavailable):
+		return rightsUnconfirmed("the group membership of " + subject +
+			" is not confirmed: " + err.Error())
+	case err != nil:
+		return rightsUnconfirmed("the rights of " + subject +
+			" could not be checked: " + err.Error())
+	case principal == nil:
+		return rightsUnconfirmed("the rights of " + subject +
+			" could not be checked: the identity store answered with nothing")
 	}
-	principal, err := o.Authorizer.PrincipalBySubject(ctx, campaign.CreatedBy)
-	if errors.Is(err, authz.ErrUnauthenticated) {
-		return true, "the identity that ordered the campaign (" + campaign.CreatedBy + ") is disabled or gone"
-	}
-	if err != nil {
-		// Missing knowledge about the rights must not weaken the control;
-		// the host waits for the next tick rather than starting unchecked.
-		o.log.Error("the creator's rights could not be checked before the dispatch",
-			"campaign_id", campaign.ID, "host_id", host.ID, "err", err)
-		return true, "the rights of " + campaign.CreatedBy + " could not be checked: " + err.Error()
-	}
-	scope := hosts.ScopeOf(host)
-	action := opspec.ActionType(campaign.ActionType)
-	for _, permission := range []authz.Permission{authz.PermCampaignCreate, authz.Permission(action.Permission())} {
-		if !principal.Can(permission, scope) {
-			return true, campaign.CreatedBy + " no longer holds " + string(permission) +
-				" on " + host.Site + "/" + host.Environment
+	return rightsHeld()
+}
+
+// judgeRights is the whole answer about one dispatch: the lookup, and then the
+// permissions in the scope of the host.
+//
+// A group membership nobody could confirm is weighed against what the identity
+// holds without it: a group adds rights and never takes one away, so where the
+// bindings granted by hand already carry the operation, the unanswered
+// question cannot change the outcome and the work goes on.
+func judgeRights(subject string, principal *authz.Principal, lookupErr error,
+	scope authz.Scope, place string, permissions []authz.Permission) RightsVerdict {
+	verdict := judgeLookup(subject, principal, lookupErr)
+	if verdict.Unknown && principal != nil {
+		if held := judgePermissions(subject, principal, scope, place, permissions); held.Held {
+			return held
 		}
 	}
-	return false, ""
+	if !verdict.Held {
+		return verdict
+	}
+	return judgePermissions(subject, principal, scope, place, permissions)
+}
+
+// judgePermissions says whether the identity still holds every permission in
+// the scope, naming the first one it does not.
+func judgePermissions(subject string, principal *authz.Principal, scope authz.Scope,
+	place string, permissions []authz.Permission) RightsVerdict {
+	for _, permission := range permissions {
+		if !principal.Can(permission, scope) {
+			return rightsGone(subject + " no longer holds " + string(permission) + " on " + place)
+		}
+	}
+	return rightsHeld()
+}
+
+// creatorMayDispatch says whether the campaign's creator still holds campaign.
+// create and the operation's permission in the scope of the host.
+func (o *Orchestrator) creatorMayDispatch(ctx context.Context, campaign Campaign, host *hosts.Host) RightsVerdict {
+	if o.Authorizer == nil {
+		return rightsHeld()
+	}
+	principal, err := o.Authorizer.PrincipalBySubject(ctx, campaign.CreatedBy)
+	action := opspec.ActionType(campaign.ActionType)
+	verdict := judgeRights(campaign.CreatedBy, principal, err, hosts.ScopeOf(host),
+		host.Site+"/"+host.Environment,
+		[]authz.Permission{authz.PermCampaignCreate, authz.Permission(action.Permission())})
+	if verdict.Unknown {
+		o.log.Error("the creator's rights could not be confirmed before the dispatch",
+			"campaign_id", campaign.ID, "host_id", host.ID, "err", err)
+	}
+	return verdict
 }
 
 // createJob creates the campaign's main task for a host inside the launch
@@ -593,7 +666,7 @@ func (o *Orchestrator) createJob(ctx context.Context, tx pgx.Tx, campaign Campai
 // startRemediation starts a host's remediation plan from the campaign's plan
 // set.
 func (o *Orchestrator) startRemediation(ctx context.Context, campaign Campaign,
-	target *Target, host *hosts.Host) error {
+	target *Target, host *hosts.Host, targets []Target) error {
 	fail := func(code, message string) {
 		o.releaseCapacity(ctx, target)
 		o.finishTarget(ctx, campaign, target, TargetFailed, code, message)
@@ -617,9 +690,18 @@ func (o *Orchestrator) startRemediation(ctx context.Context, campaign Campaign,
 		fail("plan_invalid", err.Error())
 		return nil
 	}
-	if refused, detail := o.creatorMayRemediate(ctx, campaign, host, plan); refused {
+	switch verdict := o.creatorMayRemediate(ctx, campaign, host, plan); {
+	case verdict.Unknown:
+		// The host keeps its place in the queue: the campaign pauses with the
+		// reason, and the plan runs once somebody answers the question.
 		o.releaseCapacity(ctx, target)
-		o.finishTarget(ctx, campaign, target, TargetSkipped, "out_of_scope", detail)
+		if err := o.pauseOnRightsUnconfirmed(ctx, campaign, targets, host.ID, verdict.Reason); err != nil {
+			return err
+		}
+		return errWavePaused
+	case !verdict.Held:
+		o.releaseCapacity(ctx, target)
+		o.finishTarget(ctx, campaign, target, TargetSkipped, "out_of_scope", verdict.Reason)
 		return nil
 	}
 
@@ -690,23 +772,27 @@ func (o *Orchestrator) startRemediation(ctx context.Context, campaign Campaign,
 // creatorMayRemediate says whether the campaign's creator still holds the
 // permission of every step of the host's plan, in the scope of the host.
 func (o *Orchestrator) creatorMayRemediate(ctx context.Context, campaign Campaign,
-	host *hosts.Host, plan remediation.HostPlan) (bool, string) {
+	host *hosts.Host, plan remediation.HostPlan) RightsVerdict {
 	if o.Authorizer == nil {
-		return false, ""
+		return rightsHeld()
 	}
 	principal, err := o.Authorizer.PrincipalBySubject(ctx, campaign.CreatedBy)
-	if err != nil {
-		return true, "the rights of " + campaign.CreatedBy + " could not be checked: " + err.Error()
-	}
 	scope := hosts.ScopeOf(host)
+	place := host.Site + "/" + host.Environment
 	for _, action := range plan.Actions() {
 		permission := authz.Permission(opspec.ActionType(action).Permission())
-		if !principal.Can(permission, scope) {
-			return true, campaign.CreatedBy + " no longer holds " + string(permission) +
-				" on " + host.Site + "/" + host.Environment + " (step " + action + ")"
+		verdict := judgeRights(campaign.CreatedBy, principal, err, scope, place,
+			[]authz.Permission{permission})
+		if verdict.Unknown {
+			o.log.Error("the creator's rights could not be confirmed before a remediation plan",
+				"campaign_id", campaign.ID, "host_id", host.ID, "step", action, "err", err)
+			return verdict
+		}
+		if !verdict.Held {
+			return rightsGone(verdict.Reason + " (step " + action + ")")
 		}
 	}
-	return false, ""
+	return rightsHeld()
 }
 
 // submitJob creates a task approved by the campaign. Approving a campaign is

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ultherego/flotestro/internal/audit"
+	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/opspec"
@@ -22,6 +23,30 @@ type Runner struct {
 	audit    *audit.Recorder
 	log      *slog.Logger
 	interval time.Duration
+	// authorizer re-checks the rights behind the plan before every step: the
+	// consent was given once, and the steps that follow it run for hours.
+	authorizer StepAuthorizer
+	// creators names the identity behind a plan a campaign started.
+	creators CampaignCreators
+}
+
+// StepAuthorizer answers which rights a subject holds now.
+type StepAuthorizer interface {
+	PrincipalBySubject(ctx context.Context, subject string) (*authz.Principal, error)
+}
+
+// CampaignCreators names the identity that ordered a campaign. A plan a
+// campaign started records the campaign as its creator, and the rights that
+// decide are those of the person who ordered the campaign.
+type CampaignCreators interface {
+	CreatorOfCampaign(ctx context.Context, campaignID string) (string, error)
+}
+
+// WithRightsCheck makes the runner confirm, before each step, that the
+// identity behind the plan still holds that step's permission on that host.
+func (r *Runner) WithRightsCheck(authorizer StepAuthorizer, creators CampaignCreators) *Runner {
+	r.authorizer, r.creators = authorizer, creators
+	return r
 }
 
 func NewRunner(store *Store, jobStore *jobs.Store, hostStore *hosts.Store,
@@ -133,6 +158,15 @@ func (r *Runner) start(ctx context.Context, plan Plan, step *Step) error {
 			return err
 		}
 		return r.finish(ctx, plan, StateFailed, err.Error())
+	}
+
+	// The right to this step is confirmed now, not when the plan was approved:
+	// a plan of ten steps outlives the role that ordered it.
+	switch verdict := r.mayRunStep(ctx, plan, step, host); {
+	case verdict.unknown:
+		return r.holdStep(ctx, plan, step, verdict.reason)
+	case !verdict.held:
+		return r.stopPlan(ctx, plan, verdict.reason)
 	}
 
 	action := opspec.ActionType(step.ActionType)

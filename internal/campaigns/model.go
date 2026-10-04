@@ -865,6 +865,14 @@ const RebootWindowClosedCode = "reboot_window_closed"
 // host did not come back from its reboot inside the maintenance window.
 const PauseWindowClosedMidReboot = "maintenance_window_closed_mid_reboot"
 
+// PauseCreatorRightsUnconfirmed is the reason a campaign is paused with when
+// nobody can say whether its creator still holds the right to what it carries.
+const PauseCreatorRightsUnconfirmed = "creator_rights_unconfirmed"
+
+// errWavePaused ends a wave because the campaign was paused inside it. It is
+// not a failure: the caller stops launching and leaves the hosts as they are.
+var errWavePaused = errors.New("the campaign was paused during the wave")
+
 // RebootWindowClosed says whether the host ended because the maintenance
 // window closed while it was rebooting.
 func (t Target) RebootWindowClosed() bool {

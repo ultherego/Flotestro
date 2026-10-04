@@ -407,6 +407,16 @@ func (e *Evaluator) remediate(ctx context.Context, policy Policy, version Versio
 	// The campaign is created on the publisher's authority, and the publisher's
 	// rights are read now rather than assumed from the publication.
 	publisher, err := e.principal(ctx, version.PublishedBy)
+	if errors.Is(err, authz.ErrGroupsUnavailable) {
+		// Nobody could say what the publisher holds now, so no campaign is
+		// ordered and no host is written off: the drift is judged again at the
+		// next pass, with the reason on record.
+		e.recordRemediation(ctx, policy, document, audit.OutcomeDenied, map[string]any{
+			"reason": "publisher_rights_unconfirmed", "publisher": version.PublishedBy,
+			"error": err.Error()})
+		return "", "the rights of the publisher " + version.PublishedBy +
+			" are not confirmed, so nothing is ordered: " + err.Error(), nil
+	}
 	if err != nil {
 		e.recordRemediation(ctx, policy, document, audit.OutcomeDenied, map[string]any{
 			"reason": "publisher_unknown", "publisher": version.PublishedBy, "error": err.Error()})

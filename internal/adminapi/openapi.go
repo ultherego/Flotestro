@@ -1075,6 +1075,12 @@ var responseSchemas = map[string]map[string]any{
 			"bindings": map[string]any{"type": "array", "items": ref("Binding")},
 		},
 	},
+	"PUT /api/v1/principals/{id}/directory-account": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"principal_id": str(), "subject": str(), "directory_uid": str(),
+		},
+	},
 	"POST /api/v1/principals/{id}/roles": map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -2089,6 +2095,13 @@ var requestSchemas = map[string]map[string]any{
 		"properties": map[string]any{
 			"team":   map[string]any{"type": "string", "description": "The identifier of the team the host joins; empty takes it out of the one it is in."},
 			"reason": map[string]any{"type": "string", "description": "Kept in the audit trail; the move changes who may act on the machine, so the trail asks for one."},
+		},
+	},
+	"PUT /api/v1/principals/{id}/directory-account": {
+		"type": "object",
+		"properties": map[string]any{
+			"directory_uid": map[string]any{"type": "string", "description": "The directory account (FreeIPA uid) this identity is; empty clears the link. Only a linked identity is asked about at the directory, because its groups are not the identity provider's groups."},
+			"reason":        map[string]any{"type": "string", "description": "Kept in the audit trail; the link decides which directory groups grant this identity a role."},
 		},
 	},
 	"POST /api/v1/principals/{id}/tokens": {
