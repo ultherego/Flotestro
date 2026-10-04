@@ -651,6 +651,21 @@ func (s *Store) RevokeSupersededCertificates(ctx context.Context, hostID string,
 	return int(tag.RowsAffected()), nil
 }
 
+// MarkCertificatePresented records that a host opened a session with this
+// certificate. The first moment is kept: later sessions say nothing new, and
+// the guard of a handover asks whether the host had it by a given moment.
+func (s *Store) MarkCertificatePresented(ctx context.Context, hostID string,
+	fingerprint []byte) error {
+	_, err := s.pool.Exec(ctx, `
+		update agent_certificates set presented_at = now()
+		 where host_id = $1::uuid and fingerprint_sha256 = $2 and presented_at is null`,
+		hostID, fingerprint)
+	if err != nil {
+		return fmt.Errorf("recording that the host presented its certificate: %w", err)
+	}
+	return nil
+}
+
 // HasLiveCertificate says whether the host holds a certificate that is neither
 // revoked nor expired.
 func (s *Store) HasLiveCertificate(ctx context.Context, hostID string) (bool, error) {
@@ -1795,13 +1810,20 @@ func (s *Store) CertificateIssuers(ctx context.Context) (map[string]int, error) 
 // row that was never recorded is unknown, and unknown is not evidence either.
 func (s *Store) HostsWithoutCertificateSince(ctx context.Context, since time.Time,
 	issuerID string) (int, error) {
+	// presented_at, not created_at: the panel issues a certificate and the host
+	// receives it, together with the trust bundle, in one answer - and that
+	// answer can be lost. The moment of issue said that the panel had done its
+	// part; what the guard has to know is that the host has the new authority,
+	// because handing signing over to one it does not trust yet cuts the host
+	// off. A session opened with the certificate proves the answer arrived.
 	const query = `
 		select count(*)
 		from hosts h
 		where h.lifecycle_state <> 'retired'
 		  and not exists (
 		      select 1 from agent_certificates c
-		      where c.host_id = h.id and c.revoked_at is null and c.created_at >= $1
+		      where c.host_id = h.id and c.revoked_at is null
+		        and c.presented_at is not null and c.presented_at >= $1
 		        and c.issuer_id = $2::uuid
 		  )`
 	var count int

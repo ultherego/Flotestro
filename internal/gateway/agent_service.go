@@ -2562,6 +2562,16 @@ func (s *AgentService) openSession(ctx context.Context, session *Session,
 	s.detectDuplicateIdentity(ctx, session, fingerprint)
 	s.countReconnect(ctx, session)
 
+	// A host that opens a session with a certificate holds it, so the answer
+	// that carried it - and the trust bundle with it - arrived. That is the
+	// evidence a CA handover waits for, and it is recorded whether the session
+	// came straight here or through a relay: the relay attests which
+	// certificate the host presented.
+	if err := s.hosts.MarkCertificatePresented(ctx, session.HostID, fingerprint); err != nil {
+		s.log.Error("the certificate the host presented was not recorded",
+			"host_id", session.HostID, "err", err)
+	}
+
 	// The certificate that opened this session is the identity of the host from
 	// now on.
 	if relayID == "" {
