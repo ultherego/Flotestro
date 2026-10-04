@@ -25,6 +25,8 @@ import (
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/outbox"
+
+	"github.com/ultherego/flotestro/internal/vuln/version"
 )
 
 type campaignView struct {
@@ -2855,10 +2857,22 @@ func TestTimeSourceCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) 
 func TestFilesystemCheckCampaignComputesAPlanOnEveryHost(t *testing.T) {
 	h := newHarness(t)
 
+	// Naming a device by its label in a device plan is behaviour of the commit
+	// under test, so a host deliberately held at the previous release - the
+	// laboratory keeps one, for the enrollment tests - cannot be a target here:
+	// its agent refuses the form, correctly, by its own code. The fleet has two
+	// roles for a host, "under test" and "one release behind", and this test
+	// picks by role rather than by what the host happens to have on disk.
+	newest := h.newestAgentVersion()
 	paths := map[string]string{}
 	var targets []string
 	for _, host := range h.hosts() {
 		if host.ConnectionState != "online" {
+			continue
+		}
+		var reported agentHostView
+		h.get("/api/v1/hosts/"+host.ID, &reported)
+		if reported.AgentVersion == "" || version.CompareDeb(reported.AgentVersion, newest) < 0 {
 			continue
 		}
 		// The storage fragment comes from the inventory cycle; the previous
@@ -2884,7 +2898,8 @@ func TestFilesystemCheckCampaignComputesAPlanOnEveryHost(t *testing.T) {
 	// absent, not a bare skip: the laboratory prepares this, so its absence is
 	// a laboratory that did not.
 	if len(targets) < 2 {
-		absent(t, "the fleet has fewer than two hosts with an unmounted, labelled ext4 filesystem")
+		absent(t, "fewer than two hosts at the agent version under test (%s) carry an unmounted, "+
+			"labelled ext4 filesystem", newest)
 	}
 	label := paths[targets[0]]
 	selected := targets[:0]
