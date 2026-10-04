@@ -212,12 +212,44 @@ func (s *MetricsSpool) Pending() []*agentv1.MetricsSample {
 	return pending
 }
 
-// Acknowledge drops the sample the panel named.
+// Acknowledge drops the sample the panel named, and takes the one piece of
+// knowledge only the panel has.
+//
+// A counter lost while the spool was empty leaves this boot renumbering from
+// the beginning, below numbers the panel already holds: every sample is then
+// refused as a duplicate, and the host would walk its numbering up to the top
+// one sample at a time - at a sample a minute, for as long as it had been up.
+// A refusal by number carries how far this boot got, so the host steps over
+// the used range at once. Only forward: a number this boot has already used
+// is spent, and an acknowledgement is not allowed to hand the numbering back.
 func (s *MetricsSpool) Acknowledge(ack *agentv1.MetricsAck) {
 	if ack == nil || ack.GetBootId() == "" || ack.GetSequence() == 0 {
 		return
 	}
+	s.resumeAbove(ack)
 	s.Forget(ack.GetBootId(), ack.GetSequence())
+}
+
+// resumeAbove moves the numbering of this boot past what the panel holds.
+func (s *MetricsSpool) resumeAbove(ack *agentv1.MetricsAck) {
+	if ack.GetStatus() != agentv1.MetricsAck_STATUS_DUPLICATE || ack.HighestSequenceHeld == nil {
+		return
+	}
+	if ack.GetBootId() != s.bootID {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	held := ack.GetHighestSequenceHeld()
+	if held <= s.sequence {
+		return
+	}
+	if s.log != nil {
+		s.log.Warn("the panel holds a higher sample number for this boot than the host does; "+
+			"the numbering continues above it",
+			"boot_id", s.bootID, "was", s.sequence, "continuing_above", held)
+	}
+	s.sequence = held
 }
 
 // Forget removes one sample from the spool by its identity.

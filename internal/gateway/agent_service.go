@@ -738,6 +738,28 @@ func (s *AgentService) recordSample(ctx context.Context, hostID string, session 
 	return nil
 }
 
+// resumeHint is the number a host that lost its counter needs: the highest
+// sequence this panel holds for that boot. It is only answered for a refusal by
+// number - a persisted sample tells the host nothing it does not know - and a
+// store that cannot answer leaves it absent, which is the host's cue to keep
+// walking its numbering up as it did before.
+func (s *AgentService) resumeHint(ctx context.Context, hostID string,
+	sample *agentv1.MetricsSample, status agentv1.MetricsAck_Status) *uint64 {
+	if status != agentv1.MetricsAck_STATUS_DUPLICATE || s.samples == nil {
+		return nil
+	}
+	highest, err := s.samples.HighestSequence(ctx, hostID, sample.GetBootId())
+	if err != nil {
+		s.log.Warn("the panel could not say how far this boot got; the host keeps renumbering upwards",
+			"host_id", hostID, "boot_id", sample.GetBootId(), "err", err)
+		return nil
+	}
+	if highest == 0 {
+		return nil
+	}
+	return &highest
+}
+
 // ackSample tells the agent what became of one sample.
 func (s *AgentService) ackSample(hostID string, session *Session, sample *agentv1.MetricsSample,
 	status agentv1.MetricsAck_Status, reason string) {
@@ -746,10 +768,11 @@ func (s *AgentService) ackSample(hostID string, session *Session, sample *agentv
 	}
 	err := session.Send(&agentv1.ServerMessage{
 		Payload: &agentv1.ServerMessage_MetricsAck{MetricsAck: &agentv1.MetricsAck{
-			BootId:     sample.GetBootId(),
-			Sequence:   sample.GetSequence(),
-			Status:     status,
-			ReasonCode: reason,
+			BootId:              sample.GetBootId(),
+			Sequence:            sample.GetSequence(),
+			Status:              status,
+			ReasonCode:          reason,
+			HighestSequenceHeld: s.resumeHint(context.Background(), hostID, sample, status),
 		}},
 	}, ackSendTimeout)
 	if err != nil {

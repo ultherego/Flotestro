@@ -601,6 +601,32 @@ func ClampObservation(at, now time.Time, skewLimit, maxLateness time.Duration) O
 	return observed
 }
 
+// HighestSequence is the largest sequence this panel holds for that boot of
+// that host, and zero when it holds none.
+//
+// It exists for the one case the host cannot answer by itself: a counter lost
+// while the spool is empty leaves the numbering restarting below what the panel
+// already has, and every sample is then refused as one it holds - at a sample a
+// minute, for as long as the host had been up. The acknowledgement of such a
+// refusal carries this number, so the host resumes above it in one round trip
+// instead of walking up to it.
+func (s *Store) HighestSequence(ctx context.Context, hostID, bootID string) (uint64, error) {
+	if hostID == "" || bootID == "" {
+		return 0, nil
+	}
+	var highest *int64
+	err := s.pool.QueryRow(ctx, `
+		select max(sequence) from metric_samples where host_id = $1 and boot_id = $2`,
+		hostID, bootID).Scan(&highest)
+	if err != nil {
+		return 0, err
+	}
+	if highest == nil || *highest < 0 {
+		return 0, nil
+	}
+	return uint64(*highest), nil
+}
+
 // RecordOutcome says what one delivery of a sample did.
 type RecordOutcome string
 
@@ -650,10 +676,10 @@ func (s *Store) Record(ctx context.Context, hostID string, sample Sample) (Recor
 			//
 			// It also means a host that lost its counter and renumbered inside
 			// one boot writes into spent numbers, and every such sample is
-			// dropped here with its metrics (ACOL-02). The answer to that is on
-			// the host - it must not renumber into a used range - and the part
-			// of it that needs the panel to say how far it got is a change to
-			// the protocol, written down as the owner's decision.
+			// dropped here with its metrics (ACOL-02). Half the answer is on
+			// the host - it must not renumber into a used range - and the half
+			// only the panel holds is the number it got to, which the
+			// acknowledgement now carries.
 			return OutcomeDuplicate, nil
 		}
 		if err != nil {
