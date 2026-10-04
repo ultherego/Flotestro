@@ -281,3 +281,55 @@ func TestTheSamplerResendsWhatWasNotAcknowledged(t *testing.T) {
 		t.Fatal("the resend emptied the spool; only the panel's answer may do that")
 	}
 }
+
+// The counter file says where this boot's numbering stopped, and reading it
+// used to answer zero for three different things: it is not there, it names
+// another boot, and it is there and unreadable. The third means "the numbers
+// below are taken", and numbering into them stops the host's metrics until its
+// next boot - the boot identifier does not change, so every later sample falls
+// on a number the panel already holds (audit of 6c38561, ACOL-02).
+func TestAnUnreadableCounterDoesNotRestartTheNumbering(t *testing.T) {
+	dir := t.TempDir()
+	spool := openSpool(t, dir, "boot-a", 10)
+	for i := 1; i <= 4; i++ {
+		if err := spool.Enqueue(&agentv1.MetricsSample{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// The counter file survives as rubbish, which is what a power cut in the
+	// middle of a write leaves.
+	counter := filepath.Join(dir, metricsSpoolDirName, metricsSpoolCounter)
+	if err := os.WriteFile(counter, []byte("\x00\x00 not a counter"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	again := openSpool(t, dir, "boot-a", 10)
+	sample := &agentv1.MetricsSample{}
+	if err := again.Enqueue(sample); err != nil {
+		t.Fatal(err)
+	}
+	if sample.GetSequence() <= 4 {
+		t.Fatalf("the agent handed out %d after losing its counter; the panel already holds 1 to 4",
+			sample.GetSequence())
+	}
+
+	// And the three states are told apart: no file is a first start, another
+	// boot's file is this boot's first start, rubbish is a loss.
+	for name, prepare := range map[string]func(){
+		"absent":       func() { _ = os.Remove(counter) },
+		"another boot": func() { _ = os.WriteFile(counter, []byte("boot-b 99\n"), 0o600) },
+	} {
+		prepare()
+		fresh := openSpool(t, dir, "boot-c", 10)
+		if _, state := fresh.readCounter(); state != counterAbsent {
+			t.Errorf("%s: the counter reads as state %d, want absent", name, state)
+		}
+	}
+	if err := os.WriteFile(counter, []byte("boot-c rubbish\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lost := openSpool(t, dir, "boot-c", 10)
+	if _, state := lost.readCounter(); state != counterLost {
+		t.Errorf("an unreadable counter of this boot reads as state %d, want lost", state)
+	}
+}

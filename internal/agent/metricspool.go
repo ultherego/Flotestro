@@ -145,11 +145,21 @@ func (s *MetricsSpool) load() error {
 	}
 	// The next number is past everything this boot has already used: what the
 	// counter recorded, and what is still on disk.
-	s.sequence = s.readCounter()
+	recorded, state := s.readCounter()
+	s.sequence = recorded
 	for _, entry := range s.entries {
 		if entry.bootID == s.bootID && entry.sequence > s.sequence {
 			s.sequence = entry.sequence
 		}
+	}
+	if state == counterLost && s.log != nil {
+		// The samples still on disk are a floor, and they are the only thing
+		// left that says how far this boot got. Said out loud, because the
+		// numbers below may be taken and the operator is the one who will see
+		// a gap in the chart.
+		s.log.Warn("the counter of the metric samples could not be read; the numbering of this boot "+
+			"continues from what the spool still holds, which may repeat a number the panel already has",
+			"boot_id", s.bootID, "continuing_from", s.sequence, "samples_on_disk", len(s.entries))
 	}
 	s.evict()
 	return nil
@@ -306,22 +316,48 @@ func (s *MetricsSpool) read(name string) (*agentv1.MetricsSample, error) {
 	return sample, nil
 }
 
-// readCounter reads the last sequence recorded for this boot; zero when
-// the counter names another boot or is not there.
-func (s *MetricsSpool) readCounter() uint64 {
+// counterState says which of three things the counter file is, because they
+// used to be one answer - zero - and two of them mean "number from the start"
+// while the third means "the numbers below are taken". The panel drops a
+// sample whose number it holds already, so numbering into a used range stops
+// the host's metrics until its next boot: the boot identifier does not change,
+// and every sample after the loss lands on a taken number.
+type counterState int
+
+const (
+	// counterAbsent: no counter of this boot. Numbering starts at the
+	// beginning, which is correct and is what a first start looks like.
+	counterAbsent counterState = iota
+	// counterPresent: the counter says where this boot stopped.
+	counterPresent
+	// counterLost: the file is there and cannot be read, or holds something
+	// that is not a counter. What this boot already used is unknown.
+	counterLost
+)
+
+// readCounter reads the last sequence recorded for this boot, and says which of
+// the three states the file is in.
+func (s *MetricsSpool) readCounter() (uint64, counterState) {
 	raw, err := os.ReadFile(filepath.Join(s.dir, metricsSpoolCounter))
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, counterAbsent
+	}
 	if err != nil {
-		return 0
+		return 0, counterLost
 	}
 	boot, value, found := strings.Cut(strings.TrimSpace(string(raw)), " ")
-	if !found || boot != s.bootID {
-		return 0
+	if !found {
+		return 0, counterLost
+	}
+	if boot != s.bootID {
+		// Another boot's counter is this boot's first start.
+		return 0, counterAbsent
 	}
 	sequence, err := strconv.ParseUint(value, 10, 64)
 	if err != nil {
-		return 0
+		return 0, counterLost
 	}
-	return sequence
+	return sequence, counterPresent
 }
 
 // writeCounter records the last sequence handed out for this boot.

@@ -639,13 +639,21 @@ func (s *Store) Record(ctx context.Context, hostID string, sample Sample) (Recor
 			returning true`,
 			hostID, sample.BootID, int64(sample.Sequence), sample.At,
 			orNullTime(sample.ReceivedAt)).Scan(&taken)
-		if errors.Is(err, pgx.ErrNoRows) {
-			// The panel holds this reading already.
-			return OutcomeDuplicate, nil
-		}
-		if err != nil {
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return OutcomeUnknown, err
 		}
+		// A number this host has used before is not the same thing as a
+		// reading the panel holds. The host numbers its samples from a counter
+		// file, and a counter lost to a power cut starts the numbering again
+		// inside the same boot - so every sample after that loss fell on a
+		// taken number and was dropped here, together with its metrics. The
+		// host stayed online with charts that had stopped, until its next
+		// boot, and the monitoring of this product is built in: nothing else
+		// would have covered it.
+		//
+		// What identifies a reading is its moment, which the insert below
+		// enforces. A genuine resend carries the same moment and is refused
+		// there, as before; a new reading under a used number is stored.
 	}
 
 	stored, err := tx.Exec(ctx, `
