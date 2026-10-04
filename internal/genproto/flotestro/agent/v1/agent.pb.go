@@ -2019,8 +2019,11 @@ type FetchSecretResponse struct {
 	// scheme sealing names and its own associated data.
 	SealedReceipt      []byte `protobuf:"bytes,9,opt,name=sealed_receipt,json=sealedReceipt,proto3" json:"sealed_receipt,omitempty"`
 	SealedReceiptNonce []byte `protobuf:"bytes,10,opt,name=sealed_receipt_nonce,json=sealedReceiptNonce,proto3" json:"sealed_receipt_nonce,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Its own one-time key of the panel's: each sealing makes a fresh one, so
+	// the receipt cannot ride on the key the value was sealed with.
+	SealedReceiptServerKey []byte `protobuf:"bytes,11,opt,name=sealed_receipt_server_key,json=sealedReceiptServerKey,proto3" json:"sealed_receipt_server_key,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *FetchSecretResponse) Reset() {
@@ -2119,6 +2122,13 @@ func (x *FetchSecretResponse) GetSealedReceipt() []byte {
 func (x *FetchSecretResponse) GetSealedReceiptNonce() []byte {
 	if x != nil {
 		return x.SealedReceiptNonce
+	}
+	return nil
+}
+
+func (x *FetchSecretResponse) GetSealedReceiptServerKey() []byte {
+	if x != nil {
+		return x.SealedReceiptServerKey
 	}
 	return nil
 }
@@ -16471,7 +16481,7 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x0esecret_version\x18\x03 \x01(\rR\rsecretVersion\x12?\n" +
 	"\bidentity\x18\x04 \x01(\v2#.flotestro.agent.v1.RelayedEnvelopeR\bidentity\x120\n" +
 	"\x14ephemeral_public_key\x18\x05 \x01(\fR\x12ephemeralPublicKey\x126\n" +
-	"\x17ephemeral_key_signature\x18\x06 \x01(\fR\x15ephemeralKeySignature\"\x8d\x03\n" +
+	"\x17ephemeral_key_signature\x18\x06 \x01(\fR\x15ephemeralKeySignature\"\xc8\x03\n" +
 	"\x13FetchSecretResponse\x12\x14\n" +
 	"\x05value\x18\x01 \x01(\fR\x05value\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\rR\aversion\x12\x16\n" +
@@ -16483,7 +16493,8 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x0esecret_receipt\x18\b \x01(\v2\".flotestro.helper.v1.SecretReceiptR\rsecretReceipt\x12%\n" +
 	"\x0esealed_receipt\x18\t \x01(\fR\rsealedReceipt\x120\n" +
 	"\x14sealed_receipt_nonce\x18\n" +
-	" \x01(\fR\x12sealedReceiptNonce\"\x1a\n" +
+	" \x01(\fR\x12sealedReceiptNonce\x129\n" +
+	"\x19sealed_receipt_server_key\x18\v \x01(\fR\x16sealedReceiptServerKey\"\x1a\n" +
 	"\x18IdentityChallengeRequest\"|\n" +
 	"\x19IdentityChallengeResponse\x12\x1c\n" +
 	"\tchallenge\x18\x01 \x01(\fR\tchallenge\x12&\n" +

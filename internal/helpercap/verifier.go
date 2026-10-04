@@ -122,6 +122,25 @@ func (v *Verifier) Verify(request *helperv1.HelperRequest, expectation Expectati
 		return Reservation{}, refusal(ErrorPayloadBinding,
 			fmt.Sprintf("the bound payload is of %s, the capability of %s", bound.Action, capability.GetActionType()))
 	}
+	// The receipt of a secret's bytes, before the binding reads what it says:
+	// an unsigned receipt's fields are worth nothing, and a write whose content
+	// comes from the store has no other check on its bytes at all.
+	if file := request.GetFile(); file != nil && file.GetFromSecret() {
+		if err := v.VerifyReceipt(file.GetSecretReceipt()); err != nil {
+			return Reservation{}, err
+		}
+		receipt := file.GetSecretReceipt()
+		if receipt.GetHostId() != capability.GetHostId() {
+			return Reservation{}, refusal(ErrorPayloadBinding,
+				fmt.Sprintf("the receipt of the secret names the host %q, the capability %q",
+					receipt.GetHostId(), capability.GetHostId()))
+		}
+		if receipt.GetTaskId() != capability.GetTaskId() {
+			return Reservation{}, refusal(ErrorPayloadBinding,
+				fmt.Sprintf("the receipt of the secret names the task %q, the capability %q",
+					receipt.GetTaskId(), capability.GetTaskId()))
+		}
+	}
 	if err := CheckBinding(request, bound, v.priorSysctl); err != nil {
 		return Reservation{}, err
 	}

@@ -10,6 +10,8 @@ import (
 
 	"github.com/ultherego/flotestro/internal/audit"
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
+	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
+	"github.com/ultherego/flotestro/internal/helpercap"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/metrics"
 	"github.com/ultherego/flotestro/internal/relayproof"
@@ -124,10 +126,27 @@ func (s *AgentService) FetchSecret(ctx context.Context,
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
+	// The receipt: what the panel signed over the bytes it is releasing. The
+	// helper refuses a write from a secret without one, because the capability
+	// cannot carry the digest - version 0 means "whatever is current when the
+	// task is delivered", so the consent was signed before the content was
+	// known.
+	receipt, err := s.secretReceipt(hostID, req.Msg.GetTaskId(), name, uint32(version), value)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
 	if sealTo == nil {
 		return connect.NewResponse(&agentv1.FetchSecretResponse{
 			Value: value, Version: uint32(version), Sha256: secrets.Fingerprint(value),
+			// Beside the value, because on a direct session the digest is
+			// already in sha256 above: the receipt discloses nothing more.
+			SecretReceipt: receipt,
 		}), nil
+	}
+	marshalled, err := proto.Marshal(receipt)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	// Sealed to the host's one-time key under the lease as associated data: the
 	// plaintext leaves this process inside the cipher text, without a digest.
@@ -136,13 +155,40 @@ func (s *AgentService) FetchSecret(ctx context.Context,
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
+	// The receipt is sealed too, and that is the whole reason it has its own
+	// fields: sha256 above is deliberately empty on a sealed answer, because a
+	// digest of a short secret in a relay's log would be a hint this protocol
+	// does not give. A receipt in the clear would hand the relay exactly that.
+	sealedReceipt, receiptNonce, receiptKey, err := relayproof.Seal(sealTo, marshalled,
+		relayproof.SecretReceiptAAD(req.Msg.GetTaskId(), name, uint32(version)))
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
 	return connect.NewResponse(&agentv1.FetchSecretResponse{
-		Version:         uint32(version),
-		SealedValue:     sealed,
-		SealedNonce:     nonce,
-		ServerPublicKey: serverPublic,
-		Sealing:         relayproof.Sealing,
+		Version:                uint32(version),
+		SealedValue:            sealed,
+		SealedNonce:            nonce,
+		ServerPublicKey:        serverPublic,
+		Sealing:                relayproof.Sealing,
+		SealedReceipt:          sealedReceipt,
+		SealedReceiptNonce:     receiptNonce,
+		SealedReceiptServerKey: receiptKey,
 	}), nil
+}
+
+// secretReceipt signs the release of a secret's bytes. A panel without a
+// helper signer issues none, and the helper then refuses the write - which is
+// the right way round: a helper that writes a secret nobody vouched for is the
+// hole this closes.
+func (s *AgentService) secretReceipt(hostID, taskID, name string, version uint32,
+	value []byte) (*helperv1.SecretReceipt, error) {
+	if s.helperSigner == nil {
+		return nil, errors.New("this panel has no helper signing key, so it cannot vouch for the bytes of a secret")
+	}
+	return s.helperSigner.IssueReceipt(helpercap.Release{
+		HostID: hostID, TaskID: taskID, SecretName: name,
+		Version: version, SHA256: secrets.Fingerprint(value),
+	})
 }
 
 // verifySecretEnvelope checks the host's proof on a relayed fetch: the

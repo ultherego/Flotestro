@@ -211,7 +211,7 @@ func (e *TaskExecutor) applyCertificate(ctx context.Context, task *agentv1.TaskE
 				return rejected(agentv1.TaskResult_STATUS_FAILED, RejectInternalError,
 					"the agent has no connection through which a secret could be fetched")
 			}
-			value, err := e.secrets(callCtx, task.GetTaskId(),
+			value, _, err := e.secrets(callCtx, task.GetTaskId(),
 				payload.KeySecret.Name, payload.KeySecret.Version)
 			if err != nil {
 				// The reason for the refusal is the content of the result; the

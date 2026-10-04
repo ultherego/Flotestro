@@ -188,6 +188,9 @@ message FetchSecretResponse {
   // scheme sealing names and its own associated data.
   bytes sealed_receipt = 9;
   bytes sealed_receipt_nonce = 10;
+  // Its own one-time key of the panel's: each sealing makes a fresh one, so
+  // the receipt cannot ride on the key the value was sealed with.
+  bytes sealed_receipt_server_key = 11;
 }
 
 // IdentityChallengeRequest carries nothing: the identity comes from the

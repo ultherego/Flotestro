@@ -47,16 +47,70 @@ func TestTheCapabilityBindsWhatAFileOrderWouldWriteAndNotOnlyWhere(t *testing.T)
 	}
 }
 
-// The panel does not hold the bytes in two cases, and each is bound by the
-// name they travel under instead of by a digest of nothing.
-func TestContentThePanelDoesNotHoldIsBoundByItsName(t *testing.T) {
+// The panel does not hold the bytes in two cases. A return to a version only
+// the host kept is bound by the digest of that version, which is a name the
+// panel does hold. Bytes from the secret store are bound by the receipt the
+// panel signed when it released them.
+//
+// This test used to say the opposite - that content from the store is "bound by
+// the name it travels under instead of by a digest of nothing" - and that
+// sentence was the finding. The name was all that was bound: an agent with a
+// consent to write the secret db-password into a path could write any bytes
+// into it, and the path is often worth more than the secret.
+func TestContentFromTheStoreIsBoundByTheReceiptOfItsRelease(t *testing.T) {
 	secret := &opspec.FilePayload{Path: "/etc/app.conf",
 		ContentSecret: &opspec.SecretRef{Name: "app.conf", Version: 3}}
+	released := []byte("whatever the store answered")
 	fromStore := &helperv1.FileRequest{Path: secret.Path, FromSecret: true,
-		Content: []byte("whatever the store answered")}
+		Content: released,
+		SecretReceipt: &helperv1.SecretReceipt{
+			SecretName: "app.conf", SecretVersion: 3, Sha256: contentDigest(released),
+		}}
 	if err := sameContent(fromStore, secret); err != nil {
 		t.Errorf("a file filled from the secret store was refused: %v", err)
 	}
+
+	// The case the receipt exists for: the order is honoured, the receipt is
+	// the panel's, and the bytes are the agent's own.
+	substituted := &helperv1.FileRequest{Path: secret.Path, FromSecret: true,
+		Content:       []byte("flotestro-agent ALL=(ALL) NOPASSWD: ALL\n"),
+		SecretReceipt: fromStore.GetSecretReceipt()}
+	if err := sameContent(substituted, secret); err == nil {
+		t.Error("bytes the receipt does not vouch for were written as a secret")
+	}
+	// No receipt at all is the older agent, and it is refused rather than
+	// trusted: the helper would otherwise have only the request's word.
+	noReceipt := &helperv1.FileRequest{Path: secret.Path, FromSecret: true, Content: released}
+	if err := sameContent(noReceipt, secret); err == nil {
+		t.Error("a write from a secret was accepted with no receipt for its bytes")
+	}
+	// A receipt for another secret, or another version than the consent pinned.
+	otherSecret := &helperv1.FileRequest{Path: secret.Path, FromSecret: true, Content: released,
+		SecretReceipt: &helperv1.SecretReceipt{
+			SecretName: "app.conf.old", SecretVersion: 3, Sha256: contentDigest(released),
+		}}
+	if err := sameContent(otherSecret, secret); err == nil {
+		t.Error("a receipt for another secret was accepted")
+	}
+	otherVersion := &helperv1.FileRequest{Path: secret.Path, FromSecret: true, Content: released,
+		SecretReceipt: &helperv1.SecretReceipt{
+			SecretName: "app.conf", SecretVersion: 2, Sha256: contentDigest(released),
+		}}
+	if err := sameContent(otherVersion, secret); err == nil {
+		t.Error("a receipt for another version was accepted where the consent pinned one")
+	}
+	// A consent that pinned no version takes whichever the panel released, and
+	// the receipt records which that was.
+	anyVersion := &opspec.FilePayload{Path: "/etc/app.conf",
+		ContentSecret: &opspec.SecretRef{Name: "app.conf"}}
+	current := &helperv1.FileRequest{Path: secret.Path, FromSecret: true, Content: released,
+		SecretReceipt: &helperv1.SecretReceipt{
+			SecretName: "app.conf", SecretVersion: 9, Sha256: contentDigest(released),
+		}}
+	if err := sameContent(current, anyVersion); err != nil {
+		t.Errorf("a consent without a version refused the version the panel released: %v", err)
+	}
+
 	// A request that carries its own content where the order named a secret is
 	// the agent putting words in the panel's mouth.
 	ownContent := &helperv1.FileRequest{Path: secret.Path, Content: []byte("mine")}

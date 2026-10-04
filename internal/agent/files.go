@@ -70,20 +70,15 @@ func (e *TaskExecutor) applyFile(ctx context.Context, task *agentv1.TaskEnvelope
 
 	// The content from the store is fetched only now, right before the write.
 	content := []byte(payload.Content)
+	var receipt *helperv1.SecretReceipt
 	if !payload.ContentSecret.Empty() {
-		if e.secrets == nil {
-			return rejected(agentv1.TaskResult_STATUS_FAILED, RejectInternalError,
-				"the agent has no connection through which a secret could be fetched")
+		value, vouched, refusal := e.fetchSecretWithReceipt(callCtx, task, *payload.ContentSecret)
+		if refusal != nil {
+			return refusal
 		}
-		value, err := e.secrets(callCtx, task.GetTaskId(),
-			payload.ContentSecret.Name, payload.ContentSecret.Version)
-		if err != nil {
-			// The reason for the refusal is the content of the result; the value
-			// is not in it.
-			return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectPrecondition,
-				"the secret "+payload.ContentSecret.Name+" was not fetched: "+err.Error())
-		}
-		content = value
+		// The receipt is what makes these bytes checkable: without it the
+		// helper has only the request's word for what the secret contained.
+		content, receipt = value, vouched
 	}
 
 	response, err := e.helper.Call(callCtx, &helperv1.HelperRequest{
@@ -101,6 +96,9 @@ func (e *TaskExecutor) applyFile(ctx context.Context, task *agentv1.TaskEnvelope
 				ExpectedSha256: payload.ExpectedSHA256,
 				Validator:      payload.Validator,
 				FromSecret:     !payload.ContentSecret.Empty(),
+				// What the panel signed over the bytes of the secret. The
+				// helper refuses the write without it.
+				SecretReceipt: receipt,
 				// The flag travels with the order; the grant that makes it
 				// count travels in the capability the client attaches.
 				AllowMissingValidator: payload.AllowMissingValidator,

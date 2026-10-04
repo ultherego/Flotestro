@@ -42,7 +42,7 @@ func (e *TaskExecutor) applyRepository(ctx context.Context, task *agentv1.TaskEn
 			return rejected(agentv1.TaskResult_STATUS_FAILED, RejectInternalError,
 				"the agent has no connection through which a secret could be fetched")
 		}
-		value, err := e.secrets(callCtx, task.GetTaskId(),
+		value, _, err := e.secrets(callCtx, task.GetTaskId(),
 			payload.PasswordSecret.Name, payload.PasswordSecret.Version)
 		if err != nil {
 			return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectPrecondition,

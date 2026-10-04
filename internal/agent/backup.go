@@ -146,28 +146,38 @@ func (e *TaskExecutor) applyBackup(ctx context.Context, task *agentv1.TaskEnvelo
 	}
 }
 
-// fetchSecret fetches the value from the store right before the operation.
+// fetchSecret fetches the value from the store right before the operation. The
+// receipt comes with it; a caller that writes the bytes into a file has to hand
+// it to the helper.
 func (e *TaskExecutor) fetchSecret(ctx context.Context, task *agentv1.TaskEnvelope,
 	reference opspec.SecretRef) ([]byte, *agentv1.TaskResult) {
+	value, _, result := e.fetchSecretWithReceipt(ctx, task, reference)
+	return value, result
+}
+
+// fetchSecretWithReceipt is the same fetch for the caller that needs the
+// receipt as well.
+func (e *TaskExecutor) fetchSecretWithReceipt(ctx context.Context, task *agentv1.TaskEnvelope,
+	reference opspec.SecretRef) ([]byte, *helperv1.SecretReceipt, *agentv1.TaskResult) {
 	if e.secrets == nil {
-		return nil, rejected(agentv1.TaskResult_STATUS_FAILED, RejectInternalError,
+		return nil, nil, rejected(agentv1.TaskResult_STATUS_FAILED, RejectInternalError,
 			"the agent has no connection through which a secret could be fetched")
 	}
 	// The panel issues one lease per task and redeems it once: a task that reads
 	// the repository before the change, writes it and reads it again to verify
 	// asks for the same secret three times, and the second ask would be refused.
-	if value, held := e.taskSecret(task.GetTaskId(), reference); held {
-		return value, nil
+	if held, found := e.taskSecret(task.GetTaskId(), reference); found {
+		return held.value, held.receipt, nil
 	}
-	value, err := e.secrets(ctx, task.GetTaskId(), reference.Name, reference.Version)
+	value, receipt, err := e.secrets(ctx, task.GetTaskId(), reference.Name, reference.Version)
 	if err != nil {
 		// The reason for the refusal is the content of the result; the value is
 		// not in it.
-		return nil, rejected(agentv1.TaskResult_STATUS_REJECTED, RejectPrecondition,
+		return nil, nil, rejected(agentv1.TaskResult_STATUS_REJECTED, RejectPrecondition,
 			"the secret "+reference.Name+" was not fetched: "+err.Error())
 	}
-	e.keepTaskSecret(task.GetTaskId(), reference, value)
-	return value, nil
+	e.keepTaskSecret(task.GetTaskId(), reference, fetchedSecret{value: value, receipt: receipt})
+	return value, receipt, nil
 }
 
 // secretKey names one secret of one task: the same name and version asked
@@ -177,21 +187,21 @@ func secretKey(taskID string, reference opspec.SecretRef) string {
 }
 
 // taskSecret answers a value already fetched for this task.
-func (e *TaskExecutor) taskSecret(taskID string, reference opspec.SecretRef) ([]byte, bool) {
+func (e *TaskExecutor) taskSecret(taskID string, reference opspec.SecretRef) (fetchedSecret, bool) {
 	e.secretsMu.Lock()
 	defer e.secretsMu.Unlock()
-	value, held := e.taskSecrets[secretKey(taskID, reference)]
-	return value, held
+	held, found := e.taskSecrets[secretKey(taskID, reference)]
+	return held, found
 }
 
 // keepTaskSecret remembers a value for the life of the task.
-func (e *TaskExecutor) keepTaskSecret(taskID string, reference opspec.SecretRef, value []byte) {
+func (e *TaskExecutor) keepTaskSecret(taskID string, reference opspec.SecretRef, held fetchedSecret) {
 	e.secretsMu.Lock()
 	defer e.secretsMu.Unlock()
 	if e.taskSecrets == nil {
-		e.taskSecrets = map[string][]byte{}
+		e.taskSecrets = map[string]fetchedSecret{}
 	}
-	e.taskSecrets[secretKey(taskID, reference)] = value
+	e.taskSecrets[secretKey(taskID, reference)] = held
 }
 
 // forgetTaskSecrets drops what a finished task fetched.
@@ -199,10 +209,10 @@ func (e *TaskExecutor) forgetTaskSecrets(taskID string) {
 	e.secretsMu.Lock()
 	defer e.secretsMu.Unlock()
 	prefix := taskID + "\x00"
-	for key, value := range e.taskSecrets {
+	for key, held := range e.taskSecrets {
 		if strings.HasPrefix(key, prefix) {
-			for i := range value {
-				value[i] = 0
+			for i := range held.value {
+				held.value[i] = 0
 			}
 			delete(e.taskSecrets, key)
 		}

@@ -6,14 +6,19 @@ import (
 
 	"connectrpc.com/connect"
 
+	"google.golang.org/protobuf/proto"
+
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
+	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 	"github.com/ultherego/flotestro/internal/relayproof"
 )
 
-// fetchSecret fetches the value of a secret for one task.
+// fetchSecret fetches the value of a secret for one task, with the receipt the
+// panel signed over its bytes. The root helper refuses a write from a secret
+// without one, so the receipt travels with the value and not beside it.
 func fetchSecret(ctx context.Context, client agentv1connect.AgentServiceClient,
-	signer *relayproof.Signer, taskID, name string, version int) ([]byte, error) {
+	signer *relayproof.Signer, taskID, name string, version int) ([]byte, *helperv1.SecretReceipt, error) {
 	request := &agentv1.FetchSecretRequest{
 		TaskId: taskID, SecretName: name, SecretVersion: uint32(version),
 	}
@@ -22,26 +27,26 @@ func fetchSecret(ctx context.Context, client agentv1connect.AgentServiceClient,
 		call := signer.ForCall()
 		key, err := relayproof.NewEphemeralKey()
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		ephemeral = key
 		request.EphemeralPublicKey = key.PublicKey()
 		request.EphemeralKeySignature, err = relayproof.SignEphemeralKey(call.Key(), taskID, name, key.PublicKey())
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		// The envelope signs the request as it stands without the envelope
 		// itself; the gateway clears the field before it digests.
 		envelope, err := call.SignRequest(relayproof.KindFetchSecret, request)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		request.Identity = envelope
 	}
 
 	response, err := client.FetchSecret(ctx, connect.NewRequest(request))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	answer := response.Msg
 	if answer.GetSealing() != "" || len(answer.GetSealedValue()) > 0 {
@@ -58,35 +63,58 @@ func fetchSecret(ctx context.Context, client agentv1connect.AgentServiceClient,
 	// and not this line - the sealing itself is still only as good as the
 	// server key that arrived with it.
 	if ephemeral != nil {
-		return nil, errors.New("this fetch offered a one-time key and the answer came back unsealed")
+		return nil, nil, errors.New("this fetch offered a one-time key and the answer came back unsealed")
 	}
 	value := answer.GetValue()
 	// The panel gives the digest of what it issued: this checks that
 	// exactly that arrived and not content damaged on the way.
 	if digest := answer.GetSha256(); digest != "" && digest != valueDigest(value) {
-		return nil, errors.New("the digest of the fetched secret does not match the one given by the panel")
+		return nil, nil, errors.New("the digest of the fetched secret does not match the one given by the panel")
 	}
-	return value, nil
+	return value, answer.GetSecretReceipt(), nil
 }
 
 // openSealedSecret opens a sealed answer with the one-time key of the call.
 func openSealedSecret(ephemeral *relayproof.EphemeralKey, answer *agentv1.FetchSecretResponse,
-	taskID, name string) ([]byte, error) {
+	taskID, name string) ([]byte, *helperv1.SecretReceipt, error) {
 	if answer.GetSealing() != relayproof.Sealing {
-		return nil, errors.New("the panel sealed the secret with a scheme this agent does not know: " + answer.GetSealing())
+		return nil, nil, errors.New("the panel sealed the secret with a scheme this agent does not know: " + answer.GetSealing())
 	}
 	if ephemeral == nil {
-		return nil, errors.New("the panel answered sealed, but this fetch offered no one-time key")
+		return nil, nil, errors.New("the panel answered sealed, but this fetch offered no one-time key")
 	}
 	if len(answer.GetValue()) > 0 {
 		// A sealed answer carries no plaintext. One that does is not the
 		// panel's answer.
-		return nil, errors.New("the sealed answer also carries the value in the clear")
+		return nil, nil, errors.New("the sealed answer also carries the value in the clear")
 	}
 	value, err := ephemeral.Open(answer.GetServerPublicKey(), answer.GetSealedValue(), answer.GetSealedNonce(),
 		relayproof.SecretAAD(taskID, name, answer.GetVersion()))
 	if err != nil {
-		return nil, errors.New("the sealed secret did not open: " + err.Error())
+		return nil, nil, errors.New("the sealed secret did not open: " + err.Error())
 	}
-	return value, nil
+	// The receipt is sealed too, with its own one-time key of the panel's and
+	// its own associated data, because on this path the digest is deliberately
+	// absent from the answer: in the clear it would hand a relay the digest of
+	// a short secret. A receipt in the clear on a sealed answer is therefore
+	// not the panel's, whoever carried it.
+	if receipt := answer.GetSecretReceipt(); receipt != nil {
+		return nil, nil, errors.New("the sealed answer carries a receipt in the clear")
+	}
+	if len(answer.GetSealedReceipt()) == 0 {
+		// An older panel vouches for nothing, and the helper will refuse the
+		// write. Said here, where the name of the secret is known.
+		return value, nil, nil
+	}
+	raw, err := ephemeral.Open(answer.GetSealedReceiptServerKey(), answer.GetSealedReceipt(),
+		answer.GetSealedReceiptNonce(),
+		relayproof.SecretReceiptAAD(taskID, name, answer.GetVersion()))
+	if err != nil {
+		return nil, nil, errors.New("the sealed receipt of the secret did not open: " + err.Error())
+	}
+	var receipt helperv1.SecretReceipt
+	if err := proto.Unmarshal(raw, &receipt); err != nil {
+		return nil, nil, errors.New("the sealed receipt of the secret is not one: " + err.Error())
+	}
+	return value, &receipt, nil
 }

@@ -30,6 +30,7 @@ import (
 	"github.com/ultherego/flotestro/internal/endpoints"
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
+	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 	"github.com/ultherego/flotestro/internal/opspec"
 	"github.com/ultherego/flotestro/internal/pki"
 	"github.com/ultherego/flotestro/internal/relayproof"
@@ -467,11 +468,11 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 		}
 		// A secret is fetched with a separate call, at the moment the operation
 		// runs.
-		opts.Executor.secrets = func(ctx context.Context, taskID, name string, version int) ([]byte, error) {
+		opts.Executor.secrets = func(ctx context.Context, taskID, name string, version int) ([]byte, *helperv1.SecretReceipt, error) {
 			// After the final task the leases are dropped: no secret is
 			// fetched for a host that is leaving, whatever the task.
 			if final.isLeaving() {
-				return nil, errLeasesDropped
+				return nil, nil, errLeasesDropped
 			}
 			// Through a relay the value comes back sealed to a one-time key of this
 			// fetch; directly it comes as it is.

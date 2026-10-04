@@ -437,6 +437,12 @@ func SecretAAD(taskID, secretName string, version uint32) []byte {
 	return []byte(taskID + "|" + secretName + "|" + strconv.FormatUint(uint64(version), 10))
 }
 
+// SecretReceiptAAD names the receipt of a release, so a sealed receipt cannot
+// be presented as the sealed value of the same release or the other way round.
+func SecretReceiptAAD(taskID, secretName string, version uint32) []byte {
+	return append([]byte("receipt|"), SecretAAD(taskID, secretName, version)...)
+}
+
 // Seal encrypts a value to the host's one-time key with a one-time key of the
 // panel's own: X25519 for the shared secret, HKDF-SHA256 for the cipher key,
 // AES-256-GCM for the value.

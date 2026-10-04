@@ -149,11 +149,21 @@ type TaskExecutor struct {
 	// taskSecrets holds what a running task has fetched, so the read, the change
 	// and the verification after it share one lease of the secret.
 	secretsMu   sync.Mutex
-	taskSecrets map[string][]byte
+	taskSecrets map[string]fetchedSecret
 }
 
-// SecretFetch reaches for the value of the secret named in the task.
-type SecretFetch func(ctx context.Context, taskID, name string, version int) ([]byte, error)
+// fetchedSecret is a value a task fetched together with the receipt the panel
+// signed over its bytes: the helper refuses a write from a secret without one,
+// and a task that reads, writes and verifies shares one lease, so it shares
+// one receipt too.
+type fetchedSecret struct {
+	value   []byte
+	receipt *helperv1.SecretReceipt
+}
+
+// SecretFetch reaches for the value of the secret named in the task, with the
+// receipt the panel signed over its bytes.
+type SecretFetch func(ctx context.Context, taskID, name string, version int) ([]byte, *helperv1.SecretReceipt, error)
 
 func NewTaskExecutor(helperClient *HelperClient, journal *IdempotencyJournal,
 	facts func() Facts, log *slog.Logger) *TaskExecutor {
