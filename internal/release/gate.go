@@ -3,15 +3,23 @@ package release
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/ultherego/flotestro/internal/agent"
 )
 
 // GateSchemaVersion is the shape of the laboratory's result.json this code
 // reads. A report that declares another number is refused, not guessed at.
-const GateSchemaVersion = 1
+//
+// Version 2 added the capability manifest and made the evidence verifiable from
+// its bytes: a report of version 1 cannot answer what the checker now asks, so
+// it is refused rather than judged on the fields it happens to have.
+const GateSchemaVersion = 2
 
 // The three verdicts a gate run may reach. A stable release accepts only
 // VerdictPass; VerdictLimited says the run was green over limitations somebody
@@ -89,6 +97,16 @@ type GateSkip struct {
 	Evidence string `json:"evidence,omitempty"`
 }
 
+// GateCapability accounts for one adapter of the agent over the run: the hosts
+// that offered it, or the reason no host did. An empty list with no reason is
+// refused, because an adapter nobody could order and nobody explained is the
+// shape of a scenario quietly dropping out of the run.
+type GateCapability struct {
+	Hosts []string `json:"hosts"`
+	// Absent is why no host offered it. Required exactly when Hosts is empty.
+	Absent string `json:"absent_reason,omitempty"`
+}
+
 // GateReport is the laboratory's result.json.
 //
 // Every field the verdict rests on is a pointer or a slice, so that a report
@@ -113,7 +131,11 @@ type GateReport struct {
 	Skips           []GateSkip           `json:"skips"`
 	Logs            map[string]string    `json:"logs"`
 	Artifacts       map[string]string    `json:"artifacts"`
-	Verdict         string               `json:"verdict"`
+	// CapabilityManifest has to name every adapter the agent declares. The
+	// fleet that ran is what makes "not_applicable, runs_on another host" mean
+	// anything, so the run says which host could order what.
+	CapabilityManifest map[string]GateCapability `json:"capability_manifest"`
+	Verdict            string                    `json:"verdict"`
 }
 
 // The keys a report has to carry as keys. Presence is checked before the
@@ -123,7 +145,7 @@ var gateRequiredKeys = []string{
 	"schema_version", "sha", "tree_hash", "tree_clean", "quick",
 	"harness_digest", "lab_config_digest", "started_at", "finished_at",
 	"commands", "hosts", "agents", "stages", "counts", "skips", "logs",
-	"verdict",
+	"capability_manifest", "verdict",
 }
 
 // ParseGateReport reads a report and refuses one it cannot vouch for. It says
@@ -275,15 +297,23 @@ func (r GateReport) validate() error {
 			return fmt.Errorf("the digest of the artefact %s is %q; it has to be sha256 and sixty-four hex digits", name, value)
 		}
 	}
+	named := make(map[string]bool, len(r.Hosts))
 	for _, host := range r.Hosts {
 		if host.Name == "" || host.Distribution == "" || host.Version == "" {
 			return fmt.Errorf("the host %q is reported without its distribution and version", host.Name)
 		}
+		named[host.Name] = true
 	}
 	for _, agent := range r.Agents {
 		if agent.Host == "" || agent.Before == "" || agent.After == "" {
 			return fmt.Errorf("the agent on %q is reported without both its versions", agent.Host)
 		}
+		if !named[agent.Host] {
+			return fmt.Errorf("an agent is reported on %q, which the report does not name as a host", agent.Host)
+		}
+	}
+	if err := r.validateCapabilityManifest(named); err != nil {
+		return err
 	}
 	if r.Counts == nil {
 		return fmt.Errorf("the gate report carries no counts")
@@ -292,6 +322,30 @@ func (r GateReport) validate() error {
 	case VerdictPass, VerdictLimited, VerdictFail:
 	default:
 		return fmt.Errorf("the gate report reaches the verdict %q, which is not one of pass, limited, fail", r.Verdict)
+	}
+	return nil
+}
+
+// validateCapabilityManifest checks the shape of the manifest: an entry that
+// names a host the report does not, an entry for an adapter this agent does not
+// declare, and an entry that is neither a list of hosts nor a reason. Whether
+// the manifest is complete is a question about the run, so the verdict asks it.
+func (r GateReport) validateCapabilityManifest(hosts map[string]bool) error {
+	for capability, entry := range r.CapabilityManifest {
+		if !slices.Contains(agent.AllCapabilities, capability) {
+			return fmt.Errorf("the capability manifest names %q, which this agent does not declare", capability)
+		}
+		if len(entry.Hosts) == 0 && strings.TrimSpace(entry.Absent) == "" {
+			return fmt.Errorf(
+				"the capability manifest reports no host for %s and no reason; an adapter nobody could order is not an absence of one",
+				capability)
+		}
+		for _, host := range entry.Hosts {
+			if !hosts[host] {
+				return fmt.Errorf("the capability manifest offers %s on %q, which the report does not name as a host",
+					capability, host)
+			}
+		}
 	}
 	return nil
 }
@@ -339,6 +393,21 @@ func (r GateReport) ComputeVerdict() (string, []string) {
 	for _, host := range r.Hosts {
 		hosts[host.Name] = true
 	}
+	// A run over an empty fleet skips every scenario as not applicable and the
+	// arithmetic still adds up: "it runs on another host" cannot be false when
+	// there is no other host, and the capability manifest accounts for nothing.
+	if len(r.Hosts) == 0 {
+		fatal = append(fatal, "the run names no host: a suite that ran against nothing attests nothing")
+	}
+	if len(r.Agents) == 0 {
+		fatal = append(fatal, "the run names no agent: nothing says the fleet carried a build of this commit")
+	}
+	for _, capability := range agent.AllCapabilities {
+		if _, accounted := r.CapabilityManifest[capability]; !accounted {
+			fatal = append(fatal, fmt.Sprintf(
+				"the capability manifest says nothing about %s, which the agent declares", capability))
+		}
+	}
 	// The clock a waiver expires against is the run's own end: a report is
 	// judged by when it was produced, not by when somebody reads it.
 	finished, err := time.Parse(time.RFC3339, r.FinishedAt)
@@ -362,7 +431,7 @@ func (r GateReport) ComputeVerdict() (string, []string) {
 				fatal = append(fatal, fmt.Sprintf("%s is not_applicable here and names no host that does run it", name))
 				break
 			}
-			if len(hosts) > 0 && !hosts[skip.RunsOn] {
+			if !hosts[skip.RunsOn] {
 				fatal = append(fatal, fmt.Sprintf("%s says it runs on %s, which is not a host of this run", name, skip.RunsOn))
 			}
 		case SkipWaived:
@@ -442,10 +511,12 @@ func (r GateReport) ComputeVerdict() (string, []string) {
 	return VerdictPass, nil
 }
 
-// CheckGateReport is what a workflow calls: it parses the report, insists it is
+// checkGateReport judges a report on its own. It is package-internal on
+// purpose: judging a report without the bytes behind it was the finding, so the
+// only way in from outside is CheckGateEvidence. It parses the report, insists it is
 // about the commit being attested, recomputes the verdict and refuses a report
 // whose own verdict disagrees with the evidence in it.
-func CheckGateReport(data []byte, sha string) (GateReport, string, []string, error) {
+func checkGateReport(data []byte, sha string) (GateReport, string, []string, error) {
 	report, err := ParseGateReport(data)
 	if err != nil {
 		return GateReport{}, "", nil, err
@@ -460,6 +531,23 @@ func CheckGateReport(data []byte, sha string) (GateReport, string, []string, err
 			"the report claims the verdict %q; the evidence in it says %q", report.Verdict, verdict)
 	}
 	return report, verdict, reasons, nil
+}
+
+// CheckGateEvidence is the whole judgement over a bundle: the bytes back the
+// report, git backs the tree, and the verdict is recomputed from the evidence.
+// A report supplied on its own can no longer be judged - that path was the
+// finding, not an interface worth keeping.
+func CheckGateEvidence(bundle io.Reader, sha, treeFromGit string) (Evidence, string, []string, error) {
+	evidence, err := VerifyEvidence(bundle, sha, treeFromGit)
+	if err != nil {
+		return Evidence{}, "", nil, err
+	}
+	verdict, reasons := evidence.Report.ComputeVerdict()
+	if evidence.Report.Verdict != verdict {
+		return evidence, verdict, reasons, fmt.Errorf(
+			"the report claims the verdict %q; the evidence in it says %q", evidence.Report.Verdict, verdict)
+	}
+	return evidence, verdict, reasons, nil
 }
 
 // Summary is the one line a commit status carries. It begins with the verdict

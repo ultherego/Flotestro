@@ -1,49 +1,56 @@
-// Command gatecheck judges a laboratory gate report.
+// Command gatecheck judges a laboratory gate report, from the bundle the
+// laboratory produced.
 //
-// It reads result.json, refuses one that is incomplete or that is about
-// another commit, recomputes the verdict from the evidence and prints it. The
-// workflow that records the commit status runs this instead of a handful of
-// jq expressions, so the rules live in one place and have tests.
+// It takes the bundle, not a report: a pasted report was the finding. The
+// report is read out of the bundle, every log and artefact it claims a digest
+// of is hashed from the bytes beside it, and the tree is compared with the one
+// git holds for the commit - which the caller reads from git, not from the
+// report. Then the verdict is recomputed from the evidence.
 //
-//	gatecheck -sha <commit> [report.json]   # stdin when no file is named
+//	gatecheck -sha <commit> -tree <tree of that commit, from git> bundle.tar.gz
 //
-// Stdout is two lines: the verdict, then the one line a status carries.
-// Anything else goes to stderr, and a refusal is a non-zero exit.
+// Stdout is three lines: the verdict, the line a status carries, and the digest
+// of the bundle the verdict was computed over. Anything else goes to stderr,
+// and a refusal is a non-zero exit.
 package main
 
 import (
 	"flag"
 	"fmt"
-	"io"
 	"os"
 
 	"github.com/ultherego/flotestro/internal/release"
 )
 
 func main() {
-	sha := flag.String("sha", "", "the commit the report has to be about")
+	sha := flag.String("sha", "", "the commit the evidence has to be about")
+	tree := flag.String("tree", "", "the tree of that commit as git holds it")
 	flag.Parse()
 
-	data, err := read(flag.Arg(0))
+	if *sha == "" || *tree == "" {
+		fail(fmt.Errorf("both -sha and -tree are required: the tree has to come from git, not from the report"))
+	}
+	path := flag.Arg(0)
+	if path == "" {
+		fail(fmt.Errorf("name the evidence bundle the laboratory produced"))
+	}
+	bundle, err := os.Open(path)
 	if err != nil {
 		fail(err)
 	}
-	report, verdict, reasons, err := release.CheckGateReport(data, *sha)
+	defer bundle.Close()
+
+	evidence, verdict, reasons, err := release.CheckGateEvidence(bundle, *sha, *tree)
 	if err != nil {
 		fail(err)
 	}
 	for _, reason := range reasons {
 		fmt.Fprintf(os.Stderr, "  - %s\n", reason)
 	}
+	fmt.Fprintf(os.Stderr, "%d files in the bundle hash to the digests the report claims\n", evidence.Verified)
 	fmt.Println(verdict)
-	fmt.Println(report.Summary(verdict))
-}
-
-func read(path string) ([]byte, error) {
-	if path == "" || path == "-" {
-		return io.ReadAll(os.Stdin)
-	}
-	return os.ReadFile(path)
+	fmt.Println(evidence.Report.Summary(verdict))
+	fmt.Println(evidence.Digest)
 }
 
 func fail(err error) {

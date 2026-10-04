@@ -3,30 +3,38 @@
 # The integration suite (build tag "integration") and the Playwright
 # screenshots need the fleet: the panel, the database, the relay and the
 # hosts with the agent. None of that exists on a runner, so this workflow
-# runs nothing of the sort and does not pretend to. It takes the report
-# Vagrant/gate.sh wrote in the laboratory and records the verdict that report
-# earns as the commit status "lab-suite", so that a branch can require it
-# before a merge.
+# runs nothing of the sort and does not pretend to. It takes the evidence
+# Vagrant/gate.sh produced and records the verdict that evidence earns as the
+# commit status "lab-suite", so that a branch can require it before a merge.
 #
-# The verdict is not typed here. It used to be: an input called "result" with
-# the options pass and fail, cross-checked against a pasted report only when
-# somebody chose pass. That made the status worth what the typing was worth.
-# Now the only thing a human supplies is the commit and the file the gate
-# produced, and internal/release/gatecheck recomputes the verdict from the
-# evidence in it - refusing a report that is incomplete, that is about another
-# commit, or whose own "verdict" field disagrees with its own numbers.
+# Neither the verdict nor the report is supplied here. The verdict used to be
+# typed; then the report was pasted and internal/release/gatecheck validated
+# its shape. A parser over a pasted report and a trusted producer of evidence
+# are two different jobs, and only the first was being done: a report could
+# claim a digest of a log nobody could see.
 #
-# The owner triggers it from the machine that ran the suite:
+# Now the only thing a human supplies is the commit. The evidence comes as the
+# bundle the gate produced - result.json together with the bytes of every log
+# and artefact it names - published as an asset of the tag gate-<sha>.
+# gatecheck reads the report out of that bundle, hashes every file beside it
+# against the digest the report claims, compares the tree with the one git
+# holds for the commit, and recomputes the verdict. A log replaced after the
+# run, an artefact the report does not account for, a tree that is not the
+# commit's, a capability the manifest leaves out: each is a refusal, and a
+# refusal records nothing.
 #
-#   gh workflow run lab-gate.yml \
-#       -f sha=$(git rev-parse HEAD) \
-#       -f report="$(cat Vagrant/.gate/$(git rev-parse HEAD)/result.json)"
+# The owner publishes the bundle from the machine that ran the suite:
+#
+#   sha=$(git rev-parse HEAD)
+#   gh release create "gate-$sha" --prerelease --notes "laboratory evidence" \
+#       "Vagrant/.gate/$sha/evidence.tar.gz"
+#   gh workflow run lab-gate.yml -f sha="$sha"
 #
 # The commit has to be pushed first: a status belongs to a commit the
-# repository knows. The whole report is kept in the run's summary; the status
-# holds one line, which begins with "verdict=<pass|limited|fail>" because the
-# release workflow reads it to tell a clean run from one that was green over
-# approved limitations.
+# repository knows. The status holds one line, which begins with
+# "verdict=<pass|limited|fail>" because the release workflow reads it to tell a
+# clean run from one that was green over approved limitations, and the run
+# summary records the digest of the bundle the verdict was computed over.
 name: Lab gate
 
 on:
@@ -36,9 +44,9 @@ on:
         description: The full 40-character commit the laboratory ran.
         required: true
         type: string
-      report:
-        description: The contents of Vagrant/.gate/<sha>/result.json.
-        required: true
+      release_tag:
+        description: The tag whose asset carries the evidence bundle. Defaults to gate-<sha>.
+        required: false
         type: string
 
 permissions:
@@ -49,18 +57,23 @@ jobs:
   record:
     name: Record the verdict
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       # The checkout is of the ref this workflow was dispatched on, not of the
       # commit being attested: the rules that judge a commit must not be the
-      # ones that commit ships.
+      # ones that commit ships. It is a full checkout because the tree of the
+      # attested commit is read out of git here, and a shallow clone does not
+      # hold it.
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@3041bf56c941b39c61721a86cd11f3bb1338122a # v5.2.0
         with:
           go-version-file: go.mod
           cache: false
 
-      - name: The commit is one this repository knows
+      - name: The commit is one this repository knows, and git holds its tree
+        id: commit
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ inputs.sha }}
@@ -77,25 +90,64 @@ jobs:
             echo "::error::the repository does not know the commit $SHA; push it first" >&2
             exit 1
           fi
+          # The tree of the commit is git's answer. The report claims one too,
+          # and a run of the right commit over the wrong tree is exactly what a
+          # claim cannot rule out.
+          git fetch --no-tags --depth=1 origin "$SHA"
+          tree="$(git rev-parse "$SHA^{tree}")"
+          if ! printf '%s' "$tree" | grep -qE '^[0-9a-f]{40}$'; then
+            echo "::error::git did not give a tree for $SHA" >&2
+            exit 1
+          fi
+          echo "tree=$tree" >> "$GITHUB_OUTPUT"
+          echo "git holds the tree $tree for $SHA"
 
-      - name: Judge the report
+      - name: Fetch the evidence the laboratory produced
+        id: evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ inputs.sha }}
+          TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          tag="${TAG:-gate-$SHA}"
+          mkdir -p evidence
+          # One asset, named by the gate. A tag carrying several bundles cannot
+          # say which one the verdict is about.
+          if ! gh release download "$tag" --dir evidence --pattern '*.tar.gz' --clobber; then
+            echo "::error::no evidence bundle under the tag $tag; publish Vagrant/.gate/$SHA/evidence.tar.gz first" >&2
+            exit 1
+          fi
+          count="$(find evidence -name '*.tar.gz' | wc -l)"
+          if [ "$count" -ne 1 ]; then
+            echo "::error::the tag $tag carries $count bundles; exactly one says which run is being attested" >&2
+            exit 1
+          fi
+          bundle="$(find evidence -name '*.tar.gz')"
+          echo "bundle=$bundle" >> "$GITHUB_OUTPUT"
+          echo "the evidence is $bundle, $(stat -c %s "$bundle") bytes"
+
+      - name: Judge the evidence
         id: judge
         env:
           SHA: ${{ inputs.sha }}
-          REPORT: ${{ inputs.report }}
+          TREE: ${{ steps.commit.outputs.tree }}
+          BUNDLE: ${{ steps.evidence.outputs.bundle }}
         run: |
           set -euo pipefail
-          printf '%s' "$REPORT" > report.json
-          # Two lines on stdout: the verdict, then the line the status carries.
-          # Every refusal - a missing field, a skip nobody classified, a quick
-          # run, a verdict the numbers deny - leaves this step red and records
-          # nothing.
-          if ! out="$(go run ./internal/release/gatecheck -sha "$SHA" report.json)"; then
-            echo "::error::the laboratory report does not support a verdict; nothing was recorded." >&2
+          # Three lines on stdout: the verdict, the line the status carries,
+          # and the digest of the bundle it was computed over. Every refusal -
+          # a log whose bytes do not hash to the digest claimed for it, a file
+          # the report does not account for, a tree git does not hold, a
+          # capability the manifest leaves out, a verdict the numbers deny -
+          # leaves this step red and records nothing.
+          if ! out="$(go run ./internal/release/gatecheck -sha "$SHA" -tree "$TREE" "$BUNDLE")"; then
+            echo "::error::the laboratory evidence does not support a verdict; nothing was recorded." >&2
             exit 1
           fi
           verdict="$(printf '%s\n' "$out" | sed -n 1p)"
           summary="$(printf '%s\n' "$out" | sed -n 2p)"
+          bundle_digest="$(printf '%s\n' "$out" | sed -n 3p)"
           case "$verdict" in
             pass|limited|fail) ;;
             *) echo "::error::gatecheck reached the unknown verdict \"$verdict\"" >&2; exit 1 ;;
@@ -103,16 +155,20 @@ jobs:
           {
             echo "verdict=$verdict"
             echo "summary=$summary"
+            echo "bundle_digest=$bundle_digest"
           } >> "$GITHUB_OUTPUT"
-          echo "the evidence in the report says: $verdict"
+          # The report of the run, from the bundle, for the summary of this run.
+          tar -xzOf "$BUNDLE" result.json > report.json
+          echo "the evidence says: $verdict"
 
       - name: Record the status
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ inputs.sha }}
-          REPORT: ${{ inputs.report }}
+          TREE: ${{ steps.commit.outputs.tree }}
           VERDICT: ${{ steps.judge.outputs.verdict }}
           SUMMARY: ${{ steps.judge.outputs.summary }}
+          BUNDLE_DIGEST: ${{ steps.judge.outputs.bundle_digest }}
         run: |
           set -euo pipefail
           # A run that was green over approved limitations is green for a merge
@@ -133,14 +189,16 @@ jobs:
           {
             echo "### lab-suite: $VERDICT"
             echo
-            echo "Commit \`$SHA\`, recorded by @$GITHUB_ACTOR."
+            echo "Commit \`$SHA\`, tree \`$TREE\` as git holds it, recorded by @$GITHUB_ACTOR."
             echo
             echo "$SUMMARY"
             echo
-            echo 'The report the laboratory produced:'
+            echo "Evidence bundle: \`$BUNDLE_DIGEST\`"
+            echo
+            echo 'The report, read out of that bundle:'
             echo
             echo '```json'
-            printf '%s\n' "$REPORT"
+            cat report.json
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           echo "lab-suite = $state ($VERDICT) on $SHA"

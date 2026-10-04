@@ -596,3 +596,24 @@ func sshdReason(sshd, dropIn bool) string {
 	}
 	return ""
 }
+
+// AllCapabilities names every adapter this agent can report. The gate's report
+// has to account for each of them, so the list has to be the code's own and not
+// a copy somebody maintains: capabilities_declared_test.go reads the constants
+// out of this file and refuses a list that drifts from them.
+var AllCapabilities = []string{
+	CapSystemd,
+	CapAPT, CapDNF, CapPacman,
+	CapJournald,
+	CapDocker, CapCompose,
+	CapSchedules,
+	CapNetwork, CapDNS, CapFirewall,
+	CapStorage,
+	CapSSHD, CapKernel, CapTime,
+	CapSecurity, CapSecurityMAC, CapSecurityAudit,
+	CapCertificates, CapCertificatesRenew,
+	CapFiles, CapMonitoring, CapBackup,
+	CapAccountsLocal,
+	CapHelperCapability,
+	CapRelayIdentity,
+}

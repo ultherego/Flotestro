@@ -31,10 +31,31 @@ func TestTheLabGateTakesNoTypedVerdict(t *testing.T) {
 	if !strings.Contains(content, "./internal/release/gatecheck") {
 		t.Error("lab-gate.yml does not run gatecheck, so nothing recomputes the verdict")
 	}
-	// The report is the only evidence there is; a run without one records
-	// nothing at all.
-	if !strings.Contains(content, "      report:\n        description: The contents of Vagrant/.gate/<sha>/result.json.\n        required: true\n") {
-		t.Error("lab-gate.yml does not require the report")
+}
+
+// A pasted report cannot be checked against the bytes it claims digests of, and
+// a parser over it is not a trusted producer of evidence. The workflow takes
+// the bundle the gate produced instead; these are the four things that has to
+// mean, each of which a convenience could quietly undo.
+func TestTheLabGateJudgesEvidenceAndNotAPastedReport(t *testing.T) {
+	content := workflow(t, "lab-gate.yml")
+	if strings.Contains(content, "\n      report:") || strings.Contains(content, "inputs.report") {
+		t.Error("lab-gate.yml takes the report as an input again: nothing checks the bytes behind it")
+	}
+	// The bundle has to be fetched, not described.
+	if !strings.Contains(content, "gh release download") {
+		t.Error("lab-gate.yml fetches no evidence bundle")
+	}
+	// The tree has to come from git, in a checkout deep enough to hold it.
+	if !strings.Contains(content, "git rev-parse \"$SHA^{tree}\"") {
+		t.Error("lab-gate.yml does not read the tree of the commit out of git")
+	}
+	if !strings.Contains(content, "fetch-depth: 0") {
+		t.Error("lab-gate.yml checks out shallowly, so git cannot hold the tree it compares")
+	}
+	// And gatecheck has to be given both, or it judges less than it could.
+	if !strings.Contains(content, "-sha \"$SHA\" -tree \"$TREE\"") {
+		t.Error("lab-gate.yml does not hand gatecheck the commit and the tree git holds")
 	}
 }
 

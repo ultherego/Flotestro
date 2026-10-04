@@ -716,38 +716,243 @@ jobs:
           fi
           echo "verified $REFERENCE@$DIGEST as signed by $identity"
 
-      - name: The names a deployment reads are moved onto the verified digest
-        # Promotion, and nothing is rebuilt to do it: every name is pointed at
-        # the one manifest that was built, signed and verified a step ago. The
-        # order is the one the facts step wrote - version, commit, minor
-        # alias, latest - and it is least read first on purpose.
+      - name: The candidate digest, read back from the registry
+        # The build stops here. Every name a deployment reads is moved by the
+        # promote job, which needs an approval this job does not hold: a build
+        # that could move those names itself is a build that can publish a
+        # release, and that was the finding - this workflow has
+        # workflow_dispatch, dispatch can be run on a tag, and push=true comes
+        # from the ref type alone.
         #
-        # imagetools create with one index as its source copies that index
-        # byte for byte, so the digest comes out the same - but "so it should"
-        # is not a thing to publish on. Each move is therefore read back
-        # before the next one starts, because a copy that had re-serialised
-        # the manifest would be a name pointing at a digest nothing verified,
-        # and the run has to stop at that name rather than carry the mistake
-        # all the way to latest.
-        #
-        # This is the window that remains, and it cannot be closed here: a
-        # registry has no way to move four names in one transaction, so a run
-        # that dies between two of them leaves some names on the new release
-        # and some on the one before. What it costs is bounded by the order -
-        # the worst case is a version tag that has moved and a latest that has
-        # not, which is a fleet still on the old release and an operator who
-        # can pin the new one. The names that did move are therefore printed
-        # in the failure, because that is the state somebody has to reason
-        # about. A whole re-run will not repair it: the version tag has moved,
-        # and the check further up refuses to republish it. What repairs it is
-        # pointing the names still missing at the digest in the error, which is
-        # the digest this run verified.
+        # Asked of the registry rather than taken from the build: what gets
+        # promoted is what the registry serves under the candidate tag.
         if: steps.facts.outputs.push == 'true'
         env:
-          DIGEST: ${{ steps.build.outputs.digest }}
+          BUILT: ${{ steps.build.outputs.digest }}
+          CANDIDATE: ${{ steps.facts.outputs.candidate }}
+        run: |
+          set -euo pipefail
+          published="sha256:$(docker buildx imagetools inspect --raw "$CANDIDATE" \
+            | sha256sum | cut -d' ' -f1)"
+          case "$published" in
+            sha256:*) ;;
+            *) echo "the registry gave no digest for $CANDIDATE" >&2; exit 1 ;;
+          esac
+          if [ "$published" != "$BUILT" ]; then
+            echo "the registry serves $published under $CANDIDATE; the run built $BUILT" >&2
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/digests"
+          # The target is named too: the promote job verifies and moves each
+          # image's own names and must not have to guess which file is which.
+          printf '%s %s %s %s\n' "${{ matrix.target }}" "${{ matrix.image }}" \
+            "${{ steps.facts.outputs.version }}" "$published" \
+            > "$RUNNER_TEMP/digests/${{ matrix.target }}.txt"
+
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        if: steps.facts.outputs.push == 'true'
+        with:
+          name: digest-${{ matrix.target }}
+          path: ${{ runner.temp }}/digests
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: bills-${{ matrix.target }}
+          path: ${{ runner.temp }}/bills
+          if-no-files-found: error
+
+
+  # Promotion: the step where a build becomes a release.
+  #
+  # It is its own job, and not a step of the build, because of what the build
+  # job can be made to do. This workflow has workflow_dispatch; a dispatch can
+  # be run on a tag; push=true follows from the ref type alone; and the only
+  # thing standing between that and the public names was an "if" on the event
+  # not being a pull request. The approval that gates a release lives on the
+  # sign job of release.yml, which a dispatch of this workflow never touches.
+  #
+  # So this job carries the approval itself, and asks its three questions from
+  # scratch rather than inheriting an answer from however the run was started:
+  #
+  #   1. the tag's commit is an ancestor of the default branch;
+  #   2. the laboratory recorded verdict=pass on that commit;
+  #   3. the candidate manifest verifies as signed by this workflow, at this
+  #      tag - an identity built from the repository and the ref, not read out
+  #      of the token of the run doing the verifying.
+  #
+  # Only then is a name a deployment reads pointed at the digest.
+  promote:
+    name: Promote ${{ matrix.target }}
+    needs: [context, images]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # The approval. A release of the images waits here for the same people the
+    # signed packages wait for.
+    environment: release-signing
+    permissions:
+      contents: read
+      packages: write
+      statuses: read
+    strategy:
+      # Never in parallel and never past a failure: the names are moved least
+      # read first, and a second image racing ahead would publish a release
+      # whose first image stopped half way.
+      fail-fast: true
+      max-parallel: 1
+      matrix:
+        include:
+          - target: control-plane
+            image: flotestro-control-plane
+          - target: relay
+            image: flotestro-relay
+          - target: admin-tools
+            image: flotestro-admin-tools
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # The ancestry question needs the history, and a shallow clone has
+          # none to answer it with.
+          fetch-depth: 0
+
+      - name: The tag points at a commit of the default branch
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          commit="$(git rev-parse HEAD)"
+          branch="${DEFAULT_BRANCH:-main}"
+          git fetch --no-tags origin "$branch"
+          if ! git merge-base --is-ancestor "$commit" "origin/$branch"; then
+            echo "::error title=The tag is not on the default branch::$commit is not an ancestor of origin/$branch; a release is made of code that was merged" >&2
+            exit 1
+          fi
+          echo "commit=$commit" >> "$GITHUB_ENV"
+          echo "$commit is on origin/$branch"
+
+      - name: The laboratory passed on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # The status, read for this commit and not for the branch: the gate
+          # is about a tree, and a later green commit says nothing about this
+          # one. The description begins with verdict=<pass|limited|fail>
+          # because lab-gate.yml writes it that way; limited is a merge and
+          # not a shipment, so only pass promotes.
+          status="$(gh api "repos/$GITHUB_REPOSITORY/commits/$commit/statuses" \
+            --jq '[.[] | select(.context == "lab-suite")][0] // empty')"
+          if [ -z "$status" ]; then
+            echo "::error title=No laboratory verdict::nothing recorded lab-suite on $commit; run the lab-gate workflow with the evidence bundle first" >&2
+            exit 1
+          fi
+          state="$(printf '%s' "$status" | jq -r .state)"
+          description="$(printf '%s' "$status" | jq -r .description)"
+          if [ "$state" != success ]; then
+            echo "::error title=The laboratory did not pass::lab-suite on $commit is $state: $description" >&2
+            exit 1
+          fi
+          case "$description" in
+            verdict=pass*) ;;
+            *) echo "::error title=Not a clean run::lab-suite on $commit says \"$description\"; a release takes verdict=pass" >&2
+               exit 1 ;;
+          esac
+          echo "lab-suite on $commit: $description"
+
+      - uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3.7.1
+
+      - uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: digest-${{ matrix.target }}
+          path: ${{ runner.temp }}/digests
+
+      - name: What this job is promoting
+        id: facts
+        env:
+          REGISTRY: ghcr.io
+        run: |
+          set -euo pipefail
+          read -r target image version digest < "$RUNNER_TEMP/digests/${{ matrix.target }}.txt"
+          if [ "$target" != "${{ matrix.target }}" ] || [ "$image" != "${{ matrix.image }}" ]; then
+            echo "::error::the digest artefact is about $target/$image and this job promotes ${{ matrix.target }}/${{ matrix.image }}" >&2
+            exit 1
+          fi
+          case "$digest" in sha256:*) ;; *) echo "::error::$digest is not a digest" >&2; exit 1 ;; esac
+          # The version the build recorded has to be the tag this run is on, or
+          # the artefact belongs to another release.
+          tag_version="${GITHUB_REF_NAME#v}"
+          if [ "$version" != "$tag_version" ]; then
+            echo "::error::the build recorded version $version and this run is on $tag_version" >&2
+            exit 1
+          fi
+          owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          repository="$REGISTRY/$owner/$image"
+          # The same order as the build wrote it, and for the same reason:
+          # least read first, so that a failure part way through stops short of
+          # the name most of the fleet follows.
+          promote="$repository:$version,$repository:sha-${commit:0:12}"
+          case "$version" in
+            *-*) ;;
+            *)   promote="$promote,$repository:${version%.*},$repository:latest" ;;
+          esac
+          {
+            echo "repository=$repository"
+            echo "digest=$digest"
+            echo "version=$version"
+            echo "promote=$promote"
+          } >> "$GITHUB_OUTPUT"
+          echo "promoting $repository@$digest as $promote"
+
+      - uses: sigstore/cosign-installer@dc72c7d5c4d10cd6bcb8cf6e3fd625a9e5e537da # v3.7.0
+
+      - name: The candidate verifies as signed by the build of this tag
+        env:
           REFERENCE: ${{ steps.facts.outputs.repository }}
+          DIGEST: ${{ steps.facts.outputs.digest }}
+        run: |
+          set -euo pipefail
+          # The identity is constructed, not discovered. Taking the signing
+          # workflow out of this run's own token and verifying against it asks
+          # "was this signed by whatever signed it", which the run satisfies by
+          # existing. Built from the repository and the ref, it asks the
+          # question that matters: was this manifest signed by the build of
+          # this repository, on this tag.
+          identity="https://github.com/$GITHUB_REPOSITORY/.github/workflows/images.yml@$GITHUB_REF"
+          if ! cosign verify \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity "$identity" \
+            "$REFERENCE@$DIGEST" > /dev/null; then
+            echo "::error title=Signature does not verify::$REFERENCE@$DIGEST does not verify as signed by $identity; no name was moved" >&2
+            exit 1
+          fi
+          echo "verified $REFERENCE@$DIGEST as signed by $identity"
+
+      - name: The names a deployment reads are moved onto the verified digest
+        # Nothing is rebuilt to promote: every name is pointed at the one
+        # manifest that was built, signed and verified. Each move is read back
+        # before the next starts, because a copy that had re-serialised the
+        # manifest would be a name pointing at a digest nothing verified.
+        #
+        # The window that remains cannot be closed here: a registry has no way
+        # to move four names in one transaction, so a run that dies between two
+        # of them leaves some names on the new release and some on the one
+        # before. The order bounds what that costs - the worst case is a moved
+        # version tag and an unmoved latest, which is a fleet still on the old
+        # release and an operator who can pin the new one. The names that did
+        # move are printed, because that is the state somebody has to reason
+        # about; a re-run will not repair it, pointing the missing names at the
+        # digest in the error will.
+        env:
+          REFERENCE: ${{ steps.facts.outputs.repository }}
+          DIGEST: ${{ steps.facts.outputs.digest }}
           PROMOTE: ${{ steps.facts.outputs.promote }}
-          SIGNED: ${{ steps.sign.outputs.signed }}
         run: |
           set -euo pipefail
           IFS=',' read -r -a wanted <<< "$PROMOTE"
@@ -765,9 +970,6 @@ jobs:
             [ -n "$tag" ] || continue
             docker buildx imagetools create --tag "$tag" "$REFERENCE@$DIGEST" \
               || stop "$tag could not be pointed at $DIGEST"
-            # The digest of a manifest is the sha256 of its own bytes, so what
-            # the registry now serves under the name is computed from what it
-            # hands back.
             published="sha256:$(docker buildx imagetools inspect --raw "$tag" \
               | sha256sum | cut -d' ' -f1)"
             if [ "$published" != "$DIGEST" ]; then
@@ -776,9 +978,6 @@ jobs:
             moved+=("$tag")
             echo "$tag -> $DIGEST"
           done
-          if [ "${SIGNED:-false}" != true ]; then
-            echo "::warning title=Unsigned image published::$REFERENCE@$DIGEST carries no signature; the names moved because this is a pre-release, which is allowed to ship unsigned"
-          fi
           {
             echo "### ${REFERENCE##*/}"
             echo
@@ -790,55 +989,15 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: The digest of this image, read back from the registry
-        if: steps.facts.outputs.push == 'true'
-        env:
-          BUILT: ${{ steps.build.outputs.digest }}
-          REFERENCE: ${{ env.REGISTRY }}/${{ steps.facts.outputs.owner }}/${{ matrix.image }}:${{ steps.facts.outputs.version }}
-        run: |
-          set -euo pipefail
-          # Asked of the registry rather than taken from the build: what a
-          # deployment pulls is what the registry serves under that tag, and the
-          # two differing is exactly the case a pinned digest exists to catch.
-          # The version tag is the one that was promoted, so this is also the
-          # last word on whether the promotion above landed where it said.
-          # The digest of a manifest is the sha256 of its own bytes, so it is
-          # computed here rather than read out of a template field whose name
-          # only a real tag would ever exercise.
-          published="sha256:$(docker buildx imagetools inspect --raw "$REFERENCE" \
-            | sha256sum | cut -d' ' -f1)"
-          case "$published" in
-            sha256:*) ;;
-            *) echo "the registry gave no digest for $REFERENCE" >&2; exit 1 ;;
-          esac
-          if [ "$published" != "$BUILT" ]; then
-            echo "the registry serves $published under $REFERENCE; the run built, signed and verified $BUILT" >&2
-            exit 1
-          fi
-          mkdir -p "$RUNNER_TEMP/digests"
-          printf '%s %s %s\n' "${{ matrix.image }}" \
-            "${{ steps.facts.outputs.version }}" "$published" \
-            > "$RUNNER_TEMP/digests/${{ matrix.target }}.txt"
-
-      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
-        if: steps.facts.outputs.push == 'true'
-        with:
-          name: digest-${{ matrix.target }}
-          path: ${{ runner.temp }}/digests
-          if-no-files-found: error
-
-      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
-        with:
-          name: bills-${{ matrix.target }}
-          path: ${{ runner.temp }}/bills
-          if-no-files-found: error
-
   # What an operator actually needs out of a release: three lines to paste.
   # The job exists because a digest that has to be fished out of three other
   # jobs' logs is a digest nobody pins.
   pins:
     name: The digests to pin
-    needs: images
+    # After the promotion, not after the build: the lines an operator pastes
+    # name tags, and those tags point at the release only once promote moved
+    # them.
+    needs: promote
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -861,9 +1020,11 @@ jobs:
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
           owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
-          control_plane="$(awk '$1 == "flotestro-control-plane" { print $3 }' digests/*.txt)"
-          relay="$(awk '$1 == "flotestro-relay" { print $3 }' digests/*.txt)"
-          tools="$(awk '$1 == "flotestro-admin-tools" { print $3 }' digests/*.txt)"
+          # The build writes "target image version digest", so the image is the
+          # second field and the digest the fourth.
+          control_plane="$(awk '$2 == "flotestro-control-plane" { print $4 }' digests/*.txt)"
+          relay="$(awk '$2 == "flotestro-relay" { print $4 }' digests/*.txt)"
+          tools="$(awk '$2 == "flotestro-admin-tools" { print $4 }' digests/*.txt)"
           for value in "$control_plane" "$relay" "$tools"; do
             case "$value" in
               sha256:*) ;;

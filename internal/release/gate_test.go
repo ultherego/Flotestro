@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/ultherego/flotestro/internal/agent"
 )
 
 // A report of a run that proves what it says it proves. The tests below take
@@ -51,10 +53,37 @@ func goodReport() map[string]any {
 			"discovered": 310, "passed": 310, "failed": 0,
 			"skipped": 0, "absent": 0, "not_applicable": 0, "waived": 0,
 		},
-		"skips":   []map[string]string{},
-		"logs":    map[string]string{"go_test_json": "sha256:" + strings.Repeat("c", 64)},
-		"verdict": "pass",
+		"skips":               []map[string]string{},
+		"logs":                map[string]string{"go_test_json": "sha256:" + strings.Repeat("c", 64)},
+		"capability_manifest": manifestOverTheFleet(),
+		"verdict":             "pass",
 	}
+}
+
+// manifestOverTheFleet accounts for every adapter the agent declares: the two
+// hosts of the fixture offer them, except the ones a laboratory cannot have,
+// which carry their reason.
+func manifestOverTheFleet() map[string]any {
+	manifest := map[string]any{}
+	for _, capability := range agent.AllCapabilities {
+		switch capability {
+		case agent.CapPacman:
+			manifest[capability] = map[string]any{"hosts": []string{}, "absent_reason": "no arch host in this run"}
+		default:
+			manifest[capability] = map[string]any{"hosts": []string{"agent-debian"}}
+		}
+	}
+	return manifest
+}
+
+// manifestWithoutAFleet is the manifest of a run that had no hosts to offer an
+// adapter: every entry carries its reason instead of a host.
+func manifestWithoutAFleet() map[string]any {
+	manifest := map[string]any{}
+	for _, capability := range agent.AllCapabilities {
+		manifest[capability] = map[string]any{"hosts": []string{}, "absent_reason": "a quick run has no fleet"}
+	}
+	return manifest
 }
 
 func encode(t *testing.T, report map[string]any) []byte {
@@ -92,7 +121,7 @@ func TestEveryRequiredFieldIsRequiredByItsPresence(t *testing.T) {
 }
 
 func TestAGoodReportPasses(t *testing.T) {
-	_, verdict, reasons, err := CheckGateReport(encode(t, goodReport()), "0123456789abcdef0123456789abcdef01234567")
+	_, verdict, reasons, err := checkGateReport(encode(t, goodReport()), "0123456789abcdef0123456789abcdef01234567")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +298,7 @@ func TestAClaimedVerdictThatTheEvidenceDeniesIsRefused(t *testing.T) {
 	report["stages"] = map[string]any{
 		"integration": map[string]any{"result": "fail", "seconds": 2100},
 	}
-	_, _, _, err := CheckGateReport(encode(t, report), "")
+	_, _, _, err := checkGateReport(encode(t, report), "")
 	if err == nil {
 		t.Fatal("a report that claims a pass over a failed stage was accepted")
 	}
@@ -279,7 +308,7 @@ func TestAClaimedVerdictThatTheEvidenceDeniesIsRefused(t *testing.T) {
 }
 
 func TestAReportAboutAnotherCommitIsRefused(t *testing.T) {
-	_, _, _, err := CheckGateReport(encode(t, goodReport()), strings.Repeat("f", 40))
+	_, _, _, err := checkGateReport(encode(t, goodReport()), strings.Repeat("f", 40))
 	if err == nil || !strings.Contains(err.Error(), "the same commit") {
 		t.Fatalf("unexpected refusal: %v", err)
 	}
@@ -325,6 +354,9 @@ func TestAQuickReportWithoutASuiteLogIsStillReadable(t *testing.T) {
 	report["logs"] = map[string]string{}
 	report["hosts"] = []map[string]string{}
 	report["agents"] = []map[string]string{}
+	// A quick run has no fleet, so no adapter was offered anywhere and each one
+	// says why.
+	report["capability_manifest"] = manifestWithoutAFleet()
 	report["counts"] = map[string]int{
 		"discovered": 40, "passed": 40, "failed": 0,
 		"skipped": 0, "absent": 0, "not_applicable": 0, "waived": 0,
