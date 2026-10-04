@@ -1357,6 +1357,40 @@ message FileRequest {
   // digest this host never kept is refused with file_version_unknown
   // rather than answered with the newest copy.
   string version_sha256 = 11;
+  // SecretReceipt is what the panel signed over the bytes it released. A
+  // write that fills the file from the secret store carries it, and without
+  // it the helper refuses: the capability cannot carry the digest, because
+  // version 0 means "whatever is current when the task is delivered" and the
+  // panel does not yet know the content when it signs the consent.
+  SecretReceipt secret_receipt = 12;
+}
+
+// SecretReceipt binds the bytes of a released secret to the consent they
+// were released under.
+//
+// Until it existed, a write whose content came from the secret store was
+// checked against nothing at all: the request said "from the secret
+// db-password" and the helper wrote the bytes of the request. The place such
+// a file goes is often worth more than the secret - authorized_keys, a rule
+// under sudoers.d, a systemd unit.
+//
+// It is signed by the same key the panel signs a capability with, and
+// checked the same way: against the keyring, then against the host, the task
+// and the secret the consent already names.
+message SecretReceipt {
+  string host_id = 1;
+  string task_id = 2;
+  string secret_name = 3;
+  // The version actually released. The consent may name 0, meaning the
+  // current one; this says which that turned out to be.
+  uint32 secret_version = 4;
+  // The digest of the bytes released, in the same form the rest of the
+  // protocol uses for one.
+  string sha256 = 5;
+  int64 issued_unix = 6;
+  // The key that signed this, and the signature over the fields above.
+  string signed_by_key_id = 7;
+  bytes signature = 8;
 }
 
 message FileResult {
