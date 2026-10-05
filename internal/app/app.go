@@ -1699,15 +1699,31 @@ type subjectPermissions struct {
 // can do and wrong for deciding whether they may do it here: a creator holding
 // firewall.write over one site held the grant for a host in another.
 func (p subjectPermissions) PermissionsOfSubject(ctx context.Context, subject, hostID string) ([]string, error) {
-	principal, err := p.store.PrincipalBySubject(ctx, subject)
-	switch {
-	case errors.Is(err, authz.ErrNotFound):
+	// A system actor is named, not guessed at. The panel's own machinery
+	// records what ordered a task - "campaign:<name>", "schedule:<id>",
+	// "remediation:<plan>", "policy:<rule>" - and none of those is a principal.
+	// Reading their absence as "a subject the panel never knew" was how a
+	// blocked operator's task used to pass; reading it as "blocked" would stop
+	// every campaign. Neither is an answer about an account, because there is
+	// no account.
+	if systemActor(subject) {
 		return nil, nil
-	case errors.Is(err, authz.ErrUnauthenticated):
-		// The row exists and is disabled or denied; without a row at all the
-		// store answers ErrNotFound above.
+	}
+	known, blocked, err := p.store.SubjectState(ctx, subject)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case !known:
+		// Somebody ordered this task, so the subject existed when it was
+		// queued and does not now. That is a right that is gone, not a system
+		// actor and not a question waiting for an answer.
+		return nil, fmt.Errorf("%w: the panel holds no identity under %q", scheduler.ErrSubjectBlocked, subject)
+	case blocked:
 		return nil, scheduler.ErrSubjectBlocked
-	case err != nil:
+	}
+	principal, err := p.store.PrincipalBySubject(ctx, subject)
+	if err != nil {
 		return nil, err
 	}
 	target, err := p.hostScope(ctx, hostID)

@@ -179,7 +179,7 @@ func VerifyEvidence(bundle io.Reader, sha, treeFromGit string) (Evidence, error)
 	// and whose report claimed 803 passed over a log holding a failure was
 	// accepted, because nothing read the log it had just verified.
 	outcome, err := countFromLogs(files[evidenceLogs+"go_test_json"],
-		files[evidenceLogs+"playwright_json"])
+		files[evidenceLogs+"playwright_json"], len(report.Logs) > 0)
 	if err != nil {
 		return Evidence{}, fmt.Errorf("the logs of the run cannot be read: %w", err)
 	}

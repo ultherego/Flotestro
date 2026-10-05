@@ -50,7 +50,10 @@ type suiteOutcome struct {
 // carries. An absent log contributes nothing: a quick run has no suite log
 // because it ran no suite, and that is a verdict matter rather than a malformed
 // report.
-func countFromLogs(goTestJSON, playwrightJSON []byte) (suiteOutcome, error) {
+// named says the report claims a log of the run. An empty file the report names
+// is a run that proved nothing, and until the two were told apart the checker
+// read a zero-byte log exactly as it reads a quick run that carries none.
+func countFromLogs(goTestJSON, playwrightJSON []byte, named bool) (suiteOutcome, error) {
 	outcome := suiteOutcome{}
 	if len(goTestJSON) > 0 {
 		if err := outcome.addGoSuite(goTestJSON); err != nil {
@@ -62,10 +65,7 @@ func countFromLogs(goTestJSON, playwrightJSON []byte) (suiteOutcome, error) {
 			return suiteOutcome{}, err
 		}
 	}
-	if len(goTestJSON) == 0 && len(playwrightJSON) == 0 {
-		return outcome, nil
-	}
-	if outcome.Counts.Discovered == 0 {
+	if named && outcome.Counts.Discovered == 0 {
 		outcome.Problems = append(outcome.Problems,
 			"the logs of the run name no scenario at all")
 	}
@@ -89,6 +89,8 @@ func (o *suiteOutcome) addGoSuite(raw []byte) error {
 	final := map[key]string{}
 
 	started := map[key]bool{}
+	startedPackages := map[string]bool{}
+	endedPackages := map[string]bool{}
 	var packageFailures []string
 	for _, line := range strings.Split(string(raw), "\n") {
 		line = strings.TrimSpace(line)
@@ -102,6 +104,12 @@ func (o *suiteOutcome) addGoSuite(raw []byte) error {
 			continue
 		}
 		if event.Test == "" {
+			switch event.Action {
+			case "start":
+				startedPackages[event.Package] = true
+			case "pass", "fail", "skip":
+				endedPackages[event.Package] = true
+			}
 			// A package-level verdict. "skip" there only means the package
 			// holds no test files, which is nothing anybody was owed - but
 			// "fail" is the package itself failing after its tests are done:
@@ -122,6 +130,22 @@ func (o *suiteOutcome) addGoSuite(raw []byte) error {
 		case "pass", "fail", "skip":
 			final[at] = event.Action
 		}
+	}
+
+	// A package that started and never reached a verdict is a process that was
+	// killed: the runner reports nothing for it, and every test it had already
+	// finished still counts. On 05.10 a real run interrupted after a passing
+	// test came out of the arithmetic clean.
+	var unfinishedPackages []string
+	for name := range startedPackages {
+		if !endedPackages[name] {
+			unfinishedPackages = append(unfinishedPackages, name)
+		}
+	}
+	sort.Strings(unfinishedPackages)
+	for _, name := range unfinishedPackages {
+		o.Problems = append(o.Problems,
+			fmt.Sprintf("the package %s started and never reached a verdict", name))
 	}
 
 	sort.Strings(packageFailures)
@@ -202,6 +226,18 @@ func (o *suiteOutcome) addGoSuite(raw []byte) error {
 // playwrightReport is the part of Playwright's JSON report this reads.
 type playwrightReport struct {
 	Suites []playwrightSuite `json:"suites"`
+	// Errors are the failures that belong to no test: a globalSetup or
+	// globalTeardown that threw, a configuration the runner refused. The run
+	// exits 1 and every spec in it may still read "expected", so counting
+	// specs alone comes out clean - which is what a real teardown failure did
+	// on 05.10.
+	Errors []struct {
+		Message  string `json:"message"`
+		Value    string `json:"value"`
+		Location struct {
+			File string `json:"file"`
+		} `json:"location"`
+	} `json:"errors"`
 }
 
 type playwrightSuite struct {
@@ -234,6 +270,14 @@ func (o *suiteOutcome) addPlaywright(raw []byte) error {
 	}
 	for _, suite := range report.Suites {
 		o.walkPlaywright(suite, []string{suite.Title})
+	}
+	for _, failure := range report.Errors {
+		where := failure.Location.File
+		if where == "" {
+			where = "the run itself"
+		}
+		o.Problems = append(o.Problems,
+			fmt.Sprintf("the browser suite failed outside any test, in %s", where))
 	}
 	return nil
 }

@@ -368,6 +368,28 @@ func (s *Store) Authenticate(ctx context.Context, value string) (*Principal, err
 // says. An unanswered question about the groups is returned as
 // ErrGroupsUnavailable: the caller pauses with that reason rather than
 // dispatching on rights nobody confirmed.
+// SubjectState says whether the panel holds an identity under that subject and
+// whether it may do anything.
+//
+// PrincipalBySubject answers ErrUnauthenticated for a row that is disabled or
+// denied **and** for no row at all, because the condition is in its WHERE
+// clause - so a caller that has to tell a blocked operator from a subject the
+// panel never knew cannot do it with that call. This one asks without the
+// condition and reports what it found.
+func (s *Store) SubjectState(ctx context.Context, subject string) (known, blocked bool, err error) {
+	const query = `
+		select disabled_at is not null or denied_at is not null
+		from principals where subject = $1`
+	err = s.pool.QueryRow(ctx, query, subject).Scan(&blocked)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, err
+	}
+	return true, blocked, nil
+}
+
 func (s *Store) PrincipalBySubject(ctx context.Context, subject string) (*Principal, error) {
 	const query = `
 		select id, subject, display_name, kind, coalesce(issuer, ''),
