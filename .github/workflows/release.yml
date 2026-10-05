@@ -838,18 +838,20 @@ jobs:
 
       - uses: sigstore/cosign-installer@dc72c7d5c4d10cd6bcb8cf6e3fd625a9e5e537da # v3.7.0
 
-      - name: Build and publish
+      - name: Build under a candidate tag nobody follows
         id: publish
+        # The names a deployment reads are moved at the end of this job, after
+        # the signature has been read back. The first shape of this step
+        # pushed :version, :latest and the minor alias and signed afterwards,
+        # so a failure of the signing or of its verification ended the run
+        # with those names already pointing at an unsigned image - the run was
+        # red and the registry was wrong. images.yml had solved this one job
+        # above the one whose signing command was copied here.
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
           image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/flotestro-package-repository"
-          tags="--tag $image:$version"
-          # latest and the minor alias follow a finished release only.
-          case "$version" in
-          *-*) ;;
-          *)   tags="$tags --tag $image:latest --tag $image:${version%.*}" ;;
-          esac
+          candidate="$image:candidate-${GITHUB_SHA:0:12}"
           docker buildx build source \
             --file source/docker/Containerfile \
             --target package-repository \
@@ -860,15 +862,30 @@ jobs:
             --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --provenance=true --sbom=true \
             --metadata-file "$RUNNER_TEMP/metadata.json" \
-            $tags --push
-          digest="$(jq -r '."containerimage.digest"' "$RUNNER_TEMP/metadata.json")"
-          case "$digest" in
+            --tag "$candidate" --push
+          built="$(jq -r '."containerimage.digest"' "$RUNNER_TEMP/metadata.json")"
+          # Asked of the registry rather than taken from the build, and then
+          # held to agreeing with it: what gets signed and promoted is what the
+          # registry serves under that tag, and it has to be what this run
+          # built.
+          published="sha256:$(docker buildx imagetools inspect --raw "$candidate" \
+            | sha256sum | cut -d' ' -f1)"
+          case "$published" in
           sha256:*) ;;
-          *) echo "the build reported no digest to sign: $digest" >&2; exit 1 ;;
+          *) echo "the registry gave no digest for $candidate" >&2; exit 1 ;;
           esac
-          echo "image=$image" >> "$GITHUB_OUTPUT"
-          echo "digest=$digest" >> "$GITHUB_OUTPUT"
-          echo "published $image@$digest"
+          if [ "$published" != "$built" ]; then
+            echo "the registry serves $published under $candidate; the run built $built" >&2
+            exit 1
+          fi
+          digest="$published"
+          {
+            echo "image=$image"
+            echo "candidate=$candidate"
+            echo "digest=$digest"
+            echo "version=$version"
+          } >> "$GITHUB_OUTPUT"
+          echo "the candidate is $candidate@$digest"
 
       - name: Sign the image the air-gap procedure verifies
         # The procedure tells an operator to check this signature on the
@@ -890,12 +907,13 @@ jobs:
           cosign sign --yes --recursive "$IMAGE@$DIGEST"
           echo "signed $IMAGE@$DIGEST"
 
-      - name: The signature is read back before the release stands
+      - name: The signature is read back before any name is moved
         # "cosign sign exited zero" is not the same statement as "the operator
         # can verify it", and the difference is what the procedure rests on.
         # It is read back with the same command the documentation gives, so a
         # signature made under an identity that command does not accept stops
-        # the release here rather than at a site with no network.
+        # the release here - while every name a deployment follows still points
+        # at the release before this one.
         env:
           IMAGE: ${{ steps.publish.outputs.image }}
           DIGEST: ${{ steps.publish.outputs.digest }}
@@ -906,3 +924,20 @@ jobs:
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             "$IMAGE@$DIGEST" > /dev/null
           echo "the operator's own command verifies $IMAGE@$DIGEST"
+
+      - name: Move the names a deployment follows
+        # Last, and only on the digest that verified. latest and the minor
+        # alias follow a finished release only.
+        env:
+          IMAGE: ${{ steps.publish.outputs.image }}
+          DIGEST: ${{ steps.publish.outputs.digest }}
+          VERSION: ${{ steps.publish.outputs.version }}
+        run: |
+          set -euo pipefail
+          names=(--tag "$IMAGE:$VERSION")
+          case "$VERSION" in
+          *-*) ;;
+          *)   names+=(--tag "$IMAGE:latest" --tag "$IMAGE:${VERSION%.*}") ;;
+          esac
+          docker buildx imagetools create "${names[@]}" "$IMAGE@$DIGEST"
+          echo "moved ${#names[@]} name(s) to $IMAGE@$DIGEST"

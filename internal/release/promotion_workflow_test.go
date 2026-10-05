@@ -131,3 +131,130 @@ func TestThePromotionReadsTheVerdictOfItsOwnCommit(t *testing.T) {
 		t.Error("the promote job does not name the status it reads")
 	}
 }
+
+// The same question, asked of every workflow rather than of one.
+//
+// TestOnlyAnApprovedJobMovesThePublicNames above reads images.yml, and that is
+// how a job added to release.yml came to push :version, :latest and the minor
+// alias straight from the build and sign afterwards: the rule was being kept in
+// one file, so breaking it in another file broke nothing a test could see. A
+// failure of the signing left the run red and the registry pointing at an
+// unsigned image, which is the worse of the two outcomes.
+//
+// The invariant: a job that moves a name a deployment follows must read a
+// signature back in that same job. Promotion by imagetools create is the shape
+// that moves a name; a build pushes a candidate nobody follows.
+func TestNoWorkflowMovesANameWithoutReadingASignature(t *testing.T) {
+	dir := filepath.Join("..", "..", ".github", "workflows")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	promotions := 0
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || (!strings.HasSuffix(name, ".yml") && !strings.HasSuffix(name, ".yaml")) {
+			continue
+		}
+		workflow := parsedWorkflow(t, name)
+		for job := range workflow.Jobs {
+			script := workflow.script(job)
+			// Asked of the build invocation itself, and of every job - not of
+			// jobs that do not promote. The first shape of this test let a job
+			// push :version and :latest from the build and pass, because it
+			// also promoted later on, so the question about pushing was never
+			// reached. The structure of the test carried the assumption that a
+			// job either pushes or promotes.
+			for _, tag := range buildTags(script) {
+				if !strings.Contains(tag, "candidate") {
+					t.Errorf("%s: the job %s builds with --tag %s and pushes it, "+
+						"so a name a deployment follows is moved before anything is signed",
+						name, job, tag)
+				}
+			}
+			if !strings.Contains(script, "imagetools create") {
+				continue
+			}
+			promotions++
+			if !strings.Contains(script, "cosign verify") {
+				t.Errorf("%s: the job %s moves a name without reading a signature back; "+
+					"a failure of the signing then leaves the registry pointing at an unsigned image",
+					name, job)
+			}
+		}
+	}
+	if promotions == 0 {
+		t.Fatal("no job in any workflow moves a name, so this check read nothing")
+	}
+	t.Logf("%d job(s) move a public name, each after reading a signature", promotions)
+}
+
+// And the order inside such a job: the names are moved after the verification,
+// not merely in its company. A job that promotes first and verifies second
+// passes the check above and is exactly the defect.
+func TestANameIsMovedAfterTheSignatureIsVerified(t *testing.T) {
+	dir := filepath.Join("..", "..", ".github", "workflows")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || (!strings.HasSuffix(name, ".yml") && !strings.HasSuffix(name, ".yaml")) {
+			continue
+		}
+		workflow := parsedWorkflow(t, name)
+		for job := range workflow.Jobs {
+			script := workflow.script(job)
+			move := strings.Index(script, "imagetools create")
+			verify := strings.Index(script, "cosign verify")
+			if move < 0 || verify < 0 {
+				continue
+			}
+			checked++
+			if verify > move {
+				t.Errorf("%s: the job %s moves a name at %d and verifies at %d, in that order",
+					name, job, move, verify)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no job both verifies and promotes, so this check read nothing")
+	}
+}
+
+// buildTags returns the tags every pushing `docker buildx build` in a script
+// carries. A build that does not push moves no name and is not asked.
+func buildTags(script string) []string {
+	var tags []string
+	for rest := script; ; {
+		start := strings.Index(rest, "docker buildx build")
+		if start < 0 {
+			return tags
+		}
+		rest = rest[start+len("docker buildx build"):]
+		// The invocation ends at the first line that is not a continuation.
+		invocation := rest
+		if end := strings.Index(invocation, "--push"); end >= 0 {
+			invocation = invocation[:end]
+		} else {
+			continue
+		}
+		for _, field := range strings.Fields(invocation) {
+			if field == "--tag" {
+				continue
+			}
+			if strings.HasPrefix(field, "--tag=") {
+				tags = append(tags, strings.TrimPrefix(field, "--tag="))
+			}
+		}
+		// --tag and its value are separate words in every build here.
+		fields := strings.Fields(invocation)
+		for i, field := range fields {
+			if field == "--tag" && i+1 < len(fields) {
+				tags = append(tags, fields[i+1])
+			}
+		}
+	}
+}
