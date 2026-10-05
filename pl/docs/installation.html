@@ -786,10 +786,22 @@ upstream:
     zabierz: podpis sprawdzony po przejściu byłby podpisem sprawdzonym w logu
     przejrzystości, do którego site nie dociera.</p>
 
-<pre><code>for name in control-plane package-repository admin-tools relay; do
+<pre><code># Trzy obrazy, które buduje i podpisuje workflow publikujący.
+for name in control-plane admin-tools relay; do
   reference="ghcr.io/ultherego/flotestro-$name:$version"
   cosign verify \
     --certificate-identity-regexp '^https://github\.com/ultherego/Flotestro/\.github/workflows/images\.yml@refs/tags/v' \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com "$reference" \
+    || { echo "$reference does not verify; it was not copied" &gt;&amp;2; break; }
+  docker pull "$reference"
+  docker save -o "flotestro-$name-$version.tar" "$reference"
+done
+
+# Repozytorium pakietów buduje workflow wydania, więc jego podpis nosi tożsamość tego workflow.
+for name in package-repository; do
+  reference="ghcr.io/ultherego/flotestro-$name:$version"
+  cosign verify \
+    --certificate-identity-regexp '^https://github\.com/ultherego/Flotestro/\.github/workflows/release\.yml@refs/tags/v' \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com "$reference" \
     || { echo "$reference does not verify; it was not copied" &gt;&amp;2; break; }
   docker pull "$reference"
