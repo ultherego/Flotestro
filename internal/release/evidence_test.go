@@ -15,7 +15,9 @@ import (
 // spoils exactly one thing about it.
 func goodBundle(t *testing.T) (bundle []byte, sha, tree string) {
 	t.Helper()
-	suiteLog := []byte(`{"Action":"pass","Test":"TestTheFleetAnswers"}` + "\n")
+	// The log has to say what the report says: the checker recomputes the
+	// arithmetic from these bytes, which is the whole point of carrying them.
+	suiteLog := goSuiteLog(310, 0)
 	screenshot := []byte("\x89PNG\r\n\x1a\nthe panel, as the run left it")
 
 	report := goodReport()
@@ -28,6 +30,35 @@ func goodBundle(t *testing.T) (bundle []byte, sha, tree string) {
 		"logs/go_test_json":   suiteLog,
 		"artifacts/panel.png": screenshot,
 	}), report["sha"].(string), report["tree_hash"].(string)
+}
+
+// goSuiteLog writes the events of a `go test -json` run of that many passing
+// and failing scenarios, in the shape the runner emits them.
+func goSuiteLog(passed, failed int) []byte {
+	var log strings.Builder
+	write := func(action, test string) {
+		log.WriteString(`{"Action":"run","Package":"github.com/ultherego/flotestro/tests/integration","Test":"` + test + `"}` + "\n")
+		log.WriteString(`{"Action":"` + action + `","Package":"github.com/ultherego/flotestro/tests/integration","Test":"` + test + `"}` + "\n")
+	}
+	for index := range passed {
+		write("pass", "TestScenario"+itoa(index))
+	}
+	for index := range failed {
+		write("fail", "TestFailingScenario"+itoa(index))
+	}
+	return []byte(log.String())
+}
+
+func itoa(value int) string {
+	if value == 0 {
+		return "0"
+	}
+	var digits []byte
+	for value > 0 {
+		digits = append([]byte{byte('0' + value%10)}, digits...)
+		value /= 10
+	}
+	return string(digits)
 }
 
 func digestOf(content []byte) string {
@@ -283,5 +314,129 @@ func TestAHostWithNoAgentVersionIsAFail(t *testing.T) {
 	}
 	if !containsText(reasons, "no agent version is reported for agent-fedora") {
 		t.Fatalf("the reasons do not name the host: %v", reasons)
+	}
+}
+
+// The counter-test of the verification report, run against the real checker:
+// a bundle whose SHA, tree and digests are all correct, whose report claims
+// every scenario passed, and whose log holds a failure. It used to come back
+// pass, because the digest proved the log had not been altered and nothing
+// read what the log said.
+func TestAReportThatContradictsItsOwnLogIsRefused(t *testing.T) {
+	report := goodReport()
+	// The log the report travels with: 802 passed and one failed, against a
+	// report that says 803 passed and none failed.
+	log := goSuiteLog(802, 1)
+	report["logs"] = map[string]string{"go_test_json": digestOf(log)}
+	report["artifacts"] = map[string]string{}
+	report["counts"] = map[string]int{
+		"discovered": 803, "passed": 803, "failed": 0,
+		"skipped": 0, "absent": 0, "not_applicable": 0, "waived": 0,
+	}
+	bundle := bundleOf(t, map[string][]byte{
+		"result.json":       encode(t, report),
+		"logs/go_test_json": log,
+	})
+	evidence, err := VerifyEvidence(bytes.NewReader(bundle),
+		report["sha"].(string), report["tree_hash"].(string))
+	if err == nil {
+		verdict, _ := evidence.Report.ComputeVerdict()
+		t.Fatalf("a report contradicting its own log was accepted and reached %q", verdict)
+	}
+	for _, wanted := range []string{"disagree", "passed: the report says 803", "failed: the report says 0"} {
+		if !strings.Contains(err.Error(), wanted) {
+			t.Errorf("the refusal does not say %q: %v", wanted, err)
+		}
+	}
+}
+
+// The same trick one level down: the counts add up and a skipped scenario is
+// dropped from the list, so nobody has to classify it.
+func TestASkipTheReportDoesNotListIsRefused(t *testing.T) {
+	report := goodReport()
+	log := append(goSuiteLog(309, 0),
+		[]byte(`{"Action":"output","Package":"p","Test":"TestQuietlyDropped","Output":"    FLOTESTRO-SKIP class=absent reason=\"no host had the tool\"\n"}`+"\n"+
+			`{"Action":"skip","Package":"p","Test":"TestQuietlyDropped"}`+"\n")...)
+	report["logs"] = map[string]string{"go_test_json": digestOf(log)}
+	report["artifacts"] = map[string]string{}
+	report["counts"] = map[string]int{
+		"discovered": 310, "passed": 309, "failed": 0,
+		"skipped": 1, "absent": 1, "not_applicable": 0, "waived": 0,
+	}
+	// The skip is counted and not named, so no rule can ask what kind it was.
+	report["skips"] = []map[string]string{}
+	bundle := bundleOf(t, map[string][]byte{
+		"result.json":       encode(t, report),
+		"logs/go_test_json": log,
+	})
+	_, err := VerifyEvidence(bytes.NewReader(bundle),
+		report["sha"].(string), report["tree_hash"].(string))
+	if err == nil {
+		t.Fatal("a report that counted a skip and did not name it was accepted")
+	}
+	if !strings.Contains(err.Error(), "the report does not list") {
+		t.Fatalf("the refusal does not name the dropped skip: %v", err)
+	}
+}
+
+// And the honest case: a log with a classified skip that the report lists the
+// same way is accepted, so the rule does not refuse a real run.
+func TestAClassifiedSkipTheReportNamesIsAccepted(t *testing.T) {
+	report := goodReport()
+	log := append(goSuiteLog(309, 0),
+		[]byte(`{"Action":"output","Package":"p","Test":"TestNeedsArch","Output":"    FLOTESTRO-SKIP class=not_applicable runs_on=agent-arch reason=\"pacman only\"\n"}`+"\n"+
+			`{"Action":"skip","Package":"p","Test":"TestNeedsArch"}`+"\n")...)
+	report["logs"] = map[string]string{"go_test_json": digestOf(log)}
+	report["artifacts"] = map[string]string{}
+	report["counts"] = map[string]int{
+		"discovered": 310, "passed": 309, "failed": 0,
+		"skipped": 1, "absent": 0, "not_applicable": 1, "waived": 0,
+	}
+	report["skips"] = []map[string]string{
+		{"test": "p.TestNeedsArch", "suite": "go", "class": SkipNotApplicable,
+			"runs_on": "agent-arch", "reason": "pacman only"},
+	}
+	bundle := bundleOf(t, map[string][]byte{
+		"result.json":       encode(t, report),
+		"logs/go_test_json": log,
+	})
+	if _, err := VerifyEvidence(bytes.NewReader(bundle),
+		report["sha"].(string), report["tree_hash"].(string)); err != nil {
+		t.Fatalf("an honest run was refused: %v", err)
+	}
+}
+
+// The other half of the counter-test: every capability accounted for by a
+// sentence and offered by nobody. The manifest used to make that a pass - the
+// names were all there - so a run that could order nothing came out green.
+func TestAFleetThatCouldOrderNothingIsNotAPass(t *testing.T) {
+	report := goodReport()
+	report["capability_manifest"] = manifestWithoutAFleet()
+	parsed, err := ParseGateReport(encode(t, report))
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdict, reasons := parsed.ComputeVerdict()
+	if verdict == VerdictPass {
+		t.Fatal("a run where no host offered any adapter came out pass")
+	}
+	if !containsText(reasons, "every scenario that needs it was skipped") {
+		t.Fatalf("the reasons do not say the scenarios were skipped: %v", reasons)
+	}
+}
+
+// And a real absence stays a limitation rather than a failure: a laboratory
+// without an arch host still proves everything else it ran.
+func TestOneAdapterNobodyOfferedIsALimitationAndNotAFailure(t *testing.T) {
+	report := goodReport()
+	manifest := report["capability_manifest"].(map[string]any)
+	manifest["docker"] = map[string]any{"hosts": []string{}, "absent_reason": "no container engine in this fleet"}
+	parsed, err := ParseGateReport(encode(t, report))
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdict, reasons := parsed.ComputeVerdict()
+	if verdict != VerdictLimited {
+		t.Fatalf("one adapter nobody offered reached %q, expected limited: %v", verdict, reasons)
 	}
 }

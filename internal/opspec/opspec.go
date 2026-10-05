@@ -670,6 +670,25 @@ func (a ActionType) UnderCapability() bool {
 	return ok && (spec.mutating || spec.authorized)
 }
 
+// RequiredCapabilities names every capability some operation needs. The
+// release gate asks it which adapters a run had to be able to order: a
+// capability no host offered means every scenario that needs it was skipped,
+// and a run that skipped them is not a run that proved them.
+func RequiredCapabilities() []string {
+	seen := map[string]bool{}
+	for _, spec := range actionSpecs {
+		if spec.capability != "" {
+			seen[spec.capability] = true
+		}
+	}
+	names := make([]string, 0, len(seen))
+	for name := range seen {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 // RequiredCapability returns the host capability without which the operation
 // makes no sense.
 func (a ActionType) RequiredCapability() string {

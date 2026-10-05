@@ -56,8 +56,14 @@ func goodReport() map[string]any {
 			"discovered": 310, "passed": 310, "failed": 0,
 			"skipped": 0, "absent": 0, "not_applicable": 0, "waived": 0,
 		},
-		"skips":               []map[string]string{},
-		"logs":                map[string]string{"go_test_json": "sha256:" + strings.Repeat("c", 64)},
+		"skips": []map[string]string{},
+		"logs":  map[string]string{"go_test_json": "sha256:" + strings.Repeat("c", 64)},
+		// A full run leaves a log per stage beside the report; a bundle with
+		// none carries only the report's word for what the stages did.
+		"artifacts": map[string]string{
+			"integration.log": "sha256:" + strings.Repeat("d", 64),
+			"panel.log":       "sha256:" + strings.Repeat("e", 64),
+		},
 		"capability_manifest": manifestOverTheFleet(),
 		"verdict":             "pass",
 	}

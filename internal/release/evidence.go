@@ -168,6 +168,23 @@ func VerifyEvidence(bundle io.Reader, sha, treeFromGit string) (Evidence, error)
 			strings.Join(unaccounted, ", "))
 	}
 
+	// The numbers of the run, recomputed from the logs that just proved they
+	// are the bytes the run produced. Until this existed the report was the
+	// authority on its own arithmetic: a bundle whose every digest was right
+	// and whose report claimed 803 passed over a log holding a failure was
+	// accepted, because nothing read the log it had just verified.
+	if outcome, err := countFromLogs(files[evidenceLogs+"go_test_json"],
+		files[evidenceLogs+"playwright_json"]); err != nil {
+		return Evidence{}, fmt.Errorf("the logs of the run cannot be read: %w", err)
+	} else if report.Counts != nil && (len(files[evidenceLogs+"go_test_json"]) > 0 ||
+		len(files[evidenceLogs+"playwright_json"]) > 0) {
+		if differs := report.disagreement(outcome); len(differs) > 0 {
+			return Evidence{}, fmt.Errorf(
+				"the report and the logs it travels with disagree: %s",
+				strings.Join(differs, "; "))
+		}
+	}
+
 	// The digest of the bundle is only complete once the whole stream has been
 	// read; the tar reader stops at the end of the last entry.
 	if _, err := io.Copy(io.Discard, counted); err != nil {

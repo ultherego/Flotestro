@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ultherego/flotestro/internal/agent"
+	"github.com/ultherego/flotestro/internal/opspec"
 )
 
 // GateSchemaVersion is the shape of the laboratory's result.json this code
@@ -179,6 +180,23 @@ func ParseGateReport(data []byte) (GateReport, error) {
 	}
 	return report, nil
 }
+
+// mustBeOrderable is every adapter that some operation needs and the agent
+// declares. Built from the product's own two lists rather than written out, so
+// an adapter added to either is covered the day it is added.
+var mustBeOrderable = func() map[string]bool {
+	declared := map[string]bool{}
+	for _, capability := range agent.AllCapabilities {
+		declared[capability] = true
+	}
+	needed := map[string]bool{}
+	for _, capability := range opspec.RequiredCapabilities() {
+		if declared[capability] {
+			needed[capability] = true
+		}
+	}
+	return needed
+}()
 
 // panelHost is the machine that runs the control plane rather than an agent, so
 // the report names it as a host and no agent version belongs to it.
@@ -411,10 +429,29 @@ func (r GateReport) ComputeVerdict() (string, []string) {
 			fatal = append(fatal, "the run names no agent: nothing says the fleet carried a build of this commit")
 		}
 		for _, capability := range agent.AllCapabilities {
-			if _, accounted := r.CapabilityManifest[capability]; !accounted {
+			entry, accounted := r.CapabilityManifest[capability]
+			if !accounted {
 				fatal = append(fatal, fmt.Sprintf(
 					"the capability manifest says nothing about %s, which the agent declares", capability))
+				continue
 			}
+			// Accounting for a capability by name is not coverage. An adapter
+			// no host offered means every scenario that needs it was skipped,
+			// and the manifest said so in a sentence nobody had to read: the
+			// whole manifest could be absent with a reason and the run still
+			// came out pass. A reason makes it a limitation, which is a
+			// verdict of its own and never a pass.
+			if len(entry.Hosts) == 0 && mustBeOrderable[capability] {
+				limits = append(limits, fmt.Sprintf(
+					"no host offered %s, so every scenario that needs it was skipped: %s",
+					capability, entry.Absent))
+			}
+		}
+		// The bytes of the run beside the report. A full run leaves a log per
+		// stage; a bundle carrying none carries the report's word for what the
+		// stages did.
+		if len(r.Artifacts) == 0 {
+			fatal = append(fatal, "the run accounts for no artefact, so nothing of what its stages produced travels with the report")
 		}
 		// A host under test whose agent version nobody recorded: the suite then
 		// exercised a binary the report cannot name.
