@@ -140,8 +140,11 @@ func TestRotationOverlapsTwoKeys(t *testing.T) {
 		t.Fatalf("the overlap keyring = %v", overlap.KeyIDs)
 	}
 
+	// A second later: inside one second the helper cannot tell a bundle that
+	// drops a key from a replay of the one before the key arrived, so the
+	// bundle that finishes a rotation carries the next moment.
 	fresh.previous = nil
-	retired, err := store.Apply(fresh.TrustBundle("host-1", now))
+	retired, err := store.Apply(fresh.TrustBundle("host-1", now.Add(time.Second)))
 	if err != nil {
 		t.Fatalf("the bundle after the rotation: %v", err)
 	}
@@ -336,6 +339,53 @@ func TestAnOlderBundleDoesNotUndoARotation(t *testing.T) {
 	// And the rotation finishes: the new key alone, signed by itself, later.
 	fresh.previous = nil
 	if _, err := store.Apply(fresh.TrustBundle("host-1", later.Add(time.Hour))); err != nil {
+		t.Fatalf("the bundle that retires the old key: %v", err)
+	}
+}
+
+// The moment of issue is a whole second, so a rotation inside one second gives
+// two bundles the same one, and a check that refuses only a strictly older
+// bundle lets the first one back in: {K1}, {K1,K2} and {K1} again, all at the
+// same second, removed K2 (audit of 6c38561, CR-07).
+func TestABundleOfTheSameSecondDoesNotShrinkTheKeyring(t *testing.T) {
+	store := newStore(t)
+	old := newSigner(t)
+	moment := time.Unix(1_800_000_000, 0)
+	first := old.TrustBundle("host-1", moment)
+	if _, err := store.Apply(first); err != nil {
+		t.Fatal(err)
+	}
+
+	// The overlap bundle of the same second: the keyring grows, which is the
+	// one direction a bundle that cannot be ordered may move it.
+	fresh := newSigner(t)
+	fresh.previous = old
+	if _, err := store.Apply(fresh.TrustBundle("host-1", moment)); err != nil {
+		t.Fatalf("the overlap bundle of the same second: %v", err)
+	}
+	after, _, err := store.Keyring()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after.IDs()) != 2 {
+		t.Fatalf("the keyring holds %d keys after the overlap bundle", len(after.IDs()))
+	}
+
+	// The first bundle again, at the same second as the overlap one. It
+	// verifies, it is not older, and taking it would remove the new key.
+	if _, err := store.Apply(first); CodeOf(err) != ErrorTrustStale {
+		t.Fatalf("a bundle of the same second that drops a key: %v", err)
+	}
+	now, _, err := store.Keyring()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(now.IDs()) != 2 {
+		t.Fatalf("the keyring holds %d keys after the replay, 2 before it", len(now.IDs()))
+	}
+	// The next second may drop it: the rotation finishes as it always did.
+	fresh.previous = nil
+	if _, err := store.Apply(fresh.TrustBundle("host-1", moment.Add(time.Second))); err != nil {
 		t.Fatalf("the bundle that retires the old key: %v", err)
 	}
 }
