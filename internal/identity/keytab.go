@@ -113,6 +113,7 @@ func (o *FleetOrderer) OrderKeytabRenewal(ctx context.Context, host FleetHost, p
 		TimeoutSeconds:   action.DefaultTimeout(),
 		TTL:              time.Duration(action.DefaultTimeout()+600) * time.Second,
 		CreatedBy:        "directory-change:" + change.ID,
+		CreatedByKind:    jobs.ActorMachinery,
 		RequestID:        change.RequestID,
 		Preconditions: jobs.Preconditions{
 			OSFamily:             host.OSFamily,

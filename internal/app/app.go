@@ -1699,16 +1699,10 @@ type subjectPermissions struct {
 // can do and wrong for deciding whether they may do it here: a creator holding
 // firewall.write over one site held the grant for a host in another.
 func (p subjectPermissions) PermissionsOfSubject(ctx context.Context, subject, hostID string) ([]string, error) {
-	// A system actor is named, not guessed at. The panel's own machinery
-	// records what ordered a task - "campaign:<name>", "schedule:<id>",
-	// "remediation:<plan>", "policy:<rule>" - and none of those is a principal.
-	// Reading their absence as "a subject the panel never knew" was how a
-	// blocked operator's task used to pass; reading it as "blocked" would stop
-	// every campaign. Neither is an answer about an account, because there is
-	// no account.
-	if systemActor(subject) {
-		return nil, nil
-	}
+	// What ordered the task is recorded on the task itself and read by the
+	// dispatcher before this is called, so there is no name to recognise here:
+	// every subject that reaches this is somebody's, and the only question is
+	// what that somebody may do on this host now.
 	known, blocked, err := p.store.SubjectState(ctx, subject)
 	if err != nil {
 		return nil, err

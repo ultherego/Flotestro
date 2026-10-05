@@ -64,6 +64,7 @@ func (s *AgentService) releaseKeptArtefact(ctx context.Context, hostID, version,
 		// the settlement does not create a second task.
 		IdempotencyKey: "agent-upgrade-release:" + jobID,
 		CreatedBy:      "system",
+		CreatedByKind:  jobs.ActorMachinery,
 	}); err != nil {
 		s.log.Error("the release of the kept artefact was not ordered",
 			"host_id", hostID, "job_id", jobID, "err", err)

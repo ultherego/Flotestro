@@ -183,17 +183,17 @@ func TestTimerCalendarAsksSystemdInItsOwnLanguage(t *testing.T) {
 // the consent to take over what the host already carries under it.
 func ensureOrder(id string, adopt bool) (*helperv1.ScheduleRequest, schedules.Schedule) {
 	return &helperv1.ScheduleRequest{
-			Operation:  helperv1.ScheduleRequest_OPERATION_ENSURE,
-			Id:         id,
-			Kind:       schedules.KindCron,
-			Expression: "0 5 * * *",
-			Command:    []string{"/usr/bin/true"},
-			User:       "root",
-			Adopt:      adopt,
-		}, schedules.Schedule{
-			ID: id, Kind: schedules.KindCron, Expression: "0 5 * * *",
-			Command: []string{"/usr/bin/true"}, User: "root", Enabled: true,
-		}
+		Operation:  helperv1.ScheduleRequest_OPERATION_ENSURE,
+		Id:         id,
+		Kind:       schedules.KindCron,
+		Expression: "0 5 * * *",
+		Command:    []string{"/usr/bin/true"},
+		User:       "root",
+		Adopt:      adopt,
+	}, schedules.Schedule{
+		ID: id, Kind: schedules.KindCron, Expression: "0 5 * * *",
+		Command: []string{"/usr/bin/true"}, User: "root", Enabled: true,
+	}
 }
 
 // Adoption takes over the line found, and removes the file only when it holds

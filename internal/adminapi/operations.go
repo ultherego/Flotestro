@@ -300,6 +300,7 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 		MaxOutputBytes:   request.MaxOutputBytes,
 		TTL:              time.Duration(request.TTLSeconds) * time.Second,
 		CreatedBy:        actor,
+		CreatedByKind:    jobs.ActorPerson,
 		RequestID:        requestIDOf(r),
 		Preconditions:    preconditions,
 		Class:            class,

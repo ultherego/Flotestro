@@ -52,7 +52,15 @@ type Spec struct {
 	MaxOutputBytes    int
 	TTL               time.Duration
 	CreatedBy         string
-	RequestID         string
+	// CreatedByKind says whether a person ordered this or the panel's own
+	// machinery did. It is recorded, not read off the name: the authors the
+	// panel writes for itself are "campaign:<name>", "directory-change:<id>",
+	// "flotestro/vuln" and "system", and a dispatcher deciding by prefix got
+	// that list both wrong and incomplete on 05.10 - it carried three prefixes
+	// nobody writes and missed two that are written. A name is also something
+	// an identity could be given; a column is not.
+	CreatedByKind ActorKind
+	RequestID     string
 	// CampaignID binds the operation to the rollout that ordered it.
 	CampaignID string
 	// FanoutID binds the operation to the diagnostic read fan-out that ordered
@@ -98,11 +106,15 @@ type Job struct {
 	MaxOutputBytes     int             `json:"max_output_bytes"`
 	ExpiresAt          time.Time       `json:"expires_at"`
 	CreatedBy          string          `json:"created_by"`
-	RequestID          string          `json:"request_id,omitempty"`
-	ApprovedBy         string          `json:"approved_by,omitempty"`
-	ApprovedAt         *time.Time      `json:"approved_at,omitempty"`
-	CanceledBy         string          `json:"canceled_by,omitempty"`
-	CancelReason       string          `json:"cancel_reason,omitempty"`
+	// CreatedByKind says what ordered this: a person, or the panel's own
+	// machinery. Empty on a row written before the column, which the
+	// dispatcher reads as a person - the narrow side.
+	CreatedByKind ActorKind  `json:"created_by_kind,omitempty"`
+	RequestID     string     `json:"request_id,omitempty"`
+	ApprovedBy    string     `json:"approved_by,omitempty"`
+	ApprovedAt    *time.Time `json:"approved_at,omitempty"`
+	CanceledBy    string     `json:"canceled_by,omitempty"`
+	CancelReason  string     `json:"cancel_reason,omitempty"`
 	// CancelRequestedAt is when a cancel was asked of the host holding the task;
 	// CancelAckAt, CancelOutcome and CancelPhase are the agent's answer - what
 	// the request found on the host and what the host was doing.
@@ -237,9 +249,10 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec) (*Job, error) 
 		insert into jobs (id, host_id, action_type, action_version, payload, payload_hash,
 		                  idempotency_key, state, requires_approval, preconditions,
 		                  timeout_seconds, max_output_bytes, expires_at, created_by, request_id,
-		                  campaign_id, required_approvals, fanout_id, budget_class)
+		                  campaign_id, required_approvals, fanout_id, budget_class,
+		                  created_by_kind)
 		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-		        nullif($16, '')::uuid, $17, nullif($18, '')::uuid, $19)
+		        nullif($16, '')::uuid, $17, nullif($18, '')::uuid, $19, nullif($20, ''))
 		on conflict (host_id, idempotency_key) do nothing
 		returning id`
 	jobID := uuid.NewString()
@@ -247,7 +260,7 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec) (*Job, error) 
 		payloadJSON, payloadHash, idempotencyKey, string(state), spec.RequiresApproval,
 		preconditionsJSON, timeout, maxOutput, time.Now().Add(ttl),
 		spec.CreatedBy, nullable(spec.RequestID), spec.CampaignID, requiredApprovals(spec),
-		spec.FanoutID, string(spec.Class)).Scan(&jobID)
+		spec.FanoutID, string(spec.Class), string(spec.CreatedByKind)).Scan(&jobID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// The same idempotency key returns the existing task instead of
 		// creating a second one. A repeated order is not an error - but only a
@@ -1695,7 +1708,8 @@ func (s *Store) queryJobs(ctx context.Context, q queryable, clause string, args 
 		       (select count(*) from job_approvals a where a.job_id = jobs.id),
 		       coalesce((select h.hostname from hosts h where h.id = jobs.host_id), ''),
 		       fanout_id, wait_reason, budget_class,
-		       cancel_requested_at, cancel_ack_at, coalesce(cancel_outcome, ''), coalesce(cancel_phase, '')
+		       cancel_requested_at, cancel_ack_at, coalesce(cancel_outcome, ''), coalesce(cancel_phase, ''),
+		       coalesce(created_by_kind, '')
 		from jobs ` + clause
 
 	rows, err := q.Query(ctx, query, args...)
@@ -1716,7 +1730,7 @@ func (s *Store) queryJobs(ctx context.Context, q queryable, clause string, args 
 			&j.ResultMessage, &j.FinishedAt, &j.CreatedAt, &j.UpdatedAt,
 			&j.RequiredApprovals, &collected, &j.Hostname, &j.FanoutID,
 			&j.WaitReason, &j.BudgetClass,
-			&j.CancelRequestedAt, &j.CancelAckAt, &j.CancelOutcome, &j.CancelPhase); err != nil {
+			&j.CancelRequestedAt, &j.CancelAckAt, &j.CancelOutcome, &j.CancelPhase, &j.CreatedByKind); err != nil {
 			return nil, err
 		}
 		// Every view of a task carries the number of collected approvals: without it

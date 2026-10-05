@@ -129,8 +129,16 @@ func (s *Scheduler) attachCapability(ctx context.Context, item jobs.LeasedJob,
 	// A question that was asked and not answered is a different matter: the
 	// rights may be narrower than the action, and nobody can tell. The task
 	// waits with the reason rather than leaving on a guess.
+	// What ordered this is recorded on the task. The panel's own machinery has
+	// no account to read, and a prefix on the author's name was the wrong way
+	// to find that out twice over: the list carried three prefixes nobody
+	// writes and missed two that are written, and a name is something an
+	// identity could be given. An unrecorded kind - every row from before the
+	// column - is read as a person, which is the narrow side.
 	var permissions []string
-	if s.capabilities.Permissions != nil && item.Job.CreatedBy != "" {
+	if item.Job.CreatedByKind == jobs.ActorMachinery {
+		permissions = nil
+	} else if s.capabilities.Permissions != nil && item.Job.CreatedBy != "" {
 		permissions, err = s.capabilities.Permissions.PermissionsOfSubject(ctx,
 			item.Job.CreatedBy, item.Job.HostID)
 		if errors.Is(err, ErrSubjectBlocked) {

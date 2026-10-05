@@ -199,6 +199,7 @@ func (r *Runner) start(ctx context.Context, plan Plan, step *Step) error {
 		IdempotencyKey:   "remediation:" + plan.ID + ":" + step.CheckID,
 		RequiresApproval: action.Mutating() && campaign == "",
 		CreatedBy:        plan.CreatedBy,
+		CreatedByKind:    jobs.ActorPerson,
 		CampaignID:       campaign,
 		Preconditions: jobs.Preconditions{
 			OSFamily:             host.OSFamily,

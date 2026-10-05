@@ -774,6 +774,7 @@ func (h *Scheduler) requestRead(ctx context.Context, description HostDescription
 		IdempotencyKey:   key,
 		RequiresApproval: false,
 		CreatedBy:        "flotestro/vuln",
+		CreatedByKind:    jobs.ActorMachinery,
 		Preconditions: jobs.Preconditions{
 			RequiredCapabilities: []string{opspec.ActionPackageList.RequiredCapability()},
 		},

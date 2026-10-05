@@ -50,25 +50,58 @@ type suiteOutcome struct {
 // carries. An absent log contributes nothing: a quick run has no suite log
 // because it ran no suite, and that is a verdict matter rather than a malformed
 // report.
-// named says the report claims a log of the run. An empty file the report names
-// is a run that proved nothing, and until the two were told apart the checker
-// read a zero-byte log exactly as it reads a quick run that carries none.
-func countFromLogs(goTestJSON, playwrightJSON []byte, named bool) (suiteOutcome, error) {
+// declared names the suites the report claims a log of. Each is asked about on
+// its own: a suite that was declared and whose log is missing, empty, or names
+// no scenario is a suite that proved nothing, and the totals cannot see it -
+// a passing Go suite made an absent browser run look like a complete one, and
+// the other way round.
+type declaredSuites struct {
+	goSuite    bool
+	playwright bool
+}
+
+func countFromLogs(goTestJSON, playwrightJSON []byte, declared declaredSuites) (suiteOutcome, error) {
 	outcome := suiteOutcome{}
+	goFound, browserFound := 0, 0
 	if len(goTestJSON) > 0 {
 		if err := outcome.addGoSuite(goTestJSON); err != nil {
 			return suiteOutcome{}, err
 		}
+		goFound = outcome.Counts.Discovered
 	}
 	if len(playwrightJSON) > 0 {
 		if err := outcome.addPlaywright(playwrightJSON); err != nil {
 			return suiteOutcome{}, err
 		}
+		browserFound = outcome.Counts.Discovered - goFound
 	}
-	if named && outcome.Counts.Discovered == 0 {
-		outcome.Problems = append(outcome.Problems,
-			"the logs of the run name no scenario at all")
+	// Per suite, by name, so one cannot stand in for the other: a passing Go
+	// suite made an absent browser run look like a complete one, and a passing
+	// browser run did the same for an empty Go log. The totals cannot see it,
+	// because a total is what the two came to together.
+	for _, suite := range []struct {
+		name     string
+		declared bool
+		bytes    int
+		found    int
+	}{
+		{"Go", declared.goSuite, len(goTestJSON), goFound},
+		{"browser", declared.playwright, len(playwrightJSON), browserFound},
+	} {
+		if !suite.declared {
+			continue
+		}
+		if suite.bytes == 0 {
+			outcome.Problems = append(outcome.Problems, fmt.Sprintf(
+				"the report names a %s suite log and the bundle carries nothing in it", suite.name))
+			continue
+		}
+		if suite.found == 0 {
+			outcome.Problems = append(outcome.Problems, fmt.Sprintf(
+				"the %s suite log names no scenario", suite.name))
+		}
 	}
+
 	for _, skip := range outcome.Skips {
 		switch skip.Class {
 		case SkipAbsent:

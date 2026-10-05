@@ -16,7 +16,7 @@ func TestAPackageThatFailedAfterItsTestsPassedEndsTheVerdict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	outcome, err := countFromLogs(log, nil, true)
+	outcome, err := countFromLogs(log, nil, declaredSuites{goSuite: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestAScenarioThatStartedAndNeverEndedEndsTheVerdict(t *testing.T) {
 	log := []byte(`{"Action":"run","Package":"p","Test":"TestOne"}` + "\n" +
 		`{"Action":"pass","Package":"p","Test":"TestOne"}` + "\n" +
 		`{"Action":"run","Package":"p","Test":"TestCutOff"}` + "\n")
-	outcome, err := countFromLogs(log, nil, true)
+	outcome, err := countFromLogs(log, nil, declaredSuites{goSuite: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,26 +71,26 @@ func TestAScenarioThatStartedAndNeverEndedEndsTheVerdict(t *testing.T) {
 
 // A log with nothing in it is not a run with nothing to report.
 func TestALogThatNamesNoScenarioEndsTheVerdict(t *testing.T) {
-	outcome, err := countFromLogs([]byte("\n\n"), nil, true)
+	outcome, err := countFromLogs([]byte("\n\n"), nil, declaredSuites{goSuite: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(outcome.Problems) != 1 || !strings.Contains(outcome.Problems[0], "name no scenario") {
+	if !problemSays(outcome.Problems, "the Go suite log names no scenario") {
 		t.Fatalf("the log problems are %v", outcome.Problems)
 	}
 	// A log the report names and did not write: zero bytes, and the checker
 	// used to read it exactly as it reads a run that carries no log at all.
-	zero, err := countFromLogs([]byte{}, nil, true)
+	zero, err := countFromLogs([]byte{}, nil, declaredSuites{goSuite: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(zero.Problems) != 1 {
+	if !problemSays(zero.Problems, "carries nothing in it") {
 		t.Fatalf("a zero-byte log the report names reported %v", zero.Problems)
 	}
 
 	// And no logs at all is a different matter: a quick run carries none, and
 	// its verdict already says why.
-	empty, err := countFromLogs(nil, nil, false)
+	empty, err := countFromLogs(nil, nil, declaredSuites{})
 	if err != nil {
 		t.Fatal(err)
 	}

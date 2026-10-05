@@ -828,6 +828,7 @@ func (o *Orchestrator) submitJobTx(ctx context.Context, tx pgx.Tx, campaign Camp
 		TimeoutSeconds:   campaign.JobTimeoutSeconds,
 		TTL:              time.Duration(campaign.JobTimeoutSeconds+600) * time.Second,
 		CreatedBy:        "campaign:" + campaign.Name,
+		CreatedByKind:    jobs.ActorMachinery,
 		RequestID:        campaign.RequestID,
 		CampaignID:       campaign.ID,
 		Preconditions: jobs.Preconditions{

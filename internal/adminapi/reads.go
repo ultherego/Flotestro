@@ -404,7 +404,7 @@ func (s *Server) handleCreateRead(w http.ResponseWriter, r *http.Request) {
 			Action:    action,
 			Payload:   payload,
 			TTL:       fanOutTTL,
-			CreatedBy: principal.Subject,
+			CreatedBy: principal.Subject, CreatedByKind: jobs.ActorPerson,
 			RequestID: requestIDOf(r),
 			FanoutID:  fanOutID,
 			Preconditions: jobs.Preconditions{
