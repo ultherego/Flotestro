@@ -1,6 +1,7 @@
 package pki
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/sha256"
@@ -592,6 +593,29 @@ func (ca *CA) SignTrustBundle(bundle []byte) ([]byte, error) {
 		return nil, fmt.Errorf("an empty trust bundle is not vouched for")
 	}
 	return ecdsa.SignASN1(rand.Reader, ca.PrivateKey, trustBundleDigest(bundle))
+}
+
+// AdoptableTrust says whether the set of authorities an answer offers may be
+// written as the ones this peer trusts.
+//
+// A rotation legitimately adds an authority, so the answer cannot be judged by
+// what it changes; it is judged by who says so. Only an authority the peer
+// already believes in can vouch for the set, and the vouch is required over
+// every change: an authority appended, one taken away, the same set in another
+// order. An answer that carries none leaves the peer on the trust it has.
+//
+// Agents, relays and relayctl all ask this one function. The relay used to ask
+// nothing at all and wrote down whatever answered the renewal as the
+// authorities of its whole site.
+func AdoptableTrust(held, offered, vouch []byte) error {
+	if len(held) == 0 || bytes.Equal(offered, held) {
+		return nil
+	}
+	if err := VerifyTrustBundle(held, offered, vouch); err != nil {
+		return fmt.Errorf("the renewal carries a different set of authorities and no authority this host "+
+			"trusts vouched for it, so this is not a change the panel can be shown to have made: %w", err)
+	}
+	return nil
 }
 
 // VerifyTrustBundle says whether an authority of the given trust vouched for

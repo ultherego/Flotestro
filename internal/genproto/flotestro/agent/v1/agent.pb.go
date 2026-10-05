@@ -1656,6 +1656,10 @@ type RenewRelayCertificateResponse struct {
 	// the new issuer starts issuing certificates to hosts.
 	ClientCaBundlePem []byte                 `protobuf:"bytes,2,opt,name=client_ca_bundle_pem,json=clientCaBundlePem,proto3" json:"client_ca_bundle_pem,omitempty"`
 	NotAfter          *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=not_after,json=notAfter,proto3" json:"not_after,omitempty"`
+	// CaBundleSignature is the vouch of an authority in force for the bundle
+	// above. A relay took a changed set of authorities on the word of whoever
+	// answered the renewal; the vouch is what shows the panel made the change.
+	CaBundleSignature []byte `protobuf:"bytes,4,opt,name=ca_bundle_signature,json=caBundleSignature,proto3" json:"ca_bundle_signature,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -1707,6 +1711,13 @@ func (x *RenewRelayCertificateResponse) GetClientCaBundlePem() []byte {
 func (x *RenewRelayCertificateResponse) GetNotAfter() *timestamppb.Timestamp {
 	if x != nil {
 		return x.NotAfter
+	}
+	return nil
+}
+
+func (x *RenewRelayCertificateResponse) GetCaBundleSignature() []byte {
+	if x != nil {
+		return x.CaBundleSignature
 	}
 	return nil
 }
@@ -16470,11 +16481,12 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x11client_request_id\x18\x01 \x01(\tR\x0fclientRequestId\x12\x17\n" +
 	"\acsr_pem\x18\x02 \x01(\fR\x06csrPem\x124\n" +
 	"\x05build\x18\x03 \x01(\v2\x1e.flotestro.agent.v1.AgentBuildR\x05build\x12)\n" +
-	"\x10advertised_names\x18\x04 \x03(\tR\x0fadvertisedNames\"\xb2\x01\n" +
+	"\x10advertised_names\x18\x04 \x03(\tR\x0fadvertisedNames\"\xe2\x01\n" +
 	"\x1dRenewRelayCertificateResponse\x12'\n" +
 	"\x0fcertificate_pem\x18\x01 \x01(\fR\x0ecertificatePem\x12/\n" +
 	"\x14client_ca_bundle_pem\x18\x02 \x01(\fR\x11clientCaBundlePem\x127\n" +
-	"\tnot_after\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bnotAfter\"\xfe\x02\n" +
+	"\tnot_after\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bnotAfter\x12.\n" +
+	"\x13ca_bundle_signature\x18\x04 \x01(\fR\x11caBundleSignature\"\xfe\x02\n" +
 	"\x10RelayPingRequest\x124\n" +
 	"\x05build\x18\x01 \x01(\v2\x1e.flotestro.agent.v1.AgentBuildR\x05build\x12!\n" +
 	"\fbuffer_bytes\x18\x02 \x01(\x04R\vbufferBytes\x12%\n" +

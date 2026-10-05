@@ -180,6 +180,12 @@ func renewNow(ctx context.Context, stateDir, gatewayURL string, names []string) 
 	if len(bundle) == 0 {
 		return nil, errors.New("a renewal without a trust bundle")
 	}
+	// A relay carries a whole site: what it writes down here decides which
+	// agents it will believe.
+	if err := identitystore.AcceptableRenewal(current.TrustPEM, response.Msg.GetCertificatePem(),
+		bundle, response.Msg.GetCaBundleSignature()); err != nil {
+		return nil, err
+	}
 	saved, err := store.Commit(identitystore.Generation{
 		Key:            key,
 		CertificatePEM: response.Msg.GetCertificatePem(),

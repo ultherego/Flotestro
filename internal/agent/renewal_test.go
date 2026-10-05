@@ -24,12 +24,12 @@ func TestAChangedSetOfAuthoritiesIsAdoptedOnlyOnTheWordOfOne(t *testing.T) {
 
 	// The same set, with nobody vouching: an ordinary renewal, which is the
 	// overwhelming majority of them.
-	if err := adoptableTrust(held, held, nil); err != nil {
+	if err := pki.AdoptableTrust(held, held, nil); err != nil {
 		t.Fatalf("a renewal that changes nothing was refused: %v", err)
 	}
 	// A host with no trust yet has nothing to judge against; that is the
 	// enrollment, and it is not this function's question.
-	if err := adoptableTrust(nil, held, nil); err != nil {
+	if err := pki.AdoptableTrust(nil, held, nil); err != nil {
 		t.Fatalf("a host without trust was refused its first bundle: %v", err)
 	}
 
@@ -40,7 +40,7 @@ func TestAChangedSetOfAuthoritiesIsAdoptedOnlyOnTheWordOfOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	foreign := append(append([]byte(nil), held...), rogue.Bundle()...)
-	if err := adoptableTrust(held, foreign, nil); err == nil {
+	if err := pki.AdoptableTrust(held, foreign, nil); err == nil {
 		t.Fatal("a foreign authority appended to the bundle was adopted")
 	}
 	// Vouched for by the authority that wants in, which is the answer vouching
@@ -49,7 +49,7 @@ func TestAChangedSetOfAuthoritiesIsAdoptedOnlyOnTheWordOfOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := adoptableTrust(held, foreign, byItself); err == nil {
+	if err := pki.AdoptableTrust(held, foreign, byItself); err == nil {
 		t.Fatal("a foreign authority that vouched for itself was adopted")
 	}
 	// And a signature over another set does not carry this one.
@@ -57,7 +57,7 @@ func TestAChangedSetOfAuthoritiesIsAdoptedOnlyOnTheWordOfOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := adoptableTrust(held, foreign, elsewhere); err == nil {
+	if err := pki.AdoptableTrust(held, foreign, elsewhere); err == nil {
 		t.Fatal("a signature over the old set was taken as a vouch for the new one")
 	}
 
@@ -71,17 +71,17 @@ func TestAChangedSetOfAuthoritiesIsAdoptedOnlyOnTheWordOfOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := adoptableTrust(held, rotated, vouch); err != nil {
+	if err := pki.AdoptableTrust(held, rotated, vouch); err != nil {
 		t.Fatalf("a prepared authority of the fleet was refused: %v", err)
 	}
 	// Without the vouch the same rotation waits: the host keeps the trust it
 	// has rather than taking a set on the word of whoever delivered it.
-	if err := adoptableTrust(held, rotated, nil); err == nil {
+	if err := pki.AdoptableTrust(held, rotated, nil); err == nil {
 		t.Fatal("a changed bundle was adopted with no authority vouching for it")
 	}
 	// A set that takes an authority away is a change like any other.
 	shrunk := rogue.Bundle()
-	if err := adoptableTrust(rotated, shrunk, nil); err == nil {
+	if err := pki.AdoptableTrust(rotated, shrunk, nil); err == nil {
 		t.Fatal("a bundle that drops every authority the host trusts was adopted")
 	}
 }

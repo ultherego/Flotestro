@@ -145,7 +145,10 @@ func (s *RelayService) RenewCertificate(ctx context.Context,
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
-	trust, err := s.certIssuer.Trust(ctx)
+	// The authority in force vouches for the bundle, exactly as it does for a
+	// host: a relay writes down what it is given here as the authorities of its
+	// whole site, and whoever answered the renewal is not that decision.
+	trust, vouch, err := s.certIssuer.VouchedTrust(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -198,6 +201,7 @@ func (s *RelayService) RenewCertificate(ctx context.Context,
 		CertificatePem:    issued.PEM,
 		ClientCaBundlePem: trust,
 		NotAfter:          timestamppb.New(issued.NotAfter),
+		CaBundleSignature: vouch,
 	}), nil
 }
 

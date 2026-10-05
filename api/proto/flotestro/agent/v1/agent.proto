@@ -97,6 +97,10 @@ message RenewRelayCertificateResponse {
   // the new issuer starts issuing certificates to hosts.
   bytes client_ca_bundle_pem = 2;
   google.protobuf.Timestamp not_after = 3;
+  // CaBundleSignature is the vouch of an authority in force for the bundle
+  // above. A relay took a changed set of authorities on the word of whoever
+  // answered the renewal; the vouch is what shows the panel made the change.
+  bytes ca_bundle_signature = 4;
 }
 
 message RelayPingRequest {

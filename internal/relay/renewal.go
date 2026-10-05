@@ -238,6 +238,16 @@ func renew(ctx context.Context, current_ Identity, options RenewalOptions) (Iden
 		return Identity{}, "", fmt.Errorf("a renewal without a trust bundle")
 	}
 
+	// A relay carries a whole site: what it writes down here decides which
+	// agents it will believe. So the renewed certificate has to verify under
+	// the trust the relay already holds, and a different set of authorities
+	// has to be vouched for by one of them - the same two questions an agent
+	// asks, through the same function.
+	if err := identitystore.AcceptableRenewal(current_.TrustPEM, message.GetCertificatePem(),
+		bundle, message.GetCaBundleSignature()); err != nil {
+		return Identity{}, "", err
+	}
+
 	saved, err := store.Commit(identitystore.Generation{
 		Key:            key,
 		CertificatePEM: message.GetCertificatePem(),

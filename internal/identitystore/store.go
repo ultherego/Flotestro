@@ -150,6 +150,29 @@ func (m *Store) Dir() string { return m.root }
 // from the same answer, so a consistent pair signed by anybody at all passed -
 // and the agent then wrote that authority to disk as the one it trusts. The
 // caller that knows what this host trusted a moment ago asks this instead.
+// AcceptableRenewal says whether a renewal may be written down as this host's
+// identity. Two questions, and both have to be asked wherever a renewal is
+// committed - by the agent, by the relay's own renewal loop and by relayctl.
+//
+// The certificate has to verify under the trust in force, because an answer
+// may travel through a relay and what is written here becomes the authorities
+// of the whole fleet for this host. And a different set of authorities has to
+// be vouched for by one of the authorities already held, because a rotation
+// that nobody in force vouched for is a decision somebody has to make by
+// enrolling the host again.
+//
+// A host with no trust yet is enrolling, and the pin answers for it there.
+func AcceptableRenewal(held, certificatePEM, offered, vouch []byte) error {
+	if len(held) == 0 {
+		return nil
+	}
+	if err := VerifiesUnder(certificatePEM, held); err != nil {
+		return fmt.Errorf("the renewed certificate does not verify under the trust this host "+
+			"already holds, so the authority behind it is not one this host believes: %w", err)
+	}
+	return pki.AdoptableTrust(held, offered, vouch)
+}
+
 func VerifiesUnder(certificatePEM, trustPEM []byte) error {
 	block, _ := pem.Decode(certificatePEM)
 	if block == nil {
