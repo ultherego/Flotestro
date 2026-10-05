@@ -697,6 +697,19 @@ jobs:
           ./gitleaks detect --source . --no-banner --redact \
             --config .github/gitleaks.toml --log-opts "--no-merges $range"
 
+          # And the tree as it stands, which a range cannot answer. A range
+          # reports a finding once - in the run of the commit that brought it -
+          # and the next push scans a range that no longer contains it, so a
+          # finding that lands on the branch stops being reported. Nine stood
+          # in the tree on 05.10 for that reason; all nine were identifiers,
+          # file names or fixtures shaped like a key, and all nine are
+          # allowlisted by their literal or by a shape no real key fits. The
+          # checkout holds what git tracks and nothing else, so the whole tree
+          # is the product here.
+          echo "scanning the tree as it stands"
+          ./gitleaks detect --source . --no-git --no-banner --redact \
+            --config .github/gitleaks.toml
+
       - name: The product tree carries no key and no token
         # Our own check, and deliberately narrow: a PEM header at the
         # beginning of a line is a key file, not a string in a test, and

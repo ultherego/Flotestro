@@ -23,4 +23,30 @@ regexes = [
   # internal/freeipa/write_test.go: "openssh-key" in base64, the body of a
   # key that a user must not be allowed to submit as a public key.
   '''b3BlbnNzaC1rZXk=''',
+  # A PEM block whose body is one short line and then the END marker. Four
+  # fixtures are written that way - cmd/agentctl/supportbundle_test.go proves
+  # the bundle refuses a key, internal/cryptostate/authorities_db_test.go and
+  # migrate_test.go stand in for an active and a previous authority - and the
+  # bound is what makes this safe: a key in a Go string literal carries
+  # hundreds of characters between the first \n and the END marker, so no real
+  # key fits. The bodies are MHcCAQEEIA, MIIB, active, previous, not really.
+  #
+  # Written as a shape rather than as five literals on purpose: MHcCAQEEIA is
+  # the opening of every P-256 EC key there is, and allowlisting it would hide
+  # the real thing.
+  '''-----BEGIN (EC |RSA |OPENSSH )?PRIVATE KEY-----\\n[^\\]{1,24}\\n-----END''',
+  # internal/cryptostate/migrate_test.go: the identifiers of two keys, beside
+  # the fixtures above. A name, not key material.
+  '''cf4a324d-ea01-5141-a3a4-032fdc10e703''',
+  '''hs-0123456789abcdef''',
+  # internal/oidc/provider_login_test.go: the kid of the signing key a fake
+  # provider advertises.
+  '''keycloak-rs256-1''',
+  # internal/modules/accounts/managed.go: the name of the file the panel writes
+  # authorized keys into. A file name that ends in .keys reads as a credential
+  # to the generic rule.
+  '''60-flotestro.keys''',
+  # internal/freeipa/lifecycle_test.go: the temporary password a test hands the
+  # directory so that it can prove the password is changed afterwards.
+  '''Zx9-temporary''',
 ]
