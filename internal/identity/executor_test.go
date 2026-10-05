@@ -186,7 +186,12 @@ func newPreserveHarness(t *testing.T) *preserveHarness {
 		},
 	}
 	harness.executor = &Executor{
-		sessions: &fakeSessions{live: map[string]int64{}},
+		// The account has signed in to the panel, so there is an identity here
+		// to deny; the denial is aimed at the identities, not at the name.
+		sessions: &fakeSessions{
+			principals: []authz.Principal{{ID: "p-alice", Subject: "alice"}},
+			live:       map[string]int64{},
+		},
 		capabilities: func(_ context.Context, uid string) (freeipa.DirectoryCapabilities, error) {
 			// The question is about this account's entry: the order records which one
 			// it was asked about, so a preserve that asked about somebody else would be

@@ -250,7 +250,9 @@ func scanChanges(rows pgx.Rows) ([]Change, error) {
 	return changes, rows.Err()
 }
 
-// SetLocalDeny sets the local denial marker for an external account.
+// SetLocalDeny sets the local denial marker on one panel identity, named
+// exactly as the identity provider wrote it. Which identities a directory
+// account covers is decided once, by MatchesDirectoryUser.
 func (s *Store) SetLocalDeny(ctx context.Context, subject, reason string, denied bool) (int64, error) {
 	var query string
 	var args []any

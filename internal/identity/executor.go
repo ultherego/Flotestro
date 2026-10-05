@@ -264,7 +264,7 @@ func (e *Executor) setUserAccess(ctx context.Context, ref *ReferencePayload, ena
 
 	if !enable {
 		phase := startPhase("the local denial marker")
-		count, err := e.store.SetLocalDeny(ctx, ref.UID, ref.Reason, true)
+		count, err := e.denyDirectoryUser(ctx, ref.UID, ref.Reason, true)
 		// Saying "identities marked: 0" as a success was the thing ID-01 found;
 		// this says which of the two it is.
 		phases = append(phases, deniedLocally(phase, count, err, "identities marked",
@@ -290,7 +290,7 @@ func (e *Executor) setUserAccess(ctx context.Context, ref *ReferencePayload, ena
 
 	if enable && err == nil {
 		phase := startPhase("lifting the local denial marker")
-		count, denyErr := e.store.SetLocalDeny(ctx, ref.UID, "", false)
+		count, denyErr := e.denyDirectoryUser(ctx, ref.UID, "", false)
 		// The same distinction as on the way in.
 		phases = append(phases, deniedLocally(phase, count, denyErr, "identities unlocked",
 			"the panel knows no identity by that name, so there was nothing to lift"))
@@ -349,6 +349,40 @@ func MatchesDirectoryUser(subject, uid string) bool {
 		return false
 	}
 	return subject == uid || strings.HasPrefix(subject, uid+"@")
+}
+
+// denyDirectoryUser sets - or lifts - the local denial marker on every panel
+// identity that is this directory account, asking the same question the session
+// revocation asks. The marker was written by the account name alone, so an
+// identity the login named "uid@issuer" kept its tokens while its sessions were
+// ended, and the phase said there was nothing to deny.
+func (e *Executor) denyDirectoryUser(ctx context.Context, uid, reason string, denied bool) (int64, error) {
+	if e.sessions == nil {
+		return 0, fmt.Errorf("the panel identities cannot be read, so it is not known whom to deny")
+	}
+	principals, err := e.sessions.ListPrincipals(ctx)
+	if err != nil {
+		// Not knowing the identities is not knowing that there are none.
+		return 0, fmt.Errorf("reading the panel identities of %s: %w", uid, err)
+	}
+	var marked int64
+	var matched bool
+	for _, principal := range principals {
+		if !MatchesDirectoryUser(principal.Subject, uid) {
+			continue
+		}
+		matched = true
+		count, err := e.denyLocally(ctx, principal.Subject, reason, denied)
+		if err != nil && !errors.Is(err, ErrNoPrincipal) {
+			return marked, err
+		}
+		marked += count
+	}
+	if !matched || marked == 0 {
+		return 0, fmt.Errorf("%w: no identity of the panel is the directory account %q, so the denial marked nobody",
+			ErrNoPrincipal, uid)
+	}
+	return marked, nil
 }
 
 // revokeSessions ends the panel sessions belonging to a directory account.
@@ -534,7 +568,7 @@ func (e *Executor) preserveUser(ctx context.Context, change Change,
 
 	reason := firstNonEmpty(ref.Reason, "the account was preserved")
 	phase = startPhase("the local denial marker")
-	count, err := e.denyLocally(ctx, ref.UID, reason, true)
+	count, err := e.denyDirectoryUser(ctx, ref.UID, reason, true)
 	phases = append(phases, deniedLocally(phase, count, err, "identities marked",
 		"the panel knows no identity by that name, so there was nothing to deny locally"))
 
