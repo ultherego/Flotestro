@@ -19,6 +19,9 @@ type memoryStore struct {
 	kekID   string
 	record  *Record
 	retired map[string][]byte
+	// betweenReadAndWrite runs once, inside the next rewrap, where another
+	// replica's write would land.
+	betweenReadAndWrite func()
 }
 
 func newMemoryStore() *memoryStore {
@@ -62,19 +65,39 @@ func (m *memoryStore) ImportKeys(ctx context.Context, kekID string, keys []Wrapp
 	return nil
 }
 
-func (m *memoryStore) ReplaceKeys(ctx context.Context, from, to string, keys []WrappedKey) error {
+func (m *memoryStore) ReplaceKeys(ctx context.Context, from, to string, read, keys []WrappedKey) error {
 	if m.kekID != from {
 		return errors.New("not wrapped with that key")
 	}
+	// The hook stands for another replica writing between the read of the rows
+	// and this write, which is the moment the condition below exists for.
+	if m.betweenReadAndWrite != nil {
+		hook := m.betweenReadAndWrite
+		m.betweenReadAndWrite = nil
+		hook()
+	}
 	m.mu.Lock()
-	for _, key := range keys {
+	var current []WrappedKey
+	for _, row := range m.rows {
+		if row.KEKID == from {
+			current = append(current, row)
+		}
+	}
+	m.mu.Unlock()
+	// The same condition the database applies, by the same function: the rows
+	// are the ones the rewrap opened, or nothing is written.
+	if err := rowsStillThese(current, read); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	for _, key := range read {
 		delete(m.rows, key.KeyID)
 	}
-	appeared := len(m.rows)
+	left := len(m.rows)
 	m.mu.Unlock()
-	if appeared > 0 {
+	if left > 0 {
 		return fmt.Errorf("%w: %d keys were wrapped with %s while the rewrap ran",
-			ErrRevisionMoved, appeared, from)
+			ErrRevisionMoved, left, from)
 	}
 	for _, key := range keys {
 		if err := m.PutWrappedKey(ctx, key); err != nil {
@@ -464,7 +487,7 @@ func TestAKeyThatAppearedMeanwhileIsNotTakenAway(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		err = store.ReplaceKeys(ctx, first.ID(), second.ID(), rows)
+		err = store.ReplaceKeys(ctx, first.ID(), second.ID(), sealedRows(materials), rows)
 		if !errors.Is(err, ErrRevisionMoved) {
 			t.Fatalf("the rewrap answered %v", err)
 		}

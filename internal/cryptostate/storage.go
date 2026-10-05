@@ -1,6 +1,7 @@
 package cryptostate
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -501,7 +502,7 @@ func (p *Postgres) ImportKeys(ctx context.Context, kekID string, keys []WrappedK
 // ReplaceKeys implements ImportStore: the rewrap. Every row and the record
 // move together, so that no moment exists in which the database names one key
 // encryption key and holds rows wrapped with another.
-func (p *Postgres) ReplaceKeys(ctx context.Context, fromKEKID, toKEKID string, keys []WrappedKey) error {
+func (p *Postgres) ReplaceKeys(ctx context.Context, fromKEKID, toKEKID string, read, keys []WrappedKey) error {
 	return p.inTransaction(ctx, func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `
 			update crypto_installation_state set kek_id = $2, updated_at = now()
@@ -512,31 +513,32 @@ func (p *Postgres) ReplaceKeys(ctx context.Context, fromKEKID, toKEKID string, k
 		if tag.RowsAffected() == 0 {
 			return fmt.Errorf("the installation is no longer wrapped with %s", fromKEKID)
 		}
+		// The rows are taken for update and held against what the rewrap
+		// opened. A row it never read, and a row whose bytes changed under it -
+		// an authority another replica activated carries the same name and
+		// other content - must not be written over with what this rewrap
+		// re-sealed, because that would put the state the installation had
+		// before back as the state it has now.
+		current, err := wrappedKeysOf(ctx, tx, fromKEKID)
+		if err != nil {
+			return err
+		}
+		if err := rowsStillThese(current, read); err != nil {
+			return err
+		}
 		// Only the rows this rewrap read, by name. A key made by another replica
 		// between the read and here is wrapped with the old key encryption key
 		// too, and deleting it by that alone would take away a key the record
 		// may already name as the active one - and one this rewrap never
 		// re-wrapped, so it would be in no backup either.
-		names := make([]string, 0, len(keys))
-		for _, key := range keys {
+		names := make([]string, 0, len(read))
+		for _, key := range read {
 			names = append(names, key.KeyID)
 		}
 		if _, err := tx.Exec(ctx,
 			`delete from crypto_wrapped_keys where kek_id = $1 and key_id = any($2)`,
 			fromKEKID, names); err != nil {
 			return err
-		}
-		// Whatever is still wrapped with the old key is a key that appeared
-		// while this ran. The rewrap refuses rather than leaving it behind
-		// unreadable: the operator runs it again over the set as it now is.
-		var appeared int
-		if err := tx.QueryRow(ctx,
-			`select count(*) from crypto_wrapped_keys where kek_id = $1`, fromKEKID).Scan(&appeared); err != nil {
-			return err
-		}
-		if appeared > 0 {
-			return fmt.Errorf("%w: %d keys were wrapped with %s while the rewrap ran",
-				ErrRevisionMoved, appeared, fromKEKID)
 		}
 		var strangers int
 		if err := tx.QueryRow(ctx,
@@ -587,6 +589,76 @@ func (p *Postgres) ForgetKeys(ctx context.Context, kekID string, keyIDs []string
 		_, err = tx.Exec(ctx, `delete from crypto_retired_authorities`)
 		return err
 	})
+}
+
+// wrappedKeysOf reads every row wrapped with one key encryption key and holds
+// them for the rest of the transaction, so a second writer waits here.
+func wrappedKeysOf(ctx context.Context, tx pgx.Tx, kekID string) ([]WrappedKey, error) {
+	rows, err := tx.Query(ctx, `
+		select key_id, purpose, kek_id, installation_id, envelope_version, nonce, ciphertext, created_at, retired_at
+		  from crypto_wrapped_keys where kek_id = $1 order by key_id for update`, kekID)
+	if err != nil {
+		return nil, fmt.Errorf("the keys wrapped with %s: %w", kekID, err)
+	}
+	defer rows.Close()
+	var keys []WrappedKey
+	for rows.Next() {
+		var key WrappedKey
+		var installation *string
+		if err := rows.Scan(&key.KeyID, &key.Purpose, &key.KEKID, &installation, &key.EnvelopeVersion,
+			&key.Nonce, &key.Ciphertext, &key.CreatedAt, &key.RetiredAt); err != nil {
+			return nil, err
+		}
+		key.InstallationID = installationOf(installation)
+		keys = append(keys, key)
+	}
+	return keys, rows.Err()
+}
+
+// rowsStillThese refuses when the rows the database holds are not the rows the
+// caller read: another name, or the same name holding other bytes. A rewrap
+// re-seals what it opened and writes it back under the same names, so anything
+// that moved in between would be written over with the state as it was before
+// it moved - an authority another replica activated would go back to being the
+// prepared one, with both operations reported as having succeeded.
+func rowsStillThese(now, read []WrappedKey) error {
+	seen := make(map[string]WrappedKey, len(read))
+	for _, key := range read {
+		seen[key.KeyID] = key
+	}
+	for _, key := range now {
+		was, ok := seen[key.KeyID]
+		if !ok {
+			return fmt.Errorf("%w: the key %s appeared while this ran", ErrRevisionMoved, key.KeyID)
+		}
+		if !sameWrappedKey(was, key) {
+			return fmt.Errorf("%w: the key %s changed while this ran", ErrRevisionMoved, key.KeyID)
+		}
+		delete(seen, key.KeyID)
+	}
+	for keyID := range seen {
+		return fmt.Errorf("%w: the key %s went away while this ran", ErrRevisionMoved, keyID)
+	}
+	return nil
+}
+
+// sameWrappedKey says whether two rows hold the same wrapped key: everything
+// the row is sealed from or about, which is every column but the moment it was
+// created.
+func sameWrappedKey(a, b WrappedKey) bool {
+	return a.KeyID == b.KeyID && a.Purpose == b.Purpose && a.KEKID == b.KEKID &&
+		a.InstallationID == b.InstallationID && a.EnvelopeVersion == b.EnvelopeVersion &&
+		bytes.Equal(a.Nonce, b.Nonce) && bytes.Equal(a.Ciphertext, b.Ciphertext) &&
+		sameMoment(a.RetiredAt, b.RetiredAt)
+}
+
+// sameMoment compares two moments that may be absent; an absent one is not a
+// moment equal to any other.
+func sameMoment(a, b *time.Time) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return a.Equal(*b)
 }
 
 // insertKeys writes the rows of a migration. The retirement of a key is kept:
@@ -655,9 +727,15 @@ func (p *Postgres) ReplaceAuthority(ctx context.Context, row WrappedKey, remove,
 	})
 }
 
-// DeleteAuthorities implements AuthorityKeyStore.
-func (p *Postgres) DeleteAuthorities(ctx context.Context, keyIDs []string) error {
+// DeleteAuthorities implements AuthorityKeyStore. seen carries the condition
+// the decision rested on, like the write does: dropping a prepared authority
+// another replica has meanwhile activated would leave the installation with
+// nothing that signs.
+func (p *Postgres) DeleteAuthorities(ctx context.Context, keyIDs, seen []string) error {
 	return p.inTransaction(ctx, func(tx pgx.Tx) error {
+		if err := authoritiesStillThese(ctx, tx, seen); err != nil {
+			return err
+		}
 		return deleteAuthorities(ctx, tx, keyIDs)
 	})
 }
