@@ -526,6 +526,7 @@ func (e *Executor) setUserAccess(ctx context.Context, change Change, ref *Refere
 		phase, ended := e.endProviderSessions(ctx, ref.UID)
 		phases = append(phases, phase)
 		result.ProviderSessionsEnded = &ended.Ended
+		result.ProviderSubjects = ended.Subjects
 		result.ProviderReason = ended.Reason
 		revoked = &result
 	}
@@ -553,15 +554,20 @@ type sessionRevocation struct {
 	WithoutPrincipal []string `json:"without_principal"`
 	// ProviderSessionsEnded says whether the identity provider ended the user's
 	// sessions too; nil for a change that does not ask it to.
-	ProviderSessionsEnded *bool  `json:"provider_sessions_ended,omitempty"`
-	ProviderReason        string `json:"provider_reason,omitempty"`
+	ProviderSessionsEnded *bool `json:"provider_sessions_ended,omitempty"`
+	// ProviderSubjects names the identities the provider was asked about.
+	ProviderSubjects []string `json:"provider_subjects,omitempty"`
+	ProviderReason   string   `json:"provider_reason,omitempty"`
 }
 
 // providerLogout is the outcome of asking the identity provider to end a
 // user's sessions.
 type providerLogout struct {
-	Ended  bool
-	Reason string
+	Ended bool
+	// Subjects names the identities the provider was asked about, so the
+	// record says who was logged out rather than only that somebody was.
+	Subjects []string
+	Reason   string
 }
 
 // endProviderSessions asks the identity provider to end the user's sessions,
@@ -572,11 +578,56 @@ func (e *Executor) endProviderSessions(ctx context.Context, uid string) (Phase, 
 		outcome := providerLogout{Reason: "no identity provider is configured"}
 		return skipPhase(phase, outcome.Reason), outcome
 	}
-	if err := e.provider.LogoutSubject(ctx, uid); err != nil {
-		outcome := providerLogout{Reason: err.Error()}
+
+	// The provider holds a user under the subject it issued, which for an
+	// identity an operator linked by hand is not the directory name: a
+	// principal "a.smith@example.test" linked to the account "alice" was
+	// logged out by asking the provider about "alice", whom it does not hold.
+	// So the identities are named first, and each is asked for by its own
+	// subject.
+	matched, err := e.identitiesOfDirectoryUser(ctx, uid)
+	if err != nil {
+		outcome := providerLogout{Reason: "the panel identities of " + uid + " could not be read: " + err.Error()}
 		return skipPhase(phase, "provider sessions not ended: "+outcome.Reason), outcome
 	}
-	return finishPhase(phase, nil, "provider sessions ended for "+uid), providerLogout{Ended: true}
+	subjects := make([]string, 0, len(matched))
+	for _, principal := range matched {
+		subjects = append(subjects, principal.Subject)
+	}
+	// With no identity of its own, the directory name is the only name there
+	// is. It is a guess at what the provider calls the user, and the phase
+	// says so rather than reporting it as the subject that was asked for.
+	guessed := false
+	if len(subjects) == 0 {
+		subjects, guessed = []string{uid}, true
+	}
+
+	outcome := providerLogout{Subjects: []string{}}
+	var refused []string
+	for _, subject := range subjects {
+		if err := e.provider.LogoutSubject(ctx, subject); err != nil {
+			refused = append(refused, subject+": "+err.Error())
+			continue
+		}
+		outcome.Subjects = append(outcome.Subjects, subject)
+	}
+	outcome.Ended = len(outcome.Subjects) > 0 && len(refused) == 0
+	outcome.Reason = strings.Join(refused, "; ")
+
+	asked := strings.Join(outcome.Subjects, ", ")
+	if guessed && len(outcome.Subjects) > 0 {
+		asked += " (the directory name; the panel holds no identity for it)"
+	}
+	switch {
+	case len(outcome.Subjects) == 0:
+		return skipPhase(phase, "provider sessions not ended: "+outcome.Reason), outcome
+	case len(refused) > 0:
+		// Some ended and some did not, which is neither of the two answers the
+		// old shape could give.
+		return finishPhase(phase, nil, "provider sessions ended for "+asked+
+			"; not ended for "+outcome.Reason), outcome
+	}
+	return finishPhase(phase, nil, "provider sessions ended for "+asked), outcome
 }
 
 // String renders the outcome as the message of a phase.
@@ -652,26 +703,45 @@ func (e *Executor) denyDirectoryUser(ctx context.Context, uid, reason string, de
 // revokeSessions ends the panel sessions belonging to a directory account.
 func (e *Executor) revokeSessions(ctx context.Context, uid, reason string) (sessionRevocation, error) {
 	result := sessionRevocation{WithoutPrincipal: []string{}}
-	principals, err := e.sessions.ListPrincipals(ctx)
+	matched, err := e.identitiesOfDirectoryUser(ctx, uid)
 	if err != nil {
 		return result, err
 	}
-	matched := false
-	for _, principal := range principals {
-		if !MatchesDirectoryPrincipal(principal, uid) {
-			continue
-		}
-		matched = true
+	for _, principal := range matched {
 		revoked, err := e.sessions.RevokeSessionsOf(ctx, principal.ID, reason)
 		if err != nil {
 			return result, err
 		}
 		result.Sessions += revoked
 	}
-	if !matched {
+	if len(matched) == 0 {
 		result.WithoutPrincipal = append(result.WithoutPrincipal, uid)
 	}
 	return result, nil
+}
+
+// identitiesOfDirectoryUser names the panel identities that are the given
+// directory account.
+//
+// One enumeration, asked by the session revocation and by the provider logout
+// alike. MatchesDirectoryPrincipal exists so that those two cannot disagree
+// about which identities an account is - and the provider logout was not
+// asking it at all, which is how it came to aim at the directory name.
+func (e *Executor) identitiesOfDirectoryUser(ctx context.Context, uid string) ([]authz.Principal, error) {
+	if e.sessions == nil {
+		return nil, nil
+	}
+	principals, err := e.sessions.ListPrincipals(ctx)
+	if err != nil {
+		return nil, err
+	}
+	matched := make([]authz.Principal, 0, 1)
+	for _, principal := range principals {
+		if MatchesDirectoryPrincipal(principal, uid) {
+			matched = append(matched, principal)
+		}
+	}
+	return matched, nil
 }
 
 // revokeChangedMembers ends the sessions of the users whose groups changed, as
@@ -1277,6 +1347,7 @@ func (e *Executor) cutLocalAccess(ctx context.Context, ref *ReferencePayload) ([
 	phase, ended := e.endProviderSessions(ctx, ref.UID)
 	phases = append(phases, phase)
 	result.ProviderSessionsEnded = &ended.Ended
+	result.ProviderSubjects = ended.Subjects
 	result.ProviderReason = ended.Reason
 	return phases, &result
 }

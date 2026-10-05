@@ -1053,3 +1053,129 @@ func TestTheInterruptedIntentIsRecoveredWithoutAssumingItsEffect(t *testing.T) {
 		t.Errorf("the change is %s, expected partially_applied", state)
 	}
 }
+
+// principalLister is a session store that holds the identities given.
+type principalLister struct {
+	principals []authz.Principal
+	revoked    []string
+}
+
+func (p *principalLister) ListPrincipals(context.Context) ([]authz.Principal, error) {
+	return p.principals, nil
+}
+
+func (p *principalLister) RevokeSessionsOf(_ context.Context, principalID, _ string) (int64, error) {
+	p.revoked = append(p.revoked, principalID)
+	return 1, nil
+}
+
+// The provider holds a user under the subject it issued. For an identity an
+// operator linked by hand that is not the directory name, and the logout was
+// asking the provider about the directory name - so it named somebody the
+// provider does not hold, and the user kept the sessions that let them into
+// other applications. The local denial cuts them out of the panel either way,
+// which is why this was a window and not a hole; the window was the point of
+// the phase.
+func TestTheProviderIsAskedAboutTheIdentityItHoldsAndNotTheDirectoryName(t *testing.T) {
+	sessions := &principalLister{principals: []authz.Principal{
+		{ID: "p-1", Subject: "a.smith@example.test", DirectoryUID: "alice"},
+		{ID: "p-2", Subject: "someone.else@example.test", DirectoryUID: "bob"},
+	}}
+	provider := &fakeLogoutProvider{}
+	executor := &Executor{provider: provider, sessions: sessions}
+
+	phase, ended := executor.endProviderSessions(context.Background(), "alice")
+	if phase.Status != "succeeded" || !ended.Ended {
+		t.Fatalf("phase = %s (%s), outcome = %+v", phase.Status, phase.Message, ended)
+	}
+	if len(provider.loggedOut) != 1 || provider.loggedOut[0] != "a.smith@example.test" {
+		t.Fatalf("the provider was asked to log out %v, not the linked identity", provider.loggedOut)
+	}
+	// And the record says who it concerned, because an auditor reading
+	// "provider sessions ended" has no way to ask afterwards.
+	if len(ended.Subjects) != 1 || ended.Subjects[0] != "a.smith@example.test" {
+		t.Errorf("the outcome names %v", ended.Subjects)
+	}
+	if !strings.Contains(phase.Message, "a.smith@example.test") {
+		t.Errorf("the phase says %q", phase.Message)
+	}
+}
+
+// Two identities of one account are both asked for: a directory user who logs
+// into the panel under two subjects holds sessions at the provider under both.
+func TestEveryIdentityOfTheAccountIsAskedFor(t *testing.T) {
+	sessions := &principalLister{principals: []authz.Principal{
+		{ID: "p-1", Subject: "alice", DirectoryUID: ""},
+		{ID: "p-2", Subject: "a.smith@example.test", DirectoryUID: "alice"},
+		{ID: "p-3", Subject: "alice@example.test", DirectoryUID: ""},
+	}}
+	provider := &fakeLogoutProvider{}
+	executor := &Executor{provider: provider, sessions: sessions}
+	_, ended := executor.endProviderSessions(context.Background(), "alice")
+	if len(provider.loggedOut) != 3 {
+		t.Fatalf("the provider was asked about %v", provider.loggedOut)
+	}
+	if len(ended.Subjects) != 3 {
+		t.Errorf("the outcome names %v", ended.Subjects)
+	}
+}
+
+// Adjacency, from the legitimate side: an account the panel has never seen
+// still gets asked for under the directory name, because that is the only name
+// there is - and the phase says that is what it did rather than reporting a
+// subject it does not have.
+func TestAnAccountWithNoPanelIdentityIsAskedForByItsDirectoryName(t *testing.T) {
+	sessions := &principalLister{principals: []authz.Principal{
+		{ID: "p-2", Subject: "someone.else@example.test", DirectoryUID: "bob"},
+	}}
+	provider := &fakeLogoutProvider{}
+	executor := &Executor{provider: provider, sessions: sessions}
+	phase, ended := executor.endProviderSessions(context.Background(), "carol")
+	if len(provider.loggedOut) != 1 || provider.loggedOut[0] != "carol" {
+		t.Fatalf("the provider was asked about %v", provider.loggedOut)
+	}
+	if !ended.Ended || !strings.Contains(phase.Message, "the panel holds no identity") {
+		t.Errorf("phase = %s (%s)", phase.Status, phase.Message)
+	}
+}
+
+// One identity logged out and one refused is neither of the two answers the
+// previous shape could give, and the disable must still not be a failure.
+func TestAPartialProviderLogoutIsReportedAsItHappened(t *testing.T) {
+	sessions := &principalLister{principals: []authz.Principal{
+		{ID: "p-1", Subject: "a.smith@example.test", DirectoryUID: "alice"},
+		{ID: "p-2", Subject: "alice", DirectoryUID: ""},
+	}}
+	provider := &refusingOne{refuse: "alice", err: errors.New("the admin API answered 404 Not Found")}
+	executor := &Executor{provider: provider, sessions: sessions}
+	phase, ended := executor.endProviderSessions(context.Background(), "alice")
+	if phase.Status != "succeeded" {
+		t.Fatalf("phase = %s (%s)", phase.Status, phase.Message)
+	}
+	if ended.Ended {
+		t.Error("a partial logout reports itself as ended")
+	}
+	if len(ended.Subjects) != 1 || ended.Subjects[0] != "a.smith@example.test" {
+		t.Errorf("the outcome names %v as logged out", ended.Subjects)
+	}
+	if !strings.Contains(ended.Reason, "404") || !strings.Contains(ended.Reason, "alice") {
+		t.Errorf("the reason is %q", ended.Reason)
+	}
+	// And a disable does not become partially applied over it.
+	if state := StateFor([]Phase{{Status: "succeeded"}, phase}); state != StateSucceeded {
+		t.Errorf("a partial provider logout made the change %s", state)
+	}
+}
+
+// refusingOne logs out everybody except one subject.
+type refusingOne struct {
+	refuse string
+	err    error
+}
+
+func (r *refusingOne) LogoutSubject(_ context.Context, subject string) error {
+	if subject == r.refuse {
+		return r.err
+	}
+	return nil
+}
