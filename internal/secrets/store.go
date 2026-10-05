@@ -702,8 +702,8 @@ func (s *Store) Verify(ctx context.Context) ([]VersionCheck, error) {
 // form does not open them: it is not the key they were sealed with.
 var ErrFirstFormUnreadable = errors.New("secrets_first_form_unreadable")
 
-// CheckFirstForm asks whether the legacy key the provider holds is the one the
-// versions of the first form were sealed with.
+// CheckFirstForm asks whether the given key is the one the versions of the
+// first form in this database were sealed with.
 //
 // An installation being adopted has no sentinel yet - the sentinel is sealed
 // under the key being adopted - so nothing else compares the key with the data
@@ -716,13 +716,11 @@ var ErrFirstFormUnreadable = errors.New("secrets_first_form_unreadable")
 // before the ciphertext was bound to its row opens unbound, and a damaged
 // version decides nothing: the key may be right and the row wrong, so the walk
 // goes on to the next one. Nothing decided means nothing is said.
-func (s *Store) CheckFirstForm(ctx context.Context, limit int) error {
-	legacy, ok := s.keys.(LegacyOpener)
-	if !ok {
-		return nil
-	}
-	cipher, ok := legacy.LegacyCipher()
-	if !ok {
+// The key comes in as the primitive over it rather than through the provider,
+// because the one caller asks before the installation has been committed to the
+// key: registering it to ask would be the start already deciding.
+func (s *Store) CheckFirstForm(ctx context.Context, cipher *Cipher, limit int) error {
+	if cipher == nil {
 		return nil
 	}
 	rows, err := s.pool.Query(ctx, `

@@ -64,10 +64,6 @@ type Provider interface {
 	// Adopt registers existing material under a name, and keeps it where
 	// the provider keeps keys: a file, or a row.
 	Adopt(ctx context.Context, id string, key []byte) error
-	// Offer registers existing material for this process only, without
-	// keeping it anywhere. It is how a start can try a key against the data
-	// before it commits the installation to that key.
-	Offer(id string, key []byte) error
 	// SetActive names the key new envelopes are wrapped with.
 	SetActive(id string)
 }
@@ -87,6 +83,9 @@ type LocalSealedProvider struct {
 	// readOnly marks the keys that came from a credential: they are not
 	// files of the directory and are not written or removed.
 	readOnly map[string]bool
+	// offered marks the keys this process was handed to try, which are not
+	// files either - until Adopt is called on one, and then they are.
+	offered map[string]bool
 }
 
 // NewLocalProvider reads the keys of the directory and, when named, the
@@ -95,6 +94,7 @@ func NewLocalProvider(dir, credential string) (*LocalSealedProvider, error) {
 	p := &LocalSealedProvider{
 		dir: dir, credential: credential,
 		keys: map[string]*secrets.Cipher{}, raw: map[string][]byte{}, readOnly: map[string]bool{},
+		offered: map[string]bool{},
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -331,13 +331,24 @@ func (p *LocalSealedProvider) GenerateNamed(_ context.Context, id string) error 
 // installation from before the provider lies in secrets.key, and nothing puts
 // it in keys/legacy.key until a start adopts it - so a report run before that
 // start could not open a single one of that installation's secrets, which is
-// the one installation the report is most wanted on. Adopt is the start's call
-// and writes the file; this one does not.
+// the one installation the report is most wanted on.
+//
+// It is not on the Provider interface and no start calls it, on purpose: Adopt
+// returns early for a name it already holds with the same material, so a key
+// offered and then adopted is a key that never reaches the disk. The start that
+// did exactly that served happily and could not come back, because the record
+// named a key no file held.
 func (p *LocalSealedProvider) Offer(id string, key []byte) error {
 	if err := ValidateKeyID(id); err != nil {
 		return err
 	}
-	return p.register(id, key, true)
+	if err := p.register(id, key, true); err != nil {
+		return err
+	}
+	p.mu.Lock()
+	p.offered[id] = true
+	p.mu.Unlock()
+	return nil
 }
 
 // Adopt implements Provider: the material lands as a file of the
@@ -347,13 +358,19 @@ func (p *LocalSealedProvider) Adopt(_ context.Context, id string, key []byte) er
 		return err
 	}
 	p.mu.RLock()
-	existing, ok := p.raw[id]
+	existing, held := p.raw[id]
+	offered := p.offered[id]
 	p.mu.RUnlock()
-	if ok {
+	if held {
 		if string(existing) != string(key) {
 			return fmt.Errorf("the key %s already exists with different material", id)
 		}
-		return nil
+		// A key this process was only trying is kept now rather than passed
+		// over. Returning here left the installation recording a key that no
+		// file held: it served, and it could not come back.
+		if !offered {
+			return nil
+		}
 	}
 	// A file that appeared since the directory was read - another panel of the
 	// same installation adopting the same key on a shared state directory - is
@@ -362,14 +379,27 @@ func (p *LocalSealedProvider) Adopt(_ context.Context, id string, key []byte) er
 		if string(onDisk) != string(key) {
 			return fmt.Errorf("the key file %s already exists with different material", p.path(id))
 		}
-		return p.register(id, key, false)
+		return p.keep(id, key)
 	} else if !errors.Is(err, secrets.ErrKeyMissing) {
 		return err
 	}
 	if err := secrets.WriteKeyFile(p.path(id), key); err != nil {
 		return err
 	}
-	return p.register(id, key, false)
+	return p.keep(id, key)
+}
+
+// keep registers a key as a file of the directory, and drops any mark that
+// said it was not one.
+func (p *LocalSealedProvider) keep(id string, key []byte) error {
+	if err := p.register(id, key, false); err != nil {
+		return err
+	}
+	p.mu.Lock()
+	delete(p.offered, id)
+	delete(p.readOnly, id)
+	p.mu.Unlock()
+	return nil
 }
 
 // Remove deletes a key file that was created in this process and turned out

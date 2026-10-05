@@ -85,13 +85,15 @@ type Options struct {
 	// LegacyKeyPath is where an installation from before the provider
 	// kept its one key. Empty means nowhere to look.
 	LegacyKeyPath string
-	// SecretProbe asks the secret store whether the key just adopted for the
-	// versions of the first form is the key they were sealed with. It is a
-	// hook rather than a call, because which forms there are and how each one
-	// opens belongs to internal/secrets and must not be told twice. Nil skips
-	// the question, which is what the startup table does where the store is
-	// not part of the case.
-	SecretProbe func(ctx context.Context, keys secrets.KeyProvider) error
+	// SecretProbe asks the secret store whether the key offered for the
+	// versions of the first form is the key they were sealed with. It takes
+	// the material and not the provider, so that asking changes nothing at
+	// all: the key is tried before the installation is committed to it. It is
+	// a hook rather than a call, because which forms there are and how each
+	// one opens belongs to internal/secrets and must not be told twice. Nil
+	// skips the question, which is what the startup table does where the store
+	// is not part of the case.
+	SecretProbe func(ctx context.Context, legacyKey []byte) error
 	// RotateTo names a key to switch the store to at this start; empty leaves the
 	// active key alone.
 	RotateTo string
@@ -366,19 +368,15 @@ func (r *Runtime) establish(ctx context.Context, o Options) error {
 		// secrets.key used to be adopted, recorded, and left with every secret
 		// unreadable and one line in the log about it.
 		//
-		// Offered and not adopted, in that order and for that reason: the key
-		// is held by this process while it is tried, so a start that refuses
-		// leaves the state directory as it found it. Adopting first left
-		// keys/legacy.key holding the very key that had just been refused, and
-		// the next start - with the right secrets.key restored - was then
-		// refused too, for differing from it. The repair of a refusal must not
-		// need a file nobody was told about.
+		// Asked of the material and before the key is adopted, so that a start
+		// which refuses leaves the state directory as it found it. Adopting
+		// first left keys/legacy.key holding the very key that had just been
+		// refused, and the next start - with the right secrets.key restored,
+		// which is the whole repair - was then refused too, for differing from
+		// it. The repair of a refusal must not need a file nobody was told
+		// about.
 		if o.SecretProbe != nil && facts.SecretVersions > 0 {
-			if err := o.Provider.Offer(secrets.LegacyKeyID, legacyKey); err != nil {
-				return fatal(CodeStateAmbiguous,
-					fmt.Sprintf("%s and the key %q of the provider differ", o.LegacyKeyPath, secrets.LegacyKeyID), err)
-			}
-			if err := o.SecretProbe(ctx, o.Provider); err != nil {
+			if err := o.SecretProbe(ctx, legacyKey); err != nil {
 				return fatal(CodeSecretsKeyUnavailable, fmt.Sprintf(
 					"the database holds %d secret versions sealed the first way and %s does not open them: "+
 						"it is not the key of this installation",

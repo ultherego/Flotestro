@@ -190,14 +190,6 @@ func (f *fakeProvider) keep(id string, key []byte) error {
 	return nil
 }
 
-// Offer keeps the key in the maps and nothing else, and - unlike Adopt - does
-// not count. The real providers differ in that Adopt writes a file or a row;
-// what a test here can hold them to is that a start which refuses never got as
-// far as Adopt.
-func (f *fakeProvider) Offer(id string, key []byte) error {
-	return f.keep(id, key)
-}
-
 func (f *fakeProvider) SetActive(id string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -279,7 +271,7 @@ type lab struct {
 	// probe stands in for the secret store's answer about the key an
 	// adoption is about to trust. Nil is the shape of every case that is
 	// not about the store, and skips the question.
-	probe func(context.Context, secrets.KeyProvider) error
+	probe func(context.Context, []byte) error
 }
 
 func newLab(t *testing.T) *lab {
@@ -937,7 +929,10 @@ func TestAKeyThatDoesNotOpenTheFirstFormIsNotAdopted(t *testing.T) {
 		t.Fatal(err)
 	}
 	l.storage.facts = Facts{SecretVersions: 3, Hosts: 4, Certificates: 4}
-	l.probe = func(context.Context, secrets.KeyProvider) error {
+	l.probe = func(_ context.Context, key []byte) error {
+		if !bytes.Equal(key, before) {
+			return fmt.Errorf("the probe was asked about %d bytes that are not the key file's", len(key))
+		}
 		return fmt.Errorf("%w: secret-a version 1 does not open under the key offered for the first form",
 			secrets.ErrFirstFormUnreadable)
 	}
@@ -978,7 +973,7 @@ func TestAKeyThatDoesNotOpenTheFirstFormIsNotAdopted(t *testing.T) {
 	// One step outside, from the legitimate side: the same installation whose
 	// key does open its rows is adopted exactly as before. A check that
 	// refused this would stop every upgrade from before the envelope.
-	l.probe = func(context.Context, secrets.KeyProvider) error { return nil }
+	l.probe = func(context.Context, []byte) error { return nil }
 	runtime := l.open(t)
 	if runtime.Record().ActiveKeyID != secrets.LegacyKeyID {
 		t.Fatalf("active key after the adoption = %s", runtime.Record().ActiveKeyID)

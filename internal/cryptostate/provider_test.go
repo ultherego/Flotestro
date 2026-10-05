@@ -185,3 +185,42 @@ func TestAnOfferedKeyOpensWithoutBecomingAFileOfTheDirectory(t *testing.T) {
 		t.Fatal("a name that is not a key id was accepted")
 	}
 }
+
+// One step outside the test above, from the legitimate side: a key that was
+// offered and is then adopted has to reach the disk.
+//
+// Adopt returned early for a name it already held with the same material, so an
+// adoption that had tried the key first recorded a key that no file held. The
+// panel started, adopted, rewrapped every version and served; the next start
+// refused with "the installation names the key legacy and the provider does not
+// hold it". An installation that works until it is restarted is worse than one
+// that refuses.
+func TestAKeyOfferedAndThenAdoptedReachesTheDisk(t *testing.T) {
+	dir := t.TempDir()
+	provider, err := NewLocalProvider(dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := bytes.Repeat([]byte{9}, secrets.KeyLength)
+	if err := provider.Offer(secrets.LegacyKeyID, key); err != nil {
+		t.Fatalf("offering the legacy key: %v", err)
+	}
+	if err := provider.Adopt(context.Background(), secrets.LegacyKeyID, key); err != nil {
+		t.Fatalf("adopting a key that was offered first: %v", err)
+	}
+	onDisk, err := secrets.ReadKeyFile(filepath.Join(dir, secrets.LegacyKeyID+".key"))
+	if err != nil {
+		t.Fatalf("the adopted key is not a file of the directory: %v", err)
+	}
+	if !bytes.Equal(onDisk, key) {
+		t.Fatal("the file of the adopted key holds other material")
+	}
+	// What the next start does: build a provider over the directory again.
+	again, err := NewLocalProvider(dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := again.LegacyCipher(); !ok {
+		t.Fatal("a provider built again over the directory does not hold the adopted key")
+	}
+}

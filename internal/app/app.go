@@ -680,8 +680,12 @@ func Run() error {
 		LegacyKeyPath: legacyKeyPath,
 		RotateTo:      *secretsKeyRotateTo,
 		Log:           log,
-		SecretProbe: func(ctx context.Context, keys secrets.KeyProvider) error {
-			return secrets.NewStore(pool, keys).CheckFirstForm(ctx, firstFormProbeRows)
+		SecretProbe: func(ctx context.Context, legacyKey []byte) error {
+			cipher, err := secrets.NewCipher(legacyKey)
+			if err != nil {
+				return err
+			}
+			return secrets.NewStore(pool, nil).CheckFirstForm(ctx, cipher, firstFormProbeRows)
 		},
 	})
 	if err != nil {
