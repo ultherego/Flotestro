@@ -169,10 +169,29 @@ func TestACiphertextIsBoundToItsRow(t *testing.T) {
 		t.Errorf("the ciphertext did not open in its own row: %q, %v", value, err)
 	}
 
-	// The old way: no associated data at all.
+	// The old way: no associated data at all. Such a row opened in any row it
+	// was put into, because the second attempt passed no associated data
+	// either - a ciphertext moved between two secrets was handed out as the
+	// other one (audit of 6c38561, WL-01). A read refuses it now and says why.
 	legacyNonce := make([]byte, c.aead.NonceSize())
 	legacy := c.aead.Seal(nil, legacyNonce, []byte("older value"), nil)
-	if value, err := c.Decrypt(legacyNonce, legacy, "secret-a", 1); err != nil || string(value) != "older value" {
-		t.Errorf("a version from before the binding did not open: %q, %v", value, err)
+	if _, err := c.Decrypt(legacyNonce, legacy, "secret-a", 1); !errors.Is(err, ErrVersionNotBound) {
+		t.Errorf("a version from before the binding was handed out by a read: %v", err)
+	}
+	// Including in the row it was transplanted into: the refusal does not
+	// depend on the row being the right one, because nothing says which it is.
+	if _, err := c.Decrypt(legacyNonce, legacy, "secret-b", 7); !errors.Is(err, ErrVersionNotBound) {
+		t.Errorf("a transplanted version of the first form: %v", err)
+	}
+	// The rewrap opens it by name, once, and writes it back bound.
+	if value, err := c.DecryptUnbound(legacyNonce, legacy, "secret-a", 1); err != nil ||
+		string(value) != "older value" {
+		t.Errorf("the rewrap could not open a version from before the binding: %q, %v", value, err)
+	}
+	// A row that does not open under this key at all is not reported as
+	// unbound: an unknown answer must not read as the one with a remedy.
+	if _, err := c.Decrypt(legacyNonce, append([]byte{legacy[0] ^ 0xff}, legacy[1:]...),
+		"secret-a", 1); errors.Is(err, ErrVersionNotBound) {
+		t.Error("a damaged ciphertext was reported as merely unbound")
 	}
 }

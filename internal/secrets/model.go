@@ -43,6 +43,12 @@ var (
 	// instead of refusing it, and the nonce comes from a row somebody else
 	// wrote - so the shape is checked before the key ever sees it.
 	ErrCorruptedVersion = errors.New("the stored version of this secret is damaged")
+	// ErrVersionNotBound means a stored version that opens under the key but
+	// only with no associated data: it was written before the row key was
+	// sealed into the ciphertext, so nothing says it belongs to the row it was
+	// read from. The rewrap opens such a version and writes it back bound; a
+	// read does not hand it out.
+	ErrVersionNotBound = errors.New("the stored version of this secret is not bound to its row")
 )
 
 var secretName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{1,62}$`)
@@ -236,14 +242,14 @@ func (s *Cipher) Encrypt(value []byte, secretID string, version int) (nonce, cip
 	return nonce, s.aead.Seal(nil, nonce, value, associatedData(secretID, version)), nil
 }
 
-// Decrypt returns the value of a version sealed the first way.
+// Decrypt returns the value of a version sealed the first way, bound to the
+// row it was read from.
 //
-// The second attempt, without the associated data, opens the rows written
-// before the row key was bound into them. It is also the reason the binding
-// is not one: a value of the first form opens in any row, so a ciphertext
-// moved between two secrets in the table is handed out as the other one.
-// Closing that needs those rows rewritten once and the attempt removed, which
-// is a migration and not this function.
+// A version that opens only without the associated data is not handed back: it
+// was written before the binding, so a ciphertext moved between two secrets in
+// the table would be handed out as the other one. It is named instead -
+// ErrVersionNotBound - and the one caller allowed to open it is the rewrap,
+// through DecryptUnbound, which writes it back bound in the same transaction.
 func (s *Cipher) Decrypt(nonce, ciphertext []byte, secretID string, version int) ([]byte, error) {
 	if err := s.checkShape(nonce, ciphertext, secretID, version); err != nil {
 		return nil, err
@@ -252,7 +258,31 @@ func (s *Cipher) Decrypt(nonce, ciphertext []byte, secretID string, version int)
 	if err == nil {
 		return value, nil
 	}
-	return s.aead.Open(nil, nonce, ciphertext, nil)
+	if _, unbound := s.aead.Open(nil, nonce, ciphertext, nil); unbound == nil {
+		return nil, fmt.Errorf("%w: %s version %d was sealed before the row key was bound into it; "+
+			"the rewrap of the secret store writes it back bound", ErrVersionNotBound, secretID, version)
+	}
+	return nil, err
+}
+
+// DecryptUnbound opens a version of the first form that carries no associated
+// data at all.
+//
+// Nothing ties such a ciphertext to a row, so whoever can write the table can
+// move a value from one secret to another and have it open as that one. It is
+// here for the rows an installation wrote before the binding existed and for
+// the single pass that rewrites them, and for nothing else: every other reader
+// goes through Decrypt and gets ErrVersionNotBound.
+func (s *Cipher) DecryptUnbound(nonce, ciphertext []byte, secretID string, version int) ([]byte, error) {
+	if err := s.checkShape(nonce, ciphertext, secretID, version); err != nil {
+		return nil, err
+	}
+	value, err := s.aead.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return nil, fmt.Errorf("%s version %d does not open under this key without associated data: %w",
+			secretID, version, err)
+	}
+	return value, nil
 }
 
 // checkShape refuses a stored version the key cannot take. GCM panics on a
