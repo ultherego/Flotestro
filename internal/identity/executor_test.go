@@ -309,9 +309,13 @@ type preserveHarness struct {
 	preserved    freeipa.EntryReference
 	preservedErr error
 	// denyErr is what the local denial answers; recordErr is what the attempt
-	// to write the phases down answers.
-	denyErr   error
-	recordErr error
+	// to write the phases down answers, from the recordAfter-th save onward -
+	// the change writes down more than one record now, and which of them fails
+	// is the difference between a mutation that never went out and a local half
+	// that was never recorded.
+	denyErr     error
+	recordErr   error
+	recordAfter int
 	// saved are the snapshots of the phases written down while the change runs.
 	saved [][]Phase
 	// proof is what the adapter could establish about the entry after the move.
@@ -371,7 +375,10 @@ func newPreserveHarness(t *testing.T) *preserveHarness {
 		},
 		recordPhases: func(_ context.Context, _ string, phases []Phase) error {
 			harness.saved = append(harness.saved, append([]Phase{}, phases...))
-			return harness.recordErr
+			if len(harness.saved) > harness.recordAfter {
+				return harness.recordErr
+			}
+			return nil
 		},
 	}
 	return harness
@@ -664,10 +671,18 @@ func TestThePreserveRecordsWhatThePanelOwesBeforeItPaysIt(t *testing.T) {
 			if len(harness.saved) == 0 {
 				t.Fatal("no phases were written down while the change ran")
 			}
-			snapshot := harness.saved[0]
-			owed, found := phaseNamed(snapshot, phaseLocalAccessOwed)
-			if !found || owed.Status != PhaseOutstanding {
-				t.Fatalf("the snapshot does not carry the obligation: %+v", snapshot)
+			// The first record written is the intent, so the obligation is
+			// looked for in the record that carries it rather than in the first.
+			var snapshot []Phase
+			for _, written := range harness.saved {
+				if owed, found := phaseNamed(written, phaseLocalAccessOwed); found &&
+					owed.Status == PhaseOutstanding {
+					snapshot = written
+					break
+				}
+			}
+			if snapshot == nil {
+				t.Fatalf("no record carries the obligation: %+v", harness.saved)
 			}
 			if _, found := phaseNamed(snapshot, "the local denial marker"); found {
 				t.Fatalf("the snapshot was written after the local half: %+v", snapshot)
@@ -723,12 +738,29 @@ func TestAnObligationIsSettledOnlyOnTheEffectItNames(t *testing.T) {
 		t.Fatalf("an account the panel knows nobody by left the obligation %+v", owed)
 	}
 
-	// And where the obligation cannot be written down, the mutation it covers
-	// does not happen: an effect nothing records is an effect nobody can
+	// And where the intent cannot be written down, the mutation it covers does
+	// not go out at all: an effect nothing records is an effect nobody can
 	// account for, and the claim may be the reason the write failed.
+	unintended := newPreserveHarness(t)
+	unintended.recordErr = errors.New("the change is no longer this attempt's")
+	phases, revoked := unintended.preserve(
+		preserveChange(unintended.entry), &ReferencePayload{UID: "alice"})
+	if unintended.did("preserve:alice@" + unintended.entry.DN) {
+		t.Fatalf("the directory was changed although nothing recorded the intent: %v",
+			unintended.order)
+	}
+	if last := phases[len(phases)-1]; last.Status != "failed" ||
+		!strings.Contains(last.Name, "recording the directory change") {
+		t.Fatalf("the last phase is %+v", last)
+	}
+
+	// And where the obligation cannot be written down after a mutation that
+	// did go out, the local half does not run either - it would be an effect
+	// the record does not carry, which is what a later attempt reads.
 	unrecorded := newPreserveHarness(t)
+	unrecorded.recordAfter = 1
 	unrecorded.recordErr = errors.New("the change is no longer this attempt's")
-	phases, revoked := unrecorded.preserve(
+	phases, revoked = unrecorded.preserve(
 		preserveChange(unrecorded.entry), &ReferencePayload{UID: "alice"})
 	if unrecorded.did("deny:alice:true") || revoked != nil {
 		t.Fatalf("the local half ran although nothing recorded it: %v", unrecorded.order)
@@ -912,5 +944,112 @@ func TestTheRenewalIsScheduledOutOfTheTermThatIsLeft(t *testing.T) {
 	short := claimStanding(asked, asked.Add(time.Hour), 6)
 	if got := executor.renewIn(short); got > 3*time.Second {
 		t.Errorf("a claim with six seconds left renews in %v", got)
+	}
+}
+
+// A crash after the mutating call and before the first obligation write used to
+// leave nothing durable at all: the attempt that took the change over found no
+// record that a mutation may already have been made, so it could not know what
+// there was to preserve. The intent is now written before the call, and it is
+// the first thing the change records.
+func TestTheIntentIsWrittenBeforeTheDirectoryIsChanged(t *testing.T) {
+	harness := newPreserveHarness(t)
+	harness.preserve(preserveChange(harness.entry), &ReferencePayload{UID: "alice"})
+
+	if len(harness.saved) == 0 {
+		t.Fatal("nothing was written down before the directory was changed")
+	}
+	intent, found := phaseNamed(harness.saved[0], phaseDirectoryMutationIntent)
+	if !found || intent.Status != PhaseOutstanding {
+		t.Fatalf("the first record does not carry the intent: %+v", harness.saved[0])
+	}
+	// Written before the call and not after it: the record that precedes the
+	// mutation names no outcome of it.
+	if _, found := phaseNamed(harness.saved[0], phasePreserveInDirectory); found {
+		t.Fatalf("the intent was written after the call: %+v", harness.saved[0])
+	}
+	// And it is the reader of that record that a later attempt uses.
+	if _, pending, outstanding := intendedMutation(mustPhases(t, harness.saved[0])); !outstanding {
+		t.Fatalf("an attempt reading the record would not know a mutation was coming: %q", pending)
+	}
+	// A change that reached a verdict does not leave the intent behind: an
+	// outstanding marker would hold a settled change out of its own result.
+	phases, _ := harness.preserve(preserveChange(harness.entry), &ReferencePayload{UID: "alice"})
+	if _, _, outstanding := intendedMutation(mustPhases(t, phases)); outstanding {
+		t.Errorf("the intent stayed outstanding over a call that answered: %+v", phases)
+	}
+}
+
+// And the recovery for that record: intent written, effect unknown. It may not
+// assume the mutation happened and it may not assume it did not, so it asks the
+// directory, and only an identification settles it either way.
+func TestTheInterruptedIntentIsRecoveredWithoutAssumingItsEffect(t *testing.T) {
+	interrupted := func(t *testing.T) Hold {
+		t.Helper()
+		recorded, err := json.Marshal([]Phase{
+			{Name: phaseDirectoryMutationIntent, Status: PhaseOutstanding,
+				Message: "the move is about to be ordered; its effect is unknown"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return Hold{Holder: "replica-b", Attempt: "44444444-4444-4444-4444-444444444444",
+			Resumed: true, Phases: recorded}
+	}
+
+	// The entry is preserved and carries the plan's identifier: the move was
+	// made, so what is left is the panel's own half and not the move again.
+	made := newPreserveHarness(t)
+	made.entryErr = fmt.Errorf("%w: alice", freeipa.ErrEntryNotFound)
+	made.preserved = made.entry
+	made.preservedErr = nil
+	phases, revoked := made.executor.preserveUser(context.Background(),
+		preserveChange(made.entry), interrupted(t), &ReferencePayload{UID: "alice"})
+	if made.did("preserve:alice@" + made.entry.DN) {
+		t.Fatalf("the move was ordered again over an entry already preserved: %v", made.order)
+	}
+	if !made.did("deny:alice:true") || revoked == nil {
+		t.Fatalf("the access of a preserved account stayed open: %v", made.order)
+	}
+	if _, _, outstanding := intendedMutation(mustPhases(t, phases)); outstanding {
+		t.Errorf("the intent was left outstanding after it was settled: %+v", phases)
+	}
+
+	// The entry the plan named is still active: that is an identification and
+	// not a guess, because a move that had been made would have left no active
+	// entry under the name. The change goes on from there.
+	notMade := newPreserveHarness(t)
+	phases, _ = notMade.executor.preserveUser(context.Background(),
+		preserveChange(notMade.entry), interrupted(t), &ReferencePayload{UID: "alice"})
+	if !notMade.did("preserve:alice@" + notMade.entry.DN) {
+		t.Fatalf("an interrupted change whose move never happened did not carry it out: %v",
+			notMade.order)
+	}
+	if state := StateFor(phases); state != StateSucceeded {
+		t.Errorf("the change is %s, expected succeeded: %+v", state, phases)
+	}
+
+	// Nobody can say: the active entry is gone and the preserved accounts
+	// cannot be read. The unknown stays unknown - the change is not a success
+	// and not a stale plan - and the panel's own half is owed anyway, because a
+	// preserved account keeping its sessions is the expensive mistake and a
+	// denial that was not needed is lifted with one call.
+	unknown := newPreserveHarness(t)
+	unknown.entryErr = fmt.Errorf("%w: alice", freeipa.ErrEntryNotFound)
+	unknown.preservedErr = freeipa.ErrPreservedReadUnsupported
+	phases, revoked = unknown.executor.preserveUser(context.Background(),
+		preserveChange(unknown.entry), interrupted(t), &ReferencePayload{UID: "alice"})
+	if unknown.did("preserve:alice@" + unknown.entry.DN) {
+		t.Fatalf("a move whose effect is unknown was ordered again: %v", unknown.order)
+	}
+	if !unknown.did("deny:alice:true") || revoked == nil {
+		t.Fatalf("the access of a possibly preserved account stayed open: %v", unknown.order)
+	}
+	asked, found := phaseNamed(phases, "establishing what the interrupted change did")
+	if !found || !strings.HasPrefix(asked.Message, RefusalOutcomeUnknown+":") {
+		t.Fatalf("the open question was not recorded as one: %+v", phases)
+	}
+	if state := StateFor(phases); state != StatePartiallyApplied {
+		t.Errorf("the change is %s, expected partially_applied", state)
 	}
 }

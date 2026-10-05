@@ -785,37 +785,89 @@ const phasePreserveInDirectory = "preserving the account in the directory"
 // it just as much as one recorded as done.
 const phaseLocalAccessOwed = "cutting off the panel access of the preserved account"
 
-// owesLocalAccess reads what an earlier attempt wrote down: the phases it
-// recorded, and the obligation among them if it is still outstanding. The
-// phases come back whole, because the record of a change is everything that
-// happened to it and not the last attempt's view of it - a resume that
-// replaced them dropped the directory error of the attempt before it.
+// phaseDirectoryMutationIntent is written down BEFORE the directory is asked to
+// change anything, and never after it. A replica that stopped between the
+// mutating call and the first obligation write used to leave nothing durable at
+// all: the attempt that took the change over found no record that a mutation
+// may already have been made, so it could not know what there was to preserve.
+// The marker says the one thing that matters in that window - a change was
+// about to go out and its effect is unknown until somebody states otherwise.
+const phaseDirectoryMutationIntent = "about to change the directory"
+
+// recordedPhases reads the phases an earlier attempt wrote down. They come back
+// whole, because the record of a change is everything that happened to it and
+// not the last attempt's view of it - a resume that replaced them dropped the
+// directory error of the attempt before it.
 //
 // Phases that do not read are no record, and the attempt then starts from the
 // directory rather than assuming anything about what happened.
-func owesLocalAccess(recorded json.RawMessage) ([]Phase, string, bool) {
+func recordedPhases(recorded json.RawMessage) []Phase {
 	if len(recorded) == 0 {
-		return nil, "", false
+		return nil
 	}
 	var phases []Phase
 	if err := json.Unmarshal(recorded, &phases); err != nil {
-		return nil, "", false
+		return nil
 	}
-	owed, outstanding := outstandingObligation(phases)
+	return phases
+}
+
+// outstandingMarker finds the named marker among the phases while it is still
+// owed. One reader for both markers, so the obligation and the intent cannot
+// come to disagree about what "still outstanding" means.
+func outstandingMarker(phases []Phase, name string) (string, bool) {
+	for _, phase := range phases {
+		if phase.Name == name && phase.Status == PhaseOutstanding {
+			return phase.Message, true
+		}
+	}
+	return "", false
+}
+
+// settleMarker closes the named marker with what became of it. Both markers go
+// through it, so neither can be left behind in a shape the other would not
+// recognise - and a marker left outstanding makes the change read as one whose
+// outcome is still in the air.
+func settleMarker(phases []Phase, name string, close func(Phase) Phase) []Phase {
+	for index := range phases {
+		if phases[index].Name == name && phases[index].Status == PhaseOutstanding {
+			phases[index] = close(phases[index])
+		}
+	}
+	return phases
+}
+
+// settleIntent closes the intent marker with what the directory said about the
+// effect of the call. It is a record and not a step, so it is closed as skipped:
+// the verdict on the change itself is the phase of the call.
+func settleIntent(phases []Phase, verdict string) []Phase {
+	return settleMarker(phases, phaseDirectoryMutationIntent, func(phase Phase) Phase {
+		return skipPhase(phase, verdict)
+	})
+}
+
+// owesLocalAccess reads the phases an earlier attempt recorded, and the
+// obligation among them if it is still outstanding.
+func owesLocalAccess(recorded json.RawMessage) ([]Phase, string, bool) {
+	phases := recordedPhases(recorded)
+	owed, outstanding := outstandingMarker(phases, phaseLocalAccessOwed)
 	if !outstanding {
 		return nil, "", false
 	}
 	return phases, owed, true
 }
 
-// outstandingObligation finds the obligation marker that is still owed.
-func outstandingObligation(phases []Phase) (string, bool) {
-	for _, phase := range phases {
-		if phase.Name == phaseLocalAccessOwed && phase.Status == PhaseOutstanding {
-			return phase.Message, true
-		}
+// intendedMutation reads the intent an earlier attempt wrote down before it
+// ordered a change in the directory. An intent still outstanding is the one
+// state the marker exists for: the call was about to go out, or had gone out,
+// and the attempt stopped before it could say which.
+func intendedMutation(recorded json.RawMessage) ([]Phase, string, bool) {
+	phases := recordedPhases(recorded)
+	pending, outstanding := outstandingMarker(phases, phaseDirectoryMutationIntent)
+	if !outstanding {
+		return nil, "", false
 	}
-	return "", false
+	return phases, pending, true
 }
 
 // payLocalAccess writes the obligation down, carries it out and settles it on
@@ -829,7 +881,7 @@ func outstandingObligation(phases []Phase) (string, bool) {
 // leaves nothing for a later attempt to pick up.
 func (e *Executor) payLocalAccess(ctx context.Context, change Change, hold Hold,
 	phases []Phase, ref *ReferencePayload, owed string) ([]Phase, *sessionRevocation) {
-	if _, outstanding := outstandingObligation(phases); !outstanding {
+	if _, outstanding := outstandingMarker(phases, phaseLocalAccessOwed); !outstanding {
 		phases = append(phases, outstandingPhase(startPhase(phaseLocalAccessOwed), owed))
 	}
 	if err := e.savePhases(ctx, change, hold, phases); err != nil {
@@ -843,11 +895,9 @@ func (e *Executor) payLocalAccess(ctx context.Context, change Change, hold Hold,
 	if !localAccessCut(local) {
 		return phases, revoked
 	}
-	for index := range phases {
-		if phases[index].Name == phaseLocalAccessOwed && phases[index].Status == PhaseOutstanding {
-			phases[index] = finishPhase(phases[index], nil, "carried out: "+owed)
-		}
-	}
+	phases = settleMarker(phases, phaseLocalAccessOwed, func(phase Phase) Phase {
+		return finishPhase(phase, nil, "carried out: "+owed)
+	})
 	return phases, revoked
 }
 
@@ -905,6 +955,19 @@ func (e *Executor) preserveUser(ctx context.Context, change Change, hold Hold,
 		return e.payLocalAccess(ctx, change, hold, phases, ref, owed)
 	}
 
+	// An attempt that wrote the intent and recorded no verdict on it stopped in
+	// the one window that used to leave nothing behind: the mutating call was
+	// about to go out, or had gone out, and nobody said which. That is its own
+	// state and it has its own recovery - asking the directory again from the
+	// top would read "no active entry" as a stale plan and leave the access of
+	// a possibly preserved account alive.
+	if earlier, pending, outstanding := intendedMutation(hold.Phases); outstanding {
+		phases = append(phases, earlier...)
+		phases = append(phases, skipPhase(startPhase("taking the change over"),
+			"an earlier attempt was about to change the directory and left no verdict on it: "+pending))
+		return e.resumeAfterIntent(ctx, change, hold, phases, ref)
+	}
+
 	phase := startPhase("asking the directory what it can do")
 	capabilities, err := e.directoryCapabilities(ctx, ref.UID)
 	if err != nil {
@@ -959,7 +1022,31 @@ func (e *Executor) preserveUser(ctx context.Context, change Change, hold Hold,
 	}
 	phases = append(phases, skipPhase(phase, "the entry is the one the plan named ("+planned.Binding()+")"))
 
-	phase = startPhase(phasePreserveInDirectory)
+	return e.moveInDirectory(ctx, change, hold, phases, ref, planned)
+}
+
+// moveInDirectory writes the intent down, orders the move and settles the
+// intent on what came back. The order is the whole point of it: the record that
+// a mutation is about to be made reaches the row BEFORE the call goes out, so a
+// replica that stops in the window between them leaves behind the one fact the
+// next attempt cannot otherwise have. Written after the call, the record was
+// missing in exactly the case it exists for.
+func (e *Executor) moveInDirectory(ctx context.Context, change Change, hold Hold,
+	phases []Phase, ref *ReferencePayload, planned freeipa.EntryReference) ([]Phase, *sessionRevocation) {
+	intent := outstandingPhase(startPhase(phaseDirectoryMutationIntent),
+		"the move of "+planned.Binding()+" is about to be ordered; its effect is "+
+			"unknown until this change says otherwise")
+	if err := e.savePhases(ctx, change, hold, append(phases, intent)); err != nil {
+		// Nothing durable says the mutation is coming, so it does not go out.
+		// An effect no later attempt could account for is worse than a change
+		// that visibly did not start - and a lost claim is one of the ways this
+		// write fails, in which case the row is not this attempt's to change.
+		note := startPhase("recording the directory change the panel is about to make")
+		return append(phases, finishPhase(note, err, "")), nil
+	}
+	phases = append(phases, intent)
+
+	phase := startPhase(phasePreserveInDirectory)
 	proof, err := e.preserveInDirectory(ctx, ref.UID, planned)
 	if err != nil {
 		code := RefusalDirectoryRefused
@@ -969,14 +1056,17 @@ func (e *Executor) preserveUser(ctx context.Context, change Change, hold Hold,
 		var unsettled *freeipa.PreserveUnsettled
 		if !errors.As(err, &unsettled) {
 			// Nothing in the directory changed, so there is nothing to follow.
+			phases = settleIntent(phases, "the directory refused the move, so it had no effect")
 			return append(phases, refusedPhase(phase, code, err.Error())), nil
 		}
 		// The account is preserved - or may be, and nobody can say otherwise -
 		// so the panel's own half is owed either way. A preserved account whose
 		// holder keeps its sessions and tokens is the window this leaves open.
+		phases = settleIntent(phases, "the move went out and its effect is the refusal below")
 		phases = append(phases, refusedPhase(phase, RefusalOutcomeUnknown, err.Error()))
 		return e.payLocalAccess(ctx, change, hold, phases, ref, err.Error())
 	}
+	phases = settleIntent(phases, "the move went out and the directory confirmed it")
 	phases = append(phases, finishPhase(phase, nil, "the entry stays as a preserved account"))
 
 	// Whether the entry after the move is the one the operator consented to is
@@ -995,6 +1085,80 @@ func (e *Executor) preserveUser(ctx context.Context, change Change, hold Hold,
 	// no longer active.
 	return e.payLocalAccess(ctx, change, hold, phases, ref,
 		"the account is preserved in the directory")
+}
+
+// resumeAfterIntent recovers the state the intent marker exists to leave
+// behind: intent written, effect unknown. It treats the unknown as unknown -
+// it may not assume the mutation happened and it may not assume it did not -
+// so it asks the directory and settles only on a positive identification.
+//
+// The entry still active and still the one the plan named is the single reading
+// that says the move was not made, and the change then goes on from there. The
+// entry preserved and carrying the plan's identifier says it was made, and what
+// is left is the panel's own half. Everything else stays unknown, and the
+// unknown owes the local half too: a preserved account whose holder keeps its
+// sessions and tokens is the expensive mistake here, while a denial that was
+// not needed is lifted with one call. The change is left intermediate either
+// way, so a person reads what the directory could not settle.
+func (e *Executor) resumeAfterIntent(ctx context.Context, change Change, hold Hold,
+	phases []Phase, ref *ReferencePayload) ([]Phase, *sessionRevocation) {
+	const asking = "establishing what the interrupted change did"
+
+	planned, err := preservePlan(change)
+	if err != nil {
+		// Neither side carries anything to identify the entry by, so nothing
+		// can settle this in either direction.
+		owed := "an earlier attempt was about to preserve the account and the plan names no " +
+			"entry to check it against, so whether the move was made is not known: " + err.Error()
+		phases = settleIntent(phases, owed)
+		phases = append(phases, refusedPhase(startPhase(asking), RefusalOutcomeUnknown, owed))
+		return e.payLocalAccess(ctx, change, hold, phases, ref, owed)
+	}
+
+	current, err := e.directoryEntry(ctx, ref.UID)
+	switch {
+	case err == nil:
+		if moved, stale := planned.Moved(current); stale {
+			// Another entry holds the name now, so this change has nothing left
+			// to do to it - and nothing it did can be claimed either.
+			settled := "the name is held by another entry, so the interrupted call did not " +
+				"move the one the plan named"
+			phases = settleIntent(phases, settled)
+			return append(phases, refusedPhase(startPhase(asking), RefusalStalePlan, moved)), nil
+		}
+		// The entry the plan named is still active. That is an identification
+		// and not a guess: a move that had been made would have left no active
+		// entry under the name.
+		settled := "the account is still active as the entry the plan named (" + planned.Binding() +
+			"), so the interrupted call did not move it"
+		phases = settleIntent(phases, settled)
+		phases = append(phases, skipPhase(startPhase(asking), settled))
+		return e.moveInDirectory(ctx, change, hold, phases, ref, planned)
+	case errors.Is(err, freeipa.ErrEntryNotFound):
+		preserved, identified, unknown := e.alreadyPreserved(ctx, ref.UID, planned)
+		if identified {
+			settled := "the account is preserved as the entry the plan named (" + preserved +
+				"), so the interrupted call moved it"
+			phases = settleIntent(phases, settled)
+			phases = append(phases, skipPhase(startPhase(asking), settled))
+			return e.payLocalAccess(ctx, change, hold, phases, ref, settled)
+		}
+		owed := unknown
+		if owed == "" {
+			// Not active and not among the preserved ones: something happened
+			// to the account that this change cannot claim and cannot rule out.
+			owed = "the account is neither active nor identifiable among the preserved ones, so " +
+				"whether the interrupted call moved it is not known"
+		}
+		phases = settleIntent(phases, owed)
+		phases = append(phases, refusedPhase(startPhase(asking), RefusalOutcomeUnknown, owed))
+		return e.payLocalAccess(ctx, change, hold, phases, ref, owed)
+	}
+	owed := "the directory did not answer, so whether the interrupted call moved the entry " +
+		"is not known: " + err.Error()
+	phases = settleIntent(phases, owed)
+	phases = append(phases, refusedPhase(startPhase(asking), RefusalOutcomeUnknown, owed))
+	return e.payLocalAccess(ctx, change, hold, phases, ref, owed)
 }
 
 // cutLocalAccess is the panel's own half of a preserve: the denial marker, the
