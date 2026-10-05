@@ -1113,15 +1113,23 @@ func sameProfile(request *helperv1.NetworkRequest, payload *opspec.NetworkPayloa
 	if err := same("method", request.GetMethod(), payload.Method); err != nil {
 		return err
 	}
-	if err := sameList("addresses", request.GetAddresses(), payload.Addresses); err != nil {
+	// In order, not as a set. The first address of an interface is the one a
+	// host answers from and the one its services bind by default, and the
+	// resolvers are asked in the order they are written - so a request naming
+	// the same elements in another order is a different configuration, and it
+	// used to satisfy a capability signed for the first order. The comment on
+	// sameSequence says exactly this and these three calls did not follow it.
+	if err := sameSequence("addresses", request.GetAddresses(), payload.Addresses); err != nil {
 		return err
 	}
 	if err := same("gateway", request.GetGateway(), payload.Gateway); err != nil {
 		return err
 	}
-	if err := sameList("resolvers", request.GetDns(), payload.DNS); err != nil {
+	if err := sameSequence("resolvers", request.GetDns(), payload.DNS); err != nil {
 		return err
 	}
+	// Routes stay a set on purpose: the kernel matches them by prefix and
+	// metric, so the order they are written in is not what the host will do.
 	if err := sameList("routes", request.GetRoutes(), payload.Routes); err != nil {
 		return err
 	}
@@ -1131,7 +1139,7 @@ func sameProfile(request *helperv1.NetworkRequest, payload *opspec.NetworkPayloa
 	if err := same("method6", request.GetMethod6(), payload.Method6); err != nil {
 		return err
 	}
-	if err := sameList("addresses6", request.GetAddresses6(), payload.Addresses6); err != nil {
+	if err := sameSequence("addresses6", request.GetAddresses6(), payload.Addresses6); err != nil {
 		return err
 	}
 	if err := same("gateway6", request.GetGateway6(), payload.Gateway6); err != nil {
@@ -1318,12 +1326,28 @@ func boundSysctl(got, want, before map[string]string) error {
 	}
 	// A rollback puts back every key the change touched, and a request that
 	// mixes the two - some keys back, some to the new value - is neither
-	// operation. Told apart by the first key: the whole request goes one way.
-	rollback := got[keys[0]] != want[keys[0]]
+	// operation.
+	//
+	// Which of the two it is cannot be read off the first key. A key whose
+	// prior value is already the value the panel asked for satisfies both
+	// directions, and reading the direction from it refused honest rollbacks:
+	// with a payload of A=1,B=1 over a host holding A=1,B=0, the rollback to
+	// A=1,B=0 was called a mixture because A did not move.
+	//
+	// So the request has to be the whole change or the whole rollback, and a
+	// key that fits both leaves both open rather than deciding for them.
+	toDesired, toPrevious := true, true
 	for _, key := range keys {
-		if (got[key] != want[key]) != rollback {
-			return binding("the request puts some kernel settings back and sets others, which is neither the change nor its rollback")
+		if got[key] != want[key] {
+			toDesired = false
 		}
+		was, recorded := before[key]
+		if !recorded || got[key] != was {
+			toPrevious = false
+		}
+	}
+	if !toDesired && !toPrevious {
+		return binding("the request puts some kernel settings back and sets others, which is neither the change nor its rollback")
 	}
 	return nil
 }
