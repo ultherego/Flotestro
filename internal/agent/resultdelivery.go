@@ -114,13 +114,13 @@ func (d *resultDelivery) forgetSent(taskID string) {
 // deliver writes the answer down and sends it. A send that fails leaves the
 // answer in the spool, where the next session that works finds it.
 func (d *resultDelivery) deliver(result *agentv1.TaskResult) {
-	// This delivery is about to send it, so the watch that the write below wakes
-	// does not send it as well.
-	d.noteSent(result.GetTaskId(), time.Now())
 	// The copy on disk comes before the send, always: the task is already
 	// carried out on the host, and a session that breaks between the change and
 	// the answer is the case this exists for.
 	if d.spool != nil {
+		// This delivery is about to send it, so the watch that the write below
+		// wakes does not send it as well.
+		d.noteSent(result.GetTaskId(), time.Now())
 		if err := d.spool.Enqueue(result); err != nil {
 			d.log.Error("the result was not kept for a resend; a broken session now loses it",
 				"task_id", result.GetTaskId(), "err", err)
