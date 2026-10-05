@@ -286,6 +286,13 @@ func TestTheJobThatClaimsTheApprovalAsksWhetherItHasAReviewer(t *testing.T) {
 	for what, needle := range map[string]string{
 		"it asks the API about the environment it names": "environments/release-signing",
 		"it asks for the reviewers and not for any rule": "required_reviewers",
+		// A reviewer alone is half the question: an environment any ref may
+		// use is an approval a run from any branch can ask for, so the
+		// reviewer approves something that is not a release. The first
+		// version of this step asked about the reviewer and nothing else.
+		"it asks which refs may use the environment": "custom_branch_policies",
+		"it reads the patterns themselves":           "deployment-branch-policies",
+		"it refuses a branch pattern":                "branch pattern(s)",
 	} {
 		if !strings.Contains(script, needle) {
 			t.Errorf("the job %s claims the approval but %s", claiming, what)

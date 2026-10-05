@@ -515,6 +515,46 @@ jobs:
           fi
           echo "release-signing requires $answer reviewer rule(s), so this job waited"
 
+          # A reviewer alone is half the question. An environment any ref may
+          # use is an approval a run from any branch can ask for, so the
+          # reviewer would be approving something that is not a release. The
+          # policy has to name the tags, and it is asked here because the first
+          # version of this step asked about the reviewer and nothing else.
+          if ! policy="$(gh api "repos/$GITHUB_REPOSITORY/environments/release-signing" \
+              --jq '.deployment_branch_policy.custom_branch_policies' 2>&1)"; then
+            if [ "$stable" = true ]; then
+              echo "::error title=The tag policy cannot be read::this run could not ask which refs may use release-signing ($policy); not knowing is not a policy" >&2
+              exit 1
+            fi
+            echo "::warning title=The tag policy cannot be read::$policy; a pre-release goes out anyway"
+            exit 0
+          fi
+          if [ "$policy" != true ]; then
+            if [ "$stable" = true ]; then
+              echo "::error title=Any ref may use the signing environment::release-signing carries no custom policy, so a run from any branch can ask its reviewer to approve; set Deployment branches and tags to a selected pattern of v* under Settings > Environments > release-signing" >&2
+              exit 1
+            fi
+            echo "::warning title=Any ref may use the signing environment::a pre-release goes out anyway"
+            exit 0
+          fi
+          # And the patterns themselves: a tag pattern that this tag matches,
+          # with nothing left that would let a branch in.
+          patterns="$(gh api "repos/$GITHUB_REPOSITORY/environments/release-signing/deployment-branch-policies" \
+            --jq '.branch_policies[] | "\(.type) \(.name)"' 2>&1)" || patterns=""
+          tags="$(printf '%s\n' "$patterns" | { grep -c '^tag ' || true; })"
+          branches="$(printf '%s\n' "$patterns" | { grep -c '^branch ' || true; })"
+          if [ "$tags" = 0 ] || [ "$branches" != 0 ]; then
+            if [ "$stable" = true ]; then
+              echo "::error title=The signing environment is not restricted to tags::release-signing names $tags tag pattern(s) and $branches branch pattern(s); a release is made from a tag, so the policy is v* and nothing else" >&2
+              printf '%s\n' "$patterns" >&2
+              exit 1
+            fi
+            echo "::warning title=The signing environment is not restricted to tags::$tags tag pattern(s), $branches branch pattern(s); a pre-release goes out anyway"
+            exit 0
+          fi
+          echo "release-signing is restricted to $tags tag pattern(s) and no branch:"
+          printf '  %s\n' $patterns
+
       - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
           name: dist
