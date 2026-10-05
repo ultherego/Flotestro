@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // The cron entries directory and the prefix of the files belonging to the
@@ -283,9 +284,17 @@ func ComposeCommand(arguments []string) (string, error) {
 		// again, so one argument comes back as two. Quoting would only move
 		// the problem, because the reader has no quoting - and an approved
 		// "rm -rf /var/tmp/old cache" would then remove two other directories.
-		if strings.ContainsAny(argument, " \t\n\r\v\f") {
-			return "", fmt.Errorf("the argument %q contains whitespace; the schedule keeps the "+
-				"command as one line, so an argument with a space has to go into a script", argument)
+		// The set is the reader's own: strings.Fields splits on every rune
+		// unicode.IsSpace accepts, so a no-break space or an ideographic space
+		// is a separator there although it is not one of the five ASCII
+		// characters a byte-wise check knows.
+		for _, character := range argument {
+			if unicode.IsSpace(character) {
+				return "", fmt.Errorf("the argument %q contains the whitespace character %U; "+
+					"the schedule keeps the command as one line and reads it back with a split "+
+					"on whitespace, so an argument with a space in it has to go into a script",
+					argument, character)
+			}
 		}
 	}
 	return strings.Join(arguments, " "), nil
