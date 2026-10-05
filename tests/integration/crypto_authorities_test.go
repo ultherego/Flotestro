@@ -69,7 +69,9 @@ func TestTheAuthoritiesOfTheFleetLiveInTheDatabaseAndSurviveAHandover(t *testing
 		for _, row := range rows {
 			names = append(names, row.KeyID)
 		}
-		_ = store.DeleteAuthorities(forget, names)
+		// The cleanup removes exactly what it just read, so the set it names is
+		// also the condition it carries.
+		_ = store.DeleteAuthorities(forget, names, names)
 		for _, cert := range retiredSerials(forget, t, store) {
 			_ = store.DeleteRetiredAuthority(forget, cert)
 		}

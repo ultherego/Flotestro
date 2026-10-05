@@ -560,3 +560,31 @@ func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 func ParseCertificatePEM(certPEM []byte) (*x509.Certificate, error) {
 	return parseCertificateOnly(certPEM)
 }
+
+// IssuerIDsOfBundle names every authority a trust bundle carries, by the same
+// identifier a certificate row names its issuer with. It is what a host is
+// recorded as having been given: the generation of the trust, read from the
+// bytes that were handed over rather than from the moment they went out.
+func IssuerIDsOfBundle(bundlePEM []byte) ([]string, error) {
+	var ids []string
+	rest := bundlePEM
+	for {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("a certificate of the trust bundle: %w", err)
+		}
+		ids = append(ids, IssuerIDOf(cert))
+	}
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("the trust bundle carries no certificate")
+	}
+	return ids, nil
+}

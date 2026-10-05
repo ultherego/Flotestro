@@ -6,6 +6,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"connectrpc.com/connect"
@@ -19,6 +20,22 @@ import (
 	"github.com/ultherego/flotestro/internal/pki"
 	"github.com/ultherego/flotestro/internal/relayproof"
 )
+
+// trustGeneration names the authorities of the bundle a host is being handed,
+// so the certificate row says what the host was given and not only when it was
+// given something. A bundle this panel cannot read is recorded as nothing:
+// unknown is not evidence that a generation arrived, and the guard of a
+// handover then waits for the next renewal rather than taking a guess.
+func trustGeneration(log *slog.Logger, bundle []byte) []string {
+	ids, err := pki.IssuerIDsOfBundle(bundle)
+	if err != nil {
+		if log != nil {
+			log.Error("the authorities of the trust bundle handed to a host were not read", "err", err)
+		}
+		return nil
+	}
+	return ids
+}
 
 // RenewCertificate exchanges a CSR for a new certificate of a host.
 func (s *AgentService) RenewCertificate(ctx context.Context,
@@ -167,7 +184,8 @@ func (s *AgentService) issueRenewal(ctx context.Context,
 
 	if err := s.hosts.SaveCertificate(ctx, tx, hostID, issued.Serial, issued.CommonName,
 		issued.Fingerprint, issued.NotBefore, issued.NotAfter,
-		issued.IssuerSubject, issued.IssuerSerial, issued.IssuerID); err != nil {
+		issued.IssuerSubject, issued.IssuerSerial, issued.IssuerID,
+		trustGeneration(s.log, trust)); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("writing the certificate: %w", err))
 	}
 	// The public key goes on the record with the certificate: the envelopes of

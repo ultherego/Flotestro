@@ -340,7 +340,8 @@ func (s *EnrollmentService) enrollThroughRelay(ctx context.Context,
 
 	if err := s.hosts.SaveCertificate(ctx, tx, hostID, issued.Serial, issued.CommonName,
 		issued.Fingerprint, issued.NotBefore, issued.NotAfter,
-		issued.IssuerSubject, issued.IssuerSerial, issued.IssuerID); err != nil {
+		issued.IssuerSubject, issued.IssuerSerial, issued.IssuerID,
+		trustGeneration(s.log, trust)); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	// The public key goes on the record with the certificate: the envelopes

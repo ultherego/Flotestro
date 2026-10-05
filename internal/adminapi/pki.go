@@ -35,14 +35,24 @@ func (s *Server) handlePKIStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		if ca.State == "pending" {
 			// For a prepared CA something else counts than the number of hosts
-			// using it: how many hosts do not know it yet.
-			missing, err := s.hosts.HostsWithoutCertificateSince(r.Context(), ca.PreparedAt,
-				s.trust.Active().IssuerID())
+			// using it: how many hosts have not been given it yet. The question
+			// is asked about this authority, because what a host holds is what
+			// it was handed, not when it last renewed.
+			pending, _ := s.trust.Pending()
+			if pending == nil {
+				// The handover went through between the two reads; there is
+				// nothing prepared to report about any more.
+				continue
+			}
+			missing, err := s.hosts.HostsWithoutTrustGeneration(r.Context(), pending.IssuerID())
 			if err != nil {
 				s.fail(w, err)
 				return
 			}
 			entry["prepared_at"] = ca.PreparedAt
+			// The identifier the certificate rows name an authority by, so a
+			// reader can see which hosts the count is about.
+			entry["issuer_id"] = pending.IssuerID()
 			entry["hosts_missing"] = missing
 			entry["ready_to_activate"] = missing == 0
 		}
@@ -139,15 +149,17 @@ func (s *Server) handleActivateCA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pending, preparedAt := s.trust.Pending()
+	pending, _ := s.trust.Pending()
 	if pending == nil {
 		problem(w, http.StatusConflict, "no_pending_ca", "no CA is prepared for handover")
 		return
 	}
-	// The authority that signs is read now and not at the start: this instance
-	// may have followed another one into a handover since.
-	missing, err := s.hosts.HostsWithoutCertificateSince(r.Context(), preparedAt,
-		s.trust.Active().IssuerID())
+	// The question is asked about the authority that is to take over: every
+	// host has to hold a certificate it has used whose bundle carried this
+	// authority. A moment cannot stand in for that - a certificate issued
+	// before the preparation, or by an instance that had not caught up with
+	// it, carries a bundle this authority is not in.
+	missing, err := s.hosts.HostsWithoutTrustGeneration(r.Context(), pending.IssuerID())
 	if err != nil {
 		s.fail(w, err)
 		return
