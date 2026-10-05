@@ -128,7 +128,10 @@ func ValidateRepository(repo Repository, manager string, withSecret bool) error 
 	if withSecret && repo.Username == "" {
 		return fmt.Errorf("a source with a password requires a user name")
 	}
-	if repo.Username != "" && strings.ContainsAny(repo.Username, " \t\n:") {
+	// The user name stands in the same token run of the apt credentials file
+	// and on an ini line of its own for DNF, so every separator of either
+	// format is forbidden in it, not only the three that were listed.
+	if repo.Username != "" && strings.ContainsAny(repo.Username, " \t\n\r\v\f\x00:") {
 		return fmt.Errorf("the user name contains a forbidden character")
 	}
 	if repo.Priority < 0 || repo.Priority > 1000 {
@@ -195,6 +198,20 @@ func SourceFiles(repo Repository, manager, key string, password []byte) ([]File,
 	if bytes.ContainsAny(password, "\n\r\x00") {
 		return nil, fmt.Errorf("the password of the source contains a line break, so it cannot be " +
 			"written into the description of the source")
+	}
+	// Apt reads its credentials file as a run of whitespace-separated tokens,
+	// and the password is one of them. A space or a tab in it therefore ends
+	// that token and the remainder is read as further keywords: the value
+	// "x machine evil.example login attacker password y" adds a second host to
+	// the credentials of every host that uses this source, and apt then sends
+	// the attacker's name and password to it. The file has no quoting, so a
+	// password with a separator in it cannot be written down - it is refused
+	// rather than escaped. DNF keeps the value to the end of its ini line, so
+	// a space is one character there and nothing else.
+	if manager == "apt" && bytes.ContainsAny(password, " \t\v\f") {
+		return nil, fmt.Errorf("the password of the source contains whitespace, which ends a " +
+			"token in the apt credentials file, so the password cannot be written there as one " +
+			"value; change it in the secret to one without spaces or tabs")
 	}
 	switch manager {
 	case "apt":

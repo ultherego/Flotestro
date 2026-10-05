@@ -253,6 +253,47 @@ func TestARemovalOfANetworkInUseRefusesAndAnUnusedOneDoesNot(t *testing.T) {
 	}
 }
 
+// A forced removal disconnects whatever is attached, so what is attached is
+// part of the order. The digest covered the network's name and identifier
+// only, so a container that joined after the operator approved the removal was
+// detached under the same digest and never appeared in the plan they read
+// (audit of 6c38561, HOP-D03).
+func TestAForcedNetworkRemovalBindsTheContainersItDisconnects(t *testing.T) {
+	network := Network{ID: "aaa111222333", Name: "backplane",
+		Containers: []NetworkMember{{ID: "1", Name: "storefront"}}, InUse: true}
+	approved, err := planNetworkRemovalFrom(Snapshot{Networks: []Network{network}}, "backplane", true)
+	if err != nil {
+		t.Fatalf("a forced removal was refused: %v", err)
+	}
+
+	// The same network, the same identifier, one container more.
+	joined := network
+	joined.Containers = append([]NetworkMember{{ID: "2", Name: "batch-runner"}}, network.Containers...)
+	replanned, err := planNetworkRemovalFrom(Snapshot{Networks: []Network{joined}}, "backplane", true)
+	if err != nil {
+		t.Fatalf("a forced removal was refused: %v", err)
+	}
+	if len(replanned.Detaches) != 2 {
+		t.Fatalf("the replan does not see the container that joined: %+v", replanned.Detaches)
+	}
+	if replanned.Digest == approved.Digest {
+		t.Error("a container that joined after the approval is detached under the approved digest")
+	}
+
+	// The same state twice gives the same digest, whatever order the engine
+	// lists the members in.
+	reversed := network
+	reversed.Containers = []NetworkMember{{ID: "2", Name: "batch-runner"}, {ID: "1", Name: "storefront"}}
+	again, err := planNetworkRemovalFrom(Snapshot{Networks: []Network{reversed}}, "backplane", true)
+	if err != nil {
+		t.Fatalf("a forced removal was refused: %v", err)
+	}
+	if again.Digest != replanned.Digest {
+		t.Errorf("the digest of the same plan differs with the engine's order: %s and %s",
+			again.Digest, replanned.Digest)
+	}
+}
+
 func TestAVolumeInUseIsNotRemovedWithoutTheOrderSayingSo(t *testing.T) {
 	state := Snapshot{
 		Volumes: []Volume{{

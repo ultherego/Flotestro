@@ -2,6 +2,7 @@ package helper
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -30,6 +31,56 @@ func writePanelRegistry(t *testing.T, dir string) {
 		Protocol: "tcp", Ports: []string{"25"}}}}
 	if err := firewall.SaveRegistry(dir, registry); err != nil {
 		t.Fatalf("writing the registry: %v", err)
+	}
+}
+
+// Zone listing copied from a host of the test fleet.
+const zonesListing = `public (default, active)
+  target: default
+  interfaces: enp0s3
+  services: cockpit dhcpv6-client ssh
+  ports: 8443/tcp
+`
+
+// A firewalld host whose nftables underneath answered leaves no
+// UnavailableReason, so a failed "firewall-cmd --list-all-zones" used to leave
+// Zones empty and every zone question answered: the port is not open, the way
+// back is "close it", and the rollback restores a state nobody read. The
+// listing is a question the host did not answer (audit of 6c38561, HOP-F02).
+func TestAFailedZoneListingIsNotAnEmptyFirewall(t *testing.T) {
+	// The nftables underneath answered: this is the snapshot the reader has
+	// before firewall-cmd is asked anything.
+	answered := firewall.Snapshot{Writable: true}
+	recordZones(&answered, "public\n", zonesListing, nil)
+	if answered.Adapter != firewall.AdapterFirewalld || len(answered.Zones) != 1 {
+		t.Fatalf("a listing that answered was not taken: %+v", answered)
+	}
+	if present, known := zoneHasPort(answered, "public", "8443", "tcp"); !known || !present {
+		t.Errorf("a port the listing names: present=%v known=%v", present, known)
+	}
+	if present, known := zoneHasPort(answered, "public", "25", "tcp"); !known || present {
+		t.Errorf("a port the listing does not name: present=%v known=%v", present, known)
+	}
+	// A zone absent from a list that was read carries nothing, and that is an
+	// answer.
+	if present, known := zoneHasPort(answered, "dmz", "8443", "tcp"); !known || present {
+		t.Errorf("a zone absent from a read listing: present=%v known=%v", present, known)
+	}
+
+	unanswered := firewall.Snapshot{Writable: true}
+	recordZones(&unanswered, "", "", errors.New("exit status 252"))
+	if unanswered.ZonesReason == "" {
+		t.Fatal("a listing that failed left no reason, so an empty list reads as an answer")
+	}
+	if unanswered.Adapter != firewall.AdapterFirewalld {
+		t.Errorf("adapter = %q; a host carrying firewall-cmd is a firewalld host "+
+			"whether the listing answered or not", unanswered.Adapter)
+	}
+	if _, known := zoneHasPort(unanswered, "public", "8443", "tcp"); known {
+		t.Error("a port question was answered from a listing nobody read")
+	}
+	if _, known := zoneHasService(unanswered, "public", "ssh"); known {
+		t.Error("a service question was answered from a listing nobody read")
 	}
 }
 

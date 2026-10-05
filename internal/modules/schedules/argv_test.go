@@ -15,9 +15,38 @@ func TestAnArgumentWithWhitespaceIsRefused(t *testing.T) {
 		"--exclude=/srv/my backups",
 		"a\tb",
 		"a\nb",
+		// The reader is strings.Fields, which splits on unicode.IsSpace, so a
+		// separator does not have to be one of the five ASCII characters. A
+		// path with a no-break space passed the guard and came back as two
+		// arguments (audit of 6c38561, HP-09).
+		"/srv/data/ cache",
+		"/srv/data archive",
+		"/srv/data　archive",
+		"/srv/data\u0085archive",
 	} {
 		if _, err := ComposeCommand([]string{"/usr/bin/rm", "-rf", argument}); err == nil {
 			t.Errorf("the argument %q was accepted; it comes back as two", argument)
+		}
+	}
+}
+
+// The same guard protects the whole round trip and not one of its ends: an
+// argument the composer takes has to come back as itself, whatever rune is in
+// it.
+func TestEveryAcceptedArgumentComesBackAsOne(t *testing.T) {
+	for _, argument := range []string{
+		"/srv/data/ cache",
+		"/srv/data archive",
+		"/srv/data　archive",
+		"/srv/data\u0085archive",
+		"/srv/data/ärchiv",
+	} {
+		line, err := ComposeCommand([]string{"/usr/bin/rm", "-rf", argument})
+		if err != nil {
+			continue
+		}
+		if back := strings.Fields(line); len(back) != 3 {
+			t.Errorf("the accepted argument %q came back as %d arguments: %q", argument, len(back)-2, back)
 		}
 	}
 }

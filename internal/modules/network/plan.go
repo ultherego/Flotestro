@@ -150,7 +150,13 @@ func ComputeProfile(iface string, current Profile, want ProfileRequest, ipv6 IPv
 		Method: current.Method, Addresses: current.Addresses,
 		Gateway: current.Gateway, DNS: current.DNS,
 		DNSSearch: current.DNSSearch, IgnoreAutoDNS: current.IgnoreAutoDNS,
-		Routes: current.Routes, MTU: current.MTU,
+		// The second family's resolver settings travel with the rest. Leaving
+		// them out of the copy made every address edit carry a second change
+		// nobody ordered: ipv6.dns-search became the IPv4 list and
+		// ipv6.ignore-auto-dns went back to accepting the automatic servers.
+		DNSSearch6: current.DNSSearch6, DNSSearch6Set: current.DNSSearch6Set,
+		IgnoreAutoDNS6: current.IgnoreAutoDNS6,
+		Routes:         current.Routes, MTU: current.MTU,
 		Method6: current.Method6, Addresses6: current.Addresses6,
 		Gateway6: current.Gateway6, Routes6: current.Routes6,
 		AcceptRA: current.AcceptRA, Privacy: current.Privacy,
@@ -194,6 +200,16 @@ func ComputeDNS(iface string, current Profile, servers, domains []string,
 	desired.DNS = append([]string(nil), servers...)
 	desired.DNSSearch = append([]string(nil), domains...)
 	desired.IgnoreAutoDNS = ignoreAuto
+	// DNSArguments writes the one list and the one flag into both families
+	// where the second one can hold them, so the plan says so too. It used to
+	// show the second family unchanged while the command changed it, and a
+	// host whose IPv6 search list differed from its IPv4 one lost it without
+	// the difference ever appearing on the screen.
+	if ipv6CarriesDNS(current.Method6) {
+		desired.DNSSearch6 = append([]string(nil), domains...)
+		desired.DNSSearch6Set = true
+		desired.IgnoreAutoDNS6 = ignoreAuto
+	}
 	return plan.withDesired(desired)
 }
 
@@ -303,6 +319,19 @@ func differences(current, desired Profile) []string {
 	}
 	if !sameSet(current.Routes6, desired.Routes6) {
 		changes = append(changes, "IPv6 routes from "+list(current.Routes6)+" to "+list(desired.Routes6))
+	}
+	// The second family's resolver settings were never listed, so a change to
+	// them was applied without appearing in the plan the operator approved.
+	if !sameSet(current.DNSSearch6, desired.DNSSearch6) {
+		changes = append(changes, "IPv6 search domains from "+list(current.DNSSearch6)+
+			" to "+list(desired.DNSSearch6))
+	}
+	if current.IgnoreAutoDNS6 != desired.IgnoreAutoDNS6 {
+		if desired.IgnoreAutoDNS6 {
+			changes = append(changes, "the automatic IPv6 servers will be rejected")
+		} else {
+			changes = append(changes, "the automatic IPv6 servers will be accepted")
+		}
 	}
 	if current.AcceptRA != desired.AcceptRA {
 		changes = append(changes, "router advertisements from "+orNone(current.AcceptRA)+" to "+orNone(desired.AcceptRA))

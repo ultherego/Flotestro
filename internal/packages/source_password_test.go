@@ -34,6 +34,51 @@ func TestAPasswordWithALineBreakIsRefused(t *testing.T) {
 	}
 }
 
+// The apt credentials file is a run of whitespace-separated tokens, so a space
+// or a tab in the password ends that token and the rest of the value is read as
+// further keywords. The check for a line break let this through, and the
+// resulting file names a second host whose credentials the operator never
+// entered (audit of 6c38561, PKG-03).
+func TestAnAPTPasswordThatIsNotOneTokenIsRefused(t *testing.T) {
+	repo := Repository{
+		ID: "lab", Name: "lab", URL: "https://packages.example/lab",
+		Suites: []string{"stable"}, Components: []string{"main"},
+		Username: "reader", Signed: true,
+	}
+	for _, password := range []string{
+		"x machine evil.example login attacker password y",
+		"x\tmachine evil.example login attacker password y",
+		"x\vy",
+		"x\fy",
+		"trailing ",
+	} {
+		files, err := SourceFiles(repo, "apt", "", []byte(password))
+		if err == nil {
+			t.Errorf("apt accepted a password of several tokens: %q -> %+v", password, files)
+		}
+	}
+	// A password cannot be refused for a format that holds it: DNF reads its
+	// ini value to the end of the line, so a space there is one character.
+	if _, err := SourceFiles(repo, "dnf", "", []byte("x machine evil.example login attacker")); err != nil {
+		t.Errorf("dnf refused a password its own format carries: %v", err)
+	}
+}
+
+// The user name stands in the same token run, and on an ini line of its own,
+// so the separators of both formats are forbidden in it.
+func TestAUserNameCarryingASeparatorIsRefused(t *testing.T) {
+	for _, name := range []string{"reader root", "reader\troot", "reader\rx", "reader\nx", "reader\x00x", "a:b"} {
+		repo := Repository{
+			ID: "lab", Name: "lab", URL: "https://packages.example/lab",
+			Suites: []string{"stable"}, Components: []string{"main"},
+			Username: name, Signed: true,
+		}
+		if err := ValidateRepository(repo, "apt", true); err == nil {
+			t.Errorf("the user name %q was accepted", name)
+		}
+	}
+}
+
 // A password that is a password still goes through, on both managers.
 func TestAPasswordWithoutALineBreakIsWritten(t *testing.T) {
 	repo := Repository{

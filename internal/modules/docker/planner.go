@@ -386,7 +386,13 @@ func planNetworkRemovalFrom(state Snapshot, name string, force bool) (Plan, erro
 		plan.Warnings = append(plan.Warnings, "the containers "+strings.Join(plan.Detaches, ", ")+
 			" are disconnected from this network and keep running without it")
 	}
-	plan.Digest = planDigest(KindNetwork, PlanRemove, name, current.ID)
+	// The containers that lose the network are part of what was approved, as
+	// they are for a replacement: the digest covered the name and the network's
+	// identifier only, so a container that joined between the plan and the
+	// execution kept the digest the operator approved and was disconnected
+	// without ever appearing in the order.
+	plan.Digest = planDigest(KindNetwork, PlanRemove, name,
+		append([]string{current.ID}, plan.Detaches...)...)
 	return plan, nil
 }
 

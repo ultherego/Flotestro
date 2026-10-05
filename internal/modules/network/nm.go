@@ -55,7 +55,14 @@ type Profile struct {
 	// changed a resolver policy nobody had asked it to change.
 	DNSSearch6     []string `json:"dns_search6,omitempty"`
 	IgnoreAutoDNS6 bool     `json:"ignore_auto_dns6,omitempty"`
-	Routes         []string `json:"routes,omitempty"`
+	// DNSSearch6Set says the host was asked about the second family's search
+	// list and answered. nmcli prints "--" for an empty list property and the
+	// reader turns that into no list at all, so without this an IPv6 search
+	// list the host keeps deliberately empty was indistinguishable from an
+	// order that says nothing about it - and the write then put the first
+	// family's domains into ipv6.dns-search.
+	DNSSearch6Set bool     `json:"dns_search6_set,omitempty"`
+	Routes        []string `json:"routes,omitempty"`
 	// The second family.
 	Method6    string   `json:"method6,omitempty"`
 	Addresses6 []string `json:"addresses6,omitempty"`
@@ -157,7 +164,7 @@ func ParseProfile(output string) Profile {
 		case "ipv6.dns":
 			profile.DNS = append(profile.DNS, valueList(value)...)
 		case "ipv6.dns-search":
-			profile.DNSSearch6 = valueList(value)
+			profile.DNSSearch6, profile.DNSSearch6Set = valueList(value), true
 		case "ipv6.ignore-auto-dns":
 			profile.IgnoreAutoDNS6 = value == "yes"
 		case "802-3-ethernet.mtu":
@@ -345,11 +352,13 @@ func ProfileArguments(profile Profile) ([][]string, error) {
 	if profile.IgnoreAutoDNS6 {
 		ignore6 = "yes"
 	}
-	// A profile that says nothing about the second family's search domains
-	// takes the first family's, which is what an order written by hand means;
-	// a snapshot read from the host carries both, so a rollback restores both.
+	// An order written by hand that says nothing about the second family's
+	// search domains takes the first family's. A profile read from the host
+	// has been asked, and its answer stands even when it is an empty list:
+	// taking the IPv4 domains then is not restoring a state, it is writing a
+	// resolver policy the host never had.
 	search6 := profile.DNSSearch6
-	if search6 == nil {
+	if search6 == nil && !profile.DNSSearch6Set {
 		search6 = profile.DNSSearch
 	}
 	v4, v6 := splitDNSFamilies(profile.DNS)
