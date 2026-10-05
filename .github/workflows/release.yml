@@ -480,6 +480,41 @@ jobs:
       # wrong. It now goes to the two steps that import it and nowhere else.
       RELEASE_SIGNING_KEY_PRESENT: ${{ secrets.RELEASE_SIGNING_KEY != '' }}
     steps:
+      - name: The environment that gates this job has a reviewer
+        # This job names release-signing, and a test holds it to naming it.
+        # But an environment with no protection rule waits for nobody, so the
+        # name alone was being read as an approval - and on 05.10 the
+        # environment had zero rules in this repository while every test about
+        # the approval was green. The comment below said so plainly and the
+        # test above it said the opposite; the test is what produced the
+        # signal. A stable release asks the question now instead of assuming
+        # the answer, and not being able to ask is not an approval either.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          stable=true
+          case "$version" in *-*) stable=false ;; esac
+          if ! answer="$(gh api "repos/$GITHUB_REPOSITORY/environments/release-signing" \
+              --jq '[.protection_rules[] | select(.type == "required_reviewers")] | length' 2>&1)"; then
+            if [ "$stable" = true ]; then
+              echo "::error title=The approval cannot be read::this run could not ask whether release-signing requires a reviewer ($answer); not knowing is not an approval, and a stable release does not go out on it" >&2
+              exit 1
+            fi
+            echo "::warning title=The approval cannot be read::$answer; a pre-release goes out anyway"
+            exit 0
+          fi
+          if [ "$answer" = 0 ]; then
+            if [ "$stable" = true ]; then
+              echo "::error title=No reviewer stands between a tag and a signature::the environment release-signing requires no reviewer, so this job waited for nobody; set one under Settings > Environments > release-signing before publishing a stable release" >&2
+              exit 1
+            fi
+            echo "::warning title=No reviewer::release-signing requires no reviewer; a pre-release goes out anyway"
+            exit 0
+          fi
+          echo "release-signing requires $answer reviewer rule(s), so this job waited"
+
       - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
           name: dist

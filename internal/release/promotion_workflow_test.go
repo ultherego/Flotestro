@@ -258,3 +258,42 @@ func buildTags(script string) []string {
 		}
 	}
 }
+
+// Naming an environment is not the same statement as being gated by one.
+//
+// TestOnlyAnApprovedJobMovesThePublicNames asserts that the job declares
+// environment: release-signing, and its comment calls that "the approval
+// itself - an environment is what makes a job wait for a human". In this
+// repository, on 05.10, release-signing carried zero protection rules: the
+// job waited for nobody, and every test about the approval was green. The
+// workflow's own comment admitted it ("an environment that does not exist yet
+// simply runs without the wait") while the test beside it said the opposite,
+// and the test is what produced the signal.
+//
+// So the job that claims the approval has to ask whether it exists.
+func TestTheJobThatClaimsTheApprovalAsksWhetherItHasAReviewer(t *testing.T) {
+	release := parsedWorkflow(t, "release.yml")
+	claiming := ""
+	for job, declared := range release.Jobs {
+		if environment, ok := declared.Environment.(string); ok && environment == "release-signing" {
+			claiming = job
+		}
+	}
+	if claiming == "" {
+		t.Fatal("no job of release.yml runs in release-signing, so this check read nothing")
+	}
+	script := release.script(claiming)
+	for what, needle := range map[string]string{
+		"it asks the API about the environment it names": "environments/release-signing",
+		"it asks for the reviewers and not for any rule": "required_reviewers",
+	} {
+		if !strings.Contains(script, needle) {
+			t.Errorf("the job %s claims the approval but %s", claiming, what)
+		}
+	}
+	// An answer nobody could read is not an approval: the project's rule is
+	// that unknown is never zero, and here the unknown is a refusal.
+	if !strings.Contains(script, "not knowing is not an approval") {
+		t.Errorf("the job %s does not refuse a stable release when the approval cannot be read", claiming)
+	}
+}
