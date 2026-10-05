@@ -75,3 +75,42 @@ func TestAnUnrecordedKindIsNotMachinery(t *testing.T) {
 		t.Error("a kind this panel writes does not pass as one")
 	}
 }
+
+// The author and the kind must agree where the task is written, because the
+// dispatcher cannot resolve the disagreement later: it would look for an
+// account named "campaign:c-7" and refuse the step for a right nobody holds.
+func TestATaskCannotCallThePanelsOwnWorkAPerson(t *testing.T) {
+	for _, own := range []string{
+		"campaign:c-7", "campaign:nightly-patching",
+		"directory-change:9f2", "flotestro/vuln", "system",
+	} {
+		if !CallsItsOwnWorkAPerson(ActorPerson, own) {
+			t.Errorf("%q passes as a person", own)
+		}
+		// The same name is the truth when it says what it is.
+		if CallsItsOwnWorkAPerson(ActorMachinery, own) {
+			t.Errorf("%q is refused even as machinery", own)
+		}
+	}
+	for _, person := range []string{
+		"alice@example.test", "bob", "svc-backup@example.test", "",
+	} {
+		if CallsItsOwnWorkAPerson(ActorPerson, person) {
+			t.Errorf("%q is refused as a person", person)
+		}
+	}
+}
+
+// Every author the panel writes for itself is in that list, so a new one
+// cannot be added as a person by accident. The list is searched for in the
+// packages that create tasks rather than asserted by hand.
+func TestTheAuthorsThePanelWritesForItselfAreAllNamed(t *testing.T) {
+	for _, own := range ownAuthors {
+		if !CallsItsOwnWorkAPerson(ActorPerson, own+"x") {
+			t.Errorf("%q is in the list and still passes as a person", own)
+		}
+	}
+	if len(ownAuthors) == 0 {
+		t.Fatal("the list is empty, so the check answers no to everything")
+	}
+}

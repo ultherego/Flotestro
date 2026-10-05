@@ -63,18 +63,21 @@ func judgeRights(subject string, principal *authz.Principal, lookupErr error,
 }
 
 // mayRunStep says whether the identity behind the plan may still run this step
-// on this host.
-func (r *Runner) mayRunStep(ctx context.Context, plan Plan, step *Step, host *hosts.Host) stepVerdict {
+// on this host, and names that identity so the task can record the same one.
+//
+// An empty subject with a held verdict means no rights check is configured and
+// nobody was named here.
+func (r *Runner) mayRunStep(ctx context.Context, plan Plan, step *Step, host *hosts.Host) (string, stepVerdict) {
 	if r.authorizer == nil {
-		return stepHeld()
+		return "", stepHeld()
 	}
 	subject, verdict := r.subjectOf(ctx, plan)
 	if !verdict.held {
-		return verdict
+		return "", verdict
 	}
 	principal, err := r.authorizer.PrincipalBySubject(ctx, subject)
 	permission := authz.Permission(opspec.ActionType(step.ActionType).Permission())
-	return judgeRights(subject, principal, err, permission, hosts.ScopeOf(host),
+	return subject, judgeRights(subject, principal, err, permission, hosts.ScopeOf(host),
 		host.Site+"/"+host.Environment)
 }
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/hosts"
+	"github.com/ultherego/flotestro/internal/jobs"
 )
 
 // A plan is approved once and its steps run for hours. Each step therefore
@@ -139,4 +140,44 @@ type failingCreator struct{}
 
 func (failingCreator) CreatorOfCampaign(_ context.Context, _ string) (string, error) {
 	return "", errors.New("the campaign is gone")
+}
+
+// The dispatcher re-reads the rights of whoever a task says ordered it. For a
+// campaign plan the plan's own creator is "campaign:<id>", which is no
+// account, so recording it as a person made every campaign remediation step
+// refuse with creator_rights_gone - after the rights check had already named
+// the real person and the runner had dropped the answer.
+func TestACampaignStepRecordsThePersonTheRightsCheckJudged(t *testing.T) {
+	plan := Plan{CreatedBy: CampaignCreator("c-7")}
+	author, kind := stepAuthor(plan, plan.Campaign(), "alice@example.test")
+	if author != "alice@example.test" || kind != jobs.ActorPerson {
+		t.Errorf("the task records %q/%q rather than the judged person", author, kind)
+	}
+	if jobs.CallsItsOwnWorkAPerson(kind, author) {
+		t.Error("the recorded author is one the panel writes for itself")
+	}
+}
+
+// With no rights check configured nobody was named, and a campaign plan then
+// has only the campaign to record. That is machinery, which is the honest
+// answer: there is no account, rather than an account nobody looked at.
+func TestWithoutARightsCheckACampaignStepIsRecordedAsMachinery(t *testing.T) {
+	plan := Plan{CreatedBy: CampaignCreator("c-7")}
+	author, kind := stepAuthor(plan, plan.Campaign(), "")
+	if author != plan.CreatedBy || kind != jobs.ActorMachinery {
+		t.Errorf("a campaign step with no named person reads %q/%q", author, kind)
+	}
+	if jobs.CallsItsOwnWorkAPerson(kind, author) {
+		t.Error("the pair is the contradiction the store refuses")
+	}
+}
+
+// A plan an operator ordered on one host keeps its own creator, who is a
+// person and whose rights the dispatcher must still re-read.
+func TestAnOperatorsOwnPlanKeepsItsCreator(t *testing.T) {
+	plan := Plan{CreatedBy: "bob@example.test"}
+	author, kind := stepAuthor(plan, plan.Campaign(), "")
+	if author != "bob@example.test" || kind != jobs.ActorPerson {
+		t.Errorf("an operator's own plan reads %q/%q", author, kind)
+	}
 }

@@ -37,6 +37,10 @@ var (
 	// ErrKeyReused means an idempotency key already used on this host for a
 	// different order. The first task stands; the second was not created.
 	ErrKeyReused = errors.New("idempotency_key_reused: the key was used for another order on this host")
+
+	// ErrAuthorContradiction means the task names the panel's own work as its
+	// author and calls it a person, so no account can ever answer for it.
+	ErrAuthorContradiction = errors.New("the task names the panel's own work as its author and calls it a person")
 )
 
 // Spec describes the task to create.
@@ -210,6 +214,10 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec) (*Job, error) 
 	// needs an approved plan can be held to having one.
 	if err := opspec.CheckPlanBinding(spec.Action, spec.Payload); err != nil {
 		return nil, err
+	}
+	// And the one place the author and the kind can be held to agreeing.
+	if CallsItsOwnWorkAPerson(spec.CreatedByKind, spec.CreatedBy) {
+		return nil, fmt.Errorf("%w: %q", ErrAuthorContradiction, spec.CreatedBy)
 	}
 	payloadHash, err := opspec.PayloadHash(spec.Action, opspec.ActionVersion, spec.Payload)
 	if err != nil {

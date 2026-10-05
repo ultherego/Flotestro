@@ -162,7 +162,8 @@ func (r *Runner) start(ctx context.Context, plan Plan, step *Step) error {
 
 	// The right to this step is confirmed now, not when the plan was approved:
 	// a plan of ten steps outlives the role that ordered it.
-	switch verdict := r.mayRunStep(ctx, plan, step, host); {
+	subject, verdict := r.mayRunStep(ctx, plan, step, host)
+	switch {
 	case verdict.unknown:
 		return r.holdStep(ctx, plan, step, verdict.reason)
 	case !verdict.held:
@@ -190,6 +191,7 @@ func (r *Runner) start(ctx context.Context, plan Plan, step *Step) error {
 	// covered every step of every host, so the steps do not queue for a second
 	// consent one by one.
 	campaign := plan.Campaign()
+	author, authorKind := stepAuthor(plan, campaign, subject)
 	task, err := r.jobs.Create(ctx, tx, jobs.Spec{
 		HostID:  plan.HostID,
 		Action:  action,
@@ -198,8 +200,8 @@ func (r *Runner) start(ctx context.Context, plan Plan, step *Step) error {
 		// another pass of the runner does not create a second task.
 		IdempotencyKey:   "remediation:" + plan.ID + ":" + step.CheckID,
 		RequiresApproval: action.Mutating() && campaign == "",
-		CreatedBy:        plan.CreatedBy,
-		CreatedByKind:    jobs.ActorPerson,
+		CreatedBy:        author,
+		CreatedByKind:    authorKind,
 		CampaignID:       campaign,
 		Preconditions: jobs.Preconditions{
 			OSFamily:             host.OSFamily,
@@ -226,6 +228,25 @@ func (r *Runner) start(ctx context.Context, plan Plan, step *Step) error {
 		return err
 	}
 	return r.store.StartStep(ctx, step.ID, task.ID)
+}
+
+// stepAuthor names what the task records as having ordered it: the identity
+// the rights check just judged, so that the dispatcher re-reading the task
+// asks about the same one.
+//
+// A plan's own creator is only that identity for a plan an operator ordered on
+// one host. For a campaign plan the creator is "campaign:<id>", which is no
+// account at all, and calling it a person made the dispatcher look for it.
+func stepAuthor(plan Plan, campaign, subject string) (string, jobs.ActorKind) {
+	if subject != "" {
+		return subject, jobs.ActorPerson
+	}
+	// No rights check is configured, so no person was named. A campaign plan
+	// then has nothing but the campaign to record, which is machinery.
+	if campaign != "" {
+		return plan.CreatedBy, jobs.ActorMachinery
+	}
+	return plan.CreatedBy, jobs.ActorPerson
 }
 
 // abortStep settles a step with a failure and ends the plan if that was decided.
