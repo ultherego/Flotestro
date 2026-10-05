@@ -80,9 +80,12 @@ func (s *Server) handleSetHostPlacement(w http.ResponseWriter, r *http.Request) 
 	placedBefore := placementDescription(host.Site, host.Environment)
 	placedAfter := placementDescription(site, environment)
 
-	updated, err := s.hosts.SetPlacement(r.Context(), hostID, site, environment)
+	updated, err := s.hosts.SetPlacement(r.Context(), hostID, site, environment, hosts.FactsOf(host))
 	if errors.Is(err, hosts.ErrNotFound) {
 		problem(w, http.StatusNotFound, "host_not_found", "no such host")
+		return
+	}
+	if hostMoved(w, err) {
 		return
 	}
 	if err != nil {

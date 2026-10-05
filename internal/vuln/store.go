@@ -9,6 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/ultherego/flotestro/internal/leases"
 )
 
 // ErrNoSnapshot means a provider without an active snapshot.
@@ -499,15 +501,31 @@ func (s *Store) AdvisoriesForRelease(ctx context.Context, snapshotID, distributi
 	return result, rows.Err()
 }
 
-// SaveAdvisories swaps the findings of a host together with the state of
-// its assessment.
-func (s *Store) SaveAdvisories(ctx context.Context, hostID string,
+// SaveAdvisories swaps the findings of a host together with the state of its
+// assessment, under the lease of the pass that computed them.
+//
+// The lease is asserted inside the transaction that writes, not before the
+// pass: a pass runs or pauses past the term, another instance takes the lease
+// and finishes a fresher assessment, and the first one comes back with
+// findings computed from inputs that are now old. Checking at the start said
+// nothing about that moment. Here the row of the lease is held for the write,
+// so a holder that lost it writes nothing and is told so.
+func (s *Store) SaveAdvisories(ctx context.Context, lease leases.Lease, hostID string,
 	advisories []Assessment, state HostState) error {
+	if !lease.Carried() {
+		// A write of the assessment belongs to a pass, and a pass holds the
+		// lease: nothing to be fenced by is nothing to write.
+		return leases.ErrLost
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := leases.Assert(ctx, tx, lease); err != nil {
+		return err
+	}
 
 	if _, err := tx.Exec(ctx, `delete from vuln_findings where host_id = $1`, hostID); err != nil {
 		return err
@@ -593,18 +611,33 @@ func (s *Store) SaveAdvisories(ctx context.Context, hostID string,
 
 // RecordEvaluationFailure writes down that a pass could not be computed for
 // this host. The verdict already stored is left exactly as it was.
-func (s *Store) RecordEvaluationFailure(ctx context.Context, hostID, source string,
-	at time.Time) error {
-	const query = `
+//
+// Under the lease of the pass, like the assessment itself: a pass that lost the
+// lease must not mark the fresh verdict of the instance that holds it now as
+// one nobody could compute. The condition is part of the statement, so the
+// write either lands while the lease is held or does not land at all.
+func (s *Store) RecordEvaluationFailure(ctx context.Context, lease leases.Lease,
+	hostID, source string, at time.Time) error {
+	if !lease.Carried() {
+		return leases.ErrLost
+	}
+	query := `
 		insert into vuln_host_state (host_id, evaluation_failed_reason,
 		                             evaluation_failed_source, evaluation_failed_at)
-		values ($1, $2, $3, $4)
+		select $1, $2, $3, $4 where ` + leases.HoldCondition(5) + `
 		on conflict (host_id) do update set
 			evaluation_failed_reason = excluded.evaluation_failed_reason,
 			evaluation_failed_source = excluded.evaluation_failed_source,
 			evaluation_failed_at = excluded.evaluation_failed_at`
-	_, err := s.pool.Exec(ctx, query, hostID, EvaluationFailed, source, at)
-	return err
+	args := append([]any{hostID, EvaluationFailed, source, at}, lease.Args()...)
+	tag, err := s.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return leases.ErrLost
+	}
+	return nil
 }
 
 // writeReleaseDigests records one digest per release of the snapshot, over the

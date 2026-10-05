@@ -32,3 +32,26 @@ func TestTheAttemptStatusesAreTheirOwnCodes(t *testing.T) {
 		t.Fatalf("the attempt statuses changed: %q, %q", AttemptStatusLeaseExpired, AttemptStatusSuperseded)
 	}
 }
+
+// Which attempts hold a result a reader may judge the task by. The three the
+// panel closed itself - gave up on, took back, set aside - were never read
+// back through, and a result that arrives late replaces the status with its
+// own, so an attempt still carrying one of them carries no result.
+func TestOnlyAnAttemptAResultReachedCarriesOne(t *testing.T) {
+	for _, status := range []string{
+		AttemptStatusLeaseExpired, AttemptStatusSuperseded, AttemptStatusReleased,
+	} {
+		if AttemptCarriesResult(Attempt{Status: status}) {
+			t.Errorf("an attempt that ended %q is read as carrying a result", status)
+		}
+	}
+	for _, status := range []string{"succeeded", "failed", "canceled"} {
+		if !AttemptCarriesResult(Attempt{Status: status}) {
+			t.Errorf("an attempt that ended %q is read as carrying nothing", status)
+		}
+	}
+	// The supersede also travels as the error code of the operation contract.
+	if AttemptCarriesResult(Attempt{Status: "failed", ErrorCode: AttemptStatusSuperseded}) {
+		t.Error("an attempt set aside by another's result is read as carrying one")
+	}
+}

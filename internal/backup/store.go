@@ -247,6 +247,14 @@ const runColumns = `host_id::text, definition, kind, coalesce(job_id::text, ''),
 	repository_size, last_success_at, message, started_by, recorded_at,
 	coalesce(config_sha256, '')`
 
+// runOfCurrentConfig keeps a run that is evidence about the configuration the
+// definition carries now, for a query that aliases the run r and the
+// definition d. A null on either side is a row from before the fingerprint
+// existed: it is not held against the definition, but it is the only case that
+// passes without a match.
+const runOfCurrentConfig = `(r.config_sha256 is null or d.config_sha256 is null
+		       or r.config_sha256 = d.config_sha256)`
+
 // aliasedRunColumns is the same list for a query that joins the definitions:
 // the two tables share host_id and definition, so the columns say which table
 // they come from. One list written twice would drift; this one is the first
@@ -288,8 +296,7 @@ func (s *Store) Latest(ctx context.Context, hostID string) (map[string]map[strin
 		from backup_runs r
 		join backup_definitions d on d.host_id = r.host_id and d.name = r.definition
 		where r.host_id = $1 and r.outcome = 'succeeded'
-		  and (r.config_sha256 is null or d.config_sha256 is null
-		       or r.config_sha256 = d.config_sha256)
+		  and `+runOfCurrentConfig+`
 		order by r.definition, r.kind, r.recorded_at desc`, hostID)
 	if err != nil {
 		return nil, err
@@ -319,8 +326,7 @@ func (s *Store) LatestInFleet(ctx context.Context, hostIDs []string, kind string
 		from backup_runs r
 		join backup_definitions d on d.host_id = r.host_id and d.name = r.definition
 		where r.host_id = any($1) and r.kind = $2 and r.outcome = 'succeeded'
-		  and (r.config_sha256 is null or d.config_sha256 is null
-		       or r.config_sha256 = d.config_sha256)
+		  and `+runOfCurrentConfig+`
 		order by r.host_id, r.definition, r.recorded_at desc`, hostIDs, kind)
 	if err != nil {
 		return nil, err

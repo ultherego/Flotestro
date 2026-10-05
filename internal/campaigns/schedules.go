@@ -536,9 +536,12 @@ func (s *Store) ClaimSchedule(ctx context.Context, id string, due time.Time, nex
 		// Another instance took this moment.
 		return false, nil
 	}
+	// The author is taken from the row being claimed, in the transaction that
+	// claims it: the recovery of this moment orders under the author it was
+	// claimed for, not under whoever edits the schedule in the meantime.
 	if _, err := tx.Exec(ctx, `
-		insert into schedule_occurrences (schedule_id, due_at, state)
-		values ($1, $2, 'pending')
+		insert into schedule_occurrences (schedule_id, due_at, state, claimed_by)
+		select $1, $2, 'pending', created_by from campaign_schedules where id = $1
 		on conflict (schedule_id, due_at) do nothing`, id, due); err != nil {
 		return false, err
 	}
@@ -553,6 +556,9 @@ func (s *Store) ClaimSchedule(ctx context.Context, id string, due time.Time, nex
 type PendingOccurrence struct {
 	ScheduleID string
 	DueAt      time.Time
+	// ClaimedBy is the subject the moment was claimed for. Empty only on a row
+	// claimed before the panel wrote it down.
+	ClaimedBy string
 }
 
 // PendingOccurrences lists the claimed moments that were never settled, older
@@ -560,7 +566,7 @@ type PendingOccurrence struct {
 // just claimed itself.
 func (s *Store) PendingOccurrences(ctx context.Context, grace time.Duration) ([]PendingOccurrence, error) {
 	rows, err := s.pool.Query(ctx, `
-		select schedule_id::text, due_at from schedule_occurrences
+		select schedule_id::text, due_at, claimed_by from schedule_occurrences
 		 where state = 'pending' and created_at < now() - make_interval(secs => $1::double precision)
 		 order by created_at limit 50`, grace.Seconds())
 	if err != nil {
@@ -570,7 +576,7 @@ func (s *Store) PendingOccurrences(ctx context.Context, grace time.Duration) ([]
 	var pending []PendingOccurrence
 	for rows.Next() {
 		var item PendingOccurrence
-		if err := rows.Scan(&item.ScheduleID, &item.DueAt); err != nil {
+		if err := rows.Scan(&item.ScheduleID, &item.DueAt, &item.ClaimedBy); err != nil {
 			return nil, err
 		}
 		pending = append(pending, item)

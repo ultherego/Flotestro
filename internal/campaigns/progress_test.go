@@ -276,3 +276,52 @@ func TestOnlyAConfirmedChangeCarriesTheHostForward(t *testing.T) {
 		t.Error("a task with no attempt at all was taken for a confirmed change")
 	}
 }
+
+// Three attempts: the first expired and its result came in late, the second
+// expired with nothing in it, the third was open and the late result set it
+// aside. The campaign must read the first - the only one the host ever
+// reported through. Skipping only the superseded attempt handed it the empty
+// middle one, and a change the host had verified was reported as unverified
+// (audit of 6c38561, D6).
+func TestTheCampaignReadsTheAttemptTheResultReached(t *testing.T) {
+	verification := json.RawMessage(
+		`{"verifier":"unit_state","verified":true,"expected":"active","observed":"active"}`)
+	attempts := []jobs.Attempt{
+		{Number: 1, Status: "succeeded", Verification: verification,
+			Detail: json.RawMessage(`{"kind":"unit_restart","changed":true}`)},
+		{Number: 2, Status: jobs.AttemptStatusLeaseExpired, ErrorCode: jobs.AttemptStatusLeaseExpired},
+		{Number: 3, Status: jobs.AttemptStatusSuperseded, ErrorCode: jobs.AttemptStatusSuperseded},
+	}
+	chosen := latestResultAttempt(attempts)
+	if chosen == nil || chosen.Number != 1 {
+		t.Fatalf("the campaign read attempt %+v, expected the one carrying the result", chosen)
+	}
+	// What the wrong attempt cost: a verified change reported as unverified.
+	if reason := unverifiedChange(opspec.ActionUnitRestart, chosen); reason != "" {
+		t.Errorf("the verified change reads as unverified: %s", reason)
+	}
+	if reason := unverifiedChange(opspec.ActionUnitRestart, &attempts[1]); reason == "" {
+		t.Error("the empty middle attempt passes as verified, so the test proves nothing")
+	}
+
+	// An attempt the panel took back carries no result either.
+	taken := []jobs.Attempt{
+		{Number: 1, Status: "succeeded", Verification: verification},
+		{Number: 2, Status: jobs.AttemptStatusReleased},
+	}
+	if chosen := latestResultAttempt(taken); chosen == nil || chosen.Number != 1 {
+		t.Errorf("the campaign read attempt %+v, expected the one carrying the result", chosen)
+	}
+
+	// No result through any attempt is nothing to read, not the last row.
+	none := []jobs.Attempt{
+		{Number: 1, Status: jobs.AttemptStatusLeaseExpired},
+		{Number: 2, Status: jobs.AttemptStatusSuperseded},
+	}
+	if chosen := latestResultAttempt(none); chosen != nil {
+		t.Errorf("attempt %d was handed over although no result ever reached one", chosen.Number)
+	}
+	if chosen := latestResultAttempt(nil); chosen != nil {
+		t.Error("a task with no attempts handed one over")
+	}
+}

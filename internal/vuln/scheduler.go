@@ -12,6 +12,7 @@ import (
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/inventory"
 	"github.com/ultherego/flotestro/internal/jobs"
+	"github.com/ultherego/flotestro/internal/leases"
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
@@ -204,7 +205,7 @@ func (h *Scheduler) RecalculateHosts(ctx context.Context, ids []string) {
 		h.log.Error("the hosts to recompute the assessment for were not read", "err", err)
 		return
 	}
-	h.Recalculate(ctx, descriptions)
+	h.Recalculate(ctx, lease, descriptions)
 }
 
 // describedHosts gathers what the assessment needs about the named hosts.
@@ -266,7 +267,7 @@ func (h *Scheduler) Cycle(ctx context.Context) {
 		return
 	}
 	h.Synchronize(ctx, descriptions)
-	h.Recalculate(ctx, descriptions)
+	h.Recalculate(ctx, lease, descriptions)
 }
 
 // HostDescription is what the panel knows about a host before the
@@ -514,8 +515,11 @@ func sameRange(a, b []string) bool {
 }
 
 // Recalculate assesses the hosts with the active snapshot of their
-// distribution.
-func (h *Scheduler) Recalculate(ctx context.Context, descriptions []HostDescription) {
+// distribution, under the lease of the pass: every write carries it, so a pass
+// that lost the lease stops where it is instead of writing over the assessment
+// of the instance that holds it now.
+func (h *Scheduler) Recalculate(ctx context.Context, lease leases.Lease,
+	descriptions []HostDescription) {
 	snapshots := map[string]Snapshot{}
 	releaseDigests := map[string]map[string]string{}
 	feedAdvisories := map[string]map[string][]Advisory{}
@@ -540,7 +544,7 @@ func (h *Scheduler) Recalculate(ctx context.Context, descriptions []HostDescript
 		listState, err := h.packages.State(ctx, description.ID)
 		if err != nil {
 			h.log.Error("the state of the package list was not read", "host_id", description.ID, "err", err)
-			h.recordFailure(ctx, description.ID, SourcePackageListState, now)
+			h.recordFailure(ctx, lease, description.ID, SourcePackageListState, now)
 			continue
 		}
 
@@ -566,7 +570,7 @@ func (h *Scheduler) Recalculate(ctx context.Context, descriptions []HostDescript
 			if err != nil {
 				h.log.Error("the state of the findings of the host was not read",
 					"host_id", description.ID, "err", err)
-				h.recordFailure(ctx, description.ID, SourceHostAdvisoryState, now)
+				h.recordFailure(ctx, lease, description.ID, SourceHostAdvisoryState, now)
 				continue
 			}
 			fromHost, collected, err := h.packages.HostAdvisories(ctx, description.ID)
@@ -575,7 +579,7 @@ func (h *Scheduler) Recalculate(ctx context.Context, descriptions []HostDescript
 				// with nothing would say the host is clean.
 				h.log.Error("the findings of the host were not read; the previous assessment stands",
 					"host_id", description.ID, "err", err)
-				h.recordFailure(ctx, description.ID, SourceHostAdvisories, now)
+				h.recordFailure(ctx, lease, description.ID, SourceHostAdvisories, now)
 				continue
 			}
 			set = fromHost
@@ -614,7 +618,7 @@ func (h *Scheduler) Recalculate(ctx context.Context, descriptions []HostDescript
 					// read must not assess anybody as clean.
 					h.log.Error("the findings of the feed were not read; the previous assessments stand",
 						"provider", provider, "release", description.Release, "err", err)
-					h.recordFailure(ctx, description.ID, SourceFeedAdvisories, now)
+					h.recordFailure(ctx, lease, description.ID, SourceFeedAdvisories, now)
 					continue
 				}
 				feedAdvisories[key] = fetched
@@ -636,17 +640,25 @@ func (h *Scheduler) Recalculate(ctx context.Context, descriptions []HostDescript
 		pkgs, err := h.packages.Packages(ctx, description.ID)
 		if err != nil {
 			h.log.Error("the package list was not read", "host_id", description.ID, "err", err)
-			h.recordFailure(ctx, description.ID, SourcePackageList, now)
+			h.recordFailure(ctx, lease, description.ID, SourcePackageList, now)
 			continue
 		}
 		input.Packages = pkgs
 
 		evaluation := Evaluate(input, snapshot, set, h.settings.MaxSnapshotAge, now)
-		if err := h.store.SaveAdvisories(ctx, description.ID,
+		if err := h.store.SaveAdvisories(ctx, lease, description.ID,
 			evaluation.Findings, evaluation.State); err != nil {
+			if errors.Is(err, leases.ErrLost) {
+				// Another instance holds the pass and has already written a
+				// fresher assessment than this one: it is not saved and the
+				// rest of the fleet is left to the instance that holds it.
+				h.log.Warn("the correlator lease moved on; this pass stops without writing",
+					"host_id", description.ID)
+				return
+			}
 			h.log.Error("the vulnerability assessment was not saved",
 				"host_id", description.ID, "err", err)
-			h.recordFailure(ctx, description.ID, SourceSave, now)
+			h.recordFailure(ctx, lease, description.ID, SourceSave, now)
 			continue
 		}
 	}
@@ -660,8 +672,17 @@ func (h *Scheduler) Recalculate(ctx context.Context, descriptions []HostDescript
 
 // recordFailure writes down that this pass could not be computed. The host
 // keeps its previous verdict; what changes is that the panel now says so.
-func (h *Scheduler) recordFailure(ctx context.Context, hostID, source string, at time.Time) {
-	if err := h.store.RecordEvaluationFailure(ctx, hostID, source, at); err != nil {
+func (h *Scheduler) recordFailure(ctx context.Context, lease leases.Lease,
+	hostID, source string, at time.Time) {
+	err := h.store.RecordEvaluationFailure(ctx, lease, hostID, source, at)
+	if errors.Is(err, leases.ErrLost) {
+		// The pass that holds the lease answers for this host now; a note from
+		// this one would mark its fresh verdict as uncomputable.
+		h.log.Warn("the correlator lease moved on; the failed assessment is not recorded",
+			"host_id", hostID, "source", source)
+		return
+	}
+	if err != nil {
 		h.log.Error("the failed assessment was not recorded", "host_id", hostID,
 			"source", source, "err", err)
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ultherego/flotestro/internal/audit"
+	"github.com/ultherego/flotestro/internal/outbox"
 	"github.com/ultherego/flotestro/internal/support"
 )
 
@@ -340,8 +341,11 @@ func (s *Sweeper) SweepOutbox(ctx context.Context) (int64, error) {
 			where e.published_at is not null
 			  and e.occurred_at < now() - $1::interval
 			  -- Only a consumer that is running holds the trail back. One that
-			  -- was switched off keeps its cursor and pins nothing.
-			  and e.id <= coalesce((select min(last_id) from outbox_consumers where active), e.id)
+			  -- was switched off keeps its cursor and pins nothing. Where a
+			  -- consumer stands is the pair, not the event number: an event
+			  -- with a lower number may still be ahead of the cursor, and
+			  -- deleting it would lose it as surely as skipping it.
+			  and not `+outbox.UnpassedBySomeConsumer("e")+`
 			order by e.id
 			limit $2)`,
 		interval(s.options.Outbox), SweepBatch)

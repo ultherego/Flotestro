@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/ultherego/flotestro/internal/compliance"
+	"github.com/ultherego/flotestro/internal/hosts"
 )
 
 func finding(id, action string, reboot bool) compliance.Finding {
@@ -150,5 +151,39 @@ func TestTheCurrentStepAndTheProgress(t *testing.T) {
 	settled := Plan{Steps: []Step{{State: StepSucceeded}, {State: StepSkipped}}}
 	if settled.Current() != nil {
 		t.Error("a plan without open steps has a current step")
+	}
+}
+
+// What the remediation runner declares a restart on. The host answering is not
+// a restart by itself: before this, a plan with no identifier from before the
+// change, or a host that reports none, finished the reboot step as done -
+// the unknown read as the safe answer (audit of 6c38561, D8).
+func TestTheRebootStepNeedsAnIdentifierOnBothSides(t *testing.T) {
+	cases := []struct {
+		name         string
+		host         hosts.Host
+		bootIDBefore string
+		back         bool
+	}{
+		{name: "online with a new identifier", back: true, bootIDBefore: "boot-a",
+			host: hosts.Host{ConnectionState: "online", BootID: "boot-b"}},
+		{name: "online with the same identifier", bootIDBefore: "boot-a",
+			host: hosts.Host{ConnectionState: "online", BootID: "boot-a"}},
+		{name: "online reporting no identifier", bootIDBefore: "boot-a",
+			host: hosts.Host{ConnectionState: "online"}},
+		{name: "online with nothing held from before",
+			host: hosts.Host{ConnectionState: "online", BootID: "boot-b"}},
+		{name: "not answering at all", bootIDBefore: "boot-a",
+			host: hosts.Host{ConnectionState: "offline", BootID: "boot-b"}},
+	}
+	for _, c := range cases {
+		host := c.host
+		back, reason := hostIsBack(&host, c.bootIDBefore)
+		if back != c.back {
+			t.Errorf("%s: the host reads as back=%v (%s), expected %v", c.name, back, reason, c.back)
+		}
+		if !back && reason == "" {
+			t.Errorf("%s: the step is held back without saying why", c.name)
+		}
 	}
 }

@@ -121,11 +121,16 @@ const deadLetterAfter = 12
 // instance that disappeared falls free when its term ends.
 var processInstance = uuid.NewString()
 
-// round is a claimed stretch of the trail: the events to deliver and the state
-// that decides what happens when the delivery fails.
+// round is a claimed stretch of the trail: the events to deliver, where they
+// leave the cursor, and the state that decides what happens when the delivery
+// fails.
 type round struct {
 	events   []Event
 	failures int
+	// lastXID and lastID are the key of the last event of the round, in the
+	// order the trail is read: see cursor.go for why the cursor is a pair.
+	lastXID string
+	lastID  int64
 }
 
 // Deliver runs one round: it claims a stretch of the trail, hands it to the
@@ -159,6 +164,7 @@ func (c *Consumer) claimRound(ctx context.Context) (*round, error) {
 	defer tx.Rollback(ctx)
 
 	var lastID int64
+	var lastXID string
 	var failures int
 	err = tx.QueryRow(ctx, `
 		update outbox_consumers
@@ -168,8 +174,8 @@ func (c *Consumer) claimRound(ctx context.Context) (*round, error) {
 		 where name = $1
 		   and next_attempt_at <= now()
 		   and (claimed_until is null or claimed_until < now())
-		returning last_id, failures`,
-		c.name, processInstance, claimTerm.Seconds()).Scan(&lastID, &failures)
+		returning last_id, last_xid::text, failures`,
+		c.name, processInstance, claimTerm.Seconds()).Scan(&lastID, &lastXID, &failures)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// The row is missing (first run), another instance holds the round, or
 		// the consumer is held back after a failure.
@@ -185,37 +191,33 @@ func (c *Consumer) claimRound(ctx context.Context) (*round, error) {
 	if failures >= narrowAfter {
 		limit = 1
 	}
-	// Only events no earlier event can still come before. The identifier is a
-	// sequence number, taken at the insert and visible at the commit, so a
-	// transaction that took 100 and stayed open while another took 101 and
-	// committed used to leave this cursor at 101 - and 100, committing
-	// afterwards, never satisfied "id > 101" again. It stayed in the table and
-	// reached no durable consumer: no webhook, no notification, and nothing
-	// said so, because from the cursor's side nothing had happened.
-	//
-	// So an event is read once every transaction that could still insert a
-	// lower number has finished: pg_snapshot_xmin names the oldest one that is
-	// still running. An event from before this column existed waits for
-	// nothing, which is what the null means.
+	// Only events no earlier event can still come before: an event is read once
+	// every transaction that could still insert a lower key has finished, and
+	// it is read in the order that fence answers in. cursor.go says why the
+	// cursor is the inserting transaction and the identifier within it, and
+	// what a single identifier lost.
 	rows, err := tx.Query(ctx, `
-		select id, aggregate_type, aggregate_id, event_type, payload, occurred_at
-		  from outbox_events
-		 where id > $1
-		   and (inserted_xid is null
-		        or inserted_xid < pg_snapshot_xmin(pg_current_snapshot()))
-		 order by id
-		 limit $2`, lastID, limit)
+		select e.id, (`+thisEpoch(`e.inserted_xid`)+`)::text,
+		       e.aggregate_type, e.aggregate_id, e.event_type, e.payload, e.occurred_at
+		  from outbox_events e
+		 where `+eventKey(`e`)+` > `+cursorAt(`$1::xid8`, `$2`)+`
+		   and `+settledTransaction(`e`)+`
+		 order by `+eventKey(`e`)+`
+		 limit $3`, lastXID, lastID, limit)
 	if err != nil {
 		return nil, err
 	}
 	var events []Event
+	var batchXID string
+	var batchID int64
 	for rows.Next() {
 		var event Event
-		if err := rows.Scan(&event.ID, &event.Aggregate, &event.AggregateID,
+		if err := rows.Scan(&event.ID, &batchXID, &event.Aggregate, &event.AggregateID,
 			&event.Type, &event.Payload, &event.OccurredAt); err != nil {
 			rows.Close()
 			return nil, err
 		}
+		batchID = event.ID
 		events = append(events, event)
 	}
 	rows.Close()
@@ -236,7 +238,7 @@ func (c *Consumer) claimRound(ctx context.Context) (*round, error) {
 	if len(events) == 0 {
 		return nil, nil
 	}
-	return &round{events: events, failures: failures}, nil
+	return &round{events: events, failures: failures, lastXID: batchXID, lastID: batchID}, nil
 }
 
 // releaseClaim is the head of every settlement: the round goes back so another
@@ -247,13 +249,23 @@ const releaseClaim = `update outbox_consumers set claimed_by = null, claimed_unt
 // backwards: a claim whose term ran out while another instance moved on must
 // not undo that instance's work.
 func (c *Consumer) settle(ctx context.Context, taken *round) error {
-	_, err := c.pool.Exec(ctx, `
-		update outbox_consumers
-		   set last_id = greatest(last_id, $2), failures = 0, last_error = '',
+	_, err := c.pool.Exec(ctx, advanceCursor+`
+		       failures = 0, last_error = '',
 		       next_attempt_at = now(), claimed_by = null, claimed_until = null, updated_at = now()
-		 where name = $1`, c.name, taken.events[len(taken.events)-1].ID)
+		 where name = $1`, c.name, taken.lastXID, taken.lastID)
 	return err
 }
+
+// advanceCursor moves a consumer's cursor to the key given, in $2 and $3, and
+// never backwards: the pair is compared as a whole, so a round settled by an
+// instance that had lost its claim cannot pull the cursor back behind the one
+// that holds it now.
+var advanceCursor = `
+		update outbox_consumers
+		   set last_xid = case when ` + cursorAt(`last_xid`, `last_id`) + ` < ($2::xid8, $3)
+		                       then $2::xid8 else last_xid end,
+		       last_id  = case when ` + cursorAt(`last_xid`, `last_id`) + ` < ($2::xid8, $3)
+		                       then $3 else last_id end,`
 
 // recordFailure records a refused round and the pause before the next attempt,
 // and sets one event aside when the receiver has refused it on its own often
@@ -261,7 +273,7 @@ func (c *Consumer) settle(ctx context.Context, taken *round) error {
 func (c *Consumer) recordFailure(ctx context.Context, taken *round, cause error) error {
 	failures := taken.failures + 1
 	if failures >= deadLetterAfter && len(taken.events) == 1 {
-		return c.setAside(ctx, taken.events[0], failures, cause)
+		return c.setAside(ctx, taken, failures, cause)
 	}
 	backoff := time.Duration(1<<uint(min(failures, 8))) * time.Second
 	if backoff > maxBackoff {
@@ -279,7 +291,8 @@ func (c *Consumer) recordFailure(ctx context.Context, taken *round, cause error)
 // setAside takes one event out of the way of the trail and keeps it whole. The
 // event is kept rather than skipped, because what a receiver would not take is
 // exactly what somebody will ask about.
-func (c *Consumer) setAside(ctx context.Context, event Event, failures int, cause error) error {
+func (c *Consumer) setAside(ctx context.Context, taken *round, failures int, cause error) error {
+	event := taken.events[0]
 	tx, err := c.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -294,11 +307,10 @@ func (c *Consumer) setAside(ctx context.Context, event Event, failures int, caus
 		event.Payload, failures, cause.Error()); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `
-		update outbox_consumers
-		   set last_id = greatest(last_id, $2), failures = 0, last_error = $3,
+	if _, err := tx.Exec(ctx, advanceCursor+`
+		       failures = 0, last_error = $4,
 		       next_attempt_at = now(), claimed_by = null, claimed_until = null, updated_at = now()
-		 where name = $1`, c.name, event.ID, cause.Error()); err != nil {
+		 where name = $1`, c.name, taken.lastXID, taken.lastID, cause.Error()); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {

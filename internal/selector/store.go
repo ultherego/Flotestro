@@ -22,6 +22,11 @@ var (
 	// ErrNotStatic means a member list was given to a dynamic group, whose
 	// members are the answer of its selector and cannot be set by hand.
 	ErrNotStatic = errors.New("a dynamic group has no member list; change its selector")
+
+	// ErrChanged means the group moved between the read a write was decided on
+	// and the write itself: somebody else wrote it first, and this write would
+	// have taken their change away.
+	ErrChanged = errors.New("the group changed since it was read")
 	// ErrUnknownHosts means a member list naming hosts the panel does not
 	// have or the caller may not see.
 	ErrUnknownHosts = errors.New("the member list names unknown hosts")
@@ -187,8 +192,11 @@ func (s *Store) Create(ctx context.Context, g SavedGroup) (*SavedGroup, error) {
 }
 
 // Update changes the name, the description and - for a dynamic group - the
-// selector.
-func (s *Store) Update(ctx context.Context, id string, g SavedGroup) (*SavedGroup, error) {
+// selector, on the version the caller read: read names the moment the group
+// carried then, and the write lands only while the row still carries it. Two
+// operators holding one version used to write one after the other, and the
+// second one's selector replaced the first one's without either being told.
+func (s *Store) Update(ctx context.Context, id string, g SavedGroup, read time.Time) (*SavedGroup, error) {
 	current, err := s.Get(ctx, id)
 	if err != nil {
 		return nil, err
@@ -207,13 +215,18 @@ func (s *Store) Update(ctx context.Context, id string, g SavedGroup) (*SavedGrou
 	const query = `
 		update host_groups
 		   set name = $2, description = $3, selector = $4, updated_at = now()
-		 where id = $1::uuid
+		 where id = $1::uuid and updated_at = $5
 		   and not exists (select 1 from host_groups other where other.name = $2 and other.id <> $1::uuid)`
-	tag, err := s.pool.Exec(ctx, query, current.ID, g.Name, g.Description, selector)
+	tag, err := s.pool.Exec(ctx, query, current.ID, g.Name, g.Description, selector, read)
 	if err != nil {
 		return nil, fmt.Errorf("updating the group: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
+		// Two reasons for no row, and they call for different answers: the
+		// name belongs to another group, or this group has moved on.
+		if !current.UpdatedAt.Equal(read) {
+			return nil, ErrChanged
+		}
 		return nil, ErrNameTaken
 	}
 	return s.Get(ctx, current.ID)
@@ -231,9 +244,10 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// SetMembers replaces the member list of a static group. The list is the whole
-// list: a member left out is a member removed.
-func (s *Store) SetMembers(ctx context.Context, id string, hostIDs []string) error {
+// SetMembers replaces the member list of a static group, on the version the
+// caller read. The list is the whole list: a member left out is a member
+// removed, so a stale copy would drop the members somebody else had added.
+func (s *Store) SetMembers(ctx context.Context, id string, hostIDs []string, read time.Time) error {
 	group, err := s.Get(ctx, id)
 	if err != nil {
 		return err
@@ -257,6 +271,19 @@ func (s *Store) SetMembers(ctx context.Context, id string, hostIDs []string) err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// The group's own row is written first, against the version that was read:
+	// it says the list below belongs to that version, and it holds the row for
+	// the rest of the transaction, so two replacements cannot interleave.
+	moved, err := tx.Exec(ctx,
+		`update host_groups set updated_at = now() where id = $1::uuid and updated_at = $2`,
+		group.ID, read)
+	if err != nil {
+		return err
+	}
+	if moved.RowsAffected() == 0 {
+		return ErrChanged
+	}
+
 	if _, err := tx.Exec(ctx, `delete from host_group_members where group_id = $1::uuid`, group.ID); err != nil {
 		return fmt.Errorf("clearing the member list: %w", err)
 	}
@@ -272,9 +299,6 @@ func (s *Store) SetMembers(ctx context.Context, id string, hostIDs []string) err
 	}
 	if int(tag.RowsAffected()) != len(unique) {
 		return ErrUnknownHosts
-	}
-	if _, err := tx.Exec(ctx, `update host_groups set updated_at = now() where id = $1::uuid`, group.ID); err != nil {
-		return err
 	}
 	return tx.Commit(ctx)
 }

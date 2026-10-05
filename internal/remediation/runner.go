@@ -247,11 +247,19 @@ func (r *Runner) hostCameBack(ctx context.Context, plan Plan) (bool, string) {
 	if err != nil {
 		return false, "the host's state was not read: " + err.Error()
 	}
+	return hostIsBack(host, plan.BootIDBefore)
+}
+
+// hostIsBack judges one reading of the host: it answers, and its boot
+// identifier shows that it restarted. An unknown identifier on either side is
+// not a restart - the step keeps waiting and the window closes it, rather than
+// a reboot being declared on no evidence.
+func hostIsBack(host *hosts.Host, bootIDBefore string) (bool, string) {
 	if host.ConnectionState != "online" {
 		return false, "the host did not come back after the restart within " + ReturnWindow.String()
 	}
-	if plan.BootIDBefore != "" && host.BootID == plan.BootIDBefore {
-		return false, "the host answers, but with the same boot identifier"
+	if shown, missing := hosts.RebootShown(bootIDBefore, host.BootID); !shown {
+		return false, missing
 	}
 	return true, ""
 }

@@ -933,6 +933,26 @@ const AttemptStatusLeaseExpired = "lease_expired"
 // earlier one up, the host had not, and its result settled the job.
 const AttemptStatusSuperseded = "superseded_by_result"
 
+// AttemptStatusReleased is the status of an attempt the panel took back before
+// the host held it: the task went to the queue again, and nothing was read
+// back through this attempt.
+const AttemptStatusReleased = "released"
+
+// AttemptCarriesResult says whether an attempt holds a result the task may be
+// judged by. An attempt the panel gave up on, took back or set aside was never
+// read back through, so its details are empty because nothing came - not
+// because the host reported nothing. A result that arrives late replaces the
+// status with its own, so these three are exactly the attempts no result ever
+// reached.
+func AttemptCarriesResult(attempt Attempt) bool {
+	switch attempt.Status {
+	case AttemptStatusSuperseded, AttemptStatusLeaseExpired, AttemptStatusReleased:
+		return false
+	}
+	// The supersede also travels as an error code of the operation contract.
+	return attempt.ErrorCode != AttemptStatusSuperseded
+}
+
 // lateResultDisposition says what a result does to an attempt that already has
 // a status, by that status.
 func lateResultDisposition(previousStatus string) (record, supersedes bool) {

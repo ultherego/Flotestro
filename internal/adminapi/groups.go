@@ -268,7 +268,8 @@ func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(visible) > 0 {
-		if err := s.groups.SetMembers(r.Context(), group.ID, hostIDs(visible)); s.groupProblem(w, err) {
+		if err := s.groups.SetMembers(r.Context(), group.ID, hostIDs(visible),
+			group.UpdatedAt); s.groupProblem(w, err) {
 			return
 		}
 		group, err = s.groups.Get(r.Context(), group.ID)
@@ -336,7 +337,7 @@ func (s *Server) handleUpdateGroup(w http.ResponseWriter, r *http.Request) {
 		Name:        strings.TrimSpace(orDefault(request.Name, current.Name)),
 		Description: strings.TrimSpace(request.Description),
 		Selector:    orSelector(request.Selector, current.Selector),
-	})
+	}, current.UpdatedAt)
 	if s.groupProblem(w, err) {
 		return
 	}
@@ -411,7 +412,8 @@ func (s *Server) handleSetGroupMembers(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := s.groups.SetMembers(r.Context(), group.ID, hostIDs(visible)); s.groupProblem(w, err) {
+	if err := s.groups.SetMembers(r.Context(), group.ID, hostIDs(visible),
+		group.UpdatedAt); s.groupProblem(w, err) {
 		return
 	}
 	updated, err := s.groups.Get(r.Context(), group.ID)
@@ -643,6 +645,10 @@ func (s *Server) groupProblem(w http.ResponseWriter, err error) bool {
 		return false
 	case errors.Is(err, selector.ErrGroupNotFound):
 		problem(w, http.StatusNotFound, "group_not_found", "no such group")
+	case errors.Is(err, selector.ErrChanged):
+		// The same answer a stale If-Match gets, because it is the same thing:
+		// the version the write was decided on is not the one in the database.
+		problem(w, http.StatusPreconditionFailed, "precondition_failed", recordMoved)
 	case errors.Is(err, selector.ErrNameTaken):
 		problem(w, http.StatusConflict, "group_name_taken", err.Error())
 	case errors.Is(err, selector.ErrNotStatic):

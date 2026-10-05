@@ -6,6 +6,7 @@ package leases
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -98,6 +99,49 @@ func Release(ctx context.Context, pool *pgxpool.Pool, lease Lease) error {
 		   set holder = null, lease_until = null, updated_at = now()
 		 where name = $1 and holder = $2::uuid and token = $3`,
 		lease.Name, lease.Holder, lease.Token)
+	return err
+}
+
+// Carried says whether a write may be fenced by this lease at all. A lease
+// with no name or no holder fences nothing, so a caller that passes one is
+// refused rather than writing unfenced.
+func (l Lease) Carried() bool {
+	return l.Name != "" && l.Holder != ""
+}
+
+// HoldCondition renders "this lease is still this holder's, and its term has
+// not run out", for a statement that carries its own fence. The parameters are
+// the name, the holder and the token, in that order, from the number given -
+// which is what Args returns. A write that carries this condition lands only
+// while the lease is held, so a holder that lost it finds out by writing
+// nothing rather than by having asked beforehand.
+func HoldCondition(first int) string {
+	return fmt.Sprintf(`exists (select 1 from monitoring_leases
+		 where name = $%d and holder = $%d::uuid and token = $%d and lease_until > now())`,
+		first, first+1, first+2)
+}
+
+// Args are the lease's parameters for HoldCondition and Assert.
+func (l Lease) Args() []any {
+	return []any{l.Name, l.Holder, l.Token}
+}
+
+// Assert fences the transaction it is called in: the row of the lease is taken
+// for update, so the lease cannot change hands while the write is in flight,
+// and a holder whose term has run out or whose lease has moved on is told
+// ErrLost instead of writing over the instance that holds it now.
+func Assert(ctx context.Context, tx pgx.Tx, lease Lease) error {
+	if !lease.Carried() {
+		return ErrLost
+	}
+	var held bool
+	err := tx.QueryRow(ctx, `
+		select true from monitoring_leases
+		 where name = $1 and holder = $2::uuid and token = $3 and lease_until > now()
+		   for update`, lease.Args()...).Scan(&held)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrLost
+	}
 	return err
 }
 
