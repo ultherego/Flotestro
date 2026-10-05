@@ -132,21 +132,66 @@ const ClaimTerm = 15 * time.Minute
 // declared stalled.
 const RenewTerm = ClaimTerm / 3
 
+// Hold is one replica's hold on one change: which replica took it, and which
+// attempt that take is. Every write about a running change names both, because
+// "the holder" alone cannot tell a run from the run that replaced it.
+type Hold struct {
+	Holder string
+	// Attempt is minted by Claim, once per take of the row.
+	Attempt string
+}
+
+// Held says whether the hold names an attempt. A write that cannot say which
+// run produced it does not land.
+func (h Hold) Held() bool { return h.Attempt != "" }
+
 // RenewClaim extends the claim of the holder that is carrying the change out.
-// It answers false when the row is no longer this holder's - the claim lapsed
-// and somebody else took the change - and the holder then has to stop writing
-// to it.
-func (s *Store) RenewClaim(ctx context.Context, changeID, holder string) (bool, error) {
+// It answers false when the row is no longer this hold's - the claim lapsed and
+// somebody else took the change, or the change has finished - and the holder
+// then has to stop writing to it.
+func (s *Store) RenewClaim(ctx context.Context, changeID string, hold Hold) (bool, error) {
+	if !hold.Held() {
+		return false, nil
+	}
 	const query = `
 		update directory_changes
-		   set claim_expires_at = now() + make_interval(secs => $3::double precision),
+		   set claim_expires_at = now() + make_interval(secs => $4::double precision),
 		       updated_at = now()
-		 where id = $1 and state = 'running' and claimed_by = $2`
-	tag, err := s.pool.Exec(ctx, query, changeID, nullable(holder), ClaimTerm.Seconds())
+		 where id = $1 and state = 'running'
+		   and claimed_by = $2 and claim_token = $3::uuid`
+	tag, err := s.pool.Exec(ctx, query, changeID, nullable(hold.Holder), hold.Attempt,
+		ClaimTerm.Seconds())
 	if err != nil {
 		return false, err
 	}
 	return tag.RowsAffected() > 0, nil
+}
+
+// SavePhases records the phases of a change that is still running, so that a
+// replica which takes the change over - or takes it again after a crash - reads
+// what already happened instead of assuming nothing did. It writes only under
+// this hold, and never to a change that has finished.
+func (s *Store) SavePhases(ctx context.Context, changeID string, hold Hold, phases []Phase) error {
+	if !hold.Held() {
+		return fmt.Errorf("the phases of the change %s name no attempt, so they were not recorded", changeID)
+	}
+	phasesJSON, err := json.Marshal(phases)
+	if err != nil {
+		return err
+	}
+	const query = `
+		update directory_changes set phases = $2, updated_at = now()
+		 where id = $1 and state = 'running'
+		   and claimed_by = $3 and claim_token = $4::uuid`
+	tag, err := s.pool.Exec(ctx, query, changeID, phasesJSON, nullable(hold.Holder), hold.Attempt)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("the change %s is no longer this attempt's, so its phases were not recorded",
+			changeID)
+	}
+	return nil
 }
 
 // Claim takes a change for execution. The condition on the state means two
@@ -155,26 +200,39 @@ func (s *Store) RenewClaim(ctx context.Context, changeID, holder string) (bool, 
 // replica that stopped was afterwards seen by nobody: Pending reads the
 // planned ones, so there was no way back to it and no view that showed it as
 // overdue.
-func (s *Store) Claim(ctx context.Context, changeID, holder string) (bool, error) {
+// Every take mints an attempt, so the result of a run can be told from the
+// result of the run that replaced it.
+func (s *Store) Claim(ctx context.Context, changeID, holder string) (Hold, bool, error) {
+	hold := Hold{Holder: holder, Attempt: uuid.NewString()}
 	const query = `
 		update directory_changes
 		   set state = $2, started_at = now(), updated_at = now(),
-		       claimed_by = $4, claim_expires_at = now() + make_interval(secs => $5::double precision)
+		       claimed_by = $4, claim_token = $6::uuid,
+		       claim_expires_at = now() + make_interval(secs => $5::double precision)
 		 where id = $1
 		   and (state = $3 or (state = $2 and claim_expires_at < now()))`
 	tag, err := s.pool.Exec(ctx, query, changeID, string(StateRunning), string(StatePlanned),
-		nullable(holder), ClaimTerm.Seconds())
+		nullable(holder), ClaimTerm.Seconds(), hold.Attempt)
 	if err != nil {
-		return false, err
+		return Hold{}, false, err
 	}
-	return tag.RowsAffected() > 0, nil
+	if tag.RowsAffected() == 0 {
+		return Hold{}, false, nil
+	}
+	return hold, true, nil
 }
 
-// Finish records the execution result phase by phase. The holder is part of the
-// condition: a replica whose claim lapsed and whose change somebody else took
-// must not write its own result over the one being carried out now.
-func (s *Store) Finish(ctx context.Context, changeID, holder string, state State,
+// Finish records the execution result phase by phase. The hold is the whole of
+// the condition, and the state is the other half of it: the result of an
+// attempt the row has moved on from does not land, and a change that has
+// reached a terminal state is terminal - a predecessor whose claim lapsed used
+// to satisfy "nobody holds it" once the successor had cleared the holder, and
+// wrote failed over the successor's succeeded.
+func (s *Store) Finish(ctx context.Context, changeID string, hold Hold, state State,
 	phases []Phase, message string) error {
+	if !hold.Held() {
+		return fmt.Errorf("the result of the change %s names no attempt, so it was not recorded", changeID)
+	}
 	phasesJSON, err := json.Marshal(phases)
 	if err != nil {
 		return err
@@ -182,19 +240,25 @@ func (s *Store) Finish(ctx context.Context, changeID, holder string, state State
 	const query = `
 		update directory_changes set state = $2, phases = $3, result_message = $4,
 		                             finished_at = now(), updated_at = now(),
-		                             claimed_by = null, claim_expires_at = null
-		where id = $1 and (claimed_by is null or claimed_by = $5)`
+		                             claimed_by = null, claim_expires_at = null,
+		                             claim_token = null
+		where id = $1 and state = $7
+		  and claimed_by = $5 and claim_token = $6::uuid`
 	tag, err := s.pool.Exec(ctx, query, changeID, string(state), phasesJSON, nullable(message),
-		nullable(holder))
+		nullable(hold.Holder), hold.Attempt, string(StateRunning))
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("the change %s is held by another replica, so this result was not recorded",
-			changeID)
+		return fmt.Errorf("%w: the change %s is no longer this attempt's, so its result was not recorded",
+			ErrClaimLost, changeID)
 	}
 	return nil
 }
+
+// ErrClaimLost means a write about a running change did not land, because the
+// change belongs to another attempt or has already finished.
+var ErrClaimLost = errors.New("the change is no longer this attempt's")
 
 // Pending returns the approved changes waiting for execution, and the ones
 // somebody claimed and did not finish within the term. The second half is what

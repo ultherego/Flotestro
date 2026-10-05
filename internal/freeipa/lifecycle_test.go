@@ -145,6 +145,25 @@ func TestPreserveUserAtChecksEveryValueThePlanCarries(t *testing.T) {
 		t.Fatal("the account was put back because the directory could not be asked")
 	}
 
+	// Another entry was preserved and putting it back failed as well: the
+	// account under that name stays preserved, and the error says so, because
+	// the caller still owes the local half - a preserved account whose holder
+	// keeps its sessions and tokens is the window this closes.
+	stuck, client := newFakeDirectory(t)
+	stuck.answers["user_show"] = entry(planned.EntryUUID, "")
+	stuck.answers["user_find"] = preserved("0b1d4c8e-0000-0000-0000-000000000009")
+	stuck.answers["user_undel"] = func(rpcCall) (any, *rpcError) {
+		return nil, &rpcError{Code: 4203, Name: "ExecutionError", Message: "the server failed"}
+	}
+	_, err = client.PreserveUserAt(context.Background(), "jane", planned)
+	var left *StillPreserved
+	if !errors.As(err, &left) {
+		t.Fatalf("a preserve that could not be put back ended as %v", err)
+	}
+	if left.UID != "jane" || !errors.Is(err, ErrEntryMoved) {
+		t.Fatalf("the error does not carry both halves of the story: %+v (%v)", left, err)
+	}
+
 	// The read after the move failed for a reason of its own: the account is
 	// preserved, so that is reported rather than a refusal of a move that did
 	// happen - and the entry is reported as unproven.

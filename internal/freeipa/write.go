@@ -533,6 +533,23 @@ type PreserveProof struct {
 	Detail    string
 }
 
+// StillPreserved says a preserve failed after the account had been moved, and
+// the account is preserved now. It is the same distinction UncertainChange
+// makes for a membership: a refusal before the change leaves nothing to follow,
+// while a change already made has to be followed through - here the panel's own
+// half, because the holder of a preserved account must not keep its sessions
+// and tokens.
+type StillPreserved struct {
+	UID string
+	Err error
+}
+
+func (e *StillPreserved) Error() string {
+	return e.Err.Error() + " (the account " + e.UID + " is preserved in the directory)"
+}
+
+func (e *StillPreserved) Unwrap() error { return e.Err }
+
 // PreserveUserAt preserves an account only while it is still the entry the
 // plan was made for, and says what it could prove about the entry afterwards.
 func (c *Client) PreserveUserAt(ctx context.Context, uid string, planned EntryReference) (PreserveProof, error) {
@@ -580,8 +597,13 @@ func (c *Client) PreserveUserAt(ctx context.Context, uid string, planned EntryRe
 	// comparing them would refuse every preserve that worked.
 	if reason, moved := planned.Replaced(after); moved {
 		if undo := c.UndeleteUser(ctx, uid); undo != nil {
-			return PreserveProof{}, fmt.Errorf("%w: %s; putting it back failed too, so %s stays preserved and "+
-				"needs a person: %v", ErrEntryMoved, reason, uid, undo)
+			// The account under that name is preserved and the move was not the
+			// one the operator consented to: a failure, and a failure after a
+			// change that was made, which the caller has to tell from a refusal
+			// before one.
+			return PreserveProof{}, &StillPreserved{UID: uid, Err: fmt.Errorf(
+				"%w: %s; putting it back failed too, so %s stays preserved and needs a person: %v",
+				ErrEntryMoved, reason, uid, undo)}
 		}
 		return PreserveProof{}, fmt.Errorf("%w: %s; the account was put back", ErrEntryMoved, reason)
 	}
