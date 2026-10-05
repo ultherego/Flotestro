@@ -250,6 +250,15 @@ func (s *MetricsSpool) resumeAbove(ack *agentv1.MetricsAck) {
 			"boot_id", s.bootID, "was", s.sequence, "continuing_above", held)
 	}
 	s.sequence = held
+	// On disk as well as in memory. The next sample is a minute away and a
+	// restart in that minute - which is exactly what a host that lost its
+	// counter has been doing - would otherwise lose what the panel told it and
+	// start walking the numbering up one refusal at a time all over again.
+	if err := s.writeCounter(held); err != nil && s.log != nil {
+		s.log.Error("the numbering the panel named was not written down; a restart before the next "+
+			"sample will begin below it again",
+			"boot_id", s.bootID, "sequence", held, "err", err)
+	}
 }
 
 // Forget removes one sample from the spool by its identity.
