@@ -1856,7 +1856,13 @@ func TestMountCampaignResolvesTheUUIDOnEveryHost(t *testing.T) {
 		"reason": "integration test of the mount plans",
 		"payload": map[string]any{"storage": map[string]any{
 			"source": path, "target": target, "fs_type": "ext4",
-			"options": "defaults,noatime", "persist": true}},
+			// nofail, because persist writes this into /etc/fstab and the
+			// device is a laboratory fixture. Without it a host whose spare
+			// filesystem is gone does not finish booting: systemd waits for
+			// the device with no timeout, and on 05.10 agent-ubuntu was
+			// bricked exactly that way by an entry this scenario left behind
+			// when the suite was interrupted before its cleanup.
+			"options": "defaults,noatime,nofail", "persist": true}},
 		"selector":                   map[string]any{"host_ids": hosts},
 		"canary_size":                0,
 		"wave_size":                  len(hosts),

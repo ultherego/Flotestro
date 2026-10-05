@@ -110,6 +110,10 @@ export type HostPlan = {
   // lists the packages with their versions.
   changes?: (string | PackageChange)[];
   refusal?: string;
+  // What the change costs beyond what it does. A refusal stops the change;
+  // a warning does not - it is the price of an order that will go through,
+  // and the operator approves it knowing the price.
+  warnings?: string[];
   validator_failed?: boolean;
   validator_output?: string;
   requested_source?: string;
@@ -186,6 +190,9 @@ export function PlanSummary({ plan }: { plan: HostPlan }) {
   return (
     <>
       <span>{parts.join(" · ")}</span>
+      {plan.warnings?.map((warning) => (
+        <span key={warning} className="badge warning">{warning}</span>
+      ))}
       <PlanVerbatim plan={plan} />
     </>
   );

@@ -50,6 +50,10 @@ type MountPlan struct {
 	// is absent, the filesystem is of a different type than requested, the target
 	// is already taken by another device.
 	Refusal string `json:"refusal,omitempty"`
+	// Warnings are what the change costs beyond what it does. The order still
+	// stands - these are the operator's own options and the panel does not
+	// rewrite them - but the plan says the price before anybody approves it.
+	Warnings []string `json:"warnings,omitempty"`
 
 	PlanHash string `json:"plan_hash"`
 }
@@ -120,8 +124,34 @@ func ComputeMount(state Snapshot, source, target, fsType, options string,
 			plan.Action = PlanNoChange
 		}
 	}
+	plan.Warnings = mountWarnings(options, persist, plan.Action)
 	plan.PlanHash = mountPlanFingerprint(plan)
 	return plan
+}
+
+// mountWarnings says what a persisted mount costs if the device is ever away.
+//
+// An entry in /etc/fstab without nofail stops the host booting when its device
+// is not there: systemd waits for it with no timeout, so the machine never
+// finishes starting and even a login hangs, because PAM asks logind and logind
+// has not started. On 05.10 a laboratory host was lost exactly that way, by an
+// entry a test had persisted the evening before.
+//
+// The options are not rewritten. They are the operator's, and a panel that
+// quietly adds mount options is a panel nobody can predict - but an operator
+// approving this has to be able to read what it will cost, and until now
+// nothing said it.
+func mountWarnings(options string, persist bool, action string) []string {
+	if !persist || action == PlanRemove || action == PlanRemoveAbsent {
+		return nil
+	}
+	for _, option := range strings.Split(options, ",") {
+		if strings.TrimSpace(option) == "nofail" {
+			return nil
+		}
+	}
+	return []string{"the fstab entry carries no nofail, so this host will not finish " +
+		"booting while the device is away: systemd waits for it without a timeout"}
 }
 
 // ComputeUnmount computes the difference for removing a mount.
