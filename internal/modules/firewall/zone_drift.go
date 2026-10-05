@@ -153,7 +153,8 @@ func PendingZoneDrift(drift []Drift) []Drift {
 	var pending []Drift
 	for _, entry := range drift {
 		switch entry.Reason {
-		case DriftZonePending, DriftZoneRuntimeOnly, DriftZoneNotComparable:
+		case DriftZonePending, DriftZoneRuntimeOnly, DriftZoneNotComparable,
+			DriftZoneFieldDiffers:
 			pending = append(pending, entry)
 		}
 	}
@@ -216,8 +217,13 @@ func zoneDriftPhrase(entry Drift) string {
 	if entry.Zone != "" && !strings.HasPrefix(entry.Rule, "zone ") {
 		where = "zone " + entry.Zone + " " + entry.Rule
 	}
-	if entry.Reason == DriftZonePending {
+	switch entry.Reason {
+	case DriftZonePending:
 		return where + " is kept and not in force"
+	case DriftZoneFieldDiffers:
+		// A field the panel does not model is named and not described: the
+		// detail beside it carries both values.
+		return where + " is not the same in the two configurations"
 	}
 	return where + " is in force and not kept"
 }

@@ -508,19 +508,31 @@ func recordZones(snapshot *firewall.Snapshot, defaultZone string, runtime, perma
 	// firewalld keeps the default zone in firewalld.conf and uses it for both
 	// configurations, so one answer names the default of both.
 	name := strings.TrimSpace(defaultZone)
+	var runtimeListings, permanentListings []firewall.ZoneListing
 	snapshot.ZonesReason = runtime.reason()
 	if snapshot.ZonesReason == "" {
+		runtimeListings = firewall.ZoneListings(runtime.output)
 		snapshot.Zones = firewall.ParseZones(runtime.output, name)
+		snapshot.ZonesDigest = firewall.ZoneListingsDigest(runtimeListings)
 	}
 	snapshot.PermanentZonesReason = permanent.reason()
 	if snapshot.PermanentZonesReason == "" {
+		permanentListings = firewall.ZoneListings(permanent.output)
 		snapshot.PermanentZones = firewall.ParseZones(permanent.output, name)
+		snapshot.PermanentZonesDigest = firewall.ZoneListingsDigest(permanentListings)
 	}
 	// What it filters with now against what it keeps for its next start is the
 	// same question the panel asks of nftables and of ufw, and the same answer:
 	// a difference the operator has to know about before anything reloads.
 	snapshot.Drift = append(snapshot.Drift, firewall.ZoneDrift(snapshot.Zones,
 		snapshot.PermanentZones, snapshot.ZonesReason, snapshot.PermanentZonesReason)...)
+	if snapshot.ZonesReason == "" && snapshot.PermanentZonesReason == "" {
+		// A field the panel does not model is still named, because the reload
+		// imposes it either way. Where one listing is missing there is nothing
+		// to compare, and ZoneDrift has already said so.
+		snapshot.Drift = append(snapshot.Drift,
+			firewall.ZoneFieldDrift(runtimeListings, permanentListings)...)
+	}
 }
 
 // zonesKnown says whether this snapshot carries an answer about what the host

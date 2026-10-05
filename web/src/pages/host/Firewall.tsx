@@ -82,6 +82,11 @@ type Snapshot = {
       zones above, the difference is in the list of differences. */
   permanent_zones?: Zone[];
   permanent_zones_reason?: string;
+  /** Digests of everything firewalld printed about each configuration, the
+      fields the lists above do not model included. The fields themselves do
+      not travel; a change to any of them moves the digest. */
+  zones_digest?: string;
+  permanent_zones_digest?: string;
   /** The header of "ufw status" where ufw is installed: the default policy
       is what a packet meets when no rule matches, and no rule list says
       that. An inactive ufw carries the reason the panel writes elsewhere. */

@@ -36,16 +36,18 @@ func SealFingerprint(snapshot *Snapshot) {
 	// one alone cannot see a permanent-only change, which is exactly what a
 	// zone change writes: a third party's --permanent between the plan and the
 	// apply left the fingerprint still, and our reload then activated it.
-	writeZones(sum, "zones", snapshot.Zones, snapshot.ZonesReason)
-	writeZones(sum, "permanent-zones", snapshot.PermanentZones, snapshot.PermanentZonesReason)
+	writeZones(sum, "zones", snapshot.Zones, snapshot.ZonesReason, snapshot.ZonesDigest)
+	writeZones(sum, "permanent-zones", snapshot.PermanentZones, snapshot.PermanentZonesReason,
+		snapshot.PermanentZonesDigest)
 	snapshot.Hash = hex.EncodeToString(sum.Sum(nil)[:12])
 }
 
 // writeZones folds one zone configuration into the fingerprint under its own
-// tag. Not knowing it is its own state, and must not read as a host with no
-// zones: a plan made while it was readable may not match a run that could not
-// read it.
-func writeZones(sum io.Writer, tag string, zones []Zone, reason string) {
+// tag: the zones the panel models, and the digest of everything firewalld
+// printed about them. Not knowing the configuration is its own state, and must
+// not read as a host with no zones: a plan made while it was readable may not
+// match a run that could not read it.
+func writeZones(sum io.Writer, tag string, zones []Zone, reason, digest string) {
 	if reason != "" {
 		_, _ = sum.Write([]byte(tag + "-unknown\x00" + reason + "\x00"))
 		return
@@ -54,6 +56,9 @@ func writeZones(sum io.Writer, tag string, zones []Zone, reason string) {
 	for _, zone := range zones {
 		_, _ = sum.Write([]byte(canonicalZone(zone)))
 	}
+	// The listing digest carries the fields the zones above do not model, so a
+	// rich rule written between the plan and the apply stops the apply.
+	_, _ = sum.Write([]byte(tag + "-listing\x00" + digest + "\x00"))
 }
 
 // canonicalZone writes one zone in a form where every part is length-prefixed,

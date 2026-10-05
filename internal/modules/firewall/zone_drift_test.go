@@ -5,9 +5,11 @@ import (
 	"testing"
 )
 
-// The two listings of an ordinary host. firewall-cmd marks a zone that is on an
-// interface and names the interface in the running configuration; the permanent
-// configuration has neither notion, and NetworkManager is what puts the
+// The two listings of an ordinary host, shortened to the fields these cases are
+// about; the whole text of a live host is in testdata and is what
+// zone_fields_test.go reads. firewall-cmd marks a zone that is on an interface
+// and names the interface in the running configuration; the permanent listing
+// marks the default zone and nothing else, and NetworkManager is what puts the
 // interface in the running one. A host like this has nothing pending.
 const (
 	runningListing = `public (default, active)
@@ -18,7 +20,7 @@ const (
 trusted
   target: ACCEPT
 `
-	keptListing = `public
+	keptListing = `public (default)
   target: default
   services: ssh cockpit dhcpv6-client
   ports: 9090/udp 8443/tcp
@@ -35,6 +37,10 @@ func views(running, kept string) ([]Zone, []Zone) {
 // The permanent listing prints the same fields as the running one, so one
 // parser reads both. If it did not, every host would read as keeping nothing -
 // which would look like a working guard and refuse or allow at random.
+//
+// Measured on a live host: the permanent header is not bare. It carries
+// "(default)" where the running one carries "(default, active)", and this test
+// asked for a bare name until the measurement said otherwise.
 func TestThePermanentListingIsReadTheSameWayAsTheRunningOne(t *testing.T) {
 	kept := ParseZones(keptListing, "public")
 	if len(kept) != 2 {
@@ -44,10 +50,16 @@ func TestThePermanentListingIsReadTheSameWayAsTheRunningOne(t *testing.T) {
 	if !ok || public.Target != "default" || len(public.Services) != 3 || len(public.Ports) != 2 {
 		t.Fatalf("the permanent listing of a zone read as %+v", public)
 	}
-	// A zone name without the markers is still the default zone when firewalld
-	// says it is, and nothing in the permanent listing says a zone is active.
+	// The marker names the default zone and never an active one: a permanent
+	// configuration has no notion of a zone being on an interface.
 	if !public.Default || public.Active {
 		t.Errorf("default=%v active=%v for a zone of the permanent listing", public.Default, public.Active)
+	}
+	// A bare header is read the same way, because the default zone is also
+	// known by name from firewall-cmd --get-default-zone.
+	bare, _ := zoneNamed(ParseZones("public\n  target: default\n", "public"), "public")
+	if !bare.Default || bare.Active {
+		t.Errorf("a bare header read as default=%v active=%v", bare.Default, bare.Active)
 	}
 }
 

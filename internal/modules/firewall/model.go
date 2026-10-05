@@ -128,6 +128,14 @@ type Snapshot struct {
 	// lists are two answers with two reasons: not knowing one of them is its own
 	// state and is not a host with no zones.
 	PermanentZonesReason string `json:"permanent_zones_reason,omitempty"`
+	// ZonesDigest and PermanentZonesDigest cover everything firewalld printed
+	// about one configuration's zones, the fields the lists above do not model
+	// included: rich rules, forward ports, protocols, masquerade. The fields
+	// themselves do not travel - a fleet of snapshots would carry a page of text
+	// per host - but a change to any of them moves the digest and so the
+	// fingerprint a plan is made against.
+	ZonesDigest          string `json:"zones_digest,omitempty"`
+	PermanentZonesDigest string `json:"permanent_zones_digest,omitempty"`
 	// UFW is the header of "ufw status" on a host where ufw holds the rules: the
 	// default policy is what a packet meets when no rule matches.
 	UFW *UFWStatus `json:"ufw,omitempty"`

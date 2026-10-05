@@ -44,12 +44,14 @@ const zonesListing = `public (default, active)
   interfaces: enp0s3
   services: cockpit dhcpv6-client ssh
   ports: 8443/tcp
+  rich rules:
 `
 
-const permanentZonesListing = `public
+const permanentZonesListing = `public (default)
   target: default
   services: cockpit dhcpv6-client ssh
   ports: 8443/tcp
+  rich rules:
 `
 
 // zoneListings attributes each answer to the command that produced it. The
@@ -72,13 +74,15 @@ func zoneState(runtime, permanent string) firewall.Snapshot {
 }
 
 // runtimeOnlyFingerprint is the fingerprint as it was before the permanent
-// configuration was read: the ruleset and the running zones. The tests below
-// use it to show that what they exercise is invisible to it.
+// configuration was read and before anything but the modelled fields counted:
+// the ruleset and the running zones. The tests below use it to show that what
+// they exercise is invisible to it.
 func runtimeOnlyFingerprint(runtime, permanent string) string {
 	snapshot := firewall.Snapshot{Hash: "ruleset-digest", Writable: true}
 	running, kept := zoneListings(runtime, permanent)
 	recordZones(&snapshot, "public\n", running, kept)
 	snapshot.PermanentZones, snapshot.PermanentZonesReason = nil, ""
+	snapshot.ZonesDigest, snapshot.PermanentZonesDigest = "", ""
 	firewall.SealFingerprint(&snapshot)
 	return snapshot.Hash
 }
@@ -145,6 +149,30 @@ func TestAPermanentOnlyChangeMovesTheFingerprint(t *testing.T) {
 	// that moved by itself would refuse every apply instead of the wrong ones.
 	if zoneState(zonesListing, kept).Hash != zoneState(zonesListing, kept).Hash {
 		t.Error("two readings of the same host have different fingerprints")
+	}
+
+	// A field the panel does not model is covered too, through the digest the
+	// reader computes: a rich rule written with --permanent and not reloaded
+	// moves the fingerprint, although the zones the panel models are the same.
+	// firewalld prints a rich rule under its field, one per line; the field is
+	// the last of the listing, so the rule belongs to it.
+	rich := kept + "\trule family=\"ipv4\" source address=\"10.0.0.0/8\" drop\n"
+	withRule := zoneState(zonesListing, rich)
+	plain := zoneState(zonesListing, kept)
+	if withRule.PermanentZonesDigest == plain.PermanentZonesDigest {
+		t.Error("the digest of the kept configuration does not cover a rich rule")
+	}
+	if withRule.Hash == plain.Hash {
+		t.Fatal("a rich rule written and not reloaded leaves the fingerprint still")
+	}
+	if runtimeOnlyFingerprint(zonesListing, rich) != runtimeOnlyFingerprint(zonesListing, kept) {
+		t.Error("the reading this fingerprint came from is not the same on both sides")
+	}
+	// The difference is named rather than only counted, because nobody can
+	// settle a difference the message does not name.
+	refusal := firewall.ZoneReloadRefusal(withRule.Drift)
+	if !strings.Contains(refusal, "rich rules") {
+		t.Errorf("the refusal does not name the field: %s", refusal)
 	}
 }
 

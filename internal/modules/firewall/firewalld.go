@@ -54,51 +54,34 @@ func ServicePortsArguments(service string) []string {
 
 var zoneHeader = regexp.MustCompile(`^(\S+)(?:\s+\(([^)]*)\))?$`)
 
-// ParseZones reads the output of "firewall-cmd --list-all-zones".
+// ParseZones reads the output of "firewall-cmd --list-all-zones" into the
+// zones the panel models. It reads the listing through ZoneListings, so the
+// fields the panel models and the fields it does not are read out of one text
+// by one function: nothing here can disagree with the digest about where a
+// zone begins.
 func ParseZones(output, defaultZone string) []Zone {
 	var zones []Zone
-	var current *Zone
-
-	for _, raw := range strings.Split(output, "\n") {
-		if strings.TrimSpace(raw) == "" {
-			continue
+	for _, listing := range ZoneListings(output) {
+		zone := Zone{
+			Name:    listing.Name,
+			Active:  strings.Contains(listing.Markers, "active"),
+			Default: strings.Contains(listing.Markers, "default") || listing.Name == defaultZone,
 		}
-		// A zone header starts at the beginning of the row; the zone fields are
-		// indented.
-		if !strings.HasPrefix(raw, " ") && !strings.HasPrefix(raw, "\t") {
-			fields := zoneHeader.FindStringSubmatch(strings.TrimSpace(raw))
-			if fields == nil {
-				continue
+		for _, field := range listing.Fields {
+			switch field.Name {
+			case "target":
+				zone.Target = field.Value
+			case "interfaces":
+				zone.Interfaces = strings.Fields(field.Value)
+			case "sources":
+				zone.Sources = strings.Fields(field.Value)
+			case "services":
+				zone.Services = strings.Fields(field.Value)
+			case "ports":
+				zone.Ports = strings.Fields(field.Value)
 			}
-			markers := fields[2]
-			zones = append(zones, Zone{
-				Name:    fields[1],
-				Active:  strings.Contains(markers, "active"),
-				Default: strings.Contains(markers, "default") || fields[1] == defaultZone,
-			})
-			current = &zones[len(zones)-1]
-			continue
 		}
-		if current == nil {
-			continue
-		}
-		key, value, ok := strings.Cut(strings.TrimSpace(raw), ":")
-		if !ok {
-			continue
-		}
-		value = strings.TrimSpace(value)
-		switch key {
-		case "target":
-			current.Target = value
-		case "interfaces":
-			current.Interfaces = strings.Fields(value)
-		case "sources":
-			current.Sources = strings.Fields(value)
-		case "services":
-			current.Services = strings.Fields(value)
-		case "ports":
-			current.Ports = strings.Fields(value)
-		}
+		zones = append(zones, zone)
 	}
 	return zones
 }
