@@ -346,3 +346,29 @@ func TestAnEmptyVariableIsNoStatementForAnOptionalSecret(t *testing.T) {
 		t.Fatal("an empty secret file was accepted as an absent secret")
 	}
 }
+
+func TestAnEmptyFileVariableIsNotASecondForm(t *testing.T) {
+	// The compose file the product ships passes every optional variable
+	// through, so a deployment that named only the environment form arrives
+	// with NAME_FILE set to nothing. Reading that as a second form refused the
+	// panel at start and told the operator they had set both.
+	t.Setenv("FLOTESTRO_TEST_SECRET", "from-the-environment")
+	t.Setenv("FLOTESTRO_TEST_SECRET_FILE", "")
+	value, err := SecretValue("FLOTESTRO_TEST_SECRET")
+	if err != nil {
+		t.Fatalf("the secret was refused although no file was named: %v", err)
+	}
+	if value != "from-the-environment" {
+		t.Fatalf("the value is %q rather than the one that was set", value)
+	}
+
+	// One step outside, from the legitimate side: a NAME_FILE that names
+	// something - even a path of one space, which is a name and not an absence
+	// - is a second form and still conflicts.
+	t.Setenv("FLOTESTRO_TEST_SECRET_FILE", " ")
+	_, err = SecretValue("FLOTESTRO_TEST_SECRET")
+	refused := refusal(t, err, SecretReasonConflict)
+	if !strings.Contains(refused.Error(), "FLOTESTRO_TEST_SECRET and FLOTESTRO_TEST_SECRET_FILE are both set") {
+		t.Fatalf("the refusal does not say that both forms are set: %v", err)
+	}
+}

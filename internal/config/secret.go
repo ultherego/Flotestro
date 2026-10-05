@@ -101,6 +101,12 @@ func (e *SecretError) Unwrap() error { return e.cause }
 func SecretValue(name string) (string, error) {
 	value, valueSet := os.LookupEnv(name)
 	path, fileSet := os.LookupEnv(name + "_FILE")
+	// A NAME_FILE set to nothing is the same statement as not setting it: the
+	// installation named no file. The whole function reads it that way, the
+	// conflict below included - the compose file the product ships passes every
+	// optional variable through, so an empty NAME_FILE is what a deployment
+	// that named only the environment form arrives with.
+	fileSet = fileSet && path != ""
 
 	// Both forms at once is a refusal rather than a precedence rule: the two mean
 	// different things to whoever set them, and starting with one of them
@@ -114,9 +120,7 @@ func SecretValue(name string) (string, error) {
 		}
 		return value, nil
 	}
-	// A NAME_FILE set to nothing is the same statement as not setting it:
-	// the installation named no file.
-	if !fileSet || path == "" {
+	if !fileSet {
 		return "", &SecretError{Name: name, Reason: SecretReasonMissing, cause: ErrSecretMissing}
 	}
 	result, err := readSecretFile(path)
