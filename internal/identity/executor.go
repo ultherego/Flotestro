@@ -108,6 +108,9 @@ type Executor struct {
 	// hour in an installation and a millisecond in a test.
 	renewClaim func(ctx context.Context, changeID string, hold Hold) (bool, error)
 	renewEvery time.Duration
+	// lapseAfter is the term the holder judges its own claim by; ClaimTerm in
+	// an installation, and short enough to watch in a test.
+	lapseAfter time.Duration
 	localDeny  func(ctx context.Context, subject, reason string, denied bool) (int64, error)
 }
 
@@ -187,44 +190,80 @@ func (e *Executor) tick(ctx context.Context) {
 func (e *Executor) holdClaim(ctx context.Context, changeID string, hold Hold) (context.Context, func()) {
 	working, abandon := context.WithCancel(ctx)
 	renewing, stop := context.WithCancel(ctx)
-	done := make(chan struct{})
+	// renewed carries the verdict of each renewal back to the clock below.
+	renewed := make(chan bool, 1)
 	go func() {
-		defer close(done)
 		ticker := time.NewTicker(e.renewTerm())
 		defer ticker.Stop()
-		// A renewal that failed is not a claim that was lost, so the holder
-		// keeps trying - until the term since the last renewal that did land has
-		// passed, after which the claim has certainly lapsed and another replica
-		// may be carrying the change out.
-		held := time.Now()
 		for {
 			select {
 			case <-renewing.Done():
 				return
 			case <-ticker.C:
-				still, err := e.renew(context.WithoutCancel(renewing), changeID, hold)
-				switch {
-				case err != nil:
+				// The renewal has a deadline of its own. A statement that has
+				// not answered by the time the next one is due has not
+				// answered, and a holder waiting on it must not be waiting on
+				// it instead of noticing that its claim ran out.
+				asked, give := context.WithTimeout(context.WithoutCancel(renewing), e.renewTerm())
+				still, err := e.renew(asked, changeID, hold)
+				give()
+				if err != nil {
+					// A renewal that failed is not a claim that was lost. The
+					// clock below decides that, from the term it knows.
 					e.log.Error("the claim on the directory change was not renewed",
 						"change_id", changeID, "err", err)
-					if time.Since(held) < ClaimTerm {
-						continue
-					}
-					e.log.Warn("the claim on the directory change has lapsed; the work stops",
-						"change_id", changeID, "since", time.Since(held))
-					abandon()
+					continue
+				}
+				select {
+				case renewed <- still:
+				case <-renewing.Done():
 					return
-				case !still:
-					e.log.Warn("the claim on the directory change is held by somebody else; the work stops",
-						"change_id", changeID)
-					abandon()
-					return
-				default:
-					held = time.Now()
 				}
 			}
 		}
 	}()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		// The term is known, so the holder judges it by its own clock rather
+		// than by an answer that may never come: a renewal stuck in the
+		// database used to mean the expiry was never reached at all, and the
+		// holder worked on under a claim somebody else had taken.
+		lapse := time.NewTimer(e.claimTerm())
+		defer lapse.Stop()
+		for {
+			select {
+			case <-renewing.Done():
+				return
+			case <-lapse.C:
+				e.log.Warn("the claim on the directory change has lapsed; the work stops",
+					"change_id", changeID, "term", e.claimTerm())
+				abandon()
+				return
+			case still := <-renewed:
+				if !still {
+					e.log.Warn("the claim on the directory change is held by somebody else; the work stops",
+						"change_id", changeID)
+					abandon()
+					return
+				}
+				if !lapse.Stop() {
+					// The timer had already fired and its value was read by
+					// nobody; draining it keeps the next term honest.
+					select {
+					case <-lapse.C:
+					default:
+					}
+				}
+				lapse.Reset(e.claimTerm())
+			}
+		}
+	}()
+	// Releasing waits for the clock and not for a renewal in flight: a
+	// statement hanging in the database must not hold up the replica's next
+	// change. The renewal gives up at its deadline and ends on its own, and the
+	// cancelled renewing context stops it from waiting to be read.
 	return working, func() {
 		stop()
 		<-done
@@ -232,12 +271,22 @@ func (e *Executor) holdClaim(ctx context.Context, changeID string, hold Hold) (c
 	}
 }
 
-// renewTerm is how often the holder says it is still working.
+// renewTerm is how often the holder says it is still working, and how long one
+// renewal may take.
 func (e *Executor) renewTerm() time.Duration {
 	if e.renewEvery > 0 {
 		return e.renewEvery
 	}
 	return RenewTerm
+}
+
+// claimTerm is how long the holder may go without a renewal that landed before
+// its claim has certainly run out.
+func (e *Executor) claimTerm() time.Duration {
+	if e.lapseAfter > 0 {
+		return e.lapseAfter
+	}
+	return ClaimTerm
 }
 
 func (e *Executor) renew(ctx context.Context, changeID string, hold Hold) (bool, error) {
@@ -681,17 +730,31 @@ const phasePreserveInDirectory = "preserving the account in the directory"
 // it just as much as one recorded as done.
 const phaseLocalAccessOwed = "cutting off the panel access of the preserved account"
 
-// owesLocalAccess reads the obligation an earlier attempt wrote down. Phases
-// that do not read are no record, and the attempt then starts from the
+// owesLocalAccess reads what an earlier attempt wrote down: the phases it
+// recorded, and the obligation among them if it is still outstanding. The
+// phases come back whole, because the record of a change is everything that
+// happened to it and not the last attempt's view of it - a resume that
+// replaced them dropped the directory error of the attempt before it.
+//
+// Phases that do not read are no record, and the attempt then starts from the
 // directory rather than assuming anything about what happened.
-func owesLocalAccess(recorded json.RawMessage) (string, bool) {
+func owesLocalAccess(recorded json.RawMessage) ([]Phase, string, bool) {
 	if len(recorded) == 0 {
-		return "", false
+		return nil, "", false
 	}
 	var phases []Phase
 	if err := json.Unmarshal(recorded, &phases); err != nil {
-		return "", false
+		return nil, "", false
 	}
+	owed, outstanding := outstandingObligation(phases)
+	if !outstanding {
+		return nil, "", false
+	}
+	return phases, owed, true
+}
+
+// outstandingObligation finds the obligation marker that is still owed.
+func outstandingObligation(phases []Phase) (string, bool) {
 	for _, phase := range phases {
 		if phase.Name == phaseLocalAccessOwed && phase.Status == PhaseOutstanding {
 			return phase.Message, true
@@ -700,16 +763,31 @@ func owesLocalAccess(recorded json.RawMessage) (string, bool) {
 	return "", false
 }
 
-// payLocalAccess writes the obligation down, carries it out and records that it
-// was met. The order is the point: the obligation reaches the row before the
-// work starts, so an attempt that finds it does the work rather than reasoning
-// about what the previous one got to.
+// payLocalAccess writes the obligation down, carries it out and settles it on
+// the effects it names. The order is the point: the obligation reaches the row
+// before the work starts, so an attempt that finds it does the work rather than
+// reasoning about what the previous one got to.
+//
+// It is settled only where the phases of the local half confirm the effects -
+// not where the attempt to produce them returned. A marker turned to succeeded
+// over a denial that failed makes the row claim an effect it did not have, and
+// leaves nothing for a later attempt to pick up.
 func (e *Executor) payLocalAccess(ctx context.Context, change Change, hold Hold,
 	phases []Phase, ref *ReferencePayload, owed string) ([]Phase, *sessionRevocation) {
-	phases = append(phases, outstandingPhase(startPhase(phaseLocalAccessOwed), owed))
-	e.savePhases(ctx, change, hold, phases)
+	if _, outstanding := outstandingObligation(phases); !outstanding {
+		phases = append(phases, outstandingPhase(startPhase(phaseLocalAccessOwed), owed))
+	}
+	if err := e.savePhases(ctx, change, hold, phases); err != nil {
+		// The obligation is not written down, so the mutation it covers does not
+		// happen here: the change stays owed, visibly, rather than having an
+		// effect nothing records.
+		return append(phases, finishPhase(startPhase("recording what the panel owes"), err, "")), nil
+	}
 	local, revoked := e.cutLocalAccess(ctx, ref)
 	phases = append(phases, local...)
+	if !localAccessCut(local) {
+		return phases, revoked
+	}
 	for index := range phases {
 		if phases[index].Name == phaseLocalAccessOwed && phases[index].Status == PhaseOutstanding {
 			phases[index] = finishPhase(phases[index], nil, "carried out: "+owed)
@@ -718,12 +796,26 @@ func (e *Executor) payLocalAccess(ctx context.Context, change Change, hold Hold,
 	return phases, revoked
 }
 
-// savePhases writes down what has happened so far. A failure to write is not a
-// failure of the change: it costs the next attempt its record, which is what
-// the log says.
-func (e *Executor) savePhases(ctx context.Context, change Change, hold Hold, phases []Phase) {
+// localAccessCut says whether the phases of the panel's own half confirm that
+// the access is gone. A denial with nobody to mark is a phase that skipped and
+// an access that is not there; a denial or a revocation that failed is neither.
+func localAccessCut(local []Phase) bool {
+	for _, phase := range local {
+		if phase.Status == "failed" || phase.Status == PhaseOutstanding {
+			return false
+		}
+	}
+	return len(local) > 0
+}
+
+// savePhases writes down what has happened so far, and says whether it landed.
+// The caller stops on a failure: a record that was not written is a record the
+// next attempt will not have, and the mutation that would follow it would then
+// be one nobody can account for - the claim may also be gone, which is one of
+// the ways this write fails.
+func (e *Executor) savePhases(ctx context.Context, change Change, hold Hold, phases []Phase) error {
 	if e.recordPhases == nil && e.store == nil {
-		return
+		return nil
 	}
 	save := e.recordPhases
 	if save == nil {
@@ -731,10 +823,12 @@ func (e *Executor) savePhases(ctx context.Context, change Change, hold Hold, pha
 			return e.store.SavePhases(ctx, changeID, hold, phases)
 		}
 	}
-	if err := save(ctx, change.ID, phases); err != nil && e.log != nil {
+	err := save(ctx, change.ID, phases)
+	if err != nil && e.log != nil {
 		e.log.Warn("the phases of the directory change were not recorded",
 			"change_id", change.ID, "err", err)
 	}
+	return err
 }
 
 // preserveUser removes an account while keeping its entry. The order is the
@@ -747,9 +841,12 @@ func (e *Executor) preserveUser(ctx context.Context, change Change, hold Hold,
 	// the panel still owes. Asking the directory again would refuse as stale -
 	// the active entry is gone - and the access here would stay open, so the
 	// obligation is met instead of the change starting over.
-	if owed, outstanding := owesLocalAccess(hold.Phases); outstanding {
-		phases = append(phases, skipPhase(startPhase(phasePreserveInDirectory),
-			"an earlier attempt took the change to the directory: "+owed))
+	if earlier, owed, outstanding := owesLocalAccess(hold.Phases); outstanding {
+		// The earlier attempt's phases are carried forward as they stand - its
+		// directory error included - and this attempt's are added after them.
+		phases = append(phases, earlier...)
+		phases = append(phases, skipPhase(startPhase("taking the change over"),
+			"an earlier attempt took it to the directory and left the panel's own half owed: "+owed))
 		return e.payLocalAccess(ctx, change, hold, phases, ref, owed)
 	}
 
