@@ -178,16 +178,24 @@ func VerifyEvidence(bundle io.Reader, sha, treeFromGit string) (Evidence, error)
 	// authority on its own arithmetic: a bundle whose every digest was right
 	// and whose report claimed 803 passed over a log holding a failure was
 	// accepted, because nothing read the log it had just verified.
-	outcome, err := countFromLogs(files[evidenceLogs+"go_test_json"],
-		files[evidenceLogs+"playwright_json"], declaredSuites{
-			goSuite:    report.Logs["go_test_json"] != "",
-			playwright: report.Logs["playwright_json"] != "",
-		})
+	//
+	// Which logs have to be there is asked of the stages that ran, by
+	// requiredSuiteLogs, and not of the log map: a report that omitted the key
+	// declared no suite, and an absent log was then indistinguishable from a
+	// run that legitimately had none.
+	logs := make(map[string][]byte, len(suiteLogs))
+	anyLog := false
+	for _, suite := range suiteLogs {
+		logs[suite.Key] = files[evidenceLogs+suite.Key]
+		if len(logs[suite.Key]) > 0 {
+			anyLog = true
+		}
+	}
+	outcome, err := countFromLogs(logs, report.requiredSuiteLogs())
 	if err != nil {
 		return Evidence{}, fmt.Errorf("the logs of the run cannot be read: %w", err)
 	}
-	if report.Counts != nil && (len(files[evidenceLogs+"go_test_json"]) > 0 ||
-		len(files[evidenceLogs+"playwright_json"]) > 0) {
+	if report.Counts != nil && anyLog {
 		if differs := report.disagreement(outcome); len(differs) > 0 {
 			return Evidence{}, fmt.Errorf(
 				"the report and the logs it travels with disagree: %s",

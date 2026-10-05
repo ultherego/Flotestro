@@ -206,6 +206,10 @@ const panelHost = "panel"
 // tells a report that reached the suite from one that stopped before it.
 const stageIntegration = "integration"
 
+// stagePlaywright is the stage that runs the browser suite, the same way.
+// Both are paired with the log that is their evidence in suiteLogs.
+const stagePlaywright = "playwright"
+
 // fullRunStages are the stages a run that calls itself complete has to account
 // for. A verdict is computed over the stages a report names, so a report that
 // simply leaves one out would be judged on the rest: the missing stage has to
@@ -239,7 +243,7 @@ var fullRunStages = []string{
 	// another day that answered and was registered. A report without this stage
 	// is a report that never established what it tested.
 	"identity",
-	"fixtures", "preflight", stageIntegration, "playwright",
+	"fixtures", "preflight", stageIntegration, stagePlaywright,
 	// unchanged asks the same question as tree, after everything has been built
 	// from the tree rather than before. tree proves what the working tree held
 	// when the run started; the report records HEAD^{tree}, which is the commit's
@@ -302,13 +306,11 @@ func (r GateReport) validate() error {
 			return fmt.Errorf("the stage %s reports %q, which is neither pass nor fail", name, stage.Result)
 		}
 	}
-	// A run that never reached the suite has no log of one. That is not a
-	// malformed report - a stage before it failed, and the verdict says so.
-	_, ranTheSuite := r.Stages[stageIntegration]
-	quick := r.Quick == nil || *r.Quick
-	if _, named := r.Logs["go_test_json"]; !named && ranTheSuite && !quick {
-		return fmt.Errorf("the gate report carries no digest of the raw go test -json log")
-	}
+	// Which logs a run owes is not asked here any more. A run that stopped
+	// before the suite has no log of one and is still a readable report, and
+	// the one stage this used to ask about was only one of the two: the
+	// question belongs to the verdict, where requiredSuiteLogs asks it of
+	// every stage that ran.
 	for name, value := range r.Logs {
 		if !digest.MatchString(value) {
 			return fmt.Errorf("the digest of the %s log is %q; it has to be sha256 and sixty-four hex digits", name, value)
@@ -407,6 +409,18 @@ func (r GateReport) ComputeVerdict() (string, []string) {
 	for _, name := range fullRunStages {
 		if _, ran := r.Stages[name]; !ran {
 			fatal = append(fatal, fmt.Sprintf("the run never reached the stage %s", name))
+		}
+	}
+	// The log every stage that ran owes, taken from what ran rather than from
+	// the log map. A report that omitted the key declared no such suite, so
+	// the absent log was not a problem and a bundle with no browser evidence
+	// in it at all came out pass, with its own stage list saying the browser
+	// suite had passed.
+	for _, suite := range r.requiredSuiteLogs() {
+		if _, declared := r.Logs[suite.Key]; !declared {
+			fatal = append(fatal, fmt.Sprintf(
+				"the run reached the stage %s and the report declares no %s, so nothing says what the %s suite did",
+				suite.Stage, suite.Key, suite.Name))
 		}
 	}
 

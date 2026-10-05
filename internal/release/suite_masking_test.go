@@ -11,7 +11,7 @@ func TestOneSuiteDoesNotCoverForTheOther(t *testing.T) {
 	browser := []byte(`{"suites":[{"title":"panel","specs":[{"title":"opens","tests":[{"status":"expected"}]}]}]}`)
 
 	// Both declared, both there: nothing to say.
-	both, err := countFromLogs(goLog, browser, declaredSuites{goSuite: true, playwright: true})
+	both, err := countFromLogs(suiteBytes(goLog, browser), requireSuites("go_test_json", "playwright_json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,26 +23,26 @@ func TestOneSuiteDoesNotCoverForTheOther(t *testing.T) {
 	}
 
 	// The browser suite declared and missing, behind a Go suite that passed.
-	missingBrowser, err := countFromLogs(goLog, nil, declaredSuites{goSuite: true, playwright: true})
+	missingBrowser, err := countFromLogs(suiteBytes(goLog, nil), requireSuites("go_test_json", "playwright_json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !problemSays(missingBrowser.Problems, "names a browser suite log and the bundle carries nothing") {
+	if !problemSays(missingBrowser.Problems, "owes a browser suite log and the bundle carries nothing") {
 		t.Fatalf("a missing browser log behind a passing Go suite reported %v", missingBrowser.Problems)
 	}
 
 	// And the other way round.
-	missingGo, err := countFromLogs(nil, browser, declaredSuites{goSuite: true, playwright: true})
+	missingGo, err := countFromLogs(suiteBytes(nil, browser), requireSuites("go_test_json", "playwright_json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !problemSays(missingGo.Problems, "names a Go suite log and the bundle carries nothing") {
+	if !problemSays(missingGo.Problems, "owes a Go suite log and the bundle carries nothing") {
 		t.Fatalf("a missing Go log behind a passing browser run reported %v", missingGo.Problems)
 	}
 
 	// A browser log that parses and names nothing, behind a passing Go suite.
-	emptyBrowser, err := countFromLogs(goLog, []byte(`{"suites":[]}`),
-		declaredSuites{goSuite: true, playwright: true})
+	emptyBrowser, err := countFromLogs(suiteBytes(goLog, []byte(`{"suites":[]}`)),
+		requireSuites("go_test_json", "playwright_json"))
 	if err != nil {
 		t.Fatal(err)
 	}

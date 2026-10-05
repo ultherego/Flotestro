@@ -16,7 +16,7 @@ func TestAPackageThatFailedAfterItsTestsPassedEndsTheVerdict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	outcome, err := countFromLogs(log, nil, declaredSuites{goSuite: true})
+	outcome, err := countFromLogs(suiteBytes(log, nil), requireSuites("go_test_json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestAScenarioThatStartedAndNeverEndedEndsTheVerdict(t *testing.T) {
 	log := []byte(`{"Action":"run","Package":"p","Test":"TestOne"}` + "\n" +
 		`{"Action":"pass","Package":"p","Test":"TestOne"}` + "\n" +
 		`{"Action":"run","Package":"p","Test":"TestCutOff"}` + "\n")
-	outcome, err := countFromLogs(log, nil, declaredSuites{goSuite: true})
+	outcome, err := countFromLogs(suiteBytes(log, nil), requireSuites("go_test_json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestAScenarioThatStartedAndNeverEndedEndsTheVerdict(t *testing.T) {
 
 // A log with nothing in it is not a run with nothing to report.
 func TestALogThatNamesNoScenarioEndsTheVerdict(t *testing.T) {
-	outcome, err := countFromLogs([]byte("\n\n"), nil, declaredSuites{goSuite: true})
+	outcome, err := countFromLogs(suiteBytes([]byte("\n\n"), nil), requireSuites("go_test_json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestALogThatNamesNoScenarioEndsTheVerdict(t *testing.T) {
 	}
 	// A log the report names and did not write: zero bytes, and the checker
 	// used to read it exactly as it reads a run that carries no log at all.
-	zero, err := countFromLogs([]byte{}, nil, declaredSuites{goSuite: true})
+	zero, err := countFromLogs(suiteBytes([]byte{}, nil), requireSuites("go_test_json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,11 +90,33 @@ func TestALogThatNamesNoScenarioEndsTheVerdict(t *testing.T) {
 
 	// And no logs at all is a different matter: a quick run carries none, and
 	// its verdict already says why.
-	empty, err := countFromLogs(nil, nil, declaredSuites{})
+	empty, err := countFromLogs(suiteBytes(nil, nil), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(empty.Problems) != 0 {
 		t.Fatalf("a run with no logs reported %v", empty.Problems)
 	}
+}
+
+// suiteBytes names the logs of a run the way the bundle carries them: by the
+// key the report declares a digest under.
+func suiteBytes(goTestJSON, playwrightJSON []byte) map[string][]byte {
+	return map[string][]byte{"go_test_json": goTestJSON, "playwright_json": playwrightJSON}
+}
+
+// requireSuites names the suites a run owes a log, as its stages would.
+func requireSuites(keys ...string) []suiteLog {
+	required := make([]suiteLog, 0, len(keys))
+	for _, key := range keys {
+		for _, suite := range suiteLogs {
+			if suite.Key == key {
+				required = append(required, suite)
+			}
+		}
+	}
+	if len(required) != len(keys) {
+		panic("a suite log nothing in the table names: " + strings.Join(keys, " "))
+	}
+	return required
 }

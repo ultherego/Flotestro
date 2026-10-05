@@ -13,7 +13,7 @@ func TestARunCutShortOrFailedOutsideItsTestsEndsTheVerdict(t *testing.T) {
 	cut := []byte(`{"Action":"start","Package":"p"}` + "\n" +
 		`{"Action":"run","Package":"p","Test":"TestOne"}` + "\n" +
 		`{"Action":"pass","Package":"p","Test":"TestOne"}` + "\n")
-	outcome, err := countFromLogs(cut, nil, declaredSuites{goSuite: true})
+	outcome, err := countFromLogs(suiteBytes(cut, nil), requireSuites("go_test_json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +28,7 @@ func TestARunCutShortOrFailedOutsideItsTestsEndsTheVerdict(t *testing.T) {
 	// the runner exits 1, with the failure outside any test.
 	teardown := []byte(`{"suites":[{"title":"panel","specs":[{"title":"opens","tests":[{"status":"expected"}]}]}],` +
 		`"errors":[{"message":"teardown failed","location":{"file":"e2e/global.ts"}}]}`)
-	browser, err := countFromLogs(nil, teardown, declaredSuites{playwright: true})
+	browser, err := countFromLogs(suiteBytes(nil, teardown), requireSuites("playwright_json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestARunCutShortOrFailedOutsideItsTestsEndsTheVerdict(t *testing.T) {
 
 	// A browser run with no such errors says nothing extra.
 	clean := []byte(`{"suites":[{"title":"panel","specs":[{"title":"opens","tests":[{"status":"expected"}]}]}]}`)
-	quiet, err := countFromLogs(nil, clean, declaredSuites{playwright: true})
+	quiet, err := countFromLogs(suiteBytes(nil, clean), requireSuites("playwright_json"))
 	if err != nil {
 		t.Fatal(err)
 	}

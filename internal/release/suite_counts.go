@@ -46,59 +46,89 @@ type suiteOutcome struct {
 	Problems []string
 }
 
-// countFromLogs recomputes the arithmetic of a run from the logs the bundle
-// carries. An absent log contributes nothing: a quick run has no suite log
-// because it ran no suite, and that is a verdict matter rather than a malformed
-// report.
-// declared names the suites the report claims a log of. Each is asked about on
-// its own: a suite that was declared and whose log is missing, empty, or names
-// no scenario is a suite that proved nothing, and the totals cannot see it -
-// a passing Go suite made an absent browser run look like a complete one, and
-// the other way round.
-type declaredSuites struct {
-	goSuite    bool
-	playwright bool
+// suiteLog pairs a stage of the run with the log that is its evidence: the key
+// the report declares a digest under, the reader that counts it, and the name a
+// reason calls the suite by.
+//
+// One table, read by both sides - the verdict asks it which logs a report owes,
+// and the bundle check asks it which ones have to be there. It exists because
+// the two were separate: the set of suites to be counted was derived from the
+// report's own log map, so a report that simply omitted a key declared no such
+// suite and its absent log was nothing to answer for, while the Go suite had a
+// rule of its own in the schema that the browser suite never got.
+type suiteLog struct {
+	Stage string
+	Key   string
+	Name  string
+	Read  func(*suiteOutcome, []byte) error
 }
 
-func countFromLogs(goTestJSON, playwrightJSON []byte, declared declaredSuites) (suiteOutcome, error) {
-	outcome := suiteOutcome{}
-	goFound, browserFound := 0, 0
-	if len(goTestJSON) > 0 {
-		if err := outcome.addGoSuite(goTestJSON); err != nil {
-			return suiteOutcome{}, err
+var suiteLogs = []suiteLog{
+	{Stage: stageIntegration, Key: "go_test_json", Name: "Go", Read: (*suiteOutcome).addGoSuite},
+	{Stage: stagePlaywright, Key: "playwright_json", Name: "browser", Read: (*suiteOutcome).addPlaywright},
+}
+
+// requiredSuiteLogs names every suite log this report owes: one for each stage
+// that ran, and one for each log the report declares. The stage side is the one
+// a report cannot talk its way out of - a stage it does not name did not run
+// and owes nothing, a stage that ran owes its evidence whatever the log map
+// says. The declared side stays because a key with nothing behind it was the
+// other half of the same hole.
+//
+// A quick run is exempt on the stage side: it has no fleet and no screenshots,
+// its verdict is already a fail for being quick, and a reason per suite there
+// would bury the one somebody has to read.
+func (r GateReport) requiredSuiteLogs() []suiteLog {
+	quick := r.Quick == nil || *r.Quick
+	required := make([]suiteLog, 0, len(suiteLogs))
+	for _, suite := range suiteLogs {
+		_, ran := r.Stages[suite.Stage]
+		_, declared := r.Logs[suite.Key]
+		if declared || (ran && !quick) {
+			required = append(required, suite)
 		}
-		goFound = outcome.Counts.Discovered
 	}
-	if len(playwrightJSON) > 0 {
-		if err := outcome.addPlaywright(playwrightJSON); err != nil {
+	return required
+}
+
+// countFromLogs recomputes the arithmetic of a run from the logs the bundle
+// carries, and asks each suite the run owes whether its log is there at all. A
+// log nobody owes and nobody carried contributes nothing: a quick run has no
+// suite log because it ran no suite, and that is a verdict matter rather than a
+// malformed report.
+//
+// required comes from requiredSuiteLogs, which reads the stages. Each suite is
+// asked about on its own: a suite that ran and whose log is missing, empty, or
+// names no scenario is a suite that proved nothing, and the totals cannot see
+// it - a passing Go suite made an absent browser run look like a complete one,
+// and the other way round.
+func countFromLogs(logs map[string][]byte, required []suiteLog) (suiteOutcome, error) {
+	outcome := suiteOutcome{}
+	found := make(map[string]int, len(suiteLogs))
+	for _, suite := range suiteLogs {
+		raw := logs[suite.Key]
+		if len(raw) == 0 {
+			continue
+		}
+		discovered := outcome.Counts.Discovered
+		if err := suite.Read(&outcome, raw); err != nil {
 			return suiteOutcome{}, err
 		}
-		browserFound = outcome.Counts.Discovered - goFound
+		found[suite.Key] = outcome.Counts.Discovered - discovered
 	}
 	// Per suite, by name, so one cannot stand in for the other: a passing Go
 	// suite made an absent browser run look like a complete one, and a passing
 	// browser run did the same for an empty Go log. The totals cannot see it,
 	// because a total is what the two came to together.
-	for _, suite := range []struct {
-		name     string
-		declared bool
-		bytes    int
-		found    int
-	}{
-		{"Go", declared.goSuite, len(goTestJSON), goFound},
-		{"browser", declared.playwright, len(playwrightJSON), browserFound},
-	} {
-		if !suite.declared {
+	for _, suite := range required {
+		if len(logs[suite.Key]) == 0 {
+			outcome.Problems = append(outcome.Problems, fmt.Sprintf(
+				"the run owes a %s suite log and the bundle carries nothing in it", suite.Name))
 			continue
 		}
-		if suite.bytes == 0 {
+		if found[suite.Key] == 0 {
 			outcome.Problems = append(outcome.Problems, fmt.Sprintf(
-				"the report names a %s suite log and the bundle carries nothing in it", suite.name))
-			continue
-		}
-		if suite.found == 0 {
-			outcome.Problems = append(outcome.Problems, fmt.Sprintf(
-				"the %s suite log names no scenario", suite.name))
+				"the %s suite log names no scenario", suite.Name))
 		}
 	}
 

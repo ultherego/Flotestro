@@ -15,20 +15,27 @@ import (
 // spoils exactly one thing about it.
 func goodBundle(t *testing.T) (bundle []byte, sha, tree string) {
 	t.Helper()
-	// The log has to say what the report says: the checker recomputes the
+	// The logs have to say what the report says: the checker recomputes the
 	// arithmetic from these bytes, which is the whole point of carrying them.
-	suiteLog := goSuiteLog(310, 0)
+	// One per suite the stages name, because a stage that ran and carries no
+	// log is a suite nothing accounts for - 309 Go scenarios and one browser
+	// scenario are the 310 the report claims.
+	suiteLog := goSuiteLog(309, 0)
 	screenshot := []byte("\x89PNG\r\n\x1a\nthe panel, as the run left it")
 
 	report := goodReport()
-	report["logs"] = map[string]string{"go_test_json": digestOf(suiteLog)}
+	report["logs"] = map[string]string{
+		"go_test_json":    digestOf(suiteLog),
+		"playwright_json": digestOf(browserSuiteLog),
+	}
 	report["artifacts"] = map[string]string{"panel.png": digestOf(screenshot)}
 	raw := encode(t, report)
 
 	return bundleOf(t, map[string][]byte{
-		"result.json":         raw,
-		"logs/go_test_json":   suiteLog,
-		"artifacts/panel.png": screenshot,
+		"result.json":          raw,
+		"logs/go_test_json":    suiteLog,
+		"logs/playwright_json": browserSuiteLog,
+		"artifacts/panel.png":  screenshot,
 	}), report["sha"].(string), report["tree_hash"].(string)
 }
 
@@ -138,8 +145,8 @@ func TestTheBundleTheLaboratoryWritesIsAccepted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the bundle as tar writes it was refused: %v", err)
 	}
-	if evidence.Verified != 2 {
-		t.Fatalf("%d files were verified, expected 2", evidence.Verified)
+	if evidence.Verified != 3 {
+		t.Fatalf("%d files were verified, expected 3", evidence.Verified)
 	}
 }
 
@@ -149,8 +156,8 @@ func TestABundleThatBacksItsReportIsAccepted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if evidence.Verified != 2 {
-		t.Fatalf("%d files were verified against their digests, expected 2", evidence.Verified)
+	if evidence.Verified != 3 {
+		t.Fatalf("%d files were verified against their digests, expected 3", evidence.Verified)
 	}
 	if evidence.Digest != digestOf(bundle) {
 		t.Fatalf("the bundle digest is %s, the bundle hashes to %s", evidence.Digest, digestOf(bundle))

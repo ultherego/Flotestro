@@ -57,7 +57,12 @@ func goodReport() map[string]any {
 			"skipped": 0, "absent": 0, "not_applicable": 0, "waived": 0,
 		},
 		"skips": []map[string]string{},
-		"logs":  map[string]string{"go_test_json": "sha256:" + strings.Repeat("c", 64)},
+		// One log per suite the stage list says ran: a stage that ran and
+		// declares no log is a suite nothing accounts for.
+		"logs": map[string]string{
+			"go_test_json":    "sha256:" + strings.Repeat("c", 64),
+			"playwright_json": "sha256:" + strings.Repeat("f", 64),
+		},
 		// A full run leaves a log per stage beside the report; a bundle with
 		// none carries only the report's word for what the stages did.
 		"artifacts": map[string]string{
