@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -19,6 +20,7 @@ import (
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
 	"github.com/ultherego/flotestro/internal/identitystore"
+	"github.com/ultherego/flotestro/internal/pki"
 	"github.com/ultherego/flotestro/internal/relayproof"
 )
 
@@ -207,6 +209,10 @@ func renewCertificate(ctx context.Context, identity *Identity, options RenewalOp
 			return fmt.Errorf("the renewed certificate does not verify under the trust this host "+
 				"already holds, so the authority behind it is not one this host believes: %w", err)
 		}
+		// And the bundle itself, because the certificate says nothing about it.
+		if err := adoptableTrust(identity.TrustPEM, bundle, response.Msg.GetCaBundleSignature()); err != nil {
+			return err
+		}
 	}
 
 	renewed, err := store.Commit(identitystore.Generation{
@@ -227,6 +233,28 @@ func renewCertificate(ctx context.Context, identity *Identity, options RenewalOp
 	// The renewal carries the panel's current capability keys: a rotated
 	// key reaches the helper here, and again with the next session.
 	deliverHelperTrust(ctx, response.Msg.GetHelperTrust(), options.Log)
+	return nil
+}
+
+// adoptableTrust says whether the set of authorities a renewal offers may be
+// written as the ones this host trusts.
+//
+// A rotation legitimately adds an authority, so the answer cannot be judged by
+// what it changes; it is judged by who says so. The certificate proves that
+// somebody who can make a trusted authority sign answered - through a relay
+// that somebody is the panel with the relay in the middle, which carries the
+// answer and does not decide what the host trusts. Only an authority the host
+// already believes in can vouch for the set, and the vouch is required over
+// every change: an authority appended, one taken away, the same set in another
+// order. An answer that carries none leaves the host on the trust it has.
+func adoptableTrust(held, offered, vouch []byte) error {
+	if len(held) == 0 || bytes.Equal(offered, held) {
+		return nil
+	}
+	if err := pki.VerifyTrustBundle(held, offered, vouch); err != nil {
+		return fmt.Errorf("the renewal carries a different set of authorities and no authority this host "+
+			"trusts vouched for it, so this is not a change the panel can be shown to have made: %w", err)
+	}
 	return nil
 }
 

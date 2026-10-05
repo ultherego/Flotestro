@@ -170,8 +170,11 @@ func (s *AgentService) issueRenewal(ctx context.Context,
 	}
 
 	// The trust bundle goes together with the certificate: after a rotation of
-	// the CA the host has to get the new set before the old issuer stops holding.
-	trust, err := s.certIssuer.Trust(ctx)
+	// the CA the host has to get the new set before the old issuer stops
+	// holding. The authority in force vouches for it, because the answer may
+	// travel through a relay and a host writes down what it is given here as
+	// the authorities of the whole fleet.
+	trust, vouch, err := s.certIssuer.VouchedTrust(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -223,7 +226,10 @@ func (s *AgentService) issueRenewal(ctx context.Context,
 		// The bundle carries every trusted CA, so the agent learns about a new
 		// CA at an ordinary renewal, without a separate distribution.
 		CaBundlePem: trust,
-		NotAfter:    timestamppb.New(issued.NotAfter),
+		// Signed by the authority in force, so a host can tell a set the panel
+		// put together from one that was changed on the way.
+		CaBundleSignature: vouch,
+		NotAfter:          timestamppb.New(issued.NotAfter),
 		// The capability keys travel the same way, for the same reason.
 		HelperTrust: s.helperTrustFor(hostID),
 	}), nil

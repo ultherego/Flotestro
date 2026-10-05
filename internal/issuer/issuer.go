@@ -41,6 +41,12 @@ type Issuer interface {
 	SignRelay(ctx context.Context, csrPEM []byte, relayID string, names []string) (*Certificate, error)
 	// Trust returns the CA bundle of the fleet in force now.
 	Trust(ctx context.Context) ([]byte, error)
+	// VouchedTrust returns the same bundle together with the signature of
+	// the authority that signs now over it. A host that is handed a bundle
+	// different from the one it holds adopts it on that signature: the
+	// answer may travel through a relay, which carries it and does not
+	// decide what the fleet trusts.
+	VouchedTrust(ctx context.Context) (bundle, vouch []byte, err error)
 }
 
 // FromTrust builds an issuer over the certificate authority of the panel.
@@ -75,6 +81,17 @@ func (l *local) SignRelay(_ context.Context, csrPEM []byte, relayID string,
 }
 
 func (l *local) Trust(context.Context) ([]byte, error) { return l.trust.Bundle(), nil }
+
+func (l *local) VouchedTrust(context.Context) ([]byte, []byte, error) {
+	// The bundle is read once and signed as read: signing a second reading
+	// would hand out a signature over a set nobody was given.
+	bundle := l.trust.Bundle()
+	vouch, err := l.trust.Active().SignTrustBundle(bundle)
+	if err != nil {
+		return nil, nil, err
+	}
+	return bundle, vouch, nil
+}
 
 func fromPKI(issued *pki.IssuedCert) *Certificate {
 	return &Certificate{

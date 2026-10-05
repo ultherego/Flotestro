@@ -1,6 +1,8 @@
 package pki
 
 import (
+	"crypto/ecdsa"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/hex"
@@ -559,6 +561,76 @@ func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 // or travels in a bundle.
 func ParseCertificatePEM(certPEM []byte) (*x509.Certificate, error) {
 	return parseCertificateOnly(certPEM)
+}
+
+// trustBundlePrefix separates a signature over a trust bundle from every other
+// signature an authority's key makes, a certificate above all.
+const trustBundlePrefix = "flotestro-ca-bundle/1\n"
+
+// trustBundleDigest is what is signed: the prefix and the bundle, so the
+// signature cannot be read as one over anything else.
+func trustBundleDigest(bundle []byte) []byte {
+	digest := sha256.New()
+	digest.Write([]byte(trustBundlePrefix))
+	digest.Write(bundle)
+	return digest.Sum(nil)
+}
+
+// SignTrustBundle vouches with the key of this authority for the set of
+// authorities a host is handed.
+//
+// A host verifies the certificate it is given against the trust it already
+// holds, which proves that the answer comes from somebody who can make that
+// authority sign - but the bundle travels in the same answer and a relay
+// carries that answer. The relay is trusted to pass it on, not to decide what
+// the fleet trusts, and only the authority itself can produce this.
+func (ca *CA) SignTrustBundle(bundle []byte) ([]byte, error) {
+	if ca == nil || ca.PrivateKey == nil {
+		return nil, fmt.Errorf("%w: the authority has no key to vouch for a trust bundle with", ErrStateMismatch)
+	}
+	if len(bundle) == 0 {
+		return nil, fmt.Errorf("an empty trust bundle is not vouched for")
+	}
+	return ecdsa.SignASN1(rand.Reader, ca.PrivateKey, trustBundleDigest(bundle))
+}
+
+// VerifyTrustBundle says whether an authority of the given trust vouched for
+// the bundle. The host asks it of the trust it holds now: a bundle that adds
+// an authority is adopted because an authority the host already believes in
+// says so, and not because it arrived with a certificate that verifies.
+func VerifyTrustBundle(trustPEM, bundle, signature []byte) error {
+	if len(signature) == 0 {
+		return fmt.Errorf("the trust bundle carries no signature of the authority in force")
+	}
+	digest := trustBundleDigest(bundle)
+	authorities := 0
+	rest := trustPEM
+	for {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return fmt.Errorf("an authority of the trust held: %w", err)
+		}
+		public, ok := cert.PublicKey.(*ecdsa.PublicKey)
+		if !ok {
+			continue
+		}
+		authorities++
+		if ecdsa.VerifyASN1(public, digest, signature) {
+			return nil
+		}
+	}
+	if authorities == 0 {
+		return fmt.Errorf("the trust held names no authority that could vouch for a bundle")
+	}
+	return fmt.Errorf("no authority of the %d this host trusts vouched for the trust bundle", authorities)
 }
 
 // IssuerIDsOfBundle names every authority a trust bundle carries, by the same

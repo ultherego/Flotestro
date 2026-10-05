@@ -239,6 +239,14 @@ message RenewCertificateResponse {
   // without a separate distribution. Absent from a panel without a
   // signing key.
   flotestro.helper.v1.HelperTrustBundle helper_trust = 4;
+  // The authority in force vouching for ca_bundle_pem: Sign(active CA key,
+  // SHA256("flotestro-ca-bundle/1\n" || ca_bundle_pem)). A renewal is
+  // answered through a relay, which the host trusts to carry the answer and
+  // not to decide what the host trusts; without this a relay could append an
+  // authority of its own to the bundle and the host would write it down as
+  // one of the fleet's. Required when the bundle differs from the one the
+  // host already holds.
+  bytes ca_bundle_signature = 5;
 }
 
 message EnrollRequest {
