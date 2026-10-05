@@ -236,6 +236,12 @@ type preserveHarness struct {
 	entry        freeipa.EntryReference
 	entryErr     error
 	preserveErr  error
+	// preserved is the entry the directory holds among its preserved accounts,
+	// which is what an attempt reads when the active one is gone.
+	preserved    freeipa.EntryReference
+	preservedErr error
+	// saved are the snapshots of the phases written down while the change runs.
+	saved [][]Phase
 	// proof is what the adapter could establish about the entry after the move.
 	proof freeipa.PreserveProof
 }
@@ -255,6 +261,8 @@ func newPreserveHarness(t *testing.T) *preserveHarness {
 			EntryUUID:       "0b1d4c8e-0000-0000-0000-000000000001",
 			ModifyTimestamp: "20260917103000Z",
 		},
+		// Nothing is preserved under that name until a test says so.
+		preservedErr: fmt.Errorf("%w: alice", freeipa.ErrEntryNotFound),
 	}
 	harness.executor = &Executor{
 		// The account has signed in to the panel, so there is an identity here
@@ -282,9 +290,26 @@ func newPreserveHarness(t *testing.T) *preserveHarness {
 			harness.order = append(harness.order, fmt.Sprintf("deny:%s:%v", subject, denied))
 			return 1, nil
 		},
+		preservedOf: func(_ context.Context, uid string) (freeipa.EntryReference, error) {
+			harness.order = append(harness.order, "preserved-read:"+uid)
+			return harness.preserved, harness.preservedErr
+		},
+		recordPhases: func(_ context.Context, _ string, phases []Phase) error {
+			harness.saved = append(harness.saved, append([]Phase{}, phases...))
+			return nil
+		},
 	}
 	return harness
 }
+
+// preserve runs the preserve under a hold of its own, the way the executor
+// does after claiming the change.
+func (h *preserveHarness) preserve(change Change, ref *ReferencePayload) ([]Phase, *sessionRevocation) {
+	return h.executor.preserveUser(context.Background(), change, testHold, ref)
+}
+
+// testHold stands for the claim a replica takes before it executes.
+var testHold = Hold{Holder: "replica-under-test", Attempt: "11111111-1111-1111-1111-111111111111"}
 
 // preserveChange is an approved change whose plan names the entry.
 func preserveChange(entry freeipa.EntryReference) Change {
@@ -315,7 +340,7 @@ func TestADirectoryThatRefusesThePreserveLeavesTheLocalAccountAsItWas(t *testing
 		Message: "Insufficient access: Insufficient 'delete' privilege",
 	}
 
-	phases, revoked := harness.executor.preserveUser(context.Background(),
+	phases, revoked := harness.preserve(
 		preserveChange(harness.entry), &ReferencePayload{UID: "alice"})
 
 	if harness.did("deny:alice:true") {
@@ -345,7 +370,7 @@ func TestADirectoryThatRefusesThePreserveLeavesTheLocalAccountAsItWas(t *testing
 func TestAPreserveAsksTheDirectoryBeforeItTouchesTheLocalAccount(t *testing.T) {
 	harness := newPreserveHarness(t)
 
-	phases, revoked := harness.executor.preserveUser(context.Background(),
+	phases, revoked := harness.preserve(
 		preserveChange(harness.entry), &ReferencePayload{UID: "alice"})
 
 	want := []string{"capabilities:alice", "entry:alice",
@@ -372,7 +397,7 @@ func TestAPreserveAsksTheDirectoryBeforeItTouchesTheLocalAccount(t *testing.T) {
 // the two it was.
 func TestAPreserveSaysWhetherTheEntryAfterTheMoveWasConfirmed(t *testing.T) {
 	harness := newPreserveHarness(t)
-	phases, _ := harness.executor.preserveUser(context.Background(),
+	phases, _ := harness.preserve(
 		preserveChange(harness.entry), &ReferencePayload{UID: "alice"})
 	confirmation, found := phaseNamed(phases, "confirming the identity of the preserved entry")
 	if !found {
@@ -388,7 +413,7 @@ func TestAPreserveSaysWhetherTheEntryAfterTheMoveWasConfirmed(t *testing.T) {
 	unproven.proof = freeipa.PreserveProof{
 		Detail: "this directory offers no read of its preserved accounts, so the entry was not read after the move",
 	}
-	phases, revoked := unproven.executor.preserveUser(context.Background(),
+	phases, revoked := unproven.preserve(
 		preserveChange(unproven.entry), &ReferencePayload{UID: "alice"})
 	confirmation, found = phaseNamed(phases, "confirming the identity of the preserved entry")
 	if !found {
@@ -409,6 +434,124 @@ func TestAPreserveSaysWhetherTheEntryAfterTheMoveWasConfirmed(t *testing.T) {
 	}
 }
 
+// A preserve that failed after the account had been moved left the account
+// preserved in the directory and returned before the local half, so its holder
+// kept an unset denial marker, live sessions and live tokens. A refusal before
+// the change and a failure after one are not the same thing.
+func TestAPreserveThatLeftTheAccountPreservedStillCutsTheLocalAccess(t *testing.T) {
+	harness := newPreserveHarness(t)
+	harness.preserveErr = &freeipa.StillPreserved{UID: "alice", Err: fmt.Errorf(
+		"%w: the entry carries another identifier; putting it back failed too",
+		freeipa.ErrEntryMoved)}
+
+	phases, revoked := harness.preserve(
+		preserveChange(harness.entry), &ReferencePayload{UID: "alice"})
+
+	directory, found := phaseNamed(phases, phasePreserveInDirectory)
+	if !found || directory.Status != "failed" {
+		t.Fatalf("the directory half is %+v", directory)
+	}
+	if !harness.did("deny:alice:true") {
+		t.Fatalf("the account stays preserved and keeps its tokens: %v", harness.order)
+	}
+	if revoked == nil {
+		t.Fatal("the panel sessions of a preserved account were not ended")
+	}
+	// Some of it was applied and some was not, which is what the state says.
+	if state := StateFor(phases); state != StatePartiallyApplied {
+		t.Errorf("the change is %s, expected partially_applied", state)
+	}
+	// What happened reaches the row before the local half runs, so an attempt
+	// after a crash here reads it.
+	if len(harness.saved) == 0 {
+		t.Fatal("nothing was written down before the local half")
+	}
+}
+
+// A crash between the move and the denial used to leave the access open for
+// good: the next attempt found no active entry, refused as stale and stopped.
+// Both ways back are asserted - the record the previous attempt wrote, and the
+// preserved entry itself.
+func TestAnAttemptAfterTheMoveCutsTheAccessInsteadOfRefusing(t *testing.T) {
+	// The record: the previous attempt wrote down the directory half.
+	fromRecord := newPreserveHarness(t)
+	change := preserveChange(fromRecord.entry)
+	done, err := json.Marshal([]Phase{{Name: phasePreserveInDirectory, Status: "succeeded",
+		Message: "the entry stays as a preserved account"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	change.Phases = done
+	change.State = StateRunning
+
+	phases, revoked := fromRecord.preserve(change, &ReferencePayload{UID: "alice"})
+	if fromRecord.did("preserve:alice") || fromRecord.did("capabilities:alice") {
+		t.Fatalf("the directory was asked again about a move it had already made: %v", fromRecord.order)
+	}
+	if !fromRecord.did("deny:alice:true") || revoked == nil {
+		t.Fatalf("the access of a preserved account stayed open: %v", fromRecord.order)
+	}
+	if state := StateFor(phases); state != StateSucceeded {
+		t.Errorf("the change is %s, expected succeeded", state)
+	}
+
+	// No record - the attempt stopped before writing one - but the directory
+	// holds the entry the plan named among its preserved accounts.
+	fromDirectory := newPreserveHarness(t)
+	fromDirectory.entryErr = fmt.Errorf("%w: alice", freeipa.ErrEntryNotFound)
+	fromDirectory.preserved = freeipa.EntryReference{
+		DN:              "uid=alice,cn=deleted users,cn=accounts,dc=ipa,dc=example,dc=test",
+		EntryUUID:       fromDirectory.entry.EntryUUID,
+		ModifyTimestamp: "20260918120000Z",
+	}
+	fromDirectory.preservedErr = nil
+	_, revoked = fromDirectory.preserve(
+		preserveChange(fromDirectory.entry), &ReferencePayload{UID: "alice"})
+	if !fromDirectory.did("deny:alice:true") || revoked == nil {
+		t.Fatalf("the access of an account already preserved stayed open: %v", fromDirectory.order)
+	}
+	if fromDirectory.did("preserve:alice") {
+		t.Errorf("the move was ordered a second time: %v", fromDirectory.order)
+	}
+
+	// Another entry under the same name: not this change's account, so the
+	// refusal stands and nobody's access is cut.
+	somebodyElse := newPreserveHarness(t)
+	somebodyElse.entryErr = fmt.Errorf("%w: alice", freeipa.ErrEntryNotFound)
+	somebodyElse.preserved = freeipa.EntryReference{
+		DN:        "uid=alice,cn=deleted users,cn=accounts,dc=ipa,dc=example,dc=test",
+		EntryUUID: "0b1d4c8e-0000-0000-0000-000000000009",
+	}
+	somebodyElse.preservedErr = nil
+	phases, _ = somebodyElse.preserve(
+		preserveChange(somebodyElse.entry), &ReferencePayload{UID: "alice"})
+	if somebodyElse.did("deny:alice:true") {
+		t.Fatalf("the access was cut over an entry the plan never named: %v", somebodyElse.order)
+	}
+	if last := phases[len(phases)-1]; !strings.HasPrefix(last.Message, RefusalStalePlan+":") {
+		t.Fatalf("the refusal is %q, expected the code %s", last.Message, RefusalStalePlan)
+	}
+}
+
+// The directory half of a preserve is written down before the local half
+// starts, which is what makes the attempt above possible.
+func TestThePreserveRecordsTheDirectoryHalfBeforeTheLocalOne(t *testing.T) {
+	harness := newPreserveHarness(t)
+	harness.preserve(preserveChange(harness.entry), &ReferencePayload{UID: "alice"})
+
+	if len(harness.saved) == 0 {
+		t.Fatal("no phases were written down while the change ran")
+	}
+	snapshot := harness.saved[0]
+	directory, found := phaseNamed(snapshot, phasePreserveInDirectory)
+	if !found || directory.Status != "succeeded" {
+		t.Fatalf("the snapshot does not carry the directory half: %+v", snapshot)
+	}
+	if _, found := phaseNamed(snapshot, "the local denial marker"); found {
+		t.Fatalf("the snapshot was written after the local half: %+v", snapshot)
+	}
+}
+
 // phaseNamed finds a phase by its name.
 func phaseNamed(phases []Phase, name string) (Phase, bool) {
 	for _, phase := range phases {
@@ -426,7 +569,7 @@ func TestAnEntryThatMovedSinceThePlanRefusesAsStale(t *testing.T) {
 	planned := harness.entry
 	harness.entry.DN = "uid=alice,cn=deleted users,cn=accounts,cn=provisioning,dc=ipa,dc=example,dc=test"
 
-	phases, _ := harness.executor.preserveUser(context.Background(),
+	phases, _ := harness.preserve(
 		preserveChange(planned), &ReferencePayload{UID: "alice"})
 
 	if harness.did("preserve:alice") || harness.did("deny:alice:true") {
@@ -442,7 +585,7 @@ func TestAnEntryThatMovedSinceThePlanRefusesAsStale(t *testing.T) {
 	touched := newPreserveHarness(t)
 	planned = touched.entry
 	touched.entry.ModifyTimestamp = "20260918090000Z"
-	phases, _ = touched.executor.preserveUser(context.Background(),
+	phases, _ = touched.preserve(
 		preserveChange(planned), &ReferencePayload{UID: "alice"})
 	if touched.did("preserve:alice") {
 		t.Fatal("an entry changed since the plan was still preserved")
@@ -458,7 +601,7 @@ func TestAnEntryTheDirectoryNoLongerHoldsRefusesAsStale(t *testing.T) {
 	harness := newPreserveHarness(t)
 	harness.entryErr = fmt.Errorf("%w: alice", freeipa.ErrEntryNotFound)
 
-	phases, _ := harness.executor.preserveUser(context.Background(),
+	phases, _ := harness.preserve(
 		preserveChange(harness.entry), &ReferencePayload{UID: "alice"})
 
 	if harness.did("preserve:alice") || harness.did("deny:alice:true") {
@@ -477,7 +620,7 @@ func TestADirectoryThatCannotMoveAnEntryBlocksThePreserveBeforeItStarts(t *testi
 		ReasonCodes: []string{freeipa.ReasonModDNNotPermitted},
 	}
 
-	phases, _ := harness.executor.preserveUser(context.Background(),
+	phases, _ := harness.preserve(
 		preserveChange(harness.entry), &ReferencePayload{UID: "alice"})
 
 	if len(harness.order) != 1 || harness.order[0] != "capabilities:alice" {
@@ -499,7 +642,7 @@ func TestADirectoryThatDoesNotReportRightsDoesNotBlockThePreserve(t *testing.T) 
 		ReasonCodes: []string{freeipa.ReasonModDNRightsUnknown},
 	}
 
-	phases, _ := harness.executor.preserveUser(context.Background(),
+	phases, _ := harness.preserve(
 		preserveChange(harness.entry), &ReferencePayload{UID: "alice"})
 
 	if !harness.did("preserve:alice") {
@@ -516,7 +659,7 @@ func TestAPreserveWithoutAnEntryInThePlanIsRefused(t *testing.T) {
 	harness := newPreserveHarness(t)
 	change := Change{ID: "change-2", ActionType: string(ActionUserPreserve)}
 
-	phases, _ := harness.executor.preserveUser(context.Background(),
+	phases, _ := harness.preserve(
 		change, &ReferencePayload{UID: "alice"})
 
 	if harness.did("preserve:alice") || harness.did("deny:alice:true") {
