@@ -84,3 +84,39 @@ func containsField(fields []string, wanted string) bool {
 	}
 	return false
 }
+
+// HP-02. The canonical form used to join lists with U+001F and write one
+// "name=value" line per field, so two different orders produced the same bytes:
+// a restore bound to ["/safe"] could be presented as ["/safe\x1f/extra"] and
+// the digest still matched. The same held for any value carrying a newline,
+// which could be read as the field after it.
+func TestTwoDifferentOrdersCannotShareADigest(t *testing.T) {
+	narrow := &opspec.BackupPayload{ID: "nightly", Tool: "restic", Repository: "/srv/backups",
+		Include: []string{"/safe\x1f/extra"}}
+	widened := &helperv1.BackupRequest{Id: "nightly", Tool: "restic", Repository: "/srv/backups",
+		Include: []string{"/safe", "/extra"}}
+	if backupRequestDigest(widened) == BackupOrderDigest(narrow) {
+		t.Error("an order of two paths has the digest of an order of one path carrying the separator")
+	}
+	if differing := BackupOrderDifference(widened, narrow); len(differing) == 0 {
+		t.Error("the difference says the two orders agree")
+	} else if differing[0] != "include" {
+		t.Errorf("the difference names %v, expected include", differing)
+	}
+
+	// The same shape one field over: a value that carries a line break used to
+	// be able to spell the field after it.
+	honest := &opspec.BackupPayload{ID: "nightly", Tool: "restic", Repository: "/srv/backups"}
+	smuggled := &helperv1.BackupRequest{Id: "nightly", Tool: "restic",
+		Repository: "/srv/backups\nrunbook=rm -rf /"}
+	if backupRequestDigest(smuggled) == BackupOrderDigest(honest) {
+		t.Error("a repository carrying a line break has the digest of the honest order")
+	}
+
+	// And the order that really is the same still is.
+	same := &helperv1.BackupRequest{Id: "nightly", Tool: "restic", Repository: "/srv/backups",
+		Include: []string{"/safe\x1f/extra"}}
+	if backupRequestDigest(same) != BackupOrderDigest(narrow) {
+		t.Error("the same order no longer has the same digest")
+	}
+}

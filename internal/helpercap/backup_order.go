@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
@@ -26,6 +27,11 @@ import (
 // Secrets are in the digest as names, never as values: the panel holds a
 // reference to the store and the host holds the value it fetched, so a digest
 // over values could not be computed on both sides at all.
+
+// backupOrderPrefix separates these bytes from every other thing this package
+// hashes, so a digest of an order cannot be presented as a digest of anything
+// else.
+const backupOrderPrefix = "flotestro-backup-order/2\n"
 
 // backupOrder is the one canonical form of a backup order. It is filled from
 // the payload the panel signed and from the request the helper received, and
@@ -64,10 +70,38 @@ type backupOrder struct {
 func (o backupOrder) digest() string {
 	names := append([]string(nil), o.EnvNames...)
 	sort.Strings(names)
-	var text strings.Builder
-	write := func(name string, value any) {
-		fmt.Fprintf(&text, "%s=%v\n", name, value)
+
+	// Length-prefixed, not a text form with separators.
+	//
+	// It used to be one "name=value" line per field, with lists joined by
+	// U+001F. Both choices were ambiguous: Include=["/safe\x1f/extra"] and
+	// Include=["/safe","/extra"] produced identical bytes, so a restore could
+	// be widened to another path under a digest that still matched - and a
+	// value carrying a newline could do the same to the field after it. Every
+	// field and every element now carries its own length, so no content can be
+	// read as the structure around it.
+	var out []byte
+	out = append(out, backupOrderPrefix...)
+	text := func(name, value string) {
+		out = appendBytes(appendBytes(out, []byte(name)), []byte(value))
 	}
+	number := func(name string, value int) {
+		out = appendUint(appendBytes(out, []byte(name)), uint64(value))
+	}
+	flag := func(name string, value bool) {
+		set := 0
+		if value {
+			set = 1
+		}
+		number(name, set)
+	}
+	list := func(name string, values []string) {
+		out = appendUint(appendBytes(out, []byte(name)), uint64(len(values)))
+		for _, value := range values {
+			out = appendBytes(out, []byte(value))
+		}
+	}
+
 	// The operation is deliberately not here. Which operation is being carried
 	// out is bound by the action type of the capability and by Expect, which
 	// says for each request kind which action types may authorize it - and the
@@ -76,29 +110,29 @@ func (o backupOrder) digest() string {
 	// disagree by construction, so every verified backup ended as
 	// "applied_unverified": the change made and the verifier refused at the
 	// door for a difference nobody had introduced.
-	write("id", o.ID)
-	write("tool", o.Tool)
-	write("repository", o.Repository)
-	write("paths", strings.Join(o.Paths, "\x1f"))
-	write("excludes", strings.Join(o.Excludes, "\x1f"))
-	write("tags", strings.Join(o.Tags, "\x1f"))
-	write("keep_last", o.KeepLast)
-	write("keep_daily", o.KeepDaily)
-	write("keep_weekly", o.KeepWeekly)
-	write("keep_monthly", o.KeepMonthly)
-	write("prune", o.Prune)
-	write("runbook", o.Runbook)
-	write("initialize", o.Initialize)
-	write("read_data", o.ReadData)
-	write("snapshot_id", o.SnapshotID)
-	write("target", o.Target)
-	write("include", strings.Join(o.Include, "\x1f"))
-	write("overwrite", o.Overwrite)
-	write("plan", o.Plan)
-	write("plan_hash", o.PlanHash)
-	write("password", o.HasPassword)
-	write("env", strings.Join(names, "\x1f"))
-	sum := sha256.Sum256([]byte(text.String()))
+	text("id", o.ID)
+	text("tool", o.Tool)
+	text("repository", o.Repository)
+	list("paths", o.Paths)
+	list("excludes", o.Excludes)
+	list("tags", o.Tags)
+	number("keep_last", o.KeepLast)
+	number("keep_daily", o.KeepDaily)
+	number("keep_weekly", o.KeepWeekly)
+	number("keep_monthly", o.KeepMonthly)
+	flag("prune", o.Prune)
+	text("runbook", o.Runbook)
+	flag("initialize", o.Initialize)
+	flag("read_data", o.ReadData)
+	text("snapshot_id", o.SnapshotID)
+	text("target", o.Target)
+	list("include", o.Include)
+	text("overwrite", o.Overwrite)
+	text("plan", o.Plan)
+	text("plan_hash", o.PlanHash)
+	flag("password", o.HasPassword)
+	list("env", names)
+	sum := sha256.Sum256(out)
 	return hex.EncodeToString(sum[:])
 }
 
@@ -120,9 +154,9 @@ func BackupOrderDifference(request *helperv1.BackupRequest, payload *opspec.Back
 		{"id", got.ID, want.ID},
 		{"tool", got.Tool, want.Tool},
 		{"repository", got.Repository, want.Repository},
-		{"paths", strings.Join(got.Paths, "\x1f"), strings.Join(want.Paths, "\x1f")},
-		{"excludes", strings.Join(got.Excludes, "\x1f"), strings.Join(want.Excludes, "\x1f")},
-		{"tags", strings.Join(got.Tags, "\x1f"), strings.Join(want.Tags, "\x1f")},
+		{"paths", listText(got.Paths), listText(want.Paths)},
+		{"excludes", listText(got.Excludes), listText(want.Excludes)},
+		{"tags", listText(got.Tags), listText(want.Tags)},
 		{"keep_last", got.KeepLast, want.KeepLast},
 		{"keep_daily", got.KeepDaily, want.KeepDaily},
 		{"keep_weekly", got.KeepWeekly, want.KeepWeekly},
@@ -133,18 +167,28 @@ func BackupOrderDifference(request *helperv1.BackupRequest, payload *opspec.Back
 		{"read_data", got.ReadData, want.ReadData},
 		{"snapshot_id", got.SnapshotID, want.SnapshotID},
 		{"target", got.Target, want.Target},
-		{"include", strings.Join(got.Include, "\x1f"), strings.Join(want.Include, "\x1f")},
+		{"include", listText(got.Include), listText(want.Include)},
 		{"overwrite", got.Overwrite, want.Overwrite},
 		{"plan", got.Plan, want.Plan},
 		{"plan_hash", got.PlanHash, want.PlanHash},
 		{"password", got.HasPassword, want.HasPassword},
-		{"env", strings.Join(sorted(got.EnvNames), "\x1f"), strings.Join(sorted(want.EnvNames), "\x1f")},
+		{"env", listText(sorted(got.EnvNames)), listText(sorted(want.EnvNames))},
 	} {
 		if fmt.Sprintf("%v", field.got) != fmt.Sprintf("%v", field.want) {
 			differing = append(differing, field.name)
 		}
 	}
 	return differing
+}
+
+// listText renders a list for comparison without the ambiguity the digest used
+// to have: an element carrying the separator cannot pass for two elements.
+func listText(values []string) string {
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		parts = append(parts, strconv.Quote(value))
+	}
+	return "[" + strings.Join(parts, " ") + "]"
 }
 
 func sorted(values []string) []string {
