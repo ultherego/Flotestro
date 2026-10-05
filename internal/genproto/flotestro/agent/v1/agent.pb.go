@@ -2605,9 +2605,15 @@ type EnrollResponse struct {
 	// The panel's capability keys and the host identifier, signed, which
 	// the agent hands to the root helper: the helper takes its host
 	// identity and its keyring from here, not from the agent's word.
-	HelperTrust   *v1.HelperTrustBundle `protobuf:"bytes,5,opt,name=helper_trust,json=helperTrust,proto3" json:"helper_trust,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	HelperTrust *v1.HelperTrustBundle `protobuf:"bytes,5,opt,name=helper_trust,json=helperTrust,proto3" json:"helper_trust,omitempty"`
+	// The authority in force vouching for ca_bundle_pem, the same signature a
+	// renewal carries: Sign(active CA key, SHA256("flotestro-ca-bundle/1\n" ||
+	// ca_bundle_pem)). The answer may come from a relay, which holds a leaf of
+	// the authority the host pinned and can therefore be the far end of that
+	// pinned channel; only the authority itself can produce this.
+	CaBundleSignature []byte `protobuf:"bytes,6,opt,name=ca_bundle_signature,json=caBundleSignature,proto3" json:"ca_bundle_signature,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *EnrollResponse) Reset() {
@@ -2671,6 +2677,13 @@ func (x *EnrollResponse) GetNotAfter() *timestamppb.Timestamp {
 func (x *EnrollResponse) GetHelperTrust() *v1.HelperTrustBundle {
 	if x != nil {
 		return x.HelperTrust
+	}
+	return nil
+}
+
+func (x *EnrollResponse) GetCaBundleSignature() []byte {
+	if x != nil {
+		return x.CaBundleSignature
 	}
 	return nil
 }
@@ -16553,13 +16566,14 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\bhostname\x18\x03 \x01(\tR\bhostname\x12\x17\n" +
 	"\acsr_pem\x18\x04 \x01(\fR\x06csrPem\x124\n" +
 	"\x05build\x18\x05 \x01(\v2\x1e.flotestro.agent.v1.AgentBuildR\x05build\x12*\n" +
-	"\x11client_request_id\x18\x06 \x01(\tR\x0fclientRequestId\"\xfa\x01\n" +
+	"\x11client_request_id\x18\x06 \x01(\tR\x0fclientRequestId\"\xaa\x02\n" +
 	"\x0eEnrollResponse\x12\x17\n" +
 	"\ahost_id\x18\x01 \x01(\tR\x06hostId\x12'\n" +
 	"\x0fcertificate_pem\x18\x02 \x01(\fR\x0ecertificatePem\x12\"\n" +
 	"\rca_bundle_pem\x18\x03 \x01(\fR\vcaBundlePem\x127\n" +
 	"\tnot_after\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\bnotAfter\x12I\n" +
-	"\fhelper_trust\x18\x05 \x01(\v2&.flotestro.helper.v1.HelperTrustBundleR\vhelperTrust\"\x91\x01\n" +
+	"\fhelper_trust\x18\x05 \x01(\v2&.flotestro.helper.v1.HelperTrustBundleR\vhelperTrust\x12.\n" +
+	"\x13ca_bundle_signature\x18\x06 \x01(\fR\x11caBundleSignature\"\x91\x01\n" +
 	"\n" +
 	"AgentBuild\x12#\n" +
 	"\ragent_version\x18\x01 \x01(\tR\fagentVersion\x12\x1b\n" +

@@ -3,6 +3,7 @@
 package identitystore
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/rand"
 	"crypto/tls"
@@ -171,6 +172,43 @@ func AcceptableRenewal(held, certificatePEM, offered, vouch []byte) error {
 			"already holds, so the authority behind it is not one this host believes: %w", err)
 	}
 	return pki.AdoptableTrust(held, offered, vouch)
+}
+
+// ErrTrustUnvouched is a first bundle that differs from the pinned one and
+// that no pinned authority vouched for.
+var ErrTrustUnvouched = errors.New("the trust bundle is not vouched for")
+
+// AcceptableFirstTrust says whether the set of authorities an enrollment
+// answers with may be written down as the authorities of this host's fleet.
+//
+// The pin is the bundle the enrollment request went out under. It is not
+// merely the trust of the channel: the authority in it is a CA, and in this
+// product a relay holds a leaf of that CA with serverAuth on it, so the far
+// end of the pinned channel need not be the panel. A bundle the pin itself
+// does not contain is therefore adopted on a signature of a pinned authority
+// and on nothing else - the same question AcceptableRenewal asks of a
+// renewal, with the pin in the place of the trust in force.
+//
+// An answer that repeats the pin byte for byte needs no vouch: it asks the
+// host to believe what it already believes. An answer that carries a
+// different set and no vouch is refused, including the answer of a panel too
+// old to vouch: an operator upgrades the panel or takes a fresh bootstrap
+// bundle from it, and neither is a reason to write down a set of authorities
+// nobody can be shown to have chosen.
+func AcceptableFirstTrust(pinned, offered, vouch []byte) error {
+	if len(pinned) == 0 {
+		return fmt.Errorf("%w: the enrollment pinned no authority, so there is nothing "+
+			"the first trust bundle could be judged against", ErrTrustUnvouched)
+	}
+	if bytes.Equal(offered, pinned) {
+		return nil
+	}
+	if err := pki.VerifyTrustBundle(pinned, offered, vouch); err != nil {
+		return fmt.Errorf("%w: the enrollment answered with a set of authorities other than the one "+
+			"pinned for the request, and no pinned authority vouched for it, so this is not a set the "+
+			"panel can be shown to have chosen: %v", ErrTrustUnvouched, err)
+	}
+	return nil
 }
 
 func VerifiesUnder(certificatePEM, trustPEM []byte) error {

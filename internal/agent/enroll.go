@@ -98,6 +98,9 @@ const (
 	CodeEnrollmentFailed = "enrollment_failed"
 	// CodePendingInvalid is a record of an attempt that cannot be repeated.
 	CodePendingInvalid = "pending_invalid"
+	// CodeTrustUnvouched is a first trust bundle that differs from the pinned
+	// one and that no pinned authority vouched for. Nothing was written.
+	CodeTrustUnvouched = "enrollment_trust_unvouched"
 )
 
 // EnrollmentError carries a stable code next to the cause.
@@ -342,7 +345,14 @@ func (e *Enrollment) Run(ctx context.Context) (*Identity, error) {
 	// bundle either land on the disk together or do not land at all.
 	bundle := response.GetCaBundlePem()
 	if len(bundle) == 0 {
+		// No set in the answer leaves the host on the authority it pinned.
 		bundle = e.BootstrapPEM
+	}
+	// The answer may come from a relay: it holds a leaf of the pinned
+	// authority, so the pinned channel does not say who chose this set.
+	if err := identitystore.AcceptableFirstTrust(e.BootstrapPEM, bundle,
+		response.GetCaBundleSignature()); err != nil {
+		return nil, coded(CodeTrustUnvouched, err)
 	}
 	key, err := pending.Key()
 	if err != nil {

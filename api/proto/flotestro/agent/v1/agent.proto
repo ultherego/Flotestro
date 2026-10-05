@@ -278,6 +278,12 @@ message EnrollResponse {
   // the agent hands to the root helper: the helper takes its host
   // identity and its keyring from here, not from the agent's word.
   flotestro.helper.v1.HelperTrustBundle helper_trust = 5;
+  // The authority in force vouching for ca_bundle_pem, the same signature a
+  // renewal carries: Sign(active CA key, SHA256("flotestro-ca-bundle/1\n" ||
+  // ca_bundle_pem)). The answer may come from a relay, which holds a leaf of
+  // the authority the host pinned and can therefore be the far end of that
+  // pinned channel; only the authority itself can produce this.
+  bytes ca_bundle_signature = 6;
 }
 
 message AgentBuild {

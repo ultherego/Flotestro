@@ -47,6 +47,10 @@ type Issuer interface {
 	// answer may travel through a relay, which carries it and does not
 	// decide what the fleet trusts.
 	VouchedTrust(ctx context.Context) (bundle, vouch []byte, err error)
+	// VouchFor signs a bundle the panel itself handed out earlier, for an
+	// answer that has to repeat that bundle byte for byte - a replayed
+	// enrollment. It is never called with a set that came in from outside.
+	VouchFor(ctx context.Context, bundle []byte) (vouch []byte, err error)
 }
 
 // FromTrust builds an issuer over the certificate authority of the panel.
@@ -91,6 +95,10 @@ func (l *local) VouchedTrust(context.Context) ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 	return bundle, vouch, nil
+}
+
+func (l *local) VouchFor(_ context.Context, bundle []byte) ([]byte, error) {
+	return l.trust.Active().SignTrustBundle(bundle)
 }
 
 func fromPKI(issued *pki.IssuedCert) *Certificate {

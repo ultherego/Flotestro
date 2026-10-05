@@ -254,10 +254,20 @@ func (s *EnrollmentService) enrollThroughRelay(ctx context.Context,
 		})
 		s.log.Info("a repeated enrollment attempt", "id", replayed.HostID,
 			"kind", scope.Kind, "machine_id", msg.GetMachineId())
+		// The vouch is over the bundle that was issued, not the set in force:
+		// a replay repeats the answer. No bundle recorded, no vouch to make.
+		var vouch []byte
+		if len(replayed.CABundlePEM) > 0 {
+			vouch, err = s.certIssuer.VouchFor(ctx, replayed.CABundlePEM)
+			if err != nil {
+				return nil, connect.NewError(connect.CodeInternal, err)
+			}
+		}
 		answer := &agentv1.EnrollResponse{
-			HostId:         replayed.HostID,
-			CertificatePem: replayed.CertificatePEM,
-			CaBundlePem:    replayed.CABundlePEM,
+			HostId:            replayed.HostID,
+			CertificatePem:    replayed.CertificatePEM,
+			CaBundlePem:       replayed.CABundlePEM,
+			CaBundleSignature: vouch,
 		}
 		// A relay has no helper and no capability keyring, so the trust of a
 		// host would be an answer to a question it never asked - and
@@ -333,7 +343,9 @@ func (s *EnrollmentService) enrollThroughRelay(ctx context.Context,
 	}
 	// The trust bundle goes in the same answer as the certificate: without it
 	// the host does not know whom to trust and will not establish a session.
-	trust, err := s.certIssuer.Trust(ctx)
+	// It is vouched for by the authority in force, because the answer may come
+	// from a relay and the host writes this set down as the fleet's.
+	trust, vouch, err := s.certIssuer.VouchedTrust(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -394,7 +406,9 @@ func (s *EnrollmentService) enrollThroughRelay(ctx context.Context,
 	s.log.Info("the host was registered",
 		"host_id", hostID, "hostname", msg.GetHostname(), "site", scope.Site, "created", created)
 
-	return connect.NewResponse(&agentv1.EnrollResponse{
+	// Named rather than returned inline: gofmt 1.25 and 1.27 indent a
+	// multi-line composite literal inside a multi-value return differently.
+	answer := &agentv1.EnrollResponse{
 		HostId:         hostID,
 		CertificatePem: issued.PEM,
 		CaBundlePem:    trust,
@@ -402,8 +416,10 @@ func (s *EnrollmentService) enrollThroughRelay(ctx context.Context,
 		// The helper of the new host takes its identity and the panel's capability
 		// keys from this bundle, signed, rather than from what the agent says about
 		// itself.
-		HelperTrust: s.helperTrustFor(hostID),
-	}), nil
+		HelperTrust:       s.helperTrustFor(hostID),
+		CaBundleSignature: vouch,
+	}
+	return connect.NewResponse(answer), nil
 }
 
 // enrollRelay registers the relay of a site and issues a certificate for it.
@@ -432,7 +448,7 @@ func (s *EnrollmentService) enrollRelay(ctx context.Context, tx pgx.Tx,
 			"the certificate request was refused", map[string]any{"relay_id": relayID})
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
-	trust, err := s.certIssuer.Trust(ctx)
+	trust, vouch, err := s.certIssuer.VouchedTrust(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -485,12 +501,14 @@ func (s *EnrollmentService) enrollRelay(ctx context.Context, tx pgx.Tx,
 	}
 
 	s.log.Info("the relay was registered", "relay_id", relayID, "name", name, "site", scope.Site)
-	return connect.NewResponse(&agentv1.EnrollResponse{
-		HostId:         relayID,
-		CertificatePem: issued.PEM,
-		CaBundlePem:    trust,
-		NotAfter:       timestamppb.New(issued.NotAfter),
-	}), nil
+	answer := &agentv1.EnrollResponse{
+		HostId:            relayID,
+		CertificatePem:    issued.PEM,
+		CaBundlePem:       trust,
+		NotAfter:          timestamppb.New(issued.NotAfter),
+		CaBundleSignature: vouch,
+	}
+	return connect.NewResponse(answer), nil
 }
 
 // checkPurpose guards that the order matches what is really happening. The

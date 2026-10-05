@@ -113,6 +113,8 @@ func enrollmentHint(err error) string {
 		return "the endpoint failed the check against the bootstrap CA: flotestro-agentctl diagnose"
 	case agent.CodePendingInvalid:
 		return "the record of the previous attempt cannot be repeated; discard it: flotestro-agentctl identity reset --discard-pending"
+	case agent.CodeTrustUnvouched:
+		return "the answer carried a set of certificate authorities other than the one in bootstrap_ca_file and no authority of that file vouched for it; nothing was written: take the CA file from the panel's installation sheet again, and if the panel is older than this agent, upgrade the panel"
 	}
 	return "see flotestro-agentctl diagnose"
 }

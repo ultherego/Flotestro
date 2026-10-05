@@ -106,6 +106,8 @@ func enrollmentHint(err error) string {
 		return "the endpoint did not answer: flotestro-relayctl diagnose"
 	case agent.CodeUnknownAuthority, agent.CodeNameMismatch:
 		return "the endpoint failed the check against the bootstrap CA: flotestro-relayctl diagnose"
+	case agent.CodeTrustUnvouched:
+		return "the answer carried a set of certificate authorities other than the one in bootstrap_ca_file and no authority of that file vouched for it; nothing was written: take the CA file from the panel's installation sheet again, and if the panel is older than this relay, upgrade the panel"
 	}
 	return "see flotestro-relayctl diagnose"
 }
