@@ -69,6 +69,16 @@ func stubbedRunWithIdentity(t *testing.T, workflow, job string, steps []string,
 	manifest := "a manifest\n"
 	digest := sha256Hex(manifest)
 	stub("cosign", "")
+	// jq is stubbed for the same reason docker and cosign are: the harness must
+	// answer for the step's own logic and not for what happens to be installed.
+	// It was not stubbed at first, and the laboratory's panel guest has no jq -
+	// so this test passed on a workstation and failed in the lab, which is the
+	// shape of fault that blocks a gate run for a reason nothing to do with
+	// what is being gated.
+	stub("jq", `
+# jq -r '."containerimage.digest"' <file>
+for arg in "$@"; do last="$arg"; done
+sed -n 's/.*"containerimage.digest":"\([^"]*\)".*/\1/p' "$last"`)
 	stub("docker", strings.Replace(`
 case "$1 $2" in
 "buildx build")
