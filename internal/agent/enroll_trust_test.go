@@ -30,7 +30,11 @@ func enrollAgainst(t *testing.T, pinned []byte, answer answerFunc) (*identitysto
 		Store:  store,
 		Issuer: answer,
 		Request: IdentityRequest{
-			Token: "flt_abcd1234efgh5678", MachineID: "33d45072f9f04beeb492b07e91f61db5", Hostname: "web-01",
+			// The same token the enrollment tests beside this one use: the
+			// scheme is real because TokenPrefix reads it, and the body says
+			// what it is rather than looking like a credential.
+			Token:     "flt_an-enrollment-token-of-a-test",
+			MachineID: "33d45072f9f04beeb492b07e91f61db5", Hostname: "web-01",
 		},
 		BootstrapPEM: pinned,
 		Now:          func() time.Time { return time.Now() },

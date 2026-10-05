@@ -83,7 +83,11 @@ func testEnrollment(t *testing.T, issuer *fakeIssuer) (*Enrollment, *time.Time) 
 		Store:  identitystore.New(t.TempDir()),
 		Issuer: issuer,
 		Request: IdentityRequest{
-			Token: "flt_abcd1234efgh5678", MachineID: "33d45072f9f04beeb492b07e91f61db5", Hostname: "web-01",
+			// The scheme and the length matter here, because TokenPrefix
+			// reads them - but the body says what it is instead of looking
+			// like a credential, which the secret scanner reads as one.
+			Token:     "flt_an-enrollment-token-of-a-test",
+			MachineID: "33d45072f9f04beeb492b07e91f61db5", Hostname: "web-01",
 		},
 		BootstrapPEM: issuer.ca.PEM,
 		Now:          func() time.Time { return now },
@@ -204,7 +208,7 @@ func TestARefusalKeepsTheAttempt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the attempt was not kept: %v", err)
 	}
-	if pending.TokenPrefix != "flt_abcd" {
+	if pending.TokenPrefix != "flt_an-e" {
 		t.Fatalf("token prefix = %q", pending.TokenPrefix)
 	}
 	// The record must not keep the token itself.
