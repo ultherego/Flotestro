@@ -31,7 +31,7 @@ func (e *TaskExecutor) ProbeDocker(ctx context.Context, full bool) (docker.Snaps
 		timeout = 2 * time.Minute
 	}
 
-	response, err := e.helper.Call(ctx, &helperv1.HelperRequest{
+	response, err := e.callHelper(ctx, &helperv1.HelperRequest{
 		TimeoutSeconds: uint32(timeout.Seconds()),
 		Action: &helperv1.HelperRequest_DockerRead{
 			DockerRead: &helperv1.DockerReadRequest{Scope: scope},
@@ -87,7 +87,7 @@ func (e *TaskExecutor) readDockerEvents(ctx context.Context,
 	// The helper limit covers the follow window with room for the read itself.
 	timeout := time.Duration(order.GetFollowSeconds())*time.Second + 90*time.Second
 
-	response, err := e.helper.Call(ctx, &helperv1.HelperRequest{
+	response, err := e.callHelper(ctx, &helperv1.HelperRequest{
 		TaskId:         task.GetTaskId(),
 		ExpiresAt:      task.GetExpiresAt(),
 		TimeoutSeconds: uint32(timeout.Seconds()),
@@ -133,7 +133,7 @@ func (e *TaskExecutor) applyDocker(ctx context.Context, task *agentv1.TaskEnvelo
 	actionCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	response, err := e.helper.Call(actionCtx, &helperv1.HelperRequest{
+	response, err := e.callHelper(actionCtx, &helperv1.HelperRequest{
 		TaskId:         task.GetTaskId(),
 		ExpiresAt:      task.GetExpiresAt(),
 		TimeoutSeconds: uint32(timeout.Seconds()),
@@ -210,7 +210,7 @@ func (e *TaskExecutor) applyDockerEnsure(ctx context.Context, task *agentv1.Task
 		}
 	}
 
-	response, err := e.helper.Call(callCtx, &helperv1.HelperRequest{
+	response, err := e.callHelper(callCtx, &helperv1.HelperRequest{
 		TaskId:         task.GetTaskId(),
 		ExpiresAt:      task.GetExpiresAt(),
 		TimeoutSeconds: uint32(timeout.Seconds()),
@@ -332,7 +332,7 @@ func (e *TaskExecutor) readDockerLogs(ctx context.Context, task *agentv1.TaskEnv
 	readCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	response, err := e.helper.Call(readCtx, &helperv1.HelperRequest{
+	response, err := e.callHelper(readCtx, &helperv1.HelperRequest{
 		TaskId:         task.GetTaskId(),
 		ExpiresAt:      task.GetExpiresAt(),
 		TimeoutSeconds: uint32(timeout.Seconds()),

@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
@@ -1023,34 +1022,11 @@ func sameContent(request *helperv1.FileRequest, payload *opspec.FilePayload) err
 		return binding("the request and the bound payload disagree about filling the file from a secret")
 	}
 	if request.GetFromSecret() {
-		// The bytes of a secret used to be the one content nothing checked:
-		// this returned nil here, and the helper wrote what the request
-		// carried. A consent to write one secret into one path therefore
-		// authorized writing anything into it - and the path is often worth
-		// more than the secret.
-		//
-		// The signature of the receipt and the host and task it names are
-		// checked by the verifier, which holds the keyring. What is left is
-		// what the payload says: which secret, which version if the consent
-		// pinned one, and the bytes themselves.
-		receipt := request.GetSecretReceipt()
-		if receipt == nil {
-			return binding("the request fills the file from a secret and carries no receipt for its bytes")
-		}
-		if err := same("receipt secret", receipt.GetSecretName(), payload.ContentSecret.Name); err != nil {
-			return err
-		}
-		// Version 0 in the consent means "whatever is current when the task is
-		// delivered", so there is nothing to compare it with; the receipt says
-		// which version that turned out to be and the trail records it.
-		if payload.ContentSecret.Version != 0 {
-			if err := same("receipt version",
-				strconv.Itoa(int(receipt.GetSecretVersion())),
-				strconv.Itoa(payload.ContentSecret.Version)); err != nil {
-				return err
-			}
-		}
-		return same("secret content", contentDigest(request.GetContent()), receipt.GetSha256())
+		// The bytes themselves are bound by the receipt of their release,
+		// checked on the envelope with the receipts of every other consumer:
+		// see checkSpentSecrets. Here there is nothing left to compare, because
+		// the panel does not hold the content - it holds the name.
+		return nil
 	}
 	if err := same("file version", request.GetVersionSha256(), payload.VersionSHA256); err != nil {
 		return err

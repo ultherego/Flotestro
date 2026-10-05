@@ -103,7 +103,7 @@ func (e *TaskExecutor) certificateFacts(ctx context.Context, names []string,
 		})
 	}
 
-	response, err := e.helper.Call(ctx, &helperv1.HelperRequest{
+	response, err := e.callHelper(ctx, &helperv1.HelperRequest{
 		TimeoutSeconds: 60,
 		Action:         &helperv1.HelperRequest_Certificate{Certificate: request},
 	}, time.Minute)
@@ -223,7 +223,7 @@ func (e *TaskExecutor) applyCertificate(ctx context.Context, task *agentv1.TaskE
 		}
 	}
 
-	response, err := e.helper.Call(callCtx, &helperv1.HelperRequest{
+	response, err := e.callHelper(callCtx, &helperv1.HelperRequest{
 		TaskId:         task.GetTaskId(),
 		ExpiresAt:      task.GetExpiresAt(),
 		TimeoutSeconds: uint32(timeout.Seconds()),

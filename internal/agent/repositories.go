@@ -52,7 +52,7 @@ func (e *TaskExecutor) applyRepository(ctx context.Context, task *agentv1.TaskEn
 		request.SecretName = payload.PasswordSecret.Name
 	}
 
-	response, err := e.helper.Call(callCtx, &helperv1.HelperRequest{
+	response, err := e.callHelper(callCtx, &helperv1.HelperRequest{
 		TaskId:         task.GetTaskId(),
 		ExpiresAt:      task.GetExpiresAt(),
 		TimeoutSeconds: uint32(timeout.Seconds()),

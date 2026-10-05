@@ -49,13 +49,13 @@ func (f *fixture) fileFromSecret(t *testing.T, released []byte,
 		Capability:          capability,
 		CapabilitySignature: signature,
 		CanonicalPayload:    canonical,
+		SecretReceipts:      []*helperv1.SecretReceipt{receipt},
 		Action: &helperv1.HelperRequest_File{File: &helperv1.FileRequest{
-			Operation:     helperv1.FileRequest_OPERATION_ENSURE,
-			Path:          "/etc/app.conf",
-			Mode:          "0600",
-			Content:       released,
-			FromSecret:    true,
-			SecretReceipt: receipt,
+			Operation:  helperv1.FileRequest_OPERATION_ENSURE,
+			Path:       "/etc/app.conf",
+			Mode:       "0600",
+			Content:    released,
+			FromSecret: true,
 		}},
 	}
 }
@@ -80,7 +80,7 @@ func TestBytesTheReceiptDoesNotVouchForAreRefused(t *testing.T) {
 func TestAWriteFromASecretWithNoReceiptIsRefused(t *testing.T) {
 	f := newFixture(t)
 	request := f.fileFromSecret(t, []byte("a-secret-value"), nil)
-	request.GetFile().SecretReceipt = nil
+	request.SecretReceipts = nil
 	expectCode(t, verify(f.verifier, request), ErrorPayloadBinding)
 }
 
@@ -102,7 +102,7 @@ func TestAReceiptSignedByAStrangerIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request.GetFile().SecretReceipt = forged
+	request.SecretReceipts = []*helperv1.SecretReceipt{forged}
 	expectCode(t, verify(f.verifier, request), ErrorUnknownKey)
 }
 
@@ -134,7 +134,7 @@ func TestAReceiptOfAnotherHostOrTaskIsRefused(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			request.GetFile().SecretReceipt = elsewhere
+			request.SecretReceipts = []*helperv1.SecretReceipt{elsewhere}
 			expectCode(t, verify(f.verifier, request), ErrorPayloadBinding)
 		})
 	}
@@ -154,7 +154,7 @@ func TestAReceiptPastItsWindowIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request.GetFile().SecretReceipt = stale
+	request.SecretReceipts = []*helperv1.SecretReceipt{stale}
 	expectCode(t, verify(f.verifier, request), ErrorCapabilityExpired)
 }
 

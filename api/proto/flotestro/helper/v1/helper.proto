@@ -110,6 +110,17 @@ message HelperRequest {
   HelperCapability capability = 60;
   bytes capability_signature = 61;
   bytes canonical_payload = 62;
+  // The receipts of every secret whose bytes this request carries, by the
+  // name of the secret.
+  //
+  // On the envelope and not in each action, because every action that spends
+  // a secret has the same question to answer - are these the bytes the panel
+  // released - and a field per message is a field somebody forgets. The file
+  // write was the first consumer to get a receipt; the repository password of
+  // a backup, its environment, a certificate's private key and the password of
+  // a package repository had none, and for them the binding only said that
+  // *a* secret travelled, never which bytes.
+  repeated SecretReceipt secret_receipts = 63;
 }
 
 // HelperCapability is the panel's authorization of one operation on one
@@ -1357,12 +1368,9 @@ message FileRequest {
   // digest this host never kept is refused with file_version_unknown
   // rather than answered with the newest copy.
   string version_sha256 = 11;
-  // SecretReceipt is what the panel signed over the bytes it released. A
-  // write that fills the file from the secret store carries it, and without
-  // it the helper refuses: the capability cannot carry the digest, because
-  // version 0 means "whatever is current when the task is delivered" and the
-  // panel does not yet know the content when it signs the consent.
-  SecretReceipt secret_receipt = 12;
+  // Reserved: the receipt of the secret used to travel here, and now travels
+  // on the envelope with the receipts of every other consumer.
+  reserved 12;
 }
 
 // SecretReceipt binds the bytes of a released secret to the consent they

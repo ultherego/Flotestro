@@ -1490,8 +1490,19 @@ type HelperRequest struct {
 	Capability          *HelperCapability `protobuf:"bytes,60,opt,name=capability,proto3" json:"capability,omitempty"`
 	CapabilitySignature []byte            `protobuf:"bytes,61,opt,name=capability_signature,json=capabilitySignature,proto3" json:"capability_signature,omitempty"`
 	CanonicalPayload    []byte            `protobuf:"bytes,62,opt,name=canonical_payload,json=canonicalPayload,proto3" json:"canonical_payload,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// The receipts of every secret whose bytes this request carries, by the
+	// name of the secret.
+	//
+	// On the envelope and not in each action, because every action that spends
+	// a secret has the same question to answer - are these the bytes the panel
+	// released - and a field per message is a field somebody forgets. The file
+	// write was the first consumer to get a receipt; the repository password of
+	// a backup, its environment, a certificate's private key and the password of
+	// a package repository had none, and for them the binding only said that
+	// *a* secret travelled, never which bytes.
+	SecretReceipts []*SecretReceipt `protobuf:"bytes,63,rep,name=secret_receipts,json=secretReceipts,proto3" json:"secret_receipts,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *HelperRequest) Reset() {
@@ -1914,6 +1925,13 @@ func (x *HelperRequest) GetCapabilitySignature() []byte {
 func (x *HelperRequest) GetCanonicalPayload() []byte {
 	if x != nil {
 		return x.CanonicalPayload
+	}
+	return nil
+}
+
+func (x *HelperRequest) GetSecretReceipts() []*SecretReceipt {
+	if x != nil {
+		return x.SecretReceipts
 	}
 	return nil
 }
@@ -7604,12 +7622,6 @@ type FileRequest struct {
 	// digest this host never kept is refused with file_version_unknown
 	// rather than answered with the newest copy.
 	VersionSha256 string `protobuf:"bytes,11,opt,name=version_sha256,json=versionSha256,proto3" json:"version_sha256,omitempty"`
-	// SecretReceipt is what the panel signed over the bytes it released. A
-	// write that fills the file from the secret store carries it, and without
-	// it the helper refuses: the capability cannot carry the digest, because
-	// version 0 means "whatever is current when the task is delivered" and the
-	// panel does not yet know the content when it signs the consent.
-	SecretReceipt *SecretReceipt `protobuf:"bytes,12,opt,name=secret_receipt,json=secretReceipt,proto3" json:"secret_receipt,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7719,13 +7731,6 @@ func (x *FileRequest) GetVersionSha256() string {
 		return x.VersionSha256
 	}
 	return ""
-}
-
-func (x *FileRequest) GetSecretReceipt() *SecretReceipt {
-	if x != nil {
-		return x.SecretReceipt
-	}
-	return nil
 }
 
 // SecretReceipt binds the bytes of a released secret to the consent they
@@ -10653,7 +10658,7 @@ var File_flotestro_helper_v1_helper_proto protoreflect.FileDescriptor
 
 const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\n" +
-	" flotestro/helper/v1/helper.proto\x12\x13flotestro.helper.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xd5\x17\n" +
+	" flotestro/helper/v1/helper.proto\x12\x13flotestro.helper.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xa2\x18\n" +
 	"\rHelperRequest\x12)\n" +
 	"\x10protocol_version\x18\x01 \x01(\rR\x0fprotocolVersion\x12\x17\n" +
 	"\atask_id\x18\x02 \x01(\tR\x06taskId\x129\n" +
@@ -10708,7 +10713,8 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"capability\x18< \x01(\v2%.flotestro.helper.v1.HelperCapabilityR\n" +
 	"capability\x121\n" +
 	"\x14capability_signature\x18= \x01(\fR\x13capabilitySignature\x12+\n" +
-	"\x11canonical_payload\x18> \x01(\fR\x10canonicalPayloadB\b\n" +
+	"\x11canonical_payload\x18> \x01(\fR\x10canonicalPayload\x12K\n" +
+	"\x0fsecret_receipts\x18? \x03(\v2\".flotestro.helper.v1.SecretReceiptR\x0esecretReceiptsB\b\n" +
 	"\x06action\"\x91\x03\n" +
 	"\x10HelperCapability\x12%\n" +
 	"\x0eschema_version\x18\x01 \x01(\rR\rschemaVersion\x12\x15\n" +
@@ -11393,7 +11399,7 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12%\n" +
 	"\x0epending_reboot\x18\x03 \x03(\tR\rpendingReboot\x12'\n" +
 	"\x0fapplied_runtime\x18\x04 \x03(\tR\x0eappliedRuntime\x12\x12\n" +
-	"\x04plan\x18\x05 \x01(\fR\x04plan\"\xe8\x04\n" +
+	"\x04plan\x18\x05 \x01(\fR\x04plan\"\xa3\x04\n" +
 	"\vFileRequest\x12H\n" +
 	"\toperation\x18\x01 \x01(\x0e2*.flotestro.helper.v1.FileRequest.OperationR\toperation\x12\x12\n" +
 	"\x04path\x18\x02 \x01(\tR\x04path\x12\x18\n" +
@@ -11407,15 +11413,14 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"fromSecret\x126\n" +
 	"\x17allow_missing_validator\x18\n" +
 	" \x01(\bR\x15allowMissingValidator\x12%\n" +
-	"\x0eversion_sha256\x18\v \x01(\tR\rversionSha256\x12I\n" +
-	"\x0esecret_receipt\x18\f \x01(\v2\".flotestro.helper.v1.SecretReceiptR\rsecretReceipt\"\x8e\x01\n" +
+	"\x0eversion_sha256\x18\v \x01(\tR\rversionSha256\"\x8e\x01\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eOPERATION_READ\x10\x01\x12\x14\n" +
 	"\x10OPERATION_ENSURE\x10\x02\x12\x14\n" +
 	"\x10OPERATION_REMOVE\x10\x03\x12\x12\n" +
 	"\x0eOPERATION_LIST\x10\x04\x12\x12\n" +
-	"\x0eOPERATION_PLAN\x10\x05\"\x89\x02\n" +
+	"\x0eOPERATION_PLAN\x10\x05J\x04\b\f\x10\r\"\x89\x02\n" +
 	"\rSecretReceipt\x12\x17\n" +
 	"\ahost_id\x18\x01 \x01(\tR\x06hostId\x12\x17\n" +
 	"\atask_id\x18\x02 \x01(\tR\x06taskId\x12\x1f\n" +
@@ -11850,73 +11855,73 @@ var file_flotestro_helper_v1_helper_proto_depIdxs = []int32{
 	26,  // 35: flotestro.helper.v1.HelperRequest.trust_update:type_name -> flotestro.helper.v1.HelperTrustUpdateRequest
 	41,  // 36: flotestro.helper.v1.HelperRequest.docker_ensure:type_name -> flotestro.helper.v1.DockerEnsureRequest
 	23,  // 37: flotestro.helper.v1.HelperRequest.capability:type_name -> flotestro.helper.v1.HelperCapability
-	24,  // 38: flotestro.helper.v1.HelperTrustBundle.keys:type_name -> flotestro.helper.v1.HelperTrustKey
-	25,  // 39: flotestro.helper.v1.HelperTrustUpdateRequest.bundle:type_name -> flotestro.helper.v1.HelperTrustBundle
-	0,   // 40: flotestro.helper.v1.LocalUserActionRequest.operation:type_name -> flotestro.helper.v1.LocalUserActionRequest.Operation
-	30,  // 41: flotestro.helper.v1.LocalUserActionRequest.keys:type_name -> flotestro.helper.v1.LocalSSHKeyInput
-	1,   // 42: flotestro.helper.v1.PackageActionRequest.operation:type_name -> flotestro.helper.v1.PackageActionRequest.Operation
-	38,  // 43: flotestro.helper.v1.PackageActionRequest.exact_specs:type_name -> flotestro.helper.v1.PackageExactSpec
-	2,   // 44: flotestro.helper.v1.UnitActionRequest.operation:type_name -> flotestro.helper.v1.UnitActionRequest.Operation
-	112, // 45: flotestro.helper.v1.HelperResponse.state_before:type_name -> flotestro.helper.v1.UnitState
-	112, // 46: flotestro.helper.v1.HelperResponse.state_after:type_name -> flotestro.helper.v1.UnitState
-	104, // 47: flotestro.helper.v1.HelperResponse.package_result:type_name -> flotestro.helper.v1.PackageActionResult
-	102, // 48: flotestro.helper.v1.HelperResponse.identity_result:type_name -> flotestro.helper.v1.IdentityProbeResult
-	100, // 49: flotestro.helper.v1.HelperResponse.enroll_result:type_name -> flotestro.helper.v1.DomainEnrollResult
-	97,  // 50: flotestro.helper.v1.HelperResponse.accounts_result:type_name -> flotestro.helper.v1.LocalAccountsResult
-	108, // 51: flotestro.helper.v1.HelperResponse.repair_result:type_name -> flotestro.helper.v1.PackageRepairResponse
-	96,  // 52: flotestro.helper.v1.HelperResponse.progress:type_name -> flotestro.helper.v1.TaskProgress
-	95,  // 53: flotestro.helper.v1.HelperResponse.docker_result:type_name -> flotestro.helper.v1.DockerReadResult
-	47,  // 54: flotestro.helper.v1.HelperResponse.docker_action_result:type_name -> flotestro.helper.v1.DockerActionResult
-	82,  // 55: flotestro.helper.v1.HelperResponse.compose_result:type_name -> flotestro.helper.v1.ComposeResult
-	80,  // 56: flotestro.helper.v1.HelperResponse.log_file_result:type_name -> flotestro.helper.v1.LogFileResult
-	78,  // 57: flotestro.helper.v1.HelperResponse.process_signal_result:type_name -> flotestro.helper.v1.ProcessSignalResult
-	49,  // 58: flotestro.helper.v1.HelperResponse.schedule_result:type_name -> flotestro.helper.v1.ScheduleResult
-	52,  // 59: flotestro.helper.v1.HelperResponse.network_result:type_name -> flotestro.helper.v1.NetworkResult
-	54,  // 60: flotestro.helper.v1.HelperResponse.dns_result:type_name -> flotestro.helper.v1.DnsResult
-	56,  // 61: flotestro.helper.v1.HelperResponse.firewall_result:type_name -> flotestro.helper.v1.FirewallResult
-	58,  // 62: flotestro.helper.v1.HelperResponse.storage_result:type_name -> flotestro.helper.v1.StorageResult
-	60,  // 63: flotestro.helper.v1.HelperResponse.ssh_result:type_name -> flotestro.helper.v1.SshResult
-	73,  // 64: flotestro.helper.v1.HelperResponse.kernel_result:type_name -> flotestro.helper.v1.KernelResult
-	76,  // 65: flotestro.helper.v1.HelperResponse.file_result:type_name -> flotestro.helper.v1.FileResult
-	71,  // 66: flotestro.helper.v1.HelperResponse.time_result:type_name -> flotestro.helper.v1.TimeResult
-	36,  // 67: flotestro.helper.v1.HelperResponse.power_result:type_name -> flotestro.helper.v1.PowerResult
-	62,  // 68: flotestro.helper.v1.HelperResponse.security_result:type_name -> flotestro.helper.v1.SecurityResult
-	69,  // 69: flotestro.helper.v1.HelperResponse.certificate_result:type_name -> flotestro.helper.v1.CertificateResult
-	66,  // 70: flotestro.helper.v1.HelperResponse.repository_result:type_name -> flotestro.helper.v1.RepositoryResult
-	64,  // 71: flotestro.helper.v1.HelperResponse.backup_result:type_name -> flotestro.helper.v1.BackupResult
-	84,  // 72: flotestro.helper.v1.HelperResponse.docker_events_result:type_name -> flotestro.helper.v1.DockerEventsResult
-	86,  // 73: flotestro.helper.v1.HelperResponse.docker_logs_result:type_name -> flotestro.helper.v1.DockerLogsResult
-	88,  // 74: flotestro.helper.v1.HelperResponse.hostname_result:type_name -> flotestro.helper.v1.HostnameResult
-	93,  // 75: flotestro.helper.v1.HelperResponse.smart_result:type_name -> flotestro.helper.v1.SmartResult
-	90,  // 76: flotestro.helper.v1.HelperResponse.final_wipe_result:type_name -> flotestro.helper.v1.FinalWipeResult
-	44,  // 77: flotestro.helper.v1.HelperResponse.system_result:type_name -> flotestro.helper.v1.SystemResult
-	92,  // 78: flotestro.helper.v1.HelperResponse.keytab_renew_result:type_name -> flotestro.helper.v1.KeytabRenewResult
-	27,  // 79: flotestro.helper.v1.HelperResponse.trust_result:type_name -> flotestro.helper.v1.HelperTrustResult
-	42,  // 80: flotestro.helper.v1.HelperResponse.docker_ensure_result:type_name -> flotestro.helper.v1.DockerEnsureResult
-	3,   // 81: flotestro.helper.v1.DockerEnsureRequest.operation:type_name -> flotestro.helper.v1.DockerEnsureRequest.Operation
-	113, // 82: flotestro.helper.v1.DockerEnsureRequest.env_values:type_name -> flotestro.helper.v1.DockerEnsureRequest.EnvValuesEntry
-	4,   // 83: flotestro.helper.v1.SystemRequest.facts:type_name -> flotestro.helper.v1.SystemRequest.Fact
-	5,   // 84: flotestro.helper.v1.DockerReadRequest.scope:type_name -> flotestro.helper.v1.DockerReadRequest.Scope
-	6,   // 85: flotestro.helper.v1.DockerActionRequest.operation:type_name -> flotestro.helper.v1.DockerActionRequest.Operation
-	7,   // 86: flotestro.helper.v1.ScheduleRequest.operation:type_name -> flotestro.helper.v1.ScheduleRequest.Operation
-	8,   // 87: flotestro.helper.v1.NetworkRequest.operation:type_name -> flotestro.helper.v1.NetworkRequest.Operation
-	51,  // 88: flotestro.helper.v1.NetworkRequest.link:type_name -> flotestro.helper.v1.NetworkLink
-	9,   // 89: flotestro.helper.v1.DnsRequest.operation:type_name -> flotestro.helper.v1.DnsRequest.Operation
-	10,  // 90: flotestro.helper.v1.FirewallRequest.operation:type_name -> flotestro.helper.v1.FirewallRequest.Operation
-	11,  // 91: flotestro.helper.v1.StorageRequest.operation:type_name -> flotestro.helper.v1.StorageRequest.Operation
-	12,  // 92: flotestro.helper.v1.SshRequest.operation:type_name -> flotestro.helper.v1.SshRequest.Operation
-	13,  // 93: flotestro.helper.v1.SecurityRequest.operation:type_name -> flotestro.helper.v1.SecurityRequest.Operation
-	14,  // 94: flotestro.helper.v1.SecurityRequest.facts:type_name -> flotestro.helper.v1.SecurityRequest.Fact
-	15,  // 95: flotestro.helper.v1.BackupRequest.operation:type_name -> flotestro.helper.v1.BackupRequest.Operation
-	114, // 96: flotestro.helper.v1.BackupRequest.env:type_name -> flotestro.helper.v1.BackupRequest.EnvEntry
-	16,  // 97: flotestro.helper.v1.CertificateRequest.operation:type_name -> flotestro.helper.v1.CertificateRequest.Operation
-	17,  // 98: flotestro.helper.v1.CertificateRequest.facts:type_name -> flotestro.helper.v1.CertificateRequest.Fact
-	67,  // 99: flotestro.helper.v1.CertificateRequest.targets:type_name -> flotestro.helper.v1.CertificateTarget
-	18,  // 100: flotestro.helper.v1.TimeRequest.operation:type_name -> flotestro.helper.v1.TimeRequest.Operation
-	19,  // 101: flotestro.helper.v1.KernelRequest.operation:type_name -> flotestro.helper.v1.KernelRequest.Operation
-	115, // 102: flotestro.helper.v1.KernelRequest.settings:type_name -> flotestro.helper.v1.KernelRequest.SettingsEntry
-	20,  // 103: flotestro.helper.v1.FileRequest.operation:type_name -> flotestro.helper.v1.FileRequest.Operation
-	75,  // 104: flotestro.helper.v1.FileRequest.secret_receipt:type_name -> flotestro.helper.v1.SecretReceipt
+	75,  // 38: flotestro.helper.v1.HelperRequest.secret_receipts:type_name -> flotestro.helper.v1.SecretReceipt
+	24,  // 39: flotestro.helper.v1.HelperTrustBundle.keys:type_name -> flotestro.helper.v1.HelperTrustKey
+	25,  // 40: flotestro.helper.v1.HelperTrustUpdateRequest.bundle:type_name -> flotestro.helper.v1.HelperTrustBundle
+	0,   // 41: flotestro.helper.v1.LocalUserActionRequest.operation:type_name -> flotestro.helper.v1.LocalUserActionRequest.Operation
+	30,  // 42: flotestro.helper.v1.LocalUserActionRequest.keys:type_name -> flotestro.helper.v1.LocalSSHKeyInput
+	1,   // 43: flotestro.helper.v1.PackageActionRequest.operation:type_name -> flotestro.helper.v1.PackageActionRequest.Operation
+	38,  // 44: flotestro.helper.v1.PackageActionRequest.exact_specs:type_name -> flotestro.helper.v1.PackageExactSpec
+	2,   // 45: flotestro.helper.v1.UnitActionRequest.operation:type_name -> flotestro.helper.v1.UnitActionRequest.Operation
+	112, // 46: flotestro.helper.v1.HelperResponse.state_before:type_name -> flotestro.helper.v1.UnitState
+	112, // 47: flotestro.helper.v1.HelperResponse.state_after:type_name -> flotestro.helper.v1.UnitState
+	104, // 48: flotestro.helper.v1.HelperResponse.package_result:type_name -> flotestro.helper.v1.PackageActionResult
+	102, // 49: flotestro.helper.v1.HelperResponse.identity_result:type_name -> flotestro.helper.v1.IdentityProbeResult
+	100, // 50: flotestro.helper.v1.HelperResponse.enroll_result:type_name -> flotestro.helper.v1.DomainEnrollResult
+	97,  // 51: flotestro.helper.v1.HelperResponse.accounts_result:type_name -> flotestro.helper.v1.LocalAccountsResult
+	108, // 52: flotestro.helper.v1.HelperResponse.repair_result:type_name -> flotestro.helper.v1.PackageRepairResponse
+	96,  // 53: flotestro.helper.v1.HelperResponse.progress:type_name -> flotestro.helper.v1.TaskProgress
+	95,  // 54: flotestro.helper.v1.HelperResponse.docker_result:type_name -> flotestro.helper.v1.DockerReadResult
+	47,  // 55: flotestro.helper.v1.HelperResponse.docker_action_result:type_name -> flotestro.helper.v1.DockerActionResult
+	82,  // 56: flotestro.helper.v1.HelperResponse.compose_result:type_name -> flotestro.helper.v1.ComposeResult
+	80,  // 57: flotestro.helper.v1.HelperResponse.log_file_result:type_name -> flotestro.helper.v1.LogFileResult
+	78,  // 58: flotestro.helper.v1.HelperResponse.process_signal_result:type_name -> flotestro.helper.v1.ProcessSignalResult
+	49,  // 59: flotestro.helper.v1.HelperResponse.schedule_result:type_name -> flotestro.helper.v1.ScheduleResult
+	52,  // 60: flotestro.helper.v1.HelperResponse.network_result:type_name -> flotestro.helper.v1.NetworkResult
+	54,  // 61: flotestro.helper.v1.HelperResponse.dns_result:type_name -> flotestro.helper.v1.DnsResult
+	56,  // 62: flotestro.helper.v1.HelperResponse.firewall_result:type_name -> flotestro.helper.v1.FirewallResult
+	58,  // 63: flotestro.helper.v1.HelperResponse.storage_result:type_name -> flotestro.helper.v1.StorageResult
+	60,  // 64: flotestro.helper.v1.HelperResponse.ssh_result:type_name -> flotestro.helper.v1.SshResult
+	73,  // 65: flotestro.helper.v1.HelperResponse.kernel_result:type_name -> flotestro.helper.v1.KernelResult
+	76,  // 66: flotestro.helper.v1.HelperResponse.file_result:type_name -> flotestro.helper.v1.FileResult
+	71,  // 67: flotestro.helper.v1.HelperResponse.time_result:type_name -> flotestro.helper.v1.TimeResult
+	36,  // 68: flotestro.helper.v1.HelperResponse.power_result:type_name -> flotestro.helper.v1.PowerResult
+	62,  // 69: flotestro.helper.v1.HelperResponse.security_result:type_name -> flotestro.helper.v1.SecurityResult
+	69,  // 70: flotestro.helper.v1.HelperResponse.certificate_result:type_name -> flotestro.helper.v1.CertificateResult
+	66,  // 71: flotestro.helper.v1.HelperResponse.repository_result:type_name -> flotestro.helper.v1.RepositoryResult
+	64,  // 72: flotestro.helper.v1.HelperResponse.backup_result:type_name -> flotestro.helper.v1.BackupResult
+	84,  // 73: flotestro.helper.v1.HelperResponse.docker_events_result:type_name -> flotestro.helper.v1.DockerEventsResult
+	86,  // 74: flotestro.helper.v1.HelperResponse.docker_logs_result:type_name -> flotestro.helper.v1.DockerLogsResult
+	88,  // 75: flotestro.helper.v1.HelperResponse.hostname_result:type_name -> flotestro.helper.v1.HostnameResult
+	93,  // 76: flotestro.helper.v1.HelperResponse.smart_result:type_name -> flotestro.helper.v1.SmartResult
+	90,  // 77: flotestro.helper.v1.HelperResponse.final_wipe_result:type_name -> flotestro.helper.v1.FinalWipeResult
+	44,  // 78: flotestro.helper.v1.HelperResponse.system_result:type_name -> flotestro.helper.v1.SystemResult
+	92,  // 79: flotestro.helper.v1.HelperResponse.keytab_renew_result:type_name -> flotestro.helper.v1.KeytabRenewResult
+	27,  // 80: flotestro.helper.v1.HelperResponse.trust_result:type_name -> flotestro.helper.v1.HelperTrustResult
+	42,  // 81: flotestro.helper.v1.HelperResponse.docker_ensure_result:type_name -> flotestro.helper.v1.DockerEnsureResult
+	3,   // 82: flotestro.helper.v1.DockerEnsureRequest.operation:type_name -> flotestro.helper.v1.DockerEnsureRequest.Operation
+	113, // 83: flotestro.helper.v1.DockerEnsureRequest.env_values:type_name -> flotestro.helper.v1.DockerEnsureRequest.EnvValuesEntry
+	4,   // 84: flotestro.helper.v1.SystemRequest.facts:type_name -> flotestro.helper.v1.SystemRequest.Fact
+	5,   // 85: flotestro.helper.v1.DockerReadRequest.scope:type_name -> flotestro.helper.v1.DockerReadRequest.Scope
+	6,   // 86: flotestro.helper.v1.DockerActionRequest.operation:type_name -> flotestro.helper.v1.DockerActionRequest.Operation
+	7,   // 87: flotestro.helper.v1.ScheduleRequest.operation:type_name -> flotestro.helper.v1.ScheduleRequest.Operation
+	8,   // 88: flotestro.helper.v1.NetworkRequest.operation:type_name -> flotestro.helper.v1.NetworkRequest.Operation
+	51,  // 89: flotestro.helper.v1.NetworkRequest.link:type_name -> flotestro.helper.v1.NetworkLink
+	9,   // 90: flotestro.helper.v1.DnsRequest.operation:type_name -> flotestro.helper.v1.DnsRequest.Operation
+	10,  // 91: flotestro.helper.v1.FirewallRequest.operation:type_name -> flotestro.helper.v1.FirewallRequest.Operation
+	11,  // 92: flotestro.helper.v1.StorageRequest.operation:type_name -> flotestro.helper.v1.StorageRequest.Operation
+	12,  // 93: flotestro.helper.v1.SshRequest.operation:type_name -> flotestro.helper.v1.SshRequest.Operation
+	13,  // 94: flotestro.helper.v1.SecurityRequest.operation:type_name -> flotestro.helper.v1.SecurityRequest.Operation
+	14,  // 95: flotestro.helper.v1.SecurityRequest.facts:type_name -> flotestro.helper.v1.SecurityRequest.Fact
+	15,  // 96: flotestro.helper.v1.BackupRequest.operation:type_name -> flotestro.helper.v1.BackupRequest.Operation
+	114, // 97: flotestro.helper.v1.BackupRequest.env:type_name -> flotestro.helper.v1.BackupRequest.EnvEntry
+	16,  // 98: flotestro.helper.v1.CertificateRequest.operation:type_name -> flotestro.helper.v1.CertificateRequest.Operation
+	17,  // 99: flotestro.helper.v1.CertificateRequest.facts:type_name -> flotestro.helper.v1.CertificateRequest.Fact
+	67,  // 100: flotestro.helper.v1.CertificateRequest.targets:type_name -> flotestro.helper.v1.CertificateTarget
+	18,  // 101: flotestro.helper.v1.TimeRequest.operation:type_name -> flotestro.helper.v1.TimeRequest.Operation
+	19,  // 102: flotestro.helper.v1.KernelRequest.operation:type_name -> flotestro.helper.v1.KernelRequest.Operation
+	115, // 103: flotestro.helper.v1.KernelRequest.settings:type_name -> flotestro.helper.v1.KernelRequest.SettingsEntry
+	20,  // 104: flotestro.helper.v1.FileRequest.operation:type_name -> flotestro.helper.v1.FileRequest.Operation
 	21,  // 105: flotestro.helper.v1.ComposeRequest.operation:type_name -> flotestro.helper.v1.ComposeRequest.Operation
 	116, // 106: flotestro.helper.v1.ComposeRequest.image_digests:type_name -> flotestro.helper.v1.ComposeRequest.ImageDigestsEntry
 	94,  // 107: flotestro.helper.v1.SmartResult.attributes:type_name -> flotestro.helper.v1.SmartAttribute

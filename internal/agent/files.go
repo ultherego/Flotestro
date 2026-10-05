@@ -22,7 +22,7 @@ func SetFileProbe(probe func(context.Context) (files.Snapshot, error)) {
 
 // ProbeFiles reads the state of the managed files on the host.
 func (e *TaskExecutor) ProbeFiles(ctx context.Context) (files.Snapshot, error) {
-	response, err := e.helper.Call(ctx, &helperv1.HelperRequest{
+	response, err := e.callHelper(ctx, &helperv1.HelperRequest{
 		TimeoutSeconds: 60,
 		Action: &helperv1.HelperRequest_File{
 			File: &helperv1.FileRequest{Operation: helperv1.FileRequest_OPERATION_LIST},
@@ -76,12 +76,13 @@ func (e *TaskExecutor) applyFile(ctx context.Context, task *agentv1.TaskEnvelope
 		if refusal != nil {
 			return refusal
 		}
-		// The receipt is what makes these bytes checkable: without it the
-		// helper has only the request's word for what the secret contained.
+		// The receipt travels on the envelope with the receipts of every other
+		// consumer; callHelper attaches them.
 		content, receipt = value, vouched
+		_ = receipt
 	}
 
-	response, err := e.helper.Call(callCtx, &helperv1.HelperRequest{
+	response, err := e.callHelper(callCtx, &helperv1.HelperRequest{
 		TaskId:         task.GetTaskId(),
 		ExpiresAt:      task.GetExpiresAt(),
 		TimeoutSeconds: uint32(timeout.Seconds()),
@@ -96,9 +97,6 @@ func (e *TaskExecutor) applyFile(ctx context.Context, task *agentv1.TaskEnvelope
 				ExpectedSha256: payload.ExpectedSHA256,
 				Validator:      payload.Validator,
 				FromSecret:     !payload.ContentSecret.Empty(),
-				// What the panel signed over the bytes of the secret. The
-				// helper refuses the write without it.
-				SecretReceipt: receipt,
 				// The flag travels with the order; the grant that makes it
 				// count travels in the capability the client attaches.
 				AllowMissingValidator: payload.AllowMissingValidator,

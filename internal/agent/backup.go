@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -107,7 +108,7 @@ func (e *TaskExecutor) applyBackup(ctx context.Context, task *agentv1.TaskEnvelo
 		}
 	}
 
-	response, err := e.helper.Call(callCtx, &helperv1.HelperRequest{
+	response, err := e.callHelper(callCtx, &helperv1.HelperRequest{
 		TaskId:         task.GetTaskId(),
 		ExpiresAt:      task.GetExpiresAt(),
 		TimeoutSeconds: uint32(timeout.Seconds()),
@@ -178,6 +179,36 @@ func (e *TaskExecutor) fetchSecretWithReceipt(ctx context.Context, task *agentv1
 	}
 	e.keepTaskSecret(task.GetTaskId(), reference, fetchedSecret{value: value, receipt: receipt})
 	return value, receipt, nil
+}
+
+// taskReceipts are the receipts of every secret this task has fetched, in a
+// stable order. The helper refuses the bytes of a secret that no receipt
+// vouches for, and a task that fetched none sends none.
+func (e *TaskExecutor) taskReceipts(taskID string) []*helperv1.SecretReceipt {
+	e.secretsMu.Lock()
+	defer e.secretsMu.Unlock()
+	prefix := taskID + "\x00"
+	var receipts []*helperv1.SecretReceipt
+	for key, held := range e.taskSecrets {
+		if strings.HasPrefix(key, prefix) && held.receipt != nil {
+			receipts = append(receipts, held.receipt)
+		}
+	}
+	sort.Slice(receipts, func(i, j int) bool {
+		return receipts[i].GetSecretName() < receipts[j].GetSecretName()
+	})
+	return receipts
+}
+
+// callHelper sends a request with those receipts attached. Every consumer of a
+// secret goes through here rather than remembering to carry them: the file
+// write was the only one that did, and the repository password of a backup, its
+// environment, a certificate's key and the password of a package repository
+// each handed the helper bytes nobody had vouched for.
+func (e *TaskExecutor) callHelper(ctx context.Context, request *helperv1.HelperRequest,
+	timeout time.Duration) (*helperv1.HelperResponse, error) {
+	request.SecretReceipts = e.taskReceipts(request.GetTaskId())
+	return e.callHelper(ctx, request, timeout)
 }
 
 // secretKey names one secret of one task: the same name and version asked

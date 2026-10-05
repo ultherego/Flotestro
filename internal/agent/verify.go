@@ -184,7 +184,7 @@ func (e *TaskExecutor) defaultReaders() *hostReaders {
 // attributes always, the content with them - a rollback baseline needs it and
 // nothing else keeps it.
 func (e *TaskExecutor) readFileState(ctx context.Context, path string) (fileState, error) {
-	response, err := e.helper.Call(ctx, &helperv1.HelperRequest{
+	response, err := e.callHelper(ctx, &helperv1.HelperRequest{
 		TimeoutSeconds: 60,
 		Action: &helperv1.HelperRequest_File{
 			File: &helperv1.FileRequest{Operation: helperv1.FileRequest_OPERATION_READ, Path: path},
@@ -260,7 +260,7 @@ func (e *TaskExecutor) readBackupRepository(ctx context.Context, task *agentv1.T
 			request.Env[name] = value
 		}
 	}
-	response, err := e.helper.Call(ctx, &helperv1.HelperRequest{
+	response, err := e.callHelper(ctx, &helperv1.HelperRequest{
 		TaskId: task.GetTaskId(), TimeoutSeconds: 600,
 		Action: &helperv1.HelperRequest_Backup{Backup: request},
 	}, 10*time.Minute)
@@ -629,7 +629,7 @@ func (e *TaskExecutor) rollbackFile(ctx context.Context, task *agentv1.TaskEnvel
 			AllowMissingValidator: true,
 		}
 	}
-	response, err := e.helper.Call(ctx, &helperv1.HelperRequest{
+	response, err := e.callHelper(ctx, &helperv1.HelperRequest{
 		TaskId: task.GetTaskId(), TimeoutSeconds: 60,
 		Action: &helperv1.HelperRequest_File{File: request},
 	}, time.Minute)
@@ -649,7 +649,7 @@ func (e *TaskExecutor) rollbackFile(ctx context.Context, task *agentv1.TaskEnvel
 // the change, through the helper.
 func (e *TaskExecutor) rollbackSysctl(ctx context.Context, task *agentv1.TaskEnvelope,
 	previous map[string]string) string {
-	response, err := e.helper.Call(ctx, &helperv1.HelperRequest{
+	response, err := e.callHelper(ctx, &helperv1.HelperRequest{
 		TaskId: task.GetTaskId(), TimeoutSeconds: 60,
 		Action: &helperv1.HelperRequest_Kernel{Kernel: &helperv1.KernelRequest{
 			Operation: helperv1.KernelRequest_OPERATION_SYSCTL_ENSURE, Settings: previous,
