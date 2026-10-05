@@ -97,6 +97,7 @@ const repositoryRoot = "../.."
 var enforced = []string{
 	"site-languages",
 	"healthcheck-form",
+	"image-tools-are-installed",
 	"airgap-verify-stops",
 	"airgap-images-are-signed",
 	"env-example-reaches-the-deployment",
@@ -584,4 +585,123 @@ jobs:
 		"for name in control-plane package-repository relay; do", 1)
 	write(t, root, "docs/site/docs/installation.html", "<pre><code>"+loop+"</code></pre>\n")
 	only(t, run(t, root, "airgap-images-are-signed"), "flotestro-package-repository")
+}
+
+// --- the tools a stage of the image calls ---
+
+// imageTree writes a Containerfile and nothing else.
+func imageTree(t *testing.T, containerfile string) string {
+	t.Helper()
+	root := t.TempDir()
+	write(t, root, "docker/Containerfile", containerfile)
+	return root
+}
+
+const toolsImage = `ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian12:nonroot
+ARG TOOLS_IMAGE=postgres:17-bookworm
+
+FROM ${RUNTIME_IMAGE} AS control-plane
+ENTRYPOINT ["/usr/local/bin/flotestro-control-plane"]
+
+FROM ${TOOLS_IMAGE} AS admin-tools
+RUN apt-get update && apt-get install -y --no-install-recommends zstd jq
+RUN set -eu; \
+    id="$(jq -r '.backup_id' manifest.json)"; \
+    psql -c "select 1"; \
+    zstd -d dump.zst
+`
+
+// The tree as it stands: every tool a stage calls is either installed by it or
+// carried by the image it stands on.
+func TestImageToolsAreInstalledPassesOnAStageThatInstallsWhatItCalls(t *testing.T) {
+	root := imageTree(t, toolsImage)
+	findings, err := imageToolsAreInstalled(root)
+	if err != nil || len(findings) != 0 {
+		t.Fatalf("a stage that installs what it calls was reported: %v (%v)", findings, err)
+	}
+}
+
+// The defect: the tool is called and the install no longer names it. jq was one
+// line away from this on 05.10 - ten calls in one stage, one install, and
+// nothing holding the two together.
+func TestImageToolsAreInstalledSeesACallWithNoInstall(t *testing.T) {
+	root := imageTree(t, strings.Replace(toolsImage,
+		"--no-install-recommends zstd jq", "--no-install-recommends zstd", 1))
+	only(t, run(t, root, "image-tools-are-installed"), "calls jq")
+}
+
+// And the other direction, which is what makes the check usable rather than
+// noisy: a tool the base image carries is not reported. The tools stage stands
+// on postgres, so psql is there without an install - and the first version of
+// this check reported all three postgres tools as missing.
+func TestImageToolsAreInstalledDoesNotReportWhatTheBaseCarries(t *testing.T) {
+	root := imageTree(t, toolsImage)
+	if findings, err := imageToolsAreInstalled(root); err != nil || len(findings) != 0 {
+		t.Fatalf("psql on a postgres base was reported: %v (%v)", findings, err)
+	}
+	// Change that base and the same calls become findings, which is how we
+	// know the mapping is doing the work rather than hiding it.
+	moved := imageTree(t, strings.Replace(toolsImage,
+		"ARG TOOLS_IMAGE=postgres:17-bookworm",
+		"ARG TOOLS_IMAGE=gcr.io/distroless/base-debian12", 1))
+	findings, err := imageToolsAreInstalled(moved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	named := ""
+	for _, found := range findings {
+		named += found.said
+	}
+	for _, command := range []string{"psql"} {
+		if !strings.Contains(named, command) {
+			t.Errorf("moving off the postgres base does not report %s: %v", command, findings)
+		}
+	}
+}
+
+// A stage built on another stage has what that stage installed.
+func TestImageToolsAreInstalledFollowsTheStageItIsBuiltOn(t *testing.T) {
+	root := imageTree(t, toolsImage+`
+FROM admin-tools AS admin-restore
+RUN jq -r '.kek_id' manifest.json
+`)
+	findings, err := imageToolsAreInstalled(root)
+	if err != nil || len(findings) != 0 {
+		t.Fatalf("a stage that inherits the install was reported: %v (%v)", findings, err)
+	}
+}
+
+// A comment is not a call, and the install line is not a call either.
+func TestImageToolsAreInstalledReadsNeitherCommentsNorTheInstallItself(t *testing.T) {
+	root := imageTree(t, `ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian12:nonroot
+
+FROM ${RUNTIME_IMAGE} AS control-plane
+# jq would be handy here one day
+ENTRYPOINT ["/usr/local/bin/flotestro-control-plane"]
+`)
+	findings, err := imageToolsAreInstalled(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, found := range findings {
+		if strings.Contains(found.said, "calls jq") {
+			t.Errorf("a comment was read as a call: %s", found)
+		}
+	}
+}
+
+// And a check that found nothing to inspect says so rather than passing.
+func TestImageToolsAreInstalledRefusesToPassOverNothing(t *testing.T) {
+	root := imageTree(t, `ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian12:nonroot
+
+FROM ${RUNTIME_IMAGE} AS control-plane
+ENTRYPOINT ["/usr/local/bin/flotestro-control-plane"]
+`)
+	findings, err := imageToolsAreInstalled(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || !strings.Contains(findings[0].said, "compared nothing") {
+		t.Errorf("an image whose stages call no tool at all passed in silence: %v", findings)
+	}
 }

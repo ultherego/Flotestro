@@ -54,6 +54,12 @@ var checks = []check{
 		run: healthcheckForm,
 	},
 	{
+		name: "image-tools-are-installed",
+		why: "a stage of the image that calls a tool it never installed builds and publishes, and " +
+			"fails only when an operator runs the command that needs it",
+		run: imageToolsAreInstalled,
+	},
+	{
 		name: "airgap-verify-stops",
 		why: "a documented verification loop must stop when a signature does not verify, or the " +
 			"operator carries an unverified image across the gap and signs it as checked",

@@ -764,6 +764,7 @@ jobs:
           go run ./tools/shipcheck \
             site-languages \
             healthcheck-form \
+            image-tools-are-installed \
             airgap-verify-stops \
             airgap-images-are-signed \
             table-headers-declare-scope \
