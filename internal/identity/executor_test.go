@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -185,8 +186,8 @@ func TestAHolderThatLostTheClaimStopsWorking(t *testing.T) {
 	}
 
 	// A renewal that could not be made is not a claim that was lost: the holder
-	// keeps working, and keeps trying, until the term has certainly passed.
-	unreachable := &Executor{log: quiet, renewEvery: time.Millisecond,
+	// keeps working, and keeps trying, within the term.
+	unreachable := &Executor{log: quiet, renewEvery: time.Millisecond, lapseAfter: time.Hour,
 		renewClaim: func(context.Context, string, Hold) (bool, error) {
 			return false, errors.New("the database does not answer")
 		}}
@@ -196,6 +197,30 @@ func TestAHolderThatLostTheClaimStopsWorking(t *testing.T) {
 	case <-alive.Done():
 		t.Fatal("a renewal that failed was read as a claim that was lost")
 	case <-time.After(50 * time.Millisecond):
+	}
+
+	// The renewal that never answers is the case the expiry check could not
+	// reach: it sat in the same loop, so a statement stuck in the database meant
+	// the term was never judged and the holder worked on under a claim somebody
+	// else had taken. The clock is its own now, and the renewal has a deadline.
+	var asked atomic.Int64
+	stuck := &Executor{log: quiet, renewEvery: 5 * time.Millisecond, lapseAfter: 50 * time.Millisecond,
+		renewClaim: func(ctx context.Context, _ string, _ Hold) (bool, error) {
+			asked.Add(1)
+			<-ctx.Done()
+			return false, ctx.Err()
+		}}
+	blocked, giveUp := stuck.holdClaim(context.Background(), "c1", testHold)
+	defer giveUp()
+	select {
+	case <-blocked.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("a holder whose renewal hangs never found out that its claim had run out")
+	}
+	// And the renewal was given up on rather than waited for, so it was asked
+	// more than once in that time.
+	if count := asked.Load(); count < 2 {
+		t.Errorf("the renewal was attempted %d times, so it was waited on instead of given a deadline", count)
 	}
 }
 
@@ -281,6 +306,10 @@ type preserveHarness struct {
 	// which is what an attempt reads when the active one is gone.
 	preserved    freeipa.EntryReference
 	preservedErr error
+	// denyErr is what the local denial answers; recordErr is what the attempt
+	// to write the phases down answers.
+	denyErr   error
+	recordErr error
 	// saved are the snapshots of the phases written down while the change runs.
 	saved [][]Phase
 	// proof is what the adapter could establish about the entry after the move.
@@ -329,6 +358,9 @@ func newPreserveHarness(t *testing.T) *preserveHarness {
 		},
 		localDeny: func(_ context.Context, subject, _ string, denied bool) (int64, error) {
 			harness.order = append(harness.order, fmt.Sprintf("deny:%s:%v", subject, denied))
+			if harness.denyErr != nil {
+				return 0, harness.denyErr
+			}
 			return 1, nil
 		},
 		preservedOf: func(_ context.Context, uid string) (freeipa.EntryReference, error) {
@@ -337,7 +369,7 @@ func newPreserveHarness(t *testing.T) *preserveHarness {
 		},
 		recordPhases: func(_ context.Context, _ string, phases []Phase) error {
 			harness.saved = append(harness.saved, append([]Phase{}, phases...))
-			return nil
+			return harness.recordErr
 		},
 	}
 	return harness
@@ -541,11 +573,19 @@ func TestAnAttemptAfterTheMoveCutsTheAccessInsteadOfRefusing(t *testing.T) {
 	}
 	// The obligation that was met is recorded as met, so the change is not held
 	// out of a result by its own marker.
-	if owed, outstanding := owesLocalAccess(mustPhases(t, phases)); outstanding {
+	if _, owed, outstanding := owesLocalAccess(mustPhases(t, phases)); outstanding {
 		t.Errorf("the obligation stayed outstanding after it was carried out: %q", owed)
 	}
-	if state := StateFor(phases); state != StateSucceeded {
-		t.Errorf("the change is %s, expected succeeded", state)
+	// The earlier attempt's directory error is still in the record: a change's
+	// phases are everything that happened to it.
+	directory, found := phaseNamed(phases, phasePreserveInDirectory)
+	if !found || directory.Status != "failed" {
+		t.Fatalf("the resume dropped the earlier attempt's directory phase: %+v", phases)
+	}
+	// Some of it failed and some of it was carried out, which is what the
+	// state says.
+	if state := StateFor(phases); state != StatePartiallyApplied {
+		t.Errorf("the change is %s, expected partially_applied", state)
 	}
 
 	// No record - the attempt stopped before writing one - but the directory
@@ -631,7 +671,7 @@ func TestThePreserveRecordsWhatThePanelOwesBeforeItPaysIt(t *testing.T) {
 				t.Fatalf("the snapshot was written after the local half: %+v", snapshot)
 			}
 			// And the record is the one the resuming attempt reads.
-			if _, outstanding := owesLocalAccess(mustPhases(t, snapshot)); !outstanding {
+			if _, _, outstanding := owesLocalAccess(mustPhases(t, snapshot)); !outstanding {
 				t.Fatalf("an attempt reading the record would not know what is owed: %+v", snapshot)
 			}
 		})
@@ -647,6 +687,54 @@ func mustPhases(t *testing.T, phases []Phase) json.RawMessage {
 		t.Fatal(err)
 	}
 	return encoded
+}
+
+// The obligation to cut the local access is settled on the effect it names and
+// not on the attempt returning. Marked succeeded over a denial that failed, the
+// row claimed an effect it did not have and left a later attempt nothing to
+// pick up.
+func TestAnObligationIsSettledOnlyOnTheEffectItNames(t *testing.T) {
+	failed := newPreserveHarness(t)
+	failed.denyErr = errors.New("the database does not answer")
+	phases, _ := failed.preserve(preserveChange(failed.entry), &ReferencePayload{UID: "alice"})
+
+	owed, found := phaseNamed(phases, phaseLocalAccessOwed)
+	if !found || owed.Status != PhaseOutstanding {
+		t.Fatalf("the obligation was settled over a denial that failed: %+v", owed)
+	}
+	// Which keeps the change out of a success and leaves the record a later
+	// attempt reads.
+	if state := StateFor(phases); state != StatePartiallyApplied {
+		t.Errorf("the change is %s, expected partially_applied", state)
+	}
+	if _, _, outstanding := owesLocalAccess(mustPhases(t, phases)); !outstanding {
+		t.Error("an attempt reading the record would not know the access is still owed")
+	}
+
+	// Nobody to mark is not a failure: the access this names is not there, so
+	// the obligation is met.
+	nobody := newPreserveHarness(t)
+	nobody.denyErr = ErrNoPrincipal
+	phases, _ = nobody.preserve(preserveChange(nobody.entry), &ReferencePayload{UID: "alice"})
+	owed, found = phaseNamed(phases, phaseLocalAccessOwed)
+	if !found || owed.Status != "succeeded" {
+		t.Fatalf("an account the panel knows nobody by left the obligation %+v", owed)
+	}
+
+	// And where the obligation cannot be written down, the mutation it covers
+	// does not happen: an effect nothing records is an effect nobody can
+	// account for, and the claim may be the reason the write failed.
+	unrecorded := newPreserveHarness(t)
+	unrecorded.recordErr = errors.New("the change is no longer this attempt's")
+	phases, revoked := unrecorded.preserve(
+		preserveChange(unrecorded.entry), &ReferencePayload{UID: "alice"})
+	if unrecorded.did("deny:alice:true") || revoked != nil {
+		t.Fatalf("the local half ran although nothing recorded it: %v", unrecorded.order)
+	}
+	if last := phases[len(phases)-1]; last.Status != "failed" ||
+		!strings.Contains(last.Name, "recording what the panel owes") {
+		t.Fatalf("the last phase is %+v", last)
+	}
 }
 
 // phaseNamed finds a phase by its name.
