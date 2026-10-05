@@ -84,7 +84,10 @@ func TestResolverPlanChangesOnlyResolver(t *testing.T) {
 	if plan.Action != PlanUpdate || plan.Operation != PlanDNS {
 		t.Fatalf("resolver plan: %+v", plan)
 	}
-	if len(plan.Changes) != 2 {
+	// The change writes the search list and the flag into both families where
+	// the second one can hold them, so it is four changes and not two. The
+	// plan used to list the IPv4 half and apply both.
+	if len(plan.Changes) != 4 {
 		t.Errorf("resolver changes: %v", plan.Changes)
 	}
 	if plan.Desired.MTU != current.MTU || len(plan.Desired.Routes) != len(current.Routes) ||

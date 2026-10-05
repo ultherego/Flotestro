@@ -352,14 +352,19 @@ func changeSteps(action *helperv1.NetworkRequest, connection string,
 			DNS:           current.DNS,
 			DNSSearch:     current.DNSSearch,
 			IgnoreAutoDNS: current.IgnoreAutoDNS,
-			Routes:        current.Routes,
-			MTU:           current.MTU,
-			Method6:       current.Method6,
-			Addresses6:    current.Addresses6,
-			Gateway6:      current.Gateway6,
-			Routes6:       current.Routes6,
-			AcceptRA:      current.AcceptRA,
-			Privacy:       current.Privacy,
+			// The second family's resolver settings are part of "the rest of
+			// the resolver stays as it was".
+			DNSSearch6:     current.DNSSearch6,
+			DNSSearch6Set:  current.DNSSearch6Set,
+			IgnoreAutoDNS6: current.IgnoreAutoDNS6,
+			Routes:         current.Routes,
+			MTU:            current.MTU,
+			Method6:        current.Method6,
+			Addresses6:     current.Addresses6,
+			Gateway6:       current.Gateway6,
+			Routes6:        current.Routes6,
+			AcceptRA:       current.AcceptRA,
+			Privacy:        current.Privacy,
 		}
 		if action.GetMethod() != "" {
 			desired.Method = action.GetMethod()
