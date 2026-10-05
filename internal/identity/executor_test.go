@@ -118,6 +118,46 @@ func TestAMembershipChangeOfUnknownOutcomeEndsTheSessionsOfEveryAccountItNamed(t
 	}
 }
 
+// A change read in running was claimed by a replica that recorded no result.
+// Taking it again used to mean carrying it out from the top, whatever it was:
+// a second password reset invalidates the password the requester already has,
+// and a second keytab rotation retires the key the renewal just fetched.
+func TestAnInterruptedChangeIsOnlyRepeatedWhereRepeatingItLandsOnTheSameState(t *testing.T) {
+	declarative := []ActionType{ActionUserDisable, ActionUserEnable, ActionGroupMembers,
+		ActionSSHKeys, ActionUserExpire, ActionUserPOSIX, ActionUserPreserve,
+		ActionHBACRuleEnsure, ActionSudoRuleEnsure, ActionDNSRecordEnsure}
+	for _, action := range declarative {
+		change := Change{ID: "c1", ActionType: string(action), State: StateRunning}
+		if _, _, _, stop := repeatOfInterruptedChange(change); stop {
+			t.Errorf("%s was not carried out again although repeating it changes nothing", action)
+		}
+	}
+
+	for _, action := range []ActionType{ActionUserPasswordReset, ActionKeytabRotate} {
+		change := Change{ID: "c1", ActionType: string(action), State: StateRunning}
+		phases, state, message, stop := repeatOfInterruptedChange(change)
+		if !stop {
+			t.Fatalf("%s was carried out a second time", action)
+		}
+		// Not failed: part of it may well have happened, and the operator has
+		// to read it as a change that began.
+		if state != StatePartiallyApplied {
+			t.Errorf("%s ended as %s", action, state)
+		}
+		if len(phases) != 1 || !strings.HasPrefix(phases[0].Message, RefusalInterrupted+":") {
+			t.Errorf("the phases of %s are %+v", action, phases)
+		}
+		if !strings.Contains(message, "interrupted") {
+			t.Errorf("the message does not say what happened: %q", message)
+		}
+		// The first run of the same change is carried out, of course.
+		fresh := Change{ID: "c1", ActionType: string(action), State: StatePlanned}
+		if _, _, _, stop := repeatOfInterruptedChange(fresh); stop {
+			t.Errorf("a %s nobody had started was refused", action)
+		}
+	}
+}
+
 func TestNothingToRevokeIsNotAFailure(t *testing.T) {
 	executor := &Executor{sessions: &fakeSessions{}}
 	phase, result := executor.revokeChangedMembers(context.Background(), []string{"dave"}, "moved")

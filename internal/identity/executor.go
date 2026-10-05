@@ -32,7 +32,31 @@ const (
 	RefusalDirectoryUnreachable = "directory_unreachable"
 	// RefusalStalePlan is the shared refusal of a plan the world moved under.
 	RefusalStalePlan = plan.ErrorStalePlan
+	// RefusalInterrupted: a replica took the change, stopped before recording a
+	// result, and the change is one that cannot be carried out a second time
+	// without destroying what the first attempt produced.
+	RefusalInterrupted = "directory_change_interrupted"
 )
+
+// repeatOfInterruptedChange decides what to do with a change that was read in
+// running: its holder claimed it and never recorded a result, so which of its
+// phases ran is unknown. A declarative change is simply carried out again. A
+// change that hands something out once is not, because a second attempt takes
+// back what the first one gave - a new password invalidates the one the
+// requester already has, and a second rotation retires the key the host just
+// fetched. It is recorded as partially applied, which is the honest reading of
+// a change that began and whose extent nobody knows.
+func repeatOfInterruptedChange(change Change) ([]Phase, State, string, bool) {
+	if change.State != StateRunning || RepeatableAfterInterruption(ActionType(change.ActionType)) {
+		return nil, "", "", false
+	}
+	phase := refusedPhase(startPhase("repeating the interrupted change"), RefusalInterrupted,
+		"a replica took this change and recorded no result, and "+change.ActionType+
+			" cannot be carried out again without taking back what the first attempt handed out")
+	return []Phase{phase}, StatePartiallyApplied,
+		"the change was interrupted after it had begun; read what the directory holds and plan it again",
+		true
+}
 
 // SessionRevoker revokes the panel sessions that belong to an identity.
 type SessionRevoker interface {
@@ -127,7 +151,47 @@ func (e *Executor) tick(ctx context.Context) {
 		if !claimed {
 			continue
 		}
+		// While this replica works, it says so: the term then bounds how long a
+		// change stays invisible after a replica stops, and not how long the
+		// change itself may take.
+		release := e.holdClaim(ctx, change.ID)
 		e.execute(ctx, change)
+		release()
+	}
+}
+
+// holdClaim renews the claim until the returned function is called. A claim
+// this replica has lost is logged and not renewed again: the change belongs to
+// whoever took it, and Finish refuses to write over it.
+func (e *Executor) holdClaim(ctx context.Context, changeID string) func() {
+	renewing, stop := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(RenewTerm)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-renewing.Done():
+				return
+			case <-ticker.C:
+				held, err := e.store.RenewClaim(context.WithoutCancel(renewing), changeID, jobs.InstanceID())
+				if err != nil {
+					e.log.Error("the claim on the directory change was not renewed",
+						"change_id", changeID, "err", err)
+					continue
+				}
+				if !held {
+					e.log.Warn("the claim on the directory change is held by somebody else",
+						"change_id", changeID)
+					return
+				}
+			}
+		}
+	}()
+	return func() {
+		stop()
+		<-done
 	}
 }
 
@@ -141,6 +205,14 @@ func (e *Executor) execute(ctx context.Context, change Change) {
 	}
 
 	action := ActionType(change.ActionType)
+	// A change read in running was claimed by a replica that never finished it,
+	// so what it managed to do is unknown. Carrying a declarative change out
+	// again lands on the same state; a password reset or a keytab rotation
+	// destroys what the first attempt handed out, so it waits for a person.
+	if refusal, state, message, stop := repeatOfInterruptedChange(change); stop {
+		e.finish(ctx, change, state, refusal, message, nil)
+		return
+	}
 	var phases []Phase
 	// revoked is filled in by the actions that end panel sessions, so that
 	// the trail says how many - and for whom there was nothing to end.
@@ -675,7 +747,7 @@ func (e *Executor) resetPassword(ctx context.Context, change Change, ref *Refere
 // finish records the result and notes it in the audit trail.
 func (e *Executor) finish(ctx context.Context, change Change, state State,
 	phases []Phase, message string, revoked *sessionRevocation) {
-	if err := e.store.Finish(ctx, change.ID, state, phases, message); err != nil {
+	if err := e.store.Finish(ctx, change.ID, jobs.InstanceID(), state, phases, message); err != nil {
 		e.log.Error("the result of the directory change was not recorded", "change_id", change.ID, "err", err)
 	}
 
