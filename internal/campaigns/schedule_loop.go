@@ -77,10 +77,31 @@ func (l *ScheduleLoop) recover(ctx context.Context) {
 			// with the schedule by the foreign key, so there is nothing to do.
 			continue
 		}
+		if occurrence.ClaimedBy == "" {
+			l.log.Warn("the moment does not say who it was claimed for; the schedule's author stands",
+				"schedule_id", occurrence.ScheduleID, "due_at", occurrence.DueAt,
+				"author", schedule.CreatedBy)
+		}
+		under := scheduleAsClaimed(*schedule, occurrence.ClaimedBy)
 		l.log.Warn("a moment was claimed and its campaign never placed; placing it now",
-			"schedule_id", occurrence.ScheduleID, "due_at", occurrence.DueAt)
-		l.place(ctx, *schedule, occurrence.DueAt)
+			"schedule_id", occurrence.ScheduleID, "due_at", occurrence.DueAt,
+			"author", under.CreatedBy)
+		l.place(ctx, under, occurrence.DueAt)
 	}
+}
+
+// scheduleAsClaimed returns the schedule as the claimed moment has to be
+// ordered under: the author the moment was claimed for, whoever has edited the
+// schedule since. A campaign is idempotent in (author, key), so the order of a
+// recovered moment finds the campaign of the first attempt only under the
+// author that placed it; under the editor the same key named nothing and a
+// second campaign went out for one moment. An occurrence from before the panel
+// wrote the author down carries none, and the schedule's own author stands.
+func scheduleAsClaimed(schedule Schedule, claimedBy string) Schedule {
+	if claimedBy != "" {
+		schedule.CreatedBy = claimedBy
+	}
+	return schedule
 }
 
 // tick places the order of every due schedule.

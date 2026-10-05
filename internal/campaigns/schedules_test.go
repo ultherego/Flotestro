@@ -231,3 +231,32 @@ func errorAs(err error, target *ScheduleError) bool {
 	}
 	return ok
 }
+
+// A moment is recovered under the author it was claimed for. Editing a
+// schedule makes the editor its author, and a campaign is idempotent in
+// (author, key): the recovery of an unsettled moment read the schedule again,
+// so after an edit the key "schedule:<id>:<moment>" named nothing the panel
+// had placed and a second campaign went out for one moment (audit of 6c38561,
+// D3).
+func TestARecoveredMomentKeepsTheAuthorItWasClaimedFor(t *testing.T) {
+	schedule := Schedule{ID: "3f1d5a2c-9e77-4a1b-8c2e-1d0f5b6a7c8d", Name: "monthly patching",
+		CreatedBy: "editor@example.test"}
+
+	under := scheduleAsClaimed(schedule, "author@example.test")
+	if under.CreatedBy != "author@example.test" {
+		t.Errorf("the moment is ordered under %q, expected the author it was claimed for",
+			under.CreatedBy)
+	}
+	if schedule.CreatedBy != "editor@example.test" {
+		t.Error("the schedule in hand was rewritten; only the order under it changes")
+	}
+	if under.ID != schedule.ID || under.Name != schedule.Name {
+		t.Error("the recovery changed more of the schedule than its author")
+	}
+
+	// A moment claimed before the panel wrote the author down carries none,
+	// and the schedule's own author is all there is.
+	if under := scheduleAsClaimed(schedule, ""); under.CreatedBy != "editor@example.test" {
+		t.Errorf("a moment with no author recorded is ordered under %q", under.CreatedBy)
+	}
+}
