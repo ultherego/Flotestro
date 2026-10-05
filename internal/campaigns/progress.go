@@ -406,8 +406,11 @@ func (o *Orchestrator) afterReboot(ctx context.Context, campaign Campaign, targe
 	if err != nil {
 		return err
 	}
-	// A new boot ID and an active session mean the host has come back.
-	if host.ConnectionState != "online" || host.BootID == "" || host.BootID == target.BootIDBefore {
+	// A new boot ID and an active session mean the host has come back. The same
+	// reading as the remediation runner's: both identifiers have to be known,
+	// because an unknown one says nothing about a restart.
+	rebootShown, _ := hosts.RebootShown(target.BootIDBefore, host.BootID)
+	if host.ConnectionState != "online" || !rebootShown {
 		since, known := rebootOrderedAt(target)
 		if !known {
 			return nil
