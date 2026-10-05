@@ -426,36 +426,46 @@ func (e *Executor) revokeChangedMembers(ctx context.Context, uids []string, reas
 	return finishPhase(phase, nil, total.String()), total
 }
 
+// mayHaveMoved names the accounts whose scope the directory may have changed,
+// which is what decides whose session ends.
+//
+// A batch the directory took only in part is not a step that did nothing: the
+// accounts it moved are named in the error, and their sessions end although the
+// step failed - without this they kept the scope they had while the panel
+// reported a failure. A batch whose outcome never came back is the same
+// question with no answer, so every account it named loses its session: an
+// unconfirmed change must not be accounted for as a change of nobody.
+func mayHaveMoved(err error, asked []string) []string {
+	if err == nil {
+		return asked
+	}
+	var partial *freeipa.PartialChange
+	if errors.As(err, &partial) {
+		return partial.Applied
+	}
+	var uncertain *freeipa.UncertainChange
+	if errors.As(err, &uncertain) {
+		return uncertain.Users
+	}
+	return nil
+}
+
 func (e *Executor) changeGroupMembers(ctx context.Context, spec *GroupPayload) ([]Phase, *sessionRevocation) {
 	var phases []Phase
 	// Only the members the directory actually moved lose their session: a
 	// user whose change was refused still holds the scope they had.
 	var changed []string
-	// A batch the directory took only in part is not a step that did nothing:
-	// the accounts it moved are named in the error, and their sessions end
-	// although the step failed. Without this they kept the scope they had
-	// while the panel reported a failure.
-	moved := func(err error, asked []string) []string {
-		if err == nil {
-			return asked
-		}
-		var partial *freeipa.PartialChange
-		if errors.As(err, &partial) {
-			return partial.Applied
-		}
-		return nil
-	}
 	if len(spec.Add) > 0 {
 		phase := startPhase("adding members to the group " + spec.Group)
 		err := e.directory.AddGroupMembers(ctx, spec.Group, spec.Add)
 		phases = append(phases, finishPhase(phase, err, ""))
-		changed = append(changed, moved(err, spec.Add)...)
+		changed = append(changed, mayHaveMoved(err, spec.Add)...)
 	}
 	if len(spec.Remove) > 0 {
 		phase := startPhase("removing members from the group " + spec.Group)
 		err := e.directory.RemoveGroupMembers(ctx, spec.Group, spec.Remove)
 		phases = append(phases, finishPhase(phase, err, ""))
-		changed = append(changed, moved(err, spec.Remove)...)
+		changed = append(changed, mayHaveMoved(err, spec.Remove)...)
 	}
 	if len(changed) == 0 {
 		return phases, nil

@@ -132,6 +132,25 @@ func (p *PartialChange) Error() string {
 		p.Group, len(p.Applied), len(p.Applied)+len(p.Refused), strings.Join(refused, "; "))
 }
 
+// UncertainChange says a membership change went out and its outcome is not
+// known: the directory did not answer, or it answered in a shape that names no
+// account. Every account the batch named may have moved, so they travel with
+// the error - an outcome nobody confirmed must not read as an outcome of none.
+type UncertainChange struct {
+	Method string
+	Group  string
+	// Users are the accounts the batch named, each of which may have moved.
+	Users []string
+	Err   error
+}
+
+func (u *UncertainChange) Error() string {
+	return fmt.Sprintf("it is not known whether the membership of %s changed for %s: %v",
+		u.Group, strings.Join(u.Users, ", "), u.Err)
+}
+
+func (u *UncertainChange) Unwrap() error { return u.Err }
+
 func (c *Client) changeGroupMembers(ctx context.Context, method, group string, users []string) error {
 	if !groupNamePattern.MatchString(group) {
 		return fmt.Errorf("invalid group name %q", group)
@@ -147,7 +166,17 @@ func (c *Client) changeGroupMembers(ctx context.Context, method, group string, u
 
 	result, err := c.call(ctx, method, []string{group}, map[string]any{"user": users})
 	if err != nil {
-		return fmt.Errorf("changing the membership of the group %s: %w", group, err)
+		var refusal *DirectoryError
+		if errors.As(err, &refusal) && refusal.Permanent() {
+			// The directory read the command and turned it down, so the
+			// membership stands as it stood.
+			return fmt.Errorf("changing the membership of the group %s: %w", group, err)
+		}
+		// The command went out and no verdict came back. The cache goes, because
+		// the directory may well have applied it, and the accounts travel with
+		// the error so their sessions end on the chance that they moved.
+		c.invalidate()
+		return &UncertainChange{Method: method, Group: group, Users: users, Err: err}
 	}
 
 	// The directory returns a list of failures instead of an error when some of
@@ -161,28 +190,43 @@ func (c *Client) changeGroupMembers(ctx context.Context, method, group string, u
 	var decoded struct {
 		Failed map[string]map[string][]any `json:"failed"`
 	}
-	if err := json.Unmarshal(result, &decoded); err == nil {
-		refused := map[string]string{}
-		for _, category := range decoded.Failed {
-			for _, entries := range category {
-				for _, entry := range entries {
-					name, reason := refusedAccount(entry)
-					if name == "" {
-						continue
-					}
-					refused[name] = reason
+	if err := json.Unmarshal(result, &decoded); err != nil {
+		// An answer in a shape this adapter does not read says nothing about
+		// which accounts moved, and nothing is not "none of them".
+		return &UncertainChange{Method: method, Group: group, Users: users,
+			Err: fmt.Errorf("the answer of the directory does not read: %w", err)}
+	}
+	refused := map[string]string{}
+	var unnamed []string
+	for _, category := range decoded.Failed {
+		for _, entries := range category {
+			for _, entry := range entries {
+				name, reason := refusedAccount(entry)
+				if name == "" {
+					// A failure the adapter cannot name is still a failure the
+					// directory reported: it is carried as an uncertain outcome
+					// rather than dropped, because dropping it read as a success.
+					unnamed = append(unnamed, fmt.Sprintf("%v", entry))
+					continue
 				}
+				refused[name] = reason
 			}
 		}
-		if len(refused) > 0 {
-			applied := make([]string, 0, len(users))
-			for _, user := range users {
-				if _, no := refused[user]; !no {
-					applied = append(applied, user)
-				}
+	}
+	if len(unnamed) > 0 {
+		sort.Strings(unnamed)
+		return &UncertainChange{Method: method, Group: group, Users: users,
+			Err: fmt.Errorf("the directory refused a part of the batch in a shape that names no account: %s",
+				strings.Join(unnamed, "; "))}
+	}
+	if len(refused) > 0 {
+		applied := make([]string, 0, len(users))
+		for _, user := range users {
+			if _, no := refused[user]; !no {
+				applied = append(applied, user)
 			}
-			return &PartialChange{Method: method, Group: group, Applied: applied, Refused: refused}
 		}
+		return &PartialChange{Method: method, Group: group, Applied: applied, Refused: refused}
 	}
 	return nil
 }

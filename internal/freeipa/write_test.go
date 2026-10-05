@@ -128,3 +128,67 @@ func TestAGroupChangeTheDirectoryTookInPartNamesWhatItMoved(t *testing.T) {
 		t.Errorf("a change the directory took whole came back as %v", err)
 	}
 }
+
+// An outcome nobody confirmed was folded into "nothing happened": a failure
+// list in an unexpected shape was skipped entry by entry and the batch returned
+// success, an answer that did not parse returned success as well, and a call
+// whose answer was lost returned a plain error, so no session of the accounts
+// that may have moved was ended.
+func TestAMembershipChangeOfUnknownOutcomeSaysSoAndNamesTheAccounts(t *testing.T) {
+	asked := []string{"alice", "bob"}
+	cases := map[string]func(rpcCall) (any, *rpcError){
+		"a failure list that names no account": func(rpcCall) (any, *rpcError) {
+			return map[string]any{
+				"result": map[string]any{},
+				"failed": map[string]any{
+					"member": map[string]any{"user": []any{map[string]any{"code": 4202}}},
+				},
+			}, nil
+		},
+		"an answer in a shape the adapter does not read": func(rpcCall) (any, *rpcError) {
+			return []any{"developers"}, nil
+		},
+		"an answer that was lost": func(rpcCall) (any, *rpcError) {
+			return nil, &rpcError{Code: 4203, Name: "ExecutionError", Message: "the server failed"}
+		},
+	}
+	for name, answer := range cases {
+		t.Run(name, func(t *testing.T) {
+			fake, client := newFakeDirectory(t)
+			fake.answers["group_add_member"] = answer
+			client.cache["user_find"] = cacheEntry{expiresAt: time.Now().Add(time.Minute)}
+
+			err := client.AddGroupMembers(context.Background(), "developers", asked)
+			var uncertain *UncertainChange
+			if !errors.As(err, &uncertain) {
+				t.Fatalf("err = %v, expected an uncertain outcome", err)
+			}
+			if strings.Join(uncertain.Users, ",") != strings.Join(asked, ",") {
+				t.Errorf("the accounts of the batch came back as %v", uncertain.Users)
+			}
+			if !strings.Contains(err.Error(), "not known") || !strings.Contains(err.Error(), "developers") {
+				t.Errorf("the error does not say the outcome is unknown: %v", err)
+			}
+			// The membership may have changed, so the cache cannot stand.
+			if len(client.cache) != 0 {
+				t.Errorf("the cache survived a change of unknown outcome: %v", client.cache)
+			}
+		})
+	}
+
+	// A command the directory read and turned down is a different thing: the
+	// membership stands as it stood, and the error says so plainly.
+	fake, client := newFakeDirectory(t)
+	fake.answers["group_add_member"] = func(rpcCall) (any, *rpcError) {
+		return nil, &rpcError{Code: 4001, Name: "NotFound", Message: "developers: group not found"}
+	}
+	err := client.AddGroupMembers(context.Background(), "developers", asked)
+	var uncertain *UncertainChange
+	if errors.As(err, &uncertain) {
+		t.Fatalf("a refusal of the whole command became an uncertain outcome: %v", err)
+	}
+	var refusal *DirectoryError
+	if !errors.As(err, &refusal) {
+		t.Fatalf("err = %v, expected the directory's own refusal", err)
+	}
+}

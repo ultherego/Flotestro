@@ -93,6 +93,31 @@ func TestAMembershipChangeEndsTheSessionsOfTheMovedUsers(t *testing.T) {
 	}
 }
 
+// Whose session ends after a membership change is decided by what the
+// directory confirmed. A batch whose answer was lost confirmed nothing, and
+// nothing was read as "no account moved": the users kept the scope they had.
+func TestAMembershipChangeOfUnknownOutcomeEndsTheSessionsOfEveryAccountItNamed(t *testing.T) {
+	asked := []string{"alice", "bob"}
+	if got := mayHaveMoved(nil, asked); strings.Join(got, ",") != "alice,bob" {
+		t.Fatalf("a change the directory took whole moved %v", got)
+	}
+	partial := &freeipa.PartialChange{Group: "ops", Applied: []string{"alice"},
+		Refused: map[string]string{"bob": "This entry is not a member"}}
+	if got := mayHaveMoved(partial, asked); strings.Join(got, ",") != "alice" {
+		t.Fatalf("a batch taken in part moved %v", got)
+	}
+	uncertain := &freeipa.UncertainChange{Group: "ops", Users: asked,
+		Err: errors.New("the query to the directory: connection reset")}
+	if got := mayHaveMoved(uncertain, asked); strings.Join(got, ",") != "alice,bob" {
+		t.Fatalf("a batch of unknown outcome moved %v, expected every account it named", got)
+	}
+	// A command the directory read and turned down changed nobody.
+	refused := &freeipa.DirectoryError{Name: "NotFound", Message: "ops: group not found"}
+	if got := mayHaveMoved(refused, asked); len(got) != 0 {
+		t.Fatalf("a refused command moved %v", got)
+	}
+}
+
 func TestNothingToRevokeIsNotAFailure(t *testing.T) {
 	executor := &Executor{sessions: &fakeSessions{}}
 	phase, result := executor.revokeChangedMembers(context.Background(), []string{"dave"}, "moved")
