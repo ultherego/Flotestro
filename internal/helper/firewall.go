@@ -634,7 +634,17 @@ func (s *Server) restoreFirewall(ctx context.Context, id string) *helperv1.Helpe
 }
 
 // readFirewall assembles the picture of the host firewall.
+// readFirewall reads the enforced state of this host and seals its
+// fingerprint. Every path out of the reading is sealed, the ones that could
+// not read the host included.
 func (s *Server) readFirewall(ctx context.Context) firewall.Snapshot {
+	snapshot := s.readFirewallState(ctx)
+	// One reading, one fingerprint, and the zones are part of it.
+	firewall.SealFingerprint(&snapshot)
+	return snapshot
+}
+
+func (s *Server) readFirewallState(ctx context.Context) firewall.Snapshot {
 	snapshot := firewall.Snapshot{ObservedAt: time.Now().UTC()}
 
 	nft := exists(firewall.NftPath)
