@@ -153,8 +153,8 @@ func TestACampaignStepRecordsThePersonTheRightsCheckJudged(t *testing.T) {
 	if author != "alice@example.test" || kind != jobs.ActorPerson {
 		t.Errorf("the task records %q/%q rather than the judged person", author, kind)
 	}
-	if jobs.CallsItsOwnWorkAPerson(kind, author) {
-		t.Error("the recorded author is one the panel writes for itself")
+	if author == plan.CreatedBy {
+		t.Error("the task records the campaign rather than the person who ordered it")
 	}
 }
 
@@ -167,8 +167,8 @@ func TestWithoutARightsCheckACampaignStepIsRecordedAsMachinery(t *testing.T) {
 	if author != plan.CreatedBy || kind != jobs.ActorMachinery {
 		t.Errorf("a campaign step with no named person reads %q/%q", author, kind)
 	}
-	if jobs.CallsItsOwnWorkAPerson(kind, author) {
-		t.Error("the pair is the contradiction the store refuses")
+	if kind == jobs.ActorPerson {
+		t.Error("a campaign with nobody named reads as a person, and no account answers for it")
 	}
 }
 

@@ -1,8 +1,14 @@
 package jobs
 
 import (
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -76,41 +82,129 @@ func TestAnUnrecordedKindIsNotMachinery(t *testing.T) {
 	}
 }
 
-// The author and the kind must agree where the task is written, because the
-// dispatcher cannot resolve the disagreement later: it would look for an
-// account named "campaign:c-7" and refuse the step for a right nobody holds.
-func TestATaskCannotCallThePanelsOwnWorkAPerson(t *testing.T) {
-	for _, own := range []string{
-		"campaign:c-7", "campaign:nightly-patching",
-		"directory-change:9f2", "flotestro/vuln", "system",
-	} {
-		if !CallsItsOwnWorkAPerson(ActorPerson, own) {
-			t.Errorf("%q passes as a person", own)
+// A call site that names the panel's own work as its author and calls it a
+// person is a programming error: no account can ever answer for it, so the
+// task waits or refuses forever. It is caught here, by reading the sources,
+// and not at runtime - the runtime check that did this matched by prefix and
+// refused every person whose account began with "system".
+//
+// Read from the syntax rather than by grep: a field of a jobs.Spec is a field
+// of a jobs.Spec wherever it is written, and a name mentioned in a comment or
+// a log line is not one.
+func TestNoCallSitePairsTheOwnWorkOfThePanelWithAPerson(t *testing.T) {
+	// The namespaces the panel writes for itself, as the code that builds them
+	// does: "campaign:"+id, "directory-change:"+id, "flotestro/vuln",
+	// "system". A name missing here only means this test asks about less; it
+	// cannot refuse anything at runtime, because nothing reads it there.
+	own := []string{"campaign:", "directory-change:", "flotestro/", "system"}
+
+	sites := 0
+	err := filepath.WalkDir("..", func(path string, entry fs.DirEntry, err error) error {
+		switch {
+		case err != nil:
+			return err
+		case entry.IsDir() && (entry.Name() == "genproto" || entry.Name() == "testdata"):
+			return fs.SkipDir
+		case entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go"):
+			return nil
 		}
-		// The same name is the truth when it says what it is.
-		if CallsItsOwnWorkAPerson(ActorMachinery, own) {
-			t.Errorf("%q is refused even as machinery", own)
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.SkipObjectResolution)
+		if err != nil {
+			return fmt.Errorf("%s: %w", path, err)
 		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			literal, ok := node.(*ast.CompositeLit)
+			if !ok || !isJobSpec(literal.Type) {
+				return true
+			}
+			author, kind := specAuthor(literal)
+			if kind == "" {
+				return true
+			}
+			// Counted here, where a spec declares a kind at all: that is what
+			// says the walk reached the call sites. Most of them pass the
+			// author in a variable, which this test cannot judge and does not
+			// pretend to.
+			sites++
+			if kind != "ActorPerson" || author == "" {
+				return true
+			}
+			for _, prefix := range own {
+				if strings.HasPrefix(author, prefix) {
+					t.Errorf("%s writes a task whose author is %q and whose kind is a person; "+
+						"no account answers for that name, so the task can only wait or refuse",
+						path, author)
+				}
+			}
+			return true
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, person := range []string{
-		"alice@example.test", "bob", "svc-backup@example.test", "",
-	} {
-		if CallsItsOwnWorkAPerson(ActorPerson, person) {
-			t.Errorf("%q is refused as a person", person)
-		}
+	// A walk that inspected nothing would pass in silence.
+	if sites == 0 {
+		t.Fatal("no spec declaring an actor kind was found, so this test read nothing")
 	}
+	t.Logf("%d call site(s) declare an actor kind", sites)
 }
 
-// Every author the panel writes for itself is in that list, so a new one
-// cannot be added as a person by accident. The list is searched for in the
-// packages that create tasks rather than asserted by hand.
-func TestTheAuthorsThePanelWritesForItselfAreAllNamed(t *testing.T) {
-	for _, own := range ownAuthors {
-		if !CallsItsOwnWorkAPerson(ActorPerson, own+"x") {
-			t.Errorf("%q is in the list and still passes as a person", own)
+// isJobSpec says whether a composite literal is a jobs.Spec, written from
+// inside this package or from another.
+func isJobSpec(node ast.Expr) bool {
+	switch typed := node.(type) {
+	case *ast.Ident:
+		return typed.Name == "Spec"
+	case *ast.SelectorExpr:
+		return typed.Sel.Name == "Spec"
+	}
+	return false
+}
+
+// specAuthor reads the author and the kind out of a spec literal. The author
+// is read only when it begins with a string: "campaign:" + campaign.Name is
+// the shape that mattered, and a value computed elsewhere is not a name this
+// test can judge.
+func specAuthor(literal *ast.CompositeLit) (author, kind string) {
+	for _, element := range literal.Elts {
+		pair, ok := element.(*ast.KeyValueExpr)
+		if !ok {
+			continue
+		}
+		key, ok := pair.Key.(*ast.Ident)
+		if !ok {
+			continue
+		}
+		switch key.Name {
+		case "CreatedBy":
+			author = leadingString(pair.Value)
+		case "CreatedByKind":
+			if selector, ok := pair.Value.(*ast.SelectorExpr); ok {
+				kind = selector.Sel.Name
+			} else if ident, ok := pair.Value.(*ast.Ident); ok {
+				kind = ident.Name
+			}
 		}
 	}
-	if len(ownAuthors) == 0 {
-		t.Fatal("the list is empty, so the check answers no to everything")
+	return author, kind
+}
+
+// leadingString returns the literal text an expression starts with, following
+// the left side of a concatenation.
+func leadingString(node ast.Expr) string {
+	switch typed := node.(type) {
+	case *ast.BasicLit:
+		if typed.Kind == token.STRING {
+			text, err := strconv.Unquote(typed.Value)
+			if err == nil {
+				return text
+			}
+		}
+	case *ast.BinaryExpr:
+		if typed.Op == token.ADD {
+			return leadingString(typed.X)
+		}
 	}
+	return ""
 }

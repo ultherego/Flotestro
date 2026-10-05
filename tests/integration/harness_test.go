@@ -285,6 +285,7 @@ type jobView struct {
 	PayloadHash        string `json:"payload_hash"`
 	RequiresApproval   bool   `json:"requires_approval"`
 	CreatedBy          string `json:"created_by"`
+	CreatedByKind      string `json:"created_by_kind"`
 	ApprovedBy         string `json:"approved_by"`
 	ResultStatus       string `json:"result_status"`
 	ResultErrorCode    string `json:"result_error_code"`
