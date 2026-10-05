@@ -18,6 +18,12 @@ import (
 // writes it.
 const firewallCapturesEnv = "FLOTESTRO_TEST_FIREWALL_CAPTURES"
 
+// What every file of those readings is called. They sit directly in the run
+// directory beside the stage logs, because the report accounts for the files of
+// that directory and not for its folders: a reading inside one never reaches
+// the evidence bundle.
+const firewallCapturePrefix = "firewall-capture."
+
 // How old a capture may be and still be evidence about this run. A gate run
 // takes a couple of hours at most; anything older is a directory left behind by
 // an earlier one, and reading it would attest a host nobody asked today.
@@ -82,7 +88,7 @@ func TestTheTwoFirewalldConfigurationsAgreePerFamily(t *testing.T) {
 // configuration, and the pair after the planting was undone.
 func checkFirewallCapture(t *testing.T, directory string, capture firewallCapture, port string) {
 	read := func(part string) string {
-		return firewallCaptureFile(t, directory, capture.guest+"."+part+".txt")
+		return firewallCaptureFile(t, directory, firewallCapturePrefix+capture.guest+"."+part+".txt")
 	}
 	running, kept := read("runtime"), read("permanent")
 
@@ -157,7 +163,7 @@ func checkFirewallCapture(t *testing.T, directory string, capture firewallCaptur
 // planted and every guest it visited, firewalld or not.
 func readFirewallManifest(t *testing.T, directory string) (string, []firewallCapture) {
 	t.Helper()
-	name := filepath.Join(directory, "captures.tsv")
+	name := filepath.Join(directory, firewallCapturePrefix+"manifest.tsv")
 	content, err := os.ReadFile(name)
 	if err != nil {
 		t.Fatalf("the captures do not say what was read: %v", err)
