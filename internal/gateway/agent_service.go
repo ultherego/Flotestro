@@ -3094,9 +3094,17 @@ func capabilitiesFromProto(caps *agentv1.Capabilities) hosts.Capabilities {
 }
 
 // localAccountsFromReport moves the accounts from a report into the inventory
-// model.
+// model. Nil is "this report says nothing about the accounts", which leaves
+// what the panel holds standing; an empty list erases it.
 func localAccountsFromReport(report *agentv1.InventoryReport) []inventory.LocalAccount {
 	if !report.GetFull() && len(report.GetLocalAccounts()) == 0 {
+		return nil
+	}
+	if len(report.GetLocalAccounts()) == 0 && accountsUnavailable(report) != "" {
+		// The host could not read its accounts. A full report would otherwise
+		// replace every account the panel holds with nothing, and the operator
+		// would read a host with no local accounts - which is not a thing that
+		// happens - instead of a host nobody could ask.
 		return nil
 	}
 	accounts := make([]inventory.LocalAccount, 0, len(report.GetLocalAccounts()))
@@ -3765,6 +3773,17 @@ func smartResultJSON(smart *agentv1.SmartResult) map[string]any {
 		encoded["wear_percent"] = smart.GetWearPercent()
 	}
 	return encoded
+}
+
+// accountsUnavailable returns what the host says went wrong with reading its
+// accounts, empty when the module was read.
+func accountsUnavailable(report *agentv1.InventoryReport) string {
+	for _, fragment := range report.GetFragments() {
+		if fragment.GetModule() == inventory.ModuleAccounts {
+			return fragment.GetUnavailableReason()
+		}
+	}
+	return ""
 }
 
 // fragmentsFromReport reads the modules of a report.

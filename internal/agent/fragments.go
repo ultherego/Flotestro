@@ -91,7 +91,10 @@ func (f Facts) Fragments() ([]Fragment, error) {
 
 		{ModuleIdentity, "agent/sssd", f.Identity.UnavailableReason, f.Identity},
 
-		{ModuleAccounts, "agent/passwd", "", struct {
+		// The reason travels with the module: an empty list of accounts with a
+		// reason beside it is a host nobody could ask, and the panel has to be
+		// able to tell it from a host with no privileged accounts.
+		{ModuleAccounts, "agent/passwd", f.LocalAccountsReason, struct {
 			Accounts []LocalAccount `json:"accounts"`
 		}{f.LocalAccounts}},
 
