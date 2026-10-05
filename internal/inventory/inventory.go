@@ -52,6 +52,11 @@ func (r Report) covers(module string) bool {
 	return false
 }
 
+// ModuleAccounts is the module of the local accounts, as the agent names it.
+// The panel reads its unavailable reason: a report whose accounts could not be
+// read must not erase the ones the panel holds.
+const ModuleAccounts = "accounts"
+
 // Fragment is the state of one module of a host together with a revision and
 // a freshness of its own.
 type Fragment struct {

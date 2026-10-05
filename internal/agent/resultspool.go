@@ -69,6 +69,11 @@ type ResultSpool struct {
 	ttl     time.Duration
 	log     *slog.Logger
 
+	// spooled says a result was written down. The spool belongs to the process
+	// and the session that is live listens on it, so an answer written by a task
+	// of a session that is already gone wakes the one that can send it.
+	spooled chan struct{}
+
 	mu sync.Mutex
 	// sequence orders the results within the spool; the attempt identifier is
 	// what a result is found by.
@@ -155,7 +160,8 @@ func OpenResultSpool(stateDir string, limit int, maxSize int64, ttl time.Duratio
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("the directory of the result spool: %w", err)
 	}
-	spool := &ResultSpool{dir: dir, limit: limit, maxSize: maxSize, ttl: ttl, log: log}
+	spool := &ResultSpool{dir: dir, limit: limit, maxSize: maxSize, ttl: ttl, log: log,
+		spooled: make(chan struct{}, 1)}
 	if err := spool.load(); err != nil {
 		return nil, err
 	}
@@ -241,7 +247,24 @@ func (s *ResultSpool) Enqueue(result *agentv1.TaskResult) error {
 	})
 	s.bytes += size
 	s.evict()
+	s.wake()
 	return nil
+}
+
+// Spooled is the signal that an answer was written down, for the session that
+// is live to offer it.
+func (s *ResultSpool) Spooled() <-chan struct{} { return s.spooled }
+
+// wake rings the signal without waiting for anybody to be listening. The
+// caller holds the lock.
+func (s *ResultSpool) wake() {
+	if s.spooled == nil {
+		return
+	}
+	select {
+	case s.spooled <- struct{}{}:
+	default:
+	}
 }
 
 // Pending returns the results the panel has not acknowledged, oldest first:

@@ -18,6 +18,7 @@ import (
 
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/hosts"
+	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/relayproof"
 )
 
@@ -43,6 +44,10 @@ type RelayRefusal struct {
 	// Redelivery marks a relay_sequence_replayed that is no replay: the relay
 	// carried the message again because its acknowledgement did not arrive.
 	Redelivery bool
+	// InFlight marks a message another delivery of the same message is applying
+	// right now. Nothing is wrong with it and nothing is finished, so it is
+	// neither held against the host nor acknowledged to the relay.
+	InFlight bool
 }
 
 func (r *RelayRefusal) Error() string { return r.Code + ": " + r.Detail }
@@ -155,7 +160,9 @@ func (v *RelayVerifier) verify(ctx context.Context, peer RelayPeer, envelope *ag
 		return nil, err
 	}
 	if code, detail := certificateStatusRefusal(certificate, peer.HostID, v.now()); code != "" {
-		return nil, &RelayRefusal{Code: code, Detail: detail}
+		if !decommissionEvidence(kind, code) {
+			return nil, &RelayRefusal{Code: code, Detail: detail}
+		}
 	}
 
 	// The host in the relay's scope.
@@ -220,6 +227,13 @@ func (v *RelayVerifier) verify(ctx context.Context, peer RelayPeer, envelope *ag
 				Detail: "sequence " + strconv.FormatUint(envelope.GetSequence(), 10) +
 					" of session " + envelope.GetSessionId() + " was applied before (the session is at " +
 					strconv.FormatUint(claim.Last, 10) + ")"}
+		case claim.Busy:
+			// Another gateway - or another stream of this one - holds this very
+			// message. Not acknowledged: if that delivery fails, the relay has to be
+			// the one still holding the record.
+			return nil, &RelayRefusal{Code: hosts.RefusalRelaySequenceReplayed, InFlight: true,
+				Detail: "sequence " + strconv.FormatUint(envelope.GetSequence(), 10) +
+					" of session " + envelope.GetSessionId() + " is being applied by another delivery"}
 		case claim.Dead:
 			return nil, &RelayRefusal{Code: hosts.RefusalRelaySequenceReplayed, Redelivery: true,
 				Detail: "sequence " + strconv.FormatUint(envelope.GetSequence(), 10) +
@@ -273,9 +287,49 @@ type relaySequences struct {
 	pool *pgxpool.Pool
 }
 
-// helloKind is the payload name of the message that opens a session; it is the
-// oneof field name, as relayproof reads it.
-const helloKind = "hello"
+// The payload names of the messages this file decides about; they are the oneof
+// field names, as relayproof reads them.
+const (
+	// helloKind opens a session.
+	helloKind = "hello"
+	// finalReadyKind is the agent's answer to the final task, and
+	// finalWipeReportKind what became of the wipe. Both belong to a session the
+	// panel itself is ending.
+	finalReadyKind      = "final_ready"
+	finalWipeReportKind = "final_wipe_report"
+)
+
+// decommissionEvidence says whether a refusal the decommission itself caused
+// has to let this message through on the session it already admitted.
+//
+// The order moves the host to retiring before the final task goes out and
+// revokes its certificates before the commit, and the envelope of every
+// relayed message is checked against the record. So the two messages of the
+// handshake - the answer to the final task, and the report of what became of
+// the wipe - were refused by the panel's own doing, and a relayed host could
+// not take part in its own decommission: the answer never arrived, the panel
+// retired the host without ever sending the commit, and the identity stayed on
+// disk. The report is the only evidence of the wipe there is, and the end of a
+// session is no evidence at all - a wipe that failed closes its session too.
+//
+// Nothing is taken on trust for it: the envelope is still signed by the key on
+// record for the certificate, the sequence is still spent, and the host still
+// has to be the one the relay named. What a revoked certificate cannot do is
+// open a session or carry anything else - a Hello is not on this list.
+func decommissionEvidence(kind, code string) bool {
+	switch kind {
+	case finalReadyKind, finalWipeReportKind:
+	default:
+		return false
+	}
+	switch code {
+	case hosts.RefusalRevokedCertificate,
+		"lifecycle_" + hosts.StateRetiring,
+		"lifecycle_" + hosts.StateRetired:
+		return true
+	}
+	return false
+}
 
 // Claim is what the panel knows about one relayed message.
 type Claim struct {
@@ -291,6 +345,10 @@ type Claim struct {
 	// Dead says the message was refused often enough to be set aside. The relay
 	// is told to stop carrying it.
 	Dead bool
+	// Busy says another delivery of this very message holds the inbox row and is
+	// applying it now. The number is spent, the work is in somebody else's
+	// hands, and this delivery must not do it a second time.
+	Busy bool
 	// Last is the watermark of the session, and Attempts how many times this
 	// message has been tried.
 	Last     uint64
@@ -300,6 +358,9 @@ type Claim struct {
 // Claim records the sequence and says what became of the message it names. The
 // watermark moves in the same statement, so two gateways serving one host's
 // spool cannot both take the same number.
+//
+// The row carries the lease of the delivery that is applying it: a number that
+// is spent and unfinished is work, and work needs one owner.
 func (r relaySequences) Claim(ctx context.Context, hostID, sessionID string,
 	sequence uint64) (Claim, error) {
 	var moved, noted bool
@@ -316,7 +377,8 @@ func (r relaySequences) Claim(ctx context.Context, hostID, sessionID string,
 			returning last_sequence
 		),
 		noted as (
-			insert into relay_inbox (host_id, session_id, sequence) values ($1, $2, $3)
+			insert into relay_inbox (host_id, session_id, sequence, claimed_by, claimed_at)
+			values ($1, $2, $3, $4, now())
 			on conflict (host_id, session_id, sequence) do nothing
 			returning 1
 		)
@@ -327,7 +389,8 @@ func (r relaySequences) Claim(ctx context.Context, hostID, sessionID string,
 		                  where host_id = $1 and session_id = $2 and sequence = $3), ''),
 		       coalesce((select attempts from relay_inbox
 		                  where host_id = $1 and session_id = $2 and sequence = $3), 0)`,
-		hostID, sessionID, int64(sequence)).Scan(&moved, &noted, &last, &state, &attempts)
+		hostID, sessionID, int64(sequence), jobs.InstanceID()).
+		Scan(&moved, &noted, &last, &state, &attempts)
 	if err != nil {
 		return Claim{}, fmt.Errorf("recording the sequence: %w", err)
 	}
@@ -336,14 +399,11 @@ func (r relaySequences) Claim(ctx context.Context, hostID, sessionID string,
 	}
 	claim := Claim{Last: uint64(last), Attempts: attempts}
 	switch {
-	case noted && moved:
-		// The row was created by this statement, so the two selects above - which
-		// read the snapshot the statement began with - saw nothing. The watermark
-		// moved with it, so this number is new work.
-		claim.Fresh = true
 	case noted:
-		// The row was created by this statement, so no gateway has ever claimed
-		// this number: it is new work. The watermark says nothing about that.
+		// The row was created by this statement - which also put this delivery's
+		// lease on it - so no gateway has ever claimed this number: it is new
+		// work. The watermark says nothing about that, and the two selects above
+		// read the snapshot the statement began with, so they saw nothing either.
 		//
 		// It used to decide here, and the spool delivers by priority before
 		// sequence - that is what priorities are for - so a message numbered
@@ -363,18 +423,48 @@ func (r relaySequences) Claim(ctx context.Context, hostID, sessionID string,
 	case state == "dead":
 		claim.Dead = true
 	default:
-		// The number was spent and the work was not finished. Whichever gateway
-		// spent it, this delivery is the one that does the work.
-		claim.Retry = true
+		// The number was spent and the work was not finished. Whoever does it has
+		// to hold the row while doing it, so the answer here is the lease: this
+		// delivery does the work, or another one already is.
+		taken, err := r.lease(ctx, hostID, sessionID, sequence)
+		if err != nil {
+			return Claim{}, err
+		}
+		claim.Retry, claim.Busy = taken, !taken
 	}
 	return claim, nil
+}
+
+// inboxLease is how long one delivery owns an unfinished message. A gateway
+// that goes down in the middle of applying one holds it for no longer than
+// this, and then the relay's next delivery takes it over.
+const inboxLease = 2 * time.Minute
+
+// lease makes this delivery the owner of a message that is spent and
+// unfinished, and says whether it got it. Nobody holds it, or the holder's
+// lease ran out: either way one statement decides, so two deliveries of the
+// same message cannot both be told to do the work.
+func (r relaySequences) lease(ctx context.Context, hostID, sessionID string, sequence uint64) (bool, error) {
+	window := fmt.Sprintf("%d seconds", int(inboxLease.Seconds()))
+	tag, err := r.pool.Exec(ctx, `
+		update relay_inbox set claimed_by = $4, claimed_at = now()
+		 where host_id = $1 and session_id = $2 and sequence = $3
+		   and state = 'received'
+		   and (claimed_by = '' or claimed_at is null or claimed_at < now() - $5::interval)`,
+		hostID, sessionID, int64(sequence), jobs.InstanceID(), window)
+	if err != nil {
+		return false, fmt.Errorf("taking the message of the relay: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 // NoteApplied records that the panel has the message. A redelivery of it is a
 // repeat from here on.
 func (r relaySequences) NoteApplied(ctx context.Context, hostID, sessionID string, sequence uint64) error {
 	_, err := r.pool.Exec(ctx, `
-		update relay_inbox set state = 'applied', applied_at = now(), last_error = ''
+		update relay_inbox
+		   set state = 'applied', applied_at = now(), last_error = '',
+		       claimed_by = '', claimed_at = null
 		 where host_id = $1 and session_id = $2 and sequence = $3 and state <> 'applied'`,
 		hostID, sessionID, int64(sequence))
 	return err
@@ -386,6 +476,8 @@ func (r relaySequences) NoteApplied(ctx context.Context, hostID, sessionID strin
 const inboxAttempts = 8
 
 // NoteFailure counts a failed apply and says whether the message was set aside.
+// The lease goes with the failure: this delivery is done with the message, and
+// the relay's next one is not to wait out a lease nobody holds any more.
 func (r relaySequences) NoteFailure(ctx context.Context, hostID, sessionID string,
 	sequence uint64, cause error) (bool, error) {
 	reason := ""
@@ -396,6 +488,7 @@ func (r relaySequences) NoteFailure(ctx context.Context, hostID, sessionID strin
 	err := r.pool.QueryRow(ctx, `
 		update relay_inbox
 		   set attempts = attempts + 1, last_error = $4,
+		       claimed_by = '', claimed_at = null,
 		       state = case when attempts + 1 >= $5 then 'dead' else state end
 		 where host_id = $1 and session_id = $2 and sequence = $3
 		returning state`,
@@ -419,19 +512,20 @@ const sequenceRetention = 30 * 24 * time.Hour
 // A message still owed is kept: it is work the panel has not done.
 func (r relaySequences) Sweep(ctx context.Context) (int64, error) {
 	window := fmt.Sprintf("%d seconds", int(sequenceRetention.Seconds()))
-	// The sessions first, and the inbox only for sessions that are gone.
+	// The inbox first, and only for sessions that were already gone when this
+	// pass began; the sessions after it.
 	//
-	// Claim now reads "this number was never claimed" as new work, which is
-	// only true while the inbox of a live session is complete. A session row's
-	// clock moves with every claim and an inbox row's does not, so a long-lived
-	// session used to lose its oldest numbers while the session itself stayed -
-	// and those numbers would then be done a second time. Keeping the two in
-	// this order costs one pass of delay and makes the question answerable.
-	tag, err := r.pool.Exec(ctx, `
-		delete from relay_host_sequences where updated_at < now() - $1::interval`, window)
-	if err != nil {
-		return 0, err
-	}
+	// Claim reads "this number was never claimed" as new work, which is only
+	// true while the inbox of a live session is complete. A session row's clock
+	// moves with every claim and an inbox row's does not, so a long-lived
+	// session would otherwise lose its oldest numbers while the session itself
+	// stayed - and those numbers would then be done a second time.
+	//
+	// This order is also the horizon of a replay. Deleting the session row and
+	// then the rows of sessions that are gone emptied both in one pass, and a
+	// message of that session presented afterwards read as never seen. Asking
+	// the inbox before the sessions leaves what the panel remembers about a
+	// message standing a whole pass longer than the session it belongs to.
 	if _, err := r.pool.Exec(ctx, `
 		delete from relay_inbox i
 		 where i.state <> 'received'
@@ -440,6 +534,11 @@ func (r relaySequences) Sweep(ctx context.Context) (int64, error) {
 		                    where s.host_id = i.host_id and s.session_id = i.session_id)`,
 		window); err != nil {
 		return 0, fmt.Errorf("sweeping the relay inbox: %w", err)
+	}
+	tag, err := r.pool.Exec(ctx, `
+		delete from relay_host_sequences where updated_at < now() - $1::interval`, window)
+	if err != nil {
+		return 0, err
 	}
 	return tag.RowsAffected(), nil
 }

@@ -120,6 +120,10 @@ type AgentService struct {
 	// samples keeps the resource samples of the hosts. Empty means a panel
 	// without the built-in monitoring: the samples are then dropped.
 	samples *monitoring.Store
+	// highestSequence answers how far a boot of a host got, for the one hint an
+	// acknowledgement carries. It is the sample store's, and a field so that a
+	// test can put a store that does not answer behind it.
+	highestSequence func(ctx context.Context, hostID, bootID string) (uint64, error)
 	// attempts translates the identifier of an attempt into the identifier of an
 	// operation.
 	attemptsMu sync.RWMutex
@@ -188,7 +192,10 @@ func (s *AgentService) SetAssessmentRefresh(refresh func(hostID string)) {
 func (s *AgentService) SetEvents(bus *events.Bus) { s.events = bus }
 
 // SetMetrics connects the store the resource samples of the hosts go to.
-func (s *AgentService) SetMetrics(store *monitoring.Store) { s.samples = store }
+func (s *AgentService) SetMetrics(store *monitoring.Store) {
+	s.samples = store
+	s.highestSequence = store.HighestSequence
+}
 
 // SetClonePolicy sets what the gateway does with a copied identity.
 func (s *AgentService) SetClonePolicy(policy ClonePolicy) { s.clonePolicy = policy }
@@ -538,6 +545,15 @@ func (s *AgentService) checkRelayedMessage(ctx context.Context, hostID string, s
 	verified, err := s.envelopes.VerifyMessage(ctx, relayed.peer, msg)
 	if err != nil {
 		if refusal := RelayRefusalOf(err); refusal != nil && refusal.Code == hosts.RefusalRelaySequenceReplayed {
+			if refusal.InFlight {
+				// Another delivery of this very message holds it and is applying it.
+				// Nothing is written on the host - this is not its doing - and nothing
+				// is acknowledged: the record stays in the relay's spool, which is what
+				// has to carry the message again if that delivery does not finish it.
+				s.log.Warn("a relayed message is being applied by another delivery and this one was dropped unacknowledged",
+					"host_id", hostID, "relay_id", relayed.peer.RelayID, "detail", refusal.Detail)
+				return errMessageDropped
+			}
 			if refusal.Redelivery {
 				// The panel consumed this message already and the relay carried it again
 				// because the acknowledgement never reached it - a link that broke while
@@ -694,7 +710,7 @@ func (s *AgentService) recordSample(ctx context.Context, hostID string, session 
 	if s.samples == nil {
 		// A gateway without a monitoring store keeps no samples at all.
 		status = monitoring.ErrorSampleNotKept
-		s.ackSample(hostID, session, sample,
+		s.ackSample(ctx, hostID, session, sample,
 			agentv1.MetricsAck_STATUS_REJECTED_INVALID, monitoring.ErrorSampleNotKept)
 		return nil
 	}
@@ -713,7 +729,7 @@ func (s *AgentService) recordSample(ctx context.Context, hostID string, session 
 			status = "error"
 			return err
 		}
-		s.ackSample(hostID, session, sample,
+		s.ackSample(ctx, hostID, session, sample,
 			agentv1.MetricsAck_STATUS_REJECTED_TOO_OLD, monitoring.ErrorSampleTooOld)
 		return nil
 	}
@@ -734,9 +750,14 @@ func (s *AgentService) recordSample(ctx context.Context, hostID string, session 
 	if outcome == monitoring.OutcomeDuplicate {
 		ack, status = agentv1.MetricsAck_STATUS_DUPLICATE, "duplicate"
 	}
-	s.ackSample(hostID, session, sample, ack, "")
+	s.ackSample(ctx, hostID, session, sample, ack, "")
 	return nil
 }
+
+// resumeHintTimeout bounds the one query behind the acknowledgement of a
+// sample. It used to run on context.Background(): no deadline, and no
+// cancellation when the session it answers is already gone.
+var resumeHintTimeout = 2 * time.Second
 
 // resumeHint is the number a host that lost its counter needs: the highest
 // sequence this panel holds for that boot. It is only answered for a refusal by
@@ -745,10 +766,15 @@ func (s *AgentService) recordSample(ctx context.Context, hostID string, session 
 // walking its numbering up as it did before.
 func (s *AgentService) resumeHint(ctx context.Context, hostID string,
 	sample *agentv1.MetricsSample, status agentv1.MetricsAck_Status) *uint64 {
-	if status != agentv1.MetricsAck_STATUS_DUPLICATE || s.samples == nil {
+	if status != agentv1.MetricsAck_STATUS_DUPLICATE || s.highestSequence == nil {
 		return nil
 	}
-	highest, err := s.samples.HighestSequence(ctx, hostID, sample.GetBootId())
+	// The hint is a convenience on the way to an acknowledgement the host is
+	// waiting for, so it gets a deadline of its own: a store that does not
+	// answer costs the host the hint, not the acknowledgement.
+	ctx, cancel := context.WithTimeout(ctx, resumeHintTimeout)
+	defer cancel()
+	highest, err := s.highestSequence(ctx, hostID, sample.GetBootId())
 	if err != nil {
 		s.log.Warn("the panel could not say how far this boot got; the host keeps renumbering upwards",
 			"host_id", hostID, "boot_id", sample.GetBootId(), "err", err)
@@ -761,8 +787,8 @@ func (s *AgentService) resumeHint(ctx context.Context, hostID string,
 }
 
 // ackSample tells the agent what became of one sample.
-func (s *AgentService) ackSample(hostID string, session *Session, sample *agentv1.MetricsSample,
-	status agentv1.MetricsAck_Status, reason string) {
+func (s *AgentService) ackSample(ctx context.Context, hostID string, session *Session,
+	sample *agentv1.MetricsSample, status agentv1.MetricsAck_Status, reason string) {
 	if session == nil || sample.GetBootId() == "" || sample.GetSequence() == 0 {
 		return
 	}
@@ -772,7 +798,7 @@ func (s *AgentService) ackSample(hostID string, session *Session, sample *agentv
 			Sequence:            sample.GetSequence(),
 			Status:              status,
 			ReasonCode:          reason,
-			HighestSequenceHeld: s.resumeHint(context.Background(), hostID, sample, status),
+			HighestSequenceHeld: s.resumeHint(ctx, hostID, sample, status),
 		}},
 	}, ackSendTimeout)
 	if err != nil {
@@ -3085,9 +3111,17 @@ func capabilitiesFromProto(caps *agentv1.Capabilities) hosts.Capabilities {
 }
 
 // localAccountsFromReport moves the accounts from a report into the inventory
-// model.
+// model. Nil is "this report says nothing about the accounts", which leaves
+// what the panel holds standing; an empty list erases it.
 func localAccountsFromReport(report *agentv1.InventoryReport) []inventory.LocalAccount {
 	if !report.GetFull() && len(report.GetLocalAccounts()) == 0 {
+		return nil
+	}
+	if len(report.GetLocalAccounts()) == 0 && accountsUnavailable(report) != "" {
+		// The host could not read its accounts. A full report would otherwise
+		// replace every account the panel holds with nothing, and the operator
+		// would read a host with no local accounts - which is not a thing that
+		// happens - instead of a host nobody could ask.
 		return nil
 	}
 	accounts := make([]inventory.LocalAccount, 0, len(report.GetLocalAccounts()))
@@ -3756,6 +3790,17 @@ func smartResultJSON(smart *agentv1.SmartResult) map[string]any {
 		encoded["wear_percent"] = smart.GetWearPercent()
 	}
 	return encoded
+}
+
+// accountsUnavailable returns what the host says went wrong with reading its
+// accounts, empty when the module was read.
+func accountsUnavailable(report *agentv1.InventoryReport) string {
+	for _, fragment := range report.GetFragments() {
+		if fragment.GetModule() == inventory.ModuleAccounts {
+			return fragment.GetUnavailableReason()
+		}
+	}
+	return ""
 }
 
 // fragmentsFromReport reads the modules of a report.

@@ -728,6 +728,10 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 	// the acknowledgements are read as they come and a wedged stream does not
 	// hold up the heartbeat.
 	go results.offer(time.Now())
+	// And it keeps looking afterwards: a task of a session that broke finishes
+	// while this one is running and writes its answer to the spool of the
+	// process, which no later trigger used to read.
+	go results.watch(sessionCtx)
 
 	// A stable per-host offset spreads the heartbeats of the whole fleet over
 	// time.

@@ -126,6 +126,46 @@ func (s *Store) Upsert(ctx context.Context, tx pgx.Tx, name, site, environment s
 // certificate being written was being signed.
 var ErrCertificateMoved = errors.New("the certificate of this relay moved while it was being issued")
 
+// The write carries the condition the caller decided on: the row was not
+// revoked, and it held the fingerprint the relay presented. A renewal reads
+// those facts, signs a certificate - which takes a moment - and then writes; a
+// revocation committed in that moment used to be wiped by "revoked_at = null",
+// and the relay got its authority back with nothing in the journal but a
+// successful renewal.
+//
+// The condition accepts whichever fingerprint the lookup accepted, the current
+// one or the one it replaced while that is still in its term. A relay whose
+// renewal answer was lost keeps the certificate it already has, so it comes
+// back with the previous one - recognised at the handshake, and then refused
+// here, which left it with no way to renew at all until its certificate
+// expired and it fell out of the fleet.
+//
+// Deciding on the previous certificate also leaves the overlap where it is:
+// that one is what the relay is holding, and it has to stay recognisable in
+// case this answer is lost too. The certificate being replaced is one nobody
+// ever installed.
+//
+// $7 null is the first certificate of a relay, where there is no fingerprint
+// yet to have decided on.
+const saveCertificateQuery = `
+	update relays
+	   set previous_fingerprint_sha256 = case
+	           when fingerprint_sha256 is null or fingerprint_sha256 = $2
+	                or previous_fingerprint_sha256 = $7 then previous_fingerprint_sha256
+	           else fingerprint_sha256 end,
+	       previous_not_after = case
+	           when fingerprint_sha256 is null or fingerprint_sha256 = $2
+	                or previous_fingerprint_sha256 = $7 then previous_not_after
+	           else not_after end,
+	       fingerprint_sha256 = $2, serial = $3, not_after = $4,
+	       issuer_subject = nullif($5, ''), issuer_serial = nullif($6, '')
+	 where id = $1
+	   and revoked_at is null
+	   and ($7::bytea is null
+	        or fingerprint_sha256 = $7
+	        or (previous_fingerprint_sha256 = $7
+	            and (previous_not_after is null or previous_not_after > now())))`
+
 // SaveCertificate writes the current certificate of a relay and keeps the one
 // it replaces. The answer to a renewal can be lost, and the relay commits its
 // new identity only when the answer arrives: without the overlap it would then
@@ -133,29 +173,7 @@ var ErrCertificateMoved = errors.New("the certificate of this relay moved while 
 // that refuses an unknown certificate.
 func (s *Store) SaveCertificate(ctx context.Context, tx pgx.Tx, id, serial string,
 	fingerprint []byte, notAfter time.Time, issuer Issuer, decidedOn []byte) error {
-	// The write carries the condition the caller decided on: the row was not
-	// revoked, and it held this fingerprint. A renewal reads those facts, signs
-	// a certificate - which takes a moment - and then writes; a revocation
-	// committed in that moment used to be wiped by "revoked_at = null", and
-	// the relay got its authority back with nothing in the journal but a
-	// successful renewal.
-	//
-	// decidedOn nil is the first certificate of a relay, where there is no
-	// fingerprint yet to have decided on.
-	const query = `
-		update relays
-		   set previous_fingerprint_sha256 = case
-		           when fingerprint_sha256 is null or fingerprint_sha256 = $2 then previous_fingerprint_sha256
-		           else fingerprint_sha256 end,
-		       previous_not_after = case
-		           when fingerprint_sha256 is null or fingerprint_sha256 = $2 then previous_not_after
-		           else not_after end,
-		       fingerprint_sha256 = $2, serial = $3, not_after = $4,
-		       issuer_subject = nullif($5, ''), issuer_serial = nullif($6, '')
-		 where id = $1
-		   and revoked_at is null
-		   and ($7::bytea is null or fingerprint_sha256 = $7)`
-	tag, err := tx.Exec(ctx, query, id, fingerprint, serial, notAfter,
+	tag, err := tx.Exec(ctx, saveCertificateQuery, id, fingerprint, serial, notAfter,
 		issuer.Subject, issuer.Serial, decidedOn)
 	if err != nil {
 		return err
@@ -248,21 +266,25 @@ type Status struct {
 	Current bool
 }
 
+// The fingerprints a relay is recognised by: the current one, and the one it
+// replaced while that is still in its term. Whatever this accepts, the write
+// of the next renewal has to accept as well.
+const lookupCertificateQuery = `
+	select id, name, site, coalesce(environment, ''), revoked_at is not null,
+	       fingerprint_sha256 = $1
+	  from relays
+	 where fingerprint_sha256 = $1
+	    or (previous_fingerprint_sha256 = $1
+	        and (previous_not_after is null or previous_not_after > now()))
+	 order by (fingerprint_sha256 = $1) desc
+	 limit 1`
+
 // LookupCertificate recognises a relay by the fingerprint of its certificate,
 // current or the one it replaced. The overlap ends when the relay first
 // arrives with the new certificate, or when the old one expires.
 func (s *Store) LookupCertificate(ctx context.Context, fingerprint []byte) (Status, error) {
-	const query = `
-		select id, name, site, coalesce(environment, ''), revoked_at is not null,
-		       fingerprint_sha256 = $1
-		  from relays
-		 where fingerprint_sha256 = $1
-		    or (previous_fingerprint_sha256 = $1
-		        and (previous_not_after is null or previous_not_after > now()))
-		 order by (fingerprint_sha256 = $1) desc
-		 limit 1`
 	var status Status
-	err := s.pool.QueryRow(ctx, query, fingerprint).
+	err := s.pool.QueryRow(ctx, lookupCertificateQuery, fingerprint).
 		Scan(&status.ID, &status.Name, &status.Site, &status.Environment, &status.Revoked,
 			&status.Current)
 	if errors.Is(err, pgx.ErrNoRows) {

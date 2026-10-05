@@ -59,6 +59,37 @@ func TestTheNumberingIsNotHandedBackByAnAcknowledgement(t *testing.T) {
 	}
 }
 
+// The number the panel named survives a restart. The host moved its numbering
+// in memory while the counter on disk still said what it said before, so an
+// agent that went down before its next sample - a minute away, and a host that
+// lost its counter is a host that has been restarting - came back below the
+// range the panel holds and began climbing out of it one refused sample at a
+// time all over again.
+func TestTheNumberingThePanelNamedSurvivesARestart(t *testing.T) {
+	dir := t.TempDir()
+	spool := openSpool(t, dir, "boot-a", 50)
+	first := &agentv1.MetricsSample{}
+	if err := spool.Enqueue(first); err != nil {
+		t.Fatal(err)
+	}
+	held := uint64(4321)
+	spool.Acknowledge(&agentv1.MetricsAck{
+		BootId: first.GetBootId(), Sequence: first.GetSequence(),
+		Status: agentv1.MetricsAck_STATUS_DUPLICATE, HighestSequenceHeld: &held,
+	})
+
+	// The agent restarts on the same boot, before it took another sample.
+	returned := openSpool(t, dir, "boot-a", 50)
+	next := &agentv1.MetricsSample{}
+	if err := returned.Enqueue(next); err != nil {
+		t.Fatal(err)
+	}
+	if next.GetSequence() != held+1 {
+		t.Fatalf("the first sample after the restart is %d; the panel holds up to %d, so it has to be %d",
+			next.GetSequence(), held, held+1)
+	}
+}
+
 // A persisted sample says nothing the host does not know, so it must not move
 // the numbering even if the field arrives filled in.
 func TestAPersistedAcknowledgementDoesNotMoveTheNumbering(t *testing.T) {
