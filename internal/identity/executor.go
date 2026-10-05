@@ -88,7 +88,7 @@ type Executor struct {
 	// can do, which entry it holds, the move itself, and the local denial marker.
 	capabilities func(ctx context.Context, uid string) (freeipa.DirectoryCapabilities, error)
 	entryOf      func(ctx context.Context, uid string) (freeipa.EntryReference, error)
-	preserve     func(ctx context.Context, uid string, planned freeipa.EntryReference) error
+	preserve     func(ctx context.Context, uid string, planned freeipa.EntryReference) (freeipa.PreserveProof, error)
 	localDeny    func(ctx context.Context, subject, reason string, denied bool) (int64, error)
 }
 
@@ -639,7 +639,8 @@ func (e *Executor) preserveUser(ctx context.Context, change Change,
 	phases = append(phases, skipPhase(phase, "the entry is the one the plan named ("+planned.Binding()+")"))
 
 	phase = startPhase("preserving the account in the directory")
-	if err := e.preserveInDirectory(ctx, ref.UID, planned); err != nil {
+	proof, err := e.preserveInDirectory(ctx, ref.UID, planned)
+	if err != nil {
 		code := RefusalDirectoryRefused
 		if errors.Is(err, freeipa.ErrEntryMoved) {
 			code = RefusalStalePlan
@@ -647,6 +648,17 @@ func (e *Executor) preserveUser(ctx context.Context, change Change,
 		return append(phases, refusedPhase(phase, code, err.Error())), nil
 	}
 	phases = append(phases, finishPhase(phase, nil, "the entry stays as a preserved account"))
+
+	// Whether the entry after the move is the one the operator consented to is
+	// a step of its own: it was read back and compared, or it was not, and the
+	// phase that said "the entry stays as a preserved account" claimed a proof
+	// it did not always have.
+	phase = startPhase("confirming the identity of the preserved entry")
+	if proof.Confirmed {
+		phases = append(phases, finishPhase(phase, nil, proof.Detail))
+	} else {
+		phases = append(phases, skipPhase(phase, proof.Detail))
+	}
 
 	reason := firstNonEmpty(ref.Reason, "the account was preserved")
 	phase = startPhase("the local denial marker")
@@ -682,7 +694,7 @@ func (e *Executor) directoryEntry(ctx context.Context, uid string) (freeipa.Entr
 }
 
 func (e *Executor) preserveInDirectory(ctx context.Context, uid string,
-	planned freeipa.EntryReference) error {
+	planned freeipa.EntryReference) (freeipa.PreserveProof, error) {
 	if e.preserve != nil {
 		return e.preserve(ctx, uid, planned)
 	}

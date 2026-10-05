@@ -236,6 +236,8 @@ type preserveHarness struct {
 	entry        freeipa.EntryReference
 	entryErr     error
 	preserveErr  error
+	// proof is what the adapter could establish about the entry after the move.
+	proof freeipa.PreserveProof
 }
 
 func newPreserveHarness(t *testing.T) *preserveHarness {
@@ -244,6 +246,10 @@ func newPreserveHarness(t *testing.T) *preserveHarness {
 		// A directory that reports the connector may move an entry: the
 		// preflight then blocks nothing and the test is about what follows.
 		capabilities: freeipa.DirectoryCapabilities{UserModDN: true},
+		// The entry was read back after the move and carries the identifier the
+		// plan named: the ordinary case, where the preserve is proven.
+		proof: freeipa.PreserveProof{Confirmed: true,
+			Detail: "the preserved entry carries the identifier the plan named"},
 		entry: freeipa.EntryReference{
 			DN:              "uid=alice,cn=users,cn=accounts,dc=ipa,dc=example,dc=test",
 			EntryUUID:       "0b1d4c8e-0000-0000-0000-000000000001",
@@ -268,9 +274,9 @@ func newPreserveHarness(t *testing.T) *preserveHarness {
 			harness.order = append(harness.order, "entry:"+uid)
 			return harness.entry, harness.entryErr
 		},
-		preserve: func(_ context.Context, uid string, planned freeipa.EntryReference) error {
+		preserve: func(_ context.Context, uid string, planned freeipa.EntryReference) (freeipa.PreserveProof, error) {
 			harness.order = append(harness.order, "preserve:"+uid+"@"+planned.DN)
-			return harness.preserveErr
+			return harness.proof, harness.preserveErr
 		},
 		localDeny: func(_ context.Context, subject, _ string, denied bool) (int64, error) {
 			harness.order = append(harness.order, fmt.Sprintf("deny:%s:%v", subject, denied))
@@ -358,6 +364,59 @@ func TestAPreserveAsksTheDirectoryBeforeItTouchesTheLocalAccount(t *testing.T) {
 	if state := StateFor(phases); state != StateSucceeded {
 		t.Errorf("the change is %s, expected succeeded", state)
 	}
+}
+
+// A preserve the directory could not be asked about afterwards used to end in
+// a phase reading "the entry stays as a preserved account" - a claim of a proof
+// nobody had. The confirmation is a step of its own now, and it says which of
+// the two it was.
+func TestAPreserveSaysWhetherTheEntryAfterTheMoveWasConfirmed(t *testing.T) {
+	harness := newPreserveHarness(t)
+	phases, _ := harness.executor.preserveUser(context.Background(),
+		preserveChange(harness.entry), &ReferencePayload{UID: "alice"})
+	confirmation, found := phaseNamed(phases, "confirming the identity of the preserved entry")
+	if !found {
+		t.Fatalf("no phase confirms the entry: %+v", phases)
+	}
+	if confirmation.Status != "succeeded" {
+		t.Fatalf("a confirmed entry became %s (%s)", confirmation.Status, confirmation.Message)
+	}
+
+	// The same preserve on a directory that offers no read of its preserved
+	// accounts: carried out, not proven, and the change is not a failure.
+	unproven := newPreserveHarness(t)
+	unproven.proof = freeipa.PreserveProof{
+		Detail: "this directory offers no read of its preserved accounts, so the entry was not read after the move",
+	}
+	phases, revoked := unproven.executor.preserveUser(context.Background(),
+		preserveChange(unproven.entry), &ReferencePayload{UID: "alice"})
+	confirmation, found = phaseNamed(phases, "confirming the identity of the preserved entry")
+	if !found {
+		t.Fatalf("no phase confirms the entry: %+v", phases)
+	}
+	if confirmation.Status != "skipped" {
+		t.Fatalf("an unproven entry became %s (%s)", confirmation.Status, confirmation.Message)
+	}
+	if !strings.Contains(confirmation.Message, "no read of its preserved accounts") {
+		t.Errorf("the phase does not say why there is no proof: %q", confirmation.Message)
+	}
+	// The account is preserved either way, so the panel's own half still runs.
+	if !unproven.did("deny:alice:true") || revoked == nil {
+		t.Errorf("the local half did not run after an unproven preserve: %v", unproven.order)
+	}
+	if state := StateFor(phases); state != StateSucceeded {
+		t.Errorf("the change is %s, expected succeeded", state)
+	}
+}
+
+// phaseNamed finds a phase by its name.
+func phaseNamed(phases []Phase, name string) (Phase, bool) {
+	for _, phase := range phases {
+		if phase.Name == name {
+			return phase, true
+		}
+	}
+	return Phase{}, false
 }
 
 // Two operators preserving the same user: the second one finds the entry

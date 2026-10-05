@@ -95,8 +95,12 @@ func TestPreserveUserAtChecksEveryValueThePlanCarries(t *testing.T) {
 	// plan bound to the two values it does report, and those agree.
 	fake.answers["user_show"] = entry(planned.EntryUUID, "")
 	fake.answers["user_find"] = preserved(planned.EntryUUID)
-	if err := client.PreserveUserAt(context.Background(), "jane", planned); err != nil {
+	proof, err := client.PreserveUserAt(context.Background(), "jane", planned)
+	if err != nil {
 		t.Fatalf("a plan bound to the entry it named was refused: %v", err)
+	}
+	if !proof.Confirmed || !strings.Contains(proof.Detail, planned.EntryUUID) {
+		t.Fatalf("the entry read back and compared came back as %+v", proof)
 	}
 	if fake.count("user_del") != 1 {
 		t.Fatalf("the move was ordered %d times", fake.count("user_del"))
@@ -110,7 +114,7 @@ func TestPreserveUserAtChecksEveryValueThePlanCarries(t *testing.T) {
 	swapped, client := newFakeDirectory(t)
 	swapped.answers["user_show"] = entry(planned.EntryUUID, "")
 	swapped.answers["user_find"] = preserved("0b1d4c8e-0000-0000-0000-000000000009")
-	if err := client.PreserveUserAt(context.Background(), "jane", planned); !errors.Is(err, ErrEntryMoved) {
+	if _, err := client.PreserveUserAt(context.Background(), "jane", planned); !errors.Is(err, ErrEntryMoved) {
 		t.Fatalf("another entry was preserved and kept: %v", err)
 	}
 	if swapped.count("user_undel") != 1 {
@@ -125,11 +129,59 @@ func TestPreserveUserAtChecksEveryValueThePlanCarries(t *testing.T) {
 	silent.answers["user_find"] = func(rpcCall) (any, *rpcError) {
 		return nil, &rpcError{Name: "OptionError", Message: "Unknown option: preserved"}
 	}
-	if err := client.PreserveUserAt(context.Background(), "jane", planned); err != nil {
+	proof, err = client.PreserveUserAt(context.Background(), "jane", planned)
+	if err != nil {
 		t.Fatalf("a preserve on a directory that cannot be asked afterwards was reported as failed: %v", err)
+	}
+	// Carried out and not proven: the phase says so instead of claiming the
+	// entry was read back and compared.
+	if proof.Confirmed {
+		t.Fatalf("a preserve nobody could confirm came back confirmed: %+v", proof)
+	}
+	if !strings.Contains(proof.Detail, "no read of its preserved accounts") {
+		t.Errorf("the detail does not say why there is no proof: %q", proof.Detail)
 	}
 	if silent.count("user_undel") != 0 {
 		t.Fatal("the account was put back because the directory could not be asked")
+	}
+
+	// The read after the move failed for a reason of its own: the account is
+	// preserved, so that is reported rather than a refusal of a move that did
+	// happen - and the entry is reported as unproven.
+	unread, client := newFakeDirectory(t)
+	unread.answers["user_show"] = entry(planned.EntryUUID, "")
+	unread.answers["user_find"] = func(rpcCall) (any, *rpcError) {
+		return nil, &rpcError{Code: 4203, Name: "ExecutionError", Message: "the server failed"}
+	}
+	proof, err = client.PreserveUserAt(context.Background(), "jane", planned)
+	if err != nil {
+		t.Fatalf("a preserve that was carried out was reported as a refusal: %v", err)
+	}
+	if proof.Confirmed || !strings.Contains(proof.Detail, "could not be read back") {
+		t.Fatalf("the proof of an unreadable entry is %+v", proof)
+	}
+	if unread.count("user_undel") != 0 {
+		t.Fatal("the account was put back because the entry could not be read")
+	}
+
+	// The preserved entry comes back without an identifier: there is nothing to
+	// compare, which is not the same thing as a comparison that agreed.
+	nameless, client := newFakeDirectory(t)
+	nameless.answers["user_show"] = entry(planned.EntryUUID, "")
+	nameless.answers["user_find"] = func(rpcCall) (any, *rpcError) {
+		return map[string]any{"result": []any{map[string]any{
+			"dn": "uid=jane,cn=deleted users,cn=accounts,dc=test",
+		}}}, nil
+	}
+	proof, err = client.PreserveUserAt(context.Background(), "jane", planned)
+	if err != nil {
+		t.Fatalf("a preserve whose entry carries no identifier was refused: %v", err)
+	}
+	if proof.Confirmed || !strings.Contains(proof.Detail, "no identifier") {
+		t.Fatalf("the proof of an entry with no identifier is %+v", proof)
+	}
+	if nameless.count("user_undel") != 0 {
+		t.Fatal("the account was put back although nothing contradicted the plan")
 	}
 
 	// Another entry under the same name: the identifier says so, and
@@ -137,7 +189,7 @@ func TestPreserveUserAtChecksEveryValueThePlanCarries(t *testing.T) {
 	reused, client := newFakeDirectory(t)
 	reused.answers["user_show"] = entry("0b1d4c8e-0000-0000-0000-000000000002", "")
 	reused.answers["user_find"] = preserved("0b1d4c8e-0000-0000-0000-000000000002")
-	err := client.PreserveUserAt(context.Background(), "jane", planned)
+	_, err = client.PreserveUserAt(context.Background(), "jane", planned)
 	if !errors.Is(err, ErrEntryMoved) {
 		t.Fatalf("a different entry under the same name was preserved: %v", err)
 	}
@@ -152,7 +204,7 @@ func TestPreserveUserAtChecksEveryValueThePlanCarries(t *testing.T) {
 	// than carried out on whatever is there now.
 	empty, client := newFakeDirectory(t)
 	empty.answers["user_show"] = entry(planned.EntryUUID, "")
-	if err := client.PreserveUserAt(context.Background(), "jane", EntryReference{}); !errors.Is(err, ErrEntryMoved) {
+	if _, err := client.PreserveUserAt(context.Background(), "jane", EntryReference{}); !errors.Is(err, ErrEntryMoved) {
 		t.Fatalf("a plan bound to nothing was carried out: %v", err)
 	}
 	if empty.count("user_del") != 0 || empty.count("user_show") != 0 {

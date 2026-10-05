@@ -522,24 +522,35 @@ func (c *Client) PreserveUser(ctx context.Context, uid string) error {
 // somebody made in between.
 var ErrEntryMoved = errors.New("the entry is not the one the plan named")
 
+// PreserveProof says what was established about the entry after the move.
+// Confirmed means the preserved entry was read back and carries the identifier
+// the plan named; anything else is a preserve that was carried out and not
+// proven, and Detail says which of the reasons it is. A preserve nobody could
+// confirm is not a preserve nobody carried out, and it is not a confirmed one
+// either - so it travels as neither.
+type PreserveProof struct {
+	Confirmed bool
+	Detail    string
+}
+
 // PreserveUserAt preserves an account only while it is still the entry the
-// plan was made for.
-func (c *Client) PreserveUserAt(ctx context.Context, uid string, planned EntryReference) error {
+// plan was made for, and says what it could prove about the entry afterwards.
+func (c *Client) PreserveUserAt(ctx context.Context, uid string, planned EntryReference) (PreserveProof, error) {
 	if !userNamePattern.MatchString(uid) {
-		return fmt.Errorf("invalid account name %q", uid)
+		return PreserveProof{}, fmt.Errorf("invalid account name %q", uid)
 	}
 	if !planned.Complete() {
-		return fmt.Errorf("%w: the plan names no entry to bind to", ErrEntryMoved)
+		return PreserveProof{}, fmt.Errorf("%w: the plan names no entry to bind to", ErrEntryMoved)
 	}
 	current, err := c.UserEntry(ctx, uid)
 	if err != nil {
-		return err
+		return PreserveProof{}, err
 	}
 	if reason, moved := planned.Moved(current); moved {
-		return fmt.Errorf("%w: %s (the plan was %s)", ErrEntryMoved, reason, planned.Binding())
+		return PreserveProof{}, fmt.Errorf("%w: %s (the plan was %s)", ErrEntryMoved, reason, planned.Binding())
 	}
 	if err := c.PreserveUser(ctx, uid); err != nil {
-		return err
+		return PreserveProof{}, err
 	}
 
 	// The directory offers no compare-and-delete, so the binding is proven
@@ -554,24 +565,50 @@ func (c *Client) PreserveUserAt(ctx context.Context, uid string, planned EntryRe
 		// its preserved accounts, so there is no after-the-fact proof to have.
 		// Treating that as a failure undid every successful preserve on such a
 		// directory - which is the same mistake as reading "the probe could not
-		// run" as "the answer is no".
-		return nil
+		// run" as "the answer is no". It is reported as unproven, because
+		// reporting it as proven was the other half of the same mistake.
+		return PreserveProof{Detail: "this directory offers no read of its preserved accounts, so the " +
+			"entry was not read after the move; the binding before it is the whole of the proof (" +
+			planned.Binding() + ")"}, nil
 	}
 	if err != nil {
-		return fmt.Errorf("the account %s was preserved and could not be read back, so it is not "+
-			"known whether it is the entry the plan named: %w", uid, err)
+		return PreserveProof{Detail: "the preserved entry could not be read back, so it is not known " +
+			"whether it is the entry the plan named: " + err.Error()}, nil
 	}
 	// Judged by the identifier alone: the preserve itself moved the entry and
 	// stamped it, so the DN and the timestamp have changed by definition and
 	// comparing them would refuse every preserve that worked.
 	if reason, moved := planned.Replaced(after); moved {
 		if undo := c.UndeleteUser(ctx, uid); undo != nil {
-			return fmt.Errorf("%w: %s; putting it back failed too, so %s stays preserved and "+
+			return PreserveProof{}, fmt.Errorf("%w: %s; putting it back failed too, so %s stays preserved and "+
 				"needs a person: %v", ErrEntryMoved, reason, uid, undo)
 		}
-		return fmt.Errorf("%w: %s; the account was put back", ErrEntryMoved, reason)
+		return PreserveProof{}, fmt.Errorf("%w: %s; the account was put back", ErrEntryMoved, reason)
 	}
-	return nil
+	// Replaced answers "no" where there is nothing to compare, which is the
+	// answer a caller needs for the decision to put the account back and not
+	// the answer it needs for the trail: without an identifier on either side
+	// the entry after the move was never identified.
+	if missing := unidentified(planned, after); missing != "" {
+		return PreserveProof{Detail: missing + ", so there was nothing to compare after the move; " +
+			"the binding before it is the whole of the proof (" + planned.Binding() + ")"}, nil
+	}
+	return PreserveProof{Confirmed: true,
+		Detail: "the preserved entry carries the identifier the plan named (" + after.EntryUUID + ")"}, nil
+}
+
+// unidentified names the side that carries no identifier, and an empty string
+// when both do.
+func unidentified(planned, after EntryReference) string {
+	switch {
+	case planned.EntryUUID == "" && after.EntryUUID == "":
+		return "neither the plan nor the preserved entry carries an identifier"
+	case planned.EntryUUID == "":
+		return "the plan carries no identifier of the entry"
+	case after.EntryUUID == "":
+		return "the directory reports no identifier for the preserved entry"
+	}
+	return ""
 }
 
 // PreservedEntry reads a preserved account, which user_show does not return
