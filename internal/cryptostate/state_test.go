@@ -115,6 +115,9 @@ type fakeProvider struct {
 	active string
 	keys   map[string]*secrets.Cipher
 	raw    map[string][]byte
+	// adopts counts the calls to Adopt, which is the one that keeps a key
+	// where the installation will find it again.
+	adopts int
 }
 
 func newFakeProvider() *fakeProvider {
@@ -163,6 +166,14 @@ func (f *fakeProvider) GenerateNamed(ctx context.Context, id string) error {
 
 func (f *fakeProvider) Adopt(_ context.Context, id string, key []byte) error {
 	f.mu.Lock()
+	f.adopts++
+	f.mu.Unlock()
+	return f.keep(id, key)
+}
+
+// keep is what both Adopt and Offer do to this fake's maps.
+func (f *fakeProvider) keep(id string, key []byte) error {
+	f.mu.Lock()
 	defer f.mu.Unlock()
 	if existing, ok := f.raw[id]; ok {
 		if string(existing) != string(key) {
@@ -177,6 +188,14 @@ func (f *fakeProvider) Adopt(_ context.Context, id string, key []byte) error {
 	f.keys[id] = cipher
 	f.raw[id] = key
 	return nil
+}
+
+// Offer keeps the key in the maps and nothing else, and - unlike Adopt - does
+// not count. The real providers differ in that Adopt writes a file or a row;
+// what a test here can hold them to is that a start which refuses never got as
+// far as Adopt.
+func (f *fakeProvider) Offer(id string, key []byte) error {
+	return f.keep(id, key)
 }
 
 func (f *fakeProvider) SetActive(id string) {
@@ -937,6 +956,13 @@ func TestAKeyThatDoesNotOpenTheFirstFormIsNotAdopted(t *testing.T) {
 	}
 	if l.storage.record != nil {
 		t.Fatal("a record was written for an installation whose secrets the key does not open")
+	}
+	// The key was tried, not kept. A refusal that had already adopted left
+	// keys/legacy.key holding the key it refused, and the next start - with the
+	// right secrets.key restored - was refused for differing from it: the
+	// repair of a refusal needed a file nobody had been told about.
+	if l.provider.adopts != 0 {
+		t.Fatalf("the refused start kept the key it refused (%d adoptions)", l.provider.adopts)
 	}
 	// Nothing is lost by the refusal: the ciphertexts are untouched because
 	// they were never read for writing, and the key file is the one that was

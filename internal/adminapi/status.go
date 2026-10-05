@@ -771,18 +771,19 @@ func (s *Server) cryptoStatus(ctx context.Context) statusBlock {
 	}
 	report := s.process.Crypto.Report(ctx)
 	facts := map[string]any{
-		"installation_id":    report.InstallationID,
-		"provider":           report.Provider,
-		"active_key_id":      report.ActiveKeyID,
-		"issuer_id":          report.IssuerID,
-		"issuer_fingerprint": report.IssuerFingerprint,
-		"revision":           report.Revision,
-		"initialized_at":     report.InitializedAt.UTC(),
-		"keys":               report.Keys,
-		"versions_by_key":    report.VersionsByKey,
-		"pending_rewrap":     report.PendingRewrap,
-		"initialised":        report.Initialised,
-		"adopted":            report.Adopted,
+		"installation_id":     report.InstallationID,
+		"provider":            report.Provider,
+		"active_key_id":       report.ActiveKeyID,
+		"issuer_id":           report.IssuerID,
+		"issuer_fingerprint":  report.IssuerFingerprint,
+		"revision":            report.Revision,
+		"initialized_at":      report.InitializedAt.UTC(),
+		"keys":                report.Keys,
+		"versions_by_key":     report.VersionsByKey,
+		"pending_rewrap":      report.PendingRewrap,
+		"unreadable_versions": report.UnreadableVersions,
+		"initialised":         report.Initialised,
+		"adopted":             report.Adopted,
 	}
 	if report.RecordedProvider != "" {
 		// The record was changed beside this process, which a restart resolves
@@ -804,12 +805,31 @@ func (s *Server) cryptoStatus(ctx context.Context) statusBlock {
 		return statusFailed("this replica is behind the installation record: "+report.Stale, facts)
 	}
 	block := statusOK(facts)
-	if report.PendingRewrap > 0 {
-		block.Attention = strconv.Itoa(report.PendingRewrap) + " secret versions are still on another key or in the old form; the rewrap runs in the background"
-	} else if unused := unusedKeys(report); len(unused) > 0 {
-		block.Attention = "keys that no version names any more may be removed: " + strings.Join(unused, ", ")
-	}
+	block.Attention = cryptoAttention(report)
 	return block
+}
+
+// cryptoAttention is the one line the crypto block says about work left over.
+//
+// The three cases were two, and the first two were one sentence: versions the
+// rewrap has not reached yet and versions no key opens both read as "the
+// rewrap runs in the background". One of them clears itself in five minutes
+// and the other never does, and the operator was told to wait for both.
+func cryptoAttention(report cryptostate.Report) string {
+	switch {
+	case report.UnreadableVersions > 0:
+		return strconv.Itoa(report.UnreadableVersions) +
+			" secret versions cannot be opened by any key this panel holds; the rewrap leaves them as they are, " +
+			"and crypto verify-secrets names them. Waiting does not clear this: restore them from a backup"
+	case report.PendingRewrap > 0:
+		return strconv.Itoa(report.PendingRewrap) +
+			" secret versions are still on another key or in the old form; the rewrap runs in the background"
+	default:
+		if unused := unusedKeys(report); len(unused) > 0 {
+			return "keys that no version names any more may be removed: " + strings.Join(unused, ", ")
+		}
+		return ""
+	}
 }
 
 // unusedKeys lists the keys the provider holds that are neither active nor

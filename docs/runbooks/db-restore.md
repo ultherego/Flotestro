@@ -137,6 +137,15 @@ destroyed: 0
 failed: 0
 ```
 
+A version that no key opens - a damaged nonce or ciphertext - is not refused at the start: the
+rewrap steps over it and moves everything else, because stopping on one row would hold the
+rotation of every other secret hostage to it. The crypto block says so in its own words,
+`unreadable_versions` beside `pending_rewrap`: "N secret versions cannot be opened by any key this
+panel holds ... restore them from a backup". That is a different sentence from the backlog the
+rewrap is still working through, and deliberately so - one clears itself at the next tick and the
+other never does. The row is left exactly as it was, so a restore of that one secret's version is
+the repair.
+
 A wrong `secrets.key` is refused before any of this. The first start of an adopted installation
 tries the key against the rows of the first form it is about to be trusted with, and stops with
 `secrets_key_unavailable` naming the file when they do not open: nothing is written, nothing is

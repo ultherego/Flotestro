@@ -283,6 +283,16 @@ func (p *DBSealedProvider) Adopt(ctx context.Context, id string, material []byte
 	return p.write(ctx, id, material, true)
 }
 
+// Offer implements Provider: the material is held by this instance and no row
+// is written. A start that is about to refuse must leave the installation as
+// it found it, here as much as in the state directory.
+func (p *DBSealedProvider) Offer(id string, material []byte) error {
+	if err := ValidateKeyID(id); err != nil {
+		return err
+	}
+	return p.remember(id, material, false)
+}
+
 // write seals the material and puts it in the database. A name already taken
 // is not an error by itself: two replicas of one installation initialising at
 // once make the same key under the same name, and a row that holds the same

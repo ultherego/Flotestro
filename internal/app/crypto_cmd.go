@@ -14,9 +14,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/ultherego/flotestro/internal/config"
 	"github.com/ultherego/flotestro/internal/cryptostate"
 	"github.com/ultherego/flotestro/internal/database"
+
 	"github.com/ultherego/flotestro/internal/helpercap"
 	"github.com/ultherego/flotestro/internal/pki"
 	"github.com/ultherego/flotestro/internal/secrets"
@@ -53,6 +55,30 @@ func runCrypto(args []string) error {
 	default:
 		return fmt.Errorf("%q is not a crypto command; %s", args[0], cryptoUsage)
 	}
+}
+
+// readableSchema refuses a report over a schema that does not carry what the
+// report reads.
+//
+// Both reading commands below ask columns of migrations: the installation
+// record, and envelope_version on the secret versions. A database from before
+// them answered with "relation crypto_installation_state does not exist", a
+// SQLSTATE an operator cannot act on - and it is exactly the database these
+// commands are most wanted on, because the question "what is in here before I
+// upgrade" is asked of a database that has not been upgraded. So the schema is
+// named, with the command that moves it, and the report is not attempted.
+func readableSchema(ctx context.Context, pool *pgxpool.Pool) error {
+	report, err := database.CheckSchema(ctx, pool)
+	if err != nil {
+		return err
+	}
+	if report.Current() {
+		return nil
+	}
+	return fmt.Errorf("%s: %s. This report reads the installation record and the envelope of each "+
+		"secret version, both of which a migration adds; bring the schema forward with the migrate "+
+		"command and ask again",
+		report.Code(), report.Summary())
 }
 
 // cryptoStatusReport is the cryptographic state of an installation as a
@@ -122,6 +148,10 @@ func cryptoStatus(args []string) error {
 		return err
 	}
 	defer pool.Close()
+
+	if err := readableSchema(ctx, pool); err != nil {
+		return err
+	}
 
 	report := cryptoStatusReport{VersionsByKey: map[string]int{}}
 	record, err := cryptostate.NewPostgres(pool).Load(ctx)
@@ -223,6 +253,8 @@ func cryptoVerifySecrets(args []string) error {
 		"the state directory the keys are read from")
 	kekFile := set.String("kek-file", config.Env("FLOTESTRO_KEK_FILE", cryptostate.DefaultKEKFile),
 		"the file the key encryption key is mounted at, for an installation whose keys are rows")
+	legacyKeyFile := set.String("secrets-key-file", config.Env("FLOTESTRO_SECRETS_KEY_FILE", ""),
+		"the one key of an installation from before the keys were named; the default is secrets.key in the state directory")
 	asJSON := set.Bool("json", false, "print the report as JSON")
 	if err := set.Parse(args); err != nil {
 		return err
@@ -242,9 +274,29 @@ func cryptoVerifySecrets(args []string) error {
 	}
 	defer pool.Close()
 
+	if err := readableSchema(ctx, pool); err != nil {
+		return err
+	}
+
 	local, err := cryptostate.NewLocalProvider(filepath.Join(*stateDir, cryptostate.KeysDir), "")
 	if err != nil {
 		return fmt.Errorf("the key provider: %w", err)
+	}
+	// The key of an installation from before the provider lies in secrets.key,
+	// and a start is what puts it in keys/legacy.key. Before that start the
+	// report would have failed on every version of such an installation - the
+	// one it is most wanted on - so the file is offered here, held for this
+	// process and never written.
+	if *legacyKeyFile == "" {
+		*legacyKeyFile = filepath.Join(*stateDir, "secrets.key")
+	}
+	if key, err := secrets.ReadKeyFile(*legacyKeyFile); err == nil {
+		if err := local.Offer(secrets.LegacyKeyID, key); err != nil {
+			return fmt.Errorf("%s: %w", *legacyKeyFile, err)
+		}
+		fmt.Printf("legacy_key_file: %s\n", *legacyKeyFile)
+	} else if !errors.Is(err, secrets.ErrKeyMissing) {
+		return fmt.Errorf("%s: %w", *legacyKeyFile, err)
 	}
 	storage := cryptostate.NewPostgres(pool)
 	// The same choice the start makes, and from the record rather than from a

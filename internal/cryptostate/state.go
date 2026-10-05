@@ -125,7 +125,10 @@ type Runtime struct {
 	// installation, or wrote the record for an existing one.
 	initialised bool
 	adopted     bool
-	store       *secrets.Store
+	// unreadable is how many live versions the last full rewrap pass could
+	// not open with any key the panel holds.
+	unreadable int
+	store      *secrets.Store
 }
 
 // Open is the startup guard.
@@ -355,19 +358,26 @@ func (r *Runtime) establish(ctx context.Context, o Options) error {
 	var createdKey bool
 	switch {
 	case legacyKey != nil:
-		if err := o.Provider.Adopt(ctx, secrets.LegacyKeyID, legacyKey); err != nil {
-			return fatal(CodeStateAmbiguous,
-				fmt.Sprintf("%s and the key %q of the provider differ", o.LegacyKeyPath, secrets.LegacyKeyID), err)
-		}
-		activeKey = secrets.LegacyKeyID
 		// The key and the data it is about to be trusted with, compared before
-		// the record is written. An installation being adopted has no sentinel
+		// anything is written. An installation being adopted has no sentinel
 		// yet - it is sealed below, under this very key - so this is the only
 		// moment anything can tell the installation's own key from somebody
 		// else's. A restore that brought the database and the wrong
 		// secrets.key used to be adopted, recorded, and left with every secret
 		// unreadable and one line in the log about it.
+		//
+		// Offered and not adopted, in that order and for that reason: the key
+		// is held by this process while it is tried, so a start that refuses
+		// leaves the state directory as it found it. Adopting first left
+		// keys/legacy.key holding the very key that had just been refused, and
+		// the next start - with the right secrets.key restored - was then
+		// refused too, for differing from it. The repair of a refusal must not
+		// need a file nobody was told about.
 		if o.SecretProbe != nil && facts.SecretVersions > 0 {
+			if err := o.Provider.Offer(secrets.LegacyKeyID, legacyKey); err != nil {
+				return fatal(CodeStateAmbiguous,
+					fmt.Sprintf("%s and the key %q of the provider differ", o.LegacyKeyPath, secrets.LegacyKeyID), err)
+			}
 			if err := o.SecretProbe(ctx, o.Provider); err != nil {
 				return fatal(CodeSecretsKeyUnavailable, fmt.Sprintf(
 					"the database holds %d secret versions sealed the first way and %s does not open them: "+
@@ -375,6 +385,11 @@ func (r *Runtime) establish(ctx context.Context, o Options) error {
 					facts.SecretVersions, o.LegacyKeyPath), err)
 			}
 		}
+		if err := o.Provider.Adopt(ctx, secrets.LegacyKeyID, legacyKey); err != nil {
+			return fatal(CodeStateAmbiguous,
+				fmt.Sprintf("%s and the key %q of the provider differ", o.LegacyKeyPath, secrets.LegacyKeyID), err)
+		}
+		activeKey = secrets.LegacyKeyID
 	case facts.SecretVersions > 0:
 		return fatal(CodeSecretsKeyUnavailable,
 			fmt.Sprintf("the database holds %d secret versions and neither %s nor an installation record exists",
@@ -837,7 +852,7 @@ func (r *Runtime) Rewrap(ctx context.Context) {
 	if store == nil {
 		return
 	}
-	total, unbound := 0, 0
+	total, unbound, unreadable := 0, 0, 0
 	for {
 		moved, remaining, loose, err := r.rewrapBatch(ctx, store)
 		unbound += loose
@@ -845,7 +860,16 @@ func (r *Runtime) Rewrap(ctx context.Context) {
 			if ctx.Err() == nil {
 				r.log.Error("rewrapping the secret store stopped; it resumes at the next start", "err", err, "moved", total)
 			}
+			if errors.Is(err, secrets.ErrCorruptedVersion) && moved == 0 {
+				// A pass that read these rows, moved none of them and said they
+				// are damaged: no key this panel holds opens them, so they are
+				// not a backlog that waiting clears. The status screen said "the
+				// rewrap runs in the background" about them, which sent the
+				// operator away to wait for something that had already happened.
+				unreadable = remaining
+			}
 			if moved == 0 {
+				r.noteUnreadable(unreadable)
 				return
 			}
 			// A batch that moved something and still reported a problem - rows
@@ -857,6 +881,7 @@ func (r *Runtime) Rewrap(ctx context.Context) {
 			break
 		}
 	}
+	r.noteUnreadable(unreadable)
 	if total > 0 {
 		r.log.Info("the secret store was rewrapped onto the active key", "versions", total)
 	}
@@ -866,6 +891,21 @@ func (r *Runtime) Rewrap(ctx context.Context) {
 		// value that could have come from another row.
 		r.log.Warn("versions sealed before the row key was bound into them were rewritten bound",
 			"versions", unbound)
+	}
+}
+
+// noteUnreadable records how many live versions the last full pass of the
+// rewrap could not open with any key. It is reported rather than logged
+// because a line in the log of a process that has since restarted is not an
+// answer to "what is wrong with my installation".
+func (r *Runtime) noteUnreadable(count int) {
+	r.mu.Lock()
+	changed := r.unreadable != count
+	r.unreadable = count
+	r.mu.Unlock()
+	if changed && count > 0 {
+		r.log.Error("secret versions no key of this installation opens were left as they are; "+
+			"the rewrap cannot move them and a restore is what puts them right", "versions", count)
 	}
 }
 
@@ -913,6 +953,11 @@ type Report struct {
 	// the sum over every key but the active one.
 	VersionsByKey map[string]int
 	PendingRewrap int
+	// UnreadableVersions is how many of those the last rewrap pass could not
+	// open with any key. They are part of PendingRewrap and will not leave it
+	// on their own: a backlog that waiting clears and one that it does not are
+	// two different mornings for whoever is on call.
+	UnreadableVersions int
 	// Initialised and Adopted say what this process did at start.
 	Initialised bool
 	Adopted     bool
@@ -931,7 +976,7 @@ func (r *Runtime) Report(ctx context.Context) Report {
 		ActiveKeyID: record.ActiveKeyID, IssuerID: record.IssuerID, IssuerFingerprint: record.IssuerFingerprint,
 		Revision: record.Revision, InitializedAt: record.InitializedAt,
 		Keys: r.provider.KeyIDs(), Initialised: r.initialised, Adopted: r.adopted,
-		VersionsByKey: map[string]int{},
+		VersionsByKey: map[string]int{}, UnreadableVersions: r.unreadable,
 	}
 	// The record this instance holds is the one it could adopt; a record it
 	// refused names its provider here instead.

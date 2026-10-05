@@ -1,6 +1,7 @@
 package cryptostate
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -143,5 +144,44 @@ func TestAKeyMayComeFromASystemdCredential(t *testing.T) {
 	t.Setenv("CREDENTIALS_DIRECTORY", "")
 	if _, err := NewLocalProvider(dir, "k-cred"); err == nil {
 		t.Fatal("a credential without a credentials directory was accepted")
+	}
+}
+
+// A report run before the start that adopts secrets.key has to be able to open
+// that installation's secrets, and must not leave a key file behind doing it:
+// a command that reports and writes keys/legacy.key has changed the thing it
+// was asked about.
+func TestAnOfferedKeyOpensWithoutBecomingAFileOfTheDirectory(t *testing.T) {
+	dir := t.TempDir()
+	provider, err := NewLocalProvider(dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := bytes.Repeat([]byte{9}, secrets.KeyLength)
+	if err := provider.Offer(secrets.LegacyKeyID, key); err != nil {
+		t.Fatalf("offering the legacy key: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, secrets.LegacyKeyID+".key")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("the offered key was written as a file of the directory")
+	}
+	cipher, ok := provider.LegacyCipher()
+	if !ok {
+		t.Fatal("the offered key is not the one the first form opens with")
+	}
+	nonce, ciphertext, err := cipher.Encrypt([]byte("value"), "secret-a", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value, err := cipher.Decrypt(nonce, ciphertext, "secret-a", 1); err != nil || string(value) != "value" {
+		t.Fatalf("the offered key does not open what it sealed: %q, %v", value, err)
+	}
+	// One step outside: the same name with other material is a contradiction
+	// and is refused, exactly as it is for a key read from the directory.
+	if err := provider.Offer(secrets.LegacyKeyID, bytes.Repeat([]byte{8}, secrets.KeyLength)); err == nil {
+		t.Fatal("two different keys were accepted under one name")
+	}
+	// And a name that cannot be a key id is not one.
+	if err := provider.Offer("Legacy Key", key); err == nil {
+		t.Fatal("a name that is not a key id was accepted")
 	}
 }

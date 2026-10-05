@@ -61,8 +61,13 @@ type Provider interface {
 	// GenerateNamed creates a new key under the given name. It refuses a
 	// name that exists.
 	GenerateNamed(ctx context.Context, id string) error
-	// Adopt registers existing material under a name.
+	// Adopt registers existing material under a name, and keeps it where
+	// the provider keeps keys: a file, or a row.
 	Adopt(ctx context.Context, id string, key []byte) error
+	// Offer registers existing material for this process only, without
+	// keeping it anywhere. It is how a start can try a key against the data
+	// before it commits the installation to that key.
+	Offer(id string, key []byte) error
 	// SetActive names the key new envelopes are wrapped with.
 	SetActive(id string)
 }
@@ -316,6 +321,23 @@ func (p *LocalSealedProvider) GenerateNamed(_ context.Context, id string) error 
 		return err
 	}
 	return p.register(id, key, false)
+}
+
+// Offer registers key material for this process only: it is not written as a
+// file of the directory and is not removed with the others, exactly like a key
+// that arrived as a systemd credential.
+//
+// It is for a command that reports and must change nothing. The key of an
+// installation from before the provider lies in secrets.key, and nothing puts
+// it in keys/legacy.key until a start adopts it - so a report run before that
+// start could not open a single one of that installation's secrets, which is
+// the one installation the report is most wanted on. Adopt is the start's call
+// and writes the file; this one does not.
+func (p *LocalSealedProvider) Offer(id string, key []byte) error {
+	if err := ValidateKeyID(id); err != nil {
+		return err
+	}
+	return p.register(id, key, true)
 }
 
 // Adopt implements Provider: the material lands as a file of the
