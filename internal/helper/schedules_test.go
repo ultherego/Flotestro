@@ -181,8 +181,13 @@ func TestTimerCalendarAsksSystemdInItsOwnLanguage(t *testing.T) {
 
 // ensureOrder is an order to write a cron entry of this name, with or without
 // the consent to take over what the host already carries under it.
+//
+// The two values are named before being returned because gofmt 1.25 and gofmt
+// 1.27 indent a composite literal inside a multi-value return differently, and
+// a file cannot satisfy both: CI runs the toolchain in go.mod, a workstation
+// whatever it has. Named locals format the same under every version.
 func ensureOrder(id string, adopt bool) (*helperv1.ScheduleRequest, schedules.Schedule) {
-	return &helperv1.ScheduleRequest{
+	order := &helperv1.ScheduleRequest{
 		Operation:  helperv1.ScheduleRequest_OPERATION_ENSURE,
 		Id:         id,
 		Kind:       schedules.KindCron,
@@ -190,10 +195,12 @@ func ensureOrder(id string, adopt bool) (*helperv1.ScheduleRequest, schedules.Sc
 		Command:    []string{"/usr/bin/true"},
 		User:       "root",
 		Adopt:      adopt,
-	}, schedules.Schedule{
+	}
+	want := schedules.Schedule{
 		ID: id, Kind: schedules.KindCron, Expression: "0 5 * * *",
 		Command: []string{"/usr/bin/true"}, User: "root", Enabled: true,
 	}
+	return order, want
 }
 
 // Adoption takes over the line found, and removes the file only when it holds
