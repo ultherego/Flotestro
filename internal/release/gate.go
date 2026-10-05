@@ -611,6 +611,14 @@ func CheckGateEvidence(bundle io.Reader, sha, treeFromGit string) (Evidence, str
 		return Evidence{}, "", nil, err
 	}
 	verdict, reasons := evidence.Report.ComputeVerdict()
+	// What the logs say beyond the arithmetic. A run whose package failed
+	// after every test passed, or whose scenario started and never ended, has
+	// counts that look exactly like a clean run - so these end the verdict
+	// here rather than being compared with a report that cannot carry them.
+	if len(evidence.LogProblems) > 0 {
+		reasons = append(reasons, evidence.LogProblems...)
+		verdict = VerdictFail
+	}
 	if evidence.Report.Verdict != verdict {
 		return evidence, verdict, reasons, fmt.Errorf(
 			"the report claims the verdict %q; the evidence in it says %q", evidence.Report.Verdict, verdict)

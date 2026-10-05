@@ -1368,7 +1368,7 @@ func Run() error {
 	// grants of whoever created the task.
 	dispatcher.SetHelperCapabilities(scheduler.HelperCapabilities{
 		Signer: helperSigner, Mode: helperCapabilityMode,
-		Permissions: subjectPermissions{store: authzStore},
+		Permissions: subjectPermissions{store: authzStore, hosts: hostStore},
 	})
 	// The same budget store the campaigns lease from: a single job and a
 	// campaign target compete for the same tokens.
@@ -1681,15 +1681,62 @@ func (c campaignCreators) CreatorOfCampaign(ctx context.Context, campaignID stri
 // of a helper capability.
 type subjectPermissions struct {
 	store *authz.Store
+	hosts *hosts.Store
 }
 
-func (p subjectPermissions) PermissionsOfSubject(ctx context.Context, subject string) ([]string, error) {
+// PermissionsOfSubject answers what the creator of a task may do on the host
+// the task is for.
+//
+// Three answers, which used to be two. A subject the panel has never heard of
+// is a system task and keeps the permission of its action alone. A subject that
+// exists and may do nothing - disabled, or carrying a denial marker - is
+// ErrSubjectBlocked, and the task stops: PrincipalBySubject refuses both with
+// the same error, so a blocked operator's queued task used to look exactly like
+// a system task and left with a signed capability.
+//
+// And the permissions are the ones that reach this host. Principal.Permissions
+// answers "in any scope at all", which is right for showing somebody what they
+// can do and wrong for deciding whether they may do it here: a creator holding
+// firewall.write over one site held the grant for a host in another.
+func (p subjectPermissions) PermissionsOfSubject(ctx context.Context, subject, hostID string) ([]string, error) {
 	principal, err := p.store.PrincipalBySubject(ctx, subject)
-	if errors.Is(err, authz.ErrNotFound) || errors.Is(err, authz.ErrUnauthenticated) {
+	switch {
+	case errors.Is(err, authz.ErrNotFound):
 		return nil, nil
+	case errors.Is(err, authz.ErrUnauthenticated):
+		// The row exists and is disabled or denied; without a row at all the
+		// store answers ErrNotFound above.
+		return nil, scheduler.ErrSubjectBlocked
+	case err != nil:
+		return nil, err
 	}
+	target, err := p.hostScope(ctx, hostID)
 	if err != nil {
 		return nil, err
 	}
-	return principal.Permissions(), nil
+	granted := make([]string, 0, len(principal.Permissions()))
+	for _, permission := range principal.Permissions() {
+		if principal.Can(authz.Permission(permission), target) {
+			granted = append(granted, permission)
+		}
+	}
+	return granted, nil
+}
+
+// hostScope is what the panel holds about the host now: a task queued yesterday
+// is judged against where the host is today.
+func (p subjectPermissions) hostScope(ctx context.Context, hostID string) (authz.Scope, error) {
+	if p.hosts == nil || hostID == "" {
+		return authz.Scope{}, nil
+	}
+	host, err := p.hosts.Get(ctx, hostID)
+	if err != nil {
+		return authz.Scope{}, err
+	}
+	if host == nil {
+		// A host the panel no longer holds is not a host anybody may act on,
+		// and an empty scope matches nothing that is scoped.
+		return authz.Scope{}, nil
+	}
+	return authz.TargetOf(host.Site, host.Environment, host.TeamID, host.Owner, host.Tags), nil
 }

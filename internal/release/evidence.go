@@ -38,6 +38,11 @@ type Evidence struct {
 	// Digest is the bundle itself, so the commit status can name the file the
 	// verdict was computed over.
 	Digest string
+	// LogProblems are what the logs say that no count carries: a package that
+	// failed after its tests passed, a scenario that started and never ended,
+	// a log with nothing in it. The report cannot be asked about them - it is
+	// the thing being checked - so they travel here and end the verdict.
+	LogProblems []string
 	// Verified counts the files whose bytes matched the digest the report
 	// claimed for them.
 	Verified int
@@ -173,10 +178,12 @@ func VerifyEvidence(bundle io.Reader, sha, treeFromGit string) (Evidence, error)
 	// authority on its own arithmetic: a bundle whose every digest was right
 	// and whose report claimed 803 passed over a log holding a failure was
 	// accepted, because nothing read the log it had just verified.
-	if outcome, err := countFromLogs(files[evidenceLogs+"go_test_json"],
-		files[evidenceLogs+"playwright_json"]); err != nil {
+	outcome, err := countFromLogs(files[evidenceLogs+"go_test_json"],
+		files[evidenceLogs+"playwright_json"])
+	if err != nil {
 		return Evidence{}, fmt.Errorf("the logs of the run cannot be read: %w", err)
-	} else if report.Counts != nil && (len(files[evidenceLogs+"go_test_json"]) > 0 ||
+	}
+	if report.Counts != nil && (len(files[evidenceLogs+"go_test_json"]) > 0 ||
 		len(files[evidenceLogs+"playwright_json"]) > 0) {
 		if differs := report.disagreement(outcome); len(differs) > 0 {
 			return Evidence{}, fmt.Errorf(
@@ -193,6 +200,7 @@ func VerifyEvidence(bundle io.Reader, sha, treeFromGit string) (Evidence, error)
 	return Evidence{
 		Report:      report,
 		ReportBytes: raw,
+		LogProblems: outcome.Problems,
 		Digest:      "sha256:" + hex.EncodeToString(digester.Sum(nil)),
 		Verified:    verified,
 		Bytes:       total,

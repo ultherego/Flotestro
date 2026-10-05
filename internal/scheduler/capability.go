@@ -28,8 +28,23 @@ var helperCapabilityDispatch = metrics.Default.NewCounter("flotestro_helper_capa
 // PrincipalPermissions reads the permissions of the creator of a task, by the
 // subject the task records.
 type PrincipalPermissions interface {
-	PermissionsOfSubject(ctx context.Context, subject string) ([]string, error)
+	// PermissionsOfSubject answers what the creator may do on this host.
+	//
+	// On this host, because a permission is held in a scope: a creator with
+	// firewall.write over one site holds it in "any scope at all", which is
+	// what the capability used to be built from - so a task queued for a host
+	// in another site left with the grant anyway.
+	//
+	// ErrSubjectBlocked says the creator exists and may do nothing, which is a
+	// different answer from a subject the panel has never heard of. The second
+	// is what a system task looks like and keeps the permission of the action
+	// alone; the first used to look the same, so a disabled operator's queued
+	// task left with a signed capability.
+	PermissionsOfSubject(ctx context.Context, subject, hostID string) ([]string, error)
 }
+
+// ErrSubjectBlocked is the answer for a creator that exists and may do nothing.
+var ErrSubjectBlocked = errors.New("the creator of the task may do nothing")
 
 // HelperCapabilities configures the minting.
 type HelperCapabilities struct {
@@ -116,7 +131,13 @@ func (s *Scheduler) attachCapability(ctx context.Context, item jobs.LeasedJob,
 	// waits with the reason rather than leaving on a guess.
 	var permissions []string
 	if s.capabilities.Permissions != nil && item.Job.CreatedBy != "" {
-		permissions, err = s.capabilities.Permissions.PermissionsOfSubject(ctx, item.Job.CreatedBy)
+		permissions, err = s.capabilities.Permissions.PermissionsOfSubject(ctx,
+			item.Job.CreatedBy, item.Job.HostID)
+		if errors.Is(err, ErrSubjectBlocked) {
+			s.log.Warn("the task stops: its creator may do nothing now",
+				"job_id", item.Job.ID, "created_by", item.Job.CreatedBy)
+			return "", fmt.Errorf("%w: %v", errCreatorRightsGone, err)
+		}
 		if err != nil {
 			s.log.Warn("the task waits: the rights of its creator were not read",
 				"job_id", item.Job.ID, "created_by", item.Job.CreatedBy, "err", err)

@@ -37,6 +37,13 @@ type goEvent struct {
 type suiteOutcome struct {
 	Counts GateCounts
 	Skips  []GateSkip
+	// Problems are what the logs say that no count can carry. A verdict is
+	// computed from the counts, and the counts are about scenarios - so a
+	// package that failed after every one of its tests passed, a test that
+	// started and never ended, and a log with nothing in it all left the
+	// arithmetic spotless. Each of them is a run that proved less than it
+	// says, so each of them ends the verdict.
+	Problems []string
 }
 
 // countFromLogs recomputes the arithmetic of a run from the logs the bundle
@@ -54,6 +61,13 @@ func countFromLogs(goTestJSON, playwrightJSON []byte) (suiteOutcome, error) {
 		if err := outcome.addPlaywright(playwrightJSON); err != nil {
 			return suiteOutcome{}, err
 		}
+	}
+	if len(goTestJSON) == 0 && len(playwrightJSON) == 0 {
+		return outcome, nil
+	}
+	if outcome.Counts.Discovered == 0 {
+		outcome.Problems = append(outcome.Problems,
+			"the logs of the run name no scenario at all")
 	}
 	for _, skip := range outcome.Skips {
 		switch skip.Class {
@@ -74,6 +88,8 @@ func (o *suiteOutcome) addGoSuite(raw []byte) error {
 	output := map[key][]string{}
 	final := map[key]string{}
 
+	started := map[key]bool{}
+	var packageFailures []string
 	for _, line := range strings.Split(string(raw), "\n") {
 		line = strings.TrimSpace(line)
 		if !strings.HasPrefix(line, "{") {
@@ -85,18 +101,50 @@ func (o *suiteOutcome) addGoSuite(raw []byte) error {
 			// skips it too rather than refusing the whole log.
 			continue
 		}
-		// A package-level event: "skip" there only means the package holds no
-		// test files, which is not a scenario anybody was owed.
 		if event.Test == "" {
+			// A package-level verdict. "skip" there only means the package
+			// holds no test files, which is nothing anybody was owed - but
+			// "fail" is the package itself failing after its tests are done:
+			// a panic in TestMain, a cleanup that exits non-zero, a data race
+			// the runner reports against the package. Every test passes and
+			// `go test` exits 1, and counting scenarios alone never sees it.
+			if event.Action == "fail" {
+				packageFailures = append(packageFailures, event.Package)
+			}
 			continue
 		}
 		at := key{event.Package, event.Test}
 		switch event.Action {
+		case "run":
+			started[at] = true
 		case "output":
 			output[at] = append(output[at], event.Output)
 		case "pass", "fail", "skip":
 			final[at] = event.Action
 		}
+	}
+
+	sort.Strings(packageFailures)
+	for _, name := range packageFailures {
+		o.Problems = append(o.Problems,
+			fmt.Sprintf("the package %s failed, after its tests were done", name))
+	}
+	// A scenario that started and never ended is a suite that was cut off -
+	// by a timeout, a signal, a machine that went away. The counts are of what
+	// finished, so they come out of such a run looking complete.
+	var unfinished []string
+	for at := range started {
+		if _, ended := final[at]; !ended {
+			name := at.test
+			if at.pkg != "" {
+				name = at.pkg + "." + at.test
+			}
+			unfinished = append(unfinished, name)
+		}
+	}
+	sort.Strings(unfinished)
+	for _, name := range unfinished {
+		o.Problems = append(o.Problems, fmt.Sprintf("%s started and never ended", name))
 	}
 
 	// A parent whose subtests all skipped is reported skipped too. The subtests

@@ -1,0 +1,8 @@
+{"Time":"2026-10-05T09:41:43.731836293+02:00","Action":"start","Package":"pkgfail"}
+{"Time":"2026-10-05T09:41:43.733259635+02:00","Action":"run","Package":"pkgfail","Test":"TestOnePasses"}
+{"Time":"2026-10-05T09:41:43.733281866+02:00","Action":"output","Package":"pkgfail","Test":"TestOnePasses","Output":"=== RUN   TestOnePasses\n","OutputType":"frame"}
+{"Time":"2026-10-05T09:41:43.733295376+02:00","Action":"output","Package":"pkgfail","Test":"TestOnePasses","Output":"--- PASS: TestOnePasses (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-05T09:41:43.733298796+02:00","Action":"pass","Package":"pkgfail","Test":"TestOnePasses","Elapsed":0}
+{"Time":"2026-10-05T09:41:43.733317506+02:00","Action":"output","Package":"pkgfail","Output":"PASS\n","OutputType":"frame"}
+{"Time":"2026-10-05T09:41:43.733455658+02:00","Action":"output","Package":"pkgfail","Output":"FAIL\tpkgfail\t0.001s\n","OutputType":"frame"}
+{"Time":"2026-10-05T09:41:43.733467339+02:00","Action":"fail","Package":"pkgfail","Elapsed":0.002}
