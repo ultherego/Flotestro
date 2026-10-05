@@ -160,7 +160,9 @@ func (v *RelayVerifier) verify(ctx context.Context, peer RelayPeer, envelope *ag
 		return nil, err
 	}
 	if code, detail := certificateStatusRefusal(certificate, peer.HostID, v.now()); code != "" {
-		return nil, &RelayRefusal{Code: code, Detail: detail}
+		if !decommissionEvidence(kind, code) {
+			return nil, &RelayRefusal{Code: code, Detail: detail}
+		}
 	}
 
 	// The host in the relay's scope.
@@ -285,9 +287,49 @@ type relaySequences struct {
 	pool *pgxpool.Pool
 }
 
-// helloKind is the payload name of the message that opens a session; it is the
-// oneof field name, as relayproof reads it.
-const helloKind = "hello"
+// The payload names of the messages this file decides about; they are the oneof
+// field names, as relayproof reads them.
+const (
+	// helloKind opens a session.
+	helloKind = "hello"
+	// finalReadyKind is the agent's answer to the final task, and
+	// finalWipeReportKind what became of the wipe. Both belong to a session the
+	// panel itself is ending.
+	finalReadyKind      = "final_ready"
+	finalWipeReportKind = "final_wipe_report"
+)
+
+// decommissionEvidence says whether a refusal the decommission itself caused
+// has to let this message through on the session it already admitted.
+//
+// The order moves the host to retiring before the final task goes out and
+// revokes its certificates before the commit, and the envelope of every
+// relayed message is checked against the record. So the two messages of the
+// handshake - the answer to the final task, and the report of what became of
+// the wipe - were refused by the panel's own doing, and a relayed host could
+// not take part in its own decommission: the answer never arrived, the panel
+// retired the host without ever sending the commit, and the identity stayed on
+// disk. The report is the only evidence of the wipe there is, and the end of a
+// session is no evidence at all - a wipe that failed closes its session too.
+//
+// Nothing is taken on trust for it: the envelope is still signed by the key on
+// record for the certificate, the sequence is still spent, and the host still
+// has to be the one the relay named. What a revoked certificate cannot do is
+// open a session or carry anything else - a Hello is not on this list.
+func decommissionEvidence(kind, code string) bool {
+	switch kind {
+	case finalReadyKind, finalWipeReportKind:
+	default:
+		return false
+	}
+	switch code {
+	case hosts.RefusalRevokedCertificate,
+		"lifecycle_" + hosts.StateRetiring,
+		"lifecycle_" + hosts.StateRetired:
+		return true
+	}
+	return false
+}
 
 // Claim is what the panel knows about one relayed message.
 type Claim struct {
