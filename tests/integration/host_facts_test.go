@@ -3,11 +3,15 @@
 package integration
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/ultherego/flotestro/internal/hosts"
 )
 
 // hostFactsView is the part of a host the fact tests read.
@@ -286,5 +290,71 @@ func TestEnrollmentOrderCarriesOwnerAndTags(t *testing.T) {
 	}
 	if !found {
 		t.Error("the enrolled host is not found by its owner and tags")
+	}
+}
+
+// Two writers holding one version of a host's hand-recorded facts. The
+// handlers read the host, compared the If-Match to what they had read and then
+// wrote unconditionally, so two writes decided on the same version both landed
+// and the second one's owner, notes or tags replaced the first one's without
+// either being told. The window is between the read of a request and its own
+// write, which no HTTP order can be built around; the store is where the two
+// writes meet, so that is where this is asked (audit of 6c38561, R1).
+func TestTwoWritesOfOneVersionOfAHostDoNotBothLand(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	pool := h.database(ctx)
+	host := h.enrollSyntheticHost(t)
+
+	store := hosts.NewStore(pool)
+	read, err := store.Get(ctx, host.ID)
+	if err != nil {
+		t.Fatalf("reading the host: %v", err)
+	}
+	version := hosts.FactsOf(read)
+
+	first, err := store.SetOwner(ctx, host.ID, "platform team", version)
+	if err != nil {
+		t.Fatalf("the first write was refused: %v", err)
+	}
+	if first.Owner != "platform team" {
+		t.Fatalf("the owner is %q after the first write", first.Owner)
+	}
+
+	// The second write was decided on the version the first one replaced.
+	if _, err := store.SetNotes(ctx, host.ID, "do not reboot", version); !errors.Is(err, hosts.ErrChanged) {
+		t.Errorf("the second write answered %v, expected ErrChanged", err)
+	}
+	if _, err := store.SetTags(ctx, host.ID, []string{"db"}, version); !errors.Is(err, hosts.ErrChanged) {
+		t.Errorf("a tag write on the replaced version answered %v, expected ErrChanged", err)
+	}
+	after, err := store.Get(ctx, host.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Notes != "" || len(after.Tags) != 0 {
+		t.Errorf("the refused writes landed anyway: notes %q, tags %v", after.Notes, after.Tags)
+	}
+
+	// On the version it left, the next write lands - and the tags belong to the
+	// same version, so a tag written in between stops a write of the notes.
+	tagged, err := store.SetTags(ctx, host.ID, []string{"db", "primary"}, hosts.FactsOf(first))
+	if err != nil {
+		t.Fatalf("the write on the current version was refused: %v", err)
+	}
+	if _, err := store.SetNotes(ctx, host.ID, "do not reboot",
+		hosts.FactsOf(first)); !errors.Is(err, hosts.ErrChanged) {
+		t.Errorf("a write on the version before the tags answered %v, expected ErrChanged", err)
+	}
+	if _, err := store.SetNotes(ctx, host.ID, "do not reboot", hosts.FactsOf(tagged)); err != nil {
+		t.Errorf("the write on the current version was refused: %v", err)
+	}
+
+	// A host that is gone and one that moved are two answers, not one.
+	if _, err := pool.Exec(ctx, `delete from hosts where id = $1::uuid`, host.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SetOwner(ctx, host.ID, "nobody", version); !errors.Is(err, hosts.ErrNotFound) {
+		t.Errorf("a write to a host that is gone answered %v, expected ErrNotFound", err)
 	}
 }

@@ -52,9 +52,12 @@ func (s *Server) handleSetHostNotes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updated, err := s.hosts.SetNotes(r.Context(), hostID, notes)
+	updated, err := s.hosts.SetNotes(r.Context(), hostID, notes, hosts.FactsOf(host))
 	if errors.Is(err, hosts.ErrNotFound) {
 		problem(w, http.StatusNotFound, "host_not_found", "no such host")
+		return
+	}
+	if hostMoved(w, err) {
 		return
 	}
 	if err != nil {

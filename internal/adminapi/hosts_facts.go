@@ -14,10 +14,13 @@ import (
 // The facts an operator records about a host by hand: who answers for it, how
 // it is reached and what it goes down with.
 
-// hostFactsTag is the version of the hand-recorded facts of a host.
+// hostFactsTag is the version of the hand-recorded facts of a host: one tag
+// over everything an operator writes about the machine by hand, which is also
+// what every write of one of them is conditional on.
 func hostFactsTag(host *hosts.Host) string {
-	return etagOf("facts", host.Owner, host.ManagementAddress, host.ManagementAddressSource,
-		host.FailureDomain, host.Site, host.Environment, host.Notes)
+	return etagOf(append([]string{"facts", host.Owner, host.ManagementAddress,
+		host.ManagementAddressSource, host.FailureDomain, host.Site, host.Environment,
+		host.Notes}, host.Tags...)...)
 }
 
 type hostOwnerRequest struct {
@@ -57,9 +60,12 @@ func (s *Server) handleSetHostOwner(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updated, err := s.hosts.SetOwner(r.Context(), hostID, owner)
+	updated, err := s.hosts.SetOwner(r.Context(), hostID, owner, hosts.FactsOf(host))
 	if errors.Is(err, hosts.ErrNotFound) {
 		problem(w, http.StatusNotFound, "host_not_found", "no such host")
+		return
+	}
+	if hostMoved(w, err) {
 		return
 	}
 	if err != nil {
@@ -117,9 +123,12 @@ func (s *Server) handleSetHostManagementAddress(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	updated, err := s.hosts.SetManualManagementAddress(r.Context(), hostID, address)
+	updated, err := s.hosts.SetManualManagementAddress(r.Context(), hostID, address, hosts.FactsOf(host))
 	if errors.Is(err, hosts.ErrNotFound) {
 		problem(w, http.StatusNotFound, "host_not_found", "no such host")
+		return
+	}
+	if hostMoved(w, err) {
 		return
 	}
 	if err != nil {
@@ -187,9 +196,12 @@ func (s *Server) handleSetHostFailureDomain(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	updated, err := s.hosts.SetFailureDomain(r.Context(), hostID, domain)
+	updated, err := s.hosts.SetFailureDomain(r.Context(), hostID, domain, hosts.FactsOf(host))
 	if errors.Is(err, hosts.ErrNotFound) {
 		problem(w, http.StatusNotFound, "host_not_found", "no such host")
+		return
+	}
+	if hostMoved(w, err) {
 		return
 	}
 	if err != nil {

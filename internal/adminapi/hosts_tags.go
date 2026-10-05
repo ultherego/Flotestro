@@ -26,6 +26,9 @@ func (s *Server) handleSetHostTags(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !requireMatch(w, r, hostFactsTag(host)) {
+		return
+	}
 
 	var request hostTagsRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&request); err != nil {
@@ -42,9 +45,12 @@ func (s *Server) handleSetHostTags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updated, err := s.hosts.SetTags(r.Context(), hostID, tags)
+	updated, err := s.hosts.SetTags(r.Context(), hostID, tags, hosts.FactsOf(host))
 	if errors.Is(err, hosts.ErrNotFound) {
 		problem(w, http.StatusNotFound, "host_not_found", "no such host")
+		return
+	}
+	if hostMoved(w, err) {
 		return
 	}
 	if err != nil {
@@ -61,6 +67,7 @@ func (s *Server) handleSetHostTags(w http.ResponseWriter, r *http.Request) {
 		Before: map[string]any{"tags": tagList(host.Tags)},
 		After:  map[string]any{"tags": tagList(tags)},
 	})
+	setETag(w, hostFactsTag(updated))
 	writeJSON(w, http.StatusOK, updated)
 }
 

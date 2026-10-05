@@ -2031,19 +2031,14 @@ func (s *Store) SetChannel(ctx context.Context, hostID, channel string) (*Host, 
 	return s.Get(ctx, hostID)
 }
 
-// SetTags replaces the tags of a host.
-func (s *Store) SetTags(ctx context.Context, hostID string, tags []string) (*Host, error) {
+// SetTags replaces the tags of a host, on the facts the caller read. The list
+// is replaced whole, so a stale copy would drop the tag somebody else added
+// since it was read.
+func (s *Store) SetTags(ctx context.Context, hostID string, tags []string, read Facts) (*Host, error) {
 	if tags == nil {
 		tags = []string{}
 	}
-	tag, err := s.pool.Exec(ctx, `update hosts set tags = $2, updated_at = now() where id = $1`, hostID, tags)
-	if err != nil {
-		return nil, fmt.Errorf("setting the tags: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return nil, ErrNotFound
-	}
-	return s.Get(ctx, hostID)
+	return s.writeFacts(ctx, hostID, read, `set tags = $2, updated_at = now()`, tags)
 }
 
 // MaxNotesLength bounds the notes of a host.
@@ -2068,21 +2063,14 @@ func NormalizeNotes(notes string) (string, error) {
 	return notes, nil
 }
 
-// SetNotes records the notes of a host. Empty notes clear the field.
-func (s *Store) SetNotes(ctx context.Context, hostID, notes string) (*Host, error) {
+// SetNotes records the notes of a host, on the facts the caller read. Empty
+// notes clear the field.
+func (s *Store) SetNotes(ctx context.Context, hostID, notes string, read Facts) (*Host, error) {
 	normalized, err := NormalizeNotes(notes)
 	if err != nil {
 		return nil, err
 	}
-	tag, err := s.pool.Exec(ctx,
-		`update hosts set notes = $2, updated_at = now() where id = $1`, hostID, normalized)
-	if err != nil {
-		return nil, fmt.Errorf("setting the notes: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return nil, ErrNotFound
-	}
-	return s.Get(ctx, hostID)
+	return s.writeFacts(ctx, hostID, read, `set notes = $2, updated_at = now()`, normalized)
 }
 
 // MaxOwnerLength bounds the owner of a host.
@@ -2107,21 +2095,14 @@ func NormalizeOwner(owner string) (string, error) {
 	return owner, nil
 }
 
-// SetOwner records who answers for a host. An empty owner clears the field.
-func (s *Store) SetOwner(ctx context.Context, hostID, owner string) (*Host, error) {
+// SetOwner records who answers for a host, on the facts the caller read. An
+// empty owner clears the field.
+func (s *Store) SetOwner(ctx context.Context, hostID, owner string, read Facts) (*Host, error) {
 	normalized, err := NormalizeOwner(owner)
 	if err != nil {
 		return nil, err
 	}
-	tag, err := s.pool.Exec(ctx,
-		`update hosts set owner = nullif($2, ''), updated_at = now() where id = $1`, hostID, normalized)
-	if err != nil {
-		return nil, fmt.Errorf("setting the owner: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return nil, ErrNotFound
-	}
-	return s.Get(ctx, hostID)
+	return s.writeFacts(ctx, hostID, read, `set owner = nullif($2, ''), updated_at = now()`, normalized)
 }
 
 // MaxFailureDomainLength bounds the failure domain of a host. It is a
@@ -2146,22 +2127,15 @@ func NormalizeFailureDomain(domain string) (string, error) {
 	return domain, nil
 }
 
-// SetFailureDomain records what the host goes down with. An empty domain
-// clears the field.
-func (s *Store) SetFailureDomain(ctx context.Context, hostID, domain string) (*Host, error) {
+// SetFailureDomain records what the host goes down with, on the facts the
+// caller read. An empty domain clears the field.
+func (s *Store) SetFailureDomain(ctx context.Context, hostID, domain string, read Facts) (*Host, error) {
 	normalized, err := NormalizeFailureDomain(domain)
 	if err != nil {
 		return nil, err
 	}
-	tag, err := s.pool.Exec(ctx,
-		`update hosts set failure_domain = nullif($2, ''), updated_at = now() where id = $1`, hostID, normalized)
-	if err != nil {
-		return nil, fmt.Errorf("setting the failure domain: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return nil, ErrNotFound
-	}
-	return s.Get(ctx, hostID)
+	return s.writeFacts(ctx, hostID, read,
+		`set failure_domain = nullif($2, ''), updated_at = now()`, normalized)
 }
 
 // MaxPlacementLength bounds the site and the environment of a host.
@@ -2193,25 +2167,18 @@ func NormalizePlacement(site, environment string) (string, string, error) {
 	return site, environment, nil
 }
 
-// SetPlacement moves a host to a site and an environment.
-func (s *Store) SetPlacement(ctx context.Context, hostID, site, environment string) (*Host, error) {
+// SetPlacement moves a host to a site and an environment, on the facts the
+// caller read.
+func (s *Store) SetPlacement(ctx context.Context, hostID, site, environment string,
+	read Facts) (*Host, error) {
 	site, environment, err := NormalizePlacement(site, environment)
 	if err != nil {
 		return nil, err
 	}
-	tag, err := s.pool.Exec(ctx, `
-		update hosts
+	return s.writeFacts(ctx, hostID, read, `
 		   set placement_changed_at = case when site = $2 and environment = $3
 		                                   then placement_changed_at else now() end,
-		       site = $2, environment = $3, updated_at = now()
-		 where id = $1`, hostID, site, environment)
-	if err != nil {
-		return nil, fmt.Errorf("setting the placement: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return nil, ErrNotFound
-	}
-	return s.Get(ctx, hostID)
+		       site = $2, environment = $3, updated_at = now()`, site, environment)
 }
 
 // ErrInvalidAddress means a management address that is neither an IP
@@ -2239,46 +2206,28 @@ func NormalizeManagementAddress(address string) (string, error) {
 }
 
 // SetManualManagementAddress records the address an operator chose for
-// reaching the host.
-func (s *Store) SetManualManagementAddress(ctx context.Context, hostID, address string) (*Host, error) {
+// reaching the host, on the facts the caller read.
+func (s *Store) SetManualManagementAddress(ctx context.Context, hostID, address string,
+	read Facts) (*Host, error) {
 	normalized, err := NormalizeManagementAddress(address)
 	if err != nil {
 		return nil, err
 	}
-	var (
-		query string
-		args  []any
-	)
 	if normalized == "" {
-		query = `
-			update hosts
+		return s.writeFacts(ctx, hostID, read, `
 			   set management_address = case when management_address_source = 'manual'
 			                                 then null else management_address end,
 			       management_address_source = case when management_address_source = 'manual'
 			                                        then null else management_address_source end,
 			       management_address_observed_at = case when management_address_source = 'manual'
 			                                             then null else management_address_observed_at end,
-			       updated_at = now()
-			 where id = $1`
-		args = []any{hostID}
-	} else {
-		query = `
-			update hosts
+			       updated_at = now()`)
+	}
+	return s.writeFacts(ctx, hostID, read, `
 			   set management_address             = $2,
 			       management_address_source       = 'manual',
 			       management_address_observed_at  = now(),
-			       updated_at                      = now()
-			 where id = $1`
-		args = []any{hostID, normalized}
-	}
-	tag, err := s.pool.Exec(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("setting the management address: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return nil, ErrNotFound
-	}
-	return s.Get(ctx, hostID)
+			       updated_at                      = now()`, normalized)
 }
 
 // ApplyEnrollmentFacts records what the installation order said about the

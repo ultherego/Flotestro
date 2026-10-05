@@ -3,10 +3,12 @@ package adminapi
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/paging"
 )
 
@@ -47,9 +49,25 @@ func requireMatch(w http.ResponseWriter, r *http.Request, current string) bool {
 	if current != "" {
 		setETag(w, current)
 	}
-	problem(w, http.StatusPreconditionFailed, "precondition_failed",
-		"the record changed since it was read; read it again and repeat the write with its current ETag")
+	problem(w, http.StatusPreconditionFailed, "precondition_failed", recordMoved)
 	return false
+}
+
+// recordMoved is what a write is told when the version it was decided on is
+// not the version in the database - whether the If-Match said so or the write
+// itself found out.
+const recordMoved = "the record changed since it was read; " +
+	"read it again and repeat the write with its current ETag"
+
+// hostMoved answers a write of a host's facts that landed on no row because
+// somebody wrote it first. The answer is the one a stale If-Match gets,
+// because it is the same thing: the version the write was decided on is gone.
+func hostMoved(w http.ResponseWriter, err error) bool {
+	if !errors.Is(err, hosts.ErrChanged) {
+		return false
+	}
+	problem(w, http.StatusPreconditionFailed, "precondition_failed", recordMoved)
+	return true
 }
 
 // opaqueTag strips the weakness marker: two tags with the same opaque

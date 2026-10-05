@@ -269,6 +269,12 @@ func (s *Server) applyBulkChange(r *http.Request, principal authz.Principal, hos
 
 	before := bulkFacts(host)
 	updated, err := s.writeBulkChange(ctx, host, change, principal.Subject)
+	if errors.Is(err, hosts.ErrChanged) {
+		// Somebody wrote this host between the read and the write. The change
+		// is reported against this host and the rest of the selection goes on.
+		return bulkHostOutcome{HostID: hostID, Code: "precondition_failed",
+			Detail: "the host changed while the change was being written; read it again"}
+	}
 	if err != nil {
 		s.log.Error("bulk metadata: writing the host failed", "host", hostID, "err", err)
 		return bulkHostOutcome{HostID: hostID, Code: "internal_error", Detail: "internal error"}
@@ -287,6 +293,10 @@ func (s *Server) applyBulkChange(r *http.Request, principal authz.Principal, hos
 // writeBulkChange writes the facts of the change on one host, in the order the
 // single routes would: the tags, the owner, the domain, the placement, the
 // window.
+//
+// Every write carries the facts the step before it left, like the single
+// routes: the row is read back by each of them, so a change of several facts
+// still lands only while nobody else has written the host in between.
 func (s *Server) writeBulkChange(ctx context.Context, host *hosts.Host, change bulkChange,
 	actor string) (*hosts.Host, error) {
 	updated := host
@@ -302,17 +312,18 @@ func (s *Server) writeBulkChange(ctx context.Context, host *hosts.Host, change b
 		if tags, err = hosts.NormalizeTags(tags); err != nil {
 			return nil, err
 		}
-		if updated, err = s.hosts.SetTags(ctx, host.ID, tags); err != nil {
+		if updated, err = s.hosts.SetTags(ctx, host.ID, tags, hosts.FactsOf(updated)); err != nil {
 			return nil, err
 		}
 	}
 	if change.owner != nil {
-		if updated, err = s.hosts.SetOwner(ctx, host.ID, *change.owner); err != nil {
+		if updated, err = s.hosts.SetOwner(ctx, host.ID, *change.owner, hosts.FactsOf(updated)); err != nil {
 			return nil, err
 		}
 	}
 	if change.failureDomain != nil {
-		if updated, err = s.hosts.SetFailureDomain(ctx, host.ID, *change.failureDomain); err != nil {
+		if updated, err = s.hosts.SetFailureDomain(ctx, host.ID, *change.failureDomain,
+			hosts.FactsOf(updated)); err != nil {
 			return nil, err
 		}
 	}
@@ -324,7 +335,8 @@ func (s *Server) writeBulkChange(ctx context.Context, host *hosts.Host, change b
 		if change.environment != nil {
 			environment = *change.environment
 		}
-		if updated, err = s.hosts.SetPlacement(ctx, host.ID, site, environment); err != nil {
+		if updated, err = s.hosts.SetPlacement(ctx, host.ID, site, environment,
+			hosts.FactsOf(updated)); err != nil {
 			return nil, err
 		}
 	}
