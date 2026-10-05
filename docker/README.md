@@ -808,13 +808,28 @@ site cannot reach - the verification belongs where the network is.
 ```
 version=0.60.0
 owner=ultherego
-images="control-plane package-repository admin-tools relay"
+issuer=https://token.actions.githubusercontent.com
 
-for name in $images; do
+# The three images the publishing workflow builds and signs.
+for name in control-plane admin-tools relay; do
   reference="ghcr.io/$owner/flotestro-$name:$version"
   cosign verify \
     --certificate-identity-regexp '^https://github\.com/ultherego/Flotestro/\.github/workflows/images\.yml@refs/tags/v' \
-    --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+    --certificate-oidc-issuer "$issuer" \
+    "$reference" \
+    || { echo "$reference does not verify; it was not copied" >&2; break; }
+  docker pull "$reference"
+  docker save -o "flotestro-$name-$version.tar" "$reference"
+done
+
+# The repository of packages is built from the published tree by the release
+# workflow, so its signature carries that workflow's identity. Asking for the
+# publishing one here would refuse an image that is correctly signed.
+for name in package-repository; do
+  reference="ghcr.io/$owner/flotestro-$name:$version"
+  cosign verify \
+    --certificate-identity-regexp '^https://github\.com/ultherego/Flotestro/\.github/workflows/release\.yml@refs/tags/v' \
+    --certificate-oidc-issuer "$issuer" \
     "$reference" \
     || { echo "$reference does not verify; it was not copied" >&2; break; }
   docker pull "$reference"

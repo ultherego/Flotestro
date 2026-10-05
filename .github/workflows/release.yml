@@ -803,6 +803,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # The air-gap procedure tells the operator to verify this image before
+      # carrying it across, so the run needs an identity to sign it with.
+      id-token: write
     # The image --profile airgap pulls. Its own job because it needs a
     # registry token and the signing job holds the release key.
     steps:
@@ -833,7 +836,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - uses: sigstore/cosign-installer@dc72c7d5c4d10cd6bcb8cf6e3fd625a9e5e537da # v3.7.0
+
       - name: Build and publish
+        id: publish
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
@@ -853,4 +859,50 @@ jobs:
             --build-arg COMMIT="$GITHUB_SHA" \
             --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --provenance=true --sbom=true \
+            --metadata-file "$RUNNER_TEMP/metadata.json" \
             $tags --push
+          digest="$(jq -r '."containerimage.digest"' "$RUNNER_TEMP/metadata.json")"
+          case "$digest" in
+          sha256:*) ;;
+          *) echo "the build reported no digest to sign: $digest" >&2; exit 1 ;;
+          esac
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "published $image@$digest"
+
+      - name: Sign the image the air-gap procedure verifies
+        # The procedure tells an operator to check this signature on the
+        # connected side and to carry nothing across that does not verify. For
+        # three releases there was no signature to check: the image was built
+        # here and signed nowhere, so that step of the procedure could only
+        # ever fail. A release does not publish it unsigned.
+        env:
+          IMAGE: ${{ steps.publish.outputs.image }}
+          DIGEST: ${{ steps.publish.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "::error title=Unsigned repository image::this run received no OIDC identity, so $IMAGE@$DIGEST cannot be signed; the air-gap procedure verifies it, so it is not published unsigned" >&2
+            exit 1
+          fi
+          # --recursive, as for the other images: a deployment that pins the
+          # index and one that pins a platform both have something to verify.
+          cosign sign --yes --recursive "$IMAGE@$DIGEST"
+          echo "signed $IMAGE@$DIGEST"
+
+      - name: The signature is read back before the release stands
+        # "cosign sign exited zero" is not the same statement as "the operator
+        # can verify it", and the difference is what the procedure rests on.
+        # It is read back with the same command the documentation gives, so a
+        # signature made under an identity that command does not accept stops
+        # the release here rather than at a site with no network.
+        env:
+          IMAGE: ${{ steps.publish.outputs.image }}
+          DIGEST: ${{ steps.publish.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cosign verify \
+            --certificate-identity-regexp '^https://github\.com/[^/]+/[Ff]lotestro/\.github/workflows/release\.yml@refs/tags/v' \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$IMAGE@$DIGEST" > /dev/null
+          echo "the operator's own command verifies $IMAGE@$DIGEST"

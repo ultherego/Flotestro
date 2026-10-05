@@ -803,10 +803,22 @@ upstream:
     signature checked after the crossing would be a signature checked against a
     transparency log the site cannot reach.</p>
 
-<pre><code>for name in control-plane package-repository admin-tools relay; do
+<pre><code># The three images the publishing workflow builds and signs.
+for name in control-plane admin-tools relay; do
   reference="ghcr.io/ultherego/flotestro-$name:$version"
   cosign verify \
     --certificate-identity-regexp '^https://github\.com/ultherego/Flotestro/\.github/workflows/images\.yml@refs/tags/v' \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com "$reference" \
+    || { echo "$reference does not verify; it was not copied" &gt;&amp;2; break; }
+  docker pull "$reference"
+  docker save -o "flotestro-$name-$version.tar" "$reference"
+done
+
+# The repository of packages is built by the release workflow, so its signature carries that workflow's identity.
+for name in package-repository; do
+  reference="ghcr.io/ultherego/flotestro-$name:$version"
+  cosign verify \
+    --certificate-identity-regexp '^https://github\.com/ultherego/Flotestro/\.github/workflows/release\.yml@refs/tags/v' \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com "$reference" \
     || { echo "$reference does not verify; it was not copied" &gt;&amp;2; break; }
   docker pull "$reference"

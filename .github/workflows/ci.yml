@@ -738,28 +738,21 @@ jobs:
         # The recurring defect here is one thing described in two places and
         # edited in one, and none of these properties needs the laboratory to
         # check: the site's two languages, the form of a healthcheck against the
-        # image it runs in, the air-gap procedure against the job that signs,
+        # image it runs in, the air-gap procedure against the jobs that sign,
         # env.example against what a container is actually handed. The checks are
         # named so that a failure says which invariant broke without opening the
         # log, and each one refuses to pass when it finds nothing to inspect.
+        #
+        # airgap-images-are-signed was reported and not required for as long as
+        # the repository image of an isolated site was published unsigned. The
+        # release signs it now and reads the signature back, so the check is
+        # required here like the others.
         run: |
           go run ./tools/shipcheck \
             site-languages \
             healthcheck-form \
             airgap-verify-stops \
+            airgap-images-are-signed \
             table-headers-declare-scope \
             checklist-mirror-is-complete \
             env-example-reaches-the-deployment
-
-      - name: Findings that are open work
-        # Reported, not required. The air-gap procedure tells an operator to
-        # verify flotestro-package-repository and no job signs it; the fix
-        # travels with the build-once pipeline, and until it lands a red check
-        # here would block every pull request over something no pull request
-        # caused. When the image is signed, move this check into the step above
-        # and delete the pin in tools/shipcheck/shipcheck_test.go.
-        continue-on-error: true
-        run: |
-          set -o pipefail
-          go run ./tools/shipcheck airgap-images-are-signed 2>&1 \
-            | tee -a "$GITHUB_STEP_SUMMARY"

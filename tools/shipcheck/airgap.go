@@ -227,53 +227,107 @@ func airgapImagesAreSigned(root string) ([]finding, error) {
 	return findings, nil
 }
 
-// signedImages reads the images the publishing workflow signs out of its own
-// matrix, so that an image added to the matrix is counted without anybody
-// editing this tool. The signing step is looked for as well: a matrix whose job
-// stopped signing would otherwise read as four signed images.
+// signedImages reads the images the release signs out of the workflows
+// themselves, so that an image added to a matrix is counted without anybody
+// editing this tool.
+//
+// Every workflow is read, not one: the repository image of an isolated site is
+// built and signed by release.yml and nowhere near the matrix of images.yml,
+// and reading only that matrix reported it as signed by nobody for as long as
+// it was. A job counts only when one of its own steps runs cosign sign, so a
+// matrix whose job stopped signing does not read as four signed images.
+//
+// A name is taken either from the job's matrix or from the scripts of the job
+// that signs. Shell comments are cut out of those scripts first: a name
+// mentioned in a comment beside the signing would otherwise read as signed,
+// and this check exists to refuse exactly that kind of agreement.
 func signedImages(root string) (map[string]bool, error) {
-	text, err := readText(root, ".github", "workflows", "images.yml")
+	dir := filepath.Join(root, ".github", "workflows")
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("reading the workflows: %w", err)
 	}
-	var document yaml.Node
-	if err := yaml.Unmarshal([]byte(text), &document); err != nil {
-		return nil, fmt.Errorf("images.yml: %w", err)
-	}
-	if len(document.Content) == 0 {
-		return nil, fmt.Errorf("images.yml is empty")
-	}
-	jobs := field(document.Content[0], "jobs")
-	if jobs == nil {
-		return nil, fmt.Errorf("images.yml declares no jobs")
-	}
-
 	signed := map[string]bool{}
-	for i := 0; i+1 < len(jobs.Content); i += 2 {
-		job := jobs.Content[i+1]
-		steps := field(job, "steps")
-		if steps == nil {
+	read := 0
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || (!strings.HasSuffix(name, ".yml") && !strings.HasSuffix(name, ".yaml")) {
 			continue
 		}
-		signs := false
-		for _, step := range steps.Content {
-			if run := field(step, "run"); run != nil && strings.Contains(run.Value, "cosign sign") {
-				signs = true
-				break
-			}
+		text, err := readText(root, ".github", "workflows", name)
+		if err != nil {
+			return nil, err
 		}
-		if !signs {
+		var document yaml.Node
+		if err := yaml.Unmarshal([]byte(text), &document); err != nil {
+			return nil, fmt.Errorf("%s: %w", name, err)
+		}
+		if len(document.Content) == 0 {
+			return nil, fmt.Errorf("%s is empty", name)
+		}
+		read++
+		jobs := field(document.Content[0], "jobs")
+		if jobs == nil {
 			continue
 		}
-		include := field(field(field(job, "strategy"), "matrix"), "include")
-		if include == nil {
+		for i := 0; i+1 < len(jobs.Content); i += 2 {
+			collectSignedImages(jobs.Content[i+1], signed)
+		}
+	}
+	if read == 0 {
+		return nil, fmt.Errorf("no workflow was read, so nothing could say which images are signed")
+	}
+	return signed, nil
+}
+
+// collectSignedImages adds the images one job signs, and nothing when it does
+// not sign.
+func collectSignedImages(job *yaml.Node, signed map[string]bool) {
+	steps := field(job, "steps")
+	if steps == nil {
+		return
+	}
+	var scripts []string
+	signs := false
+	for _, step := range steps.Content {
+		run := field(step, "run")
+		if run == nil {
 			continue
 		}
+		scripts = append(scripts, run.Value)
+		if strings.Contains(run.Value, "cosign sign") {
+			signs = true
+		}
+	}
+	if !signs {
+		return
+	}
+	if include := field(field(field(job, "strategy"), "matrix"), "include"); include != nil {
 		for _, entry := range include.Content {
 			if image := field(entry, "image"); image != nil && image.Value != "" {
 				signed[image.Value] = true
 			}
 		}
 	}
-	return signed, nil
+	for _, script := range scripts {
+		for _, name := range imageNames.FindAllString(withoutShellComments(script), -1) {
+			signed[name] = true
+		}
+	}
+}
+
+// imageNames matches an image of this product written out in full.
+var imageNames = regexp.MustCompile(`flotestro-[a-z0-9]+(?:-[a-z0-9]+)*`)
+
+// withoutShellComments drops what a script says about itself, keeping what it
+// does.
+func withoutShellComments(script string) string {
+	var kept []string
+	for _, line := range strings.Split(script, "\n") {
+		if trimmed := strings.TrimSpace(line); strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n")
 }

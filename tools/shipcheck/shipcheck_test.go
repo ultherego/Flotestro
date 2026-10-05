@@ -90,13 +90,15 @@ func checkNameShaped(word string) bool {
 // writing the check.
 const repositoryRoot = "../.."
 
-// The checks the tree is held to. airgap-images-are-signed is not among them: it
-// reports an open finding, and the test below pins what it reports so that the
-// day it changes is a day somebody reads.
+// The checks the tree is held to. airgap-images-are-signed joined them when the
+// release started signing the repository image of an isolated site: until then
+// it reported an open finding, and a pinned test here recorded what it found so
+// that the day it changed was a day somebody read.
 var enforced = []string{
 	"site-languages",
 	"healthcheck-form",
 	"airgap-verify-stops",
+	"airgap-images-are-signed",
 	"env-example-reaches-the-deployment",
 }
 
@@ -112,27 +114,6 @@ func TestTheTreeAgreesWithWhatItSaysAboutItself(t *testing.T) {
 			t.Errorf("%s: %s", name, found)
 		}
 	}
-}
-
-// The one check that does not pass yet, pinned to exactly what it finds. It is
-// the regression path of an open finding: the air-gap procedure is the only way
-// packages reach a disconnected site, and it tells the operator to verify an
-// image no job signs. When the image gets signed this test fails and is deleted
-// along with the check's place in the reporting job.
-func TestTheAirGapProcedureStillNamesAnImageNobodySigns(t *testing.T) {
-	findings, err := checkNamed(t, "airgap-images-are-signed").run(repositoryRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(findings) == 0 {
-		t.Fatal("flotestro-package-repository is signed now: make this check required and delete this test")
-	}
-	for _, found := range findings {
-		if !strings.Contains(found.said, "flotestro-package-repository") {
-			t.Errorf("an unexpected image is documented as verified but unsigned: %s", found)
-		}
-	}
-	t.Logf("%d documented loop(s) name an unsigned image", len(findings))
 }
 
 func checkNamed(t *testing.T, name string) check {
@@ -550,4 +531,57 @@ func TestEnvExampleDoesNotCountANameWrittenInAComment(t *testing.T) {
 func TestEnvExampleRefusesToPassOverNothing(t *testing.T) {
 	root := envTree(t, "# only comments here\n", reachingCompose, "# nothing\n")
 	only(t, run(t, root, "env-example-reaches-the-deployment"), "compared nothing")
+}
+
+// A signature made outside a matrix counts too. The repository image of an
+// isolated site is built and signed by release.yml, with its name written in
+// the script rather than in a matrix entry, and reading only the matrix of
+// images.yml reported it as signed by nobody for as long as it was.
+func TestAnImageSignedOutsideAMatrixCounts(t *testing.T) {
+	root := airgapTree(t, strings.Replace(stoppingLoop,
+		"for name in control-plane package-repository relay; do",
+		"for name in control-plane relay; do", 1))
+	write(t, root, ".github/workflows/release.yml", `name: Release
+jobs:
+  repository-image:
+    steps:
+      - name: Build and publish
+        run: |
+          image="ghcr.io/$owner/flotestro-package-repository"
+          docker buildx build --tag "$image:$version" --push .
+      - name: Sign
+        run: cosign sign --yes --recursive "$image@$digest"
+`)
+	loop := strings.Replace(stoppingLoop,
+		"for name in control-plane relay; do",
+		"for name in control-plane package-repository relay; do", 1)
+	write(t, root, "docs/site/docs/installation.html", "<pre><code>"+loop+"</code></pre>\n")
+	findings, err := checkNamed(t, "airgap-images-are-signed").run(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 0 {
+		t.Errorf("an image signed outside a matrix reads as unsigned: %v", findings)
+	}
+}
+
+// And a name that only appears in a comment beside the signing is not a signed
+// image. The check exists to refuse a documented verification nothing backs,
+// so it may not be talked into agreement.
+func TestANameInACommentIsNotASignature(t *testing.T) {
+	root := airgapTree(t, stoppingLoop)
+	write(t, root, ".github/workflows/release.yml", `name: Release
+jobs:
+  something-else:
+    steps:
+      - name: Sign
+        run: |
+          # flotestro-package-repository is built elsewhere and not signed here
+          cosign sign --yes "$image@$digest"
+`)
+	loop := strings.Replace(stoppingLoop,
+		"for name in control-plane relay; do",
+		"for name in control-plane package-repository relay; do", 1)
+	write(t, root, "docs/site/docs/installation.html", "<pre><code>"+loop+"</code></pre>\n")
+	only(t, run(t, root, "airgap-images-are-signed"), "flotestro-package-repository")
 }
