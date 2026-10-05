@@ -91,7 +91,7 @@
 
   <main class="content">
 <h1>7. Błędy i odmowy</h1>
-<p class="lede">Każda odmowa, każde niepowodzenie i każde pominięcie, jakie panel, agent i helper mogą przypisać zadaniu, celowi kampanii albo żądaniu, niesie stały kod. Kod odpowiada na dwa pytania: co się stało i co można bezpiecznie zrobić dalej. Ta strona to cały wykaz, 324 pozycji, przepisany z <code>internal/opspec/errors.go</code>; panel udostępnia tę samą listę pod <code>GET /api/v1/errors</code>.</p>
+<p class="lede">Każda odmowa, każde niepowodzenie i każde pominięcie, jakie panel, agent i helper mogą przypisać zadaniu, celowi kampanii albo żądaniu, niesie stały kod. Kod odpowiada na dwa pytania: co się stało i co można bezpiecznie zrobić dalej. Ta strona to cały wykaz, 326 pozycji, przepisany z <code>internal/opspec/errors.go</code>; panel udostępnia tę samą listę pod <code>GET /api/v1/errors</code>.</p>
     <ul class="linkrow">
       <li><a href="#retry">Polityka ponowień</a></li>
       <li><a href="#failure">Czy kod liczy się jako niepowodzenie</a></li>
@@ -166,7 +166,7 @@
 <tr><td><a href="#stage-preflight"><code>preflight</code></a></td><td>13</td></tr>
 <tr><td><a href="#stage-admission"><code>admission</code></a></td><td>43</td></tr>
 <tr><td><a href="#stage-approval"><code>approval</code></a></td><td>9</td></tr>
-<tr><td><a href="#stage-dispatch"><code>dispatch</code></a></td><td>23</td></tr>
+<tr><td><a href="#stage-dispatch"><code>dispatch</code></a></td><td>25</td></tr>
 <tr><td><a href="#stage-agent"><code>agent</code></a></td><td>29</td></tr>
 <tr><td><a href="#stage-helper"><code>helper</code></a></td><td>105</td></tr>
 <tr><td><a href="#stage-verify"><code>verify</code></a></td><td>10</td></tr>
@@ -424,6 +424,8 @@
 <tr><td><a href="#err-schedule-adopt-shared-file"><code class="refusal">schedule_adopt_shared_file</code></a></td><td>helper</td><td><span class="badge retry-after-change">after_change</span></td><td>tak</td></tr>
 <tr><td><a href="#err-schema-ahead"><code class="refusal">schema_ahead</code></a></td><td>startup</td><td><span class="badge retry-after-change">after_change</span></td><td>nie</td></tr>
 <tr><td><a href="#err-schema-behind"><code class="refusal">schema_behind</code></a></td><td>startup</td><td><span class="badge retry-after-change">after_change</span></td><td>nie</td></tr>
+<tr><td><a href="#err-creator-rights-gone"><code class="refusal">creator_rights_gone</code></a></td><td>dispatch</td><td><span class="badge retry-after-change">after_change</span></td><td>tak</td></tr>
+<tr><td><a href="#err-creator-rights-unconfirmed"><code class="refusal">creator_rights_unconfirmed</code></a></td><td>dispatch</td><td><span class="badge retry-automatic">automatic</span></td><td>nie</td></tr>
 <tr><td><a href="#err-secret-gone"><code class="refusal">secret_gone</code></a></td><td>dispatch</td><td><span class="badge retry-after-change">after_change</span></td><td>nie</td></tr>
 <tr><td><a href="#err-secret-source-invalid"><code class="refusal">secret_source_invalid</code></a></td><td>startup</td><td><span class="badge retry-after-change">after_change</span></td><td>nie</td></tr>
 <tr><td><a href="#err-secret-unavailable"><code class="refusal">secret_unavailable</code></a></td><td>dispatch</td><td><span class="badge retry-automatic">automatic</span></td><td>tak</td></tr>
@@ -667,7 +669,7 @@
 <dd><p>Z linku już skorzystano. Jeden link wydaje archiwum jeden raz.</p><p><span class="label">Co zrobić</span> Poproś o nowy link.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge not-failure">nie jest niepowodzeniem</span></p></dd>
 </dl>
 <h2 id="stage-dispatch">Etap: dispatch</h2>
-<p>23 kody.</p>
+<p>25 kodów.</p>
 <dl class="kv">
 <dt id="err-agent-package-signer-not-applicable"><code class="refusal">agent_package_signer_not_applicable</code></dt>
 <dd><p>Plan wskazał klucz, którego podpis musi nieść plik pakietu, a host należy do rodziny apt, gdzie plik pakietu nie niesie własnego podpisu. Zlecenie nie poszło: tego żądania nie dałoby się nigdy spełnić. Nic nie zostało zainstalowane.</p><p><span class="label">Co zrobić</span> Zleć podmianę bez wskazywania podpisującego. Na Debianie i Ubuntu pochodzenie pakietu dowodzi podpisany indeks repozytorium - InRelease pokrywa listę pakietów, a lista pakietów sumę kontrolną pliku - a host podaje w wyniku zadania, który klucz podpisał ten indeks.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge counts-failure">liczy się jako niepowodzenie</span></p></dd>
@@ -701,6 +703,10 @@
 <dd><p>Stan hosta zmienił się po policzeniu planu.</p><p><span class="label">Co zrobić</span> Policz plany od nowa i zatwierdź nowy zestaw.</p><p><span class="badge retry-after-replan">ponowienie: after_replan</span> <span class="badge not-failure">nie jest niepowodzeniem</span></p></dd>
 <dt id="err-reboot-create-failed"><code class="refusal">reboot_create_failed</code></dt>
 <dd><p>Nie udało się utworzyć operacji restartu dla hosta.</p><p><span class="label">Co zrobić</span> Sprawdź log panelu; w razie potrzeby zrestartuj host ręcznie.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge counts-failure">liczy się jako niepowodzenie</span></p></dd>
+<dt id="err-creator-rights-gone"><code class="refusal">creator_rights_gone</code></dt>
+<dd><p>Operator, który zlecił zadanie, nie ma już uprawnienia wymaganego przez tę operację. Zadanie czekało w kolejce od czasu, gdy mógł je zlecić, a host wrócił już po tym, jak przestał móc — więc żadna zdolność nie została wystawiona.</p><p><span class="label">Co zrobić</span> Zleć ponownie jako ktoś, kto ma to uprawnienie, albo niech zadanie zatwierdzi ktoś, kto je ma.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge counts-failure">liczy się jako porażka</span></p></dd>
+<dt id="err-creator-rights-unconfirmed"><code class="refusal">creator_rights_unconfirmed</code></dt>
+<dd><p>Panel nie mógł odczytać, co operator zlecający zadanie może teraz robić, więc nic nie zostało wysłane. Autoryzacja, której nikt nie sprawdził, nie jest autoryzacją węższą — zadanie czeka, zamiast wyruszać na domysł.</p><p><span class="label">Co zrobić</span> Sprawdź, czy dostawca tożsamości albo katalog, z którego panel czyta uprawnienia, odpowiada; zadanie wyruszy samo, gdy pytanie dostanie odpowiedź.</p><p><span class="badge retry-automatic">ponowienie: automatic</span> <span class="badge not-failure">nie liczy się jako porażka</span></p></dd>
 <dt id="err-secret-gone"><code class="refusal">secret_gone</code></dt>
 <dd><p>Sekretu, którego wymaga zadanie, już nie ma: ktoś go wycofał albo usunął między zleceniem a dostarczeniem. Żadne z tych dwóch nie cofa się samo, więc zadanie zamknięto, zamiast powtarzać je do terminu. Nic nie poszło na host.</p><p><span class="label">Co zrobić</span> Skieruj zlecenie na sekret, który istnieje, albo przywróć sekret, i zleć zadanie ponownie.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge not-failure">nie jest niepowodzeniem</span></p></dd>
 <dt id="err-secret-unavailable"><code class="refusal">secret_unavailable</code></dt>
