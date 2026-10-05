@@ -290,14 +290,26 @@ backup() {
     # after the first value was already in hand, so a rotation between two of
     # the reads wrote a manifest naming a key the dump is not sealed with.
     local record kek_id crypto_revision installation_id active_key_id issuer_id
-    if ! record="$(query "select coalesce(kek_id, '') || E'\t' || revision || E'\t' ||
-                          coalesce(installation_id::text, '') || E'\t' ||
-                          coalesce(active_secrets_key_id, '') || E'\t' ||
-                          coalesce(active_agent_ca_id::text, '')
-                          from crypto_installation_state" 2>&1)"; then
+    # One row, as JSON, because a tab-separated line cannot carry an empty
+    # first field: tab is an IFS whitespace character, so bash collapses a
+    # leading empty field and every value after it shifts one place. A local
+    # sealed installation has no kek_id, which is exactly that case - the
+    # manifest then named the revision as the key, the installation identifier
+    # as the revision, and left the issuer empty.
+    if ! record="$(query "select row_to_json(r) from (
+                          select coalesce(kek_id, '') as kek_id,
+                                 revision::text as revision,
+                                 coalesce(installation_id::text, '') as installation_id,
+                                 coalesce(active_secrets_key_id, '') as active_key_id,
+                                 coalesce(active_agent_ca_id::text, '') as issuer_id
+                          from crypto_installation_state) r" 2>&1)"; then
         fail "the installation record could not be read, so it is not known where the keys of this installation are: $record"
     fi
-    IFS=$'\t' read -r kek_id crypto_revision installation_id active_key_id issuer_id <<< "$record"
+    kek_id="$(printf '%s' "$record" | jq -r '.kek_id // ""')"
+    crypto_revision="$(printf '%s' "$record" | jq -r '.revision // ""')"
+    installation_id="$(printf '%s' "$record" | jq -r '.installation_id // ""')"
+    active_key_id="$(printf '%s' "$record" | jq -r '.active_key_id // ""')"
+    issuer_id="$(printf '%s' "$record" | jq -r '.issuer_id // ""')"
     # A revision that did not arrive is not a revision to compare against, and
     # a backup whose pair cannot be checked is not a backup. The reads used to
     # carry "2>/dev/null || true", which left the variable empty - and the
@@ -342,11 +354,13 @@ backup() {
     # activation of an authority outside the window: the manifest recorded an
     # issuer newer than the dump, and the check had already finished.
     local record_after
-    if ! record_after="$(query "select coalesce(kek_id, '') || E'\t' || revision || E'\t' ||
-                                coalesce(installation_id::text, '') || E'\t' ||
-                                coalesce(active_secrets_key_id, '') || E'\t' ||
-                                coalesce(active_agent_ca_id::text, '')
-                                from crypto_installation_state" 2>&1)"; then
+    if ! record_after="$(query "select row_to_json(r) from (
+                          select coalesce(kek_id, '') as kek_id,
+                                 revision::text as revision,
+                                 coalesce(installation_id::text, '') as installation_id,
+                                 coalesce(active_secrets_key_id, '') as active_key_id,
+                                 coalesce(active_agent_ca_id::text, '') as issuer_id
+                          from crypto_installation_state) r" 2>&1)"; then
         rm -rf "$dir"
         fail "the installation record could not be read after the archive, so it is not known whether the key material moved while the backup ran: $record_after"
     fi
@@ -400,6 +414,15 @@ backup() {
           state_sha256: $state_sha256,
           image_digest: ($image_digest | orNull)}' \
         > "$dir/manifest.json"
+
+    # The manifest goes into the checksums too. Until it did, SHA256SUMS
+    # covered the two archives and not the file that says which installation,
+    # which key encryption key and which issuer they belong to - so a manifest
+    # changed afterwards passed the check and a restore could be pointed at
+    # another installation's key material with both archives intact. It is
+    # added after it is written, because a digest of a file cannot live inside
+    # that file.
+    ( cd "$dir" && sha256sum manifest.json >> SHA256SUMS )
 
     note "written to $dir: database.dump, state.tar.zst, manifest.json, SHA256SUMS"
     note "the manifest carries no DSN, no password and no secret - the backup itself does, so it belongs on encrypted storage away from this host"
