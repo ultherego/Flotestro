@@ -75,6 +75,12 @@ import (
 	ubuntusource "github.com/ultherego/flotestro/internal/vuln/sources/ubuntu"
 )
 
+// firstFormProbeRows bounds the versions of the first form an adoption tries
+// its key against. One that opens settles it; a damaged row settles nothing and
+// the walk goes on, so there is more than one - and a few is enough, because an
+// installation whose every first row is damaged has a different problem.
+const firstFormProbeRows = 20
+
 const staleCheckInterval = 30 * time.Second
 
 // sessionAbsolute ends a panel session a day after the login whatever the
@@ -674,6 +680,9 @@ func Run() error {
 		LegacyKeyPath: legacyKeyPath,
 		RotateTo:      *secretsKeyRotateTo,
 		Log:           log,
+		SecretProbe: func(ctx context.Context, keys secrets.KeyProvider) error {
+			return secrets.NewStore(pool, keys).CheckFirstForm(ctx, firstFormProbeRows)
+		},
 	})
 	if err != nil {
 		return refuseCryptoStart(log, err)

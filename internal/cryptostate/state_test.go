@@ -1,6 +1,7 @@
 package cryptostate
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -256,6 +257,10 @@ type lab struct {
 	provider *fakeProvider
 	dir      string
 	legacy   string
+	// probe stands in for the secret store's answer about the key an
+	// adoption is about to trust. Nil is the shape of every case that is
+	// not about the store, and skips the question.
+	probe func(context.Context, secrets.KeyProvider) error
 }
 
 func newLab(t *testing.T) *lab {
@@ -268,7 +273,8 @@ func newLab(t *testing.T) *lab {
 }
 
 func (l *lab) options() Options {
-	return Options{Storage: l.storage, Provider: l.provider, CADir: l.dir, LegacyKeyPath: l.legacy}
+	return Options{Storage: l.storage, Provider: l.provider, CADir: l.dir, LegacyKeyPath: l.legacy,
+		SecretProbe: l.probe}
 }
 
 func (l *lab) open(t *testing.T) *Runtime {
@@ -890,5 +896,68 @@ func TestTheActivationHookDoesNotUndoAKeyRotation(t *testing.T) {
 	if after.IssuerID != runtime.trust.Active().IssuerID() {
 		t.Fatalf("the record names the issuer %q, and the authority that signs is %q",
 			after.IssuerID, runtime.trust.Active().IssuerID())
+	}
+}
+
+// An adoption trusts the key file with the data in the database, and until this
+// check nothing compared the two: the sentinel that proves the key at every
+// later start is sealed under this very key, here, now. A restore that brought
+// the database and somebody else's secrets.key was adopted, the record was
+// written, the sentinel was resealed, and every secret of the installation was
+// unreadable with one line in the log to say so.
+func TestAKeyThatDoesNotOpenTheFirstFormIsNotAdopted(t *testing.T) {
+	l := newLab(t)
+	if _, err := pki.Init(l.dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := secrets.InitCipher(l.legacy); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(l.legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.storage.facts = Facts{SecretVersions: 3, Hosts: 4, Certificates: 4}
+	l.probe = func(context.Context, secrets.KeyProvider) error {
+		return fmt.Errorf("%w: secret-a version 1 does not open under the key offered for the first form",
+			secrets.ErrFirstFormUnreadable)
+	}
+
+	fatal := l.openFatal(t, CodeSecretsKeyUnavailable)
+	// The operator has to read which file is wrong and how much is behind it;
+	// "the key is unavailable" sends them looking for a missing file.
+	if !strings.Contains(fatal.Reason, l.legacy) {
+		t.Errorf("the refusal does not name the key file: %s", fatal.Reason)
+	}
+	if !strings.Contains(fatal.Reason, "3 secret versions") {
+		t.Errorf("the refusal does not say how many versions are behind it: %s", fatal.Reason)
+	}
+	if !errors.Is(fatal, secrets.ErrFirstFormUnreadable) {
+		t.Errorf("the refusal does not carry what the store said: %v", fatal)
+	}
+	if l.storage.record != nil {
+		t.Fatal("a record was written for an installation whose secrets the key does not open")
+	}
+	// Nothing is lost by the refusal: the ciphertexts are untouched because
+	// they were never read for writing, and the key file is the one that was
+	// there - so the right key, when it is found, still opens everything.
+	after, err := os.ReadFile(l.legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("the refused start rewrote the key file")
+	}
+
+	// One step outside, from the legitimate side: the same installation whose
+	// key does open its rows is adopted exactly as before. A check that
+	// refused this would stop every upgrade from before the envelope.
+	l.probe = func(context.Context, secrets.KeyProvider) error { return nil }
+	runtime := l.open(t)
+	if runtime.Record().ActiveKeyID != secrets.LegacyKeyID {
+		t.Fatalf("active key after the adoption = %s", runtime.Record().ActiveKeyID)
+	}
+	if report := runtime.Report(context.Background()); !report.Adopted || report.Err != nil {
+		t.Errorf("report = %+v", report)
 	}
 }

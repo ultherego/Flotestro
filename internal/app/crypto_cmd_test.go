@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -101,5 +102,34 @@ func TestTheStatusOfACopyWithNoRecordNamesTheFirstForm(t *testing.T) {
 	}
 	if strings.Contains(printed, "note:") {
 		t.Fatalf("a migrated installation is told there is work to do:\n%s", printed)
+	}
+}
+
+// TestWhatTheVerificationOfTheStorePrints pins the fields a trial reads off
+// each line, and that a version which did not open is told apart from one
+// destroyed on purpose. The two used to be one "not available".
+func TestWhatTheVerificationOfTheStorePrints(t *testing.T) {
+	var out strings.Builder
+	printVerification(&out, []secrets.VersionCheck{
+		{SecretName: "db-root", Version: 1, EnvelopeVersion: 1, SHA256: "aa"},
+		{SecretName: "db-root", Version: 2, EnvelopeVersion: 2, KeyID: "legacy", SHA256: "bb"},
+		{SecretName: "gone", Version: 1, EnvelopeVersion: 2, KeyID: "legacy", Destroyed: true},
+		{SecretName: "wrong", Version: 1, EnvelopeVersion: 1, Err: errors.New("cipher: message authentication failed")},
+	})
+	printed := out.String()
+	for _, line := range []string{
+		// A version of the first form names no key, and "-" says so rather
+		// than an empty column a reader would misalign.
+		"db-root version 1 envelope 1 key - sha256 aa",
+		"db-root version 2 envelope 2 key legacy sha256 bb",
+		"gone version 1 envelope 2 key legacy destroyed",
+		"wrong version 1 envelope 1 key - FAILED cipher: message authentication failed",
+		"opened: 2",
+		"destroyed: 1",
+		"failed: 1",
+	} {
+		if !strings.Contains(printed, line+"\n") {
+			t.Fatalf("the report does not carry the line %q:\n%s", line, printed)
+		}
 	}
 }

@@ -123,6 +123,27 @@ live_versions: 3
 pending_migration: 3
 ```
 
+`crypto verify-secrets` is the other half: it opens every stored version with the keys the
+installation holds and prints the form, the key and the **fingerprint** of each value, never the
+value. Run before the upgrade and after it, the two reports are the comparison that says the
+migration changed the wrapping and not the content. A version that does not open is printed as
+`FAILED` with the reason, and the command exits non-zero saying how many of how many.
+
+```
+flotestro-control-plane crypto verify-secrets
+db-root version 1 envelope 1 key - sha256 2c26b46b68ffc68ff99b453c1d304134...
+opened: 1
+destroyed: 0
+failed: 0
+```
+
+A wrong `secrets.key` is refused before any of this. The first start of an adopted installation
+tries the key against the rows of the first form it is about to be trusted with, and stops with
+`secrets_key_unavailable` naming the file when they do not open: nothing is written, nothing is
+resealed, and the right key still opens everything when it is found. The check before it existed
+was the sentinel - which, at an adoption, is sealed under the very key being adopted and so
+proves nothing about it.
+
 `legacy/v1` is the first form - the value sealed under `secrets.key` directly, with no envelope
 of its own. It is counted apart from `legacy`, because a version wrapped under the key named
 `legacy` is already an envelope and a version of the first form is not, and the rewrap has work

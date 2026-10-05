@@ -85,6 +85,13 @@ type Options struct {
 	// LegacyKeyPath is where an installation from before the provider
 	// kept its one key. Empty means nowhere to look.
 	LegacyKeyPath string
+	// SecretProbe asks the secret store whether the key just adopted for the
+	// versions of the first form is the key they were sealed with. It is a
+	// hook rather than a call, because which forms there are and how each one
+	// opens belongs to internal/secrets and must not be told twice. Nil skips
+	// the question, which is what the startup table does where the store is
+	// not part of the case.
+	SecretProbe func(ctx context.Context, keys secrets.KeyProvider) error
 	// RotateTo names a key to switch the store to at this start; empty leaves the
 	// active key alone.
 	RotateTo string
@@ -353,6 +360,21 @@ func (r *Runtime) establish(ctx context.Context, o Options) error {
 				fmt.Sprintf("%s and the key %q of the provider differ", o.LegacyKeyPath, secrets.LegacyKeyID), err)
 		}
 		activeKey = secrets.LegacyKeyID
+		// The key and the data it is about to be trusted with, compared before
+		// the record is written. An installation being adopted has no sentinel
+		// yet - it is sealed below, under this very key - so this is the only
+		// moment anything can tell the installation's own key from somebody
+		// else's. A restore that brought the database and the wrong
+		// secrets.key used to be adopted, recorded, and left with every secret
+		// unreadable and one line in the log about it.
+		if o.SecretProbe != nil && facts.SecretVersions > 0 {
+			if err := o.SecretProbe(ctx, o.Provider); err != nil {
+				return fatal(CodeSecretsKeyUnavailable, fmt.Sprintf(
+					"the database holds %d secret versions sealed the first way and %s does not open them: "+
+						"it is not the key of this installation",
+					facts.SecretVersions, o.LegacyKeyPath), err)
+			}
+		}
 	case facts.SecretVersions > 0:
 		return fatal(CodeSecretsKeyUnavailable,
 			fmt.Sprintf("the database holds %d secret versions and neither %s nor an installation record exists",

@@ -30,7 +30,7 @@ import (
 // is an operator saying, at a moment of their choosing, that they know what
 // the installation is about to depend on.
 
-const cryptoUsage = "the crypto commands are status, import-state, revert-state, rewrap-kek and forget-files"
+const cryptoUsage = "the crypto commands are status, verify-secrets, import-state, revert-state, rewrap-kek and forget-files"
 
 // runCrypto dispatches the crypto commands.
 func runCrypto(args []string) error {
@@ -40,6 +40,8 @@ func runCrypto(args []string) error {
 	switch args[0] {
 	case "status":
 		return cryptoStatus(args[1:])
+	case "verify-secrets":
+		return cryptoVerifySecrets(args[1:])
 	case "import-state":
 		return cryptoImportState(args[1:])
 	case "revert-state":
@@ -194,6 +196,159 @@ func orNone(activeKeyID string) string {
 		return "the key the next start adopts"
 	}
 	return activeKeyID
+}
+
+// cryptoVerifySecrets opens every stored secret version with the keys the
+// installation holds and prints, per version, the form it is in, the key it
+// names and the fingerprint of its value.
+//
+// It exists because the store has no reader an operator can use. A value is
+// handed out on a lease, to a host, for one task - correctly - and nothing
+// else in the product will say whether the installation can still open what it
+// holds. That is the question of a restore drill, and it is the question a key
+// migration has to answer about itself: the fingerprints before and after are
+// the comparison, and the value does not leave the process to make it.
+//
+// Nothing is written. The keys it uses are the ones already on disk or in the
+// rows, so it does not adopt, create or rotate anything, and it may be run
+// against an installation nobody has started.
+func cryptoVerifySecrets(args []string) error {
+	databaseURL, err := config.OptionalSecretValue("FLOTESTRO_DATABASE_URL")
+	if err != nil {
+		return err
+	}
+	set := flag.NewFlagSet("crypto verify-secrets", flag.ContinueOnError)
+	set.StringVar(&databaseURL, "database-url", databaseURL, "the PostgreSQL DSN")
+	stateDir := set.String("state-dir", config.Env("FLOTESTRO_STATE_DIR", "/var/lib/flotestro"),
+		"the state directory the keys are read from")
+	kekFile := set.String("kek-file", config.Env("FLOTESTRO_KEK_FILE", cryptostate.DefaultKEKFile),
+		"the file the key encryption key is mounted at, for an installation whose keys are rows")
+	asJSON := set.Bool("json", false, "print the report as JSON")
+	if err := set.Parse(args); err != nil {
+		return err
+	}
+	if databaseURL == "" {
+		return errors.New("no database was named; pass -database-url or set FLOTESTRO_DATABASE_URL")
+	}
+
+	ctx := context.Background()
+	settings, err := config.DatabasePoolFromEnv()
+	if err != nil {
+		return err
+	}
+	pool, err := database.Open(ctx, databaseURL, settings)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	local, err := cryptostate.NewLocalProvider(filepath.Join(*stateDir, cryptostate.KeysDir), "")
+	if err != nil {
+		return fmt.Errorf("the key provider: %w", err)
+	}
+	storage := cryptostate.NewPostgres(pool)
+	// The same choice the start makes, and from the record rather than from a
+	// flag: a report that read the files of an installation that has moved its
+	// keys into the database would be a report about material the installation
+	// stopped sealing with.
+	provider, err := cryptostate.SelectProvider(ctx, storage, *kekFile, "", local)
+	if err != nil {
+		return err
+	}
+	checks, err := secrets.NewStore(pool, provider).Verify(ctx)
+	if err != nil {
+		return err
+	}
+
+	if *asJSON {
+		if err := printVerificationJSON(os.Stdout, checks); err != nil {
+			return err
+		}
+	} else {
+		printVerification(os.Stdout, checks)
+	}
+	failed := 0
+	for _, check := range checks {
+		if check.Err != nil {
+			failed++
+		}
+	}
+	if failed > 0 {
+		return fmt.Errorf("%d of %d stored secret versions did not open with the keys of this installation",
+			failed, len(checks))
+	}
+	return nil
+}
+
+// verifiedVersion is one line of the report, for the JSON form.
+type verifiedVersion struct {
+	Secret          string `json:"secret"`
+	Version         int    `json:"version"`
+	EnvelopeVersion int    `json:"envelope_version"`
+	KeyID           string `json:"key_id,omitempty"`
+	SHA256          string `json:"sha256,omitempty"`
+	Destroyed       bool   `json:"destroyed,omitempty"`
+	Error           string `json:"error,omitempty"`
+}
+
+// renderVerification turns the checks into the lines both forms print.
+func renderVerification(checks []secrets.VersionCheck) []verifiedVersion {
+	rendered := make([]verifiedVersion, 0, len(checks))
+	for _, check := range checks {
+		line := verifiedVersion{
+			Secret: check.SecretName, Version: check.Version,
+			EnvelopeVersion: check.EnvelopeVersion, KeyID: check.KeyID,
+			SHA256: check.SHA256, Destroyed: check.Destroyed,
+		}
+		if check.Err != nil {
+			line.Error = check.Err.Error()
+		}
+		rendered = append(rendered, line)
+	}
+	return rendered
+}
+
+// printVerification writes one line per version, in a shape a script can read
+// field by field.
+func printVerification(out io.Writer, checks []secrets.VersionCheck) {
+	opened, failed, destroyed := 0, 0, 0
+	for _, line := range renderVerification(checks) {
+		switch {
+		case line.Destroyed:
+			destroyed++
+			fmt.Fprintf(out, "%s version %d envelope %d key %s destroyed\n",
+				line.Secret, line.Version, line.EnvelopeVersion, orNoKey(line.KeyID))
+		case line.Error != "":
+			failed++
+			fmt.Fprintf(out, "%s version %d envelope %d key %s FAILED %s\n",
+				line.Secret, line.Version, line.EnvelopeVersion, orNoKey(line.KeyID), line.Error)
+		default:
+			opened++
+			fmt.Fprintf(out, "%s version %d envelope %d key %s sha256 %s\n",
+				line.Secret, line.Version, line.EnvelopeVersion, orNoKey(line.KeyID), line.SHA256)
+		}
+	}
+	fmt.Fprintf(out, "opened: %d\n", opened)
+	fmt.Fprintf(out, "destroyed: %d\n", destroyed)
+	fmt.Fprintf(out, "failed: %d\n", failed)
+}
+
+// printVerificationJSON writes the same report for something that parses it.
+func printVerificationJSON(out io.Writer, checks []secrets.VersionCheck) error {
+	encoded, err := json.MarshalIndent(renderVerification(checks), "", "  ")
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(out, "%s\n", encoded)
+	return err
+}
+
+// orNoKey names the key of a version of the first form, which names none.
+func orNoKey(keyID string) string {
+	if keyID == "" {
+		return "-"
+	}
+	return keyID
 }
 
 // cryptoOptions is what every crypto command needs to know.

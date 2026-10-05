@@ -629,3 +629,147 @@ func (s *Store) RewrapBatch(ctx context.Context, limit int) (moved, remaining, u
 	}
 	return moved, remaining, unbound, nil
 }
+
+// VersionCheck is what opening one stored version said.
+type VersionCheck struct {
+	SecretName      string
+	SecretID        string
+	Version         int
+	EnvelopeVersion int
+	KeyID           string
+	// SHA256 is the fingerprint of the value. It is what a comparison across
+	// a migration compares, because the value itself does not leave here: a
+	// migration that changed a value by one byte shows up as a different
+	// fingerprint, and the store still has no path that hands a value to an
+	// operator.
+	SHA256 string
+	// Destroyed marks a version whose content was destroyed on purpose. It is
+	// not a failure and it is not counted as one.
+	Destroyed bool
+	// Err is why the version did not open, and is nil when it did.
+	Err error
+}
+
+// Verify opens every stored version with the keys the provider holds and says,
+// per version, whether it opened and what the fingerprint of its value is.
+//
+// This is the only reader of the store that neither issues a lease nor serves
+// the panel's own use, and it exists for the two questions a restore drill and
+// a key migration ask: can this installation still open everything it holds,
+// and is what it opens the same as before. It reads and writes nothing else,
+// so it may be run against an installation nobody has started.
+func (s *Store) Verify(ctx context.Context) ([]VersionCheck, error) {
+	rows, err := s.pool.Query(ctx, `
+		select s.name, v.secret_id, v.version, v.envelope_version, coalesce(v.key_id, ''),
+		       v.destroyed_at is not null or length(v.ciphertext) = 0
+		  from secret_versions v join secrets s on s.id = v.secret_id
+		 order by s.name, v.version`)
+	if err != nil {
+		return nil, err
+	}
+	var checks []VersionCheck
+	for rows.Next() {
+		var check VersionCheck
+		if err := rows.Scan(&check.SecretName, &check.SecretID, &check.Version,
+			&check.EnvelopeVersion, &check.KeyID, &check.Destroyed); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		checks = append(checks, check)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// The opening is done after the cursor is closed: open reads through the
+	// same pool, and a decryption per row inside the cursor would hold a
+	// connection for the length of the whole walk.
+	for i := range checks {
+		if checks[i].Destroyed {
+			continue
+		}
+		value, err := s.open(ctx, s.pool, checks[i].SecretID, checks[i].Version)
+		if err != nil {
+			checks[i].Err = err
+			continue
+		}
+		checks[i].SHA256 = Fingerprint(value)
+	}
+	return checks, nil
+}
+
+// ErrFirstFormUnreadable means the key offered for the versions of the first
+// form does not open them: it is not the key they were sealed with.
+var ErrFirstFormUnreadable = errors.New("secrets_first_form_unreadable")
+
+// CheckFirstForm asks whether the legacy key the provider holds is the one the
+// versions of the first form were sealed with.
+//
+// An installation being adopted has no sentinel yet - the sentinel is sealed
+// under the key being adopted - so nothing else compares the key with the data
+// it is about to be trusted with. Without this, a restore that brought the
+// database and somebody else's secrets.key was adopted, the record was written,
+// and every secret of the installation became unreadable with only a line in
+// the log to say so.
+//
+// It refuses only on a key that is demonstrably not theirs. A version written
+// before the ciphertext was bound to its row opens unbound, and a damaged
+// version decides nothing: the key may be right and the row wrong, so the walk
+// goes on to the next one. Nothing decided means nothing is said.
+func (s *Store) CheckFirstForm(ctx context.Context, limit int) error {
+	legacy, ok := s.keys.(LegacyOpener)
+	if !ok {
+		return nil
+	}
+	cipher, ok := legacy.LegacyCipher()
+	if !ok {
+		return nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		select secret_id, version, nonce, ciphertext
+		  from secret_versions
+		 where destroyed_at is null and length(ciphertext) > 0 and envelope_version < $1
+		 order by secret_id, version
+		 limit $2`, EnvelopeVersion, limit)
+	if err != nil {
+		return err
+	}
+	type candidate struct {
+		secretID   string
+		version    int
+		nonce      []byte
+		ciphertext []byte
+	}
+	var candidates []candidate
+	for rows.Next() {
+		var row candidate
+		if err := rows.Scan(&row.secretID, &row.version, &row.nonce, &row.ciphertext); err != nil {
+			rows.Close()
+			return err
+		}
+		candidates = append(candidates, row)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for _, row := range candidates {
+		_, err := cipher.Decrypt(row.nonce, row.ciphertext, row.secretID, row.version)
+		if errors.Is(err, ErrVersionNotBound) {
+			// Written before the binding existed. The rewrap writes it back
+			// bound; here it only has to say whether the key is the right one.
+			_, err = cipher.DecryptUnbound(row.nonce, row.ciphertext, row.secretID, row.version)
+		}
+		switch {
+		case err == nil:
+			return nil
+		case errors.Is(err, ErrCorruptedVersion):
+			continue
+		default:
+			return fmt.Errorf("%w: %s version %d does not open under the key offered for the first form",
+				ErrFirstFormUnreadable, row.secretID, row.version)
+		}
+	}
+	return nil
+}
