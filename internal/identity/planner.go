@@ -310,10 +310,18 @@ func (p *Planner) accessFor(ctx context.Context, groups []string, uid string) (a
 		if !rule.Enabled || (!rule.AllUsers && !matchesSubject(rule.Users, rule.UserGroups, uid, groups)) {
 			continue
 		}
-		if rule.AllowsEverything {
+		// The host side is what decides where the access reaches: a rule whose
+		// host category is "all" reaches every host whether or not it also opens
+		// every service, and it then carries no host list. Only AllowsEverything
+		// was read that way, so a rule covering every host for one named service
+		// - sshd on the whole fleet - showed no host at all in the impact.
+		if rule.AllHosts {
 			result.hosts = append(result.hosts, "every host (the rule "+rule.Name+")")
-			result.warnings = append(result.warnings,
-				"the access follows from the rule "+rule.Name+" covering the whole fleet")
+			warning := "the access follows from the rule " + rule.Name + " reaching every host"
+			if rule.AllowsEverything {
+				warning = "the access follows from the rule " + rule.Name + " covering the whole fleet"
+			}
+			result.warnings = append(result.warnings, warning)
 			continue
 		}
 		result.hosts = append(result.hosts, rule.Hosts...)
