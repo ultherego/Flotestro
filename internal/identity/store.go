@@ -139,6 +139,14 @@ type Hold struct {
 	Holder string
 	// Attempt is minted by Claim, once per take of the row.
 	Attempt string
+	// Resumed says the row was already running when this attempt took it: an
+	// earlier attempt had begun and recorded no result. It is read by the
+	// claiming statement itself, because the snapshot a poll took before the
+	// claim can say "planned" about a row that is being taken out of running.
+	Resumed bool
+	// Phases are the phases the row carried at the moment of the take - what an
+	// earlier attempt wrote down, read in the same statement that claimed it.
+	Phases json.RawMessage
 }
 
 // Held says whether the hold names an attempt. A write that cannot say which
@@ -202,23 +210,39 @@ func (s *Store) SavePhases(ctx context.Context, changeID string, hold Hold, phas
 // overdue.
 // Every take mints an attempt, so the result of a run can be told from the
 // result of the run that replaced it.
+//
+// The take also reports what it found: whether the row was already running, and
+// the phases it carried. That is read here and not from the list a tick polled,
+// because between the poll and the claim the row moves: a snapshot saying
+// "planned" has admitted a second password reset to a change that was already
+// running, which is precisely what the guard against repeating one exists to
+// stop. The claiming statement is the only reader whose answer is about the row
+// it took.
 func (s *Store) Claim(ctx context.Context, changeID, holder string) (Hold, bool, error) {
 	hold := Hold{Holder: holder, Attempt: uuid.NewString()}
 	const query = `
+		with before as (
+		    select id, state, phases from directory_changes where id = $1 for update
+		)
 		update directory_changes
 		   set state = $2, started_at = now(), updated_at = now(),
 		       claimed_by = $4, claim_token = $6::uuid,
 		       claim_expires_at = now() + make_interval(secs => $5::double precision)
-		 where id = $1
-		   and (state = $3 or (state = $2 and claim_expires_at < now()))`
-	tag, err := s.pool.Exec(ctx, query, changeID, string(StateRunning), string(StatePlanned),
-		nullable(holder), ClaimTerm.Seconds(), hold.Attempt)
+		  from before
+		 where directory_changes.id = before.id
+		   and (before.state = $3
+		        or (before.state = $2 and directory_changes.claim_expires_at < now()))
+		returning (before.state = $2) as resumed, before.phases`
+	var phases []byte
+	err := s.pool.QueryRow(ctx, query, changeID, string(StateRunning), string(StatePlanned),
+		nullable(holder), ClaimTerm.Seconds(), hold.Attempt).Scan(&hold.Resumed, &phases)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Hold{}, false, nil
+	}
 	if err != nil {
 		return Hold{}, false, err
 	}
-	if tag.RowsAffected() == 0 {
-		return Hold{}, false, nil
-	}
+	hold.Phases = phases
 	return hold, true, nil
 }
 

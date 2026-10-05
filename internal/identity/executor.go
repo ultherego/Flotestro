@@ -36,18 +36,26 @@ const (
 	// result, and the change is one that cannot be carried out a second time
 	// without destroying what the first attempt produced.
 	RefusalInterrupted = "directory_change_interrupted"
+	// RefusalOutcomeUnknown: the change went out and the directory's answer did
+	// not come back, so what it did is not known. It is not a refusal of the
+	// change - that is RefusalDirectoryRefused - and it is not a success.
+	RefusalOutcomeUnknown = "directory_outcome_unknown"
 )
 
-// repeatOfInterruptedChange decides what to do with a change that was read in
-// running: its holder claimed it and never recorded a result, so which of its
-// phases ran is unknown. A declarative change is simply carried out again. A
-// change that hands something out once is not, because a second attempt takes
-// back what the first one gave - a new password invalidates the one the
-// requester already has, and a second rotation retires the key the host just
-// fetched. It is recorded as partially applied, which is the honest reading of
-// a change that began and whose extent nobody knows.
-func repeatOfInterruptedChange(change Change) ([]Phase, State, string, bool) {
-	if change.State != StateRunning || RepeatableAfterInterruption(ActionType(change.ActionType)) {
+// repeatOfInterruptedChange decides what to do with a change the claim took out
+// of running: an earlier attempt claimed it and never recorded a result, so
+// which of its phases ran is unknown. A declarative change is simply carried
+// out again. A change that hands something out once is not, because a second
+// attempt takes back what the first one gave - a new password invalidates the
+// one the requester already has, and a second rotation retires the key the host
+// just fetched. It is recorded as partially applied, which is the honest
+// reading of a change that began and whose extent nobody knows.
+//
+// The question is asked of the hold and not of the change: the row's state in
+// the list a tick polled is a state from before the claim, and a row that reads
+// "planned" there may be the running attempt this claim just took over.
+func repeatOfInterruptedChange(change Change, hold Hold) ([]Phase, State, string, bool) {
+	if !hold.Resumed || RepeatableAfterInterruption(ActionType(change.ActionType)) {
 		return nil, "", "", false
 	}
 	phase := refusedPhase(startPhase("repeating the interrupted change"), RefusalInterrupted,
@@ -95,7 +103,12 @@ type Executor struct {
 	// recordPhases writes the phases of a running change; without a store there
 	// is nowhere to write them, and a test replaces it.
 	recordPhases func(ctx context.Context, changeID string, phases []Phase) error
-	localDeny    func(ctx context.Context, subject, reason string, denied bool) (int64, error)
+	// renewClaim says whether this replica still holds the change, and
+	// renewEvery how often it asks. Both are seams: the term is a quarter of an
+	// hour in an installation and a millisecond in a test.
+	renewClaim func(ctx context.Context, changeID string, hold Hold) (bool, error)
+	renewEvery time.Duration
+	localDeny  func(ctx context.Context, subject, reason string, denied bool) (int64, error)
 }
 
 func NewExecutor(store *Store, directory *freeipa.Client, sessions SessionRevoker,
@@ -160,45 +173,78 @@ func (e *Executor) tick(ctx context.Context) {
 		// While this replica works, it says so: the term then bounds how long a
 		// change stays invisible after a replica stops, and not how long the
 		// change itself may take.
-		release := e.holdClaim(ctx, change.ID, hold)
-		e.execute(ctx, change, hold)
+		working, release := e.holdClaim(ctx, change.ID, hold)
+		e.execute(working, change, hold)
 		release()
 	}
 }
 
-// holdClaim renews the claim until the returned function is called. A claim
-// this replica has lost is logged and not renewed again: the change belongs to
-// whoever took it, and Finish refuses to write over it.
-func (e *Executor) holdClaim(ctx context.Context, changeID string, hold Hold) func() {
+// holdClaim renews the claim until the returned function is called, and returns
+// the context the work runs under. Losing the claim cancels that context: a
+// replica that is no longer the holder has to stop, not carry the change
+// further and be refused at the write. The directory does not care which
+// replica believes it owns the change.
+func (e *Executor) holdClaim(ctx context.Context, changeID string, hold Hold) (context.Context, func()) {
+	working, abandon := context.WithCancel(ctx)
 	renewing, stop := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		ticker := time.NewTicker(RenewTerm)
+		ticker := time.NewTicker(e.renewTerm())
 		defer ticker.Stop()
+		// A renewal that failed is not a claim that was lost, so the holder
+		// keeps trying - until the term since the last renewal that did land has
+		// passed, after which the claim has certainly lapsed and another replica
+		// may be carrying the change out.
+		held := time.Now()
 		for {
 			select {
 			case <-renewing.Done():
 				return
 			case <-ticker.C:
-				held, err := e.store.RenewClaim(context.WithoutCancel(renewing), changeID, hold)
-				if err != nil {
+				still, err := e.renew(context.WithoutCancel(renewing), changeID, hold)
+				switch {
+				case err != nil:
 					e.log.Error("the claim on the directory change was not renewed",
 						"change_id", changeID, "err", err)
-					continue
-				}
-				if !held {
-					e.log.Warn("the claim on the directory change is held by somebody else",
-						"change_id", changeID)
+					if time.Since(held) < ClaimTerm {
+						continue
+					}
+					e.log.Warn("the claim on the directory change has lapsed; the work stops",
+						"change_id", changeID, "since", time.Since(held))
+					abandon()
 					return
+				case !still:
+					e.log.Warn("the claim on the directory change is held by somebody else; the work stops",
+						"change_id", changeID)
+					abandon()
+					return
+				default:
+					held = time.Now()
 				}
 			}
 		}
 	}()
-	return func() {
+	return working, func() {
 		stop()
 		<-done
+		abandon()
 	}
+}
+
+// renewTerm is how often the holder says it is still working.
+func (e *Executor) renewTerm() time.Duration {
+	if e.renewEvery > 0 {
+		return e.renewEvery
+	}
+	return RenewTerm
+}
+
+func (e *Executor) renew(ctx context.Context, changeID string, hold Hold) (bool, error) {
+	if e.renewClaim != nil {
+		return e.renewClaim(ctx, changeID, hold)
+	}
+	return e.store.RenewClaim(ctx, changeID, hold)
 }
 
 // execute carries out a change phase by phase. Every phase has its own
@@ -215,7 +261,7 @@ func (e *Executor) execute(ctx context.Context, change Change, hold Hold) {
 	// so what it managed to do is unknown. Carrying a declarative change out
 	// again lands on the same state; a password reset or a keytab rotation
 	// destroys what the first attempt handed out, so it waits for a person.
-	if refusal, state, message, stop := repeatOfInterruptedChange(change); stop {
+	if refusal, state, message, stop := repeatOfInterruptedChange(change, hold); stop {
 		e.finish(ctx, change, hold, state, refusal, message, nil)
 		return
 	}
@@ -627,24 +673,49 @@ func (e *Executor) setUserPOSIX(ctx context.Context, spec *POSIXPayload) []Phase
 // still owes, so it is a constant rather than a string written twice.
 const phasePreserveInDirectory = "preserving the account in the directory"
 
-// recordedPhase reads a phase an earlier attempt wrote down and says whether it
-// succeeded. Phases a change carries while running are the record of what has
-// already happened; unreadable phases are no record, and the caller then does
-// the work rather than assuming it was done.
-func recordedPhase(change Change, name string) (string, bool) {
-	if len(change.Phases) == 0 {
+// phaseLocalAccessOwed is the obligation the panel takes on the moment the
+// directory has - or may have - moved the account: the holder's own access here
+// has to go. It is recorded as a phase of its own, outstanding until it is met,
+// so that the obligation survives a replica stopping and does not depend on
+// reading another phase's verdict. A directory half recorded as failed can owe
+// it just as much as one recorded as done.
+const phaseLocalAccessOwed = "cutting off the panel access of the preserved account"
+
+// owesLocalAccess reads the obligation an earlier attempt wrote down. Phases
+// that do not read are no record, and the attempt then starts from the
+// directory rather than assuming anything about what happened.
+func owesLocalAccess(recorded json.RawMessage) (string, bool) {
+	if len(recorded) == 0 {
 		return "", false
 	}
 	var phases []Phase
-	if err := json.Unmarshal(change.Phases, &phases); err != nil {
+	if err := json.Unmarshal(recorded, &phases); err != nil {
 		return "", false
 	}
 	for _, phase := range phases {
-		if phase.Name == name && phase.Status == "succeeded" {
+		if phase.Name == phaseLocalAccessOwed && phase.Status == PhaseOutstanding {
 			return phase.Message, true
 		}
 	}
 	return "", false
+}
+
+// payLocalAccess writes the obligation down, carries it out and records that it
+// was met. The order is the point: the obligation reaches the row before the
+// work starts, so an attempt that finds it does the work rather than reasoning
+// about what the previous one got to.
+func (e *Executor) payLocalAccess(ctx context.Context, change Change, hold Hold,
+	phases []Phase, ref *ReferencePayload, owed string) ([]Phase, *sessionRevocation) {
+	phases = append(phases, outstandingPhase(startPhase(phaseLocalAccessOwed), owed))
+	e.savePhases(ctx, change, hold, phases)
+	local, revoked := e.cutLocalAccess(ctx, ref)
+	phases = append(phases, local...)
+	for index := range phases {
+		if phases[index].Name == phaseLocalAccessOwed && phases[index].Status == PhaseOutstanding {
+			phases[index] = finishPhase(phases[index], nil, "carried out: "+owed)
+		}
+	}
+	return phases, revoked
 }
 
 // savePhases writes down what has happened so far. A failure to write is not a
@@ -672,15 +743,14 @@ func (e *Executor) preserveUser(ctx context.Context, change Change, hold Hold,
 	ref *ReferencePayload) ([]Phase, *sessionRevocation) {
 	var phases []Phase
 
-	// An attempt that preserved the account and stopped before the local half
-	// recorded that it did. Asking the directory again would refuse as stale -
-	// the active entry is gone - and the access here would stay open, so what
-	// is left of the change is carried out instead.
-	if detail, done := recordedPhase(change, phasePreserveInDirectory); done {
+	// An attempt that took the change as far as the directory wrote down what
+	// the panel still owes. Asking the directory again would refuse as stale -
+	// the active entry is gone - and the access here would stay open, so the
+	// obligation is met instead of the change starting over.
+	if owed, outstanding := owesLocalAccess(hold.Phases); outstanding {
 		phases = append(phases, skipPhase(startPhase(phasePreserveInDirectory),
-			"an earlier attempt carried it out: "+detail))
-		local, revoked := e.cutLocalAccess(ctx, ref)
-		return append(phases, local...), revoked
+			"an earlier attempt took the change to the directory: "+owed))
+		return e.payLocalAccess(ctx, change, hold, phases, ref, owed)
 	}
 
 	phase := startPhase("asking the directory what it can do")
@@ -708,11 +778,18 @@ func (e *Executor) preserveUser(ctx context.Context, change Change, hold Hold,
 		// and a preserved one carrying the identifier the plan named. Finding
 		// that, the move stands and what is left is to cut the access here -
 		// the refusal below would leave the holder its sessions and tokens.
-		if preserved, ok := e.alreadyPreserved(ctx, ref.UID, planned); ok {
+		preserved, ok, unknown := e.alreadyPreserved(ctx, ref.UID, planned)
+		switch {
+		case ok:
 			phases = append(phases, skipPhase(phase,
 				"the account is already preserved as the entry the plan named ("+preserved+")"))
-			local, revoked := e.cutLocalAccess(ctx, ref)
-			return append(phases, local...), revoked
+			return e.payLocalAccess(ctx, change, hold, phases, ref,
+				"the account is preserved as the entry the plan named ("+preserved+")")
+		case unknown != "":
+			// Neither a stale plan nor a move this change can claim: said as
+			// the open question it is, for a person to settle.
+			return append(phases, refusedPhase(phase, RefusalOutcomeUnknown,
+				err.Error()+"; "+unknown)), nil
 		}
 	}
 	if err != nil {
@@ -737,17 +814,16 @@ func (e *Executor) preserveUser(ctx context.Context, change Change, hold Hold,
 		if errors.Is(err, freeipa.ErrEntryMoved) {
 			code = RefusalStalePlan
 		}
-		phases = append(phases, refusedPhase(phase, code, err.Error()))
-		var preserved *freeipa.StillPreserved
-		if !errors.As(err, &preserved) {
+		var unsettled *freeipa.PreserveUnsettled
+		if !errors.As(err, &unsettled) {
 			// Nothing in the directory changed, so there is nothing to follow.
-			return phases, nil
+			return append(phases, refusedPhase(phase, code, err.Error())), nil
 		}
-		// The account is preserved whatever else failed, and a preserved account
-		// whose holder keeps the panel is the window this used to leave open.
-		e.savePhases(ctx, change, hold, phases)
-		local, revoked := e.cutLocalAccess(ctx, ref)
-		return append(phases, local...), revoked
+		// The account is preserved - or may be, and nobody can say otherwise -
+		// so the panel's own half is owed either way. A preserved account whose
+		// holder keeps its sessions and tokens is the window this leaves open.
+		phases = append(phases, refusedPhase(phase, RefusalOutcomeUnknown, err.Error()))
+		return e.payLocalAccess(ctx, change, hold, phases, ref, err.Error())
 	}
 	phases = append(phases, finishPhase(phase, nil, "the entry stays as a preserved account"))
 
@@ -761,14 +837,12 @@ func (e *Executor) preserveUser(ctx context.Context, change Change, hold Hold,
 	} else {
 		phases = append(phases, skipPhase(phase, proof.Detail))
 	}
-	// The directory half is done and written down before the local half starts:
-	// a replica that stops in between leaves a record of what happened, and the
-	// attempt that takes the change reads it instead of asking the directory
-	// about an account that is no longer active.
-	e.savePhases(ctx, change, hold, phases)
-
-	local, revoked := e.cutLocalAccess(ctx, ref)
-	return append(phases, local...), revoked
+	// The obligation is written down before the local half starts: a replica
+	// that stops in between leaves the record, and the attempt that takes the
+	// change meets it instead of asking the directory about an account that is
+	// no longer active.
+	return e.payLocalAccess(ctx, change, hold, phases, ref,
+		"the account is preserved in the directory")
 }
 
 // cutLocalAccess is the panel's own half of a preserve: the denial marker, the
@@ -798,16 +872,27 @@ func (e *Executor) cutLocalAccess(ctx context.Context, ref *ReferencePayload) ([
 // named. It answers yes only on a positive identification - both sides carry
 // the identifier and they agree - because a guess here would cut off the access
 // of whoever holds the name now.
+//
+// The third answer is its own: "nobody could say" is not "it is not there", and
+// it comes back as a sentence for the refusal rather than being folded into the
+// no.
 func (e *Executor) alreadyPreserved(ctx context.Context, uid string,
-	planned freeipa.EntryReference) (string, bool) {
+	planned freeipa.EntryReference) (string, bool, string) {
 	preserved, err := e.preservedEntry(ctx, uid)
-	if err != nil || planned.EntryUUID == "" || preserved.EntryUUID == "" {
-		return "", false
+	switch {
+	case errors.Is(err, freeipa.ErrEntryNotFound):
+		return "", false, ""
+	case err != nil:
+		return "", false, "the preserved accounts could not be read, so whether this change " +
+			"moved the entry is not known: " + err.Error()
+	case planned.EntryUUID == "" || preserved.EntryUUID == "":
+		return "", false, "the entry among the preserved accounts carries no identifier to " +
+			"compare, so whether it is the one the plan named is not known"
 	}
 	if _, replaced := planned.Replaced(preserved); replaced {
-		return "", false
+		return "", false, ""
 	}
-	return preserved.EntryUUID, true
+	return preserved.EntryUUID, true, ""
 }
 
 // directoryCapabilities, directoryEntry, preserveInDirectory and denyLocally
@@ -902,6 +987,13 @@ func (e *Executor) resetPassword(ctx context.Context, change Change, ref *Refere
 // finish records the result and notes it in the audit trail.
 func (e *Executor) finish(ctx context.Context, change Change, hold Hold, state State,
 	phases []Phase, message string, revoked *sessionRevocation) {
+	// The result is written under a context of its own, briefly: the work's
+	// context is cancelled when this replica loses the claim, and a change
+	// whose result went nowhere because of that would be a change nobody can
+	// read the end of.
+	ctx, settled := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer settled()
+
 	// A result that did not land is said so in the trail: the state an auditor
 	// reads is the one another attempt wrote, and claiming this one as the
 	// outcome of the change would be the overwrite in words.

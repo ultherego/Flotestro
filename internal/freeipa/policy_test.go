@@ -21,6 +21,9 @@ type fakeDirectory struct {
 	// answers maps a method to a handler; a method without one succeeds
 	// with an empty result.
 	answers map[string]func(call rpcCall) (any, *rpcError)
+	// lose names the methods the directory carries out and then answers
+	// nothing to, by dropping the connection: the shape of a lost answer.
+	lose map[string]bool
 }
 
 type rpcCall struct {
@@ -31,7 +34,8 @@ type rpcCall struct {
 
 func newFakeDirectory(t *testing.T) (*fakeDirectory, *Client) {
 	t.Helper()
-	fake := &fakeDirectory{t: t, answers: map[string]func(rpcCall) (any, *rpcError){}}
+	fake := &fakeDirectory{t: t, answers: map[string]func(rpcCall) (any, *rpcError){},
+		lose: map[string]bool{}}
 	fake.server = httptest.NewServer(http.HandlerFunc(fake.handle))
 	t.Cleanup(fake.server.Close)
 
@@ -71,6 +75,14 @@ func (f *fakeDirectory) handle(w http.ResponseWriter, r *http.Request) {
 	var failure *rpcError
 	if answer != nil {
 		result, failure = answer(call)
+	}
+	f.mu.Lock()
+	dropped := f.lose[call.Method]
+	f.mu.Unlock()
+	if dropped {
+		// The command was carried out and the answer never left: the client
+		// sees a broken connection and knows nothing about the outcome.
+		panic(http.ErrAbortHandler)
 	}
 	encoded, _ := json.Marshal(map[string]any{"result": result, "error": failure})
 	w.Header().Set("Content-Type", "application/json")

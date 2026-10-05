@@ -145,6 +145,56 @@ func TestPreserveUserAtChecksEveryValueThePlanCarries(t *testing.T) {
 		t.Fatal("the account was put back because the directory could not be asked")
 	}
 
+	// The directory carried the move out and closed the connection before
+	// answering. The call fails, the account is preserved, and the caller has
+	// to be told the second half - returning a plain error here left the
+	// account preserved with its holder's sessions and tokens alive.
+	lost, client := newFakeDirectory(t)
+	lost.answers["user_show"] = entry(planned.EntryUUID, "")
+	lost.answers["user_find"] = preserved(planned.EntryUUID)
+	lost.lose["user_del"] = true
+	_, err = client.PreserveUserAt(context.Background(), "jane", planned)
+	var unsettled *PreserveUnsettled
+	if !errors.As(err, &unsettled) {
+		t.Fatalf("a move whose answer was lost ended as %v", err)
+	}
+	if !unsettled.Preserved || unsettled.UID != "jane" {
+		t.Fatalf("the directory confirmed the account is preserved: %+v (%v)", unsettled, err)
+	}
+
+	// The same lost answer over a directory that cannot be asked afterwards:
+	// nobody can say whether the move was made, and that is what it says. The
+	// obligation stands either way, because an account that may be preserved
+	// and keeps its access is the expensive side of the guess.
+	silentToo, client := newFakeDirectory(t)
+	silentToo.answers["user_show"] = entry(planned.EntryUUID, "")
+	silentToo.answers["user_find"] = func(rpcCall) (any, *rpcError) {
+		return nil, &rpcError{Name: "OptionError", Message: "Unknown option: preserved"}
+	}
+	silentToo.lose["user_del"] = true
+	_, err = client.PreserveUserAt(context.Background(), "jane", planned)
+	if !errors.As(err, &unsettled) {
+		t.Fatalf("a move of unknown outcome ended as %v", err)
+	}
+	if unsettled.Preserved {
+		t.Fatalf("nothing confirmed the account is preserved: %+v", unsettled)
+	}
+
+	// A refusal the directory gave and will give again is the other side of
+	// that distinction: the account stands where it stood, and nothing is owed.
+	refused, client := newFakeDirectory(t)
+	refused.answers["user_show"] = entry(planned.EntryUUID, "")
+	refused.answers["user_del"] = func(rpcCall) (any, *rpcError) {
+		return nil, &rpcError{Code: 4001, Name: "ACIError", Message: "Insufficient 'delete' privilege"}
+	}
+	_, err = client.PreserveUserAt(context.Background(), "jane", planned)
+	if errors.As(err, &unsettled) {
+		t.Fatalf("a refused move obliged the caller: %v", err)
+	}
+	if refused.count("user_find") != 0 {
+		t.Error("a refused move still asked about the preserved accounts")
+	}
+
 	// Another entry was preserved and putting it back failed as well: the
 	// account under that name stays preserved, and the error says so, because
 	// the caller still owes the local half - a preserved account whose holder
@@ -156,9 +206,12 @@ func TestPreserveUserAtChecksEveryValueThePlanCarries(t *testing.T) {
 		return nil, &rpcError{Code: 4203, Name: "ExecutionError", Message: "the server failed"}
 	}
 	_, err = client.PreserveUserAt(context.Background(), "jane", planned)
-	var left *StillPreserved
+	var left *PreserveUnsettled
 	if !errors.As(err, &left) {
 		t.Fatalf("a preserve that could not be put back ended as %v", err)
+	}
+	if !left.Preserved {
+		t.Errorf("the account is preserved and the error does not say so: %v", err)
 	}
 	if left.UID != "jane" || !errors.Is(err, ErrEntryMoved) {
 		t.Fatalf("the error does not carry both halves of the story: %+v (%v)", left, err)

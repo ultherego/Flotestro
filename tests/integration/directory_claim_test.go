@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -38,19 +39,16 @@ func TestALateResultDoesNotOverwriteTheRunThatFinishedTheChange(t *testing.T) {
 	pool := h.database(ctx)
 	store := identity.NewStore(pool)
 
-	id := writeProbeChange(t, ctx, pool)
+	// The row is born claimed, in one statement: a planned row written here and
+	// claimed a moment later is a row the panel's own executor may take in
+	// between, and then the scenario is somebody else's.
+	id, predecessor := writeClaimedProbeChange(t, ctx, pool)
 
-	predecessor, taken, err := store.Claim(ctx, id, "integration-predecessor")
-	if err != nil {
-		t.Fatalf("the change was not claimed: %v", err)
-	}
-	if !taken {
-		t.Fatalf("the change %s was not claimable", id)
-	}
 	// A phase written while the predecessor holds the change is its own.
-	if err := store.SavePhases(ctx, id, predecessor, []identity.Phase{
+	recorded := []identity.Phase{
 		{Name: "the predecessor started", Status: "succeeded", StartedAt: time.Now().UTC()},
-	}); err != nil {
+	}
+	if err := store.SavePhases(ctx, id, predecessor, recorded); err != nil {
 		t.Fatalf("the predecessor could not record its phases: %v", err)
 	}
 
@@ -63,6 +61,16 @@ func TestALateResultDoesNotOverwriteTheRunThatFinishedTheChange(t *testing.T) {
 		t.Fatalf("the change was not taken over: %v", err)
 	}
 	if taken {
+		// The take says what it took: a running attempt, and the phases that
+		// attempt had written. Read anywhere but in the claiming statement,
+		// this is the answer from before the claim.
+		if !successor.Resumed {
+			t.Error("the claim took a running attempt over and reported a first execution")
+		}
+		if !strings.Contains(string(successor.Phases), "the predecessor started") {
+			t.Errorf("the claim did not carry the phases of the attempt it took over: %s",
+				successor.Phases)
+		}
 		// While the successor holds the change, nothing of the predecessor's
 		// lands - neither its phases nor its result.
 		if err := store.SavePhases(ctx, id, predecessor, []identity.Phase{
@@ -149,27 +157,34 @@ func awaitTerminal(t *testing.T, ctx context.Context, pool *pgxpool.Pool, id str
 	}
 }
 
-// writeProbeChange puts a change of this test's own in the queue, planned and
-// approved, and takes it out again afterwards.
-func writeProbeChange(t *testing.T, ctx context.Context, pool *pgxpool.Pool) string {
+// writeClaimedProbeChange puts a change of this test's own in the queue and
+// claims it for the predecessor in the same statement, so the row is never
+// visible to anybody else's Pending: a replica is already carrying it out, and
+// its claim has not run out. It is taken out again afterwards.
+func writeClaimedProbeChange(t *testing.T, ctx context.Context,
+	pool *pgxpool.Pool) (string, identity.Hold) {
 	t.Helper()
 	id := uuid.NewString()
+	hold := identity.Hold{Holder: "integration-predecessor", Attempt: uuid.NewString()}
 	payload, err := json.Marshal(map[string]any{"probe": id})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `
 		insert into directory_changes
-			(id, action_type, payload, payload_hash, plan, state, requires_approval, created_by)
-		values ($1::uuid, $2, $3::jsonb, $4, '{}'::jsonb, 'planned', false, 'integration-test')`,
-		id, probeChange, payload, []byte(id)); err != nil {
+			(id, action_type, payload, payload_hash, plan, state, requires_approval, created_by,
+			 started_at, claimed_by, claim_token, claim_expires_at)
+		values ($1::uuid, $2, $3::jsonb, $4, '{}'::jsonb, 'running', false, 'integration-test',
+		        now(), $5, $6::uuid, now() + make_interval(secs => $7::double precision))`,
+		id, probeChange, payload, []byte(id), hold.Holder, hold.Attempt,
+		identity.ClaimTerm.Seconds()); err != nil {
 		t.Fatalf("the change was not written: %v", err)
 	}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(),
 			`delete from directory_changes where id = $1::uuid`, id)
 	})
-	return id
+	return id, hold
 }
 
 // lapseClaim is the replica that stopped, as the database sees it: the claim

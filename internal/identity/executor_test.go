@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/freeipa"
@@ -126,16 +129,17 @@ func TestAnInterruptedChangeIsOnlyRepeatedWhereRepeatingItLandsOnTheSameState(t 
 	declarative := []ActionType{ActionUserDisable, ActionUserEnable, ActionGroupMembers,
 		ActionSSHKeys, ActionUserExpire, ActionUserPOSIX, ActionUserPreserve,
 		ActionHBACRuleEnsure, ActionSudoRuleEnsure, ActionDNSRecordEnsure}
+	resumed := Hold{Holder: "replica-b", Attempt: "22222222-2222-2222-2222-222222222222", Resumed: true}
 	for _, action := range declarative {
-		change := Change{ID: "c1", ActionType: string(action), State: StateRunning}
-		if _, _, _, stop := repeatOfInterruptedChange(change); stop {
+		change := Change{ID: "c1", ActionType: string(action)}
+		if _, _, _, stop := repeatOfInterruptedChange(change, resumed); stop {
 			t.Errorf("%s was not carried out again although repeating it changes nothing", action)
 		}
 	}
 
 	for _, action := range []ActionType{ActionUserPasswordReset, ActionKeytabRotate} {
-		change := Change{ID: "c1", ActionType: string(action), State: StateRunning}
-		phases, state, message, stop := repeatOfInterruptedChange(change)
+		change := Change{ID: "c1", ActionType: string(action)}
+		phases, state, message, stop := repeatOfInterruptedChange(change, resumed)
 		if !stop {
 			t.Fatalf("%s was carried out a second time", action)
 		}
@@ -151,10 +155,47 @@ func TestAnInterruptedChangeIsOnlyRepeatedWhereRepeatingItLandsOnTheSameState(t 
 			t.Errorf("the message does not say what happened: %q", message)
 		}
 		// The first run of the same change is carried out, of course.
-		fresh := Change{ID: "c1", ActionType: string(action), State: StatePlanned}
-		if _, _, _, stop := repeatOfInterruptedChange(fresh); stop {
+		if _, _, _, stop := repeatOfInterruptedChange(change, testHold); stop {
 			t.Errorf("a %s nobody had started was refused", action)
 		}
+		// And the question is asked of the claim, not of the state a poll saw:
+		// a snapshot that says planned over a row the claim took out of running
+		// used to admit the second attempt this refuses.
+		stale := Change{ID: "c1", ActionType: string(action), State: StatePlanned}
+		if _, _, _, stop := repeatOfInterruptedChange(stale, resumed); !stop {
+			t.Errorf("a stale snapshot let %s run a second time", action)
+		}
+	}
+}
+
+// Losing the claim used to stop the renewer alone: the replica carried the
+// change on to the end and was refused at the write, having meanwhile gone on
+// talking to the directory about a change another replica was carrying out.
+func TestAHolderThatLostTheClaimStopsWorking(t *testing.T) {
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	lost := &Executor{log: quiet, renewEvery: time.Millisecond,
+		renewClaim: func(context.Context, string, Hold) (bool, error) { return false, nil }}
+	working, release := lost.holdClaim(context.Background(), "c1", testHold)
+	defer release()
+	select {
+	case <-working.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("the work went on under a claim this replica no longer holds")
+	}
+
+	// A renewal that could not be made is not a claim that was lost: the holder
+	// keeps working, and keeps trying, until the term has certainly passed.
+	unreachable := &Executor{log: quiet, renewEvery: time.Millisecond,
+		renewClaim: func(context.Context, string, Hold) (bool, error) {
+			return false, errors.New("the database does not answer")
+		}}
+	alive, stop := unreachable.holdClaim(context.Background(), "c1", testHold)
+	defer stop()
+	select {
+	case <-alive.Done():
+		t.Fatal("a renewal that failed was read as a claim that was lost")
+	case <-time.After(50 * time.Millisecond):
 	}
 }
 
@@ -440,7 +481,7 @@ func TestAPreserveSaysWhetherTheEntryAfterTheMoveWasConfirmed(t *testing.T) {
 // the change and a failure after one are not the same thing.
 func TestAPreserveThatLeftTheAccountPreservedStillCutsTheLocalAccess(t *testing.T) {
 	harness := newPreserveHarness(t)
-	harness.preserveErr = &freeipa.StillPreserved{UID: "alice", Err: fmt.Errorf(
+	harness.preserveErr = &freeipa.PreserveUnsettled{UID: "alice", Preserved: true, Err: fmt.Errorf(
 		"%w: the entry carries another identifier; putting it back failed too",
 		freeipa.ErrEntryMoved)}
 
@@ -473,23 +514,35 @@ func TestAPreserveThatLeftTheAccountPreservedStillCutsTheLocalAccess(t *testing.
 // Both ways back are asserted - the record the previous attempt wrote, and the
 // preserved entry itself.
 func TestAnAttemptAfterTheMoveCutsTheAccessInsteadOfRefusing(t *testing.T) {
-	// The record: the previous attempt wrote down the directory half.
+	// The record: the previous attempt wrote down what the panel owes. The
+	// obligation is read from the claim, because the claim is what took the row
+	// over - and it is read whatever the verdict of the directory phase next to
+	// it, which for a lost answer is a failure.
 	fromRecord := newPreserveHarness(t)
-	change := preserveChange(fromRecord.entry)
-	done, err := json.Marshal([]Phase{{Name: phasePreserveInDirectory, Status: "succeeded",
-		Message: "the entry stays as a preserved account"}})
+	recorded, err := json.Marshal([]Phase{
+		{Name: phasePreserveInDirectory, Status: "failed",
+			Message: RefusalOutcomeUnknown + ": the answer of the directory was lost"},
+		{Name: phaseLocalAccessOwed, Status: PhaseOutstanding,
+			Message: "the account may be preserved in the directory"},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	change.Phases = done
-	change.State = StateRunning
+	resumed := Hold{Holder: "replica-b", Attempt: "33333333-3333-3333-3333-333333333333",
+		Resumed: true, Phases: recorded}
 
-	phases, revoked := fromRecord.preserve(change, &ReferencePayload{UID: "alice"})
+	phases, revoked := fromRecord.executor.preserveUser(context.Background(),
+		preserveChange(fromRecord.entry), resumed, &ReferencePayload{UID: "alice"})
 	if fromRecord.did("preserve:alice") || fromRecord.did("capabilities:alice") {
 		t.Fatalf("the directory was asked again about a move it had already made: %v", fromRecord.order)
 	}
 	if !fromRecord.did("deny:alice:true") || revoked == nil {
 		t.Fatalf("the access of a preserved account stayed open: %v", fromRecord.order)
+	}
+	// The obligation that was met is recorded as met, so the change is not held
+	// out of a result by its own marker.
+	if owed, outstanding := owesLocalAccess(mustPhases(t, phases)); outstanding {
+		t.Errorf("the obligation stayed outstanding after it was carried out: %q", owed)
 	}
 	if state := StateFor(phases); state != StateSucceeded {
 		t.Errorf("the change is %s, expected succeeded", state)
@@ -514,6 +567,22 @@ func TestAnAttemptAfterTheMoveCutsTheAccessInsteadOfRefusing(t *testing.T) {
 		t.Errorf("the move was ordered a second time: %v", fromDirectory.order)
 	}
 
+	// The preserved accounts cannot be read at all: that is neither a stale
+	// plan nor a move this change may claim, and it is said as the open
+	// question it is rather than folded into "there is nothing there".
+	cannotAsk := newPreserveHarness(t)
+	cannotAsk.entryErr = fmt.Errorf("%w: alice", freeipa.ErrEntryNotFound)
+	cannotAsk.preservedErr = freeipa.ErrPreservedReadUnsupported
+	phases, _ = cannotAsk.preserve(
+		preserveChange(cannotAsk.entry), &ReferencePayload{UID: "alice"})
+	last := phases[len(phases)-1]
+	if !strings.HasPrefix(last.Message, RefusalOutcomeUnknown+":") {
+		t.Fatalf("the refusal is %q, expected the code %s", last.Message, RefusalOutcomeUnknown)
+	}
+	if !strings.Contains(last.Message, "not known") {
+		t.Errorf("the refusal does not say what is open: %q", last.Message)
+	}
+
 	// Another entry under the same name: not this change's account, so the
 	// refusal stands and nobody's access is cut.
 	somebodyElse := newPreserveHarness(t)
@@ -533,23 +602,51 @@ func TestAnAttemptAfterTheMoveCutsTheAccessInsteadOfRefusing(t *testing.T) {
 	}
 }
 
-// The directory half of a preserve is written down before the local half
-// starts, which is what makes the attempt above possible.
-func TestThePreserveRecordsTheDirectoryHalfBeforeTheLocalOne(t *testing.T) {
-	harness := newPreserveHarness(t)
-	harness.preserve(preserveChange(harness.entry), &ReferencePayload{UID: "alice"})
+// The obligation to cut the local access is written down before the local half
+// starts, which is what makes the attempt above possible - and it is written
+// down for a directory half that failed with its outcome unknown just as much
+// as for one that succeeded.
+func TestThePreserveRecordsWhatThePanelOwesBeforeItPaysIt(t *testing.T) {
+	for name, build := range map[string]func(*preserveHarness){
+		"the move went through": func(*preserveHarness) {},
+		"the answer was lost": func(h *preserveHarness) {
+			h.preserveErr = &freeipa.PreserveUnsettled{UID: "alice", Err: fmt.Errorf(
+				"preserving the account alice: the query to the directory: connection reset")}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			harness := newPreserveHarness(t)
+			build(harness)
+			harness.preserve(preserveChange(harness.entry), &ReferencePayload{UID: "alice"})
 
-	if len(harness.saved) == 0 {
-		t.Fatal("no phases were written down while the change ran")
+			if len(harness.saved) == 0 {
+				t.Fatal("no phases were written down while the change ran")
+			}
+			snapshot := harness.saved[0]
+			owed, found := phaseNamed(snapshot, phaseLocalAccessOwed)
+			if !found || owed.Status != PhaseOutstanding {
+				t.Fatalf("the snapshot does not carry the obligation: %+v", snapshot)
+			}
+			if _, found := phaseNamed(snapshot, "the local denial marker"); found {
+				t.Fatalf("the snapshot was written after the local half: %+v", snapshot)
+			}
+			// And the record is the one the resuming attempt reads.
+			if _, outstanding := owesLocalAccess(mustPhases(t, snapshot)); !outstanding {
+				t.Fatalf("an attempt reading the record would not know what is owed: %+v", snapshot)
+			}
+		})
 	}
-	snapshot := harness.saved[0]
-	directory, found := phaseNamed(snapshot, phasePreserveInDirectory)
-	if !found || directory.Status != "succeeded" {
-		t.Fatalf("the snapshot does not carry the directory half: %+v", snapshot)
+}
+
+// mustPhases writes phases out the way the store does, so a test can read them
+// back through the reader the executor uses.
+func mustPhases(t *testing.T, phases []Phase) json.RawMessage {
+	t.Helper()
+	encoded, err := json.Marshal(phases)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, found := phaseNamed(snapshot, "the local denial marker"); found {
-		t.Fatalf("the snapshot was written after the local half: %+v", snapshot)
-	}
+	return encoded
 }
 
 // phaseNamed finds a phase by its name.

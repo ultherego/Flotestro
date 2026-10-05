@@ -533,22 +533,31 @@ type PreserveProof struct {
 	Detail    string
 }
 
-// StillPreserved says a preserve failed after the account had been moved, and
-// the account is preserved now. It is the same distinction UncertainChange
-// makes for a membership: a refusal before the change leaves nothing to follow,
-// while a change already made has to be followed through - here the panel's own
-// half, because the holder of a preserved account must not keep its sessions
-// and tokens.
-type StillPreserved struct {
-	UID string
-	Err error
+// PreserveUnsettled says a preserve did not end the way it was asked and the
+// account is - or may be - preserved now. It is the same distinction
+// UncertainChange makes for a membership: a refusal before the change leaves
+// nothing to follow, while a change that was or may have been made has to be
+// followed through - here the panel's own half, because the holder of a
+// preserved account must not keep its sessions and tokens.
+//
+// Preserved says which of the two it is. Both oblige the caller, because the
+// expensive mistake is the same one either way: leaving the access of a
+// preserved account alive.
+type PreserveUnsettled struct {
+	UID       string
+	Preserved bool
+	Err       error
 }
 
-func (e *StillPreserved) Error() string {
-	return e.Err.Error() + " (the account " + e.UID + " is preserved in the directory)"
+func (e *PreserveUnsettled) Error() string {
+	state := "the account " + e.UID + " may be preserved in the directory and nobody confirmed it"
+	if e.Preserved {
+		state = "the account " + e.UID + " is preserved in the directory"
+	}
+	return e.Err.Error() + " (" + state + ")"
 }
 
-func (e *StillPreserved) Unwrap() error { return e.Err }
+func (e *PreserveUnsettled) Unwrap() error { return e.Err }
 
 // PreserveUserAt preserves an account only while it is still the entry the
 // plan was made for, and says what it could prove about the entry afterwards.
@@ -567,7 +576,7 @@ func (c *Client) PreserveUserAt(ctx context.Context, uid string, planned EntryRe
 		return PreserveProof{}, fmt.Errorf("%w: %s (the plan was %s)", ErrEntryMoved, reason, planned.Binding())
 	}
 	if err := c.PreserveUser(ctx, uid); err != nil {
-		return PreserveProof{}, err
+		return PreserveProof{}, c.preserveOutcome(ctx, uid, planned, err)
 	}
 
 	// The directory offers no compare-and-delete, so the binding is proven
@@ -601,7 +610,7 @@ func (c *Client) PreserveUserAt(ctx context.Context, uid string, planned EntryRe
 			// one the operator consented to: a failure, and a failure after a
 			// change that was made, which the caller has to tell from a refusal
 			// before one.
-			return PreserveProof{}, &StillPreserved{UID: uid, Err: fmt.Errorf(
+			return PreserveProof{}, &PreserveUnsettled{UID: uid, Preserved: true, Err: fmt.Errorf(
 				"%w: %s; putting it back failed too, so %s stays preserved and needs a person: %v",
 				ErrEntryMoved, reason, uid, undo)}
 		}
@@ -617,6 +626,34 @@ func (c *Client) PreserveUserAt(ctx context.Context, uid string, planned EntryRe
 	}
 	return PreserveProof{Confirmed: true,
 		Detail: "the preserved entry carries the identifier the plan named (" + after.EntryUUID + ")"}, nil
+}
+
+// preserveOutcome reads a failed user_del for what it says about the account.
+// A refusal the directory gave and will give again left the account where it
+// was; anything else - a connection the directory closed after carrying the
+// delete out, a timeout, an answer that never arrived - says nothing about
+// whether the move was made, so the directory is asked once and the answer
+// decides. Where it cannot decide, the caller is obliged anyway: a preserved
+// account whose holder keeps its sessions is the expensive mistake, and a
+// denial that was not needed is lifted with one call.
+func (c *Client) preserveOutcome(ctx context.Context, uid string, planned EntryReference,
+	cause error) error {
+	var refusal *DirectoryError
+	if errors.As(cause, &refusal) && refusal.Permanent() {
+		return cause
+	}
+	after, err := c.PreservedEntry(ctx, uid)
+	switch {
+	case err == nil && planned.EntryUUID != "" && after.EntryUUID == planned.EntryUUID:
+		return &PreserveUnsettled{UID: uid, Preserved: true, Err: fmt.Errorf(
+			"%w; the account is preserved, so the move was carried out and the answer was lost", cause)}
+	case errors.Is(err, ErrEntryNotFound):
+		// The account is not among the preserved ones, and the active entry was
+		// there a moment ago: the move did not happen.
+		return cause
+	}
+	return &PreserveUnsettled{UID: uid, Err: fmt.Errorf(
+		"%w; whether the move was carried out could not be established (%v)", cause, err)}
 }
 
 // unidentified names the side that carries no identifier, and an empty string
