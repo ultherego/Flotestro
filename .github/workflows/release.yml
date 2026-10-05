@@ -975,4 +975,6 @@ jobs:
           *)   names+=(--tag "$IMAGE:latest" --tag "$IMAGE:${VERSION%.*}") ;;
           esac
           docker buildx imagetools create "${names[@]}" "$IMAGE@$DIGEST"
-          echo "moved ${#names[@]} name(s) to $IMAGE@$DIGEST"
+          # Halved because each name is two words in that array, --tag and the
+          # name itself: the line said six for three.
+          echo "moved $(( ${#names[@]} / 2 )) name(s) to $IMAGE@$DIGEST"
