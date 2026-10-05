@@ -282,6 +282,11 @@ var (
 	// and suppressed for a row a silence caught on its way out.
 	NotificationDeliveries = Default.NewCounter("flotestro_notification_deliveries_total",
 		"Settled attempts of the notification queue, by the state they settled in.", "state")
+	// LocalAccessArrears counts the attempts at the panel half of an access cut
+	// by what became of them: settled where the denial and the revocation were
+	// read back as done, outstanding where they were not.
+	LocalAccessArrears = Default.NewCounter("flotestro_local_access_arrears_total",
+		"Attempts at the panel half of an access cut, by what became of the obligation.", "outcome")
 	// AlertFence counts the alert-state writes the evaluator's fencing token
 	// refused: start, fire, refresh, restart, resume, resolve, no_data, discard.
 	AlertFence = Default.NewCounter("flotestro_alert_fence_refused_total",

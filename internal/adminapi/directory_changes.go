@@ -250,6 +250,32 @@ func (s *Server) handleCancelDirectoryChange(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, canceled)
 }
 
+// handleListLocalAccessArrears lists the panel halves of an access cut that are
+// still owed: how long each has been outstanding and what the last attempt at
+// it said. A change that cut a directory account and failed to cut the access
+// here is terminal, so the change's own view stops moving; this is where the
+// obligation that outlived it is read.
+func (s *Server) handleListLocalAccessArrears(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.authorize(w, r, authz.PermIdentityRead, authz.GlobalScope,
+		"local_access_arrear", ""); !ok {
+		return
+	}
+	if s.changes == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"items": []any{}, "count": 0})
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	items, err := s.changes.OpenLocalAccess(r.Context(), limit)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if items == nil {
+		items = []identity.LocalAccessArrear{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "count": len(items)})
+}
+
 func (s *Server) handleListDirectoryChanges(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorize(w, r, authz.PermIdentityRead, authz.GlobalScope, "directory_change", "")
 	if !ok {

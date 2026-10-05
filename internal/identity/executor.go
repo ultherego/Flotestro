@@ -92,6 +92,9 @@ type Executor struct {
 	// retire is the test seam for the directory half of a rotation; nil
 	// means the connector's own call.
 	retire func(ctx context.Context, principal string) error
+	// setEnabled is the test seam for the directory half of a disable or an
+	// enable; nil means the connector's own call.
+	setEnabled func(ctx context.Context, uid string, enable bool) error
 	// The halves of a preserve, each replaceable on its own: what the directory
 	// can do, which entry it holds, the move itself, and the local denial marker.
 	capabilities func(ctx context.Context, uid string) (freeipa.DirectoryCapabilities, error)
@@ -112,6 +115,10 @@ type Executor struct {
 	// an installation, and short enough to watch in a test.
 	lapseAfter time.Duration
 	localDeny  func(ctx context.Context, subject, reason string, denied bool) (int64, error)
+	// recordArrear writes the durable obligation to finish the panel's own half
+	// of an access cut; nil means the store's own write, and a test replaces it.
+	recordArrear func(ctx context.Context, changeID, uid, reason string,
+		principals []AccessPrincipal) error
 }
 
 func NewExecutor(store *Store, directory *freeipa.Client, sessions SessionRevoker,
@@ -378,9 +385,9 @@ func (e *Executor) execute(ctx context.Context, change Change, hold Hold) {
 	case ActionUserCreate:
 		phases, revoked = e.createUser(ctx, payload.User)
 	case ActionUserDisable:
-		phases, revoked = e.setUserAccess(ctx, payload.Reference, false)
+		phases, revoked = e.setUserAccess(ctx, change, payload.Reference, false)
 	case ActionUserEnable:
-		phases, _ = e.setUserAccess(ctx, payload.Reference, true)
+		phases, _ = e.setUserAccess(ctx, change, payload.Reference, true)
 	case ActionGroupMembers:
 		phases, revoked = e.changeGroupMembers(ctx, payload.Group)
 	case ActionHostGroupMembers:
@@ -486,11 +493,22 @@ func deniedLocally(phase Phase, count int64, err error, marked, nothing string) 
 }
 
 // setUserAccess locks or unlocks an account.
-func (e *Executor) setUserAccess(ctx context.Context, ref *ReferencePayload, enable bool) ([]Phase, *sessionRevocation) {
+func (e *Executor) setUserAccess(ctx context.Context, change Change, ref *ReferencePayload,
+	enable bool) ([]Phase, *sessionRevocation) {
 	var phases []Phase
 	var revoked *sessionRevocation
 
 	if !enable {
+		// Before either half of the cut: the local denial is a mutation too, and
+		// the directory call that follows it goes out whatever the local half
+		// did. A disable whose local half failed used to end partially_applied
+		// with nobody to finish it.
+		owed := e.oweLocalAccess(ctx, change, ref)
+		phases = append(phases, owed)
+		if owed.Status == "failed" {
+			return phases, nil
+		}
+
 		phase := startPhase("the local denial marker")
 		count, err := e.denyDirectoryUser(ctx, ref.UID, ref.Reason, true)
 		// Saying "identities marked: 0" as a success was the thing ID-01 found;
@@ -513,7 +531,7 @@ func (e *Executor) setUserAccess(ctx context.Context, ref *ReferencePayload, ena
 	}
 
 	phase := startPhase("changing the account state in the directory")
-	err := e.directory.SetUserEnabled(ctx, ref.UID, enable)
+	err := e.enableInDirectory(ctx, ref.UID, enable)
 	phases = append(phases, finishPhase(phase, err, ""))
 
 	if enable && err == nil {
@@ -794,6 +812,77 @@ const phaseLocalAccessOwed = "cutting off the panel access of the preserved acco
 // about to go out and its effect is unknown until somebody states otherwise.
 const phaseDirectoryMutationIntent = "about to change the directory"
 
+// phaseLocalAccessOwedDurably is the write that outlives the change. The
+// obligation inside the phases survives a replica stopping; it does not survive
+// the change reaching a terminal state, and a change whose local half failed is
+// terminal partially_applied. This phase is the row that keeps being retried
+// after that.
+const phaseLocalAccessOwedDurably = "recording the panel access the change owes"
+
+// accessPrincipals resolves the panel identities a directory account covers,
+// with the same question the denial and the revocation ask. It is read before
+// the directory is touched, because the obligation that outlives the change
+// cannot resolve them afterwards: the account the read would go to is the one
+// the change is about to remove.
+func (e *Executor) accessPrincipals(ctx context.Context, uid string) ([]AccessPrincipal, error) {
+	if e.sessions == nil {
+		return nil, fmt.Errorf(
+			"the panel identities cannot be read, so it is not known whose access is owed")
+	}
+	principals, err := e.sessions.ListPrincipals(ctx)
+	if err != nil {
+		// Not knowing the identities is not knowing that there are none.
+		return nil, fmt.Errorf("reading the panel identities of %s: %w", uid, err)
+	}
+	matched := make([]AccessPrincipal, 0, len(principals))
+	for _, principal := range principals {
+		if MatchesDirectoryPrincipal(principal, uid) {
+			matched = append(matched,
+				AccessPrincipal{Subject: principal.Subject, PrincipalID: principal.ID})
+		}
+	}
+	return matched, nil
+}
+
+// oweLocalAccess records, before the mutating call, that the panel owes the
+// local half of this access cut. The row it writes carries the identities and
+// outlives the change, and a separate executor retries it until the denial and
+// the revocation are read back as done.
+//
+// The phase it returns is failed where nothing was written, and the caller then
+// does not make the call: an access cut whose local half nothing records is one
+// nobody can finish, and that is the whole reason this row exists.
+func (e *Executor) oweLocalAccess(ctx context.Context, change Change, ref *ReferencePayload) Phase {
+	phase := startPhase(phaseLocalAccessOwedDurably)
+	owe := e.recordArrear
+	if owe == nil {
+		if e.store == nil {
+			return skipPhase(phase, "nothing records what the panel owes in this configuration")
+		}
+		owe = e.store.OweLocalAccess
+	}
+	principals, err := e.accessPrincipals(ctx, ref.UID)
+	if err != nil {
+		return finishPhase(phase, err, "")
+	}
+	reason := firstNonEmpty(ref.Reason, "the account's access was cut")
+	if err := owe(ctx, change.ID, ref.UID, reason, principals); err != nil {
+		return finishPhase(phase, err, "")
+	}
+	// It is not settled here, and not by this change at all. The one place that
+	// settles it is the one that reads the effects back, so there is no second
+	// settlement to agree with the first - and an account with nobody to deny
+	// settles on the first pass of it anyway.
+	//
+	// Closed as skipped, because writing down what is owed is a record and not
+	// an effect on the world. Closed as succeeded it would have counted towards
+	// the change's result, and a preserve the directory refused outright - one
+	// that applied nothing at all - would have read as partially_applied on the
+	// strength of this phase alone.
+	return skipPhase(phase,
+		describeCount("panel identities the cut names", int64(len(principals))))
+}
+
 // recordedPhases reads the phases an earlier attempt wrote down. They come back
 // whole, because the record of a change is everything that happened to it and
 // not the last attempt's view of it - a resume that replaced them dropped the
@@ -1033,6 +1122,14 @@ func (e *Executor) preserveUser(ctx context.Context, change Change, hold Hold,
 // missing in exactly the case it exists for.
 func (e *Executor) moveInDirectory(ctx context.Context, change Change, hold Hold,
 	phases []Phase, ref *ReferencePayload, planned freeipa.EntryReference) ([]Phase, *sessionRevocation) {
+	// The obligation that outlives the change goes down first, for the same
+	// reason the intent does and in the same window.
+	owed := e.oweLocalAccess(ctx, change, ref)
+	phases = append(phases, owed)
+	if owed.Status == "failed" {
+		return phases, nil
+	}
+
 	intent := outstandingPhase(startPhase(phaseDirectoryMutationIntent),
 		"the move of "+planned.Binding()+" is about to be ordered; its effect is "+
 			"unknown until this change says otherwise")
@@ -1246,6 +1343,13 @@ func (e *Executor) preserveInDirectory(ctx context.Context, uid string,
 	// ordering it: this check and the one above are the same question asked at
 	// the two ends of the window between them.
 	return e.directory.PreserveUserAt(ctx, uid, planned)
+}
+
+func (e *Executor) enableInDirectory(ctx context.Context, uid string, enable bool) error {
+	if e.setEnabled != nil {
+		return e.setEnabled(ctx, uid, enable)
+	}
+	return e.directory.SetUserEnabled(ctx, uid, enable)
 }
 
 func (e *Executor) denyLocally(ctx context.Context, subject, reason string,

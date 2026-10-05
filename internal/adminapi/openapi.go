@@ -93,6 +93,7 @@ func (s *Server) openAPI() map[string]any {
 	register("HBACTestResult", freeipa.HBACTestResult{})
 	register("ProvisioningReport", freeipa.ProvisioningReport{})
 	register("DirectoryChange", identity.Change{})
+	register("LocalAccessArrear", identity.LocalAccessArrear{})
 	register("HostInventory", inventory.Revision{})
 	register("HostInventoryModule", inventory.Fragment{})
 	register("HostLocalAccount", inventory.LocalAccount{})
@@ -688,6 +689,9 @@ var queryParameters = map[string][]queryParameter{
 		{"state", "string", "planned, awaiting_approval, running, succeeded, partially_applied, failed or canceled."},
 		{"limit", "integer", "The most changes to return: 50 by default, 200 at most."},
 	},
+	"GET /api/v1/identity/access-arrears": {
+		{"limit", "integer", "The most obligations to return: 50 by default, 200 at most."},
+	},
 	"GET /api/v1/monitoring/alerts": append([]queryParameter{
 		{"state", "string", "pending, firing or resolved."},
 		{"acknowledged", "string", "true keeps the alerts somebody took, false the ones still waiting."},
@@ -900,6 +904,7 @@ var responseSchemas = map[string]map[string]any{
 	"GET /api/v1/hosts/{id}/inventory":            ref("HostInventory"),
 	"GET /api/v1/hosts/{id}/inventory/{module}":   ref("HostInventoryModule"),
 	"GET /api/v1/hosts/{id}/security/remediation": collection("RemediationPlan"),
+	"GET /api/v1/identity/access-arrears":         collection("LocalAccessArrear"),
 	"GET /api/v1/identity/changes":                collection("DirectoryChange"),
 	"GET /api/v1/identity/changes/{id}":           ref("DirectoryChange"),
 	"GET /api/v1/identity/dns/records":            collection("DirectoryRecord"),

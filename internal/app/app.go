@@ -831,6 +831,17 @@ func Run() error {
 			executor.WithProviderLogout(identityProvider)
 		}
 		go executor.Run(ctx)
+
+		// And the panel's own half of an access cut, on a claim of its own.
+		// The change that owes it is terminal by the time this runs - that is
+		// the point: a terminal change is never claimed again, so the half it
+		// left owed had nobody to finish it. This touches the panel only and
+		// never the directory.
+		arrears := identity.NewLocalAccessExecutor(changeStore, authzStore, log, 5*time.Second)
+		if identityProvider != nil && *oidcAdminLogout {
+			arrears.WithProviderLogout(identityProvider)
+		}
+		go arrears.Run(ctx)
 	}
 
 	// The authorization of work nobody is watching reads group membership from

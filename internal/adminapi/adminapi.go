@@ -551,6 +551,10 @@ func (s *Server) Routes() http.Handler {
 
 	// Directory changes: plan, approval and execution phase by phase.
 	s.route(mux, "GET /api/v1/identity/changes", s.handleListDirectoryChanges)
+	// The panel's own half of an access cut that is still owed. It is read
+	// separately because the change that owes it is terminal: its own view
+	// stopped moving the moment the local half failed.
+	s.route(mux, "GET /api/v1/identity/access-arrears", s.handleListLocalAccessArrears)
 	// The one route that changes the directory's own configuration: it gives the
 	// connector the right to preserve an account and nothing else, and it is run
 	// on purpose rather than by an operation.
