@@ -844,11 +844,14 @@ func (b Binding) Active(now time.Time) bool {
 
 // Principal is an authenticated identity together with its roles.
 type Principal struct {
-	ID          string    `json:"id"`
-	Subject     string    `json:"subject"`
-	DisplayName string    `json:"display_name,omitempty"`
-	Kind        string    `json:"kind"`
-	Bindings    []Binding `json:"bindings"`
+	ID          string `json:"id"`
+	Subject     string `json:"subject"`
+	DisplayName string `json:"display_name,omitempty"`
+	Kind        string `json:"kind"`
+	// DirectoryUID is the directory account somebody wrote this identity down
+	// as. Empty means no link, and an identity without one serialises as before.
+	DirectoryUID string    `json:"directory_uid,omitempty"`
+	Bindings     []Binding `json:"bindings"`
 }
 
 // live returns the bindings that grant something now.

@@ -414,8 +414,26 @@ func (r sessionRevocation) String() string {
 	return message
 }
 
-// MatchesDirectoryUser says whether a panel principal is the given directory
-// account.
+// MatchesDirectoryPrincipal says whether a panel identity is the given
+// directory account. Both halves are asked here - the link an operator wrote
+// down and the name the login carries - so the denial and the session
+// revocation cannot drift apart on the question again.
+func MatchesDirectoryPrincipal(principal authz.Principal, uid string) bool {
+	if uid == "" {
+		return false
+	}
+	// The link exists for an identity whose subject says nothing about the
+	// account: without reading it, the field an operator fills in changed
+	// nothing and the very case it was added for was covered by neither path.
+	if principal.DirectoryUID != "" && strings.EqualFold(principal.DirectoryUID, uid) {
+		return true
+	}
+	return MatchesDirectoryUser(principal.Subject, uid)
+}
+
+// MatchesDirectoryUser says whether the name of a panel principal is the given
+// directory account: the account itself, or that account qualified with the
+// issuer the login added.
 func MatchesDirectoryUser(subject, uid string) bool {
 	if uid == "" {
 		return false
@@ -440,7 +458,7 @@ func (e *Executor) denyDirectoryUser(ctx context.Context, uid, reason string, de
 	var marked int64
 	var matched bool
 	for _, principal := range principals {
-		if !MatchesDirectoryUser(principal.Subject, uid) {
+		if !MatchesDirectoryPrincipal(principal, uid) {
 			continue
 		}
 		matched = true
@@ -466,7 +484,7 @@ func (e *Executor) revokeSessions(ctx context.Context, uid, reason string) (sess
 	}
 	matched := false
 	for _, principal := range principals {
-		if !MatchesDirectoryUser(principal.Subject, uid) {
+		if !MatchesDirectoryPrincipal(principal, uid) {
 			continue
 		}
 		matched = true

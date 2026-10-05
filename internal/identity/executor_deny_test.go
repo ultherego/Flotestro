@@ -77,3 +77,64 @@ func TestTheDenialCoversTheRealmQualifiedIdentityTheSessionsCover(t *testing.T) 
 		t.Fatalf("an unreadable list of identities ended as %v", err)
 	}
 }
+
+// The link an operator writes down through PUT /principals/{id}/directory-account
+// exists for an identity whose subject says nothing about the account. Neither
+// the denial nor the revocation read it, so the field changed nothing and the
+// one case it was added for was covered by neither.
+func TestTheLinkAnOperatorWroteDownIsTheIdentityOfThatDirectoryAccount(t *testing.T) {
+	sessions := &fakeSessions{
+		principals: []authz.Principal{
+			{ID: "p-linked", Subject: "a.smith@keycloak.example.test", DirectoryUID: "alice"},
+			{ID: "p-other", Subject: "j.doe@keycloak.example.test", DirectoryUID: "bob"},
+			{ID: "p-unlinked", Subject: "m.jones@keycloak.example.test"},
+		},
+		live: map[string]int64{"p-linked": 2, "p-other": 1, "p-unlinked": 4},
+	}
+	var denied []string
+	executor := &Executor{sessions: sessions,
+		localDeny: func(_ context.Context, subject, _ string, _ bool) (int64, error) {
+			denied = append(denied, subject)
+			return 1, nil
+		}}
+
+	count, err := executor.denyDirectoryUser(context.Background(), "alice", "locked", true)
+	if err != nil {
+		t.Fatalf("denying the account the link names: %v", err)
+	}
+	if count != 1 || len(denied) != 1 || denied[0] != "a.smith@keycloak.example.test" {
+		t.Fatalf("marked %d identities: %v", count, denied)
+	}
+
+	// And the same identity loses its sessions, because both halves ask the
+	// one function.
+	result, err := executor.revokeSessions(context.Background(), "alice", "the account was locked")
+	if err != nil {
+		t.Fatalf("revoking the sessions of the account the link names: %v", err)
+	}
+	if result.Sessions != 2 || len(result.WithoutPrincipal) != 0 {
+		t.Fatalf("the revocation came back as %+v", result)
+	}
+	if _, ended := sessions.revoked["p-other"]; ended {
+		t.Error("an identity linked to another account lost its sessions")
+	}
+	if _, ended := sessions.revoked["p-unlinked"]; ended {
+		t.Error("an identity with no link and an unrelated subject lost its sessions")
+	}
+
+	// A link to another account is not this account, and an identity with
+	// neither a link nor the name is nobody's.
+	for _, uid := range []string{"carol", "dave"} {
+		if _, err := executor.denyDirectoryUser(context.Background(), uid, "locked", true); !errors.Is(err, ErrNoPrincipal) {
+			t.Errorf("denying %q ended as %v", uid, err)
+		}
+	}
+	// The name still carries where nobody wrote a link down.
+	if !MatchesDirectoryPrincipal(authz.Principal{Subject: "alice@ipa.example.test"}, "alice") {
+		t.Error("the qualified name stopped matching once the link was added")
+	}
+	// A link wins nothing it does not name: the subject rule still applies.
+	if !MatchesDirectoryPrincipal(authz.Principal{Subject: "alice", DirectoryUID: "bob"}, "alice") {
+		t.Error("a link to another account hid the identity's own name")
+	}
+}

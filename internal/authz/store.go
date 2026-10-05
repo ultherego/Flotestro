@@ -266,10 +266,12 @@ func (s *Store) RevokeRole(ctx context.Context, tx pgx.Tx, principalID string,
 
 // PrincipalByID reads one identity, disabled or not, with its bindings.
 func (s *Store) PrincipalByID(ctx context.Context, principalID string) (*Principal, error) {
-	const query = `select id, subject, display_name, kind from principals where id = $1`
+	const query = `select id, subject, display_name, kind, coalesce(directory_uid, '')
+	               from principals where id = $1`
 	var principal Principal
 	err := s.pool.QueryRow(ctx, query, principalID).
-		Scan(&principal.ID, &principal.Subject, &principal.DisplayName, &principal.Kind)
+		Scan(&principal.ID, &principal.Subject, &principal.DisplayName, &principal.Kind,
+			&principal.DirectoryUID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -314,7 +316,8 @@ func (s *Store) Authenticate(ctx context.Context, value string) (*Principal, err
 	hash := sha256.Sum256([]byte(value))
 
 	const query = `
-		select t.id, t.token_hash, p.id, p.subject, p.display_name, p.kind
+		select t.id, t.token_hash, p.id, p.subject, p.display_name, p.kind,
+		       coalesce(p.directory_uid, '')
 		from api_tokens t
 		join principals p on p.id = t.principal_id
 		where t.token_hash = $1
@@ -331,7 +334,7 @@ func (s *Store) Authenticate(ctx context.Context, value string) (*Principal, err
 	)
 	err := s.pool.QueryRow(ctx, query, hash[:]).
 		Scan(&tokenID, &storedHash, &principal.ID, &principal.Subject,
-			&principal.DisplayName, &principal.Kind)
+			&principal.DisplayName, &principal.Kind, &principal.DirectoryUID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrUnauthenticated
 	}
@@ -372,10 +375,10 @@ func (s *Store) PrincipalBySubject(ctx context.Context, subject string) (*Princi
 		from principals
 		where subject = $1 and disabled_at is null and denied_at is null`
 	var principal Principal
-	var issuer, subjectID, directoryUID string
+	var issuer, subjectID string
 	err := s.pool.QueryRow(ctx, query, subject).
 		Scan(&principal.ID, &principal.Subject, &principal.DisplayName, &principal.Kind,
-			&issuer, &subjectID, &directoryUID)
+			&issuer, &subjectID, &principal.DirectoryUID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrUnauthenticated
 	}
@@ -386,7 +389,7 @@ func (s *Store) PrincipalBySubject(ctx context.Context, subject string) (*Princi
 	if err != nil {
 		return nil, err
 	}
-	mapped, err := s.directoryBindings(ctx, issuer, subjectID, directoryUID)
+	mapped, err := s.directoryBindings(ctx, issuer, subjectID, principal.DirectoryUID)
 	if err != nil {
 		// The identity, its direct bindings and the local blocks are known;
 		// only the group side is not. Both go back, because a group can add a
@@ -525,7 +528,7 @@ func (s *Store) readBindings(ctx context.Context, principalID string, liveOnly b
 // ListPrincipals returns the identities together with their roles.
 func (s *Store) ListPrincipals(ctx context.Context) ([]Principal, error) {
 	const query = `
-		select id, subject, display_name, kind
+		select id, subject, display_name, kind, coalesce(directory_uid, '')
 		from principals
 		where disabled_at is null
 		order by subject`
@@ -537,7 +540,7 @@ func (s *Store) ListPrincipals(ctx context.Context) ([]Principal, error) {
 	for rows.Next() {
 		var principal Principal
 		if err := rows.Scan(&principal.ID, &principal.Subject,
-			&principal.DisplayName, &principal.Kind); err != nil {
+			&principal.DisplayName, &principal.Kind, &principal.DirectoryUID); err != nil {
 			rows.Close()
 			return nil, err
 		}
