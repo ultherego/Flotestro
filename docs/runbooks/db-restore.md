@@ -110,6 +110,24 @@ was rewrapped onto the active key"). `GET /api/v1/status` shows `active_key_id: 
 `adopted: true` and `pending_rewrap: 0` once the rewrap is through. Keep `secrets.key` in the
 backup set until it is retired; the status block lists it under `keys`.
 
+To see what is there **before** the first start, run `crypto status` against the restored
+database. It reads and changes nothing, so the number it prints is the number that was there:
+the status block of a running panel cannot answer this, because the panel rewraps as it starts.
+
+```
+flotestro-control-plane crypto status
+installation_id: none
+note: this database holds no installation record; the next start adopts one
+versions_by_key legacy/v1: 3
+live_versions: 3
+pending_migration: 3
+```
+
+`legacy/v1` is the first form - the value sealed under `secrets.key` directly, with no envelope
+of its own. It is counted apart from `legacy`, because a version wrapped under the key named
+`legacy` is already an envelope and a version of the first form is not, and the rewrap has work
+to do on the second even while that key is the active one.
+
 ### Rotating the key of the secret store
 
 1. Set `FLOTESTRO_SECRETS_KEY_ROTATE_TO=k-<name>` and restart. The panel creates

@@ -7,8 +7,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 	"github.com/ultherego/flotestro/internal/database"
 	"github.com/ultherego/flotestro/internal/helpercap"
 	"github.com/ultherego/flotestro/internal/pki"
+	"github.com/ultherego/flotestro/internal/secrets"
 )
 
 // The commands that move the cryptographic identity of an installation
@@ -27,7 +30,7 @@ import (
 // is an operator saying, at a moment of their choosing, that they know what
 // the installation is about to depend on.
 
-const cryptoUsage = "the crypto commands are import-state, revert-state, rewrap-kek and forget-files"
+const cryptoUsage = "the crypto commands are status, import-state, revert-state, rewrap-kek and forget-files"
 
 // runCrypto dispatches the crypto commands.
 func runCrypto(args []string) error {
@@ -35,6 +38,8 @@ func runCrypto(args []string) error {
 		return errors.New(cryptoUsage)
 	}
 	switch args[0] {
+	case "status":
+		return cryptoStatus(args[1:])
 	case "import-state":
 		return cryptoImportState(args[1:])
 	case "revert-state":
@@ -46,6 +51,149 @@ func runCrypto(args []string) error {
 	default:
 		return fmt.Errorf("%q is not a crypto command; %s", args[0], cryptoUsage)
 	}
+}
+
+// cryptoStatusReport is the cryptographic state of an installation as a
+// command that only reads can tell it.
+type cryptoStatusReport struct {
+	// Installation is empty when the database holds no record: either a new
+	// installation or one made before the record existed.
+	Installation  string         `json:"installation_id"`
+	Provider      string         `json:"provider,omitempty"`
+	ActiveKeyID   string         `json:"active_key_id,omitempty"`
+	Revision      int64          `json:"revision,omitempty"`
+	InitializedAt string         `json:"initialized_at,omitempty"`
+	VersionsByKey map[string]int `json:"versions_by_key"`
+	// Pending counts the live versions that are not sealed the current way
+	// under the active key: the first form, and anything on another key.
+	Pending int `json:"pending_migration"`
+}
+
+// pendingMigration counts the live versions a rewrap still owes.
+//
+// Every key but the active one, which is what the status screen of a running
+// panel counts too. An installation with no record has no active key, so every
+// live version is owed - and that is the honest answer: the start adopts a key
+// and rewraps all of them.
+func pendingMigration(counts map[string]int, activeKeyID string) int {
+	pending := 0
+	for keyID, count := range counts {
+		if keyID != activeKeyID || activeKeyID == "" {
+			pending += count
+		}
+	}
+	return pending
+}
+
+// cryptoStatus reports what the database says about the installation's keys
+// and how many secret versions a rewrap still owes.
+//
+// It exists because nothing else could answer the second question without
+// answering it wrongly. The counts are on the status screen of a running
+// panel, but a panel that runs rewraps as it starts: by the time the screen
+// could be read, the number it would have shown is zero. An operator about to
+// restore a backup, or to upgrade an installation whose secrets predate the
+// envelope, has no way to see what is there first. This command reads and
+// changes nothing, so the number it prints is the number that was there.
+func cryptoStatus(args []string) error {
+	databaseURL, err := config.OptionalSecretValue("FLOTESTRO_DATABASE_URL")
+	if err != nil {
+		return err
+	}
+	set := flag.NewFlagSet("crypto status", flag.ContinueOnError)
+	set.StringVar(&databaseURL, "database-url", databaseURL, "the PostgreSQL DSN")
+	asJSON := set.Bool("json", false, "print the report as JSON")
+	if err := set.Parse(args); err != nil {
+		return err
+	}
+	if databaseURL == "" {
+		return errors.New("no database was named; pass -database-url or set FLOTESTRO_DATABASE_URL")
+	}
+
+	ctx := context.Background()
+	settings, err := config.DatabasePoolFromEnv()
+	if err != nil {
+		return err
+	}
+	pool, err := database.Open(ctx, databaseURL, settings)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	report := cryptoStatusReport{VersionsByKey: map[string]int{}}
+	record, err := cryptostate.NewPostgres(pool).Load(ctx)
+	switch {
+	case errors.Is(err, cryptostate.ErrNoRecord):
+	case err != nil:
+		return fmt.Errorf("the installation record: %w", err)
+	default:
+		report.Installation = record.InstallationID
+		report.Provider = record.Provider
+		report.ActiveKeyID = record.ActiveKeyID
+		report.Revision = record.Revision
+		report.InitializedAt = record.InitializedAt.UTC().Format(time.RFC3339)
+	}
+	// The store is built without a provider on purpose: the count is a query
+	// over the rows, and a command that only reports must not need the keys.
+	counts, err := secrets.NewStore(pool, nil).VersionsByKey(ctx)
+	if err != nil {
+		return fmt.Errorf("counting the live secret versions by key: %w", err)
+	}
+	report.VersionsByKey = counts
+	report.Pending = pendingMigration(counts, report.ActiveKeyID)
+
+	if *asJSON {
+		encoded, err := json.MarshalIndent(report, "", "  ")
+		if err != nil {
+			return err
+		}
+		fmt.Printf("%s\n", encoded)
+		return nil
+	}
+	printCryptoStatus(os.Stdout, report)
+	return nil
+}
+
+// printCryptoStatus writes the report as name: value lines, so that a script
+// asserting one number does not have to read a sentence.
+func printCryptoStatus(out io.Writer, report cryptoStatusReport) {
+	if report.Installation == "" {
+		fmt.Fprintln(out, "installation_id: none")
+		fmt.Fprintln(out, "note: this database holds no installation record; the next start adopts one")
+	} else {
+		fmt.Fprintf(out, "installation_id: %s\n", report.Installation)
+		fmt.Fprintf(out, "provider: %s\n", report.Provider)
+		fmt.Fprintf(out, "active_key_id: %s\n", report.ActiveKeyID)
+		fmt.Fprintf(out, "revision: %d\n", report.Revision)
+		fmt.Fprintf(out, "initialized_at: %s\n", report.InitializedAt)
+	}
+	live := 0
+	for _, keyID := range slices.Sorted(maps.Keys(report.VersionsByKey)) {
+		count := report.VersionsByKey[keyID]
+		live += count
+		label := keyID
+		if label == "" {
+			label = "(no key)"
+		}
+		fmt.Fprintf(out, "versions_by_key %s: %d\n", label, count)
+	}
+	fmt.Fprintf(out, "live_versions: %d\n", live)
+	fmt.Fprintf(out, "pending_migration: %d\n", report.Pending)
+	if report.Pending > 0 {
+		fmt.Fprintf(out, "note: %d live secret versions are in the first form or on another key; "+
+			"the rewrap of a running panel moves them onto %s\n", report.Pending,
+			orNone(report.ActiveKeyID))
+	}
+}
+
+// orNone names the active key for a message, for an installation that has none
+// yet.
+func orNone(activeKeyID string) string {
+	if activeKeyID == "" {
+		return "the key the next start adopts"
+	}
+	return activeKeyID
 }
 
 // cryptoOptions is what every crypto command needs to know.

@@ -14,7 +14,9 @@ route or command for a step, the runbook says so rather than describing one.
 - [The key encryption key](key-encryption-key.md): generating it, moving the installation's
   private keys into the database with `crypto import-state`, rotating the key with
   `crypto rewrap-kek`, going back with `crypto revert-state`, and the six conditions
-  `crypto forget-files` asks before it removes a file.
+  `crypto forget-files` asks before it removes a file. `crypto status` reads the same
+  state without changing it, and is the only way to see how many secret versions a
+  rewrap still owes before a panel starts and does the rewrap.
 - [Database restore](db-restore.md): what the database holds and what lives in
   `FLOTESTRO_STATE_DIR`, backup with `pg_dump`, the restore drill, in-flight jobs after a restore,
   the audit chain check with `flotestro-auditverify`.
