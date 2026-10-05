@@ -110,6 +110,10 @@ type Snapshot struct {
 	Chains []Chain `json:"chains,omitempty"`
 	Rules  []Rule  `json:"rules,omitempty"`
 	Zones  []Zone  `json:"zones,omitempty"`
+	// ZonesReason says why the zones were not read. An empty list then means
+	// "nobody answered", not "this host has no zone with that name", and a
+	// change whose way back depends on the zone state has to refuse.
+	ZonesReason string `json:"zones_reason,omitempty"`
 	// UFW is the header of "ufw status" on a host where ufw holds the rules: the
 	// default policy is what a packet meets when no rule matches.
 	UFW *UFWStatus `json:"ufw,omitempty"`

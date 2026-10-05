@@ -295,13 +295,15 @@ func (s *Server) changeZone(ctx context.Context, action *helperv1.FirewallReques
 	if !exists(firewall.FirewallCmdPath) {
 		return reject(ErrorUnsupported, "this host has no firewalld")
 	}
+	// One reading of the host answers both the precondition and the questions
+	// about the zone, so the decision and the way back rest on one state
+	// rather than on three readings taken at three moments.
+	state := s.readFirewall(ctx)
 	// A change ordered against a different rule set is not the same change the
 	// operator looked at in the plan.
-	if expected := action.GetExpectedHash(); expected != "" {
-		if state := s.readFirewall(ctx); expected != state.Hash {
-			return reject(ErrorPreconditionFailed, fmt.Sprintf(
-				"the rule set changed since the plan (%s instead of %s)", state.Hash, expected))
-		}
+	if expected := action.GetExpectedHash(); expected != "" && expected != state.Hash {
+		return reject(ErrorPreconditionFailed, fmt.Sprintf(
+			"the rule set changed since the plan (%s instead of %s)", state.Hash, expected))
 	}
 
 	var steps, undo [][]string
@@ -319,7 +321,7 @@ func (s *Server) changeZone(ctx context.Context, action *helperv1.FirewallReques
 				"the port "+action.GetPorts()[0]+" is the management channel; "+
 					"closing it deliberately needs explicit operator consent")
 		}
-		present, known := s.zoneHasPort(ctx, action.GetZone(), action.GetPorts()[0], action.GetProtocol())
+		present, known := zoneHasPort(state, action.GetZone(), action.GetPorts()[0], action.GetProtocol())
 		if !known {
 			return reject(ErrorUnsupported,
 				"this host could not say whether the port "+action.GetPorts()[0]+" is already open in "+
@@ -356,7 +358,7 @@ func (s *Server) changeZone(ctx context.Context, action *helperv1.FirewallReques
 						strconv.Itoa(management)+"; closing it deliberately needs explicit operator consent")
 			}
 		}
-		present, known := s.zoneHasService(ctx, action.GetZone(), action.GetService())
+		present, known := zoneHasService(state, action.GetZone(), action.GetService())
 		if !known {
 			return reject(ErrorUnsupported,
 				"this host could not say whether the service "+action.GetService()+" is already open in "+
@@ -404,9 +406,8 @@ func (s *Server) changeZone(ctx context.Context, action *helperv1.FirewallReques
 // zoneHasPort says whether the zone already carries the port, and whether the
 // host could be asked at all. The answer decides the way back: an absent
 // answer is not "no".
-func (s *Server) zoneHasPort(ctx context.Context, zone, port, protocol string) (present, known bool) {
-	snapshot := s.readFirewall(ctx)
-	if snapshot.UnavailableReason != "" {
+func zoneHasPort(snapshot firewall.Snapshot, zone, port, protocol string) (present, known bool) {
+	if !zonesKnown(snapshot) {
 		return false, false
 	}
 	entry := port
@@ -419,14 +420,14 @@ func (s *Server) zoneHasPort(ctx context.Context, zone, port, protocol string) (
 		}
 		return slices.Contains(carried.Ports, entry), true
 	}
-	// A zone the host does not list carries nothing, which is an answer.
+	// A zone the host does not list carries nothing, which is an answer -
+	// because the list was read.
 	return false, true
 }
 
 // zoneHasService says whether the zone already carries the service.
-func (s *Server) zoneHasService(ctx context.Context, zone, service string) (present, known bool) {
-	snapshot := s.readFirewall(ctx)
-	if snapshot.UnavailableReason != "" {
+func zoneHasService(snapshot firewall.Snapshot, zone, service string) (present, known bool) {
+	if !zonesKnown(snapshot) {
 		return false, false
 	}
 	for _, carried := range snapshot.Zones {
@@ -436,6 +437,31 @@ func (s *Server) zoneHasService(ctx context.Context, zone, service string) (pres
 		return slices.Contains(carried.Services, service), true
 	}
 	return false, true
+}
+
+// recordZones puts what firewall-cmd said about the zones into the snapshot.
+// A listing that failed leaves a reason and no zones, because an empty list is
+// an answer and a failed command is not one.
+func recordZones(snapshot *firewall.Snapshot, defaultZone, zones string, err error) {
+	// What holds the rules here does not depend on whether one command
+	// answered: a host carrying firewall-cmd is a firewalld host. Naming the
+	// adapter only on success left a failed listing describing the nftables
+	// underneath, which firewalld rewrites on its next reload.
+	snapshot.Adapter = firewall.AdapterFirewalld
+	if err != nil {
+		snapshot.ZonesReason = "firewall-cmd --list-all-zones: " + err.Error()
+		return
+	}
+	snapshot.Zones = firewall.ParseZones(zones, strings.TrimSpace(defaultZone))
+}
+
+// zonesKnown says whether this snapshot carries an answer about the zones. The
+// check used to be UnavailableReason alone, which a firewalld host whose
+// nftables underneath answered never set: a failed firewall-cmd listing then
+// left Zones empty, and an empty list read as "the zone does not carry the
+// port" - the state the rollback would restore to.
+func zonesKnown(snapshot firewall.Snapshot) bool {
+	return snapshot.UnavailableReason == "" && snapshot.ZonesReason == ""
 }
 
 // armZoneRollback writes the inverse of a zone change and arms the timer that
@@ -644,10 +670,8 @@ func (s *Server) readFirewall(ctx context.Context) firewall.Snapshot {
 	// a host we speak of zones and not of panel rules.
 	if exists(firewall.FirewallCmdPath) {
 		defaultZone, _ := toolOutput(ctx, firewall.FirewallCmdPath, "--get-default-zone")
-		if zones, err := toolOutput(ctx, firewall.FirewallCmdPath, "--list-all-zones"); err == nil {
-			snapshot.Zones = firewall.ParseZones(zones, strings.TrimSpace(defaultZone))
-			snapshot.Adapter = firewall.AdapterFirewalld
-		}
+		zones, err := toolOutput(ctx, firewall.FirewallCmdPath, "--list-all-zones")
+		recordZones(&snapshot, defaultZone, zones, err)
 	}
 
 	// Where nftables itself is the adapter, the running rules used to be the
