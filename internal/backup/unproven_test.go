@@ -50,8 +50,12 @@ func TestTheMigrationAndTheQueryAgreeAboutAnAbsentFingerprint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The claim is the thing being held to, so its absence is a failure and not
+	// a reason to skip: somebody removing the sentence is exactly when this
+	// test has to speak.
 	if !strings.Contains(string(migration), `a null reads as "unknown" rather than as a match`) {
-		t.Skip("the migration no longer makes that claim; nothing to hold the query to")
+		t.Fatal("migration 0145 no longer says what a null fingerprint means; " +
+			"say it there, or decide the rule again and change this test deliberately")
 	}
 	if strings.Contains(runOfCurrentConfig, "is null or") {
 		t.Error("the migration says unknown and the query says match")
