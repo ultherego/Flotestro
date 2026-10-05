@@ -93,6 +93,71 @@ func TestAMembershipChangeEndsTheSessionsOfTheMovedUsers(t *testing.T) {
 	}
 }
 
+// Whose session ends after a membership change is decided by what the
+// directory confirmed. A batch whose answer was lost confirmed nothing, and
+// nothing was read as "no account moved": the users kept the scope they had.
+func TestAMembershipChangeOfUnknownOutcomeEndsTheSessionsOfEveryAccountItNamed(t *testing.T) {
+	asked := []string{"alice", "bob"}
+	if got := mayHaveMoved(nil, asked); strings.Join(got, ",") != "alice,bob" {
+		t.Fatalf("a change the directory took whole moved %v", got)
+	}
+	partial := &freeipa.PartialChange{Group: "ops", Applied: []string{"alice"},
+		Refused: map[string]string{"bob": "This entry is not a member"}}
+	if got := mayHaveMoved(partial, asked); strings.Join(got, ",") != "alice" {
+		t.Fatalf("a batch taken in part moved %v", got)
+	}
+	uncertain := &freeipa.UncertainChange{Group: "ops", Users: asked,
+		Err: errors.New("the query to the directory: connection reset")}
+	if got := mayHaveMoved(uncertain, asked); strings.Join(got, ",") != "alice,bob" {
+		t.Fatalf("a batch of unknown outcome moved %v, expected every account it named", got)
+	}
+	// A command the directory read and turned down changed nobody.
+	refused := &freeipa.DirectoryError{Name: "NotFound", Message: "ops: group not found"}
+	if got := mayHaveMoved(refused, asked); len(got) != 0 {
+		t.Fatalf("a refused command moved %v", got)
+	}
+}
+
+// A change read in running was claimed by a replica that recorded no result.
+// Taking it again used to mean carrying it out from the top, whatever it was:
+// a second password reset invalidates the password the requester already has,
+// and a second keytab rotation retires the key the renewal just fetched.
+func TestAnInterruptedChangeIsOnlyRepeatedWhereRepeatingItLandsOnTheSameState(t *testing.T) {
+	declarative := []ActionType{ActionUserDisable, ActionUserEnable, ActionGroupMembers,
+		ActionSSHKeys, ActionUserExpire, ActionUserPOSIX, ActionUserPreserve,
+		ActionHBACRuleEnsure, ActionSudoRuleEnsure, ActionDNSRecordEnsure}
+	for _, action := range declarative {
+		change := Change{ID: "c1", ActionType: string(action), State: StateRunning}
+		if _, _, _, stop := repeatOfInterruptedChange(change); stop {
+			t.Errorf("%s was not carried out again although repeating it changes nothing", action)
+		}
+	}
+
+	for _, action := range []ActionType{ActionUserPasswordReset, ActionKeytabRotate} {
+		change := Change{ID: "c1", ActionType: string(action), State: StateRunning}
+		phases, state, message, stop := repeatOfInterruptedChange(change)
+		if !stop {
+			t.Fatalf("%s was carried out a second time", action)
+		}
+		// Not failed: part of it may well have happened, and the operator has
+		// to read it as a change that began.
+		if state != StatePartiallyApplied {
+			t.Errorf("%s ended as %s", action, state)
+		}
+		if len(phases) != 1 || !strings.HasPrefix(phases[0].Message, RefusalInterrupted+":") {
+			t.Errorf("the phases of %s are %+v", action, phases)
+		}
+		if !strings.Contains(message, "interrupted") {
+			t.Errorf("the message does not say what happened: %q", message)
+		}
+		// The first run of the same change is carried out, of course.
+		fresh := Change{ID: "c1", ActionType: string(action), State: StatePlanned}
+		if _, _, _, stop := repeatOfInterruptedChange(fresh); stop {
+			t.Errorf("a %s nobody had started was refused", action)
+		}
+	}
+}
+
 func TestNothingToRevokeIsNotAFailure(t *testing.T) {
 	executor := &Executor{sessions: &fakeSessions{}}
 	phase, result := executor.revokeChangedMembers(context.Background(), []string{"dave"}, "moved")
@@ -171,6 +236,8 @@ type preserveHarness struct {
 	entry        freeipa.EntryReference
 	entryErr     error
 	preserveErr  error
+	// proof is what the adapter could establish about the entry after the move.
+	proof freeipa.PreserveProof
 }
 
 func newPreserveHarness(t *testing.T) *preserveHarness {
@@ -179,6 +246,10 @@ func newPreserveHarness(t *testing.T) *preserveHarness {
 		// A directory that reports the connector may move an entry: the
 		// preflight then blocks nothing and the test is about what follows.
 		capabilities: freeipa.DirectoryCapabilities{UserModDN: true},
+		// The entry was read back after the move and carries the identifier the
+		// plan named: the ordinary case, where the preserve is proven.
+		proof: freeipa.PreserveProof{Confirmed: true,
+			Detail: "the preserved entry carries the identifier the plan named"},
 		entry: freeipa.EntryReference{
 			DN:              "uid=alice,cn=users,cn=accounts,dc=ipa,dc=example,dc=test",
 			EntryUUID:       "0b1d4c8e-0000-0000-0000-000000000001",
@@ -186,7 +257,12 @@ func newPreserveHarness(t *testing.T) *preserveHarness {
 		},
 	}
 	harness.executor = &Executor{
-		sessions: &fakeSessions{live: map[string]int64{}},
+		// The account has signed in to the panel, so there is an identity here
+		// to deny; the denial is aimed at the identities, not at the name.
+		sessions: &fakeSessions{
+			principals: []authz.Principal{{ID: "p-alice", Subject: "alice"}},
+			live:       map[string]int64{},
+		},
 		capabilities: func(_ context.Context, uid string) (freeipa.DirectoryCapabilities, error) {
 			// The question is about this account's entry: the order records which one
 			// it was asked about, so a preserve that asked about somebody else would be
@@ -198,9 +274,9 @@ func newPreserveHarness(t *testing.T) *preserveHarness {
 			harness.order = append(harness.order, "entry:"+uid)
 			return harness.entry, harness.entryErr
 		},
-		preserve: func(_ context.Context, uid string, planned freeipa.EntryReference) error {
+		preserve: func(_ context.Context, uid string, planned freeipa.EntryReference) (freeipa.PreserveProof, error) {
 			harness.order = append(harness.order, "preserve:"+uid+"@"+planned.DN)
-			return harness.preserveErr
+			return harness.proof, harness.preserveErr
 		},
 		localDeny: func(_ context.Context, subject, _ string, denied bool) (int64, error) {
 			harness.order = append(harness.order, fmt.Sprintf("deny:%s:%v", subject, denied))
@@ -288,6 +364,59 @@ func TestAPreserveAsksTheDirectoryBeforeItTouchesTheLocalAccount(t *testing.T) {
 	if state := StateFor(phases); state != StateSucceeded {
 		t.Errorf("the change is %s, expected succeeded", state)
 	}
+}
+
+// A preserve the directory could not be asked about afterwards used to end in
+// a phase reading "the entry stays as a preserved account" - a claim of a proof
+// nobody had. The confirmation is a step of its own now, and it says which of
+// the two it was.
+func TestAPreserveSaysWhetherTheEntryAfterTheMoveWasConfirmed(t *testing.T) {
+	harness := newPreserveHarness(t)
+	phases, _ := harness.executor.preserveUser(context.Background(),
+		preserveChange(harness.entry), &ReferencePayload{UID: "alice"})
+	confirmation, found := phaseNamed(phases, "confirming the identity of the preserved entry")
+	if !found {
+		t.Fatalf("no phase confirms the entry: %+v", phases)
+	}
+	if confirmation.Status != "succeeded" {
+		t.Fatalf("a confirmed entry became %s (%s)", confirmation.Status, confirmation.Message)
+	}
+
+	// The same preserve on a directory that offers no read of its preserved
+	// accounts: carried out, not proven, and the change is not a failure.
+	unproven := newPreserveHarness(t)
+	unproven.proof = freeipa.PreserveProof{
+		Detail: "this directory offers no read of its preserved accounts, so the entry was not read after the move",
+	}
+	phases, revoked := unproven.executor.preserveUser(context.Background(),
+		preserveChange(unproven.entry), &ReferencePayload{UID: "alice"})
+	confirmation, found = phaseNamed(phases, "confirming the identity of the preserved entry")
+	if !found {
+		t.Fatalf("no phase confirms the entry: %+v", phases)
+	}
+	if confirmation.Status != "skipped" {
+		t.Fatalf("an unproven entry became %s (%s)", confirmation.Status, confirmation.Message)
+	}
+	if !strings.Contains(confirmation.Message, "no read of its preserved accounts") {
+		t.Errorf("the phase does not say why there is no proof: %q", confirmation.Message)
+	}
+	// The account is preserved either way, so the panel's own half still runs.
+	if !unproven.did("deny:alice:true") || revoked == nil {
+		t.Errorf("the local half did not run after an unproven preserve: %v", unproven.order)
+	}
+	if state := StateFor(phases); state != StateSucceeded {
+		t.Errorf("the change is %s, expected succeeded", state)
+	}
+}
+
+// phaseNamed finds a phase by its name.
+func phaseNamed(phases []Phase, name string) (Phase, bool) {
+	for _, phase := range phases {
+		if phase.Name == name {
+			return phase, true
+		}
+	}
+	return Phase{}, false
 }
 
 // Two operators preserving the same user: the second one finds the entry

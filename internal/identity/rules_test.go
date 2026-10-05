@@ -187,6 +187,47 @@ func TestTheRulePlanWarnsAboutARuleThatOpensEverything(t *testing.T) {
 	}
 }
 
+// Where a membership leads is decided by the host side of the rules it
+// matches. A rule whose host category is "all" carries no host list, and only
+// a rule that opened every service as well was read as reaching every host -
+// so joining a group covered by "every user, every host, sshd" was planned as
+// an impact of no hosts at all.
+func TestTheImpactOfAMembershipCountsARuleThatReachesEveryHost(t *testing.T) {
+	directory := labDirectory()
+	directory.hbac = []freeipa.HBACRule{
+		{Name: "ssh-everywhere", Enabled: true, UserGroups: []string{"ops"},
+			AllHosts: true, Services: []string{"sshd"}},
+	}
+	plan, err := NewPlanner(directory).Build(context.Background(), ActionGroupMembers, Payload{
+		Group: &GroupPayload{Group: "ops", Add: []string{"carol"}},
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(plan.ReachableHosts) == 0 {
+		t.Fatalf("a rule reaching every host led to no host: %+v", plan)
+	}
+	if !strings.Contains(strings.Join(plan.ReachableHosts, "\n"), "every host") {
+		t.Fatalf("reachable hosts = %v", plan.ReachableHosts)
+	}
+	if !strings.Contains(strings.Join(plan.Warnings, "\n"), "every host") {
+		t.Fatalf("warnings = %v", plan.Warnings)
+	}
+	// A rule that opens every service too is the louder sentence, and it is
+	// still the same reach.
+	directory.hbac[0].AllServices, directory.hbac[0].AllowsEverything = true, true
+	directory.hbac[0].Services = nil
+	plan, err = NewPlanner(directory).Build(context.Background(), ActionGroupMembers, Payload{
+		Group: &GroupPayload{Group: "ops", Add: []string{"carol"}},
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if !strings.Contains(strings.Join(plan.Warnings, "\n"), "whole fleet") {
+		t.Fatalf("warnings = %v", plan.Warnings)
+	}
+}
+
 func TestTheRulePlanRefusesToCutOffTheAdministrator(t *testing.T) {
 	// The only rule letting admin in is allow_all; removing it is a conflict
 	// on every host, not a warning.

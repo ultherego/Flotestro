@@ -132,6 +132,25 @@ func (p *PartialChange) Error() string {
 		p.Group, len(p.Applied), len(p.Applied)+len(p.Refused), strings.Join(refused, "; "))
 }
 
+// UncertainChange says a membership change went out and its outcome is not
+// known: the directory did not answer, or it answered in a shape that names no
+// account. Every account the batch named may have moved, so they travel with
+// the error - an outcome nobody confirmed must not read as an outcome of none.
+type UncertainChange struct {
+	Method string
+	Group  string
+	// Users are the accounts the batch named, each of which may have moved.
+	Users []string
+	Err   error
+}
+
+func (u *UncertainChange) Error() string {
+	return fmt.Sprintf("it is not known whether the membership of %s changed for %s: %v",
+		u.Group, strings.Join(u.Users, ", "), u.Err)
+}
+
+func (u *UncertainChange) Unwrap() error { return u.Err }
+
 func (c *Client) changeGroupMembers(ctx context.Context, method, group string, users []string) error {
 	if !groupNamePattern.MatchString(group) {
 		return fmt.Errorf("invalid group name %q", group)
@@ -147,7 +166,17 @@ func (c *Client) changeGroupMembers(ctx context.Context, method, group string, u
 
 	result, err := c.call(ctx, method, []string{group}, map[string]any{"user": users})
 	if err != nil {
-		return fmt.Errorf("changing the membership of the group %s: %w", group, err)
+		var refusal *DirectoryError
+		if errors.As(err, &refusal) && refusal.Permanent() {
+			// The directory read the command and turned it down, so the
+			// membership stands as it stood.
+			return fmt.Errorf("changing the membership of the group %s: %w", group, err)
+		}
+		// The command went out and no verdict came back. The cache goes, because
+		// the directory may well have applied it, and the accounts travel with
+		// the error so their sessions end on the chance that they moved.
+		c.invalidate()
+		return &UncertainChange{Method: method, Group: group, Users: users, Err: err}
 	}
 
 	// The directory returns a list of failures instead of an error when some of
@@ -161,28 +190,43 @@ func (c *Client) changeGroupMembers(ctx context.Context, method, group string, u
 	var decoded struct {
 		Failed map[string]map[string][]any `json:"failed"`
 	}
-	if err := json.Unmarshal(result, &decoded); err == nil {
-		refused := map[string]string{}
-		for _, category := range decoded.Failed {
-			for _, entries := range category {
-				for _, entry := range entries {
-					name, reason := refusedAccount(entry)
-					if name == "" {
-						continue
-					}
-					refused[name] = reason
+	if err := json.Unmarshal(result, &decoded); err != nil {
+		// An answer in a shape this adapter does not read says nothing about
+		// which accounts moved, and nothing is not "none of them".
+		return &UncertainChange{Method: method, Group: group, Users: users,
+			Err: fmt.Errorf("the answer of the directory does not read: %w", err)}
+	}
+	refused := map[string]string{}
+	var unnamed []string
+	for _, category := range decoded.Failed {
+		for _, entries := range category {
+			for _, entry := range entries {
+				name, reason := refusedAccount(entry)
+				if name == "" {
+					// A failure the adapter cannot name is still a failure the
+					// directory reported: it is carried as an uncertain outcome
+					// rather than dropped, because dropping it read as a success.
+					unnamed = append(unnamed, fmt.Sprintf("%v", entry))
+					continue
 				}
+				refused[name] = reason
 			}
 		}
-		if len(refused) > 0 {
-			applied := make([]string, 0, len(users))
-			for _, user := range users {
-				if _, no := refused[user]; !no {
-					applied = append(applied, user)
-				}
+	}
+	if len(unnamed) > 0 {
+		sort.Strings(unnamed)
+		return &UncertainChange{Method: method, Group: group, Users: users,
+			Err: fmt.Errorf("the directory refused a part of the batch in a shape that names no account: %s",
+				strings.Join(unnamed, "; "))}
+	}
+	if len(refused) > 0 {
+		applied := make([]string, 0, len(users))
+		for _, user := range users {
+			if _, no := refused[user]; !no {
+				applied = append(applied, user)
 			}
-			return &PartialChange{Method: method, Group: group, Applied: applied, Refused: refused}
 		}
+		return &PartialChange{Method: method, Group: group, Applied: applied, Refused: refused}
 	}
 	return nil
 }
@@ -478,24 +522,35 @@ func (c *Client) PreserveUser(ctx context.Context, uid string) error {
 // somebody made in between.
 var ErrEntryMoved = errors.New("the entry is not the one the plan named")
 
+// PreserveProof says what was established about the entry after the move.
+// Confirmed means the preserved entry was read back and carries the identifier
+// the plan named; anything else is a preserve that was carried out and not
+// proven, and Detail says which of the reasons it is. A preserve nobody could
+// confirm is not a preserve nobody carried out, and it is not a confirmed one
+// either - so it travels as neither.
+type PreserveProof struct {
+	Confirmed bool
+	Detail    string
+}
+
 // PreserveUserAt preserves an account only while it is still the entry the
-// plan was made for.
-func (c *Client) PreserveUserAt(ctx context.Context, uid string, planned EntryReference) error {
+// plan was made for, and says what it could prove about the entry afterwards.
+func (c *Client) PreserveUserAt(ctx context.Context, uid string, planned EntryReference) (PreserveProof, error) {
 	if !userNamePattern.MatchString(uid) {
-		return fmt.Errorf("invalid account name %q", uid)
+		return PreserveProof{}, fmt.Errorf("invalid account name %q", uid)
 	}
 	if !planned.Complete() {
-		return fmt.Errorf("%w: the plan names no entry to bind to", ErrEntryMoved)
+		return PreserveProof{}, fmt.Errorf("%w: the plan names no entry to bind to", ErrEntryMoved)
 	}
 	current, err := c.UserEntry(ctx, uid)
 	if err != nil {
-		return err
+		return PreserveProof{}, err
 	}
 	if reason, moved := planned.Moved(current); moved {
-		return fmt.Errorf("%w: %s (the plan was %s)", ErrEntryMoved, reason, planned.Binding())
+		return PreserveProof{}, fmt.Errorf("%w: %s (the plan was %s)", ErrEntryMoved, reason, planned.Binding())
 	}
 	if err := c.PreserveUser(ctx, uid); err != nil {
-		return err
+		return PreserveProof{}, err
 	}
 
 	// The directory offers no compare-and-delete, so the binding is proven
@@ -510,24 +565,50 @@ func (c *Client) PreserveUserAt(ctx context.Context, uid string, planned EntryRe
 		// its preserved accounts, so there is no after-the-fact proof to have.
 		// Treating that as a failure undid every successful preserve on such a
 		// directory - which is the same mistake as reading "the probe could not
-		// run" as "the answer is no".
-		return nil
+		// run" as "the answer is no". It is reported as unproven, because
+		// reporting it as proven was the other half of the same mistake.
+		return PreserveProof{Detail: "this directory offers no read of its preserved accounts, so the " +
+			"entry was not read after the move; the binding before it is the whole of the proof (" +
+			planned.Binding() + ")"}, nil
 	}
 	if err != nil {
-		return fmt.Errorf("the account %s was preserved and could not be read back, so it is not "+
-			"known whether it is the entry the plan named: %w", uid, err)
+		return PreserveProof{Detail: "the preserved entry could not be read back, so it is not known " +
+			"whether it is the entry the plan named: " + err.Error()}, nil
 	}
 	// Judged by the identifier alone: the preserve itself moved the entry and
 	// stamped it, so the DN and the timestamp have changed by definition and
 	// comparing them would refuse every preserve that worked.
 	if reason, moved := planned.Replaced(after); moved {
 		if undo := c.UndeleteUser(ctx, uid); undo != nil {
-			return fmt.Errorf("%w: %s; putting it back failed too, so %s stays preserved and "+
+			return PreserveProof{}, fmt.Errorf("%w: %s; putting it back failed too, so %s stays preserved and "+
 				"needs a person: %v", ErrEntryMoved, reason, uid, undo)
 		}
-		return fmt.Errorf("%w: %s; the account was put back", ErrEntryMoved, reason)
+		return PreserveProof{}, fmt.Errorf("%w: %s; the account was put back", ErrEntryMoved, reason)
 	}
-	return nil
+	// Replaced answers "no" where there is nothing to compare, which is the
+	// answer a caller needs for the decision to put the account back and not
+	// the answer it needs for the trail: without an identifier on either side
+	// the entry after the move was never identified.
+	if missing := unidentified(planned, after); missing != "" {
+		return PreserveProof{Detail: missing + ", so there was nothing to compare after the move; " +
+			"the binding before it is the whole of the proof (" + planned.Binding() + ")"}, nil
+	}
+	return PreserveProof{Confirmed: true,
+		Detail: "the preserved entry carries the identifier the plan named (" + after.EntryUUID + ")"}, nil
+}
+
+// unidentified names the side that carries no identifier, and an empty string
+// when both do.
+func unidentified(planned, after EntryReference) string {
+	switch {
+	case planned.EntryUUID == "" && after.EntryUUID == "":
+		return "neither the plan nor the preserved entry carries an identifier"
+	case planned.EntryUUID == "":
+		return "the plan carries no identifier of the entry"
+	case after.EntryUUID == "":
+		return "the directory reports no identifier for the preserved entry"
+	}
+	return ""
 }
 
 // PreservedEntry reads a preserved account, which user_show does not return

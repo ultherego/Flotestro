@@ -66,6 +66,21 @@ const (
 	StateCanceled         State = "canceled"
 )
 
+// RepeatableAfterInterruption says whether a change may be carried out a
+// second time after the replica that claimed it stopped without recording a
+// result. A declarative change lands on the state it declares however often it
+// runs. A password reset hands the password to the requester once, and a keytab
+// rotation retires the key the renewal just fetched, so repeating either one
+// takes back what the first attempt gave.
+func RepeatableAfterInterruption(action ActionType) bool {
+	switch action {
+	case ActionUserPasswordReset, ActionKeytabRotate:
+		return false
+	default:
+		return true
+	}
+}
+
 // Terminal says whether the state is final.
 func (s State) Terminal() bool {
 	switch s {

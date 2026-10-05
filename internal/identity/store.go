@@ -121,10 +121,33 @@ func (s *Store) Cancel(ctx context.Context, changeID, actor, reason string) (*Ch
 	return s.Get(ctx, changeID)
 }
 
-// ClaimTerm is how long a claim on a directory change holds. It covers a slow
-// directory with room to spare: what it bounds is not the work but how long a
-// change stays invisible after the replica carrying it stops.
+// ClaimTerm is how long a claim on a directory change holds. What it bounds is
+// not the work but how long a change stays invisible after the replica carrying
+// it stops: a holder that is alive renews the claim through RenewClaim, so a
+// change slower than the term is not taken from under it.
 const ClaimTerm = 15 * time.Minute
+
+// RenewTerm is how often a holder renews its claim while it works. It is a
+// third of the term, so two renewals may be lost without the change being
+// declared stalled.
+const RenewTerm = ClaimTerm / 3
+
+// RenewClaim extends the claim of the holder that is carrying the change out.
+// It answers false when the row is no longer this holder's - the claim lapsed
+// and somebody else took the change - and the holder then has to stop writing
+// to it.
+func (s *Store) RenewClaim(ctx context.Context, changeID, holder string) (bool, error) {
+	const query = `
+		update directory_changes
+		   set claim_expires_at = now() + make_interval(secs => $3::double precision),
+		       updated_at = now()
+		 where id = $1 and state = 'running' and claimed_by = $2`
+	tag, err := s.pool.Exec(ctx, query, changeID, nullable(holder), ClaimTerm.Seconds())
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
 
 // Claim takes a change for execution. The condition on the state means two
 // replicas will not carry out the same change in parallel - and the claim is
@@ -147,8 +170,10 @@ func (s *Store) Claim(ctx context.Context, changeID, holder string) (bool, error
 	return tag.RowsAffected() > 0, nil
 }
 
-// Finish records the execution result phase by phase.
-func (s *Store) Finish(ctx context.Context, changeID string, state State,
+// Finish records the execution result phase by phase. The holder is part of the
+// condition: a replica whose claim lapsed and whose change somebody else took
+// must not write its own result over the one being carried out now.
+func (s *Store) Finish(ctx context.Context, changeID, holder string, state State,
 	phases []Phase, message string) error {
 	phasesJSON, err := json.Marshal(phases)
 	if err != nil {
@@ -158,9 +183,17 @@ func (s *Store) Finish(ctx context.Context, changeID string, state State,
 		update directory_changes set state = $2, phases = $3, result_message = $4,
 		                             finished_at = now(), updated_at = now(),
 		                             claimed_by = null, claim_expires_at = null
-		where id = $1`
-	_, err = s.pool.Exec(ctx, query, changeID, string(state), phasesJSON, nullable(message))
-	return err
+		where id = $1 and (claimed_by is null or claimed_by = $5)`
+	tag, err := s.pool.Exec(ctx, query, changeID, string(state), phasesJSON, nullable(message),
+		nullable(holder))
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("the change %s is held by another replica, so this result was not recorded",
+			changeID)
+	}
+	return nil
 }
 
 // Pending returns the approved changes waiting for execution, and the ones
@@ -250,7 +283,9 @@ func scanChanges(rows pgx.Rows) ([]Change, error) {
 	return changes, rows.Err()
 }
 
-// SetLocalDeny sets the local denial marker for an external account.
+// SetLocalDeny sets the local denial marker on one panel identity, named
+// exactly as the identity provider wrote it. Which identities a directory
+// account covers is decided once, by MatchesDirectoryUser.
 func (s *Store) SetLocalDeny(ctx context.Context, subject, reason string, denied bool) (int64, error) {
 	var query string
 	var args []any

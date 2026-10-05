@@ -32,7 +32,31 @@ const (
 	RefusalDirectoryUnreachable = "directory_unreachable"
 	// RefusalStalePlan is the shared refusal of a plan the world moved under.
 	RefusalStalePlan = plan.ErrorStalePlan
+	// RefusalInterrupted: a replica took the change, stopped before recording a
+	// result, and the change is one that cannot be carried out a second time
+	// without destroying what the first attempt produced.
+	RefusalInterrupted = "directory_change_interrupted"
 )
+
+// repeatOfInterruptedChange decides what to do with a change that was read in
+// running: its holder claimed it and never recorded a result, so which of its
+// phases ran is unknown. A declarative change is simply carried out again. A
+// change that hands something out once is not, because a second attempt takes
+// back what the first one gave - a new password invalidates the one the
+// requester already has, and a second rotation retires the key the host just
+// fetched. It is recorded as partially applied, which is the honest reading of
+// a change that began and whose extent nobody knows.
+func repeatOfInterruptedChange(change Change) ([]Phase, State, string, bool) {
+	if change.State != StateRunning || RepeatableAfterInterruption(ActionType(change.ActionType)) {
+		return nil, "", "", false
+	}
+	phase := refusedPhase(startPhase("repeating the interrupted change"), RefusalInterrupted,
+		"a replica took this change and recorded no result, and "+change.ActionType+
+			" cannot be carried out again without taking back what the first attempt handed out")
+	return []Phase{phase}, StatePartiallyApplied,
+		"the change was interrupted after it had begun; read what the directory holds and plan it again",
+		true
+}
 
 // SessionRevoker revokes the panel sessions that belong to an identity.
 type SessionRevoker interface {
@@ -64,7 +88,7 @@ type Executor struct {
 	// can do, which entry it holds, the move itself, and the local denial marker.
 	capabilities func(ctx context.Context, uid string) (freeipa.DirectoryCapabilities, error)
 	entryOf      func(ctx context.Context, uid string) (freeipa.EntryReference, error)
-	preserve     func(ctx context.Context, uid string, planned freeipa.EntryReference) error
+	preserve     func(ctx context.Context, uid string, planned freeipa.EntryReference) (freeipa.PreserveProof, error)
 	localDeny    func(ctx context.Context, subject, reason string, denied bool) (int64, error)
 }
 
@@ -127,7 +151,47 @@ func (e *Executor) tick(ctx context.Context) {
 		if !claimed {
 			continue
 		}
+		// While this replica works, it says so: the term then bounds how long a
+		// change stays invisible after a replica stops, and not how long the
+		// change itself may take.
+		release := e.holdClaim(ctx, change.ID)
 		e.execute(ctx, change)
+		release()
+	}
+}
+
+// holdClaim renews the claim until the returned function is called. A claim
+// this replica has lost is logged and not renewed again: the change belongs to
+// whoever took it, and Finish refuses to write over it.
+func (e *Executor) holdClaim(ctx context.Context, changeID string) func() {
+	renewing, stop := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(RenewTerm)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-renewing.Done():
+				return
+			case <-ticker.C:
+				held, err := e.store.RenewClaim(context.WithoutCancel(renewing), changeID, jobs.InstanceID())
+				if err != nil {
+					e.log.Error("the claim on the directory change was not renewed",
+						"change_id", changeID, "err", err)
+					continue
+				}
+				if !held {
+					e.log.Warn("the claim on the directory change is held by somebody else",
+						"change_id", changeID)
+					return
+				}
+			}
+		}
+	}()
+	return func() {
+		stop()
+		<-done
 	}
 }
 
@@ -141,6 +205,14 @@ func (e *Executor) execute(ctx context.Context, change Change) {
 	}
 
 	action := ActionType(change.ActionType)
+	// A change read in running was claimed by a replica that never finished it,
+	// so what it managed to do is unknown. Carrying a declarative change out
+	// again lands on the same state; a password reset or a keytab rotation
+	// destroys what the first attempt handed out, so it waits for a person.
+	if refusal, state, message, stop := repeatOfInterruptedChange(change); stop {
+		e.finish(ctx, change, state, refusal, message, nil)
+		return
+	}
 	var phases []Phase
 	// revoked is filled in by the actions that end panel sessions, so that
 	// the trail says how many - and for whom there was nothing to end.
@@ -264,7 +336,7 @@ func (e *Executor) setUserAccess(ctx context.Context, ref *ReferencePayload, ena
 
 	if !enable {
 		phase := startPhase("the local denial marker")
-		count, err := e.store.SetLocalDeny(ctx, ref.UID, ref.Reason, true)
+		count, err := e.denyDirectoryUser(ctx, ref.UID, ref.Reason, true)
 		// Saying "identities marked: 0" as a success was the thing ID-01 found;
 		// this says which of the two it is.
 		phases = append(phases, deniedLocally(phase, count, err, "identities marked",
@@ -290,7 +362,7 @@ func (e *Executor) setUserAccess(ctx context.Context, ref *ReferencePayload, ena
 
 	if enable && err == nil {
 		phase := startPhase("lifting the local denial marker")
-		count, denyErr := e.store.SetLocalDeny(ctx, ref.UID, "", false)
+		count, denyErr := e.denyDirectoryUser(ctx, ref.UID, "", false)
 		// The same distinction as on the way in.
 		phases = append(phases, deniedLocally(phase, count, denyErr, "identities unlocked",
 			"the panel knows no identity by that name, so there was nothing to lift"))
@@ -342,13 +414,65 @@ func (r sessionRevocation) String() string {
 	return message
 }
 
-// MatchesDirectoryUser says whether a panel principal is the given directory
-// account.
+// MatchesDirectoryPrincipal says whether a panel identity is the given
+// directory account. Both halves are asked here - the link an operator wrote
+// down and the name the login carries - so the denial and the session
+// revocation cannot drift apart on the question again.
+func MatchesDirectoryPrincipal(principal authz.Principal, uid string) bool {
+	if uid == "" {
+		return false
+	}
+	// The link exists for an identity whose subject says nothing about the
+	// account: without reading it, the field an operator fills in changed
+	// nothing and the very case it was added for was covered by neither path.
+	if principal.DirectoryUID != "" && strings.EqualFold(principal.DirectoryUID, uid) {
+		return true
+	}
+	return MatchesDirectoryUser(principal.Subject, uid)
+}
+
+// MatchesDirectoryUser says whether the name of a panel principal is the given
+// directory account: the account itself, or that account qualified with the
+// issuer the login added.
 func MatchesDirectoryUser(subject, uid string) bool {
 	if uid == "" {
 		return false
 	}
 	return subject == uid || strings.HasPrefix(subject, uid+"@")
+}
+
+// denyDirectoryUser sets - or lifts - the local denial marker on every panel
+// identity that is this directory account, asking the same question the session
+// revocation asks. The marker was written by the account name alone, so an
+// identity the login named "uid@issuer" kept its tokens while its sessions were
+// ended, and the phase said there was nothing to deny.
+func (e *Executor) denyDirectoryUser(ctx context.Context, uid, reason string, denied bool) (int64, error) {
+	if e.sessions == nil {
+		return 0, fmt.Errorf("the panel identities cannot be read, so it is not known whom to deny")
+	}
+	principals, err := e.sessions.ListPrincipals(ctx)
+	if err != nil {
+		// Not knowing the identities is not knowing that there are none.
+		return 0, fmt.Errorf("reading the panel identities of %s: %w", uid, err)
+	}
+	var marked int64
+	var matched bool
+	for _, principal := range principals {
+		if !MatchesDirectoryPrincipal(principal, uid) {
+			continue
+		}
+		matched = true
+		count, err := e.denyLocally(ctx, principal.Subject, reason, denied)
+		if err != nil && !errors.Is(err, ErrNoPrincipal) {
+			return marked, err
+		}
+		marked += count
+	}
+	if !matched || marked == 0 {
+		return 0, fmt.Errorf("%w: no identity of the panel is the directory account %q, so the denial marked nobody",
+			ErrNoPrincipal, uid)
+	}
+	return marked, nil
 }
 
 // revokeSessions ends the panel sessions belonging to a directory account.
@@ -360,7 +484,7 @@ func (e *Executor) revokeSessions(ctx context.Context, uid, reason string) (sess
 	}
 	matched := false
 	for _, principal := range principals {
-		if !MatchesDirectoryUser(principal.Subject, uid) {
+		if !MatchesDirectoryPrincipal(principal, uid) {
 			continue
 		}
 		matched = true
@@ -392,36 +516,46 @@ func (e *Executor) revokeChangedMembers(ctx context.Context, uids []string, reas
 	return finishPhase(phase, nil, total.String()), total
 }
 
+// mayHaveMoved names the accounts whose scope the directory may have changed,
+// which is what decides whose session ends.
+//
+// A batch the directory took only in part is not a step that did nothing: the
+// accounts it moved are named in the error, and their sessions end although the
+// step failed - without this they kept the scope they had while the panel
+// reported a failure. A batch whose outcome never came back is the same
+// question with no answer, so every account it named loses its session: an
+// unconfirmed change must not be accounted for as a change of nobody.
+func mayHaveMoved(err error, asked []string) []string {
+	if err == nil {
+		return asked
+	}
+	var partial *freeipa.PartialChange
+	if errors.As(err, &partial) {
+		return partial.Applied
+	}
+	var uncertain *freeipa.UncertainChange
+	if errors.As(err, &uncertain) {
+		return uncertain.Users
+	}
+	return nil
+}
+
 func (e *Executor) changeGroupMembers(ctx context.Context, spec *GroupPayload) ([]Phase, *sessionRevocation) {
 	var phases []Phase
 	// Only the members the directory actually moved lose their session: a
 	// user whose change was refused still holds the scope they had.
 	var changed []string
-	// A batch the directory took only in part is not a step that did nothing:
-	// the accounts it moved are named in the error, and their sessions end
-	// although the step failed. Without this they kept the scope they had
-	// while the panel reported a failure.
-	moved := func(err error, asked []string) []string {
-		if err == nil {
-			return asked
-		}
-		var partial *freeipa.PartialChange
-		if errors.As(err, &partial) {
-			return partial.Applied
-		}
-		return nil
-	}
 	if len(spec.Add) > 0 {
 		phase := startPhase("adding members to the group " + spec.Group)
 		err := e.directory.AddGroupMembers(ctx, spec.Group, spec.Add)
 		phases = append(phases, finishPhase(phase, err, ""))
-		changed = append(changed, moved(err, spec.Add)...)
+		changed = append(changed, mayHaveMoved(err, spec.Add)...)
 	}
 	if len(spec.Remove) > 0 {
 		phase := startPhase("removing members from the group " + spec.Group)
 		err := e.directory.RemoveGroupMembers(ctx, spec.Group, spec.Remove)
 		phases = append(phases, finishPhase(phase, err, ""))
-		changed = append(changed, moved(err, spec.Remove)...)
+		changed = append(changed, mayHaveMoved(err, spec.Remove)...)
 	}
 	if len(changed) == 0 {
 		return phases, nil
@@ -523,7 +657,8 @@ func (e *Executor) preserveUser(ctx context.Context, change Change,
 	phases = append(phases, skipPhase(phase, "the entry is the one the plan named ("+planned.Binding()+")"))
 
 	phase = startPhase("preserving the account in the directory")
-	if err := e.preserveInDirectory(ctx, ref.UID, planned); err != nil {
+	proof, err := e.preserveInDirectory(ctx, ref.UID, planned)
+	if err != nil {
 		code := RefusalDirectoryRefused
 		if errors.Is(err, freeipa.ErrEntryMoved) {
 			code = RefusalStalePlan
@@ -532,9 +667,20 @@ func (e *Executor) preserveUser(ctx context.Context, change Change,
 	}
 	phases = append(phases, finishPhase(phase, nil, "the entry stays as a preserved account"))
 
+	// Whether the entry after the move is the one the operator consented to is
+	// a step of its own: it was read back and compared, or it was not, and the
+	// phase that said "the entry stays as a preserved account" claimed a proof
+	// it did not always have.
+	phase = startPhase("confirming the identity of the preserved entry")
+	if proof.Confirmed {
+		phases = append(phases, finishPhase(phase, nil, proof.Detail))
+	} else {
+		phases = append(phases, skipPhase(phase, proof.Detail))
+	}
+
 	reason := firstNonEmpty(ref.Reason, "the account was preserved")
 	phase = startPhase("the local denial marker")
-	count, err := e.denyLocally(ctx, ref.UID, reason, true)
+	count, err := e.denyDirectoryUser(ctx, ref.UID, reason, true)
 	phases = append(phases, deniedLocally(phase, count, err, "identities marked",
 		"the panel knows no identity by that name, so there was nothing to deny locally"))
 
@@ -566,7 +712,7 @@ func (e *Executor) directoryEntry(ctx context.Context, uid string) (freeipa.Entr
 }
 
 func (e *Executor) preserveInDirectory(ctx context.Context, uid string,
-	planned freeipa.EntryReference) error {
+	planned freeipa.EntryReference) (freeipa.PreserveProof, error) {
 	if e.preserve != nil {
 		return e.preserve(ctx, uid, planned)
 	}
@@ -631,7 +777,7 @@ func (e *Executor) resetPassword(ctx context.Context, change Change, ref *Refere
 // finish records the result and notes it in the audit trail.
 func (e *Executor) finish(ctx context.Context, change Change, state State,
 	phases []Phase, message string, revoked *sessionRevocation) {
-	if err := e.store.Finish(ctx, change.ID, state, phases, message); err != nil {
+	if err := e.store.Finish(ctx, change.ID, jobs.InstanceID(), state, phases, message); err != nil {
 		e.log.Error("the result of the directory change was not recorded", "change_id", change.ID, "err", err)
 	}
 
