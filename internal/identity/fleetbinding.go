@@ -54,7 +54,7 @@ func ResolveFleetHost(listed []hosts.Host, fqdn, domain string) (hosts.Host, err
 	if wanted == "" {
 		return hosts.Host{}, fmt.Errorf("%w: the principal names no host", ErrHostNotInFleet)
 	}
-	var matched []hosts.Host
+	var matched, retired []hosts.Host
 	for _, host := range listed {
 		// A host that reported its own domain is qualified with that one: a host
 		// of another domain does not answer to this name, whoever else might.
@@ -62,14 +62,33 @@ func ResolveFleetHost(listed []hosts.Host, fqdn, domain string) (hosts.Host, err
 		if host.Identity.Domain != "" {
 			qualifier = host.Identity.Domain
 		}
-		if QualifiedHostname(host.Hostname, qualifier) == wanted {
-			matched = append(matched, host)
+		if QualifiedHostname(host.Hostname, qualifier) != wanted {
+			continue
 		}
+		// A retired host is the record of a machine that is gone, so it carries
+		// no name in the fleet. Counting it as a candidate made one live host
+		// beside one retired namesake ambiguous, and the binding was lost for
+		// as long as the record existed: a service principal of a host that is
+		// plainly there read as bound to nothing, and a decommissioned machine
+		// shadowed its own replacement for ever.
+		if host.LifecycleState == hosts.StateRetired {
+			retired = append(retired, host)
+			continue
+		}
+		matched = append(matched, host)
 	}
 	switch len(matched) {
 	case 1:
 		return matched[0], nil
 	case 0:
+		// Told apart on purpose: a name no host carries is a different answer
+		// from a name whose only host was decommissioned, and the second one
+		// says what to do about it.
+		if len(retired) > 0 {
+			return hosts.Host{}, fmt.Errorf("%w: %s is carried only by %d decommissioned record(s); "+
+				"the machine was retired and its name resolves to nothing in service",
+				ErrHostNotInFleet, wanted, len(retired))
+		}
 		return hosts.Host{}, fmt.Errorf("%w: %s", ErrHostNotInFleet, wanted)
 	default:
 		// The identifiers, not the names: two hosts stored under the same short
