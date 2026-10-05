@@ -249,11 +249,23 @@ const runColumns = `host_id::text, definition, kind, coalesce(job_id::text, ''),
 
 // runOfCurrentConfig keeps a run that is evidence about the configuration the
 // definition carries now, for a query that aliases the run r and the
-// definition d. A null on either side is a row from before the fingerprint
-// existed: it is not held against the definition, but it is the only case that
-// passes without a match.
-const runOfCurrentConfig = `(r.config_sha256 is null or d.config_sha256 is null
-		       or r.config_sha256 = d.config_sha256)`
+// definition d.
+//
+// A match, and nothing else. A null on either side used to pass, on the
+// reasoning that a row from before the fingerprint existed should not be held
+// against the definition - but a run that cannot say which configuration it
+// used is a run that proves nothing about this one, and counting it as
+// protection is a false readiness: the panel reported a definition as covered
+// by a copy nobody can tie to it. The migration's own comment said the same
+// thing the whole time ("reads as unknown rather than as a match") while the
+// SQL beside it said the opposite.
+//
+// What this costs: a copy made before the fingerprint existed stops counting as
+// protection until the definition runs once more. It stays in the history and
+// in every listing - it is not deleted and not hidden - it simply stops being
+// evidence for a configuration it was never measured against.
+const runOfCurrentConfig = `(r.config_sha256 is not null and d.config_sha256 is not null
+		       and r.config_sha256 = d.config_sha256)`
 
 // aliasedRunColumns is the same list for a query that joins the definitions:
 // the two tables share host_id and definition, so the columns say which table
