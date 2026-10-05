@@ -41,6 +41,10 @@ type Material struct {
 	// Bytes is what the row will hold: the raw key of the secret store,
 	// or the PEM the subsystem writes and reads.
 	Bytes []byte
+	// Sealed is the row this material was opened from. A rewrap carries it
+	// so that the write can be conditional on the row it read; material
+	// found outside the database has none.
+	Sealed WrappedKey
 	// RetiredAt carries a retirement across a rewrap. A key put out of use
 	// must not come back into use because its wrapping changed.
 	RetiredAt *time.Time
@@ -96,8 +100,11 @@ type ImportStore interface {
 	// second opinion about what the installation is.
 	ImportKeys(ctx context.Context, kekID string, keys []WrappedKey, retired []RetiredAuthority) error
 	// ReplaceKeys rewraps: every row and the record move from one key
-	// encryption key to another together.
-	ReplaceKeys(ctx context.Context, fromKEKID, toKEKID string, keys []WrappedKey) error
+	// encryption key to another together. read names the rows as the rewrap
+	// found them, and the write happens only while the database still holds
+	// exactly those: a row that changed under the rewrap would otherwise be
+	// written back as it was before it changed.
+	ReplaceKeys(ctx context.Context, fromKEKID, toKEKID string, read, keys []WrappedKey) error
 	// ForgetKeys takes the named keys out of the database and clears the
 	// record, which is the last step of a revert - after the files are back.
 	// The names are the keys the revert actually wrote: anything else wrapped
@@ -177,7 +184,7 @@ func Rewrap(ctx context.Context, store ImportStore, from, to *InstallationKEK) (
 	if err != nil {
 		return report, err
 	}
-	if err := store.ReplaceKeys(ctx, from.ID(), to.ID(), rows); err != nil {
+	if err := store.ReplaceKeys(ctx, from.ID(), to.ID(), sealedRows(materials), rows); err != nil {
 		return report, err
 	}
 	report.Entries = entries(materials, "rewrap")
@@ -274,6 +281,16 @@ func seal(kek *InstallationKEK, materials []Material) ([]WrappedKey, error) {
 	return rows, nil
 }
 
+// sealedRows names the rows the material was opened from, which is what the
+// write that replaces them is conditional on.
+func sealedRows(materials []Material) []WrappedKey {
+	rows := make([]WrappedKey, 0, len(materials))
+	for _, material := range materials {
+		rows = append(rows, material.Sealed)
+	}
+	return rows
+}
+
 // open reads every key of the installation out of the database.
 func open(ctx context.Context, store ImportStore, kek *InstallationKEK) ([]Material, error) {
 	var materials []Material
@@ -293,6 +310,7 @@ func open(ctx context.Context, store ImportStore, kek *InstallationKEK) ([]Mater
 				Source:    "the database",
 				Bytes:     material,
 				RetiredAt: row.RetiredAt,
+				Sealed:    row,
 			})
 		}
 	}

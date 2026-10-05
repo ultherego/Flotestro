@@ -815,9 +815,10 @@ func (r *Runtime) Rewrap(ctx context.Context) {
 	if store == nil {
 		return
 	}
-	total := 0
+	total, unbound := 0, 0
 	for {
-		moved, remaining, err := r.rewrapBatch(ctx, store)
+		moved, remaining, loose, err := r.rewrapBatch(ctx, store)
+		unbound += loose
 		if err != nil {
 			if ctx.Err() == nil {
 				r.log.Error("rewrapping the secret store stopped; it resumes at the next start", "err", err, "moved", total)
@@ -837,6 +838,13 @@ func (r *Runtime) Rewrap(ctx context.Context) {
 	if total > 0 {
 		r.log.Info("the secret store was rewrapped onto the active key", "versions", total)
 	}
+	if unbound > 0 {
+		// These are the rows written before the ciphertext was bound to its
+		// row. They are bound now, and a reader no longer has to accept a
+		// value that could have come from another row.
+		r.log.Warn("versions sealed before the row key was bound into them were rewritten bound",
+			"versions", unbound)
+	}
 }
 
 // rewrapBatch runs one batch and turns a panic in it into an error. This loop
@@ -845,7 +853,7 @@ func (r *Runtime) Rewrap(ctx context.Context) {
 // again after every restart, because the next pass reads the same row. The
 // shape is checked before the key sees it, so this is the net under that
 // check, not a substitute for it.
-func (r *Runtime) rewrapBatch(ctx context.Context, store *secrets.Store) (moved, remaining int, err error) {
+func (r *Runtime) rewrapBatch(ctx context.Context, store *secrets.Store) (moved, remaining, unbound int, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = fmt.Errorf("rewrapping a batch of the secret store panicked: %v", recovered)

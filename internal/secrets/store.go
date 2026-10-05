@@ -501,15 +501,15 @@ func (s *Store) VersionsByKey(ctx context.Context) (map[string]int, error) {
 }
 
 // RewrapBatch moves up to limit live versions onto the active key and says how
-// many remain.
-func (s *Store) RewrapBatch(ctx context.Context, limit int) (moved, remaining int, err error) {
+// many remain and how many of them were still unbound to their row.
+func (s *Store) RewrapBatch(ctx context.Context, limit int) (moved, remaining, unbound int, err error) {
 	active, err := s.keys.ActiveKeyID(ctx)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, unbound, err
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, unbound, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -522,7 +522,7 @@ func (s *Store) RewrapBatch(ctx context.Context, limit int) (moved, remaining in
 		 limit $3
 		   for update skip locked`, EnvelopeVersion, active, limit)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, unbound, err
 	}
 	type pending struct {
 		secretID string
@@ -536,7 +536,7 @@ func (s *Store) RewrapBatch(ctx context.Context, limit int) (moved, remaining in
 		if err := rows.Scan(&row.secretID, &row.version, &row.envelope.Nonce, &row.envelope.Ciphertext,
 			&row.envelope.Version, &keyID, &row.envelope.WrappedDEK); err != nil {
 			rows.Close()
-			return 0, 0, err
+			return 0, 0, unbound, err
 		}
 		if keyID != nil {
 			row.envelope.KeyID = *keyID
@@ -545,12 +545,14 @@ func (s *Store) RewrapBatch(ctx context.Context, limit int) (moved, remaining in
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return 0, 0, err
+		return 0, 0, unbound, err
 	}
 
 	// damaged counts the rows no key can take: the pass steps over them and
 	// says how many it stepped over, so the operator sees them instead of the
-	// rotation stopping dead on the first one.
+	// rotation stopping dead on the first one. unbound counts the rows of the
+	// first form that had to be opened without the row key, which only this
+	// pass may do and which it undoes by resealing them bound.
 	damaged := 0
 	for _, row := range batch {
 		var fresh Envelope
@@ -558,13 +560,21 @@ func (s *Store) RewrapBatch(ctx context.Context, limit int) (moved, remaining in
 		if row.envelope.Version < EnvelopeVersion {
 			legacy, ok := s.keys.(LegacyOpener)
 			if !ok {
-				return moved, 0, fmt.Errorf("%w: a version of the first form cannot be rewrapped without the legacy key", ErrKeyUnavailable)
+				return moved, 0, unbound, fmt.Errorf("%w: a version of the first form cannot be rewrapped without the legacy key", ErrKeyUnavailable)
 			}
 			cipher, ok := legacy.LegacyCipher()
 			if !ok {
-				return moved, 0, fmt.Errorf("%w: the legacy key is not registered", ErrKeyUnavailable)
+				return moved, 0, unbound, fmt.Errorf("%w: the legacy key is not registered", ErrKeyUnavailable)
 			}
 			value, err := cipher.Decrypt(row.envelope.Nonce, row.envelope.Ciphertext, row.secretID, row.version)
+			if errors.Is(err, ErrVersionNotBound) {
+				// The one place a version written before the binding may be
+				// opened: it is resealed below with the row key in the
+				// associated data, so it is read unbound exactly once.
+				unbound++
+				value, err = cipher.DecryptUnbound(row.envelope.Nonce, row.envelope.Ciphertext,
+					row.secretID, row.version)
+			}
 			if errors.Is(err, ErrCorruptedVersion) {
 				// A row this key cannot take is left where it is and counted as
 				// still owed. Stopping the batch on it would hold the rotation
@@ -574,11 +584,11 @@ func (s *Store) RewrapBatch(ctx context.Context, limit int) (moved, remaining in
 				continue
 			}
 			if err != nil {
-				return moved, 0, fmt.Errorf("secret %s version %d: %w", row.secretID, row.version, err)
+				return moved, 0, unbound, fmt.Errorf("secret %s version %d: %w", row.secretID, row.version, err)
 			}
 			fresh, err = SealWith(ctx, s.keys, active, value, associated)
 			if err != nil {
-				return moved, 0, err
+				return moved, 0, unbound, err
 			}
 		} else {
 			fresh, err = row.envelope.Rewrap(ctx, s.keys, active)
@@ -587,7 +597,7 @@ func (s *Store) RewrapBatch(ctx context.Context, limit int) (moved, remaining in
 				continue
 			}
 			if err != nil {
-				return moved, 0, fmt.Errorf("secret %s version %d: %w", row.secretID, row.version, err)
+				return moved, 0, unbound, fmt.Errorf("secret %s version %d: %w", row.secretID, row.version, err)
 			}
 		}
 		if _, err := tx.Exec(ctx, `
@@ -595,7 +605,7 @@ func (s *Store) RewrapBatch(ctx context.Context, limit int) (moved, remaining in
 			   set nonce = $3, ciphertext = $4, envelope_version = $5, key_id = $6, wrapped_dek = $7
 			 where secret_id = $1 and version = $2`,
 			row.secretID, row.version, fresh.Nonce, fresh.Ciphertext, fresh.Version, fresh.KeyID, fresh.WrappedDEK); err != nil {
-			return moved, 0, err
+			return moved, 0, unbound, err
 		}
 		moved++
 	}
@@ -604,18 +614,18 @@ func (s *Store) RewrapBatch(ctx context.Context, limit int) (moved, remaining in
 		 where destroyed_at is null
 		   and (envelope_version < $1 or key_id is distinct from $2)`, EnvelopeVersion, active).
 		Scan(&remaining); err != nil {
-		return moved, 0, err
+		return moved, 0, unbound, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return 0, 0, err
+		return 0, 0, unbound, err
 	}
 	if damaged > 0 {
 		// Reported as an error with what was done in it: the caller has moved
 		// what it could and still has to say that some rows cannot be moved at
 		// all. The pass is not repeated over them for ever, because remaining
 		// counts them and the caller stops when nothing moves.
-		return moved, remaining, fmt.Errorf("%w: %d versions in this batch cannot be opened by any key the panel holds",
+		return moved, remaining, unbound, fmt.Errorf("%w: %d versions in this batch cannot be opened by any key the panel holds",
 			ErrCorruptedVersion, damaged)
 	}
-	return moved, remaining, nil
+	return moved, remaining, unbound, nil
 }

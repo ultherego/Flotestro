@@ -31,8 +31,11 @@ type AuthorityKeyStore interface {
 	// seen names the authorities the caller read before it decided; the write
 	// is refused when the installation no longer holds exactly those.
 	ReplaceAuthority(ctx context.Context, row WrappedKey, remove, seen []string) error
-	// DeleteAuthorities removes authority rows together.
-	DeleteAuthorities(ctx context.Context, keyIDs []string) error
+	// DeleteAuthorities removes authority rows together, and only while the
+	// installation still holds exactly the authorities named in seen: a
+	// prepared authority another replica has activated in the meantime is
+	// no longer the row the caller decided to drop.
+	DeleteAuthorities(ctx context.Context, keyIDs, seen []string) error
 	// RetiredAuthorities returns the certificates withdrawn from signing,
 	// in a stable order.
 	RetiredAuthorities(ctx context.Context) ([][]byte, error)
@@ -222,15 +225,18 @@ func (a *DBAuthorities) WritePrepared(keyPEM, certPEM []byte, preparedAt time.Ti
 	return a.replace(row, remove, observed(active, prepared))
 }
 
-// DropPrepared implements pki.AuthorityStore.
+// DropPrepared implements pki.AuthorityStore. The removal carries the
+// condition the read gave it: another replica may have activated the prepared
+// authority since, and a removal by name alone would then take away the
+// authority that signs for the whole fleet.
 func (a *DBAuthorities) DropPrepared() error {
-	_, prepared, err := a.load()
+	active, prepared, err := a.load()
 	if err != nil || prepared == nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, authorityTimeout)
 	defer cancel()
-	return a.store.DeleteAuthorities(ctx, []string{prepared.keyID})
+	return a.store.DeleteAuthorities(ctx, []string{prepared.keyID}, observed(active, prepared))
 }
 
 // WriteRetired implements pki.AuthorityStore.

@@ -19,6 +19,62 @@ func countCertificates(t *testing.T, bundle []byte) int {
 	return strings.Count(string(bundle), "BEGIN CERTIFICATE")
 }
 
+// What a host holds is what it was handed. The guard of a handover used to ask
+// when a host last presented a certificate, and a certificate issued from the
+// bundle {A} before B was prepared counted as evidence that the host had B -
+// the activation then cut that host off. So the bundle that goes out is named
+// by its authorities, and the bundle of the moment before a preparation does
+// not name the prepared one (audit of 6c38561, CR-04).
+func TestTheGenerationOfABundleNamesTheAuthoritiesItCarries(t *testing.T) {
+	trust, err := EnsureTrust(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := trust.Active().IssuerID()
+	before := trust.Bundle()
+	if generation, err := IssuerIDsOfBundle(before); err != nil ||
+		len(generation) != 1 || generation[0] != active {
+		t.Fatalf("the bundle of a fresh installation names %v (%v), not the authority %s",
+			generation, err, active)
+	}
+
+	if _, err := trust.Prepare(); err != nil {
+		t.Fatal(err)
+	}
+	pending, _ := trust.Pending()
+	// The bundle handed out before the preparation cannot be evidence of it,
+	// whenever the host happens to present the certificate that came with it.
+	stale, err := IssuerIDsOfBundle(before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range stale {
+		if id == pending.IssuerID() {
+			t.Fatalf("the bundle from before the preparation names the prepared authority %s",
+				pending.IssuerID())
+		}
+	}
+	// The bundle handed out from now on names both: the host that renews holds
+	// the authority that is waiting to take over.
+	generation, err := IssuerIDsOfBundle(trust.Bundle())
+	if err != nil {
+		t.Fatal(err)
+	}
+	held := map[string]bool{}
+	for _, id := range generation {
+		held[id] = true
+	}
+	if !held[active] || !held[pending.IssuerID()] {
+		t.Fatalf("the bundle after the preparation names %v, not %s and %s",
+			generation, active, pending.IssuerID())
+	}
+	// A bundle that is not a bundle is an error, not an empty generation: a
+	// host recorded as holding nothing must not be a host holding anything.
+	if _, err := IssuerIDsOfBundle([]byte("not a bundle")); err == nil {
+		t.Error("bytes that carry no certificate were read as a generation")
+	}
+}
+
 // TestTheRotationHasTwoPhases guards the condition that protects the fleet
 // from being cut off.
 func TestTheRotationHasTwoPhases(t *testing.T) {

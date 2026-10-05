@@ -21,6 +21,9 @@ type memoryAuthorities struct {
 	*memoryKeys
 	mu      sync.Mutex
 	retired map[string][]byte
+	// betweenReadAndWrite runs once, inside the next removal, so that a test
+	// can put another replica's write exactly where the race is.
+	betweenReadAndWrite func()
 }
 
 func newMemoryAuthorities() *memoryAuthorities {
@@ -34,7 +37,7 @@ func (m *memoryAuthorities) ReplaceAuthority(ctx context.Context, row WrappedKey
 	if err := m.authoritiesStillThese(seen); err != nil {
 		return err
 	}
-	if err := m.DeleteAuthorities(ctx, remove); err != nil {
+	if err := m.drop(remove); err != nil {
 		return err
 	}
 	return m.PutWrappedKeyUnderRecordedKEK(ctx, row)
@@ -61,7 +64,25 @@ func (m *memoryAuthorities) authoritiesStillThese(seen []string) error {
 	return nil
 }
 
-func (m *memoryAuthorities) DeleteAuthorities(_ context.Context, keyIDs []string) error {
+// DeleteAuthorities refuses the way Postgres refuses: the removal carries the
+// set the caller read, and a set that has moved since is not dropped.
+func (m *memoryAuthorities) DeleteAuthorities(_ context.Context, keyIDs, seen []string) error {
+	// The hook stands for another replica writing between the read and this
+	// write, which is the moment the condition exists for.
+	if m.betweenReadAndWrite != nil {
+		hook := m.betweenReadAndWrite
+		m.betweenReadAndWrite = nil
+		hook()
+	}
+	if err := m.authoritiesStillThese(seen); err != nil {
+		return err
+	}
+	return m.drop(keyIDs)
+}
+
+// drop removes the rows without a condition, which is what the two writes do
+// once their condition holds.
+func (m *memoryAuthorities) drop(keyIDs []string) error {
 	m.memoryKeys.mu.Lock()
 	defer m.memoryKeys.mu.Unlock()
 	for _, id := range keyIDs {
@@ -119,6 +140,98 @@ func reopen(t *testing.T, store *memoryAuthorities) *pki.Trust {
 		t.Fatal(err)
 	}
 	return trust
+}
+
+// Abandoning a prepared authority read the set and then removed a row by name.
+// Between the two, another replica may have activated that very authority -
+// the name does not change at a handover - and the removal then took away the
+// authority the whole fleet signs with (audit of 6c38561, CR-02).
+func TestAbandoningAPreparedAuthorityDoesNotRemoveTheActivatedOne(t *testing.T) {
+	store := newMemoryAuthorities()
+	trust := dbTrust(t, store)
+	prepared, err := trust.Prepare()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The other replica activates it exactly between the read and the write.
+	var activated string
+	store.betweenReadAndWrite = func() {
+		second := reopen(t, store)
+		if _, err := second.Activate(); err != nil {
+			t.Errorf("the other replica could not activate: %v", err)
+			return
+		}
+		activated = second.Active().IssuerID()
+	}
+	if err := trust.Retire(prepared.Fingerprint, 0); !errors.Is(err, ErrRevisionMoved) {
+		t.Fatalf("abandoning an authority that was activated meanwhile answered %v", err)
+	}
+	if activated == "" {
+		t.Fatal("the other replica never ran")
+	}
+
+	back := reopen(t, store)
+	if back.Active().IssuerID() != activated {
+		t.Fatalf("the installation signs with %s after the abandonment, not with the activated %s",
+			back.Active().IssuerID(), activated)
+	}
+	if _, err := store.WrappedKey(context.Background(), activated); err != nil {
+		t.Fatalf("the activated authority is no longer in the database: %v", err)
+	}
+}
+
+// A rewrap opens every row, seals it with the new key encryption key and writes
+// it back under the same name. An authority another replica activated in
+// between keeps its name and changes its content, so a write conditional on
+// the key encryption key alone put the previous state back: the activated
+// authority became the prepared one again and the withdrawn one signed, with
+// both operations reported as successful (audit of 6c38561, CR-02).
+func TestARewrapDoesNotPutBackAnAuthorityAnotherReplicaActivated(t *testing.T) {
+	ctx := context.Background()
+	first := testKEK(t, testKEKHex)
+	second := testKEK(t, otherKEKHex)
+
+	store := newMemoryStore()
+	// One set of rows, read as the authorities of the fleet and as the keys of
+	// the installation: that is the one thing both writes touch.
+	authorities := &memoryAuthorities{memoryKeys: store.memoryKeys, retired: map[string][]byte{}}
+	trust := dbTrust(t, authorities)
+	withdrawn := trust.Active().IssuerID()
+	prepared, err := trust.Prepare()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The record names the key the rows are wrapped with, which the authorities
+	// above wrote without going through a migration.
+	store.kekID = first.ID()
+
+	// The rewrap opens the set, and the other replica hands signing over before
+	// the rewrap writes.
+	store.betweenReadAndWrite = func() {
+		if _, err := reopen(t, authorities).Activate(); err != nil {
+			t.Errorf("the other replica could not activate: %v", err)
+		}
+	}
+	if _, err := Rewrap(ctx, store, first, second); !errors.Is(err, ErrRevisionMoved) {
+		t.Fatalf("the rewrap answered %v", err)
+	}
+
+	back := reopen(t, authorities)
+	if got := back.Active().FingerprintHex(); got != prepared.Fingerprint {
+		t.Fatalf("the installation signs with %s, not with the authority that was activated (%s)",
+			got, prepared.Fingerprint)
+	}
+	if _, _, preparedAt, err := NewDBAuthorities(ctx, authorities, first).ReadPrepared(); err != nil ||
+		!preparedAt.IsZero() {
+		t.Fatalf("an authority is prepared again after the handover: %v, %v", preparedAt, err)
+	}
+	if _, err := store.WrappedKey(ctx, withdrawn); err == nil {
+		t.Fatal("the withdrawn authority was written back as a key of the installation")
+	}
+	if store.kekID != first.ID() {
+		t.Fatalf("the record names %s after the refused rewrap", store.kekID)
+	}
 }
 
 func TestAnAuthorityWrittenToTheDatabaseIsTheOneTheNextStartSignsWith(t *testing.T) {

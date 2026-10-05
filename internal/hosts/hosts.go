@@ -680,16 +680,25 @@ func (s *Store) HasLiveCertificate(ctx context.Context, hostID string) (bool, er
 	return live, nil
 }
 
-// SaveCertificate records an issued agent certificate.
+// SaveCertificate records an issued agent certificate together with the trust
+// bundle it goes out with: the generation of the trust the host is given, which
+// is what the guard of a handover needs and what no moment can stand in for.
+// An empty list is recorded as nothing at all - unknown rather than none.
 func (s *Store) SaveCertificate(ctx context.Context, tx pgx.Tx, hostID, serial, commonName string,
-	fingerprint []byte, notBefore, notAfter time.Time, issuerSubject, issuerSerial, issuerID string) error {
+	fingerprint []byte, notBefore, notAfter time.Time, issuerSubject, issuerSerial, issuerID string,
+	trustIssuerIDs []string) error {
 	const query = `
 		insert into agent_certificates
 			(id, host_id, serial, fingerprint_sha256, subject_common_name, not_before, not_after,
-			 issuer_subject, issuer_serial, issuer_id)
-		values ($1, $2, $3, $4, $5, $6, $7, nullif($8, ''), nullif($9, ''), nullif($10, '')::uuid)`
+			 issuer_subject, issuer_serial, issuer_id, trust_issuer_ids)
+		values ($1, $2, $3, $4, $5, $6, $7, nullif($8, ''), nullif($9, ''), nullif($10, '')::uuid,
+			$11::uuid[])`
+	var generation any
+	if len(trustIssuerIDs) > 0 {
+		generation = trustIssuerIDs
+	}
 	_, err := tx.Exec(ctx, query, uuid.NewString(), hostID, serial, fingerprint, commonName,
-		notBefore, notAfter, issuerSubject, issuerSerial, issuerID)
+		notBefore, notAfter, issuerSubject, issuerSerial, issuerID, generation)
 	if err != nil {
 		return fmt.Errorf("saving the certificate: %w", err)
 	}
@@ -1797,25 +1806,24 @@ func (s *Store) CertificateIssuers(ctx context.Context) (map[string]int, error) 
 	return usage, rows.Err()
 }
 
-// HostsWithoutCertificateSince counts the hosts that have not received a new
-// certificate from the given issuer since the given moment. A host gets the
-// trust bundle with the certificate, so a renewal since the preparation is how
-// it comes to know the CA that is waiting to take over.
+// HostsWithoutTrustGeneration counts the hosts that cannot be shown to hold
+// the named authority. A host gets the trust bundle with its certificate, so
+// the evidence is a certificate the host has presented whose recorded bundle
+// carried that authority.
 //
-// Which CA issued it is half of the question. An instance that has not caught
-// up with a handover still signs with the authority that was withdrawn and
-// hands out the bundle it holds, which is the old one; a certificate it issued
-// proves the host renewed and proves nothing about what the host now trusts.
-// Counting it would let the next activation cut that host off. The issuer of a
-// row that was never recorded is unknown, and unknown is not evidence either.
-func (s *Store) HostsWithoutCertificateSince(ctx context.Context, since time.Time,
-	issuerID string) (int, error) {
-	// presented_at, not created_at: the panel issues a certificate and the host
-	// receives it, together with the trust bundle, in one answer - and that
-	// answer can be lost. The moment of issue said that the panel had done its
-	// part; what the guard has to know is that the host has the new authority,
-	// because handing signing over to one it does not trust yet cuts the host
-	// off. A session opened with the certificate proves the answer arrived.
+// Two things are needed and neither does on its own. The bundle says what the
+// host was given: a certificate issued before the authority was prepared
+// carried a bundle without it, and so does one issued afterwards by an
+// instance that has not caught up with the preparation. The presentation says
+// the answer arrived: the panel issues a certificate and the host receives it,
+// together with the bundle, in one answer - and that answer can be lost, while
+// the moment of issue says only that the panel did its part. Handing signing
+// over to an authority a host does not trust yet cuts that host off, which is
+// the one thing this guard exists to prevent.
+//
+// A row whose bundle was never recorded is unknown, and unknown is not
+// evidence: the host counts as one that has still to renew.
+func (s *Store) HostsWithoutTrustGeneration(ctx context.Context, issuerID string) (int, error) {
 	const query = `
 		select count(*)
 		from hosts h
@@ -1823,11 +1831,11 @@ func (s *Store) HostsWithoutCertificateSince(ctx context.Context, since time.Tim
 		  and not exists (
 		      select 1 from agent_certificates c
 		      where c.host_id = h.id and c.revoked_at is null
-		        and c.presented_at is not null and c.presented_at >= $1
-		        and c.issuer_id = $2::uuid
+		        and c.presented_at is not null
+		        and c.trust_issuer_ids @> array[$1::uuid]
 		  )`
 	var count int
-	if err := s.pool.QueryRow(ctx, query, since, issuerID).Scan(&count); err != nil {
+	if err := s.pool.QueryRow(ctx, query, issuerID).Scan(&count); err != nil {
 		return 0, err
 	}
 	return count, nil

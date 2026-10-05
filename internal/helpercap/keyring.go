@@ -399,6 +399,22 @@ func (t TrustStore) Apply(bundle *helperv1.HelperTrustBundle) (*TrustUpdate, err
 				"an older bundle would undo a key rotation",
 			bundle.GetIssuedUnix(), accepted.IssuedUnix))
 	}
+	// The moment is a whole second, so two bundles of one second carry the same
+	// one and the comparison above cannot order them: {K1}, {K1,K2} and {K1}
+	// again within a second would take the rotation back. Inside one second the
+	// keyring may therefore only grow - the same bundle sent again is the same
+	// set and passes, and a bundle that drops a key waits for the next second.
+	if accepted.IssuedUnix == bundle.GetIssuedUnix() {
+		for _, id := range current.IDs() {
+			if _, kept := keys[id]; kept {
+				continue
+			}
+			return nil, refusal(ErrorTrustStale, fmt.Sprintf(
+				"the bundle was issued at %d, the same second as the one this helper has accepted, "+
+					"and does not carry the trusted key %s; within one second a bundle may only add keys",
+				bundle.GetIssuedUnix(), id))
+		}
+	}
 
 	changed := false
 	if err := os.MkdirAll(t.Dir, 0o755); err != nil {
