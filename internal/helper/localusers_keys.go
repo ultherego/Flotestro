@@ -22,17 +22,56 @@ var effectiveSSHDConfig = func(ctx context.Context) (string, error) {
 	return toolOutput(ctx, sshdPath, "-T")
 }
 
+// sshdKeyFiles says which of an account's two key files sshd on this host
+// opens. Neither answer is a yes by default: a file the configuration does not
+// name, a configuration that names no AuthorizedKeysFile and a configuration
+// nobody could read are all unknowns.
+type sshdKeyFiles struct {
+	managed bool
+	home    bool
+	// stated is false when the effective configuration named no
+	// AuthorizedKeysFile at all, so the host said nothing either way.
+	stated bool
+	err    error
+}
+
+// readSSHDKeyFiles asks sshd once, for both files and both directions of an
+// edit.
+func readSSHDKeyFiles(ctx context.Context) sshdKeyFiles {
+	effective, err := effectiveSSHDConfig(ctx)
+	if err != nil {
+		return sshdKeyFiles{err: err}
+	}
+	home, stated := accounts.HomeFileReadBySSHD(effective)
+	return sshdKeyFiles{
+		managed: accounts.ManagedFileReadBySSHD(effective),
+		home:    home,
+		stated:  stated,
+	}
+}
+
+// why says, for a refusal an operator reads, why the keys of a file are not a
+// way into the account.
+func (f sshdKeyFiles) why(path string) string {
+	switch {
+	case f.err != nil:
+		return "the sshd configuration could not be read, so it is not known that sshd opens " +
+			path + ": " + f.err.Error()
+	case !f.stated:
+		return "the sshd configuration names no AuthorizedKeysFile, so it is not known that " +
+			"sshd opens " + path
+	}
+	return "sshd on this host does not read " + path
+}
+
 // sshdReadsManagedFile answers whether the effective sshd configuration lists
 // the panel's managed key file among the files it takes keys from. The error is
 // handed back rather than folded into a false: not being able to ask is not an
 // answer, and only the caller knows whether its decision may rest on an
 // unknown.
 func (s *Server) sshdReadsManagedFile(ctx context.Context) (bool, error) {
-	effective, err := effectiveSSHDConfig(ctx)
-	if err != nil {
-		return false, err
-	}
-	return accounts.ManagedFileReadBySSHD(effective), nil
+	files := readSSHDKeyFiles(ctx)
+	return files.managed, files.err
 }
 
 // refuseUnreadManagedFile is the refusal shared by every order that writes the
@@ -69,15 +108,15 @@ func (s *Server) editLocalUserKeys(ctx context.Context, request *helperv1.Helper
 	// ~/.ssh/authorized_keys passed the guard because "there is still the
 	// managed file", and the account was left with no way in.
 	managed := action.GetManagedFile()
-	managedCounts, sshdErr := s.sshdReadsManagedFile(ctx)
+	sshd := readSSHDKeyFiles(ctx)
 
 	if managed {
-		if response := refuseUnreadManagedFile(managedCounts, sshdErr); response != nil {
+		if response := refuseUnreadManagedFile(sshd.managed, sshd.err); response != nil {
 			return response
 		}
 	}
 
-	content, other, uncounted, response := s.readKeyFiles(name, account, managed, managedCounts)
+	content, other, response := s.readKeyFiles(name, account, managed, sshd)
 	if response != nil {
 		return response
 	}
@@ -144,20 +183,16 @@ func (s *Server) editLocalUserKeys(ctx context.Context, request *helperv1.Helper
 	// The lockout guard: the edit leaves the account with no key in either file,
 	// and the account has no password login - none set, a locked one, or a state
 	// the host could not read, which is not "a password" either.
-	if len(change.After) == 0 && len(change.Before) > 0 && other == 0 && !action.GetAllowLockout() {
+	if len(change.After) == 0 && len(change.Before) > 0 && other.counted == 0 && !action.GetAllowLockout() {
 		if reason := noPasswordLogin(name); reason != "" {
 			// The keys the other file holds without counting are named: an
 			// operator who sees "the account has keys" in the panel has to be
 			// told that sshd does not open the file they are in, or that this
 			// host could not be asked.
 			aside := ""
-			switch {
-			case uncounted > 0 && sshdErr != nil:
-				aside = fmt.Sprintf(" (%s holds %d key(s), but the sshd configuration could not be read, so it is not known that sshd opens it: %s)",
-					accounts.ManagedKeysPattern, uncounted, sshdErr.Error())
-			case uncounted > 0:
-				aside = fmt.Sprintf(" (%s holds %d key(s), which sshd on this host does not read)",
-					accounts.ManagedKeysPattern, uncounted)
+			if other.uncounted > 0 {
+				aside = fmt.Sprintf(" (%s holds %d key(s) that are no way in: %s)",
+					other.path, other.uncounted, other.reason)
 			}
 			return reject(ErrorLastKeyLockout, fmt.Sprintf(
 				"the order would take the last key of %s and %s, so nobody could log in as it afterwards%s; "+
@@ -183,33 +218,47 @@ func (s *Server) editLocalUserKeys(ctx context.Context, request *helperv1.Helper
 	return &helperv1.HelperResponse{Accepted: true}
 }
 
-// readKeyFiles returns the file the order edits and the number of keys in the
-// other one, so the lockout guard counts every way into the account.
-// readKeyFiles returns the file the order edits, the number of keys the other
-// file contributes as a way into the account, and - separately - the number it
-// holds but does not contribute, so a refusal can say why they did not count.
+// otherKeyFile is the key file an order does not edit: how many of its keys are
+// a way into the account, how many it holds without being one, and why, so a
+// refusal can say so.
+type otherKeyFile struct {
+	path      string
+	counted   int
+	uncounted int
+	reason    string
+}
+
+// readKeyFiles returns the file the order edits and what the other one
+// contributes as a way into the account.
 func (s *Server) readKeyFiles(name string, account accountRecord,
-	managed, managedCounts bool) ([]byte, int, int, *helperv1.HelperResponse) {
+	managed bool, sshd sshdKeyFiles) ([]byte, otherKeyFile, *helperv1.HelperResponse) {
 	userFile, err := readAuthorizedKeysFile(account.Home)
 	if err != nil {
-		return nil, 0, 0, rejectKeyFileError(err)
+		return nil, otherKeyFile{}, rejectKeyFileError(err)
 	}
 	managedFile, err := readManagedKeysFile(name)
 	if err != nil {
-		return nil, 0, 0, rejectKeyFileError(err)
+		return nil, otherKeyFile{}, rejectKeyFileError(err)
 	}
+	// Neither file counts unless sshd opens it on this host. The home file used
+	// to count unconditionally, so on a host whose AuthorizedKeysFile names the
+	// managed pattern alone the guard let the last key sshd does reach be taken
+	// away while an unread home key made the count look non-zero.
 	if managed {
-		// The home file is read by sshd on every host of the fleet, so it
-		// always counts.
-		return managedFile, len(accounts.Fingerprints(accounts.ParseKeyFile(userFile))), 0, nil
+		return managedFile, countOtherKeys(filepath.Join(account.Home, accounts.HomeKeysPath),
+			userFile, sshd.home, sshd), nil
 	}
-	// The managed file counts only where sshd opens it. A file nobody reads
-	// grants nothing, and counting it let the last real key be taken away.
-	held := len(accounts.Fingerprints(accounts.ParseKeyFile(managedFile)))
-	if managedCounts {
-		return userFile, held, 0, nil
+	return userFile, countOtherKeys(accounts.ManagedKeysPattern, managedFile, sshd.managed, sshd), nil
+}
+
+// countOtherKeys splits the keys of the file the order does not edit into the
+// ones that are a way into the account and the ones that are not.
+func countOtherKeys(path string, content []byte, read bool, sshd sshdKeyFiles) otherKeyFile {
+	held := len(accounts.Fingerprints(accounts.ParseKeyFile(content)))
+	if read {
+		return otherKeyFile{path: path, counted: held}
 	}
-	return userFile, 0, held, nil
+	return otherKeyFile{path: path, uncounted: held, reason: sshd.why(path)}
 }
 
 // writeKeyFile writes the edited file where the order says: the user's

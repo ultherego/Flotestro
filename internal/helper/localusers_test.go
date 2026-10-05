@@ -617,6 +617,76 @@ func TestTheLastHomeKeyIsNotCoveredByAFileSSHDDoesNotRead(t *testing.T) {
 	}
 }
 
+// The mirror of the case above: sshd opens the managed file alone, so a key
+// left in ~/.ssh/authorized_keys is unused and the guard must not accept it as
+// the way in that keeps the account reachable (audit of 6c38561, HA-001).
+func TestTheLastManagedKeyIsNotCoveredByAnUnusedHomeKey(t *testing.T) {
+	uid := userRangeUID(t)
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".ssh"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const homeKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHZ8Kx3vQOZKq0M0hDPuJHf5Zx1kJHgqRqYqGZ6XxLm1 smith\n"
+	if err := os.WriteFile(filepath.Join(home, ".ssh", "authorized_keys"), []byte(homeKey), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "smith"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const managedKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAy6mWJn8OaXk4SvEPQ3oMfQ1fCxQbqc1hXGr6rHj2wZ panel\n"
+	if err := os.WriteFile(filepath.Join(root, "smith", accounts.ManagedKeysFileName),
+		[]byte(managedKey), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	previousRoot, previousShadow, previousSSHD := managedKeysRoot, shadowReader, effectiveSSHDConfig
+	t.Cleanup(func() {
+		managedKeysRoot, shadowReader, effectiveSSHDConfig = previousRoot, previousShadow, previousSSHD
+	})
+	managedKeysRoot = root
+	shadowReader = func() (map[string]shadowState, error) {
+		return map[string]shadowState{"smith": {locked: true}}, nil
+	}
+	// The effective configuration names the managed pattern and nothing else.
+	effectiveSSHDConfig = func(context.Context) (string, error) {
+		return "authorizedkeysfile " + accounts.ManagedKeysPattern + "\n", nil
+	}
+
+	tool := &fakeAccountTool{}
+	server := accountServer(tool, map[string]accountRecord{
+		"smith": {Name: "smith", UID: uid, GID: os.Getgid(), Home: home, InPasswd: true},
+	})
+	empty := func(a *helperv1.LocalUserActionRequest) {
+		a.ManagedFile = true
+		a.SshKeys = nil
+	}
+	response := server.handle(context.Background(), accountRequest(
+		helperv1.LocalUserActionRequest_OPERATION_SET_SSH_KEYS, empty), nil)
+	if response.GetAccepted() || response.GetErrorCode() != ErrorLastKeyLockout {
+		t.Fatalf("accepted=%v code=%q message=%q",
+			response.GetAccepted(), response.GetErrorCode(), response.GetMessage())
+	}
+	if !strings.Contains(response.GetMessage(), filepath.Join(home, accounts.HomeKeysPath)) {
+		t.Fatalf("the refusal does not name the unread home file: %q", response.GetMessage())
+	}
+	if content, err := os.ReadFile(filepath.Join(root, "smith", accounts.ManagedKeysFileName)); err != nil ||
+		string(content) != managedKey {
+		t.Fatalf("the managed file was changed: %q (%v)", content, err)
+	}
+
+	// Where sshd does open both files, the home key really is another way in
+	// and the same order goes through.
+	effectiveSSHDConfig = func(context.Context) (string, error) {
+		return "authorizedkeysfile .ssh/authorized_keys " + accounts.ManagedKeysPattern + "\n", nil
+	}
+	if response := server.handle(context.Background(), accountRequest(
+		helperv1.LocalUserActionRequest_OPERATION_SET_SSH_KEYS, empty), nil); !response.GetAccepted() {
+		t.Fatalf("code=%q message=%q", response.GetErrorCode(), response.GetMessage())
+	}
+}
+
 // Writing the managed file needs to know that sshd opens it. A configuration
 // that could not be read is not one that does.
 func TestWritingTheManagedFileRefusesWhenTheSSHDConfigurationCannotBeRead(t *testing.T) {

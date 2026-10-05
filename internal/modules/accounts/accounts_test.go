@@ -287,6 +287,35 @@ func TestManagedFileMustBeInAuthorizedKeysFile(t *testing.T) {
 		t.Error("a server without the managed file was taken as reading it")
 	}
 	if !ManagedFileReadBySSHD("authorizedkeysfile .ssh/authorized_keys " + ManagedKeysPattern + "\n") {
+		t.Error("the managed file is among the files and was not seen")
+	}
+}
+
+// The home file is read only where the effective configuration names it. One
+// naming the managed pattern alone leaves the keys under the home unused, and
+// a configuration that names no AuthorizedKeysFile answers neither way.
+func TestHomeFileReadBySSHD(t *testing.T) {
+	for _, testCase := range []struct {
+		effective    string
+		reads, known bool
+	}{
+		{"authorizedkeysfile .ssh/authorized_keys .ssh/authorized_keys2\n", true, true},
+		{"authorizedkeysfile %h/.ssh/authorized_keys\n", true, true},
+		{"authorizedkeysfile " + ManagedKeysPattern + "\n", false, true},
+		{"authorizedkeysfile .ssh/authorized_keys2\n", false, true},
+		{"authorizedkeysfile /etc/ssh/keys/%u\n", false, true},
+		{"port 22\n", false, false},
+	} {
+		reads, known := HomeFileReadBySSHD(testCase.effective)
+		if reads != testCase.reads || known != testCase.known {
+			t.Errorf("%q: reads=%v known=%v, want %v and %v",
+				testCase.effective, reads, known, testCase.reads, testCase.known)
+		}
+	}
+}
+
+func TestManagedFileIsSeenAmongSeveralFiles(t *testing.T) {
+	if !ManagedFileReadBySSHD("authorizedkeysfile .ssh/authorized_keys " + ManagedKeysPattern + "\n") {
 		t.Error("a server that lists the managed file was not recognised")
 	}
 	if ManagedKeysPath("jane") != "/etc/ssh/authorized_keys.d/jane/60-flotestro.keys" {
