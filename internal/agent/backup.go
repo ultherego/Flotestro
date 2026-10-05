@@ -208,7 +208,7 @@ func (e *TaskExecutor) taskReceipts(taskID string) []*helperv1.SecretReceipt {
 func (e *TaskExecutor) callHelper(ctx context.Context, request *helperv1.HelperRequest,
 	timeout time.Duration) (*helperv1.HelperResponse, error) {
 	request.SecretReceipts = e.taskReceipts(request.GetTaskId())
-	return e.callHelper(ctx, request, timeout)
+	return e.helper.Call(ctx, request, timeout)
 }
 
 // secretKey names one secret of one task: the same name and version asked
