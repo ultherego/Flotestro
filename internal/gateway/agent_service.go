@@ -538,6 +538,15 @@ func (s *AgentService) checkRelayedMessage(ctx context.Context, hostID string, s
 	verified, err := s.envelopes.VerifyMessage(ctx, relayed.peer, msg)
 	if err != nil {
 		if refusal := RelayRefusalOf(err); refusal != nil && refusal.Code == hosts.RefusalRelaySequenceReplayed {
+			if refusal.InFlight {
+				// Another delivery of this very message holds it and is applying it.
+				// Nothing is written on the host - this is not its doing - and nothing
+				// is acknowledged: the record stays in the relay's spool, which is what
+				// has to carry the message again if that delivery does not finish it.
+				s.log.Warn("a relayed message is being applied by another delivery and this one was dropped unacknowledged",
+					"host_id", hostID, "relay_id", relayed.peer.RelayID, "detail", refusal.Detail)
+				return errMessageDropped
+			}
 			if refusal.Redelivery {
 				// The panel consumed this message already and the relay carried it again
 				// because the acknowledgement never reached it - a link that broke while

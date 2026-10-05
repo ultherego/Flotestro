@@ -496,3 +496,55 @@ func TestOnlyARelayedMessageIsAcknowledged(t *testing.T) {
 		t.Fatal("a message without an envelope was not acknowledged; its record would stay in the spool")
 	}
 }
+
+// busySequences answers the way the store does when another delivery holds the
+// message: the number is spent, the work is unfinished, and the lease on it is
+// somebody else's.
+type busySequences struct{}
+
+func (busySequences) Claim(context.Context, string, string, uint64) (Claim, error) {
+	return Claim{Busy: true, Last: 7}, nil
+}
+
+func (busySequences) NoteApplied(context.Context, string, string, uint64) error { return nil }
+
+// A message another gateway is applying right now is dropped without an
+// acknowledgement: the relay keeps the record, because if that delivery fails
+// the relay is the only thing left that still holds the message. The panel also
+// writes nothing on the host - a second delivery is the relay's doing, not the
+// host's.
+func TestAMessageAnotherDeliveryHoldsIsNotAcknowledgedAndNotHeldAgainstTheHost(t *testing.T) {
+	host := newTestHost(t, true)
+	verifier := NewRelayVerifier(host.records, host.records, busySequences{})
+	service := &AgentService{
+		log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		envelopes: verifier,
+	}
+	session := NewSession(uuid.NewString(), testHostID, "0.54.0", uuid.NewString(), "127.0.0.1:1", 4)
+	relayed := &relayedSession{peer: host.peer, endToEnd: true}
+
+	result := &agentv1.AgentMessage{Payload: &agentv1.AgentMessage_TaskResult{
+		TaskResult: &agentv1.TaskResult{TaskId: uuid.NewString()},
+	}}
+	if err := host.signer(uuid.NewString()).SignMessage(result); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := verifier.VerifyMessage(context.Background(), host.peer, result)
+	refusal := RelayRefusalOf(err)
+	if refusal == nil || !refusal.InFlight {
+		t.Fatalf("a message held by another delivery answered %q", refusalCode(err))
+	}
+	if refusal.Redelivery {
+		t.Fatal("a message nobody has applied yet was read as a message the panel holds")
+	}
+
+	if err := service.checkRelayedMessage(context.Background(), testHostID, session, relayed, result); !errors.Is(err, errMessageDropped) {
+		t.Fatalf("the message in flight answered %v, expected a dropped message", err)
+	}
+	select {
+	case message := <-session.Outbound():
+		t.Fatalf("the message was acknowledged while another delivery was still applying it: %+v", message)
+	default:
+	}
+}
