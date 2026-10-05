@@ -131,35 +131,40 @@ func scopeCondition(scopes []authz.Scope, offset int) (string, []any) {
 	return condition, args
 }
 
+// latestRunOfKind is one lateral of the fleet query: the newest successful run
+// of one kind for the definition d, and only a run of the configuration d
+// carries now. The four laterals differ in nothing but the kind, the moment
+// they read and the name they are read back under.
+func latestRunOfKind(kind, column, alias string) string {
+	return `
+		left join lateral (
+			select r.` + column + ` from backup_runs r
+			where r.host_id = d.host_id and r.definition = d.name
+			  and r.kind = '` + kind + `' and r.outcome = 'succeeded'
+			  and ` + runOfCurrentConfig + `
+			order by r.recorded_at desc limit 1) ` + alias + ` on true`
+}
+
 // copiesSQL joins every definition of the hosts in scope with the newest
-// successful run of each kind.
-const copiesSQL = `
+// successful run of each kind. A run of a configuration the definition no
+// longer has is not evidence about it: the fleet screen asks the same question
+// as Latest, so a copy made before the repository moved no longer answers for
+// the place the definition now writes to.
+var copiesSQL = `
 	with scoped as (
 		select h.id, h.hostname from hosts h where %s
 	),
 	copies as (
 		select d.host_id, s.hostname, d.name, d.tool, d.repository,
-		       coalesce(p.last_success_at, b.recorded_at) as last_success_at,
-		       v.recorded_at as verified_at,
-		       r.recorded_at as restored_at
+		       coalesce(planned.last_success_at, copied.recorded_at) as last_success_at,
+		       verified.recorded_at as verified_at,
+		       restored.recorded_at as restored_at
 		from backup_definitions d
-		join scoped s on s.id = d.host_id
-		left join lateral (
-			select last_success_at from backup_runs
-			where host_id = d.host_id and definition = d.name and kind = '` + kindPlan + `' and outcome = 'succeeded'
-			order by recorded_at desc limit 1) p on true
-		left join lateral (
-			select recorded_at from backup_runs
-			where host_id = d.host_id and definition = d.name and kind = '` + kindBackup + `' and outcome = 'succeeded'
-			order by recorded_at desc limit 1) b on true
-		left join lateral (
-			select recorded_at from backup_runs
-			where host_id = d.host_id and definition = d.name and kind = '` + kindVerify + `' and outcome = 'succeeded'
-			order by recorded_at desc limit 1) v on true
-		left join lateral (
-			select recorded_at from backup_runs
-			where host_id = d.host_id and definition = d.name and kind = '` + kindRestore + `' and outcome = 'succeeded'
-			order by recorded_at desc limit 1) r on true
+		join scoped s on s.id = d.host_id` +
+	latestRunOfKind(kindPlan, "last_success_at", "planned") +
+	latestRunOfKind(kindBackup, "recorded_at", "copied") +
+	latestRunOfKind(kindVerify, "recorded_at", "verified") +
+	latestRunOfKind(kindRestore, "recorded_at", "restored") + `
 	),
 	judged as (
 		select c.*,

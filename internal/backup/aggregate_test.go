@@ -100,3 +100,29 @@ func TestThresholdsFollowTheAssessment(t *testing.T) {
 		}
 	}
 }
+
+// The fleet screen reads a definition's runs the way Latest does: only a run of
+// the configuration the definition carries now. A definition keeps its key when
+// its repository, its paths or its tool move, so without this the copy made
+// before the move went on reporting the fleet as protected - in a place the
+// definition no longer writes to (audit of 6c38561, DEP-06).
+func TestTheFleetQueryAsksForRunsOfTheConfigurationInForce(t *testing.T) {
+	reads := strings.Count(copiesSQL, "from backup_runs r")
+	if reads != 4 {
+		t.Fatalf("the fleet query reads backup_runs %d times, expected one lateral per kind", reads)
+	}
+	if matched := strings.Count(copiesSQL, runOfCurrentConfig); matched != reads {
+		t.Errorf("%d of the %d reads of backup_runs compare the fingerprint of the configuration",
+			matched, reads)
+	}
+	for _, kind := range []string{kindPlan, kindBackup, kindVerify, kindRestore} {
+		if !strings.Contains(copiesSQL, "r.kind = '"+kind+"'") {
+			t.Errorf("the fleet query has no lateral for the %q runs", kind)
+		}
+	}
+	// Both sides of the comparison: the run's fingerprint against the
+	// definition's, not against a constant.
+	if !strings.Contains(runOfCurrentConfig, "r.config_sha256 = d.config_sha256") {
+		t.Errorf("the condition does not compare the run to the definition: %s", runOfCurrentConfig)
+	}
+}
