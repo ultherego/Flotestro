@@ -176,7 +176,9 @@ func TestAHolderThatLostTheClaimStopsWorking(t *testing.T) {
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	lost := &Executor{log: quiet, renewEvery: time.Millisecond,
-		renewClaim: func(context.Context, string, Hold) (bool, error) { return false, nil }}
+		renewClaim: func(context.Context, string, Hold) (ClaimStanding, bool, error) {
+			return ClaimStanding{}, false, nil
+		}}
 	working, release := lost.holdClaim(context.Background(), "c1", testHold)
 	defer release()
 	select {
@@ -188,8 +190,8 @@ func TestAHolderThatLostTheClaimStopsWorking(t *testing.T) {
 	// A renewal that could not be made is not a claim that was lost: the holder
 	// keeps working, and keeps trying, within the term.
 	unreachable := &Executor{log: quiet, renewEvery: time.Millisecond, lapseAfter: time.Hour,
-		renewClaim: func(context.Context, string, Hold) (bool, error) {
-			return false, errors.New("the database does not answer")
+		renewClaim: func(context.Context, string, Hold) (ClaimStanding, bool, error) {
+			return ClaimStanding{}, false, errors.New("the database does not answer")
 		}}
 	alive, stop := unreachable.holdClaim(context.Background(), "c1", testHold)
 	defer stop()
@@ -205,10 +207,10 @@ func TestAHolderThatLostTheClaimStopsWorking(t *testing.T) {
 	// else had taken. The clock is its own now, and the renewal has a deadline.
 	var asked atomic.Int64
 	stuck := &Executor{log: quiet, renewEvery: 5 * time.Millisecond, lapseAfter: 50 * time.Millisecond,
-		renewClaim: func(ctx context.Context, _ string, _ Hold) (bool, error) {
+		renewClaim: func(ctx context.Context, _ string, _ Hold) (ClaimStanding, bool, error) {
 			asked.Add(1)
 			<-ctx.Done()
-			return false, ctx.Err()
+			return ClaimStanding{}, false, ctx.Err()
 		}}
 	blocked, giveUp := stuck.holdClaim(context.Background(), "c1", testHold)
 	defer giveUp()
@@ -852,5 +854,63 @@ func TestAPreserveWithoutAnEntryInThePlanIsRefused(t *testing.T) {
 	}
 	if last := phases[len(phases)-1]; !strings.HasPrefix(last.Message, RefusalPlanIncomplete+":") {
 		t.Fatalf("the refusal is %q, expected the code %s", last.Message, RefusalPlanIncomplete)
+	}
+}
+
+// The term of a claim used to be counted from the moment the claiming statement
+// answered. The database stamps the deadline when its transaction begins, so a
+// statement that spent three seconds in a lock wait gave the holder three
+// seconds of term the row did not have - and another replica could take the
+// change over while the first still believed it held it. The deadline is now
+// the database's own, and the local clock is set from the ask.
+func TestTheTermIsCountedFromTheAskAndNotTheAnswer(t *testing.T) {
+	asked := time.Now()
+	// The row expires a quarter of an hour after the transaction began, and the
+	// statement answered with ten minutes of that left.
+	stated := claimStanding(asked, asked.Add(15*time.Minute), (10 * time.Minute).Seconds())
+	if got := stated.Deadline().Sub(asked); got != 10*time.Minute {
+		t.Errorf("the holder was given %v of term where the database reported ten minutes", got)
+	}
+
+	// An unknown standing is neither a lapsed claim nor an endless one.
+	var unknown ClaimStanding
+	if unknown.Known() {
+		t.Error("a standing with nothing in it reads as a term the database stated")
+	}
+	if !unknown.Deadline().IsZero() {
+		t.Error("a standing with nothing in it produced a deadline")
+	}
+
+	executor := &Executor{lapseAfter: time.Hour}
+	// The database's term wins wherever it stated one.
+	if got := executor.termOf(stated); got > 10*time.Minute {
+		t.Errorf("the holder's clock was set to %v over a stated term of ten minutes", got)
+	}
+	// Where it stated none, the configured term stands in - from the ask, so a
+	// claim asked fifty minutes ago under an hour's term has ten left.
+	late := ClaimStanding{Asked: time.Now().Add(-50 * time.Minute)}
+	if got := executor.termOf(late); got > 11*time.Minute {
+		t.Errorf("the fallback gave %v of term, so it was counted from the answer", got)
+	}
+	// And a term already spent is nothing left rather than a fresh one.
+	spent := claimStanding(time.Now().Add(-time.Minute), time.Now(), 1)
+	if got := executor.termOf(spent); got != 0 {
+		t.Errorf("a claim whose term had run out was given %v more", got)
+	}
+}
+
+// A renewal was scheduled out of the whole term even when the holder did not
+// have the whole term, so the first renewal of a claim taken after a slow
+// statement could fall after the row had already expired.
+func TestTheRenewalIsScheduledOutOfTheTermThatIsLeft(t *testing.T) {
+	executor := &Executor{renewEvery: time.Minute, lapseAfter: time.Hour}
+	asked := time.Now()
+	if got := executor.renewIn(claimStanding(asked, asked.Add(time.Hour), 3600)); got != time.Minute {
+		t.Errorf("a full term renews in %v rather than the configured minute", got)
+	}
+	// Six seconds left: the renewal is due in a third of that, not in a minute.
+	short := claimStanding(asked, asked.Add(time.Hour), 6)
+	if got := executor.renewIn(short); got > 3*time.Second {
+		t.Errorf("a claim with six seconds left renews in %v", got)
 	}
 }

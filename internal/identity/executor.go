@@ -106,7 +106,7 @@ type Executor struct {
 	// renewClaim says whether this replica still holds the change, and
 	// renewEvery how often it asks. Both are seams: the term is a quarter of an
 	// hour in an installation and a millisecond in a test.
-	renewClaim func(ctx context.Context, changeID string, hold Hold) (bool, error)
+	renewClaim func(ctx context.Context, changeID string, hold Hold) (ClaimStanding, bool, error)
 	renewEvery time.Duration
 	// lapseAfter is the term the holder judges its own claim by; ClaimTerm in
 	// an installation, and short enough to watch in a test.
@@ -191,31 +191,40 @@ func (e *Executor) holdClaim(ctx context.Context, changeID string, hold Hold) (c
 	working, abandon := context.WithCancel(ctx)
 	renewing, stop := context.WithCancel(ctx)
 	// renewed carries the verdict of each renewal back to the clock below.
-	renewed := make(chan bool, 1)
+	renewed := make(chan renewal, 1)
 	go func() {
-		ticker := time.NewTicker(e.renewTerm())
-		defer ticker.Stop()
+		// The interval follows the term that is left and not the term in the
+		// constant, so a claim taken after a slow statement is renewed sooner.
+		standing := hold.Standing
+		due := time.NewTimer(e.renewIn(standing))
+		defer due.Stop()
 		for {
 			select {
 			case <-renewing.Done():
 				return
-			case <-ticker.C:
+			case <-due.C:
 				// The renewal has a deadline of its own. A statement that has
 				// not answered by the time the next one is due has not
 				// answered, and a holder waiting on it must not be waiting on
 				// it instead of noticing that its claim ran out.
 				asked, give := context.WithTimeout(context.WithoutCancel(renewing), e.renewTerm())
-				still, err := e.renew(asked, changeID, hold)
+				latest, still, err := e.renew(asked, changeID, hold)
 				give()
 				if err != nil {
 					// A renewal that failed is not a claim that was lost. The
 					// clock below decides that, from the term it knows.
 					e.log.Error("the claim on the directory change was not renewed",
 						"change_id", changeID, "err", err)
+					due.Reset(e.renewIn(standing))
 					continue
 				}
+				if still {
+					standing = latest
+				}
+				due.Reset(e.renewIn(standing))
+				answer := renewal{held: still, standing: latest}
 				select {
-				case renewed <- still:
+				case renewed <- answer:
 				case <-renewing.Done():
 					return
 				}
@@ -230,7 +239,12 @@ func (e *Executor) holdClaim(ctx context.Context, changeID string, hold Hold) (c
 		// than by an answer that may never come: a renewal stuck in the
 		// database used to mean the expiry was never reached at all, and the
 		// holder worked on under a claim somebody else had taken.
-		lapse := time.NewTimer(e.claimTerm())
+		//
+		// What the clock is set to is the database's own deadline and not the
+		// term constant: the row expires at the time the claiming statement
+		// stamped on it, which is before the answer reached this replica.
+		term := e.termOf(hold.Standing)
+		lapse := time.NewTimer(term)
 		defer lapse.Stop()
 		for {
 			select {
@@ -238,11 +252,11 @@ func (e *Executor) holdClaim(ctx context.Context, changeID string, hold Hold) (c
 				return
 			case <-lapse.C:
 				e.log.Warn("the claim on the directory change has lapsed; the work stops",
-					"change_id", changeID, "term", e.claimTerm())
+					"change_id", changeID, "term", term)
 				abandon()
 				return
-			case still := <-renewed:
-				if !still {
+			case answer := <-renewed:
+				if !answer.held {
 					e.log.Warn("the claim on the directory change is held by somebody else; the work stops",
 						"change_id", changeID)
 					abandon()
@@ -256,7 +270,8 @@ func (e *Executor) holdClaim(ctx context.Context, changeID string, hold Hold) (c
 					default:
 					}
 				}
-				lapse.Reset(e.claimTerm())
+				term = e.termOf(answer.standing)
+				lapse.Reset(term)
 			}
 		}
 	}()
@@ -289,11 +304,51 @@ func (e *Executor) claimTerm() time.Duration {
 	return ClaimTerm
 }
 
-func (e *Executor) renew(ctx context.Context, changeID string, hold Hold) (bool, error) {
+func (e *Executor) renew(ctx context.Context, changeID string, hold Hold) (ClaimStanding, bool, error) {
 	if e.renewClaim != nil {
 		return e.renewClaim(ctx, changeID, hold)
 	}
 	return e.store.RenewClaim(ctx, changeID, hold)
+}
+
+// termOf is how long the holder may work before its claim has certainly run
+// out. The database's own remaining term decides it, measured from the moment
+// the statement was asked. Where the database reported no term - a seam that
+// answers without one - the configured term stands in, measured from that same
+// moment: an unknown standing is not an unlimited one, and the fallback must
+// not be the longer of the two readings.
+func (e *Executor) termOf(standing ClaimStanding) time.Duration {
+	deadline := standing.Deadline()
+	if deadline.IsZero() {
+		from := standing.Asked
+		if from.IsZero() {
+			from = time.Now()
+		}
+		deadline = from.Add(e.claimTerm())
+	}
+	left := time.Until(deadline)
+	if left < 0 {
+		return 0
+	}
+	return left
+}
+
+// renewIn is when the next renewal is due: a third of the term that is really
+// left, and never later than the configured interval. A renewal scheduled from
+// the whole term is scheduled out of a term the holder does not have.
+func (e *Executor) renewIn(standing ClaimStanding) time.Duration {
+	every := e.renewTerm()
+	if third := e.termOf(standing) / 3; third > 0 && third < every {
+		every = third
+	}
+	return every
+}
+
+// renewal is what the renewing goroutine hands the clock: the verdict, and -
+// where the claim stands - the term the database then stated.
+type renewal struct {
+	held     bool
+	standing ClaimStanding
 }
 
 // execute carries out a change phase by phase. Every phase has its own

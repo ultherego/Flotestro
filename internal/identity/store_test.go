@@ -31,8 +31,11 @@ func TestAResultThatNamesNoAttemptDoesNotLand(t *testing.T) {
 	if err := store.SavePhases(ctx, "change-1", Hold{}, nil); err == nil {
 		t.Fatal("phases with no attempt were accepted")
 	}
-	held, err := store.RenewClaim(ctx, "change-1", Hold{Holder: "replica-a"})
+	standing, held, err := store.RenewClaim(ctx, "change-1", Hold{Holder: "replica-a"})
 	if held || err != nil {
 		t.Fatalf("renewing a claim with no attempt answered %v, %v", held, err)
+	}
+	if standing.Known() {
+		t.Fatal("a renewal that did not happen reported a term")
 	}
 }

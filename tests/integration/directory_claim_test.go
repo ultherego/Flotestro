@@ -67,6 +67,17 @@ func TestALateResultDoesNotOverwriteTheRunThatFinishedTheChange(t *testing.T) {
 		if !successor.Resumed {
 			t.Error("the claim took a running attempt over and reported a first execution")
 		}
+		// And it says how much of the term it took, measured by the database.
+		// A term counted locally from the answer would be the whole of it
+		// however long the statement took, which is the overlap that let two
+		// replicas believe they held the same change.
+		if !successor.Standing.Known() {
+			t.Error("the claim reported no term, so the holder has only the constant to go on")
+		}
+		if successor.Standing.Remaining > identity.ClaimTerm {
+			t.Errorf("the claim reported %v of term, which is more than the row holds (%v)",
+				successor.Standing.Remaining, identity.ClaimTerm)
+		}
 		if !strings.Contains(string(successor.Phases), "the predecessor started") {
 			t.Errorf("the claim did not carry the phases of the attempt it took over: %s",
 				successor.Phases)
@@ -108,7 +119,7 @@ func TestALateResultDoesNotOverwriteTheRunThatFinishedTheChange(t *testing.T) {
 		t.Errorf("the refusal does not say the claim is lost: %v", err)
 	}
 	// And the lapsed claim cannot be renewed back into life either.
-	if held, err := store.RenewClaim(ctx, id, predecessor); held || err != nil {
+	if _, held, err := store.RenewClaim(ctx, id, predecessor); held || err != nil {
 		t.Errorf("the lapsed claim was renewed: held=%v err=%v", held, err)
 	}
 

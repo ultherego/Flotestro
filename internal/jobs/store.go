@@ -569,7 +569,6 @@ func (s *Store) LeaseJobs(ctx context.Context, gatewayID string, jobIDs []string
 	}
 
 	leased := make([]LeasedJob, 0, len(taken))
-	deadline := time.Now().Add(leaseDuration)
 	for _, jobID := range taken {
 		// A task that is taken no longer waits: the reason it stood in the
 		// queue goes away together with the queue state.
@@ -586,10 +585,14 @@ func (s *Store) LeaseJobs(ctx context.Context, gatewayID string, jobIDs []string
 			return nil, err
 		}
 		attemptID := uuid.NewString()
+		// The deadline is the database's, like every later write to this column:
+		// the dispatch narrows it with least() and the acceptance widens it with
+		// greatest(), and both of those compared a gateway's clock against the
+		// database's. The reclaim sweep reads it against now() as well.
 		if _, err := tx.Exec(ctx, `
 			insert into job_attempts (id, job_id, attempt_number, lease_owner, lease_expires_at, gateway_id)
-			values ($1, $2, $3, $4, $5, $6)`,
-			attemptID, jobID, attemptNumber, gatewayID, deadline, gatewayID); err != nil {
+			values ($1, $2, $3, $4, now() + make_interval(secs => $5::double precision), $6)`,
+			attemptID, jobID, attemptNumber, gatewayID, leaseDuration.Seconds(), gatewayID); err != nil {
 			return nil, err
 		}
 

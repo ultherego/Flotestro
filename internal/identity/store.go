@@ -132,6 +132,57 @@ const ClaimTerm = 15 * time.Minute
 // declared stalled.
 const RenewTerm = ClaimTerm / 3
 
+// ClaimStanding is what a claiming or renewing statement said about the term,
+// and when it was asked. Both halves come from the database: the deadline it
+// stored, and how much of the term was left by its own clock when it answered.
+// The remaining term is the usable one, because the database's clock and the
+// holder's are not the same clock, and subtracting one from the other measures
+// the skew along with the time.
+type ClaimStanding struct {
+	// Asked is the local clock at the moment the statement was sent.
+	Asked time.Time
+	// ExpiresAt is the deadline the database stored, in the database's clock.
+	ExpiresAt time.Time
+	// Remaining is ExpiresAt less the database's own clock at the moment the
+	// statement answered.
+	Remaining time.Duration
+}
+
+// Known says whether the database answered with a term at all. An unknown
+// standing is neither a lapsed claim nor an endless one: the caller falls back
+// to the conservative local reading, and says which of the two it used.
+func (c ClaimStanding) Known() bool { return !c.Asked.IsZero() && !c.ExpiresAt.IsZero() }
+
+// Deadline is the local instant after which this claim cannot be relied on. It
+// is measured from Asked and never from the moment the answer was read: the
+// database stamped the deadline when its transaction began, so whatever a slow
+// statement spent - a loaded directory, a retried connection, a lock wait - is
+// term the holder no longer has. Measuring it from the answer handed that time
+// back, and two replicas then believed they held the same change.
+//
+// Zero where the standing is unknown; the caller decides what to make of that.
+func (c ClaimStanding) Deadline() time.Time {
+	if !c.Known() {
+		return time.Time{}
+	}
+	return c.Asked.Add(c.Remaining)
+}
+
+// claimStanding is the one reader of the two values every claim statement
+// returns, so the claim and the renewal cannot read them differently.
+func claimStanding(asked, expiresAt time.Time, remainingSeconds float64) ClaimStanding {
+	return ClaimStanding{Asked: asked, ExpiresAt: expiresAt,
+		Remaining: time.Duration(remainingSeconds * float64(time.Second))}
+}
+
+// claimStandingColumns is what a claim statement returns about the term: the
+// deadline it stored, and the term left by the database's own wall clock at the
+// moment the statement ran. now() would answer the second with the whole term,
+// because it is the transaction's start time - the very value the deadline was
+// computed from - so the time the statement itself spent would go unmeasured.
+const claimStandingColumns = `directory_changes.claim_expires_at,
+		       extract(epoch from (directory_changes.claim_expires_at - clock_timestamp()))::double precision`
+
 // Hold is one replica's hold on one change: which replica took it, and which
 // attempt that take is. Every write about a running change names both, because
 // "the holder" alone cannot tell a run from the run that replaced it.
@@ -147,6 +198,10 @@ type Hold struct {
 	// Phases are the phases the row carried at the moment of the take - what an
 	// earlier attempt wrote down, read in the same statement that claimed it.
 	Phases json.RawMessage
+	// Standing is the term as the database stated it when the claim landed. It
+	// is the only deadline there is: a term counted locally from the answer runs
+	// past the row's claim_expires_at by however long the statement took.
+	Standing ClaimStanding
 }
 
 // Held says whether the hold names an attempt. A write that cannot say which
@@ -157,22 +212,29 @@ func (h Hold) Held() bool { return h.Attempt != "" }
 // It answers false when the row is no longer this hold's - the claim lapsed and
 // somebody else took the change, or the change has finished - and the holder
 // then has to stop writing to it.
-func (s *Store) RenewClaim(ctx context.Context, changeID string, hold Hold) (bool, error) {
+func (s *Store) RenewClaim(ctx context.Context, changeID string, hold Hold) (ClaimStanding, bool, error) {
 	if !hold.Held() {
-		return false, nil
+		return ClaimStanding{}, false, nil
 	}
 	const query = `
 		update directory_changes
 		   set claim_expires_at = now() + make_interval(secs => $4::double precision),
 		       updated_at = now()
 		 where id = $1 and state = 'running'
-		   and claimed_by = $2 and claim_token = $3::uuid`
-	tag, err := s.pool.Exec(ctx, query, changeID, nullable(hold.Holder), hold.Attempt,
-		ClaimTerm.Seconds())
-	if err != nil {
-		return false, err
+		   and claimed_by = $2 and claim_token = $3::uuid
+		returning ` + claimStandingColumns
+	asked := time.Now()
+	var expiresAt time.Time
+	var remaining float64
+	err := s.pool.QueryRow(ctx, query, changeID, nullable(hold.Holder), hold.Attempt,
+		ClaimTerm.Seconds()).Scan(&expiresAt, &remaining)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ClaimStanding{}, false, nil
 	}
-	return tag.RowsAffected() > 0, nil
+	if err != nil {
+		return ClaimStanding{}, false, err
+	}
+	return claimStanding(asked, expiresAt, remaining), true, nil
 }
 
 // SavePhases records the phases of a change that is still running, so that a
@@ -232,10 +294,18 @@ func (s *Store) Claim(ctx context.Context, changeID, holder string) (Hold, bool,
 		 where directory_changes.id = before.id
 		   and (before.state = $3
 		        or (before.state = $2 and directory_changes.claim_expires_at < now()))
-		returning (before.state = $2) as resumed, before.phases`
+		returning (before.state = $2) as resumed, before.phases,
+		          ` + claimStandingColumns
+	// Asked before the statement goes out, because that is where the term the
+	// database is about to stamp begins. The lock wait in the clause above is
+	// part of it, and a take that waited has that much less term left.
+	asked := time.Now()
 	var phases []byte
+	var expiresAt time.Time
+	var remaining float64
 	err := s.pool.QueryRow(ctx, query, changeID, string(StateRunning), string(StatePlanned),
-		nullable(holder), ClaimTerm.Seconds(), hold.Attempt).Scan(&hold.Resumed, &phases)
+		nullable(holder), ClaimTerm.Seconds(), hold.Attempt).
+		Scan(&hold.Resumed, &phases, &expiresAt, &remaining)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Hold{}, false, nil
 	}
@@ -243,6 +313,7 @@ func (s *Store) Claim(ctx context.Context, changeID, holder string) (Hold, bool,
 		return Hold{}, false, err
 	}
 	hold.Phases = phases
+	hold.Standing = claimStanding(asked, expiresAt, remaining)
 	return hold, true, nil
 }
 
