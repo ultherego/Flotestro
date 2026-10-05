@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/ultherego/flotestro/internal/gateway"
@@ -54,8 +55,17 @@ var errCapabilityUnsupported = errors.New("the agent of the host does not forwar
 // with the reason instead of going out under an authorization nobody checked.
 var errCreatorRightsUnconfirmed = errors.New("the rights of the task's creator are not confirmed")
 
+// errCreatorRightsGone marks a task whose creator was read and does not hold
+// the permission of its action any more. Unlike the unconfirmed case this does
+// not come back by waiting.
+var errCreatorRightsGone = errors.New("the creator of the task no longer holds the permission of its action")
+
 // ErrorCreatorRightsUnconfirmed is the reason such a task is put back with.
 const ErrorCreatorRightsUnconfirmed = "creator_rights_unconfirmed"
+
+// ErrorCreatorRightsGone is the reason a task is settled with when its creator
+// was read and no longer holds the permission of its action.
+const ErrorCreatorRightsGone = "creator_rights_gone"
 
 // ErrorHelperCapabilityUnsupported is the code such a task ends with.
 const ErrorHelperCapabilityUnsupported = "helper_capability_unsupported"
@@ -114,6 +124,20 @@ func (s *Scheduler) attachCapability(ctx context.Context, item jobs.LeasedJob,
 		}
 	}
 	approved := item.Job.ApprovedBy != "" || len(item.Job.Approvals) > 0
+	// A right the creator no longer holds is a different answer from one nobody
+	// could read. The order waits for the second and stops for the first: the
+	// task was queued when the creator could order it, the host came back after
+	// they could not, and a capability minted now would carry a permission that
+	// no longer exists.
+	//
+	// An approved job goes out on the approval instead: somebody who holds the
+	// right said so, which is what an approval is for.
+	if permission := action.Permission(); permissions != nil && permission != "" && !approved &&
+		!slices.Contains(permissions, permission) {
+		s.log.Warn("the task stops: its creator no longer holds the permission of the action",
+			"job_id", item.Job.ID, "created_by", item.Job.CreatedBy, "permission", permission)
+		return "", fmt.Errorf("%w: %s", errCreatorRightsGone, permission)
+	}
 	capability, signature, err := s.capabilities.Signer.Issue(helpercap.Mint{
 		HostID:        item.Job.HostID,
 		TaskID:        item.AttemptID,

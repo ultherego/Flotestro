@@ -18,7 +18,19 @@ const (
 // creator in the same family (schedule.
 func GrantsFor(action opspec.ActionType, payload opspec.Payload, permissions []string, approved bool) []string {
 	grants := []string{}
-	if permission := action.Permission(); permission != "" {
+	// The permission of the action is a grant like any other: it belongs in the
+	// capability when the creator holds it, or when somebody who does approved
+	// the job. It used to be added unconditionally, so an order queued for a
+	// host that was offline still left with the right to do it after its
+	// creator had lost that right - the permissions were read at dispatch and
+	// used only to widen the grants, never to decide whether the order may go
+	// at all.
+	//
+	// A nil list is a creator the store does not know - a system task, a
+	// subject removed since - and that case keeps the permission of the action
+	// alone, which is the narrow side and what the caller already relies on.
+	if permission := action.Permission(); permission != "" &&
+		(permissions == nil || approved || slices.Contains(permissions, permission)) {
 		grants = append(grants, permission)
 	}
 	family := familyOf(action.Permission())

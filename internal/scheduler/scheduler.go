@@ -480,6 +480,16 @@ func (s *Scheduler) deliver(ctx context.Context, item jobs.LeasedJob, owner jobs
 			}
 			return
 		}
+		if errors.Is(err, errCreatorRightsGone) {
+			// Read, and gone. Waiting would not bring it back, so the task is
+			// settled with the reason instead of returning to the queue.
+			if settleErr := s.store.FailUndelivered(ctx, item.Job.ID, item.AttemptID,
+				ErrorCreatorRightsGone, err.Error()); settleErr != nil {
+				s.log.Error("the held task was not settled", "job_id", item.Job.ID, "err", settleErr)
+			}
+			metrics.JobDispatch.Inc(ErrorCreatorRightsGone, s.options.GatewayID)
+			return
+		}
 		if errors.Is(err, errCreatorRightsUnconfirmed) {
 			// Nobody could say what the creator may do now, so nothing goes out.
 			// The task goes back to the queue with the reason on its attempt and
