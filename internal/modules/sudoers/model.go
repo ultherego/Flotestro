@@ -172,8 +172,11 @@ func (s Snapshot) passwordlessFor(rule Rule) (passwordless, known bool) {
 		case "":
 			return true, true
 		case "user":
-			if ruleNames(rule, entry.Target) {
+			switch defaultCovers(rule, entry.Target) {
+			case coverageYes:
 				return true, true
+			case coverageUnknown:
+				known = false
 			}
 		case "host", "runas", "command":
 			// Which host this is, which identity the command will run as and
@@ -185,15 +188,77 @@ func (s Snapshot) passwordlessFor(rule Rule) (passwordless, known bool) {
 	return false, known
 }
 
-// ruleNames says whether the rule grants to this user or group, as the
-// Defaults line names them.
-func ruleNames(rule Rule, target string) bool {
+// coverage is how a user-scoped Defaults target relates to the grantees of a
+// rule: the target may use the rule, it may not, or these files do not settle
+// it.
+type coverage int
+
+const (
+	coverageNo coverage = iota
+	coverageYes
+	coverageUnknown
+)
+
+// defaultCovers answers whether a user-scoped Defaults line reaches the
+// grantees of a rule.
+//
+// Two things the files settle: a grantee written exactly as the Defaults line
+// writes its target, and the grantee ALL, which is every account and therefore
+// that one as well. Asking only about the first is what let "Defaults:alice
+// !authenticate" stand next to "ALL ALL=(ALL) ALL" and be reported as no
+// passwordless grant at all, although alice may run anything without one.
+//
+// What the files do not settle is which account is in which group. A default
+// for a user against a rule for a group, a rule for a user against a default
+// for a group, two different groups, a netgroup or a numeric identifier: every
+// one of those turns on a membership that lives in /etc/group or the
+// directory, not in sudoers. The answer there is unknown, never a quiet no.
+func defaultCovers(rule Rule, target string) coverage {
+	// The exclusions are read first: a rule that grants to everyone and takes
+	// this account back is no way to root for it, however the grantees are
+	// written down in the file.
 	for _, grantee := range rule.Users {
-		if grantee == target {
-			return true
+		if excluded, name := negated(grantee); excluded && name == target {
+			return coverageNo
 		}
 	}
-	return false
+	unresolved := !plainUser(target)
+	for _, grantee := range rule.Users {
+		if excluded, _ := negated(grantee); excluded {
+			continue
+		}
+		if grantee == "ALL" || grantee == target {
+			return coverageYes
+		}
+		if !plainUser(grantee) {
+			unresolved = true
+		}
+	}
+	if unresolved {
+		return coverageUnknown
+	}
+	return coverageNo
+}
+
+// plainUser says whether a grantee is an account name, rather than a group, a
+// netgroup or a numeric identifier whose members the files do not list.
+func plainUser(name string) bool {
+	switch {
+	case name == "", name == "ALL":
+		return false
+	case strings.HasPrefix(name, "%"), strings.HasPrefix(name, "+"),
+		strings.HasPrefix(name, "#"):
+		return false
+	}
+	return true
+}
+
+// negated splits a "!name" grantee from the name it takes away.
+func negated(grantee string) (bool, string) {
+	if after, found := strings.CutPrefix(grantee, "!"); found {
+		return true, after
+	}
+	return false, grantee
 }
 
 // RootWithoutPassword lists the rules that make somebody root without a
