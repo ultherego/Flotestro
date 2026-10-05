@@ -1,6 +1,65 @@
 package firewall
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
+
+// One configuration, named by both sides. The executor's arguments and the
+// reader's arguments are written out here, so a change to either that parts
+// them stops this test rather than a host. That the two were never named
+// together is why the guard watched the running configuration for two months.
+func TestTheZoneReaderAndTheZoneWriterNameOneConfiguration(t *testing.T) {
+	port, err := PortArguments("public", "8080", "tcp", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := ServiceArguments("public", "http", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		why   string
+		steps [][]string
+		write []string
+	}{
+		{why: "opening a port", steps: port,
+			write: []string{"/usr/bin/firewall-cmd", "--permanent", "--zone=public", "--add-port=8080/tcp"}},
+		{why: "disabling a service", steps: service,
+			write: []string{"/usr/bin/firewall-cmd", "--permanent", "--zone=public", "--remove-service=http"}},
+	} {
+		t.Run(tc.why, func(t *testing.T) {
+			reload := []string{"/usr/bin/firewall-cmd", "--reload"}
+			if len(tc.steps) != 2 || !slices.Equal(tc.steps[0], tc.write) ||
+				!slices.Equal(tc.steps[1], reload) {
+				t.Fatalf("the executor runs %v", tc.steps)
+			}
+			// The listing of the configuration those arguments write.
+			kept := []string{"/usr/bin/firewall-cmd", "--permanent", "--list-all-zones"}
+			if !slices.Equal(ZoneListArguments(true), kept) {
+				t.Fatalf("the reader of what the host keeps runs %v", ZoneListArguments(true))
+			}
+			if tc.steps[0][1] != ZoneListArguments(true)[1] {
+				t.Errorf("the write %v and the reading %v are not of one configuration",
+					tc.steps[0], ZoneListArguments(true))
+			}
+			// And the other reading is of the other configuration, which no
+			// write of the panel touches.
+			running := []string{"/usr/bin/firewall-cmd", "--list-all-zones"}
+			if !slices.Equal(ZoneListArguments(false), running) {
+				t.Errorf("the reader of what the host filters with runs %v", ZoneListArguments(false))
+			}
+			if slices.Contains(ZoneListArguments(false), PermanentFlag) {
+				t.Error("the reading of the running configuration carries " + PermanentFlag)
+			}
+			// The service a change names is asked about in the same
+			// configuration the change is written into.
+			if !slices.Contains(ServicePortsArguments("http"), PermanentFlag) {
+				t.Errorf("the ports of a service are read elsewhere: %v", ServicePortsArguments("http"))
+			}
+		})
+	}
+}
 
 // A service is a name for a set of ports. Removing it closes every one of
 // them, and the guard on the management channel compared one number with one

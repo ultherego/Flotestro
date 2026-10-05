@@ -95,6 +95,9 @@ type Drift struct {
 	Family string `json:"family,omitempty"`
 	Table  string `json:"table,omitempty"`
 	Chain  string `json:"chain,omitempty"`
+	// Zone names the firewalld zone the difference is in. Empty means a
+	// difference that is not about a zone.
+	Zone string `json:"zone,omitempty"`
 	// Detail says what the difference means for the host, in one sentence.
 	Detail string `json:"detail,omitempty"`
 }
@@ -109,11 +112,22 @@ type Snapshot struct {
 	Tables []Table `json:"tables,omitempty"`
 	Chains []Chain `json:"chains,omitempty"`
 	Rules  []Rule  `json:"rules,omitempty"`
-	Zones  []Zone  `json:"zones,omitempty"`
-	// ZonesReason says why the zones were not read. An empty list then means
-	// "nobody answered", not "this host has no zone with that name", and a
+	// Zones is what firewalld filters with now. A zone change does not write
+	// this configuration: it writes the permanent one and reloads.
+	Zones []Zone `json:"zones,omitempty"`
+	// ZonesReason says why the running zones were not read. An empty list then
+	// means "nobody answered", not "this host has no zone with that name", and a
 	// change whose way back depends on the zone state has to refuse.
 	ZonesReason string `json:"zones_reason,omitempty"`
+	// PermanentZones is what firewalld keeps for its next start, which is also
+	// what firewall-cmd --permanent writes and what a reload makes running. The
+	// reversibility of a zone change and the inverse it arms are read from here,
+	// because this is the configuration the executor writes.
+	PermanentZones []Zone `json:"permanent_zones,omitempty"`
+	// PermanentZonesReason says why the permanent zones were not read. The two
+	// lists are two answers with two reasons: not knowing one of them is its own
+	// state and is not a host with no zones.
+	PermanentZonesReason string `json:"permanent_zones_reason,omitempty"`
 	// UFW is the header of "ufw status" on a host where ufw holds the rules: the
 	// default policy is what a packet meets when no rule matches.
 	UFW *UFWStatus `json:"ufw,omitempty"`

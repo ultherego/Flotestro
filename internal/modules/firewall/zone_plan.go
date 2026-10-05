@@ -18,7 +18,9 @@ type ZonePlan struct {
 	// Enable says whether the order opens or closes.
 	Enable bool `json:"enable"`
 
-	// The zone state found.
+	// The zone state found. ZoneExists and Present come from the configuration
+	// the change writes; ZoneActive from the one the host filters with now,
+	// which is the only one that knows about interfaces.
 	ZoneExists bool `json:"zone_exists"`
 	ZoneActive bool `json:"zone_active,omitempty"`
 	Present    bool `json:"present"`
@@ -38,6 +40,17 @@ type ZonePlan struct {
 	PlanHash string `json:"plan_hash"`
 }
 
+// ZoneViews are the two zone configurations of a firewalld host. What the plan
+// decides - whether the entry is already there, and so what the way back is -
+// is read from the permanent one, because that is the configuration
+// firewall-cmd --permanent writes and a reload makes running. The running one
+// answers only what it alone can answer: whether the zone is active on an
+// interface now.
+type ZoneViews struct {
+	Permanent []Zone
+	Runtime   []Zone
+}
+
 // Zone entry kinds.
 const (
 	EntryPort    = "port"
@@ -46,7 +59,7 @@ const (
 
 // ComputePort computes the difference for opening or closing a port in a
 // zone.
-func ComputePort(zones []Zone, zone, port, protocol string, open bool,
+func ComputePort(views ZoneViews, zone, port, protocol string, open bool,
 	rulesetHash, adapter string) ZonePlan {
 	plan := ZonePlan{
 		Zone: zone, Kind: EntryPort, Entry: port + "/" + protocol, Enable: open,
@@ -55,12 +68,12 @@ func ComputePort(zones []Zone, zone, port, protocol string, open bool,
 	if _, err := PortArguments(zone, port, protocol, open); err != nil {
 		return plan.withRefusal(err.Error())
 	}
-	return plan.against(zones, func(z Zone) []string { return z.Ports })
+	return plan.against(views, func(z Zone) []string { return z.Ports })
 }
 
 // ComputeService computes the difference for enabling or disabling a
 // service in a zone.
-func ComputeService(zones []Zone, zone, service string, enable bool,
+func ComputeService(views ZoneViews, zone, service string, enable bool,
 	rulesetHash, adapter string) ZonePlan {
 	plan := ZonePlan{
 		Zone: zone, Kind: EntryService, Entry: service, Enable: enable,
@@ -69,7 +82,7 @@ func ComputeService(zones []Zone, zone, service string, enable bool,
 	if _, err := ServiceArguments(zone, service, enable); err != nil {
 		return plan.withRefusal(err.Error())
 	}
-	return plan.against(zones, func(z Zone) []string { return z.Services })
+	return plan.against(views, func(z Zone) []string { return z.Services })
 }
 
 // Refuse records a refusal reason learned after the differences were computed
@@ -86,23 +99,24 @@ func (p ZonePlan) withRefusal(reason string) ZonePlan {
 	return p
 }
 
-// against compares the order with the zone the host has.
-func (p ZonePlan) against(zones []Zone, entries func(Zone) []string) ZonePlan {
-	var found *Zone
-	for i := range zones {
-		if zones[i].Name == p.Zone {
-			found = &zones[i]
-			break
-		}
-	}
-	if found == nil {
-		// The zone is absent: firewalld would refuse at write time, and it is better
-		// for the operator to see that in the plan than half-way through the fleet.
-		return p.withRefusal(fmt.Sprintf("the host has no zone %s", p.Zone))
+// against compares the order with the zone the host keeps, which is the zone
+// the change writes.
+func (p ZonePlan) against(views ZoneViews, entries func(Zone) []string) ZonePlan {
+	kept, inPermanent := zoneNamed(views.Permanent, p.Zone)
+	if !inPermanent {
+		// The zone is absent from the configuration a change writes: firewalld would
+		// refuse at write time, and it is better for the operator to see that in the
+		// plan than half-way through the fleet.
+		return p.withRefusal(fmt.Sprintf("the host keeps no zone %s, "+
+			"so there is nowhere to write the change", p.Zone))
 	}
 	p.ZoneExists = true
-	p.ZoneActive = found.Active
-	for _, entry := range entries(*found) {
+	// Whether the zone is on an interface is a fact of the running
+	// configuration only; the permanent listing has no such notion.
+	if running, inRuntime := zoneNamed(views.Runtime, p.Zone); inRuntime {
+		p.ZoneActive = running.Active
+	}
+	for _, entry := range entries(kept) {
 		if entry == p.Entry {
 			p.Present = true
 			break
@@ -118,7 +132,7 @@ func (p ZonePlan) against(zones []Zone, entries func(Zone) []string) ZonePlan {
 	default:
 		p.Action = PlanNoChange
 	}
-	if !found.Active && p.Action != PlanNoChange {
+	if !p.ZoneActive && p.Action != PlanNoChange {
 		// A change in an inactive zone is legal, but does not change what
 		// the host accepts. The operator is meant to know before approving.
 		p.Changes = append(p.Changes, "the zone "+p.Zone+" is not active on any interface")

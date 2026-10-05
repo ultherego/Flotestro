@@ -134,24 +134,38 @@ func (s *Server) planRule(ctx context.Context, action *helperv1.FirewallRequest)
 // planZone computes the difference for an entry in a firewalld zone.
 func (s *Server) planZone(state firewall.Snapshot, action *helperv1.FirewallRequest) *helperv1.HelperResponse {
 	var plan firewall.ZonePlan
+	views := firewall.ZoneViews{Permanent: state.PermanentZones, Runtime: state.Zones}
+	unknown := zonesUnknownRefusal(state)
 	switch {
 	case !exists(firewall.FirewallCmdPath):
 		plan = firewall.ZonePlan{Zone: action.GetZone(), RulesetHash: state.Hash, Adapter: state.Adapter}
 		plan.Refuse("this host has no firewalld")
+	case unknown != "":
+		// A plan computed from a list nobody read would name an action and a way
+		// back for a zone state that was never seen.
+		plan = firewall.ZonePlan{Zone: action.GetZone(), RulesetHash: state.Hash, Adapter: state.Adapter}
+		plan.Refuse(unknown)
 	case action.GetService() != "":
-		plan = firewall.ComputeService(state.Zones, action.GetZone(), action.GetService(),
+		plan = firewall.ComputeService(views, action.GetZone(), action.GetService(),
 			action.GetEnable(), state.Hash, state.Adapter)
 	case len(action.GetPorts()) != 1:
 		plan = firewall.ZonePlan{Zone: action.GetZone(), Kind: firewall.EntryPort,
 			RulesetHash: state.Hash, Adapter: state.Adapter}
 		plan.Refuse("the operation concerns exactly one port")
 	default:
-		plan = firewall.ComputePort(state.Zones, action.GetZone(), action.GetPorts()[0],
+		plan = firewall.ComputePort(views, action.GetZone(), action.GetPorts()[0],
 			action.GetProtocol(), action.GetEnable(), state.Hash, state.Adapter)
 		if plan.Refusal == "" && !action.GetEnable() && !action.GetBreakGlass() &&
 			action.GetPorts()[0] == strconv.Itoa(int(action.GetManagementPort())) {
 			plan.Refuse("the port " + action.GetPorts()[0] + " is the management channel; " +
 				"closing it deliberately needs explicit operator consent")
+		}
+	}
+	// A change that would run nothing reloads nothing, so only a plan that would
+	// write answers for what the reload carries with it.
+	if plan.Refusal == "" && plan.Action != firewall.PlanNoChange {
+		if refusal := firewall.ZoneReloadRefusal(state.Drift); refusal != "" {
+			plan.Refuse(refusal)
 		}
 	}
 
@@ -325,11 +339,11 @@ func (s *Server) changeZone(ctx context.Context, action *helperv1.FirewallReques
 		if !known {
 			return reject(ErrorUnsupported,
 				"this host could not say whether the port "+action.GetPorts()[0]+" is already open in "+
-					action.GetZone()+", so the change cannot be made reversible")
+					action.GetZone()+", so the change cannot be made reversible: "+zonesUnknownRefusal(state))
 		}
 		if present == action.GetEnable() {
 			return firewallResponse(s.readFirewall(ctx),
-				"the zone already carries this port the way the order asks for", nil)
+				zoneNoChangeMessage(state, "port"), nil)
 		}
 		steps, err = firewall.PortArguments(action.GetZone(), action.GetPorts()[0],
 			action.GetProtocol(), action.GetEnable())
@@ -362,11 +376,11 @@ func (s *Server) changeZone(ctx context.Context, action *helperv1.FirewallReques
 		if !known {
 			return reject(ErrorUnsupported,
 				"this host could not say whether the service "+action.GetService()+" is already open in "+
-					action.GetZone()+", so the change cannot be made reversible")
+					action.GetZone()+", so the change cannot be made reversible: "+zonesUnknownRefusal(state))
 		}
 		if present == action.GetEnable() {
 			return firewallResponse(s.readFirewall(ctx),
-				"the zone already carries this service the way the order asks for", nil)
+				zoneNoChangeMessage(state, "service"), nil)
 		}
 		steps, err = firewall.ServiceArguments(action.GetZone(), action.GetService(), action.GetEnable())
 		if err == nil {
@@ -375,6 +389,15 @@ func (s *Server) changeZone(ctx context.Context, action *helperv1.FirewallReques
 	}
 	if err != nil {
 		return reject(ErrorMalformed, err.Error())
+	}
+	// Our own steps end with a reload, and a reload makes the whole permanent
+	// configuration the running one - including a change somebody else wrote
+	// with --permanent and did not activate, and excluding one they made in the
+	// running configuration only. Nothing in this order asked for either, so the
+	// change does not go in. The plan refuses this as well; this reading is the
+	// one contemporaneous with the write.
+	if refusal := firewall.ZoneReloadRefusal(state.Drift); refusal != "" {
+		return reject(ErrorUnsupported, refusal)
 	}
 
 	// The way back is armed before the change, exactly as it is for a rule
@@ -403,18 +426,23 @@ func (s *Server) changeZone(ctx context.Context, action *helperv1.FirewallReques
 			" unless the agent confirms connectivity", &plan)
 }
 
-// zoneHasPort says whether the zone already carries the port, and whether the
-// host could be asked at all. The answer decides the way back: an absent
-// answer is not "no".
+// zoneHasPort says whether the configuration a zone change writes already
+// carries the port, and whether the host could be asked at all. The answer
+// decides the way back: an absent answer is not "no".
+//
+// It is read from the permanent zones and not from the running ones, because
+// the inverse this answer builds is written with --permanent. Read from the
+// running zones, it armed an inverse that restored a permanent state the host
+// never had.
 func zoneHasPort(snapshot firewall.Snapshot, zone, port, protocol string) (present, known bool) {
-	if !zonesKnown(snapshot) {
+	if !permanentZonesKnown(snapshot) {
 		return false, false
 	}
 	entry := port
 	if protocol != "" {
 		entry = port + "/" + protocol
 	}
-	for _, carried := range snapshot.Zones {
+	for _, carried := range snapshot.PermanentZones {
 		if carried.Name != zone {
 			continue
 		}
@@ -425,12 +453,13 @@ func zoneHasPort(snapshot firewall.Snapshot, zone, port, protocol string) (prese
 	return false, true
 }
 
-// zoneHasService says whether the zone already carries the service.
+// zoneHasService says whether the configuration a zone change writes already
+// carries the service.
 func zoneHasService(snapshot firewall.Snapshot, zone, service string) (present, known bool) {
-	if !zonesKnown(snapshot) {
+	if !permanentZonesKnown(snapshot) {
 		return false, false
 	}
-	for _, carried := range snapshot.Zones {
+	for _, carried := range snapshot.PermanentZones {
 		if carried.Name != zone {
 			continue
 		}
@@ -439,29 +468,116 @@ func zoneHasService(snapshot firewall.Snapshot, zone, service string) (present, 
 	return false, true
 }
 
-// recordZones puts what firewall-cmd said about the zones into the snapshot.
-// A listing that failed leaves a reason and no zones, because an empty list is
-// an answer and a failed command is not one.
-func recordZones(snapshot *firewall.Snapshot, defaultZone, zones string, err error) {
+// zoneListing is one answer about one firewalld configuration: what the
+// command printed, or why it could not be asked. The command travels with the
+// answer so the reason names what failed.
+type zoneListing struct {
+	command []string
+	output  string
+	err     error
+}
+
+// readZoneListing asks firewall-cmd for the zones of one configuration.
+func readZoneListing(ctx context.Context, arguments []string) zoneListing {
+	output, err := toolOutput(ctx, arguments[0], arguments[1:]...)
+	return zoneListing{command: arguments, output: output, err: err}
+}
+
+// reason names the command and why it did not answer, or is empty when it did.
+func (l zoneListing) reason() string {
+	if l.err == nil {
+		return ""
+	}
+	if len(l.command) == 0 {
+		return l.err.Error()
+	}
+	named := append([]string{filepath.Base(l.command[0])}, l.command[1:]...)
+	return strings.Join(named, " ") + ": " + l.err.Error()
+}
+
+// recordZones puts what firewall-cmd said about the two zone configurations
+// into the snapshot. A listing that failed leaves a reason and no zones,
+// because an empty list is an answer and a failed command is not one - and the
+// two listings leave two reasons, because they are two answers.
+func recordZones(snapshot *firewall.Snapshot, defaultZone string, runtime, permanent zoneListing) {
 	// What holds the rules here does not depend on whether one command
 	// answered: a host carrying firewall-cmd is a firewalld host. Naming the
 	// adapter only on success left a failed listing describing the nftables
 	// underneath, which firewalld rewrites on its next reload.
 	snapshot.Adapter = firewall.AdapterFirewalld
-	if err != nil {
-		snapshot.ZonesReason = "firewall-cmd --list-all-zones: " + err.Error()
-		return
+	// firewalld keeps the default zone in firewalld.conf and uses it for both
+	// configurations, so one answer names the default of both.
+	name := strings.TrimSpace(defaultZone)
+	snapshot.ZonesReason = runtime.reason()
+	if snapshot.ZonesReason == "" {
+		snapshot.Zones = firewall.ParseZones(runtime.output, name)
 	}
-	snapshot.Zones = firewall.ParseZones(zones, strings.TrimSpace(defaultZone))
+	snapshot.PermanentZonesReason = permanent.reason()
+	if snapshot.PermanentZonesReason == "" {
+		snapshot.PermanentZones = firewall.ParseZones(permanent.output, name)
+	}
+	// What it filters with now against what it keeps for its next start is the
+	// same question the panel asks of nftables and of ufw, and the same answer:
+	// a difference the operator has to know about before anything reloads.
+	snapshot.Drift = append(snapshot.Drift, firewall.ZoneDrift(snapshot.Zones,
+		snapshot.PermanentZones, snapshot.ZonesReason, snapshot.PermanentZonesReason)...)
 }
 
-// zonesKnown says whether this snapshot carries an answer about the zones. The
-// check used to be UnavailableReason alone, which a firewalld host whose
-// nftables underneath answered never set: a failed firewall-cmd listing then
-// left Zones empty, and an empty list read as "the zone does not carry the
-// port" - the state the rollback would restore to.
+// zonesKnown says whether this snapshot carries an answer about what the host
+// filters with now. The check used to be UnavailableReason alone, which a
+// firewalld host whose nftables underneath answered never set: a failed
+// firewall-cmd listing then left Zones empty, and an empty list read as "the
+// zone does not carry the port" - the state the rollback would restore to.
 func zonesKnown(snapshot firewall.Snapshot) bool {
 	return snapshot.UnavailableReason == "" && snapshot.ZonesReason == ""
+}
+
+// permanentZonesKnown says whether the host answered about the configuration a
+// zone change writes. That answer, and not the running one, decides whether a
+// change is reversible: the inverse is written with --permanent too.
+func permanentZonesKnown(snapshot firewall.Snapshot) bool {
+	return snapshot.UnavailableReason == "" && snapshot.PermanentZonesReason == ""
+}
+
+// zoneNoChangeMessage says the order has nothing to write. Nothing to write is
+// read from the configuration the change writes, so where the two
+// configurations differ the host may still not be filtering the way the order
+// describes - and that is said here rather than left to the drift list.
+func zoneNoChangeMessage(snapshot firewall.Snapshot, kind string) string {
+	message := "the zone already carries this " + kind + " the way the order asks for"
+	if summary := firewall.ZoneDriftSummary(snapshot.Drift); summary != "" {
+		return message + ", so nothing was written; what it filters with now is another matter: " + summary
+	}
+	return message
+}
+
+// zonesUnknownRefusal says which of the two configurations the host did not
+// answer about. An unread list is not an empty one: a plan computed from one
+// would say the zone carries nothing, and a change ordered from it would arm an
+// inverse restoring a state nobody read.
+func zonesUnknownRefusal(snapshot firewall.Snapshot) string {
+	unknown := make([]string, 0, 2)
+	if !permanentZonesKnown(snapshot) {
+		unknown = append(unknown, "what it keeps for its next start, which is what a zone change writes ("+
+			zoneUnknownReason(snapshot, snapshot.PermanentZonesReason)+")")
+	}
+	if !zonesKnown(snapshot) {
+		unknown = append(unknown, "what it filters with now, so a reload may carry a change nobody ordered ("+
+			zoneUnknownReason(snapshot, snapshot.ZonesReason)+")")
+	}
+	if len(unknown) == 0 {
+		return ""
+	}
+	return "this host did not say " + strings.Join(unknown, " and neither ")
+}
+
+// zoneUnknownReason names why a configuration is unknown: the listing's own
+// reason, or the reason the whole firewall could not be read.
+func zoneUnknownReason(snapshot firewall.Snapshot, reason string) string {
+	if reason != "" {
+		return reason
+	}
+	return snapshot.UnavailableReason
 }
 
 // armZoneRollback writes the inverse of a zone change and arms the timer that
@@ -489,8 +605,7 @@ func (s *Server) armZoneRollback(ctx context.Context, undo [][]string,
 // servicePorts asks firewalld which ports a service name stands for, and says
 // whether it could be asked at all.
 func (s *Server) servicePorts(ctx context.Context, service string) ([]int, bool) {
-	output, err := runTool(ctx,
-		[]string{firewall.FirewallCmdPath, "--permanent", "--service=" + service, "--get-ports"})
+	output, err := runTool(ctx, firewall.ServicePortsArguments(service))
 	if err != nil {
 		return nil, false
 	}
@@ -679,9 +794,14 @@ func (s *Server) readFirewallState(ctx context.Context) firewall.Snapshot {
 	// Firewalld keeps its own tables and rewrites them on a reload, so on such
 	// a host we speak of zones and not of panel rules.
 	if exists(firewall.FirewallCmdPath) {
-		defaultZone, _ := toolOutput(ctx, firewall.FirewallCmdPath, "--get-default-zone")
-		zones, err := toolOutput(ctx, firewall.FirewallCmdPath, "--list-all-zones")
-		recordZones(&snapshot, defaultZone, zones, err)
+		arguments := firewall.DefaultZoneArguments()
+		defaultZone, _ := toolOutput(ctx, arguments[0], arguments[1:]...)
+		// Two configurations, two questions. A zone change writes the permanent
+		// one and reloads; the running one is what the host filters with until
+		// then. Neither answers for the other.
+		recordZones(&snapshot, defaultZone,
+			readZoneListing(ctx, firewall.ZoneListArguments(false)),
+			readZoneListing(ctx, firewall.ZoneListArguments(true)))
 	}
 
 	// Where nftables itself is the adapter, the running rules used to be the

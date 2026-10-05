@@ -41,6 +41,53 @@ func TestAZoneChangeMovesTheFingerprint(t *testing.T) {
 	}
 }
 
+// A change to the configuration a zone change writes has to move the
+// fingerprint, and it is not the running configuration: firewall-cmd
+// --permanent writes the zone file and the host goes on filtering with the old
+// one until a reload. The plan's precondition held through exactly that.
+func TestAPermanentOnlyChangeMovesTheFingerprint(t *testing.T) {
+	running := []Zone{{Name: "public", Active: true, Default: true, Ports: []string{"8443/tcp"}}}
+	base := Snapshot{Hash: "deadbeef", Zones: running,
+		PermanentZones: []Zone{{Name: "public", Default: true, Ports: []string{"8443/tcp"}}}}
+	reference := sealed(base)
+
+	for name, change := range map[string]func(*Snapshot){
+		"a port written and not reloaded":    func(s *Snapshot) { s.PermanentZones[0].Ports = []string{"8443/tcp", "80/tcp"} },
+		"a port removed and not reloaded":    func(s *Snapshot) { s.PermanentZones[0].Ports = nil },
+		"a service written and not reloaded": func(s *Snapshot) { s.PermanentZones[0].Services = []string{"http"} },
+		"a target written and not reloaded":  func(s *Snapshot) { s.PermanentZones[0].Target = "DROP" },
+		"a zone written and not reloaded":    func(s *Snapshot) { s.PermanentZones = append(s.PermanentZones, Zone{Name: "dmz"}) },
+	} {
+		altered := Snapshot{Hash: base.Hash, Zones: running,
+			PermanentZones: []Zone{{Name: "public", Default: true, Ports: []string{"8443/tcp"}}}}
+		change(&altered)
+		if got := sealed(altered); got == reference {
+			t.Errorf("%s leaves the fingerprint unchanged", name)
+		}
+	}
+}
+
+// The two configurations are two answers in the fingerprint as well: a zone in
+// one of them cannot read as the same zone in the other.
+func TestTheTwoZoneConfigurationsAreNotInterchangeable(t *testing.T) {
+	zones := []Zone{{Name: "public", Ports: []string{"8443/tcp"}}}
+	if sealed(Snapshot{Hash: "x", Zones: zones}) == sealed(Snapshot{Hash: "x", PermanentZones: zones}) {
+		t.Error("a zone the host filters with reads as a zone it keeps")
+	}
+	// Not knowing one of them is its own state, and not the same as not knowing
+	// the other or as an empty list.
+	unread := sealed(Snapshot{Hash: "x", Zones: zones, PermanentZonesReason: "exit status 252"})
+	if unread == sealed(Snapshot{Hash: "x", Zones: zones}) {
+		t.Error("an unread permanent listing reads as a host that keeps no zones")
+	}
+	if unread == sealed(Snapshot{Hash: "x", ZonesReason: "exit status 252", PermanentZones: zones}) {
+		t.Error("the two unread listings share a fingerprint")
+	}
+	if unread == sealed(Snapshot{Hash: "x", Zones: zones, PermanentZonesReason: "timed out"}) {
+		t.Error("two reasons for not knowing share a fingerprint")
+	}
+}
+
 // The ruleset still decides as well: the zones were added to the fingerprint,
 // not put in place of it.
 func TestARulesetChangeStillMovesTheFingerprint(t *testing.T) {

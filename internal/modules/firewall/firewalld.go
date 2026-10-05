@@ -10,6 +10,48 @@ import (
 // FirewallCmdPath points at the firewalld tool.
 const FirewallCmdPath = "/usr/bin/firewall-cmd"
 
+// PermanentFlag names the configuration a zone change writes. firewalld keeps
+// the running configuration and the permanent one apart, so the flag is spelled
+// once here and every reader and writer of that configuration takes it from
+// here.
+const PermanentFlag = "--permanent"
+
+// ZoneWriteArguments is the command that writes one operation into the
+// permanent configuration of a zone: the only place the panel writes a zone.
+// ZoneListArguments(true) reads back what this writes.
+func ZoneWriteArguments(zone, operation string) []string {
+	return []string{FirewallCmdPath, PermanentFlag, "--zone=" + zone, operation}
+}
+
+// ReloadArguments makes the permanent configuration the running one. It
+// replaces the whole runtime configuration and not only the zone the change
+// touched, so it carries every pending difference with it.
+func ReloadArguments() []string {
+	return []string{FirewallCmdPath, "--reload"}
+}
+
+// ZoneListArguments lists the zones of one configuration: the permanent one a
+// change writes, or the running one the host filters with now.
+func ZoneListArguments(permanent bool) []string {
+	if permanent {
+		return []string{FirewallCmdPath, PermanentFlag, "--list-all-zones"}
+	}
+	return []string{FirewallCmdPath, "--list-all-zones"}
+}
+
+// DefaultZoneArguments asks which zone an unassigned interface lands in.
+// firewalld keeps that name in firewalld.conf and uses it for both
+// configurations, so it is asked for once and attributed to both.
+func DefaultZoneArguments() []string {
+	return []string{FirewallCmdPath, "--get-default-zone"}
+}
+
+// ServicePortsArguments asks which ports a service name stands for in the
+// configuration a zone change writes.
+func ServicePortsArguments(service string) []string {
+	return []string{FirewallCmdPath, PermanentFlag, "--service=" + service, "--get-ports"}
+}
+
 var zoneHeader = regexp.MustCompile(`^(\S+)(?:\s+\(([^)]*)\))?$`)
 
 // ParseZones reads the output of "firewall-cmd --list-all-zones".
@@ -76,10 +118,11 @@ func PortArguments(zone, port, protocol string, open bool) ([][]string, error) {
 	if !open {
 		operation = "--remove-port=" + port + "/" + protocol
 	}
-	return [][]string{
-		{FirewallCmdPath, "--permanent", "--zone=" + zone, operation},
-		{FirewallCmdPath, "--reload"},
-	}, nil
+	// The write goes into the permanent configuration and the reload makes it
+	// the running one. Both steps are built from one place, so the reader of
+	// that configuration cannot drift away from the writer of it.
+	steps := [][]string{ZoneWriteArguments(zone, operation), ReloadArguments()}
+	return steps, nil
 }
 
 // ServiceArguments assembles the command enabling a service in a zone.
@@ -94,10 +137,8 @@ func ServiceArguments(zone, service string, enable bool) ([][]string, error) {
 	if !enable {
 		operation = "--remove-service=" + service
 	}
-	return [][]string{
-		{FirewallCmdPath, "--permanent", "--zone=" + zone, operation},
-		{FirewallCmdPath, "--reload"},
-	}, nil
+	steps := [][]string{ZoneWriteArguments(zone, operation), ReloadArguments()}
+	return steps, nil
 }
 
 // ParseServicePorts reads the answer of "firewall-cmd --service=X --get-ports":

@@ -44,7 +44,7 @@ function restoreInForce(restore: BootRestore): boolean {
   return restore.reason === "nft_boot_restore_not_needed";
 }
 
-type Drift = { reason: string; rule?: string; rule_id?: string; family?: string; table?: string; chain?: string; detail?: string };
+type Drift = { reason: string; rule?: string; rule_id?: string; family?: string; table?: string; chain?: string; zone?: string; detail?: string };
 
 /** What restores the nftables ruleset at boot. Missing on an nftables host
     means an agent that does not report it: unknown, not agreement. */
@@ -77,6 +77,11 @@ type Snapshot = {
   tables?: { family: string; name: string; source: string; owner?: string }[];
   rules?: Rule[];
   zones?: Zone[];
+  /** What firewalld keeps for its next start, which is also what a zone
+      change writes and a reload makes running. Where it differs from the
+      zones above, the difference is in the list of differences. */
+  permanent_zones?: Zone[];
+  permanent_zones_reason?: string;
   /** The header of "ufw status" where ufw is installed: the default policy
       is what a packet meets when no rule matches, and no rule list says
       that. An inactive ufw carries the reason the panel writes elsewhere. */
@@ -335,7 +340,7 @@ export function Firewall() {
                 <tr key={index}>
                   <td><span className="badge warn">{entry.reason}</span></td>
                   <td className="hm-mono">{entry.rule || "—"}</td>
-                  <td className="hm-mono">{[entry.family, entry.table, entry.chain].filter(Boolean).join(" ") || "—"}</td>
+                  <td className="hm-mono">{[entry.family, entry.table, entry.chain, entry.zone].filter(Boolean).join(" ") || "—"}</td>
                   <td>{entry.detail}</td>
                 </tr>
               ))}
