@@ -390,6 +390,51 @@ func TestARuleThatReadsBackWrongIsNotEnabled(t *testing.T) {
 	}
 }
 
+// The read that follows the enable is the step that says the rule is in
+// service with the state it was given. It answered with an error of its own and
+// nothing was put back: the operator read "the change failed" while the rule
+// was granting exactly what the declaration asked for, and the trail carried no
+// outcome at all (external verification of 05.10, IPA-01).
+func TestARuleThatCannotBeReadAfterTheEnableIsPutBack(t *testing.T) {
+	before := state(theRuleToChange())
+	_, client, store := newHBACDirectory(t, theRuleToChange())
+	// The first read is the state before the change, the second the read-back
+	// of the members, the third the one after the enable.
+	store.failMethod, store.failNth = "hbacrule_show", 3
+
+	_, err := client.EnsureHBACRule(context.Background(), theDeclaration())
+	var change *RuleChangeError
+	if !errors.As(err, &change) {
+		t.Fatalf("the unconfirmed change ended as %v", err)
+	}
+	if change.Outcome != RuleRestored || change.Restore != nil {
+		t.Fatalf("the outcome was %s: %v", change.Outcome, err)
+	}
+	if !strings.Contains(change.Step, "after enabling") {
+		t.Errorf("the failure names the step %q", change.Step)
+	}
+	if got := state(store.rule); got != before {
+		t.Fatalf("the rule stands as\n%s\nand stood as\n%s", got, before)
+	}
+
+	// A rule this change created and could not confirm is taken out again,
+	// rather than left in service as the one state nobody decided on.
+	_, fresh, created := newHBACDirectory(t, nil)
+	created.failMethod, created.failNth = "hbacrule_show", 3
+	_, err = fresh.EnsureHBACRule(context.Background(), HBACRuleSpec{
+		Name: "ops-ssh", Enabled: true, UserGroups: []string{"ops"}, Services: []string{"sshd"},
+	})
+	if !errors.As(err, &change) {
+		t.Fatalf("the unconfirmed creation ended as %v", err)
+	}
+	if change.Outcome != RuleWithdrawn {
+		t.Fatalf("the outcome was %s: %v", change.Outcome, err)
+	}
+	if created.rule != nil {
+		t.Fatalf("the rule stayed in the directory as %s", state(created.rule))
+	}
+}
+
 func TestARestoreThatFailsLeavesTheRuleDisabled(t *testing.T) {
 	_, client, store := newHBACDirectory(t, theRuleToChange())
 	// The command that adds hosts fails for the change and for the restore

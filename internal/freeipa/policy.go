@@ -450,11 +450,20 @@ func ensureRule[R any, S any](ctx context.Context, c *Client, kind ruleKind[R, S
 	if err := c.setRuleEnabled(ctx, kind.family, kind.name, false, true); err != nil {
 		return nil, restoreRule(ctx, c, kind, "enabling the rule", err, before)
 	}
+	// The read after the enable is a step like the others: a rule that cannot be
+	// read is a rule in service that nobody has confirmed, and leaving it there
+	// over a plain error told the operator the change had failed while the rule
+	// was granting what the declaration asked for.
+	const confirmEnabled = "reading the rule back after enabling it"
 	enabled, err := kind.show(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("reading the %s %s back: %w", kind.label, kind.name, err)
+		return nil, restoreRule(ctx, c, kind, confirmEnabled, err, before)
 	}
-	if enabled == nil || !kind.enabled(*enabled) {
+	if enabled == nil {
+		return nil, restoreRule(ctx, c, kind, confirmEnabled,
+			fmt.Errorf("the directory no longer holds the rule"), before)
+	}
+	if !kind.enabled(*enabled) {
 		return nil, restoreRule(ctx, c, kind, "enabling the rule",
 			fmt.Errorf("the rule reads back disabled although the directory accepted the change"), before)
 	}
