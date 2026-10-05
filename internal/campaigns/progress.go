@@ -270,28 +270,30 @@ func (o *Orchestrator) lastAttempt(ctx context.Context, jobID string) (*jobs.Att
 	if err != nil {
 		return nil, err
 	}
-	if len(attempts) == 0 {
-		return nil, nil
-	}
-	// The newest attempt that was not set aside by a result of its own.
-	//
-	// A first attempt can expire, a second be sent, and the first's success
-	// arrive late and settle the job after all - and then the second is marked
-	// superseded_by_result and carries no details, because nothing was ever
-	// read back through it. Taking simply the last attempt read those empty
-	// details: the campaign reported applied_unverified over a change that had
-	// been verified, or missed a reboot the real result had asked for.
+	return latestResultAttempt(attempts), nil
+}
+
+// latestResultAttempt returns the newest attempt a result reached, or nil when
+// none did.
+//
+// A first attempt can expire, a second be sent and expire too, a third be sent,
+// and the first's success arrive late and settle the job after all. Only the
+// open attempt is then marked superseded_by_result; the ones in between stay
+// lease_expired and carry no details either, because nothing was ever read back
+// through them. Skipping only the superseded one read those empty details: the
+// campaign reported applied_unverified over a change that had been verified, or
+// missed a reboot the real result had asked for.
+func latestResultAttempt(attempts []jobs.Attempt) *jobs.Attempt {
 	for i := len(attempts) - 1; i >= 0; i-- {
-		if attempts[i].Status == jobs.AttemptStatusSuperseded ||
-			attempts[i].ErrorCode == jobs.AttemptStatusSuperseded {
+		if !jobs.AttemptCarriesResult(attempts[i]) {
 			continue
 		}
-		return &attempts[i], nil
+		return &attempts[i]
 	}
-	// Every attempt was set aside, which says nothing about the host either
-	// way: the caller is told there is nothing to read rather than handed an
-	// attempt that was never carried out.
-	return nil, nil
+	// No attempt was ever read back through, which says nothing about the host
+	// either way: the caller is told there is nothing to read rather than
+	// handed an attempt that carried no result.
+	return nil
 }
 
 // unverifiedChange says why a task that reports success is not one, from the
