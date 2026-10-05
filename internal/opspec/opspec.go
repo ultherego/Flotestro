@@ -560,6 +560,14 @@ func PayloadPermissions(action ActionType, payload Payload) []string {
 	// The grant is about running something as root, not about writing the entry
 	// down. Asking for it only when the entry is created let whoever held
 	// schedule.run execute an existing root entry on demand without it.
+	// A run_now may carry the identifier alone, and the entry it names is
+	// already on the host - so an order that says nothing about the account is
+	// an order that may be root's. Unknown is not "not root": the stronger
+	// grant is required unless the order names an account that is not root.
+	if action == ActionScheduleRunNow && payload.Schedule != nil && payload.Schedule.User != "root" &&
+		strings.TrimSpace(payload.Schedule.User) == "" {
+		required = append(required, PermissionScheduleRootExec)
+	}
 	if (action == ActionScheduleEnsure || action == ActionScheduleRunNow) &&
 		payload.Schedule != nil && payload.Schedule.User == "root" {
 		required = append(required, PermissionScheduleRootExec)

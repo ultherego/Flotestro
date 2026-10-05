@@ -80,6 +80,17 @@ func hasGrant(grants []string, wanted string) bool {
 	return false
 }
 
+// checkScheduleRunAs judges the account an entry really runs as, for an order
+// that names no account of its own. It asks only about the grant: the entry is
+// already on the host, so whether the account exists is not this question.
+func checkScheduleRunAs(name string, grants []string) *helperv1.HelperResponse {
+	if name != "root" || grants == nil || hasGrant(grants, PermissionScheduleRootExec) {
+		return nil
+	}
+	return reject(ErrorRootGrantRequired,
+		"this entry runs as root on this host, so running it needs the grant "+PermissionScheduleRootExec)
+}
+
 // checkScheduleUser judges the account an entry is to run as.
 func checkScheduleUser(name string, grants []string) *helperv1.HelperResponse {
 	if name == "" {
@@ -150,7 +161,7 @@ func (s *Server) applySchedule(ctx context.Context, request *helperv1.HelperRequ
 		return s.removeEntry(actionCtx, action.GetId())
 
 	case helperv1.ScheduleRequest_OPERATION_RUN_NOW:
-		return s.runNow(actionCtx, action)
+		return s.runNow(actionCtx, action, grantsOf(request))
 	}
 	return reject(ErrorUnknownAction, "unknown schedule operation")
 }
@@ -470,7 +481,8 @@ func toolFailure(err error, output string) string {
 }
 
 // runNow executes the command of an entry outside its schedule.
-func (s *Server) runNow(ctx context.Context, action *helperv1.ScheduleRequest) *helperv1.HelperResponse {
+func (s *Server) runNow(ctx context.Context, action *helperv1.ScheduleRequest,
+	grants []string) *helperv1.HelperResponse {
 	entry := s.managedEntry(ctx, action.GetId())
 	if entry == nil {
 		return reject(ErrorUnsupported, "the entry "+action.GetId()+" does not belong to the panel")
@@ -490,6 +502,13 @@ func (s *Server) runNow(ctx context.Context, action *helperv1.ScheduleRequest) *
 	if named := action.GetCommand(); len(named) > 0 && !slices.Equal(named, entry.Command) {
 		return reject(ErrorPreconditionFailed,
 			"the entry "+entry.ID+" runs something else on this host than the order says")
+	}
+	// The account of the entry as the host holds it, not as the order names it.
+	// A run_now may carry the identifier alone; the order then says nothing
+	// about whose entry it is, and whoever held schedule.run could execute
+	// root's entry on demand without the grant that exists for exactly that.
+	if refusal := checkScheduleRunAs(entry.User, grants); refusal != nil {
+		return refusal
 	}
 
 	cmd, response := entryCommand(ctx, entry)

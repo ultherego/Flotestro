@@ -27,7 +27,14 @@ func GrantsFor(action opspec.ActionType, payload opspec.Payload, permissions []s
 			grants = append(grants, permission)
 		}
 	}
-	if payload.Schedule != nil && payload.Schedule.User == "root" &&
+	// The entry of a run_now that names no account may be root's, and the host
+	// is the one that knows. The grant travels whenever the creator holds it,
+	// so an order that turns out to be root's is carried out rather than
+	// refused on the host for a grant the panel could have attached.
+	mayBeRoot := payload.Schedule != nil &&
+		(payload.Schedule.User == "root" ||
+			(action == opspec.ActionScheduleRunNow && strings.TrimSpace(payload.Schedule.User) == ""))
+	if mayBeRoot &&
 		(approved || slices.Contains(permissions, GrantScheduleRootExec)) &&
 		!slices.Contains(grants, GrantScheduleRootExec) {
 		grants = append(grants, GrantScheduleRootExec)
