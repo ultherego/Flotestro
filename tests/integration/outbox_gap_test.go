@@ -125,12 +125,18 @@ func TestTheCursorDoesNotPassAnEventOfAnOlderTransaction(t *testing.T) {
 		                or e.inserted_xid >= pg_snapshot_xmax(pg_current_snapshot())
 		           then '0'::xid8 else e.inserted_xid end
 		         < pg_snapshot_xmin(pg_current_snapshot())`
+	// Both reads are narrowed to the two events this test plants. The trail is
+	// live: the panel writes host.offline, alert.resolved and the rest of its
+	// own work while this runs, and asking for everything above a point made
+	// the assertion a list of whatever the fleet happened to be doing. What is
+	// under test is the order of these two events and nothing else.
+	const own = ` and e.aggregate_type = 'test' `
 	// What the consumer reads above a cursor it holds as the pair.
 	readAbovePair := `select coalesce(string_agg(e.event_type, ',' order by ` + eventKey + `), '')
-		 from outbox_events e where ` + eventKey + ` > ($1::xid8, $2) and ` + settled
+		 from outbox_events e where ` + eventKey + ` > ($1::xid8, $2)` + own + `and ` + settled
 	// What it read above a cursor that was the event number alone.
 	readAboveID := `select coalesce(string_agg(e.event_type, ',' order by e.id), '')
-		 from outbox_events e where e.id > $1 and ` + settled
+		 from outbox_events e where e.id > $1` + own + `and ` + settled
 
 	// The earlier transaction takes its identifier at a write of its own,
 	// before any event exists: that is what a panel transaction does, and it
