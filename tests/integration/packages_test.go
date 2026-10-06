@@ -216,7 +216,7 @@ func TestTransactionRecordsVersionsBeforeAndAfter(t *testing.T) {
 		break
 	}
 	if target == "" {
-		t.Skip("no safe package for the test")
+		absent(t, "the plan of %s names no package safe to upgrade in this scenario", host.Hostname)
 	}
 
 	// An upgrade is held to the plan it was approved against, so the order carries
@@ -488,7 +488,8 @@ func TestHoldIsReversible(t *testing.T) {
 		if !holds.Known && holds.Reason == "" {
 			// An agent from before the holds rode in the fragment says
 			// nothing about them at all; that is not a failed read.
-			t.Skipf("hold=%v: the agent of %s does not report the holds yet", hold, host.Hostname)
+			absent(t, "hold=%v: the agent of %s is from before the holds rode in the fragment "+
+				"and says nothing about them", hold, host.Hostname)
 		}
 		if !holds.Known {
 			t.Fatalf("hold=%v: the packages module did not read the holds: %s", hold, holds.Reason)
@@ -816,6 +817,7 @@ type packageAttempt struct {
 		Blocked                  []struct {
 			Name   string `json:"name"`
 			Status string `json:"status"`
+			Kind   string `json:"kind"`
 		} `json:"blocked"`
 		StillBlocked []struct {
 			Name   string `json:"name"`
@@ -906,9 +908,30 @@ func (h *harness) blockedPackages(t *testing.T, hostID string) []string {
 	if last.Detail == nil {
 		return nil
 	}
+	// Only the kinds a repair is meant to clear. An "unknown" entry is not a
+	// leftover defect: it is the plan saying that the tool would not tell it
+	// something, and it carries the reason. On agent-arch the entry is
+	//
+	//   kind unknown, name vim-minimal, "this host satisfies vim-minimal, which
+	//   vim takes the place of, under a provision rather than under that name;
+	//   pacman does not print which package the upgrade would remove"
+	//
+	// which is the product refusing to call an unknown a zero - the rule this
+	// tree is built on. Demanding an empty list demanded that it lie, and this
+	// case had never run before 06.10 to say so.
+	//
+	// An unknown with nothing to say would be the real fault, so that is what is
+	// checked here instead of being waved through.
 	names := make([]string, 0, len(last.Detail.Blocked))
 	for _, pkg := range last.Detail.Blocked {
-		names = append(names, pkg.Name)
+		if pkg.Kind == "unknown" {
+			if strings.TrimSpace(pkg.Status) == "" {
+				t.Errorf("the plan blocks %s as unknown and says nothing about why", pkg.Name)
+			}
+			t.Logf("the plan cannot resolve %s: %s", pkg.Name, pkg.Status)
+			continue
+		}
+		names = append(names, pkg.Name+" ("+pkg.Kind+")")
 	}
 	return names
 }

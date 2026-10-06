@@ -1,16 +1,14 @@
 # Direct t.Skip/t.Skipf/t.SkipNow calls that predate the gate's classification
 # contract. The list may only shrink: see TestNoDirectSkipOutsideTheClassificationHelpers.
 #
-# Count at the time this contract landed: 239; nine of them were classified on
-# 06.10, in agent_rollback_test.go, network_test.go and storage_test.go. The two
-# in packages_test.go go with the finding of that file, in the commit after this
-# one.
-#
 # One line per call: <file>:<line><TAB><the call, collapsed onto one line>. The line
 # number is what it was when the entry was written and is informational; the check
 # matches on the file and the text of the call, so an edit above a skip does not
 # invalidate its entry. Converting a skip is the deletion of its line.
 #
+# Count at the time this contract landed: 239; 11 of them were classified on
+# 06.10 - the four scenarios the notes named as "skips without a sentinel", which
+# the gate reads as a failure either way, now say which condition was missing.
 internal/agent/command_test.go:18	t.Skipf("%s is missing on this host", path)
 internal/agent/facts_test.go:105	t.Skipf("this host has no /proc/uptime: %v", err)
 internal/agent/hostname_test.go:31	t.Skipf("the resolver did not answer for localhost: %s", check.GetDetail())
@@ -187,8 +185,6 @@ tests/integration/network_layers_test.go:134	t.Skip("no connected host of the la
 tests/integration/network_layers_test.go:206	t.Skipf("the host cannot read its layering: %s", state.LayeringUnavailableReason)
 tests/integration/network_layers_test.go:248	t.Skip("the host did not point at the management interface")
 tests/integration/network_layers_test.go:386	t.Skip("the host did not point at the management interface")
-tests/integration/packages_test.go:150	t.Skip("no safe package for the test")
-tests/integration/packages_test.go:418	t.Skipf("hold=%v: the agent of %s does not report the holds yet", hold, host.Hostname)
 tests/integration/packages_test.go:564	t.Skipf("host %s already has a broken package database; the scenario needs a clean baseline", host.Hostname)
 tests/integration/packages_test.go:608	t.Skipf("the lab repository does not carry %s; run Vagrant/lab-broken-package.sh (%s)", labBrokenPackage, last.Message)
 tests/integration/policy_test.go:112	t.Skip("no connected host of the debian family")
