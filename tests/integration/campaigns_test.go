@@ -4481,70 +4481,85 @@ func TestTrailConsumerMovesOnlyAfterDelivery(t *testing.T) {
 
 	// An event the receiver will never take used to stop the trail at its own
 	// identifier for ever. After a bounded number of attempts on that event
-	// alone it is set aside whole and everything behind it flows again.
-	var poison int64
-	if err := pool.QueryRow(ctx, `
-		insert into outbox_events (aggregate_type, aggregate_id, event_type, payload)
-		values ('host', gen_random_uuid(), 'host.refused',
-		        '{"reason":"the receiver will not take it"}'::jsonb)
-		returning id`).Scan(&poison); err != nil {
-		t.Fatalf("writing the refused event: %v", err)
-	}
-	// The trail is live: the panel writes its own events while this runs, so the
-	// round at the bound carries whichever event comes first and not necessarily
-	// this one. Rounds are driven until the cursor has passed it, and each round
-	// at the bound has to set aside exactly one event - that is the property,
-	// and a trail that moved past an event without keeping it would fall behind
-	// the count.
+	// alone it is set aside whole and the trail moves past it.
+	//
+	// What is asked here is that property and not the fate of one planted
+	// event. The first attempt at this drove rounds until the cursor reached an
+	// event this test had inserted, and on a live trail that cannot work: one
+	// delivery carries at most a hundred events, so the cursor had moved a
+	// hundred while the panel had written ten thousand, and the planted event
+	// sat 10 500 rows ahead of a loop that advances one row per round. The
+	// property does not need that event: every round at the bound has to set
+	// aside exactly one event and leave the cursor past it, whichever event the
+	// trail offers.
 	receiver.refuse = true
-	var aside, rounds int64
-	for attempt := 0; attempt < 40 && lastID < poison; attempt++ {
-		// deadLetterAfter in internal/outbox is 12, so one more refusal from
-		// here sets the single claimed event aside.
+	var kept int64
+	if err := pool.QueryRow(ctx, `
+		select count(*) from outbox_dead_letters where consumer = $1`, name).Scan(&kept); err != nil {
+		t.Fatalf("reading what was set aside: %v", err)
+	}
+	rounds := 0
+	for attempt := 0; attempt < 12 && rounds < 3; attempt++ {
+		// deadLetterAfter in internal/outbox is 12, and past narrowAfter the
+		// round is cut to a single event, so one more refusal from here sets
+		// that event aside.
 		if _, err := pool.Exec(ctx, `
 			update outbox_consumers set failures = 11, next_attempt_at = now() where name = $1`,
 			name); err != nil {
 			t.Fatalf("bringing the consumer to the bound: %v", err)
 		}
+		before := lastID
 		carried, err := consumer.Deliver(ctx)
 		if err == nil {
 			if carried != 0 {
-				t.Fatalf("the refusal at the bound carried %d events as a success", carried)
+				t.Fatalf("a refusing receiver carried %d events as a success", carried)
 			}
-			// Nothing was claimable: the fence has not let the event through
-			// yet. cursor.go says why an event waits for the transactions that
-			// could still come before it.
-			time.Sleep(200 * time.Millisecond)
+			// Nothing was claimable: the fence has not let the next event
+			// through yet. cursor.go says why an event waits for the
+			// transactions that could still come before it.
+			time.Sleep(250 * time.Millisecond)
 			continue
 		}
 		rounds++
+
+		var nowKept int64
+		var setAside int64
+		// The row this round kept, by the time it was set aside - not the
+		// largest identifier, which need not be the newest: the cursor is the
+		// inserting transaction and the identifier within it, and cursor.go
+		// says what reading the identifier alone cost once.
 		if err := pool.QueryRow(ctx, `
-			select count(*) from outbox_dead_letters where consumer = $1`, name).Scan(&aside); err != nil {
+			select count(*),
+			       coalesce((select event_id from outbox_dead_letters
+			                  where consumer = $1 order by set_aside_at desc, event_id desc
+			                  limit 1), 0)
+			  from outbox_dead_letters where consumer = $1`,
+			name).Scan(&nowKept, &setAside); err != nil {
 			t.Fatalf("reading what was set aside: %v", err)
 		}
-		if aside != rounds {
-			t.Fatalf("after %d rounds at the bound %d events are kept: the trail moved past one without keeping it",
-				rounds, aside)
+		if nowKept != kept+1 {
+			t.Fatalf("round %d at the bound kept %d events in all, and %d were kept before it: "+
+				"the trail moved past an event without keeping it", rounds, nowKept, kept)
 		}
+		kept = nowKept
+
 		if err := pool.QueryRow(ctx, `select last_id from outbox_consumers where name = $1`, name).
 			Scan(&lastID); err != nil {
 			t.Fatalf("reading the cursor: %v", err)
+		}
+		if lastID <= before {
+			t.Fatalf("round %d set an event aside and the cursor stayed at %d: "+
+				"the trail waits for an event nobody will take", rounds, lastID)
+		}
+		if lastID < setAside {
+			t.Fatalf("the event %d was kept and the cursor is behind it at %d", setAside, lastID)
 		}
 	}
 	if rounds == 0 {
 		t.Fatal("no round reached the bound, so nothing about setting aside was tried")
 	}
-	if lastID < poison {
-		t.Fatalf("the trail still waits at %d for the event %d nobody will take", lastID, poison)
-	}
-	var kept int64
-	if err := pool.QueryRow(ctx, `
-		select count(*) from outbox_dead_letters where consumer = $1 and event_id = $2`,
-		name, poison).Scan(&kept); err != nil {
-		t.Fatalf("reading what was set aside: %v", err)
-	}
-	if kept != 1 {
-		t.Fatalf("the cursor passed the event %d but it was not kept: %d rows", poison, kept)
+	if rounds < 3 {
+		t.Fatalf("only %d of three rounds at the bound were carried out", rounds)
 	}
 }
 
