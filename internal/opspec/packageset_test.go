@@ -42,3 +42,29 @@ func TestAnOrderThatNamesNoPackageHasNoDigest(t *testing.T) {
 		}
 	}
 }
+
+// The trail tells two orders of one campaign apart by this digest, so two
+// different sets must not share one. The comment here used to assert that a
+// package name cannot carry the separator, and nothing enforced it.
+func TestTwoDifferentPackageSetsDoNotShareOneDigest(t *testing.T) {
+	set := func(names ...string) string {
+		return PackageSetDigest(Payload{PackageChange: &PackageChangePayload{Packages: names}})
+	}
+	if one, two := set("nginx\nsudo"), set("nginx", "sudo"); one == two {
+		t.Errorf("a name carrying the separator shares a digest with two names: %s", one)
+	}
+	if one, two := set("ngin", "xsudo"), set("nginx", "sudo"); one == two {
+		t.Errorf("two sets whose names run together share a digest: %s", one)
+	}
+	// And the properties the digest is for still hold: it is a set, so order
+	// and repetition do not change it.
+	if set("a", "b") != set("b", "a") {
+		t.Error("the same two packages in another order give another digest")
+	}
+	if set("a", "a", "b") != set("a", "b") {
+		t.Error("a name repeated gives another digest")
+	}
+	if set() != "" {
+		t.Error("an order naming no package has a digest")
+	}
+}
