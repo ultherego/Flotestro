@@ -160,6 +160,23 @@ func (s *ReplayStore) Reserve(nonce []byte, expires int64, taskID, digest string
 	return s.claimEffectLocked(nonce, expires, taskID, digest)
 }
 
+// ReserveRead binds the nonce to the task and reserves nothing else. A read is
+// carried out every time it is asked: there is no effect to keep from running
+// twice, and an answer kept for it would report a state nobody looked at.
+func (s *ReplayStore) ReserveRead(nonce []byte, expires int64, taskID string) error {
+	if len(nonce) != NonceSize {
+		return refusal(ErrorInvalidNonce,
+			fmt.Sprintf("the nonce has %d bytes, not %d", len(nonce), NonceSize))
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.dirfd < 0 {
+		return errors.New("the replay store is closed")
+	}
+	s.sweepLocked()
+	return s.claimOwnerLocked(nonce, expires, taskID)
+}
+
 // claimOwnerLocked binds the nonce to one task and one life of the helper.
 func (s *ReplayStore) claimOwnerLocked(nonce []byte, expires int64, taskID string) error {
 	name := ownerName(nonce)

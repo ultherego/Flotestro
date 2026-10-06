@@ -147,6 +147,17 @@ func (v *Verifier) Verify(request *helperv1.HelperRequest, expectation Expectati
 	if v.replay == nil {
 		return Reservation{}, fmt.Errorf("the helper has no replay store")
 	}
+	// A read is performed every time it is asked. The replay store keeps an
+	// effect from happening twice; a read has none, and a verification reads
+	// the host with the same request before a change and after it, so keeping
+	// the first answer handed the verifier the state from before the change.
+	if !expectation.Mutating {
+		if err := v.replay.ReserveRead(capability.GetNonce(), capability.GetExpiresUnix(),
+			capability.GetTaskId()); err != nil {
+			return Reservation{}, err
+		}
+		return Reservation{Fresh: true}, nil
+	}
 	// The nonce covers the whole task and a task calls the helper more than
 	// once, so what is reserved is this request under that nonce.
 	requestDigest, err := RequestDigest(request)
