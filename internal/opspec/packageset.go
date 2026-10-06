@@ -2,6 +2,7 @@ package opspec
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"sort"
 	"strings"
@@ -37,8 +38,23 @@ func PackageSetDigest(payload Payload) string {
 		return ""
 	}
 	sort.Strings(unique)
-	// The separator cannot appear in a package name, so no two sets can spell
-	// the same joined string.
-	sum := sha256.Sum256([]byte(strings.Join(unique, "\n")))
+	// Length-prefixed, not joined. The comment here used to say "the separator
+	// cannot appear in a package name, so no two sets can spell the same joined
+	// string" - and nothing enforced that. A name carrying the separator made
+	// two different sets share one digest, so the trail could say two orders
+	// were given the same set when they were not. The same ambiguity in the
+	// capability binding of a package order was the finding of 06.10; this is
+	// its neighbour, and the trail is a place where a thing has to be true.
+	var out []byte
+	out = append(out, "flotestro-package-set/2\n"...)
+	var word [8]byte
+	binary.BigEndian.PutUint64(word[:], uint64(len(unique)))
+	out = append(out, word[:]...)
+	for _, name := range unique {
+		binary.BigEndian.PutUint64(word[:], uint64(len(name)))
+		out = append(out, word[:]...)
+		out = append(out, name...)
+	}
+	sum := sha256.Sum256(out)
 	return hex.EncodeToString(sum[:])
 }

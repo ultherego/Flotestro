@@ -163,7 +163,7 @@ func TestFilesystemCheckRequiresUnmounting(t *testing.T) {
 		}
 	}
 	if mounted == "" {
-		t.Skip("the host has no mounted filesystem")
+		absent(t, "%s has no mounted filesystem to check", host.Hostname)
 	}
 
 	job, attempts := h.runOperation(host.ID, map[string]any{
@@ -258,12 +258,12 @@ func TestDestructiveOperationChecksTheDeviceIdentity(t *testing.T) {
 		}
 	}
 	if empty.Path == "" {
-		t.Skip("the host has no free disk")
+		absent(t, "%s has no free disk to wipe", host.Hostname)
 	}
 
 	// A wrong identity: the host is to refuse before doing anything.
 	if empty.ByID == "" {
-		t.Skip("the free disk has no stable identity link")
+		absent(t, "the free disk of %s has no stable identity link to refuse against", host.Hostname)
 	}
 	job := h.createOperation(host.ID, map[string]any{
 		"action": "disk.wipe", "reason": storageReason,
@@ -334,7 +334,7 @@ func TestSmartReportsHonestly(t *testing.T) {
 	host := h.hostByFamily("debian")
 
 	if !hostHasFeature(host, "storage", "smart") {
-		t.Skip("the host has no smartctl; the SMART read is not offered there")
+		absent(t, "%s has no smartctl, so the SMART read is not offered there", host.Hostname)
 	}
 
 	job, attempts := h.runOperation(host.ID, map[string]any{

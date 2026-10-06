@@ -1,7 +1,9 @@
 package paging
 
 import (
+	"encoding/base64"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -55,5 +57,63 @@ func TestLimitIsBounded(t *testing.T) {
 	}
 	if got := Limit(42, 100, 500); got != 42 {
 		t.Errorf("a plain limit = %d", got)
+	}
+}
+
+// A part holding the old separator used to make the token decode to one part
+// too many, and the caller was told the cursor was invalid. The certificate
+// list pages by the path a host reported, and a path on Linux may hold a
+// newline, so a host could break that list's paging.
+func TestAPartHoldingTheOldSeparatorStillRoundTrips(t *testing.T) {
+	cases := [][]string{
+		{"2026-10-06T00:00:00Z", "agent-debian", "/etc/ssl/certs/odd\nname.pem"},
+		{"a\nb", "c", "d"},
+		{"", "", ""},
+		{"\n\n\n", "x"},
+		{strings.Repeat("p", 4096), "q"},
+	}
+	for _, parts := range cases {
+		back, err := Decode(Encode(parts...), len(parts))
+		if err != nil {
+			t.Errorf("%q did not decode: %v", parts, err)
+			continue
+		}
+		if len(back) != len(parts) {
+			t.Errorf("%q came back as %q", parts, back)
+			continue
+		}
+		for index := range parts {
+			if back[index] != parts[index] {
+				t.Errorf("part %d of %q came back as %q", index, parts, back[index])
+			}
+		}
+	}
+}
+
+// And a token nobody encoded here is refused rather than read as parts.
+func TestATokenThisPanelDidNotWriteIsRefused(t *testing.T) {
+	for name, token := range map[string]string{
+		"the old joined form":   base64.RawURLEncoding.EncodeToString([]byte("a\nb")),
+		"a truncated length":    base64.RawURLEncoding.EncodeToString([]byte{2, 0, 0, 0, 2, 0, 0}),
+		"a part past the end":   base64.RawURLEncoding.EncodeToString([]byte{2, 0, 0, 0, 1, 0, 0, 0, 9, 'a'}),
+		"bytes nobody counted":  base64.RawURLEncoding.EncodeToString([]byte{2, 0, 0, 0, 1, 0, 0, 0, 1, 'a', 'b'}),
+		"another panel's shape": base64.RawURLEncoding.EncodeToString([]byte{7, 0, 0, 0, 1, 0, 0, 0, 1, 'a'}),
+		"not base64":            "!!!!",
+	} {
+		if _, err := Decode(token, 2); err == nil {
+			t.Errorf("%s was accepted as a cursor of two parts", name)
+		}
+	}
+}
+
+// No parts is no cursor, which is what every caller reads as "no next page".
+// The joined form spelled it as the empty string and this has to keep doing so.
+func TestNoPartsIsNoCursor(t *testing.T) {
+	if token := Encode(); token != "" {
+		t.Errorf("a cursor of no parts is %q and not the empty string", token)
+	}
+	parts, err := Decode("", 0)
+	if err != nil || parts != nil {
+		t.Errorf("the empty token decoded to %q (%v)", parts, err)
 	}
 }

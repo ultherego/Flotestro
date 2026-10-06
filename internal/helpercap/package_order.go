@@ -3,7 +3,6 @@ package helpercap
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"strings"
 	"time"
 
@@ -41,30 +40,73 @@ type packageOrder struct {
 	ResourceRevision  string
 	PlanExpiresUnix   int64
 	// Changes are the elements of the plan the operator approved, as the
-	// request carries them.
-	Changes []string
+	// request carries them: one tuple per change, and its fields kept apart.
+	// Joined into one string they were ambiguous in their turn - a name of
+	// "nginx\x1f1.0" read the same as a name of "nginx" at version "1.0".
+	Changes [][]string
 }
 
+// packageOrderPrefix separates these bytes from every other thing this package
+// hashes, so a digest of a package order cannot be presented as a digest of
+// anything else.
+const packageOrderPrefix = "flotestro-package-order/2\n"
+
+// The encoding is length-prefixed, not a text form with separators. It used to
+// be one "name=value" line per field with lists joined by U+001F, and that was
+// ambiguous in the way the backup order was: Packages=["nginx\x1fbackdoor"] and
+// Packages=["nginx","backdoor"] hashed to the same bytes - measured, identical
+// digest - so a consent to install one package could be presented as a consent
+// to install two, and the binding still matched. The backup order was given
+// this encoding on 05.10 and the neighbour that shares the defect was not
+// asked; it is asked now, and a guard in the tests asks it of the next one.
 func (o packageOrder) digest() string {
-	var text strings.Builder
-	write := func(name string, value any) {
-		fmt.Fprintf(&text, "%s=%v\n", name, value)
-	}
-	write("operation", o.Operation)
-	write("packages", strings.Join(o.Packages, "\x1f"))
-	write("expected_removals", strings.Join(o.ExpectedRemovals, "\x1f"))
-	write("hold", o.Hold)
-	write("security_only", o.SecurityOnly)
-	write("allow_downgrade", o.AllowDowngrade)
-	write("plan_hash", o.PlanHash)
-	write("plan_schema_version", o.PlanSchemaVersion)
-	write("planner_version", o.PlannerVersion)
-	write("inventory_revision", o.InventoryRevision)
-	write("resource_revision", o.ResourceRevision)
-	write("plan_expires_unix", o.PlanExpiresUnix)
-	write("changes", strings.Join(o.Changes, "\x1e"))
-	sum := sha256.Sum256([]byte(text.String()))
+	out := []byte(packageOrderPrefix)
+	out = appendBytes(appendBytes(out, []byte("operation")), []byte(o.Operation))
+	out = appendList(out, "packages", o.Packages)
+	out = appendList(out, "expected_removals", o.ExpectedRemovals)
+	out = appendFlag(out, "hold", o.Hold)
+	out = appendFlag(out, "security_only", o.SecurityOnly)
+	out = appendFlag(out, "allow_downgrade", o.AllowDowngrade)
+	out = appendBytes(appendBytes(out, []byte("plan_hash")), []byte(o.PlanHash))
+	out = appendUint(appendBytes(out, []byte("plan_schema_version")), uint64(o.PlanSchemaVersion))
+	out = appendBytes(appendBytes(out, []byte("planner_version")), []byte(o.PlannerVersion))
+	out = appendBytes(appendBytes(out, []byte("inventory_revision")), []byte(o.InventoryRevision))
+	out = appendBytes(appendBytes(out, []byte("resource_revision")), []byte(o.ResourceRevision))
+	out = appendUint(appendBytes(out, []byte("plan_expires_unix")), uint64(o.PlanExpiresUnix))
+	out = appendTuples(out, "changes", o.Changes)
+	sum := sha256.Sum256(out)
 	return hex.EncodeToString(sum[:])
+}
+
+// appendList writes a named list so that no element can be read as the
+// structure around it: the count, then every element with its own length.
+func appendList(out []byte, name string, values []string) []byte {
+	out = appendUint(appendBytes(out, []byte(name)), uint64(len(values)))
+	for _, value := range values {
+		out = appendBytes(out, []byte(value))
+	}
+	return out
+}
+
+// appendTuples writes a named list of tuples: the number of tuples, then each
+// one's own length and every field within it carrying its own.
+func appendTuples(out []byte, name string, tuples [][]string) []byte {
+	out = appendUint(appendBytes(out, []byte(name)), uint64(len(tuples)))
+	for _, tuple := range tuples {
+		out = appendUint(out, uint64(len(tuple)))
+		for _, field := range tuple {
+			out = appendBytes(out, []byte(field))
+		}
+	}
+	return out
+}
+
+func appendFlag(out []byte, name string, value bool) []byte {
+	set := uint64(0)
+	if value {
+		set = 1
+	}
+	return appendUint(appendBytes(out, []byte(name)), set)
 }
 
 // packageOrderDigest is the digest of the order a capability authorizes, from
@@ -106,10 +148,10 @@ func packageOrderDigest(operation string, change *opspec.PackageChangePayload,
 			}
 		}
 		for _, change := range reference.Changes {
-			order.Changes = append(order.Changes, strings.Join([]string{
+			order.Changes = append(order.Changes, []string{
 				change.Name, change.CurrentVersion, change.CandidateVersion,
 				change.Architecture, change.Origin, change.Action,
-			}, "\x1f"))
+			})
 		}
 	}
 	return order.digest()
@@ -132,10 +174,10 @@ func packageRequestDigest(request *helperv1.PackageActionRequest) string {
 		PlanExpiresUnix:   request.GetPlanExpiresAtUnix(),
 	}
 	for _, spec := range request.GetExactSpecs() {
-		order.Changes = append(order.Changes, strings.Join([]string{
+		order.Changes = append(order.Changes, []string{
 			spec.GetName(), spec.GetCurrentVersion(), spec.GetCandidateVersion(),
 			spec.GetArchitecture(), spec.GetOrigin(), spec.GetAction(),
-		}, "\x1f"))
+		})
 	}
 	return order.digest()
 }
@@ -189,25 +231,25 @@ type repositoryOrder struct {
 	Remove        bool
 }
 
+// repositoryOrderPrefix keeps these bytes apart from a package order's.
+const repositoryOrderPrefix = "flotestro-repository-order/2\n"
+
 func (o repositoryOrder) digest() string {
-	var text strings.Builder
-	write := func(name string, value any) {
-		fmt.Fprintf(&text, "%s=%v\n", name, value)
-	}
-	write("id", o.ID)
-	write("name", o.Name)
-	write("url", o.URL)
-	write("suites", strings.Join(o.Suites, "\x1f"))
-	write("components", strings.Join(o.Components, "\x1f"))
-	write("architectures", strings.Join(o.Architectures, "\x1f"))
-	write("enabled", o.Enabled)
-	write("priority", o.Priority)
-	write("gpg_key", o.GPGKey)
-	write("allow_unsigned", o.AllowUnsigned)
-	write("username", o.Username)
-	write("secret_name", o.SecretName)
-	write("remove", o.Remove)
-	sum := sha256.Sum256([]byte(text.String()))
+	out := []byte(repositoryOrderPrefix)
+	out = appendBytes(appendBytes(out, []byte("id")), []byte(o.ID))
+	out = appendBytes(appendBytes(out, []byte("name")), []byte(o.Name))
+	out = appendBytes(appendBytes(out, []byte("url")), []byte(o.URL))
+	out = appendList(out, "suites", o.Suites)
+	out = appendList(out, "components", o.Components)
+	out = appendList(out, "architectures", o.Architectures)
+	out = appendFlag(out, "enabled", o.Enabled)
+	out = appendUint(appendBytes(out, []byte("priority")), uint64(o.Priority))
+	out = appendBytes(appendBytes(out, []byte("gpg_key")), []byte(o.GPGKey))
+	out = appendFlag(out, "allow_unsigned", o.AllowUnsigned)
+	out = appendBytes(appendBytes(out, []byte("username")), []byte(o.Username))
+	out = appendBytes(appendBytes(out, []byte("secret_name")), []byte(o.SecretName))
+	out = appendFlag(out, "remove", o.Remove)
+	sum := sha256.Sum256(out)
 	return hex.EncodeToString(sum[:])
 }
 

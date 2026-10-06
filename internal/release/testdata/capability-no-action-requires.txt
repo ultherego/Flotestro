@@ -1,0 +1,10 @@
+# Adapters the agent declares that no action names as its requirement -
+# measured from opspec.AllActions, not assumed. Nothing can be ordered to reach
+# them, so the coverage guard has nothing to say about them; they are recorded
+# so the set cannot change in silence.
+packages.apt
+packages.dnf
+packages.pacman
+accounts.local
+helper.capability
+relay.identity

@@ -6,7 +6,9 @@
 # matches on the file and the text of the call, so an edit above a skip does not
 # invalidate its entry. Converting a skip is the deletion of its line.
 #
-# Count at the time this contract landed: 239
+# Count at the time this contract landed: 239; 11 of them were classified on
+# 06.10 - the four scenarios the notes named as "skips without a sentinel", which
+# the gate reads as a failure either way, now say which condition was missing.
 internal/agent/command_test.go:18	t.Skipf("%s is missing on this host", path)
 internal/agent/facts_test.go:105	t.Skipf("this host has no /proc/uptime: %v", err)
 internal/agent/hostname_test.go:31	t.Skipf("the resolver did not answer for localhost: %s", check.GetDetail())
@@ -37,8 +39,6 @@ internal/opspec/errors_documented_test.go:20	t.Skipf("the published reference is
 internal/opspec/errors_documented_test.go:58	t.Skipf("the published reference is not in this tree: %v", err)
 internal/opspec/operations_documented_test.go:17	t.Skipf("the published reference is not in this tree: %v", err)
 tests/integration/agent_footprint_test.go:107	t.Skip("no online host in the lab")
-tests/integration/agent_rollback_test.go:27	t.Skip("the host does not report the version of its agent")
-tests/integration/agent_rollback_test.go:46	t.Skipf("the host could not keep the artefact of %s, so there is no kept copy to read: %s", before.AgentVersion, prepare.ResultMessage)
 tests/integration/agent_test.go:41	t.Skip("no host in the lab")
 tests/integration/agent_test.go:136	t.Skip("no host in the lab")
 tests/integration/agent_upgrade_test.go:35	t.Skip("the host does not report the version of its agent")
@@ -185,11 +185,6 @@ tests/integration/network_layers_test.go:134	t.Skip("no connected host of the la
 tests/integration/network_layers_test.go:206	t.Skipf("the host cannot read its layering: %s", state.LayeringUnavailableReason)
 tests/integration/network_layers_test.go:248	t.Skip("the host did not point at the management interface")
 tests/integration/network_layers_test.go:386	t.Skip("the host did not point at the management interface")
-tests/integration/network_test.go:224	t.Skip("the host has no mechanism to write the network configuration")
-tests/integration/network_test.go:228	t.Skip("the host did not point at the management interface")
-tests/integration/network_test.go:293	t.Skipf("no connected host writes its network through %s", adapter)
-tests/integration/packages_test.go:150	t.Skip("no safe package for the test")
-tests/integration/packages_test.go:418	t.Skipf("hold=%v: the agent of %s does not report the holds yet", hold, host.Hostname)
 tests/integration/packages_test.go:564	t.Skipf("host %s already has a broken package database; the scenario needs a clean baseline", host.Hostname)
 tests/integration/packages_test.go:608	t.Skipf("the lab repository does not carry %s; run Vagrant/lab-broken-package.sh (%s)", labBrokenPackage, last.Message)
 tests/integration/policy_test.go:112	t.Skip("no connected host of the debian family")
@@ -213,10 +208,6 @@ tests/integration/storage_identity_test.go:233	t.Skipf("the system disk has no b
 tests/integration/storage_identity_test.go:340	t.Skip("the root filesystem has no UUID")
 tests/integration/storage_layers_test.go:145	t.Skipf("this host has no LVM: %s", state.LVMUnavailableReason)
 tests/integration/storage_layers_test.go:148	t.Skip("this host has LVM and no volume group")
-tests/integration/storage_test.go:165	t.Skip("the host has no mounted filesystem")
-tests/integration/storage_test.go:260	t.Skip("the host has no free disk")
-tests/integration/storage_test.go:265	t.Skip("the free disk has no stable identity link")
-tests/integration/storage_test.go:336	t.Skip("the host has no smartctl; the SMART read is not offered there")
 tests/integration/system_module_test.go:96	t.Skip("the fleet has no connected host")
 tests/integration/teams_test.go:111	t.Skipf("the boundary needs three hosts to tell apart; the fleet has %d", len(fleet))
 tests/integration/time_test.go:231	t.Skipf("this host already has the panel directory (%s), so there is nothing to append", state.ManagedPath)
