@@ -36,17 +36,13 @@ func (e *TaskExecutor) applyRepository(ctx context.Context, task *agentv1.TaskEn
 		AllowUnsigned: payload.AllowUnsigned, Username: payload.Username,
 		Remove: payload.Remove,
 	}
-	// The password is fetched only now, right before the write.
+	// The password is fetched only now, right before the write, and through the
+	// fetch that keeps the receipt: the helper refuses bytes no receipt vouches
+	// for, and asking the store directly discarded the receipt.
 	if !payload.PasswordSecret.Empty() && !payload.Remove {
-		if e.secrets == nil {
-			return rejected(agentv1.TaskResult_STATUS_FAILED, RejectInternalError,
-				"the agent has no connection through which a secret could be fetched")
-		}
-		value, _, err := e.secrets(callCtx, task.GetTaskId(),
-			payload.PasswordSecret.Name, payload.PasswordSecret.Version)
-		if err != nil {
-			return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectPrecondition,
-				"the secret "+payload.PasswordSecret.Name+" was not fetched: "+err.Error())
+		value, _, refusal := e.fetchSecretWithReceipt(callCtx, task, *payload.PasswordSecret)
+		if refusal != nil {
+			return refusal
 		}
 		request.Password = value
 		request.SecretName = payload.PasswordSecret.Name

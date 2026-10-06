@@ -202,22 +202,14 @@ func (e *TaskExecutor) applyCertificate(ctx context.Context, task *agentv1.TaskE
 		request.Operation = helperv1.CertificateRequest_OPERATION_DEPLOY
 		request.Certificate = []byte(payload.Certificate)
 		request.PlanHash = payload.PlanHash
+		// The key is fetched only now, right before the swap, and through the
+		// fetch that keeps the receipt: the helper refuses bytes no receipt
+		// vouches for.
 		if !payload.KeySecret.Empty() {
 			request.KeySecretRef = payload.KeySecret.String()
-		}
-		// The key is fetched only now, right before the swap.
-		if !payload.KeySecret.Empty() {
-			if e.secrets == nil {
-				return rejected(agentv1.TaskResult_STATUS_FAILED, RejectInternalError,
-					"the agent has no connection through which a secret could be fetched")
-			}
-			value, _, err := e.secrets(callCtx, task.GetTaskId(),
-				payload.KeySecret.Name, payload.KeySecret.Version)
-			if err != nil {
-				// The reason for the refusal is the content of the result; the
-				// value is not in it.
-				return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectPrecondition,
-					"the secret "+payload.KeySecret.Name+" was not fetched: "+err.Error())
+			value, _, refusal := e.fetchSecretWithReceipt(callCtx, task, *payload.KeySecret)
+			if refusal != nil {
+				return refusal
 			}
 			request.Key = value
 		}
