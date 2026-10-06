@@ -24,7 +24,7 @@ func TestGoingBackReadsTheKeptArtefactAndNotTheRepository(t *testing.T) {
 	var before agentHostView
 	h.get("/api/v1/hosts/"+host.ID, &before)
 	if before.AgentVersion == "" {
-		t.Skip("the host does not report the version of its agent")
+		absent(t, "%s does not report the version of its agent", host.Hostname)
 	}
 
 	// The host is made to keep a way back to the version it runs: the target of
@@ -43,8 +43,8 @@ func TestGoingBackReadsTheKeptArtefactAndNotTheRepository(t *testing.T) {
 		t.Fatalf("a release that exists nowhere was installed: %s", prepare.ResultMessage)
 	}
 	if prepare.ResultErrorCode == "agent_rollback_unavailable" {
-		t.Skipf("the host could not keep the artefact of %s, so there is no kept copy to read: %s",
-			before.AgentVersion, prepare.ResultMessage)
+		absent(t, "%s could not keep the artefact of %s, so there is no kept copy to read: %s",
+			host.Hostname, before.AgentVersion, prepare.ResultMessage)
 	}
 
 	// Going back to the version the host kept, under a digest that matches

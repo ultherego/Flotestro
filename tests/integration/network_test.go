@@ -244,11 +244,11 @@ func TestNetworkChangeIsConfirmedByConnectivity(t *testing.T) {
 	host := h.hostByFamily("rhel")
 	state := hostNetworkSnapshot(t, h, host.ID)
 	if state.WriteAdapter == "" {
-		t.Skip("the host has no mechanism to write the network configuration")
+		absent(t, "%s has no mechanism to write the network configuration", host.Hostname)
 	}
 	iface := state.ManagementInterface
 	if iface == "" {
-		t.Skip("the host did not point at the management interface")
+		absent(t, "%s did not point at the interface the panel reaches it on", host.Hostname)
 	}
 
 	t.Cleanup(func() {
@@ -313,7 +313,7 @@ func hostWithWriteAdapter(t *testing.T, h *harness, adapter string) (hostView, n
 			return host, state
 		}
 	}
-	t.Skipf("no connected host writes its network through %s", adapter)
+	absent(t, "no connected host of this run writes its network through %s", adapter)
 	return hostView{}, networkSnapshot{}
 }
 
