@@ -35,7 +35,17 @@ func TestAnOperatorNamedLikeThePanelsOwnWorkMayStillOrder(t *testing.T) {
 				"action":  "unit.restart",
 				"payload": unitPayload("cron.service"),
 			})
+			// Cancelled only if it is still cancellable. This test waits for the
+			// task to succeed, so by the time the cleanup runs there is normally
+			// nothing to cancel - and cancelling a finished task answers 409
+			// invalid_state, which failed the test after its own assertions had
+			// all passed. The cleanup exists for the early exits, where the task
+			// is left waiting for an approval that never comes.
 			t.Cleanup(func() {
+				switch h.job(job.ID).State {
+				case "succeeded", "failed", "canceled", "expired":
+					return
+				}
 				operator.do(http.MethodPost, "/api/v1/jobs/"+job.ID+"/cancel",
 					map[string]any{"reason": "end of the test"}, nil, http.StatusOK)
 			})
