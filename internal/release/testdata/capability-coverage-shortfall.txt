@@ -1,0 +1,6 @@
+# Adapters an action can reach and no scenario of the integration suite orders.
+# The list may only shrink: capability_coverage_test.go fails on an entry whose
+# capability has since gained a scenario, and on a capability that has none and
+# is not listed here.
+#
+# Empty since 06.10, when security.scan and security.audit.reload got theirs.
