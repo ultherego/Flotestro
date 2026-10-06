@@ -44,7 +44,7 @@ func TestTheRecordedTrustGenerationIsWhatTheHostWasHanded(t *testing.T) {
 			HostsMissing int    `json:"hosts_missing"`
 		} `json:"authorities"`
 	}
-	h.get("/api/v1/pki/ca", &authorities)
+	h.get("/api/v1/pki", &authorities)
 	issuerID := ""
 	reported := 0
 	for _, authority := range authorities.Authorities {

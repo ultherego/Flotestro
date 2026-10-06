@@ -10,7 +10,8 @@ import (
 )
 
 // SPAHandler serves the built panel. Paths unknown to the router go to index.
-// html, because the panel routes exist only on the browser side.
+// html, because the panel routes exist only on the browser side - except under
+// /api/, where an unknown path is an unknown route and says so.
 func SPAHandler(root string) http.Handler {
 	if root == "" {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -26,6 +27,20 @@ func SPAHandler(root string) http.Handler {
 		// comes from the network and must not leave the panel directory.
 		if strings.Contains(clean, "..") {
 			problem(w, http.StatusBadRequest, "invalid_path", "invalid path")
+			return
+		}
+
+		// A path under /api/ that reached the catch-all is an API route this
+		// panel does not serve, and the browser never navigates there. Served
+		// the index, it answered 200 with a page - so a client asking a wrong
+		// path got what looks like success, and a caller reading JSON got
+		// "invalid character '<'". That is how an integration scenario asked
+		// /api/v1/pki/ca of a panel that serves /api/v1/pki and nobody noticed
+		// until the first run that reached it, on 06.10.
+		if clean == "/api" || strings.HasPrefix(clean, "/api/") {
+			problem(w, http.StatusNotFound, "no_such_route",
+				"this panel serves no "+r.Method+" "+r.URL.Path+
+					"; the routes it serves are in its OpenAPI document at /api/v1/openapi.json")
 			return
 		}
 
