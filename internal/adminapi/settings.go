@@ -179,6 +179,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			fact("heartbeat_jitter", effective.HeartbeatJitter),
 			durationFact("stale_after", effective.StaleAfter),
 			durationFact("agent_cert_ttl", effective.AgentCertTTL),
+			durationFact("relay_cert_ttl", effective.RelayCertTTL),
 			fact("clone_policy", process.ClonePolicy),
 			fact("relay_identity", process.RelayIdentity),
 			fact("dispatch_rate", process.DispatchRate),

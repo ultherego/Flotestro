@@ -39,6 +39,8 @@ type CA struct {
 	PEM         []byte
 	// AgentTTL overrides the lifetime of an agent certificate.
 	AgentTTL time.Duration
+	// RelayTTL overrides the lifetime of a relay certificate.
+	RelayTTL time.Duration
 	// Reserved answers which names and addresses the panel itself is seen under.
 	// It is asked at every issue rather than holding a copy: the advertised
 	// address is the installation's choice and changes while the panel runs, and
@@ -441,18 +443,29 @@ type IssuedCert struct {
 	IPAddresses []string
 }
 
-// relayCertTTL is shorter than the lifetime of an agent certificate.
-const relayCertTTL = 7 * 24 * time.Hour
+// RelayCertTTL is shorter than the lifetime of an agent certificate. It is the
+// default rather than the rule: an installation may want shorter credentials
+// for the one component that stands between the panel and a site, and until
+// 07.10 this was the only certificate lifetime an operator could not set.
+const RelayCertTTL = 7 * 24 * time.Hour
+
+// relayCertTTL returns the lifetime of a relay certificate.
+func (ca *CA) relayCertTTL() time.Duration {
+	if ca.RelayTTL > 0 {
+		return ca.RelayTTL
+	}
+	return RelayCertTTL
+}
 
 // SignRelayCSR signs a relay's CSR.
 func (ca *CA) SignRelayCSR(csrPEM []byte, relayID string) (*IssuedCert, error) {
-	return ca.signCSR(csrPEM, "relay", relayID, relayCertTTL, nil)
+	return ca.signCSR(csrPEM, "relay", relayID, ca.relayCertTTL(), nil)
 }
 
 // SignRelayCSRWithNames issues a relay certificate with the names given by the
 // panel instead of those from the CSR.
 func (ca *CA) SignRelayCSRWithNames(csrPEM []byte, relayID string, names []string) (*IssuedCert, error) {
-	return ca.signCSR(csrPEM, "relay", relayID, relayCertTTL, names)
+	return ca.signCSR(csrPEM, "relay", relayID, ca.relayCertTTL(), names)
 }
 
 // SignAgentCSR signs an agent's CSR, embedding the host's identity in the URI

@@ -141,6 +141,7 @@ type Effective struct {
 	HeartbeatJitter  int
 	StaleAfter       time.Duration
 	AgentCertTTL     time.Duration
+	RelayCertTTL     time.Duration
 
 	Identity  EffectiveIdentity
 	Directory EffectiveDirectory

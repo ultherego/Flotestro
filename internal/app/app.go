@@ -150,6 +150,9 @@ func Run() error {
 	directoryWrite := flag.Bool("directory-write",
 		config.Env("FLOTESTRO_DIRECTORY_WRITE", "") == "true",
 		"enables changes in the identity directory; by default the panel only reads it")
+	relayCertTTL := flag.Duration("relay-cert-ttl",
+		config.EnvDuration("FLOTESTRO_RELAY_CERT_TTL", pki.RelayCertTTL),
+		"how long a relay certificate is valid; the relay renews when less than a third is left")
 	agentCertTTL := flag.Duration("agent-cert-ttl",
 		config.EnvDuration("FLOTESTRO_AGENT_CERT_TTL", pki.AgentCertTTL),
 		"the lifetime of an agent certificate; the agent renews it after two thirds have passed")
@@ -706,6 +709,7 @@ func Run() error {
 
 	ca := trust.Active()
 	ca.AgentTTL = *agentCertTTL
+	ca.RelayTTL = *relayCertTTL
 	// The names of the panel are reserved: a relay certificate carrying one of
 	// them would let the relay stand in for the panel towards the agents of its
 	// site. The CA asks at every issue, so a confirmation reaches this too.
@@ -1247,6 +1251,7 @@ func Run() error {
 		HeartbeatJitter:      cfg.HeartbeatJitter,
 		StaleAfter:           cfg.StaleAfter,
 		AgentCertTTL:         *agentCertTTL,
+		RelayCertTTL:         *relayCertTTL,
 		Identity: config.EffectiveIdentity{
 			IssuerURL: *issuerURL, ClientID: *clientID,
 			ClientSecretSet: *clientSecret != "", GroupsClaim: *groupsClaim,
