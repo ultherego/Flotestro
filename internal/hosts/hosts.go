@@ -169,6 +169,54 @@ func (c Capabilities) Satisfies(requirement string) bool {
 	}
 }
 
+// AdaptersBehind names the adapters a requirement is met by, in the order
+// Satisfies asks them. It exists so that a caller can say *why* a host does not
+// meet a requirement: the requirement is not always an adapter name - it can be
+// a family, or an adapter and one of its features - and the reason a host gave
+// belongs to the adapter, not to the requirement.
+//
+// It is beside Satisfies on purpose. Two lists of the same thing drift, and the
+// test below holds them together: every requirement Satisfies knows has to name
+// its adapters here.
+func AdaptersBehind(requirement string) []string {
+	switch requirement {
+	case "":
+		return nil
+	case NeedPackages, NeedPackageRepair:
+		return []string{CapAPT, CapDNF, CapPacman}
+	case NeedFirewallWrite, NeedFirewallZones:
+		return []string{CapFirewall}
+	case NeedDNSWrite:
+		return []string{CapDNS}
+	case NeedNetworkWrite:
+		return []string{CapNetwork}
+	case NeedLVM:
+		return []string{CapStorage}
+	default:
+		return []string{requirement}
+	}
+}
+
+// FeatureBehind names the feature a requirement asks of its adapter, and the
+// empty string when the requirement is about the adapter itself. A host can
+// hold the adapter and not the feature - apt without repair, firewalld without
+// zones - and then the honest sentence is about the feature, not about a
+// package that is missing somewhere else in the family.
+func FeatureBehind(requirement string) string {
+	switch requirement {
+	case NeedPackageRepair:
+		return "repair"
+	case NeedNetworkWrite, NeedDNSWrite, NeedFirewallWrite:
+		return "write"
+	case NeedFirewallZones:
+		return "zones"
+	case NeedLVM:
+		return "lvm"
+	default:
+		return ""
+	}
+}
+
 // Health is the minimal set of signals from a heartbeat.
 type Health struct {
 	FailedUnits            *uint32

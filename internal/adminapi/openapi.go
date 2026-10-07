@@ -948,6 +948,26 @@ var responseSchemas = map[string]map[string]any{
 			"count": count(), "from": timestamp(), "to": timestamp(),
 		},
 	},
+	"GET /api/v1/fleet/readiness": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"hosts": count(), "silent": count(),
+			"operations": count(), "unorderable": count(),
+			"gaps": map[string]any{"type": "array", "items": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"requirement": str(), "satisfied": count(), "nowhere": flag(),
+					"operations": map[string]any{"type": "array", "items": str()},
+					"hosts": map[string]any{"type": "array", "items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"id": str(), "hostname": str(), "reason": str(), "silent": flag(),
+						},
+					}},
+				},
+			}},
+		},
+	},
 	"GET /api/v1/pki": map[string]any{
 		"type": "object",
 		"properties": map[string]any{

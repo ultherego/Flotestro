@@ -229,6 +229,7 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "GET /api/v1/openapi.json", s.handleOpenAPI)
 	s.route(mux, "GET /api/v1/capabilities", s.handleCapabilities)
 	s.route(mux, "GET /metrics", s.handleMetrics)
+	s.route(mux, "GET /api/v1/fleet/readiness", s.handleFleetReadiness)
 	s.route(mux, "GET /api/v1/pki", s.handlePKIStatus)
 	s.route(mux, "POST /api/v1/pki/prepare", s.handlePrepareCA)
 	s.route(mux, "POST /api/v1/pki/activate", s.handleActivateCA)
