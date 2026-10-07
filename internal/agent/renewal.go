@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -49,6 +50,10 @@ func checkInterval(notAfter, notBefore time.Time) time.Duration {
 	return interval
 }
 
+// storeCheckInterval is how often the loop reads the generation store, apart
+// from the deadline of the certificate it holds.
+const storeCheckInterval = time.Minute
+
 // renewalRetryInterval applies after a failed attempt. The centre may be
 // unavailable for the moment, and there are still many days until the expiry.
 const renewalRetryInterval = 30 * time.Minute
@@ -72,10 +77,22 @@ func KeepCertificateFresh(ctx context.Context, identity *Identity, options Renew
 	if log == nil {
 		log = slog.Default()
 	}
-	timer := time.NewTimer(checkInterval(identity.NotAfter, leafNotBefore(identity)))
-	defer timer.Stop()
+	// The store is read on a clock of its own. The deadline is consulted on the
+	// certificate's own scale - a month-long one every six hours - and an
+	// operator who renewed by hand must not wait six hours for the host to
+	// present what they issued; reading three local files once a minute costs
+	// nothing next to that.
+	store := time.NewTicker(storeCheckInterval)
+	defer store.Stop()
 
 	for {
+		if adoptStored(identity, options) {
+			log.Info("the identity in the store was renewed by somebody else",
+				"expires", identity.NotAfter.Format(time.RFC3339))
+			if options.OnRenewed != nil {
+				options.OnRenewed()
+			}
+		}
 		if needsRenewal(identity.NotAfter, leafNotBefore(identity)) {
 			if err := renewCertificate(ctx, identity, options); err != nil {
 				log.Warn("the certificate of the agent was not renewed",
@@ -95,13 +112,45 @@ func KeepCertificateFresh(ctx context.Context, identity *Identity, options Renew
 
 		// The interval follows from the current certificate, so after a renewal it
 		// adjusts to the new deadline.
-		timer.Reset(checkInterval(identity.NotAfter, leafNotBefore(identity)))
+		deadline := time.NewTimer(checkInterval(identity.NotAfter, leafNotBefore(identity)))
 		select {
 		case <-ctx.Done():
+			deadline.Stop()
 			return
-		case <-timer.C:
+		case <-deadline.C:
+		case <-store.C:
+			deadline.Stop()
 		}
 	}
+}
+
+// adoptStored picks up a certificate somebody else renewed: agentctl renew, a
+// recovery, any writer of the generation store. The loop holds the identity it
+// was started with, so without this it would go on timing off - and the session
+// go on presenting - a certificate the host no longer stores.
+func adoptStored(identity *Identity, options RenewalOptions) bool {
+	if options.StateDir == "" {
+		return false
+	}
+	stored, err := identitystore.New(options.StateDir).Current()
+	if err != nil {
+		// The store answers for itself; a renewal of its own is still due.
+		return false
+	}
+	if sameLeaf(stored.Certificate, identity.Certificate) {
+		return false
+	}
+	*identity = *fromIdentity(stored)
+	return true
+}
+
+// sameLeaf compares the certificates by their bytes: anything else is another
+// certificate, whichever way its deadline runs.
+func sameLeaf(a, b tls.Certificate) bool {
+	if len(a.Certificate) == 0 || len(b.Certificate) == 0 {
+		return false
+	}
+	return bytes.Equal(a.Certificate[0], b.Certificate[0])
 }
 
 // needsRenewal decides on the basis of the remaining share of the validity

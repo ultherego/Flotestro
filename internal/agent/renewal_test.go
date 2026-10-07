@@ -1,9 +1,12 @@
 package agent
 
 import (
+	"bytes"
+	"context"
 	"testing"
 	"time"
 
+	"github.com/ultherego/flotestro/internal/identitystore"
 	"github.com/ultherego/flotestro/internal/pki"
 )
 
@@ -135,5 +138,48 @@ func TestTheCheckIntervalScales(t *testing.T) {
 	// loop.
 	if zero := checkInterval(now, now); zero < minRenewalCheckInterval {
 		t.Errorf("the interval %s risks polling in a loop", zero)
+	}
+}
+
+// An operator renewing out of band - agentctl renew, a recovery - writes a new
+// generation while the daemon runs. The loop took the identity once, at the
+// start, and timed off its deadline for the rest of its life, so the host went
+// on presenting the certificate it had loaded until somebody restarted the
+// service: the renewal the operator had asked for took effect only then, and
+// the lab measurement of a self-renewal passed because a hand had restarted
+// the agent in the middle of it (measured on agent-fedora, 07.10).
+func TestACertificateRenewedOutOfBandIsPickedUp(t *testing.T) {
+	issuer := newFakeIssuer(t)
+	stateDir := t.TempDir()
+	store := identitystore.New(stateDir)
+
+	held := existingGeneration(t, store, issuer.ca)
+	// What the tool writes: the store decides which generation is current, so
+	// this is the certificate the host presents from now on.
+	renewed := existingGeneration(t, store, issuer.ca)
+	if bytes.Equal(held.Certificate.Certificate[0], renewed.Certificate.Certificate[0]) {
+		t.Fatal("the store gave the same certificate twice; the test proves nothing")
+	}
+
+	identity := fromIdentity(held)
+	var adopted []byte
+	signalled := make(chan struct{}, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go KeepCertificateFresh(ctx, identity, RenewalOptions{
+		StateDir: stateDir,
+		OnRenewed: func() {
+			adopted = append([]byte(nil), identity.Certificate.Certificate[0]...)
+			signalled <- struct{}{}
+		},
+	})
+
+	select {
+	case <-signalled:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the agent kept the identity it started with although the store held another one")
+	}
+	if !bytes.Equal(adopted, renewed.Certificate.Certificate[0]) {
+		t.Fatal("the agent broke its session over a certificate that is not the one the store holds")
 	}
 }
