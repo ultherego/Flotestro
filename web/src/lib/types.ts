@@ -196,6 +196,38 @@ export type HostGroup = {
   unresolvable?: string;
 };
 
+/** One host against one adapter requirement it does not meet. */
+export type ReadinessHost = {
+  id: string;
+  hostname: string;
+  /** What the agent said about the adapter; empty when it said nothing. */
+  reason?: string;
+  /** The host has reported no adapter registry at all: unknown, not absent. */
+  silent?: boolean;
+};
+
+/** One requirement the fleet does not meet everywhere, and what it costs. */
+export type ReadinessGap = {
+  requirement: string;
+  /** The operations that cannot be ordered without it. */
+  operations: string[];
+  hosts: ReadinessHost[];
+  /** How many hosts do meet it. */
+  satisfied: number;
+  /** No visible host meets it at all. */
+  nowhere: boolean;
+};
+
+/** What stands between this fleet and being managed. */
+export type FleetReadiness = {
+  hosts: number;
+  silent: number;
+  operations: number;
+  /** Operations no visible host can be sent. */
+  unorderable: number;
+  gaps: ReadinessGap[];
+};
+
 export type FleetSummary = {
   hosts: number;
   online: number;

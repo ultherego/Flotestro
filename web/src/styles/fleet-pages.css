@@ -66,3 +66,16 @@ td.fp-meter-cell .meter { width: 100%; }
 /* The permissions of the profile: the actions allowed in one area of the
    panel, as chips on one row of the table. */
 .fp-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* The operations one missing adapter blocks, opened under its row. Columns,
+   because fifteen names on one line do not read and fifteen lines are a
+   column of scrolling: the grid fills the width it has and keeps them
+   alphabetical down each column. */
+.fp-op-grid {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 2px 20px;
+}

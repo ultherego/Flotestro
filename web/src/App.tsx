@@ -35,6 +35,7 @@ import { Kernel } from "./pages/host/Kernel";
 import { Time } from "./pages/host/Time";
 import { Power } from "./pages/host/Power";
 import { Security } from "./pages/host/Security";
+import Readiness from "./pages/Readiness";
 import { FleetSecurity } from "./pages/Security";
 import { Secrets } from "./pages/Secrets";
 import { SecretPage } from "./pages/Secret";
@@ -196,6 +197,11 @@ export function App() {
       label: "Operations",
       items: [
         { to: "/jobs", label: "Jobs", icon: "jobs" },
+        // What the fleet cannot be asked to do, and why. It stands at the head
+        // of the operations because it is the question before any of them:
+        // ordering work a host cannot carry out is refused, and this is where
+        // that is read once rather than one refusal at a time.
+        { to: "/readiness", label: "Readiness", icon: "overview" },
         // A read on a handful of hosts at once: a diagnostic, not a change,
         // so it stands next to the jobs it is made of rather than with the
         // campaigns.
@@ -316,6 +322,7 @@ export function App() {
               <Route path="/groups/:id" element={<Groups />} />
               {seesRelays && <Route path="/relays" element={<Relays />} />}
               {seesRelays && <Route path="/relays/:id" element={<RelayPage />} />}
+              <Route path="/readiness" element={<Readiness />} />
               <Route path="/security" element={<FleetSecurity />} />
               {seesPolicies && <Route path="/policies" element={<Policies />} />}
               {seesPolicies && <Route path="/policies/:id" element={<PolicyPage />} />}
