@@ -142,3 +142,25 @@ func TestRenewIgnoresADamagedRecord(t *testing.T) {
 		t.Fatalf("code = %d, renewals = %d: %s", code, *calls, errOut.String())
 	}
 }
+
+// The tool used to close a forced renewal by telling the operator to restart
+// the service, because the daemon really did keep the certificate it had
+// started with. It no longer does - it reads the store once a minute - and an
+// instruction to restart a service that does not need restarting is one an
+// operator follows, breaking every session on the host for nothing.
+func TestRenewDoesNotAskForARestartTheProductNoLongerNeeds(t *testing.T) {
+	r, _, _ := testRenewal(t)
+	var out, errOut bytes.Buffer
+	if code := r.run(context.Background(), &out, &errOut); code != 0 {
+		t.Fatalf("code = %d: %s%s", code, out.String(), errOut.String())
+	}
+	said := out.String()
+	if strings.Contains(said, "systemctl restart") {
+		t.Errorf("a forced renewal told the operator to restart the agent:\n%s", said)
+	}
+	// And it does say what happens instead, because silence here reads as "the
+	// certificate is in use already", which it is not for up to a minute.
+	if !strings.Contains(said, "store") {
+		t.Errorf("a forced renewal said nothing about when the agent takes it up:\n%s", said)
+	}
+}

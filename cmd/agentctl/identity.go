@@ -193,6 +193,7 @@ func (r identityReset) run(ctx context.Context, out, errOut io.Writer) int {
 	} else {
 		fmt.Fprintln(out, "Revocation:   the previous certificate stays valid until the panel revokes it (revoke_old_immediately on the recovery order)")
 	}
-	fmt.Fprintln(out, "The running agent keeps its session on the previous certificate; to switch: systemctl restart flotestro-agent.service")
+	// The daemon reads the store once a minute; no restart is owed.
+	fmt.Fprintln(out, "The running agent picks the new certificate up at its next look in the store, within a minute, and ends its current session then.")
 	return 0
 }

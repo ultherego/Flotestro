@@ -121,10 +121,9 @@ func (r renewal) run(ctx context.Context, out, errOut io.Writer) int {
 	fmt.Fprintf(out, "Renewed:      host/%s\n", renewed.HostID)
 	fmt.Fprintf(out, "Gateway:      %s\n", answered)
 	fmt.Fprintf(out, "Certificate:  valid until %s\n", renewed.NotAfter.UTC().Format(time.RFC3339))
-	// The daemon has no local channel to be told about the new generation, and
-	// the previous certificate stays valid until its term - so the session goes
-	// on, and the switch happens at the next start.
-	fmt.Fprintln(out, "The running agent keeps its session on the previous certificate; to switch: systemctl restart flotestro-agent.service")
+	// The daemon has no channel to be told, so it reads the store itself once a
+	// minute. This used to say the switch waited for a restart, and so it did.
+	fmt.Fprintln(out, "The running agent picks the new certificate up at its next look in the store, within a minute, and ends its current session then.")
 	return 0
 }
 

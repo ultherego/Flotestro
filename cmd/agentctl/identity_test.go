@@ -87,7 +87,11 @@ func TestResetReplacesTheIdentityWithTheToken(t *testing.T) {
 		// Revocation is not something this host can do; the operator is
 		// told where the decision lies.
 		"revoked by the panel, not by this host", "revoke_old_immediately",
-		"systemctl restart flotestro-agent.service",
+		// And when the running agent starts using it, which is not "when you
+		// restart it": the daemon reads the store once a minute. This line
+		// asked for the restart until 07.10, and that is what kept the gap in
+		// the renewal loop looking like a property of the tool.
+		"picks the new certificate up at its next look in the store",
 	} {
 		if !strings.Contains(text, line) {
 			t.Fatalf("the output has no %q:\n%s", line, text)
