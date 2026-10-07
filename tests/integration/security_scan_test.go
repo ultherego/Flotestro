@@ -25,10 +25,14 @@ func TestSecurityScanComesFromTheHost(t *testing.T) {
 		notApplicable(t, "agent-debian", "%s does not offer the security adapter", host.Hostname)
 	}
 
+	// The field is "action". It was "action_type" here on the first run, which
+	// is the name the *response* carries, so the panel read an empty action and
+	// refused with unknown_action and the whole list of the ones it knows. The
+	// refusal said exactly what was wrong; the scenario had never run to read
+	// it.
 	job, attempts := h.runOperation(host.ID, map[string]any{
-		"action_type":    "security.scan",
-		"action_version": 1,
-		"payload":        map[string]any{},
+		"action":  "security.scan",
+		"payload": map[string]any{},
 	}, 3*time.Minute)
 	if job.State != "succeeded" {
 		t.Fatalf("the scan ended in state %s: %s", job.State, job.ResultMessage)
@@ -84,9 +88,8 @@ func TestAuditRulesReloadIsOrderedAndRead(t *testing.T) {
 	}
 
 	job, attempts := h.runOperation(target.ID, map[string]any{
-		"action_type":    "security.audit.reload",
-		"action_version": 1,
-		"payload":        map[string]any{},
+		"action":  "security.audit.reload",
+		"payload": map[string]any{},
 	}, 3*time.Minute)
 	if job.State != "succeeded" {
 		t.Fatalf("the reload on %s ended in state %s: %s", target.Hostname, job.State, job.ResultMessage)
