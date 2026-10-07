@@ -5,6 +5,8 @@ package integration
 import (
 	"context"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 // The guard of a CA handover has to know that a host holds the authority that
@@ -37,23 +39,53 @@ func TestTheRecordedTrustGenerationIsWhatTheHostWasHanded(t *testing.T) {
 	// What the panel reports about a prepared authority is the count by that
 	// rule and by no other. A host whose certificate was issued before the
 	// preparation counts as missing however recently it connected.
-	var authorities struct {
-		Authorities []struct {
-			State        string `json:"state"`
-			IssuerID     string `json:"issuer_id"`
-			HostsMissing int    `json:"hosts_missing"`
-		} `json:"authorities"`
+	type authorityView struct {
+		State        string `json:"state"`
+		IssuerID     string `json:"issuer_id"`
+		HostsMissing int    `json:"hosts_missing"`
+		Fingerprint  string `json:"fingerprint"`
 	}
-	h.get("/api/v1/pki", &authorities)
-	issuerID := ""
-	reported := 0
-	for _, authority := range authorities.Authorities {
-		if authority.State == "pending" {
-			issuerID, reported = authority.IssuerID, authority.HostsMissing
+	read := func() (authorityView, bool) {
+		var authorities struct {
+			Authorities []authorityView `json:"authorities"`
+		}
+		h.get("/api/v1/pki", &authorities)
+		for _, authority := range authorities.Authorities {
+			if authority.State == "pending" {
+				return authority, true
+			}
+		}
+		return authorityView{}, false
+	}
+
+	// The scenario brings its own prepared authority when the fleet has none,
+	// and takes it away again. Waiting for one to be lying about is a scenario
+	// that runs on some days and not others: it ended absent() on 07.10 - which
+	// the gate reads as a failure, rightly - because the one laboratory test
+	// that prepares an authority also puts the laboratory back as it was.
+	//
+	// Preparing is not activating. The fleet keeps trusting what it trusts; a
+	// pending authority is exactly the state whose accounting is under test.
+	pending, found := read()
+	if !found {
+		h.do("POST", "/api/v1/pki/prepare", map[string]any{
+			"reason":          "counting the hosts that do not hold a prepared authority yet, integration test",
+			"idempotency_key": uuid.NewString(),
+		}, nil, 201)
+		t.Cleanup(func() {
+			if left, still := read(); still {
+				h.do("DELETE", "/api/v1/pki/"+left.Fingerprint+
+					"?reason=the+laboratory+is+put+back+as+it+was&idempotency_key="+uuid.NewString(),
+					nil, nil, 0)
+			}
+		})
+		if pending, found = read(); !found {
+			t.Fatal("an authority was prepared and the panel reports none pending")
 		}
 	}
+	issuerID, reported := pending.IssuerID, pending.HostsMissing
 	if issuerID == "" {
-		absent(t, "no CA is prepared, so there is nothing to count as missing")
+		t.Fatal("the pending authority carries no issuer identifier")
 	}
 
 	var missing int
