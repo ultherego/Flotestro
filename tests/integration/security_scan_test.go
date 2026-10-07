@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -67,24 +68,33 @@ func TestSecurityScanComesFromTheHost(t *testing.T) {
 // reload nobody read back is a change nobody saw.
 func TestAuditRulesReloadIsOrderedAndRead(t *testing.T) {
 	h := newHarness(t)
+	// A host where the reload has something to load. Offering the adapter is
+	// not enough and asking only that was the first version's mistake: it took
+	// the first host that offers it, which was agent-arch, where the daemon is
+	// not running and /etc/audit/rules.d is empty. The reload there did exactly
+	// what it could - nothing - and the panel refused to call that verified,
+	// correctly. Measured across the fleet on 07.10: fedora active with one
+	// rule in the kernel, ubuntu active with none, arch inactive with none,
+	// debian without the daemon at all.
 	var target *hostView
+	var before securitySnapshot
 	for _, host := range h.hosts() {
-		if host.ConnectionState != "online" {
+		if host.ConnectionState != "online" || !hasCapability(host, "security.audit") {
 			continue
 		}
-		if hasCapability(host, "security.audit") {
-			candidate := host
-			target = &candidate
-			break
+		snapshot := hostSecuritySnapshot(t, h, host.ID)
+		if !snapshot.Audit.Present || snapshot.Audit.Active == nil || !*snapshot.Audit.Active {
+			continue
 		}
+		if snapshot.Audit.RulesLoaded == nil || *snapshot.Audit.RulesLoaded == 0 {
+			continue
+		}
+		candidate := host
+		target, before = &candidate, snapshot
+		break
 	}
 	if target == nil {
-		notApplicable(t, "agent-fedora", "no online host of this run offers the security.audit adapter")
-	}
-
-	before := hostSecuritySnapshot(t, h, target.ID)
-	if !before.Audit.Present {
-		notApplicable(t, "agent-fedora", "%s offers the adapter and reports no audit daemon", target.Hostname)
+		absent(t, "no online host runs an audit daemon with a rule in the kernel, so a reload has nothing to load")
 	}
 
 	job, attempts := h.runOperation(target.ID, map[string]any{
@@ -106,8 +116,61 @@ func TestAuditRulesReloadIsOrderedAndRead(t *testing.T) {
 	}
 	if after.Audit.RulesLoaded == nil {
 		t.Error("after a reload the host reports no number of loaded rules")
+	} else if before.Audit.RulesLoaded != nil && *after.Audit.RulesLoaded < *before.Audit.RulesLoaded {
+		// A reload that ends with fewer rules than it began with has taken
+		// protection off the host, which is the direction that matters.
+		t.Errorf("%s knew %d audit rules and knows %d after the reload",
+			target.Hostname, *before.Audit.RulesLoaded, *after.Audit.RulesLoaded)
 	}
 	if after.Audit.Active == nil {
 		t.Error("after a reload the host does not say whether the daemon is active")
+	}
+}
+
+// TestAReloadThatLoadsNothingIsNotCalledVerified is the other side, and it is
+// the one the fleet actually offers: a host whose audit daemon knows no rule.
+// The reload runs - there is nothing wrong with the host - and the panel
+// refuses to call the result verified, because "the kernel knows no audit rule
+// after the reload" is not the state an operator asked for when they ordered
+// the rules reloaded.
+//
+// Written on 07.10 after the positive case was pointed at agent-arch by
+// mistake and this is what came back. A behaviour measured and then left
+// undescribed is a behaviour nobody is holding to.
+func TestAReloadThatLoadsNothingIsNotCalledVerified(t *testing.T) {
+	h := newHarness(t)
+	var target *hostView
+	for _, host := range h.hosts() {
+		if host.ConnectionState != "online" || !hasCapability(host, "security.audit") {
+			continue
+		}
+		snapshot := hostSecuritySnapshot(t, h, host.ID)
+		if !snapshot.Audit.Present {
+			continue
+		}
+		if snapshot.Audit.RulesLoaded != nil && *snapshot.Audit.RulesLoaded > 0 {
+			continue
+		}
+		candidate := host
+		target = &candidate
+		break
+	}
+	if target == nil {
+		absent(t, "every online host with an audit daemon already knows a rule, so none can show an empty reload")
+	}
+
+	job, _ := h.runOperation(target.ID, map[string]any{
+		"action":  "security.audit.reload",
+		"payload": map[string]any{},
+	}, 3*time.Minute)
+	if job.State == "succeeded" {
+		t.Fatalf("the reload on %s loaded no rule and the panel called it succeeded", target.Hostname)
+	}
+	// And the refusal says what is missing rather than failing blankly: the
+	// difference between "it did not work" and "the host now knows no rule" is
+	// the whole value of the verifier.
+	if !strings.Contains(job.ResultMessage, "audit rule") {
+		t.Errorf("the result of an empty reload on %s says %q, which does not name the rules",
+			target.Hostname, job.ResultMessage)
 	}
 }
