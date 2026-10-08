@@ -264,11 +264,18 @@ hr { border: 0; border-top: 1px solid var(--surface1); margin: 3rem 0; }
 .content > ul,
 .content > ol,
 .content > dl,
+.prose { max-width: var(--measure); }
+
+/* The front page does not hold its paragraphs to a reading measure. On a
+   documentation page that measure is right - those are pages somebody reads
+   from the top. Here a paragraph sits between a table and a diagram that both
+   run the full width, and a column of seventy characters beside them reads as
+   a column that failed to fill, not as a kindness to the eye. */
 .band > p,
 .band > ul,
 .band > ol,
 .band > dl,
-.prose { max-width: var(--measure); }
+.band > .prose { max-width: none; }
 
 .site-footer {
   background: var(--crust);
