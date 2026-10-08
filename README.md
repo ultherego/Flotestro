@@ -54,8 +54,10 @@ docker compose cp control-plane:/var/lib/flotestro/bootstrap-token .
 
 Open <http://localhost:8080>, sign in with the token, and add your first host.
 Every setting has a working default; to serve hosts on other machines, put your
-own address in `.env` — [`env.example`](docker/env.example) lists all of them
-and names the three that matter.
+own address in `.env` — [`env.example`](docker/env.example) carries the three
+that matter for a first installation and the ones most deployments touch after
+it. The whole list is in
+[5. Configuration](https://ultherego.github.io/Flotestro/docs/configuration.html).
 
 **A host:**
 
@@ -77,8 +79,18 @@ printf '%s\n' '[flotestro]' 'name=Flotestro' \
 sudo dnf install flotestro-agent
 ```
 
-For `pacman`, a server line in `/etc/pacman.conf`:
-`Server = https://ultherego.github.io/Flotestro/packages/arch/stable`.
+For `pacman`, the key has to be imported and locally signed before the server
+line, or the database is refused as untrusted:
+
+```bash
+curl -fsS https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc | sudo pacman-key --add -
+sudo pacman-key --lsign-key "$(curl -fsS https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc \
+    | gpg --show-keys --with-colons | awk -F: '/^fpr:/ {print $10; exit}')"
+printf '%s\n' '[flotestro]' 'SigLevel = Required DatabaseRequired' \
+    'Server = https://ultherego.github.io/Flotestro/packages/arch/stable' |
+    sudo tee -a /etc/pacman.conf >/dev/null
+sudo pacman -Sy && sudo pacman -S --noconfirm flotestro-agent
+```
 
 What the repository carries is on [its own pages](https://ultherego.github.io/Flotestro/packages/),
 and the rest is in the
