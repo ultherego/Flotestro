@@ -277,6 +277,14 @@ hr { border: 0; border-top: 1px solid var(--surface1); margin: 3rem 0; }
 .band > dl,
 .band > .prose { max-width: none; }
 
+/* The gallery is eight pictures that run the full width of the column, and
+   every one of them is explained by the line under it. A caption held to
+   seventy characters under an image four times as wide points at the picture
+   from a corner of it. */
+.content--wide > p,
+.content--wide > .prose,
+.content--wide .figure figcaption { max-width: none; }
+
 .site-footer {
   background: var(--crust);
   border-top: 1px solid var(--surface1);
