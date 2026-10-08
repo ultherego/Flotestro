@@ -2568,6 +2568,7 @@ export const pl: Record<string, string> = {
   "The path the panel opens on after signing in, such as /hosts or /jobs; empty for the dashboard.": "Ścieżka, na której panel otwiera się po zalogowaniu, np. /hosts albo /jobs; puste oznacza dashboard.",
   "The payload delivered differs from the one approved.": "Dostarczony payload różni się od zatwierdzonego.",
   "The payload is not valid JSON.": "Payload nie jest poprawnym JSON-em.",
+  "A payload is an object grouped by name, like {\"journal\": {\"lines\": 100}}.": "Payload jest obiektem grupowanym po nazwie, np. {\"journal\": {\"lines\": 100}}.",
   "The pending updates as the hosts last reported them, and the upgrades and campaigns of the period.": "Oczekujące aktualizacje według ostatnich raportów hostów oraz aktualizacje i kampanie z tego okresu.",
   "The plan did not arrive in time.": "Plan nie dotarł na czas.",
   "The plan has to be computed and approved again before a repeat.": "Przed powtórzeniem plan trzeba policzyć i zatwierdzić od nowa.",

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -104,12 +105,10 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var payload opspec.Payload
-	if len(request.Payload) > 0 {
-		if err := json.Unmarshal(request.Payload, &payload); err != nil {
-			problem(w, http.StatusBadRequest, "invalid_payload", "the payload is not valid JSON")
-			return
-		}
+	payload, err := decodePayload(request.Payload)
+	if err != nil {
+		problem(w, http.StatusBadRequest, "invalid_payload", err.Error())
+		return
 	}
 	// A refusal on grounds other than shape - a release whose protocol this panel
 	// does not speak - carries a code of its own, so the interface can tell it
@@ -1008,4 +1007,47 @@ func (s *Server) requestInterrupt(ctx context.Context, job *jobs.Job) {
 		s.log.Debug("interrupt request not sent",
 			"job_id", job.ID, "host_id", job.HostID, "err", err)
 	}
+}
+
+// decodePayload reads the payload of an order and says what is wrong with it
+// when it cannot.
+//
+// The three places that decode a payload all answered "the payload is not valid
+// JSON", and for the commonest mistake that is false: an operation's payload is
+// grouped by name - {"unit":{"unit":"cron.service"}} - and a caller who sends
+// the fields unwrapped - {"unit":"cron.service"} - has written perfectly valid
+// JSON of the wrong shape. Told that their JSON is broken, they go looking for a
+// missing quote. The validator beyond this point is already plain ("the
+// operation unit.restart requires a unit payload"); this is the one answer on
+// the way to it that pointed at the wrong thing.
+func decodePayload(raw json.RawMessage) (opspec.Payload, error) {
+	var payload opspec.Payload
+	if len(raw) == 0 {
+		return payload, nil
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		var mismatch *json.UnmarshalTypeError
+		if errors.As(err, &mismatch) && mismatch.Field != "" {
+			return payload, fmt.Errorf(
+				"the payload field %q takes %s and the order gave %s; the payload of an "+
+					"operation is grouped by name, as {%q:{...}}, and the groups are in the "+
+					"OpenAPI document under components.schemas.Payload",
+				mismatch.Field, mismatch.Type, mismatch.Value, payloadGroup(mismatch.Field))
+		}
+		var syntax *json.SyntaxError
+		if errors.As(err, &syntax) {
+			return payload, fmt.Errorf("the payload is not valid JSON: %w", err)
+		}
+		return payload, fmt.Errorf("the payload does not have the shape of a payload: %w", err)
+	}
+	return payload, nil
+}
+
+// payloadGroup is the group a field belongs to: the first segment of the path
+// the decoder reports, so a nested field still names the group to wrap.
+func payloadGroup(field string) string {
+	if cut := strings.IndexByte(field, '.'); cut > 0 {
+		return field[:cut]
+	}
+	return field
 }

@@ -90,6 +90,7 @@
       <h2 class="sidebar__title">Procedures</h2>
       <ul class="sidebar__list">
         <li><a href="runbooks.html">10. Runbooks</a></li>
+        <li><a href="examples.html">11. Worked examples</a></li>
       </ul>
     </nav>
   </aside>
@@ -99,6 +100,7 @@
 <p class="lede">Flotestro has no &ldquo;run this command&rdquo; action. Every change and every read is one of 128 typed operations, each with its own permission, its own risk level, its own lock on the host and its own payload. This page is the whole registry, transcribed from <code>internal/opspec/</code>; the panel serves the same list at <code>GET /api/v1/actions</code>.</p>
     <ul class="linkrow">
       <li><a href="#reading">How to read an entry</a></li>
+      <li><a href="#envelope">The payload, and the order it travels in</a></li>
       <li><a href="#risk">Risk levels</a></li>
       <li><a href="#fresh-auth">Fresh authentication and typing the target</a></li>
       <li><a href="#extra-permissions">Permissions an order needs beyond the operation's own</a></li>
@@ -147,6 +149,16 @@
 <tr><td>Rollback</td><td>What way back exists after the change landed.</td></tr>
 <tr><td>Retry</td><td>Whether repeating the same thing can succeed.</td></tr>
 </tbody></table></div>
+<h2 id="envelope">The payload, and the order it travels in</h2>
+<p>Every entry below names a <em>Payload</em>, and that name is a group: the fields go inside an object called after it, not beside the action. An order for <a href="#op-unit-restart"><code>unit.restart</code></a>, whose payload is <a href="#payload-unit"><code>unit</code></a>, is therefore:</p>
+<pre><code>POST /api/v1/hosts/{id}/operations
+
+{
+  "action": "unit.restart",
+  "payload": { "unit": { "unit": "cron.service" } }
+}</code></pre>
+<p>Three things about that body are worth saying once rather than per entry. The operation is named in <code>action</code> going in, and the job record reports it as <code>action_type</code> coming back. The payload is grouped, so the fields of <a href="#payload-unit"><code>unit</code></a> sit inside <code>"unit"</code> — unwrapped fields are valid JSON of the wrong shape, and the panel says so rather than pretending the JSON is broken. And an operation that needs a reason, a typed target name or an approval takes those beside the payload, not inside it: <code>reason</code>, <code>target_confirmation</code>, <code>requires_approval</code>.</p>
+<p>The fields of every group, with their types and which are required, are in the document the panel generates from its own code — <code>GET /api/v1/openapi.json</code>, under <code>components.schemas.Payload</code>. <a href="examples.html">11. Worked examples</a> walks the whole journey: the order, the job, the attempt the host answered with, and the refusals on the way.</p>
 <h2 id="risk">Risk levels</h2>
 <div class="table-scroll">
 <table>

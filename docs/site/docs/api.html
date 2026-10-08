@@ -90,13 +90,14 @@
       <h2 class="sidebar__title">Procedures</h2>
       <ul class="sidebar__list">
         <li><a href="runbooks.html">10. Runbooks</a></li>
+        <li><a href="examples.html">11. Worked examples</a></li>
       </ul>
     </nav>
   </aside>
 
   <main class="content">
 <h1>8. API</h1>
-<p class="lede">Everything the panel does, a program can do. The API is the same surface the web panel runs on: 230 routes under <code>/api/v1</code>, answered in JSON, authorised by the same permissions and written to the same audit trail. This page is the route table as <code>internal/adminapi/adminapi.go</code> registers it and the conventions as <code>internal/adminapi/openapi.go</code> describes them; the panel serves its own OpenAPI document at <code>GET /api/v1/openapi.json</code>.</p>
+<p class="lede">Everything the panel does, a program can do. The API is the same surface the web panel runs on: 230 routes under <code>/api/v1</code>, answered in JSON, authorised by the same permissions and written to the same audit trail. This page is the route table as <code>internal/adminapi/adminapi.go</code> registers it and the conventions as <code>internal/adminapi/openapi.go</code> describes them; the panel serves its own OpenAPI document at <code>GET /api/v1/openapi.json</code>. For calls to paste into a terminal, with the answers they gave, see <a href="examples.html">11. Worked examples</a>.</p>
     <ul class="linkrow">
       <li><a href="#basics">The shape of the interface</a></li>
       <li><a href="#authentication">Authentication</a></li>

@@ -162,6 +162,17 @@ const DEFAULT_PAYLOADS: Record<string, unknown> = {
   "unit.status": {},
 };
 
+/**
+ * What to say about the payload field. A shape that is not an object is not
+ * broken JSON, and saying so is the difference between the operator fixing the
+ * wrapping and hunting for a typo.
+ */
+export function payloadHint(t: (text: string) => string, payload: { error?: string; shape?: boolean }): string {
+  if (!payload.error) return t("The same payload the host page sends for this read.");
+  if (payload.shape) return t("A payload is an object grouped by name, like {\"journal\": {\"lines\": 100}}.");
+  return t("The payload is not valid JSON.");
+}
+
 type TargetMode = "filters" | "expression" | "hosts";
 
 /**
@@ -266,7 +277,7 @@ function NewRead({ onDone }: { onDone: () => void }) {
         <Field label={t("Reason")} hint={t("Optional; it goes to the audit log next to the order.")}>
           <input placeholder={t("e.g. checking the leak on the web tier")} value={reason} onChange={(e) => setReason(e.target.value)} />
         </Field>
-        <Field label={t("Payload")} hint={payload.error ? t("The payload is not valid JSON.") : t("The same payload the host page sends for this read.")} wide>
+        <Field label={t("Payload")} hint={payloadHint(t, payload)} wide>
           <textarea rows={6} className="mono" value={payloadText} onChange={(e) => setPayloadText(e.target.value)} spellCheck={false} />
         </Field>
       </FieldGrid>
@@ -323,12 +334,15 @@ function NewRead({ onDone }: { onDone: () => void }) {
 }
 
 /** The payload text as an object, or the reason it is not one. */
-function parsePayload(text: string): { value?: Record<string, unknown>; error?: string } {
+export function parsePayload(text: string): { value?: Record<string, unknown>; error?: string; shape?: boolean } {
   if (!text.trim()) return { value: {} };
   try {
     const parsed: unknown = JSON.parse(text);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return { value: parsed as Record<string, unknown> };
-    return { error: "not an object" };
+    // Valid JSON that is not an object. Calling that "not valid JSON" sends the
+    // operator looking for a missing quote in text that has none; the panel
+    // answered that way until 08.10, as the API did.
+    return { error: "not an object", shape: true };
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) };
   }

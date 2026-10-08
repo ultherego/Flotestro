@@ -271,12 +271,10 @@ func (s *Server) handleCreateRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var payload opspec.Payload
-	if len(request.Payload) > 0 {
-		if err := json.Unmarshal(request.Payload, &payload); err != nil {
-			problem(w, http.StatusBadRequest, "invalid_payload", "the payload is not valid JSON")
-			return
-		}
+	payload, err := decodePayload(request.Payload)
+	if err != nil {
+		problem(w, http.StatusBadRequest, "invalid_payload", err.Error())
+		return
 	}
 	if err := opspec.Validate(action, payload); err != nil {
 		problem(w, http.StatusBadRequest, "invalid_payload", err.Error())
