@@ -705,3 +705,78 @@ ENTRYPOINT ["/usr/local/bin/flotestro-control-plane"]
 		t.Errorf("an image whose stages call no tool at all passed in silence: %v", findings)
 	}
 }
+
+// --- site-links ---
+
+// linkedSite is two pages that point at each other, at an anchor, at an asset
+// and at the package repository the release writes.
+func linkedSite(t *testing.T, apiBody string) string {
+	t.Helper()
+	root := t.TempDir()
+	write(t, root, "docs/site/style.css", "body{}")
+	write(t, root, "docs/site/img/logo.webp", "binary")
+	write(t, root, "docs/site/index.html",
+		`<a href="docs/api.html">API</a><a href="packages/">Packages</a><a href="style.css">s</a>`)
+	write(t, root, "docs/site/docs/api.html", apiBody)
+	write(t, root, "docs/site/pl/index.html", `<a href="../docs/api.html">API</a>`)
+	write(t, root, "docs/site/pl/docs/api.html", `<a href="../../docs/api.html">EN</a>`)
+	return root
+}
+
+func TestSiteLinksPassesWhenEveryLinkLands(t *testing.T) {
+	root := linkedSite(t, `<h2 id="paging">Paging</h2><a href="#paging">up</a><a href="../index.html">home</a>`)
+	findings, err := siteLinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("a site whose links all land was reported: %v", findings)
+	}
+}
+
+// The reason this check exists: a heading renamed in one chapter and linked
+// from another is published broken, because the site has no build step and
+// nothing between the edit and the publishing branch asks the question.
+func TestSiteLinksSeesAnAnchorNothingDeclares(t *testing.T) {
+	root := linkedSite(t, `<h2 id="paging-renamed">Paging</h2><a href="#paging">up</a>`)
+	findings, err := siteLinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	only(t, findings, `links to "#paging"`)
+}
+
+func TestSiteLinksSeesAPageThatIsNotThere(t *testing.T) {
+	root := linkedSite(t, `<a href="roles.html">Roles</a>`)
+	findings, err := siteLinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	only(t, findings, `links to "roles.html"`)
+}
+
+// The package repository is written onto the publishing branch by the release,
+// so a link to it is not this tree's to resolve - and an asset that is in the
+// tree is not a page, which is no reason to call it missing.
+func TestSiteLinksLeavesTheReleasesOwnPagesAndTheAssetsAlone(t *testing.T) {
+	root := linkedSite(t, `<a href="../packages/">repo</a><a href="../style.css">s</a><a href="../img/logo.webp">l</a>`)
+	findings, err := siteLinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("the package repository or an asset was reported: %v", findings)
+	}
+}
+
+func TestSiteLinksRefusesToPassOverNothing(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "docs", "site"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	findings, err := siteLinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	only(t, findings, "would pass over nothing")
+}

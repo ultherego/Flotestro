@@ -70,7 +70,15 @@
       <h2 class="sidebar__title">Manual</h2>
       <ul class="sidebar__list">
         <li><a href="./">Contents</a></li>
-        <li><a href="introduction.html" aria-current="page">1. Introduction</a></li>
+        <li><a href="introduction.html" aria-current="page">1. Introduction</a>
+          <ul class="sidebar__sections">
+            <li><a href="#what">What it is</a></li>
+            <li><a href="#manages">What it manages</a></li>
+            <li><a href="#doctrine">The doctrine</a></li>
+            <li><a href="#not">What it does not do</a></li>
+            <li><a href="#who">Who uses it</a></li>
+          </ul>
+        </li>
         <li><a href="architecture.html">2. Architecture</a></li>
         <li><a href="installation.html">3. Installation</a></li>
         <li><a href="concepts.html">4. How a change happens</a></li>
@@ -104,13 +112,6 @@
     an agent that runs unprivileged and hands the privileged part of a change to
     a root helper with a fixed repertoire.</p>
 
-    <ul class="linkrow">
-      <li><a href="#what">What it is</a></li>
-      <li><a href="#manages">What it manages</a></li>
-      <li><a href="#doctrine">The doctrine</a></li>
-      <li><a href="#not">What it does not do</a></li>
-      <li><a href="#who">Who uses it</a></li>
-    </ul>
 
     <h2 id="what">What Flotestro is</h2>
 

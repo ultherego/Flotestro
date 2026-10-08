@@ -71,7 +71,18 @@
       <ul class="sidebar__list">
         <li><a href="./">Contents</a></li>
         <li><a href="introduction.html">1. Introduction</a></li>
-        <li><a href="architecture.html" aria-current="page">2. Architecture</a></li>
+        <li><a href="architecture.html" aria-current="page">2. Architecture</a>
+          <ul class="sidebar__sections">
+            <li><a href="#parts">The parts</a></li>
+            <li><a href="#wires">Who talks to whom</a></li>
+            <li><a href="#cp">The control plane</a></li>
+            <li><a href="#agent">The agent</a></li>
+            <li><a href="#helper">The root helper</a></li>
+            <li><a href="#relay">The relay</a></li>
+            <li><a href="#data">The database and the state</a></li>
+            <li><a href="#why-native">Why the agent is a package</a></li>
+          </ul>
+        </li>
         <li><a href="installation.html">3. Installation</a></li>
         <li><a href="concepts.html">4. How a change happens</a></li>
       </ul>
@@ -104,16 +115,6 @@
     identity to the next, and each one has a state that is not the other's
     backup.</p>
 
-    <ul class="linkrow">
-      <li><a href="#parts">The parts</a></li>
-      <li><a href="#wires">Who talks to whom</a></li>
-      <li><a href="#cp">The control plane</a></li>
-      <li><a href="#agent">The agent</a></li>
-      <li><a href="#helper">The root helper</a></li>
-      <li><a href="#relay">The relay</a></li>
-      <li><a href="#data">The database and the state</a></li>
-      <li><a href="#why-native">Why the agent is a package</a></li>
-    </ul>
 
     <h2 id="parts">The parts</h2>
 

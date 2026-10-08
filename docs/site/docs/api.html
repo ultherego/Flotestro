@@ -82,7 +82,34 @@
         <li><a href="configuration.html">5. Configuration</a></li>
         <li><a href="operations.html">6. Operations</a></li>
         <li><a href="errors.html">7. Errors and refusals</a></li>
-        <li><a href="api.html" aria-current="page">8. API</a></li>
+        <li><a href="api.html" aria-current="page">8. API</a>
+          <ul class="sidebar__sections">
+            <li><a href="#basics">The shape of the interface</a></li>
+            <li><a href="#authentication">Authentication</a></li>
+            <li><a href="#stepup">Step-up: the operations of the greatest impact</a></li>
+            <li><a href="#problem">The shape of a refusal</a></li>
+            <li><a href="#paging">Paging and cursors</a></li>
+            <li><a href="#sorting">Sorting</a></li>
+            <li><a href="#revisions">Revisions, ETag and If-Match</a></li>
+            <li><a href="#idempotency">Idempotency keys</a></li>
+            <li><a href="#exports">Exports and streams</a></li>
+            <li><a href="#request-id">Request identifiers</a></li>
+            <li><a href="#routes">The routes</a></li>
+            <li><a href="#routes-service">Service endpoints</a></li>
+            <li><a href="#routes-caller">Signing in, and the caller's own records</a></li>
+            <li><a href="#routes-fleet">The fleet at a glance</a></li>
+            <li><a href="#routes-hosts">Hosts</a></li>
+            <li><a href="#routes-enrollment">Enrollment, relays and the fleet CA</a></li>
+            <li><a href="#routes-work">Operations, reads and campaigns</a></li>
+            <li><a href="#routes-compliance">Policies, compliance, vulnerabilities, certificates and backups</a></li>
+            <li><a href="#routes-monitoring">Monitoring and notifications</a></li>
+            <li><a href="#routes-directory">The directory</a></li>
+            <li><a href="#routes-access">Identities, teams, roles and secrets</a></li>
+            <li><a href="#routes-audit">The audit trail</a></li>
+            <li><a href="#routes-support">Support bundles</a></li>
+            <li><a href="#filters">The filters of the big lists</a></li>
+          </ul>
+        </li>
         <li><a href="roles.html">9. Roles and permissions</a></li>
       </ul>
     </nav>
@@ -98,32 +125,6 @@
   <main class="content">
 <h1>8. API</h1>
 <p class="lede">Everything the panel does, a program can do. The API is the same surface the web panel runs on: 230 routes under <code>/api/v1</code>, answered in JSON, authorised by the same permissions and written to the same audit trail. This page is the route table as <code>internal/adminapi/adminapi.go</code> registers it and the conventions as <code>internal/adminapi/openapi.go</code> describes them; the panel serves its own OpenAPI document at <code>GET /api/v1/openapi.json</code>. For calls to paste into a terminal, with the answers they gave, see <a href="examples.html">11. Worked examples</a>.</p>
-    <ul class="linkrow">
-      <li><a href="#basics">The shape of the interface</a></li>
-      <li><a href="#authentication">Authentication</a></li>
-      <li><a href="#stepup">Step-up: the operations of the greatest impact</a></li>
-      <li><a href="#problem">The shape of a refusal</a></li>
-      <li><a href="#paging">Paging and cursors</a></li>
-      <li><a href="#sorting">Sorting</a></li>
-      <li><a href="#revisions">Revisions, ETag and If-Match</a></li>
-      <li><a href="#idempotency">Idempotency keys</a></li>
-      <li><a href="#exports">Exports and streams</a></li>
-      <li><a href="#request-id">Request identifiers</a></li>
-      <li><a href="#routes">The routes</a></li>
-      <li><a href="#routes-service">Service endpoints</a></li>
-      <li><a href="#routes-caller">Signing in, and the caller's own records</a></li>
-      <li><a href="#routes-fleet">The fleet at a glance</a></li>
-      <li><a href="#routes-hosts">Hosts</a></li>
-      <li><a href="#routes-enrollment">Enrollment, relays and the fleet CA</a></li>
-      <li><a href="#routes-work">Operations, reads and campaigns</a></li>
-      <li><a href="#routes-compliance">Policies, compliance, vulnerabilities, certificates and backups</a></li>
-      <li><a href="#routes-monitoring">Monitoring and notifications</a></li>
-      <li><a href="#routes-directory">The directory</a></li>
-      <li><a href="#routes-access">Identities, teams, roles and secrets</a></li>
-      <li><a href="#routes-audit">The audit trail</a></li>
-      <li><a href="#routes-support">Support bundles</a></li>
-      <li><a href="#filters">The filters of the big lists</a></li>
-    </ul>
 <h2 id="basics">The shape of the interface</h2>
 <ul><li>Reads use <code>GET</code>. Plans, operations and campaigns are created with <code>POST</code> and have explicit <code>approve</code>, <code>cancel</code>, <code>pause</code> and <code>resume</code> endpoints of their own.</li><li>Every list is paged on the server.</li><li>Errors are problem objects with a stable code.</li><li>The document describes itself: <code>GET /api/v1/openapi.json</code> is generated from the registered routes, so it can never drift from them.</li><li>The panel listens on <code>FLOTESTRO_ADMIN_ADDR</code>, <code>127.0.0.1:8080</code> by default, in plain HTTP; it is meant to sit behind a reverse proxy that terminates TLS.</li></ul>
 <h2 id="authentication">Authentication</h2>

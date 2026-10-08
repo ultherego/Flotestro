@@ -192,6 +192,11 @@ hr { border: 0; border-top: 1px solid var(--surface1); margin: 3rem 0; }
   position: sticky;
   top: 4.5rem;
   font-size: 0.9375rem;
+  /* The chapter being read opens its own sections here, and Operations has
+     twenty-nine of them: the tree scrolls rather than running off the page. */
+  max-height: calc(100vh - 6rem);
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 .sidebar__group + .sidebar__group { margin-top: 1.75rem; }
@@ -223,6 +228,28 @@ hr { border: 0; border-top: 1px solid var(--surface1); margin: 3rem 0; }
 .sidebar a[aria-current="page"] {
   color: var(--peach);
   border-left-color: var(--peach);
+}
+
+/* The sections of the chapter being read. They are in the tree and not at the
+   top of the text, where they were a wrapped row of small type that the eye
+   reads as a code sample - and where nobody looks for a table of contents. */
+.sidebar__sections {
+  list-style: none;
+  margin: 0.1rem 0 0.6rem;
+  padding: 0;
+  font-size: 0.875rem;
+}
+
+.sidebar__sections a {
+  padding: 0.15rem 0 0.15rem 1.5rem;
+  border-left-color: var(--surface0);
+  color: var(--overlay1);
+  font-weight: 400;
+}
+
+.sidebar__sections a:hover {
+  color: var(--text);
+  border-left-color: var(--surface2);
 }
 
 .content { min-width: 0; }

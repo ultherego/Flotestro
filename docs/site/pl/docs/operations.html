@@ -75,7 +75,39 @@
       <h2 class="sidebar__title">Wykazy</h2>
       <ul class="sidebar__list">
         <li><a href="configuration.html">5. Konfiguracja</a></li>
-        <li><a href="operations.html" aria-current="page">6. Operacje</a></li>
+        <li><a href="operations.html" aria-current="page">6. Operacje</a>
+          <ul class="sidebar__sections">
+            <li><a href="#reading">Jak czytać wpis</a></li>
+            <li><a href="#envelope">Payload i zamówienie, w którym jedzie</a></li>
+            <li><a href="#risk">Poziomy ryzyka</a></li>
+            <li><a href="#fresh-auth">Świeże uwierzytelnienie i wpisanie celu</a></li>
+            <li><a href="#extra-permissions">Uprawnienia, których zlecenie wymaga ponad uprawnienie samej operacji</a></li>
+            <li><a href="#locks">Klasy blokad</a></li>
+            <li><a href="#resources">Scope zasobów na hoście</a></li>
+            <li><a href="#campaigns">Tryby kampanii</a></li>
+            <li><a href="#offline">Polityki offline</a></li>
+            <li><a href="#fanout">Odczyty fan-out</a></li>
+            <li><a href="#verification">Weryfikacja i droga powrotna</a></li>
+            <li><a href="#deprecated">Operacja wycofana</a></li>
+            <li><a href="#catalogue">Katalog operacji</a></li>
+            <li><a href="#group-services">Usługi</a></li>
+            <li><a href="#group-scheduled-jobs">Zadania cykliczne</a></li>
+            <li><a href="#group-packages">Pakiety</a></li>
+            <li><a href="#group-files">Pliki</a></li>
+            <li><a href="#group-network">Sieć</a></li>
+            <li><a href="#group-security">Bezpieczeństwo</a></li>
+            <li><a href="#group-storage">Pamięć masowa</a></li>
+            <li><a href="#group-containers">Kontenery</a></li>
+            <li><a href="#group-system">System</a></li>
+            <li><a href="#group-accounts">Konta</a></li>
+            <li><a href="#group-directory">Katalog</a></li>
+            <li><a href="#group-certificates">Certyfikaty</a></li>
+            <li><a href="#group-backups">Kopie zapasowe</a></li>
+            <li><a href="#group-logs-and-processes">Logi i procesy</a></li>
+            <li><a href="#group-inventory-and-monitoring">Inventory i monitoring</a></li>
+            <li><a href="#payloads">Kształty payloadów</a></li>
+          </ul>
+        </li>
         <li><a href="errors.html">7. Błędy i odmowy</a></li>
         <li><a href="api.html">8. API</a></li>
         <li><a href="roles.html">9. Role i uprawnienia</a></li>
@@ -93,37 +125,6 @@
   <main class="content">
 <h1>6. Wykaz operacji</h1>
 <p class="lede">Flotestro nie ma akcji &bdquo;wykonaj to polecenie&rdquo;. Każda zmiana i każdy odczyt to jedna ze 128 typowanych operacji, z własnym uprawnieniem, własnym poziomem ryzyka, własną blokadą na hoście i własnym payloadem. Ta strona to cały rejestr, przepisany z <code>internal/opspec/</code>; panel podaje tę samą listę pod <code>GET /api/v1/actions</code>.</p>
-    <ul class="linkrow">
-      <li><a href="#reading">Jak czytać wpis</a></li>
-      <li><a href="#envelope">Payload i zamówienie, w którym jedzie</a></li>
-      <li><a href="#risk">Poziomy ryzyka</a></li>
-      <li><a href="#fresh-auth">Świeże uwierzytelnienie i wpisanie celu</a></li>
-      <li><a href="#extra-permissions">Uprawnienia, których zlecenie wymaga ponad uprawnienie samej operacji</a></li>
-      <li><a href="#locks">Klasy blokad</a></li>
-      <li><a href="#resources">Scope zasobów na hoście</a></li>
-      <li><a href="#campaigns">Tryby kampanii</a></li>
-      <li><a href="#offline">Polityki offline</a></li>
-      <li><a href="#fanout">Odczyty fan-out</a></li>
-      <li><a href="#verification">Weryfikacja i droga powrotna</a></li>
-      <li><a href="#deprecated">Operacja wycofana</a></li>
-      <li><a href="#catalogue">Katalog operacji</a></li>
-      <li><a href="#group-services">Usługi</a></li>
-      <li><a href="#group-scheduled-jobs">Zadania cykliczne</a></li>
-      <li><a href="#group-packages">Pakiety</a></li>
-      <li><a href="#group-files">Pliki</a></li>
-      <li><a href="#group-network">Sieć</a></li>
-      <li><a href="#group-security">Bezpieczeństwo</a></li>
-      <li><a href="#group-storage">Pamięć masowa</a></li>
-      <li><a href="#group-containers">Kontenery</a></li>
-      <li><a href="#group-system">System</a></li>
-      <li><a href="#group-accounts">Konta</a></li>
-      <li><a href="#group-directory">Katalog</a></li>
-      <li><a href="#group-certificates">Certyfikaty</a></li>
-      <li><a href="#group-backups">Kopie zapasowe</a></li>
-      <li><a href="#group-logs-and-processes">Logi i procesy</a></li>
-      <li><a href="#group-inventory-and-monitoring">Inventory i monitoring</a></li>
-      <li><a href="#payloads">Kształty payloadów</a></li>
-    </ul>
 <h2 id="reading">Jak czytać wpis</h2>
 <p>Każda operacja deklaruje ten sam zestaw faktów. To nie są wskazówki: panel, agent i root helper podejmują na ich podstawie decyzje.</p>
 <div class="table-scroll">
