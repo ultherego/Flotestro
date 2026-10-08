@@ -4,167 +4,11 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [semantic versioning](https://semver.org/). Dates are the
 day the tag was published.
 
-## [0.61.5] - 2026-10-02
+## [0.62.0] - 2026-10-08
 
-Two findings of the code audit, in what a signed capability binds, and one
-scenario that read two rows and assumed they were sampled together.
-
-### Fixed
-
-- A capability binds the order of the three lists where the order is the meaning:
-  the argv of a scheduled command, the resolvers a host asks in turn, and the
-  search domains it appends in turn. The comparison sorted both sides first,
-  which is right for a set of packages or images and wrong here - a request
-  naming the same elements in another order satisfied a capability signed for the
-  first order, so the panel approved one command and the host would have run
-  another, approved one resolver first and the host would have asked another.
-- A relay is refused a wildcard among its names. They come from the relay's own
-  first certificate request and stay in the registry from then on, so a relay
-  asking for `*.example.test` would be issued a certificate standing for every
-  host and every other relay of that domain, and would keep it at every renewal.
-- The budget scenario asks the job once more before calling the budget wrong. The
-  state of a job and the state of a budget are two reads of two different rows and
-  the lease is given back the moment the job ends, so a job that finished between
-  them left a budget that rightly listed nobody. The product was not what was
-  wrong: the lease is taken before the job is admitted, so no job ever runs
-  without its place in the budget.
-
-
-## [0.61.4] - 2026-10-01
-
-A patch over 0.61.3 for one defect of the gate's own making, and the rule that
-keeps it from coming back.
-
-### Fixed
-
-- The first-run checklist is mirrored by hand in the integration suite, which
-  asserts the order of its steps, and that suite is behind a build tag - so
-  `go vet ./...` never compares the two and a step added on the server is caught
-  only when the gate reaches the integration stage. `installation_keys` did
-  exactly that: the run was forty-nine minutes old when it said "expected 11
-  steps, got 12". The mirror names the step now, and `shipcheck` gained a rule
-  that compares the two files in milliseconds, with the negative control to
-  prove it fails when they disagree.
-
-
-## [0.61.3] - 2026-10-01
-
-What a day of installing the product the documented way found after 0.61.2, and
-two things the panel knew and did not say.
-
-### Fixed
-
-- The checklist says where the keys of the installation live. The fleet CA, the
-  secret store and the helper's signing key are either files under the state
-  directory or rows in the database, and every other step looks the same either
-  way - so an installation whose keys are files reported itself finished, and the
-  difference is the whole of what losing that machine costs. For files it is a
-  warning, because a backup of the database alone cannot bring such an
-  installation back.
-- A sign-in that carries no permission gets a page instead of an empty panel.
-  Every section hides itself for want of a permission, so a first sign-in through
-  an identity provider whose groups nobody had mapped yet rendered the frame
-  around nothing. The checklist knew; the person who had just signed in was not
-  told. Now they are, along with what grants it.
-- `packaging/sign-repo.sh` publishes an architecture-independent package where a
-  host looks for it. A package built `any` went to a directory with a database of
-  its own, and a host reads the one at the root of the channel: signed, indexed
-  and present, it was invisible to every host.
-- The fault-injection test cuts the link where a containerised panel sees it. The
-  rule sat on the input hook, which is where a packet arrives when the panel
-  listens on the machine itself; the documented deployment publishes a port as a
-  DNAT, so the packet is forwarded and never passes input. The scenario had never
-  run on the deployment the documentation describes.
-- The integration suite finds the relay that is running rather than the one
-  enrolled last, and clears the records it makes. Its cleanup deleted the relay
-  row while two other tables referenced it, and the complaint went to the test
-  log, where nothing reads it.
-- The gate's own contract requires the stage that establishes what was tested.
-
-
-## [0.61.2] - 2026-10-01
-
-A second patch from the same run: what installing the product the documented way
-found after 0.61.1 went out, and one defect of the panel that the browser suite
-had been reporting honestly while I took it for a defect of the test.
-
-### Fixed
-
-- Every table in the panel says which column a cell belongs to. The headers were
-  bare `<th>`, which is enough for a reader who can see the table and not enough
-  for one who cannot: a browser decides for itself whether a table carries data or
-  only arranges a layout, and a short table whose headers declare nothing is taken
-  for layout - its headers then stop being headers in the accessibility tree, and
-  a screen reader reads each cell without saying which column it is in. Measured
-  on a page with two rows: five headers in the markup, zero column headers exposed
-  to assistive technology; with `scope` on the same five, all five came back.
-- The quickstart on the site no longer shows an edit that the configuration the
-  panel composes cannot take. It told an operator to point the agent at the panel
-  with two `sed` expressions; the second matched nothing, because the panel writes
-  `gateway_urls` as a list under its own key, so the command changed nothing, said
-  nothing and exited zero. A host configured that way kept whatever address it
-  had. The two settings are shown as the file carries them instead.
-- `packaging/sign-repo.sh` asks for `dpkg-scanpackages` by name, the way it
-  already asked for `gpg`, `rpmsign`, `createrepo_c` and `repo-add`. Without it
-  the apt half - the half that runs first - stopped with a message from the shell,
-  after the signing key had been made and the pool filled.
-- The gate recomputes a laboratory verdict and its own arithmetic could be made to
-  lie: a negative count of failures passed the test for failures, and the number
-  of tests discovered was only compared with zero. Every count must now be a
-  quantity, and the three outcomes have to add up to what was discovered.
-- The fuzz check in CI can tell its two failures apart again. `set -uo pipefail`
-  does not take `-e` off, so the step ended at the first target that exited
-  non-zero - before the verdict that distinguishes an input the fuzzer found from
-  a run that did not fit in its budget, and without printing what the target said.
-
-## [0.61.1] - 2026-10-01
-
-A patch cut from the development line for four defects found by installing the
-product the way the documentation describes it, on hosts built from nothing.
-
-### Fixed
-
-- The `.deb` no longer ships `/etc/flotestro/agent.yaml` as a conffile. The panel
-  composes that file per host and an operator puts it in place before installing
-  the package, so dpkg met a file "created by you" where the package expected its
-  own and asked what to do about it. An automated install has nobody to answer,
-  and the package was left unpacked and unconfigured - which means the service
-  account was never created, so the enrollment that follows could not run at all,
-  and `apt` then refused to repair it without naming a configuration file as the
-  reason. It travels as a template now and the maintainer script writes it only
-  where nothing is there, the way `helper.yaml` beside it always has. Only the
-  `.deb` was affected; the `.rpm` carries the same file as `%config(noreplace)`.
-- The container deployment passes the fourteen settings of the identity provider
-  and of the directory that the panel reads. It passed none of them, so a
-  deployment made the documented way could not be connected to Keycloak or
-  FreeIPA at all: the keys went into `.env` and stopped there, because Compose
-  substitutes from that file and does not hand it to a container. Nothing broke
-  loudly - the panel served without single sign-on and without a directory, and
-  an operator who had filled in `.env` had no reason to suspect otherwise. Both
-  deployment variants carry them, the client secret travels as a path and never
-  as a value, and the four files of the two integrations are named beside the
-  mount each one needs.
-- The helper removes the names its registries carried before its root was
-  translated to English. A rename leaves the old file on every host that ran the
-  earlier build, and nothing read it: an operator reading the state directory
-  took it for something the product writes, and a host upgraded from an older
-  build carried file names under a product whose rule is that every name is
-  English.
-- The install runbook printed an enrollment that cannot run as printed. The
-  command is executed as `flotestro-agent` and the token file it named was
-  written by root, so it answered `permission denied`.
-
-### Changed
-
-- `env.example` documents the settings of the identity provider, which it never
-  did, and groups all of them in sections. It had listed four FreeIPA keys and no
-  OIDC key at all, with the FreeIPA ones under a heading about running your own
-  database.
-- The README gives the `dnf` and `pacman` addresses of the package repository
-  inline, as it already did for `apt`. It had sent a reader to the repository's
-  own pages for those two, and those pages were a stub.
-
-## [0.62.0] - 2026-09-26
+The release this version line waited for. The 0.61.x patches were cut from it
+while it waited, so what follows is this line in full: the chapter written in
+September, and everything measured into it since.
 
 ### Added
 
@@ -200,6 +44,18 @@ product the way the documentation describes it, on hosts built from nothing.
   vocabulary taken from the code rather than restated. The 56 orders still
   described as an unconstrained object are listed in a test that fails when a
   route is added to them, so the count can only fall.
+- A readiness view of the fleet: what stands between these hosts and being
+  managed, grouped by cause rather than by host, with the reason each host
+  gives. The product enforced "unknown is not zero" in every module and had
+  nowhere to show the unknowns; this is that screen.
+- An installation may set how long a relay certificate lives, beside the agent
+  lifetime it already set: `FLOTESTRO_RELAY_CERT_TTL`.
+- The manual gained the chapter it had no equivalent of: worked examples, every
+  request and response run against a live installation - ordering an operation
+  and reading the attempt it answered with, where a payload shape comes from,
+  the refusals a first integration meets, a fan-out read, a campaign from
+  preview to cancellation, idempotency keys, ETags and verifying a webhook
+  signature.
 
 ### Changed
 
@@ -266,6 +122,22 @@ product the way the documentation describes it, on hosts built from nothing.
   process (the pid, the signal and the incarnation), the host's own name, a
   declared container, network or volume, a repository, a backup definition and
   a certificate deployment.
+- A running agent picks up a certificate renewed out of band. The renewal loop
+  took the identity once, at start, and timed every later look off it, so a
+  generation written by `agentctl renew`, by a recovery or by an operator was
+  invisible until somebody restarted the service - and the tool said as much on
+  its way out, which is how the gap stayed looking like an inconvenience of the
+  tool. The loop reads its own store on a clock of its own now, and both
+  commands stopped telling the operator to restart what no longer needs it.
+- A payload of the wrong shape is no longer called invalid JSON. The payload of
+  an operation is grouped by name, and a caller who sends the fields unwrapped
+  has written valid JSON of the wrong shape; told their JSON is broken they go
+  looking for a missing quote in a body that has none. The refusal names the
+  field, what it takes, what arrived and where the groups are written down. The
+  panel repeated the same misnaming in its own payload field, and stopped.
+- An unknown path under `/api/v1/` answers 404 `no_such_route` instead of the
+  panel page. A health probe asking a route that does not exist was being
+  answered 200 with HTML, which is a probe that cannot fail.
 
 ### Removed
 
@@ -444,6 +316,183 @@ product the way the documentation describes it, on hosts built from nothing.
   run received no OIDC identity.
 - The release signing job carried its key and passphrase in the environment of
   every step, and the passphrase travelled on gpg's command line.
+- A signed capability binds the order of the three lists where the order is the
+  meaning, and binds a package set and a package order by one digest each,
+  length-prefixed so a value cannot be read as the structure around it. A page
+  cursor is encoded the same way, for the same reason.
+- A non-mutating request reserves nothing in the replay store. A read repeated
+  under one task was answered from the record of the first, so the second read
+  returned the first read's answer rather than the state of the host.
+- A plan says "unknown" where the package manager will not say what it removes,
+  instead of reporting an empty list as nothing to remove.
+- A decision waiting on nobody is counted as waiting. The summary counted only
+  the decisions that already had a target, so the ones that needed an operator
+  most were the ones it did not mention.
+- A scope that narrows nothing no longer becomes a condition that matches
+  everything.
+- The audit rules are reloaded where there are rules to reload, and the other
+  case is described rather than reported as a success.
+
+
+## [0.61.5] - 2026-10-02
+
+Two findings of the code audit, in what a signed capability binds, and one
+scenario that read two rows and assumed they were sampled together.
+
+### Fixed
+
+- A capability binds the order of the three lists where the order is the meaning:
+  the argv of a scheduled command, the resolvers a host asks in turn, and the
+  search domains it appends in turn. The comparison sorted both sides first,
+  which is right for a set of packages or images and wrong here - a request
+  naming the same elements in another order satisfied a capability signed for the
+  first order, so the panel approved one command and the host would have run
+  another, approved one resolver first and the host would have asked another.
+- A relay is refused a wildcard among its names. They come from the relay's own
+  first certificate request and stay in the registry from then on, so a relay
+  asking for `*.example.test` would be issued a certificate standing for every
+  host and every other relay of that domain, and would keep it at every renewal.
+- The budget scenario asks the job once more before calling the budget wrong. The
+  state of a job and the state of a budget are two reads of two different rows and
+  the lease is given back the moment the job ends, so a job that finished between
+  them left a budget that rightly listed nobody. The product was not what was
+  wrong: the lease is taken before the job is admitted, so no job ever runs
+  without its place in the budget.
+
+
+## [0.61.4] - 2026-10-01
+
+A patch over 0.61.3 for one defect of the gate's own making, and the rule that
+keeps it from coming back.
+
+### Fixed
+
+- The first-run checklist is mirrored by hand in the integration suite, which
+  asserts the order of its steps, and that suite is behind a build tag - so
+  `go vet ./...` never compares the two and a step added on the server is caught
+  only when the gate reaches the integration stage. `installation_keys` did
+  exactly that: the run was forty-nine minutes old when it said "expected 11
+  steps, got 12". The mirror names the step now, and `shipcheck` gained a rule
+  that compares the two files in milliseconds, with the negative control to
+  prove it fails when they disagree.
+
+
+## [0.61.3] - 2026-10-01
+
+What a day of installing the product the documented way found after 0.61.2, and
+two things the panel knew and did not say.
+
+### Fixed
+
+- The checklist says where the keys of the installation live. The fleet CA, the
+  secret store and the helper's signing key are either files under the state
+  directory or rows in the database, and every other step looks the same either
+  way - so an installation whose keys are files reported itself finished, and the
+  difference is the whole of what losing that machine costs. For files it is a
+  warning, because a backup of the database alone cannot bring such an
+  installation back.
+- A sign-in that carries no permission gets a page instead of an empty panel.
+  Every section hides itself for want of a permission, so a first sign-in through
+  an identity provider whose groups nobody had mapped yet rendered the frame
+  around nothing. The checklist knew; the person who had just signed in was not
+  told. Now they are, along with what grants it.
+- `packaging/sign-repo.sh` publishes an architecture-independent package where a
+  host looks for it. A package built `any` went to a directory with a database of
+  its own, and a host reads the one at the root of the channel: signed, indexed
+  and present, it was invisible to every host.
+- The fault-injection test cuts the link where a containerised panel sees it. The
+  rule sat on the input hook, which is where a packet arrives when the panel
+  listens on the machine itself; the documented deployment publishes a port as a
+  DNAT, so the packet is forwarded and never passes input. The scenario had never
+  run on the deployment the documentation describes.
+- The integration suite finds the relay that is running rather than the one
+  enrolled last, and clears the records it makes. Its cleanup deleted the relay
+  row while two other tables referenced it, and the complaint went to the test
+  log, where nothing reads it.
+- The gate's own contract requires the stage that establishes what was tested.
+
+
+## [0.61.2] - 2026-10-01
+
+A second patch from the same run: what installing the product the documented way
+found after 0.61.1 went out, and one defect of the panel that the browser suite
+had been reporting honestly while I took it for a defect of the test.
+
+### Fixed
+
+- Every table in the panel says which column a cell belongs to. The headers were
+  bare `<th>`, which is enough for a reader who can see the table and not enough
+  for one who cannot: a browser decides for itself whether a table carries data or
+  only arranges a layout, and a short table whose headers declare nothing is taken
+  for layout - its headers then stop being headers in the accessibility tree, and
+  a screen reader reads each cell without saying which column it is in. Measured
+  on a page with two rows: five headers in the markup, zero column headers exposed
+  to assistive technology; with `scope` on the same five, all five came back.
+- The quickstart on the site no longer shows an edit that the configuration the
+  panel composes cannot take. It told an operator to point the agent at the panel
+  with two `sed` expressions; the second matched nothing, because the panel writes
+  `gateway_urls` as a list under its own key, so the command changed nothing, said
+  nothing and exited zero. A host configured that way kept whatever address it
+  had. The two settings are shown as the file carries them instead.
+- `packaging/sign-repo.sh` asks for `dpkg-scanpackages` by name, the way it
+  already asked for `gpg`, `rpmsign`, `createrepo_c` and `repo-add`. Without it
+  the apt half - the half that runs first - stopped with a message from the shell,
+  after the signing key had been made and the pool filled.
+- The gate recomputes a laboratory verdict and its own arithmetic could be made to
+  lie: a negative count of failures passed the test for failures, and the number
+  of tests discovered was only compared with zero. Every count must now be a
+  quantity, and the three outcomes have to add up to what was discovered.
+- The fuzz check in CI can tell its two failures apart again. `set -uo pipefail`
+  does not take `-e` off, so the step ended at the first target that exited
+  non-zero - before the verdict that distinguishes an input the fuzzer found from
+  a run that did not fit in its budget, and without printing what the target said.
+
+## [0.61.1] - 2026-10-01
+
+A patch cut from the development line for four defects found by installing the
+product the way the documentation describes it, on hosts built from nothing.
+
+### Fixed
+
+- The `.deb` no longer ships `/etc/flotestro/agent.yaml` as a conffile. The panel
+  composes that file per host and an operator puts it in place before installing
+  the package, so dpkg met a file "created by you" where the package expected its
+  own and asked what to do about it. An automated install has nobody to answer,
+  and the package was left unpacked and unconfigured - which means the service
+  account was never created, so the enrollment that follows could not run at all,
+  and `apt` then refused to repair it without naming a configuration file as the
+  reason. It travels as a template now and the maintainer script writes it only
+  where nothing is there, the way `helper.yaml` beside it always has. Only the
+  `.deb` was affected; the `.rpm` carries the same file as `%config(noreplace)`.
+- The container deployment passes the fourteen settings of the identity provider
+  and of the directory that the panel reads. It passed none of them, so a
+  deployment made the documented way could not be connected to Keycloak or
+  FreeIPA at all: the keys went into `.env` and stopped there, because Compose
+  substitutes from that file and does not hand it to a container. Nothing broke
+  loudly - the panel served without single sign-on and without a directory, and
+  an operator who had filled in `.env` had no reason to suspect otherwise. Both
+  deployment variants carry them, the client secret travels as a path and never
+  as a value, and the four files of the two integrations are named beside the
+  mount each one needs.
+- The helper removes the names its registries carried before its root was
+  translated to English. A rename leaves the old file on every host that ran the
+  earlier build, and nothing read it: an operator reading the state directory
+  took it for something the product writes, and a host upgraded from an older
+  build carried file names under a product whose rule is that every name is
+  English.
+- The install runbook printed an enrollment that cannot run as printed. The
+  command is executed as `flotestro-agent` and the token file it named was
+  written by root, so it answered `permission denied`.
+
+### Changed
+
+- `env.example` documents the settings of the identity provider, which it never
+  did, and groups all of them in sections. It had listed four FreeIPA keys and no
+  OIDC key at all, with the FreeIPA ones under a heading about running your own
+  database.
+- The README gives the `dnf` and `pacman` addresses of the package repository
+  inline, as it already did for `apt`. It had sent a reader to the repository's
+  own pages for those two, and those pages were a stub.
 
 ## [0.61.0] - 2026-09-23
 
