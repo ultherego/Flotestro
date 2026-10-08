@@ -652,22 +652,43 @@ td { color: var(--subtext1); }
   inset: 0 calc(50% - 50vw);
 }
 
+/* The band itself, a shade lighter than the page so the sections read as
+   raised rather than as a darker patch, with the edges feathered so the
+   boundary is a change of light and not a line. */
 .band--tint::before {
-  background: linear-gradient(180deg, rgba(24, 24, 37, 0), rgba(24, 24, 37, .9) 12%,
-    rgba(24, 24, 37, .9) 88%, rgba(24, 24, 37, 0));
+  background:
+    radial-gradient(60% 70% at 50% 50%, rgba(49, 50, 68, .55), transparent 75%),
+    linear-gradient(180deg, rgba(49, 50, 68, 0), rgba(49, 50, 68, .34) 14%,
+      rgba(49, 50, 68, .34) 86%, rgba(49, 50, 68, 0));
+  animation: breathe 34s ease-in-out infinite alternate;
 }
 
+/* Three blobs, heavily blurred, drifting the other way. The blur is what makes
+   them read as light behind the page rather than as shapes drawn on it, and
+   the two layers moving against each other is what keeps it from looking like
+   a still image somebody tinted. */
 .band--tint::after {
   background:
-    radial-gradient(34rem 16rem at 18% 28%, rgba(250, 179, 135, .13), transparent 66%),
-    radial-gradient(30rem 15rem at 82% 72%, rgba(137, 180, 250, .13), transparent 66%),
-    radial-gradient(26rem 13rem at 55% 95%, rgba(203, 166, 247, .10), transparent 70%);
+    radial-gradient(18rem 10rem at 16% 26%, rgba(250, 179, 135, .30), transparent 70%),
+    radial-gradient(16rem 9rem at 84% 68%, rgba(137, 180, 250, .28), transparent 70%),
+    radial-gradient(13rem 8rem at 54% 98%, rgba(203, 166, 247, .24), transparent 72%);
+  filter: blur(48px);
   animation: aurora 26s ease-in-out infinite alternate;
 }
 
+/* The last band carries its light into the footer instead of stopping four
+   rems short of it, which left a dark strip the eye reads as a mistake. */
+.content > .band:last-child::before,
+.content > .band:last-child::after { bottom: -4rem; }
+
 @keyframes aurora {
-  from { transform: translate3d(-1.5%, -1%, 0) scale(1); }
-  to   { transform: translate3d(2.5%, 1.5%, 0) scale(1.07); }
+  from { transform: translate3d(-2%, -1.5%, 0) scale(1); }
+  to   { transform: translate3d(3%, 2%, 0) scale(1.1); }
+}
+
+@keyframes breathe {
+  from { transform: translate3d(1.5%, 1%, 0) scale(1.04); }
+  to   { transform: translate3d(-1.5%, -1%, 0) scale(1); }
 }
 
 /* The opening. The claim, what it is in one line, three ways in, and the
@@ -739,5 +760,6 @@ td { color: var(--subtext1); }
 
 /* A reader who asked for no motion gets the tint, standing still. */
 @media (prefers-reduced-motion: reduce) {
+  .band--tint::before,
   .band--tint::after { animation: none; }
 }
