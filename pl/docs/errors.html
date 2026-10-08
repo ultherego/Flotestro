@@ -76,7 +76,31 @@
       <ul class="sidebar__list">
         <li><a href="configuration.html">5. Konfiguracja</a></li>
         <li><a href="operations.html">6. Operacje</a></li>
-        <li><a href="errors.html" aria-current="page">7. Błędy i odmowy</a></li>
+        <li><a href="errors.html" aria-current="page">7. Błędy i odmowy</a>
+          <ul class="sidebar__sections">
+            <li><a href="#retry">Polityka ponowień</a></li>
+            <li><a href="#failure">Czy kod liczy się jako niepowodzenie</a></li>
+            <li><a href="#stages">Etapy</a></li>
+            <li><a href="#index">Wszystkie kody alfabetycznie</a></li>
+            <li><a href="#stage-planning">Etap: planning</a></li>
+            <li><a href="#stage-materialize">Etap: materialize</a></li>
+            <li><a href="#stage-preflight">Etap: preflight</a></li>
+            <li><a href="#stage-admission">Etap: admission</a></li>
+            <li><a href="#stage-approval">Etap: approval</a></li>
+            <li><a href="#stage-dispatch">Etap: dispatch</a></li>
+            <li><a href="#stage-agent">Etap: agent</a></li>
+            <li><a href="#stage-helper">Etap: helper</a></li>
+            <li><a href="#stage-verify">Etap: verify</a></li>
+            <li><a href="#stage-reconcile">Etap: reconcile</a></li>
+            <li><a href="#stage-cancel">Etap: cancel</a></li>
+            <li><a href="#stage-inventory">Etap: inventory</a></li>
+            <li><a href="#stage-monitoring">Etap: monitoring</a></li>
+            <li><a href="#stage-notification">Etap: notification</a></li>
+            <li><a href="#stage-directory">Etap: directory</a></li>
+            <li><a href="#stage-provisioning">Etap: provisioning</a></li>
+            <li><a href="#stage-startup">Etap: startup</a></li>
+          </ul>
+        </li>
         <li><a href="api.html">8. API</a></li>
         <li><a href="roles.html">9. Role i uprawnienia</a></li>
       </ul>
@@ -93,29 +117,6 @@
   <main class="content">
 <h1>7. Błędy i odmowy</h1>
 <p class="lede">Każda odmowa, każde niepowodzenie i każde pominięcie, jakie panel, agent i helper mogą przypisać zadaniu, celowi kampanii albo żądaniu, niesie stały kod. Kod odpowiada na dwa pytania: co się stało i co można bezpiecznie zrobić dalej. Ta strona to cały wykaz, 326 pozycji, przepisany z <code>internal/opspec/errors.go</code>; panel udostępnia tę samą listę pod <code>GET /api/v1/errors</code>.</p>
-    <ul class="linkrow">
-      <li><a href="#retry">Polityka ponowień</a></li>
-      <li><a href="#failure">Czy kod liczy się jako niepowodzenie</a></li>
-      <li><a href="#stages">Etapy</a></li>
-      <li><a href="#index">Wszystkie kody alfabetycznie</a></li>
-      <li><a href="#stage-planning">Etap: planning</a></li>
-      <li><a href="#stage-materialize">Etap: materialize</a></li>
-      <li><a href="#stage-preflight">Etap: preflight</a></li>
-      <li><a href="#stage-admission">Etap: admission</a></li>
-      <li><a href="#stage-approval">Etap: approval</a></li>
-      <li><a href="#stage-dispatch">Etap: dispatch</a></li>
-      <li><a href="#stage-agent">Etap: agent</a></li>
-      <li><a href="#stage-helper">Etap: helper</a></li>
-      <li><a href="#stage-verify">Etap: verify</a></li>
-      <li><a href="#stage-reconcile">Etap: reconcile</a></li>
-      <li><a href="#stage-cancel">Etap: cancel</a></li>
-      <li><a href="#stage-inventory">Etap: inventory</a></li>
-      <li><a href="#stage-monitoring">Etap: monitoring</a></li>
-      <li><a href="#stage-notification">Etap: notification</a></li>
-      <li><a href="#stage-directory">Etap: directory</a></li>
-      <li><a href="#stage-provisioning">Etap: provisioning</a></li>
-      <li><a href="#stage-startup">Etap: startup</a></li>
-    </ul>
 <div class="note"><p class="note__title">Brzmienie pochodzi z samego panelu</p><p>Znaczenie i zalecane działanie przytoczono dokładnie tak, jak pokazuje je panel, więc kod wyszukany tutaj brzmi tak samo jak ten na ekranie. Nieznany kod nie dostaje żadnego opisu: panel pokazuje kod w postaci, w jakiej przyszedł, zamiast wymyślać poradę.</p></div>
 <h2 id="retry">Polityka ponowień</h2>
 <p>Każda pozycja niesie politykę ponowień. To odpowiedź na pytanie &bdquo;czy wolno to powtórzyć&rdquo;, gdy wynik jest niepowodzeniem albo pozostaje nieznany.</p>

@@ -80,7 +80,39 @@
       <h2 class="sidebar__title">Reference</h2>
       <ul class="sidebar__list">
         <li><a href="configuration.html">5. Configuration</a></li>
-        <li><a href="operations.html" aria-current="page">6. Operations</a></li>
+        <li><a href="operations.html" aria-current="page">6. Operations</a>
+          <ul class="sidebar__sections">
+            <li><a href="#reading">How to read an entry</a></li>
+            <li><a href="#envelope">The payload, and the order it travels in</a></li>
+            <li><a href="#risk">Risk levels</a></li>
+            <li><a href="#fresh-auth">Fresh authentication and typing the target</a></li>
+            <li><a href="#extra-permissions">Permissions an order needs beyond the operation's own</a></li>
+            <li><a href="#locks">Lock classes</a></li>
+            <li><a href="#resources">Resource scopes on the host</a></li>
+            <li><a href="#campaigns">Campaign modes</a></li>
+            <li><a href="#offline">Offline policies</a></li>
+            <li><a href="#fanout">Fan-out reads</a></li>
+            <li><a href="#verification">Verification and the way back</a></li>
+            <li><a href="#deprecated">A deprecated operation</a></li>
+            <li><a href="#catalogue">The catalogue</a></li>
+            <li><a href="#group-services">Services</a></li>
+            <li><a href="#group-scheduled-jobs">Scheduled jobs</a></li>
+            <li><a href="#group-packages">Packages</a></li>
+            <li><a href="#group-files">Files</a></li>
+            <li><a href="#group-network">Network</a></li>
+            <li><a href="#group-security">Security</a></li>
+            <li><a href="#group-storage">Storage</a></li>
+            <li><a href="#group-containers">Containers</a></li>
+            <li><a href="#group-system">System</a></li>
+            <li><a href="#group-accounts">Accounts</a></li>
+            <li><a href="#group-directory">Directory</a></li>
+            <li><a href="#group-certificates">Certificates</a></li>
+            <li><a href="#group-backups">Backups</a></li>
+            <li><a href="#group-logs-and-processes">Logs and processes</a></li>
+            <li><a href="#group-inventory-and-monitoring">Inventory and monitoring</a></li>
+            <li><a href="#payloads">Payload shapes</a></li>
+          </ul>
+        </li>
         <li><a href="errors.html">7. Errors and refusals</a></li>
         <li><a href="api.html">8. API</a></li>
         <li><a href="roles.html">9. Roles and permissions</a></li>
@@ -98,37 +130,6 @@
   <main class="content">
 <h1>6. Operations reference</h1>
 <p class="lede">Flotestro has no &ldquo;run this command&rdquo; action. Every change and every read is one of 128 typed operations, each with its own permission, its own risk level, its own lock on the host and its own payload. This page is the whole registry, transcribed from <code>internal/opspec/</code>; the panel serves the same list at <code>GET /api/v1/actions</code>.</p>
-    <ul class="linkrow">
-      <li><a href="#reading">How to read an entry</a></li>
-      <li><a href="#envelope">The payload, and the order it travels in</a></li>
-      <li><a href="#risk">Risk levels</a></li>
-      <li><a href="#fresh-auth">Fresh authentication and typing the target</a></li>
-      <li><a href="#extra-permissions">Permissions an order needs beyond the operation's own</a></li>
-      <li><a href="#locks">Lock classes</a></li>
-      <li><a href="#resources">Resource scopes on the host</a></li>
-      <li><a href="#campaigns">Campaign modes</a></li>
-      <li><a href="#offline">Offline policies</a></li>
-      <li><a href="#fanout">Fan-out reads</a></li>
-      <li><a href="#verification">Verification and the way back</a></li>
-      <li><a href="#deprecated">A deprecated operation</a></li>
-      <li><a href="#catalogue">The catalogue</a></li>
-      <li><a href="#group-services">Services</a></li>
-      <li><a href="#group-scheduled-jobs">Scheduled jobs</a></li>
-      <li><a href="#group-packages">Packages</a></li>
-      <li><a href="#group-files">Files</a></li>
-      <li><a href="#group-network">Network</a></li>
-      <li><a href="#group-security">Security</a></li>
-      <li><a href="#group-storage">Storage</a></li>
-      <li><a href="#group-containers">Containers</a></li>
-      <li><a href="#group-system">System</a></li>
-      <li><a href="#group-accounts">Accounts</a></li>
-      <li><a href="#group-directory">Directory</a></li>
-      <li><a href="#group-certificates">Certificates</a></li>
-      <li><a href="#group-backups">Backups</a></li>
-      <li><a href="#group-logs-and-processes">Logs and processes</a></li>
-      <li><a href="#group-inventory-and-monitoring">Inventory and monitoring</a></li>
-      <li><a href="#payloads">Payload shapes</a></li>
-    </ul>
 <h2 id="reading">How to read an entry</h2>
 <p>Every operation declares the same facts. They are not advice: the panel, the agent and the root helper all decide by them.</p>
 <div class="table-scroll">

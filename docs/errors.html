@@ -81,7 +81,31 @@
       <ul class="sidebar__list">
         <li><a href="configuration.html">5. Configuration</a></li>
         <li><a href="operations.html">6. Operations</a></li>
-        <li><a href="errors.html" aria-current="page">7. Errors and refusals</a></li>
+        <li><a href="errors.html" aria-current="page">7. Errors and refusals</a>
+          <ul class="sidebar__sections">
+            <li><a href="#retry">The retry policy</a></li>
+            <li><a href="#failure">Whether a code counts as a failure</a></li>
+            <li><a href="#stages">The stages</a></li>
+            <li><a href="#index">Every code, alphabetically</a></li>
+            <li><a href="#stage-planning">Stage: planning</a></li>
+            <li><a href="#stage-materialize">Stage: materialize</a></li>
+            <li><a href="#stage-preflight">Stage: preflight</a></li>
+            <li><a href="#stage-admission">Stage: admission</a></li>
+            <li><a href="#stage-approval">Stage: approval</a></li>
+            <li><a href="#stage-dispatch">Stage: dispatch</a></li>
+            <li><a href="#stage-agent">Stage: agent</a></li>
+            <li><a href="#stage-helper">Stage: helper</a></li>
+            <li><a href="#stage-verify">Stage: verify</a></li>
+            <li><a href="#stage-reconcile">Stage: reconcile</a></li>
+            <li><a href="#stage-cancel">Stage: cancel</a></li>
+            <li><a href="#stage-inventory">Stage: inventory</a></li>
+            <li><a href="#stage-monitoring">Stage: monitoring</a></li>
+            <li><a href="#stage-notification">Stage: notification</a></li>
+            <li><a href="#stage-directory">Stage: directory</a></li>
+            <li><a href="#stage-provisioning">Stage: provisioning</a></li>
+            <li><a href="#stage-startup">Stage: startup</a></li>
+          </ul>
+        </li>
         <li><a href="api.html">8. API</a></li>
         <li><a href="roles.html">9. Roles and permissions</a></li>
       </ul>
@@ -98,29 +122,6 @@
   <main class="content">
 <h1>7. Errors and refusals</h1>
 <p class="lede">Every refusal, failure and skip the panel, the agent and the helper can put on a task, a campaign target or a request carries a stable code. A code answers two questions: what happened, and what can safely be done next. This page is the whole guide, 326 entries, transcribed from <code>internal/opspec/errors.go</code>; the panel serves the same list at <code>GET /api/v1/errors</code>.</p>
-    <ul class="linkrow">
-      <li><a href="#retry">The retry policy</a></li>
-      <li><a href="#failure">Whether a code counts as a failure</a></li>
-      <li><a href="#stages">The stages</a></li>
-      <li><a href="#index">Every code, alphabetically</a></li>
-      <li><a href="#stage-planning">Stage: planning</a></li>
-      <li><a href="#stage-materialize">Stage: materialize</a></li>
-      <li><a href="#stage-preflight">Stage: preflight</a></li>
-      <li><a href="#stage-admission">Stage: admission</a></li>
-      <li><a href="#stage-approval">Stage: approval</a></li>
-      <li><a href="#stage-dispatch">Stage: dispatch</a></li>
-      <li><a href="#stage-agent">Stage: agent</a></li>
-      <li><a href="#stage-helper">Stage: helper</a></li>
-      <li><a href="#stage-verify">Stage: verify</a></li>
-      <li><a href="#stage-reconcile">Stage: reconcile</a></li>
-      <li><a href="#stage-cancel">Stage: cancel</a></li>
-      <li><a href="#stage-inventory">Stage: inventory</a></li>
-      <li><a href="#stage-monitoring">Stage: monitoring</a></li>
-      <li><a href="#stage-notification">Stage: notification</a></li>
-      <li><a href="#stage-directory">Stage: directory</a></li>
-      <li><a href="#stage-provisioning">Stage: provisioning</a></li>
-      <li><a href="#stage-startup">Stage: startup</a></li>
-    </ul>
 <div class="note"><p class="note__title">The wording is the panel&rsquo;s own</p><p>The meaning and the action are quoted exactly as the panel shows them, so a code searched for here reads the same as the one on the screen. An unknown code gets no guide at all: the panel shows the code as it came rather than inventing advice.</p></div>
 <h2 id="retry">The retry policy</h2>
 <p>Every entry carries a retry policy. It is the answer to &ldquo;may this be repeated&rdquo; when the outcome is a failure or unknown.</p>
