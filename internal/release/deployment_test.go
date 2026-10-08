@@ -977,3 +977,42 @@ func TestTheShapesOfOnePortAndOneMountCompareEqual(t *testing.T) {
 		}
 	}
 }
+
+// A volume with no name of its own is named after the directory the Compose
+// file happens to sit in, so the same installation started from somewhere else
+// attaches to an empty one and comes up with no state and nothing saying why.
+// The names here are the example's, and an operator who wants other ones
+// changes them in the file; what this holds is that each volume has a name at
+// all, which is the part a reader cannot see is missing.
+func TestEveryVolumeCarriesAName(t *testing.T) {
+	checked := 0
+	for _, deployment := range composeDeployments(t) {
+		declared, present := deployment.top["volumes"]
+		if !present {
+			continue
+		}
+		volumes, ok := declared.(map[string]any)
+		if !ok {
+			t.Errorf("%s: the volumes of the deployment are not a mapping", deployment.file)
+			continue
+		}
+		for volume, body := range volumes {
+			checked++
+			settings, ok := body.(map[string]any)
+			if !ok {
+				t.Errorf("%s: the volume %s says nothing, so Compose names it after the "+
+					"directory of the file and the state of one installation depends on where "+
+					"the file was copied", deployment.file, volume)
+				continue
+			}
+			if scalar(settings["name"]) == "" {
+				t.Errorf("%s: the volume %s declares no name; Compose would prefix it with the "+
+					"project, which is the directory the file sits in", deployment.file, volume)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no deployment declares a volume; either the files changed shape or this guard stopped reading them")
+	}
+	t.Logf("%d volumes carry a name of their own", checked)
+}

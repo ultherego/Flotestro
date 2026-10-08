@@ -629,6 +629,8 @@ networks:
   # lets the control plane reach PostgreSQL is one an operator can see.
   database_egress:
 
+# The names are fixed so that one installation finds its own state again after
+# a recreate. A second installation on the same host renames them here first.
 volumes:
   control_plane_state:
     name: flotestro-state
