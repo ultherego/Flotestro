@@ -107,10 +107,16 @@ jobs:
     name: Images
     needs: gate
     uses: ./.github/workflows/images.yml
+    # Every permission any job of that workflow asks for. A called workflow may
+    # not ask for more than it was granted, and GitHub does not fail the job
+    # over it - it refuses to start the run at all, with no job and no log. The
+    # promotion was given "statuses: read" on 06.10 and the first tag after that
+    # was answered with a bare startup_failure.
     permissions:
       contents: read
       packages: write
       id-token: write
+      statuses: read
 
   panel:
     name: Panel
