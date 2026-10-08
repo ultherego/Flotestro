@@ -20,13 +20,13 @@
       Flotestro
     </a>
     <nav class="site-nav" aria-label="Sekcje">
-      <a href="gallery.html">Galeria</a>
       <a href="#change">Zmiana</a>
       <a href="#operations">Operacje</a>
       <a href="#architecture">Architektura</a>
       <a href="#install">Instalacja</a>
       <a href="docs/">Dokumentacja</a>
       <a href="https://github.com/ultherego/Flotestro">Kod</a>
+      <a href="gallery.html">Galeria</a>
       <details class="lang-menu">
         <summary class="lang-menu__toggle" aria-label="Język: polski (PL)">
           <svg class="lang-menu__flag" viewBox="0 0 60 40" width="18" height="12" aria-hidden="true">
@@ -68,30 +68,31 @@
 <div class="layout layout--plain">
   <main class="content">
 
-    <h1>Zarządzanie flotą serwerów Linux</h1>
-    <p class="lede prose">Jeden panel, który planuje, zatwierdza, przeprowadza i zapisuje zmiany
-      na hostach Debian, Ubuntu, Fedora, RHEL i Arch.</p>
+    <section class="hero">
+      <div>
+        <p class="hero__eyebrow"><b>0.62.0</b> &middot; Apache-2.0 &middot; Debian &middot; Ubuntu &middot; Fedora &middot; RHEL &middot; Arch</p>
+        <h1>Zarządzanie flotą serwerów Linux</h1>
+        <p class="lede">Jeden panel, który planuje, zatwierdza, przeprowadza i zapisuje każdą
+          zmianę &mdash; i nigdy nie otwiera w tym celu powłoki na hoście.</p>
+        <p class="hero__cta">
+          <a class="button button--primary" href="#install">Zainstaluj</a>
+          <a class="button" href="docs/">Przeczytaj podręcznik</a>
+          <a class="button button--quiet" href="gallery.html">Zobacz panel</a>
+        </p>
+      </div>
+      <figure class="hero__shot">
+        <img src="../img/terminal.svg" alt="Terminal wysyła operację pod /api/v1/hosts/{id}/operations z payloadem grupowanym po nazwie; panel odpowiada zapisanym zadaniem - queued, ze zdolnością, którą host musi mieć - a drugie wywołanie czyta próbę: succeeded, kod wyjścia 0." width="1000" height="440">
+      </figure>
+    </section>
 
-    <p class="prose">Flotestro to control plane i agent. Agent zgłasza, czym host naprawdę jest;
-      panel rozstrzyga, co to znaczy, i zleca zmianę. Nie ma operacji
-      &bdquo;uruchom polecenie&rdquo;, a panel nigdy nie otwiera powłoki na hoście: każde działanie to
-      wersjonowany kontrakt z własnym uprawnieniem, poziomem ryzyka, klasą blokady i trybem
-      kampanii. W skali floty ta sama zmiana idzie jako kampania, z canary, falami, bramami i
-      progiem niepowodzeń.</p>
-
-    <figure class="figure figure--bare">
-      <img src="../img/terminal.svg" alt="Terminal wysyła operację pod /api/v1/hosts/{id}/operations z payloadem grupowanym po nazwie; panel odpowiada zapisanym zadaniem - queued, ze zdolnością, którą host musi mieć - a drugie wywołanie czyta próbę: succeeded, kod wyjścia 0." width="1000" height="440" loading="lazy">
-      <figcaption>Jedna operacja, od zamówienia do odpowiedzi. Każda linijka została wykonana na
-      działającej instalacji; rozdział, z którego pochodzi, to <b><a href="docs/examples.html">11. Przykłady użycia</a></b>.</figcaption>
-    </figure>
-
-    <ul class="linkrow">
-      <li><a href="#install">Instalacja</a></li>
-      <li><a href="docs/">Dokumentacja</a></li>
-      <li><a href="https://github.com/ultherego/Flotestro">Kod na GitHubie</a></li>
-      <li><a href="../packages/">Repozytorium pakietów</a></li>
+    <ul class="facts">
+      <li><b>129</b><span>typowanych operacji, każda z własnym uprawnieniem, ryzykiem i klasą blokady</span></li>
+      <li><b>0</b><span>powłok otwartych na hoście &mdash; nie ma operacji &bdquo;uruchom polecenie&rdquo;</span></li>
+      <li><b>826</b><span>kontroli w bramie laboratoryjnej tego wydania, zero pominiętych</span></li>
+      <li><b>0,30&thinsp;s</b><span>na zamrożenie kampanii nad 500 hostami, zmierzone</span></li>
     </ul>
 
+    <section class="band band--tint">
     <h2 id="principles">Zasady</h2>
 
     <dl class="kv">
@@ -115,13 +116,17 @@
       <dd>Każdy agent próbkuje swój host; panel trzyma próbki i agregaty,
         ocenia reguły oraz prowadzi alerty i wyciszenia.</dd>
     </dl>
+    </section>
 
+    <section class="band">
     <h2 id="panel">Panel</h2>
 
     <p class="prose">Osiem ekranów działającej instalacji &mdash; flota, host, kampania, pakiety,
       które zmieni, znaleziska bezpieczeństwa, monitoring i ślad audytowy &mdash; jest
       w <a href="gallery.html">galerii</a>.</p>
+    </section>
 
+    <section class="band band--tint">
     <h2 id="change">Jak przebiega zmiana</h2>
 
     <ol class="steps">
@@ -139,7 +144,9 @@
     <p class="prose">W skali floty ta sama zmiana idzie jako kampania: canary, fale, bramy ręczne
       lub automatyczne, progi niepowodzeń, okna serwisowe, budżety na site i polityka dla hostów
       offline.</p>
+    </section>
 
+    <section class="band">
     <h2 id="operations">Na czym potrafi działać</h2>
 
     <dl class="kv">
@@ -196,7 +203,9 @@
       <dd>Trwały zapis wysyłany partiami na webhooka, podpisany HMAC-SHA256, dostarczany co
         najmniej raz i w kolejności.</dd>
     </dl>
+    </section>
 
+    <section class="band band--tint">
     <h2 id="architecture">Architektura</h2>
 
     <div class="table-scroll">
@@ -252,7 +261,9 @@
         <tr><td>8453</td><td>relay</td></tr>
       </tbody>
     </table>
+    </section>
 
+    <section class="band">
     <h2 id="install">Instalacja</h2>
 
     <p class="prose">Nie ma czego budować ani klonować. Panel działa z opublikowanego obrazu, a
@@ -355,7 +366,9 @@ flotestro-agentctl diagnose                                        # explains a 
       dla site za relayem &mdash; <code>docker/compose.relay.yaml</code>. Instalacja od zera, od
       początku do końca, to
       <a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/install.md">runbook instalacyjny</a>.</p>
+    </section>
 
+    <section class="band band--tint">
     <h2 id="documentation">Dokumentacja</h2>
 
     <ul class="cards">
@@ -379,6 +392,7 @@ flotestro-agentctl diagnose                                        # explains a 
           komponentów.</p>
       </li>
     </ul>
+    </section>
 
   </main>
 </div>
