@@ -683,6 +683,21 @@ sudo apt update &amp;&amp; sudo apt install flotestro-agent</code></pre>
     <code>arch/&lt;channel&gt;/&lt;architecture&gt;</code>, dla hosta
     konfigurowanego ręcznie.</p>
 
+    <p class="filename">RHEL i Fedora</p>
+<pre><code>sudo rpm --import https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc
+printf '%s\n' '[flotestro]' 'name=Flotestro' 'baseurl=https://ultherego.github.io/Flotestro/packages/rpm/stable' \
+  'enabled=1' 'gpgcheck=1' 'repo_gpgcheck=1' 'gpgkey=https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc' \
+  | sudo tee /etc/yum.repos.d/flotestro.repo &gt;/dev/null
+sudo dnf install -y flotestro-agent</code></pre>
+
+    <p class="filename">Arch Linux</p>
+<pre><code>curl -fsS https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc | sudo pacman-key --add -
+sudo pacman-key --lsign-key "$(curl -fsS https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc \
+  | gpg --show-keys --with-colons | awk -F: '/^fpr:/ {print $10; exit}')"
+printf '%s\n' '[flotestro]' 'SigLevel = Required DatabaseRequired' \
+  'Server = https://ultherego.github.io/Flotestro/packages/arch/stable' | sudo tee -a /etc/pacman.conf &gt;/dev/null
+sudo pacman -Sy &amp;&amp; sudo pacman -S --noconfirm flotestro-agent</code></pre>
+
     <h3>Bez drogi na zewnątrz</h3>
 
     <p>Nazwa pliku niesie wersję, więc nie ma adresu <code>latest</code>, który

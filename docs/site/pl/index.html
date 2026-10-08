@@ -258,106 +258,36 @@
     <section class="band">
     <h2 id="install">Instalacja</h2>
 
-    <p class="prose">Nie ma czego budować ani klonować. Panel działa z opublikowanego obrazu, a
-      hosty biorą pakiet z podpisanego repozytorium projektu.</p>
+    <p>Nie ma czego budować ani klonować. Panel chodzi z opublikowanego obrazu; hosty biorą pakiet
+      z podpisanego repozytorium projektu. Całość, razem z profilem bez dostępu do sieci, lokalizacją
+      za relayem i drogą powrotną, jest w rozdziale
+      <a href="docs/installation.html">3. Instalacja</a>.</p>
 
-    <h3>Panel z własną bazą danych</h3>
+    <h3>Panel, z własną bazą</h3>
 
     <pre><code>curl -fsSLO https://raw.githubusercontent.com/ultherego/Flotestro/main/docker/compose.yaml
 docker compose up -d
 docker compose cp control-plane:/var/lib/flotestro/bootstrap-token .</code></pre>
 
-    <p class="prose">Każde ustawienie ma działającą wartość domyślną, więc to już jest panel pod
-      adresem <code>http://localhost:8080</code>. Token bootstrap służy do pierwszego logowania; po
-      zmapowaniu grup dostawcy tożsamości na role należy go usunąć.</p>
-
-    <p class="prose">Do obsługi hostów na innych maszynach <code>FLOTESTRO_ADVERTISE</code> w
-      <code>.env</code> musi wskazywać nazwę, pod którą flota naprawdę dociera do tego panelu:
-      trafia ona do certyfikatu bramy agentów, a panel zostawiony na loopbacku odmawia zdalnego
-      enrollmentu, zamiast wystawić certyfikat, który host i tak by odrzucił.
-      <code>env.example</code> niesie całą listę.</p>
-
-    <p class="prose">Przy bazie danych, która już działa, dochodzi
-      <code>compose.external-db.yaml</code>: wyjmuje lokalną bazę, trzyma DSN do zweryfikowanego
-      serwera i konta zapisującego oraz podnosi schemat osobnym przebiegiem, zanim cokolwiek
-      zacznie obsługiwać ruch. DSN trafia do <code>secrets/database-url</code> przed pierwszym
-      startem, a ten sam plik działa pod Dockerem i pod rootless Podmanem, na hoście z SELinuksem
-      i bez niego. Para do kopii zapasowych, odizolowany site, przypięcie digestu i aktualizacja są
-      w <a href="https://github.com/ultherego/Flotestro/blob/main/docker/README.md">docker/README.md</a>.</p>
-
-    <div class="note">
-      <p class="note__title">Który obraz</p>
-      <p>Control plane to <code>ghcr.io/ultherego/flotestro-control-plane</code>, a relay
-        <code>ghcr.io/ultherego/flotestro-relay</code>. Wydanie publikuje pełną wersję i
-        <code>sha-&lt;twelve characters of the commit&gt;</code>, i żadne z nich nigdy nie jest
-        nadpisywane; gotowe wydanie przesuwa dodatkowo <code>latest</code> oraz alias wersji
-        minor, wydanie przedpremierowe nie przesuwa żadnego. Tag jest tym, co czyta człowiek
-        &mdash; produkcja przypina digest, który wypisał przebieg wydania.</p>
-    </div>
+    <p>Każde ustawienie ma działającą wartość domyślną, więc to jest panel pod
+      <code>http://localhost:8080</code>, a token to pierwsze logowanie. Żeby obsługiwać hosty na
+      innych maszynach, ustaw <code>FLOTESTRO_ADVERTISE</code> na nazwę, pod którą flota naprawdę
+      sięga tego panelu; przy bazie, którą już prowadzisz, dołóż
+      <code>compose.external-db.yaml</code>.</p>
 
     <h3>Host, z <a href="../packages/">repozytorium pakietów</a></h3>
 
-    <p class="filename">Debian i Ubuntu</p>
     <pre><code>sudo install -d -m 0755 /etc/apt/keyrings
 curl -fsS https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc | sudo tee /etc/apt/keyrings/flotestro.asc &gt;/dev/null
 echo 'deb [signed-by=/etc/apt/keyrings/flotestro.asc] https://ultherego.github.io/Flotestro/packages/deb stable main' | sudo tee /etc/apt/sources.list.d/flotestro.list &gt;/dev/null
 sudo apt update &amp;&amp; sudo apt install flotestro-agent</code></pre>
 
-    <p class="filename">RHEL i Fedora</p>
-    <pre><code>sudo rpm --import https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc
-printf '%s\n' '[flotestro]' 'name=Flotestro' 'baseurl=https://ultherego.github.io/Flotestro/packages/rpm/stable' \
-  'enabled=1' 'gpgcheck=1' 'repo_gpgcheck=1' 'gpgkey=https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc' \
-  | sudo tee /etc/yum.repos.d/flotestro.repo &gt;/dev/null
-sudo dnf install -y flotestro-agent</code></pre>
+    <p>Każdy indeks jest podpisany kluczem wydania, a w żadnej z tych linii nie ma wersji &mdash;
+      hosta przesuwa <code>apt upgrade</code>. <code>dnf</code> i <code>pacman</code> czytają to
+      samo drzewo, a ich linie są w rozdziale. Potem enrollment: panel wypisuje dokładne polecenia
+      dla swoich adresów pod <b>Add host</b> &mdash; CA floty z odciskiem do porównania, token
+      jednorazowy i start.</p>
 
-    <p class="filename">Arch Linux</p>
-    <pre><code>curl -fsS https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc | sudo pacman-key --add -
-sudo pacman-key --lsign-key "$(curl -fsS https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc \
-  | gpg --show-keys --with-colons | awk -F: '/^fpr:/ {print $10; exit}')"
-printf '%s\n' '[flotestro]' 'SigLevel = Required DatabaseRequired' \
-  'Server = https://ultherego.github.io/Flotestro/packages/arch/stable' | sudo tee -a /etc/pacman.conf &gt;/dev/null
-sudo pacman -Sy &amp;&amp; sudo pacman -S --noconfirm flotestro-agent</code></pre>
-
-    <p class="prose">Każdy indeks w repozytorium jest podpisany kluczem wydania i w żadnej z tych
-      linii nie ma wersji: <code>apt update</code> jest tym, czym host dowiaduje się o nowszej
-      wersji, a <code>apt upgrade</code> tym, co go na nią przenosi. Wydanie przedpremierowe idzie
-      do kanału <code>testing</code>, którego host pytający o <code>stable</code> nigdy nie czyta.
-      Bez drogi na zewnątrz pakiet pobiera się na maszynie z siecią, sprawdza względem
-      <code>SHA256SUMS</code> i przenosi ręcznie; każdy plik niesie też atestację buildu, którą
-      sprawdza <code>gh attestation verify</code>.</p>
-
-    <h3>Potem enrollment hosta</h3>
-
-    <p class="prose">Panel wypisuje dokładne polecenia dla własnych adresów pod <b>Dodaj
-      host</b> &mdash; repozytorium, pakiet, CA floty z odciskiem do
-      porównania, jednorazowy token i start. Tak wyglądają dwa ostatnie
-      kroki:</p>
-
-    <pre><code>sudo tee /var/lib/flotestro-agent/ca.pem &gt;/dev/null   # the fleet CA, fingerprint shown in the panel
-# /etc/flotestro/agent.yaml is composed by the panel and carries the two
-# addresses; a host that was given the file needs nothing edited here:
-#   connection:
-#     enrollment_url: "https://panel.example.org:8444"
-#     gateway_urls:
-#       - "https://panel.example.org:8443"
-printf '%s' "$TOKEN" | sudo -u flotestro-agent flotestro-agentctl enroll   # one-time, from the panel
-sudo systemctl enable --now flotestro-agent
-flotestro-agentctl diagnose                                        # explains a host that does not show up</code></pre>
-
-    <div class="note note--warning">
-      <p class="note__title">Token jest jednorazowy i krótko żyje</p>
-      <p>Podaje się go plikiem albo na standardowym wejściu, nigdy w środowisku:
-        <code>sudo -u flotestro-agent flotestro-agentctl enroll --token-file /run/token</code>, a
-        plik potem kasuje. Host, który wciąż trzyma tożsamość z poprzedniej instalacji, dostaje
-        odmowę <code class="refusal">machine_already_enrolled</code>: nowa CA floty nie uznaje
-        certyfikatów wystawionych przez poprzednią.</p>
-    </div>
-
-    <p class="prose">Dla całego inventory naraz jest rola Ansible w
-      <a href="https://github.com/ultherego/Flotestro/tree/main/ansible">ansible</a>;
-      dla site za relayem &mdash; <code>docker/compose.relay.yaml</code>. Instalacja od zera, od
-      początku do końca, to
-      <a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/install.md">runbook instalacyjny</a>.</p>
     </section>
 
     <section class="band band--tint">
