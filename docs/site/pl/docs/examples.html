@@ -85,7 +85,22 @@
       <h2 class="sidebar__title">Procedury</h2>
       <ul class="sidebar__list">
         <li><a href="runbooks.html">10. Runbooki</a></li>
-        <li><a href="examples.html" aria-current="page">11. Przykłady użycia</a></li>
+        <li><a href="examples.html" aria-current="page">11. Przykłady użycia</a>
+          <ul class="sidebar__sections">
+            <li><a href="#token">Co jest potrzebne: adres i token</a></li>
+            <li><a href="#first">Pierwsze wywołanie i kształt listy</a></li>
+            <li><a href="#paging">Przejście listy do końca</a></li>
+            <li><a href="#order">Zamówienie jednej operacji na jednym hoście</a></li>
+            <li><a href="#result">Odczyt tego, co host zrobił</a></li>
+            <li><a href="#payload">Skąd bierze się kształt payloadu</a></li>
+            <li><a href="#refusals">Cztery odmowy i co każda znaczy</a></li>
+            <li><a href="#reads">Odczyt na wielu hostach naraz</a></li>
+            <li><a href="#campaign">Kampania: podgląd, utworzenie, zatwierdzenie, anulowanie</a></li>
+            <li><a href="#idempotency">Zapytać dwa razy, nie zrobić dwa razy</a></li>
+            <li><a href="#etag">Zapis rekordu, który ktoś mógł ruszyć</a></li>
+            <li><a href="#webhook">Odbiór śladu i sprawdzenie podpisu</a></li>
+          </ul>
+        </li>
       </ul>
     </nav>
   </aside>
@@ -93,20 +108,6 @@
   <main class="content">
 <h1>11. Przykłady użycia</h1>
 <p class="lede">Wykazy mówią, czym jest każda trasa i każda operacja. Ta strona jest drugą połową: wywołaniami, które można wkleić do terminala, i tym, co na nie odpowiedziało. Każde żądanie i każda odpowiedź poniżej zostały wykonane na działającej instalacji — identyfikatory pochodzą z tego przebiegu, więc u Ciebie będą inne.</p>
-    <ul class="linkrow">
-      <li><a href="#token">Co jest potrzebne: adres i token</a></li>
-      <li><a href="#first">Pierwsze wywołanie i kształt listy</a></li>
-      <li><a href="#paging">Przejście listy do końca</a></li>
-      <li><a href="#order">Zamówienie jednej operacji na jednym hoście</a></li>
-      <li><a href="#result">Odczyt tego, co host zrobił</a></li>
-      <li><a href="#payload">Skąd bierze się kształt payloadu</a></li>
-      <li><a href="#refusals">Cztery odmowy i co każda znaczy</a></li>
-      <li><a href="#reads">Odczyt na wielu hostach naraz</a></li>
-      <li><a href="#campaign">Kampania: podgląd, utworzenie, zatwierdzenie, anulowanie</a></li>
-      <li><a href="#idempotency">Zapytać dwa razy, nie zrobić dwa razy</a></li>
-      <li><a href="#etag">Zapis rekordu, który ktoś mógł ruszyć</a></li>
-      <li><a href="#webhook">Odbiór śladu i sprawdzenie podpisu</a></li>
-    </ul>
 
 <h2 id="token">Co jest potrzebne: adres i token</h2>
 

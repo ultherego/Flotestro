@@ -90,7 +90,22 @@
       <h2 class="sidebar__title">Procedures</h2>
       <ul class="sidebar__list">
         <li><a href="runbooks.html">10. Runbooks</a></li>
-        <li><a href="examples.html" aria-current="page">11. Worked examples</a></li>
+        <li><a href="examples.html" aria-current="page">11. Worked examples</a>
+          <ul class="sidebar__sections">
+            <li><a href="#token">What you need: an address and a token</a></li>
+            <li><a href="#first">The first call, and the shape of a list</a></li>
+            <li><a href="#paging">Walking a list to the end</a></li>
+            <li><a href="#order">Ordering one operation on one host</a></li>
+            <li><a href="#result">Reading what the host did</a></li>
+            <li><a href="#payload">Where the payload shape comes from</a></li>
+            <li><a href="#refusals">Four refusals, and what each one means</a></li>
+            <li><a href="#reads">A read across many hosts at once</a></li>
+            <li><a href="#campaign">A campaign: preview, create, approve, cancel</a></li>
+            <li><a href="#idempotency">Asking twice without doing it twice</a></li>
+            <li><a href="#etag">Writing a record somebody else may have moved</a></li>
+            <li><a href="#webhook">Receiving the trail, and checking the signature</a></li>
+          </ul>
+        </li>
       </ul>
     </nav>
   </aside>
@@ -98,20 +113,6 @@
   <main class="content">
 <h1>11. Worked examples</h1>
 <p class="lede">The reference pages say what every route and every operation is. This page is the other half: calls you can paste into a terminal, and what came back when they were run. Every request and every response below was run against a real installation; the identifiers are from that run, so yours will differ.</p>
-    <ul class="linkrow">
-      <li><a href="#token">What you need: an address and a token</a></li>
-      <li><a href="#first">The first call, and the shape of a list</a></li>
-      <li><a href="#paging">Walking a list to the end</a></li>
-      <li><a href="#order">Ordering one operation on one host</a></li>
-      <li><a href="#result">Reading what the host did</a></li>
-      <li><a href="#payload">Where the payload shape comes from</a></li>
-      <li><a href="#refusals">Four refusals, and what each one means</a></li>
-      <li><a href="#reads">A read across many hosts at once</a></li>
-      <li><a href="#campaign">A campaign: preview, create, approve, cancel</a></li>
-      <li><a href="#idempotency">Asking twice without doing it twice</a></li>
-      <li><a href="#etag">Writing a record somebody else may have moved</a></li>
-      <li><a href="#webhook">Receiving the trail, and checking the signature</a></li>
-    </ul>
 
 <h2 id="token">What you need: an address and a token</h2>
 

@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -104,3 +106,103 @@ func translatablePage(relative string) bool {
 	}
 	return false
 }
+
+// siteLinks follows every link the site makes to itself. The pages are written
+// by hand and copied to the publishing branch with no build step, so a heading
+// renamed in one chapter and referred to from another is published broken, and
+// the only way anybody learns is by clicking it.
+//
+// Two kinds of link are checked: a file this repository should carry, and an
+// anchor that file should declare. A link to something the release pipeline
+// writes - the package repository under packages/ - is not this tree's to
+// resolve, and is listed as such rather than ignored by accident.
+func siteLinks(root string) ([]finding, error) {
+	site := filepath.Join(root, siteRoot)
+	pages := map[string]string{}
+	err := filepath.WalkDir(site, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".html") {
+			return nil
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(site, path)
+		if err != nil {
+			return err
+		}
+		pages[filepath.ToSlash(relative)] = string(content)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(pages) == 0 {
+		return []finding{{
+			place: siteRoot,
+			said:  "no page of the site was read, so this check would pass over nothing",
+		}}, nil
+	}
+
+	identifiers := map[string]map[string]bool{}
+	for page, text := range pages {
+		found := map[string]bool{}
+		for _, match := range htmlIdentifier.FindAllStringSubmatch(text, -1) {
+			found[match[1]] = true
+		}
+		identifiers[page] = found
+	}
+
+	var findings []finding
+	for page, text := range pages {
+		base := path.Dir(page)
+		for _, match := range htmlHref.FindAllStringSubmatch(text, -1) {
+			href := match[1]
+			if href == "" || strings.HasPrefix(href, "http://") ||
+				strings.HasPrefix(href, "https://") || strings.HasPrefix(href, "mailto:") {
+				continue
+			}
+			file, fragment, _ := strings.Cut(href, "#")
+			target := page
+			if file != "" {
+				target = path.Clean(path.Join(base, file))
+				if strings.HasSuffix(file, "/") {
+					target = path.Clean(path.Join(base, file, "index.html"))
+				}
+				if _, ok := pages[target]; !ok {
+					// The package repository is written by the release, onto the
+					// publishing branch; this tree has no copy of it.
+					if strings.HasPrefix(target, "packages/") {
+						continue
+					}
+					// A stylesheet, an image, anything that is not a page: it is
+					// a file of the site all the same, and it has to be there.
+					if _, err := os.Stat(filepath.Join(site, filepath.FromSlash(target))); err == nil {
+						continue
+					}
+					findings = append(findings, finding{
+						place: path.Join(siteRoot, page),
+						said:  fmt.Sprintf("links to %q, which this site does not carry", href),
+					})
+					continue
+				}
+			}
+			if fragment != "" && !identifiers[target][fragment] {
+				findings = append(findings, finding{
+					place: path.Join(siteRoot, page),
+					said: fmt.Sprintf("links to %q, and %s declares no such identifier",
+						href, target),
+				})
+			}
+		}
+	}
+	return findings, nil
+}
+
+var (
+	htmlIdentifier = regexp.MustCompile(`\sid="([^"]+)"`)
+	htmlHref       = regexp.MustCompile(`href="([^"]*)"`)
+)

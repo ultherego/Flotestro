@@ -48,6 +48,12 @@ var checks = []check{
 		run: siteLanguages,
 	},
 	{
+		name: "site-links",
+		why: "a link the site makes to itself is published broken; the pages are hand-written and " +
+			"copied with no build step, so a renamed heading is found by whoever clicks it",
+		run: siteLinks,
+	},
+	{
 		name: "healthcheck-form",
 		why: "a healthcheck on a shell-less image has to be written in exec form; a shell string " +
 			"there cannot run at all, and the container reports unhealthy while serving",
