@@ -20,7 +20,7 @@
       Flotestro
     </a>
     <nav class="site-nav" aria-label="Sekcje">
-      <a href="#panel">Panel</a>
+      <a href="gallery.html">Galeria</a>
       <a href="#change">Zmiana</a>
       <a href="#operations">Operacje</a>
       <a href="#architecture">Architektura</a>
@@ -118,112 +118,9 @@
 
     <h2 id="panel">Panel</h2>
 
-    <p class="prose">Każdy obrazek poniżej pochodzi z działającej instalacji: czterohostowego
-      laboratorium z jedną maszyną Debian, jedną Ubuntu, jedną Fedora i jedną Arch, stąd małe
-      liczby. Chodzi o to, co robią te strony, a nie o rozmiar floty.</p>
-
-    <h3>Flota</h3>
-
-    <figure class="figure">
-      <img src="../img/dashboard.png" alt="Dashboard floty: dostępność hostów, problemy według rodzaju, operacje z ostatnich 24 godzin, to, co wymaga uwagi, oraz skład floty." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Dashboard.</b> Tylko to, co wymaga decyzji. Po lewej dostępność hostów &mdash;
-        cztery online, zero nieaktualnych, offline, nieznanych, w kwarantannie i w trybie
-        serwisowym &mdash; po prawej problemy według rodzaju: 13 znalezisk bezpieczeństwa, 8
-        nieudanych zadań w ciągu 24 godzin, 6 kontroli z wynikiem nieznanym. Niżej zakończone
-        operacje na godzinę według wyniku; blok <i>wymaga uwagi</i> liczony w bazie danych: dwa hosty z
-        nieudanymi jednostkami, jeden enrollment w toku i cztery certyfikaty
-        agentów wygasające w ciągu 30 dni; oraz skład floty według systemu,
-        wersji agenta, site i środowiska.</figcaption>
-    </figure>
-
-    <figure class="figure">
-      <img src="../img/hosts.png" alt="Lista hostów z filtrami po stronie serwera i wierszem na host: stan, system, site, środowisko, domena, aktualizacje, nieudane jednostki, restart i ostatni kontakt." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Hosty.</b> Filtry działają po stronie serwera: nazwa hosta lub adres, site,
-        środowisko, właściciel, tagi, dalej system operacyjny, stan, cykl życia, tryb serwisowy,
-        możliwości i kanał wydań. Wiersz niesie stan, system tak, jak zgłosił go host &mdash;
-        <code>arch</code>, <code>debian 13</code>, <code>fedora 42</code>,
-        <code>ubuntu 24.04</code> &mdash; site i środowisko, to, czy jest w domenie, ile aktualizacji
-        na niego czeka, ile jednostek padło, czy chce restartu i kiedy był
-        widziany ostatni raz.</figcaption>
-    </figure>
-
-    <h3>Pojedynczy host</h3>
-
-    <figure class="figure">
-      <img src="../img/host-overview.png" alt="Strona hosta: menu modułów, adaptery dostępne na tym hoście, fakty systemowe i sprzęt zgłoszony przez agenta." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Przegląd hosta.</b> Menu po lewej to moduły tego hosta: pakiety, usługi,
-        procesy, harmonogramy, jądro, czas, zasilanie, sieć, DNS, firewall, SSH, pamięć masowa,
-        pliki, kopie zapasowe, kontenery, Compose, bezpieczeństwo, podatności, certyfikaty.
-        Każda strona mówi, skąd wzięły się fakty i kiedy, tutaj
-        <code>agent/os-release+procfs, revision 1dc313f1f045, observed 8m ago</code>. Spośród
-        adapterów na tym hoście 16 potrafi czytać i zmieniać, 2 są tylko do odczytu, a 5 jest
-        niedostępnych, co jest inną odpowiedzią niż zero. Obok tożsamości i sprzętu stoi to, co
-        wymaga uwagi na samym tym hoście: żadnych nieudanych jednostek, 36 czekających
-        aktualizacji, brak aktualizacji bezpieczeństwa.</figcaption>
-    </figure>
-
-    <figure class="figure">
-      <img src="../img/host-packages.png" alt="Strona pakietów jednego hosta: aktualizacje według stanu, źródła pakietów, operacje, o które może poprosić operator, oraz wersja samego agenta." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Pakiety hosta.</b> 351 pakietów aktualnych, 36 do aktualizacji, w tym żadnej
-        aktualizacji bezpieczeństwa. Po prawej źródła tak, jak zgłasza je host: 387 zainstalowanych przez
-        <code>apt</code>, zdrowa baza pakietów, siedem repozytoriów, z czego jedno ma sprawdzane
-        podpisy i żadne nie jest zarządzane przez panel. Operator może zaplanować aktualizacje
-        &mdash; samo ich policzenie niczego na hoście nie zmienia &mdash; albo zainstalować,
-        wstrzymać, zdjąć wstrzymanie i zaplanować usunięcie. Zwykłe aktualizacje nie ruszają
-        agenta: jego wymiana to osobna operacja, a za wykonaną uznaje się ją dopiero wtedy, gdy
-        host wraca, zgłaszając wersję, o którą poproszono.</figcaption>
-    </figure>
-
-    <h3>Zmiana w całej flocie</h3>
-
-    <figure class="figure">
-      <img src="../img/campaign.png" alt="Zakończona kampania: liczby celów, ustawienia canary i fal, zapis zatwierdzenia, fale oraz plany z ich odciskami." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Kampania.</b> Zakończona kampania <code>file.ensure</code> na czterech
-        hostach: jeden canary i dwie fale, najwyżej dwa hosty naraz, próg niepowodzeń 25% albo
-        jeden host, polityka restartu <code>never</code>, polityka dla hostów offline
-        <code>replan_on_reconnect</code> i kontrakt operacji wypisany na stronie &mdash;
-        anulowanie między krokami, ponowienie po nowym planie, rollback przez dokładne
-        odtworzenie, weryfikacja przez ponowne sprawdzenie planu. Zapis zatwierdzenia mówi, kto
-        zatwierdził, na jakim uwierzytelnieniu (token API, bez ponownego uwierzytelnienia) i
-        dlaczego: <i>zmiana CHG-1042 zatwierdzona na cotygodniowym przeglądzie</i>. Powstaje raz
-        i nigdy się nie zmienia. Pod falami jeden wiersz na każdy kształt zmiany, z odciskiem planu i
-        czasem ważności &mdash; host, którego plan zdążył się zmienić, odmawia
-        wykonania.</figcaption>
-    </figure>
-
-    <h3>Co panel obserwuje</h3>
-
-    <figure class="figure">
-      <img src="../img/security.png" alt="Strona bezpieczeństwa: znaleziska według stanu, tabela kontroli z wartością oczekiwaną oraz znaleziska według wagi i hosta." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Bezpieczeństwo.</b> Wersjonowane kontrole oceniane w panelu na faktach, które
-        hosty i tak zgłaszają: 13 kontroli na czterech hostach, 13 znalezisk wymagających
-        działania, 23 zaliczone, 6 nieznanych, 10 takich, które nie dotyczą hosta, 6 takich, które
-        panel potrafi naprawić. Każdy wiersz podaje nazwę kontroli i jej identyfikator &mdash;
-        <code>ssh.password-auth</code>, <code>exposure.listening</code>,
-        <code>kernel.rp-filter</code> &mdash; oraz wartość, względem której była oceniana. Jedno
-        złe ustawienie na stu hostach to jeden problem, a naprawa to jedna kampania z jednym
-        zatwierdzeniem.</figcaption>
-    </figure>
-
-    <figure class="figure">
-      <img src="../img/monitoring.png" alt="Strona monitoringu: alerty według wagi, pokrycie hostów oraz reguły alertów wraz z ich warunkami." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Monitoring.</b> Każdy agent próbkuje swój host; reguły z tej strony zamieniają
-        próbki w alerty i nic nie odpali bez reguły, którą operator może tu przeczytać. Najpierw
-        pokrycie &mdash; cztery hosty zgłaszają dane, żaden nie milczy, pięć reguł włączonych
-        &mdash; a potem same reguły: <code>filesystem_used_percent &gt; 90%</code> utrzymane przez
-        dziesięć minut to ostrzeżenie dla całej floty, ta sama metryka powyżej 97% jest krytyczna
-        i nie czeka wcale.</figcaption>
-    </figure>
-
-    <figure class="figure">
-      <img src="../img/audit.png" alt="Strona audytu: zdarzenia na godzinę według wyniku, podsumowanie wyników i aktorów, filtry oraz tabela zdarzeń." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Audyt.</b> Każde powodzenie i niepowodzenie tworzy zdarzenie; każda odmowa
-        również. Wśród stu wypisanych tutaj: 89 się powiodło, 9 zawiodło, 2 zostały odrzucone,
-        policzone według aktora &mdash; nazwany operator, sam panel oraz kampanie pod własnymi
-        identyfikatorami. Wiersz niesie czas, aktora, rodzaj, operację, cel i wynik, a pod nazwą
-        użytkownika uwierzytelnienie, na którym oparło się żądanie: sesję i kontekst
-        uwierzytelnienia, w jakim ją nadano.</figcaption>
-    </figure>
+    <p class="prose">Osiem ekranów działającej instalacji &mdash; flota, host, kampania, pakiety,
+      które zmieni, znaleziska bezpieczeństwa, monitoring i ślad audytowy &mdash; jest
+      w <a href="gallery.html">galerii</a>.</p>
 
     <h2 id="change">Jak przebiega zmiana</h2>
 
