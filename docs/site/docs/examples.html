@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Worked examples &middot; Flotestro documentation</title>
+<meta name="description" content="Calls you can paste into a terminal and the answers they gave: ordering an operation, reading its result, the shape of a payload, campaigns, idempotency, ETags and signed webhook deliveries.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;600&display=swap">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header__inner">
+    <a class="brand" href="../"><img class="brand__mark" src="../img/logo.webp" alt="">Flotestro</a>
+    <nav class="site-nav">
+      <a href="../">Overview</a>
+      <a href="./" aria-current="page">Documentation</a>
+      <a href="https://ultherego.github.io/Flotestro/packages/">Packages</a>
+      <a href="https://github.com/ultherego/Flotestro">Source</a>
+      <details class="lang-menu">
+        <summary class="lang-menu__toggle" aria-label="Language: English (EN)">
+          <svg class="lang-menu__flag" viewBox="0 0 60 40" width="18" height="12" aria-hidden="true">
+            <path fill="#012169" d="M0 0h60v40H0z"/>
+            <g fill="none">
+              <path stroke="#ffffff" stroke-width="8" d="M0 0L60 40M60 0L0 40"/>
+              <path stroke="#c8102e" stroke-width="4" d="M0 0L60 40M60 0L0 40"/>
+              <path stroke="#ffffff" stroke-width="13" d="M30 0V40M0 20H60"/>
+              <path stroke="#c8102e" stroke-width="8" d="M30 0V40M0 20H60"/>
+            </g>
+          </svg>
+          <span class="lang-menu__code">EN</span>
+        </summary>
+        <ul class="lang-menu__list">
+          <li>
+            <span class="lang-menu__item" lang="en" aria-current="true">
+              <svg class="lang-menu__flag" viewBox="0 0 60 40" width="18" height="12" aria-hidden="true">
+                <path fill="#012169" d="M0 0h60v40H0z"/>
+                <g fill="none">
+                  <path stroke="#ffffff" stroke-width="8" d="M0 0L60 40M60 0L0 40"/>
+                  <path stroke="#c8102e" stroke-width="4" d="M0 0L60 40M60 0L0 40"/>
+                  <path stroke="#ffffff" stroke-width="13" d="M30 0V40M0 20H60"/>
+                  <path stroke="#c8102e" stroke-width="8" d="M30 0V40M0 20H60"/>
+                </g>
+              </svg>
+              English
+            </span>
+          </li>
+          <li>
+            <a class="lang-menu__item" href="../pl/docs/examples.html" hreflang="pl" lang="pl">
+              <svg class="lang-menu__flag" viewBox="0 0 60 40" width="18" height="12" aria-hidden="true">
+                <path fill="#ffffff" d="M0 0h60v20H0z"/>
+                <path fill="#dc143c" d="M0 20h60v20H0z"/>
+              </svg>
+              Polski
+            </a>
+          </li>
+        </ul>
+      </details>
+    </nav>
+  </div>
+</header>
+
+<div class="layout">
+
+  <aside class="sidebar">
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Manual</h2>
+      <ul class="sidebar__list">
+        <li><a href="./">Contents</a></li>
+        <li><a href="introduction.html">1. Introduction</a></li>
+        <li><a href="architecture.html">2. Architecture</a></li>
+        <li><a href="installation.html">3. Installation</a></li>
+        <li><a href="concepts.html">4. How a change happens</a></li>
+      </ul>
+    </nav>
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Reference</h2>
+      <ul class="sidebar__list">
+        <li><a href="configuration.html">5. Configuration</a></li>
+        <li><a href="operations.html">6. Operations</a></li>
+        <li><a href="errors.html">7. Errors and refusals</a></li>
+        <li><a href="api.html">8. API</a></li>
+        <li><a href="roles.html">9. Roles and permissions</a></li>
+      </ul>
+    </nav>
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Procedures</h2>
+      <ul class="sidebar__list">
+        <li><a href="runbooks.html">10. Runbooks</a></li>
+        <li><a href="examples.html" aria-current="page">11. Worked examples</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main class="content">
+<h1>11. Worked examples</h1>
+<p class="lede">The reference pages say what every route and every operation is. This page is the other half: calls you can paste into a terminal, and what came back when they were run. Every request and every response below was run against a real installation; the identifiers are from that run, so yours will differ.</p>
+    <ul class="linkrow">
+      <li><a href="#token">What you need: an address and a token</a></li>
+      <li><a href="#first">The first call, and the shape of a list</a></li>
+      <li><a href="#paging">Walking a list to the end</a></li>
+      <li><a href="#order">Ordering one operation on one host</a></li>
+      <li><a href="#result">Reading what the host did</a></li>
+      <li><a href="#payload">Where the payload shape comes from</a></li>
+      <li><a href="#refusals">Four refusals, and what each one means</a></li>
+      <li><a href="#reads">A read across many hosts at once</a></li>
+      <li><a href="#campaign">A campaign: preview, create, approve, cancel</a></li>
+      <li><a href="#idempotency">Asking twice without doing it twice</a></li>
+      <li><a href="#etag">Writing a record somebody else may have moved</a></li>
+      <li><a href="#webhook">Receiving the trail, and checking the signature</a></li>
+    </ul>
+
+<h2 id="token">What you need: an address and a token</h2>
+
+<p>The panel answers on <code>FLOTESTRO_ADMIN_ADDR</code>, <code>127.0.0.1:8080</code> by default, in plain HTTP behind whatever terminates TLS for it. Nothing below needs a browser.</p>
+
+<p>A fresh installation writes one token into its state directory, as <code class="filename">bootstrap-token</code>. In the container deployment that directory is a volume, so the file is read out of it rather than off the host:</p>
+
+<pre><code>docker compose exec -T control-plane cat /var/lib/flotestro/bootstrap-token</code></pre>
+
+<p>That token belongs to a principal called <code>bootstrap-admin</code> and lives 30 days. It is the credential that creates the others: a long-lived automation should have a token of its own, issued to its own principal with its own permissions, through <code>POST /api/v1/principals/{id}/tokens</code>. Keep the address and the token in the shell for the rest of this page:</p>
+
+<pre><code>PANEL=http://127.0.0.1:8080
+TOKEN=$(docker compose exec -T control-plane cat /var/lib/flotestro/bootstrap-token)</code></pre>
+
+<div class="note">
+  <p class="note__title">A token is not a session</p>
+  <p>Both credentials reach the same permissions, but a browser session is bounded, carries a CSRF header and can be re-authenticated; a token cannot. That matters for the few operations that demand fresh authentication, and <code>FLOTESTRO_STEPUP_TOKENS=refuse</code> is how an installation says a token may never order them. See <a href="api.html#stepup">step-up</a>.</p>
+</div>
+
+<h2 id="first">The first call, and the shape of a list</h2>
+
+<p>Two hosts, sorted by name:</p>
+
+<pre><code>curl -sS -H "Authorization: Bearer $TOKEN" \
+  "$PANEL/api/v1/hosts?limit=2&amp;sort=hostname"</code></pre>
+
+<p>Every list has the same envelope. <code>count</code> is this page, <code>total</code> is how many match the filter across every page, and <code>next_cursor</code> is empty on the last page:</p>
+
+<pre><code>{
+  "count": 2,
+  "total": 8,
+  "next_cursor": "AgAAAAMAAAAIaG9zdG5hbWUAAAAMYWdlbnQtZGViaWFu...",
+  "items": [
+    {
+      "id": "91010c96-a7ed-4733-91ee-0f06cc7a6482",
+      "hostname": "agent-arch",
+      "site": "lab",
+      "environment": "test",
+      "lifecycle_state": "active",
+      "os_family": "arch",
+      "agent_version": "0.62.0",
+      "connection_state": "online",
+      "last_seen_at": "2026-10-08T09:40:28.018922Z",
+      "agent_build_commit": "7bc2abf369a275d51ed01effafb66be8f28f6594",
+      "helper_capability_mode": "enforce",
+      "failed_units": 0,
+      "pending_updates": 12,
+      "pending_security_updates": null,
+      "management_address": "192.168.56.70"
+    }
+  ]
+}</code></pre>
+
+<p>A host record carries 35 fields; the ones above are the ones a list is usually read for. Note <code>pending_security_updates</code>: <code>null</code>, not <code>0</code>. The host has not reported that number, and the panel does not invent one — which is why a sort puts an unknown count below zero rather than among the zeroes.</p>
+
+<h2 id="paging">Walking a list to the end</h2>
+
+<p>A cursor is opaque: the sort key of the last row, passed back exactly as it came. It is not an offset, so rows inserted while you page do not shift the window or repeat a row:</p>
+
+<pre><code>cursor=
+while :; do
+  page=$(curl -sS -H "Authorization: Bearer $TOKEN" \
+    "$PANEL/api/v1/hosts?limit=100&amp;sort=hostname&amp;cursor=$cursor")
+  echo "$page" | jq -r '.items[].hostname'
+  cursor=$(echo "$page" | jq -r '.next_cursor // empty')
+  [ -n "$cursor" ] || break
+done</code></pre>
+
+<p>A cursor this panel did not issue, or one issued under a different <code>sort</code>, is refused — it is not quietly read as the first page.</p>
+
+<h2 id="order">Ordering one operation on one host</h2>
+
+<p>This is the call most automation is written around, and it has two details worth getting right the first time.</p>
+
+<p><strong>The route is per host.</strong> An operation is created under the host it acts on: <code>POST /api/v1/hosts/{id}/operations</code>. There is no route that takes a host identifier in the body.</p>
+
+<p><strong>The field is <code>action</code> going in and <code>action_type</code> coming back.</strong> The request names the operation in <code>action</code>; the job record that comes back reports it as <code>action_type</code>, because a job has a type and a version. A request that sends <code>action_type</code> is a request with no action in it.</p>
+
+<p>Restarting a service on one host:</p>
+
+<pre><code>HOST=42e2f7c7-8e02-4131-a797-55b5f0f53f54
+
+curl -sS -X POST -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -H "Idempotency-Key: restart-cron-$(date +%s)" \
+  -d '{
+        "action": "unit.restart",
+        "payload": { "unit": { "unit": "cron.service" } }
+      }' \
+  "$PANEL/api/v1/hosts/$HOST/operations"</code></pre>
+
+<p><code>201 Created</code>, and the job as the panel recorded it:</p>
+
+<pre><code>{
+  "id": "904dfe79-8c6c-4b3f-9fc1-ee7638ff5b6f",
+  "host_id": "42e2f7c7-8e02-4131-a797-55b5f0f53f54",
+  "hostname": "agent-debian",
+  "action_type": "unit.restart",
+  "action_version": 1,
+  "payload": { "unit": { "unit": "cron.service" } },
+  "payload_hash": "17af2e027304d8f9737c4e1551b65e3a8ac219f241f1e3eb14b6b4b70bf961f1",
+  "state": "queued",
+  "requires_approval": false,
+  "required_approvals": 1,
+  "collected_approvals": 0,
+  "preconditions": {
+    "os_family": "debian",
+    "required_capabilities": [ "systemd" ]
+  },
+  "timeout_seconds": 120
+}</code></pre>
+
+<p>The payload sits inside a named group — <code>"unit": { ... }</code> — and that group is the same for every operation that acts on a unit. <code>preconditions</code> is the panel telling you what it will hold the host to before the work is dispatched; a host that does not meet them is refused rather than attempted.</p>
+
+<div class="note">
+  <p class="note__title">Some operations will not start on a request alone</p>
+  <p>An operation of high or critical risk may need <code>reason</code> (at least 8 characters), the hostname typed back in <code>target_confirmation</code>, an approval by somebody else, or authentication no older than a few minutes. Which of those applies is in the <a href="operations.html">operations reference</a> per operation, and the refusal always says which one is missing.</p>
+</div>
+
+<h2 id="result">Reading what the host did</h2>
+
+<p>The job record carries the state; the attempt carries what the host said. Ask for the job first:</p>
+
+<pre><code>curl -sS -H "Authorization: Bearer $TOKEN" "$PANEL/api/v1/jobs/$JOB" | jq '{state, finished_at, result_status}'</code></pre>
+
+<pre><code>{
+  "state": "succeeded",
+  "finished_at": "2026-10-08T09:42:12.636754Z",
+  "result_status": "succeeded"
+}</code></pre>
+
+<p>Then the attempts, which is where the output, the exit code and the identity of the gateway that dispatched it are:</p>
+
+<pre><code>curl -sS -H "Authorization: Bearer $TOKEN" "$PANEL/api/v1/jobs/$JOB/attempts" | jq '.items[0]'</code></pre>
+
+<pre><code>{
+  "attempt_number": 1,
+  "status": "succeeded",
+  "exit_code": 0,
+  "gateway_id": "cp-01",
+  "session_id": "1353c457-2ae1-4391-b445-5c0b11091da1",
+  "dispatched_at": "2026-10-08T09:42:12.440228Z",
+  "started_at": "2026-10-08T09:42:12.446875Z",
+  "finished_at": "2026-10-08T09:42:12.636754Z",
+  "output_truncated": false,
+  "replayed": false,
+  "stdout": "2026-10-08T08:17:01+00:00 agent-debian CRON[2351]: pam_unix(cron:session): session closed for user root\n..."
+}</code></pre>
+
+<p>There is one record per attempt, so a retry does not overwrite what the first one said. <code>replayed</code> marks an answer the panel took from the host's own record of a request it had already carried out, rather than a second execution. <code>output_truncated</code> tells you the output hit <code>max_output_bytes</code> — ask for more with that field on the order if you need it.</p>
+
+<p>A job that ran but could not be confirmed is not reported as a success: <code>result_status</code> becomes <code>applied_unverified</code>, which means the change was made and the verifier could not read the host back. It is a state to watch for, not an error to retry blindly.</p>
+
+<h2 id="payload">Where the payload shape comes from</h2>
+
+<p>A payload is grouped by name. There are 43 groups, one per kind of thing an operation acts on, and an operation reads exactly one of them. The groups and their fields are in the document the panel generates from its own routes, so they cannot drift from the code:</p>
+
+<pre><code>curl -sS -H "Authorization: Bearer $TOKEN" "$PANEL/api/v1/openapi.json" \
+  | jq '.components.schemas.Payload.properties.journal'</code></pre>
+
+<pre><code>{
+  "type": "object",
+  "required": [ "lines" ],
+  "properties": {
+    "unit":           { "type": "string" },
+    "lines":          { "type": "integer" },
+    "since":          { "type": "string" },
+    "until":          { "type": "string" },
+    "boot_id":        { "type": "string" },
+    "max_priority":   { "type": "integer" },
+    "after_cursor":   { "type": "string" },
+    "follow_seconds": { "type": "integer" }
+  }
+}</code></pre>
+
+<p>Read it as the payload of a journal read: <code>lines</code> is required, <code>unit</code> is not — a journal read with no unit reads the whole journal, which is a legitimate thing to ask for. To list every group:</p>
+
+<pre><code>curl -sS -H "Authorization: Bearer $TOKEN" "$PANEL/api/v1/openapi.json" \
+  | jq -r '.components.schemas.Payload.properties | keys[]'</code></pre>
+
+<p>Which group an operation reads is in the <a href="operations.html#catalogue">catalogue</a>, in the <em>Payload</em> column of every entry. <code>GET /api/v1/actions</code> answers the rest of what an operation is — its permission, its risk, its timeout, whether a campaign can run it, what verifies it:</p>
+
+<pre><code>curl -sS -H "Authorization: Bearer $TOKEN" "$PANEL/api/v1/actions" \
+  | jq '.items[] | select(.action == "journal.read")'</code></pre>
+
+<pre><code>{
+  "action": "journal.read",
+  "mutating": false,
+  "required_capability": "journald",
+  "permission": "journal.read",
+  "default_timeout_seconds": 60,
+  "risk": "low",
+  "campaign_mode": "none",
+  "campaign_ready": false,
+  "campaign_refusal": "this operation is not available for campaigns; run it host by host",
+  "offline_policy": "skip_if_offline",
+  "fanout_limit": 20,
+  "cancel_mode": "safe",
+  "retry_class": "automatic",
+  "rollback": "none",
+  "verification": "none",
+  "resource_claims": [ { "class": "logs-read", "mode": "shared", "weight": 1 } ]
+}</code></pre>
+
+<h2 id="refusals">Four refusals, and what each one means</h2>
+
+<p>Every refusal is a problem object with a stable <code>code</code> for programs and a <code>detail</code> for people. These four are the ones a first integration meets, in the order it usually meets them.</p>
+
+<p><strong>The operation does not exist.</strong> A typo in the action, answered with the whole vocabulary:</p>
+
+<pre><code>{
+  "code": "unknown_action",
+  "detail": "unknown operation type; allowed: agent.upgrade, backup.plan, backup.restore, ...",
+  "status": 400
+}</code></pre>
+
+<p><strong>The payload is valid JSON of the wrong shape.</strong> The fields were sent unwrapped — <code>{"unit": "cron.service"}</code> instead of <code>{"unit": {"unit": "cron.service"}}</code>:</p>
+
+<pre><code>{
+  "code": "invalid_payload",
+  "detail": "the payload field \"unit\" takes opspec.UnitPayload and the order gave string; the payload of an operation is grouped by name, as {\"unit\":{...}}, and the groups are in the OpenAPI document under components.schemas.Payload",
+  "status": 400
+}</code></pre>
+
+<p><strong>The payload is the wrong group, or missing.</strong> The shape is fine and the operation cannot use it:</p>
+
+<pre><code>{
+  "code": "invalid_payload",
+  "detail": "the operation unit.restart requires a unit payload",
+  "status": 400
+}</code></pre>
+
+<p><strong>The body is not JSON at all.</strong> A different code, on purpose — this one is about the request, not about the payload inside it:</p>
+
+<pre><code>{
+  "code": "invalid_body",
+  "detail": "the request body is not valid JSON",
+  "status": 400
+}</code></pre>
+
+<p>Every code the machinery can put on a request or a task is in the <a href="errors.html">errors guide</a>, and the panel serves the same guide at <code>GET /api/v1/errors</code> — so a program can look up what it was told without a human reading this page.</p>
+
+<h2 id="reads">A read across many hosts at once</h2>
+
+<p>A read, and only a read, can be fanned out over a selector instead of a host: <code>POST /api/v1/reads</code>. A change is never one of them.</p>
+
+<pre><code>curl -sS -X POST -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+        "action": "journal.read",
+        "selector": { "environment": "test" },
+        "payload": { "journal": { "unit": "cron.service", "lines": 2 } }
+      }' \
+  "$PANEL/api/v1/reads"</code></pre>
+
+<pre><code>{
+  "id": "baf39e0f-2057-44d2-8c8d-e83f8237f08a",
+  "action": "journal.read",
+  "host_count": 6,
+  "counts": { "queued": 6, "running": 0, "succeeded": 0, "failed": 0 },
+  "total_hosts": 6,
+  "evaluated_hosts": 0,
+  "unknown_hosts": 6,
+  "partial": false,
+  "unknown_reasons": { "not_finished": 6 },
+  "kind": "timeline",
+  "hosts": [
+    { "job_id": "8b21e054-21e1-456c-bfc9-e34501b3de1c", "hostname": "agent-arch", "state": "queued" }
+  ]
+}</code></pre>
+
+<p>One job per host, each readable on its own at <code>/api/v1/jobs/{id}</code>, and a summary that counts what is still unknown and why. <code>unknown_hosts</code> with <code>unknown_reasons</code> is the rule of the product in one field: six hosts have not answered yet, and that is reported as six unknowns rather than six zeroes. Ask the same identifier again to see them resolve. A fan-out is capped per operation by <code>fanout_limit</code> from the action catalogue.</p>
+
+<h2 id="campaign">A campaign: preview, create, approve, cancel</h2>
+
+<p>A campaign is the same operation across a fleet, in waves, with thresholds and a verification per host. Ask what it would touch before creating it:</p>
+
+<pre><code>curl -sS -H "Authorization: Bearer $TOKEN" \
+  "$PANEL/api/v1/campaigns/preview?action=unit.restart&amp;environment=test" | jq '{campaign_mode, count}'</code></pre>
+
+<pre><code>{ "campaign_mode": "same_payload", "count": 8 }</code></pre>
+
+<p>The full answer carries a distribution: how the matched hosts break down by capability, by environment, by site — and which of them lack the capability the operation needs. Two hosts answering <code>"reason": "unknown"</code> under <code>capability</code> are hosts that have not reported whether they have systemd, and the campaign will not guess on their behalf.</p>
+
+<p>Creating one needs a name, an action and a selector; everything else has a default the panel will tell you about in the record it returns:</p>
+
+<pre><code>curl -sS -X POST -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+        "name": "restart cron on the test fleet",
+        "action": "unit.restart",
+        "selector": { "host_ids": ["42e2f7c7-8e02-4131-a797-55b5f0f53f54"] },
+        "payload": { "unit": { "unit": "cron.service" } },
+        "wave_size": 1,
+        "failure_threshold_absolute": 1
+      }' \
+  "$PANEL/api/v1/campaigns"</code></pre>
+
+<pre><code>{
+  "id": "97e926ce-d57b-4798-bc61-e1b09bbe8b7d",
+  "name": "restart cron on the test fleet",
+  "action_type": "unit.restart",
+  "state": "awaiting_approval",
+  "revision": 1,
+  "canary_size": 1,
+  "wave_size": 1,
+  "max_concurrent": 5,
+  "requires_approval": true,
+  "offline_policy": "wait_until_deadline",
+  "reboot_policy": "never"
+}</code></pre>
+
+<p>It starts in <code>awaiting_approval</code> and does nothing until somebody approves it:</p>
+
+<pre><code>curl -sS -X POST -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{ "reason": "the monthly restart window" }' \
+  "$PANEL/api/v1/campaigns/$CAMPAIGN/approve"</code></pre>
+
+<p>An approval may carry <code>payload_hash</code>, and is then refused if the plan changed between being read and being approved. In an environment named by <code>FLOTESTRO_PRODUCTION_ENVIRONMENTS</code> the approval may not come from the person who ordered it.</p>
+
+<p>From there: <code>/pause</code>, <code>/resume</code>, <code>/advance</code>, <code>/retry</code>, <code>/targets/{host}/skip</code>, and <code>/cancel</code>:</p>
+
+<pre><code>curl -sS -X POST -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{ "reason": "called off, the window closed" }' \
+  "$PANEL/api/v1/campaigns/$CAMPAIGN/cancel"</code></pre>
+
+<p>The campaign's own <code>revision</code> grows with every state change and is the panel's compare-and-set: an order given against a campaign that moved in between is answered <code>409 invalid_state</code> rather than applied. Read it again and decide again.</p>
+
+<h2 id="idempotency">Asking twice without doing it twice</h2>
+
+<p>Networks repeat requests. An order that creates work takes <code>Idempotency-Key</code>, and a repeat under the same key returns the job that was already created instead of a second one:</p>
+
+<pre><code>curl -sS -X POST -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: nightly-cron-restart-2026-10-08' \
+  -d '{ "action": "unit.restart", "payload": { "unit": { "unit": "cron.service" } } }' \
+  "$PANEL/api/v1/hosts/$HOST/operations"</code></pre>
+
+<p>The key belongs to the caller: make it from what the work <em>is</em>, not from the moment it was sent, or a retry will carry a new key and order the work twice. The same field may go in the body as <code>idempotency_key</code>; the header wins when both are present.</p>
+
+<h2 id="etag">Writing a record somebody else may have moved</h2>
+
+<p>Two operators editing one record is an ordinary event, so the shared records carry a version. A read answers with a weak entity tag:</p>
+
+<pre><code>curl -sS -D- -o /dev/null -H "Authorization: Bearer $TOKEN" "$PANEL/api/v1/hosts/$HOST"</code></pre>
+
+<pre><code>HTTP/1.1 200 OK
+Etag: W/"e62a8e5fd2181584"</code></pre>
+
+<p>Send it back on the write, and the write happens only if nothing moved in between:</p>
+
+<pre><code>curl -sS -X PUT -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -H 'If-Match: W/"e62a8e5fd2181584"' \
+  -d '{ "tags": ["database", "production"] }' \
+  "$PANEL/api/v1/hosts/$HOST/tags"</code></pre>
+
+<p>With a tag that is no longer current:</p>
+
+<pre><code>{
+  "code": "precondition_failed",
+  "detail": "the record changed since it was read; read it again and repeat the write with its current ETag",
+  "status": 412
+}</code></pre>
+
+<p>Without the header the write simply proceeds, so a careful client always sends it. Note what that <code>tags</code> body is: the whole list, not a change to it — a tag left out is a tag removed.</p>
+
+<h2 id="webhook">Receiving the trail, and checking the signature</h2>
+
+<p>Set <code>FLOTESTRO_WEBHOOK_URL</code> and <code>FLOTESTRO_WEBHOOK_SECRET</code> and the panel posts the audit trail onward in batches, each one signed. A receiver that checks the body alone would accept a forged delivery: <strong>the signature covers the timestamp, a dot, and the body</strong>, which is what keeps a captured delivery from being replayed.</p>
+
+<pre><code>import hashlib, hmac
+
+SECRET = b"the value of FLOTESTRO_WEBHOOK_SECRET"
+
+def verify(headers, raw_body: bytes) -> bool:
+    timestamp = headers.get("X-Flotestro-Timestamp", "")
+    carried = headers.get("X-Flotestro-Signature", "").split("=")[-1].strip()
+    if not timestamp or not carried:
+        return False                      # unsigned, or signing nothing replayable
+    expected = hmac.new(SECRET, timestamp.encode() + b"." + raw_body,
+                        hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, carried)</code></pre>
+
+<p>Each delivery is a batch of trail events with the identifiers of its ends, so a receiver can tell whether it has a gap:</p>
+
+<pre><code>{
+  "first_id": 1402,
+  "last_id": 1501,
+  "events": [
+    { "id": 1402, "aggregate_type": "campaign_target", "aggregate_id": "784bfdc7-b98c-418e-883f-...", "...": "..." }
+  ]
+}</code></pre>
+
+<p>Answer <code>2xx</code> and the panel moves its cursor; answer anything else, or nothing, and it keeps the place and tries again. The consumer never moves past an event it did not deliver, which is why a receiver that is down loses nothing.</p>
+
+<div class="note note--success">
+  <p class="note__title">Where to go next</p>
+  <p><a href="api.html">The API reference</a> for every route and the conventions in full, <a href="operations.html">the operations catalogue</a> for what each operation needs and promises, <a href="errors.html">the errors guide</a> for every code, and <a href="roles.html">roles and permissions</a> for which principal may do which of this.</p>
+</div>
+    <ul class="linkrow">
+      <li><a href="runbooks.html">&larr; 10. Runbooks</a></li>
+      <li><a href="api.html">8. API</a></li>
+      <li><a href="operations.html">6. Operations</a></li>
+      <li><a href="errors.html">7. Errors and refusals</a></li>
+      <li><a href="./">Contents</a></li>
+    </ul>
+  </main>
+
+</div>
+
+<footer class="site-footer">
+  <div class="site-footer__inner">
+    <p>Flotestro documentation, release 0.62.0.</p>
+    <p><a href="https://github.com/ultherego/Flotestro">github.com/ultherego/Flotestro</a></p>
+  </div>
+</footer>
+
+</body>
+</html>

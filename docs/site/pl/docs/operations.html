@@ -85,6 +85,7 @@
       <h2 class="sidebar__title">Procedury</h2>
       <ul class="sidebar__list">
         <li><a href="runbooks.html">10. Runbooki</a></li>
+        <li><a href="examples.html">11. Przykłady użycia</a></li>
       </ul>
     </nav>
   </aside>
@@ -94,6 +95,7 @@
 <p class="lede">Flotestro nie ma akcji &bdquo;wykonaj to polecenie&rdquo;. Każda zmiana i każdy odczyt to jedna ze 128 typowanych operacji, z własnym uprawnieniem, własnym poziomem ryzyka, własną blokadą na hoście i własnym payloadem. Ta strona to cały rejestr, przepisany z <code>internal/opspec/</code>; panel podaje tę samą listę pod <code>GET /api/v1/actions</code>.</p>
     <ul class="linkrow">
       <li><a href="#reading">Jak czytać wpis</a></li>
+      <li><a href="#envelope">Payload i zamówienie, w którym jedzie</a></li>
       <li><a href="#risk">Poziomy ryzyka</a></li>
       <li><a href="#fresh-auth">Świeże uwierzytelnienie i wpisanie celu</a></li>
       <li><a href="#extra-permissions">Uprawnienia, których zlecenie wymaga ponad uprawnienie samej operacji</a></li>
@@ -142,6 +144,16 @@
 <tr><td>Rollback</td><td>Jaka droga powrotna istnieje po tym, jak zmiana wejdzie w życie.</td></tr>
 <tr><td>Ponowienie</td><td>Czy powtórzenie tego samego może się udać.</td></tr>
 </tbody></table></div>
+<h2 id="envelope">Payload i zamówienie, w którym jedzie</h2>
+<p>Każdy wpis poniżej nazywa <em>Payload</em>, a ta nazwa jest grupą: pola idą wewnątrz obiektu o tej nazwie, nie obok akcji. Zamówienie <a href="#op-unit-restart"><code>unit.restart</code></a>, którego payloadem jest <a href="#payload-unit"><code>unit</code></a>, wygląda więc tak:</p>
+<pre><code>POST /api/v1/hosts/{id}/operations
+
+{
+  "action": "unit.restart",
+  "payload": { "unit": { "unit": "cron.service" } }
+}</code></pre>
+<p>Trzy rzeczy o tym ciele warto powiedzieć raz, a nie przy każdym wpisie. Operacja nazywa się <code>action</code> w żądaniu, a rekord zadania raportuje ją jako <code>action_type</code> w odpowiedzi. Payload jest grupowany, więc pola <a href="#payload-unit"><code>unit</code></a> siedzą wewnątrz <code>"unit"</code> — pola bez opakowania to poprawny JSON o złym kształcie i panel tak to nazywa, zamiast udawać, że JSON jest zepsuty. A operacja, która wymaga powodu, przepisanej nazwy celu albo zatwierdzenia, bierze je <em>obok</em> payloadu, nie w jego środku: <code>reason</code>, <code>target_confirmation</code>, <code>requires_approval</code>.</p>
+<p>Pola każdej grupy, z typami i tym, które są wymagane, są w dokumencie, który panel generuje z własnego kodu — <code>GET /api/v1/openapi.json</code>, pod <code>components.schemas.Payload</code>. <a href="examples.html">11. Przykłady użycia</a> przechodzi całą drogę: zamówienie, zadanie, próbę, którą odpowiedział host, i odmowy po drodze.</p>
 <h2 id="risk">Poziomy ryzyka</h2>
 <div class="table-scroll">
 <table>

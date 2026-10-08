@@ -151,12 +151,10 @@ func (s *Server) orderCampaign(w http.ResponseWriter, r *http.Request, request c
 		return
 	}
 
-	var payload opspec.Payload
-	if len(request.Payload) > 0 {
-		if err := json.Unmarshal(request.Payload, &payload); err != nil {
-			problem(w, http.StatusBadRequest, "invalid_payload", "the payload is not valid JSON")
-			return
-		}
+	payload, err := decodePayload(request.Payload)
+	if err != nil {
+		problem(w, http.StatusBadRequest, "invalid_payload", err.Error())
+		return
 	}
 	// A campaign order is validated differently than an operation on one host:
 	// there is no plan fingerprint yet, because the plan is made on the hosts.
