@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Galeria &middot; Flotestro</title>
+<meta name="description" content="Osiem ekranów działającej instalacji Flotestro: flota, host, kampania, pakiety, które zmieni, znaleziska bezpieczeństwa, monitoring i ślad audytowy.">
+<link rel="icon" href="../img/logo.webp" type="image/webp">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;600&display=swap">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header__inner">
+    <a class="brand" href="./">
+      <img class="brand__mark" src="../img/logo.webp" alt="" width="459" height="160">
+      Flotestro
+    </a>
+    <nav class="site-nav" aria-label="Sekcje">
+      <a href="./">Przegląd</a>
+      <a href="gallery.html" aria-current="page">Galeria</a>
+      <a href="docs/">Dokumentacja</a>
+      <a href="https://github.com/ultherego/Flotestro">Źródła</a>
+      <details class="lang-menu">
+        <summary class="lang-menu__toggle" aria-label="Język: polski (PL)">
+          <svg class="lang-menu__flag" viewBox="0 0 60 40" width="18" height="12" aria-hidden="true">
+            <path fill="#ffffff" d="M0 0h60v20H0z"/>
+            <path fill="#dc143c" d="M0 20h60v20H0z"/>
+          </svg>
+          <span class="lang-menu__code">PL</span>
+        </summary>
+        <ul class="lang-menu__list">
+          <li>
+            <a class="lang-menu__item" href="../gallery.html" hreflang="en" lang="en">
+              <svg class="lang-menu__flag" viewBox="0 0 60 40" width="18" height="12" aria-hidden="true">
+                <path fill="#012169" d="M0 0h60v40H0z"/>
+                <g fill="none">
+                  <path stroke="#ffffff" stroke-width="8" d="M0 0L60 40M60 0L0 40"/>
+                  <path stroke="#c8102e" stroke-width="4" d="M0 0L60 40M60 0L0 40"/>
+                  <path stroke="#ffffff" stroke-width="13" d="M30 0V40M0 20H60"/>
+                  <path stroke="#c8102e" stroke-width="8" d="M30 0V40M0 20H60"/>
+                </g>
+              </svg>
+              English
+            </a>
+          </li>
+          <li>
+            <span class="lang-menu__item" lang="pl" aria-current="true">
+              <svg class="lang-menu__flag" viewBox="0 0 60 40" width="18" height="12" aria-hidden="true">
+                <path fill="#ffffff" d="M0 0h60v20H0z"/>
+                <path fill="#dc143c" d="M0 20h60v20H0z"/>
+              </svg>
+              Polski
+            </span>
+          </li>
+        </ul>
+      </details>
+    </nav>
+  </div>
+</header>
+
+<div class="layout layout--plain">
+  <main class="content">
+
+    <h1>Panel</h1>
+    <p class="lede prose">Osiem ekranów działającej instalacji. Strona główna mówi, czego produkt się trzyma; ta pokazuje, jak to wygląda w przeglądarce.</p>
+
+        <p class="prose">Każdy obrazek poniżej pochodzi z działającej instalacji: czterohostowego
+      laboratorium z jedną maszyną Debian, jedną Ubuntu, jedną Fedora i jedną Arch, stąd małe
+      liczby. Chodzi o to, co robią te strony, a nie o rozmiar floty.</p>
+
+    <h3>Flota</h3>
+
+    <figure class="figure">
+      <img src="../img/dashboard.png" alt="Dashboard floty: dostępność hostów, problemy według rodzaju, operacje z ostatnich 24 godzin, to, co wymaga uwagi, oraz skład floty." width="1600" height="1000" loading="lazy">
+      <figcaption><b>Dashboard.</b> Tylko to, co wymaga decyzji. Po lewej dostępność hostów &mdash;
+        cztery online, zero nieaktualnych, offline, nieznanych, w kwarantannie i w trybie
+        serwisowym &mdash; po prawej problemy według rodzaju: 13 znalezisk bezpieczeństwa, 8
+        nieudanych zadań w ciągu 24 godzin, 6 kontroli z wynikiem nieznanym. Niżej zakończone
+        operacje na godzinę według wyniku; blok <i>wymaga uwagi</i> liczony w bazie danych: dwa hosty z
+        nieudanymi jednostkami, jeden enrollment w toku i cztery certyfikaty
+        agentów wygasające w ciągu 30 dni; oraz skład floty według systemu,
+        wersji agenta, site i środowiska.</figcaption>
+    </figure>
+
+    <figure class="figure">
+      <img src="../img/hosts.png" alt="Lista hostów z filtrami po stronie serwera i wierszem na host: stan, system, site, środowisko, domena, aktualizacje, nieudane jednostki, restart i ostatni kontakt." width="1600" height="1000" loading="lazy">
+      <figcaption><b>Hosty.</b> Filtry działają po stronie serwera: nazwa hosta lub adres, site,
+        środowisko, właściciel, tagi, dalej system operacyjny, stan, cykl życia, tryb serwisowy,
+        możliwości i kanał wydań. Wiersz niesie stan, system tak, jak zgłosił go host &mdash;
+        <code>arch</code>, <code>debian 13</code>, <code>fedora 42</code>,
+        <code>ubuntu 24.04</code> &mdash; site i środowisko, to, czy jest w domenie, ile aktualizacji
+        na niego czeka, ile jednostek padło, czy chce restartu i kiedy był
+        widziany ostatni raz.</figcaption>
+    </figure>
+
+    <h3>Pojedynczy host</h3>
+
+    <figure class="figure">
+      <img src="../img/host-overview.png" alt="Strona hosta: menu modułów, adaptery dostępne na tym hoście, fakty systemowe i sprzęt zgłoszony przez agenta." width="1600" height="1000" loading="lazy">
+      <figcaption><b>Przegląd hosta.</b> Menu po lewej to moduły tego hosta: pakiety, usługi,
+        procesy, harmonogramy, jądro, czas, zasilanie, sieć, DNS, firewall, SSH, pamięć masowa,
+        pliki, kopie zapasowe, kontenery, Compose, bezpieczeństwo, podatności, certyfikaty.
+        Każda strona mówi, skąd wzięły się fakty i kiedy, tutaj
+        <code>agent/os-release+procfs, revision 1dc313f1f045, observed 8m ago</code>. Spośród
+        adapterów na tym hoście 16 potrafi czytać i zmieniać, 2 są tylko do odczytu, a 5 jest
+        niedostępnych, co jest inną odpowiedzią niż zero. Obok tożsamości i sprzętu stoi to, co
+        wymaga uwagi na samym tym hoście: żadnych nieudanych jednostek, 36 czekających
+        aktualizacji, brak aktualizacji bezpieczeństwa.</figcaption>
+    </figure>
+
+    <figure class="figure">
+      <img src="../img/host-packages.png" alt="Strona pakietów jednego hosta: aktualizacje według stanu, źródła pakietów, operacje, o które może poprosić operator, oraz wersja samego agenta." width="1600" height="1000" loading="lazy">
+      <figcaption><b>Pakiety hosta.</b> 351 pakietów aktualnych, 36 do aktualizacji, w tym żadnej
+        aktualizacji bezpieczeństwa. Po prawej źródła tak, jak zgłasza je host: 387 zainstalowanych przez
+        <code>apt</code>, zdrowa baza pakietów, siedem repozytoriów, z czego jedno ma sprawdzane
+        podpisy i żadne nie jest zarządzane przez panel. Operator może zaplanować aktualizacje
+        &mdash; samo ich policzenie niczego na hoście nie zmienia &mdash; albo zainstalować,
+        wstrzymać, zdjąć wstrzymanie i zaplanować usunięcie. Zwykłe aktualizacje nie ruszają
+        agenta: jego wymiana to osobna operacja, a za wykonaną uznaje się ją dopiero wtedy, gdy
+        host wraca, zgłaszając wersję, o którą poproszono.</figcaption>
+    </figure>
+
+    <h3>Zmiana w całej flocie</h3>
+
+    <figure class="figure">
+      <img src="../img/campaign.png" alt="Zakończona kampania: liczby celów, ustawienia canary i fal, zapis zatwierdzenia, fale oraz plany z ich odciskami." width="1600" height="1000" loading="lazy">
+      <figcaption><b>Kampania.</b> Zakończona kampania <code>file.ensure</code> na czterech
+        hostach: jeden canary i dwie fale, najwyżej dwa hosty naraz, próg niepowodzeń 25% albo
+        jeden host, polityka restartu <code>never</code>, polityka dla hostów offline
+        <code>replan_on_reconnect</code> i kontrakt operacji wypisany na stronie &mdash;
+        anulowanie między krokami, ponowienie po nowym planie, rollback przez dokładne
+        odtworzenie, weryfikacja przez ponowne sprawdzenie planu. Zapis zatwierdzenia mówi, kto
+        zatwierdził, na jakim uwierzytelnieniu (token API, bez ponownego uwierzytelnienia) i
+        dlaczego: <i>zmiana CHG-1042 zatwierdzona na cotygodniowym przeglądzie</i>. Powstaje raz
+        i nigdy się nie zmienia. Pod falami jeden wiersz na każdy kształt zmiany, z odciskiem planu i
+        czasem ważności &mdash; host, którego plan zdążył się zmienić, odmawia
+        wykonania.</figcaption>
+    </figure>
+
+    <h3>Co panel obserwuje</h3>
+
+    <figure class="figure">
+      <img src="../img/security.png" alt="Strona bezpieczeństwa: znaleziska według stanu, tabela kontroli z wartością oczekiwaną oraz znaleziska według wagi i hosta." width="1600" height="1000" loading="lazy">
+      <figcaption><b>Bezpieczeństwo.</b> Wersjonowane kontrole oceniane w panelu na faktach, które
+        hosty i tak zgłaszają: 13 kontroli na czterech hostach, 13 znalezisk wymagających
+        działania, 23 zaliczone, 6 nieznanych, 10 takich, które nie dotyczą hosta, 6 takich, które
+        panel potrafi naprawić. Każdy wiersz podaje nazwę kontroli i jej identyfikator &mdash;
+        <code>ssh.password-auth</code>, <code>exposure.listening</code>,
+        <code>kernel.rp-filter</code> &mdash; oraz wartość, względem której była oceniana. Jedno
+        złe ustawienie na stu hostach to jeden problem, a naprawa to jedna kampania z jednym
+        zatwierdzeniem.</figcaption>
+    </figure>
+
+    <figure class="figure">
+      <img src="../img/monitoring.png" alt="Strona monitoringu: alerty według wagi, pokrycie hostów oraz reguły alertów wraz z ich warunkami." width="1600" height="1000" loading="lazy">
+      <figcaption><b>Monitoring.</b> Każdy agent próbkuje swój host; reguły z tej strony zamieniają
+        próbki w alerty i nic nie odpali bez reguły, którą operator może tu przeczytać. Najpierw
+        pokrycie &mdash; cztery hosty zgłaszają dane, żaden nie milczy, pięć reguł włączonych
+        &mdash; a potem same reguły: <code>filesystem_used_percent &gt; 90%</code> utrzymane przez
+        dziesięć minut to ostrzeżenie dla całej floty, ta sama metryka powyżej 97% jest krytyczna
+        i nie czeka wcale.</figcaption>
+    </figure>
+
+    <figure class="figure">
+      <img src="../img/audit.png" alt="Strona audytu: zdarzenia na godzinę według wyniku, podsumowanie wyników i aktorów, filtry oraz tabela zdarzeń." width="1600" height="1000" loading="lazy">
+      <figcaption><b>Audyt.</b> Każde powodzenie i niepowodzenie tworzy zdarzenie; każda odmowa
+        również. Wśród stu wypisanych tutaj: 89 się powiodło, 9 zawiodło, 2 zostały odrzucone,
+        policzone według aktora &mdash; nazwany operator, sam panel oraz kampanie pod własnymi
+        identyfikatorami. Wiersz niesie czas, aktora, rodzaj, operację, cel i wynik, a pod nazwą
+        użytkownika uwierzytelnienie, na którym oparło się żądanie: sesję i kontekst
+        uwierzytelnienia, w jakim ją nadano.</figcaption>
+    </figure>
+
+    <ul class="linkrow">
+      <li><a href="./">&larr; Przegląd</a></li>
+      <li><a href="docs/">Dokumentacja</a></li>
+    </ul>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="site-footer__inner">
+    <p>Flotestro &middot; <a href="https://github.com/ultherego/Flotestro">github.com/ultherego/Flotestro</a></p>
+    <p>Ta strona opisuje wersję 0.62.0.</p>
+  </div>
+</footer>
+
+</body>
+</html>
