@@ -16,6 +16,73 @@
       .heading{font-size:21px;font-weight:750;fill:#CDD6F4}
       .copy{font-size:15px;fill:#BAC2DE}
       .small{font-size:13px;fill:#A6ADC8}
+
+      /* One change, travelling. The timeline is eight seconds: the order goes
+         out over the first three, the result and its verification come back
+         over the next two, and the audit chain writes itself over the last
+         three. The numbers below are shares of that, which is why they look
+         like odd percentages. */
+      .token{opacity:0}
+      .token--out{
+        offset-path:path("M194,288 H875");
+        animation:token-out 8s linear infinite;
+      }
+      .token--back{
+        offset-path:path("M1013,452 V500 H684 V434");
+        animation:token-back 8s linear infinite;
+      }
+      @keyframes token-out{
+        0%{offset-distance:0%;opacity:0}
+        3%{opacity:1}
+        34%{offset-distance:100%;opacity:1}
+        38%{offset-distance:100%;opacity:0}
+        100%{offset-distance:100%;opacity:0}
+      }
+      @keyframes token-back{
+        0%,38%{offset-distance:0%;opacity:0}
+        41%{opacity:1}
+        58%{offset-distance:100%;opacity:1}
+        62%{offset-distance:100%;opacity:0}
+        100%{offset-distance:100%;opacity:0}
+      }
+
+      /* The line the order runs along, drawn as it is used. */
+      .flow{stroke-dasharray:14 10;animation:flow 1.6s linear infinite}
+      @keyframes flow{to{stroke-dashoffset:-24}}
+
+      /* Each stage lights when the change reaches it. */
+      .stage{transform-box:fill-box;transform-origin:center;animation:stage 8s ease-in-out infinite}
+      .s1{animation-delay:0s}
+      .s2{animation-delay:.9s}
+      .s3{animation-delay:2.1s}
+      .s4{animation-delay:2.9s}
+      .s5{animation-delay:5.2s}
+      @keyframes stage{
+        0%,100%{opacity:.55;transform:scale(1)}
+        4%{opacity:1;transform:scale(1.22)}
+        12%{opacity:1;transform:scale(1)}
+        40%{opacity:.55}
+      }
+
+      /* The chain writes itself, one entry at a time, after the result is in. */
+      .entry{opacity:0;animation:entry 8s ease-out infinite}
+      .e1{animation-delay:5.3s}
+      .e2{animation-delay:5.7s}
+      .e3{animation-delay:6.1s}
+      .e4{animation-delay:6.5s}
+      @keyframes entry{
+        0%,2%{opacity:0;r:3}
+        6%{opacity:1;r:9}
+        10%,100%{opacity:1;r:7}
+      }
+
+      /* A reader who asked for no motion gets the diagram as it was: every
+         stage lit, the chain written, and nothing moving. */
+      @media (prefers-reduced-motion: reduce){
+        .token{display:none}
+        .flow{animation:none;stroke-dasharray:none}
+        .stage,.entry{animation:none;opacity:1}
+      }
     </style>
   </defs>
 
@@ -28,7 +95,7 @@
     <text x="64" y="112" class="subtitle">One controlled change path for the entire Linux fleet</text>
 
     <!-- flow line -->
-    <path d="M194 288H277M493 288H576M792 288H875" fill="none" stroke="#FAB387" stroke-width="5" stroke-linecap="round" marker-end="url(#arrow)"/>
+    <path class="flow" d="M194 288H277M493 288H576M792 288H875" fill="none" stroke="#FAB387" stroke-width="5" stroke-linecap="round" marker-end="url(#arrow)"/>
 
     <!-- Operator -->
     <g filter="url(#shadow)">
@@ -36,7 +103,7 @@
       <circle cx="121" cy="235" r="29" fill="#FAB387"/>
       <circle cx="121" cy="226" r="9" fill="#181825"/>
       <path d="M101 249c4-13 36-13 40 0" fill="#181825"/>
-      <circle cx="76" cy="202" r="17" fill="#FAB387"/>
+      <circle class="stage s1" cx="76" cy="202" r="17" fill="#FAB387"/>
       <text x="76" y="207" text-anchor="middle" class="step">1</text>
       <text x="121" y="299" text-anchor="middle" class="heading">Operator</text>
       <text x="121" y="329" text-anchor="middle" class="copy">selects an action</text>
@@ -48,7 +115,7 @@
       <rect x="277" y="162" width="216" height="252" rx="24" fill="#1E1E2E" stroke="#45475A"/>
       <rect x="337" y="207" width="96" height="72" rx="14" fill="#313244" stroke="#FAB387" stroke-width="3"/>
       <path d="M357 228h56M357 245h40M357 262h48" stroke="#FAB387" stroke-width="6" stroke-linecap="round"/>
-      <circle cx="305" cy="186" r="17" fill="#FAB387"/>
+      <circle class="stage s2" cx="305" cy="186" r="17" fill="#FAB387"/>
       <text x="305" y="191" text-anchor="middle" class="step">2</text>
       <text x="385" y="319" text-anchor="middle" class="heading">Control plane</text>
       <text x="385" y="349" text-anchor="middle" class="copy">plans the campaign</text>
@@ -61,7 +128,7 @@
       <rect x="576" y="162" width="216" height="252" rx="24" fill="#1E1E2E" stroke="#45475A"/>
       <path d="M634 225h100v68H634z" fill="#313244" stroke="#89B4FA" stroke-width="3"/>
       <path d="M650 245l14 14-14 14M675 273h34" fill="none" stroke="#89B4FA" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-      <circle cx="604" cy="186" r="17" fill="#89B4FA"/>
+      <circle class="stage s3" cx="604" cy="186" r="17" fill="#89B4FA"/>
       <text x="604" y="191" text-anchor="middle" class="step">3</text>
       <text x="684" y="319" text-anchor="middle" class="heading">Host agent</text>
       <text x="684" y="349" text-anchor="middle" class="copy">computes plan and digest</text>
@@ -72,7 +139,7 @@
     <!-- Fleet -->
     <g filter="url(#shadow)">
       <rect x="875" y="146" width="277" height="284" rx="24" fill="#1E1E2E" stroke="#45475A"/>
-      <circle cx="903" cy="170" r="17" fill="#A6E3A1"/>
+      <circle class="stage s4" cx="903" cy="170" r="17" fill="#A6E3A1"/>
       <text x="903" y="175" text-anchor="middle" class="step">4</text>
       <g transform="translate(915 202)">
         <rect width="197" height="45" rx="11" fill="#313244" stroke="#A6E3A1" stroke-width="2"/>
@@ -93,13 +160,17 @@
     <!-- Audit -->
     <g filter="url(#shadow)">
       <rect x="277" y="520" width="575" height="116" rx="24" fill="#181825" stroke="#FAB387" stroke-width="2"/>
-      <circle cx="318" cy="557" r="17" fill="#FAB387"/>
+      <circle class="stage s5" cx="318" cy="557" r="17" fill="#FAB387"/>
       <text x="318" y="562" text-anchor="middle" class="step">5</text>
       <path d="M315 582v23h499" fill="none" stroke="#45475A" stroke-width="3" stroke-linecap="round"/>
-      <circle cx="386" cy="605" r="7" fill="#A6E3A1"/><circle cx="516" cy="605" r="7" fill="#89B4FA"/><circle cx="646" cy="605" r="7" fill="#CBA6F7"/><circle cx="776" cy="605" r="7" fill="#FAB387"/>
+      <circle class="entry e1" cx="386" cy="605" r="7" fill="#A6E3A1"/><circle class="entry e2" cx="516" cy="605" r="7" fill="#89B4FA"/><circle class="entry e3" cx="646" cy="605" r="7" fill="#CBA6F7"/><circle class="entry e4" cx="776" cy="605" r="7" fill="#FAB387"/>
       <text x="358" y="563" class="heading">Audit trail</text>
       <text x="358" y="591" class="copy">Every plan, approval, step and result is recorded in the audit chain.</text>
     </g>
+
+    <!-- The order on its way out, and the result coming back. -->
+    <circle class="token token--out" r="10" fill="#FAB387"/>
+    <circle class="token token--back" r="8" fill="#89B4FA"/>
 
     <text x="64" y="671" class="small">Plan → approval → execution only for a matching digest → verification → audit</text>
   </g>

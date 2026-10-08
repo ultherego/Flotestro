@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 440" width="1000" height="440" role="img" aria-labelledby="t d">
+  <title id="t">Ordering one operation over the API</title>
+  <desc id="d">A terminal types a POST to /api/v1/hosts/{id}/operations with a grouped payload, the panel answers with the job it recorded, and a second call reads the attempt the host answered with: status succeeded, exit code 0.</desc>
+  <defs>
+    <style>
+      .mono{font-family:ui-monospace,SFMono-Regular,'IBM Plex Mono',Menlo,Consolas,monospace;font-size:15px}
+      .dim{fill:#6C7086}
+      .txt{fill:#CDD6F4}
+      .key{fill:#89B4FA}
+      .str{fill:#A6E3A1}
+      .cmd{fill:#FAB387}
+      .ok{fill:#A6E3A1;font-weight:600}
+
+      /* Every line waits its turn. The cast is twelve seconds: the order is
+         typed, the panel answers, the attempt is read. Then it begins again,
+         because a page nobody scrolled should still be showing something. */
+      .line{opacity:0;animation:line 12s steps(1,end) infinite}
+      @keyframes line{0%,100%{opacity:0}}
+      .l1{animation-name:l1}.l2{animation-name:l2}.l3{animation-name:l3}
+      .l4{animation-name:l4}.l5{animation-name:l5}.l6{animation-name:l6}
+      .l7{animation-name:l7}.l8{animation-name:l8}.l9{animation-name:l9}
+      .l10{animation-name:l10}.l11{animation-name:l11}
+      @keyframes l1{0%,3%{opacity:0}4%,96%{opacity:1}100%{opacity:0}}
+      @keyframes l2{0%,8%{opacity:0}9%,96%{opacity:1}100%{opacity:0}}
+      @keyframes l3{0%,13%{opacity:0}14%,96%{opacity:1}100%{opacity:0}}
+      @keyframes l4{0%,22%{opacity:0}23%,96%{opacity:1}100%{opacity:0}}
+      @keyframes l5{0%,25%{opacity:0}26%,96%{opacity:1}100%{opacity:0}}
+      @keyframes l6{0%,28%{opacity:0}29%,96%{opacity:1}100%{opacity:0}}
+      @keyframes l7{0%,31%{opacity:0}32%,96%{opacity:1}100%{opacity:0}}
+      @keyframes l8{0%,34%{opacity:0}35%,96%{opacity:1}100%{opacity:0}}
+      @keyframes l9{0%,37%{opacity:0}38%,96%{opacity:1}100%{opacity:0}}
+      @keyframes l10{0%,55%{opacity:0}56%,96%{opacity:1}100%{opacity:0}}
+      @keyframes l11{0%,72%{opacity:0}73%,96%{opacity:1}100%{opacity:0}}
+
+      /* The cursor waits for the cast to finish and then blinks where a
+         person would type next. It does not chase the text: a cursor landing
+         a few pixels off every line looks like a bug, and guessing where a
+         proportional-to-monospace fallback ends a line is guessing. */
+      .cursor{opacity:0;animation:cursor 12s steps(1,end) infinite}
+      @keyframes cursor{
+        0%,77%{opacity:0}
+        78%{opacity:1}
+        82%{opacity:0}
+        86%{opacity:1}
+        90%{opacity:0}
+        94%{opacity:1}
+        97%,100%{opacity:0}
+      }
+
+      /* No motion asked for: the whole cast, already run. */
+      @media (prefers-reduced-motion: reduce){
+        .line{animation:none;opacity:1}
+        .cursor{display:none}
+      }
+    </style>
+  </defs>
+
+  <rect width="1000" height="440" rx="18" fill="#11111B"/>
+  <rect x="1" y="1" width="998" height="438" rx="17" fill="none" stroke="#313244"/>
+  <rect width="1000" height="44" rx="18" fill="#181825"/>
+  <rect y="26" width="1000" height="18" fill="#181825"/>
+  <circle cx="26" cy="22" r="6" fill="#45475A"/>
+  <circle cx="48" cy="22" r="6" fill="#45475A"/>
+  <circle cx="70" cy="22" r="6" fill="#45475A"/>
+  <text x="500" y="27" text-anchor="middle" class="mono dim" font-size="13">flotestro — one operation, start to answer</text>
+
+  <g class="mono">
+    <text x="28" y="86"><tspan class="line l1 cmd">$</tspan><tspan class="line l1 txt" dx="8">curl -sS -X POST "$PANEL/api/v1/hosts/$HOST/operations" \</tspan></text>
+    <text x="28" y="112" class="line l2 txt">     -H "Authorization: Bearer $TOKEN" \</text>
+    <text x="28" y="138" class="line l3 txt">     -d '<tspan class="key">{"action"</tspan>: <tspan class="str">"unit.restart"</tspan>, <tspan class="key">"payload"</tspan>: {<tspan class="key">"unit"</tspan>: {<tspan class="key">"unit"</tspan>: <tspan class="str">"cron.service"</tspan>}}}'</text>
+
+    <text x="28" y="190" class="line l4 txt">{</text>
+    <text x="28" y="216" class="line l5"><tspan class="key">  "id"</tspan><tspan class="txt">: </tspan><tspan class="str">"904dfe79-8c6c-4b3f-9fc1-ee7638ff5b6f"</tspan><tspan class="txt">,</tspan></text>
+    <text x="28" y="242" class="line l6"><tspan class="key">  "hostname"</tspan><tspan class="txt">: </tspan><tspan class="str">"agent-debian"</tspan><tspan class="txt">,</tspan></text>
+    <text x="28" y="268" class="line l7"><tspan class="key">  "action_type"</tspan><tspan class="txt">: </tspan><tspan class="str">"unit.restart"</tspan><tspan class="txt">,  </tspan><tspan class="dim">← action going in, action_type coming back</tspan></text>
+    <text x="28" y="294" class="line l8"><tspan class="key">  "state"</tspan><tspan class="txt">: </tspan><tspan class="str">"queued"</tspan><tspan class="txt">,</tspan></text>
+    <text x="28" y="320" class="line l9"><tspan class="key">  "preconditions"</tspan><tspan class="txt">: {</tspan><tspan class="key">"required_capabilities"</tspan><tspan class="txt">: [</tspan><tspan class="str">"systemd"</tspan><tspan class="txt">]} }</tspan></text>
+
+    <text x="28" y="372"><tspan class="line l10 cmd">$</tspan><tspan class="line l10 txt" dx="8">curl -sS "$PANEL/api/v1/jobs/$JOB/attempts" | jq '.items[0] | {status, exit_code}'</tspan></text>
+    <text x="28" y="398" class="line l11"><tspan class="txt">{ </tspan><tspan class="key">"status"</tspan><tspan class="txt">: </tspan><tspan class="ok">"succeeded"</tspan><tspan class="txt">, </tspan><tspan class="key">"exit_code"</tspan><tspan class="txt">: </tspan><tspan class="ok">0</tspan><tspan class="txt"> }</tspan></text>
+    <rect class="cursor" x="28" y="420" width="9" height="3" rx="1.5" fill="#FAB387"/>
+  </g>
+</svg>
