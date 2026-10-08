@@ -20,7 +20,7 @@
       Flotestro
     </a>
     <nav class="site-nav" aria-label="Sections">
-      <a href="#panel">The panel</a>
+      <a href="gallery.html">Gallery</a>
       <a href="#change">A change</a>
       <a href="#operations">Operations</a>
       <a href="#architecture">Architecture</a>
@@ -123,109 +123,9 @@
 
     <h2 id="panel">The panel</h2>
 
-    <p class="prose">Every picture below is a running installation: a four-host laboratory with one
-      Debian, one Ubuntu, one Fedora and one Arch machine, which is why the numbers in it are
-      small. What the pages do is the point, not the size of the fleet.</p>
-
-    <h3>The fleet</h3>
-
-    <figure class="figure">
-      <img src="img/dashboard.png" alt="The fleet dashboard: host availability, problems by kind, operations of the last 24 hours, what needs attention, and the composition of the fleet." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Dashboard.</b> Only what needs a decision. Host availability on the left —
-        four online, nothing stale, offline, unknown, quarantined or in maintenance — and the
-        problems by kind on the right: 13 security findings, 8 failed jobs in 24 hours, 6 checks
-        that came back unknown. Below them, finished operations per hour by outcome; a
-        <i>needs attention</i> block counted in the database, with two hosts carrying failed
-        units, one pending enrollment and four agent certificates expiring within 30 days; and
-        the composition of the fleet by system, agent build, site and environment.</figcaption>
-    </figure>
-
-    <figure class="figure">
-      <img src="img/hosts.png" alt="The host list with server-side filters and a row per host: state, system, site, environment, domain, updates, failed units, reboot and last seen." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Hosts.</b> The filters are applied server-side: hostname or address, site,
-        environment, owner, tags, then operating system, state, lifecycle, maintenance,
-        capability and release channel. A row carries the state, the system as the host reported
-        it — <code>arch</code>, <code>debian 13</code>, <code>fedora 42</code>,
-        <code>ubuntu 24.04</code> — its site and environment, whether it is in a domain, how many
-        updates wait for it, how many units have failed, whether it wants a reboot, and when it
-        was last seen.</figcaption>
-    </figure>
-
-    <h3>One host</h3>
-
-    <figure class="figure">
-      <img src="img/host-overview.png" alt="A host page: the module menu, the adapters available on this host, the system facts and the hardware the agent reported." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Host overview.</b> The left-hand menu is that host&rsquo;s modules: packages,
-        services, processes, schedules, kernel, time, power, network, DNS, firewall, SSH,
-        storage, files, backups, containers, Compose, security, vulnerabilities, certificates.
-        Every page says where its facts came from and when — here
-        <code>agent/os-release+procfs, revision 1dc313f1f045, observed 8m ago</code>. Of the
-        adapters on this host 16 can read and change, 2 are read-only and 5 are unavailable,
-        which is a different answer from zero. Beside the identity and the hardware sits what
-        needs attention on this host alone: no failed units, 36 updates waiting, no security
-        updates.</figcaption>
-    </figure>
-
-    <figure class="figure">
-      <img src="img/host-packages.png" alt="The packages page of one host: updates by state, the package sources, the operations an operator may request, and the agent's own version." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Packages of a host.</b> 351 packages up to date, 36 upgradable, none of them
-        security. On the right the sources as the host reports them: 387 installed through
-        <code>apt</code>, a healthy package database, seven repositories of which one has its
-        signatures checked and none is managed by the panel. The operator can plan the updates —
-        counting them changes nothing on the host — or install, hold, unhold and plan a removal.
-        Ordinary upgrades leave the agent alone: replacing it is an operation of its own, and it
-        counts as done only when the host comes back reporting the version that was asked
-        for.</figcaption>
-    </figure>
-
-    <h3>A change across the fleet</h3>
-
-    <figure class="figure">
-      <img src="img/campaign.png" alt="A completed campaign: target counts, canary and wave settings, the approval record, the waves and the plans with their fingerprints." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Campaign.</b> A completed <code>file.ensure</code> campaign over four hosts:
-        one canary and two waves, at most two hosts at a time, a failure threshold of 25% or one
-        host, reboot policy <code>never</code>, offline policy
-        <code>replan_on_reconnect</code>, and the contract of the operation stated on the page —
-        cancel between steps, retry after a new plan, rollback by exact restore, verification by
-        re-checking the plan. The approval record says who approved, on what authentication (an
-        API token, not re-authenticated) and why: <i>change CHG-1042 approved in the weekly
-        review</i>. It is written once and never changed. Below the waves, one row per shape of
-        the change with its plan fingerprint and how long it stays valid — a host whose plan has
-        changed since refuses the change.</figcaption>
-    </figure>
-
-    <h3>What the panel watches</h3>
-
-    <figure class="figure">
-      <img src="img/security.png" alt="The security page: findings by state, a table of checks with the expected value, and findings by severity and by host." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Security.</b> Versioned checks judged in the panel over facts the hosts
-        already report: 13 checks across four hosts, 13 findings that need action, 23 passed, 6
-        unknown, 10 not applicable, 6 that the panel can fix. Each row names the check and its
-        identifier — <code>ssh.password-auth</code>, <code>exposure.listening</code>,
-        <code>kernel.rp-filter</code> — and the value it was judged against. One bad setting on
-        a hundred hosts is one problem, and the fix is one campaign with one
-        approval.</figcaption>
-    </figure>
-
-    <figure class="figure">
-      <img src="img/monitoring.png" alt="The monitoring page: alerts by severity, coverage of the hosts, and the alert rules with their conditions." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Monitoring.</b> Every agent samples its host; the rules on this page turn
-        the samples into alerts, and nothing fires without a rule an operator can read here.
-        Coverage first — four hosts reporting, none silent, five rules enabled — then the
-        rules themselves: <code>filesystem_used_percent &gt; 90%</code> held for ten minutes is
-        a warning over the whole fleet, the same metric past 97% is critical with no waiting
-        at all.</figcaption>
-    </figure>
-
-    <figure class="figure">
-      <img src="img/audit.png" alt="The audit page: events per hour by outcome, the outcome and actor summary, filters, and the event table." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Audit.</b> Every success and failure creates an event; so does every denial.
-        Among the hundred listed here: 89 succeeded, 9 failed, 2 were denied, counted by actor —
-        a named operator, the panel itself, and campaigns under their own identifiers. A row
-        carries the time, the actor, the kind, the operation, the target and the result, and
-        under a user&rsquo;s name the authentication the request rested on: the session and the
-        authentication context it was granted with.</figcaption>
-    </figure>
+    <p class="prose">Eight pages of a running installation &mdash; the fleet, a host, a campaign,
+      the packages it would change, the security findings, the monitoring and the audit trail
+      &mdash; are in <a href="gallery.html">the gallery</a>.</p>
 
     <h2 id="change">How a change happens</h2>
 
