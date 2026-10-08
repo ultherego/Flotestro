@@ -33,6 +33,11 @@ html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
 
 body {
   margin: 0;
+  /* The tinted bands of the front page bleed to the edge with 100vw, which on a
+     page with a scrollbar is wider than the page. clip rather than hidden,
+     because hidden would make this a scroll container and the sidebar of the
+     documentation is sticky inside it. */
+  overflow-x: clip;
   background: var(--base);
   color: var(--text);
   font-family: var(--font-body);
@@ -259,6 +264,10 @@ hr { border: 0; border-top: 1px solid var(--surface1); margin: 3rem 0; }
 .content > ul,
 .content > ol,
 .content > dl,
+.band > p,
+.band > ul,
+.band > ol,
+.band > dl,
 .prose { max-width: var(--measure); }
 
 .site-footer {
@@ -332,7 +341,8 @@ blockquote {
 
 /* Key and value lists: the shape of most tables here. */
 .kv,
-.content > .kv { display: grid; grid-template-columns: 13rem minmax(0, 1fr); gap: 0 1.5rem; max-width: none; }
+.content > .kv,
+.band > .kv { display: grid; grid-template-columns: 13rem minmax(0, 1fr); gap: 0 1.5rem; max-width: none; }
 .kv dt {
   font-family: var(--font-head);
   font-size: 0.875rem;
@@ -620,3 +630,114 @@ td { color: var(--subtext1); }
 .badge.method-post { border-color: var(--sapphire); color: var(--sapphire); }
 .badge.method-put { border-color: var(--yellow); color: var(--yellow); }
 .badge.method-delete { border-color: var(--red); color: var(--red); }
+
+
+/* ---------------------------------------------------------------------- */
+/* The front page: a sequence of rooms rather than one corridor of text.   */
+/* ---------------------------------------------------------------------- */
+
+/* A band is one section of the overview. Every other one is tinted, and the
+   tint drifts - slowly enough to be noticed only when the eye rests, which is
+   the whole of what decoration is allowed to do on a page about a product. */
+.band { position: relative; padding: 3.25rem 0 1.5rem; }
+.band > * { position: relative; z-index: 1; }
+
+.band--tint::before,
+.band--tint::after {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  pointer-events: none;
+  /* Edge to edge, out of a column that is not. */
+  inset: 0 calc(50% - 50vw);
+}
+
+.band--tint::before {
+  background: linear-gradient(180deg, rgba(24, 24, 37, 0), rgba(24, 24, 37, .9) 12%,
+    rgba(24, 24, 37, .9) 88%, rgba(24, 24, 37, 0));
+}
+
+.band--tint::after {
+  background:
+    radial-gradient(34rem 16rem at 18% 28%, rgba(250, 179, 135, .13), transparent 66%),
+    radial-gradient(30rem 15rem at 82% 72%, rgba(137, 180, 250, .13), transparent 66%),
+    radial-gradient(26rem 13rem at 55% 95%, rgba(203, 166, 247, .10), transparent 70%);
+  animation: aurora 26s ease-in-out infinite alternate;
+}
+
+@keyframes aurora {
+  from { transform: translate3d(-1.5%, -1%, 0) scale(1); }
+  to   { transform: translate3d(2.5%, 1.5%, 0) scale(1.07); }
+}
+
+/* The opening. The claim, what it is in one line, three ways in, and the
+   terminal that shows the product doing the thing the claim is about. */
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2.5rem;
+  padding: 1.5rem 0 2.5rem;
+}
+
+@media (min-width: 64rem) {
+  .hero { grid-template-columns: minmax(0, 30rem) minmax(0, 1fr); align-items: center; gap: 3.5rem; }
+}
+
+.hero h1 { margin-top: 0; }
+.hero__eyebrow {
+  margin: 0 0 1rem;
+  font-family: var(--font-head);
+  font-size: 0.8125rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--overlay1);
+}
+.hero__eyebrow b { color: var(--peach); font-weight: 600; }
+.hero .lede { max-width: 34rem; }
+.hero__shot { margin: 0; }
+.hero__shot img { width: 100%; height: auto; display: block; border-radius: 12px; }
+
+.hero__cta { display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 1.75rem 0 0; }
+
+.button {
+  display: inline-block;
+  padding: 0.6rem 1.15rem;
+  border: 1px solid var(--surface1);
+  border-bottom: 1px solid var(--surface1);
+  border-radius: var(--radius);
+  font-family: var(--font-head);
+  font-size: 0.9375rem;
+  color: var(--text);
+  background: var(--surface0);
+  transition: border-color .15s, background .15s, color .15s;
+}
+.button:hover { border-color: var(--peach); color: var(--peach); background: var(--surface1); }
+.button--primary { background: var(--peach); border-color: var(--peach); color: var(--crust); font-weight: 600; }
+.button--primary:hover { background: var(--rosewater); border-color: var(--rosewater); color: var(--crust); }
+.button--quiet { background: transparent; }
+
+/* Four numbers, all of them measured. A page that says "fast" and "secure"
+   says nothing; these are counts somebody can check. */
+.facts {
+  list-style: none;
+  margin: 2.5rem 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 1.5rem 2rem;
+}
+.facts li { margin: 0; }
+.facts b {
+  display: block;
+  font-family: var(--font-head);
+  font-size: 2rem;
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--peach);
+}
+.facts span { display: block; margin-top: 0.3rem; font-size: 0.9375rem; color: var(--subtext0); }
+
+/* A reader who asked for no motion gets the tint, standing still. */
+@media (prefers-reduced-motion: reduce) {
+  .band--tint::after { animation: none; }
+}

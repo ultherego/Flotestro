@@ -20,13 +20,13 @@
       Flotestro
     </a>
     <nav class="site-nav" aria-label="Sections">
-      <a href="gallery.html">Gallery</a>
       <a href="#change">A change</a>
       <a href="#operations">Operations</a>
       <a href="#architecture">Architecture</a>
       <a href="#install">Install</a>
       <a href="docs/">Documentation</a>
       <a href="https://github.com/ultherego/Flotestro">Source</a>
+      <a href="gallery.html">Gallery</a>
       <details class="lang-menu">
         <summary class="lang-menu__toggle" aria-label="Language: English (EN)">
           <svg class="lang-menu__flag" viewBox="0 0 60 40" width="18" height="12" aria-hidden="true">
@@ -73,30 +73,31 @@
 <div class="layout layout--plain">
   <main class="content">
 
-    <h1>Fleet management for Linux servers</h1>
-    <p class="lede prose">One panel that plans, approves, carries and records changes across
-      Debian, Ubuntu, Fedora, RHEL and Arch hosts.</p>
+    <section class="hero">
+      <div>
+        <p class="hero__eyebrow"><b>0.62.0</b> &middot; Apache-2.0 &middot; Debian &middot; Ubuntu &middot; Fedora &middot; RHEL &middot; Arch</p>
+        <h1>Fleet management for Linux servers</h1>
+        <p class="lede">One panel that plans, approves, carries and records every change &mdash;
+          and never opens a shell on a host to do it.</p>
+        <p class="hero__cta">
+          <a class="button button--primary" href="#install">Install it</a>
+          <a class="button" href="docs/">Read the manual</a>
+          <a class="button button--quiet" href="gallery.html">See the panel</a>
+        </p>
+      </div>
+      <figure class="hero__shot">
+        <img src="img/terminal.svg" alt="A terminal posts an operation to /api/v1/hosts/{id}/operations with a grouped payload; the panel answers with the job it recorded - queued, with the capability the host must have - and a second call reads the attempt: succeeded, exit code 0." width="1000" height="440">
+      </figure>
+    </section>
 
-    <p class="prose">Flotestro is a control plane and an agent. The agent reports what its host
-      actually is; the panel decides what that means and orders the change. There is no
-      &ldquo;run a command&rdquo; operation and the panel never opens a shell on a host: every action is
-      a versioned contract with its own permission, risk level, lock class and campaign mode.
-      Across a fleet the same change runs as a campaign, with a canary, waves, gates and a
-      failure threshold.</p>
-
-    <figure class="figure figure--bare">
-      <img src="img/terminal.svg" alt="A terminal posts an operation to /api/v1/hosts/{id}/operations with a grouped payload; the panel answers with the job it recorded - queued, with the capability the host must have - and a second call reads the attempt: succeeded, exit code 0." width="1000" height="440" loading="lazy">
-      <figcaption>One operation, start to answer. Every line of it was run against a real
-      installation; the chapter it comes from is <b><a href="docs/examples.html">11. Worked examples</a></b>.</figcaption>
-    </figure>
-
-    <ul class="linkrow">
-      <li><a href="#install">Install</a></li>
-      <li><a href="docs/">Documentation</a></li>
-      <li><a href="https://github.com/ultherego/Flotestro">Source on GitHub</a></li>
-      <li><a href="packages/">Package repository</a></li>
+    <ul class="facts">
+      <li><b>129</b><span>typed operations, each with its own permission, risk and lock class</span></li>
+      <li><b>0</b><span>shells opened on a host &mdash; there is no &ldquo;run a command&rdquo;</span></li>
+      <li><b>826</b><span>checks in the laboratory gate of this release, none skipped</span></li>
+      <li><b>0.30&thinsp;s</b><span>to freeze a campaign over 500 hosts, measured</span></li>
     </ul>
 
+    <section class="band band--tint">
     <h2 id="principles">What it holds to</h2>
 
     <dl class="kv">
@@ -120,13 +121,17 @@
       <dd>Agents sample their host; the panel keeps the samples and the rollups, evaluates the
         rules, and holds the alerts and the silences.</dd>
     </dl>
+    </section>
 
+    <section class="band">
     <h2 id="panel">The panel</h2>
 
     <p class="prose">Eight pages of a running installation &mdash; the fleet, a host, a campaign,
       the packages it would change, the security findings, the monitoring and the audit trail
       &mdash; are in <a href="gallery.html">the gallery</a>.</p>
+    </section>
 
+    <section class="band band--tint">
     <h2 id="change">How a change happens</h2>
 
     <ol class="steps">
@@ -144,7 +149,9 @@
     <p class="prose">Across a fleet the same change runs as a campaign: canary, waves, manual or
       automatic gates, failure thresholds, maintenance windows, per-site budgets and an offline
       policy per host.</p>
+    </section>
 
+    <section class="band">
     <h2 id="operations">What it can operate on</h2>
 
     <dl class="kv">
@@ -201,7 +208,9 @@
       <dd>A durable trail posted to a webhook in batches, signed with HMAC-SHA256, delivered at
         least once and in order.</dd>
     </dl>
+    </section>
 
+    <section class="band band--tint">
     <h2 id="architecture">Architecture</h2>
 
     <div class="table-scroll">
@@ -257,7 +266,9 @@
         <tr><td>8453</td><td>relay</td></tr>
       </tbody>
     </table>
+    </section>
 
+    <section class="band">
     <h2 id="install">Install</h2>
 
     <p class="prose">Nothing to build and nothing to clone. The panel runs from a published image;
@@ -359,7 +370,9 @@ flotestro-agentctl diagnose                                        # explains a 
       for a site behind a relay, <code>docker/compose.relay.yaml</code>. Installing from nothing,
       end to end, is the
       <a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/install.md">installation runbook</a>.</p>
+    </section>
 
+    <section class="band band--tint">
     <h2 id="documentation">Documentation</h2>
 
     <ul class="cards">
@@ -383,6 +396,7 @@ flotestro-agentctl diagnose                                        # explains a 
           materials.</p>
       </li>
     </ul>
+    </section>
 
   </main>
 </div>
