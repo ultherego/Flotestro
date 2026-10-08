@@ -1011,6 +1011,22 @@ func sameFile(request *helperv1.FileRequest, payload *opspec.FilePayload) error 
 	if err := same("file validator", request.GetValidator(), payload.Validator); err != nil {
 		return err
 	}
+	// The two conditions of the write, which were not compared until 08.10. The
+	// digest is what stops a write from landing on a file somebody changed since
+	// the operator looked at it, and an empty one turns that check off
+	// altogether - so an agent holding a genuine capability for this very file
+	// could blank it and overwrite work nobody had seen. The flag is the other
+	// half: it says the order may go on without its validator, and while the
+	// grant for it still has to be in the capability, whether the order asks at
+	// all is the panel's to decide and not the caller's.
+	if err := same("expected digest", request.GetExpectedSha256(), payload.ExpectedSHA256); err != nil {
+		return err
+	}
+	if request.GetAllowMissingValidator() != payload.AllowMissingValidator {
+		return binding(fmt.Sprintf(
+			"the request says the validator may be missing: %t, the bound payload: %t",
+			request.GetAllowMissingValidator(), payload.AllowMissingValidator))
+	}
 	return sameContent(request, payload)
 }
 

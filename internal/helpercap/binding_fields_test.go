@@ -248,3 +248,53 @@ func TestTheCapabilityBindsTheTargetOfTheRemainingOrders(t *testing.T) {
 		}
 	}
 }
+
+// A file order carries two conditions beside its content: the digest the file
+// must still have, and whether the write may go on without its validator.
+// Neither was compared with the signed payload until 08.10, so an agent holding
+// a genuine capability for a path could change the terms under which that
+// capability was granted - blank the digest and the "has this file changed
+// since the operator looked at it" check stops happening at all, which is the
+// one thing standing between a write and somebody else's work.
+//
+// Found by an audit on b12a82e and reproduced before the fix: all three
+// substitutions below were answered allowed.
+func TestTheCapabilityBindsTheConditionsOfAFileWriteAndNotOnlyItsContent(t *testing.T) {
+	approved := &opspec.FilePayload{
+		Path: "/etc/ssh/sshd_config.d/10-ops.conf", Content: "PermitRootLogin no\n",
+		Mode: "0644", Owner: "root", Group: "root",
+		Validator:             "sshd -t",
+		ExpectedSHA256:        "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+		AllowMissingValidator: false,
+	}
+	honest := func() *helperv1.FileRequest {
+		return &helperv1.FileRequest{
+			Path: approved.Path, Content: []byte(approved.Content),
+			Mode: approved.Mode, Owner: approved.Owner, Group: approved.Group,
+			Validator:             approved.Validator,
+			ExpectedSha256:        approved.ExpectedSHA256,
+			AllowMissingValidator: approved.AllowMissingValidator,
+		}
+	}
+	if err := sameFile(honest(), approved); err != nil {
+		t.Fatalf("the request the panel approved was refused: %v", err)
+	}
+
+	for name, change := range map[string]func(*helperv1.FileRequest){
+		"another digest than the one approved": func(r *helperv1.FileRequest) {
+			r.ExpectedSha256 = "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03"
+		},
+		"no digest at all, which turns the check off": func(r *helperv1.FileRequest) {
+			r.ExpectedSha256 = ""
+		},
+		"the validator may be missing, which the order did not ask for": func(r *helperv1.FileRequest) {
+			r.AllowMissingValidator = true
+		},
+	} {
+		request := honest()
+		change(request)
+		if err := sameFile(request, approved); err == nil {
+			t.Errorf("%s: the helper took it", name)
+		}
+	}
+}
