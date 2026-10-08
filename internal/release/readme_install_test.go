@@ -47,11 +47,13 @@ func TestTheReadmeInstallsFromTheSamePlaceAsTheChapter(t *testing.T) {
 	}
 
 	// A package manager the README names has to be set up the way the chapter
-	// says it has to be. These are the steps that are not optional: without
+	// says it has to be. The directory for the key is one of them: the README
+	// wrote the key into /etc/apt/keyrings without creating it, which works
+	// only on a release that ships it. These are the steps that are not optional: without
 	// them the manager refuses the repository, and the reader is left with an
 	// error that does not say which line was missing.
 	required := map[string][]string{
-		"apt":    {"/etc/apt/keyrings", "signed-by="},
+		"apt":    {"install -d -m 0755 /etc/apt/keyrings", "signed-by="},
 		"dnf":    {"rpm --import", "gpgcheck=1", "repo_gpgcheck=1"},
 		"pacman": {"pacman-key --add", "--lsign-key", "SigLevel"},
 	}

@@ -62,6 +62,7 @@ it. The whole list is in
 **A host:**
 
 ```bash
+sudo install -d -m 0755 /etc/apt/keyrings
 curl -fsS https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc | sudo tee /etc/apt/keyrings/flotestro.asc >/dev/null
 echo 'deb [signed-by=/etc/apt/keyrings/flotestro.asc] https://ultherego.github.io/Flotestro/packages/deb stable main' | sudo tee /etc/apt/sources.list.d/flotestro.list >/dev/null
 sudo apt update && sudo apt install flotestro-agent

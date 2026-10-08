@@ -675,7 +675,11 @@ podman start flotestro_control-plane_1</code></pre>
       <tbody>
         <tr><td>repository</td><td>Adds the signed repository and its key to apt, dnf or pacman.</td></tr>
         <tr><td>package</td><td>Installs <code>flotestro-agent</code>, which brings the helper with it.</td></tr>
+        <tr><td>config</td><td>Writes <code>/etc/flotestro/agent.yaml</code> with this installation's addresses,
+          owned by root and readable by the agent's account.</td></tr>
         <tr><td>CA</td><td>Writes the fleet CA where the agent reads it, and prints its fingerprint to compare.</td></tr>
+        <tr><td>pin</td><td>Writes down the fingerprint of the panel's signing key. A helper on the
+          default policy takes no bundle it was not told to expect, so a host with no pin enrols with nobody.</td></tr>
         <tr><td>enroll</td><td>Spends the one-time token and takes the host's own certificate.</td></tr>
         <tr><td>start</td><td><code>systemctl enable --now flotestro-agent</code>.</td></tr>
       </tbody>
@@ -734,6 +738,7 @@ gh attestation verify flotestro-agent_1.2.3_amd64.deb --repo ultherego/Flotestro
 <pre><code>sudo tee /var/lib/flotestro-agent/ca.pem &gt;/dev/null   # the fleet CA; compare the fingerprint with the panel
 sudo sed -i -e 's|^  enrollment_url: .*|  enrollment_url: "https://panel.example.org:8444"|' \
             -e 's|^  gateway_urls: .*|  gateway_urls: ["https://panel.example.org:8443"]|' /etc/flotestro/agent.yaml
+sudo flotestro-agentctl helper-trust pin $FINGERPRINT     # the panel's own signing key, from Add host
 echo "$TOKEN" | sudo -u flotestro-agent flotestro-agentctl enroll
 sudo systemctl enable --now flotestro-agent
 flotestro-agentctl diagnose                            # explains a host that does not show up</code></pre>
