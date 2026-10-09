@@ -86,11 +86,15 @@ type ResultSpool struct {
 
 // spooledResult is one result on disk.
 type spooledResult struct {
-	file      string
-	sequence  uint64
-	taskID    string
-	spooledAt time.Time
-	size      int64
+	file     string
+	sequence uint64
+	taskID   string
+	// idempotencyKey is the key the host performed the operation under. The
+	// panel echoes it in the acknowledgement, and an acknowledgement that
+	// names another key is not about the answer held here.
+	idempotencyKey string
+	spooledAt      time.Time
+	size           int64
 }
 
 // The spool of one process. A task started in one session finishes in a
@@ -199,6 +203,7 @@ func (s *ResultSpool) load() error {
 		}
 		s.entries = append(s.entries, spooledResult{
 			file: item.Name(), sequence: sequence, taskID: taskID,
+			idempotencyKey: result.GetIdempotencyKey(),
 			// The moment the file was written is what the answer's age is counted
 			// from, and it is the one clock that survives a restart of the agent.
 			spooledAt: info.ModTime(), size: info.Size(),
@@ -243,7 +248,8 @@ func (s *ResultSpool) Enqueue(result *agentv1.TaskResult) error {
 	size := int64(len(body) + resultSpoolHeader)
 	s.entries = append(s.entries, spooledResult{
 		file: name, sequence: s.sequence, taskID: taskID,
-		spooledAt: time.Now(), size: size,
+		idempotencyKey: result.GetIdempotencyKey(),
+		spooledAt:      time.Now(), size: size,
 	})
 	s.bytes += size
 	s.evict()
@@ -297,11 +303,42 @@ func (s *ResultSpool) Pending(now time.Time) []*agentv1.TaskResult {
 // Acknowledge drops the result the panel answered, whatever the answer says:
 // a settlement, a duplicate and a refusal all mean the panel will not take
 // this answer again.
-func (s *ResultSpool) Acknowledge(ack *agentv1.TaskResultAck) {
+// It frees nothing and answers false when the acknowledgement is not about the
+// answer this spool holds. The attempt identifier alone used to be enough: a
+// frame naming a task was able to delete whatever was spooled under it, and the
+// spool is the only durable copy of work already carried out on the host. The
+// panel echoes the key the host performed the operation under, so the two can
+// be compared - a replayed acknowledgement from an earlier attempt of the same
+// operation, or one for a result that has since been replaced, no longer frees
+// the answer nobody has taken.
+func (s *ResultSpool) Acknowledge(ack *agentv1.TaskResultAck) error {
 	if ack == nil || ack.GetTaskId() == "" {
-		return
+		return nil
 	}
-	s.Forget(ack.GetTaskId())
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, entry := range s.entries {
+		if entry.taskID != ack.GetTaskId() {
+			continue
+		}
+		// An answer spooled without a key cannot be told apart this way, and a
+		// panel that echoes none leaves nothing to compare: both are the shape
+		// of an older half, and the attempt identifier is all there is.
+		if entry.idempotencyKey != "" && ack.GetIdempotencyKey() != "" &&
+			entry.idempotencyKey != ack.GetIdempotencyKey() {
+			return fmt.Errorf(
+				"the answer held for the attempt %s was performed under %s and the "+
+					"acknowledgement names %s",
+				entry.taskID, entry.idempotencyKey, ack.GetIdempotencyKey())
+		}
+		s.forget(entry.taskID)
+		return nil
+	}
+	// Nothing is held under that attempt, which is ordinary: a panel that
+	// acknowledges nothing has the answer freed by the send itself, and a
+	// second acknowledgement of the same answer arrives after the first freed
+	// it. Neither is a refusal.
+	return nil
 }
 
 // Forget removes one result from the spool by the attempt it answers.
