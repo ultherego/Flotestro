@@ -38,13 +38,7 @@ func enrollClone(t *testing.T, h *harness, token, machine string) cloneIdentity 
 	if err := json.Unmarshal(raw, &result); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		ctx := context.Background()
-		if _, err := h.database(ctx).Exec(ctx,
-			`delete from hosts where id = $1::uuid`, result.HostID); err != nil {
-			t.Logf("the synthetic host %s was not cleaned up: %v", result.HostID, err)
-		}
-	})
+	h.forgetHostOnCleanup(result.HostID)
 	block, _ := pem.Decode(result.CertificatePEM)
 	if block == nil {
 		t.Fatalf("the answer for %s carries no PEM certificate", machine)

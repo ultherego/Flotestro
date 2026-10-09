@@ -140,6 +140,9 @@ func (h *harness) enrollRelay(t *testing.T, names []string) testRelay {
 		t.Fatal(err)
 	}
 
+	// The pool before the registration: t.Cleanup runs last in, first out, so
+	// a pool first opened later has its Close run before this.
+	pool := h.database(context.Background())
 	t.Cleanup(func() {
 		ctx := context.Background()
 		// The sessions first: a relay that carried one is referenced from
@@ -151,13 +154,14 @@ func (h *harness) enrollRelay(t *testing.T, names []string) testRelay {
 			`delete from agent_sessions where relay_id = $1::uuid`,
 			`delete from enrollment_requests where relay_id = $1::uuid`,
 		} {
-			if _, err := h.database(ctx).Exec(ctx, statement, result.HostID); err != nil {
-				t.Logf("what relay %s left behind was not cleaned up: %v", result.HostID, err)
+			if _, err := pool.Exec(ctx, statement, result.HostID); err != nil {
+				t.Errorf("what relay %s left behind stays in the installation: %v",
+					result.HostID, err)
 			}
 		}
-		if _, err := h.database(ctx).Exec(ctx,
+		if _, err := pool.Exec(ctx,
 			`delete from relays where id = $1::uuid`, result.HostID); err != nil {
-			t.Logf("relay %s was not cleaned up: %v", result.HostID, err)
+			t.Errorf("the relay %s stays in the installation: %v", result.HostID, err)
 		}
 	})
 
@@ -356,13 +360,7 @@ func TestEnrollmentThroughARelayInAnIsolatedSite(t *testing.T) {
 	if err := json.Unmarshal(response, &result); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		ctx := context.Background()
-		if _, err := h.database(ctx).Exec(ctx,
-			`delete from hosts where id = $1::uuid`, result.HostID); err != nil {
-			t.Logf("host %s was not cleaned up: %v", result.HostID, err)
-		}
-	})
+	h.forgetHostOnCleanup(result.HostID)
 
 	_, leaf := tlsPair(t, key, result.CertificatePem)
 	// The certificate comes from the centre and is a host certificate, not

@@ -132,13 +132,7 @@ func (h *harness) enrollSyntheticHostWithIdentity(t *testing.T) (hostView, tls.C
 	// The synthetic machine disappears together with the test, straight in the
 	// database, as the plain helper does it: the product has no such operation
 	// and should not.
-	t.Cleanup(func() {
-		ctx := context.Background()
-		if _, err := h.database(ctx).Exec(ctx,
-			`delete from hosts where id = $1::uuid`, result.HostID); err != nil {
-			t.Logf("the synthetic host %s was not cleaned up: %v", result.HostID, err)
-		}
-	})
+	h.forgetHostOnCleanup(result.HostID)
 	identity, leaf := tlsPair(t, key, result.CertificatePem)
 	if leaf.NotAfter.Before(time.Now()) {
 		t.Fatalf("the panel issued a certificate that is already expired: %s", leaf.NotAfter)
