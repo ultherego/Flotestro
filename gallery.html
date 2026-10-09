@@ -158,6 +158,17 @@
     </figure>
 
     <figure class="figure">
+      <img src="img/readiness.png" alt="The readiness page: how many hosts are silent about their adapters, how many operations need one, and what each host said about the ones it does not offer." width="1600" height="1000" loading="lazy">
+      <figcaption><b>Readiness.</b> What the fleet can actually be asked to do, before anybody
+        asks. Four hosts, none silent about its adapters, 114 operations that need one and
+        <b>none orderable nowhere</b> &mdash; and for each adapter a host does not offer, the
+        reason in the host&rsquo;s own words: <i>this host has no Docker socket</i>,
+        <i>network is here and offers no write</i>, <i>this host does not run certmonger</i>,
+        <i>this host has no SELinux to switch</i>. A host of another family is a reason, not a
+        fault, and the page says which is which rather than counting the gap as zero.</figcaption>
+    </figure>
+
+    <figure class="figure">
       <img src="img/monitoring.png" alt="The monitoring page: alerts by severity, coverage of the hosts, and the alert rules with their conditions." width="1600" height="1000" loading="lazy">
       <figcaption><b>Monitoring.</b> Every agent samples its host; the rules on this page turn
         the samples into alerts, and nothing fires without a rule an operator can read here.
