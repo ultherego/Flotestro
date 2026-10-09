@@ -23,6 +23,7 @@ import (
 	"github.com/ultherego/flotestro/internal/buildinfo"
 	"github.com/ultherego/flotestro/internal/config"
 	"github.com/ultherego/flotestro/internal/ctl"
+	"github.com/ultherego/flotestro/internal/identitystore"
 	"github.com/ultherego/flotestro/internal/relay"
 	"github.com/ultherego/flotestro/internal/relayconfig"
 )
@@ -109,6 +110,8 @@ func enrollCommand(args []string, log *slog.Logger) error {
 	flags := flag.NewFlagSet("enroll", flag.ContinueOnError)
 	path := flags.String("config", relayconfig.DefaultPath, "the configuration file of the relay")
 	tokenFile := flags.String("token-file", "", "the file with the enrollment token")
+	replace := flags.Bool("replace", false,
+		"register anew although this relay already holds an identity, and leave the old one behind")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -121,15 +124,64 @@ func enrollCommand(args []string, log *slog.Logger) error {
 		return err
 	}
 
+	held, err := heldIdentity(cfg.Relay.StateDir)
+	if err != nil {
+		return err
+	}
+	if refusal := refuseHeldIdentity(held, *replace); refusal != nil {
+		return refusal
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	identity, err := register(ctx, cfg, token)
+	identity, err := register(ctx, cfg, token, *replace)
 	if err != nil {
 		return err
 	}
 	log.Info("the relay was registered", "relay_id", identity.RelayID,
 		"name", cfg.Relay.Name, "expires", identity.NotAfter.Format(time.RFC3339))
 	return nil
+}
+
+// heldIdentity is what the relay's state already holds, or nothing.
+//
+// A state directory with no identity in it is the ordinary case of a first
+// registration, and so is one this build cannot read; neither is an error
+// here, because the registration that follows writes what belongs there.
+func heldIdentity(stateDir string) (*identitystore.Identity, error) {
+	if stateDir == "" {
+		return nil, errors.New("the configuration of the relay names no state directory")
+	}
+	held, err := identitystore.New(stateDir).Current()
+	if err != nil {
+		return nil, nil
+	}
+	return held, nil
+}
+
+// refuseHeldIdentity stops a registration that would have done nothing.
+//
+// enroll asks for the identity to be ensured, which keeps the one already
+// there - and then reported "the relay was registered" with that identity's
+// own expiry, as if it had just been issued. A relay pointed at a rebuilt
+// installation was the case: the token was new, the registration said it
+// worked, and the relay went on holding a certificate and a trust bundle of
+// an installation that no longer exists. What it said afterwards was "tls:
+// failed to verify certificate", which sends a reader to look at the panel's
+// certificate rather than at the relay's own identity. 09.10, in the gate.
+//
+// The agent refuses the same situation by name - machine_already_enrolled -
+// and this now does too.
+func refuseHeldIdentity(held *identitystore.Identity, replace bool) error {
+	if held == nil || replace {
+		return nil
+	}
+	return fmt.Errorf(
+		"relay_already_enrolled: this relay already holds the identity %s, valid until %s, "+
+			"and enroll would have kept it and said nothing. Nothing was registered. "+
+			"Run it again with -replace to register anew with this token - the identity in %s "+
+			"is then superseded, which is what a relay moved to another installation needs",
+		held.HostID, held.NotAfter.Format(time.RFC3339), held.Dir)
 }
 
 // readToken takes the token from a file or from the standard input.
@@ -156,8 +208,14 @@ func readToken(file string) (string, error) {
 
 // register creates the identity of the relay out of the configuration and
 // the token.
-func register(ctx context.Context, cfg relayconfig.Config, token string) (relay.Identity, error) {
-	identity, err := agent.EnsureIdentityFor(ctx, agent.IdentityRequest{
+//
+// Ensuring an identity keeps the one already there, which is right for a
+// restart and wrong for a registration: with -replace the token has to be
+// spent and a new identity written, or the flag would say one thing and the
+// command do another.
+func register(ctx context.Context, cfg relayconfig.Config, token string,
+	replace bool) (relay.Identity, error) {
+	request := agent.IdentityRequest{
 		StateDir:        cfg.Relay.StateDir,
 		EnrollmentURL:   cfg.Upstream.EnrollmentURL,
 		Token:           token,
@@ -165,7 +223,12 @@ func register(ctx context.Context, cfg relayconfig.Config, token string) (relay.
 		MachineID:       cfg.Relay.Name,
 		Hostname:        cfg.Relay.Name,
 		Advertised:      strings.Join(cfg.Relay.AdvertisedNames, ","),
-	})
+	}
+	issue := agent.EnsureIdentityFor
+	if replace {
+		issue = agent.Enroll
+	}
+	identity, err := issue(ctx, request)
 	if err != nil {
 		return relay.Identity{}, fmt.Errorf("the identity of the relay: %w", err)
 	}
@@ -195,8 +258,9 @@ func runCommand(args []string, log *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// A relay without an identity does not come up.
-	identity, err := register(ctx, cfg, "")
+	// A relay without an identity does not come up. Here the identity is
+	// ensured and never replaced: a start is not a registration.
+	identity, err := register(ctx, cfg, "", false)
 	if err != nil {
 		return fmt.Errorf("%w; register the relay: flotestro-relay enroll", err)
 	}
