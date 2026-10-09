@@ -957,9 +957,15 @@ jobs:
               END { if (!done && ok && file != "" && sum != "") print file, sum }
           ' packages.txt)"
           [ -n "${filename:-}" ] || { echo "::error::the index names $VERSION but no file for it." >&2; exit 1; }
-          echo "downloading $base/${filename#packages/}"
-          curl -fsS --max-time 300 -o package.deb "$base/${filename#packages/}" ||
-            curl -fsS --max-time 300 -o package.deb "https://${REPOSITORY%%/*}.github.io/${REPOSITORY#*/}/$filename"
+          # Filename in a Packages index is relative to the root of that
+          # repository, which is .../packages/deb - not to .../packages. The
+          # first version of this step dropped the deb/ and asked for
+          # .../packages/pool/..., which answers 404: 0.62.1 was published
+          # correctly and this job failed over its own address. The test of it
+          # passed because the directory it served was the one I had invented
+          # rather than the one the repository publishes.
+          echo "downloading $base/deb/$filename"
+          curl -fsS --max-time 300 -o package.deb "$base/deb/$filename"
           actual="$(sha256sum package.deb | cut -d" " -f1)"
           if [ "$actual" != "$sha256" ]; then
             echo "::error::the package at the address hashes to $actual and the index claims $sha256." >&2
