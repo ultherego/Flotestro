@@ -4,6 +4,82 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [semantic versioning](https://semver.org/). Dates are the
 day the tag was published.
 
+## [0.62.1] - 2026-10-09
+
+A day of reading what the product says when something is wrong, and finding
+that in eight places it said the wrong thing - or nothing. Every item here
+was met on a running installation or in the gate, not read off a list.
+
+### Security
+
+- The Go release that closes ten advisories against the standard library this
+  code calls, and three against `golang.org/x/net`. Nothing in the tree
+  changed: the advisories were published. The toolchain was named in two
+  places - `go.mod`, which every workflow reads, and the base image that
+  builds the binaries - and nothing compared them, so a bump of the one would
+  have shipped images built by the compiler that still had the bug.
+- A spooled result is freed only for the operation it answers. The spool is
+  the only durable copy of work already carried out on the host, and the
+  attempt identifier alone was enough to delete it: a frame naming a task
+  freed whatever was spooled under it. The panel already echoed the key the
+  host performed the operation under, for exactly this purpose, and nothing
+  compared it. This closes a replay and a confusion; whoever can read the
+  session can still read the key, and a signature over the acknowledgement is
+  the answer to that.
+
+### Fixed
+
+- An upgrade no longer leaves the helper unreachable. Replacing a socket
+  unit's file and reloading systemd takes the listening descriptor away from
+  the running unit - systemd says so and leaves the unit reporting active -
+  and `enable --now` then does nothing. Every package did that, so after
+  `apt upgrade` or `dnf upgrade` the host answered and refused every
+  operation that needs a signed capability, with nothing reporting a failure.
+- `flotestro-relay enroll` refuses a registration that would have kept the
+  identity already there. It asked for the identity to be ensured and then
+  reported a registration, with the old certificate's expiry: a relay pointed
+  at a rebuilt installation held a trust bundle of the installation that was
+  gone and said "tls: failed to verify certificate", which is about the
+  panel's certificate and not about its own identity. `-replace` registers
+  anew.
+- An enrollment refused for the state of the machine says so. A machine the
+  panel already knows, offered an order for a new host, was refused with "the
+  enrollment token is invalid" - the token was fine, and the refusal the panel
+  recorded named the real reason all along. The one an operator meets after
+  reinstalling a host now points at the identity recovery, which is the order
+  that fits. A refused enrollment is in the log, where somebody whose host
+  will not enrol looks first, and not only in the audit trail.
+- `flotestro-agentctl helper-trust reset` no longer promises that the next
+  bundle is taken on trust. The shipped policy is pinned, so on an ordinary
+  host that sentence promised an enrollment the helper then refuses.
+- The README creates `/etc/apt/keyrings` before writing the repository key
+  into it, and the installation chapter names the two steps the panel
+  generates and the chapter had left out: the pin, without which a host
+  enrols with nobody, and the configuration that carries the addresses.
+
+### Added
+
+- The operation registry says what a payload has to carry: the group an
+  operation reads and the fields its refusal is about, each with the sort of
+  value that goes in it, asked of the validator rather than listed beside it.
+  A fan-out read used to offer an empty object - seven of the twenty-four had
+  an example written by hand and the rest had nothing - so ordering a journal
+  read across the fleet meant knowing from somewhere else that it takes a
+  line count. The panel and the campaign wizard build their skeleton from it.
+
+### Changed
+
+- The laboratory gate's verdict reads what its fleet watchdog did. A host
+  reloaded in the middle of the suite was printed and never read, so a run
+  measured over a repaired fleet was recorded as a pass - including the two
+  runs this project had leaned on. A repair is not an approved limitation, so
+  the run is a fail and has to be repeated.
+- A release ends by asking the published address whether it serves what was
+  just published. The workflow writes the pages branch and GitHub Pages then
+  builds it; nothing asked the second half, and 0.62.0 was announced while
+  the public apt repository went on serving 0.60.4 for an hour because that
+  build had failed.
+
 ## [0.62.0] - 2026-10-08
 
 The release this version line waited for. The 0.61.x patches were cut from it
