@@ -287,9 +287,16 @@ func (s *EnrollmentService) enrollThroughRelay(ctx context.Context,
 	// The purpose of the order settles what may be done with a machine the panel
 	// already knows.
 	if err := s.checkPurpose(ctx, tx, msg, scope); err != nil {
-		s.deny(ctx, msg, scope.TokenID, purposeDenialCode(err), err.Error(),
+		// The token is good here; it is the state of the machine that does not
+		// fit the order. The host used to be told "the enrollment token is
+		// invalid" for it, which sent an operator to look at the order - and a
+		// reinstalled machine, whose host the panel still knows, is the most
+		// ordinary way to arrive here. The reason the panel records is the
+		// reason the host hears, the way the loopback refusal already does.
+		code := purposeDenialCode(err)
+		s.deny(ctx, msg, scope.TokenID, code, err.Error(),
 			map[string]any{"purpose": scope.Purpose})
-		return nil, connect.NewError(connect.CodePermissionDenied, enrollment.ErrInvalidToken)
+		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New(denialMessage(code)))
 	}
 
 	build := msg.GetBuild()
@@ -588,6 +595,10 @@ func (s *EnrollmentService) deny(ctx context.Context, msg *agentv1.EnrollRequest
 		event.TargetType, event.TargetID = "enrollment_request", requestID
 	}
 	s.audit.Record(ctx, event)
+	// And the log, which is where an operator whose host will not enrol looks
+	// first. The refusal was in the audit trail and nowhere else.
+	s.log.Warn("an enrollment was refused", "reason", code, "message", message,
+		"hostname", msg.GetHostname(), "machine_id", msg.GetMachineId(), "token_id", requestID)
 	// The order's screen hears of the refusal at once.
 	if requestID == "" || s.hosts == nil {
 		return
@@ -622,6 +633,20 @@ func denialMessage(code string) string {
 		return "the token matched no order"
 	case enrollment.DenialMachineRetired:
 		return "the machine belongs to a retired host and is held back; a new-host token does not fit it yet"
+	case enrollment.DenialDuplicateMachine:
+		return "this machine is already a host of this installation, so an order for a new host " +
+			"does not fit it; recover the identity of that host instead, which its own screen in " +
+			"the panel orders"
+	case "recovery_without_host":
+		return "the order recovers an identity and names no host to recover it for"
+	case "recovery_host_missing":
+		return "the host the order recovers an identity for is not in this installation"
+	case "host_retired":
+		return "the host the order names was retired, and a recovery does not bring it back"
+	case "relay_purpose_for_host":
+		return "the order registers a relay and this is a host"
+	case "unknown_purpose":
+		return "the order names a purpose this panel does not know"
 	case enrollment.DenialAdvertiseLoopback:
 		return "the panel presents itself to the fleet as loopback, so a certificate issued now " +
 			"would not match the address this host dials; confirm an address the fleet reaches " +

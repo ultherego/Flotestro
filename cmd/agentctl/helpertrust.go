@@ -157,7 +157,7 @@ func helperTrustResetCommand(args []string, out, errOut io.Writer) int {
 		fmt.Fprintln(errOut, "the files of the helper belong to root; run the command as root")
 		return 1
 	}
-	store, _, ok := helperTrustStore(errOut)
+	store, settings, ok := helperTrustStore(errOut)
 	if !ok {
 		return 1
 	}
@@ -165,6 +165,32 @@ func helperTrustResetCommand(args []string, out, errOut io.Writer) int {
 		fmt.Fprintf(errOut, "the reset failed: %v\n", err)
 		return 1
 	}
-	fmt.Fprintln(out, "The helper's identity and keys were forgotten; the next session of the agent hands it the panel's bundle, which is taken on trust.")
+	pins, _ := store.Pins()
+	fmt.Fprintln(out, resetOutcome(settings.Bootstrap, settings.PinPath, pins))
 	return 0
+}
+
+// resetOutcome says what the next session will really do, which depends on the
+// bootstrap policy and on whether a panel is pinned. The message used to say
+// the bundle "is taken on trust" whatever the host held - and the shipped
+// policy is pinned, so on an ordinary host that sentence was wrong in the one
+// direction that matters: it promised an enrollment that the helper will
+// refuse.
+func resetOutcome(bootstrap helpercap.Bootstrap, pinPath string, pins []string) string {
+	const forgotten = "The helper's identity and keys were forgotten; "
+	switch {
+	case len(pins) > 0:
+		return forgotten + fmt.Sprintf(
+			"the next session is held to the %d panel(s) pinned in %s, and to no other.",
+			len(pins), pinPath)
+	// Only an explicit tofu takes a bundle on trust: an unset policy is pinned,
+	// and the sentence has to follow that rather than the absence of a value.
+	case bootstrap != helpercap.BootstrapTOFU:
+		return forgotten + fmt.Sprintf(
+			"the helper now enrolls with nobody: the policy is pinned and %s names no panel. "+
+				"Pin one with flotestro-agentctl helper-trust pin <fingerprint>.", pinPath)
+	default:
+		return forgotten + "the next session of the agent hands it the panel's bundle, " +
+			"which this host takes on trust."
+	}
 }
