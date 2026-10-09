@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/x509"
@@ -152,9 +153,18 @@ func TestTwoClonesOfOneImageGetDistinctIdentities(t *testing.T) {
 		t.Fatalf("the order was not bound to the machine: %+v", bound)
 	}
 
+	// The token is valid and the order is the right shape; what does not fit is
+	// the state of the machine, so the refusal is a failed precondition rather
+	// than a permission. It used to be a permission denial reading "the
+	// enrollment token is invalid", which sent whoever met it to look at the
+	// order. What the operator needs is the sentence that names the order which
+	// does fit, so this asks for that too.
 	status, body := h.enrollAttempt(t, bound.Token, first.MachineID, testCSR(t, first.MachineID))
-	if status != http.StatusForbidden {
+	if status != http.StatusBadRequest {
 		t.Fatalf("a clone with a known machine id was answered with %d: %s", status, body)
+	}
+	if !bytes.Contains(body, []byte("recover the identity")) {
+		t.Errorf("the refusal does not point at the order that fits: %s", body)
 	}
 
 	// Nothing was adopted: the first host is the same row with the same machine

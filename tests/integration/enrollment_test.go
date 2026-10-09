@@ -356,9 +356,16 @@ func TestDecommissionedHostDoesNotComeBackWithAToken(t *testing.T) {
 	t.Cleanup(func() {
 		h.do(http.MethodPost, "/api/v1/enrollment-requests/"+order.ID+"/revoke", nil, nil, 0)
 	})
+	// A failed precondition: the token is good and the machine is the one it
+	// was bound to - what refuses the enrollment is that the machine belongs to
+	// a host which was retired, and the message says so rather than blaming the
+	// token.
 	status, body := h.enrollAttempt(t, order.Token, identity.MachineID, testCSR(t, identity.MachineID))
-	if status != http.StatusForbidden {
+	if status != http.StatusBadRequest {
 		t.Fatalf("a retired machine was answered with %d: %s", status, body)
+	}
+	if !bytes.Contains(body, []byte("retired host")) {
+		t.Errorf("the refusal does not say the host was retired: %s", body)
 	}
 	var trail struct {
 		Items []struct {
