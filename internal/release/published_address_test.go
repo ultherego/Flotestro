@@ -102,6 +102,13 @@ exit 22
 
 // index writes a Packages stanza of the shape the signed repository really
 // publishes: the one at the address on 09.10, with the digest of the body.
+//
+// Filename is relative to the root of the deb repository, which is
+// .../packages/deb, so the served path below carries that deb/ as the
+// published tree does. The first version of this test served the file one
+// directory higher - where the step then looked for it - and both halves
+// agreed with each other and with nothing else. The release of 0.62.1 failed
+// on that, over an address no repository ever had.
 func index(version, body string) (string, string) {
 	sum := sha256.Sum256([]byte(body))
 	digest := hex.EncodeToString(sum[:])
@@ -122,14 +129,17 @@ func TestTheReleaseAcceptsAnAddressThatServesIt(t *testing.T) {
 	path, packages := index("0.62.1", body)
 	output, ok := publishedStep(t, map[string]string{
 		path: packages,
-		"packages/pool/stable/flotestro-agent_0.62.1_amd64.deb": body,
-		"packages/rpm/stable/repodata/repomd.xml":               "<repomd/>",
-		"packages/arch/stable/flotestro.db":                     "db",
+		"packages/deb/pool/stable/flotestro-agent_0.62.1_amd64.deb": body,
+		"packages/rpm/stable/repodata/repomd.xml":                   "<repomd/>",
+		"packages/arch/stable/flotestro.db":                         "db",
 	}, "built")
 	if !ok {
 		t.Fatalf("the step refused an address that serves the release:\n%s", output)
 	}
-	for _, want := range []string{"names 0.62.1", "matches the digest"} {
+	for _, want := range []string{"names 0.62.1", "matches the digest",
+		// The address it asked for: the one the published repository really
+		// serves, with the deb/ that Filename is relative to.
+		"/packages/deb/pool/stable/"} {
 		if !strings.Contains(output, want) {
 			t.Errorf("the step passed without saying %q:\n%s", want, output)
 		}
@@ -160,9 +170,9 @@ func TestTheReleaseRefusesAPackageThatDoesNotMatchTheIndex(t *testing.T) {
 	path, packages := index("0.62.1", "the package the index describes")
 	output, ok := publishedStep(t, map[string]string{
 		path: packages,
-		"packages/pool/stable/flotestro-agent_0.62.1_amd64.deb": "something else entirely",
-		"packages/rpm/stable/repodata/repomd.xml":               "<repomd/>",
-		"packages/arch/stable/flotestro.db":                     "db",
+		"packages/deb/pool/stable/flotestro-agent_0.62.1_amd64.deb": "something else entirely",
+		"packages/rpm/stable/repodata/repomd.xml":                   "<repomd/>",
+		"packages/arch/stable/flotestro.db":                         "db",
 	}, "built")
 	if ok {
 		t.Fatalf("the step accepted a package that is not the one the index describes:\n%s", output)
@@ -179,8 +189,8 @@ func TestTheReleaseRefusesAHalfPublishedAddress(t *testing.T) {
 	path, packages := index("0.62.1", body)
 	output, ok := publishedStep(t, map[string]string{
 		path: packages,
-		"packages/pool/stable/flotestro-agent_0.62.1_amd64.deb": body,
-		"packages/rpm/stable/repodata/repomd.xml":               "<repomd/>",
+		"packages/deb/pool/stable/flotestro-agent_0.62.1_amd64.deb": body,
+		"packages/rpm/stable/repodata/repomd.xml":                   "<repomd/>",
 	}, "built")
 	if ok {
 		t.Fatalf("the step accepted an address with no pacman database:\n%s", output)
@@ -208,5 +218,30 @@ func TestTheReleaseRefusesAnAddressThatNeverNamesTheVersion(t *testing.T) {
 	}
 	if !strings.Contains(output, "the address is what a host reads") {
 		t.Errorf("the step did not tell the reader where to look:\n%s", output)
+	}
+}
+
+// The address the step asks for, on its own, because getting it wrong is what
+// failed the release of 0.62.1 and the test of the step agreed with the
+// mistake. Filename in a Packages index is relative to the root of that
+// repository - .../packages/deb - and a step that asks one directory higher
+// gets a 404 over a release that published perfectly well.
+func TestTheReleaseAsksForThePackageAtTheRepositoryRoot(t *testing.T) {
+	body := "the package as the address serves it"
+	path, packages := index("0.62.1", body)
+	served := map[string]string{
+		path: packages,
+		// Served only under deb/, as the published tree serves it. A step that
+		// looks anywhere else finds nothing here either.
+		"packages/deb/pool/stable/flotestro-agent_0.62.1_amd64.deb": body,
+		"packages/rpm/stable/repodata/repomd.xml":                   "<repomd/>",
+		"packages/arch/stable/flotestro.db":                         "db",
+	}
+	output, ok := publishedStep(t, served, "built")
+	if !ok {
+		t.Fatalf("the step did not find the package where the repository serves it:\n%s", output)
+	}
+	if !strings.Contains(output, "/packages/deb/pool/stable/flotestro-agent_0.62.1_amd64.deb") {
+		t.Errorf("the step asked for another address than the repository root:\n%s", output)
 	}
 }
