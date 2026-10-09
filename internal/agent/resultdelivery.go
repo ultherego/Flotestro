@@ -204,6 +204,17 @@ func (d *resultDelivery) acknowledge(ack *agentv1.TaskResultAck) {
 	default:
 		d.log.Debug("the panel took the result", "task_id", ack.GetTaskId())
 	}
+	// The spool decides whether this acknowledgement is about the answer it
+	// holds. What this session remembers about the send is only dropped when
+	// it is: otherwise the answer stays spooled and the retry interval still
+	// applies to it, instead of being offered on every tick.
+	// The spool decides whether this acknowledgement is about the answer it
+	// holds. When it is not, nothing is freed and this session goes on
+	// remembering the send, so the answer keeps its place in the queue.
+	if err := d.spool.Acknowledge(ack); err != nil {
+		d.log.Warn("an acknowledgement was refused and the answer is kept for a resend",
+			"task_id", ack.GetTaskId(), "err", err)
+		return
+	}
 	d.forgetSent(ack.GetTaskId())
-	d.spool.Acknowledge(ack)
 }
