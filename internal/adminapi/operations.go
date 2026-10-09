@@ -821,6 +821,12 @@ func (s *Server) handleListActions(w http.ResponseWriter, r *http.Request) {
 		// a placeholder for certificate material the operator supplies.
 		PayloadTemplate *opspec.Payload `json:"payload_template,omitempty"`
 		NeedsMaterial   bool            `json:"needs_material,omitempty"`
+		// What the payload has to carry, for the operations a template does not
+		// cover - which is every fan-out read. The panel offered an empty object
+		// for those and the operator had a skeleton with nothing in it. Both are
+		// asked of the validator rather than listed here.
+		PayloadGroup  string                    `json:"payload_group,omitempty"`
+		PayloadFields []opspec.PayloadFieldName `json:"payload_fields,omitempty"`
 		// The second half of the contract: what a cancel does to an operation under
 		// way, whether it may be repeated, what way back exists, what the campaign
 		// checks afterwards and which host resources it takes.
@@ -843,9 +849,12 @@ func (s *Server) handleListActions(w http.ResponseWriter, r *http.Request) {
 			template = &example
 		}
 		contract := action.Contract()
+		shape := opspec.Shape(action)
 		items = append(items, actionInfo{
 			PayloadTemplate:    template,
 			NeedsMaterial:      opspec.TemplateNeedsMaterial(action),
+			PayloadGroup:       shape.Group,
+			PayloadFields:      shape.Fields,
 			Action:             string(action),
 			Mutating:           action.Mutating(),
 			RequiredCapability: action.RequiredCapability(),

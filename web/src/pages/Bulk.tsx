@@ -659,7 +659,34 @@ export type Operation = OperationContract & {
   default_timeout_seconds?: number;
   payload_template?: Record<string, unknown>;
   needs_material?: boolean;
+  // What the payload has to carry, for the operations a template does not
+  // cover. The panel builds a skeleton from these rather than offering an
+  // empty object: the group is the key, and the fields are what goes inside.
+  payload_group?: string;
+  payload_fields?: { name: string; kind: string }[];
 };
+
+/**
+ * The skeleton of a payload, from what the registry says the operation reads.
+ *
+ * Every fan-out read lacked a hand-written template, so the form offered "{}"
+ * and the operator had to know which group and which fields the operation
+ * takes - or order it, read the refusal and try again. An empty group is a
+ * complete answer for the operations that accept one: {"docker_read":{}} is a
+ * payload docker.read takes as it stands.
+ */
+export function payloadSkeleton(operation: Operation | undefined): Record<string, unknown> {
+  if (!operation?.payload_group) return {};
+  const body: Record<string, unknown> = {};
+  for (const field of operation.payload_fields ?? []) {
+    body[field.name] = field.kind === "number" ? 0
+      : field.kind === "boolean" ? false
+      : field.kind === "array" ? []
+      : field.kind === "object" ? {}
+      : "";
+  }
+  return { [operation.payload_group]: body };
+}
 
 /**
  * The operation catalogue under /api/v1/actions, read once and shared by

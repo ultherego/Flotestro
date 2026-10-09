@@ -872,6 +872,10 @@ var responseSchemas = map[string]map[string]any{
 					"offline_policy": str(), "fanout_limit": count(),
 					"fanout_refusal": str(), "campaign_refusal": str(),
 					"payload_template": ref("Payload"), "needs_material": flag(),
+					"payload_group": str(),
+					"payload_fields": map[string]any{"type": "array", "items": map[string]any{
+						"type": "object", "properties": map[string]any{"name": str(), "kind": str()},
+					}},
 					"cancel_mode": str(), "retry_class": str(), "rollback": str(),
 					"verification": str(),
 					"resource_claims": map[string]any{"type": "array", "items": map[string]any{

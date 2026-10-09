@@ -3,7 +3,7 @@ import {
   campaignBody, clearDraft, DRAFT_KEY, emptyOrder, jobTimeoutValid, loadDraft, MIN_REASON,
   orderForm, orderTargets, parseUnits, prefilledOrder, previewTokenOf, reasonValid,
   REVERSE_OPERATION, reversePayload,
-  saveDraft, selectorNames, windowInstant, windowProblem, wizardOperations, type Operation,
+  payloadSkeleton, saveDraft, selectorNames, windowInstant, windowProblem, wizardOperations, type Operation,
 } from "./Bulk";
 
 /* The wizard's decisions - what counts as a reason, whether the window
@@ -382,5 +382,50 @@ describe("an operation ordered through the registry's form", () => {
     const draft = prefilledOrder(params);
     expect(draft?.order.form).toEqual({ settings: "" });
     expect(draft?.order.payloadText).toBe(JSON.stringify({ kernel: { module: "br_netfilter" } }));
+  });
+});
+
+describe("the skeleton of a payload", () => {
+  // Every fan-out read lacked a hand-written template, so the form offered
+  // "{}" and the operator had to know the group and the fields from
+  // somewhere else - or order the read, be refused and try again.
+  it("names the group and the fields the registry describes", () => {
+    expect(payloadSkeleton({
+      action: "journal.read",
+      payload_group: "journal",
+      payload_fields: [{ name: "lines", kind: "number" }],
+    } as Operation)).toEqual({ journal: { lines: 0 } });
+  });
+
+  // A value of the right sort, so what the operator sees is a payload to
+  // edit rather than a shape to guess at.
+  it("writes a value of each kind", () => {
+    expect(payloadSkeleton({
+      action: "an.operation",
+      payload_group: "group",
+      payload_fields: [
+        { name: "text", kind: "string" },
+        { name: "count", kind: "number" },
+        { name: "yes", kind: "boolean" },
+        { name: "many", kind: "array" },
+        { name: "nested", kind: "object" },
+      ],
+    } as Operation)).toEqual({
+      group: { text: "", count: 0, yes: false, many: [], nested: {} },
+    });
+  });
+
+  // An empty group is a complete answer, not a silence: docker.read takes
+  // {"docker_read":{}} as it stands.
+  it("offers the bare group where the operation accepts one", () => {
+    expect(payloadSkeleton({
+      action: "docker.read", payload_group: "docker_read",
+    } as Operation)).toEqual({ docker_read: {} });
+  });
+
+  // And an operation that takes no payload still gets the empty object.
+  it("stays empty for an operation that reads no payload", () => {
+    expect(payloadSkeleton({ action: "security.scan" } as Operation)).toEqual({});
+    expect(payloadSkeleton(undefined)).toEqual({});
   });
 });
