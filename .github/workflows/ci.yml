@@ -112,6 +112,28 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
           "$(go env GOPATH)/bin/govulncheck" ./...
 
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: The dependencies the panel ships
+        # Half the product is the interface, and this job asked about the Go
+        # half alone: on 08.10 npm audit reported nine advisories and every one
+        # of them was in a build dependency, which is the answer somebody has
+        # to read rather than assume. What ships to a browser is what --omit=dev
+        # leaves, so that is what is held to zero here; the build's own
+        # dependencies are reported beside it and fail nothing, because a
+        # vulnerability in a bundler is not a vulnerability in the panel.
+        working-directory: web
+        run: |
+          set -o pipefail
+          npm audit --omit=dev --audit-level=low
+          echo "::group::the build's own dependencies, which do not ship"
+          npm audit --audit-level=low || true
+          echo "::endgroup::"
+
   protocol:
     name: Protocol compatibility
     runs-on: ubuntu-latest
