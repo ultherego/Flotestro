@@ -468,6 +468,12 @@ jobs:
     needs: collect
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # The channel and the version are computed in this job and read by the one
+    # that asks the address afterwards; recomputing the rule in two places is
+    # how a pre-release would end up checked against the stable channel.
+    outputs:
+      channel: ${{ steps.channel.outputs.name }}
+      version: ${{ steps.channel.outputs.version }}
     # The protected environment is the point of this job. The build runner
     # that compiled the code never sees the signing key; this one sees the
     # key and, of the product, one packaging script it takes from the tag
@@ -875,6 +881,105 @@ jobs:
             [ -f "$file" ] && assets+=("$file")
           done
           gh release upload "$tag" "${assets[@]}"
+
+  published:
+    name: The address answers
+    needs: sign
+    runs-on: ubuntu-latest
+    # Pages builds after the push and takes its time; this waits rather than
+    # asking once and calling it published.
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      # The build status of the site, which is the half of the chain the
+      # repository cannot show: gh-pages held the files on 08.10 and the
+      # address served the previous release, because the build had failed.
+      pages: read
+    steps:
+      - name: The published repository serves this release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          CHANNEL: ${{ needs.sign.outputs.channel }}
+          VERSION: ${{ needs.sign.outputs.version }}
+        # Publishing is two links: this workflow writes gh-pages, and Pages
+        # then builds it. Nothing here ever asked the second one. On 08.10 the
+        # build for the release commit failed, 0.62.0 was announced, and the
+        # public apt repository went on serving 0.60.4 until an unrelated
+        # change to the site rebuilt the branch an hour later. The release said
+        # it had published; no host could install it.
+        run: |
+          set -euo pipefail
+          base="https://${REPOSITORY%%/*}.github.io/${REPOSITORY#*/}/packages"
+          index="$base/deb/dists/$CHANNEL/main/binary-amd64/Packages"
+          echo "asking $index for $VERSION"
+          # Named rather than written into the arithmetic, so that the test
+          # of this step can ask what happens when the address never answers
+          # without waiting twenty minutes for it.
+          deadline=$(( SECONDS + ${PUBLISHED_WAIT_SECONDS:-1200} ))
+          while :; do
+            if curl -fsS --max-time 60 -o packages.txt "$index" 2>/dev/null &&
+               grep -qxF "Version: $VERSION" packages.txt; then
+              echo "the index at the address names $VERSION"
+              break
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::the address did not name $VERSION in time: $index." >&2
+              echo "The files are on gh-pages; the address is what a host reads. Check the Pages build." >&2
+              gh api "repos/$REPOSITORY/pages/builds/latest" \
+                --jq '"the latest Pages build: \(.status) on \(.commit[0:12]) - \(.error.message // "no error recorded")"' >&2 || true
+              exit 1
+            fi
+            # The build, so that a failure is named at once instead of after
+            # twenty minutes of asking a page that will never change.
+            status="$(gh api "repos/$REPOSITORY/pages/builds/latest" --jq '.status' 2>/dev/null || echo unknown)"
+            if [ "$status" = errored ]; then
+              echo "::error::the Pages build errored, so the address will not serve this release." >&2
+              gh api "repos/$REPOSITORY/pages/builds/latest" \
+                --jq '"\(.commit[0:12]): \(.error.message // "no message")"' >&2 || true
+              exit 1
+            fi
+            sleep "${PUBLISHED_POLL_SECONDS:-20}"
+          done
+
+          # The stanza of this version, and the file it points at, fetched from
+          # the address and checked against the digest the index itself claims.
+          # An index that names a version over a file nobody can download is
+          # the same outage with a different symptom.
+          read -r filename sha256 <<<"$(awk -v want="Version: $VERSION" '
+              /^Package:/ { file = ""; sum = ""; ok = 0 }
+              $0 == want { ok = 1 }
+              /^Filename:/ { file = $2 }
+              /^SHA256:/ { sum = $2 }
+              # exit runs END, so the first match is remembered rather than
+              # printed twice - once here and once there.
+              /^$/ { if (ok && file != "" && sum != "") { print file, sum; done = 1; exit } }
+              END { if (!done && ok && file != "" && sum != "") print file, sum }
+          ' packages.txt)"
+          [ -n "${filename:-}" ] || { echo "::error::the index names $VERSION but no file for it." >&2; exit 1; }
+          echo "downloading $base/${filename#packages/}"
+          curl -fsS --max-time 300 -o package.deb "$base/${filename#packages/}" ||
+            curl -fsS --max-time 300 -o package.deb "https://${REPOSITORY%%/*}.github.io/${REPOSITORY#*/}/$filename"
+          actual="$(sha256sum package.deb | cut -d" " -f1)"
+          if [ "$actual" != "$sha256" ]; then
+            echo "::error::the package at the address hashes to $actual and the index claims $sha256." >&2
+            exit 1
+          fi
+          echo "the package downloads from the address and matches the digest the index claims"
+
+          # The other two families are written by the same push, so an address
+          # that serves one and not the others is a half-published release.
+          for path in "rpm/$CHANNEL/repodata/repomd.xml" "arch/$CHANNEL/flotestro.db"; do
+            code="$(curl -fsS -o /dev/null -w '%{http_code}' --max-time 60 "$base/$path" || echo 000)"
+            echo "$path -> $code"
+            [ "$code" = 200 ] || { echo "::error::$base/$path answers $code." >&2; exit 1; }
+          done
+          {
+            echo "### The address answers"
+            echo
+            echo "\`$VERSION\` is served by <$base/> in the \`$CHANNEL\` channel: the index names it,"
+            echo "the package downloads and its digest matches."
+          } >> "$GITHUB_STEP_SUMMARY"
 
   repository-image:
     name: The repository of an isolated site
