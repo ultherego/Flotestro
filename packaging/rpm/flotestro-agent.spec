@@ -154,8 +154,12 @@ if [ -f %{_sysconfdir}/flotestro/agent.env ] &&
     echo "  remove the line from the file" >&2
 fi
 %systemd_post flotestro-agent.service flotestro-helper.socket flotestro-firewall-restore.service
-# The helper socket must exist before the agent tries to connect to it.
-systemctl enable --now flotestro-helper.socket || :
+# The helper socket must exist before the agent tries to connect to it, and a
+# running one has to be restarted: replacing the unit file and reloading takes
+# its listening descriptor away, and "enable --now" does nothing to a unit that
+# still reports active with no socket left.
+systemctl enable flotestro-helper.socket || :
+systemctl restart flotestro-helper.socket || :
 # The panel's own nftables table is in no boot file of the distribution, so a
 # unit of ours rebuilds it from the helper's registry before the host is
 # reachable. It is started and not restarted: where it has already run the

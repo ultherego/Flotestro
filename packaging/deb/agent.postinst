@@ -80,8 +80,12 @@ configure)
     fi
 
     systemctl daemon-reload || true
-    # The helper socket must exist before the agent tries to connect to it.
-    systemctl enable --now flotestro-helper.socket || true
+    # The helper socket must exist before the agent tries to connect to it, and
+    # a running one has to be restarted: the daemon-reload above takes its
+    # listening descriptor away, and "enable --now" does nothing to a unit that
+    # still reports active with no socket left.
+    systemctl enable flotestro-helper.socket || true
+    systemctl restart flotestro-helper.socket || true
     # The helper is started by the socket and keeps running after the binary
     # is replaced, so after an update it would serve jobs with the old code
     # until the idle timeout. Stopping it here makes the next job reach the

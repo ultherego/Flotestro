@@ -29,8 +29,11 @@ post_install() {
             /etc/flotestro/helper.yaml
         echo "flotestro-agent: /etc/flotestro/helper.yaml was written with capabilities.mode: enforce and capabilities.bootstrap: pinned - this host enrols with no panel until one is named with \"flotestro-agentctl helper-trust pin <fingerprint>\"" >&2
     fi
-    # The helper socket must exist before the agent tries to connect to it.
-    systemctl enable --now flotestro-helper.socket >/dev/null 2>&1 || true
+    # The helper socket must exist before the agent tries to connect to it, and
+    # a running one has to be restarted: a reload takes its listening descriptor
+    # away, and "enable --now" does nothing to a unit that still reports active.
+    systemctl enable flotestro-helper.socket >/dev/null 2>&1 || true
+    systemctl restart flotestro-helper.socket >/dev/null 2>&1 || true
     # The panel's own nftables table is in no boot file of the distribution,
     # so a unit of ours rebuilds it from the helper's registry before the host
     # is reachable. It is started and not restarted: where it has already run
@@ -65,6 +68,9 @@ post_upgrade() {
     # update it would serve jobs with the old code; the socket starts the
     # new version.
     systemctl stop flotestro-helper.service >/dev/null 2>&1 || true
+    # The reload above left the socket unit active with no listening descriptor,
+    # so without this the upgraded host answers no capability at all.
+    systemctl restart flotestro-helper.socket >/dev/null 2>&1 || true
     systemctl enable flotestro-firewall-restore.service >/dev/null 2>&1 || true
     systemctl start flotestro-firewall-restore.service >/dev/null 2>&1 || true
     systemctl try-restart flotestro-agent.service >/dev/null 2>&1 || true
