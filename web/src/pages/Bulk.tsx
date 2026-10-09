@@ -667,6 +667,20 @@ export type Operation = OperationContract & {
 };
 
 /**
+ * What the payload field opens on for an operation the wizard draws no form
+ * for: the example if the operation has one, the skeleton the registry
+ * describes if it has not, and nothing at all for an operation that reads no
+ * payload - an empty box is the honest offer there.
+ */
+export function startingPayloadText(operation: Operation | undefined, hasForm: boolean): string {
+  if (hasForm) return "";
+  const skeleton = payloadSkeleton(operation);
+  const starting = operation?.payload_template
+    ?? (Object.keys(skeleton).length > 0 ? skeleton : undefined);
+  return starting ? JSON.stringify(starting, null, 2) : "";
+}
+
+/**
  * The skeleton of a payload, from what the registry says the operation reads.
  *
  * Every fan-out read lacked a hand-written template, so the form offered "{}"
@@ -1200,12 +1214,10 @@ function ScopeStep({
               // their own starting values.
               const action = e.target.value;
               const next = bulk.find((item) => item.action === action);
-              const known = Boolean(operationForm(action));
               change({
                 action,
                 form: startingForm(action),
-                payloadText: !known && next?.payload_template
-                  ? JSON.stringify(next.payload_template, null, 2) : "",
+                payloadText: startingPayloadText(next, Boolean(operationForm(action))),
               });
             }}
           >

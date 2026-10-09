@@ -3,7 +3,7 @@ import {
   campaignBody, clearDraft, DRAFT_KEY, emptyOrder, jobTimeoutValid, loadDraft, MIN_REASON,
   orderForm, orderTargets, parseUnits, prefilledOrder, previewTokenOf, reasonValid,
   REVERSE_OPERATION, reversePayload,
-  payloadSkeleton, saveDraft, selectorNames, windowInstant, windowProblem, wizardOperations, type Operation,
+  payloadSkeleton, saveDraft, startingPayloadText, selectorNames, windowInstant, windowProblem, wizardOperations, type Operation,
 } from "./Bulk";
 
 /* The wizard's decisions - what counts as a reason, whether the window
@@ -427,5 +427,39 @@ describe("the skeleton of a payload", () => {
   it("stays empty for an operation that reads no payload", () => {
     expect(payloadSkeleton({ action: "security.scan" } as Operation)).toEqual({});
     expect(payloadSkeleton(undefined)).toEqual({});
+  });
+});
+
+describe("what the wizard's payload field opens on", () => {
+  const read = {
+    action: "docker.container.logs",
+    payload_group: "docker_logs",
+    payload_fields: [{ name: "container_id", kind: "string" }],
+  } as Operation;
+
+  // An operation the wizard draws a form for writes its own payload; the text
+  // box is not shown and has nothing to say.
+  it("stays empty where the wizard draws a form", () => {
+    expect(startingPayloadText(read, true)).toBe("");
+  });
+
+  // Without a form the operator writes it, and used to be handed an empty box
+  // for every operation that had no example.
+  it("offers the skeleton where there is no example", () => {
+    expect(JSON.parse(startingPayloadText(read, false)))
+      .toEqual({ docker_logs: { container_id: "" } });
+  });
+
+  // An example says more than a skeleton can, so it wins.
+  it("prefers the example the registry carries", () => {
+    expect(JSON.parse(startingPayloadText(
+      { ...read, payload_template: { docker_logs: { container_id: "abc123", tail: 200 } } } as Operation,
+      false,
+    ))).toEqual({ docker_logs: { container_id: "abc123", tail: 200 } });
+  });
+
+  it("offers nothing for an operation that reads no payload", () => {
+    expect(startingPayloadText({ action: "host.reboot" } as Operation, false)).toBe("");
+    expect(startingPayloadText(undefined, false)).toBe("");
   });
 });
