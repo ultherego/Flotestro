@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, ApiError, LIST_PAGE, loadedItems, type Page } from "../lib/api";
@@ -11,7 +11,7 @@ import { useConfirm } from "../components/Modal";
 import { useToast } from "../components/Toast";
 import { OPERATIONS_INTERVAL } from "../lib/stream";
 import { buildExpression, describeExpression, HostChooser, SelectorBuilder, type Rule } from "./Groups";
-import { FacetList, useFleetFacets, useOperations, type Operation } from "./Bulk";
+import { FacetList, payloadSkeleton, useFleetFacets, useOperations, type Operation } from "./Bulk";
 import { useT } from "../i18n";
 
 /**
@@ -149,8 +149,9 @@ function CountChips({ counts }: { counts: ReadFanOut["counts"] }) {
 }
 
 /**
- * The payload a read starts from, for the operations the form knows. The
- * rest start empty; the operator writes the payload the operation takes.
+ * The payload a read starts from where an example says more than a skeleton:
+ * a log path and a line count are what an operator would have typed anyway.
+ * Every other read starts from the skeleton the registry describes.
  */
 const DEFAULT_PAYLOADS: Record<string, unknown> = {
   "journal.read": { journal: { lines: 100 } },
@@ -190,9 +191,23 @@ function NewRead({ onDone }: { onDone: () => void }) {
   );
 
   const [action, setAction] = useState(prefill.get("action") ?? "journal.read");
+  // The example if there is one, then what the registry says the operation
+  // reads, and an empty object only for the reads that take no payload.
+  const startingPayload = useCallback(
+    (name: string) => JSON.stringify(
+      DEFAULT_PAYLOADS[name] ?? payloadSkeleton(fannable.find((item) => item.action === name)),
+      null, 2),
+    [fannable],
+  );
   const [payloadText, setPayloadText] = useState(
     prefill.get("payload") ?? JSON.stringify(DEFAULT_PAYLOADS[action] ?? {}, null, 2),
   );
+  // Whether the operator has written in the field. The starting payload is
+  // only put there while they have not: a skeleton that overwrote what
+  // somebody typed would be worse than the empty object it replaces.
+  const [payloadTyped, setPayloadTyped] = useState(prefill.has("payload"));
+  // Which operation the text in the field belongs to.
+  const [payloadFor, setPayloadFor] = useState(action);
   // A group page hands over its name: the read then opens on the group's
   // selector rather than on the filters.
   const prefilledGroup = prefill.get("group") ?? "";
@@ -211,12 +226,17 @@ function NewRead({ onDone }: { onDone: () => void }) {
   // target fields' suggestions.
   const facets = useFleetFacets();
 
-  // A read picked from the list starts from its own payload, unless the
-  // form was opened with one already filled in.
+  // A read picked from the list starts from its own payload, unless the form
+  // was opened with one already filled in. The registry arrives after the
+  // first render, so this also fills the field for the operation the form
+  // opened on - but never over what the operator has written for it.
   useEffect(() => {
     if (prefill.get("payload") && prefill.get("action") === action) return;
-    setPayloadText(JSON.stringify(DEFAULT_PAYLOADS[action] ?? {}, null, 2));
-  }, [action, prefill]);
+    if (payloadFor === action && payloadTyped) return;
+    setPayloadText(startingPayload(action));
+    setPayloadFor(action);
+    setPayloadTyped(false);
+  }, [action, payloadFor, payloadTyped, prefill, startingPayload]);
 
   const chosen = fannable.find((item) => item.action === action);
   const limit = chosen?.fanout_limit ?? 0;
@@ -278,7 +298,13 @@ function NewRead({ onDone }: { onDone: () => void }) {
           <input placeholder={t("e.g. checking the leak on the web tier")} value={reason} onChange={(e) => setReason(e.target.value)} />
         </Field>
         <Field label={t("Payload")} hint={payloadHint(t, payload)} wide>
-          <textarea rows={6} className="mono" value={payloadText} onChange={(e) => setPayloadText(e.target.value)} spellCheck={false} />
+          <textarea
+            rows={6}
+            className="mono"
+            value={payloadText}
+            onChange={(e) => { setPayloadText(e.target.value); setPayloadTyped(true); }}
+            spellCheck={false}
+          />
         </Field>
       </FieldGrid>
 

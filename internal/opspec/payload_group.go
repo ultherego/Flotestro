@@ -17,44 +17,7 @@ import (
 // operation whose group is absent, so the group is the one whose presence stops
 // it refusing - which is a question the validator can be asked, once, rather
 // than a claim made alongside it.
-func PayloadGroup(action ActionType) string {
-	groups := payloadGroups()
-	derived, _ := payloadGroupCache.LoadOrStore(action, deriveGroup(action, groups))
-	name, _ := derived.(string)
-	return name
-}
-
-var payloadGroupCache sync.Map
-
-// deriveGroup asks the validator about an empty payload and then about one
-// group at a time. A group that is not what this operation wants leaves the
-// refusal in place; the one it wants replaces it with a complaint about the
-// content, or with nothing.
-func deriveGroup(action ActionType, groups []payloadField) string {
-	if !action.Known() {
-		return ""
-	}
-	absent := Validate(action, Payload{})
-	if absent == nil {
-		// Nothing is required, so no group is the answer.
-		return ""
-	}
-	if !strings.Contains(absent.Error(), "payload") {
-		// The operation is refused for a reason other than a missing payload;
-		// whatever else it wants, it is not one of these groups.
-		return ""
-	}
-	for _, group := range groups {
-		candidate := Payload{}
-		value := reflect.ValueOf(&candidate).Elem()
-		value.Field(group.index).Set(reflect.New(group.element))
-		err := Validate(action, candidate)
-		if err == nil || err.Error() != absent.Error() {
-			return group.name
-		}
-	}
-	return ""
-}
+func PayloadGroup(action ActionType) string { return Shape(action).Group }
 
 // payloadField is one group of Payload: where it sits and what to allocate.
 type payloadField struct {
