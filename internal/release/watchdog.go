@@ -24,6 +24,14 @@ const watchdogLog = "watchdog.log"
 // A repair is not an approved limitation either - nobody signed it, it has no
 // expiry - so it is not what "limited" is for. The measurement was helped, and
 // a helped measurement measures the help: the run has to be repeated.
+//
+// What the reasons say is what the log says happened, and no more. The first
+// version of this read "reloading it once" as a reload - and on 09.10 the gate
+// recorded that over a machine whose boot time proved it had never restarted,
+// because vagrant refuses a reload while the suite holds the machine's lock.
+// The watchdog now writes whether the reload happened, and a machine that
+// stopped answering ends the verdict either way: that is the fact the suite
+// ran over, and it is the one worth naming.
 func RepairsDuringTheSuite(log []byte) []string {
 	var reasons []string
 	scanner := bufio.NewScanner(bytes.NewReader(log))
@@ -37,10 +45,20 @@ func RepairsDuringTheSuite(log []byte) []string {
 		}
 		when, machine := timeAndMachine(line)
 		switch {
-		case strings.Contains(line, "reloading it once"):
+		case strings.Contains(line, "has not answered"):
+			// The watchdog saw a machine of the fleet stop answering and set
+			// about repairing it. Whether the repair worked is the next line's
+			// business; either way the suite was running over a fleet that
+			// faltered, which is what ends the verdict here.
 			reasons = append(reasons, fmt.Sprintf(
-				"the watchdog reloaded %s at %s while the suite was running, so the tests "+
-					"of this run were measured over a repaired fleet", machine, when))
+				"%s stopped answering at %s while the suite was running, and the watchdog "+
+					"stepped in: the tests of this run were measured over a fleet that faltered",
+				machine, when))
+		case strings.Contains(line, "could not be reloaded"):
+			reasons = append(reasons, fmt.Sprintf(
+				"the watchdog could not reload %s at %s, so the machine recovered on its own "+
+					"or did not recover at all; the run says which only by what its tests did",
+				machine, when))
 		case strings.Contains(line, "needs a person"),
 			strings.Contains(line, "after the reload either"):
 			reasons = append(reasons, fmt.Sprintf(
