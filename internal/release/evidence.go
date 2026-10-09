@@ -203,6 +203,11 @@ func VerifyEvidence(bundle io.Reader, sha, treeFromGit string) (Evidence, error)
 		}
 	}
 
+	// What the watchdog did, which no count carries and the report's arithmetic
+	// cannot show: a host reloaded in the middle of the suite leaves counts
+	// that look exactly like a fleet that never faltered.
+	problems := append(outcome.Problems, RepairsDuringTheSuite(files[evidenceArtifacts+watchdogLog])...)
+
 	// The digest of the bundle is only complete once the whole stream has been
 	// read; the tar reader stops at the end of the last entry.
 	if _, err := io.Copy(io.Discard, counted); err != nil {
@@ -211,7 +216,7 @@ func VerifyEvidence(bundle io.Reader, sha, treeFromGit string) (Evidence, error)
 	return Evidence{
 		Report:      report,
 		ReportBytes: raw,
-		LogProblems: outcome.Problems,
+		LogProblems: problems,
 		Digest:      "sha256:" + hex.EncodeToString(digester.Sum(nil)),
 		Verified:    verified,
 		Bytes:       total,
