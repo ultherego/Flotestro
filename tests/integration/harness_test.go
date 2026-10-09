@@ -96,6 +96,31 @@ func (h *harness) database(ctx context.Context) *pgxpool.Pool {
 	return pool
 }
 
+// forgetHostOnCleanup removes a synthetic host when the test that made one
+// ends.
+//
+// The pool is taken here and not inside the closure. t.Cleanup runs last in,
+// first out, and the pool registers its Close the first time anything asks for
+// it: a test that touches the database only after this registration has that
+// Close registered later and therefore run earlier, and the delete then finds
+// a closed pool. It says so - "the synthetic host ... was not cleaned up:
+// closed pool" - in a log line of a passing test, which nobody reads. One run
+// on 09.10 left four of them in the laboratory's installation, where they
+// counted towards the fleet, towards the dashboard and towards readiness.
+func (h *harness) forgetHostOnCleanup(hostID string) {
+	h.t.Helper()
+	pool := h.database(context.Background())
+	h.t.Cleanup(func() {
+		ctx := context.Background()
+		if _, err := pool.Exec(ctx, `delete from hosts where id = $1::uuid`, hostID); err != nil {
+			// Loud, because a host left behind is a host every later run of
+			// this suite counts.
+			h.t.Errorf("the synthetic host %s was not cleaned up and stays in the "+
+				"installation: %v", hostID, err)
+		}
+	})
+}
+
 // createPrincipal creates an identity with roles and returns its token.
 func (h *harness) createPrincipal(subject string, bindings []map[string]string) string {
 	h.t.Helper()
@@ -618,13 +643,7 @@ func (h *harness) enrollSyntheticHostWithToken(t *testing.T, token string) hostV
 	}
 
 	// The synthetic machine disappears together with the test.
-	t.Cleanup(func() {
-		ctx := context.Background()
-		if _, err := h.database(ctx).Exec(ctx,
-			`delete from hosts where id = $1::uuid`, result.HostID); err != nil {
-			t.Logf("the synthetic host %s was not cleaned up: %v", result.HostID, err)
-		}
-	})
+	h.forgetHostOnCleanup(result.HostID)
 
 	for _, host := range h.hosts() {
 		if host.ID == result.HostID {

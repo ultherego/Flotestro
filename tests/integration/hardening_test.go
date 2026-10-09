@@ -443,9 +443,14 @@ func TestBudgetScopeFollowsTheKey(t *testing.T) {
 	const key = "site:lab:integration-hardening"
 	scoped.do(http.MethodPut, "/api/v1/budgets/"+key,
 		map[string]any{"capacity": 5, "note": hardeningReason}, nil, http.StatusOK)
+	// The pool before the registration: t.Cleanup runs last in, first out, so
+	// a pool first opened later has its Close run before this.
+	pool := h.database(context.Background())
 	t.Cleanup(func() {
 		ctx := context.Background()
-		_, _ = h.database(ctx).Exec(ctx, `delete from budget_limits where key = $1`, key)
+		if _, err := pool.Exec(ctx, `delete from budget_limits where key = $1`, key); err != nil {
+			t.Errorf("the budget limit %s stays in the installation: %v", key, err)
+		}
 	})
 }
 

@@ -48,10 +48,13 @@ func recordTrailEvent(h *harness, hostID, eventType string, payload map[string]a
 // forgetSilence removes a silence when the test is done: a silence left behind
 // would keep the lab's own alerts back.
 func forgetSilence(h *harness, id string) {
+	// The pool before the registration: t.Cleanup runs last in, first out, so
+	// a pool first opened later has its Close run before this.
+	pool := h.database(context.Background())
 	h.t.Cleanup(func() {
 		ctx := context.Background()
-		if _, err := h.database(ctx).Exec(ctx, `delete from silences where id = $1::uuid`, id); err != nil {
-			h.t.Logf("the silence %s was not cleaned up: %v", id, err)
+		if _, err := pool.Exec(ctx, `delete from silences where id = $1::uuid`, id); err != nil {
+			h.t.Errorf("the silence %s stays in the installation: %v", id, err)
 		}
 	})
 }
