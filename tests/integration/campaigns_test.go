@@ -166,6 +166,41 @@ func describeTargets(targets []campaignTargetView) string {
 // does not get there is not a fact on its own: its targets say what it is waiting
 // for, so the wait is extended once for a host the panel is holding, and the
 // failure names every target and its reason instead of the campaign's state alone.
+// awaitTargetsPlanned waits until every target of a campaign has been decided:
+// it either carries a plan job or has fallen out of the plan.
+//
+// A campaign reaches awaiting_approval as soon as its own bookkeeping allows,
+// which can be before the plan job of every host has come back. The check that
+// follows then reads a target that has not been decided yet and calls it
+// wrong: on 10.10 agent-fedora, which is meant to fall out of the plan, was
+// read as "pending/" and the test failed over its own timing. It only showed
+// once the campaign stopped failing outright, which is the way a race hides.
+//
+// The signal is the decision and not the target's state: a target can still
+// read "pending" while its plan is already there, and waiting for the state
+// alone just made the test ninety seconds slower without making it surer.
+func (h *harness) awaitTargetsPlanned(id string, timeout time.Duration) []campaignTargetView {
+	h.t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		targets := h.campaignTargets(id)
+		undecided := 0
+		for _, target := range targets {
+			if target.PlanJobID == "" && target.State == "pending" {
+				undecided++
+			}
+		}
+		if undecided == 0 || time.Now().After(deadline) {
+			if undecided > 0 {
+				h.t.Logf("%d target(s) of campaign %s have neither a plan nor a refusal after %s",
+					undecided, id, timeout)
+			}
+			return targets
+		}
+		time.Sleep(2 * time.Second)
+	}
+}
+
 func (h *harness) awaitCampaign(id string, wanted map[string]bool, timeout time.Duration) campaignView {
 	h.t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -2743,7 +2778,15 @@ func TestTimeSourceCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) 
 
 	states := map[string]timeSnapshot{}
 	var targets []string
-	server := ""
+	// The server the most hosts already use, not the first source of the
+	// first host. That rule took whatever the provider's DHCP had handed to
+	// one machine: measured on 10.10, three hosts shared one of those
+	// addresses, a fourth had no source at all, and the shared one answered
+	// intermittently - so the campaign failed with "none of the given time
+	// servers answered" over a server nobody here controls, and the product
+	// was right to refuse it. A fleet has one server it shares; this picks
+	// that one.
+	shared := map[string]int{}
 	for _, host := range h.hosts() {
 		if host.ConnectionState != "online" {
 			continue
@@ -2751,8 +2794,23 @@ func TestTimeSourceCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) 
 		state := hostTimeSnapshot(t, h, host.ID)
 		states[host.ID] = state
 		targets = append(targets, host.ID)
-		if server == "" && len(state.Sources) > 0 {
-			server = state.Sources[0].Address
+		seen := map[string]bool{}
+		for _, source := range state.Sources {
+			if source.Address == "" || seen[source.Address] {
+				continue
+			}
+			seen[source.Address] = true
+			shared[source.Address]++
+		}
+	}
+	server, shares := "", 0
+	for _, host := range targets {
+		// Walked over the hosts and their sources in order, so the choice does
+		// not depend on the order a map happens to hand back.
+		for _, source := range states[host].Sources {
+			if count := shared[source.Address]; count > shares {
+				server, shares = source.Address, count
+			}
 		}
 	}
 	if len(targets) < 2 || server == "" {
@@ -2783,7 +2841,7 @@ func TestTimeSourceCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) 
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true, "plan_failed": true, "completed": true}, 3*time.Minute)
 
 	capable := 0
-	for _, target := range h.campaignTargets(campaign.ID) {
+	for _, target := range h.awaitTargetsPlanned(campaign.ID, 90*time.Second) {
 		if refusals[target.HostID] {
 			if target.State != "ineligible" || target.ErrorCode != "plan_refused" {
 				t.Errorf("target %s without a daemon or a directory: %s/%s",
