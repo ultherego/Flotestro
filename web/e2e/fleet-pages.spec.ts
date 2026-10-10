@@ -1,7 +1,5 @@
 import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
-import {
-  expectHealthy, fleetHosts, hostTags, onlineHostWith, onlineHosts, permissions, setHostTags, watchErrors, type Host,
-} from "./fleet";
+import { absent, expectHealthy, fleetHosts, hostTags, onlineHostWith, onlineHosts, permissions, setHostTags, watchErrors, type Host } from "./fleet";
 
 /**
  * The fleet pages added after the host workspace: groups, reads, monitoring,
@@ -43,8 +41,8 @@ async function expectCounted(bar: Locator, count: number) {
 
 test.describe("groups", () => {
   test("a tag set on a host finds the host in the list and resolves a dynamic group", async ({ page, request }) => {
-    test.skip(!granted.has("host.tag.write"), "the token may not tag a host (host.tag.write)");
-    test.skip(!granted.has("host.group.write"), "the token may not create a group (host.group.write)");
+    test.skip(!granted.has("host.tag.write"), absent("the token may not tag a host (host.tag.write)"));
+    test.skip(!granted.has("host.group.write"), absent("the token may not create a group (host.group.write)"));
     test.slow();
     const { errors } = watchErrors(page);
 
@@ -120,7 +118,7 @@ test.describe("groups", () => {
   });
 
   test("the empty group form refuses to create without a name or a member", async ({ page }) => {
-    test.skip(!granted.has("host.group.write"), "the token may not create a group (host.group.write)");
+    test.skip(!granted.has("host.group.write"), absent("the token may not create a group (host.group.write)"));
     await page.goto("/groups");
     await expect(header(page, "Groups")).toBeVisible();
     await page.locator(".page-header").getByRole("button", { name: "New group" }).click();
@@ -136,9 +134,9 @@ test.describe("groups", () => {
 
 test.describe("reads", () => {
   test("a journal read fans out to two hosts and the lines come back merged", async ({ page, request }) => {
-    test.skip(!granted.has("job.create"), "the token may not order a read (job.create)");
+    test.skip(!granted.has("job.create"), absent("the token may not order a read (job.create)"));
     const capable = onlineHosts(hosts).filter((host) => host.capabilities?.some((item) => item.name === "journald" && item.available));
-    test.skip(capable.length < 2, `only ${capable.length} online hosts with journald; a fan-out needs two`);
+    test.skip(capable.length < 2, absent(`only ${capable.length} online hosts with journald; a fan-out needs two`));
     test.slow();
     const { errors } = watchErrors(page);
     const targets = capable.slice(0, 2);
@@ -154,7 +152,7 @@ test.describe("reads", () => {
     await expect(form).toBeVisible();
     const operation = form.locator("label.field").filter({ hasText: /^Operation/ }).locator("select");
     await expect(operation.locator("option").first()).toBeAttached();
-    test.skip((await operation.locator("option[value='journal.read']").count()) === 0, "this installation opens no journal read to a fan-out");
+    test.skip((await operation.locator("option[value='journal.read']").count()) === 0, absent("this installation opens no journal read to a fan-out"));
     await operation.selectOption("journal.read");
     await expect(form.locator("textarea")).toHaveValue(/"journal"/);
     await form.getByPlaceholder("e.g. checking the leak on the web tier").fill("e2e journal read on two hosts");
@@ -224,10 +222,10 @@ test.describe("reads", () => {
 
 test.describe("monitoring", () => {
   test("the fleet page counts the alerts and filters the history by state", async ({ page, request }) => {
-    test.skip(!granted.has("monitoring.read"), "the token may not read monitoring (monitoring.read)");
+    test.skip(!granted.has("monitoring.read"), absent("the token may not read monitoring (monitoring.read)"));
     const { errors } = watchErrors(page);
     const overview = await request.get("/api/v1/monitoring");
-    test.skip(overview.status() === 503, "this installation runs without the built-in monitoring");
+    test.skip(overview.status() === 503, absent("this installation runs without the built-in monitoring"));
     expect(overview.ok(), `GET /api/v1/monitoring answered ${overview.status()}`).toBeTruthy();
     const summary = (await overview.json()) as { hosts_reporting: number; hosts_silent: number; rules: number };
     // The overview counts the enabled rules; the table lists every rule.
@@ -272,14 +270,14 @@ test.describe("monitoring", () => {
   });
 
   test("the host page draws the samples of the window it is asked for", async ({ page, request }) => {
-    test.skip(!granted.has("monitoring.read"), "the token may not read monitoring (monitoring.read)");
+    test.skip(!granted.has("monitoring.read"), absent("the token may not read monitoring (monitoring.read)"));
     const host = onlineHostWith(hosts, "monitoring");
-    test.skip(!host, "no online host reports the monitoring adapter");
+    test.skip(!host, absent("no online host reports the monitoring adapter"));
     const target = host as Host;
     const { errors } = watchErrors(page);
 
     const metrics = await request.get(`/api/v1/hosts/${target.id}/metrics?range=3h`);
-    test.skip(metrics.status() === 503, "this installation runs without the built-in monitoring");
+    test.skip(metrics.status() === 503, absent("this installation runs without the built-in monitoring"));
     expect(metrics.ok(), `GET /api/v1/hosts/${target.id}/metrics answered ${metrics.status()}`).toBeTruthy();
     const series = (await metrics.json()) as { points?: unknown[]; sampling_interval_seconds: number };
 
@@ -319,7 +317,7 @@ test.describe("monitoring", () => {
 
 test.describe("relays", () => {
   test("the relay list agrees with the API and opens a relay", async ({ page, request }) => {
-    test.skip(!granted.has("host.enroll.read"), "the token may not read the relays (host.enroll.read)");
+    test.skip(!granted.has("host.enroll.read"), absent("the token may not read the relays (host.enroll.read)"));
     const { errors } = watchErrors(page);
     const response = await request.get("/api/v1/relays");
     expect(response.ok(), `GET /api/v1/relays answered ${response.status()}`).toBeTruthy();
@@ -361,7 +359,7 @@ test.describe("relays", () => {
 
 test.describe("settings", () => {
   test("every area of the configuration is a card with its facts", async ({ page, request }) => {
-    test.skip(!granted.has("settings.read") && !granted.has("principal.manage"), "the token may not read the settings (settings.read)");
+    test.skip(!granted.has("settings.read") && !granted.has("principal.manage"), absent("the token may not read the settings (settings.read)"));
     const { errors } = watchErrors(page);
     const response = await request.get("/api/v1/settings");
     expect(response.ok(), `GET /api/v1/settings answered ${response.status()}`).toBeTruthy();
@@ -396,7 +394,7 @@ test.describe("settings", () => {
 
 test.describe("access", () => {
   test("the access review tab counts the identities and filters the flagged ones", async ({ page, request }) => {
-    test.skip(!granted.has("principal.manage"), "the token may not manage access (principal.manage)");
+    test.skip(!granted.has("principal.manage"), absent("the token may not manage access (principal.manage)"));
     const { errors } = watchErrors(page);
     const response = await request.get("/api/v1/access/review");
     expect(response.ok(), `GET /api/v1/access/review answered ${response.status()}`).toBeTruthy();
@@ -434,7 +432,7 @@ test.describe("access", () => {
 
 test.describe("audit", () => {
   test("the trail is charted, counted and filtered by outcome on the server", async ({ page }) => {
-    test.skip(!granted.has("audit.read"), "the token may not read the audit trail (audit.read)");
+    test.skip(!granted.has("audit.read"), absent("the token may not read the audit trail (audit.read)"));
     const { errors } = watchErrors(page);
     await page.goto("/audit");
     await expect(header(page, "Audit")).toBeVisible();
@@ -466,12 +464,12 @@ test.describe("audit", () => {
   });
 
   test("an event that rests on an approval shows its chain under the row", async ({ page, request }) => {
-    test.skip(!granted.has("audit.read"), "the token may not read the audit trail (audit.read)");
+    test.skip(!granted.has("audit.read"), absent("the token may not read the audit trail (audit.read)"));
     const response = await request.get("/api/v1/audit?limit=100");
     expect(response.ok(), `GET /api/v1/audit answered ${response.status()}`).toBeTruthy();
     const events = ((await response.json()) as { items: { action: string; approval_chain?: { created_by: string; approvers: string[] } }[] }).items;
     const approved = events.find((event) => event.approval_chain);
-    test.skip(!approved, "no event of the last hundred carries an approval chain");
+    test.skip(!approved, absent("no event of the last hundred carries an approval chain"));
     const chain = approved?.approval_chain as { created_by: string; approvers: string[] };
 
     await page.goto(`/audit?action=${encodeURIComponent((approved as { action: string }).action)}`);

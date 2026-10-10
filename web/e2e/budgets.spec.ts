@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
-import { expectHealthy, permissions, watchErrors } from "./fleet";
+import { absent, expectHealthy, permissions, watchErrors } from "./fleet";
 
 /**
  * The budgets page: the capacity of the fleet, the sites and the backup
@@ -80,7 +80,7 @@ function rowOf(page: Page, key: string) {
 
 test.describe("budgets", () => {
   test("the sidebar leads to the page and the table agrees with the API", async ({ page, request }) => {
-    test.skip(!granted.has("budget.read"), "the token may not read the budgets (budget.read)");
+    test.skip(!granted.has("budget.read"), absent("the token may not read the budgets (budget.read)"));
     const { errors } = watchErrors(page);
     const items = await budgets(request);
 
@@ -162,9 +162,9 @@ test.describe("budgets", () => {
   });
 
   test("the editor is offered only with the right to write", async ({ page, request }) => {
-    test.skip(!granted.has("budget.read"), "the token may not read the budgets (budget.read)");
+    test.skip(!granted.has("budget.read"), absent("the token may not read the budgets (budget.read)"));
     const items = (await budgets(request)) ?? [];
-    test.skip(items.length === 0, "no budget is configured in this installation");
+    test.skip(items.length === 0, absent("no budget is configured in this installation"));
 
     await page.goto("/budgets");
     await expect(header(page, "Budgets")).toBeVisible();
@@ -173,10 +173,10 @@ test.describe("budgets", () => {
   });
 
   test("a capacity changed in the editor reaches the API and is restored", async ({ page, request }) => {
-    test.skip(!granted.has("budget.read"), "the token may not read the budgets (budget.read)");
-    test.skip(!granted.has("budget.write"), "the token may not change a budget (budget.write)");
+    test.skip(!granted.has("budget.read"), absent("the token may not read the budgets (budget.read)"));
+    test.skip(!granted.has("budget.write"), absent("the token may not change a budget (budget.write)"));
     const items = (await budgets(request)) ?? [];
-    test.skip(items.length === 0, "no budget is configured in this installation");
+    test.skip(items.length === 0, absent("no budget is configured in this installation"));
     const { errors } = watchErrors(page);
 
     // A site's own key is the narrowest scope the right can be held in, so

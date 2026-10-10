@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { expectHealthy, fleetHosts, navigation, openHostList, watchErrors, type Host } from "./fleet";
+import { absent, expectHealthy, fleetHosts, navigation, openHostList, watchErrors, type Host } from "./fleet";
 
 /**
  * The host list and the host workspace.
@@ -114,7 +114,7 @@ test.describe("host list", () => {
     // right there is no workspace to open and the test has nothing to do.
     const whoami = await request.get("/api/v1/whoami");
     const permissions = ((await whoami.json()) as { permissions: string[] }).permissions;
-    test.skip(!permissions.includes("campaign.read"), "the token cannot read campaigns; no selection is offered");
+    test.skip(!permissions.includes("campaign.read"), absent("the token cannot read campaigns; no selection is offered"));
 
     const table = await openHostList(page);
     const chosen = hosts.slice(0, 2);

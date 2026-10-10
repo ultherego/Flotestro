@@ -1,96 +1,18 @@
-# The skips the browser suite held when this ratchet landed (10.10.2026).
+# The skips the browser suite held when this ratchet landed (10.10.2026), and
+# what is left of them.
 #
 # One line each: "<file>:<line><tab><call as written, on one line>". The line
-# number is informational; the call text is what gets matched, so an edit above
-# a skip does not invalidate its entry.
+# number is informational; the call text is what gets matched.
 #
-# This list may only shrink. A skip comes off it by saying which kind of skip it
-# is, the way the Go suite does:
+# This list may only shrink. On 10.10 it held eighty entries; all eighty were
+# classified the same day, so it holds none. A skip comes off it by saying
+# which kind of skip it is, the way the Go suite does:
 #
-#   test.skip(cond, 'FLOTESTRO-SKIP class=absent reason="..."')
-#   test.skip(cond, `FLOTESTRO-SKIP class=not_applicable runs_on=agent-arch reason="..."`)
+#   test.skip(cond, absent("..."))
+#   test.skip(cond, notApplicable("agent-arch", "..."))
+#   test.skip(cond, waived("WV-2026-004", "2026-12-31", "<evidence>", "..."))
 #
-# Most of these fire only on a token that cannot read something, and the gate
-# runs with a token that can read everything - so they are quiet in the gate
-# and would be a fatal run the day they are not. That is the point of writing
-# them down: nothing new joins them.
-web/e2e/budgets.spec.ts:165	test.skip(!granted.has("budget.read"), "the token may not read the budgets (budget.read)")
-web/e2e/budgets.spec.ts:167	test.skip(items.length === 0, "no budget is configured in this installation")
-web/e2e/budgets.spec.ts:176	test.skip(!granted.has("budget.read"), "the token may not read the budgets (budget.read)")
-web/e2e/budgets.spec.ts:177	test.skip(!granted.has("budget.write"), "the token may not change a budget (budget.write)")
-web/e2e/budgets.spec.ts:179	test.skip(items.length === 0, "no budget is configured in this installation")
-web/e2e/budgets.spec.ts:83	test.skip(!granted.has("budget.read"), "the token may not read the budgets (budget.read)")
-web/e2e/campaign.spec.ts:137	test.skip(await noEngine.isVisible(), "this installation has no campaign engine; the wizard is not offered")
-web/e2e/campaign.spec.ts:143	test.skip((await refusals.count()) === 0, "every mutating operation of this installation runs as a campaign")
-web/e2e/campaign.spec.ts:34	test.skip(await noEngine.isVisible(), "this installation has no campaign engine; the wizard is not offered")
-web/e2e/directory.spec.ts:22	test.skip(!status.configured || !status.reachable, "this installation has no directory connection")
-web/e2e/directory.spec.ts:23	test.skip(!granted.has("identity.read"), "the token may not read the directory (identity.read)")
-web/e2e/directory.spec.ts:81	test.skip(!granted.has("identity.policy.read"), "the token may not read the access rules (identity.policy.read)")
-web/e2e/directory.spec.ts:90	test.skip(!granted.has("identity.policy.read"), "the token may not read the sudo rules (identity.policy.read)")
-web/e2e/fleet-pages.spec.ts:123	test.skip(!granted.has("host.group.write"), "the token may not create a group (host.group.write)")
-web/e2e/fleet-pages.spec.ts:139	test.skip(!granted.has("job.create"), "the token may not order a read (job.create)")
-web/e2e/fleet-pages.spec.ts:141	test.skip(capable.length < 2, `only ${capable.length} online hosts with journald; a fan-out needs two`)
-web/e2e/fleet-pages.spec.ts:157	test.skip((await operation.locator("option[value='journal.read']").count()) === 0, "this installation opens no journal read to a fan-out")
-web/e2e/fleet-pages.spec.ts:227	test.skip(!granted.has("monitoring.read"), "the token may not read monitoring (monitoring.read)")
-web/e2e/fleet-pages.spec.ts:230	test.skip(overview.status() === 503, "this installation runs without the built-in monitoring")
-web/e2e/fleet-pages.spec.ts:275	test.skip(!granted.has("monitoring.read"), "the token may not read monitoring (monitoring.read)")
-web/e2e/fleet-pages.spec.ts:277	test.skip(!host, "no online host reports the monitoring adapter")
-web/e2e/fleet-pages.spec.ts:282	test.skip(metrics.status() === 503, "this installation runs without the built-in monitoring")
-web/e2e/fleet-pages.spec.ts:322	test.skip(!granted.has("host.enroll.read"), "the token may not read the relays (host.enroll.read)")
-web/e2e/fleet-pages.spec.ts:364	test.skip(!granted.has("settings.read") && !granted.has("principal.manage"), "the token may not read the settings (settings.read)")
-web/e2e/fleet-pages.spec.ts:399	test.skip(!granted.has("principal.manage"), "the token may not manage access (principal.manage)")
-web/e2e/fleet-pages.spec.ts:437	test.skip(!granted.has("audit.read"), "the token may not read the audit trail (audit.read)")
-web/e2e/fleet-pages.spec.ts:469	test.skip(!granted.has("audit.read"), "the token may not read the audit trail (audit.read)")
-web/e2e/fleet-pages.spec.ts:46	test.skip(!granted.has("host.tag.write"), "the token may not tag a host (host.tag.write)")
-web/e2e/fleet-pages.spec.ts:474	test.skip(!approved, "no event of the last hundred carries an approval chain")
-web/e2e/fleet-pages.spec.ts:47	test.skip(!granted.has("host.group.write"), "the token may not create a group (host.group.write)")
-web/e2e/host-modules.spec.ts:113	test.skip(!["succeeded", "failed"].includes(state), `${target.hostname} did not answer the unit listing: ${state}`)
-web/e2e/host-modules.spec.ts:153	test.skip(!granted.has("job.create"), "the token may not order a read (job.create)")
-web/e2e/host-modules.spec.ts:155	test.skip(!host, "no online host reports the schedules adapter")
-web/e2e/host-modules.spec.ts:161	test.skip(missing !== null, missing ?? "")
-web/e2e/host-modules.spec.ts:188	test.skip(true, `${target.hostname} refused the preview: ${await refused.textContent()}`)
-web/e2e/host-modules.spec.ts:207	test.skip(!granted.has("job.create"), "the token may not order a read (job.create)")
-web/e2e/host-modules.spec.ts:209	test.skip(!host, "no host is online")
-web/e2e/host-modules.spec.ts:215	test.skip(missing !== null, missing ?? "")
-web/e2e/host-modules.spec.ts:228	test.skip(state !== "succeeded", `${target.hostname} did not answer the process read: ${state}`)
-web/e2e/host-modules.spec.ts:258	test.skip((await folds.count()) === 0, `${target.hostname} sent a slice with no parent and child together; nothing to fold`)
-web/e2e/host-modules.spec.ts:278	test.skip(!granted.has("job.create"), "the token may not order a read (job.create)")
-web/e2e/host-modules.spec.ts:279	test.skip(!granted.has("job.cancel"), "the token may not cancel a job (job.cancel)")
-web/e2e/host-modules.spec.ts:281	test.skip(!host, "no online host reports journald")
-web/e2e/host-modules.spec.ts:287	test.skip(missing !== null, missing ?? "")
-web/e2e/host-modules.spec.ts:305	test.skip(true, `${target.hostname} refused the journal read: ${await refused.textContent()}`)
-web/e2e/host-modules.spec.ts:339	test.skip(!host, "no host reports the security adapter")
-web/e2e/host-modules.spec.ts:344	test.skip(missing !== null, missing ?? "")
-web/e2e/host-modules.spec.ts:367	test.skip(!host, "no host reports the sshd adapter")
-web/e2e/host-modules.spec.ts:376	test.skip(missing !== null, missing ?? "")
-web/e2e/host-modules.spec.ts:378	test.skip(await unreported.isVisible(), `${target.hostname} has not reported its sshd yet`)
-web/e2e/host-modules.spec.ts:52	test.skip(!granted.has("job.create"), "the token may not order a read (job.create)")
-web/e2e/host-modules.spec.ts:54	test.skip(!host, "no online host reports systemd")
-web/e2e/host-modules.spec.ts:61	test.skip(missing !== null, missing ?? "")
-web/e2e/host-modules.spec.ts:74	test.skip(true, `${target.hostname} answered the detail read of ${unit} with: ${await refused.textContent()}`)
-web/e2e/host-modules.spec.ts:90	test.skip(!granted.has("job.create"), "the token may not order a read (job.create)")
-web/e2e/host-modules.spec.ts:92	test.skip(!host, "no online host reports systemd")
-web/e2e/host-modules.spec.ts:98	test.skip(missing !== null, missing ?? "")
-web/e2e/hosts.spec.ts:117	test.skip(!permissions.includes("campaign.read"), "the token cannot read campaigns; no selection is offered")
-web/e2e/operator-pages.spec.ts:116	test.skip(!granted.has("campaign.read"), "the token may not read campaigns (campaign.read)")
-web/e2e/operator-pages.spec.ts:158	test.skip(!granted.has("campaign.read"), "the token may not read campaigns (campaign.read)")
-web/e2e/operator-pages.spec.ts:184	test.skip(!granted.has("secret.read"), "the token may not read secrets (secret.read)")
-web/e2e/operator-pages.spec.ts:226	test.skip(!granted.has("principal.manage"), "the token may not manage access (principal.manage)")
-web/e2e/operator-pages.spec.ts:268	test.skip(!granted.has("audit.read"), "the token may not read the audit trail (audit.read)")
-web/e2e/operator-pages.spec.ts:283	test.skip(!granted.has("vulnerability.read"), "the token may not read vulnerabilities (vulnerability.read)")
-web/e2e/operator-pages.spec.ts:363	test.skip(!granted.has("settings.read") && !granted.has("principal.manage"), "the token may not read the status (settings.read)")
-web/e2e/operator-pages.spec.ts:388	test.skip(!granted.has("settings.read") && !granted.has("principal.manage"), "the token may not read the checklist (settings.read)")
-web/e2e/operator-pages.spec.ts:430	test.skip(!granted.has("notification.read"), "the token may not read notifications (notification.read)")
-web/e2e/operator-pages.spec.ts:50	test.skip(!granted.has("job.read"), "the token may not read jobs (job.read)")
-web/e2e/operator-pages.spec.ts:552	test.skip(notice !== null, notice ?? undefined)
-web/e2e/operator-pages.spec.ts:554	test.skip(list.status() === 403, "the token may not read the package list (packages.read)")
-web/e2e/operator-pages.spec.ts:562	test.skip(packages.items.length === 0, "the panel has not read the package list of this host yet")
-web/e2e/operator-pages.spec.ts:93	test.skip(!granted.has("job.read"), "the token may not read jobs (job.read)")
-web/e2e/operator-pages.spec.ts:95	test.skip(jobs.length === 0, "the fleet has no job yet")
-web/e2e/viewer.spec.ts:104	test.skip(state !== "succeeded", `${target.hostname} did not answer the unit listing: ${state}`)
-web/e2e/viewer.spec.ts:138	test.skip(!granted.has("principal.manage"), "the token may not create a viewer (principal.manage)")
-web/e2e/viewer.spec.ts:162	test.skip(!granted.has("principal.manage"), "the token may not create a viewer (principal.manage)")
-web/e2e/viewer.spec.ts:83	test.skip(!granted.has("principal.manage"), "the token may not create a viewer (principal.manage)")
-web/e2e/viewer.spec.ts:84	test.skip(!granted.has("unit.restart") || !granted.has("job.create"), "the token may not restart a unit itself (unit.restart, job.create)")
-web/e2e/viewer.spec.ts:86	test.skip(!host, "no online host reports systemd")
-web/e2e/viewer.spec.ts:93	test.skip(missing !== null, missing ?? "")
+# An entry here with nothing left to match is itself a failure, so the list
+# cannot rot into a rubber stamp. It is kept empty rather than deleted: the
+# ratchet reads it, and a missing file would be a different failure that says
+# something else.

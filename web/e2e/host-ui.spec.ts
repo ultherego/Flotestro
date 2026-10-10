@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { fleetHosts, hostWith, openHostList, type Host } from "./fleet";
+import { absent, fleetHosts, hostWith, openHostList, type Host } from "./fleet";
 
 /**
  * The acceptance criteria of the host management document (HOST-UI): unknown
@@ -24,10 +24,8 @@ test.describe("HOST-UI: unknown is not zero", () => {
     const noUpdates = hosts.find((host) => host.pending_updates === null);
     const noSecurity = hosts.find((host) => host.pending_security_updates === null);
     const host = noUpdates ?? noSecurity;
-    test.skip(
-      !host,
-      'FLOTESTRO-SKIP class=absent reason="every host reports both an update count and a security count, so the list has no undetermined number to show"',
-    );
+    test.skip(!host, absent(
+      "every host reports both an update count and a security count, so the list has no undetermined number to show"));
     const column = noUpdates ? "updates" : "security";
 
     const table = await openHostList(page);
@@ -87,8 +85,8 @@ test.describe("HOST-UI: a change asks before it runs", () => {
     const header = page.locator(".hm-header").getByRole("heading", { name: "Power", exact: true });
     const unreported = page.getByText("This host has not reported its boot state yet.");
     await expect(header.or(unreported).first()).toBeVisible();
-    test.skip(await unreported.isVisible(),
-      `FLOTESTRO-SKIP class=absent reason="${host.hostname} has not reported its boot state, so the power module offers no action to confirm"`);
+    test.skip(await unreported.isVisible(), absent(
+      `${host.hostname} has not reported its boot state, so the power module offers no action to confirm`));
 
     await expect(page.getByTestId("target-confirmation")).toHaveCount(0);
     await page.getByRole("button", { name: "Reboot", exact: true }).click();
@@ -115,8 +113,8 @@ test.describe("HOST-UI: a change asks before it runs", () => {
     const header = page.locator(".hm-header").getByRole("heading", { name: "Power", exact: true });
     const unreported = page.getByText("This host has not reported its boot state yet.");
     await expect(header.or(unreported).first()).toBeVisible();
-    test.skip(await unreported.isVisible(),
-      `FLOTESTRO-SKIP class=absent reason="${host.hostname} has not reported its boot state, so the shutdown button is not on the page"`);
+    test.skip(await unreported.isVisible(), absent(
+      `${host.hostname} has not reported its boot state, so the shutdown button is not on the page`));
 
     await expect(page.getByRole("button", { name: "Shut down", exact: true })).toBeDisabled();
     await expect(page.getByTestId("target-confirmation")).toHaveCount(0);

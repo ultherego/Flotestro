@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
-import { expectHealthy, fleetHosts, openModule, permissions, watchErrors, type Host } from "./fleet";
+import { absent, expectHealthy, fleetHosts, openModule, permissions, watchErrors, type Host } from "./fleet";
 
 /**
  * The pages that give the operator a working day: the job list and one job,
@@ -47,7 +47,7 @@ async function items<T>(request: APIRequestContext, path: string): Promise<T[]> 
 
 test.describe("jobs", () => {
   test("the job list has a host column, a state filter that can be cleared, and a host chip from a link", async ({ page }) => {
-    test.skip(!granted.has("job.read"), "the token may not read jobs (job.read)");
+    test.skip(!granted.has("job.read"), absent("the token may not read jobs (job.read)"));
     const { errors } = watchErrors(page);
     await page.goto("/jobs");
     await expect(header(page, "Jobs")).toBeVisible();
@@ -90,9 +90,9 @@ test.describe("jobs", () => {
   });
 
   test("the first job opens on its operation with the payload card", async ({ page, request }) => {
-    test.skip(!granted.has("job.read"), "the token may not read jobs (job.read)");
+    test.skip(!granted.has("job.read"), absent("the token may not read jobs (job.read)"));
     const jobs = await items<{ id: string; action_type: string; state: string }>(request, "/api/v1/jobs?limit=1");
-    test.skip(jobs.length === 0, "the fleet has no job yet");
+    test.skip(jobs.length === 0, absent("the fleet has no job yet"));
     const job = jobs[0];
     const { errors } = watchErrors(page);
 
@@ -113,7 +113,7 @@ test.describe("jobs", () => {
 
 test.describe("campaigns", () => {
   test("the campaign list filters by state and operation and links to the schedules", async ({ page, request }) => {
-    test.skip(!granted.has("campaign.read"), "the token may not read campaigns (campaign.read)");
+    test.skip(!granted.has("campaign.read"), absent("the token may not read campaigns (campaign.read)"));
     const { errors } = watchErrors(page);
     const campaigns = await items<{ id: string; name: string }>(request, "/api/v1/campaigns?limit=200");
 
@@ -155,7 +155,7 @@ test.describe("campaigns", () => {
   });
 
   test("the maintenance calendar draws the seven weekdays of a month", async ({ page }) => {
-    test.skip(!granted.has("campaign.read"), "the token may not read campaigns (campaign.read)");
+    test.skip(!granted.has("campaign.read"), absent("the token may not read campaigns (campaign.read)"));
     const { errors } = watchErrors(page);
     await page.goto("/campaigns/schedules");
     await expect(header(page, "Scheduled campaigns")).toBeVisible();
@@ -181,7 +181,7 @@ test.describe("campaigns", () => {
 
 test.describe("secrets", () => {
   test("the store has a search box and opens the first secret on its metadata", async ({ page, request }) => {
-    test.skip(!granted.has("secret.read"), "the token may not read secrets (secret.read)");
+    test.skip(!granted.has("secret.read"), absent("the token may not read secrets (secret.read)"));
     const { errors } = watchErrors(page);
     const secrets = await items<{ name: string; current_version?: number }>(request, "/api/v1/secrets");
 
@@ -223,7 +223,7 @@ test.describe("secrets", () => {
 
 test.describe("access", () => {
   test("the identities and roles tabs open from the address and the roles come as a matrix", async ({ page }) => {
-    test.skip(!granted.has("principal.manage"), "the token may not manage access (principal.manage)");
+    test.skip(!granted.has("principal.manage"), absent("the token may not manage access (principal.manage)"));
     const { errors } = watchErrors(page);
 
     await page.goto("/access?tab=identities");
@@ -265,7 +265,7 @@ test.describe("access", () => {
 
 test.describe("audit", () => {
   test("the events card offers the signed export", async ({ page }) => {
-    test.skip(!granted.has("audit.read"), "the token may not read the audit trail (audit.read)");
+    test.skip(!granted.has("audit.read"), absent("the token may not read the audit trail (audit.read)"));
     const { errors } = watchErrors(page);
     await page.goto("/audit");
     await expect(header(page, "Audit")).toBeVisible();
@@ -280,7 +280,7 @@ test.describe("audit", () => {
 
 test.describe("vulnerabilities", () => {
   test("the CVE view is chosen by the address and the toggle shows it", async ({ page }) => {
-    test.skip(!granted.has("vulnerability.read"), "the token may not read vulnerabilities (vulnerability.read)");
+    test.skip(!granted.has("vulnerability.read"), absent("the token may not read vulnerabilities (vulnerability.read)"));
     const { errors } = watchErrors(page);
     await page.goto("/vulnerabilities?view=cves");
     await expect(header(page, "Vulnerabilities")).toBeVisible();
@@ -360,7 +360,7 @@ test.describe("reports", () => {
 
 test.describe("status", () => {
   test("the panel judges itself and says what it is built from", async ({ page, request }) => {
-    test.skip(!granted.has("settings.read") && !granted.has("principal.manage"), "the token may not read the status (settings.read)");
+    test.skip(!granted.has("settings.read") && !granted.has("principal.manage"), absent("the token may not read the status (settings.read)"));
     const { errors } = watchErrors(page);
     const response = await request.get("/api/v1/status");
     expect(response.ok(), `GET /api/v1/status answered ${response.status()}`).toBeTruthy();
@@ -385,7 +385,7 @@ test.describe("status", () => {
 
 test.describe("setup", () => {
   test("the first-run checklist has a card for every step the server counts", async ({ page, request }) => {
-    test.skip(!granted.has("settings.read") && !granted.has("principal.manage"), "the token may not read the checklist (settings.read)");
+    test.skip(!granted.has("settings.read") && !granted.has("principal.manage"), absent("the token may not read the checklist (settings.read)"));
     const { errors } = watchErrors(page);
     const response = await request.get("/api/v1/setup");
     expect(response.ok(), `GET /api/v1/setup answered ${response.status()}`).toBeTruthy();
@@ -427,7 +427,7 @@ test.describe("setup", () => {
 
 test.describe("notifications", () => {
   test("the channels card lists the channels or says nobody is told", async ({ page, request }) => {
-    test.skip(!granted.has("notification.read"), "the token may not read notifications (notification.read)");
+    test.skip(!granted.has("notification.read"), absent("the token may not read notifications (notification.read)"));
     const { errors } = watchErrors(page);
     const channels = await items<{ id: string; name: string }>(request, "/api/v1/notifications/channels");
 
@@ -549,9 +549,9 @@ test.describe("host workspace", () => {
     const { errors } = watchErrors(page);
     const host = hosts.find((entry) => entry.connection_state === "online") ?? hosts[0];
     const notice = await openModule(page, host, "packages", "Packages");
-    test.skip(notice !== null, notice ?? undefined);
+    test.skip(notice !== null, absent(notice ?? ""));
     const list = await request.get(`/api/v1/hosts/${host.id}/packages`);
-    test.skip(list.status() === 403, "the token may not read the package list (packages.read)");
+    test.skip(list.status() === 403, absent("the token may not read the package list (packages.read)"));
     expect(list.ok(), `GET /api/v1/hosts/${host.id}/packages answered ${list.status()}`).toBeTruthy();
     const packages = (await list.json()) as { items: { name: string }[] };
 
@@ -559,7 +559,7 @@ test.describe("host workspace", () => {
     await expect(section(page, "Sources")).toBeVisible();
     const installed = section(page, "Installed packages");
     await expect(installed).toBeVisible();
-    test.skip(packages.items.length === 0, "the panel has not read the package list of this host yet");
+    test.skip(packages.items.length === 0, absent("the panel has not read the package list of this host yet"));
 
     // The tools stand in the heading: the search, the filter, the order.
     const search = installed.getByPlaceholder("Search packages");

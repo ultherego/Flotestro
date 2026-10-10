@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext, type Browser, type BrowserContext, type Page } from "@playwright/test";
-import { expectHealthy, fleetHosts, jobState, onlineHostWith, openModule, permissions, watchErrors, type Host } from "./fleet";
+import { absent, expectHealthy, fleetHosts, jobState, onlineHostWith, openModule, permissions, watchErrors, type Host } from "./fleet";
 
 /**
  * What a viewer sees.
@@ -80,17 +80,17 @@ test.afterAll(async () => {
 
 test.describe("a viewer sees no mutating control", () => {
   test("the Services page shows Restart to the administrator and not to the viewer", async ({ page, request, browser, baseURL }) => {
-    test.skip(!granted.has("principal.manage"), "the token may not create a viewer (principal.manage)");
-    test.skip(!granted.has("unit.restart") || !granted.has("job.create"), "the token may not restart a unit itself (unit.restart, job.create)");
+    test.skip(!granted.has("principal.manage"), absent("the token may not create a viewer (principal.manage)"));
+    test.skip(!granted.has("unit.restart") || !granted.has("job.create"), absent("the token may not restart a unit itself (unit.restart, job.create)"));
     const host = onlineHostWith(hosts, "systemd");
-    test.skip(!host, "no online host reports systemd");
+    test.skip(!host, absent("no online host reports systemd"));
     const target = host as Host;
     test.slow();
 
     // The administrator's session: the unit list is read once, and its
     // rows carry the restart button.
     const missing = await openModule(page, target, "services", "Services");
-    test.skip(missing !== null, missing ?? "");
+    test.skip(missing !== null, absent(missing ?? ""));
     const list = unitList(page);
     const filter = list.getByPlaceholder("Filter by name");
     const unread = list.getByText("This host has not been read yet.");
@@ -101,7 +101,7 @@ test.describe("a viewer sees no mutating control", () => {
       const job = await ordered;
       await expect.poll(() => jobState(request, job), { timeout: 60_000 }).toMatch(/^(succeeded|failed|timed_out|canceled|expired)$/);
       const state = await jobState(request, job);
-      test.skip(state !== "succeeded", `${target.hostname} did not answer the unit listing: ${state}`);
+      test.skip(state !== "succeeded", absent(`${target.hostname} did not answer the unit listing: ${state}`));
       await expect(filter).toBeVisible({ timeout: 60_000 });
     }
     await expect(list.locator("tbody tr").first()).toBeVisible();
@@ -135,7 +135,7 @@ test.describe("a viewer sees no mutating control", () => {
   });
 
   test("the preview refuses the viewer every change, and the order is refused all the same", async ({ playwright, baseURL }) => {
-    test.skip(!granted.has("principal.manage"), "the token may not create a viewer (principal.manage)");
+    test.skip(!granted.has("principal.manage"), absent("the token may not create a viewer (principal.manage)"));
     const host = onlineHostWith(hosts, "systemd") ?? hosts[0];
     const api = await playwright.request.newContext({ baseURL, extraHTTPHeaders: { Authorization: `Bearer ${viewerToken}` } });
     try {
@@ -159,7 +159,7 @@ test.describe("a viewer sees no mutating control", () => {
   });
 
   test("every module page renders for the viewer", async ({ browser, baseURL }) => {
-    test.skip(!granted.has("principal.manage"), "the token may not create a viewer (principal.manage)");
+    test.skip(!granted.has("principal.manage"), absent("the token may not create a viewer (principal.manage)"));
     const host = onlineHostWith(hosts, "systemd") ?? hosts[0];
     test.slow();
     const context = await viewerContext(browser, baseURL);
