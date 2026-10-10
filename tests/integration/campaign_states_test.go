@@ -93,7 +93,7 @@ func TestAHostAlreadyInTheDesiredStateEndsNoChange(t *testing.T) {
 		map[string]bool{"completed": true, "completed_with_issues": true, "failed": true,
 			"plan_failed": true, "paused": true, "awaiting_approval": true}, 3*time.Minute)
 	if final.State != "completed" {
-		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, h.whyItEnded(final))
 	}
 	if final.ApprovedBy != "" {
 		t.Errorf("a campaign with nothing to change was approved by %s", final.ApprovedBy)
@@ -186,7 +186,7 @@ func TestAFailureUnderTheThresholdEndsCompletedWithIssues(t *testing.T) {
 		map[string]bool{"completed": true, "completed_with_issues": true, "failed": true, "paused": true},
 		3*time.Minute)
 	if final.State != "completed_with_issues" {
-		t.Fatalf("the campaign ended in state %s (%s), expected completed_with_issues", final.State, final.PauseReason)
+		t.Fatalf("the campaign ended in state %s (%s), expected completed_with_issues", final.State, h.whyItEnded(final))
 	}
 
 	states := map[string]string{}
@@ -325,7 +325,7 @@ func TestAPlanRefusedEverywhereEndsPlanFailed(t *testing.T) {
 		map[string]bool{"plan_failed": true, "paused": true, "failed": true, "completed": true,
 			"awaiting_approval": true}, 3*time.Minute)
 	if final.State != "plan_failed" {
-		t.Fatalf("the campaign ended in state %s (%s), expected plan_failed", final.State, final.PauseReason)
+		t.Fatalf("the campaign ended in state %s (%s), expected plan_failed", final.State, h.whyItEnded(final))
 	}
 	if !strings.Contains(final.PauseReason, "no host computed a plan") {
 		t.Errorf("the reason does not say that no host planned: %q", final.PauseReason)

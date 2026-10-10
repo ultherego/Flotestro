@@ -70,7 +70,7 @@ func TestCampaignRecordsAStepPerTargetPhase(t *testing.T) {
 	afterPlanning := h.awaitCampaign(campaign.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true, "plan_failed": true, "completed": true}, 3*time.Minute)
 	if afterPlanning.State != "awaiting_approval" {
-		t.Fatalf("planning ended in state %s (%s)", afterPlanning.State, afterPlanning.PauseReason)
+		t.Fatalf("planning ended in state %s (%s)", afterPlanning.State, h.whyItEnded(afterPlanning))
 	}
 
 	// After planning the plan step is closed and nothing else exists yet: the
@@ -91,7 +91,7 @@ func TestCampaignRecordsAStepPerTargetPhase(t *testing.T) {
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 3*time.Minute)
 	if final.State != "completed" {
-		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, h.whyItEnded(final))
 	}
 	targets := h.campaignTargets(campaign.ID)
 	if len(targets) != 1 || targets[0].State != "succeeded" {

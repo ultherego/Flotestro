@@ -131,6 +131,37 @@ func (h *harness) campaignTargets(id string) []campaignTargetView {
 // for it is the offline policy doing its job.
 const offlineHoldGrace = 2 * time.Minute
 
+// whyItEnded says why a campaign is in the state it is in. The pause reason is
+// only written when something paused it, so a failed campaign has none - and a
+// message that printed that field alone said "the campaign ended in state
+// failed ()" and sent the reader to the logs of four machines. The targets
+// carry the answer, each with its code, so this reads them.
+func (h *harness) whyItEnded(campaign campaignView) string {
+	h.t.Helper()
+	if campaign.PauseReason != "" {
+		return campaign.PauseReason
+	}
+	var said []string
+	for _, target := range h.campaignTargets(campaign.ID) {
+		switch target.State {
+		case "succeeded", "no_change", "pending", "running":
+			continue
+		}
+		note := target.Hostname + ": " + target.State
+		if target.ErrorCode != "" {
+			note += "/" + target.ErrorCode
+		}
+		if target.Message != "" {
+			note += " " + target.Message
+		}
+		said = append(said, note)
+	}
+	if len(said) == 0 {
+		return "no target of this campaign explains the state"
+	}
+	return strings.Join(said, "; ")
+}
+
 // heldForAnOfflineHost names a target the campaign is holding because its host is
 // away, or the empty string when none is.
 func heldForAnOfflineHost(targets []campaignTargetView) string {
@@ -675,7 +706,7 @@ func TestCampaignWorksOnManyHostsAtOnce(t *testing.T) {
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 3*time.Minute)
 	if final.State != "completed" {
-		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, h.whyItEnded(final))
 	}
 
 	// Concurrency is decided from the attempt times, not from polling: two
@@ -838,7 +869,7 @@ func TestPackageCampaignComputesAPlanOnEveryHost(t *testing.T) {
 	}
 	if afterPlanning.State != "awaiting_approval" {
 		t.Fatalf("planning ended in state %s (%s)",
-			afterPlanning.State, afterPlanning.PauseReason)
+			afterPlanning.State, h.whyItEnded(afterPlanning))
 	}
 	if afterPlanning.PlanSetHash == "" {
 		t.Fatal("the campaign after planning has no plan set fingerprint")
@@ -868,7 +899,7 @@ func TestPackageCampaignComputesAPlanOnEveryHost(t *testing.T) {
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 5*time.Minute)
 	if final.State != "completed" {
-		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, h.whyItEnded(final))
 	}
 }
 
@@ -966,7 +997,7 @@ func TestSiteBudgetStopsTheExcessChange(t *testing.T) {
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 4*time.Minute)
 	if final.State != "completed" {
-		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, h.whyItEnded(final))
 	}
 	if !waited {
 		t.Error("no host reported waiting for capacity - the budget stopped nobody")
@@ -1225,7 +1256,7 @@ func TestComposeCampaignCarriesThePlanDigestToTheHost(t *testing.T) {
 	}
 	if afterPlanning.State != "awaiting_approval" {
 		t.Fatalf("planning ended in state %s (%s)",
-			afterPlanning.State, afterPlanning.PauseReason)
+			afterPlanning.State, h.whyItEnded(afterPlanning))
 	}
 	if afterPlanning.PlanSetHash == "" {
 		t.Fatal("the Compose campaign after planning has no plan set fingerprint")
@@ -1295,7 +1326,7 @@ func TestComposeCampaignCarriesThePlanDigestToTheHost(t *testing.T) {
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 5*time.Minute)
 	if final.State != "completed" {
-		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, h.whyItEnded(final))
 	}
 }
 
@@ -1399,7 +1430,7 @@ func TestCampaignTimelineSurvivesAPanelRestart(t *testing.T) {
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 3*time.Minute)
 	if final.State != "completed" {
-		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, h.whyItEnded(final))
 	}
 
 	var timeline struct {
@@ -1605,7 +1636,7 @@ func TestFileCampaignComputesTheDiffOnEveryHost(t *testing.T) {
 	}
 	if afterPlanning.State != "awaiting_approval" {
 		t.Fatalf("planning ended in state %s (%s)",
-			afterPlanning.State, afterPlanning.PauseReason)
+			afterPlanning.State, h.whyItEnded(afterPlanning))
 	}
 	if afterPlanning.PlanSetHash == "" {
 		t.Fatal("the file campaign after planning has no plan set fingerprint")
@@ -1635,7 +1666,7 @@ func TestFileCampaignComputesTheDiffOnEveryHost(t *testing.T) {
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 3*time.Minute)
 	if final.State != "completed" {
-		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, h.whyItEnded(final))
 	}
 
 	// Both hosts reached the same desired state, although they went there from
@@ -1753,7 +1784,7 @@ func TestFirewallCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 	}
 	if afterPlanning.State != "awaiting_approval" {
 		t.Fatalf("planning ended in state %s (%s)",
-			afterPlanning.State, afterPlanning.PauseReason)
+			afterPlanning.State, h.whyItEnded(afterPlanning))
 	}
 	actions := map[string]int{}
 	for _, target := range h.campaignTargets(campaign.ID) {
@@ -1767,7 +1798,7 @@ func TestFirewallCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 4*time.Minute)
 	if final.State != "completed" {
-		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, h.whyItEnded(final))
 	}
 	for _, hostID := range targets {
 		after := panelRule(t, h, hostID, name)
@@ -1916,7 +1947,7 @@ func TestMountCampaignResolvesTheUUIDOnEveryHost(t *testing.T) {
 	}
 	if afterPlanning.State != "awaiting_approval" {
 		t.Fatalf("planning ended in state %s (%s)",
-			afterPlanning.State, afterPlanning.PauseReason)
+			afterPlanning.State, h.whyItEnded(afterPlanning))
 	}
 
 	resolved := map[string]string{}
@@ -1945,7 +1976,7 @@ func TestMountCampaignResolvesTheUUIDOnEveryHost(t *testing.T) {
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 4*time.Minute)
 	if final.State != "completed" {
-		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, h.whyItEnded(final))
 	}
 
 	// The change that went onto the host is to carry that host's UUID, not the
@@ -2107,7 +2138,7 @@ func TestNetworkCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 	}
 	if afterPlanning.State != "awaiting_approval" {
 		t.Fatalf("planning ended in state %s (%s)",
-			afterPlanning.State, afterPlanning.PauseReason)
+			afterPlanning.State, h.whyItEnded(afterPlanning))
 	}
 	fingerprints := map[string]string{}
 	for _, target := range h.campaignTargets(campaign.ID) {
@@ -2126,7 +2157,7 @@ func TestNetworkCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 5*time.Minute)
 	if final.State != "completed" {
-		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, h.whyItEnded(final))
 	}
 	// The change that went onto the host carries that host's plan fingerprint:
 	// the host computed the plan once more before the change and had something to
@@ -2238,7 +2269,7 @@ func TestFirewalldZoneCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.
 	}
 	if afterPlanning.State != "awaiting_approval" {
 		t.Fatalf("planning ended in state %s (%s)",
-			afterPlanning.State, afterPlanning.PauseReason)
+			afterPlanning.State, h.whyItEnded(afterPlanning))
 	}
 	for _, target := range h.campaignTargets(campaign.ID) {
 		plan := zonePlan(h, target.PlanJobID)
@@ -2251,7 +2282,7 @@ func TestFirewalldZoneCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 4*time.Minute)
 	if final.State != "completed" {
-		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, h.whyItEnded(final))
 	}
 
 	// The same entry once more: the plan is to say the port is already
@@ -2271,7 +2302,7 @@ func TestFirewalldZoneCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true, "plan_failed": true, "completed": true}, 3*time.Minute)
 	if afterRepeat.State != "completed" {
 		t.Fatalf("repeat: planning ended in state %s (%s), expected completed with nothing to change",
-			afterRepeat.State, afterRepeat.PauseReason)
+			afterRepeat.State, h.whyItEnded(afterRepeat))
 	}
 	for _, target := range h.campaignTargets(repeat.ID) {
 		if target.State != "no_change" {
@@ -2408,7 +2439,7 @@ func TestResolverCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 	}
 	if afterPlanning.State != "awaiting_approval" {
 		t.Fatalf("planning ended in state %s (%s)",
-			afterPlanning.State, afterPlanning.PauseReason)
+			afterPlanning.State, h.whyItEnded(afterPlanning))
 	}
 	fingerprints := map[string]string{}
 	for _, target := range h.campaignTargets(campaign.ID) {
@@ -2430,7 +2461,7 @@ func TestResolverCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 5*time.Minute)
 	if final.State != "completed" {
-		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, h.whyItEnded(final))
 	}
 	for _, target := range h.campaignTargets(campaign.ID) {
 		var job struct {
@@ -2563,7 +2594,7 @@ func TestSSHCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 	}
 	if afterPlanning.State != "awaiting_approval" {
 		t.Fatalf("planning ended in state %s (%s)",
-			afterPlanning.State, afterPlanning.PauseReason)
+			afterPlanning.State, h.whyItEnded(afterPlanning))
 	}
 	fingerprints := map[string]string{}
 	for _, target := range h.campaignTargets(campaign.ID) {
@@ -2594,7 +2625,7 @@ func TestSSHCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 4*time.Minute)
 	if final.State != "completed" {
-		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, h.whyItEnded(final))
 	}
 	for _, hostID := range targets {
 		if after := hostSSHSnapshot(t, h, hostID); after.MaxAuthTries != 5 {
@@ -2618,7 +2649,7 @@ func TestSSHCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true, "plan_failed": true, "completed": true}, 3*time.Minute)
 	if afterRepeat.State != "completed" {
 		t.Fatalf("repeat: planning ended in state %s (%s), expected completed with nothing to change",
-			afterRepeat.State, afterRepeat.PauseReason)
+			afterRepeat.State, h.whyItEnded(afterRepeat))
 	}
 	for _, target := range h.campaignTargets(repeat.ID) {
 		if target.State != "no_change" {
@@ -2720,7 +2751,7 @@ func TestModuleBlacklistCampaignComputesTheDiffOnEveryHost(t *testing.T) {
 	}
 	if afterPlanning.State != "awaiting_approval" {
 		t.Fatalf("planning ended in state %s (%s)",
-			afterPlanning.State, afterPlanning.PauseReason)
+			afterPlanning.State, h.whyItEnded(afterPlanning))
 	}
 	actions := map[string]int{}
 	fingerprints := map[string]string{}
@@ -2740,7 +2771,7 @@ func TestModuleBlacklistCampaignComputesTheDiffOnEveryHost(t *testing.T) {
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 4*time.Minute)
 	if final.State != "completed" {
-		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, h.whyItEnded(final))
 	}
 	for _, target := range h.campaignTargets(campaign.ID) {
 		if target.State == "no_change" {
@@ -2867,7 +2898,7 @@ func TestTimeSourceCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) 
 	}
 	if afterPlanning.State != "awaiting_approval" {
 		t.Fatalf("planning ended in state %s (%s)",
-			afterPlanning.State, afterPlanning.PauseReason)
+			afterPlanning.State, h.whyItEnded(afterPlanning))
 	}
 
 	h.approveCampaign(afterPlanning)
@@ -2892,7 +2923,7 @@ func TestTimeSourceCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) 
 				target.Hostname, target.Message)
 		}
 	} else if final.State != "completed" {
-		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, h.whyItEnded(final))
 	}
 	// A host that refused has nothing to have recorded - the point of the
 	// refusal is that the change did not happen.
@@ -2997,7 +3028,7 @@ func TestFilesystemCheckCampaignComputesAPlanOnEveryHost(t *testing.T) {
 	}
 	if afterPlanning.State != "awaiting_approval" {
 		t.Fatalf("planning ended in state %s (%s)",
-			afterPlanning.State, afterPlanning.PauseReason)
+			afterPlanning.State, h.whyItEnded(afterPlanning))
 	}
 	uuids := map[string]bool{}
 	fingerprints := map[string]string{}
@@ -3019,7 +3050,7 @@ func TestFilesystemCheckCampaignComputesAPlanOnEveryHost(t *testing.T) {
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 5*time.Minute)
 	if final.State != "completed" {
-		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, h.whyItEnded(final))
 	}
 	for _, target := range h.campaignTargets(campaign.ID) {
 		var job struct {
@@ -3168,7 +3199,7 @@ func TestCertificateCampaignComputesTheDiffAndProtectsTheKey(t *testing.T) {
 	}
 	if afterPlanning.State != "awaiting_approval" {
 		t.Fatalf("planning ended in state %s (%s)",
-			afterPlanning.State, afterPlanning.PauseReason)
+			afterPlanning.State, h.whyItEnded(afterPlanning))
 	}
 	actions := map[string]int{}
 	fingerprints := map[string]string{}
@@ -3193,7 +3224,7 @@ func TestCertificateCampaignComputesTheDiffAndProtectsTheKey(t *testing.T) {
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 5*time.Minute)
 	if final.State != "completed" {
-		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, h.whyItEnded(final))
 	}
 	for _, target := range h.campaignTargets(campaign.ID) {
 		var job struct {
@@ -3316,7 +3347,7 @@ func TestBackupCampaignComputesTheScopeAndRequiresAVerification(t *testing.T) {
 	}
 	if afterPlanning.State != "awaiting_approval" {
 		t.Fatalf("planning ended in state %s (%s)",
-			afterPlanning.State, afterPlanning.PauseReason)
+			afterPlanning.State, h.whyItEnded(afterPlanning))
 	}
 	fingerprints := map[string]string{}
 	for _, target := range h.campaignTargets(campaign.ID) {
@@ -3338,7 +3369,7 @@ func TestBackupCampaignComputesTheScopeAndRequiresAVerification(t *testing.T) {
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 10*time.Minute)
 	if final.State != "completed" {
-		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, h.whyItEnded(final))
 	}
 	for _, target := range h.campaignTargets(campaign.ID) {
 		var job struct {
@@ -3516,7 +3547,7 @@ func TestBackendBudgetStopsTheSecondCampaign(t *testing.T) {
 	}
 	if afterPlanning.State != "awaiting_approval" {
 		t.Fatalf("planning ended in state %s (%s)",
-			afterPlanning.State, afterPlanning.PauseReason)
+			afterPlanning.State, h.whyItEnded(afterPlanning))
 	}
 	h.approveCampaign(afterPlanning)
 
@@ -3550,7 +3581,7 @@ func TestBackendBudgetStopsTheSecondCampaign(t *testing.T) {
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 6*time.Minute)
 	if final.State != "completed" {
-		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, h.whyItEnded(final))
 	}
 	if !waited {
 		t.Error("no host waited for the repository capacity")
@@ -3651,7 +3682,7 @@ func TestTrustCampaignDistributesTheAuthorityAndProtectsTheOneInUse(t *testing.T
 	}
 	if afterPlanning.State != "awaiting_approval" {
 		t.Fatalf("planning ended in state %s (%s)",
-			afterPlanning.State, afterPlanning.PauseReason)
+			afterPlanning.State, h.whyItEnded(afterPlanning))
 	}
 	for _, target := range h.campaignTargets(campaign.ID) {
 		plan := trustPlan(h, target.PlanJobID)
@@ -3663,7 +3694,7 @@ func TestTrustCampaignDistributesTheAuthorityAndProtectsTheOneInUse(t *testing.T
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 4*time.Minute)
 	if final.State != "completed" {
-		t.Fatalf("the authority distribution ended in state %s (%s)", final.State, final.PauseReason)
+		t.Fatalf("the authority distribution ended in state %s (%s)", final.State, h.whyItEnded(final))
 	}
 
 	// Step two, before anything was replaced: a certificate signed by this
@@ -3947,7 +3978,7 @@ func TestCampaignPlansAreGroupedByFingerprint(t *testing.T) {
 	}
 	if afterPlanning.State != "awaiting_approval" {
 		t.Fatalf("planning ended in state %s (%s)",
-			afterPlanning.State, afterPlanning.PauseReason)
+			afterPlanning.State, h.whyItEnded(afterPlanning))
 	}
 
 	var groups struct {
@@ -4184,7 +4215,7 @@ func TestBackendBudgetBindsTwoCampaigns(t *testing.T) {
 		state := h.awaitCampaign(campaigns[i].ID,
 			map[string]bool{"awaiting_approval": true, "paused": true, "failed": true, "plan_failed": true, "completed": true}, 5*time.Minute)
 		if state.State != "awaiting_approval" {
-			t.Fatalf("campaign %d finished planning in state %s (%s)", i+1, state.State, state.PauseReason)
+			t.Fatalf("campaign %d finished planning in state %s (%s)", i+1, state.State, h.whyItEnded(state))
 		}
 		h.approveCampaign(state)
 	}
@@ -4194,7 +4225,7 @@ func TestBackendBudgetBindsTwoCampaigns(t *testing.T) {
 		final := h.awaitCampaign(campaigns[i].ID,
 			map[string]bool{"completed": true, "failed": true, "paused": true}, 10*time.Minute)
 		if final.State != "completed" {
-			t.Fatalf("campaign %d ended in state %s (%s)", i+1, final.State, final.PauseReason)
+			t.Fatalf("campaign %d ended in state %s (%s)", i+1, final.State, h.whyItEnded(final))
 		}
 		for _, target := range h.campaignTargets(campaigns[i].ID) {
 			if target.JobID == "" {
@@ -4232,7 +4263,7 @@ func TestCampaignStreamResumesFromTheLastEvent(t *testing.T) {
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 3*time.Minute)
 	if final.State != "completed" {
-		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, h.whyItEnded(final))
 	}
 
 	// The publisher has two seconds between rounds; the marks appear soon
@@ -4805,7 +4836,7 @@ func TestCampaignHonorsMaxConcurrent(t *testing.T) {
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 3*time.Minute)
 	if final.State != "completed" {
-		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, h.whyItEnded(final))
 	}
 
 	windows := make([]window, 0, len(online))
@@ -4848,7 +4879,7 @@ func TestCampaignReportExportsCSV(t *testing.T) {
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 3*time.Minute)
 	if final.State != "completed" {
-		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, h.whyItEnded(final))
 	}
 
 	request, _ := http.NewRequest(http.MethodGet, h.api+"/api/v1/campaigns/"+campaign.ID+"/report?format=csv", nil)
@@ -4941,7 +4972,7 @@ func TestTwoOrchestratorsCreateOneJobPerTarget(t *testing.T) {
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 3*time.Minute)
 	stop()
 	if final.State != "completed" {
-		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, h.whyItEnded(final))
 	}
 
 	// One job per host for the main step: the idempotency key of the step
@@ -5149,7 +5180,7 @@ func TestAnExpiredPlanDoesNotStartTheHost(t *testing.T) {
 	planned := h.awaitCampaign(campaign.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true, "plan_failed": true, "completed": true}, 3*time.Minute)
 	if planned.State != "awaiting_approval" {
-		t.Fatalf("planning ended in state %s (%s)", planned.State, planned.PauseReason)
+		t.Fatalf("planning ended in state %s (%s)", planned.State, h.whyItEnded(planned))
 	}
 
 	var plans struct {
@@ -5212,7 +5243,7 @@ func TestOfflinePolicySkipsAHostThatIsNotConnected(t *testing.T) {
 			// A skipped host is not a failure: the campaign closes as
 			// completed, with the host visible and its reason given.
 			if final.State != "completed" {
-				t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+				t.Fatalf("the campaign ended in state %s (%s)", final.State, h.whyItEnded(final))
 			}
 			targets := h.campaignTargets(campaign.ID)
 			if len(targets) != 1 {
@@ -5273,7 +5304,7 @@ func TestWaitingPolicyClosesTheHostAtTheDeadline(t *testing.T) {
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 3*time.Minute)
 	if final.State != "completed" {
-		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, h.whyItEnded(final))
 	}
 	targets := h.campaignTargets(campaign.ID)
 	if len(targets) != 1 {
@@ -5319,7 +5350,7 @@ func TestManualGateStopsAfterTheCanary(t *testing.T) {
 	gated := h.awaitCampaign(campaign.ID,
 		map[string]bool{"manual_gate": true, "completed": true, "failed": true, "paused": true}, 2*time.Minute)
 	if gated.State != "manual_gate" {
-		t.Fatalf("the campaign reached %s instead of the gate (%s)", gated.State, gated.PauseReason)
+		t.Fatalf("the campaign reached %s instead of the gate (%s)", gated.State, h.whyItEnded(gated))
 	}
 	for _, target := range h.campaignTargets(campaign.ID) {
 		switch {
@@ -5351,7 +5382,7 @@ func TestManualGateStopsAfterTheCanary(t *testing.T) {
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 2*time.Minute)
 	if final.State != "completed" {
-		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, h.whyItEnded(final))
 	}
 	for _, target := range h.campaignTargets(campaign.ID) {
 		if target.State != "succeeded" {
@@ -5524,7 +5555,7 @@ func TestFinishedCampaignKeepsAnImmutableReport(t *testing.T) {
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 3*time.Minute)
 	if final.State != "completed" {
-		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, h.whyItEnded(final))
 	}
 
 	var stored struct {

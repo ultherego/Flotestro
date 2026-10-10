@@ -45,7 +45,7 @@ func (h *harness) runFileCampaign(body map[string]any) campaignView {
 	planned := h.awaitCampaign(campaign.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true, "plan_failed": true, "completed": true}, 3*time.Minute)
 	if planned.State != "awaiting_approval" {
-		h.t.Fatalf("planning of %s ended in state %s (%s)", campaign.Name, planned.State, planned.PauseReason)
+		h.t.Fatalf("planning of %s ended in state %s (%s)", campaign.Name, planned.State, h.whyItEnded(planned))
 	}
 	// Nothing landed yet.
 	if view := h.compensationLinks(campaign.ID); view.ChangedHosts != 0 {
@@ -55,7 +55,7 @@ func (h *harness) runFileCampaign(body map[string]any) campaignView {
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 3*time.Minute)
 	if final.State != "completed" {
-		h.t.Fatalf("the campaign %s ended in state %s (%s)", campaign.Name, final.State, final.PauseReason)
+		h.t.Fatalf("the campaign %s ended in state %s (%s)", campaign.Name, final.State, h.whyItEnded(final))
 	}
 	return final
 }

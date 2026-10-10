@@ -127,7 +127,7 @@ func TestHostnameCampaignSplitsTheMappingPerHost(t *testing.T) {
 		map[string]bool{"awaiting_approval": true, "queued": true, "running": true, "completed": true, "failed": true, "paused": true},
 		2*time.Minute)
 	if afterPlanning.State == "failed" || afterPlanning.State == "paused" {
-		t.Fatalf("planning ended in state %s (%s)", afterPlanning.State, afterPlanning.PauseReason)
+		t.Fatalf("planning ended in state %s (%s)", afterPlanning.State, h.whyItEnded(afterPlanning))
 	}
 	if afterPlanning.PlanSetHash == "" {
 		t.Error("the campaign after planning has no plan set fingerprint; the consent covers the set of names")
@@ -148,7 +148,7 @@ func TestHostnameCampaignSplitsTheMappingPerHost(t *testing.T) {
 	}
 	final := h.awaitCampaign(full.ID, map[string]bool{"completed": true, "failed": true, "paused": true}, 5*time.Minute)
 	if final.State != "completed" {
-		t.Fatalf("the rename campaign ended in state %s (%s)", final.State, final.PauseReason)
+		t.Fatalf("the rename campaign ended in state %s (%s)", final.State, h.whyItEnded(final))
 	}
 	for _, target := range h.campaignTargets(full.ID) {
 		if target.State != "succeeded" && target.State != "no_change" {
