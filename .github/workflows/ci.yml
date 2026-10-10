@@ -659,6 +659,14 @@ jobs:
         # are type-checked and the bundle the release ships is produced.
         run: npm run build
 
+      - name: Types of the browser suite
+        # tsconfig.json includes "src" alone, so until 10.10 nothing compiled
+        # e2e/ at all. Playwright transpiles without checking types, which put
+        # the first compiler between an edit and its author seventy minutes
+        # into a laboratory run - and only if the suite happened to reach that
+        # file. The suite cannot be executed here, but it can be compiled.
+        run: npm run typecheck:e2e
+
       - name: Unit tests
         # Vitest only: the Playwright suite drives the panel of the
         # laboratory and reaches a commit through lab-gate.yml. The one

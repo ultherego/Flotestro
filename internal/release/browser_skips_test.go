@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,7 +31,15 @@ func TestNoUnclassifiedSkipInTheBrowserSuite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading the browser suite: %v", err)
 	}
-	if len(found) == 0 {
+	// That the walk is looking in the right place is proved by how many skips
+	// there are, not by how many are unclassified: once every one of them says
+	// which kind it is, the unclassified list is empty and an empty list would
+	// otherwise be indistinguishable from a walk over the wrong directory.
+	seen, err := countBrowserSkips(root, browserDirectories...)
+	if err != nil {
+		t.Fatalf("counting the suite's skips: %v", err)
+	}
+	if seen == 0 {
 		t.Fatal("the walk found no test.skip at all in the browser suite, " +
 			"which means it is looking in the wrong place")
 	}
@@ -45,7 +54,8 @@ func TestNoUnclassifiedSkipInTheBrowserSuite(t *testing.T) {
 	for _, skip := range found {
 		t.Logf("%s:%d\t%s", skip.file, skip.line, skip.call)
 	}
-	t.Logf("%d unclassified skips in the browser suite, %d allowed", len(found), total(allowed))
+	t.Logf("%d skips in the browser suite, %d of them unclassified, %d allowed",
+		seen, len(found), total(allowed))
 }
 
 // browserSkipProblems is the Go ratchet's comparison, worded for the other
@@ -110,6 +120,11 @@ test("two", async () => {
 // A reason that merely mentions a paren ")" does not end the call early.
 test("three", async () => {
   test.skip(await thing(), "a reason with a ) in it");
+});
+
+// The helper carries the sentinel at runtime; the source says which kind.
+test("four", async () => {
+  test.skip(true, absent("said by the helper"));
 });
 `
 	if err := os.WriteFile(filepath.Join(dir, "example.spec.ts"), []byte(body), 0o600); err != nil {
@@ -245,7 +260,48 @@ func findBrowserSkips(root string, directories ...string) ([]directSkip, error) 
 	return found, nil
 }
 
+// countBrowserSkips counts every test.skip in the suite, classified or not.
+func countBrowserSkips(root string, directories ...string) (int, error) {
+	seen := 0
+	for _, directory := range directories {
+		base := filepath.Join(root, filepath.FromSlash(directory))
+		if _, err := os.Stat(base); os.IsNotExist(err) {
+			continue
+		}
+		err := filepath.WalkDir(base, func(path string, entry os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() {
+				if entry.Name() == "node_modules" {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if !strings.HasSuffix(path, ".ts") && !strings.HasSuffix(path, ".tsx") {
+				return nil
+			}
+			content, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			seen += strings.Count(string(content), browserSkipCall)
+			return nil
+		})
+		if err != nil {
+			return 0, err
+		}
+	}
+	return seen, nil
+}
+
 const browserSkipCall = "test.skip("
+
+// The classification helpers of the browser suite, named the same way the Go
+// suite names its own. A skip whose reason is one of these calls carries the
+// sentinel at runtime, which is where the gate reads it; the source says
+// absent(...) and means exactly that.
+var browserClassified = regexp.MustCompile(`,\s*(absent|notApplicable|waived)\(`)
 
 func browserSkipsIn(content, name string) []directSkip {
 	var found []directSkip
@@ -263,7 +319,7 @@ func browserSkipsIn(content, name string) []directSkip {
 		}
 		at = end + 1
 		call := strings.Join(strings.Fields(content[start:end+1]), " ")
-		if strings.Contains(call, skipSentinel) {
+		if strings.Contains(call, skipSentinel) || browserClassified.MatchString(call) {
 			continue
 		}
 		found = append(found, directSkip{

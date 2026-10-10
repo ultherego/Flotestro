@@ -1,0 +1,12 @@
+{
+  // The browser suite, type-checked. tsconfig.json includes "src" alone, so
+  // until 10.10 nothing compiled e2e/ at all: Playwright transpiles without
+  // checking types, which means a mistake there was found by a gate run an
+  // hour in, if at all. Eighty skips were rewritten that day with no compiler
+  // between the edit and the laboratory.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["e2e"]
+}

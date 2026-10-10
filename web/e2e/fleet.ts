@@ -23,6 +23,34 @@ export async function fleetHosts(request: APIRequestContext): Promise<Host[]> {
   return body.items;
 }
 
+/**
+ * The reason a skipped test gives, in the form the gate reads. A skip that
+ * does not say which kind of skip it is fails the whole run - the same
+ * contract the Go suite keeps with absent(), notApplicable() and waived().
+ *
+ * The reason is carried in double quotes, so a double quote inside it would
+ * end the field early; they become single quotes rather than being escaped,
+ * because the gate's parser reads the plain form and nothing else.
+ */
+function skipReason(fields: string, reason: string): string {
+  return `FLOTESTRO-SKIP ${fields} reason="${reason.replace(/"/g, "'")}"`;
+}
+
+/** The scenario did not run and nothing stands in for it: a failed run. */
+export function absent(reason: string): string {
+  return skipReason("class=absent", reason);
+}
+
+/** It does not apply here, and this names the host where it does run. */
+export function notApplicable(runsOn: string, reason: string): string {
+  return skipReason(`class=not_applicable runs_on=${runsOn}`, reason);
+}
+
+/** Let through until a date, by a named waiver, with evidence in its place. */
+export function waived(waiver: string, until: string, evidence: string, reason: string): string {
+  return skipReason(`class=waived waiver=${waiver} until=${until} evidence=${evidence}`, reason);
+}
+
 /** A host with a working adapter of the given name, or undefined. */
 export function hostWith(hosts: Host[], capability: string): Host | undefined {
   return hosts.find((host) => host.capabilities?.some((item) => item.name === capability && item.available));

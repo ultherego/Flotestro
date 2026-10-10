@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
-import { expectHealthy, permissions, watchErrors } from "./fleet";
+import { absent, expectHealthy, permissions, watchErrors } from "./fleet";
 
 /**
  * The identity directory page, one tab at a time.
@@ -19,8 +19,8 @@ test.beforeAll(async ({ request }) => {
 });
 
 test.beforeEach(() => {
-  test.skip(!status.configured || !status.reachable, "this installation has no directory connection");
-  test.skip(!granted.has("identity.read"), "the token may not read the directory (identity.read)");
+  test.skip(!status.configured || !status.reachable, absent("this installation has no directory connection"));
+  test.skip(!granted.has("identity.read"), absent("the token may not read the directory (identity.read)"));
 });
 
 /** The page header of the directory page. */
@@ -78,7 +78,7 @@ test("groups are listed with their members", async ({ page, request }) => {
 });
 
 test("HBAC rules are listed with the simulation below them", async ({ page }) => {
-  test.skip(!granted.has("identity.policy.read"), "the token may not read the access rules (identity.policy.read)");
+  test.skip(!granted.has("identity.policy.read"), absent("the token may not read the access rules (identity.policy.read)"));
   const { errors } = watchErrors(page);
   await openTab(page, "HBAC rules");
   await expectSettled(page, /^No rules\.$/);
@@ -87,7 +87,7 @@ test("HBAC rules are listed with the simulation below them", async ({ page }) =>
 });
 
 test("sudo rules are listed", async ({ page }) => {
-  test.skip(!granted.has("identity.policy.read"), "the token may not read the sudo rules (identity.policy.read)");
+  test.skip(!granted.has("identity.policy.read"), absent("the token may not read the sudo rules (identity.policy.read)"));
   const { errors } = watchErrors(page);
   await openTab(page, "sudo rules");
   await expectSettled(page, /^No sudo rules\.$/);

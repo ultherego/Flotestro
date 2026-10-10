@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { expectHealthy, fleetHosts, watchErrors, type Host } from "./fleet";
+import { absent, expectHealthy, fleetHosts, watchErrors, type Host } from "./fleet";
 
 /**
  * The Bulk workspace up to the preview: an operation is chosen, the scope is
@@ -31,7 +31,7 @@ test("the Bulk workspace previews a unit restart scoped to one site without crea
   const noEngine = page.getByText("the backend has no campaign engine");
   const scope = page.getByRole("heading", { name: "1. Scope" });
   await expect(scope.or(noEngine).first()).toBeVisible();
-  test.skip(await noEngine.isVisible(), "this installation has no campaign engine; the wizard is not offered");
+  test.skip(await noEngine.isVisible(), absent("this installation has no campaign engine; the wizard is not offered"));
 
   // Step 1: the order.
   const steps = page.locator(".bulk-steps");
@@ -134,13 +134,13 @@ test("the operations that cannot run as a campaign are listed with their reasons
   const noEngine = page.getByText("the backend has no campaign engine");
   const scope = page.getByRole("heading", { name: "1. Scope" });
   await expect(scope.or(noEngine).first()).toBeVisible();
-  test.skip(await noEngine.isVisible(), "this installation has no campaign engine; the wizard is not offered");
+  test.skip(await noEngine.isVisible(), absent("this installation has no campaign engine; the wizard is not offered"));
 
   const refusals = page.locator("details").filter({ hasText: "cannot run as a campaign" });
   // The list waits for the operation catalogue; a catalogue in which
   // every mutating operation runs as a campaign draws no list at all.
   await expect(page.locator("label.field").filter({ hasText: /^Operation/ }).locator("option")).not.toHaveCount(1);
-  test.skip((await refusals.count()) === 0, "every mutating operation of this installation runs as a campaign");
+  test.skip((await refusals.count()) === 0, absent("every mutating operation of this installation runs as a campaign"));
   await refusals.locator("summary").click();
   const rows = refusals.getByRole("row").filter({ has: page.locator("td") });
   expect(await rows.count()).toBeGreaterThan(0);

@@ -1,7 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import {
-  expectHealthy, fleetHosts, jobState, onlineHostWith, openModule, permissions, watchErrors, type Host,
-} from "./fleet";
+import { absent, expectHealthy, fleetHosts, jobState, onlineHostWith, openModule, permissions, watchErrors, type Host } from "./fleet";
 
 /**
  * The host modules that read from the host on request: services, schedules,
@@ -49,16 +47,16 @@ function nextJob(page: Page, hostID: string): Promise<string> {
 
 test.describe("services", () => {
   test("the detail of the cron unit opens from the address with its facts and its journal", async ({ page }) => {
-    test.skip(!granted.has("job.create"), "the token may not order a read (job.create)");
+    test.skip(!granted.has("job.create"), absent("the token may not order a read (job.create)"));
     const host = onlineHostWith(hosts, "systemd");
-    test.skip(!host, "no online host reports systemd");
+    test.skip(!host, absent("no online host reports systemd"));
     const target = host as Host;
     const unit = cronUnit(target);
     test.slow();
     const { errors } = watchErrors(page);
 
     const missing = await openModule(page, target, "services", "Services");
-    test.skip(missing !== null, missing ?? "");
+    test.skip(missing !== null, absent(missing ?? ""));
     await expect(page.locator(".hm-header .hm-lede")).toContainText("systemd units");
     await expect(section(page, "Unit states").getByTestId("status-bar")).toBeVisible();
     await expect(section(page, "Failed units")).toBeVisible();
@@ -71,7 +69,7 @@ test.describe("services", () => {
     const detail = page.getByTestId("unit-detail");
     const refused = page.locator(".hm-message.error");
     await expect(detail.or(refused).first()).toBeVisible({ timeout: 60_000 });
-    if (await refused.isVisible()) test.skip(true, `${target.hostname} answered the detail read of ${unit} with: ${await refused.textContent()}`);
+    if (await refused.isVisible()) test.skip(true, absent(`${target.hostname} answered the detail read of ${unit} with: ${await refused.textContent()}`));
 
     const fact = (label: string) => detail.locator(".hm-fact").filter({ has: page.locator("dt", { hasText: exact(label) }) }).locator("dd");
     await expect(fact("Unit file")).toContainText(unit);
@@ -87,15 +85,15 @@ test.describe("services", () => {
   });
 
   test("the full list is read from the host, filtered by name, and offers reset-failed on a failed unit", async ({ page, request }) => {
-    test.skip(!granted.has("job.create"), "the token may not order a read (job.create)");
+    test.skip(!granted.has("job.create"), absent("the token may not order a read (job.create)"));
     const host = onlineHostWith(hosts, "systemd");
-    test.skip(!host, "no online host reports systemd");
+    test.skip(!host, absent("no online host reports systemd"));
     const target = host as Host;
     const unit = cronUnit(target);
     test.slow();
 
     const missing = await openModule(page, target, "services", "Services");
-    test.skip(missing !== null, missing ?? "");
+    test.skip(missing !== null, absent(missing ?? ""));
     const all = section(page, "All units");
     const filter = all.getByPlaceholder("Filter by name");
     const unread = all.getByText("This host has not been read yet.");
@@ -110,7 +108,7 @@ test.describe("services", () => {
       await expect(page.locator(".hm-message")).toContainText(/Job \w+ has been queued|is waiting for approval/);
       await expect.poll(() => jobState(request, job), { timeout: 60_000 }).toMatch(/^(succeeded|failed|timed_out|canceled|expired)$/);
       const state = await jobState(request, job);
-      test.skip(!["succeeded", "failed"].includes(state), `${target.hostname} did not answer the unit listing: ${state}`);
+      test.skip(!["succeeded", "failed"].includes(state), absent(`${target.hostname} did not answer the unit listing: ${state}`));
       await expect(filter).toBeVisible({ timeout: 60_000 });
     }
 
@@ -150,15 +148,15 @@ test.describe("services", () => {
 
 test.describe("schedules", () => {
   test("the host previews the next runs of a cron expression in its own zone", async ({ page }) => {
-    test.skip(!granted.has("job.create"), "the token may not order a read (job.create)");
+    test.skip(!granted.has("job.create"), absent("the token may not order a read (job.create)"));
     const host = onlineHostWith(hosts, "schedules");
-    test.skip(!host, "no online host reports the schedules adapter");
+    test.skip(!host, absent("no online host reports the schedules adapter"));
     const target = host as Host;
     test.slow();
     const { errors } = watchErrors(page);
 
     const missing = await openModule(page, target, "schedules", "Schedules");
-    test.skip(missing !== null, missing ?? "");
+    test.skip(missing !== null, absent(missing ?? ""));
     await expect(section(page, "By kind")).toBeVisible();
     const list = section(page, "Schedules").last();
     await expect(list.locator("tbody tr").first().or(list.locator(".empty"))).toBeVisible();
@@ -185,7 +183,7 @@ test.describe("schedules", () => {
     const note = form.locator(".hm-form-note").filter({ hasText: /Next runs in|does not accept the expression/ });
     const refused = form.locator(".hm-message.error");
     await expect(note.or(refused).first()).toBeVisible({ timeout: 60_000 });
-    if (await refused.isVisible()) test.skip(true, `${target.hostname} refused the preview: ${await refused.textContent()}`);
+    if (await refused.isVisible()) test.skip(true, absent(`${target.hostname} refused the preview: ${await refused.textContent()}`));
     await expect(note).toContainText("Next runs in");
     // Three Mondays at half past four, written as the host's wall clock.
     const runs = (await note.locator(".hm-mono").textContent()) ?? "";
@@ -204,15 +202,15 @@ test.describe("schedules", () => {
 
 test.describe("processes", () => {
   test("the snapshot is read from the host and nests as a tree", async ({ page, request }) => {
-    test.skip(!granted.has("job.create"), "the token may not order a read (job.create)");
+    test.skip(!granted.has("job.create"), absent("the token may not order a read (job.create)"));
     const host = hosts.find((entry) => entry.connection_state === "online");
-    test.skip(!host, "no host is online");
+    test.skip(!host, absent("no host is online"));
     const target = host as Host;
     test.slow();
     const { errors } = watchErrors(page);
 
     const missing = await openModule(page, target, "processes", "Processes");
-    test.skip(missing !== null, missing ?? "");
+    test.skip(missing !== null, absent(missing ?? ""));
     await expect(section(page, "Process states").getByTestId("status-bar")).toBeVisible();
     const list = section(page, "Processes").last();
     const filter = list.getByPlaceholder("Filter by command, user, unit or PID");
@@ -225,7 +223,7 @@ test.describe("processes", () => {
       const job = await ordered;
       await expect.poll(() => jobState(request, job), { timeout: 60_000 }).toMatch(/^(succeeded|failed|timed_out|canceled|expired)$/);
       const state = await jobState(request, job);
-      test.skip(state !== "succeeded", `${target.hostname} did not answer the process read: ${state}`);
+      test.skip(state !== "succeeded", absent(`${target.hostname} did not answer the process read: ${state}`));
       await expect(filter).toBeVisible({ timeout: 60_000 });
     }
 
@@ -255,7 +253,7 @@ test.describe("processes", () => {
     // The fold is a glyph; what it does stands in its title.
     const folds = list.locator("button[title='Hide children']");
     if ((await indents.count()) > 0) expect(await folds.count(), "a child implies a parent with a fold").toBeGreaterThan(0);
-    test.skip((await folds.count()) === 0, `${target.hostname} sent a slice with no parent and child together; nothing to fold`);
+    test.skip((await folds.count()) === 0, absent(`${target.hostname} sent a slice with no parent and child together; nothing to fold`));
     // Folding a parent hides its children and the title counts them.
     await folds.first().click();
     await expect(rows).not.toHaveCount(flat);
@@ -275,16 +273,16 @@ test.describe("processes", () => {
 
 test.describe("logs", () => {
   test("a journal read returns lines, and stopping a follow cancels its job", async ({ page, request }) => {
-    test.skip(!granted.has("job.create"), "the token may not order a read (job.create)");
-    test.skip(!granted.has("job.cancel"), "the token may not cancel a job (job.cancel)");
+    test.skip(!granted.has("job.create"), absent("the token may not order a read (job.create)"));
+    test.skip(!granted.has("job.cancel"), absent("the token may not cancel a job (job.cancel)"));
     const host = onlineHostWith(hosts, "journald");
-    test.skip(!host, "no online host reports journald");
+    test.skip(!host, absent("no online host reports journald"));
     const target = host as Host;
     test.slow();
     const { errors } = watchErrors(page);
 
     const missing = await openModule(page, target, "logs", "Logs");
-    test.skip(missing !== null, missing ?? "");
+    test.skip(missing !== null, absent(missing ?? ""));
     const reading = section(page, "Reading");
     await expect(reading.locator(".badge", { hasText: "nothing read yet" })).toBeVisible();
     // Nothing read means nothing counted: dashes, not zeros.
@@ -302,7 +300,7 @@ test.describe("logs", () => {
     const output = section(page, "Output");
     const refused = page.locator(".hm-message.error");
     await expect(output.or(refused).first()).toBeVisible({ timeout: 60_000 });
-    if (await refused.isVisible()) test.skip(true, `${target.hostname} refused the journal read: ${await refused.textContent()}`);
+    if (await refused.isVisible()) test.skip(true, absent(`${target.hostname} refused the journal read: ${await refused.textContent()}`));
     expect(await jobState(request, readJob)).toBe("succeeded");
     // The count beside the title is the number of lines the host gave;
     // the text under it is those lines, one per line.
@@ -336,12 +334,12 @@ test.describe("logs", () => {
 test.describe("security and ssh", () => {
   test("the security page judges the host with dashes until the report is in", async ({ page, request }) => {
     const host = onlineHostWith(hosts, "security") ?? hosts.find((entry) => entry.capabilities?.some((item) => item.name === "security" && item.available));
-    test.skip(!host, "no host reports the security adapter");
+    test.skip(!host, absent("no host reports the security adapter"));
     const target = host as Host;
     const { errors } = watchErrors(page);
 
     const missing = await openModule(page, target, "security", "Security");
-    test.skip(missing !== null, missing ?? "");
+    test.skip(missing !== null, absent(missing ?? ""));
     await expect(page.locator(".hm-header").getByRole("button", { name: "Scan now" })).toBeVisible();
     await expect(page.getByTestId("module-freshness")).toBeVisible();
     const checks = section(page, "Checks").getByTestId("status-bar");
@@ -364,7 +362,7 @@ test.describe("security and ssh", () => {
 
   test("the ssh page shows the effective configuration and opens the editor without sending anything", async ({ page }) => {
     const host = onlineHostWith(hosts, "sshd") ?? hosts.find((entry) => entry.capabilities?.some((item) => item.name === "sshd" && item.available));
-    test.skip(!host, "no host reports the sshd adapter");
+    test.skip(!host, absent("no host reports the sshd adapter"));
     const target = host as Host;
     const { errors } = watchErrors(page);
     const posted: string[] = [];
@@ -373,9 +371,9 @@ test.describe("security and ssh", () => {
     });
 
     const missing = await openModule(page, target, "ssh", "SSH");
-    test.skip(missing !== null, missing ?? "");
+    test.skip(missing !== null, absent(missing ?? ""));
     const unreported = page.getByText("This host has not reported its sshd yet.");
-    test.skip(await unreported.isVisible(), `${target.hostname} has not reported its sshd yet`);
+    test.skip(await unreported.isVisible(), absent(`${target.hostname} has not reported its sshd yet`));
     await expect(section(page, "Ways in").getByTestId("status-bar-value")).toHaveCount(5);
     for (const title of ["Posture", "Authentication methods", "Host keys", "Managed drop-in"]) {
       await expect(section(page, title).first()).toBeVisible();
