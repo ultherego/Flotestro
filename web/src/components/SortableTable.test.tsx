@@ -230,6 +230,10 @@ describe("the header cells", () => {
     expect(headers[1]).toHaveClass("col-secondary");
     expect(screen.getByTestId("site-cell")).toHaveClass("col-secondary");
     expect(headers[2]).toHaveClass("num");
+    // Every cell names its column, so a chooser that moves the columns
+    // around cannot make a test read the wrong one.
+    expect(screen.getAllByRole("cell").map((cell) => cell.getAttribute("data-column")))
+      .toEqual(["name", "site", "count"]);
 
     // A click on the sorted column turns it round; a click on another
     // column starts that one ascending.
