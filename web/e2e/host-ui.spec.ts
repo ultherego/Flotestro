@@ -15,27 +15,47 @@ test.beforeAll(async ({ request }) => {
 });
 
 test.describe("HOST-UI: unknown is not zero", () => {
-  test("a host whose update count is undetermined shows unknown in the list", async ({ page }) => {
-    // The Arch host reports no security count and, before its first package
-    // read, no update count at all; any host with a null count serves the
-    // check.
-    const undetermined = hosts.find((host) => host.pending_updates === null);
-    test.skip(!undetermined, "every host reports an update count; nothing on the list is undetermined right now");
-    const host = undetermined as Host;
+  test("a count the fleet has not determined shows unknown in the list, never zero", async ({ page }) => {
+    // Two counts on this row can be undetermined, and the claim is the same
+    // for both: the update count, which a host has none of before its first
+    // package read, and the security count, which the arch and rhel tooling
+    // does not report at all. The test takes whichever the fleet has, so it
+    // runs on a fleet where every host has already read its packages.
+    const noUpdates = hosts.find((host) => host.pending_updates === null);
+    const noSecurity = hosts.find((host) => host.pending_security_updates === null);
+    const host = noUpdates ?? noSecurity;
+    test.skip(
+      !host,
+      'FLOTESTRO-SKIP class=absent reason="every host reports both an update count and a security count, so the list has no undetermined number to show"',
+    );
+    const column = noUpdates ? "updates" : "security";
 
     const table = await openHostList(page);
-    const row = table.getByRole("row").filter({ has: page.getByRole("link", { name: host.hostname, exact: true }) });
-    await expect(row).toHaveCount(1);
-    const updates = row.getByTestId("host-updates");
-    await expect(updates).toBeVisible();
-    await expect(updates.locator(".badge.unknown")).toHaveText("unknown");
-    await expect(updates).not.toHaveText(/^\s*0\s*$/);
-    // A known count next to it is a meter, not a badge.
-    const known = hosts.find((entry) => typeof entry.pending_updates === "number");
-    if (known) {
-      const knownRow = table.getByRole("row").filter({ has: page.getByRole("link", { name: known.hostname, exact: true }) });
-      await expect(knownRow.getByTestId("host-updates").locator(".meter-value")).toHaveText(String(known.pending_updates));
+    if (column === "security") {
+      // The security column is not on the screen by default; the operator
+      // turns it on, and so does the test.
+      await page.getByTestId("column-chooser").click();
+      await page.getByRole("group", { name: "Columns" }).getByLabel("Security updates").check();
+      await page.keyboard.press("Escape");
     }
+    const rowOf = (name: string) =>
+      table.getByRole("row").filter({ has: page.getByRole("link", { name, exact: true }) });
+    const row = rowOf((host as Host).hostname);
+    await expect(row).toHaveCount(1);
+    const cell = row.locator(`td[data-column="${column}"]`);
+    await expect(cell).toBeVisible();
+    await expect(cell.locator(".badge.unknown")).toHaveText("unknown");
+    await expect(cell).not.toHaveText(/^\s*0\s*$/);
+
+    // A determined count in the same column is the number, never the badge
+    // that says the count is unknown.
+    const known = hosts.find((entry) =>
+      typeof (column === "updates" ? entry.pending_updates : entry.pending_security_updates) === "number");
+    expect(known, `no host reports a ${column} count, so the two cannot be told apart`).toBeTruthy();
+    const knownCell = rowOf((known as Host).hostname).locator(`td[data-column="${column}"]`);
+    await expect(knownCell.locator(".badge.unknown")).toHaveCount(0);
+    await expect(knownCell).toContainText(
+      String(column === "updates" ? (known as Host).pending_updates : (known as Host).pending_security_updates));
   });
 
   test("the overview shows undetermined counts as dashes and badges, not zeros", async ({ page }) => {
@@ -67,7 +87,8 @@ test.describe("HOST-UI: a change asks before it runs", () => {
     const header = page.locator(".hm-header").getByRole("heading", { name: "Power", exact: true });
     const unreported = page.getByText("This host has not reported its boot state yet.");
     await expect(header.or(unreported).first()).toBeVisible();
-    test.skip(await unreported.isVisible(), `${host.hostname} has not reported its boot state; the power module has no actions yet`);
+    test.skip(await unreported.isVisible(),
+      `FLOTESTRO-SKIP class=absent reason="${host.hostname} has not reported its boot state, so the power module offers no action to confirm"`);
 
     await expect(page.getByTestId("target-confirmation")).toHaveCount(0);
     await page.getByRole("button", { name: "Reboot", exact: true }).click();
@@ -94,7 +115,8 @@ test.describe("HOST-UI: a change asks before it runs", () => {
     const header = page.locator(".hm-header").getByRole("heading", { name: "Power", exact: true });
     const unreported = page.getByText("This host has not reported its boot state yet.");
     await expect(header.or(unreported).first()).toBeVisible();
-    test.skip(await unreported.isVisible(), `${host.hostname} has not reported its boot state`);
+    test.skip(await unreported.isVisible(),
+      `FLOTESTRO-SKIP class=absent reason="${host.hostname} has not reported its boot state, so the shutdown button is not on the page"`);
 
     await expect(page.getByRole("button", { name: "Shut down", exact: true })).toBeDisabled();
     await expect(page.getByTestId("target-confirmation")).toHaveCount(0);

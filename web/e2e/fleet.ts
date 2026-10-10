@@ -9,6 +9,7 @@ export type Host = {
   os_family?: string;
   connection_state: "online" | "offline" | "stale" | "unknown";
   pending_updates: number | null;
+  pending_security_updates: number | null;
   capabilities?: { name: string; available: boolean }[];
 };
 

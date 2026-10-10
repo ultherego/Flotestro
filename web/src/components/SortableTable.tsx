@@ -191,7 +191,9 @@ export function Td({ columns, name, children, className, ...rest }: {
 } & TdHTMLAttributes<HTMLTableCellElement>) {
   const column = columns.all.find((entry) => entry.key === name);
   if (!column || !columns.shown(name)) return null;
-  return <td className={cellClass(column, className)} {...rest}>{children}</td>;
+  // The cell names its column: with a chooser moving columns around, position
+  // is not an identity, and a test or a screen reader needs the name.
+  return <td className={cellClass(column, className)} data-column={name} {...rest}>{children}</td>;
 }
 
 const POPOVER: CSSProperties = {
