@@ -266,7 +266,7 @@ func TestAnOfflineCanaryHoldsTheWaveUntilItIsSkipped(t *testing.T) {
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "completed_with_issues": true, "failed": true, "paused": true}, 2*time.Minute)
 	if final.State != "completed" {
-		t.Errorf("the campaign ended %s (%s); a skipped canary is not a failure", final.State, final.PauseReason)
+		t.Errorf("the campaign ended %s (%s); a skipped canary is not a failure", final.State, h.whyItEnded(final))
 	}
 	for _, target := range h.campaignTargets(campaign.ID) {
 		if target.HostID == offline.ID && (target.State != "skipped" || target.Message == "") {

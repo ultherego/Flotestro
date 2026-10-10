@@ -89,7 +89,7 @@ func TestCampaignVerifiesUnitsWithoutAReboot(t *testing.T) {
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "failed": true, "paused": true}, 3*time.Minute)
 	if final.State != "completed" {
-		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
+		t.Fatalf("the campaign ended in state %s (%s)", final.State, h.whyItEnded(final))
 	}
 
 	targets := h.healthTargets(campaign.ID)
@@ -252,7 +252,7 @@ func TestAHostStillRebootingWhenTheWindowClosesIsFailedAndPausesTheCampaign(t *t
 	paused := h.awaitCampaign(campaign.ID,
 		map[string]bool{"paused": true, "completed": true, "failed": true}, time.Minute)
 	if paused.State != "paused" {
-		t.Fatalf("the campaign ended %s instead of pausing (%s)", paused.State, paused.PauseReason)
+		t.Fatalf("the campaign ended %s instead of pausing (%s)", paused.State, h.whyItEnded(paused))
 	}
 	if !strings.HasPrefix(paused.PauseReason, "maintenance_window_closed_mid_reboot") {
 		t.Errorf("pause reason = %q, expected maintenance_window_closed_mid_reboot", paused.PauseReason)
