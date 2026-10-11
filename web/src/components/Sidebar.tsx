@@ -40,12 +40,13 @@ const GROUPS_KEY = "flotestro.sidebar.groups";
  * The counters of the fleet summary the badges read: what waits for a
  * decision behind each place.
  */
-type BadgeCounts = {
+export type BadgeCounts = {
   jobs_awaiting_approval?: number;
   campaigns_awaiting_approval?: number;
   campaigns_manual_gate?: number;
   alerts_firing?: number;
   hosts_drifted?: number;
+  operations_unconfirmed?: number;
 };
 
 /** How often the badges ask again: a queue of decisions, not a heartbeat. */
@@ -53,9 +54,10 @@ const BADGE_INTERVAL = 30 * 1000;
 
 /**
  * The badge of an item, by its address: the jobs and the campaigns waiting
- * for an approval, the alerts firing, the hosts a policy found drifted.
+ * for an approval, the alerts firing, the hosts a policy found drifted, the
+ * operations whose outcome nobody could confirm.
  */
-function badgeFor(to: string, counts?: BadgeCounts): { count: number; tone: string; title: string } | undefined {
+export function badgeFor(to: string, counts?: BadgeCounts): { count: number; tone: string; title: string } | undefined {
   if (!counts) return undefined;
   const sum = (...values: (number | undefined)[]) =>
     values.every((value) => value === undefined) ? undefined : values.reduce<number>((total, value) => total + (value ?? 0), 0);
@@ -79,6 +81,11 @@ function badgeFor(to: string, counts?: BadgeCounts): { count: number; tone: stri
     case "/policies":
       count = counts.hosts_drifted;
       title = "hosts drifted";
+      break;
+    case "/unresolved":
+      // Nothing ages this one out: it waits until somebody rules on it.
+      count = counts.operations_unconfirmed;
+      title = "operations nobody could confirm";
       break;
     default:
       return undefined;

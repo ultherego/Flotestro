@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
-import { absent, expectHealthy, fleetHosts, openModule, permissions, watchErrors, type Host } from "./fleet";
+import { absent, expectHealthy, fleetHosts, navigation, openModule, permissions, watchErrors, type Host } from "./fleet";
 
 /**
  * The pages that give the operator a working day: the job list and one job,
@@ -379,6 +379,67 @@ test.describe("status", () => {
       await expect(card(page, "About").locator("dt").first()).toBeVisible();
     }
     await expect(page.locator(".page-header").getByRole("link", { name: "OpenAPI" })).toHaveAttribute("href", "/api/v1/openapi.json");
+    await expectHealthy(page, errors);
+  });
+});
+
+test.describe("unresolved operations", () => {
+  // The screen went out and the first person to open it got "Error: internal
+  // error": the query named a column the jobs table does not have, and
+  // nothing in the suite had ever run it. The Go side now calls the route, and
+  // this opens the page the way a person does - including the badge in the
+  // navigation, which is a number the browser computes and no server test can
+  // see.
+  test("the page answers, counts the two questions apart, and opens a ruling under its own row", async ({ page, request }) => {
+    test.skip(!granted.has("job.read"), absent("the token may not read jobs (job.read)"));
+    const { errors } = watchErrors(page);
+
+    const response = await request.get("/api/v1/unresolved");
+    expect(response.ok(), `GET /api/v1/unresolved answered ${response.status()}`).toBeTruthy();
+    const answer = (await response.json()) as {
+      counts: { outcome_unknown_operations: number; applied_unverified_operations: number };
+      items: { attempt_id: string }[];
+    };
+    const waiting = answer.counts.outcome_unknown_operations + answer.counts.applied_unverified_operations;
+
+    await page.goto("/unresolved");
+    await expect(header(page, "Needs confirmation")).toBeVisible();
+    // The failure this test exists for showed as the page's error box, not as
+    // a console error, so it is named here on its own.
+    await expect(page.locator(".page-error")).toHaveCount(0);
+
+    // The two uncertainties are counted apart on purpose: one total reads the
+    // same for one host with forty of these and forty hosts with one each.
+    await expect(page.getByTestId("count-outcome_unknown")).toBeVisible();
+    await expect(page.getByTestId("count-applied_unverified")).toBeVisible();
+
+    // The badge in the navigation is the length of this queue. It is the one
+    // number here the browser works out for itself.
+    const badge = navigation(page).locator("a[href='/unresolved'] [data-testid='sidebar-badge']");
+    if (waiting > 0) {
+      await expect(badge).toHaveText(String(waiting));
+    } else {
+      // Nothing waiting is no badge, not a zero.
+      await expect(badge).toHaveCount(0);
+    }
+
+    if (answer.items.length === 0) {
+      await expectHealthy(page, errors);
+      return;
+    }
+
+    // The form belongs to the row it rules on: it opens as the next row of
+    // the same table, not at the foot of the list, and it refuses a ruling
+    // with no basis.
+    const rows = page.locator("table tbody tr");
+    const first = rows.first();
+    await first.getByRole("button", { name: "Rule on this" }).click();
+    const form = rows.nth(1);
+    await expect(form).toHaveClass(/detail-row/);
+    await expect(form.getByRole("button", { name: "Record the ruling" })).toBeDisabled();
+    await first.getByRole("button", { name: "Close" }).click();
+    await expect(page.locator("tr.detail-row")).toHaveCount(0);
+
     await expectHealthy(page, errors);
   });
 });

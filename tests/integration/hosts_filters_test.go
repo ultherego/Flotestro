@@ -226,6 +226,7 @@ func TestFleetSummaryCountsTheDecisionsWaiting(t *testing.T) {
 		CampaignsAwaitingApproval *int `json:"campaigns_awaiting_approval"`
 		CampaignsManualGate       *int `json:"campaigns_manual_gate"`
 		HostsDrifted              *int `json:"hosts_drifted"`
+		OperationsUnconfirmed     *int `json:"operations_unconfirmed"`
 		AlertsFiring              int  `json:"alerts_firing"`
 	}
 	h.get("/api/v1/fleet/summary", &summary)
@@ -234,6 +235,7 @@ func TestFleetSummaryCountsTheDecisionsWaiting(t *testing.T) {
 		"campaigns_awaiting_approval": summary.CampaignsAwaitingApproval,
 		"campaigns_manual_gate":       summary.CampaignsManualGate,
 		"hosts_drifted":               summary.HostsDrifted,
+		"operations_unconfirmed":      summary.OperationsUnconfirmed,
 	} {
 		if value == nil {
 			t.Errorf("the summary lacks %s for the global view", name)

@@ -4,10 +4,12 @@ import (
 	"context"
 
 	"github.com/ultherego/flotestro/internal/authz"
+	"github.com/ultherego/flotestro/internal/jobs"
 )
 
 // PendingDecisions is the part of the fleet summary that counts what waits for
-// a person: an unapproved order, a campaign at a gate, a drifted host.
+// a person: an unapproved order, a campaign at a gate, a drifted host, an
+// operation whose outcome nobody could confirm.
 type PendingDecisions struct {
 	// JobsAwaitingApproval counts the jobs on the visible hosts that wait
 	// for an operator's approval.
@@ -26,6 +28,15 @@ type PendingDecisions struct {
 	// HostsDrifted counts the visible hosts on which at least one rule of
 	// a published policy found drift at its last evaluation.
 	HostsDrifted *int `json:"hosts_drifted,omitempty"`
+	// OperationsUnconfirmed counts the operations on the visible hosts whose
+	// outcome nobody could confirm and nobody has ruled on yet.
+	//
+	// The screen behind it keeps the two uncertainties apart - did it happen,
+	// did it hold - because they ask for different work, and it counts hosts
+	// beside operations. This is a single number for a different reason: it is
+	// the length of a queue of decisions, like the jobs awaiting approval
+	// beside it, and it equals the number of rows waiting on that screen.
+	OperationsUnconfirmed *int `json:"operations_unconfirmed,omitempty"`
 }
 
 // countPendingDecisions fills the decision counters with one aggregated query
@@ -119,6 +130,21 @@ func (s *Server) countPendingDecisions(ctx context.Context, principal authz.Prin
 			return err
 		}
 		decisions.HostsDrifted = &drifted
+	}
+
+	// An uncertain outcome waits for a person exactly as an approval does, and
+	// nothing ages it out: it is on the list until somebody rules on it. The
+	// count comes from the store the list uses, with the scopes the list is
+	// narrowed by, so the badge cannot differ from the screen it leads to.
+	if s.jobs != nil {
+		if scopes := principal.ScopesFor(authz.PermJobRead); len(scopes) > 0 {
+			counts, err := s.jobs.UnresolvedCount(ctx, jobs.UnresolvedFilter{Scopes: scopes})
+			if err != nil {
+				return err
+			}
+			unconfirmed := counts.OutcomeUnknownOperations + counts.AppliedUnverifiedOperations
+			decisions.OperationsUnconfirmed = &unconfirmed
+		}
 	}
 	return nil
 }

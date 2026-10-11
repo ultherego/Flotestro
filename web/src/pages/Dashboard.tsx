@@ -22,6 +22,7 @@ type DecisionSummary = FleetSummary & {
   campaigns_manual_gate?: number;
   directory_changes_pending?: number;
   hosts_drifted?: number;
+  operations_unconfirmed?: number;
   alerts_firing?: number;
   alerts_critical?: number;
 };
@@ -106,13 +107,14 @@ export function Dashboard() {
 
   const waiting = [
     s?.jobs_awaiting_approval, s?.campaigns_awaiting_approval, s?.campaigns_manual_gate,
-    s?.directory_changes_pending, s?.hosts_drifted,
+    s?.directory_changes_pending, s?.hosts_drifted, s?.operations_unconfirmed,
   ].reduce<number>((sum, value) => sum + (value ?? 0), 0);
 
   // The tile has something to show when at least one kind of decision
   // is the reader's to take.
   const decidable = s !== undefined && [
     s.jobs_awaiting_approval, s.campaigns_awaiting_approval, s.directory_changes_pending, s.hosts_drifted,
+    s.operations_unconfirmed,
   ].some((value) => value !== undefined);
 
   const attention = [
@@ -278,6 +280,9 @@ export function Dashboard() {
               )}
               {s.hosts_drifted !== undefined && (
                 <Stat label={t("Hosts drifted")} value={s.hosts_drifted} hint={t("a policy disagrees with the host")} tone={warnAbove(s.hosts_drifted)} to="/policies" />
+              )}
+              {s.operations_unconfirmed !== undefined && (
+                <Stat label={t("Unconfirmed outcomes")} value={s.operations_unconfirmed} hint={t("nothing ages these out")} tone={warnAbove(s.operations_unconfirmed)} to="/unresolved" />
               )}
             </StatGrid>
           )}

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
@@ -10,7 +10,7 @@ import type {
   UnresolvedRulingKind,
 } from "../lib/types";
 import { ErrorBox, Empty, Time } from "../components/ui";
-import { Card, PageHeader } from "../components/layout";
+import { Actions, Card, Field, FieldGrid, PageHeader } from "../components/layout";
 import { useT } from "../i18n";
 
 /**
@@ -52,7 +52,9 @@ export default function Unresolved() {
   const t = useT();
   const client = useQueryClient();
   const [kind, setKind] = useState<UnresolvedKind | "">("");
-  const [ruling, setRuling] = useState<{ item: UnresolvedItem } | null>(null);
+  // The attempt whose ruling is open, or none. One at a time: the form is a
+  // row of the table and two of them would push the list apart.
+  const [ruling, setRuling] = useState<string | null>(null);
 
   const { data, error } = useQuery({
     queryKey: ["unresolved", kind],
@@ -72,7 +74,7 @@ export default function Unresolved() {
       />
 
       {counts && (
-        <div className="fp-cards">
+        <div className="grid-two">
           {(["outcome_unknown", "applied_unverified"] as UnresolvedKind[]).map((one) => {
             const described = describeKind(one);
             const operations =
@@ -88,7 +90,7 @@ export default function Unresolved() {
                 <p className="muted">{t(described.question)}</p>
                 {/* Two numbers, never one: a single total reads the same for
                     one host with forty of these and forty hosts with one. */}
-                <div className="fp-two-counts" data-testid={`count-${one}`}>
+                <div className="fp-chips" data-testid={`count-${one}`}>
                   <span className={operations > 0 ? "badge warn" : "badge"}>
                     {t("{n} operations", { n: operations })}
                   </span>
@@ -131,48 +133,63 @@ export default function Unresolved() {
           </thead>
           <tbody>
             {items.map((item) => (
-              <tr key={item.attempt_id}>
-                <td>
-                  <Link to={`/hosts/${item.host_id}/overview`}>{item.hostname || item.host_id}</Link>
-                </td>
-                <td>
-                  {/* Straight to the task and whatever evidence it holds: the
-                      operator's next move is to read it, not to search for it. */}
-                  <Link to={`/jobs/${item.job_id}`}>{item.action}</Link>
-                </td>
-                <td>{t(describeKind(item.kind).question)}</td>
-                <td className="muted">{item.reason || "—"}</td>
-                <td><Time value={item.first_seen} /></td>
-                <td>
-                  {item.last_checked_at ? (
-                    <Time value={item.last_checked_at} />
-                  ) : (
-                    /* Not "never": nobody has tried again since, which is a
-                       fact about the panel and not about the host. */
-                    <span className="badge unknown">{t("not since")}</span>
-                  )}
-                </td>
-                <td>
-                  <button type="button" onClick={() => setRuling({ item })}>
-                    {t("Rule on this")}
-                  </button>
-                </td>
-              </tr>
+              <Fragment key={item.attempt_id}>
+                <tr>
+                  <td>
+                    <Link to={`/hosts/${item.host_id}/overview`}>{item.hostname || item.host_id}</Link>
+                  </td>
+                  <td>
+                    {/* Straight to the task and whatever evidence it holds: the
+                        operator's next move is to read it, not to search for it. */}
+                    <Link to={`/jobs/${item.job_id}`}>{item.action}</Link>
+                  </td>
+                  <td>{t(describeKind(item.kind).question)}</td>
+                  <td className="muted">{item.reason || "—"}</td>
+                  <td><Time value={item.first_seen} /></td>
+                  <td>
+                    {item.last_checked_at ? (
+                      <Time value={item.last_checked_at} />
+                    ) : (
+                      /* Not "never": nobody has tried again since, which is a
+                         fact about the panel and not about the host. */
+                      <span className="badge unknown">{t("not since")}</span>
+                    )}
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => setRuling(ruling === item.attempt_id ? null : item.attempt_id)}
+                      aria-expanded={ruling === item.attempt_id}
+                    >
+                      {ruling === item.attempt_id ? t("Close") : t("Rule on this")}
+                    </button>
+                  </td>
+                </tr>
+                {/* Under the row it is about, not under the table: with a
+                    screenful of rows, a form at the foot of the list says
+                    which host it means in its heading and the eye does not
+                    join the two. The panel opens an approval the same way. */}
+                {ruling === item.attempt_id && (
+                  <tr className="detail-row">
+                    <td colSpan={7}>
+                      <RulingForm
+                        item={item}
+                        onClose={() => setRuling(null)}
+                        onRuled={() => {
+                          setRuling(null);
+                          client.invalidateQueries({ queryKey: ["unresolved"] });
+                        }}
+                      />
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
             ))}
           </tbody>
         </table>
       )}
 
-      {ruling && (
-        <RulingForm
-          item={ruling.item}
-          onClose={() => setRuling(null)}
-          onRuled={() => {
-            setRuling(null);
-            client.invalidateQueries({ queryKey: ["unresolved"] });
-          }}
-        />
-      )}
     </>
   );
 }
@@ -210,44 +227,41 @@ function RulingForm({
   });
 
   return (
-    <div className="modal" role="dialog" aria-label={t("Rule on this operation")} data-testid="ruling-form">
-      <h3>{t("Rule on this operation")}</h3>
-      <p className="muted">
-        {item.hostname || item.host_id} · {item.action} · {t(describeKind(item.kind).question)}
-      </p>
-      <p className="muted">
+    <>
+      <p className="source">
         {t("The task keeps the outcome the fleet reported. What you write here is recorded beside it, with your name and the time.")}
       </p>
-
-      <label>
-        {t("What did you find?")}
-        <select
-          value={verdict}
-          onChange={(e) => setVerdict(e.target.value as UnresolvedRulingKind)}
-          data-testid="ruling-verdict"
+      <FieldGrid>
+        <Field label={t("What did you find?")}>
+          <select
+            value={verdict}
+            onChange={(e) => setVerdict(e.target.value as UnresolvedRulingKind)}
+            data-testid="ruling-verdict"
+          >
+            <option value="confirmed_applied">{t("The change is there")}</option>
+            <option value="confirmed_not_applied">{t("The change is not there")}</option>
+            <option value="accepted_unknown">{t("It will not be known, and that is accepted")}</option>
+          </select>
+        </Field>
+        <Field
+          label={t("On what basis?")}
+          wide
+          hint={t("Required: a ruling without one is a screen being cleared.")}
         >
-          <option value="confirmed_applied">{t("The change is there")}</option>
-          <option value="confirmed_not_applied">{t("The change is not there")}</option>
-          <option value="accepted_unknown">{t("It will not be known, and that is accepted")}</option>
-        </select>
-      </label>
-
-      <label>
-        {t("On what basis?")}
-        <textarea
-          value={basis}
-          onChange={(e) => setBasis(e.target.value)}
-          placeholder={t("What you read, and where you looked.")}
-          data-testid="ruling-basis"
-        />
-      </label>
+          <textarea
+            autoFocus
+            rows={2}
+            value={basis}
+            onChange={(e) => setBasis(e.target.value)}
+            placeholder={t("What you read, and where you looked.")}
+            data-testid="ruling-basis"
+          />
+        </Field>
+      </FieldGrid>
 
       {record.error ? <ErrorBox error={record.error} /> : null}
 
-      <div className="actions">
-        <button type="button" className="secondary" onClick={onClose}>
-          {t("Cancel")}
-        </button>
+      <Actions>
         <button
           type="button"
           disabled={basis.trim() === "" || record.isPending}
@@ -256,7 +270,10 @@ function RulingForm({
         >
           {t("Record the ruling")}
         </button>
-      </div>
-    </div>
+        <button type="button" className="secondary" onClick={onClose}>
+          {t("Cancel")}
+        </button>
+      </Actions>
+    </>
   );
 }
