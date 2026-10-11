@@ -394,6 +394,12 @@ func (s *Server) Routes() http.Handler {
 	// The progress stream of one operation. The result stays durable in the
 	// database; the stream only says when it is worth reading again.
 	s.route(mux, "GET /api/v1/jobs/{id}/events", s.handleJobEvents)
+	// What the fleet left in a state nobody could confirm. Not under
+	// /jobs, because the question is about the fleet rather than about one
+	// task: "what have we not confirmed" is a screen of its own, and the
+	// counter that heads it is the one the pilot is judged by.
+	s.route(mux, "GET /api/v1/unresolved", s.handleUnresolved)
+	s.route(mux, "POST /api/v1/unresolved/{id}/ruling", s.handleRuleUnresolved)
 	s.route(mux, "POST /api/v1/jobs/{id}/approve", s.handleApproveJob)
 	s.route(mux, "POST /api/v1/jobs/{id}/cancel", s.handleCancelJob)
 

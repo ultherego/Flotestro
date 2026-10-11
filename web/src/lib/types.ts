@@ -219,6 +219,51 @@ export type ReadinessGap = {
 };
 
 /** What stands between this fleet and being managed. */
+/**
+ * An operation whose outcome nobody could confirm.
+ *
+ * Two kinds, and they ask different questions, so the screen never adds them
+ * together: outcome_unknown is "did it happen?" - the agent came back from a
+ * restart to find an operation it did not live to see the end of.
+ * applied_unverified is "did it hold?" - the change was made and the verifier
+ * could not confirm it afterwards.
+ */
+export type UnresolvedKind = "outcome_unknown" | "applied_unverified";
+
+export type Unresolved = {
+  attempt_id: string;
+  job_id: string;
+  host_id: string;
+  hostname: string;
+  action: string;
+  kind: UnresolvedKind;
+  reason?: string;
+  /** What the verifier expected and what it found; absent for an unknown outcome. */
+  verification?: unknown;
+  /** When the uncertainty arose, not when it was last looked at. */
+  first_seen: string;
+  /** The most recent later attempt of the same job, or absent when nobody has looked since. */
+  last_checked_at?: string | null;
+};
+
+export type UnresolvedCounts = {
+  outcome_unknown_operations: number;
+  outcome_unknown_hosts: number;
+  applied_unverified_operations: number;
+  applied_unverified_hosts: number;
+};
+
+export type UnresolvedOperations = {
+  counts: UnresolvedCounts;
+  items: Unresolved[];
+};
+
+/** What an operator concluded. accepted_unknown is a decision to stop asking. */
+export type UnresolvedRulingKind =
+  | "confirmed_applied"
+  | "confirmed_not_applied"
+  | "accepted_unknown";
+
 export type FleetReadiness = {
   hosts: number;
   silent: number;

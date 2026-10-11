@@ -132,6 +132,8 @@ func (s *Server) openAPI() map[string]any {
 	register("HostDetail", hostDetail{})
 	register("Job", jobs.Job{})
 	register("Attempt", jobs.Attempt{})
+	register("UnresolvedOperations", UnresolvedOperations{})
+	register("UnresolvedRuling", UnresolvedRuling{})
 	register("Campaign", campaigns.Campaign{})
 	register("CampaignTarget", campaigns.Target{})
 	register("TimelineEntry", campaigns.Event{})
@@ -1369,6 +1371,8 @@ var responseSchemas = map[string]map[string]any{
 	"POST /api/v1/jobs/{id}/approve":                    ref("Job"),
 	"POST /api/v1/jobs/{id}/cancel":                     ref("Job"),
 	"GET /api/v1/jobs/{id}/attempts":                    collection("Attempt"),
+	"GET /api/v1/unresolved":                            ref("UnresolvedOperations"),
+	"POST /api/v1/unresolved/{id}/ruling":               ref("UnresolvedRuling"),
 	"POST /api/v1/hosts/{id}/operations":                ref("Job"),
 	"GET /api/v1/campaigns":                             collection("Campaign"),
 	"POST /api/v1/campaigns":                            ref("Campaign"),
@@ -2086,6 +2090,20 @@ var requestSchemas = map[string]map[string]any{
 			"change_ticket": map[string]any{"type": "string", "description": "The ticket the change is carried out under; recorded with the approval."},
 		},
 		"required": []string{"approval_fingerprint"},
+	},
+	"POST /api/v1/unresolved/{id}/ruling": {
+		"type": "object",
+		"properties": map[string]any{
+			"kind": map[string]any{"type": "string",
+				"enum":        []string{"outcome_unknown", "applied_unverified"},
+				"description": "Which question is being answered. outcome_unknown is \"did it happen?\" - the agent came back from a restart to find an operation it did not live to see the end of. applied_unverified is \"did it hold?\" - the change was made and the verifier could not confirm it. They are never summed and a ruling on one says nothing about the other."},
+			"ruling": map[string]any{"type": "string",
+				"enum":        []string{"confirmed_applied", "confirmed_not_applied", "accepted_unknown"},
+				"description": "What the operator concluded. accepted_unknown is a decision to stop asking, which is still a decision with a name on it."},
+			"basis": map[string]any{"type": "string",
+				"description": "Why: what was read, where it was looked for. Required - a ruling without one is a screen being cleared."},
+		},
+		"required": []string{"kind", "ruling", "basis"},
 	},
 	"POST /api/v1/campaigns/{id}/pause":   reasonOnlyBody("Why the waves stop here; kept in the audit trail."),
 	"POST /api/v1/campaigns/{id}/resume":  reasonOnlyBody("Why the waves go on; kept in the audit trail."),
