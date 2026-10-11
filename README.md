@@ -52,6 +52,14 @@ docker compose up -d
 docker compose cp control-plane:/var/lib/flotestro/bootstrap-token .
 ```
 
+The directory you run that in becomes the deployment's home. The first start
+writes `deployment/deployment.id` there, and the panel's data lives in named
+volumes that are shared by every stack on the host - so that file is what tells
+a restart from a second copy of `compose.yaml` pointed at the same data. Keep
+the directory, and move it whole. A second, independent installation needs its
+own volume names, and the panel says so rather than starting on the first one's
+database.
+
 Open <http://localhost:8080>, sign in with the token, and add your first host.
 Every setting has a working default; to serve hosts on other machines, put your
 own address in `.env` — [`env.example`](docker/env.example) carries the three
