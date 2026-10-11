@@ -68,6 +68,13 @@ type SessionOptions struct {
 	OnSession func(established bool)
 	// StateDir is where the agent keeps what has to survive a restart.
 	StateDir string
+	// ReleaseResultOnSend is the host's own answer to "may a spooled result be
+	// dropped as soon as the send returns?". It comes from the agent's
+	// configuration file and never from the session: the relay terminates the
+	// session, and a relay that answered "yes" and then swallowed the result
+	// made the host discard the only durable copy of work it had already done.
+	// False - the default - keeps the answer until the panel says it holds it.
+	ReleaseResultOnSend bool
 
 	// gatewayURL is the gateway chosen for this one session.
 	gatewayURL string
@@ -553,7 +560,8 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 	// broken session would leave the job running for ever with the change made.
 	results := &resultDelivery{
 		send: send, log: opts.Log,
-		acknowledged: sessionConfig.GetTaskResultsAcknowledged(),
+		acknowledged: keepsResultsUntilAcknowledged(
+			sessionConfig.GetTaskResultsAcknowledged(), opts.ReleaseResultOnSend),
 	}
 	if opts.StateDir != "" {
 		// The spool of the process, not of this session: a result written by a
@@ -943,6 +951,20 @@ func newEnvelopeSigner(material tls.Certificate, hostID, relayID string, log *sl
 
 // stableOffset spreads the first heartbeat deterministically by machine-id, so
 // the same host always lands in the same place of the window.
+// keepsResultsUntilAcknowledged says whether a spooled answer waits for the
+// panel to claim it, rather than being dropped as soon as the send returns.
+//
+// Two voices, and only one of them may be trusted to weaken it. The session
+// says whether this panel acknowledges results at all, and a panel from
+// before the acknowledgement says no - a real case. But the relay terminates
+// that session, so "no" is also what a relay says when it wants the host to
+// throw away the only durable copy of work already carried out, before
+// dropping the answer itself. The host's own file is out of the relay's
+// reach, so the session may only ever add to the keeping, never take it away.
+func keepsResultsUntilAcknowledged(panelAcknowledges, hostReleasesOnSend bool) bool {
+	return panelAcknowledges || !hostReleasesOnSend
+}
+
 func stableOffset(machineID string, window time.Duration) time.Duration {
 	if window <= 0 {
 		return 0
