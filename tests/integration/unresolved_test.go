@@ -91,3 +91,46 @@ func TestTheUnresolvedScreenAnswersFromTheDatabase(t *testing.T) {
 		map[string]any{"kind": "outcome_unknown", "ruling": "accepted_unknown", "basis": "   "},
 		nil, http.StatusBadRequest)
 }
+
+// TestTheBadgeAgreesWithTheUnresolvedScreen asks the navigation's counter and
+// the screen it leads to in one run.
+//
+// The badge is a second query over the same rows, and a counter that
+// disagrees with its list teaches an operator to trust neither. The summary
+// answers with one number because the badge is a queue length; the screen
+// keeps the two questions apart. Both have to be the same rows.
+func TestTheBadgeAgreesWithTheUnresolvedScreen(t *testing.T) {
+	h := newHarness(t)
+
+	var screen struct {
+		Counts struct {
+			OutcomeUnknownOperations    int `json:"outcome_unknown_operations"`
+			AppliedUnverifiedOperations int `json:"applied_unverified_operations"`
+		} `json:"counts"`
+		Items []struct {
+			AttemptID string `json:"attempt_id"`
+		} `json:"items"`
+	}
+	h.get("/api/v1/unresolved", &screen)
+
+	var summary struct {
+		OperationsUnconfirmed *int `json:"operations_unconfirmed"`
+	}
+	h.get("/api/v1/fleet/summary", &summary)
+	if summary.OperationsUnconfirmed == nil {
+		t.Fatal("the summary carries no operations_unconfirmed, so the navigation has nothing to badge")
+	}
+
+	waiting := screen.Counts.OutcomeUnknownOperations + screen.Counts.AppliedUnverifiedOperations
+	if *summary.OperationsUnconfirmed != waiting {
+		t.Errorf("the badge says %d and the screen counts %d (%d unknown + %d unverified)",
+			*summary.OperationsUnconfirmed, waiting,
+			screen.Counts.OutcomeUnknownOperations, screen.Counts.AppliedUnverifiedOperations)
+	}
+
+	// The default page holds a hundred rows, so a shorter list is the whole
+	// list and has to be as long as the number above it.
+	if len(screen.Items) < 100 && len(screen.Items) != waiting {
+		t.Errorf("the screen lists %d rows and counts %d above them", len(screen.Items), waiting)
+	}
+}

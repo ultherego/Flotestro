@@ -1,5 +1,6 @@
 // The Polish translation of the interface.
 export const pl: Record<string, string> = {
+  "Required: a ruling without one is a screen being cleared.": "Wymagane: rozstrzygnięcie bez podstawy to czyszczenie ekranu, nie odpowiedź.",
   "Record the ruling": "Zapisz rozstrzygnięcie",
   "What you read, and where you looked.": "Co odczytałeś i gdzie sprawdzałeś.",
   "On what basis?": "Na jakiej podstawie?",
@@ -2795,6 +2796,7 @@ export const pl: Record<string, string> = {
   "Units to check afterwards": "Unity do sprawdzenia po zmianie",
   "Unknown": "Nieustalone",
   "Unknown checks": "Nieznane kontrole",
+  "Unconfirmed outcomes": "Wyniki bez potwierdzenia",
   "Unlock": "Odblokuj",
   "Unlock the account {uid}": "Odblokuj konto {uid}",
   "Unmask": "Odmaskuj",
@@ -3536,6 +3538,7 @@ export const pl: Record<string, string> = {
   "not yet loaded": "jeszcze nie wczytano",
   "note:": "notatka:",
   "nothing": "nic",
+  "nothing ages these out": "żadna z nich nie zniknie z czasem",
   "nothing more to place": "nic więcej do złożenia",
   "nothing read yet": "jeszcze nic nie odczytano",
   "nothing sent yet": "jeszcze nic nie wysłano",
@@ -3569,6 +3572,7 @@ export const pl: Record<string, string> = {
   "operation, e.g. job.create": "operacja, np. job.create",
   "operation, e.g. unit.restart": "operacja, np. unit.restart",
   "operation: any": "operacja: dowolna",
+  "operations nobody could confirm": "operacje bez potwierdzonego wyniku",
   "or idle": "lub bezczynność",
   "ordered by {creator}, approved by {approvers}": "zlecił {creator}, zatwierdził {approvers}",
   "origin unknown": "pochodzenie nieznane",

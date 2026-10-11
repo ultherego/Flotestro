@@ -336,6 +336,11 @@ func (s *Server) openAPI() map[string]any {
 	describe(schemas, "FleetSummary", "agents_unsupported",
 		"Visible hosts whose reported agent version speaks a protocol this panel does not. A host that reports "+
 			"no version, or a word in its place, is unknown and not counted.")
+	describe(schemas, "FleetSummary", "operations_unconfirmed",
+		"Operations on the visible hosts whose outcome nobody could confirm and nobody has ruled on, the queue "+
+			"GET /api/v1/unresolved lists. Nothing ages out of it. The screen keeps the two uncertainties apart - "+
+			"did it happen, did it hold - and this is their total, because it is the length of that queue. "+
+			"Missing for a reader without the right to read jobs.")
 	schemas["Problem"] = map[string]any{
 		"type":        "object",
 		"description": "The error answer. The code is stable and meant for programs; the message is for people.",
