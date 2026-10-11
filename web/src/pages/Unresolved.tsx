@@ -10,7 +10,7 @@ import type {
   UnresolvedRulingKind,
 } from "../lib/types";
 import { ErrorBox, Empty, Time } from "../components/ui";
-import { Actions, Card, Field, FieldGrid, PageHeader } from "../components/layout";
+import { Actions, Field, FieldGrid, PageHeader } from "../components/layout";
 import { useT } from "../i18n";
 
 /**
@@ -71,46 +71,60 @@ export default function Unresolved() {
       <PageHeader
         title={t("Needs confirmation")}
         description={t("Operations the fleet could not confirm. Nothing here disappears with time: an item leaves this list when somebody rules on it, and the ruling is recorded beside the task rather than in place of its outcome.")}
-      />
-
-      {counts && (
-        <div className="grid-two">
-          {(["outcome_unknown", "applied_unverified"] as UnresolvedKind[]).map((one) => {
-            const described = describeKind(one);
-            const operations =
-              one === "outcome_unknown"
-                ? counts.outcome_unknown_operations
-                : counts.applied_unverified_operations;
-            const hosts =
-              one === "outcome_unknown"
-                ? counts.outcome_unknown_hosts
-                : counts.applied_unverified_hosts;
-            return (
-              <Card key={one} title={t(described.title)}>
-                <p className="muted">{t(described.question)}</p>
-                {/* Two numbers, never one: a single total reads the same for
-                    one host with forty of these and forty hosts with one. */}
-                <div className="fp-chips" data-testid={`count-${one}`}>
-                  <span className={operations > 0 ? "badge warn" : "badge"}>
-                    {t("{n} operations", { n: operations })}
-                  </span>
-                  <span className={hosts > 0 ? "badge warn" : "badge"}>
-                    {t("on {n} hosts", { n: hosts })}
-                  </span>
-                </div>
+        actions={counts && (
+          // Beside the title, not in two cards above the table: the filter is
+          // three words and two numbers, and as cards it pushed the first row
+          // of the list a quarter of a screen down.
+          //
+          // Three buttons and not a total: the two questions ask for
+          // different work, so each names its own count. The badge in the
+          // navigation does add them, because that one is the length of a
+          // queue - a different question from this one.
+          <div className="segmented" role="group" aria-label={t("Which question to show")}>
+            <button
+              type="button"
+              className={kind === "" ? "active" : ""}
+              onClick={() => setKind("")}
+              aria-pressed={kind === ""}
+              data-testid="filter-both"
+            >
+              {t("Both")}
+            </button>
+            {(["outcome_unknown", "applied_unverified"] as UnresolvedKind[]).map((one) => {
+              const described = describeKind(one);
+              const operations =
+                one === "outcome_unknown"
+                  ? counts.outcome_unknown_operations
+                  : counts.applied_unverified_operations;
+              const hosts =
+                one === "outcome_unknown"
+                  ? counts.outcome_unknown_hosts
+                  : counts.applied_unverified_hosts;
+              return (
                 <button
+                  key={one}
                   type="button"
-                  className="secondary"
-                  onClick={() => setKind(kind === one ? "" : one)}
+                  className={kind === one ? "active" : ""}
+                  onClick={() => setKind(one)}
+                  aria-pressed={kind === one}
                   data-testid={`filter-${one}`}
+                  title={t(described.title)}
                 >
-                  {kind === one ? t("Show both") : t("Show only these")}
+                  {t(described.question)}{" "}
+                  <span className="fp-chips" data-testid={`count-${one}`}>
+                    <span className={operations > 0 ? "badge warn" : "badge"}>
+                      {t("{n} operations", { n: operations })}
+                    </span>
+                    <span className={hosts > 0 ? "badge warn" : "badge"}>
+                      {t("on {n} hosts", { n: hosts })}
+                    </span>
+                  </span>
                 </button>
-              </Card>
-            );
-          })}
-        </div>
-      )}
+              );
+            })}
+          </div>
+        )}
+      />
 
       {items.length === 0 ? (
         <Empty>
