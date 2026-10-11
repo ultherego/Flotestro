@@ -57,6 +57,7 @@ import { Identity } from "./pages/host/Identity";
 import { HostJobs } from "./pages/host/Jobs";
 import { HostAudit } from "./pages/host/Audit";
 import { Jobs } from "./pages/Jobs";
+import Unresolved from "./pages/Unresolved";
 import { JobPage } from "./pages/Job";
 import { Vulnerability } from "./pages/Vulnerability";
 import { Schedules as CampaignSchedules } from "./pages/Schedules";
@@ -197,6 +198,11 @@ export function App() {
       label: "Operations",
       items: [
         { to: "/jobs", label: "Jobs", icon: "jobs" },
+        // What the fleet could not confirm. Beside the jobs because that is
+        // what these are, and before the rest of the operations because an
+        // operator who has unconfirmed changes should read them before
+        // ordering more.
+        { to: "/unresolved", label: "Needs confirmation", icon: "jobs" },
         // What the fleet cannot be asked to do, and why. It stands at the head
         // of the operations because it is the question before any of them:
         // ordering work a host cannot carry out is refused, and this is where
@@ -370,6 +376,7 @@ export function App() {
               </Route>
               <Route path="/jobs" element={<Jobs />} />
               <Route path="/jobs/:id" element={<JobPage />} />
+              <Route path="/unresolved" element={<Unresolved />} />
               <Route path="/reads" element={<Reads />} />
               <Route path="/reads/:id" element={<Reads />} />
               {seesCampaigns && <Route path="/bulk" element={<Bulk />} />}
