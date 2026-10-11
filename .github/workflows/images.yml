@@ -783,7 +783,7 @@ jobs:
   #
   # Only then is a name a deployment reads pointed at the digest.
   promote:
-    name: Promote ${{ matrix.target }}
+    name: Promote the images
     needs: [context, images]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
@@ -795,20 +795,6 @@ jobs:
       contents: read
       packages: write
       statuses: read
-    strategy:
-      # Never in parallel and never past a failure: the names are moved least
-      # read first, and a second image racing ahead would publish a release
-      # whose first image stopped half way.
-      fail-fast: true
-      max-parallel: 1
-      matrix:
-        include:
-          - target: control-plane
-            image: flotestro-control-plane
-          - target: relay
-            image: flotestro-relay
-          - target: admin-tools
-            image: flotestro-admin-tools
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -868,130 +854,145 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Every image's digest, not this one's. The promotion was a matrix of
+      # three jobs until 11.10, which meant three approvals for one decision
+      # and - worse - the first image's names moved while the third had not
+      # been looked at. Four questions teach an approver to click without
+      # reading, and a release that moves one name and stops is a release
+      # nobody decided on.
       - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
-          name: digest-${{ matrix.target }}
+          pattern: digest-*
+          merge-multiple: true
           path: ${{ runner.temp }}/digests
-
-      - name: What this job is promoting
-        id: facts
-        env:
-          REGISTRY: ghcr.io
-        run: |
-          set -euo pipefail
-          read -r target image version digest < "$RUNNER_TEMP/digests/${{ matrix.target }}.txt"
-          if [ "$target" != "${{ matrix.target }}" ] || [ "$image" != "${{ matrix.image }}" ]; then
-            echo "::error::the digest artefact is about $target/$image and this job promotes ${{ matrix.target }}/${{ matrix.image }}" >&2
-            exit 1
-          fi
-          case "$digest" in sha256:*) ;; *) echo "::error::$digest is not a digest" >&2; exit 1 ;; esac
-          # The version the build recorded has to be the tag this run is on, or
-          # the artefact belongs to another release.
-          tag_version="${GITHUB_REF_NAME#v}"
-          if [ "$version" != "$tag_version" ]; then
-            echo "::error::the build recorded version $version and this run is on $tag_version" >&2
-            exit 1
-          fi
-          owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
-          repository="$REGISTRY/$owner/$image"
-          # The same order as the build wrote it, and for the same reason:
-          # least read first, so that a failure part way through stops short of
-          # the name most of the fleet follows.
-          promote="$repository:$version,$repository:sha-${commit:0:12}"
-          case "$version" in
-            *-*) ;;
-            *)   promote="$promote,$repository:${version%.*},$repository:latest" ;;
-          esac
-          {
-            echo "repository=$repository"
-            echo "digest=$digest"
-            echo "version=$version"
-            echo "promote=$promote"
-          } >> "$GITHUB_OUTPUT"
-          echo "promoting $repository@$digest as $promote"
 
       - uses: sigstore/cosign-installer@dc72c7d5c4d10cd6bcb8cf6e3fd625a9e5e537da # v3.7.0
 
-      - name: The candidate verifies as signed by the build of this tag
+      - name: Every image verifies as signed by the build of this tag
+        id: verified
+        # All three, before any name moves. This is the whole point of the
+        # job being one: a signature that does not verify on the third image
+        # must not find the first one already promoted.
         env:
-          REFERENCE: ${{ steps.facts.outputs.repository }}
-          DIGEST: ${{ steps.facts.outputs.digest }}
+          REGISTRY: ghcr.io
+          # The images this release is made of, written once. A digest
+          # artefact that is not on this list, or a name on the list with no
+          # artefact, stops the release: a release missing an image is not a
+          # release, and promoting whatever happened to be downloaded is how
+          # one goes out with two thirds of itself.
+          EXPECTED: control-plane relay admin-tools
         run: |
           set -euo pipefail
-          # The identity is constructed, not discovered. Taking the signing
-          # workflow out of this run's own token and verifying against it asks
-          # "was this signed by whatever signed it", which the run satisfies by
-          # existing. Built from the repository and the ref, it asks the
-          # question that matters: was this manifest signed by the build of
-          # this repository, on this tag.
+          owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          tag_version="${GITHUB_REF_NAME#v}"
           identity="https://github.com/$GITHUB_REPOSITORY/.github/workflows/images.yml@$GITHUB_REF"
-          if ! cosign verify \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-            --certificate-identity "$identity" \
-            "$REFERENCE@$DIGEST" > /dev/null; then
-            echo "::error title=Signature does not verify::$REFERENCE@$DIGEST does not verify as signed by $identity; no name was moved" >&2
-            exit 1
-          fi
-          echo "verified $REFERENCE@$DIGEST as signed by $identity"
+          found=""
+          : > "$RUNNER_TEMP/promote.tsv"
 
-      - name: The names a deployment reads are moved onto the verified digest
+          for target in $EXPECTED; do
+            file="$RUNNER_TEMP/digests/$target.txt"
+            if [ ! -s "$file" ]; then
+              echo "::error title=An image of this release is missing::no digest was published for $target; nothing was promoted" >&2
+              exit 1
+            fi
+            read -r recorded image version digest < "$file"
+            if [ "$recorded" != "$target" ]; then
+              echo "::error::the artefact named $target.txt is about $recorded" >&2
+              exit 1
+            fi
+            case "$digest" in sha256:*) ;; *) echo "::error::$digest is not a digest" >&2; exit 1 ;; esac
+            if [ "$version" != "$tag_version" ]; then
+              echo "::error::the build of $target recorded version $version and this run is on $tag_version" >&2
+              exit 1
+            fi
+            repository="$REGISTRY/$owner/$image"
+            if ! cosign verify \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              --certificate-identity "$identity" \
+              "$repository@$digest" > /dev/null; then
+              echo "::error title=Signature does not verify::$repository@$digest does not verify as signed by $identity; no name was moved" >&2
+              exit 1
+            fi
+            echo "verified $repository@$digest"
+
+            # The same order the build wrote: least read first, so a failure
+            # part way through stops short of the name most of the fleet
+            # follows.
+            promote="$repository:$version,$repository:sha-${commit:0:12}"
+            case "$version" in
+              *-*) ;;
+              *)   promote="$promote,$repository:${version%.*},$repository:latest" ;;
+            esac
+            printf '%s\t%s\t%s\n' "$repository" "$digest" "$promote" >> "$RUNNER_TEMP/promote.tsv"
+            found="$found $target"
+          done
+
+          # And nothing beyond the list: an artefact from another build in the
+          # same run would otherwise be promoted without ever being named.
+          for file in "$RUNNER_TEMP"/digests/*.txt; do
+            [ -e "$file" ] || continue
+            name="$(basename "$file" .txt)"
+            case " $EXPECTED " in
+              *" $name "*) ;;
+              *) echo "::error::a digest was published for $name, which this release does not name" >&2
+                 exit 1 ;;
+            esac
+          done
+          echo "every image of this release verifies:$found"
+
+      - name: The names a deployment reads are moved onto the verified digests
         # Nothing is rebuilt to promote: every name is pointed at the one
         # manifest that was built, signed and verified. Each move is read back
         # before the next starts, because a copy that had re-serialised the
         # manifest would be a name pointing at a digest nothing verified.
         #
         # The window that remains cannot be closed here: a registry has no way
-        # to move four names in one transaction, so a run that dies between two
-        # of them leaves some names on the new release and some on the one
+        # to move these names in one transaction, so a run that dies between
+        # two of them leaves some names on the new release and some on the one
         # before. The order bounds what that costs - the worst case is a moved
         # version tag and an unmoved latest, which is a fleet still on the old
         # release and an operator who can pin the new one. The names that did
         # move are printed, because that is the state somebody has to reason
-        # about; a re-run will not repair it, pointing the missing names at the
-        # digest in the error will.
-        env:
-          REFERENCE: ${{ steps.facts.outputs.repository }}
-          DIGEST: ${{ steps.facts.outputs.digest }}
-          PROMOTE: ${{ steps.facts.outputs.promote }}
+        # about; a re-run will not repair it, pointing the missing names at
+        # the digest in the error will.
         run: |
           set -euo pipefail
-          IFS=',' read -r -a wanted <<< "$PROMOTE"
           moved=()
           stop() {
             echo "::error title=The tags moved only part of the way::$1" >&2
             if [ ${#moved[@]} -gt 0 ]; then
-              echo "these already point at $DIGEST: ${moved[*]}" >&2
+              echo "these already point at their verified digest: ${moved[*]}" >&2
             else
               echo "no tag moved; the registry still serves the release before this one" >&2
             fi
             exit 1
           }
-          for tag in "${wanted[@]}"; do
-            [ -n "$tag" ] || continue
-            docker buildx imagetools create --tag "$tag" "$REFERENCE@$DIGEST" \
-              || stop "$tag could not be pointed at $DIGEST"
-            published="sha256:$(docker buildx imagetools inspect --raw "$tag" \
-              | sha256sum | cut -d' ' -f1)"
-            if [ "$published" != "$DIGEST" ]; then
-              stop "$tag now serves $published and not the verified $DIGEST"
-            fi
-            moved+=("$tag")
-            echo "$tag -> $DIGEST"
-          done
+          while IFS=$'\t' read -r reference digest promote; do
+            [ -n "$reference" ] || continue
+            IFS=',' read -r -a wanted <<< "$promote"
+            for tag in "${wanted[@]}"; do
+              [ -n "$tag" ] || continue
+              docker buildx imagetools create --tag "$tag" "$reference@$digest" \
+                || stop "$tag could not be pointed at $digest"
+              published="sha256:$(docker buildx imagetools inspect --raw "$tag" \
+                | sha256sum | cut -d' ' -f1)"
+              if [ "$published" != "$digest" ]; then
+                stop "$tag now serves $published and not the verified $digest"
+              fi
+              moved+=("$tag")
+              echo "$tag -> $digest"
+            done
+          done < "$RUNNER_TEMP/promote.tsv"
           {
-            echo "### ${REFERENCE##*/}"
+            echo '### Images'
             echo
-            echo 'Moved onto the verified digest:'
+            echo 'Moved onto their verified digests:'
             echo
             echo '```'
-            echo "$DIGEST"
             printf '  %s\n' "${moved[@]}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # What an operator actually needs out of a release: three lines to paste.
-  # The job exists because a digest that has to be fished out of three other
-  # jobs' logs is a digest nobody pins.
   pins:
     name: The digests to pin
     # After the promotion, not after the build: the lines an operator pastes
