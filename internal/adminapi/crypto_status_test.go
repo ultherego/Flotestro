@@ -33,7 +33,16 @@ func TestWhatTheCryptoBlockSaysAboutWorkLeftOver(t *testing.T) {
 	if strings.Contains(line, "the rewrap runs in the background") {
 		t.Fatalf("a version no key opens is described as work in progress: %q", line)
 	}
-	for _, part := range []string{"cannot be opened by any key", "crypto verify-secrets", "restore them from a backup"} {
+	// The wording was "restore them from a backup" until 11.10. It said more
+	// than the panel knows: no key *this installation holds* opens them, which
+	// is not the same as the data being gone - the key may be in a backup, or
+	// on the replica that wrote the versions. Those have different answers,
+	// and the operator picks between them. "at least", because a pass that
+	// filled its batch with damaged rows never read what was behind them.
+	for _, part := range []string{
+		"at least", "cannot be opened by any key", "crypto verify-secrets",
+		"The key may still exist", "look for the key before restoring",
+	} {
 		if !strings.Contains(line, part) {
 			t.Fatalf("the line does not say %q: %q", part, line)
 		}

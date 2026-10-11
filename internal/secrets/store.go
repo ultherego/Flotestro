@@ -624,8 +624,7 @@ func (s *Store) RewrapBatch(ctx context.Context, limit int) (moved, remaining, u
 		// what it could and still has to say that some rows cannot be moved at
 		// all. The pass is not repeated over them for ever, because remaining
 		// counts them and the caller stops when nothing moves.
-		return moved, remaining, unbound, fmt.Errorf("%w: %d versions in this batch cannot be opened by any key the panel holds",
-			ErrCorruptedVersion, damaged)
+		return moved, remaining, unbound, &CorruptedBatch{Count: damaged}
 	}
 	return moved, remaining, unbound, nil
 }
