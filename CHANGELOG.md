@@ -4,6 +4,48 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [semantic versioning](https://semver.org/). Dates are the
 day the tag was published.
 
+## [Unreleased]
+
+### Security
+
+- A host keeps the only copy of a task's answer until the panel says it holds
+  it, and the session can no longer talk it out of that. The panel tells the
+  agent whether it acknowledges results; an agent told no released the answer
+  as soon as the send returned. A relay terminates that session, so a relay
+  could say no, let the send through, drop the answer, and the host would have
+  discarded work it had already carried out - no forged acknowledgement, no
+  key, nothing touched. The answer now comes from the agent's own file
+  (`agent.result_acknowledgement`, `required` unless written otherwise), and
+  the session may only ever make it stricter.
+- An acknowledgement must name the key the answer was performed under. The
+  comparison was made only when both sides carried one, which turned an empty
+  field into a way past it - and that field is filled by the relay. The panel
+  echoes the key of the answer unconditionally, so an acknowledgement without
+  one is not an older panel; it is a field somebody removed.
+- A task's record of "what this host held before the change" is written once.
+  It was written before every execution and overwrote the previous record, so
+  a second execution under the same task identifier replaced the baseline with
+  the state the first one left behind - and the original value stopped being a
+  value the rollback was allowed to set. Nothing was escalated; the host
+  simply could not be put back.
+
+### Fixed
+
+- The count of secret versions no key can open is the count of versions found
+  damaged, not the count of versions still waiting to be rewrapped. Those are
+  different numbers: 200 damaged rows followed by one good one were reported
+  as 201, and what an operator does with that number is restore that many from
+  a backup. The line also stops claiming more than the panel knows - the key
+  may still exist, in a backup or on the replica that wrote the versions - and
+  says to look for it before restoring.
+
+### Changed
+
+- A secret version this installation cannot open makes the cryptographic block
+  of the status screen a failure. It was a note on an otherwise healthy block,
+  so a screen whose whole job is to say whether the installation is sound said
+  yes while part of the fleet's configuration was unreadable.
+
 ## [0.62.1] - 2026-10-09
 
 A day of reading what the product says when something is wrong, and finding
