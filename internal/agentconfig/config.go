@@ -56,6 +56,17 @@ type Agent struct {
 	// The "read_only" mode does not start the helper: the host is then
 	// observed rather than managed.
 	Mode string `yaml:"mode"`
+	// Whether a spooled result may be released on a successful send, or only
+	// when the panel says it holds it.
+	//
+	// The session used to decide this on its own: the panel sets
+	// task_results_acknowledged, and an agent told false released the answer
+	// as soon as the send returned. The relay terminates that session, so a
+	// relay that set the field false and then dropped the answer made the
+	// host throw away the only durable copy of work it had already carried
+	// out - without forging anything. The setting lives here, where the
+	// session cannot reach it.
+	ResultAck string `yaml:"result_acknowledgement"`
 
 	MaxConcurrentTasks int           `yaml:"-"`
 	InventoryInterval  time.Duration `yaml:"-"`
@@ -72,6 +83,18 @@ const (
 	ModeReadOnly = "read_only"
 )
 
+// What releases a spooled result.
+const (
+	// ResultAckRequired keeps the answer until the panel says it holds it.
+	// The default, and the only value that survives a lying relay.
+	ResultAckRequired = "required"
+	// ResultAckOnSend releases it on a successful send, which is the contract
+	// a panel from before the acknowledgement was written to. An operator who
+	// runs an agent of this version against such a panel writes this down
+	// themselves; nothing on the wire can choose it.
+	ResultAckOnSend = "on_send"
+)
+
 // The configuration error codes.
 var (
 	ErrOpen             = errors.New("config_open")
@@ -82,6 +105,7 @@ var (
 	ErrGatewayDuplicate = errors.New("config_gateway_duplicate")
 	ErrTaskLimit        = errors.New("config_task_limit_out_of_range")
 	ErrMode             = errors.New("config_mode_invalid")
+	ErrResultAck        = errors.New("config_result_acknowledgement_invalid")
 	ErrStateDir         = errors.New("config_state_dir_invalid")
 	ErrHelperSocket     = errors.New("config_helper_socket_invalid")
 	ErrConnectTimeout   = errors.New("config_connect_timeout_out_of_range")
@@ -104,6 +128,7 @@ func Defaults() Config {
 			InventoryInterval:  15 * time.Minute,
 			MaxConcurrentTasks: 2,
 			Mode:               ModeFull,
+			ResultAck:          ResultAckRequired,
 		},
 		Helper: Helper{Socket: "/run/flotestro/helper.sock"},
 	}
@@ -166,6 +191,9 @@ func fillIn(cfg *Config) {
 	} else {
 		cfg.Agent.MaxConcurrentTasks = *cfg.Agent.MaxRaw
 	}
+	if cfg.Agent.ResultAck == "" {
+		cfg.Agent.ResultAck = defaults.Agent.ResultAck
+	}
 	if cfg.Agent.Mode == "" {
 		cfg.Agent.Mode = defaults.Agent.Mode
 	}
@@ -218,6 +246,15 @@ func duration(text string, fallback time.Duration) (time.Duration, error) {
 func CheckRuntime(c Config) error {
 	if c.Agent.Mode != ModeFull && c.Agent.Mode != ModeReadOnly {
 		return fmt.Errorf("%w: %s", ErrMode, c.Agent.Mode)
+	}
+	// Unset is the strict value, the way an unset helper bootstrap policy is
+	// "pinned": a configuration that never went through the file loader - an
+	// override, a host with no file at all - must not become the weaker of
+	// the two by saying nothing. Only the word on_send releases an answer,
+	// and only when somebody wrote it down.
+	if c.Agent.ResultAck != "" &&
+		c.Agent.ResultAck != ResultAckRequired && c.Agent.ResultAck != ResultAckOnSend {
+		return fmt.Errorf("%w: %s", ErrResultAck, c.Agent.ResultAck)
 	}
 	if c.Agent.MaxConcurrentTasks < 1 || c.Agent.MaxConcurrentTasks > 16 {
 		return fmt.Errorf("%w: %d", ErrTaskLimit, c.Agent.MaxConcurrentTasks)

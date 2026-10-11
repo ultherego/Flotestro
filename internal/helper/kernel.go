@@ -3,6 +3,7 @@ package helper
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -335,7 +336,19 @@ func kernelResponse(snapshot kernel.Snapshot, message string,
 // "what was there" from "whatever the caller likes".
 var sysctlBeforeDir = "/var/lib/flotestro-helper/sysctl-before"
 
-// recordSysctlBefore writes down the values of one task's keys.
+// recordSysctlBefore writes down the values of one task's keys, once.
+//
+// Once is the whole point. This used to overwrite, and it is called before
+// every execution - so a second execution under the same task identifier
+// wrote down the state the first one had left behind. The record is what the
+// capability binding accepts as "the value this host held before the change",
+// so after that second write the original value was no longer a value the
+// rollback was allowed to set, and the way back was gone. Nothing was
+// escalated; the host simply could not be put back.
+//
+// A record that is already there is therefore kept and the write is not an
+// error: the task's baseline was taken when the task first ran, and that is
+// the one the rollback needs.
 func recordSysctlBefore(taskID string, before map[string]string) error {
 	if err := os.MkdirAll(sysctlBeforeDir, 0o700); err != nil {
 		return err
@@ -344,7 +357,22 @@ func recordSysctlBefore(taskID string, before map[string]string) error {
 	if err != nil {
 		return err
 	}
-	return writeKernelFile(sysctlBeforePath(taskID), string(encoded)+"\n", 0o600)
+	path := sysctlBeforePath(taskID)
+	// O_EXCL rather than "read it first and write if empty": two executions of
+	// one task can be in flight at once, and the check and the write have to
+	// be the same step.
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := file.WriteString(string(encoded) + "\n"); err != nil {
+		file.Close()
+		return err
+	}
+	return file.Close()
 }
 
 // SysctlBefore answers what this host held before the change of that task, or

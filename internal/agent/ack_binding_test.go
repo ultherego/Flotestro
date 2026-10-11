@@ -85,20 +85,40 @@ func TestAnAcknowledgementOfNothingIsNotARefusal(t *testing.T) {
 	}
 }
 
-// A half with no key cannot be told apart this way, and refusing there would
-// strand every answer of a host whose spool predates this: the comparison is
-// made when both sides carry a key, and the attempt identifier is all there is
-// otherwise.
-func TestAnAcknowledgementWithoutAKeyStillFreesTheAnswer(t *testing.T) {
+// An answer spooled without a key cannot be told apart by one, and refusing
+// there would strand every answer of a host whose spool predates the key: the
+// attempt identifier is all there is for those.
+//
+// An answer that carries one is a different case, and it changed on 11.10.
+// The comparison used to be made only when *both* sides carried a key, which
+// made an absent key on the acknowledgement a way past it - and the field is
+// filled by the relay. The panel does not have that excuse: it echoes
+// result.GetIdempotencyKey() unconditionally (agent_service.go:822), so an
+// acknowledgement with no key, for an answer that has one, is not an older
+// half. It is a field somebody took out. The spool is the only durable copy
+// of work already carried out on the host, so it is refused.
+func TestWhatAnAcknowledgementWithoutAKeyFreesAndWhatItDoesNot(t *testing.T) {
 	for _, c := range []struct {
 		name     string
 		spooled  string
 		acked    string
 		expected int
+		refused  bool
+		why      string
 	}{
-		{"neither carries one", "", "", 0},
-		{"the answer has none", "", "operation-a", 0},
-		{"the acknowledgement has none", "operation-a", "", 0},
+		{
+			name: "neither carries one", spooled: "", acked: "", expected: 0,
+			why: "an older half on both sides; the attempt identifier is all there is",
+		},
+		{
+			name: "the answer has none", spooled: "", acked: "operation-a", expected: 0,
+			why: "nothing to compare the panel's key against",
+		},
+		{
+			name: "the acknowledgement has none", spooled: "operation-a", acked: "",
+			expected: 1, refused: true,
+			why: "the panel echoes the key of the answer; an empty one came from somewhere else",
+		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			spool := openResultSpool(t, t.TempDir(), ResultSpoolSize, ResultSpoolBytes)
@@ -106,12 +126,16 @@ func TestAnAcknowledgementWithoutAKeyStillFreesTheAnswer(t *testing.T) {
 				TaskId: "attempt-1", IdempotencyKey: c.spooled}); err != nil {
 				t.Fatal(err)
 			}
-			if err := spool.Acknowledge(&agentv1.TaskResultAck{
-				TaskId: "attempt-1", IdempotencyKey: c.acked}); err != nil {
-				t.Fatalf("the acknowledgement was refused: %v", err)
+			err := spool.Acknowledge(&agentv1.TaskResultAck{
+				TaskId: "attempt-1", IdempotencyKey: c.acked})
+			switch {
+			case c.refused && err == nil:
+				t.Errorf("the acknowledgement was taken and it should have been refused: %s", c.why)
+			case !c.refused && err != nil:
+				t.Errorf("the acknowledgement was refused (%v) and it should have been taken: %s", err, c.why)
 			}
 			if spool.Len() != c.expected {
-				t.Errorf("the spool holds %d answers, want %d", spool.Len(), c.expected)
+				t.Errorf("the spool holds %d answers, want %d: %s", spool.Len(), c.expected, c.why)
 			}
 		})
 	}

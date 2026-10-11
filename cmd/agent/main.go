@@ -240,6 +240,8 @@ func main() {
 		// directory, so a broken session costs a second delivery rather than a hole
 		// in the host's chart.
 		StateDir: *stateDir,
+		// From the file on this host, never from the session.
+		ReleaseResultOnSend: cfg.Agent.ResultAck == agentconfig.ResultAckOnSend,
 	}); err != nil {
 		// A decommission is the panel ending this host's membership: the helper has
 		// wiped the identity and disabled the service, and the process leaves

@@ -804,6 +804,25 @@ func (s *Server) cryptoStatus(ctx context.Context) statusBlock {
 	if report.Stale != "" {
 		return statusFailed("this replica is behind the installation record: "+report.Stale, facts)
 	}
+	return cryptoVerdict(report, facts)
+}
+
+// cryptoVerdict turns a report this panel has already read into the block.
+//
+// A version this installation cannot open is not a note on an otherwise
+// healthy block. It used to be one: ok stayed true and the sentence went into
+// Attention, so a screen whose whole job is to say whether the installation
+// is sound said yes while part of the fleet's configuration was unreadable
+// here.
+//
+// What the panel knows is that no key it holds opens these versions. It does
+// not know the data is gone: the key may be in a backup, or on the replica
+// that wrote them. The block says false either way, because both are states
+// an operator has to act on, and the line says which question to ask first.
+func cryptoVerdict(report cryptostate.Report, facts map[string]any) statusBlock {
+	if report.UnreadableVersions > 0 {
+		return statusFailed(cryptoAttention(report), facts)
+	}
 	block := statusOK(facts)
 	block.Attention = cryptoAttention(report)
 	return block
@@ -818,9 +837,10 @@ func (s *Server) cryptoStatus(ctx context.Context) statusBlock {
 func cryptoAttention(report cryptostate.Report) string {
 	switch {
 	case report.UnreadableVersions > 0:
-		return strconv.Itoa(report.UnreadableVersions) +
+		return "at least " + strconv.Itoa(report.UnreadableVersions) +
 			" secret versions cannot be opened by any key this panel holds; the rewrap leaves them as they are, " +
-			"and crypto verify-secrets names them. Waiting does not clear this: restore them from a backup"
+			"and crypto verify-secrets names them. Waiting does not clear this. The key may still exist - in a " +
+			"backup, or on the replica that wrote them - so look for the key before restoring the secrets"
 	case report.PendingRewrap > 0:
 		return strconv.Itoa(report.PendingRewrap) +
 			" secret versions are still on another key or in the old form; the rewrap runs in the background"

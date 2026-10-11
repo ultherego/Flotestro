@@ -51,6 +51,29 @@ var (
 	ErrVersionNotBound = errors.New("the stored version of this secret is not bound to its row")
 )
 
+// CorruptedBatch is what a rewrap pass returns when some of the rows it read
+// cannot be opened by any key the panel holds. It carries how many, because
+// the caller reports that number to the operator and had no way to learn it:
+// the count lived in the text of the error, and the status screen used the
+// number of rows still to be rewrapped instead. Those are different things -
+// 200 damaged rows followed by one good one made the panel say 201 - and the
+// operator's answer to the number is "restore that many from a backup".
+type CorruptedBatch struct {
+	// Count is how many rows of this pass no key opened. It is what the pass
+	// saw, not what the table holds: a pass that filled its batch with
+	// damaged rows says nothing about the rows behind them.
+	Count int
+}
+
+func (e *CorruptedBatch) Error() string {
+	return fmt.Sprintf("%s: %d versions in this batch cannot be opened by any key the panel holds",
+		ErrCorruptedVersion, e.Count)
+}
+
+// Unwrap keeps errors.Is(err, ErrCorruptedVersion) true for every caller that
+// only asks what kind of failure it was.
+func (e *CorruptedBatch) Unwrap() error { return ErrCorruptedVersion }
+
 var secretName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{1,62}$`)
 
 // ValidateName checks the name of a secret.

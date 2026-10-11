@@ -290,3 +290,35 @@ func TestTheModeAnOverrideGivesIsChecked(t *testing.T) {
 		t.Error("Check accepted a configuration with no schema version")
 	}
 }
+
+// Saying nothing has to mean the strict answer. A configuration reaches
+// CheckRuntime by two roads - the file loader, which fills the defaults, and
+// an override on a host with no file at all, which does not - and on the
+// second road an empty field is the whole of what is known. If that counted
+// as "release the answer on send", a host without a configuration file would
+// be the one a lying relay could rob, which is the opposite of what the
+// setting is for.
+func TestAnUnwrittenResultAcknowledgementIsTheStrictOne(t *testing.T) {
+	cfg := Defaults()
+	if cfg.Agent.ResultAck != ResultAckRequired {
+		t.Errorf("the default is %q, want %q", cfg.Agent.ResultAck, ResultAckRequired)
+	}
+
+	// An override that names nothing is accepted, and it is not on_send.
+	bare := cfg
+	bare.Agent.ResultAck = ""
+	if err := CheckRuntime(bare); err != nil {
+		t.Errorf("a configuration that names no acknowledgement policy was refused: %v", err)
+	}
+	if bare.Agent.ResultAck == ResultAckOnSend {
+		t.Error("an unwritten policy reads as on_send, which would release answers on a host with no file")
+	}
+
+	// A word nobody recognises is refused rather than guessed at: a typo
+	// that silently became either value is the failure this avoids.
+	wrong := cfg
+	wrong.Agent.ResultAck = "requird"
+	if err := CheckRuntime(wrong); err == nil {
+		t.Error("a misspelled policy was accepted")
+	}
+}

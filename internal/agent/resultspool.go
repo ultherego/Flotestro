@@ -321,15 +321,27 @@ func (s *ResultSpool) Acknowledge(ack *agentv1.TaskResultAck) error {
 		if entry.taskID != ack.GetTaskId() {
 			continue
 		}
-		// An answer spooled without a key cannot be told apart this way, and a
-		// panel that echoes none leaves nothing to compare: both are the shape
-		// of an older half, and the attempt identifier is all there is.
-		if entry.idempotencyKey != "" && ack.GetIdempotencyKey() != "" &&
+		// An answer spooled without a key cannot be told apart this way: it is
+		// the shape of an older half, and the attempt identifier is all there
+		// is. An answer that has one is a different matter, and the
+		// acknowledgement has to name it.
+		//
+		// Both sides used to have to carry a key for the comparison to happen
+		// at all, which made an empty key a way past it - and the relay fills
+		// that field. A panel that echoes nothing is now refused rather than
+		// believed: it cannot be told from a relay that chose to echo
+		// nothing, and the spool is the only durable copy of work already
+		// carried out on the host.
+		if entry.idempotencyKey != "" &&
 			entry.idempotencyKey != ack.GetIdempotencyKey() {
+			named := ack.GetIdempotencyKey()
+			if named == "" {
+				named = "no key at all"
+			}
 			return fmt.Errorf(
 				"the answer held for the attempt %s was performed under %s and the "+
 					"acknowledgement names %s",
-				entry.taskID, entry.idempotencyKey, ack.GetIdempotencyKey())
+				entry.taskID, entry.idempotencyKey, named)
 		}
 		s.forget(entry.taskID)
 		return nil

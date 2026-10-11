@@ -21,6 +21,9 @@ agent:
   inventory_interval: "{{ flotestro_agent_inventory_interval }}"
   max_concurrent_tasks: {{ flotestro_agent_max_concurrent_tasks }}
   mode: "{{ flotestro_agent_mode }}"
+{% if flotestro_agent_result_acknowledgement != "required" %}
+  result_acknowledgement: "{{ flotestro_agent_result_acknowledgement }}"
+{% endif %}
 
 helper:
   socket: "/run/flotestro/helper.sock"

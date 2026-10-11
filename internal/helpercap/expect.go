@@ -1316,9 +1316,23 @@ func boundSysctl(got, want, before map[string]string) error {
 				key, got[key], wanted, was))
 		}
 	}
-	// A rollback puts back every key the change touched, and a request that
-	// mixes the two - some keys back, some to the new value - is neither
-	// operation.
+	// A request that mixes the two - some keys back, some to the new value -
+	// is neither operation and is refused.
+	//
+	// What is *not* required is that the request name every key the payload
+	// does. This read "a rollback puts back every key the change touched"
+	// until 11.10, and the code never enforced it: the loop walks the keys of
+	// the request. The looser rule is the right one, because a change may
+	// itself have named a subset and its baseline then holds that subset -
+	// but the sentence promised a completeness nothing here provides, and an
+	// external review read it as a defect in the code rather than in the
+	// comment.
+	//
+	// The binding authorizes values, one key at a time; it does not undertake
+	// that an operation is undone in full. Every value in a partial rollback
+	// is one this capability already authorizes, so nothing is escalated by
+	// it. Whether the whole of a change is put back is the campaign's
+	// business, and it is answered where the campaign reports its targets.
 	//
 	// Which of the two it is cannot be read off the first key. A key whose
 	// prior value is already the value the panel asked for satisfies both

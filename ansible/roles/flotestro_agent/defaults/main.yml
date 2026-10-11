@@ -43,6 +43,13 @@ flotestro_agent_tags: []
 flotestro_agent_inventory_interval: 15m
 flotestro_agent_max_concurrent_tasks: 2
 flotestro_agent_mode: full
+# What releases the copy of a task's answer the host keeps for a resend:
+# "required" waits for the panel to say it holds it, "on_send" drops it as
+# soon as the send returns. Only set on_send against a panel older than the
+# acknowledgement; the line is left out of the file entirely for the default,
+# because an absent entry is the strict value and that is the shape a fresh
+# install has.
+flotestro_agent_result_acknowledgement: required
 
 # The administrative token for ordering the enrollment. Given from outside
 # (a vault, a CI environment variable) and never recorded on the host.

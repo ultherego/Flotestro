@@ -36,6 +36,20 @@ agent:
   # full - a managed host; read_only - a host that is only observed: the
   # agent reports facts and carries out no change.
   mode: "full"
+  # What releases the copy of a task's answer this host keeps for a resend.
+  #
+  #   required (the default, and what an absent entry means)
+  #       the answer is kept until the panel says it holds it
+  #   on_send
+  #       the answer is dropped as soon as the send returns
+  #
+  # Write on_send only when this agent talks to a panel older than the
+  # acknowledgement, which otherwise leaves every answer spooled for ever.
+  # The session carries the same question and the agent no longer takes the
+  # weaker answer from it: a relay terminates that session, and one that said
+  # "this panel acknowledges nothing" and then dropped the answer made the
+  # host discard the only durable copy of work it had already carried out.
+  #result_acknowledgement: "required"
 
 helper:
   socket: "/run/flotestro/helper.sock"

@@ -858,13 +858,28 @@ func (r *Runtime) Rewrap(ctx context.Context) {
 			if ctx.Err() == nil {
 				r.log.Error("rewrapping the secret store stopped; it resumes at the next start", "err", err, "moved", total)
 			}
-			if errors.Is(err, secrets.ErrCorruptedVersion) && moved == 0 {
+			var corrupted *secrets.CorruptedBatch
+			if errors.As(err, &corrupted) && moved == 0 {
 				// A pass that read these rows, moved none of them and said they
 				// are damaged: no key this panel holds opens them, so they are
 				// not a backlog that waiting clears. The status screen said "the
 				// rewrap runs in the background" about them, which sent the
 				// operator away to wait for something that had already happened.
-				unreadable = remaining
+				//
+				// What is counted is the rows this pass found damaged, not the
+				// rows left to rewrap. Those are different numbers: a batch
+				// made entirely of damaged rows leaves every good row behind
+				// it still unrewrapped, and "remaining" counted those too - so
+				// 200 damaged versions followed by one good one were reported
+				// as 201 unreadable, and the operator was told to restore one
+				// secret that was never broken.
+				//
+				// It is a floor rather than an exact count when the pass filled
+				// its batch: rows behind a full batch of damaged ones were
+				// never read. Saying fewer than there are beats saying more
+				// than there are, because the operator's answer to this number
+				// is how much to restore from a backup.
+				unreadable = corrupted.Count
 			}
 			if moved == 0 {
 				r.noteUnreadable(unreadable)
