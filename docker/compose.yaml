@@ -36,6 +36,11 @@ services:
 
     volumes:
       - shared_secrets:/run/flotestro
+      # This deployment's half of the pairing that says the volumes above are
+      # its own. Created empty by the runtime when it is not there, like
+      # ./secrets - and a copy of compose.yaml alone does not bring it along,
+      # which is the whole point.
+      - ./deployment:/deployment
       # Read-only, and created empty by the runtime when it is not there.
       - ./secrets:/import:ro,z
       # The backup pair lands here, written by a container running as 65532.
@@ -46,6 +51,78 @@ services:
       - -euc
       - |
         umask 077
+        #==================================================================#
+        #     IS THIS DEPLOYMENT THE ONE THESE VOLUMES BELONG TO?          #
+        #==================================================================#
+        # Measured on 11.10: a copy of compose.yaml in a second directory,
+        # started with its own project name, ran this init over the shared
+        # secrets, started a second PostgreSQL on the live data directory and
+        # ran the migrations - and the only thing that stopped it was a port
+        # that happened to be taken. The first PostgreSQL then shut itself
+        # down immediately ("data directory lock file is invalid"), which is
+        # its defence against corruption and is also an outage of a running
+        # installation.
+        #
+        # The volume names are fixed and carry no project prefix, so a second
+        # deployment reaches the same data however it is named: -p does not
+        # separate volumes, only containers. The refusal therefore cannot be
+        # based on the project, the directory or the container - all three
+        # are copied or invented freely.
+        #
+        # It is based on a pairing instead. The deployment and the volumes
+        # each hold the same token, written together the first time this runs.
+        # A restart finds both and matches. An upgrade finds both and
+        # matches. A directory moved whole carries its half with it. A copied
+        # compose.yaml in a fresh directory has no half at all, and that is
+        # the one case refused - before the secrets, the migrations and the
+        # database.
+        mine=/deployment/deployment.id
+        theirs=/run/flotestro/deployment.id
+        if [ -s "$$theirs" ] && [ ! -s "$$mine" ]; then
+          echo "REFUSING TO START: these volumes already belong to another deployment." >&2
+          echo >&2
+          echo "The volumes flotestro-state, flotestro-postgres and flotestro-secrets" >&2
+          echo "hold an installation, and this directory has no record of it. Volume" >&2
+          echo "names carry no project prefix, so a copy of compose.yaml started here" >&2
+          echo "would not be a second installation: it would be this one, with a" >&2
+          echo "second PostgreSQL on its data and a second control plane on its state." >&2
+          echo >&2
+          echo "If you meant a SEPARATE installation, give it volumes of its own:" >&2
+          echo "  edit the volumes: block at the end of compose.yaml and change the" >&2
+          echo "  three name: entries, then start it again." >&2
+          echo >&2
+          echo "If you meant to MOVE or re-create this deployment, bring its record" >&2
+          echo "with it:" >&2
+          echo "  mkdir -p ./deployment && docker run --rm -v flotestro-secrets:/v \\" >&2
+          echo "    busybox cat /v/deployment.id > ./deployment/deployment.id" >&2
+          echo >&2
+          echo "If you meant a second REPLICA of this installation, it shares the" >&2
+          echo "database and not these volumes: see the replica section of the" >&2
+          echo "documentation, and give it its own FLOTESTRO_GATEWAY_ID." >&2
+          exit 1
+        fi
+        if [ -s "$$mine" ] && [ -s "$$theirs" ] && [ "$$(cat "$$mine")" != "$$(cat "$$theirs")" ]; then
+          echo "REFUSING TO START: this directory and these volumes name different deployments." >&2
+          echo "  this directory: $$(cat "$$mine")" >&2
+          echo "  the volumes:    $$(cat "$$theirs")" >&2
+          echo "One of the two was copied from somewhere else. Nothing here can say" >&2
+          echo "which, and starting would put this deployment on another one's data." >&2
+          exit 1
+        fi
+        # Fresh volumes, or an installation that predates this check: write the
+        # pairing now, from whichever half exists. Both halves absent is an
+        # ordinary first start.
+        if [ ! -s "$$theirs" ]; then
+          mkdir -p /deployment
+          if [ -s "$$mine" ]; then
+            cp "$$mine" "$$theirs"
+          else
+            token="$$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+            printf '%s\n' "$$token" > "$$theirs"
+            printf '%s\n' "$$token" > "$$mine"
+          fi
+          chmod 0644 "$$theirs" "$$mine" 2>/dev/null || true
+        fi
         # The declared kind and what is actually there have to agree. An
         # installation that says it runs on somebody else's database and has no
         # DSN would otherwise get a generated one pointing at a local server,
