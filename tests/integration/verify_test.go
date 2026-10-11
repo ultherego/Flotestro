@@ -151,6 +151,28 @@ func TestARestartOfAMaskedUnitIsNeverASuccess(t *testing.T) {
 	}
 }
 
+// waitForTheHostBack gives a host that did not come back time to come back,
+// and says what happened. It changes no verdict: it is called after one has
+// been reached, so that the tests behind this one meet the fleet they expect
+// rather than a machine still away.
+//
+// The budget covers the gate's watchdog, which power-cycles a machine that
+// has missed its checks for about ten minutes - well past what the scenario
+// above is willing to wait for the product.
+func waitForTheHostBack(h *harness, hostID, bootBefore string) string {
+	const budget = 12 * time.Minute
+	started := time.Now()
+	for time.Since(started) < budget {
+		if now := bootIDOf(h, hostID); now != "" && now != bootBefore {
+			return fmt.Sprintf("it came back on boot %s after %s, which is past what a restart may take "+
+				"- the laboratory recovered it, the product did not", now, time.Since(started).Round(time.Second))
+		}
+		time.Sleep(10 * time.Second)
+	}
+	return fmt.Sprintf("it was still away %s later, so every test behind this one ran over a fleet "+
+		"missing a host", budget)
+}
+
 // TestARestartSettlesOnTheReturnOfTheHost drives the second gap: the job of a
 // restart used to end succeeded on the exit code of the scheduling, which is
 // the same exit code a host that never comes back produces.
@@ -205,8 +227,17 @@ func TestARestartSettlesOnTheReturnOfTheHost(t *testing.T) {
 		}
 	}
 	if settled.ID == "" {
-		t.Fatalf("the restart of %s did not settle; the host is on boot %s",
-			host.Hostname, bootIDOf(h, host.ID))
+		// The verdict is decided; what follows is clearing up after it.
+		//
+		// 11.10: this host did not come back, and two later tests failed
+		// behind it because they needed a host of the debian distribution
+		// and that host was away - one fault in the laboratory read as three
+		// in the product. Nothing here can power-cycle a machine; the gate's
+		// watchdog does that, and it takes longer to notice than this test
+		// waits. So the test waits for the fleet to be whole again before it
+		// reports, and says which of the two happened.
+		t.Fatalf("the restart of %s did not settle; the host is on boot %s. %s",
+			host.Hostname, bootIDOf(h, host.ID), waitForTheHostBack(h, host.ID, bootBefore))
 	}
 
 	bootAfter := bootIDOf(h, host.ID)

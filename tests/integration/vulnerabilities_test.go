@@ -3,8 +3,10 @@
 package integration
 
 import (
+	"fmt"
 	"net/http"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 )
@@ -142,8 +144,13 @@ func hostOfDistribution(h *harness, distribution string) (hostView, vulnerabilit
 			}
 		}
 		if time.Now().After(deadline) {
-			h.t.Fatalf("no host of the test fleet was assessed as the distribution %s within %s",
-				distribution, hostOnlineBound)
+			// Which hosts there were, and in what state: on 11.10 this said
+			// only "no host of the distribution debian" twice, and the reason
+			// was that a restart scenario minutes earlier had left that one
+			// machine away. The sentence sent the reader looking at the
+			// vulnerability cycle, which was working.
+			h.t.Fatalf("no host of the test fleet was assessed as the distribution %s within %s; "+
+				"the fleet is %s", distribution, hostOnlineBound, fleetAtAGlance(h))
 			return hostView{}, vulnerabilityReportView{}
 		}
 		time.Sleep(3 * time.Second)
@@ -544,4 +551,17 @@ func TestVulnerabilityAssessmentRequiresAPermission(t *testing.T) {
 	withoutRight.do(http.MethodGet, "/api/v1/vulnerabilities", nil, nil, http.StatusForbidden)
 	withoutRight.do(http.MethodGet, "/api/v1/hosts/"+host.ID+"/vulnerabilities",
 		nil, nil, http.StatusForbidden)
+}
+
+// fleetAtAGlance names every host and its connection state, for a failure
+// whose cause may be that a host is not there at all.
+func fleetAtAGlance(h *harness) string {
+	var seen []string
+	for _, host := range h.hosts() {
+		seen = append(seen, fmt.Sprintf("%s/%s", host.Hostname, host.ConnectionState))
+	}
+	if len(seen) == 0 {
+		return "empty"
+	}
+	return strings.Join(seen, " ")
 }
