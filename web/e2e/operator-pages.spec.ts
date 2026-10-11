@@ -410,25 +410,8 @@ test.describe("unresolved operations", () => {
 
     // The two uncertainties are counted apart on purpose: one total reads the
     // same for one host with forty of these and forty hosts with one each.
-    // They live in the page header beside the title, not in cards over the
-    // table - that is where they were, and the first row of the list began a
-    // quarter of a screen down.
-    const filter = page.locator(".page-header .segmented");
-    await expect(filter.getByTestId("count-outcome_unknown")).toBeVisible();
-    await expect(filter.getByTestId("count-applied_unverified")).toBeVisible();
-    await expect(filter.getByTestId("filter-both")).toHaveAttribute("aria-pressed", "true");
-
-    // Choosing one question narrows the list to it, and the counts above stay
-    // the whole fleet's: a narrowed list must not make the fleet look settled.
-    await filter.getByTestId("filter-applied_unverified").click();
-    await expect(filter.getByTestId("filter-applied_unverified")).toHaveAttribute("aria-pressed", "true");
-    await expect(filter.getByTestId("count-outcome_unknown")).toContainText(
-      `${answer.counts.outcome_unknown_operations} operations`);
-    for (const question of await page.locator("table tbody tr td:nth-child(3)").allTextContents()) {
-      expect(question.trim(), "the list filtered to one question shows the other").toBe("Did it hold?");
-    }
-    await filter.getByTestId("filter-both").click();
-    await expect(page.locator(".page-error")).toHaveCount(0);
+    await expect(page.getByTestId("count-outcome_unknown")).toBeVisible();
+    await expect(page.getByTestId("count-applied_unverified")).toBeVisible();
 
     // The badge in the navigation is the length of this queue. It is the one
     // number here the browser works out for itself.
@@ -457,6 +440,41 @@ test.describe("unresolved operations", () => {
     await first.getByRole("button", { name: "Close" }).click();
     await expect(page.locator("tr.detail-row")).toHaveCount(0);
 
+    await expectHealthy(page, errors);
+  });
+
+  test("the filter sits in the header and narrows the list without narrowing its counts", async ({ page, request }) => {
+    test.skip(!granted.has("job.read"), absent("the token may not read jobs (job.read)"));
+    const { errors } = watchErrors(page);
+
+    const response = await request.get("/api/v1/unresolved");
+    expect(response.ok(), `GET /api/v1/unresolved answered ${response.status()}`).toBeTruthy();
+    const counts = ((await response.json()) as {
+      counts: { outcome_unknown_operations: number };
+    }).counts;
+
+    await page.goto("/unresolved");
+    // Beside the title, not in two cards over the table: as cards the first
+    // row of the list began a quarter of a screen down, and the two were not
+    // even level with each other.
+    const filter = page.locator(".page-header .segmented");
+    await expect(filter.getByTestId("count-outcome_unknown")).toBeVisible();
+    await expect(filter.getByTestId("count-applied_unverified")).toBeVisible();
+    await expect(filter.getByTestId("filter-both")).toHaveAttribute("aria-pressed", "true");
+
+    // Choosing one question narrows the list to it, and the counts stay the
+    // whole fleet's. A list that narrowed its own counter would let an
+    // operator filter until the fleet looked settled.
+    await filter.getByTestId("filter-applied_unverified").click();
+    await expect(filter.getByTestId("filter-applied_unverified")).toHaveAttribute("aria-pressed", "true");
+    await expect(filter.getByTestId("count-outcome_unknown")).toContainText(
+      `${counts.outcome_unknown_operations} operations`);
+    for (const question of await page.locator("table tbody tr td:nth-child(3)").allTextContents()) {
+      expect(question.trim(), "the list filtered to one question shows the other").toBe("Did it hold?");
+    }
+
+    await filter.getByTestId("filter-both").click();
+    await expect(filter.getByTestId("filter-both")).toHaveAttribute("aria-pressed", "true");
     await expectHealthy(page, errors);
   });
 });
