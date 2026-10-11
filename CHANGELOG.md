@@ -4,9 +4,28 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [semantic versioning](https://semver.org/). Dates are the
 day the tag was published.
 
-## [Unreleased]
+## [0.63.0] - 2026-10-11
+
+A day of answering an external review of the product's own claims, and of
+measuring two of them rather than reasoning about them. Both measurements
+found something worse than the review had described.
 
 ### Security
+
+- **A second deployment on the volumes of the first one is refused**, in the
+  init step, before the secrets, the migrations and the database. The three
+  volume names carry no project prefix, so a copy of `compose.yaml` in another
+  directory reaches the same data however the project is named. Measured on a
+  running installation: init ran, a second PostgreSQL started on the live data
+  directory and ran recovery on it, the migrations ran, and the only thing
+  that stopped the control plane was a port that happened to be taken. A
+  minute later the first PostgreSQL logged "performing immediate shutdown
+  because data directory lock file is invalid" and went down - its defence
+  against corruption working as designed, and an outage of a running
+  installation. PostgreSQL cannot defend itself here: its lock is a PID
+  checked in the container's own namespace. The refusal names the three
+  volumes and the way to a separate installation, to moving this one, and to
+  a second replica.
 
 - A host keeps the only copy of a task's answer until the panel says it holds
   it, and the session can no longer talk it out of that. The panel tells the
@@ -38,6 +57,20 @@ day the tag was published.
   a backup. The line also stops claiming more than the panel knows - the key
   may still exist, in a backup or on the replica that wrote the versions - and
   says to look for it before restoring.
+
+### Added
+
+- **A screen for the operations nobody could confirm**, at `/unresolved`.
+  Two outcomes leave a host in a state the panel cannot vouch for and they ask
+  different questions - `outcome_unknown` is "did it happen?", and
+  `applied_unverified` is "did it hold?" - so they are counted apart and never
+  summed, as are operations and hosts. Until now neither could be read
+  together anywhere, and neither could be closed: the dashboard counts failed
+  tasks of the last twenty-four hours, so an operation nobody could confirm
+  left the screen because a day had passed. Nothing here ages out. An item
+  leaves when somebody rules on it, a basis is required, and the ruling is
+  recorded beside the attempt rather than in place of its outcome - the job
+  keeps what the fleet reported.
 
 ### Changed
 
@@ -780,7 +813,15 @@ across those five tags.
 
 The first tag. It did not build.
 
-[Unreleased]: https://github.com/ultherego/Flotestro/compare/v0.61.0...HEAD
+[Unreleased]: https://github.com/ultherego/Flotestro/compare/v0.63.0...HEAD
+[0.63.0]: https://github.com/ultherego/Flotestro/compare/v0.62.1...v0.63.0
+[0.62.1]: https://github.com/ultherego/Flotestro/compare/v0.62.0...v0.62.1
+[0.62.0]: https://github.com/ultherego/Flotestro/compare/v0.61.5...v0.62.0
+[0.61.5]: https://github.com/ultherego/Flotestro/compare/v0.61.4...v0.61.5
+[0.61.4]: https://github.com/ultherego/Flotestro/compare/v0.61.3...v0.61.4
+[0.61.3]: https://github.com/ultherego/Flotestro/compare/v0.61.2...v0.61.3
+[0.61.2]: https://github.com/ultherego/Flotestro/compare/v0.61.1...v0.61.2
+[0.61.1]: https://github.com/ultherego/Flotestro/compare/v0.61.0...v0.61.1
 [0.61.0]: https://github.com/ultherego/Flotestro/compare/v0.60.5...v0.61.0
 [0.60.5]: https://github.com/ultherego/Flotestro/compare/v0.60.4...v0.60.5
 [0.60.4]: https://github.com/ultherego/Flotestro/compare/v0.60.3...v0.60.4
