@@ -143,7 +143,7 @@ func (s *Store) UnresolvedList(ctx context.Context, f UnresolvedFilter) ([]Unres
 	}
 	args = append(args, limit)
 	rows, err := s.pool.Query(ctx, `
-		select a.id, a.job_id, j.host_id, coalesce(h.hostname, ''), j.action,
+		select a.id, a.job_id, j.host_id, coalesce(h.hostname, ''), j.action_type,
 		       coalesce(a.error_code, ''), coalesce(a.message, ''),
 		       a.verification,
 		       -- Carrying a verification is not the same as having failed one:
