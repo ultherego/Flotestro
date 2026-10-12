@@ -148,6 +148,36 @@ Description: Flotestro fleet agent
  backend, nor a firewall, nor a backup tool, nor a journal forwarder of its
  own.
 
+Package: flotestro-agent
+Version: 0.63.0
+Architecture: amd64
+Maintainer: Flotestro <flotestro@localhost>
+Depends: systemd, ca-certificates, passwd
+Filename: pool/stable/flotestro-agent_0.63.0_amd64.deb
+Size: 12403016
+MD5sum: cc5536b05d12e273fd7e6e5c2e87d09d
+SHA1: 25b35b967e0dfd4ac728acb7eee8fa67c7247121
+SHA256: c89bb2b150d44a0b27e4062711b1da962b7eb4bfe2b8132537628f90ca72e1e9
+Section: admin
+Priority: optional
+Description: Flotestro fleet agent
+ The agent connects a host to the Linux fleet management panel. It keeps an
+ mTLS session to the control plane, reports the inventory and carries out
+ only typed operations - the contract has no field for an arbitrary shell
+ command.
+ .
+ Operations that require root are carried out by a separate helper process
+ started by a systemd socket, which verifies the caller by SO_PEERCRED. The
+ agent itself runs without root privileges.
+ .
+ The package installs the minimum: systemd, the trust store and the shadow
+ tools the local account module changes accounts with. Every other module
+ drives a tool the host already has, and a tool that is not there disables
+ exactly one capability, which the agent reports as unavailable with the
+ reason and the name of the missing package - it installs neither a network
+ backend, nor a firewall, nor a backup tool, nor a journal forwarder of its
+ own.
+
 Package: flotestro-control-plane
 Version: 0.60.4
 Architecture: amd64
