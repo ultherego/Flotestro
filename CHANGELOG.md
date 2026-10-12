@@ -10,6 +10,20 @@ A day of answering an external review of the product's own claims, and of
 measuring two of them rather than reasoning about them. Both measurements
 found something worse than the review had described.
 
+### Fixed
+
+- **The relay reported itself unhealthy for as long as it ran, under podman.**
+  The check was written in the compose file as `["CMD", binary, "-addr",
+  ...]`, which docker runs directly; podman-compose turns every form of a
+  compose health check into `CMD-SHELL` and hands the line to `/bin/sh`, and
+  these images are distroless. Measured on a running site: twenty-five failed
+  checks in a row with an empty output, while the relay was carrying the
+  fleet. The three images that run as a service - control plane, relay,
+  package repository - now carry the check themselves, with no arguments for
+  a compose tool to rewrite, and take the address from
+  `FLOTESTRO_ADMIN_ADDR`. The compose files no longer repeat it. PostgreSQL
+  keeps its own, because that image has a shell.
+
 ### Security
 
 - **A result arriving on an attempt the panel had given up now settles the

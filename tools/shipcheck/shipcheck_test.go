@@ -237,6 +237,9 @@ func TestSiteLanguagesRefusesToPassOverNothing(t *testing.T) {
 const shelllessContainerfile = `ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian12:nonroot
 ARG TOOLS_IMAGE=postgres:17-bookworm
 FROM --platform=$TARGETPLATFORM ${RUNTIME_IMAGE} AS control-plane
+HEALTHCHECK --interval=30s CMD ["/usr/local/bin/flotestro-healthcheck"]
+FROM --platform=$TARGETPLATFORM ${RUNTIME_IMAGE} AS relay
+HEALTHCHECK --interval=30s CMD ["/usr/local/bin/flotestro-healthcheck"]
 FROM --platform=$TARGETPLATFORM ${TOOLS_IMAGE} AS admin-tools
 `
 
@@ -258,14 +261,52 @@ services:
 	return root
 }
 
-func TestHealthcheckFormPassesOnExecForm(t *testing.T) {
-	findings, err := healthcheckForm(composeTree(t, `["CMD", "/usr/local/bin/flotestro-healthcheck"]`))
-	if err != nil {
-		t.Fatal(err)
+// Exec form is no longer enough, and 12.10 is why: podman-compose turns every
+// form written in a compose file into CMD-SHELL and hands it to /bin/sh, which
+// these images do not have. A healthcheck for one of our shell-less images is
+// reported wherever in a compose file it stands and however it is written.
+func TestHealthcheckFormSeesEvenExecFormInCompose(t *testing.T) {
+	found := only(t, run(t, composeTree(t, `["CMD", "/usr/local/bin/flotestro-healthcheck"]`),
+		"healthcheck-form"), "")
+	if !strings.Contains(found.place, "docker/compose.yaml:") {
+		t.Errorf("the finding points at %q, not at the compose file that declares it", found.place)
 	}
-	if len(findings) != 0 {
-		t.Fatalf("an exec-form healthcheck on a shell-less image was reported: %v", findings)
+	if !strings.Contains(found.said, "no shell") {
+		t.Errorf("the finding does not say why: %q", found.said)
 	}
+}
+
+// And the image is asked for the check the compose file may not carry.
+func TestHealthcheckFormWantsTheCheckOnTheImage(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "docker/Containerfile", `ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian12:nonroot
+FROM --platform=$TARGETPLATFORM ${RUNTIME_IMAGE} AS control-plane
+`)
+	write(t, root, "docker/compose.yaml", `name: flotestro
+services:
+  control-plane:
+    image: ghcr.io/ultherego/flotestro-control-plane:${FLOTESTRO_VERSION:-latest}
+`)
+	found := only(t, run(t, root, "healthcheck-form"), "carries no HEALTHCHECK")
+	if !strings.Contains(found.said, "control-plane") {
+		t.Errorf("the finding does not name the image: %q", found.said)
+	}
+}
+
+// An argument is the thing a compose tool rewrites, so the image's own check
+// takes none: the address comes from the environment.
+func TestHealthcheckFormRefusesArgumentsOnTheImage(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "docker/Containerfile", `ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian12:nonroot
+FROM --platform=$TARGETPLATFORM ${RUNTIME_IMAGE} AS control-plane
+HEALTHCHECK CMD ["/usr/local/bin/flotestro-healthcheck", "-addr", "127.0.0.1:8080"]
+`)
+	write(t, root, "docker/compose.yaml", `name: flotestro
+services:
+  control-plane:
+    image: ghcr.io/ultherego/flotestro-control-plane:${FLOTESTRO_VERSION:-latest}
+`)
+	only(t, run(t, root, "healthcheck-form"), "takes arguments")
 }
 
 // The repair somebody reaches for after reading that the list form does not pass
@@ -286,8 +327,20 @@ func TestHealthcheckFormSeesAShellStringOnAShelllessImage(t *testing.T) {
 
 // The database runs a shell command in an image that has one, and a check that
 // flagged it would be a check nobody could leave switched on.
+// postgres keeps its healthcheck in the compose file and should: that image
+// has a shell, so the translation podman-compose makes of it runs.
 func TestHealthcheckFormLeavesAShellBearingImageAlone(t *testing.T) {
-	root := composeTree(t, `["CMD", "/usr/local/bin/flotestro-healthcheck"]`)
+	root := t.TempDir()
+	write(t, root, "docker/Containerfile", shelllessContainerfile)
+	write(t, root, "docker/compose.yaml", `name: flotestro
+services:
+  control-plane:
+    image: ghcr.io/ultherego/flotestro-control-plane:${FLOTESTRO_VERSION:-latest}
+  postgres:
+    image: docker.io/library/postgres:17-bookworm
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready"]
+`)
 	findings, err := healthcheckForm(root)
 	if err != nil || len(findings) != 0 {
 		t.Fatalf("postgres was flagged for using pg_isready: %v (%v)", findings, err)
