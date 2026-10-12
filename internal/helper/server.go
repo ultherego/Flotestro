@@ -96,6 +96,17 @@ func (s *Server) CapabilityMode() helpercap.Mode {
 func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	// The records of kernel settings whose task is over. They are swept when
+	// the next one is written, which is the one path certain to run on a host
+	// that has any - but a host given one such task and never another kept
+	// them for ever, which is the fault that sweep was added for. Measured
+	// 12.10: four records on agent-debian, every expiry more than an hour
+	// past, still on the host because nothing had written since.
+	//
+	// Here rather than on a timer: this helper is socket-activated and closes
+	// itself when idle, so a ticker would run only while it happens to be up,
+	// while its start is a moment every active host reaches.
+	sweepSysctlBefore(time.Now())
 	go func() {
 		<-ctx.Done()
 		_ = listener.Close()
