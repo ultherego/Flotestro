@@ -72,6 +72,22 @@ found something worse than the review had described.
   recorded beside the attempt rather than in place of its outcome - the job
   keeps what the fleet reported.
 
+  The screen is reached from the navigation, which carries the count of what
+  waits on it, and from a tile on the dashboard beside the other decisions
+  somebody has to take. The filter sits in the page header: `Both`, `Did it
+  happen?` and `Did it hold?`, each naming its own operations and hosts. The
+  two are not added together there, because they ask for different work; the
+  badge in the navigation does add them, because that one answers how long
+  the queue is. Ruling on an item opens a form in the row it belongs to.
+
+- **`operations_unconfirmed` in `GET /api/v1/fleet/summary`**: the operations
+  on the visible hosts whose outcome nobody could confirm and nobody has
+  ruled on - the queue `GET /api/v1/unresolved` lists, and the number behind
+  the navigation's badge. It is counted by the store that builds the list and
+  narrowed by the scopes the list is narrowed by, so the counter cannot show
+  a number the screen will not account for. Missing for a reader without the
+  right to read jobs, like the other counters of what waits for a person.
+
 ### Changed
 
 - A secret version this installation cannot open makes the cryptographic block
