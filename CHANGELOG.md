@@ -12,6 +12,19 @@ found something worse than the review had described.
 
 ### Security
 
+- **The record of what a host held before a kernel setting was changed now
+  dies with the task that earned it.** Nothing removed these: the helper
+  wrote one per task under `/var/lib/flotestro-helper/sysctl-before` and no
+  code path ever deleted one, so they accumulated on every host that had
+  ever been given a kernel setting. They are not inert - the capability
+  binding accepts the values in a record as the one other set a rollback may
+  write, because a rollback carries values the panel never signed. A record
+  of a task nobody can run any more was therefore a standing authorisation
+  with no owner, for as long as the host lived. Each record now carries the
+  expiry of its own task, which the helper already receives in the request,
+  and the write path sweeps the ones whose task is over; records written
+  before this change carry no expiry and are kept a week.
+
 - **A second deployment on the volumes of the first one is refused**, in the
   init step, before the secrets, the migrations and the database. The three
   volume names carry no project prefix, so a copy of `compose.yaml` in another
