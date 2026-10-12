@@ -115,10 +115,28 @@ const (
 )
 
 // fateOfResult judges a result by the state of its job.
-func fateOfResult(current, asked State) resultFate {
+//
+// afterLeaseExpiry says the panel had already given up on the attempt this
+// result arrives on. That changes the answer, and 12.10 is the measurement
+// that says why: a journal follow outlasted its lease, the scheduler put the
+// job back in the queue, and the host offered the result it had been holding
+// all along. The job was "queued", which may become leased, canceled or
+// expired and nothing else, so the result was refused twice - and two seconds
+// later, after a redelivery, the same result was accepted on a new attempt.
+// The attempt that did the work ended "lease_expired" and the fleet had been
+// handed the same operation again.
+//
+// On a laboratory that is one red line. On a fleet it is an operation carried
+// out twice because the answer to the first one arrived in the wrong second.
+// So a result from an attempt the panel gave up on settles the job in any
+// state that is not already final: the work is done, and the only question
+// left is whether the record says so.
+func fateOfResult(current, asked State, afterLeaseExpiry bool) resultFate {
 	switch {
 	case current.Terminal():
 		return fateAfterSettlement
+	case afterLeaseExpiry:
+		return fateSettles
 	case current.Validate(asked) != nil:
 		return fateUnapplicable
 	default:

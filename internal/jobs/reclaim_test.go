@@ -105,7 +105,7 @@ func TestAResultTheJobMayNotTakeLeavesItsAttemptOpen(t *testing.T) {
 	asked := []State{StateSucceeded, StateFailed, StateTimedOut, StateCanceled, StateExpired}
 	for _, current := range leaseHoldingStates {
 		for _, to := range asked {
-			fate := fateOfResult(current, to)
+			fate := fateOfResult(current, to, false)
 			if current.CanTransition(to) || current == to {
 				if fate != fateSettles {
 					t.Errorf("%s -> %s is allowed and does not settle the job", current, to)
@@ -123,10 +123,10 @@ func TestAResultTheJobMayNotTakeLeavesItsAttemptOpen(t *testing.T) {
 	}
 	// The two the fleet runs into: a host that reports its task expired after it
 	// started, and one that finishes before the panel has recorded the delivery.
-	if fateOfResult(StateRunning, StateExpired) != fateUnapplicable {
+	if fateOfResult(StateRunning, StateExpired, false) != fateUnapplicable {
 		t.Error("running -> expired is not a move the job may make")
 	}
-	if fateOfResult(StateLeased, StateSucceeded) != fateUnapplicable {
+	if fateOfResult(StateLeased, StateSucceeded, false) != fateUnapplicable {
 		t.Error("leased -> succeeded is not a move the job may make")
 	}
 }
@@ -135,7 +135,7 @@ func TestAResultTheJobMayNotTakeLeavesItsAttemptOpen(t *testing.T) {
 // the record of what the host did stays, and the settlement stands.
 func TestAResultAfterTheSettlementClosesItsAttempt(t *testing.T) {
 	for _, current := range []State{StateSucceeded, StateFailed, StateTimedOut, StateCanceled, StateExpired} {
-		fate := fateOfResult(current, StateSucceeded)
+		fate := fateOfResult(current, StateSucceeded, false)
 		if fate != fateAfterSettlement {
 			t.Errorf("a result on a job that is already %s is not read as late", current)
 		}

@@ -1042,7 +1042,7 @@ func (s *Store) RecordResult(ctx context.Context, jobID, attemptID string,
 	// another settlement does not undo the decision - and does not rewrite what
 	// the attempt says either. A move the open job may not make settles nothing
 	// and closes nothing: the attempt is still the only thing carrying the job.
-	if fate := fateOfResult(currentState, jobState); fate != fateSettles {
+	if fate := fateOfResult(currentState, jobState, supersedes); fate != fateSettles {
 		if previousStatus == "" && fate.closesTheAttempt() {
 			if _, err := tx.Exec(ctx, `
 				update job_attempts set

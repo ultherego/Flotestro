@@ -12,6 +12,18 @@ found something worse than the review had described.
 
 ### Security
 
+- **A result arriving on an attempt the panel had given up now settles the
+  job, whatever state the job is waiting in.** A job whose lease ran out goes
+  back into the queue, and a queued job may become leased, canceled or
+  expired and nothing else - so a result that arrived in that window was
+  refused, and the operation was handed to the host a second time. Measured
+  on a running installation: a journal follow outlasted its lease, the host
+  offered the result it had been holding, the panel refused it twice, and two
+  seconds later accepted the same result on a fresh attempt while the attempt
+  that had done the work ended `lease_expired`. On a fleet that is a change
+  carried out twice because the answer to the first one arrived in the wrong
+  second.
+
 - **The record of what a host held before a kernel setting was changed now
   dies with the task that earned it.** Nothing removed these: the helper
   wrote one per task under `/var/lib/flotestro-helper/sysctl-before` and no

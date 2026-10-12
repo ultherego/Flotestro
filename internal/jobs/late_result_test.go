@@ -55,3 +55,47 @@ func TestOnlyAnAttemptAResultReachedCarriesOne(t *testing.T) {
 		t.Error("an attempt set aside by another's result is read as carrying one")
 	}
 }
+
+// TestTheResultOfAGivenUpAttemptSettlesAJobBackInTheQueue is the half the
+// state machine did not have.
+//
+// Measured on 12.10: a journal follow outlasted its lease, the scheduler put
+// the job back in the queue, and the host offered the result it had been
+// holding. A queued job may become leased, canceled or expired and nothing
+// else, so the result was refused - twice - and two seconds later, after a
+// redelivery, the same result was accepted on a new attempt. The attempt that
+// did the work ended "lease_expired".
+//
+// On a laboratory that is one red line in a suite. On a fleet it means the
+// same operation handed out again because the answer to the first one arrived
+// in the wrong second: the change is carried out twice.
+//
+// So a result arriving on an attempt the panel itself gave up settles the job
+// from any state that is not already final.
+func TestTheResultOfAGivenUpAttemptSettlesAJobBackInTheQueue(t *testing.T) {
+	// The window between the reclaim and the redelivery, which is where the
+	// refusals happened, and the states around it.
+	for _, current := range []State{StateQueued, StateLeased, StateDispatched, StateRunning} {
+		if fate := fateOfResult(current, StateSucceeded, true); fate != fateSettles {
+			t.Errorf("the result of an attempt the panel gave up does not settle a %s job; "+
+				"the operation would be handed out again", current)
+		}
+	}
+
+	// Nothing else changes. Without the lease having expired, a queued or
+	// leased job still refuses a result: that is a host answering for work
+	// this job has not handed it.
+	for _, current := range []State{StateQueued, StateLeased} {
+		if fate := fateOfResult(current, StateSucceeded, false); fate != fateUnapplicable {
+			t.Errorf("a %s job took a result from an attempt it had not given up", current)
+		}
+	}
+
+	// And a job already settled stays settled, whatever the attempt's status:
+	// the result is written on the attempt and the decision is not undone.
+	for _, expired := range []bool{false, true} {
+		if fate := fateOfResult(StateSucceeded, StateFailed, expired); fate != fateAfterSettlement {
+			t.Errorf("a settled job was reopened by a late result (lease expired: %v)", expired)
+		}
+	}
+}
