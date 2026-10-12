@@ -4,7 +4,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [semantic versioning](https://semver.org/). Dates are the
 day the tag was published.
 
-## [0.63.0] - 2026-10-11
+## [0.63.0] - 2026-10-12
 
 A day of answering an external review of the product's own claims, and of
 measuring two of them rather than reasoning about them. Both measurements
