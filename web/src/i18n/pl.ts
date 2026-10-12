@@ -439,6 +439,7 @@ export const pl: Record<string, string> = {
   "Chassis serial": "Numer seryjny obudowy",
   "Check": "Sprawdzenie",
   "Check filesystem": "Sprawdź system plików",
+  "Checks with no answer": "Kontrole bez odpowiedzi",
   "Check flotestro-helper.socket on the host; the attempt is repeated.": "Sprawdź flotestro-helper.socket na hoście; próba jest ponawiana.",
   "Check interval (minutes)": "Interwał sprawdzania (minuty)",
   "Check the host out of band.": "Sprawdź host poza pasmem (out-of-band).",

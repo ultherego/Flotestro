@@ -1498,6 +1498,7 @@ a.button.primary:hover { background: color-mix(in srgb, var(--accent) 88%, var(-
    read from across the room. The segments share the width in proportion
    to their counts, but a zero keeps a narrow slot, so the states that are
    absent are still named. */
+.status-bar-group { display: flex; flex-direction: column; gap: 10px; }
 .status-bar {
   display: flex;
   gap: 2px;
@@ -1505,8 +1506,13 @@ a.button.primary:hover { background: color-mix(in srgb, var(--accent) 88%, var(-
   overflow: hidden;
   min-height: 84px;
 }
+/* The share decides the width, and the basis is zero so that it cannot
+   quietly decide it instead: with a basis of 96px five empty states held
+   45 % of the bar while four hosts held the rest. The minimum keeps a
+   segment of one in four hundred readable and clickable. */
 .status-bar-segment {
-  flex: var(--share, 1) 1 96px;
+  flex: var(--share, 1) 1 0;
+  min-width: 72px;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -1519,7 +1525,80 @@ a.button.primary:hover { background: color-mix(in srgb, var(--accent) 88%, var(-
   color: var(--segment-text, var(--text));
   text-decoration: none;
 }
-.status-bar-segment.zero { flex: 0.6 1 84px; opacity: 0.55; }
+/* One state holding everything is not a bar; it is the number. */
+.status-bar-hero {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--segment, var(--border-strong));
+  background: var(--bg-raised);
+  color: var(--text);
+  text-decoration: none;
+}
+.status-bar-hero .status-bar-value { font-size: 34px; }
+.status-bar-hero .status-bar-label { font-size: 13px; color: var(--text-muted); opacity: 1; }
+a.status-bar-hero:hover { background: var(--bg-hover); text-decoration: none; color: var(--text); }
+
+/* The tiles a grid folded away because they are at zero: named, in a line,
+   under the ones that are not. */
+.stats-folded { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 10px; align-items: baseline; }
+.stats-folded-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-decoration: none;
+}
+.stats-folded-value { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+a.stats-folded-item:hover { color: var(--text); text-decoration: underline; }
+
+/* Counts that are not parts of one whole: a row of them, each its own tile,
+   the state in a line down the side rather than in a block of colour. */
+.count-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.count-tile {
+  flex: 1 1 140px;
+  min-width: 120px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--segment, var(--border-strong));
+  background: var(--bg-raised);
+  color: var(--text);
+  text-decoration: none;
+}
+.count-tile .status-bar-value { font-size: 26px; }
+.count-tile .status-bar-label { font-size: 12px; color: var(--text-muted); opacity: 1; white-space: normal; }
+a.count-tile:hover { background: var(--bg-hover); text-decoration: none; color: var(--text); }
+.count-tile.ok { --segment: var(--ok); }
+.count-tile.warn { --segment: var(--warn); }
+.count-tile.error { --segment: var(--error); }
+.count-tile.unknown { --segment: var(--unknown); }
+.count-tile.info { --segment: var(--blue); }
+.count-tile.neutral { --segment: var(--border-strong); }
+
+/* The states with nothing in them: named, not drawn. A zero is news as a
+   word and noise as an area. */
+.status-bar-quiet { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; }
+.status-bar-quiet-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 12px;
+}
+.status-bar-quiet-item .status-bar-value { font-size: 13px; font-weight: 600; color: var(--text-muted); }
+.status-bar-quiet-item .status-bar-label { font-size: 12px; opacity: 1; }
+/* A segment that never reported is not an empty one: it keeps the mark of
+   the unknown, because unknown is not zero. */
+.status-bar-quiet-item.unset .status-bar-value { color: var(--unknown-text, var(--text-muted)); }
+.status-bar-quiet-item.unset .status-bar-label { font-style: italic; }
+a.status-bar-quiet-item:hover { color: var(--text); text-decoration: underline; }
 a.status-bar-segment:hover { filter: brightness(1.08); text-decoration: none; color: var(--segment-text, var(--text)); }
 .status-bar-value { font-size: 28px; font-weight: 700; line-height: 1.1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .status-bar-label { font-size: 12px; font-weight: 500; opacity: 0.9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }

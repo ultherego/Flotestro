@@ -245,3 +245,58 @@ describe("the widget grid of a module page", () => {
     expect(given.querySelector(".hm-mark")).not.toBeNull();
   });
 });
+
+// A card that promises "only what needs a decision" and then shows twelve
+// tiles reading zero makes the reader do the filtering the page offered to
+// do. The fleet dashboard did exactly that: fifteen tiles, three with a
+// number in them.
+describe("StatGrid folding its zeros", () => {
+  it("keeps what is there and names what is not", () => {
+    const { container, getByTestId } = render(
+      <MemoryRouter>
+        <StatGrid foldZeros>
+          <Stat label="With failed units" value={1} to="/hosts?failed_units=true" />
+          <Stat label="Reboot required" value={0} to="/hosts?reboot_required=true" />
+          <Stat label="SSSD offline" value={0} />
+        </StatGrid>
+      </MemoryRouter>,
+    );
+    const tiles = container.querySelectorAll(".stat");
+    expect(tiles).toHaveLength(1);
+    expect(tiles[0]).toHaveTextContent("With failed units");
+
+    const folded = getByTestId("stats-folded");
+    expect(folded).toHaveTextContent("Reboot required");
+    expect(folded).toHaveTextContent("SSSD offline");
+    // The one that led somewhere still does: a zero is still a question an
+    // operator may want to open.
+    expect(folded.querySelectorAll("a")).toHaveLength(1);
+  });
+
+  it("leaves a tile that never reported in the grid, because unknown is not zero", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <StatGrid foldZeros>
+          <Stat label="Agents unsupported" value={undefined} />
+          <Stat label="Reboot required" value={0} />
+        </StatGrid>
+      </MemoryRouter>,
+    );
+    const tiles = container.querySelectorAll(".stat");
+    expect(tiles).toHaveLength(1);
+    expect(tiles[0]).toHaveTextContent("Agents unsupported");
+    expect(tiles[0]).toHaveTextContent("—");
+  });
+
+  it("does not fold anything unless the card asks for it", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <StatGrid>
+          <Stat label="Failed units" value={0} />
+        </StatGrid>
+      </MemoryRouter>,
+    );
+    expect(container.querySelectorAll(".stat")).toHaveLength(1);
+    expect(container.querySelector(".stats-folded")).toBeNull();
+  });
+});

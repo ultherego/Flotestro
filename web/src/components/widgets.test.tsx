@@ -56,7 +56,7 @@ describe("StatusBar", () => {
     expect(items[1]).not.toHaveAttribute("href");
   });
 
-  it("gives the larger count the larger share", () => {
+  it("gives every segment the share its count is of the whole", () => {
     const { getByRole } = draw(
       <StatusBar segments={[
         { label: "Online", value: 9, tone: "ok" },
@@ -65,13 +65,58 @@ describe("StatusBar", () => {
     );
     const items = within(getByRole("list")).getAllByRole("listitem");
     const share = (item: HTMLElement) => Number(item.style.getPropertyValue("--share"));
-    expect(share(items[0])).toBeGreaterThan(share(items[1]));
-    expect(share(items[1])).toBeGreaterThanOrEqual(1);
+    // Nine of ten and one of ten, not "the bigger one and the smaller one":
+    // the width of a segment is the thing a bar says, so it has to be the
+    // fraction and nothing else.
+    expect(share(items[0])).toBeCloseTo(0.9);
+    expect(share(items[1])).toBeCloseTo(0.1);
+  });
+
+  // The shape this component was changed for. Five empty states were holding
+  // 45 % of the dashboard's bar while four hosts held the rest, because the
+  // flex basis and not the share decided the width.
+  it("gives a state with nothing in it no width at all, and still names it", () => {
+    const { getByRole, container } = draw(
+      <StatusBar segments={[
+        { label: "Online", value: 4, tone: "ok" },
+        { label: "Stale", value: 0, tone: "warn" },
+        { label: "Offline", value: 0, tone: "error" },
+        { label: "Unknown", value: 0, tone: "unknown" },
+      ]} />,
+    );
+    // Every state is still accounted for, which is what the browser suite
+    // asks of this component.
+    expect(within(getByRole("list")).getAllByRole("listitem")).toHaveLength(4);
+    expect(container.querySelectorAll(".status-bar-segment")).toHaveLength(0);
+    expect(container.querySelectorAll(".status-bar-quiet-item")).toHaveLength(3);
+    // One state holding everything is the number, not a one-segment bar.
+    const hero = container.querySelector(".status-bar-hero");
+    expect(hero).not.toBeNull();
+    expect(hero).toHaveTextContent("4");
+    expect(hero).toHaveTextContent("Online");
+  });
+
+  it("keeps a segment that never reported apart from an empty one", () => {
+    const { container } = draw(
+      <StatusBar segments={[
+        { label: "Online", value: 2, tone: "ok" },
+        { label: "Offline", value: 0, tone: "error" },
+        { label: "Unknown", value: undefined, tone: "unknown" },
+      ]} />,
+    );
+    const quiet = container.querySelectorAll(".status-bar-quiet-item");
+    expect(quiet).toHaveLength(2);
+    expect(quiet[0]).toHaveClass("zero");
+    // Unknown is not zero: it carries its own mark and is never folded in
+    // with the states that reported nothing there.
+    expect(quiet[1]).toHaveClass("unset");
+    expect(quiet[1]).not.toHaveClass("zero");
+    expect(quiet[1]).toHaveTextContent("\u2014");
   });
 
   it("takes the compact form on request", () => {
     const { getByRole } = draw(<StatusBar compact segments={[{ label: "Online", value: 1, tone: "ok" }]} />);
-    expect(getByRole("list")).toHaveClass("status-bar", "compact");
+    expect(getByRole("list")).toHaveClass("status-bar-group", "compact");
   });
 });
 
