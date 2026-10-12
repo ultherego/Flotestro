@@ -254,42 +254,161 @@ func healthcheckForm(root string) ([]finding, error) {
 	}
 
 	var findings []finding
-	inspected := 0
+
+	// A healthcheck declared in a compose file for a shell-less image.
+	//
+	// This used to ask only that it be written in exec form, and our files
+	// were. It did not help: podman-compose turns every form of a compose
+	// healthcheck into CMD-SHELL and hands the line to /bin/sh, so on an
+	// image with no shell the check cannot run whatever we write. 12.10,
+	// measured on the relay - twenty-five failed checks with an empty output
+	// while it carried the fleet, and a container reporting unhealthy is
+	// something monitoring and orchestrators act on.
+	//
+	// So the question changed: a shell-less image carries its own check and
+	// the compose file says nothing about it.
 	for _, file := range files {
 		for _, one := range file.services() {
 			test, ok := readHealthcheck(one)
 			if !ok || test.form == "disabled" {
 				continue
 			}
-			// Two independent reasons to call an image shell-less, because
-			// each covers the other's blind spot: the reference resolves to
-			// a distroless stage, or the command is the static client that
-			// only such an image carries.
 			target := imageTarget(one)
 			byImage := target != "" && shellless[target]
 			byCommand := strings.Contains(test.command, staticHealthClient)
 			if !byImage && !byCommand {
 				continue
 			}
-			inspected++
-			if test.form == "exec" {
-				continue
-			}
 			findings = append(findings, finding{
 				place: file.at(test.node),
-				said: fmt.Sprintf("the healthcheck of %s is in %s form on an image with no shell; "+
-					"write it as [\"CMD\", ...] so the engine runs the binary directly",
-					one.name, test.form),
+				said: fmt.Sprintf("the healthcheck of %s is written here, and that image has no shell; "+
+					"podman-compose hands every form of it to /bin/sh. The image carries the check, "+
+					"and this file says nothing about it", one.name),
 			})
 		}
 	}
 
-	if inspected == 0 {
+	// And the images themselves: a check, in exec form, taking no arguments.
+	// An argument is the thing a compose tool rewrites; the address comes
+	// from FLOTESTRO_ADMIN_ADDR, which the deployment sets.
+	deployed, err := deployedTargets(root, files, shellless)
+	if err != nil {
+		return nil, err
+	}
+	if len(deployed) == 0 {
 		return append(findings, finding{
 			place: composeDir,
-			said: fmt.Sprintf("no healthcheck on a shell-less image was found among %d compose file(s), "+
-				"so this check inspected nothing", len(files)),
+			said:  "no deployment runs a shell-less image of ours, so this check inspected nothing",
 		}), nil
 	}
+	text, err := readText(root, composeDir, "Containerfile")
+	if err != nil {
+		return nil, err
+	}
+	checks := imageHealthchecks(text)
+	for _, target := range deployed {
+		command, ok := checks[target]
+		if !ok {
+			findings = append(findings, finding{
+				place: composeDir + "/Containerfile",
+				said: fmt.Sprintf("the image %s runs as a service and carries no HEALTHCHECK, "+
+					"and no compose file may declare one for it: nothing would ask whether it works", target),
+			})
+			continue
+		}
+		if !strings.HasPrefix(strings.TrimSpace(command), "[") {
+			findings = append(findings, finding{
+				place: composeDir + "/Containerfile",
+				said: fmt.Sprintf("the HEALTHCHECK of %s is a shell string (%s); that image has no shell",
+					target, command),
+			})
+			continue
+		}
+		if strings.Contains(command, ",") {
+			findings = append(findings, finding{
+				place: composeDir + "/Containerfile",
+				said: fmt.Sprintf("the HEALTHCHECK of %s takes arguments (%s); it reads FLOTESTRO_ADMIN_ADDR "+
+					"instead, so a compose tool has nothing to rewrite", target, command),
+			})
+		}
+	}
 	return findings, nil
+}
+
+// deployedTargets names the shell-less stages a compose file runs as a
+// service, sorted, so the message is the same on every machine.
+func deployedTargets(root string, files []composeFile, shellless map[string]bool) ([]string, error) {
+	seen := map[string]bool{}
+	for _, file := range files {
+		for _, one := range file.services() {
+			target := imageTarget(one)
+			if target == "" {
+				// A service whose image is a variable and nothing else: the
+				// relay is deployed that way on purpose, pinned by digest out
+				// of the release manifest, so imageTarget has no reference to
+				// read. The variable names the component - and on 12.10 that
+				// was the difference between this check covering the relay
+				// and skipping it in silence, which is how the relay came to
+				// report unhealthy for as long as it ran.
+				target = componentOfImageVariable(one)
+			}
+			if target != "" && shellless[target] {
+				seen[target] = true
+			}
+		}
+	}
+	targets := make([]string, 0, len(seen))
+	for target := range seen {
+		targets = append(targets, target)
+	}
+	sort.Strings(targets)
+	return targets, nil
+}
+
+// imageHealthchecks reads the HEALTHCHECK of every stage of the Containerfile,
+// by the stage's name, with its line continuations joined.
+func imageHealthchecks(text string) map[string]string {
+	checks := map[string]string{}
+	stage := ""
+	lines := strings.Split(text, "\n")
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
+		if strings.HasPrefix(line, "FROM ") {
+			fields := strings.Fields(line)
+			stage = ""
+			for j, word := range fields {
+				if strings.EqualFold(word, "AS") && j+1 < len(fields) {
+					stage = fields[j+1]
+				}
+			}
+			continue
+		}
+		if !strings.HasPrefix(line, "HEALTHCHECK") || stage == "" {
+			continue
+		}
+		joined := line
+		for strings.HasSuffix(strings.TrimSpace(joined), "\\") && i+1 < len(lines) {
+			i++
+			joined = strings.TrimSuffix(strings.TrimSpace(joined), "\\") + " " + strings.TrimSpace(lines[i])
+		}
+		if at := strings.Index(joined, "CMD "); at >= 0 {
+			checks[stage] = strings.TrimSpace(joined[at+len("CMD "):])
+		}
+	}
+	return checks
+}
+
+// componentOfImageVariable reads FLOTESTRO_<NAME>_IMAGE as the component NAME.
+func componentOfImageVariable(s service) string {
+	image := field(s.node, "image")
+	if image == nil || !strings.HasPrefix(strings.TrimSpace(image.Value), "${") {
+		return ""
+	}
+	name := strings.TrimPrefix(strings.TrimSpace(image.Value), "${")
+	for _, cut := range []string{":", "-", "}"} {
+		name = strings.SplitN(name, cut, 2)[0]
+	}
+	name = strings.TrimPrefix(name, "FLOTESTRO_")
+	name = strings.TrimSuffix(name, "_IMAGE")
+	return strings.ToLower(strings.ReplaceAll(name, "_", "-"))
 }

@@ -51,14 +51,19 @@ services:
     # The spool is flushed and the agent sessions are ended rather than cut.
     stop_grace_period: 30s
 
-    healthcheck:
-      # Liveness only: the listener of the site is up and accepts. A question
-      # about the link to the centre would restart the relay over a WAN blip.
-      test: ["CMD", "/usr/local/bin/flotestro-healthcheck", "-addr", "127.0.0.1:8454"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
+    # The health check is the image's, and this is the address it asks about.
+    # Liveness only: the listener of the site is up and accepts. A question
+    # about the link to the centre would restart the relay over a WAN blip.
+    #
+    # It is not written here as a healthcheck: block any more. docker ran that
+    # form directly, but podman-compose turns every form of it into CMD-SHELL
+    # and hands it to /bin/sh, and this image has no shell - so under podman
+    # the relay reported unhealthy for as long as it ran, twenty-five failed
+    # checks with an empty output, while it carried the fleet. The image's own
+    # check takes no arguments, so there is nothing for a compose tool to
+    # rewrite.
+    environment:
+      FLOTESTRO_ADMIN_ADDR: 127.0.0.1:8454
 
     logging:
       driver: json-file

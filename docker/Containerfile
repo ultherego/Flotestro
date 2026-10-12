@@ -140,8 +140,22 @@ COPY --from=go-build /out/rootfs-relay/ /
 USER 65532:65532
 EXPOSE 8453
 STOPSIGNAL SIGTERM
-# No HEALTHCHECK in the relay image. The relay is configured by a file and
-# not by the environment, so the image cannot know which address it will
+# The health client takes its address from FLOTESTRO_ADMIN_ADDR, which the
+# deployment sets - the same file that gives the relay the address it listens
+# on. The image cannot know that address, but it can carry the check, and
+# carrying it here is the only way it runs at all.
+#
+# 12.10: the check lived in compose.relay.yaml as ["CMD", binary, "-addr",
+# ...], which docker runs directly. podman-compose 1.0.6 turns every form of
+# it into CMD-SHELL and hands it to /bin/sh, and this image has no shell. The
+# relay was reporting unhealthy for as long as it ran - twenty-five failed
+# checks with an empty output, while the relay itself carried the fleet - and
+# an unhealthy container is something monitoring and orchestrators act on.
+#
+# No arguments, for the same reason: a tool that rewrites the check has
+# nothing here to rewrite wrongly.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD ["/usr/local/bin/flotestro-healthcheck"]
 ENTRYPOINT ["/usr/local/bin/flotestro-relay"]
 CMD ["run", "-config", "/etc/flotestro/relay.yaml"]
 
@@ -685,6 +699,9 @@ EXPOSE 8080
 STOPSIGNAL SIGTERM
 # The server answers /healthz itself, so the health client of the other
 # images asks the same question here.
+# No arguments: 127.0.0.1:8080 is this client's default and the address this
+# image serves. An argument is a thing a compose tool can rewrite into a shell
+# line, and these images have no shell - measured 12.10 on the relay.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD ["/usr/local/bin/flotestro-healthcheck", "-addr", "127.0.0.1:8080"]
+  CMD ["/usr/local/bin/flotestro-healthcheck"]
 ENTRYPOINT ["/usr/local/bin/flotestro-repository-server"]

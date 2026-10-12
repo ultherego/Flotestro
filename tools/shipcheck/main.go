@@ -55,8 +55,9 @@ var checks = []check{
 	},
 	{
 		name: "healthcheck-form",
-		why: "a healthcheck on a shell-less image has to be written in exec form; a shell string " +
-			"there cannot run at all, and the container reports unhealthy while serving",
+		why: "a shell-less image carries its own healthcheck and the compose file says nothing about " +
+			"it: podman-compose hands every form written there to /bin/sh, which these images have " +
+			"none of, and the container then reports unhealthy while serving",
 		run: healthcheckForm,
 	},
 	{

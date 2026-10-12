@@ -543,18 +543,11 @@ services:
     # agent sessions and the workers release their leases.
     stop_grace_period: 30s
 
-    healthcheck:
-      # The image carries no curl and no shell; this is the static client from
-      # cmd/container-healthcheck. It asks /healthz, which is liveness: a
-      # database that stopped answering is not a reason to restart the panel.
-      # An orchestrator that wants readiness asks /readyz.
-      test: ["CMD", "/usr/local/bin/flotestro-healthcheck"]
-      interval: 15s
-      timeout: 5s
-      retries: 4
-      # The first start checks the schema, verifies the cryptographic state of
-      # the installation and only then listens; the window covers it.
-      start_period: 60s
+    # The health check is the image's, and this file does not repeat it.
+    # Repeating it is worse than leaving it out: podman-compose turns every
+    # form of a compose health check into CMD-SHELL and hands it to /bin/sh,
+    # which these distroless images do not have. Measured 12.10 on the relay -
+    # twenty-five failed checks with an empty output while it carried the fleet.
 
     logging:
       # json-file rather than Docker's local: every runtime reads it, and
@@ -661,14 +654,11 @@ services:
     # A download in flight is finished rather than cut.
     stop_grace_period: 30s
 
-    healthcheck:
-      # The same static client as the other images; the server answers
-      # /healthz and refuses to start at all without flotestro-repo.asc.
-      test: ["CMD", "/usr/local/bin/flotestro-healthcheck", "-addr", "127.0.0.1:8080"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
+    # The health check is the image's, and this file does not repeat it.
+    # Repeating it is worse than leaving it out: podman-compose turns every
+    # form of a compose health check into CMD-SHELL and hands it to /bin/sh,
+    # which these distroless images do not have. Measured 12.10 on the relay -
+    # twenty-five failed checks with an empty output while it carried the fleet.
 
     logging:
       driver: json-file
