@@ -1,7 +1,8 @@
-import { Children, isValidElement, type ReactNode } from "react";
+import { Children, isValidElement, useState, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Icon, type IconName } from "./icons";
 import { pageTitle, useDocumentTitle } from "../lib/title";
+import { useT } from "../i18n";
 
 /**
  * The layout primitives of a page: the header, the card, the stat tile, the
@@ -185,6 +186,48 @@ export function Stat({
   );
   if (to) return <Link to={to} className={`${classes} stat-link`}>{body}</Link>;
   return <div className={classes}>{body}</div>;
+}
+
+/**
+ * The filters a list keeps out of the way until somebody wants them.
+ *
+ * The host list carries nineteen controls in five rows above a table that,
+ * in this laboratory, holds four rows. That is about 200 px of machinery
+ * before the first piece of data, on the page whose job is the data.
+ *
+ * `active` is the page's own answer to "is any of these set?", and when it
+ * is true the block opens and stays open. That rule is the whole point: a
+ * filter that is narrowing the list must be visible, or the reader sees a
+ * short list and no reason for it. Hiding the controls is allowed; hiding
+ * the fact that they are working is not.
+ */
+export function MoreFilters({
+  active, count, children,
+}: {
+  /** Whether any of the folded filters is set. */
+  active: boolean;
+  /** How many of them are set, for the button. */
+  count?: number;
+  children: ReactNode;
+}) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const shown = open || active;
+  return (
+    <>
+      <button
+        type="button"
+        className={shown ? "secondary more-filters open" : "secondary more-filters"}
+        aria-expanded={shown}
+        onClick={() => setOpen(!shown)}
+        data-testid="more-filters"
+      >
+        {shown ? t("Fewer filters") : t("More filters")}
+        {!shown && count ? <span className="badge warn">{count}</span> : null}
+      </button>
+      {shown && <div className="more-filters-row" data-testid="more-filters-row">{children}</div>}
+    </>
+  );
 }
 
 /**

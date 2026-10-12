@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 import type { ReactElement } from "react";
-import { Card, Columns, EmptyState, Field, FieldGrid, PageHeader, Stat, StatGrid, Toolbar } from "./layout";
+import { Card, Columns, EmptyState, Field, FieldGrid, MoreFilters, PageHeader, Stat, StatGrid, Toolbar } from "./layout";
 import { ModuleHeader, Section, Stats, Summary, Widgets } from "../pages/host/shared";
 
 /**
@@ -298,5 +298,34 @@ describe("StatGrid folding its zeros", () => {
     );
     expect(container.querySelectorAll(".stat")).toHaveLength(1);
     expect(container.querySelector(".stats-folded")).toBeNull();
+  });
+});
+
+// Nineteen controls stood above a table of four hosts. The fold is allowed
+// to hide the controls; it is not allowed to hide the fact that one of them
+// is narrowing the list.
+describe("MoreFilters", () => {
+  it("hides the filters until somebody asks for them", () => {
+    const { getByTestId, queryByTestId } = render(
+      <MemoryRouter>
+        <MoreFilters active={false}><input aria-label="relay" /></MoreFilters>
+      </MemoryRouter>,
+    );
+    expect(queryByTestId("more-filters-row")).toBeNull();
+    expect(getByTestId("more-filters")).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(getByTestId("more-filters"));
+    expect(getByTestId("more-filters-row")).toBeInTheDocument();
+  });
+
+  it("opens itself when one of them is set, and says how many", () => {
+    const { getByTestId } = render(
+      <MemoryRouter>
+        <MoreFilters active count={2}><input aria-label="relay" /></MoreFilters>
+      </MemoryRouter>,
+    );
+    // Open, and the button offers to close rather than to open: a list
+    // narrowed by a control nobody can see looks wrong for no reason.
+    expect(getByTestId("more-filters-row")).toBeInTheDocument();
+    expect(getByTestId("more-filters")).toHaveAttribute("aria-expanded", "true");
   });
 });
