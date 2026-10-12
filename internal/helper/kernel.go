@@ -30,7 +30,7 @@ func (s *Server) applyKernel(ctx context.Context, request *helperv1.HelperReques
 	case helperv1.KernelRequest_OPERATION_READ:
 		return kernelResponse(s.readKernel(actionCtx, action.GetKeys()), "", nil, nil)
 	case helperv1.KernelRequest_OPERATION_SYSCTL_ENSURE:
-		return s.writeSysctl(actionCtx, request.GetTaskId(), action)
+		return s.writeSysctl(actionCtx, request.GetTaskId(), request.GetExpiresAt().AsTime(), action)
 	case helperv1.KernelRequest_OPERATION_MODULE_LOAD:
 		return s.loadModule(actionCtx, action)
 	case helperv1.KernelRequest_OPERATION_MODULE_BLACKLIST:
@@ -54,7 +54,7 @@ func kernelGuard(operation helperv1.KernelRequest_Operation) string {
 }
 
 // writeSysctl writes the settings persistently and applies them right away.
-func (s *Server) writeSysctl(ctx context.Context, taskID string,
+func (s *Server) writeSysctl(ctx context.Context, taskID string, expiresAt time.Time,
 	action *helperv1.KernelRequest) *helperv1.HelperResponse {
 	settings := action.GetSettings()
 	if len(settings) == 0 {
@@ -85,7 +85,7 @@ func (s *Server) writeSysctl(ctx context.Context, taskID string,
 		before[key] = strings.TrimSpace(value)
 	}
 	if taskID != "" {
-		if err := recordSysctlBefore(taskID, before); err != nil {
+		if err := recordSysctlBefore(taskID, before, expiresAt); err != nil {
 			return reject(ErrorExecFailed,
 				"the values this host has now were not written down, so the change would have no way back: "+
 					err.Error())
@@ -336,6 +336,58 @@ func kernelResponse(snapshot kernel.Snapshot, message string,
 // "what was there" from "whatever the caller likes".
 var sysctlBeforeDir = "/var/lib/flotestro-helper/sysctl-before"
 
+// sysctlRecord is one task's baseline together with the moment after which no
+// request of that task will be honoured.
+//
+// The expiry is written down because nothing else on the host knows it. Until
+// 12.10 nothing removed these records at all: they accumulated on every host
+// that had ever been given a kernel setting, and each one stayed a standing
+// authorisation to put those values back - years after the task that earned
+// it. The laboratory had been sweeping the directory before every gate run
+// since 11.10, which is how it stayed invisible.
+type sysctlRecord struct {
+	Before    map[string]string `json:"before"`
+	ExpiresAt time.Time         `json:"expires_at"`
+}
+
+// sysctlRecordKeep is how long a record written before this change is kept.
+// Those carry no expiry, so there is nothing to read; a task that has not
+// been rolled back within a week will not be.
+const sysctlRecordKeep = 7 * 24 * time.Hour
+
+// sweepSysctlBefore removes the records of tasks that can no longer be rolled
+// back. It is best effort and says nothing: a record that outstays its task
+// is a fault to put right, not a reason to refuse the change being made now.
+func sweepSysctlBefore(now time.Time) {
+	entries, err := os.ReadDir(sysctlBeforeDir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		path := filepath.Join(sysctlBeforeDir, entry.Name())
+		content, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var record sysctlRecord
+		if err := json.Unmarshal(content, &record); err == nil && !record.ExpiresAt.IsZero() {
+			if now.After(record.ExpiresAt) {
+				os.Remove(path)
+			}
+			continue
+		}
+		// Written before the expiry was recorded, or unreadable. Either way
+		// the only thing left to go on is how long it has been there.
+		info, err := entry.Info()
+		if err == nil && now.Sub(info.ModTime()) > sysctlRecordKeep {
+			os.Remove(path)
+		}
+	}
+}
+
 // recordSysctlBefore writes down the values of one task's keys, once.
 //
 // Once is the whole point. This used to overwrite, and it is called before
@@ -349,11 +401,14 @@ var sysctlBeforeDir = "/var/lib/flotestro-helper/sysctl-before"
 // A record that is already there is therefore kept and the write is not an
 // error: the task's baseline was taken when the task first ran, and that is
 // the one the rollback needs.
-func recordSysctlBefore(taskID string, before map[string]string) error {
+func recordSysctlBefore(taskID string, before map[string]string, expiresAt time.Time) error {
 	if err := os.MkdirAll(sysctlBeforeDir, 0o700); err != nil {
 		return err
 	}
-	encoded, err := json.Marshal(before)
+	// Here rather than on a timer: this is the one path that creates these
+	// records, so it is the one place certain to run on a host that has any.
+	sweepSysctlBefore(time.Now())
+	encoded, err := json.Marshal(sysctlRecord{Before: before, ExpiresAt: expiresAt})
 	if err != nil {
 		return err
 	}
@@ -384,6 +439,12 @@ func SysctlBefore(taskID string) map[string]string {
 	if err != nil {
 		return nil
 	}
+	var record sysctlRecord
+	if err := json.Unmarshal(content, &record); err == nil && record.Before != nil {
+		return record.Before
+	}
+	// A record written before the expiry was carried in it. Reading it is
+	// what lets a host upgraded mid-task still be put back.
 	var before map[string]string
 	if err := json.Unmarshal(content, &before); err != nil {
 		return nil
