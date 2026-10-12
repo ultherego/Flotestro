@@ -1,7 +1,11 @@
 package helper
 
 import (
+	"context"
 	"encoding/json"
+	"io"
+	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -123,5 +127,69 @@ func TestTheSysctlBaselineOfATaskThatIsOverIsRemoved(t *testing.T) {
 	var record sysctlRecord
 	if err := json.Unmarshal(content, &record); err != nil || record.ExpiresAt.IsZero() {
 		t.Errorf("the record carries no expiry, so nothing can tell when it stops mattering: %s", content)
+	}
+}
+
+// TestTheHelperSweepsTheBaselinesWhenItStarts closes the other half of the
+// sweep's reach.
+//
+// The records are swept when the next one is written, which is the path
+// certain to run on a host that has any - but a host given one kernel task
+// and never another kept them for ever, which is the fault the sweep exists
+// for. Measured 12.10 on agent-debian: four records, every expiry more than
+// an hour past, still there because nothing had written since.
+//
+// The helper is socket-activated and closes itself when idle, so a timer
+// would run only while it happens to be up. Its start is the moment every
+// active host reaches.
+func TestTheHelperSweepsTheBaselinesWhenItStarts(t *testing.T) {
+	sysctlBeforeDir = t.TempDir()
+	// Written straight to the directory, not through recordSysctlBefore: that
+	// path sweeps before it writes, so a second record would take the first
+	// one away and the test would pass without the helper doing anything.
+	// This is the host the fault is about - one kernel task, long over, and
+	// nothing since.
+	write := func(task string, before map[string]string, expires time.Time) {
+		t.Helper()
+		if err := os.MkdirAll(sysctlBeforeDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		encoded, err := json.Marshal(sysctlRecord{Before: before, ExpiresAt: expires})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(sysctlBeforePath(task), encoded, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("over", map[string]string{"vm.swappiness": "25"}, time.Now().Add(-time.Hour))
+	write("open", map[string]string{"vm.nr_hugepages": "0"}, time.Now().Add(time.Hour))
+	if SysctlBefore("over") == nil {
+		t.Fatal("the finished task's record was not written, so the helper has nothing to sweep")
+	}
+
+	path := filepath.Join(t.TempDir(), "helper.sock")
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(uint32(os.Getuid()), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx, listener) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for SysctlBefore("over") != nil && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	<-done
+
+	if got := SysctlBefore("over"); got != nil {
+		t.Errorf("the helper started and left the record of a task that is over: %+v; "+
+			"a host given one kernel task and never another keeps it for ever", got)
+	}
+	if got := SysctlBefore("open"); got["vm.nr_hugepages"] != "0" {
+		t.Errorf("the helper swept a record whose task can still be rolled back: %+v", got)
 	}
 }
