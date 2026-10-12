@@ -6,7 +6,7 @@ import type { AuditEvent, Campaign, FleetActivity, FleetSummary, Job } from "../
 import { relativeTime } from "../lib/format";
 import { ErrorBox, ErrorCode, Time, Empty, JobState } from "../components/ui";
 import { Card, PageHeader, Stat, StatGrid } from "../components/layout";
-import { BarChart, Breakdown, StatusBar } from "../components/widgets";
+import { BarChart, Breakdown, CountRow, StatusBar } from "../components/widgets";
 import { FleetCoverage, type Coverage } from "../components/FleetCoverage";
 import { FirstRunCard } from "../components/FirstRunCard";
 import { useT } from "../i18n";
@@ -156,15 +156,14 @@ export function Dashboard() {
           ]} />
         </Card>
         <Card className="span-5" title={t("Problems")} description={t("Findings that need a decision, by kind.")}>
-          <StatusBar segments={[
+          {/* Not a bar: these five count different things, so a width
+              divided between them stands for nothing. */}
+          <CountRow counts={[
             { label: t("Security findings"), value: securityFailed, tone: "error", to: "/security" },
             { label: t("Failed jobs, 24 h"), value: s?.failed_jobs_24h, tone: "error", to: `/jobs?state=failed&since=${encodeURIComponent(dayAgo)}` },
-            // A segment at zero is the narrowest of the bar, and a label
-            // longer than a dozen characters is cut off in it; these two are
-            // the short names of the tiles below.
-            { label: t("Reboot due"), value: s?.reboot_required, tone: "warn", to: "/hosts?reboot_required=true" },
-            { label: t("Unpatched"), value: s?.hosts_with_security_updates, tone: "warn", to: "/hosts?security_updates=true" },
-            { label: t("Unknown checks"), value: securityUnknown, tone: "unknown", to: "/security" },
+            { label: t("Reboot required"), value: s?.reboot_required, tone: "warn", to: "/hosts?reboot_required=true" },
+            { label: t("Security updates pending"), value: s?.hosts_with_security_updates, tone: "warn", to: "/hosts?security_updates=true" },
+            { label: t("Checks with no answer"), value: securityUnknown, tone: "unknown", to: "/security" },
           ]} />
           <FleetCoverage coverage={securityCoverage} />
         </Card>
@@ -191,7 +190,9 @@ export function Dashboard() {
           description={t("Counted in the database over the hosts you can see.")}
           actions={attention > 0 && <span className="badge warn">{attention}</span>}
         >
-          <StatGrid compact>
+          {/* foldZeros: this card's own description says it counts what needs
+              attention, and twelve of its fifteen tiles read zero. */}
+          <StatGrid compact foldZeros>
             {/* Every tile leads to the host list narrowed to the hosts it
                 counted: the count is the question, the list the answer. */}
             <Stat label={t("Reboot required")} value={s?.reboot_required} tone={warnAbove(s?.reboot_required)} to="/hosts?reboot_required=true" />
@@ -265,7 +266,9 @@ export function Dashboard() {
           actions={waiting > 0 && <span className="badge warn">{waiting}</span>}
         >
           {!s ? <Empty>{t("Loading…")}</Empty> : !decidable ? <Empty>{t("Nothing you may decide on.")}</Empty> : (
-            <StatGrid compact>
+            // Same promise, same treatment: a decision nobody has taken is
+            // news, and a counter at zero is not one.
+            <StatGrid compact foldZeros>
               {s.jobs_awaiting_approval !== undefined && (
                 <Stat label={t("Jobs")} value={s.jobs_awaiting_approval} tone={warnAbove(s.jobs_awaiting_approval)} to="/jobs?state=awaiting_approval" />
               )}

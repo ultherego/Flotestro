@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { Children, isValidElement, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Icon, type IconName } from "./icons";
 import { pageTitle, useDocumentTitle } from "../lib/title";
@@ -105,9 +105,59 @@ export function Card({
 /**
  * The summary tiles. The `compact` form drops the borders and stands inside
  * a card, where one bordered box inside another would only add lines.
+ *
+ * `foldZeros` is for a grid whose card promises to show what needs doing.
+ * The fleet dashboard says "Only what needs a decision" over fifteen tiles
+ * of which twelve read zero, so the eye has to sweep all fifteen to find the
+ * one and the seven. With it on, a tile at zero becomes a word under the
+ * grid and the tiles are the things that are actually there.
+ *
+ * It is not the default, and should not be: on a host's own page "0 failed
+ * units" is the answer somebody came for. A zero is noise only where the
+ * card has promised otherwise.
+ *
+ * Unknown is not zero. A tile whose value never arrived keeps its place in
+ * the grid, because "we do not know" is exactly what such a card is for.
  */
-export function StatGrid({ children, compact = false }: { children: ReactNode; compact?: boolean }) {
-  return <div className={compact ? "stats compact" : "stats"}>{children}</div>;
+export function StatGrid({
+  children, compact = false, foldZeros = false,
+}: {
+  children: ReactNode;
+  compact?: boolean;
+  foldZeros?: boolean;
+}) {
+  const classes = compact ? "stats compact" : "stats";
+  if (!foldZeros) return <div className={classes}>{children}</div>;
+
+  const tiles: ReactNode[] = [];
+  const folded: { label: ReactNode; to?: string }[] = [];
+  Children.forEach(children, (child) => {
+    if (!isValidElement<{ value?: unknown; label?: ReactNode; to?: string }>(child)) {
+      tiles.push(child);
+      return;
+    }
+    if (child.props.value === 0) {
+      folded.push({ label: child.props.label, to: child.props.to });
+      return;
+    }
+    tiles.push(child);
+  });
+
+  return (
+    <>
+      {tiles.length > 0 && <div className={classes}>{tiles}</div>}
+      {folded.length > 0 && (
+        <div className="stats-folded" data-testid="stats-folded">
+          {folded.map((one, index) => {
+            const body = <><span className="stats-folded-value">0</span>{one.label}</>;
+            return one.to
+              ? <Link key={index} to={one.to} className="stats-folded-item">{body}</Link>
+              : <span key={index} className="stats-folded-item">{body}</span>;
+          })}
+        </div>
+      )}
+    </>
+  );
 }
 
 /**

@@ -13,29 +13,123 @@ export type Segment = {
 };
 
 /**
- * A row of coloured segments, one per state, with the count in large type:
- * the condition of the fleet at one glance.
+ * The states of a set of things, with their counts.
+ *
+ * A state with nothing in it takes no width. It used to take a slot of its
+ * own - `flex: var(--share) 1 96px`, so the 96px basis decided the width and
+ * not the share - and on the fleet dashboard five empty states were holding
+ * 45 % of the bar while four hosts held the rest. A bar whose segments do not
+ * stand for their magnitudes is not a weak chart; it is a chart that is wrong
+ * about the one thing a bar says.
+ *
+ * So the empty states move below the bar, named, in small type, where a zero
+ * reads as a word rather than as an area. They are still there - an operator
+ * who wants to know that nothing is quarantined still reads it - and they are
+ * still counted, which is what the browser suite asks of this component.
+ *
+ * When one state holds everything, there is no bar at all: a one-segment bar
+ * chart is a stat tile with extra steps, so the count is simply shown.
+ *
+ * Unknown is not zero. A segment with no value at all keeps its own mark and
+ * is never folded in with the empty ones.
  */
 export function StatusBar({ segments, compact = false }: { segments: Segment[]; compact?: boolean }) {
-  const total = segments.reduce((sum, segment) => sum + (segment.value ?? 0), 0);
+  const counted = segments.filter((segment) => (segment.value ?? 0) > 0);
+  const quiet = segments.filter((segment) => (segment.value ?? 0) <= 0);
+  const total = counted.reduce((sum, segment) => sum + (segment.value ?? 0), 0);
+
+  const draw = (segment: Segment, className: string, style?: React.CSSProperties) => {
+    const body = (
+      <>
+        <span className="status-bar-value" data-testid="status-bar-value">
+          {segment.value === undefined ? "\u2014" : segment.value}
+        </span>
+        <span className="status-bar-label">{segment.label}</span>
+      </>
+    );
+    return segment.to
+      ? (
+        <Link key={segment.label} role="listitem" className={className} style={style}
+          to={segment.to} title={segment.label}>{body}</Link>
+      )
+      : (
+        <div key={segment.label} role="listitem" className={className} style={style}
+          title={segment.label}>{body}</div>
+      );
+  };
+
   return (
-    <div className={compact ? "status-bar compact" : "status-bar"} role="list" data-testid="status-bar">
-      {segments.map((segment) => {
-        const value = segment.value;
-        const zero = !value;
-        const share = total > 0 && value ? Math.max(1, (value / total) * 6) : 1;
-        const className = ["status-bar-segment", segment.tone, zero ? "zero" : ""].join(" ").trim();
-        const style = { "--share": share } as React.CSSProperties;
-        const body = (
-          <>
-            <span className="status-bar-value" data-testid="status-bar-value">{value === undefined ? "—" : value}</span>
-            <span className="status-bar-label">{segment.label}</span>
-          </>
-        );
-        return segment.to
-          ? <Link key={segment.label} role="listitem" className={className} style={style} to={segment.to} title={segment.label}>{body}</Link>
-          : <div key={segment.label} role="listitem" className={className} style={style} title={segment.label}>{body}</div>;
-      })}
+    <div className={compact ? "status-bar-group compact" : "status-bar-group"}
+      role="list" data-testid="status-bar">
+      {counted.length === 1 && draw(counted[0], `status-bar-hero ${counted[0].tone}`)}
+      {counted.length > 1 && (
+        <div className="status-bar">
+          {counted.map((segment) => draw(
+            segment,
+            `status-bar-segment ${segment.tone}`,
+            { "--share": (segment.value ?? 0) / total } as React.CSSProperties,
+          ))}
+        </div>
+      )}
+      {quiet.length > 0 && (
+        <div className="status-bar-quiet">
+          {quiet.map((segment) => draw(
+            segment,
+            `status-bar-quiet-item ${segment.tone} ${segment.value === undefined ? "unset" : "zero"}`,
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A set of counts that are not parts of one whole.
+ *
+ * "19 security findings, 341 failed jobs, 6 unknown checks" are three
+ * different things; adding them up means nothing, so a bar that divides a
+ * width between them is the wrong form however honest its proportions are.
+ * Drawn as one on 12.10 it put "19 S…" and "6 U" in slivers - and the code
+ * already carried the admission, a comment explaining that labels longer
+ * than a dozen characters are cut off, with the names shortened to fit.
+ * The names were bent to the form. This is the form the names asked for.
+ *
+ * The counts that are at zero go under the row as words, the way they do in
+ * StatusBar, because a zero is news as a word and noise as an area.
+ */
+export function CountRow({ counts }: { counts: Segment[] }) {
+  const present = counts.filter((count) => (count.value ?? 0) > 0);
+  const quiet = counts.filter((count) => (count.value ?? 0) <= 0);
+
+  const draw = (count: Segment, className: string) => {
+    const body = (
+      <>
+        <span className="status-bar-value" data-testid="status-bar-value">
+          {count.value === undefined ? "\u2014" : count.value}
+        </span>
+        <span className="status-bar-label">{count.label}</span>
+      </>
+    );
+    return count.to
+      ? <Link key={count.label} role="listitem" className={className} to={count.to}>{body}</Link>
+      : <div key={count.label} role="listitem" className={className}>{body}</div>;
+  };
+
+  return (
+    <div className="status-bar-group" role="list" data-testid="status-bar">
+      {present.length > 0 && (
+        <div className="count-row">
+          {present.map((count) => draw(count, `count-tile ${count.tone}`))}
+        </div>
+      )}
+      {quiet.length > 0 && (
+        <div className="status-bar-quiet">
+          {quiet.map((count) => draw(
+            count,
+            `status-bar-quiet-item ${count.tone} ${count.value === undefined ? "unset" : "zero"}`,
+          ))}
+        </div>
+      )}
     </div>
   );
 }
