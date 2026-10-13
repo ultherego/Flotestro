@@ -69,6 +69,7 @@ export const pl: Record<string, string> = {
   "The values come from {source} and are read when the panel starts, so a change to them needs a restart.": "Wartości pochodzą z {source} i są czytane przy starcie panelu, więc ich zmiana wymaga restartu.",
   "The monitoring retentions are the exception: they belong to the installation, are stored by this screen and take effect without a restart.": "Wyjątkiem są retencje monitoringu: należą do instalacji, zapisuje je ten ekran i działają bez restartu.",
   "What the process was started with": "Z czym wystartował proces",
+  "How long the panel keeps what the hosts send.": "Jak długo panel trzyma to, co przysyłają hosty.",
   "Find a setting": "Znajdź ustawienie",
   "No setting of that name.": "Nie ma ustawienia o takiej nazwie.",
   /* Status: stan panelu widziany przez serwer. */

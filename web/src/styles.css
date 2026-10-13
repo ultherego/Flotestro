@@ -1982,3 +1982,8 @@ button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent
 .part table th, .part table td { padding: 4px 8px; }
 .part table th:first-child, .part table td:first-child { padding-left: 0; }
 .card-body > .parts { margin: 0; }
+
+/* The heading of a grid of tiles, with whatever narrows it. */
+.parts-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin: 20px 0 10px; }
+.parts-head h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.parts-head .settings-search { margin-left: auto; }

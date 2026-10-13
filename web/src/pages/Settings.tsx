@@ -53,10 +53,12 @@ export function Settings() {
         <MonitoringSettingsCard />
       </div>
       {data && (
-        <Card
-          flush
-          title={t("What the process was started with")}
-          actions={
+        <>
+          {/* The tiles stand on the page, not inside a card: a tile is a
+              raised surface, and a raised surface on another one of the same
+              colour is a tile nobody can see the edge of. */}
+          <div className="parts-head">
+            <h2>{t("What the process was started with")}</h2>
             <input
               type="search"
               className="settings-search"
@@ -65,15 +67,14 @@ export function Settings() {
               onChange={(event) => setQuery(event.target.value)}
               data-testid="settings-search"
             />
-          }
-        >
+          </div>
           <div className="parts" data-testid="settings-areas">
             {areas.map(({ area, facts }) => (
               <AreaTile key={area.key} area={area} facts={facts} />
             ))}
             {areas.length === 0 && <Empty>{t("No setting of that name.")}</Empty>}
           </div>
-        </Card>
+        </>
       )}
     </>
   );
@@ -223,7 +224,7 @@ function MonitoringSettingsCard() {
     <Card
       className="span-12"
       title={t("Monitoring retention")}
-      description={t("How long the panel keeps what the hosts send. These values belong to the installation: they are stored here and take effect without a restart. A field left empty is decided by the control plane's environment, and its value is shown beside the box.")}
+      description={t("How long the panel keeps what the hosts send.")}
       footer={
         <Actions>
           <button className="secondary" onClick={() => check.mutate()} disabled={check.isPending || save.isPending}>
