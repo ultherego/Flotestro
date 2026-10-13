@@ -368,7 +368,7 @@ function AreaSection({
   return (
     <Section
       title={t(area.title)}
-      count={facts.length}
+      summary={facts.length === 1 ? t("{n} value", { n: facts.length }) : t("{n} values", { n: facts.length })}
       open={open}
       className="settings-section"
     >

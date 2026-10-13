@@ -1,5 +1,19 @@
 // The Polish translation of the interface.
 export const pl: Record<string, string> = {
+  /* Dashboard: werdykt floty i to, co czeka na człowieka. */
+  "Reading the fleet…": "Czytam flotę…",
+  "Nothing needs a decision": "Nic nie wymaga decyzji",
+  "{waiting} decisions waiting": "decyzji czeka: {waiting}",
+  "{attention} things need a look": "rzeczy do sprawdzenia: {attention}",
+  "{waiting} decisions waiting, {attention} things need a look": "decyzji czeka: {waiting}, rzeczy do sprawdzenia: {attention}",
+  "{n} online": "online: {n}",
+  "{n} quarantined": "w kwarantannie: {n}",
+  "{n} in maintenance": "w oknie serwisowym: {n}",
+  "What needs you": "Co wymaga Twojej uwagi",
+  "Decisions nobody has taken": "Decyzje, których nikt nie podjął",
+  "Found on the hosts": "Znalezione na hostach",
+  "Agents behind the newest": "Agenci starsi niż najnowszy",
+  "Every counter here is taken in the database over the hosts you are allowed to see, not over a page of them. A counter the server could not answer honestly for your view is left out rather than drawn as zero, and a count at zero is a word under the row rather than a tile.": "Każdy licznik tutaj liczy się w bazie po hostach, które wolno Ci widzieć - nie po jednej stronie listy. Licznika, na który serwer nie umie uczciwie odpowiedzieć dla Twojego widoku, nie ma wcale, zamiast pokazywać zero; a licznik na zerze schodzi pod wiersz jako słowo, nie kafelek.",
   /* Settings: konfiguracja procesu i wyszukiwanie ustawienia. */
   "What this panel was started with.": "Z czym ten panel został uruchomiony.",
   "The values come from {source} and are read when the panel starts, so a change to them needs a restart.": "Wartości pochodzą z {source} i są czytane przy starcie panelu, więc ich zmiana wymaga restartu.",

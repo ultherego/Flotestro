@@ -1977,3 +1977,12 @@ button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent
 .card > .settings-section:last-of-type { border-bottom: 0; }
 .card > .settings-section > .section-head { padding-left: var(--card-pad-x); padding-right: var(--card-pad-x); }
 .card > .settings-section > .section-body { padding: 0 var(--card-pad-x) 16px calc(var(--card-pad-x) + 24px); }
+
+/* The lists of the dashboard: closed lines in one card. */
+.card > .list-section:first-of-type { border-top: 0; }
+.card > .list-section:last-of-type { border-bottom: 0; }
+.card > .list-section > .section-head { padding-left: var(--card-pad-x); padding-right: var(--card-pad-x); }
+/* A table opens flush with the card, the way it does in a card of its own. */
+.card > .list-section > .section-body { padding: 0 0 8px; }
+.card > .list-section > .section-actions { padding: 0 var(--card-pad-x) 10px; }
+.widget-subhead.first { margin-top: 0; }

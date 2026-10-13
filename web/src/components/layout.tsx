@@ -381,7 +381,7 @@ export function Section({
   /** The one number or word that says what is inside, shown while closed. */
   summary?: ReactNode;
   tone?: Tone;
-  /** How many items are inside, when the number is what somebody wants. */
+  /** How many items are inside; drawn as a number at the end of the line. */
   count?: number;
   actions?: ReactNode;
   children: ReactNode;
@@ -389,7 +389,6 @@ export function Section({
   open?: boolean;
   className?: string;
 }) {
-  const t = useT();
   // Unknown is not fine. A part the server could not judge opens itself for
   // the same reason a failing one does: the panel never draws a thing it
   // does not know as a thing that is in order.
@@ -409,11 +408,7 @@ export function Section({
         <span className="section-chevron" aria-hidden="true"><Icon name="chevron" /></span>
         <span className="section-title">{title}</span>
         {summary && <span className="section-summary">{summary}</span>}
-        {count !== undefined && (
-          <span className="section-count">
-            {count === 1 ? t("{n} value", { n: count }) : t("{n} values", { n: count })}
-          </span>
-        )}
+        {count !== undefined && <span className="section-count">{count}</span>}
       </button>
       {actions && <div className="section-actions">{actions}</div>}
       {shown && <div className="section-body">{children}</div>}

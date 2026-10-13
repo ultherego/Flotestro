@@ -384,11 +384,11 @@ describe("Section", () => {
     expect(queryByText("the detail")).not.toBeNull();
   });
 
-  it("says how many values it holds while it is closed", () => {
+  it("carries the number of what is inside at the end of its line", () => {
     const { getByTestId } = draw(
-      <PageSection title="Server" count={12}><p>values</p></PageSection>,
+      <PageSection title="Recent failures" count={12}><p>rows</p></PageSection>,
     );
-    expect(getByTestId("section-head").textContent).toContain("12 values");
+    expect(getByTestId("section-head").querySelector(".section-count")).toHaveTextContent("12");
   });
 });
 
