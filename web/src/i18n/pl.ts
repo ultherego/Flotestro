@@ -1,5 +1,12 @@
 // The Polish translation of the interface.
 export const pl: Record<string, string> = {
+  /* Dashboard: uklad widgetow, wspolny dla calej instalacji. */
+  "Arrange the dashboard": "Ułóż pulpit",
+  "Store this arrangement for everybody": "Zapisz ten układ dla wszystkich",
+  "Add a widget…": "Dodaj widget…",
+  "The arrangement is the installation's: everybody sees it.": "Układ należy do instalacji: widzą go wszyscy.",
+  "The dashboard is arranged this way for everybody who opens it.": "Pulpit jest tak ułożony dla każdego, kto go otworzy.",
+  "{n} of 12": "{n} z 12",
   "What turns a sample into an alert.": "Co zamienia próbkę w alert.",
   "{n} rules": "reguł: {n}",
   "The last fifty, newest first.": "Ostatnie pięćdziesiąt, od najnowszego.",

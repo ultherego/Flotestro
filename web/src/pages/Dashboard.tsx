@@ -1,7 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState, type ReactNode } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { REFRESH_INTERVAL } from "../lib/stream";
-import { api, type Collection } from "../lib/api";
+import { api, ApiError, type Collection } from "../lib/api";
 import type { AuditEvent, Campaign, FleetActivity, FleetSummary, Job } from "../lib/types";
 import { relativeTime } from "../lib/format";
 import { ErrorBox, ErrorCode, Time, Empty, JobState } from "../components/ui";
@@ -9,6 +10,7 @@ import { Card, NeedsAttention, PageHeader, Verdict } from "../components/layout"
 import { BarChart, Breakdown, CountRow, StatusBar, type Segment } from "../components/widgets";
 import { FleetCoverage, type Coverage } from "../components/FleetCoverage";
 import { FirstRunCard } from "../components/FirstRunCard";
+import { useToast } from "../components/Toast";
 import { useT } from "../i18n";
 
 /**
@@ -221,142 +223,141 @@ export function Dashboard() {
       </NeedsAttention>
 
       {/* Where the fleet is, read across the room. */}
-      <div className="widgets">
-        {/* The size of the fleet is in the verdict above; the bar says where it is. */}
-        <Card className="span-12" title={t("Host availability")}>
-          <StatusBar segments={[
-            { label: t("Online"), value: s?.online, tone: "ok", to: "/hosts?connection_state=online" },
-            { label: t("Stale"), value: a ? byConnection("stale") ?? 0 : undefined, tone: "warn", to: "/hosts?connection_state=stale" },
-            { label: t("Offline"), value: a ? byConnection("offline") ?? 0 : undefined, tone: "error", to: "/hosts?connection_state=offline" },
-            { label: t("Unknown"), value: a ? byConnection("unknown") ?? 0 : undefined, tone: "unknown", to: "/hosts?connection_state=unknown" },
-            { label: t("Quarantined"), value: s?.quarantined_hosts, tone: "neutral", to: "/hosts?lifecycle_state=quarantined" },
-            { label: t("In maintenance"), value: s?.in_maintenance, tone: "neutral", to: "/hosts?maintenance=true" },
-          ]} />
-        </Card>
-
-        <Card className="span-6" title={t("Operations, last 24 h")} description={t("Finished per hour, by outcome.")}>
-          {a ? (
-            <BarChart
-              labels={a.hours.map(hourLabel)}
-              everyLabel={3}
-              series={[
-                { name: t("Succeeded"), tone: "ok", values: a.succeeded },
-                { name: t("Failed"), tone: "error", values: a.failed },
-                { name: t("Other"), tone: "unknown", values: a.other },
-              ]}
-            />
-          ) : <Empty>{t("Loading…")}</Empty>}
-        </Card>
-
-
-        <Card className="span-6" title={t("Fleet composition")} description={t("By system, agent build, site and environment.")}>
-          {a ? (
-            <>
-              <Breakdown items={a.by_os_family.map((f) => ({ label: facetLabel(f.key), value: f.count }))} />
-              <h4 className="widget-subhead">{t("Agent builds")}</h4>
-              <Breakdown tone="neutral" items={a.by_agent_version.map((f) => ({ label: facetLabel(f.key), value: f.count }))} />
-              {/* Sites and environments are two dimensions, not one list:
-                  "lab 6, test 6" under one heading reads as two sites. */}
-              <h4 className="widget-subhead">{t("Sites")}</h4>
-              <Breakdown tone="ok" items={a.by_site.map((f) => ({ label: facetLabel(f.key), value: f.count }))} />
-              <h4 className="widget-subhead">{t("Environments")}</h4>
-              <Breakdown tone="ok" items={a.by_environment.map((f) => ({ label: facetLabel(f.key), value: f.count }))} />
-            </>
-          ) : <Empty>{t("Loading…")}</Empty>}
-        </Card>
-
-        {/* The three lists the dashboard keeps. They stand open: a list
-            behind a fold says its name and nothing else, which is worse
-            than the wall it was meant to answer. */}
-        <Card
-          className="span-6"
-          title={t("Campaigns in progress")}
-          actions={activeCampaigns.length > 0 && <span className="badge">{activeCampaigns.length}</span>}
-          flush
-        >
-          {activeCampaigns.length === 0 ? (
-            <Empty>{t("No campaigns need attention.")}</Empty>
-          ) : (
-            <table>
-              <thead>
-                <tr><th scope="col">{t("Name")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Operation")}</th><th scope="col">{t("Pause reason")}</th></tr>
-              </thead>
-              <tbody>
-                {activeCampaigns.map((campaign) => (
-                  <tr key={campaign.id}>
-                    <td><Link to={`/campaigns/${campaign.id}`}>{campaign.name}</Link></td>
-                    <td><JobState state={campaign.state} /></td>
-                    <td className="mono">{campaign.action_type}</td>
-                    <td>{campaign.pause_reason || ""}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </Card>
-
-        <Card
-          className="span-6"
-          title={t("Recent failures")}
-          actions={<Link to="/jobs?state=failed">{t("All jobs")}</Link>}
-          flush
-        >
-          {(failures.data?.items ?? []).length === 0 ? (
-            <Empty>{t("No failed operations.")}</Empty>
-          ) : (
-            <table>
-              <thead><tr><th scope="col">{t("Time")}</th><th scope="col">{t("Host")}</th><th scope="col">{t("Operation")}</th><th scope="col">{t("Error")}</th></tr></thead>
-              <tbody>
-                {/* The time leads to the job itself, the host to its
-                    history: the two questions a failure raises. */}
-                {(failures.data?.items ?? []).map((job) => (
-                  <tr key={job.id}>
-                    <td><Link to={`/jobs/${job.id}`}><Time value={job.finished_at ?? job.created_at} /></Link></td>
-                    <td><Link to={`/hosts/${job.host_id}/jobs`}>{job.hostname || job.host_id.slice(0, 8)}</Link></td>
-                    <td className="mono"><Link to={`/jobs/${job.id}`}>{job.action_type}</Link></td>
-                    <td><ErrorCode code={job.result_error_code || "failed"} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </Card>
-
-        <Card
-          className="span-12"
-          title={t("Recent access denials")}
-          actions={
-            <>
-              {denied.length > 0 && <span className="badge error">{denied.length}</span>}
-              <Link to="/audit?outcome=denied">{t("All denials")}</Link>
-            </>
-          }
-          flush
-        >
-          {denied.length === 0 ? (
-            <Empty>{t("No denials in recent events.")}</Empty>
-          ) : (
-            <table>
-              <thead><tr><th scope="col">{t("Time")}</th><th scope="col">{t("Actor")}</th><th scope="col">{t("Operation")}</th><th scope="col">{t("Reason")}</th></tr></thead>
-              <tbody>
-                {denied.map((event) => (
-                  <tr key={event.id}>
-                    <td><Time value={event.occurred_at} /></td>
-                    {/* The actor leads to their trail: one denial is a
-                        typo, a run of them is somebody probing. */}
-                    <td className="mono"><Link to={`/audit?actor=${encodeURIComponent(event.actor_id)}`}>{event.actor_id}</Link></td>
-                    <td className="mono">{event.action}</td>
-                    {/* The reason is a code with a guide on hover, the
-                        way a job's error is: what it means and what to
-                        do about it. */}
-                    <td><DenialReason reason={event.detail?.reason} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </Card>
-      </div>
+      <DashboardWidgets drawn={{
+            host_availability: (
+              <Card title={t("Host availability")}>
+                <StatusBar segments={[
+                  { label: t("Online"), value: s?.online, tone: "ok", to: "/hosts?connection_state=online" },
+                  { label: t("Stale"), value: a ? byConnection("stale") ?? 0 : undefined, tone: "warn", to: "/hosts?connection_state=stale" },
+                  { label: t("Offline"), value: a ? byConnection("offline") ?? 0 : undefined, tone: "error", to: "/hosts?connection_state=offline" },
+                  { label: t("Unknown"), value: a ? byConnection("unknown") ?? 0 : undefined, tone: "unknown", to: "/hosts?connection_state=unknown" },
+                  { label: t("Quarantined"), value: s?.quarantined_hosts, tone: "neutral", to: "/hosts?lifecycle_state=quarantined" },
+                  { label: t("In maintenance"), value: s?.in_maintenance, tone: "neutral", to: "/hosts?maintenance=true" },
+                ]} />
+              </Card>
+            ),
+            operations_24h: (
+              <Card title={t("Operations, last 24 h")} description={t("Finished per hour, by outcome.")}>
+                {a ? (
+                  <BarChart
+                    labels={a.hours.map(hourLabel)}
+                    everyLabel={3}
+                    series={[
+                      { name: t("Succeeded"), tone: "ok", values: a.succeeded },
+                      { name: t("Failed"), tone: "error", values: a.failed },
+                      { name: t("Other"), tone: "unknown", values: a.other },
+                    ]}
+                  />
+                ) : <Empty>{t("Loading…")}</Empty>}
+              </Card>
+            ),
+            fleet_composition: (
+              <Card title={t("Fleet composition")} description={t("By system, agent build, site and environment.")}>
+                {a ? (
+                  <>
+                    <Breakdown items={a.by_os_family.map((f) => ({ label: facetLabel(f.key), value: f.count }))} />
+                    <h4 className="widget-subhead">{t("Agent builds")}</h4>
+                    <Breakdown tone="neutral" items={a.by_agent_version.map((f) => ({ label: facetLabel(f.key), value: f.count }))} />
+                    {/* Sites and environments are two dimensions, not one list:
+                        "lab 6, test 6" under one heading reads as two sites. */}
+                    <h4 className="widget-subhead">{t("Sites")}</h4>
+                    <Breakdown tone="ok" items={a.by_site.map((f) => ({ label: facetLabel(f.key), value: f.count }))} />
+                    <h4 className="widget-subhead">{t("Environments")}</h4>
+                    <Breakdown tone="ok" items={a.by_environment.map((f) => ({ label: facetLabel(f.key), value: f.count }))} />
+                  </>
+                ) : <Empty>{t("Loading…")}</Empty>}
+              </Card>
+            ),
+            campaigns_in_progress: (
+              <Card
+                title={t("Campaigns in progress")}
+                actions={activeCampaigns.length > 0 && <span className="badge">{activeCampaigns.length}</span>}
+                flush
+              >
+                {activeCampaigns.length === 0 ? (
+                  <Empty>{t("No campaigns need attention.")}</Empty>
+                ) : (
+                  <table>
+                    <thead>
+                      <tr><th scope="col">{t("Name")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Operation")}</th><th scope="col">{t("Pause reason")}</th></tr>
+                    </thead>
+                    <tbody>
+                      {activeCampaigns.map((campaign) => (
+                        <tr key={campaign.id}>
+                          <td><Link to={`/campaigns/${campaign.id}`}>{campaign.name}</Link></td>
+                          <td><JobState state={campaign.state} /></td>
+                          <td className="mono">{campaign.action_type}</td>
+                          <td>{campaign.pause_reason || ""}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </Card>
+            ),
+            recent_failures: (
+              <Card
+                title={t("Recent failures")}
+                actions={<Link to="/jobs?state=failed">{t("All jobs")}</Link>}
+                flush
+              >
+                {(failures.data?.items ?? []).length === 0 ? (
+                  <Empty>{t("No failed operations.")}</Empty>
+                ) : (
+                  <table>
+                    <thead><tr><th scope="col">{t("Time")}</th><th scope="col">{t("Host")}</th><th scope="col">{t("Operation")}</th><th scope="col">{t("Error")}</th></tr></thead>
+                    <tbody>
+                      {/* The time leads to the job itself, the host to its
+                          history: the two questions a failure raises. */}
+                      {(failures.data?.items ?? []).map((job) => (
+                        <tr key={job.id}>
+                          <td><Link to={`/jobs/${job.id}`}><Time value={job.finished_at ?? job.created_at} /></Link></td>
+                          <td><Link to={`/hosts/${job.host_id}/jobs`}>{job.hostname || job.host_id.slice(0, 8)}</Link></td>
+                          <td className="mono"><Link to={`/jobs/${job.id}`}>{job.action_type}</Link></td>
+                          <td><ErrorCode code={job.result_error_code || "failed"} /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </Card>
+            ),
+            access_denials: (
+              <Card
+                title={t("Recent access denials")}
+                actions={
+                  <>
+                    {denied.length > 0 && <span className="badge error">{denied.length}</span>}
+                    <Link to="/audit?outcome=denied">{t("All denials")}</Link>
+                  </>
+                }
+                flush
+              >
+                {denied.length === 0 ? (
+                  <Empty>{t("No denials in recent events.")}</Empty>
+                ) : (
+                  <table>
+                    <thead><tr><th scope="col">{t("Time")}</th><th scope="col">{t("Actor")}</th><th scope="col">{t("Operation")}</th><th scope="col">{t("Reason")}</th></tr></thead>
+                    <tbody>
+                      {denied.map((event) => (
+                        <tr key={event.id}>
+                          <td><Time value={event.occurred_at} /></td>
+                          {/* The actor leads to their trail: one denial is a
+                              typo, a run of them is somebody probing. */}
+                          <td className="mono"><Link to={`/audit?actor=${encodeURIComponent(event.actor_id)}`}>{event.actor_id}</Link></td>
+                          <td className="mono">{event.action}</td>
+                          {/* The reason is a code with a guide on hover, the
+                              way a job's error is: what it means and what to
+                              do about it. */}
+                          <td><DenialReason reason={event.detail?.reason} /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </Card>
+            ),
+      }} />
     </>
   );
 }
@@ -401,5 +402,159 @@ function Refreshed({ at, fetching, onRefresh }: { at: number; fetching: boolean;
         {fetching ? t("refreshing…") : t("refresh now")}
       </button>
     </span>
+  );
+}
+
+/* ---------------------------------------------------------------------- */
+/* The layout: which widgets the dashboard draws, in what order and how     */
+/* wide. It belongs to the installation rather than to a person, so the     */
+/* screen people talk to each other over is the same screen for all of      */
+/* them.                                                                    */
+/* ---------------------------------------------------------------------- */
+
+/** One widget of the stored layout. */
+export type LayoutWidget = { key: string; width: number };
+
+type StoredLayout = {
+  widgets: LayoutWidget[];
+  present: boolean;
+  updated_at?: string;
+  updated_by?: string;
+  revision?: number;
+};
+
+/**
+ * The catalogue: every widget this panel can draw, with the name a person
+ * picks it by and the width it takes until somebody says otherwise.
+ *
+ * A key in the record that is not here is skipped rather than refused - a
+ * record written by a newer panel still draws on an older one - and a key
+ * here that the record does not carry is simply not on the screen.
+ */
+export const DASHBOARD_CATALOGUE: { key: string; title: string; width: number }[] = [
+  { key: "host_availability", title: "Host availability", width: 12 },
+  { key: "operations_24h", title: "Operations, last 24 h", width: 6 },
+  { key: "fleet_composition", title: "Fleet composition", width: 6 },
+  { key: "campaigns_in_progress", title: "Campaigns in progress", width: 6 },
+  { key: "recent_failures", title: "Recent failures", width: 6 },
+  { key: "access_denials", title: "Recent access denials", width: 12 },
+];
+
+export const DASHBOARD_WIDTHS = [3, 4, 6, 8, 12];
+
+/** The layout the panel ships with: the whole catalogue, in its own order. */
+export function defaultLayout(): LayoutWidget[] {
+  return DASHBOARD_CATALOGUE.map((one) => ({ key: one.key, width: one.width }));
+}
+
+/**
+ * What is actually drawn: the stored layout, with the widgets this panel
+ * does not know left out, and the catalogue's order when nothing is stored.
+ */
+export function layoutToDraw(stored: StoredLayout | undefined, known: Set<string>): LayoutWidget[] {
+  if (!stored || !stored.present || stored.widgets.length === 0) {
+    return defaultLayout().filter((one) => known.has(one.key));
+  }
+  return stored.widgets.filter((one) => known.has(one.key));
+}
+
+function DashboardWidgets({ drawn }: { drawn: Record<string, ReactNode> }) {
+  const t = useT();
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const known = new Set(Object.keys(drawn));
+  const [editing, setEditing] = useState<LayoutWidget[] | null>(null);
+
+  const layout = useQuery({
+    queryKey: ["dashboard-layout"],
+    queryFn: () => api.get<StoredLayout>("/api/v1/settings/dashboard"),
+    retry: false,
+  });
+  const save = useMutation({
+    mutationFn: (widgets: LayoutWidget[]) =>
+      api.put<StoredLayout>("/api/v1/settings/dashboard", { widgets }),
+    onSuccess: () => {
+      setEditing(null);
+      void queryClient.invalidateQueries({ queryKey: ["dashboard-layout"] });
+      toast.success(t("The dashboard is arranged this way for everybody who opens it."));
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : String(error)),
+  });
+
+  // Whoever may not write the layout is told so by the server, not guessed
+  // at from a role: the button appears once a write is known to be allowed.
+  const mayArrange = layout.data !== undefined && !(layout.error instanceof ApiError);
+  const current = editing ?? layoutToDraw(layout.data, known);
+
+  const move = (index: number, by: number) => {
+    const next = [...current];
+    const target = index + by;
+    if (target < 0 || target >= next.length) return;
+    [next[index], next[target]] = [next[target], next[index]];
+    setEditing(next);
+  };
+  const absent = DASHBOARD_CATALOGUE.filter(
+    (one) => known.has(one.key) && !current.some((placed) => placed.key === one.key),
+  );
+
+  return (
+    <>
+      {mayArrange && (
+        <div className="layout-bar">
+          {editing === null ? (
+            <button className="secondary" onClick={() => setEditing(current)}>{t("Arrange the dashboard")}</button>
+          ) : (
+            <>
+              <button onClick={() => save.mutate(current)} disabled={save.isPending || current.length === 0}>
+                {save.isPending ? t("storing…") : t("Store this arrangement for everybody")}
+              </button>
+              <button className="secondary" onClick={() => setEditing(null)}>{t("Back")}</button>
+              {absent.length > 0 && (
+                <select
+                  value=""
+                  onChange={(event) => {
+                    const one = DASHBOARD_CATALOGUE.find((item) => item.key === event.target.value);
+                    if (one) setEditing([...current, { key: one.key, width: one.width }]);
+                  }}
+                >
+                  <option value="">{t("Add a widget…")}</option>
+                  {absent.map((one) => <option key={one.key} value={one.key}>{t(one.title)}</option>)}
+                </select>
+              )}
+              <span className="source">{t("The arrangement is the installation's: everybody sees it.")}</span>
+            </>
+          )}
+        </div>
+      )}
+      <div className="widgets">
+        {current.map((placed, index) => (
+          <div key={placed.key} className={`span-${placed.width}`}>
+            {editing !== null && (
+              <div className="widget-handle">
+                <span>{t(DASHBOARD_CATALOGUE.find((one) => one.key === placed.key)?.title ?? placed.key)}</span>
+                <select
+                  value={placed.width}
+                  onChange={(event) => {
+                    const next = [...current];
+                    next[index] = { ...placed, width: Number(event.target.value) };
+                    setEditing(next);
+                  }}
+                >
+                  {DASHBOARD_WIDTHS.map((width) => (
+                    <option key={width} value={width}>{t("{n} of 12", { n: width })}</option>
+                  ))}
+                </select>
+                <button className="secondary" onClick={() => move(index, -1)} disabled={index === 0}>←</button>
+                <button className="secondary" onClick={() => move(index, 1)} disabled={index === current.length - 1}>→</button>
+                <button className="secondary" onClick={() => setEditing(current.filter((one) => one.key !== placed.key))}>
+                  {t("Remove")}
+                </button>
+              </div>
+            )}
+            {drawn[placed.key]}
+          </div>
+        ))}
+      </div>
+    </>
   );
 }

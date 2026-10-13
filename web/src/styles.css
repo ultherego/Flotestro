@@ -2001,3 +2001,15 @@ button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent
 .records { display: grid; gap: 8px; }
 .records .pairs { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 2px 10px; }
 .records dt { font-size: 11px; }
+
+/* Arranging the dashboard: the bar of the edit mode and the handle each
+   widget grows while it lasts. */
+.layout-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 12px; }
+.layout-bar .source { margin-left: auto; }
+.widget-handle {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  margin-bottom: 6px; padding: 6px 8px;
+  background: var(--bg-raised); border-radius: var(--radius-xs); font-size: 12px;
+}
+.widget-handle > span:first-child { font-weight: 600; margin-right: auto; }
+.widget-handle button { padding: 2px 8px; font-size: 12px; }
