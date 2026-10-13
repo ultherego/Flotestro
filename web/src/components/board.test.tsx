@@ -5,6 +5,9 @@ import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 import { ToastProvider } from "./Toast";
 import { Board } from "./board";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { boardToDraw, heightStep, widthStep, type BoardEntry } from "./board";
 
 vi.mock("../lib/api", async (importOriginal) => {
@@ -210,5 +213,20 @@ describe("the ladders a tile is resized along", () => {
     expect(heightStep(undefined, 1)).toBe(2);
     expect(heightStep(1, -1)).toBe(1);
     expect(heightStep(8, 1)).toBe(8);
+  });
+});
+
+/**
+ * The arrange mode has to show what leaving it will show. A renderer without
+ * layout cannot see a box take half the room, so the rule is read where it
+ * is written.
+ */
+describe("the arrange mode looks like the screen it is arranging", () => {
+  const src = dirname(dirname(fileURLToPath(import.meta.url)));
+  const css = readFileSync(join(src, "styles.css"), "utf8");
+
+  it("gives the bar its own height and the widget the rest of the box", () => {
+    expect(css).toContain(".widgets.arranged > div > .widget-handle { flex: 0 0 auto; }");
+    expect(/\.widgets\.arranged > div > \* \{[^}]*flex: 1 1 auto/.test(css)).toBe(true);
   });
 });
