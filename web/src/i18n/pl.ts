@@ -7,6 +7,8 @@ export const pl: Record<string, string> = {
   "Store this arrangement for everybody": "Zapisz ten układ dla wszystkich",
   "Add a widget…": "Dodaj widget…",
   "The arrangement is the installation's: everybody sees it.": "Układ należy do instalacji: widzą go wszyscy.",
+  "Drag a tile by its bar to move it. The arrangement is the installation's: everybody sees it.": "Przeciągnij kafelek za jego pasek. Układ należy do instalacji: widzą go wszyscy.",
+  "Move with the arrow keys": "Przesuń strzałkami",
   "The dashboard is arranged this way for everybody who opens it.": "Pulpit jest tak ułożony dla każdego, kto go otworzy.",
   "{n} of 12": "{n} z 12",
   "What turns a sample into an alert.": "Co zamienia próbkę w alert.",

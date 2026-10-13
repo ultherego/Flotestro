@@ -69,6 +69,10 @@ export function Board({
   const queryClient = useQueryClient();
   const known = new Set(Object.keys(drawn).filter((key) => drawn[key] !== undefined && drawn[key] !== null));
   const [editing, setEditing] = useState<BoardWidget[] | null>(null);
+  // Which tile is under the hand, and which one it is over: dragging is how
+  // a board is arranged, and the arrows it replaced were a click per place.
+  const [dragging, setDragging] = useState<number | null>(null);
+  const [over, setOver] = useState<number | null>(null);
 
   const layout = useQuery({
     queryKey: ["screen-layout", screen],
@@ -91,11 +95,18 @@ export function Board({
   // a width means something, the grid has to be the thing drawing it.
   const packed = weights !== undefined && editing === null && !(layout.data?.present ?? false);
   const titleOf = (key: string) => catalogue.find((one) => one.key === key)?.title ?? key;
-  const move = (index: number, by: number) => {
+  const move = (index: number, by: number) => reorder(index, index + by);
+  /**
+   * The tile that was picked up lands where it was dropped, and everything
+   * between shifts up or down by one - the way a card moves in a hand, not
+   * the way two cards swap places. Swapping is what the arrows did, and over
+   * three places it leaves the ones in between where they were.
+   */
+  const reorder = (from: number, to: number) => {
+    if (to < 0 || to >= current.length || from === to) return;
     const next = [...current];
-    const target = index + by;
-    if (target < 0 || target >= next.length) return;
-    [next[index], next[target]] = [next[target], next[index]];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
     setEditing(next);
   };
   const absent = catalogue.filter(
@@ -127,7 +138,7 @@ export function Board({
                   {absent.map((one) => <option key={one.key} value={one.key}>{t(one.title)}</option>)}
                 </select>
               )}
-              <span className="source">{t("The arrangement is the installation's: everybody sees it.")}</span>
+              <span className="source">{t("Drag a tile by its bar to move it. The arrangement is the installation's: everybody sees it.")}</span>
             </>
           )}
         </div>
@@ -139,9 +150,37 @@ export function Board({
       ) : (
       <div className="widgets">
         {current.map((placed, index) => (
-          <div key={placed.key} className={`span-${placed.width}`}>
+          <div
+            key={placed.key}
+            className={[
+              `span-${placed.width}`,
+              dragging === index ? "dragging" : "",
+              over === index && dragging !== null && dragging !== index ? "drop-here" : "",
+            ].join(" ").trim()}
+            draggable={editing !== null}
+            onDragStart={(event) => {
+              setDragging(index);
+              // Firefox starts no drag at all without something to carry.
+              event.dataTransfer.setData("text/plain", placed.key);
+              event.dataTransfer.effectAllowed = "move";
+            }}
+            onDragOver={(event) => {
+              if (dragging === null) return;
+              event.preventDefault();
+              setOver(index);
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              if (dragging !== null) reorder(dragging, index);
+              setDragging(null);
+              setOver(null);
+            }}
+            onDragEnd={() => { setDragging(null); setOver(null); }}
+            data-testid={editing !== null ? "board-tile" : undefined}
+          >
             {editing !== null && (
               <div className="widget-handle" data-testid="widget-handle">
+                <span className="widget-grip" aria-hidden="true">⠿</span>
                 <span>{t(titleOf(placed.key))}</span>
                 <select
                   aria-label={t("Width")}
@@ -156,8 +195,21 @@ export function Board({
                     <option key={width} value={width}>{t("{n} of 12", { n: width })}</option>
                   ))}
                 </select>
-                <button className="secondary" onClick={() => move(index, -1)} disabled={index === 0}>←</button>
-                <button className="secondary" onClick={() => move(index, 1)} disabled={index === current.length - 1}>→</button>
+                {/* The mouse drags; the keyboard still has to be able to
+                    move a tile, so the handle answers the arrow keys. */}
+                <span
+                  className="widget-keys"
+                  tabIndex={0}
+                  role="button"
+                  aria-label={t("Move with the arrow keys")}
+                  onKeyDown={(event) => {
+                    if (event.key === "ArrowLeft") { event.preventDefault(); move(index, -1); }
+                    if (event.key === "ArrowRight") { event.preventDefault(); move(index, 1); }
+                  }}
+                  data-testid="widget-keys"
+                >
+                  ← →
+                </span>
                 <button className="secondary" onClick={() => setEditing(current.filter((one) => one.key !== placed.key))}>
                   {t("Remove")}
                 </button>

@@ -1,5 +1,21 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router-dom";
+import "@testing-library/jest-dom/vitest";
+import { ToastProvider } from "./Toast";
+import { Board } from "./board";
 import { boardToDraw, type BoardEntry } from "./board";
+
+vi.mock("../lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/api")>();
+  return {
+    ...actual,
+    api: { ...actual.api, get: () => Promise.resolve({ widgets: [], present: false }) },
+  };
+});
+
+afterEach(cleanup);
 
 /**
  * Which widgets a screen draws is the installation's answer, and the panel's
@@ -43,5 +59,90 @@ describe("boardToDraw", () => {
   it("leaves out a widget this screen has nothing to draw for", () => {
     const stored = { widgets: [{ key: "first", width: 6 }, { key: "second", width: 6 }], present: true };
     expect(boardToDraw(stored, catalogue, new Set(["first"]))).toEqual([{ key: "first", width: 6 }]);
+  });
+});
+
+/* ---------------------------------------------------------------------- */
+/* Arranging with the hand.                                               */
+/* ---------------------------------------------------------------------- */
+
+const three: BoardEntry[] = [
+  { key: "first", title: "First", width: 4 },
+  { key: "second", title: "Second", width: 4 },
+  { key: "third", title: "Third", width: 4 },
+];
+
+function drawBoard() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <ToastProvider>
+          <Board
+            screen="test"
+            catalogue={three}
+            drawn={{ first: <p>one</p>, second: <p>two</p>, third: <p>three</p> }}
+          />
+        </ToastProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+async function arrange() {
+  const view = drawBoard();
+  await waitFor(() => expect(screen.getByText("Arrange this screen")).toBeInTheDocument());
+  fireEvent.click(screen.getByText("Arrange this screen"));
+  return view;
+}
+
+/* The name of each tile, in the order the board draws them. The handle also
+   holds the width select, so the name is read from its own element. */
+function order() {
+  return screen.getAllByTestId("widget-handle").map(
+    (handle) => handle.querySelectorAll("span")[1]?.textContent,
+  );
+}
+
+/* jsdom has no DataTransfer, and the handler only ever writes to it. */
+function transfer() {
+  return { dataTransfer: { setData: () => undefined, effectAllowed: "" } };
+}
+
+describe("arranging a board with the mouse", () => {
+  it("lands the tile where it was dropped and shifts the rest along", async () => {
+    await arrange();
+    expect(order()).toEqual(["First", "Second", "Third"]);
+    const tiles = screen.getAllByTestId("board-tile");
+    // The first tile is picked up and dropped on the third.
+    fireEvent.dragStart(tiles[0], transfer());
+    fireEvent.dragOver(tiles[2]);
+    fireEvent.drop(tiles[2]);
+    // Moved, not swapped: the two it passed keep their order.
+    expect(order()).toEqual(["Second", "Third", "First"]);
+  });
+
+  it("does nothing when a tile is dropped on itself", async () => {
+    await arrange();
+    const tiles = screen.getAllByTestId("board-tile");
+    fireEvent.dragStart(tiles[1], transfer());
+    fireEvent.drop(tiles[1]);
+    expect(order()).toEqual(["First", "Second", "Third"]);
+  });
+
+  /* The hand is not the only way in: a tile has to be movable from the
+     keyboard, or the arrangement is closed to anybody not using a mouse. */
+  it("moves a tile with the arrow keys as well", async () => {
+    await arrange();
+    fireEvent.keyDown(screen.getAllByTestId("widget-keys")[0], { key: "ArrowRight" });
+    expect(order()).toEqual(["Second", "First", "Third"]);
+    fireEvent.keyDown(screen.getAllByTestId("widget-keys")[1], { key: "ArrowLeft" });
+    expect(order()).toEqual(["First", "Second", "Third"]);
+  });
+
+  it("sets the width of a tile out of the twelve columns", async () => {
+    await arrange();
+    fireEvent.change(screen.getAllByLabelText("Width")[0], { target: { value: "12" } });
+    expect(screen.getAllByTestId("board-tile")[0].className).toContain("span-12");
   });
 });

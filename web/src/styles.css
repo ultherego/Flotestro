@@ -2043,3 +2043,16 @@ button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent
 }
 /* The tile fills the box the arrangement gave it rather than ending early. */
 .widgets > div > .part { height: 100%; }
+
+/* Arranging with the hand: the tile being dragged fades, and the one it
+   would land on carries the accent on the edge it would push against. */
+.widgets > .dragging { opacity: 0.45; }
+.widgets > .drop-here { outline: 2px dashed var(--accent); outline-offset: 4px; border-radius: var(--radius); }
+.widget-handle { cursor: grab; }
+.widgets > .dragging .widget-handle { cursor: grabbing; }
+.widget-grip { color: var(--text-faint); letter-spacing: -2px; }
+.widget-keys {
+  padding: 2px 6px; border: 1px solid var(--border); border-radius: var(--radius-xs);
+  color: var(--text-muted); cursor: default; user-select: none;
+}
+.widget-keys:focus-visible { outline: 2px solid var(--accent); color: var(--text); }
