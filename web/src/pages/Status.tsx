@@ -286,7 +286,10 @@ export function Status() {
               four to a row. Folding them away was worse than the wall it
               was meant to answer: thirteen closed lines say thirteen names
               and nothing else, and finding anything took a click. */}
-          <Masonry>
+          {/* A tile is about as tall as the facts it holds, with the widget
+              some of them draw on top; that is close enough to leave the
+              columns level. */}
+          <Masonry weights={[...blocks.map((key) => tileWeight(data.blocks[key])), 12]}>
             {blocks.map((key) => (
               <BlockTile key={key} name={key} block={data.blocks[key]} />
             ))}
@@ -393,6 +396,16 @@ export function blockSummary(
     default:
       return "";
   }
+}
+
+/** Roughly how tall a part's tile will be, counted in rows of facts. */
+export function tileWeight(block: StatusBlock): number {
+  const rows = Object.keys(block.facts).filter((key) => !DRAWN_ELSEWHERE.has(key)).length;
+  // A structure draws a row per field of every record, and a widget takes
+  // about four rows of its own.
+  const structured = Object.values(block.facts).filter(
+    (value) => value !== null && typeof value === "object").length;
+  return rows + structured * 4 + 3;
 }
 
 function ToneBadge({ tone }: { tone: Tone }) {

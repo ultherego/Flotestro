@@ -1597,6 +1597,11 @@ a.button.primary:hover { background: color-mix(in srgb, var(--accent) 88%, var(-
   text-decoration: none;
 }
 .status-bar-hero .status-bar-value { font-size: 34px; }
+/* Inside a tile the single number stands among a tile's worth of facts, not
+   alone on a card: a billboard there was twice the height of what it says. */
+.part .status-bar-hero { padding: 8px 12px; }
+.part .status-bar-hero .status-bar-value { font-size: 22px; }
+.part .count-tile .status-bar-value, .part .status-bar-segment .status-bar-value { font-size: 20px; }
 .status-bar-hero .status-bar-label { font-size: 13px; color: var(--text-muted); opacity: 1; }
 a.status-bar-hero:hover { background: var(--bg-hover); text-decoration: none; color: var(--text); }
 

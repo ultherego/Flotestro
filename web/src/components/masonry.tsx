@@ -14,11 +14,29 @@ import { Children, isValidElement, useEffect, useState, type ReactNode } from "r
  * columns still end at whatever height their own tiles make, with no holes
  * between them.
  */
-export function Masonry({ children, min = 420 }: { children: ReactNode; min?: number }) {
+export function Masonry({
+  children, min = 420, weights,
+}: {
+  children: ReactNode;
+  min?: number;
+  /**
+   * How much room each tile takes, in whatever unit the screen counts in -
+   * rows of facts, usually. Without it the tiles are dealt round-robin and
+   * a column of long tiles ends far below its neighbours.
+   */
+  weights?: number[];
+}) {
   const count = useColumnCount(min);
   const tiles = Children.toArray(children).filter((child) => isValidElement(child) || child);
   const columns: ReactNode[][] = Array.from({ length: count }, () => []);
-  tiles.forEach((tile, index) => columns[index % count].push(tile));
+  const filled = new Array<number>(count).fill(0);
+  tiles.forEach((tile, index) => {
+    // The first tile of each column is its position in the order the screen
+    // declared: that is what makes importance read across the top row.
+    const column = index < count ? index : shortest(filled);
+    columns[column].push(tile);
+    filled[column] += weights?.[index] ?? 1;
+  });
   return (
     <div className="masonry" data-columns={count}>
       {columns.map((column, index) => (
@@ -53,4 +71,14 @@ function width(): number {
 export function columnsFor(viewport: number, min: number): number {
   const usable = Math.max(viewport - CHROME, min);
   return Math.max(1, Math.min(4, Math.floor(usable / min)));
+}
+
+/* The column with the least in it, the first of them on a tie - so the board
+   fills left to right when every tile is the same size. */
+export function shortest(filled: number[]): number {
+  let best = 0;
+  for (let i = 1; i < filled.length; i += 1) {
+    if (filled[i] < filled[best]) best = i;
+  }
+  return best;
 }

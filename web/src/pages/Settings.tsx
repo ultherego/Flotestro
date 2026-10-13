@@ -70,7 +70,7 @@ export function Settings() {
             />
           </div>
           <div data-testid="settings-areas">
-            <Masonry>
+            <Masonry weights={areas.map(({ facts }) => facts.length + 3)}>
               {areas.map(({ area, facts }) => (
                 <AreaTile key={area.key} area={area} facts={facts} />
               ))}
