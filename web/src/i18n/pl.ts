@@ -1,5 +1,13 @@
 // The Polish translation of the interface.
 export const pl: Record<string, string> = {
+  /* Campaign: gdzie stoi kampania. */
+  "Reading the campaign…": "Czytam kampanię…",
+  "Canceled; {underWay} hosts still carry their tasks": "Anulowana; hostów wciąż wykonujących zadania: {underWay}",
+  "{done} of {total} hosts done": "zrobione hosty: {done} z {total}",
+  "{done} of {total} hosts done, {failed} failed": "zrobione hosty: {done} z {total}, nieudane: {failed}",
+  "approved by {who}": "zatwierdził {who}",
+  "written once, never changed": "zapisany raz, nigdy nie zmieniany",
+  "one group is one shape of the change": "jedna grupa to jeden kształt zmiany",
   /* Monitoring: alerty z probek agentow. */
   "What the agents' samples turned into alerts.": "Co z próbek agentów zrobiło się alertem.",
   "Every agent samples its host once a minute; the rules on this page turn the samples into alerts. Nothing fires without a rule an operator can read here. A rule fires when a metric stays past its threshold for the given minutes on every host its scope selects, and a disabled rule is listed because it would apply the moment somebody enables it.": "Każdy agent próbkuje swój host raz na minutę; reguły z tej strony zamieniają próbki w alerty. Nic nie odpala się bez reguły, którą operator może tu przeczytać. Reguła odpala, gdy metryka utrzyma się za progiem przez podaną liczbę minut na każdym hoście z jej zakresu; reguła wyłączona jest na liście, bo zadziała w chwili, gdy ktoś ją włączy.",

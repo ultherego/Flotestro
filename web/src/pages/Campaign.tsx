@@ -6,7 +6,7 @@ import type {
   Campaign as CampaignType, CampaignApproval, CampaignReport, CampaignTarget, SelectorExpression, TimelineEntry,
 } from "../lib/types";
 import { ErrorBox, ErrorCode, Time, Pair, Pairs, ProgressBar, Empty, JobState } from "../components/ui";
-import { Actions, Card, Columns, Field, FieldGrid, PageHeader, Toolbar } from "../components/layout";
+import { Actions, Card, Columns, Field, FieldGrid, PageHeader, Section, Toolbar, Verdict } from "../components/layout";
 import { StatusBar } from "../components/widgets";
 import { JobPlan, PlanGroupView, STALE_PLAN_CODES, unknownPlanHosts } from "../components/plan";
 import { VirtualRows } from "../components/virtual";
@@ -367,7 +367,7 @@ export function Campaign() {
       <PageHeader
         breadcrumb={[{ label: t("Campaigns"), to: "/campaigns" }]}
         title={data.name}
-        description={<><JobState state={data.state} /> · {data.action_type} · {t("requested by {who}", { who: data.created_by })}</>}
+        description={<><JobState state={data.state} /> · <span className="mono">{data.action_type}</span></>}
         actions={
           <>
             {data.state === "awaiting_approval" && (
@@ -548,12 +548,27 @@ export function Campaign() {
 
       {/* The fate of the hosts as one coloured bar: the campaign's state
           read from across the room, each segment leading to its hosts. */}
-      <Card
-        title={t("Targets")}
-        description={data.state === "canceling"
-          ? t("{n} hosts in this campaign. The campaign is canceled; {underWay} hosts still carry their tasks and it ends once they settle.", { n: total, underWay })
-          : t("{n} hosts in this campaign", { n: total })}
+      {/* Where the campaign stands, in one line. The bar under it is the
+          same answer as a picture; this is the answer in words, and it is
+          what somebody wants from the top of the page. */}
+      <Verdict
+        tone={failed > 0 ? "error" : SETTLED_CAMPAIGN_STATES.includes(data.state) ? "ok" : underWay > 0 ? "warn" : undefined}
+        headline={
+          !report.data ? t("Reading the campaign…")
+            : data.state === "canceling"
+              ? t("Canceled; {underWay} hosts still carry their tasks", { underWay })
+              : failed > 0
+                ? t("{done} of {total} hosts done, {failed} failed", { done: succeeded + noChange, total, failed })
+                : t("{done} of {total} hosts done", { done: succeeded + noChange, total })
+        }
       >
+        <span>{t("requested by {who}", { who: data.created_by })}</span>
+        {data.approved_by && <span>{t("approved by {who}", { who: data.approved_by })}</span>}
+        {data.started_at && <span>{t("started")} <Time value={data.started_at} /></span>}
+        {data.finished_at && <span>{t("finished")} <Time value={data.finished_at} /></span>}
+      </Verdict>
+
+      <Card title={t("Targets")}>
         <StatusBar segments={[
           { label: t("Not started"), value: report.data ? notStarted - offlineQueued : undefined, tone: "neutral" },
           { label: t("Waiting for connection"), value: report.data ? offlineQueued : undefined, tone: "warn" },
@@ -610,8 +625,33 @@ export function Campaign() {
         </Card>
       )}
 
-      <Columns wide>
-      <Card title={t("Details")}>
+      {/* A host that came back with a different plan ran nothing: the
+          consent covered the old plan, and the operator is to see which
+          hosts need a new one rather than count them among the skipped. */}
+      {report.data?.plan_changed && report.data.plan_changed.length > 0 && (
+        <Card
+          tone="warn"
+          title={t("Plans changed after a reconnect")}
+          description={t("These hosts came back with a state that gives a different plan than the one approved. Nothing ran on them; order a new campaign to approve the new plans.")}
+        >
+          <ul>
+            {report.data.plan_changed.map((target) => (
+              <li key={target.host_id}>
+                <Link to={`/hosts/${target.host_id}/${moduleForAction(data.action_type)}?campaign=${id}`}>
+                  {target.hostname || target.host_id.slice(0, 8)}
+                </Link>
+                {target.message && <> — {target.message}</>}
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+
+      {/* What the campaign is made of, behind one line each: the record of
+          who consented, the waves, the plans and the trail. The bar above and
+          the hosts below are what somebody opens this page for. */}
+      <Card flush>
+      <Section title={t("Details")} className="list-section">
         <Pairs>
           <Pair label={t("Requested by")}>{data.created_by}</Pair>
           <Pair label={t("Approved by")}>{data.approved_by || "—"}{data.approved_at && <> · <Time value={data.approved_at} /></>}</Pair>
@@ -649,11 +689,15 @@ export function Campaign() {
             </Pair>
           )}
         </Pairs>
-      </Card>
-      <div className="stack">
+      </Section>
 
       {approvals.data && approvals.data.items.length > 0 && (
-        <Card title={t("Approval record")} description={t("Who consented to what, on what authentication and why. The record is written once and never changed.")} flush>
+        <Section
+          title={t("Approval record")}
+          count={approvals.data.items.length}
+          summary={t("written once, never changed")}
+          className="list-section"
+        >
           <table>
             <thead><tr><th scope="col">{t("Approved by")}</th><th scope="col">{t("Requested by")}</th><th scope="col">{t("Authentication")}</th><th scope="col">{t("Reason")}</th><th scope="col">{t("Change ticket")}</th><th scope="col">{t("When")}</th></tr></thead>
             <tbody>
@@ -672,33 +716,12 @@ export function Campaign() {
               ))}
             </tbody>
           </table>
-        </Card>
+        </Section>
       )}
 
-      {/* A host that came back with a different plan ran nothing: the
-          consent covered the old plan, and the operator is to see which
-          hosts need a new one rather than count them among the skipped. */}
-      {report.data?.plan_changed && report.data.plan_changed.length > 0 && (
-        <Card
-          tone="warn"
-          title={t("Plans changed after a reconnect")}
-          description={t("These hosts came back with a state that gives a different plan than the one approved. Nothing ran on them; order a new campaign to approve the new plans.")}
-        >
-          <ul>
-            {report.data.plan_changed.map((target) => (
-              <li key={target.host_id}>
-                <Link to={`/hosts/${target.host_id}/${moduleForAction(data.action_type)}?campaign=${id}`}>
-                  {target.hostname || target.host_id.slice(0, 8)}
-                </Link>
-                {target.message && <> — {target.message}</>}
-              </li>
-            ))}
-          </ul>
-        </Card>
-      )}
 
       {report.data && (
-        <Card title={t("Waves")} flush>
+        <Section title={t("Waves")} count={report.data.waves.length} className="list-section">
           <table>
             <thead><tr><th scope="col" className="num">{t("Wave")}</th><th scope="col">{t("Canary")}</th><th scope="col">{t("Closed")}</th><th scope="col">{t("Summary")}</th></tr></thead>
             <tbody>
@@ -712,19 +735,20 @@ export function Campaign() {
               ))}
             </tbody>
           </table>
-        </Card>
+        </Section>
       )}
-      </div>
-      </Columns>
 
       {/* The change as the hosts computed it: one row per shape of the
           plan together with the hosts that get it. A document or a list of
           commands in the plan is shown in full, since that is what lands
           on the host. */}
-      <Card
+      <Section
         title={t("Plans")}
-        description={t("One group is one shape of the change and the hosts that get it. A host whose plan changed since refuses the change.")}
-        flush
+        summary={t("one group is one shape of the change")}
+        /* While nobody has consented yet, the plans are the thing on the
+           screen to read: that is what the approval is of. */
+        open={["planning", "planned", "awaiting_approval"].includes(data.state) ? true : undefined}
+        className="list-section"
       >
         {plans.error ? (
           <ErrorBox error={plans.error} />
@@ -745,17 +769,18 @@ export function Campaign() {
             )}
           </div>
         )}
-      </Card>
+      </Section>
 
       {/* The trail is filtered in the browser: it is already loaded whole,
           and one kind of event or one host is what a diagnosis looks for.
           The export is the filtered rows, built here from the same list. */}
-      <Card
+      <Section
         title={t("Timeline")}
+        count={timeline.data?.items.length}
         actions={events.length > 0 ? (
           <a className="button" href={timelineCSV(events, loaded)} download={`campaign-${id}-timeline.csv`}>{t("Download the timeline as CSV")}</a>
         ) : undefined}
-        flush
+        className="list-section"
       >
         <Toolbar end={<span>{t("{shown} of {total} shown", { shown: events.length, total: timeline.data?.items.length ?? 0 })}</span>}>
           <select value={eventKind} onChange={(e) => setEventKind(e.target.value)} aria-label={t("Event kind")}>
@@ -787,6 +812,7 @@ export function Campaign() {
             </tbody>
           </table>
         )}
+      </Section>
       </Card>
 
       {/* The export is a file, not a screen: a report of ten thousand hosts
