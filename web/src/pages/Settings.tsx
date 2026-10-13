@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../lib/api";
+import { goDuration } from "../lib/format";
 import type { Settings as SettingsView, SettingsArea, SettingsFact } from "../lib/types";
 import { Empty, ErrorBox, Pair, Pairs, Time } from "../components/ui";
-import { Actions, Card, Field, FieldGrid, PageHeader } from "../components/layout";
+import { Actions, Card, Field, FieldGrid, PageHeader, Section } from "../components/layout";
 import { useToast } from "../components/Toast";
-import { humanDuration } from "./Status";
 import { useT } from "../i18n";
 
 /**
@@ -20,12 +20,32 @@ export function Settings() {
     retry: false,
   });
 
+  // What somebody is looking for. A settings screen is read with a name in
+  // mind - "where is the session timeout" - and the way to answer that is a
+  // search, not nine open cards to scan.
+  const [query, setQuery] = useState("");
+  const needle = query.trim().toLowerCase();
+  const areas = (data?.areas ?? []).map((area) => ({
+    area,
+    facts: needle === ""
+      ? area.facts
+      : area.facts.filter((fact) =>
+          fact.key.toLowerCase().includes(needle)
+          || t(FACT_LABELS[fact.key] ?? fact.key).toLowerCase().includes(needle)),
+  })).filter(({ area, facts }) => needle === "" || facts.length > 0 || t(area.title).toLowerCase().includes(needle));
+
   return (
     <>
       <PageHeader
         icon="settings"
         title={t("Settings")}
-        description={t("What this panel was started with. The values come from {source} and are read when it starts; the monitoring retentions below are the exception - they belong to the installation and change without a restart.", { source: t(data?.source ?? "the environment of the control plane process") })}
+        description={t("What this panel was started with.")}
+        help={
+          <>
+            <p>{t("The values come from {source} and are read when the panel starts, so a change to them needs a restart.", { source: t(data?.source ?? "the environment of the control plane process") })}</p>
+            <p>{t("The monitoring retentions are the exception: they belong to the installation, are stored by this screen and take effect without a restart.")}</p>
+          </>
+        }
       />
       {error && <ErrorBox error={error} />}
       {!error && !data && <Card><Empty>{t("Loading…")}</Empty></Card>}
@@ -33,10 +53,27 @@ export function Settings() {
         <MonitoringSettingsCard />
       </div>
       {data && (
-        // The areas the API reports, apart from the editor above.
-        <div className="widgets" data-testid="settings-areas">
-          {data.areas.map((area) => <AreaCard key={area.key} area={area} />)}
-        </div>
+        <Card
+          flush
+          title={t("What the process was started with")}
+          actions={
+            <input
+              type="search"
+              className="settings-search"
+              placeholder={t("Find a setting")}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              data-testid="settings-search"
+            />
+          }
+        >
+          <div data-testid="settings-areas">
+            {areas.map(({ area, facts }) => (
+              <AreaSection key={area.key} area={area} facts={facts} open={needle === "" ? undefined : true} />
+            ))}
+            {areas.length === 0 && <Empty>{t("No setting of that name.")}</Empty>}
+          </div>
+        </Card>
       )}
     </>
   );
@@ -211,8 +248,8 @@ function MonitoringSettingsCard() {
             key={field.key}
             label={t(field.label)}
             hint={`${t(field.hint)} ${t("In force: {value}. Environment: {fallback}.", {
-              value: humanDuration(effective[field.key] as string),
-              fallback: humanDuration(environment[field.key] as string),
+              value: goDuration(effective[field.key] as string),
+              fallback: goDuration(environment[field.key] as string),
             })}`}
           >
             <input
@@ -273,7 +310,7 @@ function ImpactNote({
       <Pairs>
         {impact.dropped_raw_partitions.length > 0 && (
           <Pair label={t("Days of raw samples dropped")}>
-            <span className="mono fp-wrap">{impact.dropped_raw_partitions.join(", ")}</span>
+            <span className="mono wrap">{impact.dropped_raw_partitions.join(", ")}</span>
           </Pair>
         )}
         {impact.raw_samples_estimate > 0 && (
@@ -311,18 +348,38 @@ function ImpactNote({
 
 /* The titles come from the server as English keys; the catalogue turns
    them into the panel's language like every other label. */
-function AreaCard({ area }: { area: SettingsArea }) {
+/**
+ * One area of the configuration: its name and how many values it holds while
+ * it is closed, the values themselves when it is open.
+ *
+ * Nine areas used to stand open at once, every value of every one of them on
+ * the screen. Nobody reads a configuration that way; they come looking for
+ * one setting, which is what the search above and the count here are for.
+ */
+function AreaSection({
+  area, facts, open,
+}: {
+  area: SettingsArea;
+  /** The facts to draw: all of them, or what the search left. */
+  facts: SettingsFact[];
+  open?: boolean;
+}) {
   const t = useT();
   return (
-    <Card className="span-6" title={t(area.title)}>
+    <Section
+      title={t(area.title)}
+      count={facts.length}
+      open={open}
+      className="settings-section"
+    >
       <Pairs>
-        {area.facts.map((fact) => (
+        {facts.map((fact) => (
           <Pair key={fact.key} label={t(FACT_LABELS[fact.key] ?? fact.key)}>
             <FactValue fact={fact} area={area.key} />
           </Pair>
         ))}
       </Pairs>
-    </Card>
+    </Section>
   );
 }
 
@@ -345,12 +402,12 @@ function FactValue({ fact, area }: { fact: SettingsFact; area: string }) {
   if (value === "" && area === "retention") return <span title={t("No limit is set; the records are never swept.")}>{t("forever")}</span>;
   if (value === "" || (Array.isArray(value) && value.length === 0)) return <span className="source">—</span>;
   if (typeof value === "boolean") return <span className={value ? "badge ok" : "badge unknown"}>{value ? t("yes") : t("no")}</span>;
-  if (Array.isArray(value)) return <span className="mono fp-wrap">{value.join(", ")}</span>;
+  if (Array.isArray(value)) return <span className="mono wrap">{value.join(", ")}</span>;
   // A duration is read in days and hours, with the exact value on hover.
   if (typeof value === "string" && value !== "" && GO_DURATION.test(value)) {
-    return <span className="mono" title={value}>{humanDuration(value)}</span>;
+    return <span className="mono" title={value}>{goDuration(value)}</span>;
   }
-  return <span className="mono fp-wrap">{String(value)}</span>;
+  return <span className="mono wrap">{String(value)}</span>;
 }
 
 /* The English label of each fact, so the catalogue has a sentence to

@@ -2,10 +2,13 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { copyToClipboard } from "../lib/clipboard";
-import { absoluteTime, bytes, relativeTime } from "../lib/format";
-import { Empty, ErrorBox, Pair, Pairs, Time } from "../components/ui";
-import { Card, PageHeader } from "../components/layout";
-import { StatusBar, type Segment, type WidgetTone } from "../components/widgets";
+import { absoluteTime, duration, goDuration, relativeTime } from "../lib/format";
+import {
+  Empty, ErrorBox, FactValue, Pair, Pairs, Structured, TableScroll, Time,
+  type FactKind,
+} from "../components/ui";
+import { Card, NeedsAttention, PageHeader, Section, Verdict, type Tone } from "../components/layout";
+import { StatusBar, type Segment } from "../components/widgets";
 import { useT } from "../i18n";
 
 /**
@@ -36,23 +39,12 @@ type OutboxConsumer = { name: string; behind: number; failures: number; last_err
 type Feed = { provider: string; age_seconds: number; stale: boolean; advisories: number; error?: string };
 
 /** The tone of a block: red when not fine, amber when fine with a note, grey when unknown. */
-export function blockTone(block: Pick<StatusBlock, "ok" | "attention">): WidgetTone {
+export function blockTone(block: Pick<StatusBlock, "ok" | "attention">): Tone {
   if (block.ok === null || block.ok === undefined) return "unknown";
   if (!block.ok) return "error";
   return block.attention ? "warn" : "ok";
 }
 
-/**
- * A number of seconds as a short duration. Fractions matter below a minute -
- * a latency of 0.
- */
-export function formatSeconds(value: number): string {
-  if (!Number.isFinite(value) || value < 0) return "—";
-  if (value < 60) return `${value < 10 ? value.toFixed(1) : Math.round(value)}s`;
-  if (value < 3600) return `${Math.floor(value / 60)}m ${Math.round(value % 60)}s`;
-  if (value < 86400) return `${Math.floor(value / 3600)}h ${Math.floor((value % 3600) / 60)}m`;
-  return `${Math.floor(value / 86400)}d ${Math.floor((value % 86400) / 3600)}h`;
-}
 
 /** The order the blocks stand in: what breaks the panel first comes first. */
 const BLOCK_ORDER = [
@@ -80,7 +72,6 @@ const BLOCK_TITLES: Record<string, string> = {
 /* The label of each fact and how its value is drawn. A key without a
    label is shown as it is, so a new fact of the server is visible before
    the screen learns its name. */
-type FactKind = "text" | "number" | "bytes" | "seconds" | "time" | "flag" | "ms";
 const FACT_LABELS: Record<string, [string, FactKind]> = {
   settings_stored: ["Settings stored in the panel", "flag"],
   settings_updated_at: ["Settings stored at", "time"],
@@ -101,11 +92,11 @@ const FACT_LABELS: Record<string, [string, FactKind]> = {
   oldest_dirty_bucket_at: ["Oldest waiting bucket", "time"],
   hosts_with_rollup_mark: ["Hosts with a rollup mark", "number"],
   sample_identities: ["Sample identities", "number"],
-  raw_retention: ["Raw retention", "text"],
-  rollup_retention: ["Rollup retention", "text"],
-  max_lateness: ["Maximum lateness", "text"],
-  raw_query_window: ["Raw query window", "text"],
-  clock_skew_limit: ["Clock skew limit", "text"],
+  raw_retention: ["Raw retention", "duration"],
+  rollup_retention: ["Rollup retention", "duration"],
+  max_lateness: ["Maximum lateness", "duration"],
+  raw_query_window: ["Raw query window", "duration"],
+  clock_skew_limit: ["Clock skew limit", "duration"],
   partitions_ahead_days: ["Partitions ahead", "number"],
   evaluator_holder: ["Evaluator holder", "text"],
   evaluator_lease_until: ["Evaluator lease until", "time"],
@@ -126,14 +117,14 @@ const FACT_LABELS: Record<string, [string, FactKind]> = {
   connections_headroom: ["Headroom", "number"],
   next_replica_fits: ["Another replica fits", "flag"],
   next_replica_shortfall: ["Shortfall for the next replica", "number"],
-  instance_stale_after: ["Instance dead after", "text"],
+  instance_stale_after: ["Instance dead after", "duration"],
   replicas_without_a_pool: ["Replicas without a declared pool", "number"],
   pool_min: ["Pool minimum", "number"],
   pool_idle: ["Idle connections", "number"],
-  pool_max_conn_lifetime: ["Connection lifetime", "text"],
-  pool_max_conn_idle_time: ["Idle limit", "text"],
-  pool_health_check_period: ["Health check period", "text"],
-  pool_connect_timeout: ["Connect timeout", "text"],
+  pool_max_conn_lifetime: ["Connection lifetime", "duration"],
+  pool_max_conn_idle_time: ["Idle limit", "duration"],
+  pool_health_check_period: ["Health check period", "duration"],
+  pool_connect_timeout: ["Connect timeout", "duration"],
   pool_empty_acquires: ["Waits for a free connection", "number"],
   oldest_transaction_seconds: ["Oldest transaction", "seconds"],
   server_version: ["Server version", "text"],
@@ -165,6 +156,26 @@ const FACT_LABELS: Record<string, [string, FactKind]> = {
   last_sweep_at: ["Last sweep", "time"],
   total: ["Relays", "number"],
   degraded: ["Degraded", "number"],
+  /* The cryptographic state. Every one of these used to be drawn under its
+     own key, and the three identifiers ran out of the card. */
+  installation_id: ["Installation", "id"],
+  provider: ["Key provider", "text"],
+  recorded_provider: ["Provider in the record", "text"],
+  active_key_id: ["Active key", "id"],
+  issuer_id: ["Issuer", "id"],
+  issuer_fingerprint: ["Issuer fingerprint", "id"],
+  kek_id: ["Key encryption key", "id"],
+  revision: ["Revision", "number"],
+  initialized_at: ["Initialised", "time"],
+  keys: ["Keys", "text"],
+  versions_by_key: ["Versions per key", "text"],
+  pending_rewrap: ["Rows waiting to be re-sealed", "number"],
+  unreadable_versions: ["Versions this installation cannot open", "number"],
+  initialised: ["Initialised", "flag"],
+  adopted: ["Adopted", "flag"],
+  /* The replicas of the control plane. */
+  gateway_id: ["This gateway", "id"],
+  replicas: ["Replicas", "text"],
 };
 
 /* What the housekeeping sweeps, named as the settings screen names the
@@ -212,12 +223,23 @@ export function Status() {
     });
   };
 
+  const blocks = data ? BLOCK_ORDER.filter((key) => data.blocks[key]) : [];
+  // What the reader has to do something about, named at the top. The same
+  // blocks stand open below; this zone is how they are found without
+  // reading all thirteen headings.
+  const wanting = blocks.filter((key) => blockTone(data!.blocks[key]) !== "ok");
+
   return (
     <>
       <PageHeader
         icon="settings"
         title={t("Status")}
-        description={t("The condition of this panel: every part judged by the server, refreshed every {n} seconds.", { n: STATUS_REFRESH_INTERVAL / 1000 })}
+        description={t("The condition of this panel, judged by the server.")}
+        help={
+          <p>
+            {t("Every part of the panel is judged by the control plane itself and read again every {n} seconds. A part that cannot be judged is counted as unknown, which is not the same as fine. The details of a part that is fine stay closed; one that is not opens itself.", { n: STATUS_REFRESH_INTERVAL / 1000 })}
+          </p>
+        }
         actions={
           <>
             <a className="button" href="/api/v1/openapi.json" target="_blank" rel="noreferrer">{t("OpenAPI")}</a>
@@ -231,105 +253,141 @@ export function Status() {
       {error && <ErrorBox error={error} />}
       {!error && !data && <Card><Empty>{t("Loading…")}</Empty></Card>}
       {data && (
-        <div className="widgets">
-          <Verdict view={data} updatedAt={dataUpdatedAt} />
-          {BLOCK_ORDER.filter((key) => data.blocks[key]).map((key) => (
-            <BlockCard key={key} name={key} block={data.blocks[key]} />
-          ))}
-          {data.blocks.build && <About block={data.blocks.build} />}
-        </div>
+        <>
+          <Verdict
+            tone={data.ok ? (data.unknown > 0 ? "warn" : "ok") : "error"}
+            headline={data.ok ? t("Every judged part of this panel is fine") : t("A part of this panel is not fine")}
+          >
+            <span>
+              {data.unknown > 0
+                ? t("{n} of {total} parts could not be judged", { n: data.unknown, total: blocks.length })
+                : t("all {total} parts judged", { total: blocks.length })}
+            </span>
+            <span title={absoluteTime(data.generated_at)}>{t("judged {when}", { when: relativeTime(data.generated_at) })}</span>
+            <span>{dataUpdatedAt ? t("read at {when}", { when: absoluteTime(new Date(dataUpdatedAt).toISOString()) }) : "—"}</span>
+          </Verdict>
+
+          <NeedsAttention title={t("Parts that need a look")}>
+            {wanting.map((key) => (
+              <p key={key} className="attention-line">
+                <ToneBadge tone={blockTone(data.blocks[key])} />
+                <strong>{t(BLOCK_TITLES[key] ?? key)}</strong>
+                <span>{data.blocks[key].reason || data.blocks[key].attention || t("judged as unknown")}</span>
+              </p>
+            ))}
+          </NeedsAttention>
+
+          <Card flush>
+            {blocks.map((key) => (
+              <BlockSection key={key} name={key} block={data.blocks[key]} />
+            ))}
+            {data.blocks.build && <AboutSection block={data.blocks.build} />}
+          </Card>
+        </>
       )}
     </>
   );
 }
 
-/* The verdict of the whole, with how many blocks could not be judged. */
-function Verdict({ view, updatedAt }: { view: StatusView; updatedAt: number }) {
-  const t = useT();
-  const tone: WidgetTone = view.ok ? (view.unknown > 0 ? "warn" : "ok") : "error";
-  return (
-    <Card className="span-12" tone={tone === "error" ? "error" : tone === "warn" ? "warn" : undefined}>
-      <Pairs>
-        <Pair label={t("Verdict")}>
-          <span className={`badge ${tone}`}>
-            {view.ok ? t("every judged part is fine") : t("a part of the panel is not fine")}
-          </span>
-        </Pair>
-        <Pair label={t("Not judged")}>
-          {view.unknown > 0
-            ? <span className="badge unknown">{t("{n} parts unknown", { n: view.unknown })}</span>
-            : <span className="badge ok">{t("none")}</span>}
-        </Pair>
-        <Pair label={t("Generated")}>
-          <span title={absoluteTime(view.generated_at)}>{relativeTime(view.generated_at)}</span>
-        </Pair>
-        <Pair label={t("Last refresh")}>
-          <span>{updatedAt ? absoluteTime(new Date(updatedAt).toISOString()) : "—"}</span>
-        </Pair>
-      </Pairs>
-    </Card>
-  );
-}
-
-/* One block: the verdict badge in the title, the reason under it, a
-   widget where the facts make a picture and the remaining facts as rows. */
-function BlockCard({ name, block }: { name: string; block: StatusBlock }) {
+/**
+ * One part of the panel: its name, its state and the one fact that says what
+ * is inside, with the rest a click away.
+ *
+ * Thirteen parts used to stand as thirteen cards of fifteen rows each. Every
+ * row was present whether or not anything was wrong with it, so the screen
+ * said nothing until all of it had been read.
+ */
+function BlockSection({ name, block }: { name: string; block: StatusBlock }) {
   const t = useT();
   const tone = blockTone(block);
+  const rows = Object.entries(block.facts).filter(([key]) => !DRAWN_ELSEWHERE.has(key));
   return (
-    <Card
-      className="span-4"
-      tone={tone === "error" ? "error" : tone === "warn" ? "warn" : undefined}
+    <Section
+      tone={tone}
       title={<>{t(BLOCK_TITLES[name] ?? name)} <ToneBadge tone={tone} /></>}
-      description={block.reason || block.attention}
+      summary={block.reason || block.attention || blockSummary(name, block.facts, t)}
+      className="status-section"
     >
       <BlockWidget name={name} facts={block.facts} />
       <Pairs>
-        {Object.entries(block.facts)
-          .filter(([key]) => !DRAWN_ELSEWHERE.has(key))
-          .map(([key, value]) => {
-            const [label, kind] = FACT_LABELS[key] ?? [key, "text"];
-            return (
-              <Pair key={key} label={t(label)}>
-                <FactValue value={value} kind={kind} />
-              </Pair>
-            );
-          })}
+        {rows.map(([key, value]) => {
+          const [label, kind] = FACT_LABELS[key] ?? [key, "text"];
+          // A structure is given the width of the list; squeezed into a
+          // value track it used to be drawn as one line of JSON.
+          const structured = value !== null && typeof value === "object";
+          return (
+            <Pair key={key} label={t(label)} wide={structured}>
+              {structured ? <Structured value={value} /> : <FactValue value={value} kind={kind} />}
+            </Pair>
+          );
+        })}
       </Pairs>
-    </Card>
+    </Section>
   );
 }
 
-function ToneBadge({ tone }: { tone: WidgetTone }) {
+/**
+ * The one fact of a part that is worth reading while it is closed. Without
+ * it a closed section says only its own name, and the reader has to open
+ * every one to find out anything.
+ */
+export function blockSummary(
+  name: string,
+  facts: Record<string, unknown>,
+  t: (text: string, values?: Record<string, string | number>) => string,
+): string {
+  const number = (key: string): number | undefined =>
+    typeof facts[key] === "number" ? (facts[key] as number) : undefined;
+  const count = (key: string) => number(key) ?? 0;
+  switch (name) {
+    case "database": {
+      const latency = number("latency_ms");
+      return latency === undefined ? "" : t("{ms} ms round trip", { ms: latency.toFixed(1) });
+    }
+    case "replicas":
+      return t("{n} alive", { n: count("replicas_seen") });
+    case "migrations":
+      return t("level {n}", { n: count("level") });
+    case "crypto": {
+      const keys = Array.isArray(facts.keys) ? facts.keys.length : 0;
+      const provider = typeof facts.provider === "string" ? facts.provider : "";
+      return provider === "" ? t("{n} keys", { n: keys }) : t("{provider}, {n} keys", { provider, n: keys });
+    }
+    case "outbox":
+      return t("{n} events waiting", { n: count("pending") });
+    case "scheduler":
+      return t("{running} running, {queued} queued", { running: count("running"), queued: count("queued") });
+    case "sessions":
+      return t("{n} hosts online", { n: count("hosts_online") });
+    case "relays":
+      return t("{n} active", { n: count("active") });
+    case "directory":
+      return facts.configured ? t("configured") : t("not configured");
+    case "vulnerability_feeds": {
+      const feeds = Array.isArray(facts.feeds) ? facts.feeds.length : 0;
+      return t("{n} feeds", { n: feeds });
+    }
+    case "certificates": {
+      const days = number("ca_expires_in_days");
+      return days === undefined ? "" : t("fleet CA expires in {n} days", { n: days });
+    }
+    case "monitoring":
+      return facts.enabled ? t("sampling") : t("off");
+    case "housekeeping":
+      return typeof facts.last_sweep_at === "string"
+        ? t("swept {when}", { when: relativeTime(facts.last_sweep_at) })
+        : t("never swept");
+    default:
+      return "";
+  }
+}
+
+function ToneBadge({ tone }: { tone: Tone }) {
   const t = useT();
   const text = tone === "ok" ? t("fine") : tone === "warn" ? t("attention") : tone === "error" ? t("not fine") : t("unknown");
   return <span className={`badge ${tone}`}>{text}</span>;
 }
 
-function FactValue({ value, kind }: { value: unknown; kind: FactKind }) {
-  const t = useT();
-  if (value === null || value === undefined || value === "") return <span className="source">—</span>;
-  switch (kind) {
-    case "flag":
-      return <span className={value ? "badge ok" : "badge error"}>{value ? t("yes") : t("no")}</span>;
-    case "bytes":
-      return <span className="mono">{bytes(Number(value))}</span>;
-    case "seconds":
-      return <span className="mono">{formatSeconds(Number(value))}</span>;
-    case "ms":
-      return <span className="mono">{Number(value).toFixed(1)} ms</span>;
-    case "time":
-      return <Time value={String(value)} />;
-    case "number":
-      return <span className="mono">{String(value)}</span>;
-    default:
-      return typeof value === "object"
-        ? <span className="mono">{JSON.stringify(value)}</span>
-        : <span className="mono">{String(value)}</span>;
-  }
-}
-
-/* The picture of a block, where its facts make one. */
 function BlockWidget({ name, facts }: { name: string; facts: Record<string, unknown> }) {
   const t = useT();
   const count = (key: string): number | undefined => {
@@ -371,7 +429,8 @@ function BlockWidget({ name, facts }: { name: string; facts: Record<string, unkn
       const consumers = (facts.consumers as OutboxConsumer[] | undefined) ?? [];
       if (consumers.length === 0) return <p className="source">{t("No external consumer; the panel alone reads the trail.")}</p>;
       return (
-        <table>
+        <TableScroll>
+          <table>
           <thead>
             <tr><th scope="col">{t("Consumer")}</th><th scope="col">{t("Behind")}</th><th scope="col">{t("Failures")}</th><th scope="col">{t("Last delivery")}</th></tr>
           </thead>
@@ -390,13 +449,15 @@ function BlockWidget({ name, facts }: { name: string; facts: Record<string, unkn
             ))}
           </tbody>
         </table>
+        </TableScroll>
       );
     }
     case "vulnerability_feeds": {
       const feeds = (facts.feeds as Feed[] | undefined) ?? [];
       if (feeds.length === 0) return null;
       return (
-        <table>
+        <TableScroll>
+          <table>
           <thead>
             <tr><th scope="col">{t("Feed")}</th><th scope="col">{t("Age")}</th><th scope="col">{t("Advisories")}</th><th scope="col">{t("State")}</th></tr>
           </thead>
@@ -404,7 +465,7 @@ function BlockWidget({ name, facts }: { name: string; facts: Record<string, unkn
             {feeds.map((feed) => (
               <tr key={feed.provider}>
                 <td className="mono">{feed.provider}</td>
-                <td className="mono">{formatSeconds(feed.age_seconds)}</td>
+                <td className="mono">{duration(feed.age_seconds)}</td>
                 <td className="mono">{feed.advisories}</td>
                 <td>
                   {feed.stale
@@ -417,6 +478,7 @@ function BlockWidget({ name, facts }: { name: string; facts: Record<string, unkn
             ))}
           </tbody>
         </table>
+        </TableScroll>
       );
     }
     case "housekeeping": {
@@ -425,7 +487,8 @@ function BlockWidget({ name, facts }: { name: string; facts: Record<string, unkn
       const kinds = Array.from(new Set([...Object.keys(retention), ...Object.keys(removed)])).sort();
       if (kinds.length === 0) return null;
       return (
-        <table>
+        <TableScroll>
+          <table>
           <thead>
             <tr><th scope="col">{t("Kind")}</th><th scope="col">{t("Retention")}</th><th scope="col">{t("Removed by the last sweep")}</th></tr>
           </thead>
@@ -433,12 +496,13 @@ function BlockWidget({ name, facts }: { name: string; facts: Record<string, unkn
             {kinds.map((kind) => (
               <tr key={kind}>
                 <td>{t(HOUSEKEEPING_KINDS[kind] ?? kind)}</td>
-                <td className="mono">{retention[kind] ? humanDuration(retention[kind]) : t("forever")}</td>
+                <td className="mono">{retention[kind] ? goDuration(retention[kind]) : t("forever")}</td>
                 <td className="mono">{removed[kind] ?? "—"}</td>
               </tr>
             ))}
           </tbody>
         </table>
+        </TableScroll>
       );
     }
     default:
@@ -448,28 +512,35 @@ function BlockWidget({ name, facts }: { name: string; facts: Record<string, unkn
 
 /* The build and the process: the block a bug report starts with, with the
    places the documentation lives. */
-function About({ block }: { block: StatusBlock }) {
+
+/* The build and the process: the block a bug report starts with, with the
+   places the documentation lives. */
+function AboutSection({ block }: { block: StatusBlock }) {
   const t = useT();
   const facts = block.facts;
   const text = (key: string) => {
     const value = facts[key];
     return value === null || value === undefined || value === "" ? "—" : String(value);
   };
-  const uptime = typeof facts.uptime_seconds === "number" ? formatSeconds(facts.uptime_seconds) : "—";
+  const up = typeof facts.uptime_seconds === "number" ? duration(facts.uptime_seconds) : "—";
   return (
-    <Card className="span-4" title={t("About")}>
+    <Section
+      title={t("About")}
+      summary={t("version {version}, up {uptime}", { version: text("version"), uptime: up })}
+      className="status-section"
+    >
       <Pairs>
         <Pair label={t("Product")}><span>Flotestro</span></Pair>
         <Pair label={t("Version")}><span className="mono">{text("version")}</span></Pair>
-        <Pair label={t("Commit")}><span className="mono">{text("commit")}</span></Pair>
+        <Pair label={t("Commit")}><FactValue value={facts.commit} kind="id" /></Pair>
         <Pair label={t("Build date")}><span className="mono">{text("build_date")}</span></Pair>
         <Pair label={t("Go version")}><span className="mono">{text("go_version")} ({text("platform")})</span></Pair>
         <Pair label={t("Agent protocol")}><span className="mono">{text("agent_protocol")}</span></Pair>
-        <Pair label={t("Gateway identifier")}><span className="mono">{text("gateway_id")}</span></Pair>
+        <Pair label={t("Gateway identifier")}><FactValue value={facts.gateway_id} kind="id" /></Pair>
         <Pair label={t("Hostname")}><span className="mono">{text("hostname")}</span></Pair>
-        <Pair label={t("Uptime")}><span className="mono">{uptime}</span></Pair>
+        <Pair label={t("Uptime")}><span className="mono">{up}</span></Pair>
         <Pair label={t("Started")}><Time value={typeof facts.started_at === "string" ? facts.started_at : null} /></Pair>
-        <Pair label={t("Documentation")}>
+        <Pair label={t("Documentation")} wide>
           <span>
             <a href="https://ultherego.github.io/Flotestro/docs/configuration.html" target="_blank" rel="noreferrer">{t("Configuration reference")}</a>
             {" · "}
@@ -477,25 +548,6 @@ function About({ block }: { block: StatusBlock }) {
           </span>
         </Pair>
       </Pairs>
-    </Card>
+    </Section>
   );
-}
-
-/**
- * A Go duration such as 720h0m0s, 4m30s or 29m53s in the units a person
- * reads it in: whole days, hours, minutes and seconds, the zero parts left
- * out.
- */
-export function humanDuration(value: string): string {
-  const match = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)?$/.exec(value);
-  if (!match || value === "") return value;
-  const hours = Number(match[1] ?? 0);
-  const minutes = Number(match[2] ?? 0);
-  const seconds = Number(match[3] ?? 0);
-  const parts: string[] = [];
-  if (hours >= 24) parts.push(`${Math.floor(hours / 24)} d`);
-  if (hours % 24 > 0) parts.push(`${hours % 24} h`);
-  if (minutes > 0) parts.push(`${minutes} min`);
-  if (seconds > 0) parts.push(`${seconds} s`);
-  return parts.length > 0 ? parts.join(" ") : "0 s";
 }

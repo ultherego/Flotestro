@@ -837,11 +837,66 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .tabs button.active { color: var(--accent-text); border-bottom-color: var(--accent); }
 .tabs button:disabled { opacity: 0.35; }
 
-/* Label/value pairs: two tracks per pair, and as many pairs across as the
-   width allows, so a short list does not stand in one column on the left. */
-.pairs { display: grid; grid-template-columns: repeat(auto-fill, 140px minmax(140px, 1fr)); gap: 8px 16px; font-size: 13px; align-items: baseline; }
-.pairs dt { color: var(--text-muted); }
-.pairs dd { margin: 0; }
+/* Label/value pairs. One grid for every fact list in the panel.
+ *
+ * The label track used to be a fixed 140px and the value had no wrapping
+ * rule, so a fingerprint, a DSN or a JSON structure left the card through
+ * its right edge. Now the label track shrinks to its content, the value
+ * track may never be narrower than its column, and anything without spaces
+ * breaks rather than overflow. */
+.pairs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, max-content) minmax(140px, 1fr));
+  gap: 8px 16px;
+  font-size: 13px;
+  align-items: baseline;
+  min-width: 0;
+}
+.pairs dt { color: var(--text-muted); min-width: 0; overflow-wrap: anywhere; }
+.pairs dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+/* A value that needs the width of the list: a table, a nested list, a key. */
+.pairs dt.wide { grid-column: 1 / -1; }
+.pairs dd.wide { grid-column: 1 / -1; }
+/* Label over value. In a card a third of the page wide two tracks leave
+   about 120px for the value, which is narrower than a uuid; the container
+   query below switches to this by itself, and `stacked` asks for it. */
+.pairs.stacked { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px 16px; }
+.pairs.stacked dt { grid-column: auto; }
+.pairs.stacked dd { grid-column: auto; margin-top: 2px; }
+.pairs.stacked > dt { font-size: 12px; }
+.pairs.nested { margin: 2px 0 0; }
+
+/* The fact list of the host modules shares the one grid; it kept a second
+   copy of these rules, which is how the two drifted apart. */
+.hm-facts, .hm-fact dd { min-width: 0; overflow-wrap: anywhere; }
+
+/* A long value in a narrow card reads better stacked than squeezed. The
+   card is the container, so the same list adapts on the dashboard and on a
+   page where it has the whole width. */
+@container card (max-width: 420px) {
+  .pairs { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px 16px; }
+  .pairs dt { grid-column: auto; font-size: 12px; }
+  .pairs dd { grid-column: auto; margin-top: 2px; }
+}
+
+/* Anything the panel prints that has no spaces of its own. */
+.wrap { overflow-wrap: anywhere; min-width: 0; }
+
+/* A table may not widen the card that holds it: it scrolls instead. */
+.table-scroll { overflow-x: auto; max-width: 100%; min-width: 0; }
+.facts-table { font-size: 12px; }
+.facts-table th, .facts-table td { padding: 5px 10px; white-space: nowrap; }
+.card .facts-table th:first-child, .card .facts-table td:first-child { padding-left: 0; }
+
+/* An opaque identifier: its ends, and one click to take the whole value. */
+.identifier {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: none; border: 0; padding: 0; margin: 0;
+  font: inherit; color: inherit; cursor: pointer; text-align: left;
+}
+.identifier svg { width: 13px; height: 13px; color: var(--text-faint); flex: 0 0 auto; }
+.identifier:where(:hover, :focus-visible) svg { color: var(--accent-text); }
+.identifier:where(:hover, :focus-visible) .mono { color: var(--accent-text); }
 
 pre {
   background: var(--bg-sunken);
@@ -1262,6 +1317,10 @@ a.button:hover { background: var(--bg-hover); text-decoration: none; }
   border: 1px solid var(--border);
   border-radius: var(--radius);
   min-width: 0;
+  /* The card is the container its contents measure themselves against: a
+     fact list in a card a third of the page wide stacks, the same list with
+     the whole width keeps two tracks. */
+  container: card / inline-size;
 }
 .card.warn { border-color: color-mix(in srgb, var(--warn) 55%, var(--border)); }
 .card.error { border-color: color-mix(in srgb, var(--error) 55%, var(--border)); }
@@ -1839,3 +1898,82 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); }
    a filter, not a call to action of its own. */
 button.link { background: none; border: 0; padding: 0; font: inherit; color: var(--accent-text); text-decoration: underline dotted; cursor: pointer; }
 button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent); }
+
+/* ---------------------------------------------------------------------- */
+/* The three zones of a page.                                             */
+/* ---------------------------------------------------------------------- */
+
+/* The verdict: the one thing read first, so the one thing without a box.
+   A tone colours the rule on its left and nothing else - the sentence
+   itself stays in the reading colour. */
+.verdict { margin: 0 0 16px; padding: 2px 0 2px 14px; border-left: 3px solid var(--border-strong); }
+.verdict.ok { border-left-color: var(--ok); }
+.verdict.warn { border-left-color: var(--warn); }
+.verdict.error { border-left-color: var(--error); }
+.verdict.unknown { border-left-color: var(--unknown); }
+.verdict-row { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+.verdict-headline { margin: 0; font-size: 19px; font-weight: 500; line-height: 1.3; }
+.verdict-actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+.verdict-facts { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px 20px; font-size: 13px; color: var(--text-muted); }
+
+/* What needs a decision. Only ever drawn when it holds something. */
+.needs-attention { margin: 0 0 16px; }
+.needs-attention-title { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--warn-text); text-transform: uppercase; letter-spacing: 0.04em; }
+.needs-attention-body { display: grid; gap: 8px; }
+
+/* A detail section: one line closed, the whole thing open. Hairlines only -
+   a bordered box inside a page of bordered boxes adds a line and no
+   information. */
+.section { border-top: 1px solid var(--border); }
+.section:last-of-type { border-bottom: 1px solid var(--border); }
+.section-head {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  background: none; border: 0; padding: 11px 2px; margin: 0;
+  font: inherit; color: var(--text); text-align: left; cursor: pointer;
+}
+.section-head:where(:hover, :focus-visible) { background: var(--bg-hover); }
+.section-chevron { display: inline-flex; color: var(--text-faint); transition: transform 120ms ease; }
+.section-chevron svg { width: 14px; height: 14px; }
+.section.open > .section-head .section-chevron { transform: rotate(90deg); }
+.section-title { font-weight: 500; }
+.section-summary { color: var(--text-muted); font-size: 13px; }
+.section-count { margin-left: auto; color: var(--text-faint); font-size: 12px; }
+.section-body { padding: 2px 2px 16px 24px; min-width: 0; }
+.section-actions { padding: 0 2px 10px 24px; display: flex; gap: 8px; flex-wrap: wrap; }
+/* A section that is not fine carries its colour on the title line. */
+.section.warn > .section-head .section-title { color: var(--warn-text); }
+.section.error > .section-head .section-title { color: var(--error-text); }
+
+/* The long explanation of a screen, behind the mark beside its title. */
+.page-help-toggle {
+  background: none; border: 0; padding: 0 0 0 8px; margin: 0;
+  color: var(--text-faint); cursor: pointer; vertical-align: middle;
+}
+.page-help-toggle svg { width: 16px; height: 16px; }
+.page-help-toggle:where(:hover, :focus-visible, [aria-expanded="true"]) { color: var(--accent-text); }
+.page-help {
+  margin: 8px 0 0; padding: 12px 14px;
+  background: var(--bg-sunken); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  color: var(--text-muted); font-size: 13px; line-height: 1.5; max-width: 80ch;
+}
+.page-help p { margin: 0 0 8px; }
+.page-help p:last-child { margin-bottom: 0; }
+
+/* A part of the panel that needs a look: its state, its name and the server's
+   own sentence about it, on one line. */
+.attention-line { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 0; font-size: 13px; }
+.attention-line > span:last-child { color: var(--text-muted); }
+
+/* The parts of the panel stand in one card as a list of sections, so the
+   screen carries one border instead of thirteen. */
+.card > .status-section:first-of-type { border-top: 0; }
+.card > .status-section > .section-head { padding-left: var(--card-pad-x); padding-right: var(--card-pad-x); }
+.card > .status-section > .section-body { padding: 0 var(--card-pad-x) 16px calc(var(--card-pad-x) + 24px); }
+.card > .status-section:last-of-type { border-bottom: 0; }
+
+/* The search of the settings screen, in the card's own title row. */
+.settings-search { width: 220px; max-width: 40vw; }
+.card > .settings-section:first-of-type { border-top: 0; }
+.card > .settings-section:last-of-type { border-bottom: 0; }
+.card > .settings-section > .section-head { padding-left: var(--card-pad-x); padding-right: var(--card-pad-x); }
+.card > .settings-section > .section-body { padding: 0 var(--card-pad-x) 16px calc(var(--card-pad-x) + 24px); }
