@@ -49,4 +49,13 @@ regexes = [
   # internal/freeipa/lifecycle_test.go: the temporary password a test hands the
   # directory so that it can prove the password is changed afterwards.
   '''Zx9-temporary''',
+  # web/src/pages/Dashboard.tsx: the catalogue of the dashboard's widgets, in
+  # which every entry names itself `key: "operations_24h"` and so on. The
+  # generic rule reads `key: "..."` as a credential being assigned.
+  #
+  # Written as the shape of a widget key rather than as six literals: these
+  # are lower-case words and underscores between eight and forty characters,
+  # which is a name and not a secret - no real key is drawn from that alphabet
+  # without a digit, a capital or a symbol in it.
+  '''key: "[a-z][a-z0-9_]{7,39}"''',
 ]
