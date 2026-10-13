@@ -6,6 +6,7 @@ import type { Settings as SettingsView, SettingsArea, SettingsFact } from "../li
 import { Empty, ErrorBox, Pair, Pairs, Time } from "../components/ui";
 import { Actions, Card, Field, FieldGrid, PageHeader } from "../components/layout";
 import { useToast } from "../components/Toast";
+import { Masonry } from "../components/masonry";
 import { useT } from "../i18n";
 
 /**
@@ -68,10 +69,12 @@ export function Settings() {
               data-testid="settings-search"
             />
           </div>
-          <div className="parts" data-testid="settings-areas">
-            {areas.map(({ area, facts }) => (
-              <AreaTile key={area.key} area={area} facts={facts} />
-            ))}
+          <div data-testid="settings-areas">
+            <Masonry>
+              {areas.map(({ area, facts }) => (
+                <AreaTile key={area.key} area={area} facts={facts} />
+              ))}
+            </Masonry>
             {areas.length === 0 && <Empty>{t("No setting of that name.")}</Empty>}
           </div>
         </>

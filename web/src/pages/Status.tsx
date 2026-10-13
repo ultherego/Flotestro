@@ -9,6 +9,7 @@ import {
 } from "../components/ui";
 import { Card, NeedsAttention, PageHeader, Verdict, type Tone } from "../components/layout";
 import { StatusBar, type Segment } from "../components/widgets";
+import { Masonry } from "../components/masonry";
 import { useT } from "../i18n";
 
 /**
@@ -256,6 +257,7 @@ export function Status() {
       {!error && !data && <Card><Empty>{t("Loading…")}</Empty></Card>}
       {data && (
         <>
+          <div className="verdict-band">
           <Verdict
             tone={data.ok ? (data.unknown > 0 ? "warn" : "ok") : "error"}
             headline={data.ok ? t("Every judged part of this panel is fine") : t("A part of this panel is not fine")}
@@ -278,17 +280,18 @@ export function Status() {
               </p>
             ))}
           </NeedsAttention>
+          </div>
 
           {/* Every part on the screen at once, as tiles that fit three or
               four to a row. Folding them away was worse than the wall it
               was meant to answer: thirteen closed lines say thirteen names
               and nothing else, and finding anything took a click. */}
-          <div className="parts">
+          <Masonry>
             {blocks.map((key) => (
               <BlockTile key={key} name={key} block={data.blocks[key]} />
             ))}
             {data.blocks.build && <AboutTile block={data.blocks.build} />}
-          </div>
+          </Masonry>
         </>
       )}
     </>

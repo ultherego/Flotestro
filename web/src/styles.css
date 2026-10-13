@@ -1909,6 +1909,11 @@ button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent
 /* The verdict: the one thing read first, so the one thing without a box.
    A tone colours the rule on its left and nothing else - the sentence
    itself stays in the reading colour. */
+/* The answer on the left, what needs a look beside it on the right: the two
+   are read together, and the second was pushing the board down the page. */
+.verdict-band { display: flex; align-items: flex-start; gap: 32px; flex-wrap: wrap; margin-bottom: 18px; }
+.verdict-band > .verdict { flex: 1 1 380px; margin-bottom: 0; }
+.verdict-band > .needs-attention { flex: 1 1 420px; margin-bottom: 0; }
 .verdict { margin: 0 0 16px; padding: 2px 0 2px 14px; border-left: 3px solid var(--border-strong); }
 .verdict.ok { border-left-color: var(--ok); }
 .verdict.warn { border-left-color: var(--warn); }
@@ -1957,12 +1962,16 @@ button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent
    the wall these screens started as, and folding them away was worse - a
    closed line says a name and nothing else. Only a part that is not fine
    takes a coloured edge, so the eye lands on those and on nothing else. */
-/* Columns rather than a grid of rows: a row is as tall as its tallest tile,
-   and one part with thirty facts beside two with four left half the screen
-   empty. In columns the tiles pack upwards and the holes close. */
-.parts { columns: 380px; column-gap: 12px; }
+/* The board: columns filled across rather than down, so the first tile is
+   the most important and the second stands beside it rather than under it.
+   Which tile goes in which column is decided in the markup - see Masonry -
+   and the columns pack upwards, so there are no holes between them. */
+.masonry { display: flex; align-items: flex-start; gap: 14px; }
+.masonry-column { flex: 1 1 0; min-width: 0; }
+.parts { columns: 380px; column-gap: 14px; }
 .part {
   background: var(--bg-panel);
+  /* The tiles of one column stand apart from each other. */
   border-radius: var(--radius-sm);
   border-left: 3px solid transparent;
   padding: 12px 14px;
@@ -1976,23 +1985,26 @@ button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent
 /* Inside a tile a fact is one line: the label on the left in a track that
    fits it, the value beside it. Stacked - the label over the value - is
    what made these tiles twice as tall as they had to be. */
-.part .pairs { grid-template-columns: minmax(0, max-content) minmax(90px, 1fr); gap: 4px 12px; }
+.part .pairs { grid-template-columns: minmax(0, max-content) minmax(90px, 1fr); gap: 6px 16px; font-size: 13px; }
+.part .pairs dd { font-variant-numeric: tabular-nums; }
+.part .pairs dt { color: var(--text-muted); }
 .part.warn { border-left-color: var(--warn); }
 .part.error { border-left-color: var(--error); }
 .part.unknown { border-left-color: var(--unknown); }
 .part-title {
   display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
-  margin: 0 0 8px; font-size: 14px; font-weight: 600;
+  margin: 0 0 10px; font-size: 15px; font-weight: 600;
 }
 .part-summary { font-weight: 400; font-size: 12px; color: var(--text-muted); }
 .part-reason { margin: -4px 0 8px; font-size: 12px; color: var(--text-muted); }
-.part .pairs { font-size: 12px; }
-.part table { font-size: 12px; margin-bottom: 8px; }
-.part table th, .part table td { padding: 4px 8px; }
+
+.part table { font-size: 12.5px; margin-bottom: 10px; }
+.part table th, .part table td { padding: 5px 10px; }
 .part table th:first-child, .part table td:first-child { padding-left: 0; }
 .card-body > .parts { margin: 0; }
 
 /* The heading of a grid of tiles, with whatever narrows it. */
+.masonry + .masonry { margin-top: 14px; }
 .parts-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin: 20px 0 10px; }
 .parts-head h2 { margin: 0; font-size: 15px; font-weight: 600; }
 .parts-head .settings-search { margin-left: auto; }
