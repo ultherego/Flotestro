@@ -26,11 +26,6 @@ function exact(text: string): RegExp {
 }
 
 /** The card of a fleet page by its title. */
-/** A detail section by its title: one line, until somebody opens it. */
-function section(page: Page, title: string) {
-  return page.locator(".section").filter({ has: page.getByText(title, { exact: true }) }).first();
-}
-
 function card(page: Page, title: string) {
   return page.locator(".card").filter({ has: page.locator(".card-title", { hasText: exact(title) }) });
 }
@@ -253,21 +248,17 @@ test.describe("monitoring", () => {
     await expect(verdict.locator(".verdict-facts")).toContainText(`${summary.hosts_silent} gone quiet`);
     await expect(verdict.locator(".verdict-facts")).toContainText(`${summary.rules} rules enabled`);
 
-    // The rules, the history and the silences are closed lines until they
-    // are asked for. The rules line carries the number the table holds.
-    const rules = section(page, "Rules");
-    await expect(rules.locator(".section-head")).toHaveAttribute("aria-expanded", "false");
-    if (listed) await expect(rules.locator(".section-count")).toHaveText(String(listed.length));
-    await rules.locator(".section-head").click();
+    // The rules table lists as many rules as the catalogue holds, or says
+    // that there are none.
+    const rules = card(page, "Rules");
     await expect(rules.locator("tbody tr").first().or(rules.getByText(/No rules yet|You do not have permission/))).toBeVisible();
     if (listed && listed.length > 0) await expect(rules.locator("tbody tr")).toHaveCount(listed.length);
 
     // The history filter runs on the server.
-    const history = section(page, "Recent alerts");
-    await history.locator(".section-head").click();
+    const history = card(page, "Recent alerts");
     await expect(history.locator("tbody tr").first().or(history.getByText("No alerts recorded in this state."))).toBeVisible();
     const filtered = page.waitForResponse((response) => response.url().includes("/api/v1/monitoring/alerts?") && response.url().includes("state=resolved"));
-    await history.locator(".section-actions select").first().selectOption("resolved");
+    await history.locator(".card-actions select").first().selectOption("resolved");
     expect((await filtered).ok()).toBeTruthy();
     await expect(history.locator("tbody tr").first().or(history.getByText("No alerts recorded in this state."))).toBeVisible();
     // The state cell carries the state first and, on a taken alert, the
@@ -275,7 +266,7 @@ test.describe("monitoring", () => {
     for (const cell of await history.locator("tbody tr td:nth-child(4)").all()) {
       await expect(cell.locator(".badge").first()).toHaveText("resolved");
     }
-    await expect(section(page, "Silences in force")).toBeVisible();
+    await expect(card(page, "Silences in force")).toBeVisible();
     await expectHealthy(page, errors);
   });
 
