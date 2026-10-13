@@ -7,7 +7,7 @@ import { useDebounced } from "../lib/debounce";
 import { RELEASE_CHANNELS, refusalName, type FleetActivity, type Host, type Relay } from "../lib/types";
 import { relativeTime } from "../lib/format";
 import { ErrorBox, Time, OptionalFlag, OptionalNumber, Empty, ConnectionState } from "../components/ui";
-import { Card, EmptyState, PageHeader, Toolbar } from "../components/layout";
+import { Card, EmptyState, MoreFilters, PageHeader, Toolbar } from "../components/layout";
 import { ExportButton } from "../components/ExportButton";
 import {
   ColumnChooser, PageSizeSelect, Td, Th, formatSort, parseSort, useColumns, usePageSize, type ColumnDef, type SortValue,
@@ -85,6 +85,12 @@ const EMPTY_FILTERS: HostFilters = {
   sssd_offline: "", agent_behind: "", relay: "", failure_domain: "", team: "", sort: "",
 };
 
+/* The filters that stay in sight: the search, and the two the fleet is most
+   often narrowed by. The rest fold - and unfold by themselves the moment any
+   of them is set, because a list narrowed by a control nobody can see is a
+   list that looks wrong for no reason. */
+const ALWAYS_SHOWN: (keyof HostFilters)[] = ["q", "os_family", "connection_state", "sort"];
+
 /**
  * A button that reads as a word in a line rather than as a control: a value
  * in the composition or the cross on a chip narrows or widens the list, and
@@ -149,6 +155,10 @@ export function Hosts() {
   // goes back into the address so the view can be handed on as a link.
   const [searchParams, setSearchParams] = useSearchParams();
   const [filters, setFilters] = useState<HostFilters>(() => readFilters(searchParams));
+  // How many of the folded filters are narrowing the list. The block opens
+  // on this, so a reader never sees a short list with no visible reason.
+  const foldedActive = (Object.keys(EMPTY_FILTERS) as (keyof HostFilters)[])
+    .filter((key) => !ALWAYS_SHOWN.includes(key) && filters[key] !== "").length;
   const setFilter = (key: keyof HostFilters, value: string) =>
     setFilters((previous) => ({ ...previous, [key]: value }));
   const written = useRef(searchParams.toString());
@@ -376,20 +386,6 @@ export function Hosts() {
               value={filters.q}
               onChange={(e) => setFilter("q", e.target.value)}
             />
-            {/* The sites, environments and owners are suggested from the
-                facets: the fleet's own values, not a list to maintain. */}
-            <input placeholder={t("site")} value={filters.site} list="hosts-sites" onChange={(e) => setFilter("site", e.target.value)} />
-            <datalist id="hosts-sites">{facetKeys(a?.by_site).map((key) => <option key={key} value={key} />)}</datalist>
-            <input placeholder={t("environment")} value={filters.environment} list="hosts-environments" onChange={(e) => setFilter("environment", e.target.value)} />
-            <datalist id="hosts-environments">{facetKeys(a?.by_environment).map((key) => <option key={key} value={key} />)}</datalist>
-            <input placeholder={t("owner")} value={filters.owner} list="hosts-owners" onChange={(e) => setFilter("owner", e.target.value)} />
-            <datalist id="hosts-owners">{ownerKeys.map((key) => <option key={key} value={key} />)}</datalist>
-            <input
-              placeholder={t("tags, e.g. role=db tier=gold")}
-              title={t("every listed tag has to be on the host")}
-              value={filters.tags}
-              onChange={(e) => setFilter("tags", e.target.value)}
-            />
             {/* The systems are the ones the fleet reports, from the facets;
                 a family set by a link but absent from the fleet stays
                 listed, so the control shows what the list is narrowed by. */}
@@ -406,6 +402,24 @@ export function Hosts() {
               <option value="stale">{t("stale")}</option>
               <option value="unknown">{t("unknown")}</option>
             </select>
+            {/* Everything below this line is folded away until somebody
+                wants it - or until one of them is set, which opens the
+                block and keeps it open. */}
+            <MoreFilters active={foldedActive > 0} count={foldedActive}>
+            {/* The sites, environments and owners are suggested from the
+                facets: the fleet's own values, not a list to maintain. */}
+            <input placeholder={t("site")} value={filters.site} list="hosts-sites" onChange={(e) => setFilter("site", e.target.value)} />
+            <datalist id="hosts-sites">{facetKeys(a?.by_site).map((key) => <option key={key} value={key} />)}</datalist>
+            <input placeholder={t("environment")} value={filters.environment} list="hosts-environments" onChange={(e) => setFilter("environment", e.target.value)} />
+            <datalist id="hosts-environments">{facetKeys(a?.by_environment).map((key) => <option key={key} value={key} />)}</datalist>
+            <input placeholder={t("owner")} value={filters.owner} list="hosts-owners" onChange={(e) => setFilter("owner", e.target.value)} />
+            <datalist id="hosts-owners">{ownerKeys.map((key) => <option key={key} value={key} />)}</datalist>
+            <input
+              placeholder={t("tags, e.g. role=db tier=gold")}
+              title={t("every listed tag has to be on the host")}
+              value={filters.tags}
+              onChange={(e) => setFilter("tags", e.target.value)}
+            />
             <select value={filters.lifecycle_state} onChange={(e) => setFilter("lifecycle_state", e.target.value)}>
               <option value="">{t("lifecycle: any")}</option>
               <option value="active">{t("active")}</option>
@@ -507,6 +521,7 @@ export function Hosts() {
               <input type="checkbox" checked={filters.agent_behind === "true"} onChange={(e) => setFilter("agent_behind", e.target.checked ? "true" : "")} data-testid="filter-agent-behind" />
               {t("agent behind")}
             </label>
+            </MoreFilters>
           </Toolbar>
           {activeFilters.length > 0 && (
             <div className="filters" style={{ padding: "0 16px", marginBottom: 12 }} data-testid="active-filters">
