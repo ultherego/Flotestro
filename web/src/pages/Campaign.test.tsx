@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { cancelOutcomeLine, canSkipTarget, compensationOffer, secretReferences, timelineCSV } from "./Campaign";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+import "@testing-library/jest-dom/vitest";
+import { Campaign, cancelOutcomeLine, canSkipTarget, compensationOffer, secretReferences, timelineCSV } from "./Campaign";
 import { bulkPrefill } from "./Bulk";
 
 /* The compensation card is a decision read off the record and the
@@ -162,5 +166,138 @@ describe("canSkipTarget", () => {
     for (const state of ["completed", "failed", "canceled", "expired"]) {
       expect(canSkipTarget({ state: "queued_offline" }, state)).toBe(false);
     }
+  });
+});
+
+/* ---------------------------------------------------------------------- */
+/* The screen itself. Sixteen cards used to stand open on it, and nothing  */
+/* in this suite or in the browser suite ever rendered it - so the three   */
+/* zones are exercised here, by opening the page the way a person does.    */
+/* ---------------------------------------------------------------------- */
+
+const CAMPAIGN = {
+  id: "c1",
+  name: "October security updates",
+  action_type: "packages.upgrade",
+  state: "running",
+  canary_size: 1,
+  wave_size: 10,
+  max_concurrent: 5,
+  failure_threshold_percent: 10,
+  failure_threshold_absolute: 0,
+  reboot_policy: "never",
+  requires_approval: true,
+  offline_policy: "wait",
+  manual_gate: false,
+  connectivity_lost_absolute: 0,
+  approval_fingerprint: "9f2c1a4b8e7d6c5b4a39281706f5e4d3",
+  created_by: "jkowalski",
+  approved_by: "anowak",
+  approved_at: "2026-10-13T06:10:00Z",
+  created_at: "2026-10-13T06:00:00Z",
+  started_at: "2026-10-13T06:12:00Z",
+};
+
+const REPORT = {
+  state: "running",
+  totals: { succeeded: 7, no_change: 1, failed: 2, running: 2, pending: 8 },
+  waves: [
+    { wave: 0, is_canary: true, totals: { succeeded: 1 }, completed: true },
+    { wave: 1, is_canary: false, totals: { succeeded: 6, failed: 2 }, completed: false },
+  ],
+  failures: [],
+};
+
+const TARGETS = {
+  items: [{ host_id: "h1", hostname: "web-01", state: "succeeded", wave: 1, job_id: "j1" }],
+  count: 1, total: 20, next_cursor: "",
+};
+
+const APPROVALS = {
+  items: [{
+    id: "a1", approved_by: "anowak", requested_by: "jkowalski", authentication: "session",
+    authenticated_at: "2026-10-13T06:09:00Z", reason: "the October window", created_at: "2026-10-13T06:10:00Z",
+  }],
+  count: 1, total: 1,
+};
+
+vi.mock("../lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/api")>();
+  return {
+    ...actual,
+    api: {
+      ...actual.api,
+      get: (path: string) => {
+        if (path.includes("/targets")) return Promise.resolve(TARGETS);
+        if (path.endsWith("/report")) return Promise.resolve(REPORT);
+        if (path.endsWith("/approvals")) return Promise.resolve(APPROVALS);
+        if (path.endsWith("/timeline")) return Promise.resolve({ items: [], count: 0, total: 0 });
+        if (path.endsWith("/plans")) return Promise.resolve({ items: [] });
+        if (path.startsWith("/api/v1/actions")) return Promise.resolve({ items: [], count: 0, total: 0 });
+        if (path.startsWith("/api/v1/campaigns/c1")) return Promise.resolve(CAMPAIGN);
+        return Promise.reject(new Error(`no answer for ${path}`));
+      },
+    },
+  };
+});
+
+function draw() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={["/campaigns/c1"]}>
+        <Routes><Route path="/campaigns/:id" element={<Campaign />} /></Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+afterEach(cleanup);
+
+describe("the campaign screen", () => {
+  it("opens with how far the campaign has got", async () => {
+    draw();
+    // Eight of twenty done - seven succeeded and one that needed no change -
+    // and two failures, which is what makes the line red.
+    await waitFor(() => expect(screen.getByTestId("verdict")).toHaveTextContent("8 of 20 hosts done, 2 failed"));
+    const verdict = screen.getByTestId("verdict");
+    expect(verdict.className).toContain("error");
+    expect(verdict).toHaveTextContent("requested by jkowalski");
+    expect(verdict).toHaveTextContent("approved by anowak");
+  });
+
+  it("keeps the record of the campaign behind one line each", async () => {
+    draw();
+    // The approval record is fetched only once the campaign says somebody
+    // approved, so the wait is for that line to arrive.
+    await waitFor(() => expect(
+      screen.getAllByTestId("section-head").some((one) => one.textContent?.includes("Approval record")),
+    ).toBe(true));
+    const heads = screen.getAllByTestId("section-head");
+    const head = (name: string) => heads.find((one) => one.textContent?.includes(name));
+    for (const name of ["Details", "Approval record", "Waves", "Timeline"]) {
+      expect(head(name), name).toHaveAttribute("aria-expanded", "false");
+    }
+    // The waves line says how many there are without being opened.
+    expect(head("Waves")?.querySelector(".section-count")).toHaveTextContent("2");
+  });
+
+  it("opens the details when they are asked for", async () => {
+    draw();
+    await waitFor(() => expect(screen.getAllByTestId("section-head").length).toBeGreaterThan(3));
+    const details = screen.getAllByTestId("section-head").find((one) => one.textContent?.includes("Details"));
+    fireEvent.click(details as HTMLElement);
+    await waitFor(() => expect(screen.getByText("Requested by")).toBeInTheDocument());
+  });
+
+  /* While nobody has consented, the plans are what the consent would be of:
+     that section opens itself rather than waiting to be found. */
+  it("holds the plans open while the campaign waits for its approval", async () => {
+    CAMPAIGN.state = "awaiting_approval";
+    draw();
+    await waitFor(() => expect(screen.getAllByTestId("section-head").length).toBeGreaterThan(3));
+    const plans = screen.getAllByTestId("section-head").find((one) => one.textContent?.includes("Plans"));
+    expect(plans).toHaveAttribute("aria-expanded", "true");
+    CAMPAIGN.state = "running";
   });
 });
