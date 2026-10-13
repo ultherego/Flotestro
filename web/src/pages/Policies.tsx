@@ -180,7 +180,8 @@ export function Policies() {
       <PageHeader
         icon="security"
         title={t("Policies")}
-        description={t("What is to be true on a group of hosts: a package installed, a unit running, a file at a known content, a setting at a value, a key on an account. The panel judges every host from its inventory; a drift is reported, or turned into a campaign that waits for approval.")}
+        description={t("What is to be true on a group of hosts.")}
+        help={<p>{t("What is to be true on a group of hosts: a package installed, a unit running, a file at a known content, a setting at a value, a key on an account. The panel judges every host from its inventory; a drift is reported, or turned into a campaign that waits for approval.")}</p>}
         actions={canWrite && !creating && <button onClick={() => setCreating(true)}>{t("New policy")}</button>}
       />
 

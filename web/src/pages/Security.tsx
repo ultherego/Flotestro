@@ -158,7 +158,8 @@ export function FleetSecurity() {
     <>
       <PageHeader
         title={t("Security")}
-        description={t("Versioned checks over the facts hosts already report. One bad setting on a hundred hosts is one problem, not a hundred — and the fix is one campaign: every host gets its own plan of module jobs, one approval covers the whole set.")}
+        description={t("Versioned checks over the facts hosts already report.")}
+        help={<p>{t("Versioned checks over the facts hosts already report. One bad setting on a hundred hosts is one problem, not a hundred — and the fix is one campaign: every host gets its own plan of module jobs, one approval covers the whole set.")}</p>}
         actions={<ExportButton path="/api/v1/security" />}
       />
       <FleetCoverage coverage={data} />

@@ -502,7 +502,8 @@ export function Notifications() {
       <PageHeader
         icon="notifications"
         title={t("Notifications")}
-        description={t("Where the fleet reports to when nobody is looking at the panel: a webhook, a mailbox, a chat room. Every attempt is in the log below with its reason.")}
+        description={t("Where the fleet reports when nobody is watching the panel.")}
+        help={<p>{t("Where the fleet reports to when nobody is looking at the panel: a webhook, a mailbox, a chat room. Every attempt is in the log below with its reason.")}</p>}
         breadcrumb={[{ label: t("Monitoring"), to: "/monitoring" }]}
         actions={canManage && (
           <button className="primary" onClick={() => { setEditing(emptyForm()); setEditingID(""); setErrorMessage(""); }} disabled={Boolean(editing)}>

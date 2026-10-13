@@ -139,7 +139,8 @@ export function Bulk() {
     <>
       <PageHeader
         title={t("Bulk Workspace")}
-        description={t("Choose the target, read the refusals, run the change. One host at a time lives in the host workspace; this is where the fleet is changed.")}
+        description={t("Choose the target, read the refusals, run the change.")}
+        help={<p>{t("Choose the target, read the refusals, run the change. One host at a time lives in the host workspace; this is where the fleet is changed.")}</p>}
       />
 
       <ScopeBar order={order} preview={preview.data} campaign={campaign.data}

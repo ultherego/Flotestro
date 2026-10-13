@@ -129,9 +129,12 @@ export function FleetBackups() {
     <>
       <PageHeader
         title={t("Backups")}
-        description={t("What is copied, where to and how old the newest copy is. Warning after {warning} h, urgent after {critical} h. A copy nobody has ever read back is a promise, not a safeguard — that is what the verification column says, with a {days}-day limit.", {
+        description={t("What is copied, where to, and how old the newest copy is.", {
           warning: data.thresholds.warning_hours, critical: data.thresholds.critical_hours, days: data.thresholds.verification_days,
         })}
+        help={<p>{t("What is copied, where to and how old the newest copy is. Warning after {warning} h, urgent after {critical} h. A copy nobody has ever read back is a promise, not a safeguard — that is what the verification column says, with a {days}-day limit.", {
+          warning: data.thresholds.warning_hours, critical: data.thresholds.critical_hours, days: data.thresholds.verification_days,
+        })}</p>}
         actions={<ExportButton path="/api/v1/backups" />}
       />
       <FleetCoverage coverage={data} />

@@ -233,7 +233,8 @@ export function Budgets() {
       <PageHeader
         icon="overview"
         title={t("Budgets")}
-        description={t("The capacity of the fleet, in tokens: how many operations the fleet, a site or a backup backend carries at once. A campaign or a job that finds no free token waits here, and the free tokens are divided fairly between everyone asking.")}
+        description={t("How many operations the fleet carries at once.")}
+        help={<p>{t("The capacity of the fleet, in tokens: how many operations the fleet, a site or a backup backend carries at once. A campaign or a job that finds no free token waits here, and the free tokens are divided fairly between everyone asking.")}</p>}
         actions={canWrite && (
           <button className={creating ? "secondary" : ""} onClick={() => setCreating(!creating)}>
             {creating ? t("Hide the form") : t("New budget")}

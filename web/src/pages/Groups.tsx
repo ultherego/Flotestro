@@ -194,7 +194,8 @@ function GroupList() {
       <PageHeader
         icon="groups"
         title={t("Groups")}
-        description={t("A group is a saved answer to “which hosts”: a list kept by hand, or a selector the server resolves every time it is read.")}
+        description={t("A saved answer to “which hosts”.")}
+        help={<p>{t("A group is a saved answer to “which hosts”: a list kept by hand, or a selector the server resolves every time it is read.")}</p>}
         actions={canWrite && !creating && (
           <button className="primary" onClick={() => setCreating(true)}>{t("New group")}</button>
         )}

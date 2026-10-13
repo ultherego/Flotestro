@@ -65,7 +65,8 @@ function ReadsList() {
       <PageHeader
         icon="reads"
         title={t("Reads")}
-        description={t("The same read on a handful of hosts at once: a diagnostic, not a change. Nothing is approved and nothing changes on the hosts.")}
+        description={t("The same read on a handful of hosts at once.")}
+        help={<p>{t("The same read on a handful of hosts at once: a diagnostic, not a change. Nothing is approved and nothing changes on the hosts.")}</p>}
         actions={
           <button className={building ? "secondary" : ""} onClick={() => setBuilding(!building)}>
             {building ? t("Hide the form") : t("New read")}

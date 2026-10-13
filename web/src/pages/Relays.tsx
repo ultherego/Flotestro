@@ -86,7 +86,8 @@ export function Relays() {
       <PageHeader
         icon="relays"
         title={t("Relays")}
-        description={t("The relays of the sites: one connection upwards per site, a buffer for the results while the link is down, and the route a host in an isolated site installs through. A relay reports itself every minute; ten minutes of silence is a site cut off from the panel.")}
+        description={t("One connection upwards per site.")}
+        help={<p>{t("The relays of the sites: one connection upwards per site, a buffer for the results while the link is down, and the route a host in an isolated site installs through. A relay reports itself every minute; ten minutes of silence is a site cut off from the panel.")}</p>}
       />
 
       <div className="widgets">
@@ -381,7 +382,8 @@ export function RelayPage() {
         icon="relays"
         breadcrumb={[{ label: t("Relays"), to: "/relays" }]}
         title={relay.name}
-        description={t("Site {site}. A relay attests the identity of the hosts behind it to the panel, so what it reports about itself is what the panel knows about the site.", { site: relay.site })}
+        description={t("Site {site}.", { site: relay.site })}
+        help={<p>{t("Site {site}. A relay attests the identity of the hosts behind it to the panel, so what it reports about itself is what the panel knows about the site.", { site: relay.site })}</p>}
       />
 
       <div className="widgets">

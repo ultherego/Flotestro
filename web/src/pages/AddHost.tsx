@@ -336,7 +336,8 @@ export function AddHost() {
       <PageHeader
         title={t("Add host")}
         breadcrumb={[{ label: t("Hosts"), to: "/hosts" }]}
-        description={t("A host joins the fleet by proving it holds a one-time token, then keeping the certificate the panel issues for it. The token is shown once, here, and never again — it is not stored in this browser and cannot be read back from the panel.")}
+        description={t("How a host joins the fleet, and the token that lets it.")}
+        help={<p>{t("A host joins the fleet by proving it holds a one-time token, then keeping the certificate the panel issues for it. The token is shown once, here, and never again — it is not stored in this browser and cannot be read back from the panel.")}</p>}
       />
 
       <ol className="bulk-steps">
