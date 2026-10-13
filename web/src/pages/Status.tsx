@@ -133,6 +133,8 @@ const FACT_LABELS: Record<string, [string, FactKind]> = {
   latest: ["Latest migration", "text"],
   applied: ["Applied migrations", "number"],
   pending: ["Events waiting", "number"],
+  set_aside: ["Events set aside", "number"],
+  oldest_set_aside_seconds: ["Oldest set aside", "seconds"],
   oldest_pending_seconds: ["Oldest waiting", "seconds"],
   last_published_at: ["Last published", "time"],
   dispatch_rate: ["Dispatch rate (per second)", "number"],
@@ -317,7 +319,7 @@ function BlockTile({ name, block }: { name: string; block: StatusBlock }) {
         <p className="part-reason">{block.reason || block.attention}</p>
       )}
       <BlockWidget name={name} facts={block.facts} />
-      <Pairs stacked>
+      <Pairs>
         {rows.map(([key, value]) => {
           const [label, kind] = FACT_LABELS[key] ?? [key, "text"];
           // A structure is given the width of the tile; squeezed into a
@@ -537,7 +539,7 @@ function AboutTile({ block }: { block: StatusBlock }) {
         <span>{t("About")}</span>
         <span className="part-summary">{t("version {version}, up {uptime}", { version: text("version"), uptime: up })}</span>
       </h3>
-      <Pairs stacked>
+      <Pairs>
         <Pair label={t("Product")}><span>Flotestro</span></Pair>
         <Pair label={t("Version")}><span className="mono">{text("version")}</span></Pair>
         <Pair label={t("Commit")}><FactValue value={facts.commit} kind="id" /></Pair>

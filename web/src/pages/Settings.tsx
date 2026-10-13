@@ -373,7 +373,7 @@ function AreaTile({
           {facts.length === 1 ? t("{n} value", { n: facts.length }) : t("{n} values", { n: facts.length })}
         </span>
       </h3>
-      <Pairs stacked>
+      <Pairs>
         {facts.map((fact) => (
           <Pair key={fact.key} label={t(FACT_LABELS[fact.key] ?? fact.key)}>
             <FactValue fact={fact} area={area.key} />
@@ -426,6 +426,7 @@ const FACT_LABELS: Record<string, string> = {
   commit: "Commit",
   build_date: "Build date",
   agent_protocol: "Agent protocol",
+  relay_cert_ttl: "Relay certificate lifetime",
   migration_level: "Schema migration",
   gateway_addr: "Agent gateway",
   enrollment_addr: "Enrollment endpoint",

@@ -1954,20 +1954,26 @@ button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent
    the wall these screens started as, and folding them away was worse - a
    closed line says a name and nothing else. Only a part that is not fine
    takes a coloured edge, so the eye lands on those and on nothing else. */
-.parts {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-  gap: 12px;
-  align-items: start;
-}
+/* Columns rather than a grid of rows: a row is as tall as its tallest tile,
+   and one part with thirty facts beside two with four left half the screen
+   empty. In columns the tiles pack upwards and the holes close. */
+.parts { columns: 380px; column-gap: 12px; }
 .part {
   background: var(--bg-panel);
   border-radius: var(--radius-sm);
   border-left: 3px solid transparent;
   padding: 12px 14px;
+  margin: 0 0 12px;
+  /* A tile is never split across a column break: half a part at the foot of
+     one column and half at the head of the next reads as two parts. */
+  break-inside: avoid;
+  display: flow-root;
   min-width: 0;
-  container: card / inline-size;
 }
+/* Inside a tile a fact is one line: the label on the left in a track that
+   fits it, the value beside it. Stacked - the label over the value - is
+   what made these tiles twice as tall as they had to be. */
+.part .pairs { grid-template-columns: minmax(0, max-content) minmax(90px, 1fr); gap: 4px 12px; }
 .part.warn { border-left-color: var(--warn); }
 .part.error { border-left-color: var(--error); }
 .part.unknown { border-left-color: var(--unknown); }
