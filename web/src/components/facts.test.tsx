@@ -43,7 +43,7 @@ describe("Identifier", () => {
 });
 
 describe("Structured", () => {
-  it("draws a list of records as a table of their own keys", () => {
+  it("draws a short record as a table of its own keys", () => {
     const { getByRole } = render(
       <Structured value={[
         { gateway_id: "panel-a", pool_max_conns: 10 },
@@ -150,5 +150,15 @@ describe("the fact list has one definition", () => {
     const sources = ["pages/Settings.tsx", "pages/Status.tsx"].map((file) =>
       readFileSync(join(src, file), "utf8"));
     expect(sources.some((source) => source.includes("fp-wrap"))).toBe(false);
+  });
+});
+
+describe("a record set too wide for a table", () => {
+  it("becomes one little list per record once it passes four fields", () => {
+    const { container, queryByRole } = render(
+      <Structured value={[{ a: 1, b: 2, c: 3, d: 4, e: 5 }, { a: 6, b: 7, c: 8, d: 9, e: 10 }]} />,
+    );
+    expect(queryByRole("table")).toBeNull();
+    expect(container.querySelectorAll(".records > dl")).toHaveLength(2);
   });
 });

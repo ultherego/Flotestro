@@ -277,6 +277,26 @@ export function Structured({ value }: { value: unknown }) {
       return <span className="mono wrap">{value.map((one) => String(one)).join(", ")}</span>;
     }
     const columns = Array.from(new Set(records.flatMap((one) => Object.keys(one as object))));
+    // A table of eight columns inside a tile is not a table: it is a row
+    // with its end cut off. Past four fields each record is read as its own
+    // little list, which wraps and shows every field it has.
+    if (columns.length > 4) {
+      return (
+        <div className="records">
+          {records.map((record, index) => (
+            <dl className="pairs stacked nested" key={index}>
+              {columns
+                .filter((column) => (record as Record<string, unknown>)[column] !== undefined)
+                .map((column) => (
+                  <Pair key={column} label={t(labelOfKey(column))}>
+                    <FactValue value={(record as Record<string, unknown>)[column]} kind={kindOfKey(column)} />
+                  </Pair>
+                ))}
+            </dl>
+          ))}
+        </div>
+      );
+    }
     return (
       <TableScroll>
         <table className="facts-table">

@@ -172,12 +172,14 @@ describe("the status screen", () => {
      installation are structures, and every one of them was drawn with
      String() - one unbreakable line that left the card through its right
      edge. */
-  it("draws the replicas as a table of their own fields, never as JSON", async () => {
+  it("draws each replica as its own list of named fields, never as JSON", async () => {
     draw(<Status />);
-    await waitFor(() => expect(screen.getByText("Pool max conns")).toBeInTheDocument());
-    const part = screen.getByText("Pool max conns").closest(".part") as HTMLElement;
-    expect(within(part).getByRole("table")).toBeInTheDocument();
-    expect(within(part).getAllByRole("row")).toHaveLength(3);
+    await waitFor(() => expect(screen.getAllByText("Pool max conns").length).toBe(2));
+    const part = screen.getAllByText("Pool max conns")[0].closest(".part") as HTMLElement;
+    // Seven fields per replica: a table of seven columns inside a tile is a
+    // row with its end cut off, so each record is a list of its own.
+    expect(within(part).queryByRole("table")).toBeNull();
+    expect(part.querySelectorAll(".records > dl")).toHaveLength(2);
     expect(part.textContent).not.toContain('"gateway_id"');
     expect(part.textContent).not.toContain("[object Object]");
   });

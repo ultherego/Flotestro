@@ -1730,7 +1730,10 @@ a.status-bar-segment:hover { filter: brightness(1.08); text-decoration: none; co
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: 16px;
-  align-items: stretch;
+  /* Each card is as tall as what it holds. Stretched to the row's height, a
+     card with one row of a table beside a card with eight stood half empty,
+     and an empty box reads as something that failed to load. */
+  align-items: start;
 }
 .widgets > * { min-width: 0; margin: 0; }
 .widgets > .card { display: flex; flex-direction: column; }
@@ -1993,3 +1996,8 @@ button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent
 .parts-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin: 20px 0 10px; }
 .parts-head h2 { margin: 0; font-size: 15px; font-weight: 600; }
 .parts-head .settings-search { margin-left: auto; }
+
+/* Records of a structure, one little list each, inside a tile. */
+.records { display: grid; gap: 8px; }
+.records .pairs { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 2px 10px; }
+.records dt { font-size: 11px; }
