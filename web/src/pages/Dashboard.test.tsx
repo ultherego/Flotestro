@@ -213,17 +213,15 @@ describe("the dashboard's three zones", () => {
     expect(zone.textContent).toContain("\u2014");
   });
 
-  it("keeps its lists closed, with the number of rows on the line", async () => {
+  it("keeps its three lists as lists, each saying what is in it", async () => {
     summary = quietFleet as typeof summary;
     draw(<Dashboard />);
-    await waitFor(() => expect(screen.getAllByTestId("section-head").length).toBe(3));
-    const heads = screen.getAllByTestId("section-head");
-    const head = (name: string) => heads.find((one) => one.textContent?.includes(name));
-    expect(head("Recent failures")).toHaveAttribute("aria-expanded", "false");
-    expect(head("Recent access denials")).toHaveAttribute("aria-expanded", "false");
-    // Nothing is in progress in this fleet, so that list is closed too.
-    expect(head("Campaigns in progress")).toHaveAttribute("aria-expanded", "false");
-    // And no table of any of the three is on the screen.
-    expect(screen.queryByRole("table")).toBeNull();
+    // Nothing is in progress, nothing failed and nothing was denied in this
+    // fleet, so each list says so in its own words rather than standing empty.
+    await waitFor(() => expect(screen.getByText("No campaigns need attention.")).toBeInTheDocument());
+    expect(screen.getByText("No failed operations.")).toBeInTheDocument();
+    expect(screen.getByText("No denials in recent events.")).toBeInTheDocument();
+    // And nothing on this screen is behind a fold.
+    expect(screen.queryAllByTestId("section-head")).toHaveLength(0);
   });
 });

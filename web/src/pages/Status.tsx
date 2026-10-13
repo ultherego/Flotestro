@@ -7,7 +7,7 @@ import {
   Empty, ErrorBox, FactValue, Pair, Pairs, Structured, TableScroll, Time,
   type FactKind,
 } from "../components/ui";
-import { Card, NeedsAttention, PageHeader, Section, Verdict, type Tone } from "../components/layout";
+import { Card, NeedsAttention, PageHeader, Verdict, type Tone } from "../components/layout";
 import { StatusBar, type Segment } from "../components/widgets";
 import { useT } from "../i18n";
 
@@ -277,12 +277,16 @@ export function Status() {
             ))}
           </NeedsAttention>
 
-          <Card flush>
+          {/* Every part on the screen at once, as tiles that fit three or
+              four to a row. Folding them away was worse than the wall it
+              was meant to answer: thirteen closed lines say thirteen names
+              and nothing else, and finding anything took a click. */}
+          <div className="parts">
             {blocks.map((key) => (
-              <BlockSection key={key} name={key} block={data.blocks[key]} />
+              <BlockTile key={key} name={key} block={data.blocks[key]} />
             ))}
-            {data.blocks.build && <AboutSection block={data.blocks.build} />}
-          </Card>
+            {data.blocks.build && <AboutTile block={data.blocks.build} />}
+          </div>
         </>
       )}
     </>
@@ -290,29 +294,33 @@ export function Status() {
 }
 
 /**
- * One part of the panel: its name, its state and the one fact that says what
- * is inside, with the rest a click away.
+ * One part of the panel: its name, its state, the one fact worth reading
+ * first and then everything the server said about it.
  *
- * Thirteen parts used to stand as thirteen cards of fifteen rows each. Every
- * row was present whether or not anything was wrong with it, so the screen
- * said nothing until all of it had been read.
+ * The tile carries no border of its own - thirteen bordered boxes is the
+ * wall this screen started as. It is a surface with a title, and only a
+ * part that is not fine takes a coloured edge, so the eye lands on those.
  */
-function BlockSection({ name, block }: { name: string; block: StatusBlock }) {
+function BlockTile({ name, block }: { name: string; block: StatusBlock }) {
   const t = useT();
   const tone = blockTone(block);
   const rows = Object.entries(block.facts).filter(([key]) => !DRAWN_ELSEWHERE.has(key));
+  const summary = blockSummary(name, block.facts, t);
   return (
-    <Section
-      tone={tone}
-      title={<>{t(BLOCK_TITLES[name] ?? name)} <ToneBadge tone={tone} /></>}
-      summary={block.reason || block.attention || blockSummary(name, block.facts, t)}
-      className="status-section"
-    >
+    <section className={`part ${tone}`}>
+      <h3 className="part-title">
+        <span>{t(BLOCK_TITLES[name] ?? name)}</span>
+        <ToneBadge tone={tone} />
+        {summary && <span className="part-summary">{summary}</span>}
+      </h3>
+      {(block.reason || block.attention) && (
+        <p className="part-reason">{block.reason || block.attention}</p>
+      )}
       <BlockWidget name={name} facts={block.facts} />
-      <Pairs>
+      <Pairs stacked>
         {rows.map(([key, value]) => {
           const [label, kind] = FACT_LABELS[key] ?? [key, "text"];
-          // A structure is given the width of the list; squeezed into a
+          // A structure is given the width of the tile; squeezed into a
           // value track it used to be drawn as one line of JSON.
           const structured = value !== null && typeof value === "object";
           return (
@@ -322,7 +330,7 @@ function BlockSection({ name, block }: { name: string; block: StatusBlock }) {
           );
         })}
       </Pairs>
-    </Section>
+    </section>
   );
 }
 
@@ -515,7 +523,7 @@ function BlockWidget({ name, facts }: { name: string; facts: Record<string, unkn
 
 /* The build and the process: the block a bug report starts with, with the
    places the documentation lives. */
-function AboutSection({ block }: { block: StatusBlock }) {
+function AboutTile({ block }: { block: StatusBlock }) {
   const t = useT();
   const facts = block.facts;
   const text = (key: string) => {
@@ -524,12 +532,12 @@ function AboutSection({ block }: { block: StatusBlock }) {
   };
   const up = typeof facts.uptime_seconds === "number" ? duration(facts.uptime_seconds) : "—";
   return (
-    <Section
-      title={t("About")}
-      summary={t("version {version}, up {uptime}", { version: text("version"), uptime: up })}
-      className="status-section"
-    >
-      <Pairs>
+    <section className="part">
+      <h3 className="part-title">
+        <span>{t("About")}</span>
+        <span className="part-summary">{t("version {version}, up {uptime}", { version: text("version"), uptime: up })}</span>
+      </h3>
+      <Pairs stacked>
         <Pair label={t("Product")}><span>Flotestro</span></Pair>
         <Pair label={t("Version")}><span className="mono">{text("version")}</span></Pair>
         <Pair label={t("Commit")}><FactValue value={facts.commit} kind="id" /></Pair>
@@ -548,6 +556,6 @@ function AboutSection({ block }: { block: StatusBlock }) {
           </span>
         </Pair>
       </Pairs>
-    </Section>
+    </section>
   );
 }

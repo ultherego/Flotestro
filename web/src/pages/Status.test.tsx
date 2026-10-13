@@ -144,24 +144,28 @@ describe("the status screen", () => {
     expect(zone).not.toHaveTextContent("Database");
   });
 
-  it("holds a part that is fine closed and a part that is not open", async () => {
+  it("puts every part on the screen at once and marks the ones that are not fine", async () => {
     draw(<Status />);
-    await waitFor(() => expect(screen.getAllByTestId("section-head").length).toBeGreaterThan(0));
-    const heads = screen.getAllByTestId("section-head");
-    const open = (name: string) =>
-      heads.find((head) => head.textContent?.includes(name))?.getAttribute("aria-expanded");
-    expect(open("Database")).toBe("false");
-    expect(open("Replicas")).toBe("false");
-    expect(open("Cryptographic state")).toBe("true");
-    expect(open("Monitoring")).toBe("true");
+    await waitFor(() => expect(document.querySelectorAll(".part").length).toBeGreaterThan(0));
+    const parts = Array.from(document.querySelectorAll(".part"));
+    const of = (name: string) => parts.find((one) => one.querySelector(".part-title")?.textContent?.includes(name));
+    // The four parts the server judged, all drawn, none behind a click.
+    expect(parts).toHaveLength(4);
+    expect(of("Database")?.className).toContain("ok");
+    expect(of("Cryptographic state")?.className).toContain("error");
+    // Unknown is not fine, and it is marked as its own thing rather than green.
+    expect(of("Monitoring")?.className).toContain("unknown");
   });
 
-  it("says what is inside a part while it is closed", async () => {
+  it("says the one fact worth reading first on every part", async () => {
     draw(<Status />);
-    await waitFor(() => expect(screen.getAllByTestId("section-head").length).toBeGreaterThan(0));
-    const heads = screen.getAllByTestId("section-head");
-    expect(heads.find((head) => head.textContent?.includes("Replicas"))?.textContent).toContain("2 alive");
-    expect(heads.find((head) => head.textContent?.includes("Database"))?.textContent).toContain("1.4 ms round trip");
+    await waitFor(() => expect(document.querySelectorAll(".part-summary").length).toBeGreaterThan(0));
+    const parts = Array.from(document.querySelectorAll(".part"));
+    const summary = (name: string) =>
+      parts.find((one) => one.querySelector(".part-title")?.textContent?.includes(name))
+        ?.querySelector(".part-summary")?.textContent;
+    expect(summary("Replicas")).toContain("2 alive");
+    expect(summary("Database")).toContain("1.4 ms round trip");
   });
 
   /* The defect: the replicas of the control plane and the keys of the
@@ -170,23 +174,20 @@ describe("the status screen", () => {
      edge. */
   it("draws the replicas as a table of their own fields, never as JSON", async () => {
     draw(<Status />);
-    await waitFor(() => expect(screen.getAllByTestId("section-head").length).toBeGreaterThan(0));
-    const head = screen.getAllByTestId("section-head").find((one) => one.textContent?.includes("Replicas"));
-    head?.click();
     await waitFor(() => expect(screen.getByText("Pool max conns")).toBeInTheDocument());
-    const section = screen.getByText("Pool max conns").closest(".section-body") as HTMLElement;
-    expect(within(section).getByRole("table")).toBeInTheDocument();
-    expect(within(section).getAllByRole("row")).toHaveLength(3);
-    expect(section.textContent).not.toContain('"gateway_id"');
-    expect(section.textContent).not.toContain("[object Object]");
+    const part = screen.getByText("Pool max conns").closest(".part") as HTMLElement;
+    expect(within(part).getByRole("table")).toBeInTheDocument();
+    expect(within(part).getAllByRole("row")).toHaveLength(3);
+    expect(part.textContent).not.toContain('"gateway_id"');
+    expect(part.textContent).not.toContain("[object Object]");
   });
 
   it("draws the keys of the installation and their versions without JSON", async () => {
     draw(<Status />);
     await waitFor(() => expect(screen.getByText("Versions per key")).toBeInTheDocument());
-    const body = screen.getByText("Versions per key").closest(".section-body") as HTMLElement;
-    expect(body.textContent).not.toContain("{");
-    expect(body.textContent).toContain("k-7f3a");
+    const part = screen.getByText("Versions per key").closest(".part") as HTMLElement;
+    expect(part.textContent).not.toContain("{");
+    expect(part.textContent).toContain("k-7f3a");
   });
 
   it("shortens the identifiers instead of letting them out of the card", async () => {

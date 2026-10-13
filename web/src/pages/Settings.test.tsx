@@ -63,34 +63,24 @@ function draw(node: ReactNode) {
 afterEach(cleanup);
 
 describe("the settings screen", () => {
-  it("holds every area closed, each saying how many values it has", async () => {
+  it("puts every area on the screen as a tile, with how many values it holds", async () => {
     draw(<Settings />);
-    await waitFor(() => expect(screen.getAllByTestId("section-head").length).toBe(2));
-    for (const head of screen.getAllByTestId("section-head")) {
-      expect(head).toHaveAttribute("aria-expanded", "false");
-      expect(head.textContent).toContain("2 values");
+    await waitFor(() => expect(document.querySelectorAll(".part").length).toBe(2));
+    for (const tile of Array.from(document.querySelectorAll(".part"))) {
+      expect(tile.querySelector(".part-summary")?.textContent).toContain("2 values");
     }
-    // Nothing of the values themselves is on the screen until one is opened.
-    expect(screen.queryByText("Agent gateway")).toBeNull();
+    // The values themselves are there, not behind anything.
+    expect(screen.getByText("Agent gateway")).toBeInTheDocument();
   });
 
-  it("opens an area when somebody opens it", async () => {
-    draw(<Settings />);
-    await waitFor(() => expect(screen.getAllByTestId("section-head").length).toBe(2));
-    fireEvent.click(screen.getAllByTestId("section-head")[0]);
-    await waitFor(() => expect(screen.getByText("Agent gateway")).toBeInTheDocument());
-  });
-
-  it("finds a setting by name and opens what holds it", async () => {
+  it("finds a setting by name and leaves only what carries it", async () => {
     draw(<Settings />);
     await waitFor(() => expect(screen.getByTestId("settings-search")).toBeInTheDocument());
     fireEvent.change(screen.getByTestId("settings-search"), { target: { value: "lifetime" } });
-    await waitFor(() => expect(screen.getAllByTestId("section-head").length).toBe(1));
-    const head = screen.getAllByTestId("section-head")[0];
-    expect(head.textContent).toContain("Server");
-    // What matched is open and counted; the value that did not is gone.
-    expect(head).toHaveAttribute("aria-expanded", "true");
-    expect(head.textContent).toContain("1 value");
+    await waitFor(() => expect(document.querySelectorAll(".part").length).toBe(1));
+    const tile = document.querySelector(".part") as HTMLElement;
+    expect(tile.textContent).toContain("Server");
+    expect(tile.querySelector(".part-summary")?.textContent).toContain("1 value");
     expect(screen.queryByText("Agent gateway")).toBeNull();
   });
 
@@ -103,8 +93,6 @@ describe("the settings screen", () => {
 
   it("keeps a secret as the answer whether it is set, never as a value", async () => {
     draw(<Settings />);
-    await waitFor(() => expect(screen.getAllByTestId("section-head").length).toBe(2));
-    fireEvent.click(screen.getAllByTestId("section-head")[1]);
     await waitFor(() => expect(screen.getByText("set")).toBeInTheDocument());
     expect(screen.queryByText(/postgres:\/\/flotestro@/)).not.toBeNull();
   });

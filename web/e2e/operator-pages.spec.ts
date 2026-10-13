@@ -390,27 +390,24 @@ test.describe("status", () => {
       status.unknown > 0 ? "could not be judged" : "parts judged",
     );
 
-    // Every part is a closed line that says what is inside; a part that is
-    // not fine - unknown counts as not fine - is open where it stands.
-    const parts = page.locator(".status-section");
+    // Every part is on the screen at once; a part that is not fine - and
+    // unknown counts as not fine - carries the mark that says so.
+    const parts = page.locator(".part");
     await expect(parts.first()).toBeVisible();
     for (const [name, block] of Object.entries(status.blocks)) {
       if (name === "build") continue;
       const judged = (block as { ok: boolean | null; attention?: string });
-      const fine = judged.ok === true && !judged.attention;
-      // The title line carries the part's name and its state badge, so the
-      // name is matched inside it rather than as the whole of it.
-      const line = parts.filter({ has: page.locator(".section-title", { hasText: blockTitle(name) }) }).first();
-      if (await line.count() === 0) continue;
-      await expect(line.locator(".section-head")).toHaveAttribute("aria-expanded", fine ? "false" : "true");
+      const tone = judged.ok === null ? "unknown" : !judged.ok ? "error" : judged.attention ? "warn" : "ok";
+      const tile = parts.filter({ has: page.locator(".part-title", { hasText: blockTitle(name) }) }).first();
+      if (await tile.count() === 0) continue;
+      await expect(tile).toHaveClass(new RegExp(`\\b${tone}\\b`));
     }
 
     if (status.blocks.build) {
-      const about = parts.filter({ has: page.locator(".section-title", { hasText: exact("About") }) }).first();
-      await expect(about.locator(".section-head")).toHaveAttribute("aria-expanded", "false");
-      await about.locator(".section-head").click();
+      const about = parts.filter({ has: page.locator(".part-title", { hasText: exact("About") }) }).first();
       await expect(about.locator("dt").first()).toBeVisible();
     }
+
     await expect(page.locator(".page-header").getByRole("link", { name: "OpenAPI" })).toHaveAttribute("href", "/api/v1/openapi.json");
     await expectHealthy(page, errors);
   });

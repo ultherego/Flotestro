@@ -389,32 +389,28 @@ test.describe("settings", () => {
 
     // The areas the API reports, not the retention editor beside them: that
     // one writes and has no entry in /api/v1/settings.
-    const areas = page.locator("[data-testid='settings-areas'] .section");
+    const areas = page.locator("[data-testid='settings-areas'] .part");
     await expect(areas).toHaveCount(settings.areas.length);
     for (const area of settings.areas) {
-      const section = areas.filter({ has: page.getByText(area.title, { exact: true }) }).first();
-      await expect(section).toHaveCount(1);
-      // Closed, and saying how many values it holds.
-      const head = section.locator(".section-head");
-      await expect(head).toHaveAttribute("aria-expanded", "false");
-      await expect(head).toContainText(`${area.facts.length} value`);
-      await head.click();
-      await expect(section.locator("dt")).toHaveCount(area.facts.length);
+      const tile = areas.filter({ has: page.getByText(area.title, { exact: true }) }).first();
+      await expect(tile).toHaveCount(1);
+      await expect(tile.locator("dt")).toHaveCount(area.facts.length);
+      await expect(tile.locator(".part-summary")).toContainText(`${area.facts.length} value`);
       // A secret is never shown, only whether it is set.
       for (const fact of area.facts.filter((entry) => entry.secret)) {
-        const value = section.locator("dd").nth(area.facts.indexOf(fact));
+        const value = tile.locator("dd").nth(area.facts.indexOf(fact));
         await expect(value).toContainText(fact.configured ? "set" : "not set");
         // Not even the mask the API sends in place of the value.
         if (typeof fact.value === "string" && fact.value !== "") await expect(value).not.toContainText(fact.value);
       }
-      await head.click();
     }
 
     // The search is how a configuration screen is actually read: a name in
     // mind, and only what carries it on the screen.
     const first = settings.areas[0];
     await page.getByTestId("settings-search").fill(first.title);
-    await expect(page.locator("[data-testid='settings-areas'] .section")).toHaveCount(1);
+    await expect(page.locator("[data-testid='settings-areas'] .part")).toHaveCount(1);
+
     await expectHealthy(page, errors);
   });
 });

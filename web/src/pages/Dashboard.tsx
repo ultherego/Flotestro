@@ -5,7 +5,7 @@ import { api, type Collection } from "../lib/api";
 import type { AuditEvent, Campaign, FleetActivity, FleetSummary, Job } from "../lib/types";
 import { relativeTime } from "../lib/format";
 import { ErrorBox, ErrorCode, Time, Empty, JobState } from "../components/ui";
-import { Card, NeedsAttention, PageHeader, Section, Verdict } from "../components/layout";
+import { Card, NeedsAttention, PageHeader, Verdict } from "../components/layout";
 import { BarChart, Breakdown, CountRow, StatusBar, type Segment } from "../components/widgets";
 import { FleetCoverage, type Coverage } from "../components/FleetCoverage";
 import { FirstRunCard } from "../components/FirstRunCard";
@@ -265,18 +265,15 @@ export function Dashboard() {
           ) : <Empty>{t("Loading…")}</Empty>}
         </Card>
 
-        {/* The three lists the dashboard keeps. One line each until
-            somebody opens them: a table nobody opened is a table nobody
-            read, and three of them stacked is what made this screen a
-            wall. The campaigns in progress open themselves, because work
-            under way is the one list somebody is here to watch. */}
-        <Card className="span-12" flush>
-          <Section
-            title={t("Campaigns in progress")}
-            count={activeCampaigns.length}
-            open={activeCampaigns.length > 0}
-            className="list-section"
-          >
+        {/* The three lists the dashboard keeps. They stand open: a list
+            behind a fold says its name and nothing else, which is worse
+            than the wall it was meant to answer. */}
+        <Card
+          className="span-6"
+          title={t("Campaigns in progress")}
+          actions={activeCampaigns.length > 0 && <span className="badge">{activeCampaigns.length}</span>}
+          flush
+        >
           {activeCampaigns.length === 0 ? (
             <Empty>{t("No campaigns need attention.")}</Empty>
           ) : (
@@ -296,13 +293,14 @@ export function Dashboard() {
               </tbody>
             </table>
           )}
-          </Section>
-          <Section
-            title={t("Recent failures")}
-            count={(failures.data?.items ?? []).length}
-            actions={<Link to="/jobs?state=failed">{t("All jobs")}</Link>}
-            className="list-section"
-          >
+        </Card>
+
+        <Card
+          className="span-6"
+          title={t("Recent failures")}
+          actions={<Link to="/jobs?state=failed">{t("All jobs")}</Link>}
+          flush
+        >
           {(failures.data?.items ?? []).length === 0 ? (
             <Empty>{t("No failed operations.")}</Empty>
           ) : (
@@ -322,13 +320,19 @@ export function Dashboard() {
               </tbody>
             </table>
           )}
-          </Section>
-          <Section
-            title={t("Recent access denials")}
-            count={denied.length}
-            actions={<Link to="/audit?outcome=denied">{t("All denials")}</Link>}
-            className="list-section"
-          >
+        </Card>
+
+        <Card
+          className="span-12"
+          title={t("Recent access denials")}
+          actions={
+            <>
+              {denied.length > 0 && <span className="badge error">{denied.length}</span>}
+              <Link to="/audit?outcome=denied">{t("All denials")}</Link>
+            </>
+          }
+          flush
+        >
           {denied.length === 0 ? (
             <Empty>{t("No denials in recent events.")}</Empty>
           ) : (
@@ -351,7 +355,6 @@ export function Dashboard() {
               </tbody>
             </table>
           )}
-          </Section>
         </Card>
       </div>
     </>

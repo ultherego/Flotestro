@@ -1986,3 +1986,43 @@ button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent
 .card > .list-section > .section-body { padding: 0 0 8px; }
 .card > .list-section > .section-actions { padding: 0 var(--card-pad-x) 10px; }
 .widget-subhead.first { margin-top: 0; }
+
+/* ---------------------------------------------------------------------- */
+/* Parts: the tiles a screen is read as, three or four to a row.          */
+/* ---------------------------------------------------------------------- */
+/* A surface rather than a box: thirteen bordered cards of equal weight is
+   the wall these screens started as, and folding them away was worse - a
+   closed line says a name and nothing else. Only a part that is not fine
+   takes a coloured edge, so the eye lands on those and on nothing else. */
+.parts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+.part {
+  background: var(--bg-panel);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid transparent;
+  padding: 12px 14px;
+  min-width: 0;
+  container: card / inline-size;
+}
+.part.warn { border-left-color: var(--warn); }
+.part.error { border-left-color: var(--error); }
+.part.unknown { border-left-color: var(--unknown); }
+.part-title {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  margin: 0 0 8px; font-size: 14px; font-weight: 600;
+}
+.part-summary { font-weight: 400; font-size: 12px; color: var(--text-muted); }
+.part-reason { margin: -4px 0 8px; font-size: 12px; color: var(--text-muted); }
+.part .pairs { font-size: 12px; }
+.part table { font-size: 12px; margin-bottom: 8px; }
+.part table th, .part table td { padding: 4px 8px; }
+.part table th:first-child, .part table td:first-child { padding-left: 0; }
+.card-body > .parts { margin: 0; }
+
+/* A section head is a button, and the panel's buttons centre their content:
+   without this the title of a fold sat in the middle of the row. */
+.section-head { justify-content: flex-start; }

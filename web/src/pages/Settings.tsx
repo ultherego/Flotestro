@@ -4,7 +4,7 @@ import { api, ApiError } from "../lib/api";
 import { goDuration } from "../lib/format";
 import type { Settings as SettingsView, SettingsArea, SettingsFact } from "../lib/types";
 import { Empty, ErrorBox, Pair, Pairs, Time } from "../components/ui";
-import { Actions, Card, Field, FieldGrid, PageHeader, Section } from "../components/layout";
+import { Actions, Card, Field, FieldGrid, PageHeader } from "../components/layout";
 import { useToast } from "../components/Toast";
 import { useT } from "../i18n";
 
@@ -67,9 +67,9 @@ export function Settings() {
             />
           }
         >
-          <div data-testid="settings-areas">
+          <div className="parts" data-testid="settings-areas">
             {areas.map(({ area, facts }) => (
-              <AreaSection key={area.key} area={area} facts={facts} open={needle === "" ? undefined : true} />
+              <AreaTile key={area.key} area={area} facts={facts} />
             ))}
             {areas.length === 0 && <Empty>{t("No setting of that name.")}</Empty>}
           </div>
@@ -349,37 +349,37 @@ function ImpactNote({
 /* The titles come from the server as English keys; the catalogue turns
    them into the panel's language like every other label. */
 /**
- * One area of the configuration: its name and how many values it holds while
- * it is closed, the values themselves when it is open.
+ * One area of the configuration: its name and its values, in a tile that
+ * fits beside the others.
  *
- * Nine areas used to stand open at once, every value of every one of them on
- * the screen. Nobody reads a configuration that way; they come looking for
- * one setting, which is what the search above and the count here are for.
+ * The areas were cards of half the page, and a value with no spaces in it -
+ * a commit, a DSN - left the card through its right edge and ran over the
+ * card beside it. They are tiles of one grid now, and every value wraps.
  */
-function AreaSection({
-  area, facts, open,
+function AreaTile({
+  area, facts,
 }: {
   area: SettingsArea;
   /** The facts to draw: all of them, or what the search left. */
   facts: SettingsFact[];
-  open?: boolean;
 }) {
   const t = useT();
   return (
-    <Section
-      title={t(area.title)}
-      summary={facts.length === 1 ? t("{n} value", { n: facts.length }) : t("{n} values", { n: facts.length })}
-      open={open}
-      className="settings-section"
-    >
-      <Pairs>
+    <section className="part">
+      <h3 className="part-title">
+        <span>{t(area.title)}</span>
+        <span className="part-summary">
+          {facts.length === 1 ? t("{n} value", { n: facts.length }) : t("{n} values", { n: facts.length })}
+        </span>
+      </h3>
+      <Pairs stacked>
         {facts.map((fact) => (
           <Pair key={fact.key} label={t(FACT_LABELS[fact.key] ?? fact.key)}>
             <FactValue fact={fact} area={area.key} />
           </Pair>
         ))}
       </Pairs>
-    </Section>
+    </section>
   );
 }
 
