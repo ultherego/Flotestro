@@ -1,5 +1,16 @@
 // The Polish translation of the interface.
 export const pl: Record<string, string> = {
+  /* Monitoring: alerty z probek agentow. */
+  "What the agents' samples turned into alerts.": "Co z próbek agentów zrobiło się alertem.",
+  "Every agent samples its host once a minute; the rules on this page turn the samples into alerts. Nothing fires without a rule an operator can read here. A rule fires when a metric stays past its threshold for the given minutes on every host its scope selects, and a disabled rule is listed because it would apply the moment somebody enables it.": "Każdy agent próbkuje swój host raz na minutę; reguły z tej strony zamieniają próbki w alerty. Nic nie odpala się bez reguły, którą operator może tu przeczytać. Reguła odpala, gdy metryka utrzyma się za progiem przez podaną liczbę minut na każdym hoście z jej zakresu; reguła wyłączona jest na liście, bo zadziała w chwili, gdy ktoś ją włączy.",
+  "Nothing is waiting for somebody": "Nic nie czeka na człowieka",
+  "{n} alerts are waiting for somebody": "alertów czeka na człowieka: {n}",
+  "{n} hosts reporting": "hostów raportuje: {n}",
+  "{n} gone quiet": "zamilkło: {n}",
+  "{n} rules enabled": "reguł włączonych: {n}",
+  "By severity, across the hosts you can see.": "Po wadze, na hostach, które widzisz.",
+  "What tripped, where, and whether somebody has it.": "Co przekroczyło próg, gdzie i czy ktoś się tym zajął.",
+  "the last fifty, newest first": "ostatnie pięćdziesiąt, od najnowszego",
   /* Dashboard: werdykt floty i to, co czeka na człowieka. */
   "Reading the fleet…": "Czytam flotę…",
   "Nothing needs a decision": "Nic nie wymaga decyzji",

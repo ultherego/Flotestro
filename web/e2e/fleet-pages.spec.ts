@@ -26,6 +26,11 @@ function exact(text: string): RegExp {
 }
 
 /** The card of a fleet page by its title. */
+/** A detail section by its title: one line, until somebody opens it. */
+function section(page: Page, title: string) {
+  return page.locator(".section").filter({ has: page.getByText(title, { exact: true }) }).first();
+}
+
 function card(page: Page, title: string) {
   return page.locator(".card").filter({ has: page.locator(".card-title", { hasText: exact(title) }) });
 }
@@ -241,23 +246,28 @@ test.describe("monitoring", () => {
     await expectCounted(firing, 6);
     await expect(firing.getByRole("listitem").filter({ hasText: "Acknowledged" })).toHaveCount(1);
 
-    // The coverage tiles carry the numbers of the API answer.
-    const coverage = card(page, "Coverage");
-    await expect(coverage.locator(".stat").filter({ hasText: "Hosts reporting" }).locator(".stat-value")).toHaveText(String(summary.hosts_reporting));
-    await expect(coverage.locator(".stat").filter({ hasText: "Hosts silent" }).locator(".stat-value")).toHaveText(String(summary.hosts_silent));
-    await expect(coverage.locator(".stat").filter({ hasText: "Enabled rules" }).locator(".stat-value")).toHaveText(String(summary.rules));
+    // The coverage of the sampling is in the verdict line, with the numbers
+    // of the API answer.
+    const verdict = page.getByTestId("verdict");
+    await expect(verdict.locator(".verdict-facts")).toContainText(`${summary.hosts_reporting} hosts reporting`);
+    await expect(verdict.locator(".verdict-facts")).toContainText(`${summary.hosts_silent} gone quiet`);
+    await expect(verdict.locator(".verdict-facts")).toContainText(`${summary.rules} rules enabled`);
 
-    // The rules table lists as many rules as the tiles count, or says
-    // that there are none.
-    const rules = card(page, "Rules");
+    // The rules, the history and the silences are closed lines until they
+    // are asked for. The rules line carries the number the table holds.
+    const rules = section(page, "Rules");
+    await expect(rules.locator(".section-head")).toHaveAttribute("aria-expanded", "false");
+    if (listed) await expect(rules.locator(".section-count")).toHaveText(String(listed.length));
+    await rules.locator(".section-head").click();
     await expect(rules.locator("tbody tr").first().or(rules.getByText(/No rules yet|You do not have permission/))).toBeVisible();
     if (listed && listed.length > 0) await expect(rules.locator("tbody tr")).toHaveCount(listed.length);
 
     // The history filter runs on the server.
-    const history = card(page, "Recent alerts");
+    const history = section(page, "Recent alerts");
+    await history.locator(".section-head").click();
     await expect(history.locator("tbody tr").first().or(history.getByText("No alerts recorded in this state."))).toBeVisible();
     const filtered = page.waitForResponse((response) => response.url().includes("/api/v1/monitoring/alerts?") && response.url().includes("state=resolved"));
-    await history.locator(".card-actions select").first().selectOption("resolved");
+    await history.locator(".section-actions select").first().selectOption("resolved");
     expect((await filtered).ok()).toBeTruthy();
     await expect(history.locator("tbody tr").first().or(history.getByText("No alerts recorded in this state."))).toBeVisible();
     // The state cell carries the state first and, on a taken alert, the
@@ -265,7 +275,7 @@ test.describe("monitoring", () => {
     for (const cell of await history.locator("tbody tr td:nth-child(4)").all()) {
       await expect(cell.locator(".badge").first()).toHaveText("resolved");
     }
-    await expect(card(page, "Silences in force")).toBeVisible();
+    await expect(section(page, "Silences in force")).toBeVisible();
     await expectHealthy(page, errors);
   });
 
@@ -371,14 +381,24 @@ test.describe("settings", () => {
 
     await page.goto("/settings");
     await expect(header(page, "Settings")).toBeVisible();
-    await expect(page.locator(".page-header .page-description")).toContainText(settings.source);
+    // Where the values come from is the long answer, and it waits behind the
+    // mark beside the title rather than taking the top of every page view.
+    await expect(page.getByTestId("page-help")).toHaveCount(0);
+    await page.getByTestId("page-help-toggle").click();
+    await expect(page.getByTestId("page-help")).toContainText(settings.source);
+
     // The areas the API reports, not the retention editor beside them: that
     // one writes and has no entry in /api/v1/settings.
-    const cards = page.locator("[data-testid='settings-areas'] .card");
-    await expect(cards).toHaveCount(settings.areas.length);
+    const areas = page.locator("[data-testid='settings-areas'] .section");
+    await expect(areas).toHaveCount(settings.areas.length);
     for (const area of settings.areas) {
-      const section = card(page, area.title);
+      const section = areas.filter({ has: page.getByText(area.title, { exact: true }) }).first();
       await expect(section).toHaveCount(1);
+      // Closed, and saying how many values it holds.
+      const head = section.locator(".section-head");
+      await expect(head).toHaveAttribute("aria-expanded", "false");
+      await expect(head).toContainText(`${area.facts.length} value`);
+      await head.click();
       await expect(section.locator("dt")).toHaveCount(area.facts.length);
       // A secret is never shown, only whether it is set.
       for (const fact of area.facts.filter((entry) => entry.secret)) {
@@ -387,7 +407,14 @@ test.describe("settings", () => {
         // Not even the mask the API sends in place of the value.
         if (typeof fact.value === "string" && fact.value !== "") await expect(value).not.toContainText(fact.value);
       }
+      await head.click();
     }
+
+    // The search is how a configuration screen is actually read: a name in
+    // mind, and only what carries it on the screen.
+    const first = settings.areas[0];
+    await page.getByTestId("settings-search").fill(first.title);
+    await expect(page.locator("[data-testid='settings-areas'] .section")).toHaveCount(1);
     await expectHealthy(page, errors);
   });
 });

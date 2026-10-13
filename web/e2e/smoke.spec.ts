@@ -7,17 +7,26 @@ import { expectHealthy, navigation, openAccountMenu, watchErrors } from "./fleet
  */
 
 test.describe("dashboard", () => {
-  test("renders the status bars with numbers", async ({ page }) => {
+  test("answers in one line, then counts what needs a person", async ({ page }) => {
     const { errors } = watchErrors(page);
     await page.goto("/dashboard");
     await expect(page.locator(".page-header").getByRole("heading", { name: "Fleet dashboard" })).toBeVisible();
 
-    const bars = page.getByTestId("status-bar");
-    await expect(bars).toHaveCount(2);
+    // The verdict is the first thing on the screen and it is a sentence,
+    // not a box: either nothing needs a decision, or it says how much does.
+    const verdict = page.getByTestId("verdict");
+    await expect(verdict).toBeVisible();
+    await expect(verdict.locator(".verdict-headline")).toHaveText(
+      /Nothing needs a decision|decisions waiting|things need a look/,
+    );
+    await expect(verdict.locator(".verdict-facts")).toContainText("hosts you can see");
 
     // The availability bar counts hosts; every segment settles on a number
     // once the summary and the activity have arrived.
-    const availability = bars.first();
+    const availability = page
+      .locator(".card")
+      .filter({ has: page.getByRole("heading", { name: "Host availability" }) })
+      .getByTestId("status-bar");
     const values = availability.getByTestId("status-bar-value");
     await expect(values).toHaveCount(6);
     for (const value of await values.all()) {
@@ -28,13 +37,25 @@ test.describe("dashboard", () => {
     await expect(online).toBeVisible();
     await expect(online).toHaveAttribute("href", /connection_state=online/);
 
-    // The problems bar has its own numbers; a segment fed by a module the
-    // token may not read shows a dash, which is also a valid answer.
-    const problems = bars.nth(1);
-    await expect(problems.getByTestId("status-bar-value")).toHaveCount(5);
-    for (const value of await problems.getByTestId("status-bar-value").all()) {
-      await expect(value).toHaveText(/^(\d+|—)$/);
+    // What needs a person is drawn only when something does. Where it is
+    // drawn, every count is a number or a dash - a dash being a count the
+    // server could not take, which is not a count of zero.
+    const zone = page.getByTestId("needs-attention");
+    if (await zone.count() > 0) {
+      await expect(zone).toContainText(/Decisions nobody has taken|Found on the hosts/);
+      for (const value of await zone.getByTestId("status-bar-value").all()) {
+        await expect(value).toHaveText(/^(\d+|—)$/);
+      }
     }
+
+    // The three lists keep one line each, and their tables stay closed
+    // until somebody opens one.
+    const failures = page.locator(".section").filter({ hasText: "Recent failures" }).first();
+    await expect(failures.locator(".section-head")).toHaveAttribute("aria-expanded", "false");
+    await failures.locator(".section-head").click();
+    await expect(
+      failures.locator("tbody tr").first().or(failures.getByText("No failed operations.")),
+    ).toBeVisible();
 
     await expectHealthy(page, errors);
   });
