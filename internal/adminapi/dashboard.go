@@ -31,6 +31,11 @@ type DashboardWidget struct {
 	Key string `json:"key"`
 	// How many of the twelve columns the widget takes.
 	Width int `json:"width"`
+	// How many rows of the board it takes. One row is the height of the
+	// shortest useful tile; a widget that holds a long list is given more,
+	// and two widgets of one row each stand one under another in the space
+	// a taller neighbour leaves beside them.
+	Height int `json:"height,omitempty"`
 }
 
 // DashboardLayout is the stored record, with who wrote it and when.
@@ -48,6 +53,10 @@ type DashboardLayout struct {
 // The widths a widget may take: a twelfth of the grid is unreadable and a
 // width the grid has no class for would silently fall back to the full row.
 var dashboardWidths = map[int]bool{3: true, 4: true, 6: true, 8: true, 12: true}
+
+// How many rows a widget may take. Zero means the panel decides, which is
+// what a record written before heights existed carries.
+const dashboardMaxHeight = 8
 
 // A key is the panel's identifier for a widget, not free text: it reaches
 // the browser as a class and a React key.
@@ -122,6 +131,9 @@ func validateDashboardWidgets(widgets []DashboardWidget) (string, error) {
 		seen[widget.Key] = true
 		if !dashboardWidths[widget.Width] {
 			return "width", errors.New("a width is 3, 4, 6, 8 or 12 of the twelve columns")
+		}
+		if widget.Height < 0 || widget.Height > dashboardMaxHeight {
+			return "height", errors.New("a height is between 1 and 8 rows, or absent for the one the panel chooses")
 		}
 	}
 	return "", nil

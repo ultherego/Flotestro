@@ -3,7 +3,11 @@ export const pl: Record<string, string> = {
   /* Dashboard: uklad widgetow, wspolny dla calej instalacji. */
   "Arrange this screen": "Ułóż ten ekran",
   "The screen is arranged this way for everybody who opens it.": "Ekran jest tak ułożony dla każdego, kto go otworzy.",
-  "Width": "Szerokość",
+  "Narrower": "Węziej",
+  "Wider": "Szerzej",
+  "Shorter": "Niżej",
+  "Taller": "Wyżej",
+  "{n} rows": "wierszy: {n}",
   "Store this arrangement for everybody": "Zapisz ten układ dla wszystkich",
   "Add a widget…": "Dodaj widget…",
   "The arrangement is the installation's: everybody sees it.": "Układ należy do instalacji: widzą go wszyscy.",

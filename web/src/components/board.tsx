@@ -15,7 +15,13 @@ import { useT } from "../i18n";
  * per-person layout would have to be taught to every new account.
  */
 
-export type BoardWidget = { key: string; width: number };
+export type BoardWidget = {
+  key: string;
+  /** Of the twelve columns. */
+  width: number;
+  /** In rows of the board; absent means the one row every tile starts with. */
+  height?: number;
+};
 
 export type StoredBoard = {
   widgets: BoardWidget[];
@@ -30,6 +36,19 @@ export type BoardEntry = { key: string; title: string; width: number };
 
 /** The widths the twelve-column grid has a class for. */
 export const BOARD_WIDTHS = [3, 4, 6, 8, 12];
+/** How many rows of the board a tile may take. */
+export const BOARD_HEIGHTS = { min: 1, max: 8 };
+
+/** The next width up or down the ladder, staying on it at the ends. */
+export function widthStep(width: number, by: number): number {
+  const at = BOARD_WIDTHS.indexOf(width);
+  const next = (at === -1 ? 1 : at) + by;
+  return BOARD_WIDTHS[Math.max(0, Math.min(BOARD_WIDTHS.length - 1, next))];
+}
+
+export function heightStep(height: number | undefined, by: number): number {
+  return Math.max(BOARD_HEIGHTS.min, Math.min(BOARD_HEIGHTS.max, (height ?? 1) + by));
+}
 
 /**
  * What is drawn: the stored arrangement, with the widgets this panel cannot
@@ -96,6 +115,11 @@ export function Board({
   const packed = weights !== undefined && editing === null && !(layout.data?.present ?? false);
   const titleOf = (key: string) => catalogue.find((one) => one.key === key)?.title ?? key;
   const move = (index: number, by: number) => reorder(index, index + by);
+  const resize = (index: number, change: Partial<BoardWidget>) => {
+    const next = [...current];
+    next[index] = { ...next[index], ...change };
+    setEditing(next);
+  };
   /**
    * The tile that was picked up lands where it was dropped, and everything
    * between shifts up or down by one - the way a card moves in a hand, not
@@ -148,10 +172,25 @@ export function Board({
           {current.map((placed) => <div key={placed.key}>{drawn[placed.key]}</div>)}
         </Masonry>
       ) : (
-      <div className="widgets">
+      <div
+        className={["widgets", "arranged", dragging !== null ? "dragging-over" : ""].join(" ").trim()}
+        /* The empty part of the board is a place to drop a tile too: dropped
+           where nothing is, it goes to the end of the order, and the dense
+           flow then pulls it into the first hole it fits. Without this a
+           tile could only be dropped onto another tile. */
+        onDragOver={(event) => { if (dragging !== null) event.preventDefault(); }}
+        onDrop={(event) => {
+          event.preventDefault();
+          if (dragging !== null) reorder(dragging, current.length - 1);
+          setDragging(null);
+          setOver(null);
+        }}
+        data-testid="board-grid"
+      >
         {current.map((placed, index) => (
           <div
             key={placed.key}
+            style={{ gridRow: `span ${placed.height ?? 1}` }}
             className={[
               `span-${placed.width}`,
               dragging === index ? "dragging" : "",
@@ -171,6 +210,9 @@ export function Board({
             }}
             onDrop={(event) => {
               event.preventDefault();
+              // The board behind would otherwise take the same drop and send
+              // the tile to the end instead of to the place it was aimed at.
+              event.stopPropagation();
               if (dragging !== null) reorder(dragging, index);
               setDragging(null);
               setOver(null);
@@ -182,19 +224,35 @@ export function Board({
               <div className="widget-handle" data-testid="widget-handle">
                 <span className="widget-grip" aria-hidden="true">⠿</span>
                 <span>{t(titleOf(placed.key))}</span>
-                <select
-                  aria-label={t("Width")}
-                  value={placed.width}
-                  onChange={(event) => {
-                    const next = [...current];
-                    next[index] = { ...placed, width: Number(event.target.value) };
-                    setEditing(next);
-                  }}
-                >
-                  {BOARD_WIDTHS.map((width) => (
-                    <option key={width} value={width}>{t("{n} of 12", { n: width })}</option>
-                  ))}
-                </select>
+                {/* Wider and narrower, taller and shorter. A tile that holds
+                    little is given one row, and two of them stand one under
+                    another in the space a taller neighbour leaves. */}
+                <span className="widget-size">
+                  <button
+                    className="secondary" aria-label={t("Narrower")} title={t("Narrower")}
+                    disabled={placed.width === BOARD_WIDTHS[0]}
+                    onClick={() => resize(index, { width: widthStep(placed.width, -1) })}
+                  >←</button>
+                  <span className="widget-size-value">{t("{n} of 12", { n: placed.width })}</span>
+                  <button
+                    className="secondary" aria-label={t("Wider")} title={t("Wider")}
+                    disabled={placed.width === BOARD_WIDTHS[BOARD_WIDTHS.length - 1]}
+                    onClick={() => resize(index, { width: widthStep(placed.width, 1) })}
+                  >→</button>
+                </span>
+                <span className="widget-size">
+                  <button
+                    className="secondary" aria-label={t("Shorter")} title={t("Shorter")}
+                    disabled={(placed.height ?? 1) <= BOARD_HEIGHTS.min}
+                    onClick={() => resize(index, { height: heightStep(placed.height, -1) })}
+                  >↑</button>
+                  <span className="widget-size-value">{t("{n} rows", { n: placed.height ?? 1 })}</span>
+                  <button
+                    className="secondary" aria-label={t("Taller")} title={t("Taller")}
+                    disabled={(placed.height ?? 1) >= BOARD_HEIGHTS.max}
+                    onClick={() => resize(index, { height: heightStep(placed.height, 1) })}
+                  >↓</button>
+                </span>
                 {/* The mouse drags; the keyboard still has to be able to
                     move a tile, so the handle answers the arrow keys. */}
                 <span

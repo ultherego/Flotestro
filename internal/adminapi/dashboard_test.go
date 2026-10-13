@@ -26,6 +26,8 @@ func TestValidateDashboardWidgets(t *testing.T) {
 		{"the same widget twice", []DashboardWidget{{Key: "a", Width: 6}, {Key: "a", Width: 6}}, "key"},
 		{"a key that is not one", []DashboardWidget{{Key: "Host Availability", Width: 6}}, "key"},
 		{"a key with a path in it", []DashboardWidget{{Key: "../etc", Width: 6}}, "key"},
+		{"a height taller than the board", []DashboardWidget{{Key: "a", Width: 6, Height: 9}}, "height"},
+		{"a height below zero", []DashboardWidget{{Key: "a", Width: 6, Height: -1}}, "height"},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
@@ -47,6 +49,16 @@ knows a widget this one does not - has to remain readable: the screen skips
 what it cannot draw. A server that refused it would make the record
 unwritable from the newer panel instead.
 */
+/*
+A record written before widgets had a height carries none, and must go on
+being readable: no height means the panel chooses one.
+*/
+func TestAWidgetWithoutAHeightIsValid(t *testing.T) {
+	if _, err := validateDashboardWidgets([]DashboardWidget{{Key: "a", Width: 6}}); err != nil {
+		t.Fatalf("refused a widget that names no height: %v", err)
+	}
+}
+
 func TestADashboardKeyThisPanelDoesNotKnowIsStillValid(t *testing.T) {
 	if _, err := validateDashboardWidgets([]DashboardWidget{{Key: "a_widget_from_the_future", Width: 4}}); err != nil {
 		t.Fatalf("refused a key the catalogue has no entry for: %v", err)

@@ -5,7 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 import { ToastProvider } from "./Toast";
 import { Board } from "./board";
-import { boardToDraw, type BoardEntry } from "./board";
+import { boardToDraw, heightStep, widthStep, type BoardEntry } from "./board";
 
 vi.mock("../lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/api")>();
@@ -130,6 +130,26 @@ describe("arranging a board with the mouse", () => {
     expect(order()).toEqual(["First", "Second", "Third"]);
   });
 
+  /* A board is mostly empty space, and a tile has to be droppable into it:
+     dropped where no tile is, it goes to the end of the order, which is the
+     free space at the bottom. */
+  it("takes a tile dropped on the empty part of the board", async () => {
+    await arrange();
+    const tiles = screen.getAllByTestId("board-tile");
+    fireEvent.dragStart(tiles[0], transfer());
+    fireEvent.dragOver(screen.getByTestId("board-grid"));
+    fireEvent.drop(screen.getByTestId("board-grid"));
+    expect(order()).toEqual(["Second", "Third", "First"]);
+  });
+
+  it("sends a tile to where it was aimed, not to the end, when it lands on another", async () => {
+    await arrange();
+    const tiles = screen.getAllByTestId("board-tile");
+    fireEvent.dragStart(tiles[2], transfer());
+    fireEvent.drop(tiles[0]);
+    expect(order()).toEqual(["Third", "First", "Second"]);
+  });
+
   /* The hand is not the only way in: a tile has to be movable from the
      keyboard, or the arrangement is closed to anybody not using a mouse. */
   it("moves a tile with the arrow keys as well", async () => {
@@ -140,9 +160,55 @@ describe("arranging a board with the mouse", () => {
     expect(order()).toEqual(["First", "Second", "Third"]);
   });
 
-  it("sets the width of a tile out of the twelve columns", async () => {
+  it("widens and narrows a tile along the widths the grid has", async () => {
     await arrange();
-    fireEvent.change(screen.getAllByLabelText("Width")[0], { target: { value: "12" } });
-    expect(screen.getAllByTestId("board-tile")[0].className).toContain("span-12");
+    const wider = () => screen.getAllByLabelText("Wider")[0];
+    expect(screen.getAllByTestId("board-tile")[0].className).toContain("span-4");
+    fireEvent.click(wider());
+    expect(screen.getAllByTestId("board-tile")[0].className).toContain("span-6");
+    fireEvent.click(screen.getAllByLabelText("Narrower")[0]);
+    expect(screen.getAllByTestId("board-tile")[0].className).toContain("span-4");
+  });
+
+  /* Two short tiles one under another is the thing heights are for: a tile
+     that holds little takes one row, and the space a taller neighbour leaves
+     beside it is filled rather than left empty. */
+  it("makes a tile taller and shorter, a row at a time", async () => {
+    await arrange();
+    const tile = () => screen.getAllByTestId("board-tile")[0];
+    expect(tile().style.gridRow).toBe("span 1");
+    fireEvent.click(screen.getAllByLabelText("Taller")[0]);
+    expect(tile().style.gridRow).toBe("span 2");
+    fireEvent.click(screen.getAllByLabelText("Shorter")[0]);
+    expect(tile().style.gridRow).toBe("span 1");
+  });
+
+  it("stops at the ends of both ladders instead of going past them", async () => {
+    await arrange();
+    for (let i = 0; i < 10; i += 1) {
+      const shorter = screen.getAllByLabelText("Shorter")[0] as HTMLButtonElement;
+      if (!shorter.disabled) fireEvent.click(shorter);
+      const narrower = screen.getAllByLabelText("Narrower")[0] as HTMLButtonElement;
+      if (!narrower.disabled) fireEvent.click(narrower);
+    }
+    expect(screen.getAllByTestId("board-tile")[0].className).toContain("span-3");
+    expect(screen.getAllByTestId("board-tile")[0].style.gridRow).toBe("span 1");
+  });
+});
+
+describe("the ladders a tile is resized along", () => {
+  it("steps the width between the widths the grid has a class for", () => {
+    expect(widthStep(4, 1)).toBe(6);
+    expect(widthStep(4, -1)).toBe(3);
+    expect(widthStep(3, -1)).toBe(3);
+    expect(widthStep(12, 1)).toBe(12);
+    // A width from a record this panel has no class for lands on the ladder.
+    expect(widthStep(5, 1)).toBe(6);
+  });
+
+  it("steps the height between one row and eight", () => {
+    expect(heightStep(undefined, 1)).toBe(2);
+    expect(heightStep(1, -1)).toBe(1);
+    expect(heightStep(8, 1)).toBe(8);
   });
 });
