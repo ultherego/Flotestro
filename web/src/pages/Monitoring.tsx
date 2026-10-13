@@ -7,7 +7,7 @@ import type {
   RuleCatalogue, RuleOperator, RuleSelector, Silence, Whoami,
 } from "../lib/types";
 import { ErrorBox, Time, Empty } from "../components/ui";
-import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, Section, Stat, StatGrid, Toolbar, Verdict } from "../components/layout";
+import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, Stat, StatGrid, Toolbar, Verdict } from "../components/layout";
 import { ExportButton } from "../components/ExportButton";
 import { PARTIAL_REASONS } from "../components/FleetCoverage";
 import { StatusBar } from "../components/widgets";
@@ -474,11 +474,13 @@ export function FleetMonitoring() {
           </div>
         )}
 
-        {/* Everything below is what the screen is made of rather than what
-            it is saying: the rules, the history, the silences and what the
-            agents cost. One line each until somebody asks. */}
-        <Card className="span-12" flush>
-        <Section title={t("Rules")} count={ruleItems.length} className="list-section">
+        <Card
+          className="span-12"
+          title={t("Rules")}
+          description={t("What turns a sample into an alert.")}
+          actions={<span className="source">{t("{n} rules", { n: ruleItems.length })}</span>}
+          flush
+        >
           {rules.error ? (
             <ErrorBox error={rules.error} />
           ) : !rules.data ? (
@@ -552,12 +554,13 @@ export function FleetMonitoring() {
               </tbody>
             </table>
           )}
-        </Section>
+        </Card>
 
-        <Section
+        <Card
+          className="span-8"
           title={t("Recent alerts")}
-          summary={t("the last fifty, newest first")}
-          className="list-section"
+          description={t("The last fifty, newest first.")}
+          flush
           actions={
             <>
               <select value={historyState} onChange={(e) => setHistoryState(e.target.value as AlertState | "")}>
@@ -615,12 +618,13 @@ export function FleetMonitoring() {
               {t("{shown} of {total} shown", historyShown)}
             </p>
           )}
-        </Section>
+        </Card>
 
-        <Section
+        <Card
+          className="span-4"
           title={t("Silences in force")}
-          count={silenceItems.length}
-          className="list-section"
+          description={t("Every silence ends by itself.")}
+          flush
         >
           {silences.error ? (
             <ErrorBox error={silences.error} />
@@ -671,10 +675,9 @@ export function FleetMonitoring() {
           {canSilenceFleet && (
             <FleetSilenceForm canSilenceGlobal={canSilenceGlobal} onDone={refresh} onMessage={setMessage} />
           )}
-        </Section>
-
-        <AgentFootprintSection footprint={data?.agent_footprint} loaded={data !== undefined} />
         </Card>
+
+        <AgentFootprintCard footprint={data?.agent_footprint} loaded={data !== undefined} />
       </div>
     </>
   );
@@ -685,7 +688,7 @@ export function FleetMonitoring() {
  * asks for its memory and CPU on a real fleet, and this is where the fleet
  * answers.
  */
-function AgentFootprintSection({ footprint, loaded }: { footprint?: FleetFootprint; loaded: boolean }) {
+function AgentFootprintCard({ footprint, loaded }: { footprint?: FleetFootprint; loaded: boolean }) {
   const t = useT();
   const measured = footprint?.hosts_measured ?? 0;
   const over = footprint?.over_budget ?? [];
@@ -697,11 +700,12 @@ function AgentFootprintSection({ footprint, loaded }: { footprint?: FleetFootpri
   const overRSS = footprint?.rss_bytes_max !== undefined && footprint.rss_bytes_max > footprint.rss_budget_bytes;
   const overCPU = footprint?.cpu_percent_max !== undefined && footprint.cpu_percent_max > footprint.cpu_budget_percent;
   return (
-    <Section
+    <Card
+      className="span-12"
       title={t("Agent footprint")}
-      summary={budget}
+      description={t("What the agents cost the hosts they run on.")}
       tone={overRSS || overCPU ? "warn" : undefined}
-      className="list-section"
+      actions={budget && <span className="source">{budget}</span>}
     >
       <StatGrid compact>
         <Stat label={t("Hosts measured")} value={footprint ? measured : "—"} hint={t("reporting hosts whose agent sends its footprint")} />
@@ -733,7 +737,7 @@ function AgentFootprintSection({ footprint, loaded }: { footprint?: FleetFootpri
           </tbody>
         </table>
       )}
-    </Section>
+    </Card>
   );
 }
 

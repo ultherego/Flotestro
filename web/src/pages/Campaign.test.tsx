@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
@@ -266,38 +266,24 @@ describe("the campaign screen", () => {
     expect(verdict).toHaveTextContent("approved by anowak");
   });
 
-  it("keeps the record of the campaign behind one line each", async () => {
+  it("keeps the record of the campaign as tiles beside each other", async () => {
     draw();
     // The approval record is fetched only once the campaign says somebody
-    // approved, so the wait is for that line to arrive.
-    await waitFor(() => expect(
-      screen.getAllByTestId("section-head").some((one) => one.textContent?.includes("Approval record")),
-    ).toBe(true));
-    const heads = screen.getAllByTestId("section-head");
-    const head = (name: string) => heads.find((one) => one.textContent?.includes(name));
-    for (const name of ["Details", "Approval record", "Waves", "Timeline"]) {
-      expect(head(name), name).toHaveAttribute("aria-expanded", "false");
+    // approved, so the wait is for that tile to arrive.
+    await waitFor(() => expect(screen.getByText("Approval record")).toBeInTheDocument());
+    const titles = Array.from(document.querySelectorAll(".part-title")).map((one) => one.textContent ?? "");
+    for (const name of ["Details", "Approval record", "Waves"]) {
+      expect(titles.some((title) => title.includes(name)), name).toBe(true);
     }
-    // The waves line says how many there are without being opened.
-    expect(head("Waves")?.querySelector(".section-count")).toHaveTextContent("2");
+    // Everything is on the screen; nothing on this page is behind a fold.
+    expect(screen.queryAllByTestId("section-head")).toHaveLength(0);
+    expect(screen.getAllByText("Requested by").length).toBeGreaterThan(0);
   });
 
-  it("opens the details when they are asked for", async () => {
+  it("says how many waves there were without being asked", async () => {
     draw();
-    await waitFor(() => expect(screen.getAllByTestId("section-head").length).toBeGreaterThan(3));
-    const details = screen.getAllByTestId("section-head").find((one) => one.textContent?.includes("Details"));
-    fireEvent.click(details as HTMLElement);
-    await waitFor(() => expect(screen.getByText("Requested by")).toBeInTheDocument());
-  });
-
-  /* While nobody has consented, the plans are what the consent would be of:
-     that section opens itself rather than waiting to be found. */
-  it("holds the plans open while the campaign waits for its approval", async () => {
-    CAMPAIGN.state = "awaiting_approval";
-    draw();
-    await waitFor(() => expect(screen.getAllByTestId("section-head").length).toBeGreaterThan(3));
-    const plans = screen.getAllByTestId("section-head").find((one) => one.textContent?.includes("Plans"));
-    expect(plans).toHaveAttribute("aria-expanded", "true");
-    CAMPAIGN.state = "running";
+    await waitFor(() => expect(screen.getByText("Waves")).toBeInTheDocument());
+    const waves = screen.getByText("Waves").closest(".part-title") as HTMLElement;
+    expect(waves.textContent).toContain("2 waves");
   });
 });

@@ -6,7 +6,7 @@ import type {
   Campaign as CampaignType, CampaignApproval, CampaignReport, CampaignTarget, SelectorExpression, TimelineEntry,
 } from "../lib/types";
 import { ErrorBox, ErrorCode, Time, Pair, Pairs, ProgressBar, Empty, JobState } from "../components/ui";
-import { Actions, Card, Columns, Field, FieldGrid, PageHeader, Section, Toolbar, Verdict } from "../components/layout";
+import { Actions, Card, Columns, Field, FieldGrid, PageHeader, Toolbar, Verdict } from "../components/layout";
 import { StatusBar } from "../components/widgets";
 import { JobPlan, PlanGroupView, STALE_PLAN_CODES, unknownPlanHosts } from "../components/plan";
 import { VirtualRows } from "../components/virtual";
@@ -647,11 +647,12 @@ export function Campaign() {
         </Card>
       )}
 
-      {/* What the campaign is made of, behind one line each: the record of
-          who consented, the waves, the plans and the trail. The bar above and
-          the hosts below are what somebody opens this page for. */}
-      <Card flush>
-      <Section title={t("Details")} className="list-section">
+      {/* The record of the campaign: who asked, who consented, how the waves
+          went. Small things, so they stand beside each other as tiles rather
+          than as three cards down the page. */}
+      <div className="parts">
+      <section className="part">
+        <h3 className="part-title"><span>{t("Details")}</span></h3>
         <Pairs>
           <Pair label={t("Requested by")}>{data.created_by}</Pair>
           <Pair label={t("Approved by")}>{data.approved_by || "—"}{data.approved_at && <> · <Time value={data.approved_at} /></>}</Pair>
@@ -689,15 +690,14 @@ export function Campaign() {
             </Pair>
           )}
         </Pairs>
-      </Section>
+      </section>
 
       {approvals.data && approvals.data.items.length > 0 && (
-        <Section
-          title={t("Approval record")}
-          count={approvals.data.items.length}
-          summary={t("written once, never changed")}
-          className="list-section"
-        >
+        <section className="part">
+          <h3 className="part-title">
+            <span>{t("Approval record")}</span>
+            <span className="part-summary">{t("written once, never changed")}</span>
+          </h3>
           <table>
             <thead><tr><th scope="col">{t("Approved by")}</th><th scope="col">{t("Requested by")}</th><th scope="col">{t("Authentication")}</th><th scope="col">{t("Reason")}</th><th scope="col">{t("Change ticket")}</th><th scope="col">{t("When")}</th></tr></thead>
             <tbody>
@@ -716,12 +716,16 @@ export function Campaign() {
               ))}
             </tbody>
           </table>
-        </Section>
+        </section>
       )}
 
 
       {report.data && (
-        <Section title={t("Waves")} count={report.data.waves.length} className="list-section">
+        <section className="part">
+          <h3 className="part-title">
+            <span>{t("Waves")}</span>
+            <span className="part-summary">{t("{n} waves", { n: report.data.waves.length })}</span>
+          </h3>
           <table>
             <thead><tr><th scope="col" className="num">{t("Wave")}</th><th scope="col">{t("Canary")}</th><th scope="col">{t("Closed")}</th><th scope="col">{t("Summary")}</th></tr></thead>
             <tbody>
@@ -735,20 +739,19 @@ export function Campaign() {
               ))}
             </tbody>
           </table>
-        </Section>
+        </section>
       )}
 
       {/* The change as the hosts computed it: one row per shape of the
           plan together with the hosts that get it. A document or a list of
           commands in the plan is shown in full, since that is what lands
           on the host. */}
-      <Section
+      </div>
+
+      <Card
         title={t("Plans")}
-        summary={t("one group is one shape of the change")}
-        /* While nobody has consented yet, the plans are the thing on the
-           screen to read: that is what the approval is of. */
-        open={["planning", "planned", "awaiting_approval"].includes(data.state) ? true : undefined}
-        className="list-section"
+        description={t("One group is one shape of the change and the hosts that get it.")}
+        flush
       >
         {plans.error ? (
           <ErrorBox error={plans.error} />
@@ -769,18 +772,17 @@ export function Campaign() {
             )}
           </div>
         )}
-      </Section>
+      </Card>
 
       {/* The trail is filtered in the browser: it is already loaded whole,
           and one kind of event or one host is what a diagnosis looks for.
           The export is the filtered rows, built here from the same list. */}
-      <Section
+      <Card
         title={t("Timeline")}
-        count={timeline.data?.items.length}
         actions={events.length > 0 ? (
           <a className="button" href={timelineCSV(events, loaded)} download={`campaign-${id}-timeline.csv`}>{t("Download the timeline as CSV")}</a>
         ) : undefined}
-        className="list-section"
+        flush
       >
         <Toolbar end={<span>{t("{shown} of {total} shown", { shown: events.length, total: timeline.data?.items.length ?? 0 })}</span>}>
           <select value={eventKind} onChange={(e) => setEventKind(e.target.value)} aria-label={t("Event kind")}>
@@ -812,7 +814,6 @@ export function Campaign() {
             </tbody>
           </table>
         )}
-      </Section>
       </Card>
 
       {/* The export is a file, not a screen: a report of ten thousand hosts

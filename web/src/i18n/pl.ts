@@ -1,5 +1,12 @@
 // The Polish translation of the interface.
 export const pl: Record<string, string> = {
+  "What turns a sample into an alert.": "Co zamienia próbkę w alert.",
+  "{n} rules": "reguł: {n}",
+  "The last fifty, newest first.": "Ostatnie pięćdziesiąt, od najnowszego.",
+  "Every silence ends by itself.": "Każde wyciszenie kończy się samo.",
+  "What the agents cost the hosts they run on.": "Ile agenci kosztują hosty, na których chodzą.",
+  "{n} waves": "fal: {n}",
+  "One group is one shape of the change and the hosts that get it.": "Jedna grupa to jeden kształt zmiany i hosty, które ją dostaną.",
   /* Naglowki stron: jedna linia, reszta pod znakiem zapytania. */
   "Who may do what in this panel.": "Kto może co w tym panelu.",
   "A group in an identity provider's token grants nothing by itself: the role comes from a mapping made here. Beside the mappings are the local identities, the roles themselves and what each one may do, the review of every enabled identity, and the authority the panel issues its own certificates from.": "Grupa w tokenie dostawcy tożsamości sama z siebie nie daje nic: rola bierze się z mapowania zrobionego tutaj. Obok mapowań są lokalne tożsamości, same role i to, co każda z nich może, przegląd każdej włączonej tożsamości oraz urząd, z którego panel wystawia własne certyfikaty.",
@@ -4206,7 +4213,6 @@ export const pl: Record<string, string> = {
   "{n} policies": "{n} polityk",
   "{n} records": "rekordów: {n}",
   "{n} relays, {hosts} hosts attested": "{n} relayów, {hosts} hostów poświadczonych",
-  "{n} rules": "reguł: {n}",
   "{n} rules over {p} policies": "{n} reguł w {p} politykach",
   "{n} rules; each names facts the host reports and one typed operation that fixes the drift.": "{n} reguł; każda wskazuje fakty raportowane przez host i jedną typowaną operację, która naprawia drift.",
   "{n} s": "{n} s",
