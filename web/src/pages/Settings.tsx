@@ -6,7 +6,7 @@ import type { Settings as SettingsView, SettingsArea, SettingsFact } from "../li
 import { Empty, ErrorBox, Pair, Pairs, Time } from "../components/ui";
 import { Actions, Card, Field, FieldGrid, PageHeader } from "../components/layout";
 import { useToast } from "../components/Toast";
-import { Masonry } from "../components/masonry";
+import { Board } from "../components/board";
 import { useT } from "../i18n";
 
 /**
@@ -70,11 +70,14 @@ export function Settings() {
             />
           </div>
           <div data-testid="settings-areas">
-            <Masonry weights={areas.map(({ facts }) => facts.length + 3)}>
-              {areas.map(({ area, facts }) => (
-                <AreaTile key={area.key} area={area} facts={facts} />
-              ))}
-            </Masonry>
+            <Board
+              screen="settings"
+              catalogue={areas.map(({ area }) => ({ key: area.key, title: area.title, width: 4 }))}
+              weights={Object.fromEntries(areas.map(({ area, facts }) => [area.key, facts.length + 3]))}
+              drawn={Object.fromEntries(areas.map(({ area, facts }) => [
+                area.key, <AreaTile key={area.key} area={area} facts={facts} />,
+              ]))}
+            />
             {areas.length === 0 && <Empty>{t("No setting of that name.")}</Empty>}
           </div>
         </>

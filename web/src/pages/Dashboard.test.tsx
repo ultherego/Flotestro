@@ -4,7 +4,7 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
-import { DASHBOARD_CATALOGUE, Dashboard, defaultLayout, layoutToDraw } from "./Dashboard";
+import { Dashboard } from "./Dashboard";
 import type { SetupChecklist, SetupState, SetupStep } from "../lib/setup";
 
 /* The first-run card on a dashboard with no host. It is a condensed view of the
@@ -223,38 +223,5 @@ describe("the dashboard's three zones", () => {
     expect(screen.getByText("No denials in recent events.")).toBeInTheDocument();
     // And nothing on this screen is behind a fold.
     expect(screen.queryAllByTestId("section-head")).toHaveLength(0);
-  });
-});
-
-/* ---------------------------------------------------------------------- */
-/* The layout the installation stores. Which widgets the dashboard draws is */
-/* a property of the fleet being run, not of whoever wrote the screen.      */
-/* ---------------------------------------------------------------------- */
-
-describe("the stored dashboard layout", () => {
-  const known = new Set(DASHBOARD_CATALOGUE.map((one) => one.key));
-
-  it("draws the panel's own arrangement until the installation stores one", () => {
-    expect(layoutToDraw(undefined, known)).toEqual(defaultLayout());
-    expect(layoutToDraw({ widgets: [], present: false }, known)).toEqual(defaultLayout());
-    // Stored and empty is not the same as never stored, but the server
-    // refuses an empty layout, so this cannot arrive from it.
-    expect(layoutToDraw({ widgets: [], present: true }, known)).toEqual(defaultLayout());
-  });
-
-  it("draws what was stored, in the order and the widths it was stored in", () => {
-    const stored = { widgets: [{ key: "recent_failures", width: 12 }, { key: "host_availability", width: 4 }], present: true };
-    expect(layoutToDraw(stored, known)).toEqual(stored.widgets);
-  });
-
-  /* A record written by a newer panel - one that knows a widget this one
-     does not - still has to draw here. The server deliberately does not
-     refuse such a key, so the skipping has to happen on this side. */
-  it("skips a widget this panel cannot draw instead of refusing the record", () => {
-    const stored = {
-      widgets: [{ key: "a_widget_from_the_future", width: 6 }, { key: "host_availability", width: 6 }],
-      present: true,
-    };
-    expect(layoutToDraw(stored, known)).toEqual([{ key: "host_availability", width: 6 }]);
   });
 });

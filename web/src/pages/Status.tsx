@@ -9,7 +9,7 @@ import {
 } from "../components/ui";
 import { Card, NeedsAttention, PageHeader, Verdict, type Tone } from "../components/layout";
 import { StatusBar, type Segment } from "../components/widgets";
-import { Masonry } from "../components/masonry";
+import { Board } from "../components/board";
 import { useT } from "../i18n";
 
 /**
@@ -286,15 +286,25 @@ export function Status() {
               four to a row. Folding them away was worse than the wall it
               was meant to answer: thirteen closed lines say thirteen names
               and nothing else, and finding anything took a click. */}
-          {/* A tile is about as tall as the facts it holds, with the widget
-              some of them draw on top; that is close enough to leave the
-              columns level. */}
-          <Masonry weights={[...blocks.map((key) => tileWeight(data.blocks[key])), 12]}>
-            {blocks.map((key) => (
-              <BlockTile key={key} name={key} block={data.blocks[key]} />
-            ))}
-            {data.blocks.build && <AboutTile block={data.blocks.build} />}
-          </Masonry>
+          {/* Until somebody arranges this screen the tiles are packed into
+              columns, so a board nobody has touched has no holes in it. A
+              tile is about as tall as the facts it holds. */}
+          <Board
+            screen="status"
+            catalogue={[...blocks, ...(data.blocks.build ? ["build"] : [])].map((key) => ({
+              key, title: BLOCK_TITLES[key] ?? key, width: 4,
+            }))}
+            weights={Object.fromEntries([
+              ...blocks.map((key) => [key, tileWeight(data.blocks[key])]),
+              ["build", 12],
+            ])}
+            drawn={{
+              ...Object.fromEntries(blocks.map((key) => [
+                key, <BlockTile key={key} name={key} block={data.blocks[key]} />,
+              ])),
+              ...(data.blocks.build ? { build: <AboutTile block={data.blocks.build} /> } : {}),
+            }}
+          />
         </>
       )}
     </>

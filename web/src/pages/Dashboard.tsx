@@ -1,8 +1,7 @@
-import { useState, type ReactNode } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { REFRESH_INTERVAL } from "../lib/stream";
-import { api, ApiError, type Collection } from "../lib/api";
+import { api, type Collection } from "../lib/api";
 import type { AuditEvent, Campaign, FleetActivity, FleetSummary, Job } from "../lib/types";
 import { relativeTime } from "../lib/format";
 import { ErrorBox, ErrorCode, Time, Empty, JobState } from "../components/ui";
@@ -10,7 +9,7 @@ import { Card, NeedsAttention, PageHeader, Verdict } from "../components/layout"
 import { BarChart, Breakdown, CountRow, StatusBar, type Segment } from "../components/widgets";
 import { FleetCoverage, type Coverage } from "../components/FleetCoverage";
 import { FirstRunCard } from "../components/FirstRunCard";
-import { useToast } from "../components/Toast";
+import { Board, type BoardEntry } from "../components/board";
 import { useT } from "../i18n";
 
 /**
@@ -223,7 +222,7 @@ export function Dashboard() {
       </NeedsAttention>
 
       {/* Where the fleet is, read across the room. */}
-      <DashboardWidgets drawn={{
+      <Board screen="dashboard" catalogue={DASHBOARD_CATALOGUE} drawn={{
             host_availability: (
               <Card title={t("Host availability")}>
                 <StatusBar segments={[
@@ -405,33 +404,11 @@ function Refreshed({ at, fetching, onRefresh }: { at: number; fetching: boolean;
   );
 }
 
-/* ---------------------------------------------------------------------- */
-/* The layout: which widgets the dashboard draws, in what order and how     */
-/* wide. It belongs to the installation rather than to a person, so the     */
-/* screen people talk to each other over is the same screen for all of      */
-/* them.                                                                    */
-/* ---------------------------------------------------------------------- */
-
-/** One widget of the stored layout. */
-export type LayoutWidget = { key: string; width: number };
-
-type StoredLayout = {
-  widgets: LayoutWidget[];
-  present: boolean;
-  updated_at?: string;
-  updated_by?: string;
-  revision?: number;
-};
-
 /**
- * The catalogue: every widget this panel can draw, with the name a person
- * picks it by and the width it takes until somebody says otherwise.
- *
- * A key in the record that is not here is skipped rather than refused - a
- * record written by a newer panel still draws on an older one - and a key
- * here that the record does not carry is simply not on the screen.
+ * The widgets of the fleet dashboard: the name each is picked by in the
+ * arrange mode, and the width it takes until somebody says otherwise.
  */
-export const DASHBOARD_CATALOGUE: { key: string; title: string; width: number }[] = [
+export const DASHBOARD_CATALOGUE: BoardEntry[] = [
   { key: "host_availability", title: "Host availability", width: 12 },
   { key: "operations_24h", title: "Operations, last 24 h", width: 6 },
   { key: "fleet_composition", title: "Fleet composition", width: 6 },
@@ -439,122 +416,3 @@ export const DASHBOARD_CATALOGUE: { key: string; title: string; width: number }[
   { key: "recent_failures", title: "Recent failures", width: 6 },
   { key: "access_denials", title: "Recent access denials", width: 12 },
 ];
-
-export const DASHBOARD_WIDTHS = [3, 4, 6, 8, 12];
-
-/** The layout the panel ships with: the whole catalogue, in its own order. */
-export function defaultLayout(): LayoutWidget[] {
-  return DASHBOARD_CATALOGUE.map((one) => ({ key: one.key, width: one.width }));
-}
-
-/**
- * What is actually drawn: the stored layout, with the widgets this panel
- * does not know left out, and the catalogue's order when nothing is stored.
- */
-export function layoutToDraw(stored: StoredLayout | undefined, known: Set<string>): LayoutWidget[] {
-  if (!stored || !stored.present || stored.widgets.length === 0) {
-    return defaultLayout().filter((one) => known.has(one.key));
-  }
-  return stored.widgets.filter((one) => known.has(one.key));
-}
-
-function DashboardWidgets({ drawn }: { drawn: Record<string, ReactNode> }) {
-  const t = useT();
-  const toast = useToast();
-  const queryClient = useQueryClient();
-  const known = new Set(Object.keys(drawn));
-  const [editing, setEditing] = useState<LayoutWidget[] | null>(null);
-
-  const layout = useQuery({
-    queryKey: ["dashboard-layout"],
-    queryFn: () => api.get<StoredLayout>("/api/v1/settings/dashboard"),
-    retry: false,
-  });
-  const save = useMutation({
-    mutationFn: (widgets: LayoutWidget[]) =>
-      api.put<StoredLayout>("/api/v1/settings/dashboard", { widgets }),
-    onSuccess: () => {
-      setEditing(null);
-      void queryClient.invalidateQueries({ queryKey: ["dashboard-layout"] });
-      toast.success(t("The dashboard is arranged this way for everybody who opens it."));
-    },
-    onError: (error) => toast.error(error instanceof Error ? error.message : String(error)),
-  });
-
-  // Whoever may not write the layout is told so by the server, not guessed
-  // at from a role: the button appears once a write is known to be allowed.
-  const mayArrange = layout.data !== undefined && !(layout.error instanceof ApiError);
-  const current = editing ?? layoutToDraw(layout.data, known);
-
-  const move = (index: number, by: number) => {
-    const next = [...current];
-    const target = index + by;
-    if (target < 0 || target >= next.length) return;
-    [next[index], next[target]] = [next[target], next[index]];
-    setEditing(next);
-  };
-  const absent = DASHBOARD_CATALOGUE.filter(
-    (one) => known.has(one.key) && !current.some((placed) => placed.key === one.key),
-  );
-
-  return (
-    <>
-      {mayArrange && (
-        <div className="layout-bar">
-          {editing === null ? (
-            <button className="secondary" onClick={() => setEditing(current)}>{t("Arrange the dashboard")}</button>
-          ) : (
-            <>
-              <button onClick={() => save.mutate(current)} disabled={save.isPending || current.length === 0}>
-                {save.isPending ? t("storing…") : t("Store this arrangement for everybody")}
-              </button>
-              <button className="secondary" onClick={() => setEditing(null)}>{t("Back")}</button>
-              {absent.length > 0 && (
-                <select
-                  value=""
-                  onChange={(event) => {
-                    const one = DASHBOARD_CATALOGUE.find((item) => item.key === event.target.value);
-                    if (one) setEditing([...current, { key: one.key, width: one.width }]);
-                  }}
-                >
-                  <option value="">{t("Add a widget…")}</option>
-                  {absent.map((one) => <option key={one.key} value={one.key}>{t(one.title)}</option>)}
-                </select>
-              )}
-              <span className="source">{t("The arrangement is the installation's: everybody sees it.")}</span>
-            </>
-          )}
-        </div>
-      )}
-      <div className="widgets">
-        {current.map((placed, index) => (
-          <div key={placed.key} className={`span-${placed.width}`}>
-            {editing !== null && (
-              <div className="widget-handle">
-                <span>{t(DASHBOARD_CATALOGUE.find((one) => one.key === placed.key)?.title ?? placed.key)}</span>
-                <select
-                  value={placed.width}
-                  onChange={(event) => {
-                    const next = [...current];
-                    next[index] = { ...placed, width: Number(event.target.value) };
-                    setEditing(next);
-                  }}
-                >
-                  {DASHBOARD_WIDTHS.map((width) => (
-                    <option key={width} value={width}>{t("{n} of 12", { n: width })}</option>
-                  ))}
-                </select>
-                <button className="secondary" onClick={() => move(index, -1)} disabled={index === 0}>←</button>
-                <button className="secondary" onClick={() => move(index, 1)} disabled={index === current.length - 1}>→</button>
-                <button className="secondary" onClick={() => setEditing(current.filter((one) => one.key !== placed.key))}>
-                  {t("Remove")}
-                </button>
-              </div>
-            )}
-            {drawn[placed.key]}
-          </div>
-        ))}
-      </div>
-    </>
-  );
-}

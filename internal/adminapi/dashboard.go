@@ -14,10 +14,14 @@ import (
 	"github.com/ultherego/flotestro/internal/authz"
 )
 
-// The layout of the fleet dashboard: which widgets it draws, in what order
+// The layout of an arrangeable screen: which widgets it draws, in what order
 // and how wide each one is. It belongs to the installation rather than to a
-// person - see the migration for why - so one row holds it and whoever may
-// write the settings decides it for everybody.
+// person - see the migration for why - so one row per screen holds it and
+// whoever may write the settings decides it for everybody.
+
+// A screen the panel can be told how to arrange. The panel owns the
+// catalogue of widgets of each; this package only keeps the arrangement.
+var screenName = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
 
 // DashboardWidget is one widget of the layout.
 type DashboardWidget struct {
@@ -57,29 +61,29 @@ const dashboardWidgetLimit = 40
 const (
 	dashboardRead = `
 		select widgets, updated_at, updated_by, revision
-		  from dashboard_layout
-		 where singleton`
+		  from screen_layout
+		 where screen = $1`
 	dashboardWrite = `
-		insert into dashboard_layout (singleton, widgets, updated_at, updated_by, revision)
-		values (true, $1, now(), $2, 1)
-		on conflict (singleton) do update set
+		insert into screen_layout (screen, widgets, updated_at, updated_by, revision)
+		values ($1, $2, now(), $3, 1)
+		on conflict (screen) do update set
 		    widgets    = excluded.widgets,
 		    updated_at = now(),
 		    updated_by = excluded.updated_by,
-		    revision   = dashboard_layout.revision + 1
+		    revision   = screen_layout.revision + 1
 		returning updated_at, revision`
 )
 
 // readDashboardLayout answers what the installation stored. A schema from
 // before the table and an installation that stored nothing answer the same
 // way: no layout, and the panel draws its own.
-func (s *Server) readDashboardLayout(ctx context.Context) (DashboardLayout, error) {
+func (s *Server) readDashboardLayout(ctx context.Context, screen string) (DashboardLayout, error) {
 	var (
 		layout    DashboardLayout
 		raw       []byte
 		updatedAt time.Time
 	)
-	err := s.pool.QueryRow(ctx, dashboardRead).Scan(&raw, &updatedAt, &layout.UpdatedBy, &layout.Revision)
+	err := s.pool.QueryRow(ctx, dashboardRead, screen).Scan(&raw, &updatedAt, &layout.UpdatedBy, &layout.Revision)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DashboardLayout{Widgets: []DashboardWidget{}}, nil
 	}
@@ -126,10 +130,15 @@ func validateDashboardWidgets(widgets []DashboardWidget) (string, error) {
 // handleDashboardLayout answers the layout. Everybody who may open the
 // dashboard may read it: a screen cannot draw itself without it.
 func (s *Server) handleDashboardLayout(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.authorize(w, r, authz.PermHostRead, authz.GlobalScope, "dashboard_layout", ""); !ok {
+	screen := r.PathValue("screen")
+	if !screenName.MatchString(screen) {
+		problem(w, http.StatusBadRequest, "invalid_request", "screen: a screen is named in lower-case letters, digits and underscores")
 		return
 	}
-	layout, err := s.readDashboardLayout(r.Context())
+	if _, ok := s.authorize(w, r, authz.PermHostRead, authz.GlobalScope, "screen_layout", screen); !ok {
+		return
+	}
+	layout, err := s.readDashboardLayout(r.Context(), screen)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -139,7 +148,12 @@ func (s *Server) handleDashboardLayout(w http.ResponseWriter, r *http.Request) {
 
 // handleSetDashboardLayout stores the layout for the whole installation.
 func (s *Server) handleSetDashboardLayout(w http.ResponseWriter, r *http.Request) {
-	principal, ok := s.authorize(w, r, authz.PermSettingsAdvertiseWrite, authz.GlobalScope, "dashboard_layout", "")
+	screen := r.PathValue("screen")
+	if !screenName.MatchString(screen) {
+		problem(w, http.StatusBadRequest, "invalid_request", "screen: a screen is named in lower-case letters, digits and underscores")
+		return
+	}
+	principal, ok := s.authorize(w, r, authz.PermSettingsAdvertiseWrite, authz.GlobalScope, "screen_layout", screen)
 	if !ok {
 		return
 	}
@@ -163,13 +177,13 @@ func (s *Server) handleSetDashboardLayout(w http.ResponseWriter, r *http.Request
 		updatedAt time.Time
 		revision  int64
 	)
-	if err := s.pool.QueryRow(r.Context(), dashboardWrite, raw, principal.Subject).Scan(&updatedAt, &revision); err != nil {
+	if err := s.pool.QueryRow(r.Context(), dashboardWrite, screen, raw, principal.Subject).Scan(&updatedAt, &revision); err != nil {
 		s.fail(w, err)
 		return
 	}
 	s.audit.Record(r.Context(), audit.Event{
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
-		Action: "dashboard.layout.write", TargetType: "dashboard_layout", TargetID: "",
+		Action: "screen.layout.write", TargetType: "screen_layout", TargetID: screen,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		Detail: map[string]any{"widgets": len(body.Widgets), "revision": revision},
 	})

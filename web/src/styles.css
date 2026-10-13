@@ -2030,3 +2030,16 @@ button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent
 }
 .widget-handle > span:first-child { font-weight: 600; margin-right: auto; }
 .widget-handle button { padding: 2px 8px; font-size: 12px; }
+
+/* A tile is measured against its own width, so the same tile lays its facts
+   in one column when it is a quarter of the page and in three when somebody
+   gives it the whole of it. This is what makes a width worth setting. */
+.widgets > div > .part, .masonry-column > div > .part { container: tile / inline-size; }
+@container tile (min-width: 620px) {
+  .part .pairs { grid-template-columns: repeat(2, minmax(0, max-content) minmax(90px, 1fr)); }
+}
+@container tile (min-width: 1000px) {
+  .part .pairs { grid-template-columns: repeat(3, minmax(0, max-content) minmax(90px, 1fr)); }
+}
+/* The tile fills the box the arrangement gave it rather than ending early. */
+.widgets > div > .part { height: 100%; }

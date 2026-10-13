@@ -1031,10 +1031,10 @@ var responseSchemas = map[string]map[string]any{
 			"areas": map[string]any{"type": "array", "items": ref("SettingsArea")},
 		},
 	},
-	"GET /api/v1/settings/advertised": ref("AdvertisedAddress"),
-	"PUT /api/v1/settings/advertised": ref("AdvertisedAddress"),
-	"GET /api/v1/settings/dashboard":  ref("DashboardLayout"),
-	"PUT /api/v1/settings/dashboard":  ref("DashboardLayout"),
+	"GET /api/v1/settings/advertised":      ref("AdvertisedAddress"),
+	"PUT /api/v1/settings/advertised":      ref("AdvertisedAddress"),
+	"GET /api/v1/settings/layout/{screen}": ref("DashboardLayout"),
+	"PUT /api/v1/settings/layout/{screen}": ref("DashboardLayout"),
 	"GET /api/v1/settings/monitoring": map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -1970,7 +1970,7 @@ var requestSchemas = map[string]map[string]any{
 				"description": "Kept on the audit trail beside the names."},
 		},
 	},
-	"PUT /api/v1/settings/dashboard": {
+	"PUT /api/v1/settings/layout/{screen}": {
 		"type":        "object",
 		"description": "The whole layout, in the order it is drawn. The widget keys belong to the panel's own catalogue; one this panel does not know is skipped when the screen is drawn rather than refused here.",
 		"properties": map[string]any{
