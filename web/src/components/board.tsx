@@ -2,7 +2,6 @@ import { useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useToast } from "./Toast";
-import { Masonry } from "./masonry";
 import { useT } from "../i18n";
 
 /**
@@ -68,20 +67,13 @@ export function boardToDraw(
 }
 
 export function Board({
-  screen, catalogue, drawn, weights,
+  screen, catalogue, drawn,
 }: {
   /** The name the arrangement is stored under. */
   screen: string;
   catalogue: BoardEntry[];
   /** What each widget draws, by key. A key with nothing to draw is not shown. */
   drawn: Record<string, ReactNode>;
-  /**
-   * How tall each widget of the catalogue is, for the screen nobody has
-   * arranged yet: the tiles are then packed into columns so the board has no
-   * holes in it. Once there is an arrangement the widths in it decide, and
-   * a hole is what somebody chose.
-   */
-  weights?: Record<string, number>;
 }) {
   const t = useT();
   const toast = useToast();
@@ -110,9 +102,6 @@ export function Board({
   });
 
   const current = editing ?? boardToDraw(layout.data, catalogue, known);
-  // Packed only while nothing is stored and nobody is arranging: the moment
-  // a width means something, the grid has to be the thing drawing it.
-  const packed = weights !== undefined && editing === null && !(layout.data?.present ?? false);
   const titleOf = (key: string) => catalogue.find((one) => one.key === key)?.title ?? key;
   const move = (index: number, by: number) => reorder(index, index + by);
   const resize = (index: number, change: Partial<BoardWidget>) => {
@@ -167,11 +156,6 @@ export function Board({
           )}
         </div>
       )}
-      {packed ? (
-        <Masonry weights={current.map((placed) => weights?.[placed.key] ?? 1)}>
-          {current.map((placed) => <div key={placed.key}>{drawn[placed.key]}</div>)}
-        </Masonry>
-      ) : (
       <div
         className={["widgets", "arranged", dragging !== null ? "dragging-over" : ""].join(" ").trim()}
         /* The empty part of the board is a place to drop a tile too: dropped
@@ -277,7 +261,6 @@ export function Board({
           </div>
         ))}
       </div>
-      )}
     </>
   );
 }

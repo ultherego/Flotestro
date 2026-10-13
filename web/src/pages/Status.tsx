@@ -286,18 +286,13 @@ export function Status() {
               four to a row. Folding them away was worse than the wall it
               was meant to answer: thirteen closed lines say thirteen names
               and nothing else, and finding anything took a click. */}
-          {/* Until somebody arranges this screen the tiles are packed into
-              columns, so a board nobody has touched has no holes in it. A
-              tile is about as tall as the facts it holds. */}
+          {/* The board, as the installation arranged it or as the panel
+              lays it out until somebody does. */}
           <Board
             screen="status"
             catalogue={[...blocks, ...(data.blocks.build ? ["build"] : [])].map((key) => ({
               key, title: BLOCK_TITLES[key] ?? key, width: 4,
             }))}
-            weights={Object.fromEntries([
-              ...blocks.map((key) => [key, tileWeight(data.blocks[key])]),
-              ["build", 12],
-            ])}
             drawn={{
               ...Object.fromEntries(blocks.map((key) => [
                 key, <BlockTile key={key} name={key} block={data.blocks[key]} />,
@@ -326,11 +321,12 @@ function BlockTile({ name, block }: { name: string; block: StatusBlock }) {
   const summary = blockSummary(name, block.facts, t);
   return (
     <section className={`part ${tone}`}>
-      <h3 className="part-title">
-        <span>{t(BLOCK_TITLES[name] ?? name)}</span>
+      <h3 className="part-head">
+        <span className="part-name">{t(BLOCK_TITLES[name] ?? name)}</span>
         <ToneBadge tone={tone} />
         {summary && <span className="part-summary">{summary}</span>}
       </h3>
+      <div className="part-body">
       {(block.reason || block.attention) && (
         <p className="part-reason">{block.reason || block.attention}</p>
       )}
@@ -348,6 +344,7 @@ function BlockTile({ name, block }: { name: string; block: StatusBlock }) {
           );
         })}
       </Pairs>
+      </div>
     </section>
   );
 }
@@ -406,16 +403,6 @@ export function blockSummary(
     default:
       return "";
   }
-}
-
-/** Roughly how tall a part's tile will be, counted in rows of facts. */
-export function tileWeight(block: StatusBlock): number {
-  const rows = Object.keys(block.facts).filter((key) => !DRAWN_ELSEWHERE.has(key)).length;
-  // A structure draws a row per field of every record, and a widget takes
-  // about four rows of its own.
-  const structured = Object.values(block.facts).filter(
-    (value) => value !== null && typeof value === "object").length;
-  return rows + structured * 4 + 3;
 }
 
 function ToneBadge({ tone }: { tone: Tone }) {
@@ -561,10 +548,11 @@ function AboutTile({ block }: { block: StatusBlock }) {
   const up = typeof facts.uptime_seconds === "number" ? duration(facts.uptime_seconds) : "—";
   return (
     <section className="part">
-      <h3 className="part-title">
-        <span>{t("About")}</span>
+      <h3 className="part-head">
+        <span className="part-name">{t("About")}</span>
         <span className="part-summary">{t("version {version}, up {uptime}", { version: text("version"), uptime: up })}</span>
       </h3>
+      <div className="part-body">
       <Pairs>
         <Pair label={t("Product")}><span>Flotestro</span></Pair>
         <Pair label={t("Version")}><span className="mono">{text("version")}</span></Pair>
@@ -584,6 +572,7 @@ function AboutTile({ block }: { block: StatusBlock }) {
           </span>
         </Pair>
       </Pairs>
+      </div>
     </section>
   );
 }

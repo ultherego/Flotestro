@@ -1974,34 +1974,39 @@ button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent
 .masonry { display: flex; align-items: flex-start; gap: 14px; }
 .masonry-column { flex: 1 1 0; min-width: 0; }
 .parts { columns: 380px; column-gap: 14px; }
-.part {
+/* A container is a header and a body. The name of the thing stands on a bar
+   of its own above it rather than as the first line inside it, which is how
+   the arrange mode drew it and what the owner asked for everywhere: a
+   heading over a box reads as a label, a heading in a box reads as content. */
+.part { display: flex; flex-direction: column; min-width: 0; margin: 0 0 12px; }
+.part-head {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  margin: 0; padding: 7px 12px;
+  background: var(--bg-raised);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  border-left: 3px solid transparent;
+  font-size: 13px; font-weight: 600;
+}
+.part-name { font-size: 14px; }
+.part-body {
+  flex: 1 1 auto;
   background: var(--bg-panel);
-  /* The tiles of one column stand apart from each other. */
-  border-radius: var(--radius-sm);
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
   border-left: 3px solid transparent;
   padding: 12px 14px;
-  margin: 0 0 12px;
-  /* A tile is never split across a column break: half a part at the foot of
-     one column and half at the head of the next reads as two parts. */
-  break-inside: avoid;
-  display: flow-root;
   min-width: 0;
 }
+.part.warn > .part-head, .part.warn > .part-body { border-left-color: var(--warn); }
+.part.error > .part-head, .part.error > .part-body { border-left-color: var(--error); }
+.part.unknown > .part-head, .part.unknown > .part-body { border-left-color: var(--unknown); }
 /* Inside a tile a fact is one line: the label on the left in a track that
    fits it, the value beside it. Stacked - the label over the value - is
    what made these tiles twice as tall as they had to be. */
 .part .pairs { grid-template-columns: minmax(0, max-content) minmax(90px, 1fr); gap: 6px 16px; font-size: 13px; }
 .part .pairs dd { font-variant-numeric: tabular-nums; }
 .part .pairs dt { color: var(--text-muted); }
-.part.warn { border-left-color: var(--warn); }
-.part.error { border-left-color: var(--error); }
-.part.unknown { border-left-color: var(--unknown); }
-.part-title {
-  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
-  margin: 0 0 10px; font-size: 15px; font-weight: 600;
-}
 .part-summary { font-weight: 400; font-size: 12px; color: var(--text-muted); }
-.part-reason { margin: -4px 0 8px; font-size: 12px; color: var(--text-muted); }
+.part-reason { margin: 0 0 8px; font-size: 12px; color: var(--text-muted); }
 
 .part table { font-size: 12.5px; margin-bottom: 10px; }
 .part table th, .part table td { padding: 5px 10px; }
@@ -2075,3 +2080,18 @@ button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent
 
 /* While a tile is in the hand the board says it will take it anywhere. */
 .widgets.arranged.dragging-over { outline: 1px dashed var(--border-strong); outline-offset: 8px; border-radius: var(--radius); }
+
+/* The same shape for every card in the panel: the title is a bar across the
+   top, the body is the box under it. The card used to run its heading, its
+   sentence and its contents together in one surface, so a screen of cards
+   was a screen of undifferentiated boxes. */
+.card-head {
+  background: var(--bg-raised);
+  border-radius: var(--radius) var(--radius) 0 0;
+  border-bottom: 1px solid var(--border);
+  padding: 8px var(--card-pad-x);
+}
+.card-title { font-size: 14px; }
+.card-description { margin-top: 2px; }
+.card.warn > .card-head { box-shadow: inset 3px 0 0 var(--warn); }
+.card.error > .card-head { box-shadow: inset 3px 0 0 var(--error); }

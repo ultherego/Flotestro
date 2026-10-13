@@ -652,7 +652,8 @@ export function Campaign() {
           than as three cards down the page. */}
       <div className="parts">
       <section className="part">
-        <h3 className="part-title"><span>{t("Details")}</span></h3>
+        <h3 className="part-head"><span className="part-name">{t("Details")}</span></h3>
+        <div className="part-body">
         <Pairs>
           <Pair label={t("Requested by")}>{data.created_by}</Pair>
           <Pair label={t("Approved by")}>{data.approved_by || "—"}{data.approved_at && <> · <Time value={data.approved_at} /></>}</Pair>
@@ -690,14 +691,16 @@ export function Campaign() {
             </Pair>
           )}
         </Pairs>
+        </div>
       </section>
 
       {approvals.data && approvals.data.items.length > 0 && (
         <section className="part">
-          <h3 className="part-title">
-            <span>{t("Approval record")}</span>
+          <h3 className="part-head">
+            <span className="part-name">{t("Approval record")}</span>
             <span className="part-summary">{t("written once, never changed")}</span>
           </h3>
+          <div className="part-body">
           <table>
             <thead><tr><th scope="col">{t("Approved by")}</th><th scope="col">{t("Requested by")}</th><th scope="col">{t("Authentication")}</th><th scope="col">{t("Reason")}</th><th scope="col">{t("Change ticket")}</th><th scope="col">{t("When")}</th></tr></thead>
             <tbody>
@@ -716,16 +719,18 @@ export function Campaign() {
               ))}
             </tbody>
           </table>
+          </div>
         </section>
       )}
 
 
       {report.data && (
         <section className="part">
-          <h3 className="part-title">
-            <span>{t("Waves")}</span>
+          <h3 className="part-head">
+            <span className="part-name">{t("Waves")}</span>
             <span className="part-summary">{t("{n} waves", { n: report.data.waves.length })}</span>
           </h3>
+          <div className="part-body">
           <table>
             <thead><tr><th scope="col" className="num">{t("Wave")}</th><th scope="col">{t("Canary")}</th><th scope="col">{t("Closed")}</th><th scope="col">{t("Summary")}</th></tr></thead>
             <tbody>
@@ -739,6 +744,7 @@ export function Campaign() {
               ))}
             </tbody>
           </table>
+          </div>
         </section>
       )}
 

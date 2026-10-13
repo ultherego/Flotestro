@@ -271,7 +271,7 @@ describe("the campaign screen", () => {
     // The approval record is fetched only once the campaign says somebody
     // approved, so the wait is for that tile to arrive.
     await waitFor(() => expect(screen.getByText("Approval record")).toBeInTheDocument());
-    const titles = Array.from(document.querySelectorAll(".part-title")).map((one) => one.textContent ?? "");
+    const titles = Array.from(document.querySelectorAll(".part-head")).map((one) => one.textContent ?? "");
     for (const name of ["Details", "Approval record", "Waves"]) {
       expect(titles.some((title) => title.includes(name)), name).toBe(true);
     }
@@ -283,7 +283,7 @@ describe("the campaign screen", () => {
   it("says how many waves there were without being asked", async () => {
     draw();
     await waitFor(() => expect(screen.getByText("Waves")).toBeInTheDocument());
-    const waves = screen.getByText("Waves").closest(".part-title") as HTMLElement;
+    const waves = screen.getByText("Waves").closest(".part-head") as HTMLElement;
     expect(waves.textContent).toContain("2 waves");
   });
 });

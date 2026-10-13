@@ -73,7 +73,6 @@ export function Settings() {
             <Board
               screen="settings"
               catalogue={areas.map(({ area }) => ({ key: area.key, title: area.title, width: 4 }))}
-              weights={Object.fromEntries(areas.map(({ area, facts }) => [area.key, facts.length + 3]))}
               drawn={Object.fromEntries(areas.map(({ area, facts }) => [
                 area.key, <AreaTile key={area.key} area={area} facts={facts} />,
               ]))}
@@ -373,12 +372,13 @@ function AreaTile({
   const t = useT();
   return (
     <section className="part">
-      <h3 className="part-title">
-        <span>{t(area.title)}</span>
+      <h3 className="part-head">
+        <span className="part-name">{t(area.title)}</span>
         <span className="part-summary">
           {facts.length === 1 ? t("{n} value", { n: facts.length }) : t("{n} values", { n: facts.length })}
         </span>
       </h3>
+      <div className="part-body">
       <Pairs>
         {facts.map((fact) => (
           <Pair key={fact.key} label={t(FACT_LABELS[fact.key] ?? fact.key)}>
@@ -386,6 +386,7 @@ function AreaTile({
           </Pair>
         ))}
       </Pairs>
+      </div>
     </section>
   );
 }

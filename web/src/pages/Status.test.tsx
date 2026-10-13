@@ -148,7 +148,7 @@ describe("the status screen", () => {
     draw(<Status />);
     await waitFor(() => expect(document.querySelectorAll(".part").length).toBeGreaterThan(0));
     const parts = Array.from(document.querySelectorAll(".part"));
-    const of = (name: string) => parts.find((one) => one.querySelector(".part-title")?.textContent?.includes(name));
+    const of = (name: string) => parts.find((one) => one.querySelector(".part-head")?.textContent?.includes(name));
     // The four parts the server judged, all drawn, none behind a click.
     expect(parts).toHaveLength(4);
     expect(of("Database")?.className).toContain("ok");
@@ -162,7 +162,7 @@ describe("the status screen", () => {
     await waitFor(() => expect(document.querySelectorAll(".part-summary").length).toBeGreaterThan(0));
     const parts = Array.from(document.querySelectorAll(".part"));
     const summary = (name: string) =>
-      parts.find((one) => one.querySelector(".part-title")?.textContent?.includes(name))
+      parts.find((one) => one.querySelector(".part-head")?.textContent?.includes(name))
         ?.querySelector(".part-summary")?.textContent;
     expect(summary("Replicas")).toContain("2 alive");
     expect(summary("Database")).toContain("1.4 ms round trip");
