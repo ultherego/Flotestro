@@ -108,6 +108,9 @@ func TestEveryAllowlistEntryStillAllowsTheFixtureItWasWrittenFor(t *testing.T) {
 		`keyID: "keycloak-rs256-1"`,
 		`ManagedKeysFileName = "60-flotestro.keys"`,
 		`"password": "Zx9-temporary"`,
+		// The catalogue of the dashboard's widgets: every entry names itself,
+		// and the generic rule reads the assignment as a credential.
+		`{ key: "operations_24h", title: "Operations, last 24 h", width: 6 }`,
 		`MUSTNOTLEAVE`,
 		`b3BlbnNzaC1rZXk=`,
 	}
