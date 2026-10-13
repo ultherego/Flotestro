@@ -4,6 +4,50 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [semantic versioning](https://semver.org/). Dates are the
 day the tag was published.
 
+## [Unreleased]
+
+### Added
+
+- **Every screen that is a board can be arranged by the installation.** The
+  fleet dashboard, the status board and the settings screen draw the widgets
+  the installation placed, in the order and at the widths and heights it
+  chose: drag a tile by its bar, step it wider or taller, drop it on the
+  empty part of the board, or take it off. The arrangement is stored for the
+  whole installation rather than per person - an operations screen people
+  talk to each other over ("look at the second tile") stops working when
+  everyone sees a different second tile - and is read by anyone who may open
+  the screen and written by whoever may write the settings. New routes `GET`
+  and `PUT /api/v1/settings/layout/{screen}`; new tables in migrations 0155
+  and 0156. A widget key this panel does not know is skipped when the screen
+  is drawn rather than refused on the way in, so a record written by a newer
+  panel still draws on an older one.
+
+### Changed
+
+- **One shape for every container in the panel, and one way of drawing a
+  fact.** A container's title is a bar across the top rather than the first
+  line of its contents; a fact is its label on the left and its value beside
+  it, wrapping where it has to. Three separate definitions of a fact list
+  existed - `.pairs`, `.hm-fact` and `.fp-wrap` - and only one of them
+  wrapped, which is why identifiers left their cards on the status and
+  settings screens. The host module pages, which had their own heading and
+  their own stacked fact list, follow the panel now.
+- **A page opens with one line instead of a paragraph.** Eighty-three of the
+  panel's page descriptions ran over a hundred characters; the text is kept
+  word for word behind a mark beside the title.
+- **The status screen says its verdict first**, names the parts that need a
+  look beside it, and draws every part as a tile of a board instead of
+  thirteen cards of up to twenty rows. The structures the server sends - the
+  replicas of the control plane, the keys of the installation - are drawn as
+  tables and lists rather than as a line of JSON, which is what used to run
+  out of the card.
+
+### Fixed
+
+- **A fact with no spaces in it no longer leaves its card.** A commit, a DSN
+  or a fingerprint overflowed the card it was in and ran over the card beside
+  it, because the fact list had no wrapping rule.
+
 ## [0.63.0] - 2026-10-12
 
 A day of answering an external review of the product's own claims, and of
