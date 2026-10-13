@@ -137,12 +137,17 @@
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
+/* The same shape every container in the panel has: the title on a bar
+   across the top, the contents in the box under it. The host modules kept
+   their own heading, which left these pages looking like an older panel. */
 .hm-section-head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 12px;
-  padding: 11px 16px;
+  padding: 8px 16px;
+  background: var(--bg-raised);
+  border-radius: var(--radius) var(--radius) 0 0;
   border-bottom: 1px solid var(--border);
 }
 .hm-section-head h3 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
@@ -275,26 +280,37 @@ td.hm-mono { white-space: nowrap; }
 .hm-table td.hm-indent { padding-left: 34px; }
 
 /* ---------------------------------------------------------------------- */
-/* Facts: label over value, in as many columns as the width allows.        */
+/* Facts: the same row the rest of the panel draws - the label on the left  */
+/* in a track that fits it, the value beside it - in as many columns as the */
+/* width allows. These used to stack the label over the value in small      */
+/* capitals, which made the host pages read as a different product.         */
 /* ---------------------------------------------------------------------- */
 .hm-facts {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: 14px 24px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 6px 24px;
   margin: 0;
-  padding: 14px 16px;
+  padding: 12px 16px;
+  font-size: 13px;
 }
 /* Facts inside a padded body (after a form) bring no inset of their own. */
 .hm-section-body > .hm-facts { padding: 0; }
-.hm-fact { min-width: 0; }
-.hm-fact dt {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--text-faint);
+.hm-fact {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(80px, 1fr);
+  gap: 4px 12px;
+  align-items: baseline;
 }
-.hm-fact dd { margin: 3px 0 0; font-size: 13px; overflow-wrap: anywhere; }
+.hm-fact.wide { grid-column: 1 / -1; }
+.hm-fact dt {
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--text-muted);
+}
+.hm-fact dd { margin: 0; font-size: 13px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 /* A long value (a command line, a fingerprint) takes the whole row. */
 .hm-fact.wide { grid-column: 1 / -1; }
 

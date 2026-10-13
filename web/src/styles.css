@@ -1882,7 +1882,7 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); }
    itself as a table of packages or a list of sentences. */
 .plan-groups { display: flex; flex-direction: column; }
 .plan-group + .plan-group { border-top: 1px solid var(--border); }
-.plan-group-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; padding: 10px var(--card-pad-x); background: var(--bg); border-bottom: 1px solid var(--border); font-size: 13px; }
+.plan-group-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; padding: 8px var(--card-pad-x); background: var(--bg-raised); border-bottom: 1px solid var(--border); font-size: 13px; }
 .plan-group-hosts { flex: 1 1 240px; min-width: 0; }
 .plan-group-body { padding: 12px var(--card-pad-x); }
 .plan-group-words { font-size: 13px; margin-bottom: 6px; }
