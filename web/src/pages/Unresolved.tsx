@@ -12,6 +12,7 @@ import type {
 } from "../lib/types";
 import { ErrorBox, Empty, Time } from "../components/ui";
 import { Actions, Card, Field, FieldGrid, PageHeader, Toolbar } from "../components/layout";
+import { Icon } from "../components/icons";
 import { useT } from "../i18n";
 
 /**
@@ -280,20 +281,86 @@ export default function Unresolved() {
         />
       )}
 
-      {(total > 0 || search !== "") && (
-        <Toolbar>
-          <label className="inline">
-            {t("Search")}{" "}
+      <Card className="span-12" flush>
+        <Toolbar
+          end={
+            <>
+              <label className="inline">
+                {t("Rows per page")}
+                <select
+                  value={size}
+                  onChange={(e) => { setSize(Number(e.target.value)); setPage(1); }}
+                  data-testid="page-size"
+                >
+                  {PAGE_SIZES.map((one) => (
+                    <option key={one} value={one}>{one}</option>
+                  ))}
+                </select>
+              </label>
+              <span data-testid="page-of">
+                {total > 0
+                  ? t("{n} of {total}", {
+                      n: `${(page - 1) * size + 1}-${Math.min(page * size, total)}`,
+                      total,
+                    })
+                  : t("{n} of {total}", { n: 0, total: 0 })}
+              </span>
+              {pages > 1 && (
+                <nav className="pager segmented" aria-label={t("Pages")}>
+                  <button
+                    type="button"
+                    disabled={page <= 1}
+                    onClick={() => setPage(page - 1)}
+                    data-testid="page-previous"
+                    aria-label={t("Previous")}
+                  >
+                    ‹
+                  </button>
+                  {pageNumbers(page, pages).map((one, i) =>
+                    one === "gap" ? (
+                      /* The gap is not a button and is hidden from a screen
+                         reader: the numbers either side of it are the ones to
+                         press. */
+                      <span key={`gap-${i}`} className="pager-gap" aria-hidden="true">…</span>
+                    ) : (
+                      <button
+                        key={one}
+                        type="button"
+                        className={one === page ? "active" : ""}
+                        aria-current={one === page ? "page" : undefined}
+                        onClick={() => setPage(one)}
+                        data-testid={`page-${one}`}
+                      >
+                        {one}
+                      </button>
+                    ),
+                  )}
+                  <button
+                    type="button"
+                    disabled={page >= pages}
+                    onClick={() => setPage(page + 1)}
+                    data-testid="page-next"
+                    aria-label={t("Next")}
+                  >
+                    ›
+                  </button>
+                </nav>
+              )}
+            </>
+          }
+        >
+          <div className="search-field">
+            <Icon name="search" />
             <input
               type="search"
               value={typed}
               onChange={(e) => setTyped(e.target.value)}
               placeholder={t("a host or an operation")}
+              aria-label={t("Search")}
               data-testid="unresolved-search"
             />
-          </label>
+          </div>
         </Toolbar>
-      )}
 
       {items.length === 0 ? (
         <Empty>
@@ -304,7 +371,7 @@ export default function Unresolved() {
               : t("Every operation this fleet reported has an outcome somebody could confirm.")}
         </Empty>
       ) : (
-        <table className="data">
+        <table>
           <thead>
             <tr>
               <th scope="col">{t("Host")}</th>
@@ -375,66 +442,7 @@ export default function Unresolved() {
         </table>
       )}
 
-      {total > 0 && (
-        <Toolbar
-          end={
-            <label className="inline">
-              {t("Rows per page")}{" "}
-              <select
-                value={size}
-                onChange={(e) => { setSize(Number(e.target.value)); setPage(1); }}
-                data-testid="page-size"
-              >
-                {PAGE_SIZES.map((one) => (
-                  <option key={one} value={one}>{one}</option>
-                ))}
-              </select>
-            </label>
-          }
-        >
-          <nav className="pager" aria-label={t("Pages")}>
-            <button
-              type="button"
-              className="secondary"
-              disabled={page <= 1}
-              onClick={() => setPage(page - 1)}
-              data-testid="page-previous"
-            >
-              {t("Previous")}
-            </button>
-            {pageNumbers(page, pages).map((one, i) =>
-              one === "gap" ? (
-                /* The gap is not a button and says so to a screen reader:
-                   the numbers either side of it are the ones to press. */
-                <span key={`gap-${i}`} className="muted" aria-hidden="true">…</span>
-              ) : (
-                <button
-                  key={one}
-                  type="button"
-                  className={one === page ? "active" : "secondary"}
-                  aria-current={one === page ? "page" : undefined}
-                  onClick={() => setPage(one)}
-                  data-testid={`page-${one}`}
-                >
-                  {one}
-                </button>
-              ),
-            )}
-            <button
-              type="button"
-              className="secondary"
-              disabled={page >= pages}
-              onClick={() => setPage(page + 1)}
-              data-testid="page-next"
-            >
-              {t("Next")}
-            </button>
-            <span className="muted" data-testid="page-of">
-              {t("{n} of {total}", { n: `${(page - 1) * size + 1}-${Math.min(page * size, total)}`, total })}
-            </span>
-          </nav>
-        </Toolbar>
-      )}
+      </Card>
     </>
   );
 }
@@ -464,9 +472,9 @@ function ReasonCell({ item }: { item: UnresolvedItem }) {
         <>
           <p className="reason-verdict">{t("The change did not hold.")}</p>
           <p className="reason-reading">
-            <span className="muted">{t("Ordered")}:</span> <code>{reading?.expected}</code>
+            <span className="reason-label">{t("Ordered")}:</span> <code>{reading?.expected}</code>
             {" · "}
-            <span className="muted">{t("On the host")}:</span> <code>{reading?.observed}</code>
+            <span className="reason-label">{t("On the host")}:</span> <code>{reading?.observed}</code>
           </p>
         </>
       )}

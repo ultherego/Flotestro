@@ -79,3 +79,61 @@ td.fp-meter-cell .meter { width: 100%; }
   grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
   gap: 2px 20px;
 }
+
+/* ------------------------------------------------------------------ */
+/* The pager, the search box and the reason cell of a data table.      */
+/*                                                                     */
+/* These arrived as markup with class names and no rules, which is a   */
+/* table that looks like a page of HTML rather than part of a product  */
+/* - the owner's own words. They are written against the tokens so     */
+/* that light and dark need no second copy.                            */
+
+/* The pager is a segmented group, so it is the same object as the      */
+/* filters above it rather than a row of loose buttons.                */
+.pager { flex-wrap: nowrap; }
+.pager button { min-width: 30px; padding: 4px 8px; justify-content: center; font-variant-numeric: tabular-nums; }
+.pager button:disabled { color: var(--text-faint); background: var(--bg-panel); }
+.pager-gap {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px;
+  color: var(--text-faint);
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border-strong);
+  font-size: 12px;
+  user-select: none;
+}
+.pager-gap + button { border-left: 1px solid var(--border-strong); }
+
+/* A label that reads as one control with its field: "Rows per page 20". */
+label.inline { display: inline-flex; align-items: center; gap: 6px; margin: 0; color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+label.inline select { padding: 3px 24px 3px 8px; font-size: 12px; }
+
+/* The search box carries its mark inside the field, the way a search    */
+/* box is expected to, instead of a bare input with a word beside it.    */
+.search-field { position: relative; display: inline-flex; align-items: center; min-width: 0; }
+.search-field svg { position: absolute; left: 9px; width: 14px; height: 14px; color: var(--text-faint); pointer-events: none; }
+.search-field input { width: 260px; max-width: 100%; padding-left: 30px; }
+/* The browser's own clear button, which only some have, is left as it   */
+/* is: a second one drawn by us would sit beside it on those browsers.   */
+.search-field input::-webkit-search-cancel-button { cursor: pointer; }
+
+/* What a row of the unconfirmed list says: the verdict, the reading     */
+/* behind it, and the host's own sentence last and smallest. Three       */
+/* sizes, because they are three different claims and the order they are */
+/* read in is the order of their weight.                                 */
+.reason { display: flex; flex-direction: column; gap: 3px; max-width: 64ch; }
+.reason > p { margin: 0; }
+.reason-verdict { font-weight: 500; }
+.reason-reading { font-size: 12px; color: var(--text-muted); display: flex; flex-wrap: wrap; gap: 0 6px; align-items: baseline; }
+.reason-reading code {
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  border: 1px solid var(--border);
+  word-break: break-all;
+}
+/* The two words that name the sides of the comparison, a shade quieter than
+   the values they introduce. */
+.reason-label { color: var(--text-faint); }
