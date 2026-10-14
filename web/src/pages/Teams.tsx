@@ -179,7 +179,9 @@ export function Teams() {
   if (list.error instanceof ApiError && list.error.forbidden) {
     return (
       <>
-        <PageHeader title={t("Teams")} description={doctrine} />
+        <PageHeader title={t("Teams")} description={doctrine}
+        help={<p>{t("A team is a group of people and the scopes they may act in. Membership decides what the panel offers them, so a role taken away here is taken away from every screen at once.")}</p>}
+      />
         <Card><Empty>{t("You do not have permission to read the teams.")}</Empty></Card>
       </>
     );

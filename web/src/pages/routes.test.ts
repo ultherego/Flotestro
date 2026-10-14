@@ -56,6 +56,35 @@ function importOf(source: string, name: string): { from: string; exported: strin
   return direct ? { from: direct[1], exported: name } : undefined;
 }
 
+/**
+ * The whole of one JSX element, from its name to the ">" that ends its opening
+ * tag, with nested braces counted.
+ *
+ * Needed because an attribute holds expressions with their own braces and
+ * their own ">" - an arrow function, a nested element - and a scan that stops
+ * at the first ">" reads half a tag. A hand-rolled scan over these files
+ * reported pages that do not exist before this counted properly.
+ */
+function openingTag(source: string, name: string, from = 0): string | undefined {
+  const start = source.indexOf(`<${name}`, from);
+  if (start < 0) return undefined;
+  let depth = 0;
+  for (let i = start; i < source.length; i++) {
+    const c = source[i];
+    if (c === "{") depth++;
+    else if (c === "}") depth--;
+    else if (c === ">" && depth === 0) return source.slice(start, i + 1);
+  }
+  return undefined;
+}
+
+/** The icons the page header can resolve, read out of the component itself. */
+function sectionIcons(): Set<string> {
+  const layout = readFileSync(join(SRC, "components/layout.tsx"), "utf8");
+  const table = layout.slice(layout.indexOf("const SECTION_ICONS"), layout.indexOf("function iconForPath"));
+  return new Set([...table.matchAll(/(\w[\w-]*)\s*:\s*"[\w-]+"/g)].map((m) => m[1]));
+}
+
 describe("the pages the router can reach", () => {
   const routed = routedComponents(app);
 
@@ -83,5 +112,52 @@ describe("the pages the router can reach", () => {
       if (!/PageHeader|ContextBar/.test(source)) without.push(`${name} (${where.from})`);
     }
     expect(without).toEqual([]);
+  });
+
+  /**
+   * The explanation belongs behind the mark beside the title, not under it.
+   * A paragraph is read once and then takes the top of the page every time
+   * after that, which is the owner's complaint about this panel in his own
+   * words: a wall of text under the tab's title.
+   */
+  it("each keep their explanation behind the mark beside the title", () => {
+    const without: string[] = [];
+    for (const name of routed) {
+      const where = importOf(app, name);
+      if (!where) continue;
+      const file = join(SRC, `${where.from.replace(/^\.\//, "")}.tsx`);
+      const source = readFileSync(file, "utf8");
+      const tag = openingTag(source, "PageHeader");
+      // A page under a layout carries no header of its own; the header test
+      // above is what says which pages those are.
+      if (!tag) continue;
+      if (!/\bhelp=\{/.test(tag)) without.push(`${name} (${where.from})`);
+    }
+    expect(without).toEqual([]);
+  });
+
+  /**
+   * And every tab's title carries the mark of its section. The header takes it
+   * from the first segment of the address, so a page whose section is not in
+   * that table shows a title with nothing beside it.
+   */
+  it("each carry the icon of their section", () => {
+    const icons = sectionIcons();
+    expect(icons.size).toBeGreaterThan(10);
+    const routes = app.slice(app.indexOf("<Routes>"), app.lastIndexOf("</Routes>"));
+    const without: string[] = [];
+    let depth = 0;
+    for (const line of routes.split("\n")) {
+      const path = line.match(/<Route\s+path="([^"]*)"/);
+      const tag = line.replace(/element=\{[^}]*\}/g, "");
+      if (path && depth === 0) {
+        const first = path[1].split("/")[1] ?? "";
+        // The catch-all and the landing page are not sections.
+        if (first !== "" && first !== "*" && !icons.has(first)) without.push(path[1]);
+      }
+      if (tag.includes("</Route>")) depth--;
+      if (/<Route\b/.test(tag) && !/\/>/.test(tag)) depth++;
+    }
+    expect([...new Set(without)]).toEqual([]);
   });
 });

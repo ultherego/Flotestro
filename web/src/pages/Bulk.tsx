@@ -125,7 +125,9 @@ export function Bulk() {
   if (!capabilities.campaign_v2) {
     return (
       <>
-        <PageHeader title={t("Bulk Workspace")} />
+        <PageHeader title={t("Bulk Workspace")}
+        help={<p>{t("A campaign built in steps: what runs, where it runs, when it may run and what is checked afterwards. Nothing leaves this screen until the consent at the end, and the consent covers exactly what the screen shows.")}</p>}
+      />
         <Card>
           <Empty>
             {t("This installation runs operations host by host: the backend has no campaign engine, so there is no set of per-host plans to approve.")}

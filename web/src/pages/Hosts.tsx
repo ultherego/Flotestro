@@ -353,6 +353,7 @@ export function Hosts() {
         title={t("Hosts")}
         description={<>{t("Filters are applied server-side.")} <Refreshed at={hosts.dataUpdatedAt} fetching={hosts.isFetching} onRefresh={() => hosts.refetch()} /></>}
         actions={canAdd && <Link to="/hosts/new" className="button primary">{t("Add host")}</Link>}
+        help={<p>{t("Every machine that completed enrolment, narrowed to the ones you may see. A host the panel has not heard from is not shown as healthy: the connection state and the age of the inventory are separate facts and both are on the row.")}</p>}
       />
 
       <div className="widgets">

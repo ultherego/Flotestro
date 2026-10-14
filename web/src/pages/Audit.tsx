@@ -171,7 +171,9 @@ export function Audit() {
   if (trail.error instanceof ApiError && trail.error.forbidden) {
     return (
       <>
-        <PageHeader title={t("Audit")} />
+        <PageHeader title={t("Audit")}
+        help={<p>{t("Every action the panel took or refused, with who asked and when. A refusal is recorded as fully as a success - what was not allowed is as much a fact about the fleet as what was.")}</p>}
+      />
         <Card>
           <Empty>
             {t("You do not have permission to read the fleet-wide audit trail. A single host's audit trail is available in its own view.")}

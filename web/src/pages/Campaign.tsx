@@ -396,6 +396,7 @@ export function Campaign() {
             </Link>
           </>
         }
+        help={<p>{t("What was ordered, as the approval binds it: this operation, this payload, these hosts, this rollout. The hosts are counted by what they reported, so a host that never answered is not counted as done.")}</p>}
       />
 
       {/* The order itself, before any decision about it: what runs, with

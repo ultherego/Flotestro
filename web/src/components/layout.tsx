@@ -84,6 +84,15 @@ const SECTION_ICONS: Record<string, IconName> = {
   security: "security", vulnerabilities: "vulnerabilities", certificates: "certificates",
   secrets: "secrets", backups: "backups", monitoring: "monitoring", directory: "directory",
   access: "access", audit: "audit",
+  // The sixteen sections this table did not know, every one of them a tab
+  // whose title stood with nothing beside it. The icon is the one the
+  // navigation already gives that route, so the header and the sidebar say
+  // the same thing about the same place - which is the whole reason this
+  // table exists rather than each page naming its own.
+  groups: "groups", tags: "groups", teams: "accounts", profile: "accounts",
+  relays: "relays", reports: "audit", readiness: "overview", policies: "security",
+  notifications: "notifications", unresolved: "jobs", reads: "reads", budgets: "overview",
+  settings: "settings", status: "settings", setup: "settings", support: "logs",
 };
 
 function iconForPath(pathname: string): IconName | undefined {

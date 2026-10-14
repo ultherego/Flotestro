@@ -77,6 +77,11 @@ type UnresolvedFilter struct {
 	Kind   string
 	HostID string
 	Limit  int
+	// Offset is where the page starts. The order below is made total for it:
+	// an offset over an order with ties repeats rows on one page and loses
+	// them from the next, and ties are the normal case here - fifteen
+	// attempts of the same reload land in the same second.
+	Offset int
 }
 
 // unresolvedWhere builds the condition both the list and the counts use, so
@@ -142,6 +147,11 @@ func (s *Store) UnresolvedList(ctx context.Context, f UnresolvedFilter) ([]Unres
 		limit = 100
 	}
 	args = append(args, limit)
+	offsetClause := ""
+	if f.Offset > 0 {
+		args = append(args, f.Offset)
+		offsetClause = " offset $" + fmt.Sprint(len(args))
+	}
 	rows, err := s.pool.Query(ctx, `
 		select a.id, a.job_id, j.host_id, coalesce(h.hostname, ''), j.action_type,
 		       coalesce(a.error_code, ''), coalesce(a.message, ''),
@@ -158,8 +168,8 @@ func (s *Store) UnresolvedList(ctx context.Context, f UnresolvedFilter) ([]Unres
 		  join jobs j on j.id = a.job_id
 		  left join hosts h on h.id = j.host_id
 		`+where+`
-		 order by a.started_at desc
-		 limit $`+fmt.Sprint(len(args)), args...)
+		 order by a.started_at desc, a.id desc
+		 limit $`+fmt.Sprint(len(args))+offsetClause, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -182,6 +192,56 @@ func (s *Store) UnresolvedList(ctx context.Context, f UnresolvedFilter) ([]Unres
 		list = append(list, one)
 	}
 	return list, rows.Err()
+}
+
+// UnresolvedTotal is how many attempts the narrowed list has, which is what
+// a page number is computed from.
+//
+// Deliberately not one of the four counts above: those answer for the whole
+// visible fleet whatever the list shows, so that a narrowed list cannot make
+// the fleet look settled. This one answers for the list, and the two are
+// different questions that must not be served by one number.
+func (s *Store) UnresolvedTotal(ctx context.Context, f UnresolvedFilter) (int, error) {
+	where, args := unresolvedWhere(f)
+	var total int
+	err := s.pool.QueryRow(ctx, `
+		select count(*)
+		  from job_attempts a
+		  join jobs j on j.id = a.job_id
+		`+where, args...).Scan(&total)
+	return total, err
+}
+
+// UnresolvedAttemptIDs names every attempt the narrowed list holds, up to the
+// cap, so that "rule on all of them" can be sent as the attempts an operator
+// saw rather than as a filter the server re-evaluates.
+//
+// The difference matters: a filter evaluated again on the server would also
+// rule on whatever arrived between the screen being drawn and the button
+// being pressed, which is a ruling nobody made.
+func (s *Store) UnresolvedAttemptIDs(ctx context.Context, f UnresolvedFilter, most int) ([]string, error) {
+	where, args := unresolvedWhere(f)
+	args = append(args, most)
+	rows, err := s.pool.Query(ctx, `
+		select a.id
+		  from job_attempts a
+		  join jobs j on j.id = a.job_id
+		`+where+`
+		 order by a.started_at desc, a.id desc
+		 limit $`+fmt.Sprint(len(args)), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // UnresolvedCount answers how much is open, in four numbers rather than one.

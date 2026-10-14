@@ -240,6 +240,7 @@ export function JobPage() {
             )}
           </>
         }
+        help={<p>{t("One operation on one host, with every attempt it took. The attempt keeps the outcome the fleet reported: a later reading by an operator is recorded beside it and never in place of it.")}</p>}
       />
 
       {/* The consent is given to the payload on this page: the hash the

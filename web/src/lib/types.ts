@@ -256,6 +256,19 @@ export type UnresolvedCounts = {
 export type UnresolvedOperations = {
   counts: UnresolvedCounts;
   items: Unresolved[];
+  /**
+   * How many the narrowed list holds, which is what a page number is computed
+   * from. Not one of the counts: those answer for the whole visible fleet
+   * whatever the page shows, so a narrowed list cannot make the fleet look
+   * settled.
+   */
+  total: number;
+};
+/** What a batch ruling did, and what it could not do, by name. */
+export type UnresolvedRulings = {
+  ruled: number;
+  attempts: number;
+  refused?: { attempt_id: string; code: string; message: string }[];
 };
 
 /** What an operator concluded. accepted_unknown is a decision to stop asking. */
