@@ -232,6 +232,7 @@ export function PolicyPage() {
             )}
           </>
         )}
+        help={<p>{t("A published policy is frozen as it stands and is applied from its publication onwards; changing it means publishing another version, so what was enforced yesterday stays readable.")}</p>}
       />
 
       {publishing && (

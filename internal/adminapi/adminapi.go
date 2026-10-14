@@ -400,6 +400,7 @@ func (s *Server) Routes() http.Handler {
 	// counter that heads it is the one the pilot is judged by.
 	s.route(mux, "GET /api/v1/unresolved", s.handleUnresolved)
 	s.route(mux, "POST /api/v1/unresolved/{id}/ruling", s.handleRuleUnresolved)
+	s.route(mux, "POST /api/v1/unresolved/rulings", s.handleRuleUnresolvedBatch)
 	s.route(mux, "POST /api/v1/jobs/{id}/approve", s.handleApproveJob)
 	s.route(mux, "POST /api/v1/jobs/{id}/cancel", s.handleCancelJob)
 

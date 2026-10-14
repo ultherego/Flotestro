@@ -343,6 +343,7 @@ export function Jobs() {
       <PageHeader
         title={t("Jobs")}
         description={t("Approval confirms the plan hash, so tampering with its content is detectable.")}
+        help={<p>{t("One row is one operation on one host. The plan hash covers the operation and its payload, so an approval granted for one plan cannot be spent on another.")}</p>}
       />
 
       <div className="widgets">

@@ -210,7 +210,9 @@ export function Budgets() {
   if (error instanceof ApiError && error.status === 501) {
     return (
       <>
-        <PageHeader icon="overview" title={t("Budgets")} />
+        <PageHeader icon="overview" title={t("Budgets")}
+        help={<p>{t("A budget is a capacity under a key the store reads before an operation runs. It bounds how much of the fleet one change may touch at once, which is what keeps a mistake from reaching every host.")}</p>}
+      />
         <Empty>{t("Budgets are disabled in this installation.")}</Empty>
       </>
     );

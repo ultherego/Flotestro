@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { anythingOpen, describeKind } from "./Unresolved";
+import { anythingOpen, describeKind, pageNumbers, readingKind, verifierReading } from "./Unresolved";
 
 /* The two decisions this screen rests on are pure, so they are checked here
    without a browser: that the two uncertainties are never read as one thing,
@@ -48,5 +48,76 @@ describe("anythingOpen", () => {
     const manyHosts = { ...none, outcome_unknown_operations: 40, outcome_unknown_hosts: 40 };
     expect(oneHost.outcome_unknown_hosts).not.toBe(manyHosts.outcome_unknown_hosts);
     expect(anythingOpen(oneHost)).toBe(anythingOpen(manyHosts));
+  });
+});
+
+describe("the verifier's reading", () => {
+  const encode = (value: unknown) =>
+    btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(value))));
+
+  it("comes back out of the base64 the server writes it as", () => {
+    const raw = encode({ expected: "vm.nr_hugepages=1048576", observed: "vm.nr_hugepages=1205", verified: false });
+    expect(verifierReading(raw)).toMatchObject({
+      expected: "vm.nr_hugepages=1048576",
+      observed: "vm.nr_hugepages=1205",
+    });
+  });
+
+  it("keeps a path that is not ASCII intact", () => {
+    // atob alone gives one byte per character, so this is the case that
+    // decides whether the one line an operator reads to find the file is
+    // readable at all.
+    const raw = encode({ expected: "sha256:aa", observed: "sha256:bb", reason: "the file /srv/ważne/plik.conf differs" });
+    expect(verifierReading(raw)?.reason).toContain("/srv/ważne/plik.conf");
+  });
+
+  it("is nothing rather than a crash when the host sent something odd", () => {
+    for (const raw of ["", "not base64 at all!!", btoa("{"), btoa('"a string"'), null, undefined, 7]) {
+      expect(verifierReading(raw)).toBeNull();
+    }
+  });
+
+  it("takes an object as it is, for the day the server stops encoding it", () => {
+    expect(verifierReading({ expected: "a", observed: "b" })).toEqual({ expected: "a", observed: "b" });
+  });
+});
+
+describe("what a row actually says", () => {
+  it("is a conclusion when the host answered and shows something else", () => {
+    expect(readingKind("applied_unverified", { expected: "on", observed: "off" })).toBe("did_not_hold");
+  });
+
+  it("is the absence of one when the host could not be read", () => {
+    // The difference the screen was hiding: "unknown" is not a value the host
+    // holds, it is the verifier saying it could not look.
+    expect(readingKind("applied_unverified", { expected: "on", observed: "unknown" })).toBe("could_not_read");
+    expect(readingKind("applied_unverified", null)).toBe("could_not_read");
+    expect(readingKind("applied_unverified", { expected: "on" })).toBe("could_not_read");
+  });
+
+  it("never claims a change did not hold when the question is whether it happened", () => {
+    expect(readingKind("outcome_unknown", { expected: "on", observed: "off" })).toBe("outcome_unknown");
+  });
+});
+
+describe("the page numbers", () => {
+  it("always offer the first and the last", () => {
+    expect(pageNumbers(1, 1)).toEqual([1]);
+    expect(pageNumbers(1, 3)).toEqual([1, 2, 3]);
+    const far = pageNumbers(10, 30);
+    expect(far[0]).toBe(1);
+    expect(far[far.length - 1]).toBe(30);
+  });
+
+  it("keep the current one in the middle of its neighbours", () => {
+    expect(pageNumbers(10, 30)).toEqual([1, "gap", 8, 9, 10, 11, 12, "gap", 30]);
+  });
+
+  it("print a single skipped number rather than hide it behind a gap of the same width", () => {
+    expect(pageNumbers(4, 20)).toEqual([1, 2, 3, 4, 5, 6, "gap", 20]);
+  });
+
+  it("answer nothing for a list with no pages", () => {
+    expect(pageNumbers(1, 0)).toEqual([]);
   });
 });

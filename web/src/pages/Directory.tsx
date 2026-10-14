@@ -55,6 +55,7 @@ export function Directory() {
             : status.data?.error
               ? t("Directory unavailable: {error}", { error: status.data.error })
               : t("Checking…")}
+        help={<p>{t("What the identity directory holds about the fleet, as the panel reads it. The panel does not own these records: it reads them, and a change made here is a change asked of the directory.")}</p>}
       />
 
       <div className="tabs">

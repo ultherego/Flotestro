@@ -79,7 +79,12 @@ type Storage interface {
 	LiveKeyIDs(ctx context.Context) ([]string, error)
 }
 
-// installationLockID is the advisory lock of the initialisation: "FCRY".
+// installationLockID is the advisory lock of the cryptographic state: "FCRY".
+//
+// One lock for two jobs, deliberately: the startup guard takes it so that two
+// panels do not make two installations, and every command that moves the state
+// takes it so that two transitions do not interleave. Sharing it is what makes
+// a start and a transition exclude each other as well.
 const installationLockID = 0x46435259
 
 // Postgres is the Storage over the fleet database.
@@ -122,6 +127,69 @@ func (p *Postgres) Lock(ctx context.Context) (func(), error) {
 	if _, err := conn.Exec(ctx, "select pg_advisory_lock($1)", installationLockID); err != nil {
 		conn.Release()
 		return nil, fmt.Errorf("the installation lock: %w", err)
+	}
+	return func() {
+		_, _ = conn.Exec(context.WithoutCancel(ctx), "select pg_advisory_unlock($1)", installationLockID)
+		conn.Release()
+	}, nil
+}
+
+// ErrTransitionBusy says something else is moving the cryptographic state of
+// this installation right now: another crypto command, or a panel starting.
+var ErrTransitionBusy = errors.New("another transition of the cryptographic state holds the installation lock")
+
+// transitionPoll is how often a command asks again for a lock somebody holds.
+const transitionPoll = 250 * time.Millisecond
+
+// awaitLock polls take until the lock is taken, the wait runs out or the
+// context ends.
+//
+// The blocking pg_advisory_lock would be shorter and is wrong here: a wait
+// cancelled at the moment the lock is granted leaves the session holding a
+// lock nobody means to hold, and that session goes back into the pool. Every
+// try either holds the lock or does not.
+func awaitLock(ctx context.Context, wait time.Duration, take func(context.Context) (bool, error)) (bool, error) {
+	deadline := time.Now().Add(wait)
+	for {
+		taken, err := take(ctx)
+		if err != nil || taken {
+			return taken, err
+		}
+		if !time.Now().Before(deadline) {
+			return false, nil
+		}
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-time.After(transitionPoll):
+		}
+	}
+}
+
+// LockTransition takes the installation lock for a whole transition - every
+// read and every write of one command - and waits at most wait for whoever
+// holds it.
+//
+// Storage.Lock is the startup guard's form and blocks until it has the lock,
+// because a panel must not start without it. A command is run by somebody who
+// is waiting at a terminal, so it is told instead.
+func (p *Postgres) LockTransition(ctx context.Context, wait time.Duration) (func(), error) {
+	conn, err := p.pool.Acquire(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("the connection for the installation lock: %w", err)
+	}
+	taken, err := awaitLock(ctx, wait, func(ctx context.Context) (bool, error) {
+		var taken bool
+		err := conn.QueryRow(ctx, "select pg_try_advisory_lock($1)", installationLockID).Scan(&taken)
+		return taken, err
+	})
+	if err != nil {
+		conn.Release()
+		return nil, fmt.Errorf("the installation lock: %w", err)
+	}
+	if !taken {
+		conn.Release()
+		return nil, ErrTransitionBusy
 	}
 	return func() {
 		_, _ = conn.Exec(context.WithoutCancel(ctx), "select pg_advisory_unlock($1)", installationLockID)

@@ -167,6 +167,7 @@ export function Campaigns() {
             </Link>
           </>
         }
+        help={<p>{t("Campaigns are how the fleet is changed at scale: a canary first, then waves, with a gate between them. A campaign carries the operation, the payload and the rollout it was approved with.")}</p>}
       />
 
       <div className="widgets">

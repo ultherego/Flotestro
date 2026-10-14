@@ -136,6 +136,7 @@ func (s *Server) openAPI() map[string]any {
 	register("Attempt", jobs.Attempt{})
 	register("UnresolvedOperations", UnresolvedOperations{})
 	register("UnresolvedRuling", UnresolvedRuling{})
+	register("UnresolvedRulings", UnresolvedRulings{})
 	register("Campaign", campaigns.Campaign{})
 	register("CampaignTarget", campaigns.Target{})
 	register("TimelineEntry", campaigns.Event{})
@@ -340,7 +341,10 @@ func (s *Server) openAPI() map[string]any {
 			"no version, or a word in its place, is unknown and not counted.")
 	describe(schemas, "FleetSummary", "operations_unconfirmed",
 		"Operations on the visible hosts whose outcome nobody could confirm and nobody has ruled on, the queue "+
-			"GET /api/v1/unresolved lists. Nothing ages out of it. The screen keeps the two uncertainties apart - "+
+			"GET /api/v1/unresolved lists, a page at a time: limit and offset cut the page out, q narrows by "+
+			"the host's name or the operation, total says how "+
+			"many the narrowed list holds, and the four counts answer for the whole visible fleet whatever the "+
+			"page shows. Nothing ages out of it. The screen keeps the two uncertainties apart - "+
 			"did it happen, did it hold - and this is their total, because it is the length of that queue. "+
 			"Missing for a reader without the right to read jobs.")
 	schemas["Problem"] = map[string]any{
@@ -530,6 +534,13 @@ var csvExports = map[string]bool{
 }
 
 var queryParameters = map[string][]queryParameter{
+	"GET /api/v1/unresolved": {
+		{"kind", "string", "outcome_unknown or applied_unverified; both when left out. They are different questions and are never summed."},
+		{"host_id", "string", "One host's unconfirmed operations."},
+		{"q", "string", "A fragment of the host's name or of the operation; case-insensitive. Not the reason: that is the host's own sentence in the host's own words, and a search over it would answer differently for two hosts that did the same thing."},
+		{"limit", "integer", "Rows on this page. The default is 100 and the most is 500; a larger number is served 500 rather than dropped to the default."},
+		{"offset", "integer", "Where the page starts. The order is total, so no row appears on two pages."},
+	},
 	"GET /api/v1/hosts": append([]queryParameter{
 		{"q", "string", "A fragment of the hostname, the management address, the machine identifier or the owner; case-insensitive."},
 		{"site", "string", ""},
@@ -1382,6 +1393,7 @@ var responseSchemas = map[string]map[string]any{
 	"GET /api/v1/jobs/{id}/attempts":                    collection("Attempt"),
 	"GET /api/v1/unresolved":                            ref("UnresolvedOperations"),
 	"POST /api/v1/unresolved/{id}/ruling":               ref("UnresolvedRuling"),
+	"POST /api/v1/unresolved/rulings":                   ref("UnresolvedRulings"),
 	"POST /api/v1/hosts/{id}/operations":                ref("Job"),
 	"GET /api/v1/campaigns":                             collection("Campaign"),
 	"POST /api/v1/campaigns":                            ref("Campaign"),
@@ -2121,6 +2133,22 @@ var requestSchemas = map[string]map[string]any{
 				"description": "Why: what was read, where it was looked for. Required - a ruling without one is a screen being cleared."},
 		},
 		"required": []string{"kind", "ruling", "basis"},
+	},
+	"POST /api/v1/unresolved/rulings": {
+		"type": "object",
+		"properties": map[string]any{
+			"kind": map[string]any{"type": "string",
+				"enum":        []string{"outcome_unknown", "applied_unverified"},
+				"description": "Which question is being answered, as for one attempt."},
+			"ruling": map[string]any{"type": "string",
+				"enum":        []string{"confirmed_applied", "confirmed_not_applied", "accepted_unknown"},
+				"description": "What the operator concluded about all of the attempts named."},
+			"basis": map[string]any{"type": "string",
+				"description": "Why: written once and recorded against every attempt separately. Required here exactly as it is for one attempt - a batch that asked for less would be the way round the requirement."},
+			"attempt_ids": map[string]any{"type": "array", "items": map[string]any{"type": "string"},
+				"description": "The attempts to rule on, named by the caller rather than selected by a filter the server reads again: a filter re-evaluated here would also rule on whatever arrived between the screen being drawn and the button being pressed. At most 500, which is the list's own cap."},
+		},
+		"required": []string{"kind", "ruling", "basis", "attempt_ids"},
 	},
 	"POST /api/v1/campaigns/{id}/pause":   reasonOnlyBody("Why the waves stop here; kept in the audit trail."),
 	"POST /api/v1/campaigns/{id}/resume":  reasonOnlyBody("Why the waves go on; kept in the audit trail."),

@@ -57,7 +57,9 @@ export default function Readiness() {
 
   return (
     <>
-      <PageHeader title={t("Readiness")} />
+      <PageHeader title={t("Readiness")}
+        help={<p>{t("What has been measured against the criteria for production, and what has not. A criterion with no measurement behind it is shown as unmeasured rather than as met.")}</p>}
+      />
       <Card>
         <FieldGrid>
           <Field label={t("hosts")}>{data.hosts}</Field>

@@ -1,4 +1,4 @@
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
@@ -8,9 +8,11 @@ import type {
   UnresolvedKind,
   UnresolvedOperations,
   UnresolvedRulingKind,
+  UnresolvedRulings,
 } from "../lib/types";
 import { ErrorBox, Empty, Time } from "../components/ui";
-import { Actions, Field, FieldGrid, PageHeader } from "../components/layout";
+import { Actions, Card, Field, FieldGrid, PageHeader, Toolbar } from "../components/layout";
+import { Icon } from "../components/icons";
 import { useT } from "../i18n";
 
 /**
@@ -48,23 +50,149 @@ export function anythingOpen(counts: UnresolvedCounts): boolean {
   return counts.outcome_unknown_operations > 0 || counts.applied_unverified_operations > 0;
 }
 
+/**
+ * The most rows one page may hold and the most attempts one batch ruling may
+ * carry: one number, because it is one of the server's caps (jobs.MaxPage).
+ */
+export const BATCH_LIMIT = 500;
+
+/** What the verifier expected and what it read off the host. */
+export type VerifierReading = {
+  expected?: string;
+  observed?: string;
+  reason?: string;
+  verified?: boolean;
+};
+
+/**
+ * The verifier's reading, which crosses the wire as base64 because the server
+ * writes it as bytes.
+ *
+ * Decoded through TextDecoder and not atob alone: atob gives one byte per
+ * character, so a path with a non-ASCII character in it would come out
+ * mangled in the one place an operator is reading it to find that character.
+ * Anything unreadable is no reading at all - this is host-shaped data, and a
+ * screen must not fall over because a host sent something odd.
+ */
+export function verifierReading(raw: unknown): VerifierReading | null {
+  if (raw && typeof raw === "object") return raw as VerifierReading;
+  if (typeof raw !== "string" || raw === "") return null;
+  try {
+    const bytes = Uint8Array.from(atob(raw), (c) => c.charCodeAt(0));
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    return parsed && typeof parsed === "object" ? (parsed as VerifierReading) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Which of three things the row actually says, which is not the same as which
+ * question is open.
+ *
+ * "did it hold?" covers two situations that call for different work and had
+ * been reading as one: a host that answered and shows something else - where
+ * the panel KNOWS the change did not hold - and a host that could not be read
+ * at all. The first is a conclusion, the second is the absence of one, and a
+ * screen that names them the same way reads as an excuse instead of a
+ * diagnosis.
+ */
+export type ReadingKind = "did_not_hold" | "could_not_read" | "outcome_unknown";
+
+export function readingKind(kind: UnresolvedKind, reading: VerifierReading | null): ReadingKind {
+  if (kind === "outcome_unknown") return "outcome_unknown";
+  if (!reading || !reading.observed || reading.observed === "unknown") return "could_not_read";
+  return "did_not_hold";
+}
+
+/**
+ * The page sizes the screen offers. The last one is the most the server will
+ * serve, so "more" means that and not an unbounded page: a list this one can
+ * grow to tens of thousands of rows, and a page of all of them is a browser
+ * that stops responding rather than a screen.
+ */
+export const PAGE_SIZES = [5, 10, 20, 50, 100, BATCH_LIMIT];
+
+/**
+ * The page numbers to show, with a gap where the numbers are skipped.
+ *
+ * Always the first and the last, always the ones either side of the current
+ * one: a list of thirty pages does not fit, and a reader needs to know how
+ * far the list goes as much as where in it they are.
+ */
+export function pageNumbers(current: number, pages: number, around = 2): (number | "gap")[] {
+  if (pages < 1) return [];
+  const wanted = new Set<number>([1, pages]);
+  for (let n = current - around; n <= current + around; n++) {
+    if (n >= 1 && n <= pages) wanted.add(n);
+  }
+  const sorted = [...wanted].sort((a, b) => a - b);
+  const out: (number | "gap")[] = [];
+  sorted.forEach((n, i) => {
+    // A single skipped number is printed rather than hidden behind a gap that
+    // takes as much room as it would.
+    if (i > 0 && n - sorted[i - 1] === 2) out.push(n - 1);
+    else if (i > 0 && n - sorted[i - 1] > 1) out.push("gap");
+    out.push(n);
+  });
+  return out;
+}
+
 export default function Unresolved() {
   const t = useT();
   const client = useQueryClient();
   const [kind, setKind] = useState<UnresolvedKind | "">("");
+  const [size, setSize] = useState(20);
+  const [page, setPage] = useState(1);
+  // What is typed, and what has been asked of the server. They are two states
+  // on purpose: a request per keystroke over a list of thousands is a screen
+  // that fights the typing.
+  const [typed, setTyped] = useState("");
+  const [search, setSearch] = useState("");
   // The attempt whose ruling is open, or none. One at a time: the form is a
   // row of the table and two of them would push the list apart.
   const [ruling, setRuling] = useState<string | null>(null);
+  const [batch, setBatch] = useState(false);
 
-  const { data, error } = useQuery({
-    queryKey: ["unresolved", kind],
-    queryFn: () =>
-      api.get<UnresolvedOperations>(`/api/v1/unresolved${kind ? `?kind=${kind}` : ""}`),
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearch(typed.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [typed]);
+
+  const { data, error, isPlaceholderData } = useQuery({
+    queryKey: ["unresolved", kind, size, page, search],
+    queryFn: () => {
+      const query = new URLSearchParams({ limit: String(size), offset: String((page - 1) * size) });
+      if (kind) query.set("kind", kind);
+      if (search) query.set("q", search);
+      return api.get<UnresolvedOperations>(`/api/v1/unresolved?${query}`);
+    },
   });
+
+  const total = data?.total ?? 0;
+  const pages = Math.max(1, Math.ceil(total / size));
+  // A page that stopped existing - the list shrank because somebody ruled on
+  // it - is not an error to show the operator, it is the last page.
+  //
+  // Only on an answer about THIS page, though. While the next page is being
+  // fetched the total belongs to the previous one, and a clamp that fired then
+  // would take a reader back to where they came from the moment they asked to
+  // move - which is what pressing 2 did.
+  const settled = data !== undefined && !isPlaceholderData;
+  useEffect(() => {
+    if (settled && page > pages) setPage(pages);
+  }, [settled, page, pages]);
 
   if (error) return <ErrorBox error={error} />;
   const counts = data?.counts;
   const items = data?.items ?? [];
+  const show = (next: UnresolvedKind | "") => {
+    setKind(next);
+    setPage(1);
+  };
 
   return (
     <>
@@ -81,11 +209,12 @@ export default function Unresolved() {
           // different work, so each names its own count. The badge in the
           // navigation does add them, because that one is the length of a
           // queue - a different question from this one.
+          <>
           <div className="segmented" role="group" aria-label={t("Which question to show")}>
             <button
               type="button"
               className={kind === "" ? "active" : ""}
-              onClick={() => setKind("")}
+              onClick={() => show("")}
               aria-pressed={kind === ""}
               data-testid="filter-both"
             >
@@ -106,7 +235,7 @@ export default function Unresolved() {
                   key={one}
                   type="button"
                   className={kind === one ? "active" : ""}
-                  onClick={() => setKind(one)}
+                  onClick={() => show(one)}
                   aria-pressed={kind === one}
                   data-testid={`filter-${one}`}
                   title={t(described.title)}
@@ -124,17 +253,125 @@ export default function Unresolved() {
               );
             })}
           </div>
+          {total > 0 && (
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => { setBatch(true); setRuling(null); }}
+              data-testid="rule-on-all"
+            >
+              {t("Rule on all {n} of them", { n: total })}
+            </button>
+          )}
+          </>
         )}
       />
 
+      {batch && (
+        <BatchRulingForm
+          kind={kind}
+          search={search}
+          total={total}
+          onClose={() => setBatch(false)}
+          onRuled={() => {
+            setBatch(false);
+            setPage(1);
+            client.invalidateQueries({ queryKey: ["unresolved"] });
+          }}
+        />
+      )}
+
+      <Card className="span-12" flush>
+        <Toolbar
+          end={
+            <>
+              <label className="inline">
+                {t("Rows per page")}
+                <select
+                  value={size}
+                  onChange={(e) => { setSize(Number(e.target.value)); setPage(1); }}
+                  data-testid="page-size"
+                >
+                  {PAGE_SIZES.map((one) => (
+                    <option key={one} value={one}>{one}</option>
+                  ))}
+                </select>
+              </label>
+              <span data-testid="page-of">
+                {total > 0
+                  ? t("{n} of {total}", {
+                      n: `${(page - 1) * size + 1}-${Math.min(page * size, total)}`,
+                      total,
+                    })
+                  : t("{n} of {total}", { n: 0, total: 0 })}
+              </span>
+              {pages > 1 && (
+                <nav className="pager segmented" aria-label={t("Pages")}>
+                  <button
+                    type="button"
+                    disabled={page <= 1}
+                    onClick={() => setPage(page - 1)}
+                    data-testid="page-previous"
+                    aria-label={t("Previous")}
+                  >
+                    ‹
+                  </button>
+                  {pageNumbers(page, pages).map((one, i) =>
+                    one === "gap" ? (
+                      /* The gap is not a button and is hidden from a screen
+                         reader: the numbers either side of it are the ones to
+                         press. */
+                      <span key={`gap-${i}`} className="pager-gap" aria-hidden="true">…</span>
+                    ) : (
+                      <button
+                        key={one}
+                        type="button"
+                        className={one === page ? "active" : ""}
+                        aria-current={one === page ? "page" : undefined}
+                        onClick={() => setPage(one)}
+                        data-testid={`page-${one}`}
+                      >
+                        {one}
+                      </button>
+                    ),
+                  )}
+                  <button
+                    type="button"
+                    disabled={page >= pages}
+                    onClick={() => setPage(page + 1)}
+                    data-testid="page-next"
+                    aria-label={t("Next")}
+                  >
+                    ›
+                  </button>
+                </nav>
+              )}
+            </>
+          }
+        >
+          <div className="search-field">
+            <Icon name="search" />
+            <input
+              type="search"
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              placeholder={t("a host or an operation")}
+              aria-label={t("Search")}
+              data-testid="unresolved-search"
+            />
+          </div>
+        </Toolbar>
+
       {items.length === 0 ? (
         <Empty>
-          {counts && anythingOpen(counts)
-            ? t("Nothing of this kind is open.")
-            : t("Every operation this fleet reported has an outcome somebody could confirm.")}
+          {search !== ""
+            ? t("No unconfirmed operation matches what you typed.")
+            : counts && anythingOpen(counts)
+              ? t("Nothing of this kind is open.")
+              : t("Every operation this fleet reported has an outcome somebody could confirm.")}
         </Empty>
       ) : (
-        <table className="data">
+        <table>
           <thead>
             <tr>
               <th scope="col">{t("Host")}</th>
@@ -159,7 +396,7 @@ export default function Unresolved() {
                     <Link to={`/jobs/${item.job_id}`}>{item.action}</Link>
                   </td>
                   <td>{t(describeKind(item.kind).question)}</td>
-                  <td className="muted">{item.reason || "—"}</td>
+                  <td><ReasonCell item={item} /></td>
                   <td><Time value={item.first_seen} /></td>
                   <td>
                     {item.last_checked_at ? (
@@ -205,7 +442,184 @@ export default function Unresolved() {
         </table>
       )}
 
+      </Card>
     </>
+  );
+}
+
+/**
+ * What the row says, before what the host said.
+ *
+ * The screen named a category of uncertainty where it could have named a
+ * fact: "did it hold?" covered both a host that answered and shows something
+ * else - where the panel knows the change did not hold - and a host that
+ * could not be read, which is the absence of that conclusion. The owner read
+ * the tab and could not tell what it was telling him, which is the evidence
+ * that naming them alike was wrong.
+ *
+ * The host's own sentence stays, underneath and marked as the host's: it is
+ * evidence, and it is in the language the agent writes its log in. What is
+ * composed here is in the operator's language, from the two fields the
+ * verifier recorded.
+ */
+function ReasonCell({ item }: { item: UnresolvedItem }) {
+  const t = useT();
+  const reading = verifierReading(item.verification);
+  const sort = readingKind(item.kind, reading);
+  return (
+    <div className="reason">
+      {sort === "did_not_hold" && (
+        <>
+          <p className="reason-verdict">{t("The change did not hold.")}</p>
+          <p className="reason-reading">
+            <span className="reason-label">{t("Ordered")}:</span> <code>{reading?.expected}</code>
+            {" · "}
+            <span className="reason-label">{t("On the host")}:</span> <code>{reading?.observed}</code>
+          </p>
+        </>
+      )}
+      {sort === "could_not_read" && (
+        <p className="reason-verdict">{t("The host could not be read, so the state is unknown.")}</p>
+      )}
+      {sort === "outcome_unknown" && (
+        <p className="reason-verdict">
+          {t("The agent restarted while the host was carrying this operation, so whether it finished is unknown.")}
+        </p>
+      )}
+      {item.reason ? (
+        <p className="source" data-testid="reason-host-words">
+          {t("what the host itself said")}: {item.reason}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * One ruling against every attempt the filter holds.
+ *
+ * It asks for the basis exactly as the single ruling does. A button that
+ * cleared thirty-one rows without a word would turn this screen into a
+ * counter to be zeroed, and then nobody could answer "who decided that, and
+ * on what grounds" - which is the question the screen exists to keep
+ * answerable.
+ */
+function BatchRulingForm({
+  kind,
+  search,
+  total,
+  onClose,
+  onRuled,
+}: {
+  kind: UnresolvedKind | "";
+  search: string;
+  total: number;
+  onClose: () => void;
+  onRuled: () => void;
+}) {
+  const t = useT();
+  const [verdict, setVerdict] = useState<UnresolvedRulingKind>("confirmed_not_applied");
+  const [basis, setBasis] = useState("");
+  const [done, setDone] = useState<UnresolvedRulings | null>(null);
+
+  const record = useMutation({
+    mutationFn: async () => {
+      // The attempts this screen can see, named one by one. The server does
+      // not re-read the filter: it would then also rule on whatever arrived
+      // between this list being fetched and the button being pressed.
+      const query = new URLSearchParams({ limit: String(BATCH_LIMIT), offset: "0" });
+      if (kind) query.set("kind", kind);
+      // The same narrowing the screen is showing: "all of them" means all of
+      // what the operator is looking at, not all of the fleet's.
+      if (search) query.set("q", search);
+      const page = await api.get<UnresolvedOperations>(`/api/v1/unresolved?${query}`);
+      return api.post<UnresolvedRulings>("/api/v1/unresolved/rulings", {
+        kind: kind || "applied_unverified",
+        ruling: verdict,
+        basis,
+        attempt_ids: page.items.map((one) => one.attempt_id),
+      });
+    },
+    onSuccess: (answer) => {
+      // Not closed on success: what could not be ruled on has to be read, and
+      // a form that vanished would take the refusals with it.
+      if (answer.refused && answer.refused.length > 0) setDone(answer);
+      else onRuled();
+    },
+  });
+
+  return (
+    <Card
+      title={t("Rule on all {n} of them", { n: Math.min(total, BATCH_LIMIT) })}
+      description={
+        total > BATCH_LIMIT
+          ? t("A batch carries at most {cap}; the rest stay on the list and can be ruled on next.", { cap: BATCH_LIMIT })
+          : t("One ruling, written once and recorded against every one of them separately.")
+      }
+    >
+      {done ? (
+        <>
+          <p>{t("{n} of {attempts} were ruled on.", { n: done.ruled, attempts: done.attempts })}</p>
+          <p className="source">{t("These were not, and are still on the list:")}</p>
+          <ul>
+            {done.refused?.map((one) => (
+              <li key={one.attempt_id}>
+                <code>{one.attempt_id}</code> — {one.message}
+              </li>
+            ))}
+          </ul>
+          <Actions>
+            <button type="button" onClick={onRuled}>{t("Close")}</button>
+          </Actions>
+        </>
+      ) : (
+        <>
+          <FieldGrid>
+            <Field label={t("What did you find?")}>
+              <select
+                value={verdict}
+                onChange={(e) => setVerdict(e.target.value as UnresolvedRulingKind)}
+                data-testid="batch-verdict"
+              >
+                <option value="confirmed_applied">{t("The change is there")}</option>
+                <option value="confirmed_not_applied">{t("The change is not there")}</option>
+                <option value="accepted_unknown">{t("It will not be known, and that is accepted")}</option>
+              </select>
+            </Field>
+            <Field
+              label={t("On what basis?")}
+              wide
+              hint={t("Required, and recorded against every one of them: a ruling without one is a screen being cleared.")}
+            >
+              <textarea
+                autoFocus
+                rows={2}
+                value={basis}
+                onChange={(e) => setBasis(e.target.value)}
+                placeholder={t("What you read, and where you looked.")}
+                data-testid="batch-basis"
+              />
+            </Field>
+          </FieldGrid>
+
+          {record.error ? <ErrorBox error={record.error} /> : null}
+
+          <Actions>
+            <button
+              type="button"
+              disabled={basis.trim() === "" || record.isPending}
+              onClick={() => record.mutate()}
+              data-testid="batch-save"
+            >
+              {t("Record the ruling for all of them")}
+            </button>
+            <button type="button" className="secondary" onClick={onClose}>
+              {t("Cancel")}
+            </button>
+          </Actions>
+        </>
+      )}
+    </Card>
   );
 }
 

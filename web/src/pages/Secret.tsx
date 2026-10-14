@@ -46,7 +46,9 @@ export function SecretPage() {
     if (secret.error instanceof ApiError && secret.error.status === 404) {
       return (
         <>
-          <PageHeader title={name} breadcrumb={[{ label: t("Secrets"), to: "/secrets" }]} />
+          <PageHeader title={name} breadcrumb={[{ label: t("Secrets"), to: "/secrets" }]}
+        help={<p>{t("Every version of this secret, newest first. The panel holds the ciphertext and the key it was sealed with; the value itself is shown only on request and is never written into a task.")}</p>}
+      />
           <EmptyState action={<Link to="/secrets">{t("Back to the secrets")}</Link>}>
             {t("No secret named {name} exists in this installation.", { name })}
           </EmptyState>
