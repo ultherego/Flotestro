@@ -495,6 +495,11 @@ func (s *Server) Routes() http.Handler {
 	// The effective configuration, secrets masked: what this panel was
 	// started with, for whoever administers it.
 	s.route(mux, "GET /api/v1/settings", s.handleSettings)
+	// How an arrangeable screen is laid out: which widgets it draws, in what
+	// order and how wide. It belongs to the installation, so everyone sees the
+	// same screen and can talk to each other over it.
+	s.route(mux, "GET /api/v1/settings/layout/{screen}", s.handleDashboardLayout)
+	s.route(mux, "PUT /api/v1/settings/layout/{screen}", s.handleSetDashboardLayout)
 	// The monitoring retentions are the installation's own setting rather than
 	// the process's: read here, and written without a restart.
 	s.route(mux, "GET /api/v1/settings/monitoring", s.handleMonitoringSettings)

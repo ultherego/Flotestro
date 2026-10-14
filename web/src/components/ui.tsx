@@ -1,6 +1,8 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { ApiError } from "../lib/api";
-import { optional, relativeTime, absoluteTime } from "../lib/format";
+import { optional, relativeTime, absoluteTime, bytes, duration, goDuration } from "../lib/format";
+import { copyToClipboard } from "../lib/clipboard";
+import { Icon } from "./icons";
 import { useErrorGuides } from "../lib/errors";
 import { useT } from "../i18n";
 
@@ -164,17 +166,204 @@ export function ErrorBox({ error }: { error: unknown }) {
   return <div className="page-error">{t("Error: {message}", { message })}</div>;
 }
 
-export function Pairs({ children }: { children: ReactNode }) {
-  return <dl className="pairs">{children}</dl>;
+/**
+ * A list of label/value pairs. One grid for the whole panel: the label track
+ * is elastic, every value wraps, and inside a narrow card the pairs stack so
+ * that a fingerprint or a DSN cannot push past the card's edge.
+ */
+export function Pairs({ children, stacked = false }: { children: ReactNode; stacked?: boolean }) {
+  return <dl className={stacked ? "pairs stacked" : "pairs"}>{children}</dl>;
 }
 
-export function Pair({ label, children }: { label: string; children: ReactNode }) {
+export function Pair({
+  label, hint, wide = false, children,
+}: {
+  label: string;
+  /** What the value means, on hover; a sentence does not belong in the list. */
+  hint?: string;
+  /** A value that needs the whole width: a table, a list, a long identifier. */
+  wide?: boolean;
+  children: ReactNode;
+}) {
   return (
     <>
-      <dt>{label}</dt>
-      <dd>{children}</dd>
+      <dt className={wide ? "wide" : undefined} title={hint}>{label}</dt>
+      <dd className={wide ? "wide" : undefined}>{children}</dd>
     </>
   );
+}
+
+/* ---------------------------------------------------------------------- */
+/* Values. Every screen that shows a fact of the server draws it through    */
+/* here, so a byte count, a duration and an identifier look the same        */
+/* wherever they appear - and so no screen has to invent the case it         */
+/* forgot.                                                                  */
+/* ---------------------------------------------------------------------- */
+
+/** How a value is read. `id` is for an opaque identifier, `duration` for a Go one. */
+export type FactKind =
+  | "text" | "number" | "bytes" | "seconds" | "ms" | "time" | "flag" | "duration" | "id";
+
+export function FactValue({ value, kind = "text" }: { value: unknown; kind?: FactKind }) {
+  const t = useT();
+  if (value === null || value === undefined || value === "") return <span className="source">—</span>;
+  switch (kind) {
+    case "flag":
+      return <span className={value ? "badge ok" : "badge error"}>{value ? t("yes") : t("no")}</span>;
+    case "bytes":
+      return <span className="mono">{bytes(Number(value))}</span>;
+    case "seconds":
+      return <span className="mono">{duration(Number(value))}</span>;
+    case "ms":
+      return <span className="mono">{Number(value).toFixed(1)} ms</span>;
+    case "time":
+      return <Time value={String(value)} />;
+    case "number":
+      return <span className="mono">{String(value)}</span>;
+    case "duration":
+      return <span className="mono" title={String(value)}>{goDuration(String(value))}</span>;
+    case "id":
+      return <Identifier value={String(value)} />;
+    default:
+      // An object reaching a text row is the one case that used to be drawn
+      // as raw JSON on one unbreakable line. It gets its own shape instead.
+      if (typeof value === "object") return <Structured value={value} />;
+      return <span className="mono">{String(value)}</span>;
+  }
+}
+
+/**
+ * An opaque identifier: a fingerprint, a uuid, a key id. Shown by its ends,
+ * because the middle of a hash carries nothing a reader can use, with the
+ * whole value on hover and one click to copy it.
+ */
+export function Identifier({ value, keep = 8 }: { value: string; keep?: number }) {
+  const t = useT();
+  const [copied, setCopied] = useState(false);
+  const short = value.length > keep * 2 + 3
+    ? `${value.slice(0, keep)}…${value.slice(-keep)}`
+    : value;
+  return (
+    <button
+      type="button"
+      className="identifier"
+      title={copied ? t("Copied") : value}
+      onClick={() => {
+        void copyToClipboard(value).then((done) => {
+          if (!done) return;
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 2000);
+        });
+      }}
+    >
+      <span className="mono">{short}</span>
+      <Icon name={copied ? "check" : "copy"} />
+    </button>
+  );
+}
+
+/**
+ * A value the server sent as a structure. A list of records becomes a table
+ * of its own keys, a map becomes a nested list, and a list of words becomes
+ * words - never a line of JSON, which is what a card cannot hold and a
+ * reader cannot read.
+ */
+export function Structured({ value }: { value: unknown }) {
+  const t = useT();
+  if (Array.isArray(value)) {
+    if (value.length === 0) return <span className="source">—</span>;
+    const records = value.filter((one) => one !== null && typeof one === "object" && !Array.isArray(one));
+    if (records.length !== value.length) {
+      return <span className="mono wrap">{value.map((one) => String(one)).join(", ")}</span>;
+    }
+    const columns = Array.from(new Set(records.flatMap((one) => Object.keys(one as object))));
+    // A table of eight columns inside a tile is not a table: it is a row
+    // with its end cut off. Past four fields each record is read as its own
+    // little list, which wraps and shows every field it has.
+    if (columns.length > 4) {
+      return (
+        <div className="records">
+          {records.map((record, index) => (
+            <dl className="pairs stacked nested" key={index}>
+              {columns
+                .filter((column) => (record as Record<string, unknown>)[column] !== undefined)
+                .map((column) => (
+                  <Pair key={column} label={t(labelOfKey(column))}>
+                    <FactValue value={(record as Record<string, unknown>)[column]} kind={kindOfKey(column)} />
+                  </Pair>
+                ))}
+            </dl>
+          ))}
+        </div>
+      );
+    }
+    return (
+      <TableScroll>
+        <table className="facts-table">
+          <thead>
+            <tr>{columns.map((column) => <th key={column} scope="col">{t(labelOfKey(column))}</th>)}</tr>
+          </thead>
+          <tbody>
+            {records.map((record, index) => (
+              <tr key={index}>
+                {columns.map((column) => (
+                  <td key={column}>
+                    <FactValue value={(record as Record<string, unknown>)[column]} kind={kindOfKey(column)} />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </TableScroll>
+    );
+  }
+  if (value !== null && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (entries.length === 0) return <span className="source">—</span>;
+    return (
+      <dl className="pairs stacked nested">
+        {entries.map(([key, one]) => (
+          <Pair key={key} label={t(labelOfKey(key))}>
+            <FactValue value={one} kind={kindOfKey(key)} />
+          </Pair>
+        ))}
+      </dl>
+    );
+  }
+  return <span className="mono wrap">{String(value)}</span>;
+}
+
+/**
+ * A table that cannot widen its card. Four columns in a card a third of the
+ * page wide used to push the last one past the border; now the table scrolls
+ * and the card holds its shape.
+ */
+export function TableScroll({ children }: { children: ReactNode }) {
+  return <div className="table-scroll">{children}</div>;
+}
+
+/* A key of the server read as words, for a structure no screen has named:
+   the fact is visible before any screen learns its label. A key that is not
+   one of the server's own names - the id a map is keyed by, say - is left
+   exactly as it came, because an identifier with a capital letter is a
+   different identifier. */
+function labelOfKey(key: string): string {
+  if (!/^[a-z][a-z0-9_]*$/.test(key)) return key;
+  const words = key.replace(/_/g, " ").trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/* What a key of a structure is, by its name. The server's own naming is
+   consistent enough to read: _at is a time, _seconds a duration, _bytes a
+   size, _id an identifier. */
+function kindOfKey(key: string): FactKind {
+  if (/(^|_)(id|uuid|fingerprint|digest|hash)$/.test(key)) return "id";
+  if (/_at$/.test(key)) return "time";
+  if (/_seconds(_ago)?$/.test(key)) return "seconds";
+  if (/_bytes$/.test(key)) return "bytes";
+  if (/_ms$/.test(key)) return "ms";
+  return "text";
 }
 
 export { optional };

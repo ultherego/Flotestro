@@ -353,7 +353,8 @@ export function Reports() {
       <PageHeader
         icon="audit"
         title={t("Reports")}
-        description={t("The patch status, the campaigns and the compliance of the fleet over a period, as a document to print or a file to open in a spreadsheet. Every number is the server's, the same one the screens show.")}
+        description={t("The fleet over a period, to print or to open in a spreadsheet.")}
+        help={<p>{t("The patch status, the campaigns and the compliance of the fleet over a period, as a document to print or a file to open in a spreadsheet. Every number is the server's, the same one the screens show.")}</p>}
         actions={
           <button type="button" className="secondary no-print" onClick={() => window.print()} disabled={!ready}>
             {t("Print")}

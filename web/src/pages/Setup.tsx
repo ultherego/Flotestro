@@ -50,7 +50,8 @@ export function Setup() {
     <>
       <PageHeader
         title={t("First run")}
-        description={t("What the panel needs before a company fleet is run from it, what is already there, and where the rest is put in.")}
+        description={t("What the panel needs before a fleet is run from it.")}
+        help={<p>{t("What the panel needs before a company fleet is run from it, what is already there, and where the rest is put in.")}</p>}
         icon="settings"
       />
 

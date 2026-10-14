@@ -394,7 +394,8 @@ export function FleetVulnerabilities() {
     <>
       <PageHeader
         title={t("Vulnerabilities")}
-        description={t("Decided by each distribution's own security tracker, because fixes are backported: a version that looks vulnerable upstream may already carry the patch. Upstream feeds can add descriptions and scores later, but they never overrule the vendor.")}
+        description={t("Decided by each distribution's own security tracker.")}
+        help={<p>{t("Decided by each distribution's own security tracker, because fixes are backported: a version that looks vulnerable upstream may already carry the patch. Upstream feeds can add descriptions and scores later, but they never overrule the vendor.")}</p>}
       />
       <FleetCoverage coverage={data} />
 

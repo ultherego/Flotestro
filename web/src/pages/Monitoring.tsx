@@ -7,7 +7,7 @@ import type {
   RuleCatalogue, RuleOperator, RuleSelector, Silence, Whoami,
 } from "../lib/types";
 import { ErrorBox, Time, Empty } from "../components/ui";
-import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, Stat, StatGrid, Toolbar } from "../components/layout";
+import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, Stat, StatGrid, Toolbar, Verdict } from "../components/layout";
 import { ExportButton } from "../components/ExportButton";
 import { PARTIAL_REASONS } from "../components/FleetCoverage";
 import { StatusBar } from "../components/widgets";
@@ -358,6 +358,9 @@ export function FleetMonitoring() {
   // then, not a fleet with nothing firing.
   const counts = data?.counts as (FleetView["counts"] & { acknowledged?: number }) | undefined;
   const firing = filterFiring((data?.firing ?? []) as NotedAlert[], firingFilter);
+  // What the headline answers: an alert somebody has taken is not one that
+  // waits for a person, and neither is a silenced or a pending one.
+  const waitingFor = (counts?.critical ?? 0) + (counts?.warning ?? 0) + (counts?.info ?? 0);
   // The board the server sent may stop at its cap: a full page is not a
   // whole board, and the note under the table says which this is.
   const boardShown = data?.partial ? shownOf(data.firing.length, data.firing_total) : undefined;
@@ -375,17 +378,38 @@ export function FleetMonitoring() {
     <>
       <PageHeader
         title={t("Monitoring")}
-        description={t("Every agent samples its host once a minute; the rules on this page turn the samples into alerts. Nothing fires without a rule an operator can read here.")}
+        description={t("What the agents' samples turned into alerts.")}
+        help={
+          <p>{t("Every agent samples its host once a minute; the rules on this page turn the samples into alerts. Nothing fires without a rule an operator can read here. A rule fires when a metric stays past its threshold for the given minutes on every host its scope selects, and a disabled rule is listed because it would apply the moment somebody enables it.")}</p>
+        }
         actions={canWrite && editing === null && (
           <button className="primary" onClick={() => setEditing("new")}>{t("New rule")}</button>
         )}
       />
 
+      <Verdict
+        tone={(counts?.critical ?? 0) > 0 ? "error" : (counts?.warning ?? 0) > 0 ? "warn" : data ? "ok" : "unknown"}
+        headline={
+          !data ? t("Reading alerts…")
+            : waitingFor === 0 ? t("Nothing is waiting for somebody")
+              : t("{n} alerts are waiting for somebody", { n: waitingFor })
+        }
+      >
+        <span>{t("{n} hosts reporting", { n: data?.hosts_reporting ?? 0 })}</span>
+        {/* An enrolled host with no recent sample is the failure this screen
+            exists to show: it is not a host with nothing wrong. */}
+        <span className={(data?.hosts_silent ?? 0) > 0 ? "verdict-fact warn" : undefined}>
+          {t("{n} gone quiet", { n: data?.hosts_silent ?? 0 })}
+        </span>
+        <span>{t("{n} rules enabled", { n: data?.rules ?? 0 })}</span>
+        {data && <span>{t("as of")} <Time value={data.generated_at} /></span>}
+      </Verdict>
+
       <div className="widgets">
         <Card
-          className="span-8"
+          className="span-12"
           title={t("Firing now")}
-          description={t("Alerts by severity across the hosts you can see, without the ones somebody took; the taken, silenced and pending ones counted apart.")}
+          description={t("By severity, across the hosts you can see.")}
         >
           <StatusBar segments={[
             { label: t("Critical"), value: counts?.critical, tone: "error" },
@@ -397,16 +421,6 @@ export function FleetMonitoring() {
           ]} />
         </Card>
 
-        <Card className="span-4" title={t("Coverage")} description={t("Who reports, who has gone quiet, and how many rules watch them.")}>
-          <StatGrid compact>
-            <Stat label={t("Hosts reporting")} value={data ? data.hosts_reporting : "—"} tone="ok" hint={t("a sample within the last few minutes")} />
-            <Stat label={t("Hosts silent")} value={data ? data.hosts_silent : "—"} tone={(data?.hosts_silent ?? 0) > 0 ? "warn" : undefined} hint={t("enrolled, but no recent sample")} />
-            <Stat label={t("Enabled rules")} value={data ? data.rules : "—"} hint={data ? <>{t("as of")} <Time value={data.generated_at} /></> : undefined} />
-          </StatGrid>
-        </Card>
-
-        <AgentFootprintCard footprint={data?.agent_footprint} loaded={data !== undefined} />
-
         {message && (
           <div className="span-12">
             <p className="hm-message">{message}</p>
@@ -416,7 +430,7 @@ export function FleetMonitoring() {
         <Card
           className="span-12"
           title={t("Firing alerts")}
-          description={t("Each one names the rule and the value that tripped it; a silence here covers that rule on that host, and an acknowledgement says somebody is on it while the sensor stays on.")}
+          description={t("What tripped, where, and whether somebody has it.")}
           actions={
             <select value={firingFilter} onChange={(e) => setFiringFilter(e.target.value as FiringFilter)}>
               <option value="">{t("every firing alert")}</option>
@@ -463,7 +477,8 @@ export function FleetMonitoring() {
         <Card
           className="span-12"
           title={t("Rules")}
-          description={t("A rule fires when a metric stays past its threshold for the given minutes on every host its scope selects. A disabled rule is listed because it would apply the moment somebody enables it.")}
+          description={t("What turns a sample into an alert.")}
+          actions={<span className="source">{t("{n} rules", { n: ruleItems.length })}</span>}
           flush
         >
           {rules.error ? (
@@ -544,7 +559,8 @@ export function FleetMonitoring() {
         <Card
           className="span-8"
           title={t("Recent alerts")}
-          description={t("The last fifty, newest first: what fired, when, and whether it has resolved.")}
+          description={t("The last fifty, newest first.")}
+          flush
           actions={
             <>
               <select value={historyState} onChange={(e) => setHistoryState(e.target.value as AlertState | "")}>
@@ -562,7 +578,6 @@ export function FleetMonitoring() {
               <ExportButton path="/api/v1/monitoring/alerts" params={historyParams} />
             </>
           }
-          flush
         >
           {history.error ? (
             <ErrorBox error={history.error} />
@@ -608,11 +623,8 @@ export function FleetMonitoring() {
         <Card
           className="span-4"
           title={t("Silences in force")}
-          description={t("Every silence ends by itself; ending one here brings the alert back at once. A silence of one host never keeps back a security alert of the installation - only a global one does.")}
+          description={t("Every silence ends by itself.")}
           flush
-          footer={canSilenceFleet && (
-            <FleetSilenceForm canSilenceGlobal={canSilenceGlobal} onDone={refresh} onMessage={setMessage} />
-          )}
         >
           {silences.error ? (
             <ErrorBox error={silences.error} />
@@ -658,7 +670,14 @@ export function FleetMonitoring() {
               </tbody>
             </table>
           )}
+          {/* Silencing the whole fleet is an action of this list, so it
+              stands where the list is rather than in a footer of its own. */}
+          {canSilenceFleet && (
+            <FleetSilenceForm canSilenceGlobal={canSilenceGlobal} onDone={refresh} onMessage={setMessage} />
+          )}
         </Card>
+
+        <AgentFootprintCard footprint={data?.agent_footprint} loaded={data !== undefined} />
       </div>
     </>
   );
@@ -684,7 +703,8 @@ function AgentFootprintCard({ footprint, loaded }: { footprint?: FleetFootprint;
     <Card
       className="span-12"
       title={t("Agent footprint")}
-      description={t("Memory and CPU of the agent itself, from the newest sample of every reporting host; the hosts over the budget are named.")}
+      description={t("What the agents cost the hosts they run on.")}
+      tone={overRSS || overCPU ? "warn" : undefined}
       actions={budget && <span className="source">{budget}</span>}
     >
       <StatGrid compact>

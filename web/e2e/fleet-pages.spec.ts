@@ -241,13 +241,14 @@ test.describe("monitoring", () => {
     await expectCounted(firing, 6);
     await expect(firing.getByRole("listitem").filter({ hasText: "Acknowledged" })).toHaveCount(1);
 
-    // The coverage tiles carry the numbers of the API answer.
-    const coverage = card(page, "Coverage");
-    await expect(coverage.locator(".stat").filter({ hasText: "Hosts reporting" }).locator(".stat-value")).toHaveText(String(summary.hosts_reporting));
-    await expect(coverage.locator(".stat").filter({ hasText: "Hosts silent" }).locator(".stat-value")).toHaveText(String(summary.hosts_silent));
-    await expect(coverage.locator(".stat").filter({ hasText: "Enabled rules" }).locator(".stat-value")).toHaveText(String(summary.rules));
+    // The coverage of the sampling is in the verdict line, with the numbers
+    // of the API answer.
+    const verdict = page.getByTestId("verdict");
+    await expect(verdict.locator(".verdict-facts")).toContainText(`${summary.hosts_reporting} hosts reporting`);
+    await expect(verdict.locator(".verdict-facts")).toContainText(`${summary.hosts_silent} gone quiet`);
+    await expect(verdict.locator(".verdict-facts")).toContainText(`${summary.rules} rules enabled`);
 
-    // The rules table lists as many rules as the tiles count, or says
+    // The rules table lists as many rules as the catalogue holds, or says
     // that there are none.
     const rules = card(page, "Rules");
     await expect(rules.locator("tbody tr").first().or(rules.getByText(/No rules yet|You do not have permission/))).toBeVisible();
@@ -371,23 +372,36 @@ test.describe("settings", () => {
 
     await page.goto("/settings");
     await expect(header(page, "Settings")).toBeVisible();
-    await expect(page.locator(".page-header .page-description")).toContainText(settings.source);
+    // Where the values come from is the long answer, and it waits behind the
+    // mark beside the title rather than taking the top of every page view.
+    await expect(page.getByTestId("page-help")).toHaveCount(0);
+    await page.getByTestId("page-help-toggle").click();
+    await expect(page.getByTestId("page-help")).toContainText(settings.source);
+
     // The areas the API reports, not the retention editor beside them: that
     // one writes and has no entry in /api/v1/settings.
-    const cards = page.locator("[data-testid='settings-areas'] .card");
-    await expect(cards).toHaveCount(settings.areas.length);
+    const areas = page.locator("[data-testid='settings-areas'] .part");
+    await expect(areas).toHaveCount(settings.areas.length);
     for (const area of settings.areas) {
-      const section = card(page, area.title);
-      await expect(section).toHaveCount(1);
-      await expect(section.locator("dt")).toHaveCount(area.facts.length);
+      const tile = areas.filter({ has: page.getByText(area.title, { exact: true }) }).first();
+      await expect(tile).toHaveCount(1);
+      await expect(tile.locator("dt")).toHaveCount(area.facts.length);
+      await expect(tile.locator(".part-summary")).toContainText(`${area.facts.length} value`);
       // A secret is never shown, only whether it is set.
       for (const fact of area.facts.filter((entry) => entry.secret)) {
-        const value = section.locator("dd").nth(area.facts.indexOf(fact));
+        const value = tile.locator("dd").nth(area.facts.indexOf(fact));
         await expect(value).toContainText(fact.configured ? "set" : "not set");
         // Not even the mask the API sends in place of the value.
         if (typeof fact.value === "string" && fact.value !== "") await expect(value).not.toContainText(fact.value);
       }
     }
+
+    // The search is how a configuration screen is actually read: a name in
+    // mind, and only what carries it on the screen.
+    const first = settings.areas[0];
+    await page.getByTestId("settings-search").fill(first.title);
+    await expect(page.locator("[data-testid='settings-areas'] .part")).toHaveCount(1);
+
     await expectHealthy(page, errors);
   });
 });

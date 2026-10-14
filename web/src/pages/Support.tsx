@@ -125,7 +125,8 @@ export function Support() {
       <PageHeader
         icon="logs"
         title={t("Support bundle")}
-        description={t("A set of readings of this panel - its build, its status, its settings and the counts of the fleet - for whoever is helping you. No credential, key or token is read, and an assembled bundle that carries one is refused rather than written. The archive is encrypted where it rests and removed when its retention runs out.")}
+        description={t("Readings of this panel for whoever is helping you.")}
+        help={<p>{t("A set of readings of this panel - its build, its status, its settings and the counts of the fleet - for whoever is helping you. No credential, key or token is read, and an assembled bundle that carries one is refused rather than written. The archive is encrypted where it rests and removed when its retention runs out.")}</p>}
       />
 
       <div className="widgets">

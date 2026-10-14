@@ -126,9 +126,12 @@ export function FleetCertificates() {
     <>
       <PageHeader
         title={t("Certificates")}
-        description={t("Expiry dates from the paths the panel watches and from everything certmonger tracks. Warning at {warning} days, urgent at {critical}. A host that reports no certificate is not a host without them — it is a host nobody has pointed at a path yet.", {
+        description={t("Expiry dates of everything the panel watches.", {
           warning: data.thresholds.warning_days, critical: data.thresholds.critical_days,
         })}
+        help={<p>{t("Expiry dates from the paths the panel watches and from everything certmonger tracks. Warning at {warning} days, urgent at {critical}. A host that reports no certificate is not a host without them — it is a host nobody has pointed at a path yet.", {
+          warning: data.thresholds.warning_days, critical: data.thresholds.critical_days,
+        })}</p>}
         actions={<ExportButton path="/api/v1/certificates" />}
       />
       <FleetCoverage coverage={data} />

@@ -10,7 +10,9 @@ export type IconName =
   // The host modules.
   | "overview" | "packages" | "services" | "processes" | "schedules" | "kernel" | "time" | "power"
   | "network" | "dns" | "firewall" | "ssh" | "storage" | "files" | "containers" | "compose"
-  | "accounts" | "identity" | "logs";
+  | "accounts" | "identity" | "logs"
+  // The shared affordances: copy a value, confirm it was copied, ask what a screen means.
+  | "copy" | "check" | "help";
 
 const PATHS: Record<IconName, string> = {
   dashboard: "M3 3h8v8H3zM13 3h8v5h-8zM13 11h8v10h-8zM3 14h8v7H3z",
@@ -70,6 +72,9 @@ const PATHS: Record<IconName, string> = {
   identity: "M3 5h18v14H3zM7 15a3 3 0 0 1 6 0M10 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4M15 10h4M15 14h4",
   logs: "M4 6h16M4 10h12M4 14h16M4 18h8",
   back: "M19 12H5M11 6l-6 6 6 6",
+  copy: "M9 9h11v11H9zM15 9V4H4v11h5",
+  check: "M5 12l5 5 9-10",
+  help: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM9.5 9.2a2.6 2.6 0 0 1 5 .9c0 1.7-2.5 2-2.5 3.6M12 17h.01",
   star: "M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1.1 5.9-5.3-2.8-5.3 2.8 1.1-5.9-4.3-4.1 5.9-.8z",
 };
 

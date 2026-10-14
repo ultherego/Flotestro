@@ -227,7 +227,8 @@ export function Secrets() {
     <>
       <PageHeader
         title={t("Secrets")}
-        description={t("Values go in and do not come out. Nothing here can read a secret back: the only way out is a short lease issued to one host for one job, and the value never appears in a job payload, in the audit trail or in inventory. The store is encrypted with a key kept outside the database.")}
+        description={t("Values go in and do not come out.")}
+        help={<p>{t("Values go in and do not come out. Nothing here can read a secret back: the only way out is a short lease issued to one host for one job, and the value never appears in a job payload, in the audit trail or in inventory. The store is encrypted with a key kept outside the database.")}</p>}
       />
 
       <div className="widgets">

@@ -142,7 +142,8 @@ export function Profile({ theme, setTheme }: {
       <PageHeader
         icon="user"
         title={t("Profile")}
-        description={t("Who the panel takes you for, what you may do and where, where you are signed in, and how you like the panel.")}
+        description={t("Who the panel takes you for, and how you like it.")}
+        help={<p>{t("Who the panel takes you for, what you may do and where, where you are signed in, and how you like the panel.")}</p>}
       />
 
       <div className="widgets">

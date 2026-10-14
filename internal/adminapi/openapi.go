@@ -101,6 +101,8 @@ func (s *Server) openAPI() map[string]any {
 	register("CalendarEntry", calendarEntry{})
 	register("SearchResult", searchItem{})
 	register("SettingsArea", settingsArea{})
+	register("DashboardLayout", DashboardLayout{})
+	register("DashboardWidget", DashboardWidget{})
 	register("MonitoringSettings", monitoringSettingsBody{})
 	register("Setup", setupChecklist{})
 	register("AdvertisedAddress", advertisedAddressAnswer{})
@@ -1029,8 +1031,10 @@ var responseSchemas = map[string]map[string]any{
 			"areas": map[string]any{"type": "array", "items": ref("SettingsArea")},
 		},
 	},
-	"GET /api/v1/settings/advertised": ref("AdvertisedAddress"),
-	"PUT /api/v1/settings/advertised": ref("AdvertisedAddress"),
+	"GET /api/v1/settings/advertised":      ref("AdvertisedAddress"),
+	"PUT /api/v1/settings/advertised":      ref("AdvertisedAddress"),
+	"GET /api/v1/settings/layout/{screen}": ref("DashboardLayout"),
+	"PUT /api/v1/settings/layout/{screen}": ref("DashboardLayout"),
 	"GET /api/v1/settings/monitoring": map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -1965,6 +1969,14 @@ var requestSchemas = map[string]map[string]any{
 			"reason": map[string]any{"type": "string",
 				"description": "Kept on the audit trail beside the names."},
 		},
+	},
+	"PUT /api/v1/settings/layout/{screen}": {
+		"type":        "object",
+		"description": "The whole layout, in the order it is drawn. The widget keys belong to the panel's own catalogue; one this panel does not know is skipped when the screen is drawn rather than refused here.",
+		"properties": map[string]any{
+			"widgets": map[string]any{"type": "array", "items": ref("DashboardWidget")},
+		},
+		"required": []string{"widgets"},
 	},
 	"PUT /api/v1/settings/monitoring": {
 		"type":        "object",

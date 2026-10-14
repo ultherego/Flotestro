@@ -13,6 +13,8 @@ import type { SetupChecklist, SetupState, SetupStep } from "../lib/setup";
 
 let checklist: SetupChecklist;
 let summary: { hosts: number };
+/** What the security module answers, or refuses to. */
+let security: Promise<unknown> = Promise.resolve({ checks: [], partial: false, unknown_hosts: 0 });
 
 vi.mock("../lib/api", async () => {
   const actual = await vi.importActual<typeof import("../lib/api")>("../lib/api");
@@ -24,7 +26,7 @@ vi.mock("../lib/api", async () => {
         if (path.startsWith("/api/v1/setup")) return Promise.resolve(checklist);
         if (path.startsWith("/api/v1/fleet/summary")) return Promise.resolve(summary);
         if (path.startsWith("/api/v1/fleet/activity")) return Promise.resolve(ACTIVITY);
-        if (path.startsWith("/api/v1/security")) return Promise.resolve({ checks: [], partial: false, unknown_hosts: 0 });
+        if (path.startsWith("/api/v1/security")) return security;
         return Promise.resolve({ items: [], total: 0 });
       },
       post: () => Promise.reject(new Error("the dashboard writes nothing")),
@@ -78,6 +80,7 @@ function draw(node: ReactNode) {
 
 beforeEach(() => {
   summary = { ...EMPTY_FLEET };
+  security = Promise.resolve({ checks: [], partial: false, unknown_hosts: 0 });
 });
 
 afterEach(cleanup);
@@ -155,5 +158,70 @@ describe("the first-run card", () => {
     draw(<Dashboard />);
     await waitFor(() => expect(screen.getByText("3 hosts you can see")).toBeInTheDocument());
     expect(screen.queryByText("No host is enrolled yet")).not.toBeInTheDocument();
+  });
+});
+
+/* ---------------------------------------------------------------------- */
+/* The three zones. A dashboard of nine cards, three tables and twenty-one */
+/* tiles said nothing until all of it had been read; the rule now is that  */
+/* a zone with nothing in it is not drawn and a list stays closed.         */
+/* ---------------------------------------------------------------------- */
+
+describe("the dashboard's three zones", () => {
+  const quietFleet = {
+    hosts: 12, online: 12, offline: 0, active_sessions: 2,
+    jobs_awaiting_approval: 0, campaigns_awaiting_approval: 0, directory_changes_pending: 0,
+    hosts_drifted: 0, operations_unconfirmed: 0, failed_jobs_24h: 0, reboot_required: 0,
+  };
+
+  it("answers in one line when the fleet needs nothing", async () => {
+    summary = quietFleet as typeof summary;
+    draw(<Dashboard />);
+    // The zone is drawn before the counters arrive, so the wait is for the
+    // answer and not for the element.
+    await waitFor(() => expect(screen.getByTestId("verdict")).toHaveTextContent("Nothing needs a decision"));
+    expect(screen.getByTestId("verdict")).toHaveTextContent("12 hosts you can see");
+    // The zone for what needs a person is not an empty heading: it is absent.
+    expect(screen.queryByTestId("needs-attention")).toBeNull();
+  });
+
+  it("counts the decisions and the findings apart in its headline", async () => {
+    summary = {
+      ...quietFleet,
+      jobs_awaiting_approval: 2, operations_unconfirmed: 1,
+      failed_jobs_24h: 3, reboot_required: 4,
+    } as typeof summary;
+    draw(<Dashboard />);
+    // Three waiting on a person, seven found on the hosts.
+    await waitFor(() => expect(screen.getByTestId("verdict")).toHaveTextContent("3 decisions waiting"));
+    expect(screen.getByTestId("verdict")).toHaveTextContent("7 things need a look");
+    const zone = screen.getByTestId("needs-attention");
+    expect(zone).toHaveTextContent("Decisions nobody has taken");
+    expect(zone).toHaveTextContent("Found on the hosts");
+  });
+
+  /* The rule the whole panel keeps: a count nobody could take is not a
+     count of zero. A refused security sweep has to keep the zone on the
+     screen, with a dash where the number would be. */
+  it("keeps the zone when a count could not be taken at all", async () => {
+    summary = quietFleet as typeof summary;
+    security = Promise.reject(new Error("the sweep is refused for this reader"));
+    draw(<Dashboard />);
+    await waitFor(() => expect(screen.getByTestId("needs-attention")).toBeInTheDocument());
+    const zone = screen.getByTestId("needs-attention");
+    expect(zone).toHaveTextContent("Security findings");
+    expect(zone.textContent).toContain("\u2014");
+  });
+
+  it("keeps its three lists as lists, each saying what is in it", async () => {
+    summary = quietFleet as typeof summary;
+    draw(<Dashboard />);
+    // Nothing is in progress, nothing failed and nothing was denied in this
+    // fleet, so each list says so in its own words rather than standing empty.
+    await waitFor(() => expect(screen.getByText("No campaigns need attention.")).toBeInTheDocument());
+    expect(screen.getByText("No failed operations.")).toBeInTheDocument();
+    expect(screen.getByText("No denials in recent events.")).toBeInTheDocument();
+    // And nothing on this screen is behind a fold.
+    expect(screen.queryAllByTestId("section-head")).toHaveLength(0);
   });
 });

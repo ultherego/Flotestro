@@ -407,7 +407,8 @@ export function Schedules() {
     <>
       <PageHeader
         title={t("Scheduled campaigns")}
-        description={t("A schedule places a campaign order at its moment; the campaign then waits for its approval like any other. The calendar shows what the fleet has ahead.")}
+        description={t("A schedule places a campaign order at its moment.")}
+        help={<p>{t("A schedule places a campaign order at its moment; the campaign then waits for its approval like any other. The calendar shows what the fleet has ahead.")}</p>}
         breadcrumb={[{ label: t("Campaigns"), to: "/campaigns" }]}
         actions={
           <button onClick={() => { setEditing(emptyForm()); setEditingID(""); setErrorMessage(""); }} disabled={Boolean(editing)}>

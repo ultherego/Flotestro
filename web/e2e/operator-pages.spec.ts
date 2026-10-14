@@ -358,6 +358,19 @@ test.describe("reports", () => {
   });
 });
 
+/* The names the status screen gives the server's blocks. Kept here so the
+   test addresses what a reader sees rather than the key behind it. */
+const BLOCK_TITLES: Record<string, string> = {
+  database: "Database", replicas: "Replicas", crypto: "Cryptographic state", migrations: "Schema",
+  outbox: "Durable trail", scheduler: "Scheduler", sessions: "Sessions", relays: "Relays",
+  directory: "Directory connector", vulnerability_feeds: "Vulnerability feeds",
+  certificates: "Certificates", monitoring: "Monitoring", housekeeping: "Housekeeping",
+};
+
+function blockTitle(name: string): string {
+  return BLOCK_TITLES[name] ?? name;
+}
+
 test.describe("status", () => {
   test("the panel judges itself and says what it is built from", async ({ page, request }) => {
     test.skip(!granted.has("settings.read") && !granted.has("principal.manage"), absent("the token may not read the status (settings.read)"));
@@ -368,16 +381,33 @@ test.describe("status", () => {
 
     await page.goto("/status");
     await expect(header(page, "Status")).toBeVisible();
-    const verdict = page.locator(".card").filter({ has: page.locator("dt", { hasText: exact("Verdict") }) }).first();
-    await expect(verdict).toBeVisible();
-    await expect(verdict.locator(".badge").first()).toHaveText(status.ok ? "every judged part is fine" : "a part of the panel is not fine");
-    await expect(verdict.locator("dt", { hasText: exact("Not judged") })).toBeVisible();
-    await expect(verdict.locator("dt", { hasText: exact("Last refresh") })).toBeVisible();
+    // The verdict of the whole panel, in one line and without a box.
+    const verdict = page.getByTestId("verdict");
+    await expect(verdict.locator(".verdict-headline")).toHaveText(
+      status.ok ? "Every judged part of this panel is fine" : "A part of this panel is not fine",
+    );
+    await expect(verdict.locator(".verdict-facts")).toContainText(
+      status.unknown > 0 ? "could not be judged" : "parts judged",
+    );
+
+    // Every part is on the screen at once; a part that is not fine - and
+    // unknown counts as not fine - carries the mark that says so.
+    const parts = page.locator(".part");
+    await expect(parts.first()).toBeVisible();
+    for (const [name, block] of Object.entries(status.blocks)) {
+      if (name === "build") continue;
+      const judged = (block as { ok: boolean | null; attention?: string });
+      const tone = judged.ok === null ? "unknown" : !judged.ok ? "error" : judged.attention ? "warn" : "ok";
+      const tile = parts.filter({ has: page.locator(".part-head", { hasText: blockTitle(name) }) }).first();
+      if (await tile.count() === 0) continue;
+      await expect(tile).toHaveClass(new RegExp(`\\b${tone}\\b`));
+    }
 
     if (status.blocks.build) {
-      await expect(card(page, "About")).toBeVisible();
-      await expect(card(page, "About").locator("dt").first()).toBeVisible();
+      const about = parts.filter({ has: page.locator(".part-head", { hasText: exact("About") }) }).first();
+      await expect(about.locator("dt").first()).toBeVisible();
     }
+
     await expect(page.locator(".page-header").getByRole("link", { name: "OpenAPI" })).toHaveAttribute("href", "/api/v1/openapi.json");
     await expectHealthy(page, errors);
   });

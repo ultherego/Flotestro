@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 import type { ReactElement } from "react";
-import { Card, Columns, EmptyState, Field, FieldGrid, MoreFilters, PageHeader, Stat, StatGrid, Toolbar } from "./layout";
+import { Card, Columns, EmptyState, Field, FieldGrid, MoreFilters, NeedsAttention, PageHeader, Stat, StatGrid, Toolbar, Verdict } from "./layout";
 import { ModuleHeader, Section, Stats, Summary, Widgets } from "../pages/host/shared";
 
 /**
@@ -327,5 +327,51 @@ describe("MoreFilters", () => {
     // narrowed by a control nobody can see looks wrong for no reason.
     expect(getByTestId("more-filters-row")).toBeInTheDocument();
     expect(getByTestId("more-filters")).toHaveAttribute("aria-expanded", "true");
+  });
+});
+
+describe("Verdict", () => {
+  it("is the headline and its few facts, without a box of its own", () => {
+    const { getByTestId } = draw(
+      <Verdict tone="ok" headline="Every judged part is fine"><span>all 13 judged</span></Verdict>,
+    );
+    const zone = getByTestId("verdict");
+    expect(zone.className).toContain("ok");
+    expect(zone.querySelector(".verdict-headline")).toHaveTextContent("Every judged part is fine");
+    expect(zone.querySelector(".verdict-facts")).toHaveTextContent("all 13 judged");
+    // Not a card: a card is what the rest of the page is made of.
+    expect(zone.classList.contains("card")).toBe(false);
+  });
+});
+
+describe("NeedsAttention", () => {
+  it("draws nothing at all when nothing needs a decision", () => {
+    const { queryByTestId } = draw(<NeedsAttention title="Needs a look">{[]}</NeedsAttention>);
+    expect(queryByTestId("needs-attention")).toBeNull();
+  });
+
+  it("names what needs one when something does", () => {
+    const { getByTestId } = draw(
+      <NeedsAttention title="Needs a look"><p>Replicas: one is behind</p></NeedsAttention>,
+    );
+    expect(getByTestId("needs-attention")).toHaveTextContent("Replicas: one is behind");
+  });
+});
+
+describe("the page header's explanation", () => {
+  it("keeps the paragraph behind the mark beside the title", () => {
+    const { getByTestId, queryByTestId } = draw(
+      <PageHeader title="Status" description="One line." help={<p>The long explanation.</p>} />,
+      "/status",
+    );
+    expect(queryByTestId("page-help")).toBeNull();
+    expect(getByTestId("page-help-toggle")).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(getByTestId("page-help-toggle"));
+    expect(getByTestId("page-help")).toHaveTextContent("The long explanation.");
+  });
+
+  it("has no mark when a screen has nothing more to say", () => {
+    const { queryByTestId } = draw(<PageHeader title="Tags" description="One line." />, "/tags");
+    expect(queryByTestId("page-help-toggle")).toBeNull();
   });
 });

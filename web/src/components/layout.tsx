@@ -19,15 +19,24 @@ export type Crumb = { label: string; to: string };
  * belong to the whole page.
  */
 export function PageHeader({
-  title, description, actions, breadcrumb, icon,
+  title, description, help, actions, breadcrumb, icon,
 }: {
   title: ReactNode;
+  /** One line, at most about eighty characters: what this page is for. */
   description?: ReactNode;
+  /**
+   * The rest of the explanation, behind a mark beside the title. A paragraph
+   * is read once and takes the top of the page every time after that, so it
+   * waits here until somebody asks for it.
+   */
+  help?: ReactNode;
   actions?: ReactNode;
   breadcrumb?: Crumb[];
   /** The mark of the section; without it the header takes the one of its route. */
   icon?: IconName;
 }) {
+  const t = useT();
+  const [helpOpen, setHelpOpen] = useState(false);
   const location = useLocation();
   const mark = icon ?? iconForPath(location.pathname);
   // The tab is named after the page.
@@ -44,8 +53,23 @@ export function PageHeader({
               ))}
             </nav>
           )}
-          <h1 className="page-title">{title}</h1>
+          <h1 className="page-title">
+            {title}
+            {help && (
+              <button
+                type="button"
+                className="page-help-toggle"
+                aria-expanded={helpOpen}
+                title={t("What this screen is for")}
+                onClick={() => setHelpOpen(!helpOpen)}
+                data-testid="page-help-toggle"
+              >
+                <Icon name="help" />
+              </button>
+            )}
+          </h1>
           {description && <p className="page-description">{description}</p>}
+          {help && helpOpen && <div className="page-help" data-testid="page-help">{help}</div>}
         </div>
         {actions && <div className="page-actions">{actions}</div>}
       </div>
@@ -289,4 +313,55 @@ export function EmptyState({ children, action }: { children: ReactNode; action?:
  */
 export function Columns({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
   return <div className={wide ? "columns wide" : "columns"}>{children}</div>;
+}
+
+/* ---------------------------------------------------------------------- */
+/* The three zones of a page: the verdict, what needs a decision, and the  */
+/* detail. Nothing else belongs at the top level of a screen.              */
+/* ---------------------------------------------------------------------- */
+
+/**
+ * The answer the page exists to give, in one line and without a border.
+ *
+ * A screen that opens with sixteen bordered boxes of equal weight has no
+ * entry point: the eye has nowhere to land and every box asks to be read.
+ * This is the one thing that is read first, so it is the one thing that is
+ * not in a box.
+ */
+export function Verdict({
+  tone, headline, children, actions,
+}: {
+  tone?: Tone;
+  /** The sentence or the number that answers the page's question. */
+  headline: ReactNode;
+  /** The few facts that qualify it; three or four, not a list. */
+  children?: ReactNode;
+  actions?: ReactNode;
+}) {
+  const classes = ["verdict", tone].filter(Boolean).join(" ");
+  return (
+    <section className={classes} data-testid="verdict">
+      <div className="verdict-row">
+        <p className="verdict-headline">{headline}</p>
+        {actions && <div className="verdict-actions">{actions}</div>}
+      </div>
+      {children && <div className="verdict-facts">{children}</div>}
+    </section>
+  );
+}
+
+/**
+ * What the reader has to do something about. The zone draws nothing at all
+ * when it is empty, which is the point: an empty heading reads as a thing
+ * the page is still loading.
+ */
+export function NeedsAttention({ title, children }: { title: ReactNode; children?: ReactNode }) {
+  const count = Children.toArray(children).filter(Boolean).length;
+  if (count === 0) return null;
+  return (
+    <section className="needs-attention" data-testid="needs-attention">
+      <h2 className="needs-attention-title">{title}</h2>
+      <div className="needs-attention-body">{children}</div>
+    </section>
+  );
 }

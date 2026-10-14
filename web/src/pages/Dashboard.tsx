@@ -5,10 +5,11 @@ import { api, type Collection } from "../lib/api";
 import type { AuditEvent, Campaign, FleetActivity, FleetSummary, Job } from "../lib/types";
 import { relativeTime } from "../lib/format";
 import { ErrorBox, ErrorCode, Time, Empty, JobState } from "../components/ui";
-import { Card, PageHeader, Stat, StatGrid } from "../components/layout";
-import { BarChart, Breakdown, CountRow, StatusBar } from "../components/widgets";
+import { Card, NeedsAttention, PageHeader, Verdict } from "../components/layout";
+import { BarChart, Breakdown, CountRow, StatusBar, type Segment } from "../components/widgets";
 import { FleetCoverage, type Coverage } from "../components/FleetCoverage";
 import { FirstRunCard } from "../components/FirstRunCard";
+import { Board, type BoardEntry } from "../components/board";
 import { useT } from "../i18n";
 
 /**
@@ -98,10 +99,6 @@ export function Dashboard() {
     ? <span className="badge unknown">{t("unknown")}</span>
     : key);
 
-  // A count above zero on a tile that should read zero is the alarm; the
-  // rest of the tiles are the fleet's size, not a state.
-  const warnAbove = (value?: number) => ((value ?? 0) > 0 ? "warn" : undefined);
-  const errorAbove = (value?: number) => ((value ?? 0) > 0 ? "error" : undefined);
   // The window the failed-task counter covers, for the link to the list.
   const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
@@ -109,13 +106,6 @@ export function Dashboard() {
     s?.jobs_awaiting_approval, s?.campaigns_awaiting_approval, s?.campaigns_manual_gate,
     s?.directory_changes_pending, s?.hosts_drifted, s?.operations_unconfirmed,
   ].reduce<number>((sum, value) => sum + (value ?? 0), 0);
-
-  // The tile has something to show when at least one kind of decision
-  // is the reader's to take.
-  const decidable = s !== undefined && [
-    s.jobs_awaiting_approval, s.campaigns_awaiting_approval, s.directory_changes_pending, s.hosts_drifted,
-    s.operations_unconfirmed,
-  ].some((value) => value !== undefined);
 
   const attention = [
     s?.reboot_required, s?.with_failed_units, s?.package_database_broken, s?.sssd_offline,
@@ -125,278 +115,248 @@ export function Dashboard() {
     s?.relays_buffer_high, s?.duplicate_identities_24h, s?.enrollment_refusals_1h, s?.agents_unsupported,
   ].reduce<number>((sum, value) => sum + (value ?? 0), 0);
 
+  // What the fleet needs from a person, and what it has found wrong. The two
+  // are counted apart: an approval is somebody's decision, a finding is a
+  // state of a host.
+  const decisions: Segment[] = s === undefined ? [] : ([
+    { label: t("Jobs"), value: s.jobs_awaiting_approval, tone: "warn", to: "/jobs?state=awaiting_approval" },
+    { label: t("Campaigns"), value: s.campaigns_awaiting_approval, tone: "warn", to: "/campaigns?state=awaiting_approval" },
+    { label: t("Campaigns at a gate"), value: s.campaigns_manual_gate, tone: "warn", to: "/campaigns?state=manual_gate" },
+    { label: t("Directory changes"), value: s.directory_changes_pending, tone: "warn", to: "/directory" },
+    { label: t("Hosts drifted"), value: s.hosts_drifted, tone: "warn", to: "/policies" },
+    { label: t("Unconfirmed outcomes"), value: s.operations_unconfirmed, tone: "warn", to: "/unresolved" },
+    { label: t("Pending enrollments"), value: s.pending_enrollment_requests, tone: "warn", to: "/hosts/new" },
+  ] as Segment[]).filter((count) => count.value !== undefined);
+
+  const problems: Segment[] = ([
+    { label: t("Failed jobs, 24 h"), value: s?.failed_jobs_24h, tone: "error", to: `/jobs?state=failed&since=${encodeURIComponent(dayAgo)}` },
+    { label: t("Package database broken"), value: s?.package_database_broken, tone: "error", to: "/hosts?package_db_broken=true" },
+    { label: t("Agent certificates expired"), value: s?.agent_certificates_expired, tone: "error", to: "/hosts?connection_refusal=certificate_expired" },
+    { label: t("Degraded relays"), value: s?.degraded_relays, tone: "error", to: "/relays" },
+    { label: t("Duplicate identities, 24 h"), value: s?.duplicate_identities_24h, tone: "error", to: "/audit?action=security.duplicate_identity" },
+    { label: t("Agents unsupported"), value: s?.agents_unsupported, tone: "error", to: "/hosts?agent_behind=true" },
+    { label: t("Reboot required"), value: s?.reboot_required, tone: "warn", to: "/hosts?reboot_required=true" },
+    { label: t("With failed units"), value: s?.with_failed_units, tone: "warn", to: "/hosts?failed_units=true" },
+    { label: t("Security updates pending"), value: s?.hosts_with_security_updates, tone: "warn", to: "/hosts?security_updates=true" },
+    { label: t("Helper not on enforce"), value: s?.helper_capability_legacy, tone: "warn", to: "/hosts?helper_mode=prefer" },
+    { label: t("SSSD offline"), value: s?.sssd_offline, tone: "warn", to: "/hosts?sssd_offline=true" },
+    { label: t("Agent certificates expiring"), value: s?.agent_certificates_expiring, tone: "warn" },
+    { label: t("Relay buffers high"), value: s?.relays_buffer_high, tone: "warn", to: "/relays" },
+    { label: t("Enrollment refusals, 1 h"), value: s?.enrollment_refusals_1h, tone: "warn", to: "/audit?action=host.enroll&outcome=denied" },
+    { label: t("Agents behind the newest"), value: s?.agents_behind_latest, tone: "warn", to: "/hosts?agent_behind=true" },
+  ] as Segment[]).filter((count) => count.value !== undefined);
+
+  // The security module answers for itself, and until it does its two counts
+  // are absent rather than zero: they keep their place with a dash. A counter
+  // the fleet summary left out is a different thing - it is one this reader
+  // may not have, and it is left out here too.
+  const findings: Segment[] = [
+    { label: t("Security findings"), value: securityFailed, tone: "error", to: "/security" },
+    ...problems,
+    { label: t("Checks with no answer"), value: securityUnknown, tone: "unknown", to: "/security" },
+  ];
+
+  // The zone is drawn for something above zero, or for something nobody
+  // could count. A fleet of zeros is answered by the verdict alone.
+  const needsYou = [...decisions, ...findings]
+    .some((count) => count.value === undefined || (count.value ?? 0) > 0);
+
+  // The headline. A fleet with nothing waiting and nothing wrong says so in
+  // one line, and that line is the whole answer somebody opened this for.
+  const quiet = waiting === 0 && attention === 0;
+  const headline = s === undefined
+    ? t("Reading the fleet…")
+    : quiet
+      ? t("Nothing needs a decision")
+      : waiting === 0
+        ? t("{attention} things need a look")
+        : attention === 0
+          ? t("{waiting} decisions waiting")
+          : t("{waiting} decisions waiting, {attention} things need a look");
+
   return (
     <>
       <PageHeader
         title={t("Fleet dashboard")}
-        description={<>{t("Only what needs a decision.")} <Refreshed at={summary.dataUpdatedAt} fetching={summary.isFetching} onRefresh={() => summary.refetch()} /></>}
+        description={t("Only what needs a decision.")}
+        help={
+          <p>{t("Every counter here is taken in the database over the hosts you are allowed to see, not over a page of them. A counter the server could not answer honestly for your view is left out rather than drawn as zero, and a count at zero is a word under the row rather than a tile.")}</p>
+        }
+        actions={<Refreshed at={summary.dataUpdatedAt} fetching={summary.isFetching} onRefresh={() => summary.refetch()} />}
       />
 
       {/* An empty fleet is a panel on its first run, not a fleet with
           nothing wrong: the card reads the server's checklist, so the empty
           tiles below are not the whole answer and this screen keeps no
           account of the flow of its own. */}
-      {s?.hosts === 0 && (
-        <div style={{ marginBottom: 16 }}>
-          <FirstRunCard />
-        </div>
-      )}
+      {s?.hosts === 0 && <FirstRunCard />}
 
-      {/* The two bars are the state of the fleet read from across the
-          room: where the hosts are, and what is wrong. */}
-      <div className="widgets">
-        <Card className="span-7" title={t("Host availability")} description={t("{n} hosts you can see", { n: s?.hosts ?? 0 })}>
-          <StatusBar segments={[
-            { label: t("Online"), value: s?.online, tone: "ok", to: "/hosts?connection_state=online" },
-            { label: t("Stale"), value: a ? byConnection("stale") ?? 0 : undefined, tone: "warn", to: "/hosts?connection_state=stale" },
-            { label: t("Offline"), value: a ? byConnection("offline") ?? 0 : undefined, tone: "error", to: "/hosts?connection_state=offline" },
-            { label: t("Unknown"), value: a ? byConnection("unknown") ?? 0 : undefined, tone: "unknown", to: "/hosts?connection_state=unknown" },
-            { label: t("Quarantined"), value: s?.quarantined_hosts, tone: "neutral", to: "/hosts?lifecycle_state=quarantined" },
-            { label: t("In maintenance"), value: s?.in_maintenance, tone: "neutral", to: "/hosts?maintenance=true" },
-          ]} />
-        </Card>
-        <Card className="span-5" title={t("Problems")} description={t("Findings that need a decision, by kind.")}>
-          {/* Not a bar: these five count different things, so a width
-              divided between them stands for nothing. */}
-          <CountRow counts={[
-            { label: t("Security findings"), value: securityFailed, tone: "error", to: "/security" },
-            { label: t("Failed jobs, 24 h"), value: s?.failed_jobs_24h, tone: "error", to: `/jobs?state=failed&since=${encodeURIComponent(dayAgo)}` },
-            { label: t("Reboot required"), value: s?.reboot_required, tone: "warn", to: "/hosts?reboot_required=true" },
-            { label: t("Security updates pending"), value: s?.hosts_with_security_updates, tone: "warn", to: "/hosts?security_updates=true" },
-            { label: t("Checks with no answer"), value: securityUnknown, tone: "unknown", to: "/security" },
-          ]} />
-          <FleetCoverage coverage={securityCoverage} />
-        </Card>
+      <Verdict
+        tone={s === undefined ? "unknown" : quiet ? "ok" : attention > 0 ? "warn" : undefined}
+        headline={t(headline, { waiting, attention })}
+      >
+        <span>{t("{n} hosts you can see", { n: s?.hosts ?? 0 })}</span>
+        <span>{t("{n} online", { n: s?.online ?? 0 })}</span>
+        {s?.quarantined_hosts ? <span>{t("{n} quarantined", { n: s.quarantined_hosts })}</span> : null}
+        {s?.in_maintenance ? <span>{t("{n} in maintenance", { n: s.in_maintenance })}</span> : null}
+      </Verdict>
 
-        <Card className="span-5" title={t("Operations, last 24 h")} description={t("Finished per hour, by outcome.")}>
-          {a ? (
-            <BarChart
-              labels={a.hours.map(hourLabel)}
-              everyLabel={3}
-              series={[
-                { name: t("Succeeded"), tone: "ok", values: a.succeeded },
-                { name: t("Failed"), tone: "error", values: a.failed },
-                { name: t("Other"), tone: "unknown", values: a.other },
-              ]}
-            />
-          ) : <Empty>{t("Loading…")}</Empty>}
-        </Card>
+      <NeedsAttention title={t("What needs you")}>
+        {needsYou ? (
+          <Card>
+            {decisions.length > 0 && (
+              <>
+                <h4 className="widget-subhead first">{t("Decisions nobody has taken")}</h4>
+                <CountRow counts={decisions} />
+              </>
+            )}
+            {findings.length > 0 && (
+              <>
+                <h4 className="widget-subhead">{t("Found on the hosts")}</h4>
+                <CountRow counts={findings} />
+                <FleetCoverage coverage={securityCoverage} />
+              </>
+            )}
+          </Card>
+        ) : null}
+      </NeedsAttention>
 
-        {/* A tile the server left out is a counter it could not answer
-            honestly for this view; it is missing, not zero. */}
-        <Card
-          className="span-4"
-          title={t("Needs attention")}
-          description={t("Counted in the database over the hosts you can see.")}
-          actions={attention > 0 && <span className="badge warn">{attention}</span>}
-        >
-          {/* foldZeros: this card's own description says it counts what needs
-              attention, and twelve of its fifteen tiles read zero. */}
-          <StatGrid compact foldZeros>
-            {/* Every tile leads to the host list narrowed to the hosts it
-                counted: the count is the question, the list the answer. */}
-            <Stat label={t("Reboot required")} value={s?.reboot_required} tone={warnAbove(s?.reboot_required)} to="/hosts?reboot_required=true" />
-            <Stat label={t("With failed units")} value={s?.with_failed_units} tone={warnAbove(s?.with_failed_units)} to="/hosts?failed_units=true" />
-            <Stat label={t("Package database broken")} value={s?.package_database_broken} tone={errorAbove(s?.package_database_broken)} to="/hosts?package_db_broken=true" />
-            <Stat label={t("SSSD offline")} value={s?.sssd_offline} tone={warnAbove(s?.sssd_offline)} to="/hosts?sssd_offline=true" />
-            {/* A host not on enforce carries out a mutating request that arrives
-                without the panel's signed capability. The tile leads to those
-                hosts, because the mode is a state of the host and moving it on
-                is done there: prefer, then observe, then enforce. */}
-            <Stat
-              label={t("Helper not on enforce")}
-              value={s?.helper_capability_legacy}
-              tone={warnAbove(s?.helper_capability_legacy)}
-              hint={t("these hosts act on an unsigned request")}
-              to="/hosts?helper_mode=prefer"
-            />
-            {s?.pending_enrollment_requests !== undefined && (
-              <Stat label={t("Pending enrollments")} value={s.pending_enrollment_requests} tone={warnAbove(s.pending_enrollment_requests)} to="/hosts/new" />
-            )}
-            {s?.agents_behind_latest !== undefined && (
-              <Stat
-                label={t("Agents behind {version}", { version: s.latest_agent_version ?? "" })}
-                value={s.agents_behind_latest}
-                tone={warnAbove(s.agents_behind_latest)}
-                hint={t("newest version seen in the fleet")}
-                to="/hosts?agent_behind=true"
-              />
-            )}
-            {/* Two tiles for one lifetime: an agent renews with ten days
-                left, so a certificate inside its last week is one the agent
-                should already have renewed, and one that has run out is a
-                host that comes back only through an identity recovery. */}
-            {s?.agent_certificates_expiring !== undefined && (
-              <Stat label={t("Agent certificates expiring")} value={s.agent_certificates_expiring} hint={t("within 7 days; the agent renews at 10 days left")} tone={warnAbove(s.agent_certificates_expiring)} />
-            )}
-            {s?.agent_certificates_expired !== undefined && (
-              <Stat label={t("Agent certificates expired")} value={s.agent_certificates_expired} hint={t("needs identity recovery")} tone={errorAbove(s.agent_certificates_expired)} to="/hosts?connection_refusal=certificate_expired" />
-            )}
-            {s?.degraded_relays !== undefined && (
-              <Stat label={t("Degraded relays")} value={s.degraded_relays} hint={t("missed renewal")} tone={errorAbove(s.degraded_relays)} to="/relays" />
-            )}
-            {/* The lifecycle document's alarms that no host sample can
-                carry: a relay filling up, a cloned identity, a burst of
-                refused enrollments, an agent the panel cannot talk to.
-                Each is a counter over the trail or the heartbeats, and
-                each leads where the detail is. */}
-            {s?.relays_buffer_high !== undefined && (
-              <Stat label={t("Relay buffers high")} value={s.relays_buffer_high} hint={t("at least 70 % full")} tone={warnAbove(s.relays_buffer_high)} to="/relays" />
-            )}
-            {s?.duplicate_identities_24h !== undefined && (
-              <Stat label={t("Duplicate identities, 24 h")} value={s.duplicate_identities_24h} hint={t("a cloned machine or image")} tone={errorAbove(s.duplicate_identities_24h)} to="/audit?action=security.duplicate_identity" />
-            )}
-            {s?.enrollment_refusals_1h !== undefined && (
-              <Stat label={t("Enrollment refusals, 1 h")} value={s.enrollment_refusals_1h} hint={t("a burst is a leaked token")} tone={warnAbove(s.enrollment_refusals_1h)} to="/audit?action=host.enroll&outcome=denied" />
-            )}
-            {s?.agents_unsupported !== undefined && (
-              <Stat label={t("Agents unsupported")} value={s.agents_unsupported} hint={t("a protocol this panel does not speak")} tone={errorAbove(s.agents_unsupported)} to="/hosts?agent_behind=true" />
-            )}
-            <Stat label={t("Active sessions")} value={s?.active_sessions} />
-          </StatGrid>
-        </Card>
-
-        {/* What waits for a person, by kind, each count leading to the
-            list it was taken from. A kind the reader may not see is left
-            out rather than shown as nothing waiting. */}
-        <Card
-          className="span-3"
-          title={t("Waiting for approval")}
-          description={t("Decisions nobody has taken yet.")}
-          actions={waiting > 0 && <span className="badge warn">{waiting}</span>}
-        >
-          {!s ? <Empty>{t("Loading…")}</Empty> : !decidable ? <Empty>{t("Nothing you may decide on.")}</Empty> : (
-            // Same promise, same treatment: a decision nobody has taken is
-            // news, and a counter at zero is not one.
-            <StatGrid compact foldZeros>
-              {s.jobs_awaiting_approval !== undefined && (
-                <Stat label={t("Jobs")} value={s.jobs_awaiting_approval} tone={warnAbove(s.jobs_awaiting_approval)} to="/jobs?state=awaiting_approval" />
-              )}
-              {s.campaigns_awaiting_approval !== undefined && (
-                <Stat label={t("Campaigns")} value={s.campaigns_awaiting_approval} tone={warnAbove(s.campaigns_awaiting_approval)} to="/campaigns?state=awaiting_approval" />
-              )}
-              {s.campaigns_manual_gate !== undefined && (
-                <Stat label={t("Campaigns at a gate")} value={s.campaigns_manual_gate} hint={t("a wave waits for a go-ahead")} tone={warnAbove(s.campaigns_manual_gate)} to="/campaigns?state=manual_gate" />
-              )}
-              {s.directory_changes_pending !== undefined && (
-                <Stat label={t("Directory changes")} value={s.directory_changes_pending} tone={warnAbove(s.directory_changes_pending)} to="/directory" />
-              )}
-              {s.hosts_drifted !== undefined && (
-                <Stat label={t("Hosts drifted")} value={s.hosts_drifted} hint={t("a policy disagrees with the host")} tone={warnAbove(s.hosts_drifted)} to="/policies" />
-              )}
-              {s.operations_unconfirmed !== undefined && (
-                <Stat label={t("Unconfirmed outcomes")} value={s.operations_unconfirmed} hint={t("nothing ages these out")} tone={warnAbove(s.operations_unconfirmed)} to="/unresolved" />
-              )}
-            </StatGrid>
-          )}
-        </Card>
-
-        <Card className="span-3" title={t("Fleet composition")} description={t("By system, agent build, site and environment.")}>
-          {a ? (
-            <>
-              <Breakdown items={a.by_os_family.map((f) => ({ label: facetLabel(f.key), value: f.count }))} />
-              <h4 className="widget-subhead">{t("Agent builds")}</h4>
-              <Breakdown tone="neutral" items={a.by_agent_version.map((f) => ({ label: facetLabel(f.key), value: f.count }))} />
-              {/* Sites and environments are two dimensions, not one list:
-                  "lab 6, test 6" under one heading reads as two sites. */}
-              <h4 className="widget-subhead">{t("Sites")}</h4>
-              <Breakdown tone="ok" items={a.by_site.map((f) => ({ label: facetLabel(f.key), value: f.count }))} />
-              <h4 className="widget-subhead">{t("Environments")}</h4>
-              <Breakdown tone="ok" items={a.by_environment.map((f) => ({ label: facetLabel(f.key), value: f.count }))} />
-            </>
-          ) : <Empty>{t("Loading…")}</Empty>}
-        </Card>
-
-        <Card
-          className="span-5"
-          title={t("Campaigns in progress")}
-          actions={activeCampaigns.length > 0 && <span className="badge">{activeCampaigns.length}</span>}
-          flush
-        >
-          {activeCampaigns.length === 0 ? (
-            <Empty>{t("No campaigns need attention.")}</Empty>
-          ) : (
-            <table>
-              <thead>
-                <tr><th scope="col">{t("Name")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Operation")}</th><th scope="col">{t("Pause reason")}</th></tr>
-              </thead>
-              <tbody>
-                {activeCampaigns.map((campaign) => (
-                  <tr key={campaign.id}>
-                    <td><Link to={`/campaigns/${campaign.id}`}>{campaign.name}</Link></td>
-                    <td><JobState state={campaign.state} /></td>
-                    <td className="mono">{campaign.action_type}</td>
-                    <td>{campaign.pause_reason || ""}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </Card>
-
-        <Card
-          className="span-4"
-          title={t("Recent failures")}
-          description={t("The last operations that failed, newest first.")}
-          actions={<Link to="/jobs?state=failed">{t("All jobs")}</Link>}
-          flush
-        >
-          {(failures.data?.items ?? []).length === 0 ? (
-            <Empty>{t("No failed operations.")}</Empty>
-          ) : (
-            <table>
-              <thead><tr><th scope="col">{t("Time")}</th><th scope="col">{t("Host")}</th><th scope="col">{t("Operation")}</th><th scope="col">{t("Error")}</th></tr></thead>
-              <tbody>
-                {/* The time leads to the job itself, the host to its
-                    history: the two questions a failure raises. */}
-                {(failures.data?.items ?? []).map((job) => (
-                  <tr key={job.id}>
-                    <td><Link to={`/jobs/${job.id}`}><Time value={job.finished_at ?? job.created_at} /></Link></td>
-                    <td><Link to={`/hosts/${job.host_id}/jobs`}>{job.hostname || job.host_id.slice(0, 8)}</Link></td>
-                    <td className="mono"><Link to={`/jobs/${job.id}`}>{job.action_type}</Link></td>
-                    <td><ErrorCode code={job.result_error_code || "failed"} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </Card>
-
-        <Card
-          className="span-12"
-          title={t("Recent access denials")}
-          actions={(
-            <>
-              {denied.length > 0 && <span className="badge error">{denied.length}</span>}
-              <Link to="/audit?outcome=denied">{t("All denials")}</Link>
-            </>
-          )}
-          flush
-        >
-          {denied.length === 0 ? (
-            <Empty>{t("No denials in recent events.")}</Empty>
-          ) : (
-            <table>
-              <thead><tr><th scope="col">{t("Time")}</th><th scope="col">{t("Actor")}</th><th scope="col">{t("Operation")}</th><th scope="col">{t("Reason")}</th></tr></thead>
-              <tbody>
-                {denied.map((event) => (
-                  <tr key={event.id}>
-                    <td><Time value={event.occurred_at} /></td>
-                    {/* The actor leads to their trail: one denial is a
-                        typo, a run of them is somebody probing. */}
-                    <td className="mono"><Link to={`/audit?actor=${encodeURIComponent(event.actor_id)}`}>{event.actor_id}</Link></td>
-                    <td className="mono">{event.action}</td>
-                    {/* The reason is a code with a guide on hover, the
-                        way a job's error is: what it means and what to
-                        do about it. */}
-                    <td><DenialReason reason={event.detail?.reason} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </Card>
-      </div>
+      {/* Where the fleet is, read across the room. */}
+      <Board screen="dashboard" catalogue={DASHBOARD_CATALOGUE} drawn={{
+            host_availability: (
+              <Card title={t("Host availability")}>
+                <StatusBar segments={[
+                  { label: t("Online"), value: s?.online, tone: "ok", to: "/hosts?connection_state=online" },
+                  { label: t("Stale"), value: a ? byConnection("stale") ?? 0 : undefined, tone: "warn", to: "/hosts?connection_state=stale" },
+                  { label: t("Offline"), value: a ? byConnection("offline") ?? 0 : undefined, tone: "error", to: "/hosts?connection_state=offline" },
+                  { label: t("Unknown"), value: a ? byConnection("unknown") ?? 0 : undefined, tone: "unknown", to: "/hosts?connection_state=unknown" },
+                  { label: t("Quarantined"), value: s?.quarantined_hosts, tone: "neutral", to: "/hosts?lifecycle_state=quarantined" },
+                  { label: t("In maintenance"), value: s?.in_maintenance, tone: "neutral", to: "/hosts?maintenance=true" },
+                ]} />
+              </Card>
+            ),
+            operations_24h: (
+              <Card title={t("Operations, last 24 h")} description={t("Finished per hour, by outcome.")}>
+                {a ? (
+                  <BarChart
+                    labels={a.hours.map(hourLabel)}
+                    everyLabel={3}
+                    series={[
+                      { name: t("Succeeded"), tone: "ok", values: a.succeeded },
+                      { name: t("Failed"), tone: "error", values: a.failed },
+                      { name: t("Other"), tone: "unknown", values: a.other },
+                    ]}
+                  />
+                ) : <Empty>{t("Loading…")}</Empty>}
+              </Card>
+            ),
+            fleet_composition: (
+              <Card title={t("Fleet composition")} description={t("By system, agent build, site and environment.")}>
+                {a ? (
+                  <>
+                    <Breakdown items={a.by_os_family.map((f) => ({ label: facetLabel(f.key), value: f.count }))} />
+                    <h4 className="widget-subhead">{t("Agent builds")}</h4>
+                    <Breakdown tone="neutral" items={a.by_agent_version.map((f) => ({ label: facetLabel(f.key), value: f.count }))} />
+                    {/* Sites and environments are two dimensions, not one list:
+                        "lab 6, test 6" under one heading reads as two sites. */}
+                    <h4 className="widget-subhead">{t("Sites")}</h4>
+                    <Breakdown tone="ok" items={a.by_site.map((f) => ({ label: facetLabel(f.key), value: f.count }))} />
+                    <h4 className="widget-subhead">{t("Environments")}</h4>
+                    <Breakdown tone="ok" items={a.by_environment.map((f) => ({ label: facetLabel(f.key), value: f.count }))} />
+                  </>
+                ) : <Empty>{t("Loading…")}</Empty>}
+              </Card>
+            ),
+            campaigns_in_progress: (
+              <Card
+                title={t("Campaigns in progress")}
+                actions={activeCampaigns.length > 0 && <span className="badge">{activeCampaigns.length}</span>}
+                flush
+              >
+                {activeCampaigns.length === 0 ? (
+                  <Empty>{t("No campaigns need attention.")}</Empty>
+                ) : (
+                  <table>
+                    <thead>
+                      <tr><th scope="col">{t("Name")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Operation")}</th><th scope="col">{t("Pause reason")}</th></tr>
+                    </thead>
+                    <tbody>
+                      {activeCampaigns.map((campaign) => (
+                        <tr key={campaign.id}>
+                          <td><Link to={`/campaigns/${campaign.id}`}>{campaign.name}</Link></td>
+                          <td><JobState state={campaign.state} /></td>
+                          <td className="mono">{campaign.action_type}</td>
+                          <td>{campaign.pause_reason || ""}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </Card>
+            ),
+            recent_failures: (
+              <Card
+                title={t("Recent failures")}
+                actions={<Link to="/jobs?state=failed">{t("All jobs")}</Link>}
+                flush
+              >
+                {(failures.data?.items ?? []).length === 0 ? (
+                  <Empty>{t("No failed operations.")}</Empty>
+                ) : (
+                  <table>
+                    <thead><tr><th scope="col">{t("Time")}</th><th scope="col">{t("Host")}</th><th scope="col">{t("Operation")}</th><th scope="col">{t("Error")}</th></tr></thead>
+                    <tbody>
+                      {/* The time leads to the job itself, the host to its
+                          history: the two questions a failure raises. */}
+                      {(failures.data?.items ?? []).map((job) => (
+                        <tr key={job.id}>
+                          <td><Link to={`/jobs/${job.id}`}><Time value={job.finished_at ?? job.created_at} /></Link></td>
+                          <td><Link to={`/hosts/${job.host_id}/jobs`}>{job.hostname || job.host_id.slice(0, 8)}</Link></td>
+                          <td className="mono"><Link to={`/jobs/${job.id}`}>{job.action_type}</Link></td>
+                          <td><ErrorCode code={job.result_error_code || "failed"} /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </Card>
+            ),
+            access_denials: (
+              <Card
+                title={t("Recent access denials")}
+                actions={
+                  <>
+                    {denied.length > 0 && <span className="badge error">{denied.length}</span>}
+                    <Link to="/audit?outcome=denied">{t("All denials")}</Link>
+                  </>
+                }
+                flush
+              >
+                {denied.length === 0 ? (
+                  <Empty>{t("No denials in recent events.")}</Empty>
+                ) : (
+                  <table>
+                    <thead><tr><th scope="col">{t("Time")}</th><th scope="col">{t("Actor")}</th><th scope="col">{t("Operation")}</th><th scope="col">{t("Reason")}</th></tr></thead>
+                    <tbody>
+                      {denied.map((event) => (
+                        <tr key={event.id}>
+                          <td><Time value={event.occurred_at} /></td>
+                          {/* The actor leads to their trail: one denial is a
+                              typo, a run of them is somebody probing. */}
+                          <td className="mono"><Link to={`/audit?actor=${encodeURIComponent(event.actor_id)}`}>{event.actor_id}</Link></td>
+                          <td className="mono">{event.action}</td>
+                          {/* The reason is a code with a guide on hover, the
+                              way a job's error is: what it means and what to
+                              do about it. */}
+                          <td><DenialReason reason={event.detail?.reason} /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </Card>
+            ),
+      }} />
     </>
   );
 }
@@ -435,14 +395,24 @@ function Refreshed({ at, fetching, onRefresh }: { at: number; fetching: boolean;
     <span className="source" data-testid="refreshed">
       {at > 0 ? t("refreshed {when}", { when: relativeTime(new Date(at).toISOString()) }) : t("not yet loaded")}
       {" · "}
-      <button
-        type="button"
-        style={{ background: "none", border: 0, padding: 0, font: "inherit", color: "inherit", textDecoration: "underline dotted", cursor: "pointer" }}
-        onClick={onRefresh}
-        disabled={fetching}
-      >
+      {/* The panel already has a button that reads as a link; this one
+          carried its own copy of those declarations inline. */}
+      <button type="button" className="link" onClick={onRefresh} disabled={fetching}>
         {fetching ? t("refreshing…") : t("refresh now")}
       </button>
     </span>
   );
 }
+
+/**
+ * The widgets of the fleet dashboard: the name each is picked by in the
+ * arrange mode, and the width it takes until somebody says otherwise.
+ */
+export const DASHBOARD_CATALOGUE: BoardEntry[] = [
+  { key: "host_availability", title: "Host availability", width: 12 },
+  { key: "operations_24h", title: "Operations, last 24 h", width: 6 },
+  { key: "fleet_composition", title: "Fleet composition", width: 6 },
+  { key: "campaigns_in_progress", title: "Campaigns in progress", width: 6 },
+  { key: "recent_failures", title: "Recent failures", width: 6 },
+  { key: "access_denials", title: "Recent access denials", width: 12 },
+];

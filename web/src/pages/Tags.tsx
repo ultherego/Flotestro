@@ -73,7 +73,8 @@ export function Tags() {
       <PageHeader
         icon="hosts"
         title={t("Tags")}
-        description={t("Every tag the hosts you may read carry, with how many carry it. A tag is set on the host page; here it is found, followed to its hosts and, when it is spelled two ways, renamed on every host at once.")}
+        description={t("Every tag your hosts carry, and how many carry it.")}
+        help={<p>{t("Every tag the hosts you may read carry, with how many carry it. A tag is set on the host page; here it is found, followed to its hosts and, when it is spelled two ways, renamed on every host at once.")}</p>}
       />
 
       <div className="widgets">

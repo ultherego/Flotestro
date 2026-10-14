@@ -70,7 +70,8 @@ export default function Unresolved() {
     <>
       <PageHeader
         title={t("Needs confirmation")}
-        description={t("Operations the fleet could not confirm. Nothing here disappears with time: an item leaves this list when somebody rules on it, and the ruling is recorded beside the task rather than in place of its outcome.")}
+        description={t("Operations the fleet could not confirm.")}
+        help={<p>{t("Operations the fleet could not confirm. Nothing here disappears with time: an item leaves this list when somebody rules on it, and the ruling is recorded beside the task rather than in place of its outcome.")}</p>}
         actions={counts && (
           // Beside the title, not in two cards above the table: the filter is
           // three words and two numbers, and as cards it pushed the first row

@@ -190,7 +190,10 @@ export function Access() {
     <>
       <PageHeader
         title={t("Access")}
-        description={t("Mapping of identity provider groups to roles, plus local identities. A group in the token grants nothing by itself - the role comes from the mapping.")}
+        description={t("Who may do what in this panel.")}
+        help={
+          <p>{t("A group in an identity provider's token grants nothing by itself: the role comes from a mapping made here. Beside the mappings are the local identities, the roles themselves and what each one may do, the review of every enabled identity, and the authority the panel issues its own certificates from.")}</p>
+        }
       />
 
       <div className="tabs">

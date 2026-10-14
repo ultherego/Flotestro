@@ -837,11 +837,66 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .tabs button.active { color: var(--accent-text); border-bottom-color: var(--accent); }
 .tabs button:disabled { opacity: 0.35; }
 
-/* Label/value pairs: two tracks per pair, and as many pairs across as the
-   width allows, so a short list does not stand in one column on the left. */
-.pairs { display: grid; grid-template-columns: repeat(auto-fill, 140px minmax(140px, 1fr)); gap: 8px 16px; font-size: 13px; align-items: baseline; }
-.pairs dt { color: var(--text-muted); }
-.pairs dd { margin: 0; }
+/* Label/value pairs. One grid for every fact list in the panel.
+ *
+ * The label track used to be a fixed 140px and the value had no wrapping
+ * rule, so a fingerprint, a DSN or a JSON structure left the card through
+ * its right edge. Now the label track shrinks to its content, the value
+ * track may never be narrower than its column, and anything without spaces
+ * breaks rather than overflow. */
+.pairs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, max-content) minmax(140px, 1fr));
+  gap: 8px 16px;
+  font-size: 13px;
+  align-items: baseline;
+  min-width: 0;
+}
+.pairs dt { color: var(--text-muted); min-width: 0; overflow-wrap: anywhere; }
+.pairs dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+/* A value that needs the width of the list: a table, a nested list, a key. */
+.pairs dt.wide { grid-column: 1 / -1; }
+.pairs dd.wide { grid-column: 1 / -1; }
+/* Label over value. In a card a third of the page wide two tracks leave
+   about 120px for the value, which is narrower than a uuid; the container
+   query below switches to this by itself, and `stacked` asks for it. */
+.pairs.stacked { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px 16px; }
+.pairs.stacked dt { grid-column: auto; }
+.pairs.stacked dd { grid-column: auto; margin-top: 2px; }
+.pairs.stacked > dt { font-size: 12px; }
+.pairs.nested { margin: 2px 0 0; }
+
+/* The fact list of the host modules shares the one grid; it kept a second
+   copy of these rules, which is how the two drifted apart. */
+.hm-facts, .hm-fact dd { min-width: 0; overflow-wrap: anywhere; }
+
+/* A long value in a narrow card reads better stacked than squeezed. The
+   card is the container, so the same list adapts on the dashboard and on a
+   page where it has the whole width. */
+@container card (max-width: 420px) {
+  .pairs { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px 16px; }
+  .pairs dt { grid-column: auto; font-size: 12px; }
+  .pairs dd { grid-column: auto; margin-top: 2px; }
+}
+
+/* Anything the panel prints that has no spaces of its own. */
+.wrap { overflow-wrap: anywhere; min-width: 0; }
+
+/* A table may not widen the card that holds it: it scrolls instead. */
+.table-scroll { overflow-x: auto; max-width: 100%; min-width: 0; }
+.facts-table { font-size: 12px; }
+.facts-table th, .facts-table td { padding: 5px 10px; white-space: nowrap; }
+.card .facts-table th:first-child, .card .facts-table td:first-child { padding-left: 0; }
+
+/* An opaque identifier: its ends, and one click to take the whole value. */
+.identifier {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: none; border: 0; padding: 0; margin: 0;
+  font: inherit; color: inherit; cursor: pointer; text-align: left;
+}
+.identifier svg { width: 13px; height: 13px; color: var(--text-faint); flex: 0 0 auto; }
+.identifier:where(:hover, :focus-visible) svg { color: var(--accent-text); }
+.identifier:where(:hover, :focus-visible) .mono { color: var(--accent-text); }
 
 pre {
   background: var(--bg-sunken);
@@ -1262,6 +1317,10 @@ a.button:hover { background: var(--bg-hover); text-decoration: none; }
   border: 1px solid var(--border);
   border-radius: var(--radius);
   min-width: 0;
+  /* The card is the container its contents measure themselves against: a
+     fact list in a card a third of the page wide stacks, the same list with
+     the whole width keeps two tracks. */
+  container: card / inline-size;
 }
 .card.warn { border-color: color-mix(in srgb, var(--warn) 55%, var(--border)); }
 .card.error { border-color: color-mix(in srgb, var(--error) 55%, var(--border)); }
@@ -1538,6 +1597,11 @@ a.button.primary:hover { background: color-mix(in srgb, var(--accent) 88%, var(-
   text-decoration: none;
 }
 .status-bar-hero .status-bar-value { font-size: 34px; }
+/* Inside a tile the single number stands among a tile's worth of facts, not
+   alone on a card: a billboard there was twice the height of what it says. */
+.part .status-bar-hero { padding: 8px 12px; }
+.part .status-bar-hero .status-bar-value { font-size: 22px; }
+.part .count-tile .status-bar-value, .part .status-bar-segment .status-bar-value { font-size: 20px; }
 .status-bar-hero .status-bar-label { font-size: 13px; color: var(--text-muted); opacity: 1; }
 a.status-bar-hero:hover { background: var(--bg-hover); text-decoration: none; color: var(--text); }
 
@@ -1671,7 +1735,10 @@ a.status-bar-segment:hover { filter: brightness(1.08); text-decoration: none; co
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: 16px;
-  align-items: stretch;
+  /* Each card is as tall as what it holds. Stretched to the row's height, a
+     card with one row of a table beside a card with eight stood half empty,
+     and an empty box reads as something that failed to load. */
+  align-items: start;
 }
 .widgets > * { min-width: 0; margin: 0; }
 .widgets > .card { display: flex; flex-direction: column; }
@@ -1815,7 +1882,7 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); }
    itself as a table of packages or a list of sentences. */
 .plan-groups { display: flex; flex-direction: column; }
 .plan-group + .plan-group { border-top: 1px solid var(--border); }
-.plan-group-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; padding: 10px var(--card-pad-x); background: var(--bg); border-bottom: 1px solid var(--border); font-size: 13px; }
+.plan-group-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; padding: 8px var(--card-pad-x); background: var(--bg-raised); border-bottom: 1px solid var(--border); font-size: 13px; }
 .plan-group-hosts { flex: 1 1 240px; min-width: 0; }
 .plan-group-body { padding: 12px var(--card-pad-x); }
 .plan-group-words { font-size: 13px; margin-bottom: 6px; }
@@ -1839,3 +1906,192 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); }
    a filter, not a call to action of its own. */
 button.link { background: none; border: 0; padding: 0; font: inherit; color: var(--accent-text); text-decoration: underline dotted; cursor: pointer; }
 button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent); }
+
+/* ---------------------------------------------------------------------- */
+/* The three zones of a page.                                             */
+/* ---------------------------------------------------------------------- */
+
+/* The verdict: the one thing read first, so the one thing without a box.
+   A tone colours the rule on its left and nothing else - the sentence
+   itself stays in the reading colour. */
+/* The answer on the left, what needs a look beside it on the right: the two
+   are read together, and the second was pushing the board down the page. */
+.verdict-band { display: flex; align-items: flex-start; gap: 32px; flex-wrap: wrap; margin-bottom: 18px; }
+.verdict-band > .verdict { flex: 1 1 380px; margin-bottom: 0; }
+.verdict-band > .needs-attention { flex: 1 1 420px; margin-bottom: 0; }
+.verdict { margin: 0 0 16px; padding: 2px 0 2px 14px; border-left: 3px solid var(--border-strong); }
+.verdict.ok { border-left-color: var(--ok); }
+.verdict.warn { border-left-color: var(--warn); }
+.verdict.error { border-left-color: var(--error); }
+.verdict.unknown { border-left-color: var(--unknown); }
+.verdict-row { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+.verdict-headline { margin: 0; font-size: 19px; font-weight: 500; line-height: 1.3; }
+.verdict-actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+.verdict-facts { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px 20px; font-size: 13px; color: var(--text-muted); }
+
+/* What needs a decision. Only ever drawn when it holds something. */
+.needs-attention { margin: 0 0 16px; }
+.needs-attention-title { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--warn-text); text-transform: uppercase; letter-spacing: 0.04em; }
+.needs-attention-body { display: grid; gap: 8px; }
+
+/* The long explanation of a screen, behind the mark beside its title. */
+.page-help-toggle {
+  background: none; border: 0; padding: 0 0 0 8px; margin: 0;
+  color: var(--text-faint); cursor: pointer; vertical-align: middle;
+}
+.page-help-toggle svg { width: 16px; height: 16px; }
+.page-help-toggle:where(:hover, :focus-visible, [aria-expanded="true"]) { color: var(--accent-text); }
+.page-help {
+  margin: 8px 0 0; padding: 12px 14px;
+  background: var(--bg-sunken); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  color: var(--text-muted); font-size: 13px; line-height: 1.5; max-width: 80ch;
+}
+.page-help p { margin: 0 0 8px; }
+.page-help p:last-child { margin-bottom: 0; }
+
+/* A part of the panel that needs a look: its state, its name and the server's
+   own sentence about it, on one line. */
+.attention-line { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 0; font-size: 13px; }
+.attention-line > span:last-child { color: var(--text-muted); }
+
+
+
+/* The search of the settings screen, in the card's own title row. */
+.settings-search { width: 220px; max-width: 40vw; }
+.widget-subhead.first { margin-top: 0; }
+
+/* ---------------------------------------------------------------------- */
+/* Parts: the tiles a screen is read as, three or four to a row.          */
+/* ---------------------------------------------------------------------- */
+/* A surface rather than a box: thirteen bordered cards of equal weight is
+   the wall these screens started as, and folding them away was worse - a
+   closed line says a name and nothing else. Only a part that is not fine
+   takes a coloured edge, so the eye lands on those and on nothing else. */
+/* The board: columns filled across rather than down, so the first tile is
+   the most important and the second stands beside it rather than under it.
+   Which tile goes in which column is decided in the markup - see Masonry -
+   and the columns pack upwards, so there are no holes between them. */
+.masonry { display: flex; align-items: flex-start; gap: 14px; }
+.masonry-column { flex: 1 1 0; min-width: 0; }
+.parts { columns: 380px; column-gap: 14px; }
+/* A container is a header and a body. The name of the thing stands on a bar
+   of its own above it rather than as the first line inside it, which is how
+   the arrange mode drew it and what the owner asked for everywhere: a
+   heading over a box reads as a label, a heading in a box reads as content. */
+.part { display: flex; flex-direction: column; min-width: 0; margin: 0 0 12px; }
+.part-head {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  margin: 0; padding: 7px 12px;
+  background: var(--bg-raised);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  border-left: 3px solid transparent;
+  font-size: 13px; font-weight: 600;
+}
+.part-name { font-size: 14px; }
+.part-body {
+  flex: 1 1 auto;
+  background: var(--bg-panel);
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  border-left: 3px solid transparent;
+  padding: 12px 14px;
+  min-width: 0;
+}
+.part.warn > .part-head, .part.warn > .part-body { border-left-color: var(--warn); }
+.part.error > .part-head, .part.error > .part-body { border-left-color: var(--error); }
+.part.unknown > .part-head, .part.unknown > .part-body { border-left-color: var(--unknown); }
+/* Inside a tile a fact is one line: the label on the left in a track that
+   fits it, the value beside it. Stacked - the label over the value - is
+   what made these tiles twice as tall as they had to be. */
+.part .pairs { grid-template-columns: minmax(0, max-content) minmax(90px, 1fr); gap: 6px 16px; font-size: 13px; }
+.part .pairs dd { font-variant-numeric: tabular-nums; }
+.part .pairs dt { color: var(--text-muted); }
+.part-summary { font-weight: 400; font-size: 12px; color: var(--text-muted); }
+.part-reason { margin: 0 0 8px; font-size: 12px; color: var(--text-muted); }
+
+.part table { font-size: 12.5px; margin-bottom: 10px; }
+.part table th, .part table td { padding: 5px 10px; }
+.part table th:first-child, .part table td:first-child { padding-left: 0; }
+.card-body > .parts { margin: 0; }
+
+/* The heading of a grid of tiles, with whatever narrows it. */
+.masonry + .masonry { margin-top: 14px; }
+.parts-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin: 20px 0 10px; }
+.parts-head h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.parts-head .settings-search { margin-left: auto; }
+
+/* Records of a structure, one little list each, inside a tile. */
+.records { display: grid; gap: 8px; }
+.records .pairs { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 2px 10px; }
+.records dt { font-size: 11px; }
+
+/* Arranging the dashboard: the bar of the edit mode and the handle each
+   widget grows while it lasts. */
+.layout-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 12px; }
+.layout-bar .source { margin-left: auto; }
+.widget-handle {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  margin-bottom: 6px; padding: 6px 8px;
+  background: var(--bg-raised); border-radius: var(--radius-xs); font-size: 12px;
+}
+.widget-handle > span:first-child { font-weight: 600; margin-right: auto; }
+.widget-handle button { padding: 2px 8px; font-size: 12px; }
+
+/* A tile is measured against its own width, so the same tile lays its facts
+   in one column when it is a quarter of the page and in three when somebody
+   gives it the whole of it. This is what makes a width worth setting. */
+.widgets > div > .part, .masonry-column > div > .part { container: tile / inline-size; }
+@container tile (min-width: 620px) {
+  .part .pairs { grid-template-columns: repeat(2, minmax(0, max-content) minmax(90px, 1fr)); }
+}
+@container tile (min-width: 1000px) {
+  .part .pairs { grid-template-columns: repeat(3, minmax(0, max-content) minmax(90px, 1fr)); }
+}
+/* The tile fills the box the arrangement gave it rather than ending early.
+   In the arranged grid the flex child above does it; this is for the packed
+   columns, where a tile stands on its own. */
+.masonry-column > div > .part { height: auto; }
+
+/* Arranging with the hand: the tile being dragged fades, and the one it
+   would land on carries the accent on the edge it would push against. */
+.widgets > .dragging { opacity: 0.45; }
+.widgets > .drop-here { outline: 2px dashed var(--accent); outline-offset: 4px; border-radius: var(--radius); }
+.widget-handle { cursor: grab; }
+.widgets > .dragging .widget-handle { cursor: grabbing; }
+.widget-grip { color: var(--text-faint); letter-spacing: -2px; }
+.widget-keys {
+  padding: 2px 6px; border: 1px solid var(--border); border-radius: var(--radius-xs);
+  color: var(--text-muted); cursor: default; user-select: none;
+}
+.widget-keys:focus-visible { outline: 2px solid var(--accent); color: var(--text); }
+
+/* An arranged board: rows of a fixed height, so a tile can be told to take
+   two of them, and dense flow, so the short ones fall into the gaps the tall
+   ones leave rather than standing in a row of their own. */
+.widgets.arranged { grid-auto-rows: minmax(150px, auto); grid-auto-flow: row dense; align-items: stretch; }
+.widgets.arranged > div { min-width: 0; display: flex; flex-direction: column; }
+/* The widget fills the box the arrangement gave it; the bar of the arrange
+   mode is a bar. Given the same flex as the widget it took half the box,
+   which made the edit mode show something other than what leaving it would
+   show - and left no room to make a full-width tile any taller. */
+.widgets.arranged > div > * { flex: 1 1 auto; min-height: 0; }
+.widgets.arranged > div > .widget-handle { flex: 0 0 auto; }
+.widget-size { display: inline-flex; align-items: center; gap: 4px; }
+.widget-size-value { color: var(--text-muted); min-width: 56px; text-align: center; }
+
+/* While a tile is in the hand the board says it will take it anywhere. */
+.widgets.arranged.dragging-over { outline: 1px dashed var(--border-strong); outline-offset: 8px; border-radius: var(--radius); }
+
+/* The same shape for every card in the panel: the title is a bar across the
+   top, the body is the box under it. The card used to run its heading, its
+   sentence and its contents together in one surface, so a screen of cards
+   was a screen of undifferentiated boxes. */
+.card-head {
+  background: var(--bg-raised);
+  border-radius: var(--radius) var(--radius) 0 0;
+  border-bottom: 1px solid var(--border);
+  padding: 8px var(--card-pad-x);
+}
+.card-title { font-size: 14px; }
+.card-description { margin-top: 2px; }
+.card.warn > .card-head { box-shadow: inset 3px 0 0 var(--warn); }
+.card.error > .card-head { box-shadow: inset 3px 0 0 var(--error); }

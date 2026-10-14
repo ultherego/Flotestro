@@ -109,3 +109,34 @@ export function toInstant(local: string): string {
   const parsed = new Date(local);
   return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString();
 }
+
+/**
+ * A number of seconds as a short duration. Fractions matter below a minute -
+ * a latency of 0.4s is not "0s".
+ */
+export function duration(value: number): string {
+  if (!Number.isFinite(value) || value < 0) return "—";
+  if (value < 60) return `${value < 10 ? value.toFixed(1) : Math.round(value)}s`;
+  if (value < 3600) return `${Math.floor(value / 60)}m ${Math.round(value % 60)}s`;
+  if (value < 86400) return `${Math.floor(value / 3600)}h ${Math.floor((value % 3600) / 60)}m`;
+  return `${Math.floor(value / 86400)}d ${Math.floor((value % 86400) / 3600)}h`;
+}
+
+/**
+ * A Go duration such as 720h0m0s, 4m30s or 29m53s in the units a person
+ * reads it in: whole days, hours, minutes and seconds, the zero parts left
+ * out. A value that is not one is given back as it came.
+ */
+export function goDuration(value: string): string {
+  const match = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)?$/.exec(value);
+  if (!match || value === "") return value;
+  const hours = Number(match[1] ?? 0);
+  const minutes = Number(match[2] ?? 0);
+  const seconds = Number(match[3] ?? 0);
+  const parts: string[] = [];
+  if (hours >= 24) parts.push(`${Math.floor(hours / 24)} d`);
+  if (hours % 24 > 0) parts.push(`${hours % 24} h`);
+  if (minutes > 0) parts.push(`${minutes} min`);
+  if (seconds > 0) parts.push(`${seconds} s`);
+  return parts.length > 0 ? parts.join(" ") : "0 s";
+}
