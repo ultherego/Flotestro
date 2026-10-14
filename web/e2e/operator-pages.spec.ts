@@ -398,13 +398,13 @@ test.describe("status", () => {
       if (name === "build") continue;
       const judged = (block as { ok: boolean | null; attention?: string });
       const tone = judged.ok === null ? "unknown" : !judged.ok ? "error" : judged.attention ? "warn" : "ok";
-      const tile = parts.filter({ has: page.locator(".part-head", { hasText: blockTitle(name) }) }).first();
+      const tile = parts.filter({ has: page.locator(".part-name", { hasText: blockTitle(name) }) }).first();
       if (await tile.count() === 0) continue;
       await expect(tile).toHaveClass(new RegExp(`\\b${tone}\\b`));
     }
 
     if (status.blocks.build) {
-      const about = parts.filter({ has: page.locator(".part-head", { hasText: exact("About") }) }).first();
+      const about = parts.filter({ has: page.locator(".part-name", { hasText: exact("About") }) }).first();
       await expect(about.locator("dt").first()).toBeVisible();
     }
 

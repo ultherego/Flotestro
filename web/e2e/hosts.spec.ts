@@ -63,6 +63,9 @@ test.describe("host list", () => {
 
     const table = await openHostList(page);
     const rows = table.locator("tbody tr");
+    // The reboot filter is one of the folded ones: the toolbar keeps the four
+    // a list is usually narrowed by and hides the rest behind a button.
+    await page.getByTestId("more-filters").click();
     await page.getByTestId("filter-reboot").selectOption("true");
     if (needing.length === 0) {
       await expect(page.getByText("No host matches the filters.")).toBeVisible();

@@ -48,11 +48,11 @@ test.describe("dashboard", () => {
       }
     }
 
-    // The three lists keep one line each, and their tables stay closed
-    // until somebody opens one.
-    const failures = page.locator(".section").filter({ hasText: "Recent failures" }).first();
-    await expect(failures.locator(".section-head")).toHaveAttribute("aria-expanded", "false");
-    await failures.locator(".section-head").click();
+    // The three lists the dashboard keeps. Each says what is in it, in its
+    // own words, whether or not it holds anything.
+    const failures = page
+      .locator(".card")
+      .filter({ has: page.getByRole("heading", { name: "Recent failures" }) });
     await expect(
       failures.locator("tbody tr").first().or(failures.getByText("No failed operations.")),
     ).toBeVisible();
