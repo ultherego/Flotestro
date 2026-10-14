@@ -34,6 +34,16 @@ import (
 
 const cryptoUsage = "the crypto commands are status, verify-secrets, import-state, revert-state, rewrap-kek and forget-files"
 
+// transitionWait is how long a command waits for a transition somebody else
+// started: long enough for a panel's startup guard to finish, short enough
+// that the operator is told rather than left looking at nothing.
+const transitionWait = 30 * time.Second
+
+// commandBudget is the time the work itself gets. The wait for the lock is
+// added on top, so a command that queued behind another one does not do its
+// work on what is left of two minutes.
+const commandBudget = 2*time.Minute + transitionWait
+
 // runCrypto dispatches the crypto commands.
 func runCrypto(args []string) error {
 	if len(args) == 0 {
@@ -523,12 +533,29 @@ func (o *cryptoOptions) open(ctx context.Context) (*cryptostate.Postgres, *crypt
 		return nil, nil, nil, err
 	}
 	store := cryptostate.NewPostgres(pool)
-	record, err := store.Load(ctx)
+	// Every read and every write of this command under one lock. Each of them
+	// checks the state and then changes it, and the checks are worth only what
+	// they say if nothing moves in between - which no transaction can promise
+	// here, because a file this command writes or removes is in none.
+	unlock, err := store.LockTransition(ctx, transitionWait)
 	if err != nil {
 		pool.Close()
+		if errors.Is(err, cryptostate.ErrTransitionBusy) {
+			return nil, nil, nil, fmt.Errorf("%w; crypto status says where the installation stands, "+
+				"and this command is safe to run again once the other one has finished", err)
+		}
+		return nil, nil, nil, err
+	}
+	release := func() {
+		unlock()
+		pool.Close()
+	}
+	record, err := store.Load(ctx)
+	if err != nil {
+		release()
 		return nil, nil, nil, fmt.Errorf("the installation record: %w", err)
 	}
-	return store, kek.For(record.InstallationID), pool.Close, nil
+	return store, kek.For(record.InstallationID), release, nil
 }
 
 // cryptoBackup is what is written before anything changes: enough to put the
@@ -602,13 +629,13 @@ func cryptoImportState(args []string) error {
 	if err := options.parse(args); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), commandBudget)
 	defer cancel()
-	store, kek, closePool, err := options.open(ctx)
+	store, kek, release, err := options.open(ctx)
 	if err != nil {
 		return err
 	}
-	defer closePool()
+	defer release()
 
 	record, err := store.Load(ctx)
 	if err != nil {
@@ -665,13 +692,13 @@ func cryptoRevertState(args []string) error {
 	if err := options.parse(args); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), commandBudget)
 	defer cancel()
-	store, kek, closePool, err := options.open(ctx)
+	store, kek, release, err := options.open(ctx)
 	if err != nil {
 		return err
 	}
-	defer closePool()
+	defer release()
 
 	record, err := store.Load(ctx)
 	if err != nil {
@@ -748,13 +775,13 @@ func cryptoRewrapKEK(args []string) error {
 	if *newKEKFile == "" {
 		return errors.New("no new key encryption key was named; pass -new-kek-file")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), commandBudget)
 	defer cancel()
-	store, current, closePool, err := options.open(ctx)
+	store, current, release, err := options.open(ctx)
 	if err != nil {
 		return err
 	}
-	defer closePool()
+	defer release()
 	unbound, err := cryptostate.ReadKEKFile(*newKEKFile)
 	if err != nil {
 		return err
@@ -941,13 +968,13 @@ func cryptoForgetFiles(args []string) error {
 	if err := options.parse(args); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), commandBudget)
 	defer cancel()
-	store, kek, closePool, err := options.open(ctx)
+	store, kek, release, err := options.open(ctx)
 	if err != nil {
 		return err
 	}
-	defer closePool()
+	defer release()
 
 	record, err := store.Load(ctx)
 	if err != nil {
@@ -1032,6 +1059,20 @@ func cryptoForgetFiles(args []string) error {
 		fmt.Println("nothing was changed")
 		return nil
 	}
+	// Seven: nothing moved the state while this command was checking it. The
+	// lock keeps other commands out, but a serving panel raises the revision
+	// on its own when it activates an authority - and then these files are a
+	// copy of a state the database no longer has.
+	again, err := store.Load(ctx)
+	if err != nil {
+		return fmt.Errorf("the installation record, read again before the files go: %w", err)
+	}
+	if again.Revision != record.Revision {
+		return fmt.Errorf("the crypto state moved from revision %d to %d while this command was checking it; "+
+			"nothing was removed, and crypto status says where it stands now",
+			record.Revision, again.Revision)
+	}
+
 	copied, err := copyFilesTo(options.backupTo, paths)
 	if err != nil {
 		return err
