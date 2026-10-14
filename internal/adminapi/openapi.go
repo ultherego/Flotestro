@@ -341,7 +341,8 @@ func (s *Server) openAPI() map[string]any {
 			"no version, or a word in its place, is unknown and not counted.")
 	describe(schemas, "FleetSummary", "operations_unconfirmed",
 		"Operations on the visible hosts whose outcome nobody could confirm and nobody has ruled on, the queue "+
-			"GET /api/v1/unresolved lists, a page at a time: limit and offset cut the page out, total says how "+
+			"GET /api/v1/unresolved lists, a page at a time: limit and offset cut the page out, q narrows by "+
+			"the host's name or the operation, total says how "+
 			"many the narrowed list holds, and the four counts answer for the whole visible fleet whatever the "+
 			"page shows. Nothing ages out of it. The screen keeps the two uncertainties apart - "+
 			"did it happen, did it hold - and this is their total, because it is the length of that queue. "+
@@ -533,6 +534,13 @@ var csvExports = map[string]bool{
 }
 
 var queryParameters = map[string][]queryParameter{
+	"GET /api/v1/unresolved": {
+		{"kind", "string", "outcome_unknown or applied_unverified; both when left out. They are different questions and are never summed."},
+		{"host_id", "string", "One host's unconfirmed operations."},
+		{"q", "string", "A fragment of the host's name or of the operation; case-insensitive. Not the reason: that is the host's own sentence in the host's own words, and a search over it would answer differently for two hosts that did the same thing."},
+		{"limit", "integer", "Rows on this page. The default is 100 and the most is 500; a larger number is served 500 rather than dropped to the default."},
+		{"offset", "integer", "Where the page starts. The order is total, so no row appears on two pages."},
+	},
 	"GET /api/v1/hosts": append([]queryParameter{
 		{"q", "string", "A fragment of the hostname, the management address, the machine identifier or the owner; case-insensitive."},
 		{"site", "string", ""},

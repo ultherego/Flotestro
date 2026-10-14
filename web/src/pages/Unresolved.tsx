@@ -49,6 +49,12 @@ export function anythingOpen(counts: UnresolvedCounts): boolean {
   return counts.outcome_unknown_operations > 0 || counts.applied_unverified_operations > 0;
 }
 
+/**
+ * The most rows one page may hold and the most attempts one batch ruling may
+ * carry: one number, because it is one of the server's caps (jobs.MaxPage).
+ */
+export const BATCH_LIMIT = 500;
+
 /** What the verifier expected and what it read off the host. */
 export type VerifierReading = {
   expected?: string;
@@ -98,11 +104,13 @@ export function readingKind(kind: UnresolvedKind, reading: VerifierReading | nul
   return "did_not_hold";
 }
 
-/** The most attempts one batch ruling may carry, as the server caps it. */
-export const BATCH_LIMIT = 500;
-
-/** The page sizes the screen offers. */
-export const PAGE_SIZES = [5, 10, 20, 50, 100];
+/**
+ * The page sizes the screen offers. The last one is the most the server will
+ * serve, so "more" means that and not an unbounded page: a list this one can
+ * grow to tens of thousands of rows, and a page of all of them is a browser
+ * that stops responding rather than a screen.
+ */
+export const PAGE_SIZES = [5, 10, 20, 50, 100, BATCH_LIMIT];
 
 /**
  * The page numbers to show, with a gap where the numbers are skipped.
@@ -135,16 +143,30 @@ export default function Unresolved() {
   const [kind, setKind] = useState<UnresolvedKind | "">("");
   const [size, setSize] = useState(20);
   const [page, setPage] = useState(1);
+  // What is typed, and what has been asked of the server. They are two states
+  // on purpose: a request per keystroke over a list of thousands is a screen
+  // that fights the typing.
+  const [typed, setTyped] = useState("");
+  const [search, setSearch] = useState("");
   // The attempt whose ruling is open, or none. One at a time: the form is a
   // row of the table and two of them would push the list apart.
   const [ruling, setRuling] = useState<string | null>(null);
   const [batch, setBatch] = useState(false);
 
-  const { data, error } = useQuery({
-    queryKey: ["unresolved", kind, size, page],
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearch(typed.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [typed]);
+
+  const { data, error, isPlaceholderData } = useQuery({
+    queryKey: ["unresolved", kind, size, page, search],
     queryFn: () => {
       const query = new URLSearchParams({ limit: String(size), offset: String((page - 1) * size) });
       if (kind) query.set("kind", kind);
+      if (search) query.set("q", search);
       return api.get<UnresolvedOperations>(`/api/v1/unresolved?${query}`);
     },
   });
@@ -153,9 +175,15 @@ export default function Unresolved() {
   const pages = Math.max(1, Math.ceil(total / size));
   // A page that stopped existing - the list shrank because somebody ruled on
   // it - is not an error to show the operator, it is the last page.
+  //
+  // Only on an answer about THIS page, though. While the next page is being
+  // fetched the total belongs to the previous one, and a clamp that fired then
+  // would take a reader back to where they came from the moment they asked to
+  // move - which is what pressing 2 did.
+  const settled = data !== undefined && !isPlaceholderData;
   useEffect(() => {
-    if (page > pages) setPage(pages);
-  }, [page, pages]);
+    if (settled && page > pages) setPage(pages);
+  }, [settled, page, pages]);
 
   if (error) return <ErrorBox error={error} />;
   const counts = data?.counts;
@@ -241,6 +269,7 @@ export default function Unresolved() {
       {batch && (
         <BatchRulingForm
           kind={kind}
+          search={search}
           total={total}
           onClose={() => setBatch(false)}
           onRuled={() => {
@@ -251,11 +280,28 @@ export default function Unresolved() {
         />
       )}
 
+      {(total > 0 || search !== "") && (
+        <Toolbar>
+          <label className="inline">
+            {t("Search")}{" "}
+            <input
+              type="search"
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              placeholder={t("a host or an operation")}
+              data-testid="unresolved-search"
+            />
+          </label>
+        </Toolbar>
+      )}
+
       {items.length === 0 ? (
         <Empty>
-          {counts && anythingOpen(counts)
-            ? t("Nothing of this kind is open.")
-            : t("Every operation this fleet reported has an outcome somebody could confirm.")}
+          {search !== ""
+            ? t("No unconfirmed operation matches what you typed.")
+            : counts && anythingOpen(counts)
+              ? t("Nothing of this kind is open.")
+              : t("Every operation this fleet reported has an outcome somebody could confirm.")}
         </Empty>
       ) : (
         <table className="data">
@@ -452,11 +498,13 @@ function ReasonCell({ item }: { item: UnresolvedItem }) {
  */
 function BatchRulingForm({
   kind,
+  search,
   total,
   onClose,
   onRuled,
 }: {
   kind: UnresolvedKind | "";
+  search: string;
   total: number;
   onClose: () => void;
   onRuled: () => void;
@@ -473,6 +521,9 @@ function BatchRulingForm({
       // between this list being fetched and the button being pressed.
       const query = new URLSearchParams({ limit: String(BATCH_LIMIT), offset: "0" });
       if (kind) query.set("kind", kind);
+      // The same narrowing the screen is showing: "all of them" means all of
+      // what the operator is looking at, not all of the fleet's.
+      if (search) query.set("q", search);
       const page = await api.get<UnresolvedOperations>(`/api/v1/unresolved?${query}`);
       return api.post<UnresolvedRulings>("/api/v1/unresolved/rulings", {
         kind: kind || "applied_unverified",

@@ -81,6 +81,7 @@ func (s *Server) handleUnresolved(w http.ResponseWriter, r *http.Request) {
 		Scopes: principal.ScopesFor(authz.PermJobRead),
 		HostID: query.Get("host_id"),
 		Kind:   query.Get("kind"),
+		Search: query.Get("q"),
 	}
 	switch filter.Kind {
 	case "", jobs.UncertaintyOutcomeUnknown, jobs.UncertaintyAppliedUnverified:

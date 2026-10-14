@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -27,6 +28,12 @@ import (
 // now one of these left the screen because time passed. Nothing here ages
 // out: an item is on the list until somebody rules on it, and the ruling is
 // a row of its own that leaves the attempt as the fleet reported it.
+// MaxPage is the most rows one page of this list may hold. A request for more
+// is served this many rather than dropped to the default: a page that came
+// back a hundred rows long when five hundred were asked for reads as paging
+// that does not work.
+const MaxPage = 500
+
 const (
 	// UncertaintyOutcomeUnknown is "did it happen?".
 	UncertaintyOutcomeUnknown = "outcome_unknown"
@@ -77,6 +84,11 @@ type UnresolvedFilter struct {
 	Kind   string
 	HostID string
 	Limit  int
+	// Search narrows by what the operator can see on the row: the host's name
+	// and the operation. Not the reason - that is the host's own sentence, in
+	// the host's own words, and a search that matched it would answer
+	// differently for two hosts that did the same thing.
+	Search string
 	// Offset is where the page starts. The order below is made total for it:
 	// an offset over an order with ties repeats rows on one page and loses
 	// them from the next, and ties are the normal case here - fifteen
@@ -110,6 +122,16 @@ func unresolvedWhere(f UnresolvedFilter) (string, []any) {
 		args = append(args, f.HostID)
 		conditions = append(conditions, fmt.Sprintf("j.host_id = $%d", len(args)))
 	}
+	if needle := searchNeedle(f.Search); needle != "" {
+		args = append(args, needle)
+		// The host is reached with exists rather than a join, so that the same
+		// condition works in the three queries over these rows whether or not
+		// they join hosts for anything else.
+		conditions = append(conditions, fmt.Sprintf(
+			"(j.action_type ilike $%d escape '\\' or exists "+
+				"(select 1 from hosts hs where hs.id = j.host_id and hs.hostname ilike $%d escape '\\'))",
+			len(args), len(args)))
+	}
 	switch f.Kind {
 	case UncertaintyOutcomeUnknown:
 		args = append(args, UncertaintyOutcomeUnknown)
@@ -124,6 +146,39 @@ func unresolvedWhere(f UnresolvedFilter) (string, []any) {
 		where += " and " + condition
 	}
 	return where, args
+}
+
+// searchNeedle turns what the operator typed into a pattern, with the
+// wildcards of LIKE escaped.
+//
+// Unescaped, a search for "agent_debian" would match "agent-debian" as well,
+// because _ is any character - and a single % would match the whole fleet.
+// What somebody typed into a box is a string to find, not a pattern to run.
+func searchNeedle(search string) string {
+	trimmed := strings.TrimSpace(search)
+	if trimmed == "" {
+		return ""
+	}
+	escaped := strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(trimmed)
+	return "%" + escaped + "%"
+}
+
+// pageClause builds the limit and offset of one page, and is a function
+// because the index arithmetic is where this went wrong.
+//
+// The placeholder of the limit has to be numbered BEFORE the offset is
+// appended. Numbering it afterwards made both of them name the offset's
+// parameter and left the limit's unreferenced, and PostgreSQL answers that
+// with "could not determine data type of parameter $1" - so every page of
+// this list after the first was a 500. 14.10.
+func pageClause(args []any, limit, offset int) (string, []any) {
+	args = append(args, limit)
+	clause := " limit $" + fmt.Sprint(len(args))
+	if offset > 0 {
+		args = append(args, offset)
+		clause += " offset $" + fmt.Sprint(len(args))
+	}
+	return clause, args
 }
 
 // unresolvedKind says which question an attempt leaves open. An attempt can
@@ -143,15 +198,13 @@ func unresolvedKind(errorCode string, hasFailedVerification bool) string {
 func (s *Store) UnresolvedList(ctx context.Context, f UnresolvedFilter) ([]Unresolved, error) {
 	where, args := unresolvedWhere(f)
 	limit := f.Limit
-	if limit <= 0 || limit > 500 {
+	if limit <= 0 {
 		limit = 100
 	}
-	args = append(args, limit)
-	offsetClause := ""
-	if f.Offset > 0 {
-		args = append(args, f.Offset)
-		offsetClause = " offset $" + fmt.Sprint(len(args))
+	if limit > MaxPage {
+		limit = MaxPage
 	}
+	page, args := pageClause(args, limit, f.Offset)
 	rows, err := s.pool.Query(ctx, `
 		select a.id, a.job_id, j.host_id, coalesce(h.hostname, ''), j.action_type,
 		       coalesce(a.error_code, ''), coalesce(a.message, ''),
@@ -169,7 +222,7 @@ func (s *Store) UnresolvedList(ctx context.Context, f UnresolvedFilter) ([]Unres
 		  left join hosts h on h.id = j.host_id
 		`+where+`
 		 order by a.started_at desc, a.id desc
-		 limit $`+fmt.Sprint(len(args))+offsetClause, args...)
+		 `+page, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -221,14 +274,14 @@ func (s *Store) UnresolvedTotal(ctx context.Context, f UnresolvedFilter) (int, e
 // being pressed, which is a ruling nobody made.
 func (s *Store) UnresolvedAttemptIDs(ctx context.Context, f UnresolvedFilter, most int) ([]string, error) {
 	where, args := unresolvedWhere(f)
-	args = append(args, most)
+	page, args := pageClause(args, most, 0)
 	rows, err := s.pool.Query(ctx, `
 		select a.id
 		  from job_attempts a
 		  join jobs j on j.id = a.job_id
 		`+where+`
 		 order by a.started_at desc, a.id desc
-		 limit $`+fmt.Sprint(len(args)), args...)
+		 `+page, args...)
 	if err != nil {
 		return nil, err
 	}
