@@ -4,7 +4,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [semantic versioning](https://semver.org/). Dates are the
 day the tag was published.
 
-## [Unreleased]
+## [0.63.1] - 2026-10-14
 
 ### Added
 
@@ -912,7 +912,8 @@ across those five tags.
 
 The first tag. It did not build.
 
-[Unreleased]: https://github.com/ultherego/Flotestro/compare/v0.63.0...HEAD
+[Unreleased]: https://github.com/ultherego/Flotestro/compare/v0.63.1...HEAD
+[0.63.1]: https://github.com/ultherego/Flotestro/compare/v0.63.0...v0.63.1
 [0.63.0]: https://github.com/ultherego/Flotestro/compare/v0.62.1...v0.63.0
 [0.62.1]: https://github.com/ultherego/Flotestro/compare/v0.62.0...v0.62.1
 [0.62.0]: https://github.com/ultherego/Flotestro/compare/v0.61.5...v0.62.0
