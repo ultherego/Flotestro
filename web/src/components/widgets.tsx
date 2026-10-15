@@ -478,11 +478,11 @@ export function Breakdown({ items, tone = "info" }: { items: { label: ReactNode;
 
 function BreakdownRow({ label, value, share, tone }: { label: ReactNode; value: number; share: number; tone: WidgetTone }) {
   return (
-    <>
+    <div className="ui-barlist-row">
       <dt>{label}</dt>
       <dd><div className="ui-bar"><div className={`ui-bar-fill ${toneClass(tone)}`} style={{ width: `${Math.round(share * 100)}%` }} /></div></dd>
       <dd className="ui-barlist-count">{value}</dd>
-    </>
+    </div>
   );
 }
 

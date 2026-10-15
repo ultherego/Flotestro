@@ -427,7 +427,7 @@ export function HostPicker() {
                   {row.hostID !== undefined && (
                     <button
                       type="button"
-                      className={starred ? "host-picker-star on" : "host-picker-star"}
+                      className={starred ? "ui-star ui-on" : "ui-star"}
                       aria-pressed={starred}
                       title={starred ? t("Remove from favourites") : t("Add to favourites")}
                       onMouseDown={(event) => event.preventDefault()}

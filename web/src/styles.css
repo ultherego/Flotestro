@@ -254,12 +254,9 @@ html[data-scale="larger"] { zoom: 1.25; }
 .ui-name { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
 .ui-numeric { text-align: right; font-variant-numeric: tabular-nums; }
 .ui-nowrap { white-space: nowrap; }
-.ui-wrapword { overflow-wrap: anywhere; min-width: 0; }
 .ui-notes { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-muted); font-size: var(--t-body); }
 /* A line under a table or a block: counts, origin, the observation time. */
 .ui-foot { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s3); padding-top: var(--s2); color: var(--text-faint); font-size: var(--t-small); }
-/* A figure cut short, with the whole of it on hover. */
-.ui-clip { display: inline-block; max-width: 36ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 /* Two lines in one cell: the name to open, the address to type. */
 .ui-twoline { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .ui-twoline-sub { font-family: var(--font-mono); font-size: var(--t-small); color: var(--text-faint); overflow-wrap: anywhere; }
@@ -364,10 +361,8 @@ html[data-scale="larger"] { zoom: 1.25; }
 .ui-sidebar-group.ui-closed .ui-sidebar-group-chevron { transform: rotate(0deg); }
 .ui-sidebar-group.ui-closed .ui-sidebar-items { display: none; }
 .ui-sidebar-items { display: flex; flex-direction: column; gap: 2px; }
-.ui-sidebar-item { display: block; }
-.ui-sidebar-item-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.ui-nav {
+.ui-sidebar-item {
   display: flex;
   align-items: center;
   gap: var(--s3);
@@ -377,52 +372,41 @@ html[data-scale="larger"] { zoom: 1.25; }
   font-size: var(--t-body);
   min-width: 0;
 }
-.ui-nav:hover { background: var(--bg-hover); color: var(--text); text-decoration: none; }
-.ui-nav.ui-active {
+.ui-sidebar-item:hover { background: var(--bg-hover); color: var(--text); text-decoration: none; }
+.ui-sidebar-item.ui-active {
   background: var(--accent-soft);
   color: var(--accent-text);
   font-weight: 600;
   box-shadow: inset 2px 0 0 var(--accent);
 }
-.ui-nav.ui-unavailable { color: var(--text-faint); }
-.ui-nav-icon { flex: none; width: 17px; height: 17px; }
-.ui-nav-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ui-nav-count {
-  flex: none;
-  min-width: 20px;
-  padding: 0 var(--s1);
-  border-radius: 9px;
-  background: var(--bg-raised);
-  color: var(--text-muted);
-  font-size: var(--t-label);
-  font-weight: 600;
-  text-align: center;
-}
+.ui-sidebar-item.ui-unavailable { color: var(--text-faint); }
+.ui-sidebar-item > .ui-icon { flex: none; width: 17px; height: 17px; }
+.ui-sidebar-item-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Folded to the rail: labels and counts go, the marks stay, and the
    column opens over the page on hover rather than pushing it. */
 .ui-shell.ui-folded .ui-sidebar-title,
-.ui-shell.ui-folded .ui-nav-label,
-.ui-shell.ui-folded .ui-nav-count,
+.ui-shell.ui-folded .ui-sidebar-item-label,
+.ui-shell.ui-folded .ui-sidebar-item .ui-pill,
 .ui-shell.ui-folded .ui-sidebar-group-label,
 .ui-shell.ui-folded .ui-sidebar-group-chevron { display: none; }
-.ui-shell.ui-folded .ui-nav { justify-content: center; }
+.ui-shell.ui-folded .ui-sidebar-item { justify-content: center; }
 
 @media (hover: hover) {
   .ui-shell.ui-folded > .ui-sidebar:hover,
   .ui-shell.ui-folded > .ui-sidebar:focus-within { width: 264px; box-shadow: var(--shadow); }
   .ui-shell.ui-folded > .ui-sidebar:hover .ui-sidebar-title,
-  .ui-shell.ui-folded > .ui-sidebar:hover .ui-nav-label,
-  .ui-shell.ui-folded > .ui-sidebar:hover .ui-nav-count,
+  .ui-shell.ui-folded > .ui-sidebar:hover .ui-sidebar-item-label,
+  .ui-shell.ui-folded > .ui-sidebar:hover .ui-sidebar-item .ui-pill,
   .ui-shell.ui-folded > .ui-sidebar:hover .ui-sidebar-group-label,
   .ui-shell.ui-folded > .ui-sidebar:hover .ui-sidebar-group-chevron,
   .ui-shell.ui-folded > .ui-sidebar:focus-within .ui-sidebar-title,
-  .ui-shell.ui-folded > .ui-sidebar:focus-within .ui-nav-label,
-  .ui-shell.ui-folded > .ui-sidebar:focus-within .ui-nav-count,
+  .ui-shell.ui-folded > .ui-sidebar:focus-within .ui-sidebar-item-label,
+  .ui-shell.ui-folded > .ui-sidebar:focus-within .ui-sidebar-item .ui-pill,
   .ui-shell.ui-folded > .ui-sidebar:focus-within .ui-sidebar-group-label,
   .ui-shell.ui-folded > .ui-sidebar:focus-within .ui-sidebar-group-chevron { display: initial; }
-  .ui-shell.ui-folded > .ui-sidebar:hover .ui-nav,
-  .ui-shell.ui-folded > .ui-sidebar:focus-within .ui-nav { justify-content: flex-start; }
+  .ui-shell.ui-folded > .ui-sidebar:hover .ui-sidebar-item,
+  .ui-shell.ui-folded > .ui-sidebar:focus-within .ui-sidebar-item { justify-content: flex-start; }
 }
 
 .ui-sidebar-backdrop { position: fixed; inset: 0; z-index: 19; background: rgba(0, 0, 0, 0.5); }
@@ -475,11 +459,18 @@ html[data-scale="larger"] { zoom: 1.25; }
   min-width: 0;
 }
 .ui-topbar-chip:hover { border-color: var(--border-strong); color: var(--text); text-decoration: none; }
+.ui-topbar-chip button {
+  background: none;
+  border: 0;
+  padding: 0;
+  min-height: 0;
+  color: inherit;
+  font-weight: 400;
+}
+.ui-topbar-chip button:hover { background: none; filter: none; }
 .ui-topbar-hostselect { max-width: 280px; }
 .ui-topbar-hostname { font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ui-topbar-hostaddress { color: var(--text-faint); font-family: var(--font-mono); font-size: var(--t-small); }
-.ui-topbar-hostclear { border: 0; background: none; cursor: pointer; color: var(--text-faint); padding: 0 var(--s1); min-height: 0; }
-.ui-topbar-hostclear:hover { color: var(--text); }
 .ui-key {
   flex: none;
   padding: 1px var(--s1);
@@ -641,7 +632,6 @@ html[data-scale="larger"] { zoom: 1.25; }
 .ui-nested { padding-left: var(--s4); border-left: 1px solid var(--border); }
 .ui-indent { padding-left: var(--s7); }
 .ui-virtual { position: relative; overflow: auto; }
-.ui-scroll { max-height: 420px; overflow: auto; }
 .ui-narrow { max-width: 460px; }
 .ui-measure { max-width: 1180px; }
 /* Names in as many columns as the width allows, read down each one. */
@@ -990,7 +980,6 @@ input[type="checkbox"], input[type="radio"] { width: auto; min-height: 0; accent
 .ui-metercell { min-width: 160px; }
 .ui-sparkbar { background: var(--bg-raised); border-radius: 2px; }
 .ui-sparkbar.ui-filled { background: var(--accent); }
-.ui-spark { display: block; color: var(--accent-text); }
 
 /* Three tracks: the words, the bar, the number. The bar never runs under
    the words - that is what made the fleet composition unreadable. */
@@ -1054,6 +1043,7 @@ a.ui-statusbar-segment:hover, a.ui-statusbar-hero:hover { filter: brightness(1.0
 
 /* The counted tiles of "what needs you": a grid of equal cells, so a row
    of them is a row and not a torn strip. */
+.ui-statusbar-group > .ui-counts { flex: 1 1 100%; }
 .ui-counts { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(190px, 100%), 1fr)); gap: var(--s2); }
 .ui-count-tile {
   display: flex;
@@ -1558,7 +1548,7 @@ td .ui-actions button, td > button { min-height: 24px; padding: 0 var(--s2); fon
 }
 @media (max-width: 900px) {
   :root { --pad-x: var(--s4); --topbar-height: 52px; }
-  .ui-topbar-hostselect, .ui-topbar-searchword { display: none; }
+  .ui-topbar-hostselect { display: none; }
   .ui-pagehead-row { flex-wrap: wrap; }
   .ui-pagehead-actions { width: 100%; }
   .ui-sectionhead-actions { width: 100%; margin-left: 0; }

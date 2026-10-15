@@ -269,7 +269,7 @@ export function HostSelect() {
     <div className="ui-menu-anchor" ref={container}>
       <button
         type="button"
-        className={selected ? "ui-hostpicker-trigger host-select-trigger on-host" : "ui-hostpicker-trigger host-select-trigger"}
+        className={"ui-hostpicker-trigger"}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={t("Select a host")}
@@ -326,7 +326,7 @@ export function HostSelect() {
                   <span className="ui-row-s">{hostMeta(row.host)}</span>
                   <button
                     type="button"
-                    className={starred ? "host-picker-star on" : "host-picker-star"}
+                    className={starred ? "ui-star ui-on" : "ui-star"}
                     aria-pressed={starred}
                     title={starred ? t("Remove from favourites") : t("Add to favourites")}
                     onMouseDown={(event) => event.preventDefault()}
