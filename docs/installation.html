@@ -396,17 +396,21 @@ curl -fsS http://127.0.0.1:8080/readyz</code></pre>
 
     <ol class="steps">
       <li>Sign in with the token.</li>
-      <li>Connect the identity provider: <code>FLOTESTRO_OIDC_ISSUER</code>,
-      <code>FLOTESTRO_OIDC_CLIENT_ID</code> (default
-      <code>flotestro-panel</code>) and <code>FLOTESTRO_OIDC_CLIENT_SECRET</code>.
-      An empty issuer disables browser login altogether and the panel then works
-      on API tokens alone. <code>FLOTESTRO_PUBLIC_URL</code> decides the redirect
-      and the <code>Secure</code> flag of the cookies, so it has to be the
-      address the browser really uses.</li>
-      <li><strong>Map at least one group to a role.</strong> A group grants
-      nothing by itself. With no mapping, whoever signs in through the provider
-      gets no permission at all - that is the single most common reason a fresh
-      installation looks broken.</li>
+      <li>Decide how people sign in. Either connect an identity provider -
+      <code>FLOTESTRO_OIDC_ISSUER</code>, <code>FLOTESTRO_OIDC_CLIENT_ID</code>
+      (default <code>flotestro-panel</code>) and
+      <code>FLOTESTRO_OIDC_CLIENT_SECRET</code>; <code>FLOTESTRO_PUBLIC_URL</code>
+      decides the redirect and the <code>Secure</code> flag of the cookies, so
+      it has to be the address the browser really uses - or give people
+      <a href="roles.html#passwords">passwords in the panel</a>, which needs no
+      provider at all. Both work at once: an administrator with a password can
+      still get in on the day the provider is the thing that is down.</li>
+      <li><strong>Grant somebody a role.</strong> With a provider, map at
+      least one group to a role: a group grants nothing by itself, and with no
+      mapping whoever signs in gets no permission at all - the single most
+      common reason a fresh installation looks broken. Without one, create an
+      identity under Settings &rarr; Users, give it a role and set its
+      password; its owner replaces that password at their first sign-in.</li>
       <li>Sign in through the provider and confirm you have what the mapping
       granted.</li>
       <li>Revoke the bootstrap token and delete

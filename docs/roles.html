@@ -94,6 +94,7 @@
             <li><a href="#identity-admin">identity_admin</a></li>
             <li><a href="#platform-admin">platform_admin</a></li>
             <li><a href="#own-roles">A role of your own</a></li>
+            <li><a href="#passwords">Signing in without a provider</a></li>
             <li><a href="#scope">The scope of a binding</a></li>
             <li><a href="#grant">The shape of a grant</a></li>
             <li><a href="#escalation">Nobody grants what they do not hold</a></li>
@@ -411,6 +412,46 @@
       &mdash; somebody&rsquo;s access, deleted to satisfy a schema. The step
       down does not exist, deliberately.</p>
     </div>
+
+    <h2 id="passwords">Signing in without a provider</h2>
+
+    <p>An installation does not need an identity provider to let people in.
+    Until 0.64 it did: <code>/auth/login</code> answered
+    <code class="refusal">oidc_disabled</code> without one, and the only other
+    door was the bootstrap token, which exists for the first group mapping and
+    is meant to be spent and deleted. A panel with roles, scopes and tokens
+    and no way for a person to sign in is not a product anybody can run, so
+    an identity can now carry a password of its own.</p>
+
+    <p>What an administrator does, under <strong>Settings &rarr; Users</strong>:
+    create the identity, grant it a role, and set a password on it. The owner
+    replaces that password at their first sign-in - a password two people know
+    is not a password, and the panel says so rather than leaving it to
+    somebody's judgement. The person changes it themselves afterwards under
+    their own name, top right, giving the one in force: a session left open on
+    a desk must not be enough to take an account over.</p>
+
+<div class="table-scroll">
+<table>
+<thead><tr><th>Rule</th><th>What it is, and why</th></tr></thead>
+<tbody>
+<tr><td>Length</td><td>At least 12 characters. There is no character-class rule on purpose: it teaches <code>Password1!</code> and nothing else.</td></tr>
+<tr><td>Not the name</td><td>A password carrying the identity's own name is refused, in any case.</td></tr>
+<tr><td>Not on the first list</td><td>The handful of words every attacker starts with are refused wherever they appear in it.</td></tr>
+<tr><td>Hashing</td><td>argon2id, 64&nbsp;MiB and three passes, parameters written into each row so the cost can be raised later without stranding the rows below it.</td></tr>
+<tr><td>Wrong passwords</td><td>Ten in a row lock the account for fifteen minutes. A lock is short because one that needs an administrator turns an attack on one account into an outage for its owner; the right password does not open it while it holds.</td></tr>
+<tr><td>What the refusal says</td><td>A name nobody has and a wrong password are the same sentence to whoever is typing - the trail gets the difference. A locked account is told plainly, because its owner has to know that waiting is the answer.</td></tr>
+</tbody></table></div>
+
+    <p>Both doors work at once. An installation with a provider can still give
+    its administrators passwords, which is what gets somebody in on the day
+    the provider is the thing that is down. Where a step-up asks for fresh
+    authentication, a local identity is asked for its password again - there
+    is no provider to be sent back to - and the session's authentication time
+    moves only when it matches. A required authentication level
+    (<code>FLOTESTRO_STEPUP_ACR</code>) is the one thing a password cannot
+    satisfy: that vocabulary belongs to the provider, and an installation that
+    sets it is saying those operations need one.</p>
 
     <h2 id="scope">The scope of a binding</h2>
 
