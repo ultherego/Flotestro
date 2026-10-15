@@ -34,7 +34,28 @@ func (s *Server) handleWhoami(w http.ResponseWriter, r *http.Request) {
 		"roles":        principal.Roles(),
 		"bindings":     principal.Bindings,
 		"permissions":  principal.Permissions(),
+		// How this caller got in. The panel asks because the two doors need
+		// different things of somebody whose authentication has gone stale:
+		// a provider session is sent back to the provider, and a password
+		// session is asked for the password again - sending it to a provider
+		// that may not exist is how a refusal becomes a dead end.
+		"authentication": authenticationOf(r),
 	})
+}
+
+// authenticationOf says how the caller of this request got in: "password",
+// "provider" or "token".
+func authenticationOf(r *http.Request) string {
+	session, ok := authz.SessionFromContext(r.Context())
+	if !ok {
+		return "token"
+	}
+	for _, method := range session.Auth.AMR {
+		if method == "pwd" {
+			return "password"
+		}
+	}
+	return "provider"
 }
 
 // principalView is an identity as the access screen shows it: with the live

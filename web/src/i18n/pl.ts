@@ -96,6 +96,8 @@ export const pl: Record<string, string> = {
   "General": "Ogólne",
   "The identities this panel knows, the review of every one of them, and the authority it issues its own certificates from. What grants access - the roles and the mappings of the provider's groups onto them - is configured under Settings.": "Tożsamości, które panel zna, przegląd każdej z nich i urząd, z którego wystawia własne certyfikaty. To, co nadaje dostęp — role i mapowania grup dostawcy na role — konfiguruje się w Ustawieniach.",
   /* Logowanie haslem: instalacja bez dostawcy tozsamosci (16.10). */
+  "Give the password you sign in with.": "Podaj hasło, którym się logujesz.",
+  "Done - try the operation again.": "Gotowe — spróbuj operacji jeszcze raz.",
   "Sign in": "Zaloguj",
   "signing in…": "logowanie…",
   "or": "albo",

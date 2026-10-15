@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Navigate, useSearchParams } from "react-router-dom";
 import { api, ApiError, type Collection } from "../lib/api";
 import { copyToClipboard } from "../lib/clipboard";
-import type { AccessReview, ApiToken, GroupMapping, Principal, ReviewFlag, ReviewedPrincipal } from "../lib/types";
+import type { AccessReview, ApiToken, GroupMapping, Principal, ReviewFlag, ReviewedPrincipal, Whoami } from "../lib/types";
 import { ErrorBox, Time, Empty } from "../components/ui";
 import { absoluteTime, toInstant } from "../lib/format";
 import { Actions, Card, EmptyState, Field, FieldGrid, StatGrid, Stat, Toolbar, Pager} from "../components/layout";
@@ -1932,6 +1932,81 @@ const FLAG_LABELS: Record<ReviewFlag, string> = {
 };
 
 /**
+ * What a stale authentication asks for, which depends on how the person got
+ * in.
+ *
+ * A session from the provider is sent back to the provider. A session made
+ * with a password is asked for that password again - there is nowhere to
+ * send it, and an installation with no provider would have had the button
+ * lead to a 501: a refusal with a dead end in it is worse than no button.
+ */
+function ReauthenticationNeeded({ error, close }: { error: ApiError; close: () => void }) {
+  const t = useT();
+  const whoami = useQuery({
+    queryKey: ["whoami"],
+    queryFn: () => api.get<Whoami & { authentication?: string }>("/api/v1/whoami"),
+    staleTime: 60 * 1000,
+  });
+  const [password, setPassword] = useState("");
+  const [refusal, setRefusal] = useState("");
+  const [done, setDone] = useState(false);
+
+  const again = useMutation({
+    mutationFn: () => api.post("/auth/password/reauthenticate", { password }),
+    onSuccess: () => { setDone(true); setPassword(""); setRefusal(""); },
+    onError: (error) => setRefusal(error instanceof Error ? error.message : String(error)),
+  });
+
+  if (whoami.data?.authentication === "password") {
+    return (
+      <div className="warning" data-testid="reauthenticate-password">
+        <div>
+          <strong>{t("Re-authentication required.")}</strong> {error.message}{" "}
+          {done
+            ? t("Done - try the operation again.")
+            : t("Give the password you sign in with.")}
+        </div>
+        {!done && (
+          <div className="operations">
+            <input type="password" value={password} autoComplete="current-password"
+                   onChange={(event) => setPassword(event.target.value)}
+                   data-testid="reauthenticate-field" />
+            <button disabled={password === "" || again.isPending} onClick={() => again.mutate()}
+                    data-testid="reauthenticate-submit">
+              {t("Confirm")}
+            </button>
+            <button className="secondary" onClick={close}>{t("Close")}</button>
+          </div>
+        )}
+        {done && (
+          <div className="operations"><button className="secondary" onClick={close}>{t("Close")}</button></div>
+        )}
+        {refusal !== "" && <div className="page-error">{refusal}</div>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="warning">
+      <div>
+        <strong>{t("Re-authentication required.")}</strong> {error.message}
+      </div>
+      <div className="operations">
+        <button
+          onClick={() => {
+            const target = encodeURIComponent(window.location.pathname + window.location.search);
+            window.location.href = `/auth/login?step_up=1&redirect=${target}`;
+          }}
+        >
+          {t("Sign in again")}
+        </button>
+        <button className="secondary" onClick={close}>{t("Close")}</button>
+      </div>
+    </div>
+  );
+}
+
+/**
  * A refusal because of a stale authentication is not an application error:
  * the panel is to offer signing in again and come back to the same place.
  */
@@ -1940,24 +2015,7 @@ export function Warning({ error, close }: { error: ApiError | null; close: () =>
   if (!error) return null;
 
   if (error.code === "reauthentication_required") {
-    return (
-      <div className="warning">
-        <div>
-          <strong>{t("Re-authentication required.")}</strong> {error.message}
-        </div>
-        <div className="operations">
-          <button
-            onClick={() => {
-              const target = encodeURIComponent(window.location.pathname + window.location.search);
-              window.location.href = `/auth/login?step_up=1&redirect=${target}`;
-            }}
-          >
-            {t("Sign in again")}
-          </button>
-          <button className="secondary" onClick={close}>{t("Close")}</button>
-        </div>
-      </div>
-    );
+    return <ReauthenticationNeeded error={error} close={close} />;
   }
   return (
     <div className="warning">
