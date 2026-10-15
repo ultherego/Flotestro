@@ -6109,4 +6109,8 @@ export const pl: Record<string, string> = {
   // Podpisy pod liczbami na Dashboardzie: mówią, czego liczba dotyczy.
   "hosts affected": "hostów dotkniętych",
   "hosts waiting": "hostów czeka",
+  // Co zrobiono z alertami — pod ważnościami, nie obok nich.
+  "{n} acknowledged": "{n} przyjętych",
+  "{n} pending": "{n} oczekujących",
+  "{n} silenced": "{n} wyciszonych",
 };

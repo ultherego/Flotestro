@@ -70,3 +70,28 @@ describe("a tile in a widget grid", () => {
     expect(screen.getByTestId("metric-Memory").className).not.toMatch(/span-/);
   });
 });
+
+describe("a severity nobody has answered for", () => {
+  it("draws a dash, not a nought, and keeps the block in its place", () => {
+    render(<SeverityBar counts={{ critical: undefined, warning: undefined, info: undefined }} />);
+
+    // "Nothing is on fire" and "nobody has asked" look the same to an
+    // operator if both draw a nought, and only one of them is true.
+    expect(screen.getByTestId("severity-critical")).toHaveTextContent("—");
+    expect(screen.getByTestId("severity-critical").className).toContain("severity-unanswered");
+    expect(screen.getByTestId("severity-critical").className).not.toContain("severity-empty");
+  });
+
+  it("keeps a real zero a zero, and calls it empty rather than unanswered", () => {
+    render(<SeverityBar counts={{ critical: 0, warning: 2, info: 0 }} />);
+    expect(screen.getByTestId("severity-critical")).toHaveTextContent("0");
+    expect(screen.getByTestId("severity-critical").className).toContain("severity-empty");
+    expect(screen.getByTestId("severity-critical").className).not.toContain("severity-unanswered");
+  });
+
+  it("does not offer a filter on a severity nobody has answered for", () => {
+    render(<SeverityBar counts={{ critical: undefined, warning: 3, info: 0 }} onPick={() => {}} />);
+    expect(screen.getByTestId("severity-critical").tagName).toBe("DIV");
+    expect(screen.getByTestId("severity-warning").tagName).toBe("BUTTON");
+  });
+});

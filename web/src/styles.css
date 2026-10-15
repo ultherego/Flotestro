@@ -2543,3 +2543,18 @@ tr.row-open > td { background: var(--bg-raised); }
 .record { padding: 4px 0 8px; }
 .record-tabs { margin-bottom: 12px; }
 .record-body { display: flex; flex-direction: column; gap: 12px; }
+
+/* What has been done about the alerts, under the severities rather than
+   beside them: acknowledged, pending and silenced are not severities, and a
+   row that mixed the two asked the eye to compare "critical" with
+   "silenced". */
+.monitoring-handled { margin-top: 10px; }
+
+/* A severity nobody has an answer for. It is not the empty block: empty
+   means the server said none, and this means it has not said. The dash does
+   the talking; the block keeps its place so the row does not change shape
+   between the two. */
+.severity-unanswered {
+  background: var(--bg-sunken);
+  color: var(--unknown-text);
+}

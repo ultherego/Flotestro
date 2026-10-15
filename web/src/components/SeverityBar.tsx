@@ -14,9 +14,14 @@ import { useT } from "../i18n";
  */
 
 export type SeverityCounts = {
-  critical: number;
-  warning: number;
-  info: number;
+  /**
+   * How many are firing at each severity. Undefined is not zero: it is the
+   * server not having answered yet, and a bar that drew noughts there would
+   * say "nothing is on fire" about a fleet nobody has asked.
+   */
+  critical?: number;
+  warning?: number;
+  info?: number;
   /** Rules with no data. Undefined means the caller does not track it. */
   unknown?: number;
 };
@@ -40,15 +45,20 @@ export function SeverityBar({
       {ORDER.map(({ key, label }) => {
         const count = counts[key];
         if (key === "unknown" && count === undefined) return null;
-        const empty = !count;
+        // Three states, not two: a count, a nought, and no answer at all.
+        const unanswered = count === undefined;
+        const empty = !unanswered && !count;
         const content = (
           <>
-            <span className="severity-count">{count ?? 0}</span>
+            <span className="severity-count">{unanswered ? "—" : count}</span>
             <span className="severity-label">{t(label)}</span>
           </>
         );
-        const className = `severity-block severity-${key}${empty ? " severity-empty" : ""}`;
-        return onPick && !empty ? (
+        const className = [
+          "severity-block", `severity-${key}`,
+          empty ? "severity-empty" : "", unanswered ? "severity-unanswered" : "",
+        ].join(" ").trim();
+        return onPick && !empty && !unanswered ? (
           <button key={key} type="button" className={className}
                   data-testid={`severity-${key}`} onClick={() => onPick(key)}>
             {content}

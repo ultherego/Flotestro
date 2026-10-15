@@ -10,7 +10,7 @@ import { ErrorBox, Time, Empty } from "../components/ui";
 import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, Stat, StatGrid, Toolbar, Verdict } from "../components/layout";
 import { ExportButton } from "../components/ExportButton";
 import { PARTIAL_REASONS } from "../components/FleetCoverage";
-import { StatusBar } from "../components/widgets";
+import { SeverityBar } from "../components/SeverityBar";
 import { useConfirm } from "../components/Modal";
 import { useToast } from "../components/Toast";
 import { bytes } from "../lib/format";
@@ -411,14 +411,25 @@ export function FleetMonitoring() {
           title={t("Firing now")}
           description={t("By severity, across the hosts you can see.")}
         >
-          <StatusBar segments={[
-            { label: t("Critical"), value: counts?.critical, tone: "error" },
-            { label: t("Warning"), value: counts?.warning, tone: "warn" },
-            { label: t("Info"), value: counts?.info, tone: "info" },
-            { label: t("Acknowledged"), value: counts?.acknowledged, tone: "ok" },
-            { label: t("Pending"), value: counts?.pending, tone: "unknown" },
-            { label: t("Silenced"), value: counts?.silenced, tone: "neutral" },
-          ]} />
+          {/* Severity first and on its own. The three counts beside it -
+              acknowledged, pending, silenced - are not severities but what
+              has been done about them, and a bar that mixed the two asked
+              the eye to compare "critical" with "silenced". A severity at
+              zero keeps its block, greyed: a row that changes shape as the
+              fleet changes cannot be read by position, and "nothing
+              critical" is the answer worth seeing at a glance. */}
+          <SeverityBar counts={{
+            critical: counts?.critical,
+            warning: counts?.warning,
+            info: counts?.info,
+          }} />
+          <p className="source monitoring-handled">
+            {t("{n} acknowledged", { n: counts?.acknowledged ?? 0 })}
+            {" · "}
+            {t("{n} pending", { n: counts?.pending ?? 0 })}
+            {" · "}
+            {t("{n} silenced", { n: counts?.silenced ?? 0 })}
+          </p>
         </Card>
 
         {message && (
