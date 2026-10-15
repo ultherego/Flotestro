@@ -90,6 +90,7 @@
             <li><a href="#platform-admin">platform_admin</a></li>
             <li><a href="#own-roles">Rola własna</a></li>
             <li><a href="#passwords">Logowanie bez dostawcy</a></li>
+            <li><a href="#arranging">Układ ekranu dla wszystkich</a></li>
             <li><a href="#scope">Zakres powiązania</a></li>
             <li><a href="#grant">Jak wygląda nadanie</a></li>
             <li><a href="#escalation">Nikt nie nada tego, czego sam nie ma</a></li>
@@ -442,6 +443,50 @@
     spełni, to wymagany poziom uwierzytelnienia
     (<code>FLOTESTRO_STEPUP_ACR</code>): to słownik dostawcy, a instalacja,
     która go ustawia, mówi tym samym, że te operacje wymagają dostawcy.</p>
+
+    <h2 id="arranging">Układ ekranu dla wszystkich</h2>
+
+    <p>Panele ekranu &mdash; które są widoczne, w jakiej kolejności, jak
+    szerokie i jak wysokie &mdash; to ustawienie instalacji, nie przeglądarki.
+    Jedna osoba układa ekran i ten układ widzą wszyscy, którzy go otwierają.
+    Uprawnienie nazywa się <code>settings.layout.write</code>, ma je
+    <a href="#platform-admin"><code>platform_admin</code></a> i można je nadać
+    <a href="#own-roles">roli własnej</a>. Do 0.64 zapis autoryzowało
+    <code>settings.advertise.write</code>, czyli &bdquo;może zmienić adres,
+    pod który dzwonią agenci&rdquo; i &bdquo;może przestawić ekran
+    wszystkim&rdquo; było jednym nadaniem.</p>
+
+    <p><strong>Dlaczego wspólny, a nie osobisty.</strong> Ekran operacyjny to
+    coś, o czym ludzie rozmawiają ze sobą &mdash; <em>popatrz na drugi
+    kafelek</em> &mdash; a to przestaje działać, gdy każdy ma inny drugi
+    kafelek. Układ osobisty trzeba by dodatkowo wyjaśniać każdemu nowemu
+    kontu.</p>
+
+    <p><strong>Jak się to robi.</strong> Otwórz ekran, naciśnij
+    <em>Arrange this screen</em>, potem przeciągnij panel za jego belkę, a
+    strzałkami na belce zmień szerokość i wysokość. Panel ma od jednej do
+    dwunastu kolumn i do szesnastu wierszy wysokości; panel, któremu nadano
+    wysokość, tę wysokość zachowuje i przewija się w środku &mdash; dzięki
+    temu rosnąca lista nie spycha wszystkiego poniżej w dół ekranu.
+    <em>Add a widget</em> przywraca panel, który został zdjęty.</p>
+
+    <p><strong>O co panel poprosi.</strong> O powód, bo zmiana dotyczy
+    wszystkich, a dziennik zdarzeń zachowa go przy wpisie: zapisuje ekran,
+    liczbę paneli, powód i &mdash; wprost &mdash; że dotyczy to każdej
+    tożsamości, która może ten ekran otworzyć.</p>
+
+    <p><strong>Dwie osoby naraz.</strong> Zapis niesie rewizję, przy której
+    układ został odczytany. Jeśli ktoś w międzyczasie zapisał inny układ,
+    drugi zapis dostaje odmowę
+    <code class="refusal">layout_changed</code> zamiast po cichu nadpisać
+    cudzą pracę; panel pokazuje to, co jest teraz, i zmianę nanosisz na to.</p>
+
+    <p><strong>Cofanie.</strong> <em>Back to the panel&rsquo;s own</em> usuwa
+    zapisany układ i ekran wraca do fabrycznego. Dziesięć poprzednich układów
+    jest przechowywanych wraz z autorem i powodem, więc układ, który pogorszył
+    ekran, da się przywrócić bez zaglądania do bazy. Ekran, którego nikt nigdy
+    nie układał, nie ma zapisu w ogóle &mdash; a to co innego niż układ
+    celowo opróżniony: układ bez paneli jest odrzucany.</p>
 
     <h2 id="scope">Zakres powiązania</h2>
 

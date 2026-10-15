@@ -95,6 +95,7 @@
             <li><a href="#platform-admin">platform_admin</a></li>
             <li><a href="#own-roles">A role of your own</a></li>
             <li><a href="#passwords">Signing in without a provider</a></li>
+            <li><a href="#arranging">Arranging a screen for everybody</a></li>
             <li><a href="#scope">The scope of a binding</a></li>
             <li><a href="#grant">The shape of a grant</a></li>
             <li><a href="#escalation">Nobody grants what they do not hold</a></li>
@@ -452,6 +453,53 @@
     (<code>FLOTESTRO_STEPUP_ACR</code>) is the one thing a password cannot
     satisfy: that vocabulary belongs to the provider, and an installation that
     sets it is saying those operations need one.</p>
+
+    <h2 id="arranging">Arranging a screen for everybody</h2>
+
+    <p>The panels of a screen &mdash; which ones it shows, in what order, how
+    wide and how tall &mdash; are a setting of the installation, not of a
+    browser. One person arranges a screen and everybody who opens it sees
+    that arrangement. The right to do it is
+    <code>settings.layout.write</code>, held by
+    <a href="#platform-admin"><code>platform_admin</code></a> and grantable to
+    <a href="#own-roles">a role of your own</a>; until 0.64 it was borrowed
+    from <code>settings.advertise.write</code>, which meant &ldquo;may change
+    the address the agents dial&rdquo; and &ldquo;may rearrange everyone&rsquo;s
+    screen&rdquo; were one grant.</p>
+
+    <p><strong>Why it is shared rather than personal.</strong> An operations
+    screen is something people talk to each other over &mdash; <em>look at the
+    second tile</em> &mdash; and that stops working when everyone sees a
+    different second tile. A per-person arrangement would also have to be
+    taught to every new account.</p>
+
+    <p><strong>How it is done.</strong> Open the screen, press
+    <em>Arrange this screen</em>, then drag a panel by its bar to move it, and
+    use the arrows on the bar to make it wider, narrower, taller or shorter.
+    A panel is between one and twelve of the twelve columns and up to sixteen
+    rows tall; a panel given a height keeps that height and scrolls inside
+    itself, so a list that grows does not push everything below it down the
+    screen. <em>Add a widget</em> puts back one that was removed.</p>
+
+    <p><strong>What the panel asks of you.</strong> A reason, because the
+    change reaches everybody and the audit trail keeps it beside the entry:
+    the trail records the screen, the number of panels, the reason and, in as
+    many words, that it applies to every identity that can open that screen.</p>
+
+    <p><strong>Two people at once.</strong> The write carries the revision the
+    arrangement was read at. If somebody stored a different arrangement in the
+    meantime, the second write is refused with
+    <code class="refusal">layout_changed</code> rather than quietly overwriting
+    their work; the panel shows you what is there now and you make your change
+    on top of it.</p>
+
+    <p><strong>Undoing it.</strong> <em>Back to the panel&rsquo;s own</em>
+    removes the stored arrangement, and the screen returns to the one the
+    panel ships with. The ten previous arrangements are kept with who stored
+    each and why, so an arrangement that made a screen worse can be put back
+    without going to the database. A screen nobody has ever arranged has no
+    stored record at all, which is not the same thing as one somebody
+    deliberately emptied &mdash; an arrangement with no panels is refused.</p>
 
     <h2 id="scope">The scope of a binding</h2>
 
