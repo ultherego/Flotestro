@@ -158,7 +158,13 @@ const saveCertificateQuery = `
 	                or previous_fingerprint_sha256 = $7 then previous_not_after
 	           else not_after end,
 	       fingerprint_sha256 = $2, serial = $3, not_after = $4,
-	       issuer_subject = nullif($5, ''), issuer_serial = nullif($6, '')
+	       issuer_subject = nullif($5, ''), issuer_serial = nullif($6, ''),
+	       -- The bundle goes out in the same answer as the certificate, so
+	       -- these are the authorities that went with the one above. The
+	       -- presentation starts again from nothing: the relay has not been
+	       -- seen using this certificate, and until it has, what it holds is
+	       -- unknown rather than new.
+	       trust_issuer_ids = $8::uuid[], trust_presented_at = null
 	 where id = $1
 	   and revoked_at is null
 	   and ($7::bytea is null
@@ -172,9 +178,13 @@ const saveCertificateQuery = `
 // hold a certificate the panel no longer knows, and the renewal that could fix
 // that refuses an unknown certificate.
 func (s *Store) SaveCertificate(ctx context.Context, tx pgx.Tx, id, serial string,
-	fingerprint []byte, notAfter time.Time, issuer Issuer, decidedOn []byte) error {
+	fingerprint []byte, notAfter time.Time, issuer Issuer, decidedOn []byte,
+	trustIssuerIDs []string) error {
+	if trustIssuerIDs == nil {
+		trustIssuerIDs = []string{}
+	}
 	tag, err := tx.Exec(ctx, saveCertificateQuery, id, fingerprint, serial, notAfter,
-		issuer.Subject, issuer.Serial, decidedOn)
+		issuer.Subject, issuer.Serial, decidedOn, trustIssuerIDs)
 	if err != nil {
 		return err
 	}
@@ -295,6 +305,40 @@ func (s *Store) LookupCertificate(ctx context.Context, fingerprint []byte) (Stat
 	}
 	status.Known = true
 	return status, nil
+}
+
+// MarkTrustPresented records that the relay was seen using the certificate the
+// bundle went out with, which is what makes the bundle evidence rather than an
+// intention.
+//
+// Only the current certificate counts. A relay keeps the previous one until it
+// expires, so a heartbeat carrying that one says nothing about the bundle of
+// the newer answer - and marking it then would let an activation go ahead over
+// a site that never received the new authority.
+func (s *Store) MarkTrustPresented(ctx context.Context, id string, fingerprint []byte) {
+	_, _ = s.pool.Exec(ctx, `
+		update relays
+		   set trust_presented_at = now()
+		 where id = $1 and fingerprint_sha256 = $2
+		   and trust_presented_at is null
+		   and cardinality(trust_issuer_ids) > 0`, id, fingerprint)
+}
+
+// WithoutTrustGeneration counts the relays that cannot be shown to hold the
+// named authority, by the same rule the hosts are counted by: a bundle that
+// went out with a certificate the relay has been seen using.
+//
+// A relay whose presentation is unknown counts as one that has still to pick
+// the bundle up. Unknown is not evidence, and the cost of being wrong here is
+// a whole site cut off at the handover.
+func (s *Store) WithoutTrustGeneration(ctx context.Context, issuerID string) (int, error) {
+	var count int
+	err := s.pool.QueryRow(ctx, `
+		select count(*) from relays
+		 where revoked_at is null
+		   and not (trust_presented_at is not null
+		            and trust_issuer_ids @> array[$1::uuid])`, issuerID).Scan(&count)
+	return count, err
 }
 
 // MarkSeen records the contact of a relay.

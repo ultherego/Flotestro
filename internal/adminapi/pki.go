@@ -2,11 +2,13 @@ package adminapi
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
+	"github.com/ultherego/flotestro/internal/pki"
 )
 
 // handlePKIStatus describes the set of fleet CAs together with the number of
@@ -49,11 +51,20 @@ func (s *Server) handlePKIStatus(w http.ResponseWriter, r *http.Request) {
 				s.fail(w, err)
 				return
 			}
+			// A relay holds the bundle too, and a relay without the new
+			// authority darkens its whole site at the handover - so it is
+			// counted beside the hosts rather than left out of the picture.
+			relaysMissing, err := s.relays.WithoutTrustGeneration(r.Context(), pending.IssuerID())
+			if err != nil {
+				s.fail(w, err)
+				return
+			}
 			entry["prepared_at"] = ca.PreparedAt
 			// The identifier the certificate rows name an authority by, so a
 			// reader can see which hosts the count is about.
 			entry["issuer_id"] = pending.IssuerID()
 			entry["hosts_missing"] = missing
+			entry["relays_missing"] = relaysMissing
 			entry["ready_to_activate"] = missing == 0
 		}
 		list = append(list, entry)
@@ -110,6 +121,19 @@ func (s *Server) handlePrepareCA(w http.ResponseWriter, r *http.Request) {
 			RequestID: requestIDOf(r), Outcome: outcome,
 			Detail: map[string]any{"error": err.Error(), "found": found},
 		}, key, "the preparation of a CA failed") {
+			return
+		}
+		// A CA that was prepared and not announced is not a preparation that
+		// failed: the authority is in the store, and saying "prepare_failed"
+		// would send an operator to prepare a second one. What is wrong is
+		// that the other instances do not know, and activating before they do
+		// cuts off every host they serve.
+		if errors.Is(err, pki.ErrNotAnnounced) {
+			problem(w, http.StatusConflict, "prepared_not_announced",
+				"the CA was prepared and the other instances of this installation were not told of it. "+
+					"Do not activate yet: until they read the trust set again they hand the hosts a bundle "+
+					"without this authority, and the handover would cut those hosts off. "+
+					"Ask GET /api/v1/pki for what the store holds, and prepare nothing further. ("+err.Error()+")")
 			return
 		}
 		problem(w, http.StatusConflict, "prepare_failed", err.Error())
@@ -177,6 +201,29 @@ func (s *Server) handleActivateCA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// And the relays, by the same rule and for a heavier reason: a host that
+	// lacks the authority loses itself, a relay that lacks it loses the site
+	// it terminates. The evidence is the same - the bundle that went out with
+	// the certificate the relay has been seen using.
+	relaysMissing, err := s.relays.WithoutTrustGeneration(r.Context(), pending.IssuerID())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if relaysMissing > 0 {
+		s.audit.Record(r.Context(), audit.Event{
+			ActorType: audit.ActorUser, ActorID: actor.Subject,
+			Action: "pki.ca.activate", TargetType: "pki", TargetID: "",
+			RequestID: requestIDOf(r), Outcome: audit.OutcomeDenied,
+			Detail: map[string]any{"reason": "relays_missing_ca", "relays_missing": relaysMissing},
+		})
+		problem(w, http.StatusConflict, "relays_missing_ca", fmt.Sprintf(
+			"%d relays do not have the new CA yet; wait for their certificates to renew. "+
+				"A relay without it stops recognising the agents of its site the moment signing moves",
+			relaysMissing))
+		return
+	}
+
 	// Everything that could refuse has refused by now, so the next step changes
 	// the fleet's trust: the beginning is written and committed first.
 	key, ok := s.beganChange(w, r, audit.Event{
@@ -204,6 +251,18 @@ func (s *Server) handleActivateCA(w http.ResponseWriter, r *http.Request) {
 			RequestID: requestIDOf(r), Outcome: outcome,
 			Detail: map[string]any{"error": err.Error(), "found": found},
 		}, key, "the handover of signing failed") {
+			return
+		}
+		// As with the preparation: the handover happened, and what did not is
+		// the installation record naming the authority that signs now. An
+		// operator told "activate_failed" would try again over a fleet that
+		// has already moved.
+		if errors.Is(err, pki.ErrNotAnnounced) {
+			problem(w, http.StatusConflict, "activated_not_recorded",
+				"signing was handed over and the installation record does not name the new authority. "+
+					"The fleet is signing with it; what is missing is the record the other instances read, "+
+					"and they catch up at their next start. Ask GET /api/v1/pki for what signs now, and do "+
+					"not hand over again. ("+err.Error()+")")
 			return
 		}
 		problem(w, http.StatusConflict, "activate_failed", err.Error())

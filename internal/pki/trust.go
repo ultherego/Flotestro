@@ -36,10 +36,10 @@ type Trust struct {
 	store AuthorityStore
 	dir   string
 	// onActivate runs after a handover of signing; see SetActivationHook.
-	onActivate func(active *CA)
+	onActivate func(active *CA) error
 	// onPrepare runs after an authority has been admitted to the set; see
 	// SetPreparationHook.
-	onPrepare func(prepared *CA)
+	onPrepare func(prepared *CA) error
 }
 
 // retiredDir holds the CAs withdrawn from signing.
@@ -239,9 +239,19 @@ func repairActivation(store AuthorityStore) (*CA, bool, error) {
 	return half.repairActivation()
 }
 
+// ErrNotAnnounced says the change was made and the rest of the installation
+// was not told of it.
+//
+// It is not "nothing happened": the authority is in the store either way. What
+// failed is the announcement, and until it succeeds the other replicas hand
+// the hosts a trust set without the new authority - so the caller has to hear
+// about it rather than read 201 and carry on to the handover. The hooks used
+// to return nothing, so this was a line in a log and a success on the wire.
+var ErrNotAnnounced = errors.New("the other instances of this installation were not told")
+
 // SetActivationHook registers what runs once a prepared CA has taken over
 // signing on disk.
-func (t *Trust) SetActivationHook(hook func(active *CA)) {
+func (t *Trust) SetActivationHook(hook func(active *CA) error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.onActivate = hook
@@ -252,7 +262,7 @@ func (t *Trust) SetActivationHook(hook func(active *CA)) {
 // in the store has moved; a replica that is never told goes on handing the
 // hosts a bundle without the new CA, and they would be cut off the moment it
 // took over signing.
-func (t *Trust) SetPreparationHook(hook func(prepared *CA)) {
+func (t *Trust) SetPreparationHook(hook func(prepared *CA) error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.onPrepare = hook
@@ -362,14 +372,16 @@ func (t *Trust) Prepare() (Authority, error) {
 	}
 	// The hook runs outside the lock: it reads the set it is told about.
 	if hook != nil {
-		hook(prepared)
+		if err := hook(prepared); err != nil {
+			return authority, fmt.Errorf("%w: %w", ErrNotAnnounced, err)
+		}
 	}
 	return authority, nil
 }
 
 // prepare is the admission under the lock; it hands back the hook to run once
 // the lock is released.
-func (t *Trust) prepare() (Authority, func(*CA), *CA, error) {
+func (t *Trust) prepare() (Authority, func(*CA) error, *CA, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -404,14 +416,16 @@ func (t *Trust) Activate() (Authority, error) {
 	}
 	// The hook runs outside the lock: it reads the set it is told about.
 	if hook != nil {
-		hook(active)
+		if err := hook(active); err != nil {
+			return authority, fmt.Errorf("%w: %w", ErrNotAnnounced, err)
+		}
 	}
 	return authority, nil
 }
 
 // activate is the handover under the lock; it hands back the hook to run
 // once the lock is released.
-func (t *Trust) activate() (Authority, func(*CA), *CA, error) {
+func (t *Trust) activate() (Authority, func(*CA) error, *CA, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 

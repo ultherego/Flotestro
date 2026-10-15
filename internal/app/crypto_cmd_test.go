@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -131,5 +132,67 @@ func TestWhatTheVerificationOfTheStorePrints(t *testing.T) {
 		if !strings.Contains(printed, line+"\n") {
 			t.Fatalf("the report does not carry the line %q:\n%s", line, printed)
 		}
+	}
+}
+
+// The question a release asks of an installation, and the trap in asking it.
+//
+// The answer is two counts at zero. It was briefly a field anybody could leave
+// unset, which made the zero value say "no" for a report that had never been
+// asked - and a printer and a JSON document that disagree about the same
+// installation are worse than either alone. So it is computed in one place and
+// both renderings are held against each other here.
+func TestTheSecondFormIsCompleteOnlyWhenNothingIsLeftOfTheFirst(t *testing.T) {
+	for _, one := range []struct {
+		name     string
+		report   cryptoStatusReport
+		complete bool
+	}{
+		{"nothing of the first form", cryptoStatusReport{}, true},
+		{"a live version still in the first form",
+			cryptoStatusReport{LegacyEnvelopes: 1}, false},
+		{"a key that names no installation",
+			cryptoStatusReport{KeysWithoutInstallation: 1}, false},
+		{"both", cryptoStatusReport{LegacyEnvelopes: 4, KeysWithoutInstallation: 2}, false},
+	} {
+		t.Run(one.name, func(t *testing.T) {
+			if got := one.report.secondFormComplete(); got != one.complete {
+				t.Fatalf("secondFormComplete() = %v, want %v", got, one.complete)
+			}
+			var out strings.Builder
+			printCryptoStatus(&out, one.report)
+			said := out.String()
+			want := "second_form_complete: no"
+			if one.complete {
+				want = "second_form_complete: yes"
+			}
+			if !strings.Contains(said, want) {
+				t.Errorf("the report does not say %q:\n%s", want, said)
+			}
+			// Both numbers are printed whichever way the answer came out:
+			// evidence that only appears when it is bad cannot be quoted.
+			for _, line := range []string{"legacy_envelopes:", "keys_without_installation:"} {
+				if !strings.Contains(said, line) {
+					t.Errorf("the report does not carry %q:\n%s", line, said)
+				}
+			}
+			// And the JSON says the same as the text about the same report.
+			filled := one.report
+			filled.SecondFormComplete = filled.secondFormComplete()
+			encoded, err := json.Marshal(filled)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var back struct {
+				Complete bool `json:"second_form_complete"`
+			}
+			if err := json.Unmarshal(encoded, &back); err != nil {
+				t.Fatal(err)
+			}
+			if back.Complete != one.complete {
+				t.Errorf("the JSON says %v and the text says %v about one installation",
+					back.Complete, one.complete)
+			}
+		})
 	}
 }

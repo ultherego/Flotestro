@@ -105,6 +105,26 @@ type cryptoStatusReport struct {
 	// Pending counts the live versions that are not sealed the current way
 	// under the active key: the first form, and anything on another key.
 	Pending int `json:"pending_migration"`
+	// LegacyEnvelopes counts the live secret versions still in the first
+	// form. It is in VersionsByKey too, under the legacy label, and it is
+	// named here as a number of its own because a release has to read it
+	// without knowing that label.
+	LegacyEnvelopes int `json:"legacy_envelopes"`
+	// KeysWithoutInstallation counts the wrapped keys that name no
+	// installation. A row of the first form never named one, and until it is
+	// rewrapped it opens for anybody holding the same key encryption key.
+	KeysWithoutInstallation int `json:"keys_without_installation"`
+	// SecondFormComplete is the question a release asks: is every live row
+	// bound to this installation. It is filled from secondFormComplete below
+	// and never by hand - a bool with a default of false is an answer the
+	// zero value gives for free, and this one has to be computed from the two
+	// numbers above or not said at all.
+	SecondFormComplete bool `json:"second_form_complete"`
+}
+
+// secondFormComplete is the one definition of the answer: both counts at zero.
+func (r cryptoStatusReport) secondFormComplete() bool {
+	return r.LegacyEnvelopes == 0 && r.KeysWithoutInstallation == 0
 }
 
 // pendingMigration counts the live versions a rewrap still owes.
@@ -184,6 +204,12 @@ func cryptoStatus(args []string) error {
 	}
 	report.VersionsByKey = counts
 	report.Pending = pendingMigration(counts, report.ActiveKeyID)
+	report.LegacyEnvelopes = counts[secrets.LegacyFormLabel]
+	report.KeysWithoutInstallation, err = cryptostate.NewPostgres(pool).KeysWithoutInstallation(ctx)
+	if err != nil {
+		return fmt.Errorf("counting the keys that name no installation: %w", err)
+	}
+	report.SecondFormComplete = report.secondFormComplete()
 
 	if *asJSON {
 		encoded, err := json.MarshalIndent(report, "", "  ")
@@ -227,6 +253,21 @@ func printCryptoStatus(out io.Writer, report cryptoStatusReport) {
 			"the rewrap of a running panel moves them onto %s\n", report.Pending,
 			orNone(report.ActiveKeyID))
 	}
+	// The question a release asks of an installation, in two numbers and one
+	// answer. Said whichever way it comes out: "second_form_complete: yes" is
+	// the evidence, and evidence that only prints when it is bad is evidence
+	// nobody can quote.
+	fmt.Fprintf(out, "legacy_envelopes: %d\n", report.LegacyEnvelopes)
+	fmt.Fprintf(out, "keys_without_installation: %d\n", report.KeysWithoutInstallation)
+	if report.secondFormComplete() {
+		fmt.Fprintln(out, "second_form_complete: yes")
+		return
+	}
+	fmt.Fprintln(out, "second_form_complete: no")
+	fmt.Fprintf(out, "note: until these are zero the installation holds rows that name no installation. "+
+		"Two installations holding the same key encryption key give it the same identifier, so a row "+
+		"that names none opens for either - the binding is what tells them apart. The rewrap of a "+
+		"running panel moves them; nothing here is lost by waiting for it.\n")
 }
 
 // orNone names the active key for a message, for an installation that has none
@@ -747,11 +788,11 @@ func cryptoRevertState(args []string) error {
 		}
 		fmt.Printf("wrote %s\n", step.path)
 	}
-	written := make([]string, 0, len(materials))
-	for _, material := range materials {
-		written = append(written, material.KeyID)
-	}
-	if err := store.ForgetKeys(ctx, kek.ID(), written); err != nil {
+	// The rows as they were when this revert read them, which is what the
+	// files were written from. Handing the names alone would let a row whose
+	// bytes changed in between be dropped, and the installation would then
+	// read the older snapshot out of the file it just wrote.
+	if err := store.ForgetKeys(ctx, kek.ID(), rows); err != nil {
 		return fmt.Errorf("the files are back, but the rows could not be dropped: %w", err)
 	}
 	fmt.Printf("the installation reads its keys from %s again\n", options.files.StateDir)

@@ -313,16 +313,17 @@ func TestTheActivationHookRunsAfterTheFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	var seen string
-	trust.SetActivationHook(func(active *CA) {
+	trust.SetActivationHook(func(active *CA) error {
 		onDisk, err := Open(dir)
 		if err != nil {
 			t.Errorf("the hook ran before the pair landed: %v", err)
-			return
+			return nil
 		}
 		if !onDisk.Certificate.Equal(active.Certificate) {
 			t.Error("the hook ran with a CA other than the one on disk")
 		}
 		seen = active.IssuerID()
+		return nil
 	})
 	prepared, err := trust.Prepare()
 	if err != nil {
@@ -479,18 +480,19 @@ func TestThePreparationHookRunsOnceTheAuthorityIsInTheStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	var seen string
-	trust.SetPreparationHook(func(prepared *CA) {
+	trust.SetPreparationHook(func(prepared *CA) error {
 		beside, err := OpenTrust(dir)
 		if err != nil {
 			t.Errorf("the hook ran before the pair landed: %v", err)
-			return
+			return nil
 		}
 		pending, _ := beside.Pending()
 		if pending == nil || !pending.Certificate.Equal(prepared.Certificate) {
 			t.Error("the hook ran before the store held the prepared CA")
-			return
+			return nil
 		}
 		seen = prepared.IssuerID()
+		return nil
 	})
 	prepared, err := trust.Prepare()
 	if err != nil {
@@ -499,5 +501,71 @@ func TestThePreparationHookRunsOnceTheAuthorityIsInTheStore(t *testing.T) {
 	pending, _ := trust.Pending()
 	if seen == "" || seen != pending.IssuerID() {
 		t.Fatalf("the hook saw %q, the prepared CA is %q", seen, prepared.Fingerprint)
+	}
+}
+
+// A hook that fails is the installation not being told, and the caller has to
+// hear it.
+//
+// Both hooks used to return nothing, so a failure was a line in a log under a
+// 201. The consequence is in the hook's own doc: a replica that is never told
+// goes on handing the hosts a bundle without the new authority, and they are
+// cut off the moment it takes over signing. What is asserted here is the pair
+// of facts the caller needs: the call fails, AND the authority is in the store
+// anyway - because "it failed" must not be read as "nothing happened".
+func TestAPreparationNobodyWasToldOfIsAFailureThatStillLeftTheAuthority(t *testing.T) {
+	dir := t.TempDir()
+	trust, err := EnsureTrust(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused := errors.New("the installation record did not move on")
+	trust.SetPreparationHook(func(*CA) error { return refused })
+
+	prepared, err := trust.Prepare()
+	if !errors.Is(err, ErrNotAnnounced) {
+		t.Fatalf("Prepare() = %v, want it to carry %v", err, ErrNotAnnounced)
+	}
+	if !errors.Is(err, refused) {
+		t.Errorf("Prepare() = %v, want it to carry the hook's own error too", err)
+	}
+	// The authority exists: the preparation happened and the announcement did
+	// not. A caller that read this as "nothing happened" would prepare a
+	// second one over the first.
+	pending, _ := trust.Pending()
+	if pending == nil {
+		t.Fatal("the prepared CA is not in the trust set, so the failure did mean nothing happened")
+	}
+	if prepared.Fingerprint == "" {
+		t.Error("the answer does not describe the authority that was prepared")
+	}
+	beside, err := OpenTrust(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if onDisk, _ := beside.Pending(); onDisk == nil {
+		t.Error("the store does not hold the prepared CA, so the next start would not see it")
+	}
+}
+
+// The same for the handover: signing moved, the record does not say so.
+func TestAHandoverNobodyWasToldOfIsAFailureThatStillMovedTheSigning(t *testing.T) {
+	dir := t.TempDir()
+	trust, err := EnsureTrust(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := trust.Prepare(); err != nil {
+		t.Fatal(err)
+	}
+	before := trust.Active().IssuerID()
+	refused := errors.New("the installation record moved under this instance")
+	trust.SetActivationHook(func(*CA) error { return refused })
+
+	if _, err := trust.Activate(); !errors.Is(err, ErrNotAnnounced) {
+		t.Fatalf("Activate() = %v, want it to carry %v", err, ErrNotAnnounced)
+	}
+	if now := trust.Active().IssuerID(); now == before {
+		t.Fatal("signing did not move, so this was a handover that failed rather than one nobody was told of")
 	}
 }

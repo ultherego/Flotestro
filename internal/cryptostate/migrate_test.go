@@ -109,13 +109,24 @@ func (m *memoryStore) ReplaceKeys(ctx context.Context, from, to string, read, ke
 	return nil
 }
 
-func (m *memoryStore) ForgetKeys(_ context.Context, kekID string, keyIDs []string) error {
+func (m *memoryStore) ForgetKeys(_ context.Context, kekID string, read []WrappedKey) error {
 	if m.kekID != kekID {
 		return errors.New("not wrapped with that key")
 	}
 	m.mu.Lock()
-	for _, name := range keyIDs {
-		delete(m.rows, name)
+	// As Postgres does: the rows have to be the ones the caller read, by
+	// content. A row whose bytes changed since would be dropped on its name
+	// alone and the installation would read the older snapshot from the file.
+	current := make([]WrappedKey, 0, len(m.rows))
+	for _, row := range m.rows {
+		current = append(current, row)
+	}
+	if err := rowsStillThese(current, read); err != nil {
+		m.mu.Unlock()
+		return err
+	}
+	for _, key := range read {
+		delete(m.rows, key.KeyID)
 	}
 	left := len(m.rows)
 	m.mu.Unlock()
@@ -373,7 +384,7 @@ func TestARevertHandsBackTheMaterialBeforeTheRowsGo(t *testing.T) {
 	if err := store.ForgetKeys(ctx, stranger.ID(), nil); err == nil {
 		t.Error("the rows were dropped on the word of a key the installation is not wrapped with")
 	}
-	if err := store.ForgetKeys(ctx, kek.ID(), keyNames(back)); err != nil {
+	if err := store.ForgetKeys(ctx, kek.ID(), store.allRows()); err != nil {
 		t.Fatal(err)
 	}
 	if store.count() != 0 || store.kekID != "" {
@@ -432,11 +443,10 @@ func TestTheWithdrawnAuthoritiesTravelWithTheKeys(t *testing.T) {
 	}
 
 	// They go with the keys on the way back, not before them and not after.
-	held, err := Export(ctx, store, kek)
-	if err != nil {
+	if _, err := Export(ctx, store, kek); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.ForgetKeys(ctx, kek.ID(), keyNames(held)); err != nil {
+	if err := store.ForgetKeys(ctx, kek.ID(), store.allRows()); err != nil {
 		t.Fatal(err)
 	}
 	if len(store.retired) != 0 {
@@ -445,6 +455,26 @@ func TestTheWithdrawnAuthoritiesTravelWithTheKeys(t *testing.T) {
 }
 
 // keyNames is what a revert tells the store it wrote to the files.
+// replaceRow puts a row back with other bytes under the same name, the way an
+// activation re-seals an authority.
+func (m *memoryStore) replaceRow(row WrappedKey) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.rows[row.KeyID] = row
+}
+
+// allRows is what a revert hands to ForgetKeys: the rows as it read them,
+// not their names.
+func (m *memoryStore) allRows() []WrappedKey {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	rows := make([]WrappedKey, 0, len(m.rows))
+	for _, row := range m.rows {
+		rows = append(rows, row)
+	}
+	return rows
+}
+
 func keyNames(materials []Material) []string {
 	names := make([]string, 0, len(materials))
 	for _, material := range materials {
@@ -496,15 +526,51 @@ func TestAKeyThatAppearedMeanwhileIsNotTakenAway(t *testing.T) {
 		}
 	})
 
+	// The case the entry was written for: not a key that appeared, but the
+	// same identifier holding other bytes. A revert exports what it reads,
+	// writes the files from it and then drops the rows; if it drops them by
+	// name alone, an authority another replica activated under that same
+	// identifier is thrown away and the installation goes on reading the older
+	// snapshot out of the file it just wrote - with both operations reported
+	// as having succeeded.
+	t.Run("a revert refuses when a key it read changed under its identifier", func(t *testing.T) {
+		store := newMemoryStore()
+		if _, err := Import(ctx, store, first, installationMaterial(), nil); err != nil {
+			t.Fatal(err)
+		}
+		read := store.allRows()
+		if len(read) == 0 {
+			t.Fatal("the installation has no rows to revert")
+		}
+		// The same name, other bytes. In the product that is an activation
+		// re-sealing the authority row through ReplaceAuthority, which deletes
+		// and inserts; here the row is put back changed, which is the same
+		// thing seen from the store.
+		changed, err := sealSecretsKey(first, read[0].KeyID, bytes.Repeat([]byte{9}, secrets.KeyLength))
+		if err != nil {
+			t.Fatal(err)
+		}
+		store.replaceRow(changed)
+
+		err = store.ForgetKeys(ctx, first.ID(), read)
+		if !errors.Is(err, ErrRevisionMoved) {
+			t.Fatalf("the revert answered %v, want it to refuse over the row that changed", err)
+		}
+		if _, ok := store.rows[read[0].KeyID]; !ok {
+			t.Error("the row that changed was taken away anyway")
+		}
+	})
+
 	t.Run("a revert refuses", func(t *testing.T) {
 		store := newMemoryStore()
 		if _, err := Import(ctx, store, first, installationMaterial(), nil); err != nil {
 			t.Fatal(err)
 		}
-		written, err := Export(ctx, store, first)
-		if err != nil {
+		if _, err := Export(ctx, store, first); err != nil {
 			t.Fatal(err)
 		}
+		// The rows as the revert read them, before anything moved.
+		read := store.allRows()
 		fresh, err := sealSecretsKey(first, "k-made-meanwhile", bytes.Repeat([]byte{8}, secrets.KeyLength))
 		if err != nil {
 			t.Fatal(err)
@@ -513,7 +579,7 @@ func TestAKeyThatAppearedMeanwhileIsNotTakenAway(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		err = store.ForgetKeys(ctx, first.ID(), keyNames(written))
+		err = store.ForgetKeys(ctx, first.ID(), read)
 		if !errors.Is(err, ErrRevisionMoved) {
 			t.Fatalf("the revert answered %v", err)
 		}

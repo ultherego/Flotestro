@@ -49,7 +49,10 @@ func TestARelayIsStillRecognisedByTheCertificateItsRenewalReplaced(t *testing.T)
 		defer func() { _ = tx.Rollback(ctx) }()
 		if err := store.SaveCertificate(ctx, tx, id, "serial-"+string(fingerprint),
 			fingerprint, time.Now().Add(30*24*time.Hour),
-			relays.Issuer{Subject: "CN=Flotestro Fleet CA", Serial: "01"}, decidedOn); err != nil {
+			relays.Issuer{Subject: "CN=Flotestro Fleet CA", Serial: "01"}, decidedOn,
+			// This test is about the overlap of fingerprints, not the trust
+			// generation; no bundle went with these.
+			nil); err != nil {
 			t.Fatalf("saving the certificate: %v", err)
 		}
 		if err := tx.Commit(ctx); err != nil {
