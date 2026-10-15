@@ -662,7 +662,8 @@ func permissionsOf(values []string) []Permission {
 // names and a question about access.
 func (s *Store) AllPrincipals(ctx context.Context) ([]Principal, error) {
 	rows, err := s.pool.Query(ctx, `
-		select id, subject, display_name, kind, coalesce(directory_uid, '')
+		select id, subject, display_name, kind, coalesce(directory_uid, ''),
+		       coalesce(awaiting_issuer, '')
 		from principals
 		where disabled_at is null
 		order by subject`)
@@ -674,7 +675,8 @@ func (s *Store) AllPrincipals(ctx context.Context) ([]Principal, error) {
 	for rows.Next() {
 		var principal Principal
 		if err := rows.Scan(&principal.ID, &principal.Subject,
-			&principal.DisplayName, &principal.Kind, &principal.DirectoryUID); err != nil {
+			&principal.DisplayName, &principal.Kind, &principal.DirectoryUID,
+			&principal.AwaitingIssuer); err != nil {
 			return nil, err
 		}
 		principals = append(principals, principal)

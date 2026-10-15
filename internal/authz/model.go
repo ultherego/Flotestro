@@ -1011,8 +1011,14 @@ type Principal struct {
 	Kind        string `json:"kind"`
 	// DirectoryUID is the directory account somebody wrote this identity down
 	// as. Empty means no link, and an identity without one serialises as before.
-	DirectoryUID string    `json:"directory_uid,omitempty"`
-	Bindings     []Binding `json:"bindings"`
+	DirectoryUID string `json:"directory_uid,omitempty"`
+	// AwaitingIssuer is set on a record written before its owner ever arrived:
+	// a role granted in advance. It names the issuer whose first sign-in
+	// adopts the record, and it is cleared at that sign-in. A screen that
+	// reads it can tell "the panel has a record" from "this person has been
+	// here", which are not the same sentence.
+	AwaitingIssuer string    `json:"awaiting_issuer,omitempty"`
+	Bindings       []Binding `json:"bindings"`
 }
 
 // live returns the bindings that grant something now.

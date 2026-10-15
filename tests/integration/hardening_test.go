@@ -45,7 +45,9 @@ func TestIdentityTokensAreIssuedRevokedAndDisabled(t *testing.T) {
 		} `json:"items"`
 	}
 	find := func() (id string, bindings, tokens int) {
-		h.get("/api/v1/principals", &listing)
+		// Searched for by name: the list is paged and ordered by subject, so
+		// page one is not the installation.
+		h.get("/api/v1/principals?q="+subject, &listing)
 		for _, item := range listing.Items {
 			if item.Subject == subject {
 				return item.ID, len(item.Bindings), len(item.Tokens)

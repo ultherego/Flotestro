@@ -45,7 +45,11 @@ func TestAGroupMappingKeepsItsOwnerAndTagThroughTheDatabase(t *testing.T) {
 	}, &created, http.StatusCreated)
 	t.Cleanup(func() {
 		if created.ID != "" {
-			h.do(http.MethodDelete, "/api/v1/group-mappings/"+created.ID, nil, nil, http.StatusNoContent)
+			// With a reason: every change to who may get in carries one,
+			// and the route refuses the removal without it.
+			h.do(http.MethodDelete, "/api/v1/group-mappings/"+created.ID, map[string]any{
+				"reason": "the integration suite removes the mapping it created",
+			}, nil, http.StatusNoContent)
 		}
 	})
 
