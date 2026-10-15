@@ -802,16 +802,30 @@ a.topbar-crumb:hover { color: var(--text); text-decoration: none; }
 .tile.error .value { color: var(--error-text); }
 
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
+/* The head of a table is a label, like the head of a card: upper case and
+   letter-spaced, quiet, and with no heavy rule under it. The rule was the
+   strongest line on most screens and it was drawn under the least
+   important row. */
 th {
   text-align: left;
-  color: var(--text-muted);
-  font-weight: 500;
-  font-size: 12px;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--border-strong);
+  color: var(--text-faint);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
   white-space: nowrap;
 }
-td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+/* A row of a dense table in the consoles this was measured against is 36
+   to 40 pixels; ours was loose enough to fit eight fewer rows on a screen
+   and no easier to read for it. The line between rows goes nearly away:
+   with rows this regular, the eye needs the rhythm, not the ruling. */
+td {
+  padding: 9px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  vertical-align: middle;
+}
 tbody tr:hover { background: color-mix(in srgb, var(--text) 5%, transparent); }
 
 .badge {
@@ -2215,7 +2229,18 @@ button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent
 .verdict-band { display: flex; align-items: flex-start; gap: 32px; flex-wrap: wrap; margin-bottom: 18px; }
 .verdict-band > .verdict { flex: 1 1 380px; margin-bottom: 0; }
 .verdict-band > .needs-attention { flex: 1 1 420px; margin-bottom: 0; }
-.verdict { margin: 0 0 16px; padding: 2px 0 2px 14px; border-left: 3px solid var(--border-strong); }
+/* The answer to the page's question, in a container of its own.
+   It used to be a sentence with a three-pixel stripe beside it, floating
+   on the page above the cards - which is what the owner meant by "jakiś
+   tekst na górze". It is a card now, like everything else on the screen,
+   and the stripe stays as the one thing that says how it is going. */
+.verdict {
+  margin: 0 0 22px;
+  padding: 18px 22px;
+  background: var(--bg-panel);
+  border-radius: var(--radius-card);
+  border-left: 3px solid var(--border-strong);
+}
 .verdict.ok { border-left-color: var(--ok); }
 .verdict.warn { border-left-color: var(--warn); }
 .verdict.error { border-left-color: var(--error); }
@@ -2227,7 +2252,7 @@ button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent
 
 /* What needs a decision. Only ever drawn when it holds something. */
 .needs-attention { margin: 0 0 16px; }
-.needs-attention-title { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--warn-text); text-transform: uppercase; letter-spacing: 0.04em; }
+.needs-attention-title { margin: 0 0 10px; font-size: 11px; font-weight: 600; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.08em; }
 .needs-attention-body { display: grid; gap: 8px; }
 
 /* The long explanation of a screen, behind the mark beside its title. */
@@ -2649,3 +2674,21 @@ tr.row-open > td { background: var(--bg-raised); }
    printed one by one in small type, which is a wall of text saying
    nothing. They are one line now. */
 .attention-clear { margin-top: 10px; }
+
+/* A button with no box: the label alone, in the quiet ink, for a control
+   that is there when wanted and silent otherwise. */
+.ghost {
+  background: none;
+  border: 0;
+  padding: 6px 2px;
+  font: inherit;
+  cursor: pointer;
+  color: var(--text-muted);
+}
+.ghost:hover { color: var(--text); text-decoration: underline; }
+
+/* The arrange control sits at the right edge of the board, level with the
+   cards, and says nothing until somebody looks for it. */
+.layout-bar:has(.layout-arrange) { justify-content: flex-end; margin-bottom: 8px; }
+.layout-arrange { color: var(--text-faint); }
+.layout-arrange:hover { color: var(--text); }

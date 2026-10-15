@@ -223,7 +223,13 @@ export function Board({
       {layout.data !== undefined && (
         <div className="layout-bar">
           {editing === null ? (
-            <button className="secondary" onClick={() => setEditing(current)}>{t("Arrange this screen")}</button>
+            /* Quiet and at the right edge, level with the cards: arranging
+               is something somebody does once in a while, and a filled
+               button floating between two cards reads as the thing the
+               screen is for. */
+            <button className="ghost layout-arrange" onClick={() => setEditing(current)}>
+              {t("Arrange this screen")}
+            </button>
           ) : (
             <>
               {/* A reason, because the trail keeps one for every change that
