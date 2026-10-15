@@ -197,6 +197,20 @@ func (p *Postgres) LockTransition(ctx context.Context, wait time.Duration) (func
 	}, nil
 }
 
+// KeysWithoutInstallation counts the wrapped keys that name no installation.
+//
+// A row of the first form never named one, and until it is rewrapped it opens
+// for anybody holding the same key encryption key - two installations that
+// hold the same key give it the same identifier, so the installation is the
+// only thing that tells their rows apart. The count is what a release has to
+// see at zero before it can say the second form is in force.
+func (p *Postgres) KeysWithoutInstallation(ctx context.Context) (int, error) {
+	var count int
+	err := p.pool.QueryRow(ctx,
+		`select count(*) from crypto_wrapped_keys where installation_id is null`).Scan(&count)
+	return count, err
+}
+
 // Load implements Storage.
 func (p *Postgres) Load(ctx context.Context) (*Record, error) {
 	var record Record
