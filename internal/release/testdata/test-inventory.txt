@@ -2663,6 +2663,7 @@ tests/integration/authz_test.go:TestPermissionIsPerOperation
 tests/integration/authz_test.go:TestProductionRequiresASecondPerson
 tests/integration/authz_test.go:TestScopeLimitsFleetVisibility
 tests/integration/authz_test.go:TestViewerChangesNothing
+tests/integration/awaiting_identity_test.go:TestARoleCanWaitForSomebodyWhoHasNotSignedIn
 tests/integration/backups_test.go:TestBackupDefinitionRequiresAnExistingSecret
 tests/integration/backups_test.go:TestBackupFullCycle
 tests/integration/backups_test.go:TestBackupGuardsTheRestoreTarget

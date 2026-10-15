@@ -493,6 +493,7 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "GET /api/v1/access/review", s.handleAccessReview)
 	s.route(mux, "GET /api/v1/whoami", s.handleWhoami)
 	s.route(mux, "GET /api/v1/access/holders", s.handleAccessHolders)
+	s.route(mux, "POST /api/v1/access/holders/grant", s.handleGrantToHolder)
 	s.route(mux, "GET /api/v1/roles", s.handleListRoles)
 	s.route(mux, "POST /api/v1/roles", s.handleCreateRole)
 	s.route(mux, "PUT /api/v1/roles/{role}", s.handleReplaceRole)

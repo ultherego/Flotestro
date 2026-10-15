@@ -952,6 +952,15 @@ var responseSchemas = map[string]map[string]any{
 	"GET /api/v1/installation-profiles":           ref("InstallationProfile"),
 	"GET /api/v1/monitoring/alerts":               pagedCollection("Alert"),
 	"GET /api/v1/policies/{id}/campaigns":         collection("PolicyCampaignLink"),
+	"POST /api/v1/access/holders/grant": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"principal_id": str(), "subject": str(), "role": roleField(),
+			"scope":                       map[string]any{"type": "object"},
+			"identity_written_in_advance": map[string]any{"type": "boolean", "description": "Whether this call is the moment the panel first wrote the person down. False when they already had a record."},
+			"awaiting_issuer":             map[string]any{"type": "string", "description": "The issuer whose first sign-in adopts the record written in advance."},
+		},
+	},
 	"GET /api/v1/access/holders": map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -2290,6 +2299,20 @@ var requestSchemas = map[string]map[string]any{
 	// A role of this installation's own. The permissions are written whole on
 	// every call: an edit that could only add would be a strange thing to
 	// offer on a screen about access.
+	// A role for somebody who has not signed in yet. The record is written
+	// down in advance and waits for the provider named in the answer.
+	"POST /api/v1/access/holders/grant": {
+		"type": "object",
+		"properties": map[string]any{
+			"subject":      map[string]any{"type": "string", "description": "The name the person will sign in under, as the directory spells it."},
+			"display_name": map[string]any{"type": "string"},
+			"role":         roleField(),
+			"site":         map[string]any{"type": "string", "description": "Empty is every site."},
+			"environment":  map[string]any{"type": "string", "description": "Empty is every environment."},
+			"reason":       map[string]any{"type": "string", "description": "Kept in the audit trail."},
+		},
+		"required": []string{"subject", "role"},
+	},
 	"POST /api/v1/roles": {
 		"type": "object",
 		"properties": map[string]any{

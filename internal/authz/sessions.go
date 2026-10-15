@@ -439,6 +439,27 @@ func (s *Store) UpsertExternalPrincipal(ctx context.Context, tx pgx.Tx,
 		return "", err
 	}
 
+	// A record written down before this person ever arrived, waiting for
+	// exactly this issuer, is adopted: that is what it was made for, and the
+	// role an administrator granted in advance is on it. The condition is
+	// narrow on purpose - the subject matches, the record says which issuer
+	// it expects, and it has no identity of its own yet.
+	err = tx.QueryRow(ctx, `
+		update principals set
+			issuer = $1, subject_id = $2, awaiting_issuer = null,
+			display_name = coalesce(nullif($4, ''), display_name),
+			email = coalesce(nullif($5, ''), email), last_login_at = now(), updated_at = now()
+		where awaiting_issuer = $1
+		  and lower(subject) = lower($3)
+		  and issuer is null and subject_id is null
+		returning id`, issuer, subjectID, subject, displayName, email).Scan(&id)
+	if err == nil {
+		return id, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return "", err
+	}
+
 	// An external identity never takes over a principal that exists under the
 	// same subject with another origin, such as a local or service principal.
 	err = tx.QueryRow(ctx, `

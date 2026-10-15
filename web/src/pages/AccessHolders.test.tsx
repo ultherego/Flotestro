@@ -33,6 +33,8 @@ const answer = {
 };
 
 let directory = answer.directory as Record<string, unknown>;
+/** What a form sent, so a test can check it rather than guess. */
+const sent: { path: string; body: unknown }[] = [];
 
 vi.mock("../lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/api")>();
@@ -44,8 +46,12 @@ vi.mock("../lib/api", async (importOriginal) => {
         if (path === "/api/v1/access/holders") {
           return Promise.resolve({ ...answer, directory });
         }
+        if (path === "/api/v1/roles") {
+          return Promise.resolve({ items: [{ role: "operator" }, { role: "viewer" }], count: 2 });
+        }
         return Promise.resolve({ items: [], count: 0 });
       },
+      post: (path: string, body: unknown) => { sent.push({ path, body }); return Promise.resolve({}); },
     },
   };
 });
@@ -59,7 +65,11 @@ function draw(node: ReactNode) {
   );
 }
 
-afterEach(() => { cleanup(); directory = answer.directory as Record<string, unknown>; });
+afterEach(() => {
+  cleanup();
+  directory = answer.directory as Record<string, unknown>;
+  sent.length = 0;
+});
 
 describe("shortScope", () => {
   it("drops the categories that narrow nothing", () => {
@@ -135,5 +145,45 @@ describe("who may sign in", () => {
     draw(<AccessHolders />);
     await waitFor(() => expect(screen.getByTestId("directory-absent")).toBeInTheDocument());
     expect(screen.queryByTestId("directory-unread")).toBeNull();
+  });
+});
+
+describe("granting a role to somebody the panel has not met", () => {
+  it("writes the person down and binds the role in one call", async () => {
+    draw(<AccessHolders />);
+    await waitFor(() => expect(screen.getByTestId("grant-xdupa")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("grant-xdupa"));
+
+    // The form says plainly what it is about to do, because the record does
+    // not exist yet and the person may never have heard of this panel.
+    await waitFor(() => expect(screen.getByTestId("grant-role")).toBeInTheDocument());
+    expect(screen.getByText(/The panel has never seen this person/)).toBeInTheDocument();
+
+    // A role and a reason, both required: this is a change to who may do
+    // what, and the trail wants the sentence.
+    const confirm = screen.getByText("Grant the role");
+    expect(confirm).toBeDisabled();
+    // The roles come from the catalogue, so the choice waits for it: a
+    // select with no options cannot be changed.
+    await waitFor(() => expect(screen.getByTestId("grant-role")).toBeEnabled());
+    fireEvent.change(screen.getByTestId("grant-role"), { target: { value: "operator" } });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(screen.getByTestId("grant-reason"), { target: { value: "took over the night rota" } });
+    await waitFor(() => expect(confirm).toBeEnabled());
+
+    fireEvent.click(confirm);
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0].path).toBe("/api/v1/access/holders/grant");
+    expect(sent[0].body).toMatchObject({ subject: "xdupa", role: "operator" });
+  });
+
+  it("says the role joins what a group already grants, for somebody known", async () => {
+    draw(<AccessHolders />);
+    await waitFor(() => expect(screen.getByTestId("holders-bound")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("holders-bound"));
+    await waitFor(() => expect(screen.getByTestId("grant-bootstrap-admin")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("grant-bootstrap-admin"));
+    await waitFor(() =>
+      expect(screen.getByText(/The role is bound to this identity/)).toBeInTheDocument());
   });
 });
