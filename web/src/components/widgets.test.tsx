@@ -533,3 +533,33 @@ describe("ChartLegend", () => {
     expect(container.querySelectorAll(".chart-legend li")).toHaveLength(0);
   });
 });
+
+/* A dozen states at zero is a wall of small type saying nothing happened.
+   Four are named and the rest become one chip - which still names them to
+   anyone who hovers, because the counts are not hidden, only folded. */
+describe("a status bar with a long tail of zeros", () => {
+  const many = [
+    { label: "Online", value: 4, tone: "ok" as const },
+    { label: "Stale", value: 0, tone: "warn" as const },
+    { label: "Offline", value: 0, tone: "error" as const },
+    { label: "Unknown", value: 0, tone: "unknown" as const },
+    { label: "Quarantined", value: 0, tone: "neutral" as const },
+    { label: "In maintenance", value: 0, tone: "neutral" as const },
+    { label: "Drifted", value: 0, tone: "warn" as const },
+  ];
+
+  it("names four and folds the rest into one chip", () => {
+    const { getByText, getByTestId } = draw(<StatusBar segments={many} />);
+    expect(getByText("Stale")).toBeInTheDocument();
+    expect(getByText("Quarantined")).toBeInTheDocument();
+    const more = getByTestId("status-bar-more-at-zero");
+    expect(more).toHaveTextContent("+2 at zero");
+    // Folded, not hidden: the chip says which.
+    expect(more.getAttribute("title")).toBe("In maintenance, Drifted");
+  });
+
+  it("folds nothing when there are only a few", () => {
+    const { queryByTestId } = draw(<StatusBar segments={many.slice(0, 4)} />);
+    expect(queryByTestId("status-bar-more-at-zero")).toBeNull();
+  });
+});

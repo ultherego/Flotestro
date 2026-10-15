@@ -6117,4 +6117,5 @@ export const pl: Record<string, string> = {
   // Kafle Dashboardu po przebudowie 15.10.
   "Waiting on a person": "Czeka na człowieka",
   "{n} other checks are clear.": "Pozostałe {n} kontroli bez zastrzeżeń.",
+  "+{n} at zero": "+{n} na zerze",
 };

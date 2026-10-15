@@ -1803,7 +1803,19 @@ a.button.primary:hover { background: color-mix(in srgb, var(--accent) 88%, var(-
    read from across the room. The segments share the width in proportion
    to their counts, but a zero keeps a narrow slot, so the states that are
    absent are still named. */
-.status-bar-group { display: flex; flex-direction: column; gap: 10px; }
+/* One segment above zero is a number, not a billboard. It used to be
+   drawn as a block across the whole card with the empty states listed
+   underneath - a row of a dashboard spent on "4 Online". The number and
+   the states it is not now sit on one line, and the line wraps. */
+.status-bar-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 20px;
+}
+/* With more than one count there is a bar to draw, and a bar wants the
+   width to itself. */
+.status-bar-group:has(.status-bar) { display: flex; flex-direction: column; align-items: stretch; }
 .status-bar {
   display: flex;
   gap: 2px;
@@ -1832,17 +1844,17 @@ a.button.primary:hover { background: color-mix(in srgb, var(--accent) 88%, var(-
 }
 /* One state holding everything is not a bar; it is the number. */
 .status-bar-hero {
-  display: flex;
+  display: inline-flex;
   align-items: baseline;
   gap: 10px;
-  padding: 14px 16px;
+  padding: 10px 16px 10px 14px;
   border-radius: var(--radius-sm);
   border-left: 3px solid var(--segment, var(--border-strong));
   background: var(--bg-raised);
   color: var(--text);
   text-decoration: none;
 }
-.status-bar-hero .status-bar-value { font-size: 34px; }
+.status-bar-hero .status-bar-value { font-size: var(--metric-m); font-weight: 600; }
 /* Inside a tile the single number stands among a tile's worth of facts, not
    alone on a card: a billboard there was twice the height of what it says. */
 .part .status-bar-hero { padding: 8px 12px; }
@@ -2692,3 +2704,8 @@ tr.row-open > td { background: var(--bg-raised); }
 .layout-bar:has(.layout-arrange) { justify-content: flex-end; margin-bottom: 8px; }
 .layout-arrange { color: var(--text-faint); }
 .layout-arrange:hover { color: var(--text); }
+
+/* The states at zero. Named while there are few of them; past the fourth
+   they fold into one chip of the same cloth, which names the rest in its
+   title rather than printing them. */
+.status-bar-quiet-item.zero { color: var(--text-faint); }

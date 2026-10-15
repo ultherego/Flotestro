@@ -42,6 +42,9 @@ export type Segment = {
  * the zeros. It is said in words now, under the bar, in the one case it is
  * true - the state that was not counted is named there.
  */
+/** How many states at zero are named before the rest become one chip. */
+const QUIET_NAMED = 4;
+
 export function StatusBar({ segments, compact = false }: { segments: Segment[]; compact?: boolean }) {
   const t = useT();
   const counted = segments.filter((segment) => segment.value !== undefined && segment.value > 0);
@@ -86,7 +89,21 @@ export function StatusBar({ segments, compact = false }: { segments: Segment[]; 
       )}
       {quiet.length > 0 && (
         <div className="status-bar-quiet">
-          {quiet.map((segment) => draw(segment, `status-bar-quiet-item ${segment.tone} zero`))}
+          {/* A few states at zero are worth naming; a dozen are a wall of
+              small type saying nothing happened. Past the fourth they are
+              one chip, which still names them to anyone who hovers - and a
+              state nobody could count is never in here, because unknown is
+              not zero and is listed below under its own heading. */}
+          {quiet.slice(0, QUIET_NAMED).map((segment) => draw(segment, `status-bar-quiet-item ${segment.tone} zero`))}
+          {quiet.length > QUIET_NAMED && (
+            <span
+              className="status-bar-quiet-item zero"
+              data-testid="status-bar-more-at-zero"
+              title={quiet.slice(QUIET_NAMED).map((segment) => segment.label).join(", ")}
+            >
+              {t("+{n} at zero", { n: quiet.length - QUIET_NAMED })}
+            </span>
+          )}
         </div>
       )}
       {uncounted.length > 0 && (
