@@ -120,7 +120,7 @@
 
   <main class="content">
 <h1>8. API</h1>
-<p class="lede">Wszystko, co robi panel, może zrobić program. API to ta sama powierzchnia, na której działa panel webowy: 244 tras pod <code>/api/v1</code>, odpowiedzi w JSON, autoryzacja tymi samymi uprawnieniami i zapis do tego samego śladu audytowego. Ta strona to tabela tras w postaci, w jakiej rejestruje je <code>internal/adminapi/adminapi.go</code>, oraz konwencje opisane w <code>internal/adminapi/openapi.go</code>; panel udostępnia własny dokument OpenAPI pod <code>GET /api/v1/openapi.json</code>. Po wywołania do wklejenia w terminal, z odpowiedziami, jakie dały, zob. <a href="examples.html">11. Przykłady użycia</a>.</p>
+<p class="lede">Wszystko, co robi panel, może zrobić program. API to ta sama powierzchnia, na której działa panel webowy: 246 tras pod <code>/api/v1</code>, odpowiedzi w JSON, autoryzacja tymi samymi uprawnieniami i zapis do tego samego śladu audytowego. Ta strona to tabela tras w postaci, w jakiej rejestruje je <code>internal/adminapi/adminapi.go</code>, oraz konwencje opisane w <code>internal/adminapi/openapi.go</code>; panel udostępnia własny dokument OpenAPI pod <code>GET /api/v1/openapi.json</code>. Po wywołania do wklejenia w terminal, z odpowiedziami, jakie dały, zob. <a href="examples.html">11. Przykłady użycia</a>.</p>
 <h2 id="basics">Kształt interfejsu</h2>
 <ul><li>Odczyty idą przez <code>GET</code>. Plany, operacje i kampanie tworzy się przez <code>POST</code>; mają też własne jawne endpointy <code>approve</code>, <code>cancel</code>, <code>pause</code> i <code>resume</code>.</li><li>Każda lista jest stronicowana po stronie serwera.</li><li>Błędy to obiekty problem ze stabilnym kodem.</li><li>Dokument opisuje sam siebie: <code>GET /api/v1/openapi.json</code> powstaje z zarejestrowanych tras, więc nie może się od nich rozjechać.</li><li>Panel nasłuchuje na <code>FLOTESTRO_ADMIN_ADDR</code>, domyślnie <code>127.0.0.1:8080</code>, po zwykłym HTTP; ma stać za reverse proxy, które terminuje TLS.</li></ul>
 <h2 id="authentication">Uwierzytelnianie</h2>
@@ -181,7 +181,7 @@
 <table>
 <thead><tr><th>Sekcja</th><th>Trasy</th></tr></thead>
 <tbody>
-<tr><td><a href="#routes-service">Endpointy serwisowe</a></td><td>19</td></tr>
+<tr><td><a href="#routes-service">Endpointy serwisowe</a></td><td>21</td></tr>
 <tr><td><a href="#routes-caller">Logowanie i własne rekordy wywołującego</a></td><td>8</td></tr>
 <tr><td><a href="#routes-fleet">Flota w skrócie</a></td><td>10</td></tr>
 <tr><td><a href="#routes-hosts">Hosty</a></td><td>59</td></tr>
@@ -209,7 +209,9 @@
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/settings/monitoring</code><br><span class="caption">Retencje monitoringu są ustawieniem instalacji, a nie procesu: czyta się je tutaj i zapisuje bez restartu.</span></td><td><code>settings.read</code></td></tr>
 <tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/settings/monitoring</code></td><td><code>monitoring.rules.write</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/settings/layout/{screen}</code><br><span class="caption">Układ kafelków ekranu. Układ należy do instalacji, więc wszyscy widzą ten sam.</span></td><td><code>host.read</code></td></tr>
-<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/settings/layout/{screen}</code></td><td><code>settings.advertise.write</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/settings/layout/{screen}</code><br><span class="caption">Układa ekran wszystkim, którzy go otwierają. Niesie <code>revision</code> odczytaną przed edycją — zapis na starszej dostaje 409 zamiast nadpisać kogoś, kto zapisał w międzyczasie — oraz <code>reason</code>, który trafia do dziennika zdarzeń.</span></td><td><code>settings.layout.write</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/settings/layout/{screen}</code><br><span class="caption">Przywraca układ fabryczny ekranu. Poprzednie układy zostają zachowane.</span></td><td><code>settings.layout.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/settings/layout/{screen}/history</code><br><span class="caption">Dziesięć ostatnich układów tego ekranu, od najnowszego, każdy z autorem i powodem.</span></td><td><code>settings.layout.write</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/setup</code><br><span class="caption">Pierwsze uruchomienie: czego instalacji jeszcze brakuje oraz dwa testy połączenia, które lista kontrolna udostępnia na miejscu.</span></td><td><span class="caption">dowolna uwierzytelniona tożsamość</span></td></tr>
 <tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/setup/test-directory</code></td><td><code>identity.read</code></td></tr>
 <tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/setup/test-oidc</code></td><td><code>settings.read</code>, <code>principal.manage</code></td></tr>
