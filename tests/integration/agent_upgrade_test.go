@@ -22,11 +22,23 @@ var artefactRefusals = []string{"agent_package_digest_mismatch", "agent_package_
 
 // TestAnAgentUpgradeWithAWrongPackageDigestIsRefusedAndTheAgentKeepsRunning is
 // the negative side of chapter 14.
+//
+// What it measures, and what it cannot: the digest is compared by the agent
+// that is being replaced, because an upgrade is always carried out by the old
+// one. In the laboratory that agent is deliberately a version behind, so this
+// measures the refusal as the previous release wrote it. The version being
+// released is measured by the upgrade that succeeds - after which the new
+// agent is the one running - and by the unit tests of the helper. The order
+// here names the version the repository actually offers rather than the one
+// the host already has, so the artefact fetched is the one the release
+// publishes; targeting the installed version made the package manager fetch a
+// file it already had, which answered a narrower question than anybody
+// wanted.
 func TestAnAgentUpgradeWithAWrongPackageDigestIsRefusedAndTheAgentKeepsRunning(t *testing.T) {
 	defer replacingAgent()()
 	h := newHarness(t)
-	// A Debian-family host: its package manager fetches a file of a version
-	// it already has, which is what makes the digest check reachable here.
+	// A Debian-family host: the digest of a .deb is what its package manager
+	// hands the helper, so the comparison is reachable here.
 	host := h.hostByFamily("debian")
 
 	var before agentHostView
@@ -35,13 +47,24 @@ func TestAnAgentUpgradeWithAWrongPackageDigestIsRefusedAndTheAgentKeepsRunning(t
 		t.Skip("the host does not report the version of its agent")
 	}
 
+	// The version the fleet repository offers. Where that is the version the
+	// host already runs - a lab whose candidate has not been published yet -
+	// the order names the installed one, and the comparison still happens.
+	target, published := h.publishedAgentVersion()
+	if !published {
+		target = before.AgentVersion
+	}
+	if target != before.AgentVersion {
+		t.Logf("the order targets %s, the host runs %s", target, before.AgentVersion)
+	}
+
 	// A digest of the right shape and of nothing the release ever published.
 	wrongDigest := strings.Repeat("9f", 32)
 	job, attempts := h.runOperation(host.ID, map[string]any{
 		"action": "agent.upgrade",
 		"payload": map[string]any{
 			"agent_upgrade": map[string]any{
-				"target_version": before.AgentVersion,
+				"target_version": target,
 				"package_sha256": wrongDigest,
 			},
 		},
