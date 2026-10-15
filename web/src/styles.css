@@ -2458,3 +2458,27 @@ button.severity-block { cursor: pointer; }
   background: var(--bg-sunken);
   color: var(--text-faint);
 }
+
+/* The name of a row, which is the way into its record: a link in weight and
+   colour, a button in behaviour, and no button chrome at all. */
+.cell-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--accent-text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.cell-link:hover { text-decoration: underline; }
+
+tr.row-open > td { background: var(--bg-raised); }
+
+.state-on  { color: var(--ok-text); }
+.state-off { color: var(--text-faint); }
+
+/* The record of one row, opened under it. */
+.record { padding: 4px 0 8px; }
+.record-tabs { margin-bottom: 12px; }
+.record-body { display: flex; flex-direction: column; gap: 12px; }

@@ -112,18 +112,54 @@ describe("the identities list", () => {
  * part worth pinning: an identity with no password is not an identity whose
  * password is empty, and the button says which it is.
  */
-describe("the password of an identity", () => {
-  it("says whether there is one, without saying anything about it", async () => {
+describe("a row of the identity list", () => {
+  it("carries no buttons but the name", async () => {
+    const { container } = draw(<Identities initialSearch="" />);
+    await waitFor(() => expect(screen.getByTestId("open-identity-0")).toBeInTheDocument());
+
+    // The norm of 15.10: a row shows data and opens a record. Seven buttons
+    // a row meant three hundred and fifty on a page of fifty, and none of
+    // them was the important one. If this count grows, the wall is back.
+    const row = screen.getByTestId("open-identity-0").closest("tr") as HTMLElement;
+    const buttons = Array.from(row.querySelectorAll("button"));
+    expect(buttons.map((button) => button.getAttribute("data-testid")))
+      .toEqual(["open-identity-0"]);
+    expect(container.querySelectorAll(".actions-cell")).toHaveLength(0);
+  });
+
+  it("opens the record on the name and sorts the rare acts into tabs", async () => {
     draw(<Identities initialSearch="" />);
-    await waitFor(() => expect(screen.getByTestId("password-identity-0")).toBeInTheDocument());
-    expect(screen.getByTestId("password-identity-0")).toHaveTextContent("Set a password");
-    expect(screen.getByTestId("password-identity-1")).toHaveTextContent("Password set");
+    await waitFor(() => expect(screen.getByTestId("open-identity-1")).toBeInTheDocument());
+    expect(screen.queryByTestId("record-identity-1")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("open-identity-1"));
+    await waitFor(() => expect(screen.getByTestId("record-identity-1")).toBeInTheDocument());
+    for (const tab of ["identity", "roles", "tokens", "password"]) {
+      expect(screen.getByTestId(`record-tab-${tab}`)).toBeInTheDocument();
+    }
+    // The name closes what it opened: one record at a time.
+    fireEvent.click(screen.getByTestId("open-identity-1"));
+    await waitFor(() => expect(screen.queryByTestId("record-identity-1")).toBeNull());
+  });
+});
+
+describe("the password of an identity", () => {
+  it("says whether there is one in the row, as a fact and not as a button", async () => {
+    draw(<Identities initialSearch="" />);
+    await waitFor(() => expect(screen.getByTestId("password-state-identity-0")).toBeInTheDocument());
+    // An identity with no password is not one whose password is empty, and
+    // the column says which it is without inviting a click.
+    expect(screen.getByTestId("password-state-identity-0")).toHaveTextContent("—");
+    expect(screen.getByTestId("password-state-identity-1")).toHaveTextContent("set");
+    expect(screen.queryByRole("button", { name: "Set a password" })).toBeNull();
   });
 
   it("asks for a reason before it stores one, and says who set the last", async () => {
     draw(<Identities initialSearch="" />);
-    await waitFor(() => expect(screen.getByTestId("password-identity-1")).toBeInTheDocument());
-    fireEvent.click(screen.getByTestId("password-identity-1"));
+    // The way in is the name, and the password is a tab of the record.
+    await waitFor(() => expect(screen.getByTestId("open-identity-1")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("open-identity-1"));
+    fireEvent.click(screen.getByTestId("record-tab-password"));
 
     await waitFor(() => expect(screen.getByTestId("set-password")).toBeInTheDocument());
     expect(screen.getByText(/Set by bootstrap-admin/)).toBeInTheDocument();
@@ -143,8 +179,9 @@ describe("the password of an identity", () => {
 
   it("offers to take a password away only where there is one", async () => {
     draw(<Identities initialSearch="" />);
-    await waitFor(() => expect(screen.getByTestId("password-identity-0")).toBeInTheDocument());
-    fireEvent.click(screen.getByTestId("password-identity-0"));
+    await waitFor(() => expect(screen.getByTestId("open-identity-0")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("open-identity-0"));
+    fireEvent.click(screen.getByTestId("record-tab-password"));
     await waitFor(() => expect(screen.getByTestId("set-password")).toBeInTheDocument());
     expect(screen.queryByTestId("clear-password")).toBeNull();
     expect(screen.getByText(/signs in through the identity provider, or not at all/)).toBeInTheDocument();

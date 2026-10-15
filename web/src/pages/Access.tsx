@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Navigate, useSearchParams } from "react-router-dom";
 import { api, ApiError, type Collection } from "../lib/api";
 import { copyToClipboard } from "../lib/clipboard";
-import type { AccessReview, ApiToken, GroupMapping, Principal, ReviewFlag, ReviewedPrincipal, Whoami } from "../lib/types";
+import type { AccessReview, ApiToken, GroupMapping, Principal, ReviewFlag, ReviewedPrincipal, RoleBinding, Whoami } from "../lib/types";
 import { ErrorBox, Time, Empty } from "../components/ui";
 import { absoluteTime, toInstant } from "../lib/format";
 import { Actions, Card, EmptyState, Field, FieldGrid, StatGrid, Stat, Toolbar, Pager} from "../components/layout";
@@ -624,8 +624,10 @@ export function Identities({ initialSearch }: { initialSearch: string }) {
   const [showDisabled, setShowDisabled] = useState(false);
   const [pending, setPending] = useState<Pending | null>(null);
   const [creating, setCreating] = useState(false);
-  const [sessionsOf, setSessionsOf] = useState<ListedPrincipal | null>(null);
-  const [passwordFor, setPasswordFor] = useState<ListedPrincipal | null>(null);
+  // One record open at a time. Two separate panels - sessions and password -
+  // used to hang off two separate buttons in every row; they are tabs of the
+  // record now, so the row carries none.
+  const [openRecord, setOpenRecord] = useState<ListedPrincipal | null>(null);
   // Who to ask for, and which page of them. The search goes to the server:
   // an installation whose suites have been running for a month had 1803
   // identities, and the person looking for their own name could not find it
@@ -808,7 +810,7 @@ export function Identities({ initialSearch }: { initialSearch: string }) {
               onChange={(e) => { setSearch(e.target.value); setPage(1); }}
               data-testid="identity-search"
             />
-            <select value={showDisabled ? "disabled" : "enabled"} onChange={(e) => { setShowDisabled(e.target.value === "disabled"); setPending(null); setSessionsOf(null); }}>
+            <select value={showDisabled ? "disabled" : "enabled"} onChange={(e) => { setShowDisabled(e.target.value === "disabled"); setPending(null); setOpenRecord(null); }}>
               <option value="enabled">{t("Enabled")}</option>
               <option value="disabled">{t("Disabled")}</option>
             </select>
@@ -820,14 +822,25 @@ export function Identities({ initialSearch }: { initialSearch: string }) {
           ) : (
           <table>
             <thead>
-              <tr><th scope="col">{t("Subject")}</th><th scope="col">{t("Name")}</th><th scope="col">{t("Kind")}</th><th scope="col">{t("Roles and scopes")}</th><th scope="col">{t("Tokens")}</th><th scope="col" /></tr>
+              <tr><th scope="col">{t("Subject")}</th><th scope="col">{t("Name")}</th><th scope="col">{t("Kind")}</th><th scope="col">{t("Roles and scopes")}</th><th scope="col">{t("Tokens")}</th><th scope="col">{t("Password")}</th><th scope="col">{t("Status")}</th></tr>
             </thead>
             <tbody>
               {shown.map((principal) => (
                 <Fragment key={principal.id}>
-                <tr>
+                <tr className={openRecord?.id === principal.id ? "row-open" : undefined}>
                   <td className="mono">
-                    {principal.subject}
+                    {/* The name is the way in. Everything this identity can
+                        be done to lives in its record, which is what the row
+                        used to carry as seven buttons. */}
+                    <button
+                      type="button"
+                      className="cell-link"
+                      aria-expanded={openRecord?.id === principal.id}
+                      data-testid={`open-${principal.subject}`}
+                      onClick={() => setOpenRecord(openRecord?.id === principal.id ? null : principal)}
+                    >
+                      {principal.subject}
+                    </button>
                     {principal.disabled_at && (
                       <div className="source"><span className="badge unknown">{t("disabled")}</span> <Time value={principal.disabled_at} /></div>
                     )}
@@ -861,24 +874,6 @@ export function Identities({ initialSearch }: { initialSearch: string }) {
                                   : <span className="source"> · {t("until")} <Time value={binding.valid_until} /></span>
                               )}
                             </span>
-                            {!principal.disabled_at && (
-                              <button
-                                className="secondary"
-                                disabled={revokeRole.isPending || revokeTeamRole.isPending}
-                                onClick={() => openPending(team
-                                  ? {
-                                      kind: "revoke-team-role", principal, role: binding.role,
-                                      team, teamName: teamName(team),
-                                    }
-                                  : {
-                                      kind: "revoke-role", principal, role: binding.role,
-                                      site: scope.site === "*" ? "" : scope.site ?? "",
-                                      environment: scope.environment === "*" ? "" : scope.environment ?? "",
-                                    })}
-                              >
-                                {t("Remove")}
-                              </button>
-                            )}
                           </div>
                           );
                         })}
@@ -896,73 +891,63 @@ export function Identities({ initialSearch }: { initialSearch: string }) {
                               </span>
                               {expiresSoon(token) && <> <span className="badge warn">{t("expires soon")}</span></>}
                             </span>
-                            <button
-                              className="danger"
-                              disabled={revokeToken.isPending}
-                              onClick={() => openPending({ kind: "revoke-token", principal, token })}
-                            >
-                              {t("Revoke")}
-                            </button>
                           </div>
                         ))}
                   </td>
-                  <td className="actions-cell">
-                    <div className="row-actions">
-                      {principal.disabled_at ? (
-                        <button disabled={enable.isPending} onClick={() => openPending({ kind: "enable", principal })}>
-                          {t("Enable")}
-                        </button>
-                      ) : (
-                        <>
-                          <button className="secondary" onClick={() => openGrant(principal)}>
-                            {t("Grant role")}
-                          </button>
-                          <button className="secondary" disabled={issueToken.isPending} onClick={() => openPending({ kind: "issue-token", principal })}>
-                            {t("Issue token")}
-                          </button>
-                          <button
-                            className={sessionsOf?.id === principal.id ? "" : "secondary"}
-                            onClick={() => setSessionsOf(sessionsOf?.id === principal.id ? null : principal)}
-                          >
-                            {t("Sessions")}
-                          </button>
-                          <button
-                            className={passwordFor?.id === principal.id ? "" : "secondary"}
-                            onClick={() => setPasswordFor(passwordFor?.id === principal.id ? null : principal)}
-                            data-testid={`password-${principal.subject}`}
-                            title={principal.password
-                              ? t("This identity signs in with a password here.")
-                              : t("This identity has no password here.")}
-                          >
-                            {principal.password ? t("Password set") : t("Set a password")}
-                          </button>
-                          <button className="danger" disabled={disable.isPending} onClick={() => openPending({ kind: "disable", principal })}>
-                            {t("Disable")}
-                          </button>
-                        </>
-                      )}
-                    </div>
+                  <td>
+                    {/* Whether somebody signs in here with a password is a
+                        fact about them, so it is a column. It was a button
+                        until 15.10, which said the same thing and invited a
+                        click nobody wanted to make. A lock is shown because
+                        an operator who cannot get in is the one case where
+                        the list has to speak first. */}
+                    {principal.password
+                      ? (
+                        <span data-testid={`password-state-${principal.subject}`}>
+                          {t("set")}
+                          {principal.password.locked_until
+                            && new Date(principal.password.locked_until).getTime() > Date.now()
+                            && <> <span className="badge error">{t("locked")}</span></>}
+                        </span>
+                      )
+                      : <span className="source" data-testid={`password-state-${principal.subject}`}>—</span>}
+                  </td>
+                  <td>
+                    {/* State is a word in colour, not a button. The things
+                        that change it live in the record. */}
+                    {principal.disabled_at
+                      ? <span className="state-off">{t("Disabled")}</span>
+                      : <span className="state-on">{t("Enabled")}</span>}
                   </td>
                 </tr>
-                {passwordFor?.id === principal.id && (
+                {openRecord?.id === principal.id && (
                   <tr className="detail-row">
-                    <td colSpan={6}>
-                      <PasswordPanel
+                    <td colSpan={7}>
+                      <IdentityRecord
                         principal={principal}
-                        onDone={() => { setPasswordFor(null); refresh(); }}
-                        onCancel={() => setPasswordFor(null)}
+                        onGrantRole={() => openGrant(principal)}
+                        onRevokeRole={(binding) => {
+                          const scope = binding.scope as BindingScope;
+                          const team = scopeTeam(scope);
+                          openPending(team
+                            ? { kind: "revoke-team-role", principal, role: binding.role, team, teamName: teamName(team) }
+                            : {
+                                kind: "revoke-role", principal, role: binding.role,
+                                site: scope.site === "*" ? "" : scope.site ?? "",
+                                environment: scope.environment === "*" ? "" : scope.environment ?? "",
+                              });
+                        }}
+                        onIssueToken={() => openPending({ kind: "issue-token", principal })}
+                        onRevokeToken={(token) => openPending({ kind: "revoke-token", principal, token })}
+                        onRevokeSession={(session) => openPending({ kind: "revoke-session", principal, session })}
+                        revokingSession={pending?.kind === "revoke-session" ? pending.session.id : null}
+                        onDisable={() => openPending({ kind: "disable", principal })}
+                        onEnable={() => openPending({ kind: "enable", principal })}
+                        onPasswordDone={refresh}
                         onError={onError}
-                      />
-                    </td>
-                  </tr>
-                )}
-                {sessionsOf?.id === principal.id && (
-                  <tr className="detail-row">
-                    <td colSpan={6}>
-                      <Sessions
-                        principal={principal}
-                        revoking={pending?.kind === "revoke-session" ? pending.session.id : null}
-                        onRevoke={(session) => openPending({ kind: "revoke-session", principal, session })}
+                        teamName={teamName}
+                        busy={disable.isPending || enable.isPending || issueToken.isPending
+                          || revokeToken.isPending || revokeRole.isPending || revokeTeamRole.isPending}
                       />
                     </td>
                   </tr>
@@ -1214,6 +1199,179 @@ export function Identities({ initialSearch }: { initialSearch: string }) {
  * replaced by its owner at their next sign-in, and the panel says so rather
  * than leaving an administrator to decide whether it matters.
  */
+/**
+ * One identity, opened from its name in the list.
+ *
+ * Everything that can be done to an identity used to stand in its row: seven
+ * buttons, repeated for every row on the page, so a screen of fifty rows
+ * carried three hundred and fifty of them and none of them was the important
+ * one. They live here instead, behind the name, sorted into the four things
+ * an identity is: who it is, what it may do, what it signs in with, and the
+ * password it has here.
+ *
+ * The tabs are not decoration. Revoking a token and granting a role are
+ * rare, deliberate acts; putting them one click deep is the difference
+ * between a list that can be read and a control panel that has to be
+ * navigated.
+ */
+function IdentityRecord({
+  principal, onGrantRole, onRevokeRole, onIssueToken, onRevokeToken, onRevokeSession,
+  revokingSession, onDisable, onEnable, onPasswordDone, onError, teamName, busy,
+}: {
+  principal: ListedPrincipal;
+  onGrantRole: () => void;
+  onRevokeRole: (binding: RoleBinding) => void;
+  onIssueToken: () => void;
+  onRevokeToken: (token: ApiToken) => void;
+  onRevokeSession: (session: SessionView) => void;
+  revokingSession: string | null;
+  onDisable: () => void;
+  onEnable: () => void;
+  onPasswordDone: () => void;
+  onError: (error: unknown) => void;
+  teamName: (team: string) => string;
+  busy: boolean;
+}) {
+  const t = useT();
+  const tabs = [
+    { key: "identity", label: t("Identity") },
+    { key: "roles", label: t("Roles and scopes") },
+    { key: "tokens", label: t("Tokens and sessions") },
+    { key: "password", label: t("Password") },
+  ] as const;
+  const [tab, setTab] = useState<(typeof tabs)[number]["key"]>("identity");
+  const bindings = principal.bindings ?? [];
+  const tokens = principal.tokens ?? [];
+  const live = !principal.disabled_at;
+
+  return (
+    <div className="record" data-testid={`record-${principal.subject}`}>
+      <div className="tabs record-tabs">
+        {tabs.map((one) => (
+          <button
+            key={one.key}
+            type="button"
+            className={tab === one.key ? "active" : undefined}
+            data-testid={`record-tab-${one.key}`}
+            onClick={() => setTab(one.key)}
+          >
+            {one.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "identity" && (
+        <div className="record-body">
+          <dl className="facts">
+            <dt>{t("Subject")}</dt><dd className="mono">{principal.subject}</dd>
+            <dt>{t("Name")}</dt><dd>{principal.display_name || "—"}</dd>
+            <dt>{t("Kind")}</dt><dd>{principal.kind}</dd>
+            <dt>{t("Status")}</dt>
+            <dd>
+              {live
+                ? <span className="state-on">{t("Enabled")}</span>
+                : <><span className="state-off">{t("Disabled")}</span> <Time value={principal.disabled_at} /></>}
+            </dd>
+          </dl>
+          <Actions>
+            {live
+              ? <button className="danger" disabled={busy} onClick={onDisable}>{t("Disable")}</button>
+              : <button disabled={busy} onClick={onEnable}>{t("Enable")}</button>}
+          </Actions>
+        </div>
+      )}
+
+      {tab === "roles" && (
+        <div className="record-body">
+          {bindings.length === 0
+            ? <Empty>{t("no direct assignments; roles may come from group mappings")}</Empty>
+            : (
+              <table>
+                <thead><tr><th scope="col">{t("Role")}</th><th scope="col">{t("Granted over")}</th><th scope="col" /></tr></thead>
+                <tbody>
+                  {bindings.map((binding, index) => {
+                    const scope = binding.scope as BindingScope;
+                    const team = scopeTeam(scope);
+                    const over = new Date(binding.valid_until ?? "").getTime() <= Date.now();
+                    return (
+                      <tr key={index} data-testid="binding">
+                        <td>{binding.role}</td>
+                        <td>
+                          <ScopeText scope={scope} teamName={team ? teamName(team) : undefined} />
+                          {binding.valid_until && (
+                            over
+                              ? <> <span className="badge unknown">{t("expired")}</span></>
+                              : <span className="source"> · {t("until")} <Time value={binding.valid_until} /></span>
+                          )}
+                        </td>
+                        <td className="actions-cell">
+                          {live && (
+                            <button className="secondary" disabled={busy} onClick={() => onRevokeRole(binding)}>
+                              {t("Remove")}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          {live && (
+            <Actions>
+              <button className="secondary" onClick={onGrantRole}>{t("Grant role")}</button>
+            </Actions>
+          )}
+        </div>
+      )}
+
+      {tab === "tokens" && (
+        <div className="record-body">
+          {tokens.length === 0
+            ? <Empty>{t("This identity has no tokens.")}</Empty>
+            : (
+              <table>
+                <thead><tr><th scope="col">{t("Token")}</th><th scope="col">{t("Expires")}</th><th scope="col">{t("Last used")}</th><th scope="col" /></tr></thead>
+                <tbody>
+                  {tokens.map((token) => (
+                    <tr key={token.id}>
+                      <td>{token.description || token.id.slice(0, 8)}</td>
+                      <td>
+                        {token.expires_at ? <Time value={token.expires_at} /> : <span className="source">{t("never expires")}</span>}
+                        {expiresSoon(token) && <> <span className="badge warn">{t("expires soon")}</span></>}
+                      </td>
+                      <td>{token.last_used_at ? <Time value={token.last_used_at} /> : <span className="source">{t("never")}</span>}</td>
+                      <td className="actions-cell">
+                        <button className="danger" disabled={busy} onClick={() => onRevokeToken(token)}>{t("Revoke")}</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          {live && (
+            <Actions>
+              <button className="secondary" disabled={busy} onClick={onIssueToken}>{t("Issue token")}</button>
+            </Actions>
+          )}
+          <Sessions principal={principal} revoking={revokingSession} onRevoke={onRevokeSession} />
+        </div>
+      )}
+
+      {tab === "password" && (
+        <div className="record-body">
+          <PasswordPanel
+            principal={principal}
+            onDone={onPasswordDone}
+            onCancel={() => setTab("identity")}
+            onError={onError}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PasswordPanel({ principal, onDone, onCancel, onError }: {
   principal: ListedPrincipal;
   onDone: () => void;
