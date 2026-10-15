@@ -7,9 +7,11 @@ import type { AuditEvent, Campaign, FleetActivity, FleetSummary, Job } from "../
 import { stateName } from "../../components/ui";
 import { useT } from "../../i18n";
 import {
-  Band, Bars, Card, Chart, Empty, Grid, Head, Kpi, Kpis, Pill, Problem, Table,
+  Band, Bars, Card, Chart, Empty, Head, Kpi, Pill, Problem, Ring, Table,
   type Segment, type Tone,
 } from "../kit";
+import { Board } from "../Board";
+import type { BoardEntry } from "../../components/board";
 
 /**
  * What the fleet needs from a person, and what it found wrong.
@@ -157,152 +159,194 @@ export function Dashboard() {
         }
       />
 
-      <Kpis>
-        <Kpi icon="hosts" label={t("Hosts")} value={s?.hosts ?? null} hero />
-        <Kpi
-          icon="server"
-          label={t("Online")}
-          value={s?.online ?? null}
-          tone={s && s.offline > 0 ? "warn" : "ok"}
-          delta={s === undefined ? undefined : {
-            text: t("{n} offline", { n: s.offline }),
-            direction: s.offline > 0 ? "down" : "up",
-            good: s.offline === 0,
-          }}
-        />
-        <Kpi
-          icon="jobs"
-          label={t("Waiting on a person")}
-          value={s === undefined ? null : waiting}
-          tone={waiting > 0 ? "warn" : "ok"}
-          note={waiting > 0 ? t("approvals, gates and confirmations") : t("nothing waits")}
-        />
-        <Kpi
-          icon="security"
-          label={t("Found on the hosts")}
-          value={s === undefined ? null : found}
-          tone={found > 0 ? "error" : "ok"}
-          note={found > 0 ? t("across every check the fleet answers") : t("every check is clear")}
-        />
-      </Kpis>
-
-      <Grid>
-        <Card
-          span={8}
-          title={t("What needs you")}
-          note={coverage ? t("Judged over {n} hosts; the rest have not answered.", { n: coverage.hosts_judged ?? 0 }) : undefined}
-          tools={open.length > 0 ? <Pill tone="warn">{open.length}</Pill> : undefined}
-          foot={clear > 0 ? t("{n} other checks are clear.", { n: clear }) : undefined}
-        >
-          {open.length === 0
-            ? <Empty>{t("Nothing waits and nothing is wrong.")}</Empty>
-            : <Needs items={open} />}
-        </Card>
-
-        <Card span={4} title={t("Host availability")}>
-          <Band segments={availability} testId="availability" />
-        </Card>
-
-        <Card span={7} title={t("Operations, last 24 h")} note={t("Finished per hour, by outcome.")}>
-          {a ? (
-            <Chart
-              labels={a.hours.map(hour)}
-              series={[
-                { name: t("Succeeded"), tone: "ok", values: a.succeeded },
-                { name: t("Failed"), tone: "error", values: a.failed },
-                { name: t("Other"), tone: "unknown", values: a.other },
+      <Board screen="next-dashboard" catalogue={DASHBOARD} drawn={{
+        hosts: <Kpi icon="hosts" label={t("Hosts")} value={s?.hosts ?? null} hero />,
+        online: (
+          <Kpi
+            icon="server"
+            label={t("Online")}
+            value={s?.online ?? null}
+            tone={s && s.offline > 0 ? "warn" : "ok"}
+            delta={s === undefined ? undefined : {
+              text: t("{n} offline", { n: s.offline }),
+              direction: s.offline > 0 ? "down" : "up",
+              good: s.offline === 0,
+            }}
+          />
+        ),
+        waiting: (
+          <Kpi
+            icon="jobs"
+            label={t("Waiting on a person")}
+            value={s === undefined ? null : waiting}
+            tone={waiting > 0 ? "warn" : "ok"}
+            note={waiting > 0 ? t("approvals, gates and confirmations") : t("nothing waits")}
+          />
+        ),
+        found: (
+          <Kpi
+            icon="security"
+            label={t("Found on the hosts")}
+            value={s === undefined ? null : found}
+            tone={found > 0 ? "error" : "ok"}
+            note={found > 0 ? t("across every check the fleet answers") : t("every check is clear")}
+          />
+        ),
+        needs: (
+          <Card
+            title={t("What needs you")}
+            note={coverage ? t("Judged over {n} hosts; the rest have not answered.", { n: coverage.hosts_judged ?? 0 }) : undefined}
+            tools={open.length > 0 ? <Pill tone="warn">{open.length}</Pill> : undefined}
+            foot={clear > 0 ? t("{n} other checks are clear.", { n: clear }) : undefined}
+          >
+            {open.length === 0
+              ? <Empty>{t("Nothing waits and nothing is wrong.")}</Empty>
+              : <Needs items={open} />}
+          </Card>
+        ),
+        answering: (
+          <Card title={t("Fleet answering")} note={t("The share of the fleet the panel has heard from.")}>
+            <Ring
+              share={s && s.hosts > 0 ? s.online / s.hosts : undefined}
+              label={t("online")}
+              tone={s && s.offline > 0 ? "warn" : "ok"}
+              legend={[
+                { label: t("Online"), value: s?.online ?? "—", tone: "ok" },
+                { label: t("Stale"), value: a ? byConnection("stale") ?? 0 : "—", tone: "warn" },
+                { label: t("Offline"), value: a ? byConnection("offline") ?? 0 : "—", tone: "error" },
+                { label: t("Unknown"), value: a ? byConnection("unknown") ?? 0 : "—", tone: "unknown" },
               ]}
             />
-          ) : <Empty>{t("Loading…")}</Empty>}
-        </Card>
-
-        <Card span={5} title={t("Fleet composition")} note={t("By system, agent build, site and environment.")}>
-          {a ? (
-            <div className="fl-stack">
-              <Composition label={t("Systems")} items={a.by_os_family.map((f) => ({ label: facet(f.key), value: f.count, tone: "accent" as Tone }))} />
-              <Composition label={t("Agent builds")} items={a.by_agent_version.map((f) => ({ label: facet(f.key), value: f.count, tone: "neutral" as Tone }))} />
-              <Composition label={t("Sites")} items={a.by_site.map((f) => ({ label: facet(f.key), value: f.count, tone: "info" as Tone }))} />
-              <Composition label={t("Environments")} items={a.by_environment.map((f) => ({ label: facet(f.key), value: f.count, tone: "info" as Tone }))} />
-            </div>
-          ) : <Empty>{t("Loading…")}</Empty>}
-        </Card>
-
-        <Card
-          span={6}
-          title={t("Campaigns in progress")}
-          tools={active.length > 0 ? <Pill tone="info">{active.length}</Pill> : undefined}
-          flush
-        >
-          <Table
-            rows={active}
-            keyOf={(one) => one.id}
-            empty={t("No campaigns need attention.")}
-            columns={[
-              { key: "name", head: t("Name"), cell: (one) => <Link to={`/campaigns/${one.id}`}>{one.name}</Link> },
-              { key: "state", head: t("State"), cell: (one) => <Pill tone={campaignTone(one.state)}>{t(stateName(one.state))}</Pill> },
-              { key: "action", head: t("Operation"), minor: true, cell: (one) => <code>{one.action_type}</code> },
-            ]}
-          />
-        </Card>
-
-        <Card
-          span={6}
-          title={t("Recent failures")}
-          tools={<Link to="/next/jobs?state=failed">{t("All jobs")}</Link>}
-          flush
-        >
-          <Table
-            rows={failures.data?.items ?? []}
-            keyOf={(one) => one.id}
-            empty={t("No failed operations.")}
-            columns={[
-              { key: "when", head: t("Time"), cell: (one) => (
-                <Link to={`/jobs/${one.id}`} title={absoluteTime(one.finished_at ?? one.created_at)}>
-                  {relativeTime(one.finished_at ?? one.created_at)}
-                </Link>
-              ) },
-              { key: "host", head: t("Host"), cell: (one) => (
-                <Link to={`/next/hosts/${one.host_id}`}>{one.hostname || one.host_id.slice(0, 8)}</Link>
-              ) },
-              { key: "what", head: t("Operation"), minor: true, cell: (one) => <code>{one.action_type}</code> },
-              { key: "error", head: t("Error"), cell: (one) => <code>{one.result_error_code || "failed"}</code> },
-            ]}
-          />
-        </Card>
-
-        <Card
-          span={12}
-          title={t("Recent access denials")}
-          tools={
-            <>
-              {denied.length > 0 && <Pill tone="error">{denied.length}</Pill>}
-              <Link to="/next/audit?outcome=denied">{t("All denials")}</Link>
-            </>
-          }
-          flush
-        >
-          <Table
-            rows={denied}
-            keyOf={(one) => String(one.id)}
-            empty={t("No denials in recent events.")}
-            columns={[
-              { key: "when", head: t("Time"), cell: (one) => (
-                <span title={absoluteTime(one.occurred_at)}>{relativeTime(one.occurred_at)}</span>
-              ) },
-              { key: "actor", head: t("Actor"), cell: (one) => (
-                <Link to={`/next/audit?actor=${encodeURIComponent(one.actor_id)}`} className="fl-mono">{one.actor_id}</Link>
-              ) },
-              { key: "action", head: t("Operation"), cell: (one) => <code>{one.action}</code> },
-              { key: "reason", head: t("Reason"), minor: true, cell: (one) => (
-                one.detail?.reason ? <code>{String(one.detail.reason)}</code> : <>—</>
-              ) },
-            ]}
-          />
-        </Card>
-      </Grid>
+          </Card>
+        ),
+        availability: (
+          <Card title={t("Host availability")}>
+            <Band segments={availability} testId="availability" />
+          </Card>
+        ),
+        operations: (
+          <Card title={t("Operations, last 24 h")} note={t("Finished per hour, by outcome.")}>
+            {a ? (
+              <Chart
+                labels={a.hours.map(hour)}
+                series={[
+                  { name: t("Succeeded"), tone: "ok", values: a.succeeded },
+                  { name: t("Failed"), tone: "error", values: a.failed },
+                  { name: t("Other"), tone: "unknown", values: a.other },
+                ]}
+              />
+            ) : <Empty>{t("Loading…")}</Empty>}
+          </Card>
+        ),
+        composition: (
+          <Card title={t("Fleet composition")} note={t("By system, agent build, site and environment.")}>
+            {a ? (
+              <div className="fl-stack">
+                <Composition label={t("Systems")} items={a.by_os_family.map((f) => ({ label: facet(f.key), value: f.count, tone: "accent" as Tone }))} />
+                <Composition label={t("Agent builds")} items={a.by_agent_version.map((f) => ({ label: facet(f.key), value: f.count, tone: "neutral" as Tone }))} />
+                <Composition label={t("Sites")} items={a.by_site.map((f) => ({ label: facet(f.key), value: f.count, tone: "info" as Tone }))} />
+                <Composition label={t("Environments")} items={a.by_environment.map((f) => ({ label: facet(f.key), value: f.count, tone: "info" as Tone }))} />
+              </div>
+            ) : <Empty>{t("Loading…")}</Empty>}
+          </Card>
+        ),
+        campaigns: (
+          <Card
+            title={t("Campaigns in progress")}
+            tools={active.length > 0 ? <Pill tone="info">{active.length}</Pill> : undefined}
+            flush
+          >
+            <Table
+              rows={active}
+              keyOf={(one) => one.id}
+              empty={t("No campaigns need attention.")}
+              columns={[
+                { key: "name", head: t("Name"), cell: (one) => <Link to={`/campaigns/${one.id}`}>{one.name}</Link> },
+                { key: "state", head: t("State"), cell: (one) => <Pill tone={campaignTone(one.state)}>{t(stateName(one.state))}</Pill> },
+                { key: "action", head: t("Operation"), minor: true, cell: (one) => <code>{one.action_type}</code> },
+              ]}
+            />
+          </Card>
+        ),
+        failures: (
+          <Card
+            title={t("Recent failures")}
+            tools={<Link to="/next/jobs?state=failed">{t("All jobs")}</Link>}
+            flush
+          >
+            <Table
+              rows={failures.data?.items ?? []}
+              keyOf={(one) => one.id}
+              empty={t("No failed operations.")}
+              columns={[
+                { key: "when", head: t("Time"), cell: (one) => (
+                  <Link to={`/jobs/${one.id}`} title={absoluteTime(one.finished_at ?? one.created_at)}>
+                    {relativeTime(one.finished_at ?? one.created_at)}
+                  </Link>
+                ) },
+                { key: "host", head: t("Host"), cell: (one) => (
+                  <Link to={`/next/hosts/${one.host_id}`}>{one.hostname || one.host_id.slice(0, 8)}</Link>
+                ) },
+                { key: "what", head: t("Operation"), minor: true, cell: (one) => <code>{one.action_type}</code> },
+                { key: "error", head: t("Error"), cell: (one) => <code>{one.result_error_code || "failed"}</code> },
+              ]}
+            />
+          </Card>
+        ),
+        denials: (
+          <Card
+            title={t("Recent access denials")}
+            tools={
+              <>
+                {denied.length > 0 && <Pill tone="error">{denied.length}</Pill>}
+                <Link to="/next/audit?outcome=denied">{t("All denials")}</Link>
+              </>
+            }
+            flush
+          >
+            <Table
+              rows={denied}
+              keyOf={(one) => String(one.id)}
+              empty={t("No denials in recent events.")}
+              columns={[
+                { key: "when", head: t("Time"), cell: (one) => (
+                  <span title={absoluteTime(one.occurred_at)}>{relativeTime(one.occurred_at)}</span>
+                ) },
+                { key: "actor", head: t("Actor"), cell: (one) => (
+                  <Link to={`/next/audit?actor=${encodeURIComponent(one.actor_id)}`} className="fl-mono">{one.actor_id}</Link>
+                ) },
+                { key: "action", head: t("Operation"), cell: (one) => <code>{one.action}</code> },
+                { key: "reason", head: t("Reason"), minor: true, cell: (one) => (
+                  one.detail?.reason ? <code>{String(one.detail.reason)}</code> : <>—</>
+                ) },
+              ]}
+            />
+          </Card>
+        ),
+      }} />
     </>
   );
 }
+
+/**
+ * The containers this screen can draw: the name each is picked by when the
+ * screen is arranged, and the width and height it takes until somebody
+ * says otherwise.
+ */
+export const DASHBOARD: BoardEntry[] = [
+  { key: "hosts", title: "Hosts", width: 3, height: 2 },
+  { key: "online", title: "Online", width: 3, height: 2 },
+  { key: "waiting", title: "Waiting on a person", width: 3, height: 2 },
+  { key: "found", title: "Found on the hosts", width: 3, height: 2 },
+  { key: "needs", title: "What needs you", width: 8, height: 5 },
+  { key: "answering", title: "Fleet answering", width: 4, height: 5 },
+  { key: "availability", title: "Host availability", width: 4, height: 3 },
+  { key: "operations", title: "Operations, last 24 h", width: 8, height: 4 },
+  { key: "composition", title: "Fleet composition", width: 4, height: 7 },
+  { key: "campaigns", title: "Campaigns in progress", width: 4, height: 4 },
+  { key: "failures", title: "Recent failures", width: 4, height: 4 },
+  { key: "denials", title: "Recent access denials", width: 12, height: 4 },
+];
 
 type Need = { label: string; value?: number; tone: Tone; to?: string };
 

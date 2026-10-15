@@ -85,11 +85,12 @@ export function Card({ title, note, tools, children, foot, flush = false, span }
   tools?: ReactNode;
   children?: ReactNode;
   foot?: ReactNode;
+  /** For a body that is a table or a toolbar: it reaches the edges. */
   flush?: boolean;
   span?: Span;
 }) {
   const card = (
-    <section className="fl-card">
+    <section className={join("fl-card", flush && "fl-flush")}>
       {(title || tools) && (
         <div className="fl-card-head">
           {title && <h2 className="fl-card-title">{title}</h2>}
@@ -98,7 +99,7 @@ export function Card({ title, note, tools, children, foot, flush = false, span }
         </div>
       )}
       {children !== undefined && children !== null && children !== false && (
-        <div className={join("fl-card-body", flush && "fl-flush")}>{children}</div>
+        <div className="fl-card-body">{children}</div>
       )}
       {foot && <div className="fl-card-foot">{foot}</div>}
     </section>
@@ -145,20 +146,24 @@ export function Kpi({
   const body = (
     <>
       <div className="fl-kpi-top">
+        <span className="fl-kpi-label">{unknown ? t("{label}: unknown", { label }) : label}</span>
         {icon && <span className="fl-kpi-mark" aria-hidden="true"><Icon name={icon} /></span>}
-        {delta && !unknown && (
-          <span className={join("fl-kpi-delta", delta.good === true && "fl-up", delta.good === false && "fl-down")}>
-            {delta.text}
-            {delta.direction && <span aria-hidden="true">{delta.direction === "up" ? "↑" : "↓"}</span>}
-          </span>
-        )}
       </div>
       <div className="fl-kpi-value">
         {unknown ? <span className="fl-kpi-dash" title={t("unknown")}>—</span> : value}
         {!unknown && unit && <span className="fl-kpi-unit">{unit}</span>}
       </div>
-      <div className="fl-kpi-label">{unknown ? t("{label}: unknown", { label }) : label}</div>
-      {note && <div className="fl-kpi-note">{note}</div>}
+      {(note || (delta && !unknown)) && (
+        <div className="fl-kpi-foot">
+          {delta && !unknown && (
+            <span className={join("fl-kpi-delta", delta.good === true && "fl-up", delta.good === false && "fl-down")}>
+              {delta.text}
+              {delta.direction && <span aria-hidden="true">{delta.direction === "up" ? "↑" : "↓"}</span>}
+            </span>
+          )}
+          {note && <span className="fl-kpi-note">{note}</span>}
+        </div>
+      )}
     </>
   );
   const className = join("fl-kpi", hero && "fl-hero", toneClass(shown));
@@ -532,14 +537,15 @@ export function Pager({ page, size, total, onPage, onSize, sizes = PAGE_SIZES }:
 export type Series = { name: string; tone: Tone; values: number[] };
 
 /**
- * Hours along the bottom, counts up the side, the series stacked.
+ * Hours along the bottom, counts up the side, the series stacked, and the
+ * tallest column's reading in a bubble over it.
  *
  * It is drawn rather than charted: a panel that pulls a charting library
- * in for eight bars pays for it on every screen, and a reading nobody can
- * hover is not worth that. The value of a column is its title, which is
- * what a reader actually asks of a bar.
+ * in for a dozen bars pays for it on every screen. Every column carries
+ * its own reading as a title, which is what a reader actually asks of a
+ * bar, and the axis says what the heights mean.
  */
-export function Chart({ labels, series, everyLabel = 3, height = 160 }: {
+export function Chart({ labels, series, everyLabel = 3, height = 150 }: {
   labels: string[];
   series: Series[];
   /** Draw one label in every n, so they do not run together. */
@@ -549,44 +555,61 @@ export function Chart({ labels, series, everyLabel = 3, height = 160 }: {
   const columns = labels.length;
   const totals = labels.map((_, i) => series.reduce((sum, one) => sum + (one.values[i] ?? 0), 0));
   const top = Math.max(1, ...totals);
+  const peak = totals.indexOf(Math.max(...totals));
   const width = 100;
-  const gap = 0.8;
-  const barWidth = Math.max(1, width / Math.max(1, columns) - gap);
+  const gap = columns > 40 ? 0.3 : 0.9;
+  const barWidth = Math.max(0.6, width / Math.max(1, columns) - gap);
+  const round = Math.min(barWidth / 2, 2);
   return (
     <figure className="fl-chart">
-      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" className="fl-chart-plot" style={{ height }}>
-        {[0.25, 0.5, 0.75, 1].map((at) => (
-          <line key={at} className="fl-chart-rule" x1="0" x2={width} y1={height - at * height} y2={height - at * height} />
-        ))}
-        {labels.map((label, i) => {
-          let bottom = 0;
-          return (
-            <g key={i}>
-              <title>{`${label} · ${totals[i]}`}</title>
-              {series.map((one) => {
-                const value = one.values[i] ?? 0;
-                const tall = (value / top) * (height - 4);
-                const y = height - bottom - tall;
-                bottom += tall;
-                return value === 0 ? null : (
-                  <rect
-                    key={one.name}
-                    className={join("fl-chart-bar", toneClass(one.tone))}
-                    x={i * (barWidth + gap)}
-                    y={y}
-                    width={barWidth}
-                    height={tall}
-                  />
-                );
-              })}
-            </g>
-          );
-        })}
-      </svg>
+      <div className="fl-chart-scale" style={{ height }} aria-hidden="true">
+        <span>{top}</span><span>{Math.round(top / 2)}</span><span>0</span>
+      </div>
+      <div className="fl-chart-plot">
+        <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" style={{ height }}>
+          {[0, 0.5, 1].map((at) => (
+            <line key={at} className="fl-chart-rule" x1="0" x2={width} y1={height - at * height} y2={height - at * height} />
+          ))}
+          {labels.map((label, i) => {
+            let bottom = 0;
+            return (
+              <g key={i}>
+                <title>{`${label} · ${totals[i]}`}</title>
+                {series.map((one) => {
+                  const value = one.values[i] ?? 0;
+                  const tall = (value / top) * (height - 2);
+                  const y = height - bottom - tall;
+                  bottom += tall;
+                  return value === 0 ? null : (
+                    <rect
+                      key={one.name}
+                      className={join("fl-chart-bar", toneClass(one.tone))}
+                      x={i * (barWidth + gap)}
+                      y={y}
+                      width={barWidth}
+                      height={tall}
+                      rx={round}
+                    />
+                  );
+                })}
+              </g>
+            );
+          })}
+        </svg>
+        {totals[peak] > 0 && (
+          <span
+            className="fl-chart-bubble"
+            style={{
+              left: `${((peak + 0.5) / Math.max(1, columns)) * 100}%`,
+              top: `${(1 - totals[peak] / top) * height - 6}px`,
+            }}
+          >
+            {totals[peak]}
+          </span>
+        )}
+      </div>
       <div className="fl-chart-axis">
-        {labels.map((label, i) => (
-          <span key={i}>{i % everyLabel === 0 ? label : ""}</span>
-        ))}
+        {labels.map((label, i) => <span key={i}>{i % everyLabel === 0 ? label : ""}</span>)}
       </div>
       <figcaption className="fl-chart-legend">
         {series.map((one) => (
@@ -594,5 +617,61 @@ export function Chart({ labels, series, everyLabel = 3, height = 160 }: {
         ))}
       </figcaption>
     </figure>
+  );
+}
+
+/* ---------------------------------------------------------------- ring */
+
+/**
+ * One share of a whole, read at a glance, with what it is made of beside
+ * it. A share nobody could take draws no arc at all rather than an arc of
+ * nothing, which would read as a share of none.
+ */
+export function Ring({ share, label, tone = "accent", legend }: {
+  /** 0..1, or undefined when nobody could take it. */
+  share?: number;
+  label: ReactNode;
+  tone?: Tone;
+  legend?: { label: ReactNode; value: ReactNode; tone?: Tone }[];
+}) {
+  const known = share !== undefined && Number.isFinite(share);
+  const size = 132;
+  const stroke = 13;
+  const radius = (size - stroke) / 2;
+  const round = 2 * Math.PI * radius;
+  const filled = known ? Math.min(1, Math.max(0, share)) : 0;
+  return (
+    <div className="fl-ring">
+      <div className={join("fl-ring-plot", toneClass(tone))}>
+        <svg viewBox={`0 0 ${size} ${size}`} role="img" aria-hidden="true">
+          <circle className="fl-ring-track" cx={size / 2} cy={size / 2} r={radius} strokeWidth={stroke} />
+          {known && (
+            <circle
+              className="fl-ring-arc"
+              cx={size / 2}
+              cy={size / 2}
+              r={radius}
+              strokeWidth={stroke}
+              strokeDasharray={`${round * filled} ${round}`}
+            />
+          )}
+        </svg>
+        <div className="fl-ring-face">
+          <span className="fl-ring-value">{known ? `${Math.round(filled * 100)}%` : "—"}</span>
+          <span className="fl-ring-label">{label}</span>
+        </div>
+      </div>
+      {legend && legend.length > 0 && (
+        <dl className="fl-ring-legend">
+          {legend.map((one, index) => (
+            <div className={join("fl-ring-legend-row", toneClass(one.tone ?? tone))} key={index}>
+              <i className="fl-ring-key" />
+              <dt className="fl-truncate">{one.label}</dt>
+              <dd><b>{one.value}</b></dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </div>
   );
 }

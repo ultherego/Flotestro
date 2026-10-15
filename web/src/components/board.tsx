@@ -85,8 +85,13 @@ export type StoredBoard = {
   reason?: string;
 };
 
-/** One widget the screen can draw: how it is named when picked, and its own width. */
-export type BoardEntry = { key: string; title: string; width: number };
+/**
+ * One widget the screen can draw: how it is named when picked, and the
+ * shape it ships with. The height is optional, because a screen arranged
+ * by ordering alone never had one; a screen laid out on the grid says
+ * what each container is worth in rows.
+ */
+export type BoardEntry = { key: string; title: string; width: number; height?: number };
 
 /**
  * The widths the twelve-column grid has a class for: every one of them.
@@ -121,7 +126,7 @@ export function boardToDraw(
   stored: StoredBoard | undefined, catalogue: BoardEntry[], known: Set<string>,
 ): BoardWidget[] {
   if (!stored || !stored.present || stored.widgets.length === 0) {
-    return catalogue.filter((one) => known.has(one.key)).map((one) => ({ key: one.key, width: one.width }));
+    return catalogue.filter((one) => known.has(one.key)).map((one) => ({ key: one.key, width: one.width, height: one.height }));
   }
   const placed = stored.widgets.filter((one) => known.has(one.key) && !one.hidden);
   const decided = new Set(stored.widgets.map((one) => one.key));
@@ -151,7 +156,7 @@ export function boardToDraw(
       const neighbour = result.findIndex((one) => one.key === catalogue[before].key);
       if (neighbour !== -1 && neighbour + 1 > at) at = neighbour + 1;
     }
-    result.splice(at, 0, { key: entry.key, width: entry.width });
+    result.splice(at, 0, { key: entry.key, width: entry.width, height: entry.height });
   }
   return result;
 }

@@ -63,6 +63,7 @@ export function Shell({ trail, children }: { trail: Trail; children: ReactNode }
         </aside>
         {drawer && <div className="fl-rail-backdrop" onClick={() => setDrawer(false)} />}
 
+        <div className="fl-page">
         <header className="fl-bar">
           <button
             type="button"
@@ -90,9 +91,10 @@ export function Shell({ trail, children }: { trail: Trail; children: ReactNode }
           </button>
         </header>
 
-        <main className="fl-main" id="fl-main" tabIndex={-1}>
+        <main className="fl-screen" id="fl-main" tabIndex={-1}>
           {me.error ? <Problem>{t("Error: {message}", { message: String(me.error) })}</Problem> : children}
         </main>
+        </div>
       </div>
     </div>
   );

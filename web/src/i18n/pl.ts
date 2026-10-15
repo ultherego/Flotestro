@@ -6146,4 +6146,9 @@ export const pl: Record<string, string> = {
   "All": "Wszystkie",
   "package database": "baza pakietów",
   "{n} failed units": "{n} nieudanych jednostek",
+  "Fleet answering": "Flota odpowiada",
+  "The share of the fleet the panel has heard from.": "Jaka część floty odezwała się do panelu.",
+  "Add a container…": "Dodaj kontener…",
+  "Take this container off the screen": "Zdejmij ten kontener z ekranu",
+  "The stored arrangement could not be read; this is the one the panel ships with.": "Nie udało się odczytać zapisanego układu; to jest ten, z którym panel przychodzi.",
 };
