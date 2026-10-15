@@ -1430,6 +1430,16 @@ a.button:hover { background: var(--bg-hover); text-decoration: none; }
   white-space: nowrap;
 }
 
+/* The sign-in form: the name, the password and the one button, in a column
+   the width of the card they stand in. */
+.login-form { display: flex; flex-direction: column; gap: 10px; text-align: left; margin: 0 0 14px; }
+.login-form .field-label { font-size: 12px; color: var(--text-muted); }
+.login-form input { width: 100%; }
+.login-form button { width: 100%; }
+/* "or" between the two doors, with a rule either side of it. */
+.login-or { display: flex; align-items: center; gap: 10px; color: var(--text-faint); font-size: 12px; margin: 10px 0; }
+.login-or::before, .login-or::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--border); }
+
 /* The bar that appears under a list when rows are picked: what is selected
    and what can be done with it, held at the bottom of the card. Written
    inline, identically, on the host list and the group list - two copies of
@@ -1515,6 +1525,9 @@ button.expander:where(:hover:not(:disabled)) { background: var(--bg-hover); colo
 button.expander[aria-expanded="true"] { border-color: var(--accent); color: var(--accent-text); }
 /* A row opened under another: the detail sits on the page ground. */
 tr.detail-row > td { background: var(--bg); padding: 12px var(--card-pad-x, 12px); }
+/* What stands inside such a row: a sentence, a few fields and the actions,
+   spaced by the container as everywhere else. */
+.detail-panel > * + * { margin-top: 10px; }
 tr.detail-row:hover > td { background: var(--bg); }
 
 /* The stat tiles: a label, a big number, a hint saying what it counts. */

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { Link, useSearchParams } from "react-router-dom";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { api, ApiError, type Collection } from "../lib/api";
 import type { ApiToken, Whoami } from "../lib/types";
 import { COMMON_TIME_ZONES, usePreferences, validTimeZone } from "../lib/preferences";
@@ -247,6 +247,7 @@ export function Profile({ theme, setTheme }: {
           )}
         </Card>
 
+        <OwnPasswordCard />
         <PreferencesCard theme={theme} setTheme={setTheme} />
 
         <Card
@@ -275,6 +276,75 @@ export function Profile({ theme, setTheme }: {
  * The preferences, edited whole: the zone, the page size, the landing page,
  * and the language and the theme the top bar also switches.
  */
+/**
+ * Your own password, where this installation signs people in without a
+ * provider.
+ *
+ * The one in force is asked for even though the session is already yours: a
+ * session left open on a desk must not be enough to lock its owner out of
+ * their own account. The screen opens on this card when a sign-in said the
+ * password has to be replaced - somebody else chose it, which means two
+ * people know it.
+ */
+function OwnPasswordCard() {
+  const t = useT();
+  const toast = useToast();
+  const [search] = useSearchParams();
+  const mustChange = search.get("change_password") === "1";
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [again, setAgain] = useState("");
+  const [refusal, setRefusal] = useState("");
+
+  const change = useMutation({
+    mutationFn: () => api.post("/api/v1/profile/password", { current, new: next }),
+    onSuccess: () => {
+      setCurrent(""); setNext(""); setAgain(""); setRefusal("");
+      toast.success(t("The password is changed; it is in force from the next sign-in."));
+    },
+    onError: (error) => setRefusal(error instanceof Error ? error.message : String(error)),
+  });
+
+  const mismatch = again !== "" && next !== again;
+  return (
+    <Card
+      className="span-6"
+      title={t("Password")}
+      description={mustChange
+        ? t("Somebody else chose the password you signed in with, so two people know it. Replace it here.")
+        : t("The password you sign in with where this installation has no identity provider.")}
+      footer={
+        <Actions>
+          <button
+            disabled={current === "" || next === "" || mismatch || change.isPending}
+            onClick={() => change.mutate()}
+            data-testid="change-password"
+          >
+            {change.isPending ? t("changing…") : t("Change the password")}
+          </button>
+          {refusal !== "" && <span className="page-error" data-testid="password-refusal">{refusal}</span>}
+        </Actions>
+      }
+    >
+      <FieldGrid>
+        <Field label={t("The password in force")}>
+          <input type="password" value={current} autoComplete="current-password"
+                 onChange={(event) => setCurrent(event.target.value)} data-testid="current-password" />
+        </Field>
+        <Field label={t("The new password")} hint={t("At least 12 characters. Length is the rule; a word from every list is refused however it is spelled.")}>
+          <input type="password" value={next} autoComplete="new-password"
+                 onChange={(event) => setNext(event.target.value)} data-testid="new-password" />
+        </Field>
+        <Field label={t("The new password again")}>
+          <input type="password" value={again} autoComplete="new-password"
+                 onChange={(event) => setAgain(event.target.value)} data-testid="new-password-again" />
+        </Field>
+      </FieldGrid>
+      {mismatch && <p className="page-error">{t("The two new passwords are not the same.")}</p>}
+    </Card>
+  );
+}
+
 function PreferencesCard({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => void }) {
   const t = useT();
   const toast = useToast();

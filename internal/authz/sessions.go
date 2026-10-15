@@ -170,6 +170,19 @@ func (s *Store) AuthenticateSession(ctx context.Context, cookieValue string) (*P
 	return &principal, &session, nil
 }
 
+// RefreshAuthentication moves a session's authentication time to now.
+//
+// What re-authentication means for a local identity: there is no provider to
+// be sent back to, so the password is asked for again and this records that
+// it was given. A step-up reads the same field whichever way the session was
+// made.
+func (s *Store) RefreshAuthentication(ctx context.Context, sessionID string) error {
+	_, err := s.pool.Exec(ctx, `
+		update web_sessions set authenticated_at = now()
+		where id = $1 and revoked_at is null`, sessionID)
+	return err
+}
+
 // RevokeSession ends a session.
 func (s *Store) RevokeSession(ctx context.Context, sessionID, reason string) error {
 	_, err := s.pool.Exec(ctx, `
@@ -431,6 +444,27 @@ func (s *Store) UpsertExternalPrincipal(ctx context.Context, tx pgx.Tx,
 			subject = $3, display_name = coalesce(nullif($4, ''), display_name),
 			email = coalesce(nullif($5, ''), email), last_login_at = now(), updated_at = now()
 		where issuer = $1 and subject_id = $2
+		returning id`, issuer, subjectID, subject, displayName, email).Scan(&id)
+	if err == nil {
+		return id, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return "", err
+	}
+
+	// A record written down before this person ever arrived, waiting for
+	// exactly this issuer, is adopted: that is what it was made for, and the
+	// role an administrator granted in advance is on it. The condition is
+	// narrow on purpose - the subject matches, the record says which issuer
+	// it expects, and it has no identity of its own yet.
+	err = tx.QueryRow(ctx, `
+		update principals set
+			issuer = $1, subject_id = $2, awaiting_issuer = null,
+			display_name = coalesce(nullif($4, ''), display_name),
+			email = coalesce(nullif($5, ''), email), last_login_at = now(), updated_at = now()
+		where awaiting_issuer = $1
+		  and lower(subject) = lower($3)
+		  and issuer is null and subject_id is null
 		returning id`, issuer, subjectID, subject, displayName, email).Scan(&id)
 	if err == nil {
 		return id, nil

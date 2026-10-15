@@ -32,7 +32,10 @@ test("the panel signs in, shows the host and follows one operation to its answer
   // start of the control plane wrote into the state directory.
   await page.goto("/");
   await page.getByText("Sign in with a bootstrap token").click();
-  await page.locator('.login-screen input[type="password"]').fill(token);
+  // The field is named, not described by its type: since 16.10 the screen
+  // also carries the password form, and "the password box on the login
+  // screen" is two boxes.
+  await page.getByTestId("bootstrap-token").fill(token);
   await page.getByRole("button", { name: "Continue to the first run" }).click();
   await expect(page).toHaveURL(/\/setup$/);
   await expect(page.locator(".page-header").getByRole("heading", { name: "First run" })).toBeVisible();

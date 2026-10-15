@@ -18,6 +18,8 @@ import { Identities } from "./Access";
 
 /** Every address the screen asked for, in order. */
 const asked: string[] = [];
+/** What a form wrote, so a test reads it rather than guessing. */
+const sentWrites: { path: string; body: unknown }[] = [];
 
 function page(subjects: string[], total: number) {
   return {
@@ -28,6 +30,11 @@ function page(subjects: string[], total: number) {
       kind: "user",
       bindings: [],
       tokens: [],
+      // The second row has a password; the first has none. The difference
+      // is what the row's button says.
+      password: index === 1
+        ? { set_at: "2026-10-16T08:00:00Z", set_by: "bootstrap-admin", must_change: true, failed_attempts: 0 }
+        : undefined,
     })),
     count: subjects.length,
     total,
@@ -43,6 +50,8 @@ vi.mock("../lib/api", async (importOriginal) => {
     ...actual,
     api: {
       ...actual.api,
+      put: (path: string, body: unknown) => { sentWrites.push({ path, body }); return Promise.resolve({}); },
+      del: (path: string) => { sentWrites.push({ path, body: null }); return Promise.resolve({}); },
       get: (path: string) => {
         asked.push(path);
         if (path.startsWith("/api/v1/principals")) {
@@ -68,7 +77,7 @@ function draw(node: ReactNode) {
   );
 }
 
-afterEach(() => { cleanup(); asked.length = 0; });
+afterEach(() => { cleanup(); asked.length = 0; sentWrites.length = 0; });
 
 describe("the identities list", () => {
   it("asks the server for a page, and says which page of how many", async () => {
@@ -94,5 +103,50 @@ describe("the identities list", () => {
     await waitFor(() => expect(screen.getByTestId("page-next")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("page-next"));
     await waitFor(() => expect(asked.some((path) => /offset=(?!0)\d+/.test(path))).toBe(true));
+  });
+});
+
+/*
+ * The password of an identity, for an installation that signs people in
+ * without a provider. What the row says before anything is clicked is the
+ * part worth pinning: an identity with no password is not an identity whose
+ * password is empty, and the button says which it is.
+ */
+describe("the password of an identity", () => {
+  it("says whether there is one, without saying anything about it", async () => {
+    draw(<Identities initialSearch="" />);
+    await waitFor(() => expect(screen.getByTestId("password-identity-0")).toBeInTheDocument());
+    expect(screen.getByTestId("password-identity-0")).toHaveTextContent("Set a password");
+    expect(screen.getByTestId("password-identity-1")).toHaveTextContent("Password set");
+  });
+
+  it("asks for a reason before it stores one, and says who set the last", async () => {
+    draw(<Identities initialSearch="" />);
+    await waitFor(() => expect(screen.getByTestId("password-identity-1")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("password-identity-1"));
+
+    await waitFor(() => expect(screen.getByTestId("set-password")).toBeInTheDocument());
+    expect(screen.getByText(/Set by bootstrap-admin/)).toBeInTheDocument();
+    expect(screen.getByText(/The owner has to replace it at their next sign-in/)).toBeInTheDocument();
+
+    const save = screen.getByTestId("save-password");
+    fireEvent.change(screen.getByTestId("set-password"), { target: { value: "a long enough passphrase" } });
+    expect(save).toBeDisabled();
+    fireEvent.change(screen.getByTestId("password-reason"), { target: { value: "new operator on the rota" } });
+    await waitFor(() => expect(save).toBeEnabled());
+
+    fireEvent.click(save);
+    await waitFor(() => expect(sentWrites).toHaveLength(1));
+    expect(sentWrites[0].path).toContain("/password");
+    expect(sentWrites[0].body).toMatchObject({ must_change: true });
+  });
+
+  it("offers to take a password away only where there is one", async () => {
+    draw(<Identities initialSearch="" />);
+    await waitFor(() => expect(screen.getByTestId("password-identity-0")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("password-identity-0"));
+    await waitFor(() => expect(screen.getByTestId("set-password")).toBeInTheDocument());
+    expect(screen.queryByTestId("clear-password")).toBeNull();
+    expect(screen.getByText(/signs in through the identity provider, or not at all/)).toBeInTheDocument();
   });
 });

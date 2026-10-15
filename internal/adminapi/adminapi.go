@@ -239,6 +239,9 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "GET /auth/login", s.handleLogin)
 	s.route(mux, "GET /auth/callback", s.handleAuthCallback)
 	s.route(mux, "POST /auth/logout", s.handleLogout)
+	// Signing in without an identity provider: the password door.
+	s.route(mux, "POST /auth/password", s.handlePasswordSignIn)
+	s.route(mux, "POST /auth/password/reauthenticate", s.handlePasswordReauthenticate)
 	s.route(mux, "GET /api/v1/fleet/summary", s.handleFleetSummary)
 	// One question across every kind the caller may read.
 	s.route(mux, "GET /api/v1/search", s.handleSearch)
@@ -483,6 +486,9 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "GET /api/v1/principals/{id}/sessions", s.handleListSessions)
 	s.route(mux, "DELETE /api/v1/principals/{id}/sessions/{sid}", s.handleRevokeSession)
 	s.route(mux, "POST /api/v1/principals/{id}/tokens", s.handleIssueToken)
+	s.route(mux, "PUT /api/v1/principals/{id}/password", s.handleSetPassword)
+	s.route(mux, "DELETE /api/v1/principals/{id}/password", s.handleClearPassword)
+	s.route(mux, "POST /api/v1/profile/password", s.handleChangeOwnPassword)
 	s.route(mux, "DELETE /api/v1/principals/{id}/tokens/{token}", s.handleRevokeToken)
 	// A binding is granted with a validity or without one; granting it
 	// again changes the validity alone.
@@ -493,6 +499,7 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "GET /api/v1/access/review", s.handleAccessReview)
 	s.route(mux, "GET /api/v1/whoami", s.handleWhoami)
 	s.route(mux, "GET /api/v1/access/holders", s.handleAccessHolders)
+	s.route(mux, "POST /api/v1/access/holders/grant", s.handleGrantToHolder)
 	s.route(mux, "GET /api/v1/roles", s.handleListRoles)
 	s.route(mux, "POST /api/v1/roles", s.handleCreateRole)
 	s.route(mux, "PUT /api/v1/roles/{role}", s.handleReplaceRole)

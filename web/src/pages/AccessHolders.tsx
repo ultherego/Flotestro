@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
-import { Card, Pager, Toolbar } from "../components/layout";
+import { Actions, Card, Field, FieldGrid, Pager, Toolbar } from "../components/layout";
 import { DataTable } from "../components/table";
 import { Empty, ErrorBox } from "../components/ui";
 import { useT } from "../i18n";
@@ -86,12 +86,94 @@ export function holdersToShow(items: Holder[], which: Which, search: string): Ho
     });
 }
 
+/**
+ * Granting a role to somebody whose record does not exist yet.
+ *
+ * The panel writes the record down in advance and marks which provider it
+ * waits for, so the person's first sign-in adopts it. Without that mark the
+ * sign-in would make a second record under the same name and the role would
+ * sit on the one nobody uses - which is why this is its own endpoint rather
+ * than the ordinary way of creating an identity.
+ */
+function GrantToHolder({ holder, onDone, onCancel, onError }: {
+  holder: Holder;
+  onDone: () => void;
+  onCancel: () => void;
+  onError: (error: unknown) => void;
+}) {
+  const t = useT();
+  const catalogue = useQuery({
+    queryKey: ["roles"],
+    queryFn: () => api.get<{ items: { role: string }[] }>("/api/v1/roles"),
+    staleTime: 60 * 1000,
+  });
+  const [role, setRole] = useState("");
+  const [site, setSite] = useState("");
+  const [environment, setEnvironment] = useState("");
+  const [reason, setReason] = useState("");
+
+  const grant = useMutation({
+    mutationFn: () => api.post("/api/v1/access/holders/grant", {
+      subject: holder.subject,
+      display_name: holder.display_name ?? "",
+      role, site: site.trim(), environment: environment.trim(), reason: reason.trim(),
+    }),
+    onSuccess: () => onDone(),
+    onError: (error) => onError(error),
+  });
+  const choices = (catalogue.data?.items ?? []).map((one) => one.role);
+
+  return (
+    <Card
+      className="span-4 fp-narrow"
+      title={t("Grant a role to {subject}", { subject: holder.subject })}
+      description={holder.signed_in
+        ? t("The role is bound to this identity, beside whatever a group grants them.")
+        : t("The panel has never seen this person. The record is written down now and waits for their first sign-in, so the role is theirs when they arrive.")}
+      footer={
+        <Actions>
+          <button
+            disabled={role === "" || reason.trim().length < 8 || grant.isPending}
+            onClick={() => grant.mutate()}
+          >
+            {t("Grant the role")}
+          </button>
+          <button className="secondary" onClick={onCancel}>{t("Cancel")}</button>
+        </Actions>
+      }
+    >
+      <FieldGrid>
+        <Field label={t("Role")}>
+          <select value={role} onChange={(event) => setRole(event.target.value)}
+                  disabled={choices.length === 0} data-testid="grant-role">
+            <option value="">{t("choose a role")}</option>
+            {choices.map((one) => <option key={one} value={one}>{one}</option>)}
+          </select>
+        </Field>
+        <Field label={t("Site (empty = all)")}>
+          <input value={site} onChange={(event) => setSite(event.target.value)} placeholder="lab" />
+        </Field>
+        <Field label={t("Environment (empty = all)")}>
+          <input value={environment} onChange={(event) => setEnvironment(event.target.value)} placeholder="test" />
+        </Field>
+        <Field label={t("Reason for the change")} wide>
+          <input value={reason} onChange={(event) => setReason(event.target.value)}
+                 placeholder={t("e.g. took over the night rota")} data-testid="grant-reason" />
+        </Field>
+      </FieldGrid>
+    </Card>
+  );
+}
+
 export function AccessHolders() {
   const t = useT();
   const [search, setSearch] = useState("");
   const [which, setWhich] = useState<Which>("directory");
+  const [granting, setGranting] = useState<Holder | null>(null);
+  const [refusal, setRefusal] = useState<string>("");
   const [page, setPage] = useState(1);
   const [size, setSize] = useState(25);
+  const queryClient = useQueryClient();
   const { data, error } = useQuery({
     queryKey: ["access-holders"],
     queryFn: () => api.get<Holders>("/api/v1/access/holders"),
@@ -107,8 +189,10 @@ export function AccessHolders() {
   const fromDirectory = items.filter(fromTheDirectory).length;
 
   return (
+    <>
+    {refusal !== "" && <p className="page-error" data-testid="grant-refusal">{refusal}</p>}
     <Card
-      className="span-12"
+      className={granting ? "span-8" : "span-12"}
       title={t("Who may sign in")}
       description={t("Everyone with a role here: bound by hand, or granted by a group of the identity provider. Somebody who has never signed in is here too - the panel makes their record at the first sign-in.")}
       flush
@@ -229,6 +313,10 @@ export function AccessHolders() {
               actions: true,
               cell: (holder) => (
                 <div className="row-actions">
+                  <button className="secondary" onClick={() => { setRefusal(""); setGranting(holder); }}
+                          data-testid={`grant-${holder.subject}`}>
+                    {t("Grant a role")}
+                  </button>
                   {holder.principal_id
                     ? (
                       <Link className="button secondary" to={`/settings?tab=users&q=${encodeURIComponent(holder.subject)}`}>
@@ -247,5 +335,19 @@ export function AccessHolders() {
         />
       )}
     </Card>
+    {granting && (
+      <GrantToHolder
+        key={granting.subject}
+        holder={granting}
+        onDone={() => {
+          setGranting(null);
+          queryClient.invalidateQueries({ queryKey: ["access-holders"] });
+          queryClient.invalidateQueries({ queryKey: ["principals"] });
+        }}
+        onCancel={() => setGranting(null)}
+        onError={(error) => setRefusal(error instanceof Error ? error.message : String(error))}
+      />
+    )}
+    </>
   );
 }

@@ -93,6 +93,43 @@ func (s *Store) EnsurePrincipal(ctx context.Context, tx pgx.Tx,
 	return id, nil
 }
 
+// EnsureAwaitingPrincipal writes down an identity for somebody who has not
+// signed in yet, so that a role can be granted to them in advance.
+//
+// It names the issuer the record is waiting for. The first sign-in from that
+// issuer, under that subject, adopts the record (UpsertExternalPrincipal);
+// nothing else does. A record that already exists for this subject is used
+// as it is rather than being bent into a waiting one: an administrator
+// granting a role must not quietly turn somebody's local identity into one
+// the provider will take over.
+func (s *Store) EnsureAwaitingPrincipal(ctx context.Context, tx pgx.Tx,
+	subject, displayName, issuer string) (string, bool, error) {
+	if strings.TrimSpace(subject) == "" || strings.TrimSpace(issuer) == "" {
+		return "", false, fmt.Errorf("an identity written down in advance needs a subject and the issuer it waits for")
+	}
+	var id string
+	var awaiting *string
+	err := tx.QueryRow(ctx, `
+		select id, awaiting_issuer from principals where lower(subject) = lower($1)`,
+		subject).Scan(&id, &awaiting)
+	if err == nil {
+		// It exists already: the caller is granting a role to somebody the
+		// panel knows, which is the ordinary path.
+		return id, false, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return "", false, err
+	}
+	err = tx.QueryRow(ctx, `
+		insert into principals (id, subject, display_name, kind, awaiting_issuer)
+		values ($1, $2, $3, 'user', $4)
+		returning id`, uuid.NewString(), subject, displayName, issuer).Scan(&id)
+	if err != nil {
+		return "", false, fmt.Errorf("writing down the identity of %s: %w", subject, err)
+	}
+	return id, true, nil
+}
+
 // GrantRole assigns a role within a scope, until the given moment or, with
 // nil, until revoked.
 func (s *Store) GrantRole(ctx context.Context, tx pgx.Tx,
