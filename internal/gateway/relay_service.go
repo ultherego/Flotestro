@@ -165,10 +165,18 @@ func (s *RelayService) RenewCertificate(ctx context.Context,
 	// The fingerprint the refusals above were decided on. Between that decision
 	// and this write the certificate was signed, and a revocation committed in
 	// the meantime must refuse the renewal rather than disappear under it.
+	// The authorities of the bundle that goes out in this same answer, read
+	// off the bundle itself with the function the host renewal uses - one
+	// description of "what a bundle carries", not two.
+	bundleIssuers, err := pki.IssuerIDsOfBundle(trust)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal,
+			fmt.Errorf("the authorities of the trust bundle: %w", err))
+	}
 	if err := s.relays.SaveCertificate(ctx, tx, relayID, issued.Serial,
 		issued.Fingerprint, issued.NotAfter,
 		relays.Issuer{Subject: issued.IssuerSubject, Serial: issued.IssuerSerial},
-		pki.Fingerprint(cert)); err != nil {
+		pki.Fingerprint(cert), bundleIssuers); err != nil {
 		if errors.Is(err, relays.ErrCertificateMoved) {
 			s.refuse(ctx, relayID, "revoked_or_replaced_while_issuing")
 			return nil, connect.NewError(connect.CodeAborted,
@@ -229,6 +237,9 @@ func (s *RelayService) Ping(ctx context.Context,
 			fmt.Errorf("the relay %s is not active", relayID))
 	}
 	s.relays.MarkSeen(ctx, relayID)
+	// Using the certificate is how the relay shows it took the answer the
+	// bundle came in; without this the panel would only ever know what it sent.
+	s.relays.MarkTrustPresented(ctx, relayID, pki.Fingerprint(cert))
 	// The numbers of the heartbeat are informational: the panel shows them next
 	// to the relay so that a site whose results stopped arriving is visible
 	// before anybody looks at the site itself.

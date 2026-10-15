@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/ultherego/flotestro/internal/helpercap"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/issuer"
+	"github.com/ultherego/flotestro/internal/pki"
 	"github.com/ultherego/flotestro/internal/relays"
 )
 
@@ -459,11 +461,19 @@ func (s *EnrollmentService) enrollRelay(ctx context.Context, tx pgx.Tx,
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
+	// The authorities of the bundle that goes out with this certificate, read
+	// off the bundle itself, as at a renewal.
+	bundleIssuers, err := pki.IssuerIDsOfBundle(trust)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal,
+			fmt.Errorf("the authorities of the trust bundle: %w", err))
+	}
 	// nil: this is the first certificate of the relay, so there is no
 	// fingerprint the decision rested on.
 	if err := s.relays.SaveCertificate(ctx, tx, relayID, issued.Serial,
 		issued.Fingerprint, issued.NotAfter,
-		relays.Issuer{Subject: issued.IssuerSubject, Serial: issued.IssuerSerial}, nil); err != nil {
+		relays.Issuer{Subject: issued.IssuerSubject, Serial: issued.IssuerSerial},
+		nil, bundleIssuers); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	// The network names from the first CSR become a record in the registry.

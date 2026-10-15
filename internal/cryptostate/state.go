@@ -165,8 +165,12 @@ func Open(ctx context.Context, o Options) (*Runtime, error) {
 			return nil, err
 		}
 	}
-	r.trust.SetActivationHook(func(active *pki.CA) { r.recordIssuer(context.WithoutCancel(ctx), active) })
-	r.trust.SetPreparationHook(func(*pki.CA) { r.notePreparation(context.WithoutCancel(ctx)) })
+	r.trust.SetActivationHook(func(active *pki.CA) error {
+		return r.recordIssuer(context.WithoutCancel(ctx), active)
+	})
+	r.trust.SetPreparationHook(func(*pki.CA) error {
+		return r.notePreparation(context.WithoutCancel(ctx))
+	})
 	r.assignIssuers(ctx)
 	return r, nil
 }
@@ -600,7 +604,7 @@ func (r *Runtime) rotate(ctx context.Context, to string) error {
 // to the old key and the old sentinel - the secrets of the installation sealed
 // with one key and the record naming another. The fields this hook owns are the
 // two it sets; everything else comes from the row as it is now.
-func (r *Runtime) recordIssuer(ctx context.Context, active *pki.CA) {
+func (r *Runtime) recordIssuer(ctx context.Context, active *pki.CA) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for attempt := 0; attempt < recordAttempts; attempt++ {
@@ -613,12 +617,12 @@ func (r *Runtime) recordIssuer(ctx context.Context, active *pki.CA) {
 				r.record = *loaded
 			}
 			r.assignIssuers(ctx)
-			return
+			return nil
 		}
 		if !errors.Is(err, ErrRevisionMoved) {
 			r.log.Error("the fleet CA took over signing, but the installation record could not be updated; the next start catches it up",
 				"err", err, "issuer_id", moved.IssuerID)
-			return
+			return err
 		}
 		// Somebody else wrote the row. Read it again and set the two fields on
 		// what is there now rather than on what was there before.
@@ -626,12 +630,17 @@ func (r *Runtime) recordIssuer(ctx context.Context, active *pki.CA) {
 		if loadErr != nil {
 			r.log.Error("the installation record moved and could not be read again; the next start catches it up",
 				"err", loadErr, "issuer_id", moved.IssuerID)
-			return
+			return loadErr
 		}
 		r.record = *loaded
 	}
+	// Every attempt lost the row to somebody else. The signing did happen, so
+	// this is not "nothing changed" - it is a handover the record does not
+	// name, and the caller is the one who can decide what to do about it.
 	r.log.Error("the installation record moved under this instance at every attempt; "+
 		"the next start catches it up", "attempts", recordAttempts)
+	return fmt.Errorf("%w: the installation record moved under this instance at every one of %d attempts",
+		ErrRevisionMoved, recordAttempts)
 }
 
 // recordAttempts bounds the retries of a conditional write of the record. The
@@ -645,7 +654,7 @@ const recordAttempts = 3
 // that signs. What moves is the revision, and that is the point - a reload is
 // the only reason another replica reads the store again, and until it does it
 // hands the hosts a bundle without the new authority.
-func (r *Runtime) notePreparation(ctx context.Context) {
+func (r *Runtime) notePreparation(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// Under the revision this instance read: writing the whole record out of a
@@ -657,17 +666,21 @@ func (r *Runtime) notePreparation(ctx context.Context) {
 		if loaded, loadErr := r.storage.Load(ctx); loadErr == nil {
 			r.record = *loaded
 		}
-		return
+		return nil
 	}
 	if err != nil {
+		// Said in the log and handed back: this used to be a log line under a
+		// 201, so an operator read "prepared" and went on to the handover that
+		// cuts off every host the un-told replicas serve.
 		r.log.Error("a new fleet CA was prepared, but the installation record did not move on; "+
 			"the other instances learn of it only at their next start, and activating before "+
 			"they have would cut off the hosts they serve", "err", err)
-		return
+		return err
 	}
 	if loaded, err := r.storage.Load(ctx); err == nil {
 		r.record = *loaded
 	}
+	return nil
 }
 
 // assignIssuers fills in the issuer identifier of certificate rows that
