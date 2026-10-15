@@ -110,7 +110,10 @@ type ImportStore interface {
 	// The names are the keys the revert actually wrote: anything else wrapped
 	// with the same key appeared while it ran, is in no file, and is a refusal
 	// rather than a row to drop.
-	ForgetKeys(ctx context.Context, kekID string, keyIDs []string) error
+	// The rows are given whole, not as names: the revert wrote its files from
+	// what it read, and a row whose bytes changed since must not be dropped
+	// on the strength of its identifier.
+	ForgetKeys(ctx context.Context, kekID string, read []WrappedKey) error
 	// RetiredAuthorities returns the certificates withdrawn from signing.
 	RetiredAuthorities(ctx context.Context) ([][]byte, error)
 	KEKID(ctx context.Context) (string, error)

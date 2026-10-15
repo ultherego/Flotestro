@@ -747,11 +747,11 @@ func cryptoRevertState(args []string) error {
 		}
 		fmt.Printf("wrote %s\n", step.path)
 	}
-	written := make([]string, 0, len(materials))
-	for _, material := range materials {
-		written = append(written, material.KeyID)
-	}
-	if err := store.ForgetKeys(ctx, kek.ID(), written); err != nil {
+	// The rows as they were when this revert read them, which is what the
+	// files were written from. Handing the names alone would let a row whose
+	// bytes changed in between be dropped, and the installation would then
+	// read the older snapshot out of the file it just wrote.
+	if err := store.ForgetKeys(ctx, kek.ID(), rows); err != nil {
 		return fmt.Errorf("the files are back, but the rows could not be dropped: %w", err)
 	}
 	fmt.Printf("the installation reads its keys from %s again\n", options.files.StateDir)

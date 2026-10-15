@@ -623,7 +623,7 @@ func (p *Postgres) ReplaceKeys(ctx context.Context, fromKEKID, toKEKID string, r
 
 // ForgetKeys implements ImportStore: the last step of a revert, once the files
 // are back where the panel reads them from.
-func (p *Postgres) ForgetKeys(ctx context.Context, kekID string, keyIDs []string) error {
+func (p *Postgres) ForgetKeys(ctx context.Context, kekID string, read []WrappedKey) error {
 	return p.inTransaction(ctx, func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `
 			update crypto_installation_state
@@ -635,9 +635,32 @@ func (p *Postgres) ForgetKeys(ctx context.Context, kekID string, keyIDs []string
 		if tag.RowsAffected() == 0 {
 			return fmt.Errorf("the installation is not wrapped with %s", kekID)
 		}
+		// The rows have to be the ones the revert read, by content and not only
+		// by name. The files were written from what it exported; a row whose
+		// bytes changed in between - an authority another replica activated
+		// under the same identifier - would be dropped here and the
+		// installation would go on reading the older snapshot out of the file,
+		// with both operations reported as having succeeded.
+		current, err := wrappedKeysOf(ctx, tx, kekID)
+		if err != nil {
+			return err
+		}
+		mine := make([]WrappedKey, 0, len(read))
+		for _, key := range read {
+			if key.KEKID == kekID {
+				mine = append(mine, key)
+			}
+		}
+		if err := rowsStillThese(current, mine); err != nil {
+			return err
+		}
 		// The keys the revert wrote to the files, by name, and nothing else: a key
 		// made while the revert ran is in no file, so dropping it here would lose
 		// it entirely.
+		keyIDs := make([]string, 0, len(mine))
+		for _, key := range mine {
+			keyIDs = append(keyIDs, key.KeyID)
+		}
 		if _, err := tx.Exec(ctx,
 			`delete from crypto_wrapped_keys where kek_id = $1 and key_id = any($2)`,
 			kekID, keyIDs); err != nil {
