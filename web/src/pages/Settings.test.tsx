@@ -59,6 +59,14 @@ vi.mock("../lib/api", async (importOriginal) => {
           const answer = answers.collections[path];
           return answer instanceof Error ? Promise.reject(answer) : Promise.resolve(answer);
         }
+        // The address the agents dial has its own shape; answering it with the
+        // settings document is how this mock once crashed the screen.
+        if (path === "/api/v1/settings/advertised") {
+          return Promise.resolve({
+            in_force: ["192.168.56.10"], source: "confirmed", loopback_only: false,
+            environment_in_force: false, detected: [], confirmed: [],
+          });
+        }
         if (path.startsWith("/api/v1/settings")) return Promise.resolve(settings);
         return Promise.reject(new actual.ApiError(403, "forbidden", "not for you"));
       },
@@ -171,21 +179,34 @@ describe("hubState", () => {
   });
 });
 
-describe("the configuration hub", () => {
-  it("puts every configurable resource on the screen with what is set now and the way in", async () => {
+/*
+ * The resources kept on screens of their own, listed at the end of the
+ * settings screen.
+ *
+ * They were six tiles across the top of the screen for half a day, until the
+ * owner read what they were: "setting przypomina przejdz do zakladki X-Y a
+ * nie ustawienia". A box whose whole content is a sentence and a button to go
+ * somewhere else is a menu. What survived the change is the part worth
+ * having - the state each resource is in, and the rule that a number nobody
+ * could take is never drawn as a zero.
+ */
+describe("the resources kept elsewhere", () => {
+  it("lists every one with what is set now and the way in", async () => {
     grantEverything();
     draw(<Settings />);
-    await waitFor(() => expect(screen.getByTestId("hub-channels")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("elsewhere-channels")).toBeInTheDocument());
     await waitFor(() =>
-      expect(screen.getByTestId("hub-channels-state").textContent).toContain("set: 3"));
-    expect(screen.getByTestId("hub-budgets-state").textContent).toContain("set: 4");
+      expect(screen.getByTestId("elsewhere-channels-state").textContent).toContain("set: 3"));
+    expect(screen.getByTestId("elsewhere-budgets-state").textContent).toContain("set: 4");
     // A collection that holds nothing says so in words, not as a count tile.
     await waitFor(() =>
-      expect(screen.getByTestId("hub-mappings-state").textContent).toContain("none set"));
+      expect(screen.getByTestId("elsewhere-mappings-state").textContent).toContain("none set"));
     // Every tile offers the screen that owns the resource.
-    const channels = screen.getByTestId("hub-channels");
+    const channels = screen.getByTestId("elsewhere-channels");
     expect(channels.querySelector("a")).toHaveAttribute("href", "/notifications");
-    expect(screen.getByTestId("hub-roles").querySelector("a"))
+    // One table at the end of the screen, not a board of cards at the top.
+    expect(document.querySelectorAll('[data-testid="settings-elsewhere"] tr')).toHaveLength(6);
+    expect(screen.getByTestId("elsewhere-roles").querySelector("a"))
       .toHaveAttribute("href", "/access?tab=roles");
     // And the facts of the process are still their own section, named as such.
     expect(screen.getByText("What the process was started with")).toBeInTheDocument();
@@ -196,16 +217,16 @@ describe("the configuration hub", () => {
     answers.permissions = answers.permissions.filter((one) => one !== "principal.manage");
     draw(<Settings />);
     await waitFor(() =>
-      expect(screen.getByTestId("hub-roles-state").textContent).toContain("not yours to read"));
-    expect(screen.getByTestId("hub-roles-state").textContent).not.toContain("0");
+      expect(screen.getByTestId("elsewhere-roles-state").textContent).toContain("not yours to read"));
+    expect(screen.getByTestId("elsewhere-roles-state").textContent).not.toContain("0");
     // No way in is offered to a screen that would refuse on arrival.
-    expect(screen.getByTestId("hub-roles").querySelector("a")).toBeNull();
+    expect(screen.getByTestId("elsewhere-roles").querySelector("a")).toBeNull();
     // The resource is still named: the installation has roles, they are not
     // this viewer's to see.
-    expect(screen.getByTestId("hub-roles").textContent).toContain("Roles");
+    expect(screen.getByTestId("elsewhere-roles").textContent).toContain("Roles");
     // And the tile beside it, which this sign-in may read, still counts.
     await waitFor(() =>
-      expect(screen.getByTestId("hub-channels-state").textContent).toContain("set: 3"));
+      expect(screen.getByTestId("elsewhere-channels-state").textContent).toContain("set: 3"));
   });
 
   it("says a collection that refused is unread, with the resource still open", async () => {
@@ -215,8 +236,8 @@ describe("the configuration hub", () => {
     answers.collections["/api/v1/budgets"] = new ApiError(403, "forbidden", "not yours");
     draw(<Settings />);
     await waitFor(() =>
-      expect(screen.getByTestId("hub-budgets-state").textContent).toContain("not yours to read"));
-    expect(screen.getByTestId("hub-budgets-state").textContent).not.toContain("set: 0");
+      expect(screen.getByTestId("elsewhere-budgets-state").textContent).toContain("not yours to read"));
+    expect(screen.getByTestId("elsewhere-budgets-state").textContent).not.toContain("set: 0");
   });
 
   it("does not claim a refusal while the sign-in is still unknown", async () => {
@@ -225,7 +246,7 @@ describe("the configuration hub", () => {
     answers.permissions = [];
     answers.collections = {};
     draw(<Settings />);
-    await waitFor(() => expect(screen.getByTestId("hub-roles-state")).toBeInTheDocument());
-    expect(screen.getByTestId("hub-roles-state").textContent).toContain("not known");
+    await waitFor(() => expect(screen.getByTestId("elsewhere-roles-state")).toBeInTheDocument());
+    expect(screen.getByTestId("elsewhere-roles-state").textContent).toContain("not known");
   });
 });

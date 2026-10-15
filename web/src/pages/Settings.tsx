@@ -8,6 +8,7 @@ import { Empty, ErrorBox, Pair, Pairs, Time } from "../components/ui";
 import { Actions, Card, Field, FieldGrid, PageHeader } from "../components/layout";
 import { useToast } from "../components/Toast";
 import { Board } from "../components/board";
+import { AdvertisedAddressSection } from "./AdvertisedAddress";
 import { useT } from "../i18n";
 
 /**
@@ -37,13 +38,19 @@ export function hubState(data: unknown, error: unknown, loading: boolean): HubSt
 }
 
 /**
- * The resources this installation configures, each owned by the screen that
- * holds its list.
+ * The resources this installation configures that are kept on screens of
+ * their own.
  *
- * Deliberately not a copy of those screens. A section says the state set now
- * and gives the way to change it: the control here when it is small, the
- * screen that owns the resource when the resource is a list. A page of links
- * is not management; a state with a way in is. Decision of 15.10.
+ * They were six tiles across the top of this screen for half a day, and the
+ * owner read them for what they were: *"setting przypomina przejdz do
+ * zakladki X-Y a nie ustawienia"*. A box whose whole content is a sentence
+ * and a button to go elsewhere is a menu, and a settings screen whose first
+ * third is a menu is not a settings screen.
+ *
+ * So they are one compact table at the end, under a heading that says what it
+ * is. The state each one is in is still here - that is the part worth having
+ * on a settings screen, and it is still never a zero somebody could mistake
+ * for an answer nobody got.
  */
 type HubEntry = {
   key: string;
@@ -52,7 +59,7 @@ type HubEntry = {
   what: string;
   to: string;
   path: string;
-  /** The permission the owning screen is behind, so a tile never offers a way in that refuses. */
+  /** The permission the owning screen is behind, so a row never offers a way in that refuses. */
   permission: string;
   open: string;
 };
@@ -149,25 +156,29 @@ export function Settings() {
         description={t("What this installation is configured with, and what it was started with.")}
         help={
           <>
-            <p>{t("The top of the screen is the configuration the installation holds: what is set now, and the way to change it. A count is a link into the screen that owns the resource; the retentions are changed here.")}</p>
-            <p>{t("Below it are the values that come from {source} and are read when the panel starts, so a change to them needs a restart.", { source: t(data?.source ?? "the environment of the control plane process") })}</p>
-            <p>{t("A resource this sign-in may not read says so. It is never shown as none: an installation with no channels and one whose channels are not yours to see are different things.")}</p>
+            <p>{t("The settings this screen stores are at the top, and they take effect without a restart: what the panel keeps of the readings the hosts send, and the address the agents dial.")}</p>
+            <p>{t("Below them are the values that come from {source} and are read when the panel starts, so a change to them needs a restart.", { source: t(data?.source ?? "the environment of the control plane process") })}</p>
+            <p>{t("The rest of the configuration is kept on screens of its own, listed at the end with the state each one is in. A resource this sign-in may not read says so rather than showing as none: an installation with no channels and one whose channels are not yours to see are different things.")}</p>
           </>
         }
       />
       {error && <ErrorBox error={error} />}
       {!error && !data && <Card><Empty>{t("Loading…")}</Empty></Card>}
-      <div className="parts-head">
-        <h2>{t("What this installation configures")}</h2>
-        <span className="source">{t("Stored by the panel; a change takes effect without a restart.")}</span>
-      </div>
-      <div className="parts" data-testid="settings-hub">
-        {CONFIGURED.map((entry) => (
-          <HubTile key={entry.key} entry={entry} permissions={permissions} known={principalKnown} />
-        ))}
-      </div>
+
+      {/* What this screen itself sets. Side by side where there is room and
+          stacked where there is not: the grid decides that, not a width
+          written into either card. */}
       <div className="widgets">
         <MonitoringSettingsCard />
+        {(permissions.has("settings.read") || permissions.has("principal.manage")) && (
+          <Card
+            className="span-5"
+            title={t("Advertised address")}
+            description={t("The address the agents dial to reach this panel.")}
+          >
+            <AdvertisedAddressSection mayConfirm={permissions.has("settings.advertise.write")} />
+          </Card>
+        )}
       </div>
       {data && (
         <>
@@ -198,26 +209,52 @@ export function Settings() {
           </div>
         </>
       )}
+
+      <div className="widgets">
+        <Card
+          className="span-12"
+          title={t("Kept on screens of their own")}
+          description={t("What this installation has configured elsewhere, and how much of it is set.")}
+          flush
+        >
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">{t("What")}</th>
+                <th scope="col">{t("Set now")}</th>
+                <th scope="col" className="wide-only">{t("What it decides")}</th>
+                <th scope="col" />
+              </tr>
+            </thead>
+            <tbody data-testid="settings-elsewhere">
+              {CONFIGURED.map((entry) => (
+                <ConfiguredRow key={entry.key} entry={entry}
+                               permissions={permissions} known={principalKnown} />
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      </div>
     </>
   );
 }
 
 /* ---------------------------------------------------------------------- */
-/* The hub: one configurable resource each, with the way in.               */
+/* The resources kept elsewhere: one row each, with the way in.           */
 /* ---------------------------------------------------------------------- */
 
 /**
  * One resource of the installation: what it decides, how much of it is set
  * now, and the screen that changes it.
  *
- * The count is asked for here rather than taken from a screen that holds the
- * list, because this tile has to say three different things and only the
+ * The count is asked for here rather than taken from the screen that holds
+ * the list, because this row has to say three different things and only the
  * answer to its own request tells them apart: a number, a refusal, and not
- * knowing. A tile that cannot count still names the resource and still opens
- * it - a hub that hides what it could not count is a hub that lies about what
- * the installation has.
+ * knowing. A row that cannot count still names the resource and still opens
+ * it - a list that hid what it could not count would be lying about what the
+ * installation has.
  */
-function HubTile({
+function ConfiguredRow({
   entry, permissions, known,
 }: {
   entry: HubEntry;
@@ -239,24 +276,26 @@ function HubTile({
     : hubState(collection.data, collection.error, collection.isPending);
 
   return (
-    <section className={`part${state.kind === "count" ? "" : " unknown"}`} data-testid={`hub-${entry.key}`}>
-      <h3 className="part-head">
-        <span className="part-name">{t(entry.title)}</span>
-        <span className="part-summary" data-testid={`hub-${entry.key}-state`}>
-          <HubSummary state={state} />
-        </span>
-      </h3>
-      <div className="part-body">
-        <p className="part-reason">{t(entry.what)}</p>
-        <Actions>
-          {state.kind === "forbidden" && known
-            ? <span className="source">{t("Whoever administers this installation changes it.")}</span>
-            : <Link className="button secondary" to={entry.to}>{t(entry.open)}</Link>}
-        </Actions>
-      </div>
-    </section>
+    <tr data-testid={`elsewhere-${entry.key}`}>
+      <th scope="row">{t(entry.title)}</th>
+      <td data-testid={`elsewhere-${entry.key}-state`}><HubSummary state={state} /></td>
+      <td className="source wide-only">{t(entry.what)}</td>
+      <td className="actions-cell">
+        {state.kind === "forbidden" && known
+          ? <span className="source">{t("Whoever administers this installation changes it.")}</span>
+          : (
+            <div className="row-actions">
+              <Link className="button secondary" to={entry.to} title={t(entry.open)}>
+                <span className="wide-only">{t(entry.open)}</span>
+                <span className="narrow-only">{t("Open")}</span>
+              </Link>
+            </div>
+          )}
+      </td>
+    </tr>
   );
 }
+
 
 /**
  * The one line that says how much is set - or that the number is not to be had.
@@ -418,7 +457,7 @@ function MonitoringSettingsCard() {
 
   return (
     <Card
-      className="span-12"
+      className="span-7"
       title={t("Monitoring retention")}
       description={t("How long the panel keeps what the hosts send.")}
       footer={

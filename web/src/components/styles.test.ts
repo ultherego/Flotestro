@@ -110,4 +110,26 @@ describe("the class names the panel's markup uses", () => {
   it("have no name on the inherited list that the markup no longer uses", () => {
     expect(INHERITED.filter((name) => !used.has(name))).toEqual([]);
   });
+
+  /*
+   * CSS multi-column fills one column to the bottom and starts the next, so
+   * it has no idea what a tile is: on a wide screen the head of a tile sat
+   * in one column and its body and its button in the next. That is why
+   * Masonry was taken out of this panel, and `.parts { columns: 380px }`
+   * survived that removal and did it again on the settings screen on 15.10,
+   * in front of the owner. A grid of tracks is the form; this refuses the
+   * other one rather than trusting anybody to remember.
+   */
+  it("lay tiles out in a grid, never in CSS columns", () => {
+    const offenders: string[] = [];
+    for (const path of sources(SRC, /\.css$/)) {
+      const text = readFileSync(path, "utf8");
+      text.split("\n").forEach((line, index) => {
+        if (/^\s*(columns|column-count|column-width)\s*:/.test(line)) {
+          offenders.push(`${path.slice(SRC.length + 1)}:${index + 1} ${line.trim()}`);
+        }
+      });
+    }
+    expect(offenders).toEqual([]);
+  });
 });

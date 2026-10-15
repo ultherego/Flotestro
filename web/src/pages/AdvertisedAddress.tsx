@@ -121,6 +121,19 @@ export function AdvertisedAddressSection({ mayConfirm }: { mayConfirm: boolean }
   if (address.error) return <ErrorBox error={address.error} />;
   const state = address.data;
   if (!state) return <p className="source" style={{ marginTop: 12 }}>{t("Loading…")}</p>;
+  // An answer without the address in force is not an address of none: it is
+  // an answer this section cannot read, and it says so rather than taking
+  // the screen down with it. It read `state.in_force.join` straight out, so
+  // an older panel - or any answer of another shape - threw inside the
+  // render and blanked every card around it. The settings screen now shows
+  // this section beside others, which is where that would have been paid for.
+  if (!Array.isArray(state.in_force)) {
+    return (
+      <p className="source" style={{ marginTop: 12 }} data-testid="advertised-address">
+        {t("This panel did not say which address is in force.")}
+      </p>
+    );
+  }
 
   const names = chosenAddress(picked, typed);
   const ready = confirmable(names, state.environment_in_force);
